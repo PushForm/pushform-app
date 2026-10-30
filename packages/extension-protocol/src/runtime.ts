@@ -31,6 +31,8 @@ export const hostMessageSchema = z.union([
   z.strictObject({ type: z.literal('response'), id, ok: z.literal(true), result: z.unknown() }),
   z.strictObject({ type: z.literal('response'), id, ok: z.literal(false), error: extensionErrorSchema }),
   z.strictObject({ type: z.literal('deactivate'), reason: z.enum(DEACTIVATION_REASONS) }),
+  /** A user event on a mounted interface (see `ui.ts`): the target, the component, the event and its payload. */
+  z.object({ type: z.literal('event'), target: z.string().max(200), component: z.string().max(100), event: z.string().max(40) }).loose(),
 ]);
 export type HostMessage = z.infer<typeof hostMessageSchema>;
 

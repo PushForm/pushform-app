@@ -200,6 +200,11 @@ export class ExtensionSession {
     });
   }
 
+  /** Sends a user event on a mounted interface to the runtime; dropped unless the extension is active. */
+  postEvent(event: { readonly target: string; readonly component: string; readonly event: string }): void {
+    if (this.currentState === 'active') this.port.post({ ...event, type: 'event' });
+  }
+
   /** Cancels every running invocation that carries `scope`, as closing its panel does. */
   cancelScope(scope: string): void {
     for (const [invocation, pending] of this.invocations) if (pending.scopes.includes(scope)) this.cancelInvocation(invocation);

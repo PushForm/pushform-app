@@ -33,6 +33,9 @@ export interface InvocationContext {
 
 export type ContributionHandler = (params: unknown, invocation: InvocationContext) => unknown;
 
+/** A user event on an interface the extension mounted: the target, the component, the event and its payload. */
+export type UiEventHandler = (event: { target: string; component: string; event: string } & Record<string, unknown>) => void;
+
 type ServiceProxy = Readonly<Record<string, (input?: unknown, options?: CallOptions) => Promise<unknown>>>;
 
 /** The object an extension's `activate` receives. Only granted services are present. */
@@ -79,6 +82,7 @@ export async function startGuest(port: RuntimePort, loadMain: () => Promise<unkn
   const pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>();
   const handlers = new Map<string, ContributionHandler>();
   const invocations = new Map<number, AbortController>();
+  const uiHandlers = new Set<UiEventHandler>();
   const lifetime = new AbortController();
   let contributions = new Set<string>();
   let state: 'loaded' | 'activating' | 'active' | 'stopped' = 'loaded';
@@ -123,6 +127,14 @@ export async function startGuest(port: RuntimePort, loadMain: () => Promise<unkn
         methods[method] = (input, options) => permission !== null && !access.grants.has(permission)
           ? Promise.reject(new ExtensionError('permission.denied', `${service}.${method} needs the ${permission} permission.`, { permission }))
           : request(service, method, input, options);
+      }
+      if (service === 'ui') {
+        // Events arrive from the host; the extension listens for them here. Returns a function that stops listening.
+        (methods as Record<string, unknown>).onEvent = (handler: UiEventHandler) => {
+          if (typeof handler !== 'function') throw new ExtensionError('validation.failed', 'onEvent needs a function.');
+          uiHandlers.add(handler);
+          return () => uiHandlers.delete(handler);
+        };
       }
       context[service] = Object.freeze(methods) satisfies ServiceProxy;
     }
@@ -215,6 +227,18 @@ export async function startGuest(port: RuntimePort, loadMain: () => Promise<unkn
       case 'deactivate':
         if (state !== 'stopped') void stop().catch(() => {});
         return;
+      case 'event': {
+        if (state !== 'active') return;
+        const { type: _type, ...event } = message as unknown as { type: string; target: string; component: string; event: string };
+        for (const handler of uiHandlers) {
+          try {
+            handler(event);
+          } catch {
+            // A failing handler must not stop the others or the runtime; the extension sees its own error in its log.
+          }
+        }
+        return;
+      }
     }
   });
   port.post({ type: 'ready', v: RUNTIME_PROTOCOL_VERSION });

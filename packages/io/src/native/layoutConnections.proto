@@ -1,0 +1,14 @@
+syntax = "proto2";
+package pushform.native;
+// DRAFT. Snapshot text is an opaque asset, never parsed as native document metadata.
+message LayoutConnectionViewport {
+  required string original_id = 1;
+  required uint32 entity_id = 2;
+}
+message LayoutConnections {
+  required string archive_id = 1;
+  required string original_id = 2;
+  required uint32 snapshot_asset_id = 3;
+  repeated LayoutConnectionViewport viewports = 4;
+  optional bytes fields = 5; // LayoutAnnotationFields
+}

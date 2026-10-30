@@ -1,0 +1,30 @@
+syntax = "proto2";
+package pushform.native;
+// DRAFT: entity records are stored separately and owned by page ID.
+message LayoutPageMargin {
+  required double top = 1;
+  required double right = 2;
+  required double bottom = 3;
+  required double left = 4;
+}
+message LayoutPageOrder {
+  required uint32 count = 1;
+  repeated uint32 chunks = 2 [packed = true];
+}
+message LayoutLayerVisibility {
+  required uint32 id = 1;
+  required bool visible = 2;
+}
+message LayoutPageVisibility {
+  required uint32 state = 1; // 0 explicit undefined, 1 map (including empty)
+  repeated LayoutLayerVisibility entries = 2;
+}
+message LayoutPage {
+  required uint32 id = 1;
+  required string name = 2;
+  required bytes size = 3; // two little-endian Float64 values in paper millimeters
+  required LayoutPageMargin margin = 4;
+  required string background = 5;
+  required LayoutPageOrder entity_order = 6;
+  optional LayoutPageVisibility layer_visibility = 7;
+}

@@ -1,0 +1,13 @@
+syntax = "proto2";
+package pushform.native;
+import "sketchVertices.proto";
+import "sketchEdges.proto";
+import "sketchFaces.proto";
+import "sketchCurves.proto";
+message Sketch {
+  required SketchVertices vertices = 1;
+  required SketchEdges edges = 2;
+  required SketchFaces faces = 3;
+  required SketchCurves curves = 4;
+  // The spatial vertexHash is derived, not persisted.
+}

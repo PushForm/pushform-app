@@ -1,0 +1,18 @@
+syntax = "proto2";
+package pushform.native;
+import "faceUv.proto";
+message SketchFaces {
+  required uint32 face_count = 1;
+  required uint32 loop_count = 2;
+  required uint32 reference_count = 3;
+  repeated uint32 ids = 4 [packed=true]; // Uint32 face IDs
+  repeated uint32 geometry = 5 [packed=true]; // Float64: plane n.xyz,d; basis origin/u/v/n.xyz (16 per face)
+  repeated uint32 properties = 6 [packed=true]; // Uint32 common-property, front material, back material (3 per face)
+  repeated uint32 material_flags = 7 [packed=true]; // Uint8 bits 0/1 = explicit front/back material
+  repeated uint32 face_offsets = 8 [packed=true]; // Uint32 face_count+1 offsets into loops
+  repeated uint32 loop_offsets = 9 [packed=true]; // Uint32 loop_count+1 offsets into references
+  repeated uint32 edge_ids = 10 [packed=true]; // Uint32 edge IDs
+  repeated uint32 forward = 11 [packed=true]; // Uint8 0/1 per reference
+  required FaceUv uv = 12;
+  // All repeated uint32 fields above are storage chunk references, not inline geometry.
+}

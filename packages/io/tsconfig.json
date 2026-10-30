@@ -1,0 +1,27 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist/types"
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../geom"
+    },
+    {
+      "path": "../model"
+    },
+    {
+      "path": "../layout"
+    },
+    {
+      "path": "../kernel"
+    }
+  ]
+}

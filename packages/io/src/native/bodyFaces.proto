@@ -1,0 +1,17 @@
+syntax = "proto2";
+package pushform.native;
+import "faceUv.proto";
+message BodyFaces {
+  required uint32 face_count = 1;
+  required uint32 loop_count = 2;
+  required uint32 point_count = 3;
+  repeated uint32 ids = 4 [packed=true]; // Uint32 body-local face IDs
+  repeated uint32 geometry = 5 [packed=true]; // Float64 plane n.xyz,d; basis origin/u/v/n.xyz
+  repeated uint32 properties = 6 [packed=true]; // Uint32 front material, back material, tag, surface ID
+  repeated uint32 flags = 7 [packed=true]; // Uint8 bits 0 front present, 1 back present, 2 hidden, 3 surface present
+  repeated uint32 face_offsets = 8 [packed=true]; // Uint32 face_count+1 loop offsets
+  repeated uint32 loop_offsets = 9 [packed=true]; // Uint32 loop_count+1 point offsets
+  repeated uint32 positions = 10 [packed=true]; // Float64 xyz in exact boundary traversal order
+  required FaceUv uv = 11;
+  // Repeated fields hold storage chunk references. Boundary positions do not mutate mesh topology.
+}

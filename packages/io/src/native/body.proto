@@ -1,0 +1,24 @@
+syntax = "proto2";
+package pushform.native;
+import "meshReference.proto";
+import "bodyFaces.proto";
+import "bodyEdges.proto";
+import "bodyCurves.proto";
+import "bodySurfaces.proto";
+import "imprint.proto";
+message Body {
+  required uint32 id = 1;
+  required uint64 version = 2;
+  required uint64 next_face_id = 3;
+  optional uint32 material_id = 4; // Absent means null
+  required uint32 properties = 5;
+  required bool valid = 6;
+  required double volume = 7;
+  required double area = 8;
+  required MeshReference mesh = 9;
+  required BodyFaces faces = 10;
+  required BodyEdges edges = 11;
+  required BodyCurves curves = 12;
+  required BodySurfaces surfaces = 13;
+  repeated Imprint imprints = 14;
+}

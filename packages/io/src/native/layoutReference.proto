@@ -1,0 +1,20 @@
+syntax = "proto2";
+package pushform.native;
+// DRAFT: references identify source documents; cloud model bytes are not embedded here.
+message LayoutCloudTarget {
+  required string document_id = 1;
+  required string revision_id = 2;
+  required uint64 revision_number = 3;
+  required string sha256 = 4;
+  required bool pinned = 5;
+}
+message LayoutPathTarget {
+  required string path = 1;
+  optional string content_hash = 2; // absent = null
+}
+message LayoutModelReference {
+  required uint32 id = 1;
+  required string display_name = 2;
+  required uint32 kind = 3; // 0 path, 1 cloud; other kinds require a newer reader
+  required bytes target = 4; // LayoutPathTarget or LayoutCloudTarget according to kind
+}

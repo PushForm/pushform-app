@@ -1,0 +1,9 @@
+syntax = "proto2";
+package pushform.native;
+// DRAFT. Payloads are independent kind-4 chunks, referenced once by the asset owner.
+message LayoutAsset {
+  required uint32 encoding = 1; // 0 exact UTF-16LE text; 1 canonical base64 represented by decoded bytes
+  required string prefix = 2; // image data URL prefix including comma; empty for archives/text fallback
+  required uint32 byte_length = 3;
+  repeated uint32 chunks = 4 [packed = true];
+}

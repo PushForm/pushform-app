@@ -1,0 +1,43 @@
+{
+  "$comment": "Default shortcuts. 'Mod' = Meta on mac, Ctrl elsewhere. Platform sections override/add bindings.",
+  "default": [
+    { "key": "Space", "command": "tool.select" },
+    { "key": "Shift+Space", "command": "tool.lasso" },
+    { "key": "B", "command": "tool.paint" },
+    { "key": "E", "command": "tool.eraser" },
+    { "key": "L", "command": "tool.line" },
+    { "key": "R", "command": "tool.rectangle" },
+    { "key": "C", "command": "tool.circle" },
+    { "key": "A", "command": "tool.arc2" },
+    { "key": "M", "command": "tool.move" },
+    { "key": "P", "command": "tool.pushpull" },
+    { "key": "Q", "command": "tool.rotate" },
+    { "key": "S", "command": "tool.scale" },
+    { "key": "F", "command": "tool.offset" },
+    { "key": "T", "command": "tool.tape" },
+    { "key": "O", "command": "tool.orbit" },
+    { "key": "H", "command": "tool.pan" },
+    { "key": "Z", "command": "tool.zoom" },
+    { "key": "Shift+Z", "command": "camera.zoomExtents" },
+    { "key": "Mod+Shift+W", "command": "tool.zoomWindow" },
+    { "key": "G", "command": "ui.makeComponent" },
+    { "key": "Mod+G", "command": "group.make" },
+    { "key": "Mod+K", "command": "view.search" },
+    { "key": "Shift+S", "command": "view.search" },
+    { "key": "K", "command": "view.backEdges" },
+    { "key": "I", "command": "view.xray" },
+    { "key": "Mod+Z", "command": "edit.undo" },
+    { "key": "Mod+Shift+Z", "command": "edit.redo" },
+    { "key": "Mod+A", "command": "edit.selectAll" },
+    { "key": "Mod+T", "command": "edit.selectNone" },
+    { "key": "Mod+Shift+I", "command": "edit.invertSelection" },
+    { "key": "Escape", "command": "tool.cancel" }
+  ],
+  "win": [{ "key": "Ctrl+Y", "command": "edit.redo" }],
+  "linux": [{ "key": "Ctrl+Y", "command": "edit.redo" }],
+  "mac": [],
+  "web": [
+    { "key": "Mod+Shift+E", "command": "camera.zoomExtents" },
+    { "key": "Shift+W", "command": "tool.zoomWindow" }
+  ]
+}

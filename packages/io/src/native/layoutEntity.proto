@@ -1,0 +1,14 @@
+syntax = "proto2";
+package pushform.native;
+// DRAFT. All records for an entity carry the same owner ID.
+message LayoutEntityRecord {
+  required uint32 owner_id = 1;
+  required uint32 kind = 2; // header=0, table=1, image=2, linear=3, angular=4, text=5, paper-anchor=6, model-annotation=7, connections=8, table-cell=9
+  required uint32 state = 3; // 0 explicit undefined (optional payloads only), 1 payload
+  optional bytes payload = 4;
+}
+message LayoutEntityHeader {
+  required bytes metadata = 1; // LayoutEntityMetadata
+  required bytes geometry = 2; // LayoutGeometry
+  required uint32 payload_mask = 3; // bit (kind-1) requires one optional-payload record, including explicit undefined
+}

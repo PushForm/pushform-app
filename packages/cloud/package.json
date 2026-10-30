@@ -1,0 +1,22 @@
+{
+  "name": "@pushform/cloud",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Supabase auth, projects, revisions, shares, comments, locks",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "sideEffects": false,
+  "dependencies": {
+    "@pushform/core": "workspace:*",
+    "@pushform/io": "workspace:*",
+    "@pushform/model": "workspace:*",
+    "@supabase/supabase-js": "^2.75.0"
+  },
+  "devDependencies": {
+    "@pushform/requests-core": "workspace:*"
+  }
+}

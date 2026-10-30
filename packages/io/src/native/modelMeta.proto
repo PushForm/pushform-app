@@ -1,0 +1,30 @@
+syntax = "proto2";
+package pushform.native;
+message EmptyState {}
+message NullableDouble { oneof state { EmptyState null_value = 2; double value = 3; } }
+message UnitSettings {
+  required uint32 format = 1; // architectural, decimal, engineering, fractional
+  required uint32 length_unit = 2; // in, ft, yd, mm, cm, m
+  required uint32 length_precision = 3;
+  required uint32 area_unit = 4; // in2, ft2, yd2, mm2, cm2, m2
+  required uint32 area_precision = 5;
+  required uint32 volume_unit = 6; // in3, ft3, yd3, mm3, cm3, m3, l
+  required uint32 volume_precision = 7;
+  required NullableDouble length_snap = 8;
+  required NullableDouble angle_snap = 9;
+  required uint32 angle_precision = 10;
+  required bool display_unit_suffix = 11;
+  required bool force_zero_inches = 12;
+}
+message DimensionDefaults {
+  required double font_size_pt = 1;
+  required uint32 arrow = 2; // none, slash, dot, closed, open
+  required uint32 align = 3; // screen, above, centered, outside
+}
+message OptionalDimensionDefaults { oneof state { EmptyState undefined_value = 1; DimensionDefaults value = 3; } }
+message ModelMeta {
+  required string guid = 1;
+  required uint64 next_id = 2;
+  required UnitSettings units = 3;
+  optional OptionalDimensionDefaults dimensions = 4;
+}

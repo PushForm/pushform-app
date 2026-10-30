@@ -1,0 +1,19 @@
+{
+  "name": "@pushform/testing",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Mesh assertions, fixtures, golden files",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "sideEffects": false,
+  "dependencies": {
+    "@pushform/core": "workspace:*",
+    "@pushform/geom": "workspace:*",
+    "@pushform/kernel": "workspace:*",
+    "@pushform/model": "workspace:*"
+  }
+}

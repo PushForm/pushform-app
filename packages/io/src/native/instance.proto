@@ -1,0 +1,18 @@
+syntax = "proto2";
+package pushform.native;
+import "modelMeta.proto";
+message OptionalGluedPlane {
+  oneof state {
+    EmptyState undefined_value = 1;
+    bytes value = 3; // 4 little-endian Float64: normal.xyz, offset
+  }
+}
+message Instance {
+  required uint32 id = 1;
+  required uint32 definition_id = 2;
+  required bytes transform = 3; // 16 little-endian Float64, column-major
+  required string name = 4;
+  optional uint32 material_id = 5; // absent means inherited (null)
+  optional OptionalGluedPlane glued_plane = 6;
+  required uint32 properties = 7; // nonzero shared common-property catalog ID
+}

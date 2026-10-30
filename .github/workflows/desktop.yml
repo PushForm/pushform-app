@@ -1,0 +1,308 @@
+# Desktop builds: the Tauri app in apps/desktop for Windows x64, macOS arm64 and Linux x86_64.
+#
+# - Nightly: every night (and on demand from the Actions tab) main is built and published to
+#   https://downloads.pushform.io/desktop/nightly/, replacing the previous one. A scheduled run skips the build when
+#   main has not moved since the last nightly. File names carry no version, so the links stay stable.
+# - Stable: pushing a tag `v<yr>.<week>.<increment>` checks it against the tagged commit's version, runs the checks,
+#   builds, and publishes the release to https://downloads.pushform.io/desktop/stable/<version>/ and the release index
+#   the download page lists. Other tags (`v1.2.0-rc.1`) do not match.
+#
+# Every build is versioned `<yr>.<week>.<increment>` from git by apps/web/buildVersion.ts,
+# computed once here and passed to the web bundle (VITE_VERSION) and to Tauri, which ignores tauri.conf.json's version.
+#
+# The web bundle is built with the same public variables as the production deploy. macOS requires the Apple signing
+# and notarization secrets ; Windows signing remains pending (PF-45).
+# Builds are signed for the in-app updater when
+# the Desktop environment holds the updater key pair: the secret TAURI_SIGNING_PRIVATE_KEY (and
+# TAURI_SIGNING_PRIVATE_KEY_PASSWORD if it has one) and the variable TAURI_UPDATER_PUBKEY. Without them the apps are
+# built without the public key, never check for updates, and no update manifest is published.
+name: desktop
+on:
+  schedule:
+    - cron: '0 7 * * *' # 07:00 UTC, after the US working day
+  workflow_dispatch:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      channel: ${{ steps.plan.outputs.channel }}
+      build: ${{ steps.plan.outputs.build }}
+      version: ${{ steps.plan.outputs.version }}
+    steps:
+      # The whole history: the version counts this week's commits.
+      - uses: actions/checkout@v7
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v7
+        with: { node-version: 24 }
+      - id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          version=$(node --experimental-strip-types apps/web/buildVersion.ts)
+          echo "Version $version"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            tag="${GITHUB_REF#refs/tags/}"
+            if [[ "$tag" != "v$version" ]]; then
+              echo "::error::Tag $tag is on a commit whose version is $version. Tag it v$version instead."
+              exit 1
+            fi
+            echo "channel=stable" >> "$GITHUB_OUTPUT"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            if [[ "$GITHUB_REF" != refs/heads/main ]]; then
+              echo "::error::Nightly builds come from main; this run is on $GITHUB_REF."
+              exit 1
+            fi
+            last=$(curl -fsSL https://downloads.pushform.io/desktop/nightly.json | jq -r '.releases[0].commit' || true)
+            build=true
+            if [[ "$EVENT" == schedule && "$last" == "$GITHUB_SHA" ]]; then
+              echo "main is still at the last nightly ($last); nothing to build."
+              build=false
+            fi
+            echo "channel=nightly" >> "$GITHUB_OUTPUT"
+            echo "build=$build" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  # A stable release ships only a commit that passes the same checks as ci.yml.
+  check:
+    needs: prepare
+    if: needs.prepare.outputs.channel == 'stable'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm license-check
+
+  build:
+    needs: [prepare, check]
+    # `check` is skipped for nightlies; run unless something actually failed.
+    if: ${{ !failure() && !cancelled() && needs.prepare.outputs.build == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: windows-x64, os: windows-latest, bundles: 'nsis,msi' }
+          # `app` makes the updater's .app.tar.gz; only the .dmg is a download for people.
+          - { platform: macos-arm64, os: macos-latest, bundles: 'app,dmg' }
+          - { platform: linux-x86_64, os: ubuntu-22.04, bundles: 'appimage,deb,rpm' }
+    runs-on: ${{ matrix.os }}
+    # Holds the public Supabase build variables (the same values as Production, which only main may use).
+    environment: Desktop
+    steps:
+      - uses: actions/checkout@v7
+      # Ubuntu 22.04 keeps the AppImage and .deb on an older glibc, so they run on more distributions.
+      - if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: apps/desktop/src-tauri }
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      # The version, and with the updater key its public key and updater artifacts, reach Tauri as a config file merged
+      # over tauri.conf.json (no shell quoting of JSON on Windows).
+      - shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          UPDATER_KEY_SET: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+          UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
+        run: |
+          echo "VITE_RELEASE=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          echo "VITE_VERSION=$VERSION" >> "$GITHUB_ENV"
+          if [[ "$UPDATER_KEY_SET" == true && -n "$UPDATER_PUBKEY" ]]; then
+            node -e 'const e = process.env; console.log(JSON.stringify({ version: e.VERSION, build: { beforeBuildCommand: null }, bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey: e.UPDATER_PUBKEY } } }))' > "$RUNNER_TEMP/version.json"
+          elif [[ "$UPDATER_KEY_SET" == true || -n "$UPDATER_PUBKEY" ]]; then
+            echo "::error::Set both the secret TAURI_SIGNING_PRIVATE_KEY and the variable TAURI_UPDATER_PUBKEY, or neither."
+            exit 1
+          else
+            echo "::warning::No updater key: this build will not update itself."
+            node -e 'console.log(JSON.stringify({ version: process.env.VERSION, build: { beforeBuildCommand: null } }))' > "$RUNNER_TEMP/version.json"
+          fi
+      # The cloud configuration is baked into the bundle, so it is checked before the build and in the built files
+      # before anything is packaged.
+      - run: node scripts/check-cloud-config.mjs
+        env:
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+      # The web bundle is built here rather than by tauri.conf.json's beforeBuildCommand, which version.json removes (Tauri
+      # merges it as a JSON merge patch), so its source maps go to Sentry and into an artifact, and are removed, before
+      # Tauri embeds the bundle.
+      - run: pnpm --filter @pushform/app-web build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+          VITE_FR_REGION: ${{ vars.VITE_FR_REGION }}
+      - run: node scripts/check-cloud-config.mjs apps/web/dist
+        env:
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+      - run: node scripts/sentry-sourcemaps.mjs apps/web/dist
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sourcemaps-desktop-${{ matrix.platform }}-${{ github.sha }}
+          path: apps/web/dist/**/*.map
+          if-no-files-found: error
+          retention-days: 90
+      - shell: bash
+        run: find apps/web/dist -name '*.map' -delete
+      - name: Prepare macOS signing and notarization
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          # A .p12 with a blank password is imported with -P "".
+          for name in APPLE_CERTIFICATE APPLE_SIGNING_IDENTITY APPLE_API_ISSUER APPLE_API_KEY APPLE_API_PRIVATE_KEY; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing Desktop environment secret: $name"
+              exit 1
+            fi
+          done
+          if [[ "$APPLE_SIGNING_IDENTITY" != 'Developer ID Application: '* ]]; then
+            echo "::error::APPLE_SIGNING_IDENTITY must name a Developer ID Application certificate."
+            exit 1
+          fi
+          keychain="$RUNNER_TEMP/pushform-signing.keychain-db"
+          keychain_password=$(openssl rand -hex 32)
+          echo "::add-mask::$keychain_password"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/pushform-signing.p12"
+          printf '%s' "$APPLE_API_PRIVATE_KEY" > "$RUNNER_TEMP/pushform-notarization.p8"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain" "$HOME/Library/Keychains/login.keychain-db"
+          security import "$RUNNER_TEMP/pushform-signing.p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security > /dev/null
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" > /dev/null
+          rm -f "$RUNNER_TEMP/pushform-signing.p12"
+          echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/pushform-notarization.p8" >> "$GITHUB_ENV"
+      - run: pnpm --filter @pushform/app-desktop tauri build --ci --bundles ${{ matrix.bundles }} --config "${{ runner.temp }}/version.json"
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+          APPLE_API_ISSUER: ${{ runner.os == 'macOS' && secrets.APPLE_API_ISSUER || '' }}
+          APPLE_API_KEY: ${{ runner.os == 'macOS' && secrets.APPLE_API_KEY || '' }}
+      - name: Verify macOS signature and notarization
+        if: runner.os == 'macOS'
+        run: |
+          codesign --verify --deep --strict --verbose=2 apps/desktop/src-tauri/target/release/bundle/macos/PushForm.app
+          xcrun stapler validate apps/desktop/src-tauri/target/release/bundle/macos/PushForm.app
+      - name: Remove macOS signing credentials
+        if: always() && runner.os == 'macOS'
+        run: |
+          rm -f "$RUNNER_TEMP/pushform-signing.p12" "$RUNNER_TEMP/pushform-notarization.p8"
+          if [[ -f "$RUNNER_TEMP/pushform-signing.keychain-db" ]]; then
+            security delete-keychain "$RUNNER_TEMP/pushform-signing.keychain-db"
+          fi
+      # Installers are named PushForm-<label>-<platform><suffix>, the label being the version or `nightly`, so nightly
+      # download links never change; scripts/desktop-release.mjs reads the platform and format from the name. Updater
+      # signatures keep the installer's name plus `.sig`; the macOS updater archive is PushForm-<label>-macos-arm64.app.tar.gz.
+      - name: Collect installers
+        shell: bash
+        env:
+          LABEL: ${{ needs.prepare.outputs.channel == 'stable' && needs.prepare.outputs.version || 'nightly' }}
+          PLATFORM: ${{ matrix.platform }}
+          BUNDLES: ${{ matrix.bundles }}
+        run: |
+          shopt -s nullglob
+          bundle=apps/desktop/src-tauri/target/release/bundle
+          name="PushForm-$LABEL-$PLATFORM"
+          mkdir -p out
+          for f in $bundle/nsis/*-setup.exe; do cp "$f" "out/$name-setup.exe"; done
+          for f in $bundle/msi/*.msi; do cp "$f" "out/$name.msi"; done
+          for f in $bundle/dmg/*.dmg; do cp "$f" "out/$name.dmg"; done
+          for f in $bundle/appimage/*.AppImage; do cp "$f" "out/$name.AppImage"; done
+          for f in $bundle/deb/*.deb; do cp "$f" "out/$name.deb"; done
+          for f in $bundle/rpm/*.rpm; do cp "$f" "out/$name.rpm"; done
+          for f in $bundle/nsis/*-setup.exe.sig; do cp "$f" "out/$name-setup.exe.sig"; done
+          for f in $bundle/msi/*.msi.sig; do cp "$f" "out/$name.msi.sig"; done
+          for f in $bundle/macos/*.app.tar.gz; do cp "$f" "out/$name.app.tar.gz"; done
+          for f in $bundle/macos/*.app.tar.gz.sig; do cp "$f" "out/$name.app.tar.gz.sig"; done
+          for f in $bundle/appimage/*.AppImage.sig; do cp "$f" "out/$name.AppImage.sig"; done
+          for f in $bundle/deb/*.deb.sig; do cp "$f" "out/$name.deb.sig"; done
+          for f in $bundle/rpm/*.rpm.sig; do cp "$f" "out/$name.rpm.sig"; done
+          ls -l out
+          # `app` is the updater archive, not an installer.
+          expected=$(tr ',' '\n' <<< "$BUNDLES" | grep -cvx app)
+          installers=$(ls out | grep -v '\.sig$' | grep -cv '\.app\.tar\.gz$')
+          if (( installers != expected )); then echo "::error::Expected $expected installers"; exit 1; fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-${{ matrix.platform }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 14
+
+  # Publishes only after every platform built, so a failed night leaves the previous nightly in place. Installers go to
+  # the public downloads bucket in Cloudflare R2 (https://downloads.pushform.io), which the download page on pushform.io
+  # reads; the repository is private, so its GitHub releases are not downloadable by users. Uploads use R2's S3 API with
+  # an R2 token scoped to the bucket (Object Read & Write): the Desktop environment holds its R2_ACCESS_KEY_ID and
+  # R2_SECRET_ACCESS_KEY, and the variable CLOUDFLARE_ACCOUNT_ID, which names the S3 endpoint.
+  publish:
+    needs: [prepare, build]
+    if: ${{ !failure() && !cancelled() && needs.prepare.outputs.build == 'true' }}
+    runs-on: ubuntu-24.04
+    environment: Desktop
+    permissions:
+      contents: write
+    concurrency: { group: desktop-publish, cancel-in-progress: false }
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: 24 }
+      - uses: actions/download-artifact@v8
+        with: { path: out, pattern: desktop-*, merge-multiple: true }
+      - run: node scripts/desktop-release.mjs --channel ${{ needs.prepare.outputs.channel }} --version "$VERSION" --commit "$GITHUB_SHA" --dir out
+        env:
+          DOWNLOADS_BUCKET: pushform-downloads
+          DOWNLOADS_URL: https://downloads.pushform.io
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      # A stable tag also gets a GitHub release in this private repository: the team's record, with notes generated from
+      # pull requests (never published to the bucket). GitHub refuses it (HTTP 403) when the tagged commit is behind a
+      # change to .github/workflows/ on main, unless the token may modify workflows, which the workflow token never may;
+      # the optional secret DESKTOP_RELEASE_TOKEN (fine-grained, this repository, Contents and Workflows read/write) can.
+      - if: needs.prepare.outputs.channel == 'stable'
+        env:
+          GH_TOKEN: ${{ secrets.DESKTOP_RELEASE_TOKEN || github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          gh release create "$tag" out/* --verify-tag --latest --title "PushForm $VERSION" --generate-notes

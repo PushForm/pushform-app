@@ -1,0 +1,9 @@
+syntax = "proto2";
+package pushform.native;
+message SketchEdges {
+  required uint32 count = 1;
+  repeated uint32 id_chunks = 2 [packed=true]; // Uint32 persistent IDs
+  repeated uint32 row_chunks = 3 [packed=true]; // Uint32 a, b, common-property ID, curve ID per edge
+  repeated uint32 flag_chunks = 4 [packed=true]; // Uint8: bit 0 soft, 1 smooth, 2 has curve
+  // Null curves have curve ID zero with bit 2 clear. ID zero with bit 2 set is an explicit curve.
+}

@@ -1,0 +1,25 @@
+syntax = "proto2";
+package pushform.native;
+message Guide {
+  required uint32 id = 1;
+  required uint32 properties = 2;
+  required uint32 kind = 3; // 0 point, 1 line, 2 segment
+  required bytes origin = 4; // Three little-endian Float64 values
+  optional bytes vector = 5; // Absent for point; direction for line; endpoint for segment
+}
+message ImagePlacement {
+  required uint32 id = 1;
+  required uint32 properties = 2;
+  required uint32 image_id = 3;
+  required bytes transform = 4; // Sixteen little-endian Float64 values, column-major
+  required double width_m = 5;
+  required double height_m = 6;
+}
+message SectionPlane {
+  required uint32 id = 1;
+  required uint32 properties = 2;
+  required string name = 3;
+  required string symbol = 4;
+  required bytes plane = 5; // Float64 normal.xyz, d
+  required bytes origin = 6; // Float64 xyz
+}

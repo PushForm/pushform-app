@@ -1,0 +1,52 @@
+syntax = "proto2";
+package pushform.native;
+// DRAFT. Model coordinates remain Float64 meters; cache frame sizes are paper millimeters.
+message LayoutViewportCamera {
+  required bytes eye = 1;
+  required bytes target = 2;
+  required bytes up = 3;
+  required uint32 projection = 4; // 0 perspective, 1 parallel
+  required double fov = 5;
+  required double scale = 6;
+  optional bytes shift = 7; // empty explicit undefined; otherwise two LE Float64 values
+}
+message LayoutViewportSource {
+  required uint32 kind = 1; // 0 embedded, 1 cloud reference
+  optional string archive_id = 2;
+  optional string model_reference_id = 3;
+  optional uint32 reference_id = 4;
+}
+message LayoutViewportOptionalRecord {
+  required uint32 state = 1; // 0 explicit undefined, 1 value
+  optional bytes value = 2;
+}
+message LayoutViewportOptionalString {
+  required uint32 state = 1;
+  optional string value = 2;
+}
+message LayoutViewportDisplay {
+  required uint32 face_style = 1; // wireframe, hiddenLine, shaded, shadedTextured, monochrome
+  required bool edges = 2;
+  required bool profiles = 3;
+  required bool back_edges = 4;
+  required bool xray = 5;
+  required bool hidden_geometry = 6;
+  optional LayoutViewportOptionalRecord shadows = 7; // value is existing Shadows record
+}
+message LayoutViewportCache {
+  required LayoutViewportCamera camera = 1;
+  required double width_mm = 2;
+  required double height_mm = 3;
+  optional LayoutViewportOptionalString sha256 = 4;
+}
+message LayoutViewport {
+  required LayoutViewportSource source = 1;
+  optional string template_id = 2; // absent means null for each nullable string
+  optional string original_id = 3;
+  required LayoutViewportCamera camera = 4;
+  optional uint32 preserve_scale_on_resize = 5; // 0 undefined, 1 false, 2 true
+  optional string scene = 6;
+  optional string background = 7;
+  optional LayoutViewportCache cache = 8; // absent means null
+  optional LayoutViewportOptionalRecord display = 9; // value is LayoutViewportDisplay
+}

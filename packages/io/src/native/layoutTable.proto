@@ -1,0 +1,35 @@
+syntax = "proto2";
+package pushform.native;
+// DRAFT. Cells are separate owner-scoped records, streamed in row-major order.
+message LayoutTableOptionalString {
+  required uint32 state = 1; // 0 undefined, 1 null, 2 string
+  optional string value = 2;
+}
+message LayoutTableCell {
+  required uint32 index = 1;
+  required bytes text = 2; // LayoutText
+  optional LayoutTableOptionalString fill_color = 3;
+  optional uint32 rotation = 4; // 0 undefined; 1=90, 2=180, 3=270
+}
+message LayoutTableEdge {
+  required string stroke_color = 1;
+  required double stroke_weight_pt = 2;
+  optional bytes stroke_dash_mm = 3; // byte 0: 0 undefined, 1 Float64 sequence follows
+}
+message LayoutTableEdges {
+  required uint32 state = 1; // 0 undefined, 1 array
+  repeated LayoutTableEdge entries = 2;
+}
+message LayoutTableMerge {
+  required uint32 row = 1;
+  required uint32 column = 2;
+  required uint32 row_span = 3;
+  required uint32 column_span = 4;
+}
+message LayoutTableHeader {
+  required bytes rows = 1; // little-endian Float64 relative sizes
+  required bytes columns = 2;
+  repeated LayoutTableMerge merges = 3;
+  optional LayoutTableEdges row_edges = 4;
+  optional LayoutTableEdges column_edges = 5;
+}

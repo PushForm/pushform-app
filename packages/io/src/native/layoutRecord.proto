@@ -1,0 +1,10 @@
+syntax = "proto2";
+package pushform.native;
+// DRAFT. Context fields are required only for their matching record kinds.
+message LayoutRecord {
+  required uint32 kind = 1; // layer, reference, page, entity, archive, archive-model, archive-viewport, asset, custom-field, numbering
+  required bytes payload = 2;
+  optional uint32 page_id = 3; // entity only; zero is the document's shared entity container
+  optional string archive_id = 4; // archive-model/archive-viewport only
+  optional uint32 asset_id = 5; // asset only
+}

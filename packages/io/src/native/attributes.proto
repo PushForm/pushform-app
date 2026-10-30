@@ -1,0 +1,19 @@
+syntax = "proto2";
+package pushform.native;
+
+message AttributeNull {}
+message AttributeValue {
+  oneof state {
+    AttributeNull null_value = 1;
+    string string_value = 2;
+    double number_value = 3;
+    bool bool_value = 4;
+    AttributeList list_value = 5;
+    AttributeObject object_value = 6;
+  }
+}
+message AttributeList { repeated AttributeValue values = 1; }
+message AttributeEntry { required string key = 1; required AttributeValue value = 2; }
+message AttributeObject { repeated AttributeEntry entries = 1; }
+message AttributeDictionary { required string name = 1; required AttributeObject value = 2; }
+message AttributeDictionaries { repeated AttributeDictionary dictionaries = 1; }

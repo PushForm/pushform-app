@@ -1,0 +1,9 @@
+syntax = "proto2";
+package pushform.native;
+message DocumentRoot {
+  required uint32 schema_major = 1;
+  required uint32 document_kind = 2; // 1 Modeling, 2 Layout
+  required uint32 metadata_chunk = 3;
+  repeated uint32 record_chunks = 4 [packed = true];
+  repeated uint32 required_capabilities = 5 [packed = true];
+}

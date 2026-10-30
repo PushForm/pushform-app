@@ -1,0 +1,11 @@
+syntax = "proto2";
+package pushform.native;
+import "attributes.proto";
+message CommonAttrs {
+  required uint32 tag_id = 1;
+  required bool hidden = 2;
+  required bool locked = 3;
+  required bool cast_shadows = 4;
+  required bool receive_shadows = 5;
+  required AttributeDictionaries attributes = 6;
+}

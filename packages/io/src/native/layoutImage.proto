@@ -1,0 +1,12 @@
+syntax = "proto2";
+package pushform.native;
+// DRAFT. Image data is held once in the document asset catalog.
+message LayoutImageOptionalRecord {
+  required uint32 state = 1; // 0 explicit undefined, 1 value
+  optional bytes value = 2;
+}
+message LayoutImage {
+  required uint32 asset_id = 1;
+  optional LayoutImageOptionalRecord clip = 2; // LayoutGeometry, normalized frame coordinates
+  optional LayoutImageOptionalRecord viewport = 3; // LayoutViewport
+}

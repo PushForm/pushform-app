@@ -1,0 +1,59 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "packages/core"
+    },
+    {
+      "path": "packages/geom"
+    },
+    {
+      "path": "packages/kernel"
+    },
+    {
+      "path": "packages/model"
+    },
+    {
+      "path": "packages/layout"
+    },
+    {
+      "path": "packages/extension-protocol"
+    },
+    {
+      "path": "packages/extensions"
+    },
+    {
+      "path": "packages/inference"
+    },
+    {
+      "path": "packages/commands"
+    },
+    {
+      "path": "packages/render"
+    },
+    {
+      "path": "packages/io"
+    },
+    {
+      "path": "packages/ui"
+    },
+    {
+      "path": "packages/mcp"
+    },
+    {
+      "path": "packages/cloud"
+    },
+    {
+      "path": "packages/testing"
+    },
+    {
+      "path": "apps/web"
+    },
+    {
+      "path": "packages/requests-core"
+    },
+    {
+      "path": "packages/requests-ui"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+syntax = "proto2";
+package pushform.native;
+// DRAFT. Coordinates are exact little-endian Float64 paper millimeters.
+message LayoutGeometryColumn {
+  required uint32 state = 1; // 0 explicit undefined, 1 column (including empty)
+  required uint32 count = 2; // scalar elements
+  repeated uint32 chunks = 3 [packed = true];
+}
+message LayoutGeometry {
+  required LayoutGeometryColumn points = 1; // interleaved x,y
+  required bool closed = 2;
+  optional LayoutGeometryColumn handle_flags = 3; // uint8: in state bits 0..1, out state bits 2..3
+  optional LayoutGeometryColumn handle_values = 4; // Float64 x,y for each present in, then out
+  optional LayoutGeometryColumn contour_starts = 5; // Uint32 point indices
+  optional LayoutGeometryColumn open_contours = 6; // Uint32 contour indices
+  // Handle states: 0 absent, 1 explicit undefined, 2 coordinate pair. 3 reserved.
+}

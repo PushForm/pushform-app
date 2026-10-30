@@ -1,0 +1,9 @@
+packages:
+  - packages/*
+  - apps/*
+  - workers/*
+allowBuilds:
+  esbuild: true
+  workerd: true
+patchedDependencies:
+  openskp@1.3.0: patches/openskp@1.3.0.patch

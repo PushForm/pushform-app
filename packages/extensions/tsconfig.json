@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist/types"
+  },
+  "include": ["src"],
+  "references": [{ "path": "../extension-protocol" }, { "path": "../layout" }, { "path": "../commands" }]
+}

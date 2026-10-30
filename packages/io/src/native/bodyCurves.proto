@@ -1,0 +1,13 @@
+syntax = "proto2";
+package pushform.native;
+message BodyCurves {
+  required uint32 count = 1;
+  required uint32 reference_count = 2; // Number of edge-key triples
+  repeated uint32 ids = 3 [packed=true]; // Uint32 body-local curve IDs
+  repeated uint32 kinds = 4 [packed=true]; // Uint8: 0 arc, 1 circle, 2 polygon, 3 freehand
+  repeated uint32 geometry = 5 [packed=true]; // Float64 center.xyz, normal.xyz, radius, startAngle, endAngle
+  repeated uint32 segments = 6 [packed=true]; // Uint32 segment counts
+  repeated uint32 offsets = 7 [packed=true]; // Uint32 count+1 offsets measured in triples
+  repeated uint32 edge_keys = 8 [packed=true]; // Uint32 faceA,faceB,run triples
+  // Repeated fields reference storage chunks. Numeric sketch-edge references are not accepted.
+}

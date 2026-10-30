@@ -1,0 +1,38 @@
+syntax = "proto2";
+package pushform.native;
+// DRAFT. Optional wrappers distinguish omitted, explicit undefined and a value.
+message LayoutOptionalString { required uint32 state = 1; optional string value = 2; }
+message LayoutOptionalNumber { required uint32 state = 1; optional double value = 2; }
+message LayoutOptionalBytes { required uint32 state = 1; optional bytes value = 2; }
+message LayoutTextSpan {
+  required uint32 start = 1;
+  required uint32 end = 2;
+  required bool bold = 3;
+  required bool italic = 4;
+  required bool underline = 5;
+  optional LayoutOptionalString font_family = 6;
+  optional LayoutOptionalNumber font_size_pt = 7;
+  optional LayoutOptionalString color = 8;
+}
+message LayoutTextSpans { required uint32 state = 1; repeated LayoutTextSpan entries = 2; }
+message LayoutLineSpacing { required uint32 mode = 1; required double value = 2; } // 0 multiple, 1 exactly, 2 atLeast
+message LayoutText {
+  required string content = 1;
+  required string font_family = 2;
+  required double font_size_pt = 3;
+  required string color = 4;
+  required bool bold = 5;
+  required bool italic = 6;
+  required bool underline = 7;
+  required uint32 align = 8; // 0 left, 1 center, 2 right
+  required uint32 vertical = 9; // 0 top, 1 middle, 2 bottom
+  required bool bounded = 10;
+  required uint32 leader = 11; // 0 straight, 1 elbow, 2 none
+  required uint32 endpoint = 12; // 0 arrow, 1 dot, 2 none
+  optional LayoutTextSpans spans = 13;
+  optional uint32 list = 14; // 0 explicit undefined, 1 none, 2 bullet, 3 number
+  optional LayoutOptionalBytes line_spacing = 15; // value is LayoutLineSpacing
+  optional LayoutOptionalBytes tab_stops_pt = 16; // value is little-endian Float64 values
+  optional LayoutOptionalNumber rotation_deg = 17;
+  optional LayoutOptionalNumber leader_offset_mm = 18;
+}

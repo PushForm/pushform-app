@@ -1,0 +1,12 @@
+syntax = "proto2";
+package pushform.native;
+message ImageAsset {
+  required uint32 id = 1;
+  required string name = 2;
+  required string mime = 3;
+  required uint32 width = 4;
+  required uint32 height = 5;
+  required string source_hash = 6;
+  repeated uint32 payload_chunks = 7 [packed = true];
+  optional uint32 byte_length = 8; // absent means bytes unavailable; zero is an empty payload
+}

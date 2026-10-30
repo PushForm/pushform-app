@@ -1,0 +1,20 @@
+syntax = "proto2";
+package pushform.native;
+import "modelMeta.proto";
+message Rgb { required double red = 1; required double green = 2; required double blue = 3; }
+message OptionalColorizeType { oneof state { EmptyState undefined_value = 1; uint32 value = 3; } } // 0 shift, 1 tint
+message MaterialTexture {
+  required uint32 image_id = 1;
+  required double width_m = 2;
+  required double height_m = 3;
+  required bool colorize = 4;
+  optional OptionalColorizeType colorize_type = 5;
+}
+message NullableTexture { oneof state { EmptyState null_value = 2; MaterialTexture value = 3; } }
+message Material {
+  required uint32 id = 1;
+  required string name = 2;
+  required Rgb color = 3;
+  required double alpha = 4;
+  required NullableTexture texture = 5;
+}

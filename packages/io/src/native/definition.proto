@@ -1,0 +1,25 @@
+syntax = "proto2";
+package pushform.native;
+message ComponentBehaviors {
+  required uint32 glue_to = 1; // 0 none, 1 any, 2 horizontal, 3 vertical, 4 sloped
+  required bool cuts_opening = 2;
+  required bool always_face_camera = 3;
+  required bool shadows_face_sun = 4;
+}
+message DefinitionOrder {
+  required uint32 count = 1;
+  repeated uint32 chunks = 2 [packed=true]; // Uint32 column, storage kind 2/schema 1
+}
+message Definition {
+  required uint32 id = 1;
+  required string guid = 2;
+  required string name = 3;
+  required string description = 4;
+  required bool is_group = 5;
+  required bytes axes = 6; // 12 little-endian Float64: origin.xyz, x.xyz, y.xyz, z.xyz
+  required ComponentBehaviors behaviors = 7;
+  required DefinitionOrder entity_order = 8;
+  optional uint32 active_section_plane_id = 9; // absent means null
+  // Entity records carry their owning definition ID in the document record stream.
+  // Cached bounds are derived and are not persisted.
+}

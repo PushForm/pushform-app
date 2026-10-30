@@ -1,0 +1,51 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "PushForm",
+  "version": "0.0.1",
+  "identifier": "com.pushform.app",
+  "build": {
+    "frontendDist": "../../web/dist",
+    "devUrl": "http://localhost:5174",
+    "beforeDevCommand": "pnpm --filter @pushform/app-web dev",
+    "beforeBuildCommand": "pnpm --filter @pushform/app-web build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "PushForm",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "titleBarStyle": "Transparent",
+        "backgroundColor": "#ffffff"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' blob: data: https://pnbbxhxqpdqxupnbqyvf.supabase.co http://127.0.0.1:54321 http://localhost:54321; media-src 'self' blob:; connect-src 'self' https://pnbbxhxqpdqxupnbqyvf.supabase.co http://127.0.0.1:54321 http://localhost:54321 wss://pnbbxhxqpdqxupnbqyvf.supabase.co ws://127.0.0.1:54321 ws://localhost:54321 https://o4512324800806912.ingest.us.sentry.io ipc: http://ipc.localhost https://cdn.jsdelivr.net https://fonts.googleapis.com https://fonts.gstatic.com blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; report-uri https://o4512324800806912.ingest.us.sentry.io/api/4512324821385216/security/?sentry_key=a2f78afa4c19ca41aa65fbd037522489",
+      "devCsp": null,
+      "dangerousDisableAssetCspModification": ["style-src"]
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": ""
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "android": {
+      "debugApplicationIdSuffix": ".debug"
+    }
+  }
+}

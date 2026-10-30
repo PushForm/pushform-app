@@ -1,0 +1,46 @@
+name: uptime
+
+# Watches production between deploys. A failed run is the alert: GitHub emails the maintainer
+# who last changed this schedule when a scheduled run fails. Run it by hand with another origin to test that a dead
+# site fails the run.
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      origin:
+        description: Origin to check
+        default: https://app.pushform.io
+
+permissions:
+  contents: read
+
+concurrency: { group: uptime, cancel-in-progress: false }
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # The Production environment holds the Supabase URL and publishable key. Reading them records no deployment.
+    environment:
+      name: Production
+      deployment: false
+    env:
+      ORIGIN: ${{ inputs.origin || 'https://app.pushform.io' }}
+      VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+      SUPABASE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+      FR_BACKEND_URL: ${{ vars.VITE_FR_BACKEND_URL }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: 24 }
+      # The site: app shell, headers, bundles, wasm, /healthz and deep links, as after a deploy.
+      - run: node scripts/verify-deploy.mjs "$ORIGIN" --strict
+      # Sign-in depends on Supabase Auth.
+      - if: ${{ !cancelled() }}
+        run: |
+          curl --fail-with-body --silent --show-error --max-time 30 -H "apikey: $SUPABASE_KEY" "${VITE_SUPABASE_URL%/}/auth/v1/health"
+      # AI Chat and feature requests: 503 when the backend's tracker configuration is invalid.
+      - if: ${{ !cancelled() && env.FR_BACKEND_URL != '' }}
+        run: |
+          curl --fail-with-body --silent --show-error --max-time 30 "${FR_BACKEND_URL%/}/health"

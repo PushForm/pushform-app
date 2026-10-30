@@ -1,0 +1,42 @@
+{
+  "$schema": "./packages/requests-core/schema/feature-requests.config.schema.json",
+  "host": "pushform",
+  "name": "PushForm",
+  "tracker": {
+    "kind": "linear",
+    "team": "CUS",
+    "project": "Customer Features",
+    "problemDestination": {
+      "sameProject": true,
+      "label": "defect"
+    },
+    "states": {
+      "triage": "Triage",
+      "done": "Done",
+      "canceled": "Canceled"
+    }
+  },
+  "mail": {
+    "kind": "resend",
+    "from": "requests@pushform.io",
+    "replyTo": "support@pushform.io"
+  },
+  "models": {
+    "conversation": "claude-haiku-5-5",
+    "document": "claude-sonnet-5-5"
+  },
+  "roles": {
+    "defaultRole": "user",
+    "admins": [
+      "steven@pushform.io"
+    ],
+    "maintainers": [
+      "testers@pushform.io"
+    ]
+  },
+  "limits": {
+    "openRequestsPerAccount": 5,
+    "messagesPerConversation": 30,
+    "messagesPerMinute": 20
+  }
+}

@@ -1,0 +1,10 @@
+syntax = "proto2";
+package pushform.native;
+message FaceUv {
+  required uint32 face_count = 1;
+  required uint32 value_count = 2;
+  repeated uint32 kind_chunks = 3 [packed=true]; // Uint8 front/back per face: 0 absent, 1 undefined, 2 auto, 3 affine, 4 projective, 5 sized
+  repeated uint32 offset_chunks = 4 [packed=true]; // Uint32, 2*face_count+1 offsets into values
+  repeated uint32 value_chunks = 5 [packed=true]; // Float64 matrix coefficients, exact source order
+  // Front slots cannot be absent/undefined. Affine/sized use 6 coefficients; projective uses 9.
+}

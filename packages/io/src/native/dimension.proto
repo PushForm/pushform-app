@@ -1,0 +1,35 @@
+syntax = "proto2";
+package pushform.native;
+message DimensionAnchor {
+  required uint32 kind = 1; // 0 null, 1 sketch vertex, 2 body vertex
+  optional bytes path = 2; // Packed uint32 IDs; required for non-null anchors, including empty paths
+  optional uint32 id = 3; // Sketch vertex only
+  optional uint32 body_id = 4; // Body vertex only
+  optional bytes face_ids = 5; // Packed uint32 IDs, body vertex only; preserve order/repeats
+}
+message DimensionAnchors {
+  required uint32 state = 1; // 0 explicit undefined, 1 pair
+  optional DimensionAnchor start = 2;
+  optional DimensionAnchor end = 3;
+}
+message DimensionCurve {
+  required uint32 state = 1; // 0 explicit undefined, 1 value
+  optional bytes path = 2; // Packed uint32 IDs; required for value
+  optional uint32 body_id = 3; // Absent means sketch curve
+  optional uint32 curve_id = 4; // Required for value
+}
+message Dimension {
+  required uint32 id = 1;
+  required uint32 properties = 2;
+  required uint32 kind = 3; // 0 linear, 1 radial, 2 diametric
+  required bytes start = 4; // Three little-endian Float64 values per vector
+  required bytes end = 5;
+  required bytes offset = 6;
+  required bytes normal = 7;
+  optional string text = 8; // Absent means null; empty override remains distinct
+  required double font_size_pt = 9;
+  optional DimensionAnchors anchors = 10;
+  optional DimensionCurve curve = 11;
+  optional uint32 arrow = 12; // Absent / 0 undefined / 1 none / 2 slash / 3 dot / 4 closed / 5 open
+  optional uint32 align = 13; // Absent / 0 undefined / 1 screen / 2 above / 3 centered / 4 outside
+}

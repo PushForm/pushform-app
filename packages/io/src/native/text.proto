@@ -1,0 +1,18 @@
+syntax = "proto2";
+package pushform.native;
+message Text {
+  required uint32 id = 1;
+  required uint32 properties = 2;
+  required string text = 3;
+  required uint32 kind = 4; // 0 screen, 1 leader
+  required bytes position = 5; // Three little-endian Float64 values
+  optional bytes offset = 6; // Absent means null; otherwise three Float64 values
+  required uint32 leader = 7; // 0 none, 1 view, 2 pushpin
+  optional bytes view_offset = 8; // Absent / empty (undefined) / two Float64 values
+  required string font_family = 9;
+  required double font_size_pt = 10;
+  optional uint32 bold = 11; // Absent / 0 undefined / 1 false / 2 true
+  optional uint32 italic = 12; // Same presence encoding as bold
+  required bytes color = 13; // Three Float64 RGB values
+  optional uint32 arrow = 14; // Absent / 0 undefined / 1 none / 2 slash / 3 dot / 4 closed / 5 open
+}

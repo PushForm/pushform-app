@@ -1,0 +1,18 @@
+{
+  "name": "@pushform/geom",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Pure geometry algorithms: planar arrangement, triangulation, coplanar grouping, curves, BVH",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "sideEffects": false,
+  "dependencies": {
+    "@pushform/core": "workspace:*",
+    "earcut": "^3.0.0",
+    "polygon-clipping": "^0.15.7"
+  }
+}

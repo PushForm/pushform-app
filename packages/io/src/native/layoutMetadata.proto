@@ -1,0 +1,22 @@
+syntax = "proto2";
+package pushform.native;
+import "layoutSettings.proto";
+import "layoutStyle.proto";
+// DRAFT: order columns, pages, entities and assets are separate document records.
+message LayoutMeta {
+  required string guid = 1;
+  required uint64 next_id = 2; // exact safe integer; runtime formatVersion is reconstructed
+}
+message LayoutMetadata {
+  required LayoutMeta meta = 1;
+  required LayoutSettings settings = 2;
+  required LayoutDefaultStyle default_style = 3;
+  required uint32 active_layer_id = 4;
+}
+message LayoutLayer {
+  required uint32 id = 1;
+  required string name = 2;
+  required bool visible = 3;
+  required bool locked = 4;
+  required bool shared = 5;
+}

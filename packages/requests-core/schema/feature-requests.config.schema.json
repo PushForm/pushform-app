@@ -1,0 +1,707 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "host": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tracker": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "linear"
+        },
+        "team": {
+          "type": "string",
+          "minLength": 1
+        },
+        "project": {
+          "type": "string",
+          "minLength": 1
+        },
+        "problemDestination": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "sameProject": {
+              "default": true,
+              "type": "boolean"
+            },
+            "project": {
+              "type": "string",
+              "minLength": 1
+            },
+            "label": {
+              "default": "defect",
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "states": {
+          "type": "object",
+          "properties": {
+            "triage": {
+              "type": "string",
+              "minLength": 1
+            },
+            "done": {
+              "type": "string",
+              "minLength": 1
+            },
+            "canceled": {
+              "type": "string",
+              "minLength": 1
+            },
+            "build": {
+              "default": "Build",
+              "type": "string",
+              "minLength": 1
+            },
+            "designReview": {
+              "default": "Design review",
+              "type": "string",
+              "minLength": 1
+            },
+            "inProgress": {
+              "default": "In Progress",
+              "type": "string",
+              "minLength": 1
+            },
+            "inTrial": {
+              "default": "In Trial",
+              "type": "string",
+              "minLength": 1
+            },
+            "needsHuman": {
+              "default": "Needs Human",
+              "type": "string",
+              "minLength": 1
+            },
+            "readyForReview": {
+              "default": "Ready for Review",
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "triage",
+            "done",
+            "canceled"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "kind",
+        "team",
+        "project",
+        "states"
+      ],
+      "additionalProperties": false
+    },
+    "repository": {
+      "default": {
+        "kind": "github",
+        "owner": "retired",
+        "name": "retired"
+      },
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "github"
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "defaultBranch": {
+          "default": "main",
+          "type": "string",
+          "minLength": 1
+        },
+        "branchPrefix": {
+          "default": "frq",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "checks": {
+          "default": [
+            "typecheck",
+            "lint",
+            "test",
+            "license-check",
+            "build"
+          ],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "instructions": {
+          "default": "AGENTS.md",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "kind",
+        "owner",
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "deploy": {
+      "default": {
+        "kind": "cloudflare-pages",
+        "project": "retired"
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "cloudflare-pages"
+            },
+            "project": {
+              "type": "string",
+              "minLength": 1
+            },
+            "healthPath": {
+              "default": "/healthz",
+              "type": "string",
+              "format": "starts_with",
+              "pattern": "^\\/.*"
+            },
+            "alias": {
+              "type": "string"
+            },
+            "previewDomain": {
+              "type": "string",
+              "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$"
+            }
+          },
+          "required": [
+            "kind",
+            "project"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "command"
+            },
+            "deploy": {
+              "type": "string",
+              "minLength": 1
+            },
+            "destroy": {
+              "type": "string",
+              "minLength": 1
+            },
+            "urlPattern": {
+              "type": "string",
+              "minLength": 1
+            },
+            "healthPath": {
+              "default": "/healthz",
+              "type": "string",
+              "format": "starts_with",
+              "pattern": "^\\/.*"
+            }
+          },
+          "required": [
+            "kind",
+            "deploy",
+            "destroy",
+            "urlPattern"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "data": {
+      "default": {
+        "kind": "fixed",
+        "env": "retired"
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "supabase-branch"
+            },
+            "fallback": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "fixed"
+                },
+                "env": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "kind",
+                "env"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "fixed"
+            },
+            "env": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "kind",
+            "env"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "access": {
+      "default": {
+        "kind": "none"
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "cloudflare-access"
+            },
+            "trustedDomains": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "none"
+            },
+            "trustedDomains": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "mail": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "resend"
+            },
+            "from": {
+              "type": "string",
+              "format": "email",
+              "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+            },
+            "replyTo": {
+              "type": "string",
+              "format": "email",
+              "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+            }
+          },
+          "required": [
+            "kind",
+            "from",
+            "replyTo"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "smtp"
+            },
+            "host": {
+              "type": "string",
+              "minLength": 1
+            },
+            "port": {
+              "default": 587,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "from": {
+              "type": "string",
+              "format": "email",
+              "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+            },
+            "replyTo": {
+              "type": "string",
+              "format": "email",
+              "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+            }
+          },
+          "required": [
+            "kind",
+            "host",
+            "from",
+            "replyTo"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "models": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "conversation": {
+          "default": "claude-haiku-5-5",
+          "type": "string",
+          "minLength": 1
+        },
+        "document": {
+          "default": "claude-sonnet-5-5",
+          "type": "string",
+          "minLength": 1
+        },
+        "build": {
+          "default": "claude-opus-5-5",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "roles": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "defaultRole": {
+          "default": "user",
+          "type": "string",
+          "enum": [
+            "user",
+            "none"
+          ]
+        },
+        "admins": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "email",
+            "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+          }
+        },
+        "maintainers": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "email",
+            "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+          }
+        },
+        "membership": {
+          "type": "string",
+          "format": "uri"
+        }
+      },
+      "additionalProperties": false
+    },
+    "boundaries": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "treatments": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "C1": {
+              "default": "allowed",
+              "type": "string",
+              "enum": [
+                "allowed",
+                "review",
+                "forbidden"
+              ]
+            },
+            "C2": {
+              "default": "allowed",
+              "type": "string",
+              "enum": [
+                "allowed",
+                "review",
+                "forbidden"
+              ]
+            },
+            "C3": {
+              "default": "allowed",
+              "type": "string",
+              "enum": [
+                "allowed",
+                "review",
+                "forbidden"
+              ]
+            },
+            "C4": {
+              "default": "allowed",
+              "type": "string",
+              "enum": [
+                "allowed",
+                "review",
+                "forbidden"
+              ]
+            },
+            "C5": {
+              "default": "review",
+              "type": "string",
+              "enum": [
+                "allowed",
+                "review",
+                "forbidden"
+              ]
+            },
+            "C6": {
+              "default": "forbidden",
+              "type": "string",
+              "enum": [
+                "allowed",
+                "review",
+                "forbidden"
+              ]
+            },
+            "C7": {
+              "default": "forbidden",
+              "type": "string",
+              "enum": [
+                "allowed",
+                "review",
+                "forbidden"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "automaticCeiling": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "builder": {
+              "default": "C3",
+              "type": "string",
+              "enum": [
+                "C1",
+                "C2",
+                "C3",
+                "C4",
+                "C5",
+                "C6",
+                "C7"
+              ]
+            },
+            "maintainer": {
+              "default": "C4",
+              "type": "string",
+              "enum": [
+                "C1",
+                "C2",
+                "C3",
+                "C4",
+                "C5",
+                "C6",
+                "C7"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "size": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "maxFiles": {
+              "default": 40,
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "maxLines": {
+              "default": 2000,
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "additionalProperties": false
+        },
+        "paths": {
+          "default": {},
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "enum": [
+              "C1",
+              "C2",
+              "C3",
+              "C4",
+              "C5",
+              "C6",
+              "C7"
+            ]
+          },
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "limits": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "openRequestsPerAccount": {
+          "default": 5,
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "messagesPerConversation": {
+          "default": 30,
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "messagesPerMinute": {
+          "default": 20,
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "concurrentRuns": {
+          "default": 2,
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "runWallClockMinutes": {
+          "default": 120,
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "runBudgetUsd": {
+          "default": 20,
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "trialDays": {
+          "default": 3,
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 3
+        },
+        "verdictGraceHours": {
+          "default": 24,
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "rounds": {
+          "default": 2,
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "dailyRuns": {
+          "default": 6,
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "liveDataBranches": {
+          "default": 3,
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "host",
+    "name",
+    "tracker",
+    "mail"
+  ],
+  "additionalProperties": false,
+  "$id": "https://pushform.io/schemas/feature-requests.config.schema.json",
+  "title": "feature-requests.config.json"
+}

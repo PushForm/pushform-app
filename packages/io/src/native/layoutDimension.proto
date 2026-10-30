@@ -1,0 +1,76 @@
+syntax = "proto2";
+package pushform.native;
+// DRAFT. Paper measurements retain exact Float64 millimeters.
+message LayoutDimensionNumber {
+  required uint32 state = 1; // 0 explicit undefined, 1 value
+  optional double value = 2;
+}
+message LayoutDimensionAnchor {
+  required uint32 entity_id = 1;
+  required uint32 point_index = 2;
+  required uint32 point_count = 3;
+  optional LayoutDimensionNumber t = 4;
+}
+message LayoutDimensionNullableAnchor {
+  optional LayoutDimensionAnchor value = 1; // absent means null
+}
+message LayoutDimensionAnchors {
+  repeated LayoutDimensionNullableAnchor entries = 1;
+}
+message LayoutLinearDimension {
+  required LayoutDimensionAnchors anchors = 1;
+  required uint32 alignment = 2; // aligned, horizontal, vertical, rotated
+  optional LayoutDimensionNumber angle_deg = 3;
+  required uint32 units = 4; // mm, cm, m, inch, ft, pt
+  optional uint32 format = 5; // 0 undefined, 1 decimal, 2 architectural, 3 engineering, 4 fractional
+  required uint32 precision = 6;
+  required bool show_units = 7;
+  optional LayoutDimensionNumber scale = 8;
+  optional uint32 show_dashes = 9; // 0 undefined, 1 false, 2 true
+  required string text = 10;
+  required string font_family = 11;
+  required double font_size_pt = 12;
+  required uint32 endpoint = 13; // arrow, tick, dot, none
+  required double arrow_size_mm = 14;
+  required double extension_gap_mm = 15;
+  required double extension_overrun_mm = 16;
+  required double cached_value_mm = 17;
+  required bool detached = 18;
+}
+message LayoutAngularEdgeAnchor {
+  required uint32 entity_id = 1;
+  required uint32 segment_index = 2;
+  required uint32 point_count = 3;
+  required uint32 direction = 4; // 0 forward (+1), 1 reverse (-1)
+}
+message LayoutAngularEdges {
+  required uint32 state = 1; // 0 undefined, 1 pair
+  repeated LayoutAngularEdgeAnchor entries = 2;
+}
+message LayoutAngularRays {
+  required bytes points = 1; // four interleaved x,y Float64 pairs
+  required LayoutDimensionAnchors anchors = 2;
+}
+message LayoutAngularOptionalRays {
+  required uint32 state = 1; // 0 undefined, 1 value
+  optional LayoutAngularRays value = 2;
+}
+message LayoutAngularDimension {
+  required LayoutDimensionAnchors anchors = 1;
+  required uint32 units = 2; // 0 degrees, 1 radians
+  required uint32 precision = 3;
+  required bool show_units = 4;
+  required string text = 5;
+  required string font_family = 6;
+  required double font_size_pt = 7;
+  required uint32 endpoint = 8; // arrow, tick, dot, none
+  required double arrow_size_mm = 9;
+  required double extension_gap_mm = 10;
+  required double extension_overrun_mm = 11;
+  required double cached_angle_deg = 12;
+  required bool detached = 13;
+  required bool reflex = 14;
+  optional LayoutDimensionNumber angle_deg = 15;
+  optional LayoutAngularEdges edge_anchors = 16;
+  optional LayoutAngularOptionalRays ray_definition = 17;
+}

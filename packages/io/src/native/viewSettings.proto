@@ -1,0 +1,18 @@
+syntax = "proto2";
+package pushform.native;
+import "material.proto";
+message Vec3 { required double x = 1; required double y = 2; required double z = 3; }
+message Camera {
+  required Vec3 eye = 1; required Vec3 target = 2; required Vec3 up = 3;
+  required bool perspective = 4; required double fov = 5; required double height = 6;
+}
+message Shadows {
+  required bool enabled = 1; required uint32 month = 2; required uint32 day = 3;
+  required double time = 4; required double utc_offset_hours = 5; required double latitude = 6;
+  required double longitude = 7; required double north_angle = 8; required double light = 9; required double dark = 10;
+  required bool use_sun_for_shading = 11; required bool on_ground = 12; required bool on_faces = 13; required bool from_edges = 14;
+}
+message Fog {
+  required bool enabled = 1; required double near = 2; required double far = 3;
+  required bool use_background = 4; required Rgb color = 5;
+}

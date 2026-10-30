@@ -1,0 +1,20 @@
+syntax = "proto2";
+package pushform.native;
+import "modelMeta.proto";
+import "material.proto";
+message NullableId { oneof state { EmptyState null_value = 2; uint32 value = 3; } }
+message NullableString { oneof state { EmptyState null_value = 2; string value = 3; } }
+message Tag {
+  required uint32 id = 1;
+  required string name = 2;
+  required bool visible = 3;
+  required Rgb color = 4;
+  required NullableString dashes = 5;
+  required NullableId folder_id = 6;
+}
+message TagFolder {
+  required uint32 id = 1;
+  required string name = 2;
+  required bool visible = 3;
+  required NullableId parent_id = 4;
+}

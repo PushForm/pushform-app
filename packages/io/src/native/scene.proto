@@ -1,0 +1,22 @@
+syntax = "proto2";
+package pushform.native;
+import "modelMeta.proto";
+import "viewSettings.proto";
+import "tags.proto";
+message SceneFlags {
+  required bool use_camera = 1; required bool use_hidden_geometry = 2; required bool use_hidden_objects = 3;
+  required bool use_tags = 4; required bool use_style = 5; required bool use_shadows = 6;
+  required bool use_section_planes = 7; required bool use_axes = 8;
+}
+message NullableShadows { oneof state { EmptyState null_value = 2; Shadows value = 3; } }
+message OptionalNullableFog { oneof state { EmptyState undefined_value = 1; EmptyState null_value = 2; Fog value = 3; } }
+message OptionalBool { oneof state { EmptyState undefined_value = 1; bool value = 3; } }
+message Scene {
+  required uint32 id = 1; required string name = 2; required string description = 3;
+  required Camera camera = 4; required SceneFlags flags = 5;
+  repeated uint32 hidden_entities = 6 [packed = true]; repeated uint32 hidden_tags = 7 [packed = true];
+  repeated uint32 hidden_tag_folders = 8 [packed = true]; required NullableId style_id = 9;
+  required NullableShadows shadows = 10; optional OptionalNullableFog fog = 11;
+  repeated uint32 active_section_planes = 12 [packed = true]; required bool axes_visible = 13;
+  optional OptionalBool include_in_animation = 14;
+}

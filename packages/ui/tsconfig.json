@@ -1,0 +1,51 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist/types"
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../model"
+    },
+    {
+      "path": "../layout"
+    },
+    {
+      "path": "../commands"
+    },
+    {
+      "path": "../render"
+    },
+    {
+      "path": "../io"
+    },
+    {
+      "path": "../inference"
+    },
+    {
+      "path": "../kernel"
+    },
+    {
+      "path": "../cloud"
+    },
+    {
+      "path": "../requests-core"
+    },
+    {
+      "path": "../requests-ui"
+    },
+    {
+      "path": "../extension-protocol"
+    },
+    {
+      "path": "../extensions"
+    }
+  ]
+}

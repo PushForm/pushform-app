@@ -1,0 +1,32 @@
+syntax = "proto2";
+package pushform.native;
+import "material.proto";
+import "modelMeta.proto";
+message EdgeStyle {
+  required bool edges=1; required bool profiles=2; required double profile_width=3; required bool depth_cue=4;
+  required uint32 depth_cue_levels=5; required bool extension=6; required double extension_length=7; required bool endpoints=8;
+  required double endpoint_length=9; required bool jitter=10; required bool back_edges=11; required Rgb color=12;
+  required uint32 color_mode=13; // allSame, byMaterial, byAxis
+}
+message OptionalStyleEnum { oneof state { EmptyState undefined_value=1; uint32 value=3; } }
+message OptionalStyleBool { oneof state { EmptyState undefined_value=1; bool value=3; } }
+message FaceStyle {
+  required uint32 mode=1; // wireframe, hiddenLine, shaded, shadedWithTextures, monochrome, xray
+  required Rgb front_color=2; required Rgb back_color=3; required double xray_opacity=4;
+  optional OptionalStyleEnum transparency_quality=5; // faster, medium, nicer
+}
+message BackgroundStyle {
+  required Rgb color=1; required bool sky=2; required Rgb sky_color=3; required bool ground=4; required Rgb ground_color=5;
+  required double ground_transparency=6; required bool show_ground_from_below=7;
+}
+message ModelingColors {
+  required Rgb selected=1; required Rgb locked=2; required Rgb guides=3; required Rgb inactive_section=4; required Rgb active_section=5;
+  required Rgb section_fill=6; required Rgb section_line=7; required double section_line_width=8; required bool section_fill_enabled=9;
+  required bool hidden_geometry=10; required bool guides_visible=11; required bool section_planes_visible=12;
+  required bool section_cuts_visible=13; required bool model_axes_visible=14; optional OptionalStyleBool color_by_tag=15;
+}
+message Watermark { required uint32 image_id=1; required uint32 position=2; required double opacity=3; } // background, overlay
+message Style {
+  required uint32 id=1; required string name=2; required string description=3; required EdgeStyle edges=4;
+  required FaceStyle faces=5; required BackgroundStyle background=6; required ModelingColors modeling=7; repeated Watermark watermarks=8;
+}

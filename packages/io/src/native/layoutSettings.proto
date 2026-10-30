@@ -1,0 +1,19 @@
+syntax = "proto2";
+package pushform.native;
+// DRAFT: Layout integration is incomplete. IDs are permanent within this schema.
+message LayoutGridSettings {
+  required double spacing_mm = 1;
+  required bool show = 2;
+  required bool snap = 3;
+  optional double angle_snap_deg = 4; // absent = null
+  optional uint32 units = 5; // absent / 0 explicit undefined / 1 mm / 2 in
+}
+message LayoutSettings {
+  optional uint32 object_snap = 1; // absent / 0 explicit undefined / 1 false / 2 true
+  required uint32 units = 2; // 0 mm / 1 inch / 2 architectural
+  optional uint32 paper_units = 3; // absent / 0 explicit undefined / 1 mm / 2 in
+  required double precision = 4;
+  required double angle_precision = 5;
+  required LayoutGridSettings grid = 6;
+  required bool auto_render = 7;
+}

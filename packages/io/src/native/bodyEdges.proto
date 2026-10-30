@@ -1,0 +1,11 @@
+syntax = "proto2";
+package pushform.native;
+message BodyEdges {
+  required uint32 count = 1;
+  required uint32 point_count = 2;
+  repeated uint32 rows = 3 [packed=true]; // Uint32 faceA,faceB,run,tag,curve per edge
+  repeated uint32 flags = 4 [packed=true]; // Uint8 soft=bit0,smooth=bit1,hidden=bit2,curve present=bit3
+  repeated uint32 offsets = 5 [packed=true]; // Uint32 count+1 point offsets
+  repeated uint32 positions = 6 [packed=true]; // Float64 xyz per polyline point
+  // Repeated fields reference storage chunks. Null curve: zero value and clear presence bit.
+}

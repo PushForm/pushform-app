@@ -1,0 +1,7 @@
+syntax = "proto2";
+package pushform.native;
+message SketchVertices {
+  required uint32 count = 1;
+  repeated uint32 id_chunks = 2 [packed=true]; // Uint32 persistent IDs, source iteration order
+  repeated uint32 position_chunks = 3 [packed=true]; // Float64 xyz, meters
+}

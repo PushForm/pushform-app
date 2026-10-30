@@ -1,0 +1,22 @@
+syntax = "proto2";
+package pushform.native;
+// DRAFT. Model geometry identities are independent of paper entities and cached paper positions.
+message LayoutModelAttachment {
+  required uint32 viewport_id = 1;
+  required bytes source = 2; // LayoutViewportSource
+  required string model_guid = 3;
+  required bytes anchor = 4; // existing model DimensionAnchor (nonnull)
+}
+message LayoutAnnotationField {
+  required string key = 1;
+  required string value = 2;
+}
+message LayoutAnnotationFields {
+  required uint32 state = 1; // 0 explicit undefined, 1 dictionary (including empty)
+  repeated LayoutAnnotationField entries = 2;
+}
+message LayoutModelAnnotation {
+  repeated LayoutModelAttachment attachments = 1;
+  required uint32 status = 2; // 0 resolved, 1 unavailable, 2 detached
+  optional LayoutAnnotationFields fields = 3;
+}

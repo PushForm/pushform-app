@@ -1,0 +1,16 @@
+syntax = "proto2";
+package pushform.native;
+message Imprint {
+  required uint32 face_id = 1;
+  required uint64 next_id = 2; // 1..2^32, including exhausted allocator sentinel
+  required uint64 version = 3; // Nonnegative JavaScript safe integer
+  required uint32 vertex_count = 4;
+  required uint32 edge_count = 5;
+  // Lists below contain numeric storage chunk IDs.
+  repeated uint32 vertex_ids = 6 [packed=true];
+  repeated uint32 positions = 7 [packed=true]; // Float64 face-local uv pairs
+  repeated uint32 edge_ids = 8 [packed=true];
+  repeated uint32 endpoints = 9 [packed=true]; // Uint32 vertex ID pairs
+  repeated uint32 curves = 10 [packed=true]; // Uint32 curve IDs
+  repeated uint32 flags = 11 [packed=true]; // Uint8: soft, smooth, hidden, curve-present
+}

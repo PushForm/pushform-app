@@ -1,0 +1,783 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`requester emails snapshots > Filed for each eligibility > filed auto 1`] = `
+{
+  "html": "<!doctype html>
+<html><head><meta charset="utf-8"><title>[FRQ-123] Filed: Layout: nudge viewports with arrow keys</title></head>
+<body style="font-family:system-ui,sans-serif;line-height:1.5;max-width:40em;margin:1em auto;padding:0 1em">
+<p>Hello,</p>
+<p>Your request was filed with PushForm as FRQ-123.</p>
+<p><strong>Identifier:</strong> FRQ-123<br><strong>Title:</strong> Layout: nudge viewports with arrow keys<br><strong>Kind:</strong> Feature<br><strong>Filed by:</strong> ada@example.com</p>
+<h2>What happens next</h2>
+<p>The team will review your request in Linear and may ask questions by email.</p>
+<h2>Kind</h2>
+<p>Feature</p>
+<h2>Problem</h2>
+<p>I cannot nudge a Layout viewport with the keyboard.</p>
+<h2>Current workaround</h2>
+<p>Not provided</p>
+<h2>Desired behavior</h2>
+<p>Arrow keys move the selected viewport by 1 mm.</p>
+<h2>Acceptance examples</h2>
+<p>- When I select a viewport and press Right, then it moves 1 mm right.<br>- When nothing is selected and I press Right, then the page scrolls as before.</p>
+<h2>Must not change</h2>
+<p>Mouse dragging of viewports.</p>
+<h2>Area</h2>
+<p>Layout</p>
+<h2>Importance</h2>
+<p>Important: Precise placement is slow with the mouse.</p>
+<p>This email is about request FRQ-123 only.</p>
+<p>Questions for the team: reply to support@pushform.io.</p>
+</body></html>
+",
+  "subject": "[FRQ-123] Filed: Layout: nudge viewports with arrow keys",
+  "text": "Hello,
+
+Your request was filed with PushForm as FRQ-123.
+
+Identifier: FRQ-123
+Title: Layout: nudge viewports with arrow keys
+Kind: Feature
+Filed by: ada@example.com
+
+What happens next
+-----------------
+
+The team will review your request in Linear and may ask questions by email.
+
+Kind
+----
+
+Feature
+
+Problem
+-------
+
+I cannot nudge a Layout viewport with the keyboard.
+
+Current workaround
+------------------
+
+Not provided
+
+Desired behavior
+----------------
+
+Arrow keys move the selected viewport by 1 mm.
+
+Acceptance examples
+-------------------
+
+- When I select a viewport and press Right, then it moves 1 mm right.
+- When nothing is selected and I press Right, then the page scrolls as before.
+
+Must not change
+---------------
+
+Mouse dragging of viewports.
+
+Area
+----
+
+Layout
+
+Importance
+----------
+
+Important: Precise placement is slow with the mouse.
+
+This email is about request FRQ-123 only.
+
+Questions for the team: reply to support@pushform.io.
+",
+}
+`;
+
+exports[`requester emails snapshots > Filed for each eligibility > filed gated 1`] = `
+{
+  "html": "<!doctype html>
+<html><head><meta charset="utf-8"><title>[FRQ-123] Filed: Layout: nudge viewports with arrow keys</title></head>
+<body style="font-family:system-ui,sans-serif;line-height:1.5;max-width:40em;margin:1em auto;padding:0 1em">
+<p>Hello,</p>
+<p>Your request was filed with PushForm as FRQ-123.</p>
+<p><strong>Identifier:</strong> FRQ-123<br><strong>Title:</strong> Layout: nudge viewports with arrow keys<br><strong>Kind:</strong> Feature<br><strong>Filed by:</strong> ada@example.com</p>
+<h2>What happens next</h2>
+<p>The team will review your request in Linear and may ask questions by email.</p>
+<h2>Kind</h2>
+<p>Feature</p>
+<h2>Problem</h2>
+<p>I cannot nudge a Layout viewport with the keyboard.</p>
+<h2>Current workaround</h2>
+<p>Not provided</p>
+<h2>Desired behavior</h2>
+<p>Arrow keys move the selected viewport by 1 mm.</p>
+<h2>Acceptance examples</h2>
+<p>- When I select a viewport and press Right, then it moves 1 mm right.<br>- When nothing is selected and I press Right, then the page scrolls as before.</p>
+<h2>Must not change</h2>
+<p>Mouse dragging of viewports.</p>
+<h2>Area</h2>
+<p>Layout</p>
+<h2>Importance</h2>
+<p>Important: Precise placement is slow with the mouse.</p>
+<p>This email is about request FRQ-123 only.</p>
+<p>Questions for the team: reply to support@pushform.io.</p>
+</body></html>
+",
+  "subject": "[FRQ-123] Filed: Layout: nudge viewports with arrow keys",
+  "text": "Hello,
+
+Your request was filed with PushForm as FRQ-123.
+
+Identifier: FRQ-123
+Title: Layout: nudge viewports with arrow keys
+Kind: Feature
+Filed by: ada@example.com
+
+What happens next
+-----------------
+
+The team will review your request in Linear and may ask questions by email.
+
+Kind
+----
+
+Feature
+
+Problem
+-------
+
+I cannot nudge a Layout viewport with the keyboard.
+
+Current workaround
+------------------
+
+Not provided
+
+Desired behavior
+----------------
+
+Arrow keys move the selected viewport by 1 mm.
+
+Acceptance examples
+-------------------
+
+- When I select a viewport and press Right, then it moves 1 mm right.
+- When nothing is selected and I press Right, then the page scrolls as before.
+
+Must not change
+---------------
+
+Mouse dragging of viewports.
+
+Area
+----
+
+Layout
+
+Importance
+----------
+
+Important: Precise placement is slow with the mouse.
+
+This email is about request FRQ-123 only.
+
+Questions for the team: reply to support@pushform.io.
+",
+}
+`;
+
+exports[`requester emails snapshots > Filed for each eligibility > filed none 1`] = `
+{
+  "html": "<!doctype html>
+<html><head><meta charset="utf-8"><title>[FRQ-123] Filed: Layout: nudge viewports with arrow keys</title></head>
+<body style="font-family:system-ui,sans-serif;line-height:1.5;max-width:40em;margin:1em auto;padding:0 1em">
+<p>Hello,</p>
+<p>Your request was filed with PushForm as FRQ-123.</p>
+<p><strong>Identifier:</strong> FRQ-123<br><strong>Title:</strong> Layout: nudge viewports with arrow keys<br><strong>Kind:</strong> Feature<br><strong>Filed by:</strong> ada@example.com</p>
+<h2>What happens next</h2>
+<p>The team will review your request in Linear and may ask questions by email.</p>
+<h2>Kind</h2>
+<p>Feature</p>
+<h2>Problem</h2>
+<p>I cannot nudge a Layout viewport with the keyboard.</p>
+<h2>Current workaround</h2>
+<p>Not provided</p>
+<h2>Desired behavior</h2>
+<p>Arrow keys move the selected viewport by 1 mm.</p>
+<h2>Acceptance examples</h2>
+<p>- When I select a viewport and press Right, then it moves 1 mm right.<br>- When nothing is selected and I press Right, then the page scrolls as before.</p>
+<h2>Must not change</h2>
+<p>Mouse dragging of viewports.</p>
+<h2>Area</h2>
+<p>Layout</p>
+<h2>Importance</h2>
+<p>Important: Precise placement is slow with the mouse.</p>
+<p>This email is about request FRQ-123 only.</p>
+<p>Questions for the team: reply to support@pushform.io.</p>
+</body></html>
+",
+  "subject": "[FRQ-123] Filed: Layout: nudge viewports with arrow keys",
+  "text": "Hello,
+
+Your request was filed with PushForm as FRQ-123.
+
+Identifier: FRQ-123
+Title: Layout: nudge viewports with arrow keys
+Kind: Feature
+Filed by: ada@example.com
+
+What happens next
+-----------------
+
+The team will review your request in Linear and may ask questions by email.
+
+Kind
+----
+
+Feature
+
+Problem
+-------
+
+I cannot nudge a Layout viewport with the keyboard.
+
+Current workaround
+------------------
+
+Not provided
+
+Desired behavior
+----------------
+
+Arrow keys move the selected viewport by 1 mm.
+
+Acceptance examples
+-------------------
+
+- When I select a viewport and press Right, then it moves 1 mm right.
+- When nothing is selected and I press Right, then the page scrolls as before.
+
+Must not change
+---------------
+
+Mouse dragging of viewports.
+
+Area
+----
+
+Layout
+
+Importance
+----------
+
+Important: Precise placement is slow with the mouse.
+
+This email is about request FRQ-123 only.
+
+Questions for the team: reply to support@pushform.io.
+",
+}
+`;
+
+exports[`requester emails snapshots > Filed for each eligibility > filed problem report 1`] = `
+{
+  "html": "<!doctype html>
+<html><head><meta charset="utf-8"><title>[FRQ-123] Filed: Push/pull by 0 mm removes the face</title></head>
+<body style="font-family:system-ui,sans-serif;line-height:1.5;max-width:40em;margin:1em auto;padding:0 1em">
+<p>Hello,</p>
+<p>Your problem report was filed with PushForm as FRQ-123.</p>
+<p><strong>Identifier:</strong> FRQ-123<br><strong>Title:</strong> Push/pull by 0 mm removes the face<br><strong>Kind:</strong> Problem<br><strong>Filed by:</strong> ada@example.com</p>
+<h2>What happens next</h2>
+<p>The team will review your report in Linear and may ask questions by email.</p>
+<h2>What I did</h2>
+<p>1. Open a model<br>2. Push/pull a face by 0 mm</p>
+<h2>What I expected</h2>
+<p>Nothing changes.</p>
+<h2>What happened</h2>
+<p>The face disappears &amp; the &lt;model&gt; breaks.</p>
+<h2>How often</h2>
+<p>Always</p>
+<h2>Area</h2>
+<p>Modeling</p>
+<h2>Impact</h2>
+<p>Cannot work</p>
+<h2>Environment</h2>
+<p>Build: 0.4.2 (abc1234)<br>Browser: Firefox 150<br>OS: macOS 26<br>Document type: model<br>Time: 2026-10-23T10:00:00.000Z</p>
+<p>This email is about request FRQ-123 only.</p>
+<p>Questions for the team: reply to support@pushform.io.</p>
+</body></html>
+",
+  "subject": "[FRQ-123] Filed: Push/pull by 0 mm removes the face",
+  "text": "Hello,
+
+Your problem report was filed with PushForm as FRQ-123.
+
+Identifier: FRQ-123
+Title: Push/pull by 0 mm removes the face
+Kind: Problem
+Filed by: ada@example.com
+
+What happens next
+-----------------
+
+The team will review your report in Linear and may ask questions by email.
+
+What I did
+----------
+
+1. Open a model
+2. Push/pull a face by 0 mm
+
+What I expected
+---------------
+
+Nothing changes.
+
+What happened
+-------------
+
+The face disappears & the <model> breaks.
+
+How often
+---------
+
+Always
+
+Area
+----
+
+Modeling
+
+Impact
+------
+
+Cannot work
+
+Environment
+-----------
+
+Build: 0.4.2 (abc1234)
+Browser: Firefox 150
+OS: macOS 26
+Document type: model
+Time: 2026-10-23T10:00:00.000Z
+
+This email is about request FRQ-123 only.
+
+Questions for the team: reply to support@pushform.io.
+",
+}
+`;
+
+exports[`requester emails snapshots > Filed for each eligibility > filed without brief 1`] = `
+{
+  "html": "<!doctype html>
+<html><head><meta charset="utf-8"><title>[FRQ-123] Filed: Layout: nudge viewports with arrow keys</title></head>
+<body style="font-family:system-ui,sans-serif;line-height:1.5;max-width:40em;margin:1em auto;padding:0 1em">
+<p>Hello,</p>
+<p>Your request was filed with PushForm as FRQ-123.</p>
+<p><strong>Identifier:</strong> FRQ-123<br><strong>Title:</strong> Layout: nudge viewports with arrow keys<br><strong>Kind:</strong> Feature<br><strong>Filed by:</strong> ada@example.com</p>
+<h2>What happens next</h2>
+<p>The team will review your request in Linear and may ask questions by email.</p>
+<p>No brief was recorded.</p>
+<p>This email is about request FRQ-123 only.</p>
+<p>Questions for the team: reply to support@pushform.io.</p>
+</body></html>
+",
+  "subject": "[FRQ-123] Filed: Layout: nudge viewports with arrow keys",
+  "text": "Hello,
+
+Your request was filed with PushForm as FRQ-123.
+
+Identifier: FRQ-123
+Title: Layout: nudge viewports with arrow keys
+Kind: Feature
+Filed by: ada@example.com
+
+What happens next
+-----------------
+
+The team will review your request in Linear and may ask questions by email.
+
+No brief was recorded.
+
+This email is about request FRQ-123 only.
+
+Questions for the team: reply to support@pushform.io.
+",
+}
+`;
+
+exports[`requester emails snapshots > Ready to try, Updated trial, Reminder, Expired > expired 1`] = `
+{
+  "html": "<!doctype html>
+<html><head><meta charset="utf-8"><title>[FRQ-123] Trial expired: Layout: nudge viewports with arrow keys</title></head>
+<body style="font-family:system-ui,sans-serif;line-height:1.5;max-width:40em;margin:1em auto;padding:0 1em">
+<p>Hello,</p>
+<p>The trial of your request FRQ-123 (Layout: nudge viewports with arrow keys) closed without a verdict and has been removed.</p>
+<p>The request is now with the team, who will decide how to continue. You will hear from us when there is news.</p>
+<p>This email is about request FRQ-123 only.</p>
+<p>Questions for the team: reply to support@pushform.io.</p>
+</body></html>
+",
+  "subject": "[FRQ-123] Trial expired: Layout: nudge viewports with arrow keys",
+  "text": "Hello,
+
+The trial of your request FRQ-123 (Layout: nudge viewports with arrow keys) closed without a verdict and has been removed.
+
+The request is now with the team, who will decide how to continue. You will hear from us when there is news.
+
+This email is about request FRQ-123 only.
+
+Questions for the team: reply to support@pushform.io.
+",
+}
+`;
+
+exports[`requester emails snapshots > Ready to try, Updated trial, Reminder, Expired > ready to try 1`] = `
+{
+  "html": "<!doctype html>
+<html><head><meta charset="utf-8"><title>[FRQ-123] Ready to try: Layout: nudge viewports with arrow keys</title></head>
+<body style="font-family:system-ui,sans-serif;line-height:1.5;max-width:40em;margin:1em auto;padding:0 1em">
+<p>Hello,</p>
+<p>A trial of your request FRQ-123 is ready.</p>
+<p><strong>Identifier:</strong> FRQ-123<br><strong>Title:</strong> Layout: nudge viewports with arrow keys<br><strong>Round:</strong> 1</p>
+<h2>What was built</h2>
+<p>Arrow keys now nudge the selected Layout viewport by 1 mm; Shift moves 10 mm.</p>
+<h2>Deliberately left out</h2>
+<ul><li>Nudging several viewports at once.</li></ul>
+<h2>Try it</h2>
+<p><strong>Trial address:</strong> https://frq-frq-123-layout-nudge.pushform-app.pages.dev<br><strong>Sign in with:</strong> ada@example.com<br><strong>Trial closes:</strong> 2026-10-26 12:00 UTC (2 days and 23 hours from now)</p>
+<p>The trial uses separate trial data: your production documents are not there and nothing you do in the trial changes them. The trial closes 24 hours after you give a verdict, or at the time above, whichever comes first.</p>
+<h2>Trial script</h2>
+<ol><li>Open the sample Layout document from the feedback panel.</li><li>Select the viewport on page 1 and press Right.</li><li>Check that the viewport moved 1 mm to the right.</li></ol>
+<p>Use the feedback panel inside the trial to report what you find and to give your verdict; that is the way results reach the team.</p>
+<p>This email is about request FRQ-123 only.</p>
+<p>Questions for the team: reply to support@pushform.io.</p>
+</body></html>
+",
+  "subject": "[FRQ-123] Ready to try: Layout: nudge viewports with arrow keys",
+  "text": "Hello,
+
+A trial of your request FRQ-123 is ready.
+
+Identifier: FRQ-123
+Title: Layout: nudge viewports with arrow keys
+Round: 1
+
+What was built
+--------------
+
+Arrow keys now nudge the selected Layout viewport by 1 mm; Shift moves 10 mm.
+
+Deliberately left out
+---------------------
+
+- Nudging several viewports at once.
+
+Try it
+------
+
+Trial address: https://frq-frq-123-layout-nudge.pushform-app.pages.dev
+Sign in with: ada@example.com
+Trial closes: 2026-10-26 12:00 UTC (2 days and 23 hours from now)
+
+The trial uses separate trial data: your production documents are not there and nothing you do in the trial changes them. The trial closes 24 hours after you give a verdict, or at the time above, whichever comes first.
+
+Trial script
+------------
+
+1. Open the sample Layout document from the feedback panel.
+2. Select the viewport on page 1 and press Right.
+3. Check that the viewport moved 1 mm to the right.
+
+Use the feedback panel inside the trial to report what you find and to give your verdict; that is the way results reach the team.
+
+This email is about request FRQ-123 only.
+
+Questions for the team: reply to support@pushform.io.
+",
+}
+`;
+
+exports[`requester emails snapshots > Ready to try, Updated trial, Reminder, Expired > reminder 1`] = `
+{
+  "html": "<!doctype html>
+<html><head><meta charset="utf-8"><title>[FRQ-123] Trial closes soon: Layout: nudge viewports with arrow keys</title></head>
+<body style="font-family:system-ui,sans-serif;line-height:1.5;max-width:40em;margin:1em auto;padding:0 1em">
+<p>Hello,</p>
+<p>The trial of your request FRQ-123 (Layout: nudge viewports with arrow keys) closes at 2026-10-26 12:00 UTC, 1 day from now, and no verdict has been given yet.</p>
+<p><strong>Trial address:</strong> https://frq-frq-123-layout-nudge.pushform-app.pages.dev<br><strong>Sign in with:</strong> ada@example.com</p>
+<p>Open the trial and use the feedback panel to give your verdict before it closes. Trials cannot be extended.</p>
+<p>This email is about request FRQ-123 only.</p>
+<p>Questions for the team: reply to support@pushform.io.</p>
+</body></html>
+",
+  "subject": "[FRQ-123] Trial closes soon: Layout: nudge viewports with arrow keys",
+  "text": "Hello,
+
+The trial of your request FRQ-123 (Layout: nudge viewports with arrow keys) closes at 2026-10-26 12:00 UTC, 1 day from now, and no verdict has been given yet.
+
+Trial address: https://frq-frq-123-layout-nudge.pushform-app.pages.dev
+Sign in with: ada@example.com
+
+Open the trial and use the feedback panel to give your verdict before it closes. Trials cannot be extended.
+
+This email is about request FRQ-123 only.
+
+Questions for the team: reply to support@pushform.io.
+",
+}
+`;
+
+exports[`requester emails snapshots > Ready to try, Updated trial, Reminder, Expired > updated trial 1`] = `
+{
+  "html": "<!doctype html>
+<html><head><meta charset="utf-8"><title>[FRQ-123] Updated trial: Layout: nudge viewports with arrow keys</title></head>
+<body style="font-family:system-ui,sans-serif;line-height:1.5;max-width:40em;margin:1em auto;padding:0 1em">
+<p>Hello,</p>
+<p>The trial of your request FRQ-123 was updated with round 2.</p>
+<h2>Your feedback</h2>
+<ul><li>Addressed: Shift+arrow moved 100 mm instead of 10 mm.</li></ul>
+<ul><li>Not addressed: Nudge with the numeric keypad. (Outside the brief; filed as a follow-up idea.)</li></ul>
+<p><strong>Identifier:</strong> FRQ-123<br><strong>Title:</strong> Layout: nudge viewports with arrow keys<br><strong>Round:</strong> 2</p>
+<h2>What was built</h2>
+<p>Arrow keys now nudge the selected Layout viewport by 1 mm; Shift moves 10 mm.</p>
+<h2>Deliberately left out</h2>
+<ul><li>Nudging several viewports at once.</li></ul>
+<h2>Try it</h2>
+<p><strong>Trial address:</strong> https://frq-frq-123-layout-nudge.pushform-app.pages.dev<br><strong>Sign in with:</strong> ada@example.com<br><strong>Trial closes:</strong> 2026-10-26 12:00 UTC (1 day and 3 hours from now)</p>
+<p>The trial uses separate trial data: your production documents are not there and nothing you do in the trial changes them. The trial closes 24 hours after you give a verdict, or at the time above, whichever comes first.</p>
+<h2>Trial script</h2>
+<ol><li>Open the sample Layout document from the feedback panel.</li><li>Select the viewport on page 1 and press Right.</li><li>Check that the viewport moved 1 mm to the right.</li></ol>
+<p>Use the feedback panel inside the trial to report what you find and to give your verdict; that is the way results reach the team.</p>
+<p>This email is about request FRQ-123 only.</p>
+<p>Questions for the team: reply to support@pushform.io.</p>
+</body></html>
+",
+  "subject": "[FRQ-123] Updated trial: Layout: nudge viewports with arrow keys",
+  "text": "Hello,
+
+The trial of your request FRQ-123 was updated with round 2.
+
+Your feedback
+-------------
+
+- Addressed: Shift+arrow moved 100 mm instead of 10 mm.
+
+- Not addressed: Nudge with the numeric keypad. (Outside the brief; filed as a follow-up idea.)
+
+Identifier: FRQ-123
+Title: Layout: nudge viewports with arrow keys
+Round: 2
+
+What was built
+--------------
+
+Arrow keys now nudge the selected Layout viewport by 1 mm; Shift moves 10 mm.
+
+Deliberately left out
+---------------------
+
+- Nudging several viewports at once.
+
+Try it
+------
+
+Trial address: https://frq-frq-123-layout-nudge.pushform-app.pages.dev
+Sign in with: ada@example.com
+Trial closes: 2026-10-26 12:00 UTC (1 day and 3 hours from now)
+
+The trial uses separate trial data: your production documents are not there and nothing you do in the trial changes them. The trial closes 24 hours after you give a verdict, or at the time above, whichever comes first.
+
+Trial script
+------------
+
+1. Open the sample Layout document from the feedback panel.
+2. Select the viewport on page 1 and press Right.
+3. Check that the viewport moved 1 mm to the right.
+
+Use the feedback panel inside the trial to report what you find and to give your verdict; that is the way results reach the team.
+
+This email is about request FRQ-123 only.
+
+Questions for the team: reply to support@pushform.io.
+",
+}
+`;
+
+exports[`requester emails snapshots > Ready to try, Updated trial, Reminder, Expired > updated trial without lists 1`] = `
+{
+  "html": "<!doctype html>
+<html><head><meta charset="utf-8"><title>[FRQ-123] Updated trial: Layout: nudge viewports with arrow keys</title></head>
+<body style="font-family:system-ui,sans-serif;line-height:1.5;max-width:40em;margin:1em auto;padding:0 1em">
+<p>Hello,</p>
+<p>The trial of your request FRQ-123 was updated with round 2.</p>
+<h2>Your feedback</h2>
+<p>No items were addressed in this round.</p>
+<p><strong>Identifier:</strong> FRQ-123<br><strong>Title:</strong> Layout: nudge viewports with arrow keys<br><strong>Round:</strong> 2</p>
+<h2>What was built</h2>
+<p>Arrow keys now nudge the selected Layout viewport by 1 mm; Shift moves 10 mm.</p>
+<h2>Deliberately left out</h2>
+<p>Nothing was left out.</p>
+<h2>Try it</h2>
+<p><strong>Trial address:</strong> https://frq-frq-123-layout-nudge.pushform-app.pages.dev<br><strong>Sign in with:</strong> ada@example.com<br><strong>Trial closes:</strong> 2026-10-26 12:00 UTC (2 days and 23 hours from now)</p>
+<p>The trial uses separate trial data: your production documents are not there and nothing you do in the trial changes them. The trial closes 24 hours after you give a verdict, or at the time above, whichever comes first.</p>
+<h2>Trial script</h2>
+<p>Not provided</p>
+<p>Use the feedback panel inside the trial to report what you find and to give your verdict; that is the way results reach the team.</p>
+<p>This email is about request FRQ-123 only.</p>
+<p>Questions for the team: reply to support@pushform.io.</p>
+</body></html>
+",
+  "subject": "[FRQ-123] Updated trial: Layout: nudge viewports with arrow keys",
+  "text": "Hello,
+
+The trial of your request FRQ-123 was updated with round 2.
+
+Your feedback
+-------------
+
+No items were addressed in this round.
+
+Identifier: FRQ-123
+Title: Layout: nudge viewports with arrow keys
+Round: 2
+
+What was built
+--------------
+
+Arrow keys now nudge the selected Layout viewport by 1 mm; Shift moves 10 mm.
+
+Deliberately left out
+---------------------
+
+Nothing was left out.
+
+Try it
+------
+
+Trial address: https://frq-frq-123-layout-nudge.pushform-app.pages.dev
+Sign in with: ada@example.com
+Trial closes: 2026-10-26 12:00 UTC (2 days and 23 hours from now)
+
+The trial uses separate trial data: your production documents are not there and nothing you do in the trial changes them. The trial closes 24 hours after you give a verdict, or at the time above, whichever comes first.
+
+Trial script
+------------
+
+Not provided
+
+Use the feedback panel inside the trial to report what you find and to give your verdict; that is the way results reach the team.
+
+This email is about request FRQ-123 only.
+
+Questions for the team: reply to support@pushform.io.
+",
+}
+`;
+
+exports[`requester emails snapshots > Relayed comment, Withdrawn, Shipped > relayed comment 1`] = `
+{
+  "html": "<!doctype html>
+<html><head><meta charset="utf-8"><title>[FRQ-123] Message from the team: Layout: nudge viewports with arrow keys</title></head>
+<body style="font-family:system-ui,sans-serif;line-height:1.5;max-width:40em;margin:1em auto;padding:0 1em">
+<p>Hello,</p>
+<p>The team wrote about your request FRQ-123 (Layout: nudge viewports with arrow keys):</p>
+<blockquote>Could you tell us which browser you used?<br>A screenshot &lt;helps&gt;.</blockquote>
+<p>Reply to support@pushform.io to follow up on FRQ-123.</p>
+<p>This email is about request FRQ-123 only.</p>
+</body></html>
+",
+  "subject": "[FRQ-123] Message from the team: Layout: nudge viewports with arrow keys",
+  "text": "Hello,
+
+The team wrote about your request FRQ-123 (Layout: nudge viewports with arrow keys):
+
+> Could you tell us which browser you used?
+> A screenshot <helps>.
+
+Reply to support@pushform.io to follow up on FRQ-123.
+
+This email is about request FRQ-123 only.
+",
+}
+`;
+
+exports[`requester emails snapshots > Relayed comment, Withdrawn, Shipped > shipped 1`] = `
+{
+  "html": "<!doctype html>
+<html><head><meta charset="utf-8"><title>[FRQ-123] Shipped: Layout: nudge viewports with arrow keys</title></head>
+<body style="font-family:system-ui,sans-serif;line-height:1.5;max-width:40em;margin:1em auto;padding:0 1em">
+<p>Hello,</p>
+<p>Your request FRQ-123 (Layout: nudge viewports with arrow keys) has shipped in PushForm. Reload the product to get it.</p>
+<p>Thank you for helping improve it.</p>
+<p>This email is about request FRQ-123 only.</p>
+<p>Questions for the team: reply to support@pushform.io.</p>
+</body></html>
+",
+  "subject": "[FRQ-123] Shipped: Layout: nudge viewports with arrow keys",
+  "text": "Hello,
+
+Your request FRQ-123 (Layout: nudge viewports with arrow keys) has shipped in PushForm. Reload the product to get it.
+
+Thank you for helping improve it.
+
+This email is about request FRQ-123 only.
+
+Questions for the team: reply to support@pushform.io.
+",
+}
+`;
+
+exports[`requester emails snapshots > Relayed comment, Withdrawn, Shipped > shipped with version 1`] = `
+{
+  "html": "<!doctype html>
+<html><head><meta charset="utf-8"><title>[FRQ-123] Shipped: Layout: nudge viewports with arrow keys</title></head>
+<body style="font-family:system-ui,sans-serif;line-height:1.5;max-width:40em;margin:1em auto;padding:0 1em">
+<p>Hello,</p>
+<p>Your request FRQ-123 (Layout: nudge viewports with arrow keys) has shipped in PushForm 0.5.0. Reload the product to get it.</p>
+<p>Thank you for helping improve it.</p>
+<p>This email is about request FRQ-123 only.</p>
+<p>Questions for the team: reply to support@pushform.io.</p>
+</body></html>
+",
+  "subject": "[FRQ-123] Shipped: Layout: nudge viewports with arrow keys",
+  "text": "Hello,
+
+Your request FRQ-123 (Layout: nudge viewports with arrow keys) has shipped in PushForm 0.5.0. Reload the product to get it.
+
+Thank you for helping improve it.
+
+This email is about request FRQ-123 only.
+
+Questions for the team: reply to support@pushform.io.
+",
+}
+`;
+
+exports[`requester emails snapshots > Relayed comment, Withdrawn, Shipped > withdrawn 1`] = `
+{
+  "html": "<!doctype html>
+<html><head><meta charset="utf-8"><title>[FRQ-123] Withdrawn: Layout: nudge viewports with arrow keys</title></head>
+<body style="font-family:system-ui,sans-serif;line-height:1.5;max-width:40em;margin:1em auto;padding:0 1em">
+<p>Hello,</p>
+<p>You withdrew your request FRQ-123 (Layout: nudge viewports with arrow keys). It is closed and you will receive no further emails about it.</p>
+<p>If you change your mind, file a new request from AI Chat in the product.</p>
+<p>This email is about request FRQ-123 only.</p>
+<p>Questions for the team: reply to support@pushform.io.</p>
+</body></html>
+",
+  "subject": "[FRQ-123] Withdrawn: Layout: nudge viewports with arrow keys",
+  "text": "Hello,
+
+You withdrew your request FRQ-123 (Layout: nudge viewports with arrow keys). It is closed and you will receive no further emails about it.
+
+If you change your mind, file a new request from AI Chat in the product.
+
+This email is about request FRQ-123 only.
+
+Questions for the team: reply to support@pushform.io.
+",
+}
+`;

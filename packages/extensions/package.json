@@ -1,0 +1,18 @@
+{
+  "name": "@pushform/extensions",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Trusted extension host: scoped document queries and atomic operation batches over the command registry",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "sideEffects": false,
+  "dependencies": {
+    "@pushform/commands": "workspace:*",
+    "@pushform/extension-protocol": "workspace:*",
+    "@pushform/layout": "workspace:*"
+  }
+}

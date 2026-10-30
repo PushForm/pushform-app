@@ -1,0 +1,86 @@
+name: ci
+on:
+  # main is dispatched by ci-schedule.yml in 15-minute batches; manual runs can bypass the wait.
+  workflow_dispatch:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm license-check
+      # Vite's chunk rendering and hidden source maps exceed Node's ~2 GiB runner default.
+      - run: pnpm build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+
+  # Deploy the checked main batch to Cloudflare Pages. Needs the repository
+  # secrets CLOUDFLARE_API_TOKEN (Workers & Pages: Edit) and CLOUDFLARE_ACCOUNT_ID.
+  deploy:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-24.04
+    environment:
+      name: Production
+      url: https://pushform-app.pages.dev
+    concurrency: { group: deploy-production, cancel-in-progress: false }
+    steps:
+      - uses: actions/checkout@v7
+        # The whole history: About PushForm's version counts this week's commits.
+        with: { fetch-depth: 0 }
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: echo "VITE_RELEASE=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+      # The cloud configuration is baked into public assets, so it is checked before the build and in the built files
+      # before anything is uploaded.
+      - run: node scripts/check-cloud-config.mjs
+        env:
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+      - run: pnpm build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+          VITE_FR_REGION: ${{ vars.VITE_FR_REGION }}
+      - run: node scripts/check-cloud-config.mjs apps/web/dist
+        env:
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+      # Source maps go to Sentry (needs the secret SENTRY_AUTH_TOKEN) and are kept as an
+      # artifact of this deploy, then removed from the upload.
+      - run: node scripts/sentry-sourcemaps.mjs apps/web/dist
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sourcemaps-web-${{ github.sha }}
+          path: apps/web/dist/**/*.map
+          if-no-files-found: error
+          retention-days: 90
+      - run: find apps/web/dist -name '*.map' -delete
+      - uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy apps/web/dist --project-name pushform-app --branch main --commit-hash ${{ github.sha }} --commit-dirty=false
+      - run: node scripts/verify-deploy.mjs https://pushform-app.pages.dev --strict
+        env:
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}

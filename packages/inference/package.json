@@ -1,0 +1,23 @@
+{
+  "name": "@pushform/inference",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Picking and inference engine",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "sideEffects": false,
+  "dependencies": {
+    "@pushform/core": "workspace:*",
+    "@pushform/geom": "workspace:*",
+    "@pushform/model": "workspace:*",
+    "three": "^0.180.0",
+    "three-mesh-bvh": "^0.9.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.180.0"
+  }
+}

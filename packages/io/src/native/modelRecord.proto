@@ -1,0 +1,12 @@
+syntax = "proto2";
+package pushform.native;
+message ModelRecord {
+  // 1 material, 2 tag, 3 tag folder, 4 style, 5 scene, 6 image asset,
+  // 7 definition, 8 common property, 9 instance, 10 sketch, 11 body,
+  // 12 guide, 13 image placement, 14 section plane, 15 text, 16 dimension. Further kinds are unassigned.
+  required uint32 kind = 1;
+  required uint32 schema_major = 2;
+  required bool required = 3;
+  required bytes payload = 4;
+  optional uint32 owner_definition_id = 5; // required for instances/sketches, forbidden for kinds 1–8
+}

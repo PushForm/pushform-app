@@ -1,0 +1,15 @@
+syntax = "proto2";
+package pushform.native;
+// DRAFT: document default style; integration awaits the complete Layout adapter.
+message LayoutOptionalArrow {
+  // 0 explicit undefined; 1..16 use LAYOUT_ARROW_TYPES order documented in the codec.
+  required uint32 type = 1;
+  optional double size_pt = 2; // required exactly when type != 0
+}
+message LayoutDefaultStyle {
+  required string stroke_color = 1;
+  required double stroke_weight_pt = 2;
+  optional string fill_color = 3; // absent = null; empty string remains distinct
+  optional LayoutOptionalArrow start_arrow = 4;
+  optional LayoutOptionalArrow end_arrow = 5;
+}

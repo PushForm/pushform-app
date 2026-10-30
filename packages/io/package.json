@@ -1,0 +1,24 @@
+{
+  "name": "@pushform/io",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Native .pf/.pfl formats and SketchUp model/LayOut import",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "sideEffects": false,
+  "dependencies": {
+    "@pushform/core": "workspace:*",
+    "@pushform/geom": "workspace:*",
+    "@pushform/kernel": "workspace:*",
+    "@pushform/layout": "workspace:*",
+    "@pushform/model": "workspace:*",
+    "fast-sha256": "1.3.0",
+    "fflate": "^0.8.2",
+    "openskp": "1.3.0",
+    "protobufjs": "8.8.1"
+  }
+}

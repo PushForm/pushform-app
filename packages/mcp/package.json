@@ -1,0 +1,33 @@
+{
+  "name": "@pushform/mcp",
+  "version": "0.0.1",
+  "private": true,
+  "description": "MCP server and headless CLI over the command registry",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "bin": {
+    "pushform-mcp": "./bin/pushform-mcp.mjs"
+  },
+  "scripts": {
+    "start": "node bin/pushform-mcp.mjs"
+  },
+  "sideEffects": false,
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.20.0",
+    "esbuild": "^0.28.2",
+    "@pushform/commands": "workspace:*",
+    "@pushform/core": "workspace:*",
+    "@pushform/io": "workspace:*",
+    "@pushform/kernel": "workspace:*",
+    "@pushform/model": "workspace:*",
+    "ws": "^8.18.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.0"
+  }
+}

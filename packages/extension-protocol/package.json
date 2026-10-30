@@ -1,0 +1,16 @@
+{
+  "name": "@pushform/extension-protocol",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Versioned document API schemas shared by the trusted host and its clients (AI Chat, extensions); runs in browsers, Node and Deno",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "sideEffects": false,
+  "dependencies": {
+    "zod": "^4.6.7"
+  }
+}

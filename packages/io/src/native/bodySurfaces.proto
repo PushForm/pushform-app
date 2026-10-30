@@ -1,0 +1,12 @@
+syntax = "proto2";
+package pushform.native;
+message BodySurfaces {
+  required uint32 count = 1;
+  required uint32 reference_count = 2;
+  // These packed lists contain chunk IDs, not the column values themselves.
+  repeated uint32 ids = 3 [packed=true]; // Uint32 surface IDs
+  repeated uint32 curves = 4 [packed=true]; // Uint32 curve IDs; zero when absent
+  repeated uint32 flags = 5 [packed=true]; // Uint8 curve-present bit
+  repeated uint32 offsets = 6 [packed=true]; // Uint32 count+1 face-reference offsets
+  repeated uint32 faces = 7 [packed=true]; // Uint32 face IDs, preserving order/repeats
+}

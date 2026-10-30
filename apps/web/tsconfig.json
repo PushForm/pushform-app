@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "dist/types", "types": ["vite/client"] },
+  "include": ["src"],
+  "references": [
+    { "path": "../../packages/core" }, { "path": "../../packages/kernel" }, { "path": "../../packages/model" },
+    { "path": "../../packages/commands" }, { "path": "../../packages/render" }, { "path": "../../packages/ui" },
+    { "path": "../../packages/cloud" }
+  ]
+}

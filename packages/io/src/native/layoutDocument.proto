@@ -1,0 +1,24 @@
+syntax = "proto2";
+package pushform.native;
+// DRAFT. Document tables are separate records; order columns are streamed Uint32 IDs.
+message LayoutDocumentOrder { required uint32 count = 1; repeated uint32 chunks = 2 [packed = true]; }
+message LayoutDocumentHeader {
+  required bytes metadata = 1; // LayoutMetadata
+  required LayoutDocumentOrder page_order = 2;
+  required LayoutDocumentOrder layer_order = 3;
+  required LayoutDocumentOrder shared_entity_order = 4;
+  required uint32 archives_state = 5; // 0 absent, 1 explicit undefined, 2 map
+  required uint32 numbering_state = 6;
+  required uint32 reference_count = 7;
+  required uint32 archive_count = 8;
+  required uint32 custom_field_count = 9;
+  required uint32 numbering_count = 10;
+  required uint32 asset_count = 11;
+}
+message LayoutCustomField { required string name = 1; required string value = 2; }
+message LayoutPageNumberField {
+  required string name = 1;
+  optional double start_page_id = 2; // absent means null; exact safe integer
+  required double start_number = 3; // exact signed safe integer
+  required uint32 style = 4; // arabic, two-digit, upper-letter, lower-letter, upper-roman, lower-roman
+}

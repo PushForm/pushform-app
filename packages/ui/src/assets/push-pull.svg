@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title id="title">Push/Pull</title>
+  <g fill="none" stroke="#231f20" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M116.5 101H113.5L101.7 112.8V151.7H106.8"/>
+    <path d="M113.4 113.5L125.6 101H143.5V137.5L131 151.7H113.4Z"/>
+    <path d="M113.4 113.5H131V151.7M131 113.5L143.5 101"/>
+    <path d="M139.3 126.9H156.8M152.1 122.1L156.8 126.9L152.1 131.7"/>
+  </g>
+</svg>

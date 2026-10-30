@@ -1,0 +1,18 @@
+syntax = "proto2";
+package pushform.native;
+
+// Container directory record; all lengths are bytes.
+// The directory envelope authenticates these descriptors before publication.
+message ChunkDescriptor {
+  required uint32 id = 1;
+  required uint32 kind = 2;
+  required uint32 schema_id = 3;
+  required bool required = 4;
+  required uint32 codec = 5; // 0 = raw, 1 = DEFLATE
+  required uint32 decoded_bytes = 6;
+  required uint32 stored_bytes = 7;
+  required bytes sha256 = 8;
+  // kind=2/schema_id=2 only: ordered (logical id, byte offset, byte length) triples.
+  // At most 256 slices, contiguous and covering the decoded page exactly.
+  repeated uint32 slices = 9 [packed = true];
+}

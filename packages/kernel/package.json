@@ -1,0 +1,18 @@
+{
+  "name": "@pushform/kernel",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Manifold kernel wrapper: protocol, worker ops, backends",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "sideEffects": false,
+  "dependencies": {
+    "@pushform/core": "workspace:*",
+    "@pushform/geom": "workspace:*",
+    "manifold-3d": "^3.5.4"
+  }
+}

@@ -1,0 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright 2026 PushForm contributors
+// @pushform/extension-protocol: versioned document API schemas shared by the trusted host and its clients.
+// Dependency-light (zod only) and runtime-neutral, so the browser host and the Edge Functions both import it.
+export * from './layout.ts';

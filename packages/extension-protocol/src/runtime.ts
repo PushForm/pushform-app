@@ -24,7 +24,9 @@ export const extensionErrorSchema = z.strictObject({
 export const hostMessageSchema = z.union([
   z.strictObject({ type: z.literal('activate'), v: z.literal(RUNTIME_PROTOCOL_VERSION), extensionId: z.string().max(200),
     grants: z.array(z.enum(EXTENSION_PERMISSIONS)), wasm: z.boolean(), contributions: z.array(contributionId) }),
-  z.strictObject({ type: z.literal('invoke'), invocation: id, contribution: contributionId, params: z.unknown() }),
+  z.strictObject({ type: z.literal('invoke'), invocation: id, contribution: contributionId, params: z.unknown(),
+    /** The host-issued handle of the document the invocation acts on, when it has one. */
+    document: z.string().max(100).optional() }),
   z.strictObject({ type: z.literal('cancel'), invocation: id }),
   z.strictObject({ type: z.literal('response'), id, ok: z.literal(true), result: z.unknown() }),
   z.strictObject({ type: z.literal('response'), id, ok: z.literal(false), error: extensionErrorSchema }),

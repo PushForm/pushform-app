@@ -24,6 +24,11 @@ export interface CallOptions {
 export interface InvocationContext {
   /** Aborted when the user cancels, the panel or document closes, or the extension is disabled or updated. */
   readonly signal: AbortSignal;
+  /**
+   * The handle of the document this invocation acts on, issued by the host. Pass it to model calls; it stays bound
+   * to that document even if the user switches tabs, and stops working when the document closes.
+   */
+  readonly document?: string;
 }
 
 export type ContributionHandler = (params: unknown, invocation: InvocationContext) => unknown;
@@ -147,7 +152,7 @@ export async function startGuest(port: RuntimePort, loadMain: () => Promise<unkn
     invocations.set(message.invocation, controller);
     const signal = AbortSignal.any([controller.signal, lifetime.signal]);
     Promise.resolve()
-      .then(() => handler(message.params, Object.freeze({ signal })))
+      .then(() => handler(message.params, Object.freeze(message.document === undefined ? { signal } : { signal, document: message.document })))
       .then(
         (value) => ({ type: 'result', invocation: message.invocation, ok: true, value: value ?? null }),
         (error: unknown) => ({ type: 'result', invocation: message.invocation, ok: false,

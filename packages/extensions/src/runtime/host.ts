@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import {
-  ExtensionError, RUNTIME_PROTOCOL_VERSION, methodPermission, runtimeMessageSchema, serviceAvailable,
+  ExtensionError, RUNTIME_PROTOCOL_VERSION, measureMessage, methodPermission, runtimeMessageSchema, serviceAvailable,
   type DeactivationReason, type ExtensionErrorData, type ExtensionManifest, type ExtensionPermission,
   type ExtensionServiceName, type RuntimeMessage,
 } from '@pushform/extension-protocol';
@@ -13,10 +13,28 @@ import type { RuntimePort } from './port';
  * Every message from the runtime is validated before use, and every service request is checked again against the
  * grants, whatever the runtime's own `context` allowed. Cancelled invocations and requests are forgotten at once,
  * so a late result from the extension is dropped.
+ *
+ * Nothing the runtime sends can name who it is or what it may touch. Its identity is the session that owns the port,
+ * and a session belongs to one runtime generation: a restarted runtime gets a new session and port, and the old
+ * port is no longer listened to. Documents are reached only through opaque handles this session issued; a handle
+ * names one document for as long as that document stays open here, so an invocation keeps acting on its own
+ * document when the user switches tabs, and nothing can be guessed or carried over from another extension.
  */
 
+/** What a service method learns about the call besides its input. */
+export interface ServiceCall {
+  readonly signal: AbortSignal;
+  readonly extensionId: string;
+  readonly generation: number;
+  /**
+   * The document a handle from the input names. Throws `permission.denied` for anything this session did not issue,
+   * including handles of closed documents, so services never resolve a document id the extension supplied itself.
+   */
+  document(handle: unknown): string;
+}
+
 /** Implements one host service method for extensions. Must return structured-cloneable data, never live objects. */
-export type ServiceMethod = (input: unknown, call: { signal: AbortSignal; extensionId: string }) => unknown;
+export type ServiceMethod = (input: unknown, call: ServiceCall) => unknown;
 
 /** Implementations keyed `service.method`, for example `model.query`. A missing one answers `unavailable`. */
 export type ServiceImplementations = Readonly<Partial<Record<`${ExtensionServiceName}.${string}`, ServiceMethod>>>;
@@ -28,15 +46,21 @@ export interface SessionLimits {
   readonly activateMs: number;
   /** Time for `deactivate()` to settle before the runtime is treated as stopped anyway. */
   readonly deactivateMs: number;
+  /** Service requests the runtime may have outstanding at once; more are refused with `limit.exceeded`. */
+  readonly maxPendingRequests: number;
+  /** Invalid messages tolerated before the session fails as a protocol violation and the runtime is to be ended. */
+  readonly maxInvalidMessages: number;
 }
 
-export const DEFAULT_SESSION_LIMITS: SessionLimits = { loadMs: 10_000, activateMs: 10_000, deactivateMs: 2_000 };
+export const DEFAULT_SESSION_LIMITS: SessionLimits = {
+  loadMs: 10_000, activateMs: 10_000, deactivateMs: 2_000, maxPendingRequests: 32, maxInvalidMessages: 50,
+};
 
 export type SessionState = 'loading' | 'loaded' | 'activating' | 'active' | 'deactivating' | 'stopped' | 'failed';
 
 /** Why a session failed, for the failure notice and for terminating the runtime. */
 export interface SessionFailure {
-  readonly kind: 'load-failed' | 'load-timeout' | 'activation-failed' | 'activation-timeout';
+  readonly kind: 'load-failed' | 'load-timeout' | 'activation-failed' | 'activation-timeout' | 'protocol-violation';
   readonly error: ExtensionErrorData;
 }
 
@@ -48,14 +72,24 @@ export interface ExtensionSessionOptions {
   readonly services?: ServiceImplementations;
   readonly limits?: Partial<SessionLimits>;
   readonly onFailure?: (failure: SessionFailure) => void;
+  /** The runtime generation this session serves; a restart creates a new session with a new generation. */
+  readonly generation?: number;
 }
 
 export interface InvokeOptions {
   /** Aborting it cancels the invocation, as the user's Cancel does. */
   readonly signal?: AbortSignal;
-  /** Scopes such as `panel:<id>` or `document:<id>`; `cancelScope` cancels every invocation carrying the scope. */
+  /** Scopes such as `panel:<id>`; `cancelScope` cancels every invocation carrying the scope. */
   readonly scopes?: readonly string[];
+  /**
+   * The id of the document the invocation acts on. The runtime receives this session's handle for it, never the id,
+   * and closing the document (`closeDocument`) cancels the invocation.
+   */
+  readonly document?: string;
 }
+
+let nextGeneration = 1;
+const randomHandle = (): string => `doc_${crypto.randomUUID().replaceAll('-', '')}`;
 
 interface PendingInvocation {
   readonly scopes: readonly string[];
@@ -67,6 +101,9 @@ interface PendingInvocation {
 export class ExtensionSession {
   readonly manifest: ExtensionManifest;
   readonly grants: ReadonlySet<ExtensionPermission>;
+  readonly generation: number;
+  private readonly documentOfHandle = new Map<string, string>();
+  private readonly handleOfDocument = new Map<string, string>();
   private readonly port: RuntimePort;
   private readonly services: ServiceImplementations;
   private readonly limits: SessionLimits;
@@ -87,6 +124,7 @@ export class ExtensionSession {
 
   constructor(options: ExtensionSessionOptions) {
     this.manifest = options.manifest;
+    this.generation = options.generation ?? nextGeneration++;
     const requested = new Set(options.manifest.permissions);
     this.grants = new Set([...options.grants].filter((p) => requested.has(p)));
     this.port = options.port;
@@ -146,23 +184,52 @@ export class ExtensionSession {
     if (this.currentState !== 'active') throw new ExtensionError('unavailable', 'The extension is not running.');
     if (options.signal?.aborted) throw new ExtensionError('cancelled', 'The operation was cancelled.');
     const invocation = this.nextInvocation++;
+    const scopes = options.document === undefined ? options.scopes ?? [] : [...(options.scopes ?? []), `document:${options.document}`];
+    const document = options.document === undefined ? undefined : this.openDocument(options.document);
     return new Promise((resolve, reject) => {
       const onAbort = () => this.cancelInvocation(invocation);
       options.signal?.addEventListener('abort', onAbort, { once: true });
       const done = () => options.signal?.removeEventListener('abort', onAbort);
       this.invocations.set(invocation, {
-        scopes: options.scopes ?? [],
+        scopes,
         resolve: (value) => { done(); resolve(value); },
         reject: (error) => { done(); reject(error); },
         cancel: () => this.port.post({ type: 'cancel', invocation }),
       });
-      this.port.post({ type: 'invoke', invocation, contribution: contributionId, params });
+      this.port.post({ type: 'invoke', invocation, contribution: contributionId, params, ...(document === undefined ? {} : { document }) });
     });
   }
 
-  /** Cancels every running invocation that carries `scope`, as closing its panel or document does. */
+  /** Cancels every running invocation that carries `scope`, as closing its panel does. */
   cancelScope(scope: string): void {
     for (const [invocation, pending] of this.invocations) if (pending.scopes.includes(scope)) this.cancelInvocation(invocation);
+  }
+
+  /** The handle this session uses for `documentId`, issued on first use. Handles are random and per session. */
+  openDocument(documentId: string): string {
+    let handle = this.handleOfDocument.get(documentId);
+    if (handle === undefined) {
+      handle = randomHandle();
+      this.handleOfDocument.set(documentId, handle);
+      this.documentOfHandle.set(handle, documentId);
+    }
+    return handle;
+  }
+
+  /** The document closed: its handle stops resolving, and invocations acting on it are cancelled. */
+  closeDocument(documentId: string): void {
+    const handle = this.handleOfDocument.get(documentId);
+    if (handle !== undefined) {
+      this.handleOfDocument.delete(documentId);
+      this.documentOfHandle.delete(handle);
+    }
+    this.cancelScope(`document:${documentId}`);
+  }
+
+  private resolveDocument(handle: unknown): string {
+    const documentId = typeof handle === 'string' ? this.documentOfHandle.get(handle) : undefined;
+    if (documentId === undefined) throw new ExtensionError('permission.denied', 'The document handle is not valid for this extension; the document may have closed.');
+    return documentId;
   }
 
   /**
@@ -187,6 +254,8 @@ export class ExtensionSession {
       });
     }
     this.currentState = 'stopped';
+    this.documentOfHandle.clear();
+    this.handleOfDocument.clear();
     this.unlisten();
     this.port.close();
     return confirmed;
@@ -203,6 +272,8 @@ export class ExtensionSession {
   private fail(kind: SessionFailure['kind'], error: ExtensionError, reject: (error: ExtensionError) => void): void {
     if (this.currentState === 'failed' || this.currentState === 'stopped') return;
     this.currentState = 'failed';
+    this.documentOfHandle.clear();
+    this.handleOfDocument.clear();
     for (const invocation of [...this.invocations.keys()]) this.cancelInvocation(invocation);
     for (const controller of this.requests.values()) controller.abort();
     this.requests.clear();
@@ -212,9 +283,24 @@ export class ExtensionSession {
   }
 
   private receive(raw: unknown, lifecycle: (message: RuntimeMessage) => void): void {
+    if (this.currentState === 'stopped' || this.currentState === 'failed') return;
+    // Size first, before anything reads the message. An oversized request or result still gets its structured
+    // answer, so the extension learns why instead of waiting forever.
+    if (measureMessage(raw) === null) {
+      this.invalid();
+      const fields = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : {};
+      const tooLarge = new ExtensionError('limit.exceeded', 'The message is larger than an extension may send.');
+      if (fields.type === 'request' && Number.isSafeInteger(fields.id)) this.port.post({ type: 'response', id: fields.id, ok: false, error: tooLarge.toJSON() });
+      if (fields.type === 'result' && typeof fields.invocation === 'number') {
+        const pending = this.invocations.get(fields.invocation);
+        this.invocations.delete(fields.invocation);
+        pending?.reject(tooLarge);
+      }
+      return;
+    }
     const parsed = runtimeMessageSchema.safeParse(raw);
     if (!parsed.success) {
-      this.invalidMessages++;
+      this.invalid();
       return;
     }
     const message = parsed.data;
@@ -254,9 +340,19 @@ export class ExtensionSession {
     }
   }
 
+  /** Counts a dropped message; a runtime that keeps sending them is treated as hostile and its session fails. */
+  private invalid(): void {
+    this.invalidMessages++;
+    if (this.invalidMessages === this.limits.maxInvalidMessages)
+      this.fail('protocol-violation', new ExtensionError('extension.failed', 'The extension sent too many invalid messages and was stopped.'), () => {});
+  }
+
   private async serve(message: Extract<RuntimeMessage, { type: 'request' }>): Promise<void> {
     const respondError = (error: ExtensionError) => this.port.post({ type: 'response', id: message.id, ok: false, error: error.toJSON() });
     if (this.currentState !== 'active' && this.currentState !== 'activating') return respondError(new ExtensionError('unavailable', 'The extension is not running.'));
+    if (this.requests.has(message.id)) return respondError(new ExtensionError('validation.failed', 'A request with this id is already running.'));
+    if (this.requests.size >= this.limits.maxPendingRequests)
+      return respondError(new ExtensionError('limit.exceeded', `An extension may have at most ${this.limits.maxPendingRequests} host calls running at once.`));
     const permission = methodPermission(message.service, message.method);
     if (permission === undefined) return respondError(new ExtensionError('validation.failed', `There is no ${message.service}.${message.method}.`));
     const service = message.service as ExtensionServiceName;
@@ -269,7 +365,10 @@ export class ExtensionSession {
     this.requests.set(message.id, controller);
     let reply: Record<string, unknown>;
     try {
-      const result = await implementation(message.input, { signal: controller.signal, extensionId: this.manifest.id });
+      const result = await implementation(message.input, {
+        signal: controller.signal, extensionId: this.manifest.id, generation: this.generation,
+        document: (handle) => this.resolveDocument(handle),
+      });
       reply = { type: 'response', id: message.id, ok: true, result: result ?? null };
     } catch (error) {
       const failure = error instanceof ExtensionError ? error : new ExtensionError('unavailable', 'The host could not complete the request.');

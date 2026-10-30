@@ -102,7 +102,7 @@ export function isHostMessage(value: unknown): value is { type: 'activate' | 'in
       return message.v === RUNTIME_PROTOCOL_VERSION && typeof message.extensionId === 'string' && Array.isArray(message.grants)
         && typeof message.wasm === 'boolean' && Array.isArray(message.contributions);
     case 'invoke':
-      return int('invocation') && typeof message.contribution === 'string';
+      return int('invocation') && typeof message.contribution === 'string' && (message.document === undefined || typeof message.document === 'string');
     case 'cancel':
       return int('invocation');
     case 'response':
@@ -112,4 +112,55 @@ export function isHostMessage(value: unknown): value is { type: 'activate' | 'in
     default:
       return false;
   }
+}
+
+/** Bounds on any one message between host and runtime, checked before the message is otherwise looked at. */
+export const MESSAGE_LIMITS = {
+  /** Approximate encoded size: UTF-16 string data, binary byte lengths, 8 bytes per number, plus keys. */
+  bytes: 4 * 1024 * 1024,
+  /** Values (objects, arrays, strings, numbers…) in the message. */
+  nodes: 200_000,
+  depth: 64,
+} as const;
+
+/**
+ * Measures a structured-cloned value without serializing it, stopping as soon as a bound is passed. Returns the
+ * approximate size in bytes, or `null` when the value exceeds `limits` or holds anything a message must not
+ * (functions, symbols, a cycle deeper than the depth bound).
+ */
+export function measureMessage(value: unknown, limits: { bytes: number; nodes: number; depth: number } = MESSAGE_LIMITS): number | null {
+  let bytes = 0;
+  let nodes = 0;
+  const seen = new Set<object>();
+  const walk = (v: unknown, depth: number): boolean => {
+    if (++nodes > limits.nodes || depth > limits.depth) return false;
+    switch (typeof v) {
+      case 'string': bytes += 2 * v.length; break;
+      case 'number': case 'bigint': bytes += 8; break;
+      case 'boolean': case 'undefined': bytes += 1; break;
+      case 'object': {
+        if (v === null) { bytes += 1; break; }
+        if (seen.has(v)) break;
+        seen.add(v);
+        if (ArrayBuffer.isView(v) || v instanceof ArrayBuffer) { bytes += v.byteLength; break; }
+        if (v instanceof Map) {
+          for (const [key, item] of v) if (!walk(key, depth + 1) || !walk(item, depth + 1)) return false;
+        } else if (v instanceof Set) {
+          for (const item of v) if (!walk(item, depth + 1)) return false;
+        } else if (Array.isArray(v)) {
+          for (const item of v) if (!walk(item, depth + 1)) return false;
+        } else {
+          for (const key of Object.keys(v)) {
+            bytes += 2 * key.length;
+            if (!walk((v as Record<string, unknown>)[key], depth + 1)) return false;
+          }
+        }
+        break;
+      }
+      default:
+        return false;
+    }
+    return bytes <= limits.bytes;
+  };
+  return walk(value, 0) ? bytes : null;
 }

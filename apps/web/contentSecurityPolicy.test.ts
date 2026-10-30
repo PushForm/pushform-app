@@ -12,6 +12,7 @@ import {
   withCspHeader,
   withReportUri,
 } from './contentSecurityPolicy';
+import { FRAME_BOOTSTRAP_SHA256 } from '@pushform/extensions/frame-bootstrap';
 import { PRODUCTION_SENTRY_DSN, sentryDsnFor } from './src/sentryDsn';
 
 const directives = (policy: string): Map<string, string[]> =>
@@ -31,7 +32,7 @@ describe('contentSecurityPolicy', () => {
   });
 
   it('lets the kernel compile its wasm without allowing eval', () => {
-    expect(web.get('script-src')).toEqual(["'self'", "'wasm-unsafe-eval'", 'blob:']);
+    expect(web.get('script-src')).toEqual(["'self'", "'wasm-unsafe-eval'", 'blob:', `'sha256-${FRAME_BOOTSTRAP_SHA256}'`]);
     expect(web.get('script-src')).not.toContain("'unsafe-eval'");
     expect(web.get('script-src')).not.toContain("'unsafe-inline'");
     expect(web.get('worker-src')).toEqual(["'self'", 'blob:']);

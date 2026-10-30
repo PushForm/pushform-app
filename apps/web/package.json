@@ -13,6 +13,7 @@
     "@pushform/cloud": "workspace:*",
     "@pushform/commands": "workspace:*",
     "@pushform/core": "workspace:*",
+    "@pushform/extensions": "workspace:*",
     "@pushform/kernel": "workspace:*",
     "@pushform/model": "workspace:*",
     "@pushform/render": "workspace:*",
@@ -28,6 +29,7 @@
     "@types/react-dom": "^19.0.0",
     "@types/three": "^0.180.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "esbuild": "^0.28.2",
     "vite": "^7.1.0"
   }
 }

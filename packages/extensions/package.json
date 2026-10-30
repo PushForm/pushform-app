@@ -2,17 +2,20 @@
   "name": "@pushform/extensions",
   "version": "0.0.1",
   "private": true,
-  "description": "Trusted extension host: scoped document queries and atomic operation batches over the command registry",
+  "description": "Trusted extension host: scoped document queries, atomic operation batches over the command registry, and the isolated extension runtime",
   "license": "GPL-3.0-or-later",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./frame-bootstrap": "./src/runtime/web/frameBootstrap.ts",
+    "./worker-bootstrap": "./src/runtime/web/workerBootstrap.ts"
   },
   "types": "./src/index.ts",
   "sideEffects": false,
   "dependencies": {
     "@pushform/commands": "workspace:*",
     "@pushform/extension-protocol": "workspace:*",
-    "@pushform/layout": "workspace:*"
+    "@pushform/layout": "workspace:*",
+    "es-module-lexer": "^2.3.2"
   }
 }

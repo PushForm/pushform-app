@@ -6,3 +6,5 @@ export * from './layout.ts';
 export * from './manifest.ts';
 export * from './package.ts';
 export * from './runtime.ts';
+export * from './runtimeCore.ts';
+export * from './vocabulary.ts';

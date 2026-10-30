@@ -3,6 +3,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Plugin } from 'vite';
+import { FRAME_BOOTSTRAP_SHA256 } from '@pushform/extensions/frame-bootstrap';
 import { PRODUCTION_SENTRY_DSN } from './src/sentryDsn';
 
 /**
@@ -66,7 +67,9 @@ export function contentSecurityPolicy(surface: CspSurface, input: CspInput): str
     ['default-src', "'self'"],
     // 'wasm-unsafe-eval' compiles the Manifold kernel. blob: lets troika-three-text's workers importScripts the
     // modules they are sent (3D text), and only scripts already running can make blob: URLs.
-    ['script-src', unique(["'self'", product && "'wasm-unsafe-eval'", product && 'blob:'])],
+    // The extension runtime frame inherits this policy (a srcdoc frame keeps its parent's), so its bootstrap script
+    // is allowed here by hash as well as by the frame's own, stricter policy.
+    ['script-src', unique(["'self'", product && "'wasm-unsafe-eval'", product && 'blob:', surface === 'web' && `'sha256-${FRAME_BOOTSTRAP_SHA256}'`])],
     ['worker-src', unique(["'self'", product && 'blob:'])],
     // React and the canvas UIs set style attributes; Layout loads Google Fonts' stylesheets.
     ['style-src', unique(["'self'", "'unsafe-inline'", product && 'https://fonts.googleapis.com'])],

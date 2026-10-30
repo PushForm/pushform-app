@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+// Only the dependency-free core: this file runs inside every extension runtime, where size matters.
 import {
-  EXTENSION_SERVICES, ExtensionError, RUNTIME_PROTOCOL_VERSION, hostMessageSchema, methodPermission, serviceAvailable,
-  servicePermissions, type ExtensionErrorData, type ExtensionPermission, type ExtensionServiceName, type HostMessage,
-  type ServiceAccess,
-} from '@pushform/extension-protocol';
+  EXTENSION_SERVICES, ExtensionError, RUNTIME_PROTOCOL_VERSION, isHostMessage, methodPermission, serviceAvailable,
+  servicePermissions, type ExtensionErrorData, type ExtensionServiceName, type ServiceAccess,
+} from '@pushform/extension-protocol/runtime-core';
+import type { ExtensionPermission, HostMessage } from '@pushform/extension-protocol';
 import type { RuntimePort } from './port';
 
 /**
@@ -178,9 +179,8 @@ export async function startGuest(port: RuntimePort, loadMain: () => Promise<unkn
   };
 
   const unlisten = port.listen((raw) => {
-    const parsed = hostMessageSchema.safeParse(raw);
-    if (!parsed.success) return;
-    const message = parsed.data;
+    if (!isHostMessage(raw)) return;
+    const message = raw as unknown as HostMessage;
     switch (message.type) {
       case 'activate': {
         if (state !== 'loaded') return;

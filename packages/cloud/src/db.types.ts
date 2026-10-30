@@ -193,6 +193,26 @@ isOneToOne: false
                   Relationships: [
                     
                   ]
+                },"cloud_import_support": {
+                  Row: {
+                    "attempts": number,"issue_key": string | null,"last_error": string | null,"report_id": string,"retry_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "attempts"?: number,"issue_key"?: string | null,"last_error"?: string | null,"report_id": string,"retry_at"?: string
+                  }
+                  Update: {
+                    "attempts"?: number,"issue_key"?: string | null,"last_error"?: string | null,"report_id"?: string,"retry_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "cloud_import_support_report_id_fkey"
+      columns: ["report_id"]
+isOneToOne: true
+      referencedRelation: "cloud_import_reports"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"cloud_profiles": {
                   Row: {
                     "account_type": string,"company_name": string | null,"company_size": string | null,"completed_at": string,"first_name": string,"industry": string,"industry_other": string | null,"last_name": string,"owner_id": string,"terms_accepted_at": string,"terms_version": string,"updated_at": string
@@ -608,6 +628,9 @@ isOneToOne: false
 "admin_grant":
 { Args: { "p_email": string,"p_role": string }; Returns: Json
                            },
+"admin_import_evidence":
+{ Args: { "p_report": string }; Returns: Json
+                           },
 "admin_imports":
 { Args: { "p_days": number }; Returns: Json
                            },
@@ -734,6 +757,9 @@ isOneToOne: false
               "attempts": number,"email": string,"id": string,"owner_id": string
             }[]
                            },
+"cloud_claim_import_support":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
 "cloud_commit_save":
 { Args: { "p_revision": string }; Returns: Json
                            },
@@ -772,6 +798,12 @@ isOneToOne: false
                            },
 "cloud_finish_export":
 { Args: { "p_document_count": number,"p_expires_at": string,"p_export": string,"p_object_path": string,"p_size_bytes": number }; Returns: undefined
+                           },
+"cloud_finish_import_support":
+{ Args: { "p_error": string,"p_issue_key": string,"p_report": string }; Returns: undefined
+                           },
+"cloud_import_source_access":
+{ Args: { "p_path": string,"p_write": boolean }; Returns: boolean
                            },
 "cloud_list_trash":
 { Args: Record<PropertyKey, never>; Returns: Json

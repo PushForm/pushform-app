@@ -160,7 +160,7 @@ export class LinearTracker implements Tracker {
     const [projectId, stateId, labelIds] = await Promise.all([this.projectId(input.kind), this.stateId(this.options.tracker.states.triage), this.labelIds(input.labels)]);
     const data = await this.graphql<{ issueCreate: { success: boolean; issue: IssueNode } }>(
       `mutation CreateIssue($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { ${ISSUE_FIELDS} } } }`,
-      { input: { teamId: team.id, projectId, stateId, labelIds, title: input.title, description: input.body } },
+      { input: { ...(input.id ? { id: input.id } : {}), teamId: team.id, projectId, stateId, labelIds, title: input.title, description: input.body } },
     );
     if (!data.issueCreate.success) throw new TrackerError('invalid', 'Linear did not create the issue.');
     return toIssue(data.issueCreate.issue);

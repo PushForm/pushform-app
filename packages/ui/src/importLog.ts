@@ -84,8 +84,11 @@ export function layoutImportReport(
  * Store a report without affecting the import: a missing cloud API or a failed write is noted in
  * the console only. The returned promise settles once the attempt finishes, for tests.
  */
-export async function logImport(api: CloudFilesApi | undefined, report: CloudImportReport): Promise<void> {
+export async function logImport(api: CloudFilesApi | undefined, report: CloudImportReport, bytes?: Uint8Array): Promise<void> {
   if (!api) return;
-  try { await api.recordImport(report); }
+  try {
+    const saved = await api.recordImport(report);
+    if (report.status === 'failed' && bytes) await api.saveFailedImport?.(saved, bytes);
+  }
   catch (cause) { console.warn('The import report was not stored.', cause); }
 }

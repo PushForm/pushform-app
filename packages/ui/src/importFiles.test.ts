@@ -9,7 +9,7 @@ import {
 import type * as IoModule from '@pushform/io';
 import { createLayoutDocument } from '@pushform/layout';
 import { createApp } from './bootstrap';
-import { convertImportFile, isImportableFile, IMPORT_FILE_ACCEPT } from './importFiles';
+import { convertImportFile, importSketchUpBytes, importLayoutBytes, isImportableFile, IMPORT_FILE_ACCEPT } from './importFiles';
 import { DocumentSession } from './session';
 
 vi.mock('@pushform/io', async original => ({ ...await original<typeof IoModule>(), readSketchUpInWorker: vi.fn(), importSketchUpLayoutInWorker: vi.fn() }));
@@ -22,7 +22,7 @@ function setup(): { session: DocumentSession; recordImport: ReturnType<typeof vi
 }
 function picked(name: string, size = 4): File {
   const file = new File([new Uint8Array(size)], name, { lastModified: Date.UTC(2026, 9, 20) });
-  Object.defineProperty(file, 'arrayBuffer', { value: async () => new Uint8Array(size).buffer });
+  Object.defineProperty(file, 'arrayBuffer', { value: async () => new Uint8Array(size).buffer, configurable: true });
   return file;
 }
 const scene: SketchUpImport = { version: '{26.2.242}', root: { key: -1, guid: 'ROOT', name: 'Model', image: false, group: false, alwaysFaceCamera: false, shadowsFaceSun: false,
@@ -79,3 +79,22 @@ it('rejects unsupported and oversized files before reading them, and reports rea
   await expect(convertImportFile(picked('Broken.skp'), { cloudFiles: api })).rejects.toThrow('invalid file header');
   expect(recordImport).toHaveBeenCalledWith(expect.objectContaining({ status: 'failed', error: 'Not a SketchUp model: invalid file header.' }));
 });
+
+for (const route of ['editor-model', 'editor-layout', 'library-model', 'library-layout'] as const) {
+  it(`retains the original bytes for a failed ${route} import and preserves its error`, async () => {
+    const { session, recordImport } = setup();
+    const saveFailedImport = vi.fn().mockResolvedValue(undefined);
+    const cloudFiles = { recordImport, saveFailedImport } as unknown as CloudFilesApi;
+    const error = new Error('Invalid source');
+    readModel.mockRejectedValue(error); readLayout.mockRejectedValue(error);
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    const file = picked(route.endsWith('layout') ? 'broken.layout' : 'broken.skp');
+    Object.defineProperty(file, 'arrayBuffer', { value: async () => bytes.buffer, configurable: true });
+    const attempt = route === 'editor-model' ? importSketchUpBytes(session, bytes, file.name, { cloudFiles })
+      : route === 'editor-layout' ? importLayoutBytes(session, bytes, file.name, { cloudFiles })
+      : convertImportFile(file, { cloudFiles });
+    await expect(attempt).rejects.toBe(error);
+    await vi.waitFor(() => expect(saveFailedImport).toHaveBeenCalledWith({ id: 'report' }, bytes));
+    expect(recordImport).toHaveBeenCalledOnce();
+  });
+}

@@ -3,6 +3,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { createClient } from '@supabase/supabase-js';
 import { CloudSession, type AuthApi } from './CloudSession';
+import type { CloudImportRecord } from './CloudImportLog';
 import { CloudFiles, cloudChecksum, cloudFileName, type CloudSavedFile } from './CloudFiles';
 
 const active: Array<{ files: CloudFiles; session: CloudSession; shutdown: () => Promise<void> }> = [];
@@ -303,4 +304,15 @@ it('renames, moves, trashes, restores, deletes and lists the Trash through the o
   await expect(files.rename('document', 'file-1', 'Bad/name.pf')).rejects.toThrow('without slashes');
   await expect(files.rename('document', 'file-1', 'Trashed.pf')).rejects.toMatchObject({ code: 'trashed' });
   await expect(files.restore('folder', 'folder-1')).rejects.toThrow('that name exists there now');
+});
+
+it('stores failed imports in immutable account-scoped storage and rejects cross-account evidence', async () => {
+  const { files, handler } = await setup();
+  const report = { id: 'report-1', owner_id: 'alice', status: 'failed', size_bytes: 3 } as CloudImportRecord;
+  await files.saveFailedImport(report, bytes);
+  expect(handler.mock.calls[0]![0].pathname).toBe('/storage/v1/object/cloud-import-failures/alice/.import-failures/report-1/source');
+  expect(new Headers(handler.mock.calls[0]![1].headers).get('x-upsert')).toBe('false');
+  await expect(files.saveFailedImport({ ...report, owner_id: 'bob' }, bytes)).rejects.toThrow('account or file');
+  await expect(files.saveFailedImport({ ...report, status: 'cancelled' }, bytes)).rejects.toThrow('account or file');
+  expect(handler).toHaveBeenCalledOnce();
 });

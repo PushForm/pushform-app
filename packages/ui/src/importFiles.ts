@@ -63,7 +63,7 @@ export async function importSketchUpBytes(
     void logImport(options.cloudFiles, modelImportReport(source, { scene, report: result.report }, options.buildInfo));
     return result;
   } catch (cause) {
-    void logImport(options.cloudFiles, modelImportReport(source, { scene, error: cause }, options.buildInfo));
+    void logImport(options.cloudFiles, modelImportReport(source, { scene, error: cause }, options.buildInfo), bytes);
     throw cause;
   }
 }
@@ -83,7 +83,7 @@ export async function importLayoutBytes(
       pages: result.tab.doc.state.pageOrder.length }, options.buildInfo));
     return result;
   } catch (cause) {
-    void logImport(options.cloudFiles, layoutImportReport(source, { error: cause }, options.buildInfo));
+    void logImport(options.cloudFiles, layoutImportReport(source, { error: cause }, options.buildInfo), bytes);
     throw cause;
   }
 }
@@ -119,20 +119,22 @@ export async function convertImportFile(
       if (options.signal?.aborted) throw new DOMException('Import cancelled.', 'AbortError');
       const doc = createDocument(), images = new ImageStore();
       const report = doc.transact(`Import ${modelImportFormat(file.name).name} model`, draft => applySketchUpImport(draft, scene!, { images })).value;
+      const converted = await encodeModelSnapshot(doc.state, modelArchiveImages(doc.state, images));
       void logImport(options.cloudFiles, modelImportReport(source, { scene, report }, options.buildInfo));
-      return { kind: 'model', name: `${modelImportBaseName(file.name)}${MODEL_FILE_EXTENSION}`, bytes: await encodeModelSnapshot(doc.state, modelArchiveImages(doc.state, images)), notes: report.warnings };
+      return { kind: 'model', name: `${modelImportBaseName(file.name)}${MODEL_FILE_EXTENSION}`, bytes: converted, notes: report.warnings };
     } catch (cause) {
-      void logImport(options.cloudFiles, modelImportReport(source, { scene, error: cause }, options.buildInfo));
+      void logImport(options.cloudFiles, modelImportReport(source, { scene, error: cause }, options.buildInfo), bytes);
       throw cause;
     }
   }
   try {
     // Inflation, XML parsing and vector conversion run in a disposable worker; only the prepared state returns.
     const { doc, warnings, properties } = await importSketchUpLayoutInWorker(bytes, file.name, options.signal ? { signal: options.signal } : {});
+    const converted = await encodeLayoutSnapshot(doc.state);
     void logImport(options.cloudFiles, layoutImportReport(source, { properties, warnings, pages: doc.state.pageOrder.length }, options.buildInfo));
-    return { kind: 'layout', name: `${file.name.slice(0, -SKETCHUP_LAYOUT_EXTENSION.length)}${LAYOUT_FILE_EXTENSION}`, bytes: await encodeLayoutSnapshot(doc.state), notes: warnings };
+    return { kind: 'layout', name: `${file.name.slice(0, -SKETCHUP_LAYOUT_EXTENSION.length)}${LAYOUT_FILE_EXTENSION}`, bytes: converted, notes: warnings };
   } catch (cause) {
-    void logImport(options.cloudFiles, layoutImportReport(source, { error: cause }, options.buildInfo));
+    void logImport(options.cloudFiles, layoutImportReport(source, { error: cause }, options.buildInfo), bytes);
     throw cause;
   }
 }

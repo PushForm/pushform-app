@@ -53,3 +53,21 @@ it('stores through the cloud API and never rejects when storage is missing or fa
   await expect(logImport({ recordImport: vi.fn().mockRejectedValue(new Error('offline')) } as unknown as CloudFilesApi, entry)).resolves.toBeUndefined();
   expect(warn).toHaveBeenCalledOnce(); warn.mockRestore();
 });
+
+it('captures failed source bytes only after storing the report, without changing the outcome on upload failure', async () => {
+  const entry = modelImportReport({ fileName: 'broken.skp', sizeBytes: 3, startedAt: 0 }, { error: new Error('Broken') });
+  const saved = { id: 'report', status: 'failed' };
+  const recordImport = vi.fn().mockResolvedValue(saved), saveFailedImport = vi.fn().mockResolvedValue(undefined);
+  const api = { recordImport, saveFailedImport } as unknown as CloudFilesApi;
+  const bytes = new Uint8Array([1, 2, 3]);
+  await logImport(api, entry, bytes);
+  expect(saveFailedImport).toHaveBeenCalledWith(saved, bytes);
+  saveFailedImport.mockClear();
+  await logImport(api, { ...entry, status: 'cancelled', error: null }, bytes);
+  await logImport(api, { ...entry, status: 'imported', error: null }, bytes);
+  expect(saveFailedImport).not.toHaveBeenCalled();
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  saveFailedImport.mockRejectedValue(new Error('offline'));
+  await expect(logImport(api, entry, bytes)).resolves.toBeUndefined();
+  expect(warn).toHaveBeenCalled(); warn.mockRestore();
+});

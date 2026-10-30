@@ -85,7 +85,8 @@ describe('LinearTracker over GraphQL', () => {
     const { calls, fetchImpl } = fakeLinear({ Team: fx.TEAM_RESPONSE, CreateIssue: fx.ISSUE_CREATE_RESPONSE });
     const separate = { ...tracker, problemDestination: { sameProject: false, project: 'Defects', label: 'defect' } };
     const t = new LinearTracker({ token: 'lin_api_abc', tracker: separate, fetch: fetchImpl });
-    await t.createIssue({ title: 'Crash', body: 'x', kind: 'problem', labels: ['defect'] });
+    await t.createIssue({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', title: 'Crash', body: 'x', kind: 'problem', labels: ['defect'] });
+    expect(calls[1]?.variables['input']).toMatchObject({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' });
     expect((calls[1]?.variables['input'] as { projectId: string }).projectId).toBe('pr-defects');
     await make(fetchImpl).createIssue({ title: 'Crash', body: 'x', kind: 'problem', labels: ['defect'] });
     expect((calls[3]?.variables['input'] as { projectId: string }).projectId).toBe('pr-customer');

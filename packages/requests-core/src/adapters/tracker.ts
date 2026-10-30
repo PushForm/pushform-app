@@ -4,7 +4,7 @@ import type { HeadersLike } from './signature.ts';
 import type { Kind } from '../domain/types.ts';
 
 /** Input of `createIssue`; `kind` selects the problem destination. */
-export interface TrackerIssueInput { title: string; body: string; labels: readonly string[]; kind: Kind }
+export interface TrackerIssueInput { id?: string; title: string; body: string; labels: readonly string[]; kind: Kind }
 /** An issue as the tracker reports it. */
 export interface TrackerIssue {
   id: string;

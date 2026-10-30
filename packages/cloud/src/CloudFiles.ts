@@ -68,6 +68,8 @@ export interface CloudFilesApi {
   save(input: CloudSaveInput): Promise<CloudSavedFile>;
   /** Store one import report for the signed-in account. */
   recordImport(report: CloudImportReport): Promise<CloudImportRecord>;
+  /** Keep failed source bytes privately with their report for support. */
+  saveFailedImport?(report: CloudImportRecord, bytes: Uint8Array): Promise<void>;
   /** Replace an owned document's thumbnail with a JPEG. */
   saveThumbnail?(fileId: string, jpeg: Uint8Array): Promise<void>;
   /** Short-lived URLs of the thumbnails these documents have; documents without one are left out. */
@@ -302,6 +304,15 @@ export class CloudFiles implements CloudFilesApi {
       const { data, error } = await callRpc(this.client, 'cloud_record_import', params);
       check(); if (error) throw error; return data as CloudImportRecord;
     } catch (error) { throw failure(error); }
+  }
+  async saveFailedImport(report: CloudImportRecord, bytes: Uint8Array): Promise<void> {
+    const check = this.guard();
+    if (report.status !== 'failed' || report.owner_id !== this.owner || report.size_bytes !== bytes.byteLength)
+      throw new CloudFilesError('invalid', 'The failed import does not match this account or file.');
+    const path = `${this.owner}/.import-failures/${report.id}/source`;
+    const { error } = await this.client.storage.from('cloud-import-failures').upload(path, new Blob([bytes.slice().buffer]),
+      { contentType: 'application/octet-stream', upsert: false });
+    check(); if (error) throw failure(error);
   }
   async saveThumbnail(fileId: string, jpeg: Uint8Array): Promise<void> {
     const check = this.guard();

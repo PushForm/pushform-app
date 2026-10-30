@@ -17,10 +17,17 @@ describe('isoWeek', () => {
 
 describe('versionFromCommitTimes', () => {
   it('counts the built commit and the earlier commits of its week', () => {
-    const times = [at('2026-10-28T09:00:00Z'), at('2026-10-27T18:00:00Z'), at('2026-10-26T00:30:00Z'), at('2026-10-25T22:00:00Z')];
-    expect(versionFromCommitTimes(times)).toBe('26.44.3');
-    expect(versionFromCommitTimes(times.slice(2))).toBe('26.44.1');
-    expect(versionFromCommitTimes(times.slice(3))).toBe('26.43.1');
+    const times = [at('2026-10-21T09:00:00Z'), at('2026-10-20T18:00:00Z'), at('2026-10-19T00:30:00Z'), at('2026-10-18T22:00:00Z')];
+    expect(versionFromCommitTimes(times)).toBe('26.43.3');
+    expect(versionFromCommitTimes(times.slice(2))).toBe('26.43.1');
+    expect(versionFromCommitTimes(times.slice(3))).toBe('26.42.1');
+  });
+
+  it('counts on from the increments a week used before this history began', () => {
+    const times = [at('2026-10-30T09:00:00Z'), at('2026-10-29T18:00:00Z'), at('2026-10-25T22:00:00Z')];
+    expect(versionFromCommitTimes(times)).toBe('26.44.262');
+    expect(versionFromCommitTimes(times.slice(1))).toBe('26.44.261');
+    expect(versionFromCommitTimes([at('2026-11-02T09:00:00Z'), ...times])).toBe('26.45.1');
   });
 
   it('uses the ISO week-year, so late-December commits can belong to the next year', () => {
@@ -28,8 +35,8 @@ describe('versionFromCommitTimes', () => {
   });
 
   it('gives no version when a shallow history may be missing commits of the week', () => {
-    expect(versionFromCommitTimes([at('2026-10-27T10:00:00Z')], false)).toBeNull();
-    expect(versionFromCommitTimes([at('2026-10-27T10:00:00Z'), at('2026-10-20T10:00:00Z')], false)).toBe('26.44.1');
+    expect(versionFromCommitTimes([at('2026-10-20T10:00:00Z')], false)).toBeNull();
+    expect(versionFromCommitTimes([at('2026-10-20T10:00:00Z'), at('2026-10-13T10:00:00Z')], false)).toBe('26.43.1');
     expect(versionFromCommitTimes([])).toBeNull();
   });
 });

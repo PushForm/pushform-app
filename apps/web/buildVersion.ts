@@ -15,6 +15,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const DAY_MS = 86_400_000;
 
+/**
+ * Increments already used in a week by builds made before this repository's history began, keyed `<yr>.<week>`.
+ * Builds of that week count on from them so versions keep increasing. 26.44 reached 26.44.260.
+ */
+const PRIOR_INCREMENTS: Readonly<Record<string, number>> = { '26.44': 260 };
+
 /** ISO 8601 week-year and week (1–53) of a UTC instant. */
 export function isoWeek(ms: number): { year: number; week: number } {
   const date = new Date(ms);
@@ -40,7 +46,8 @@ export function versionFromCommitTimes(times: readonly number[], complete = true
     increment++;
   }
   if (increment === times.length && !complete) return null;
-  return `${year % 100}.${week}.${increment}`;
+  const prior = PRIOR_INCREMENTS[`${year % 100}.${week}`] ?? 0;
+  return `${year % 100}.${week}.${prior + increment}`;
 }
 
 /** Version of the checkout's HEAD, or null when git is unavailable or a shallow clone lacks the week's history. */

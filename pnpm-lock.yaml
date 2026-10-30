@@ -328,6 +328,9 @@ importers:
 
   packages/extension-protocol:
     dependencies:
+      fflate:
+        specifier: ^0.8.2
+        version: 0.8.3
       zod:
         specifier: ^4.6.7
         version: 4.6.7

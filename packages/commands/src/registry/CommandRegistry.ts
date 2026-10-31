@@ -19,6 +19,7 @@ export interface CommandInfo {
   readonly icon: string | undefined;
   readonly menu: string | undefined;
   readonly keybinding: string | undefined;
+  readonly source?: string | undefined;
   readonly undoable: boolean;
   readonly enabled: boolean;
 }
@@ -85,6 +86,7 @@ export class CommandRegistry {
         icon: c.icon,
         menu: c.menu,
         keybinding: c.keybinding,
+        source: c.source,
         undoable: c.undoable,
         enabled: this.isEnabled(c.id),
       });

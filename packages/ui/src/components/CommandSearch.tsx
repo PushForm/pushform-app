@@ -26,6 +26,8 @@ export interface SearchItem {
   readonly icon: string;
   readonly key: string | null;
   readonly enabled: boolean;
+  /** The extension (or other provider) of a command that is not built in. */
+  readonly source: string | null;
 }
 
 /**
@@ -158,6 +160,7 @@ export function CommandSearch({ source }: CommandSearchProps): JSX.Element {
             >
               <Icon name={item.icon} size={16} />
               <span className="pf-cmd-search-title">{item.title}</span>
+              {item.source ? <span className="pf-cmd-search-source">{item.source}</span> : null}
               {item.key ? <kbd aria-hidden="true">{item.key}</kbd> : null}
             </li>
           ))}
@@ -194,6 +197,7 @@ export function searchableCommands(registry: CommandRegistry, keymap: Keymap | n
       icon: c.icon ?? (c.id.startsWith('tool.') ? `tool-${c.id.slice(5)}` : 'command'),
       key: keymap ? keymap.label(c.id) : (c.keybinding ?? null),
       enabled: c.enabled,
+      source: c.source ?? null,
     });
   }
   return out;
@@ -209,7 +213,7 @@ function acceptsNoParams(registry: CommandRegistry, c: CommandInfo): boolean {
   }
 }
 
-/** Rank commands against a query: exact title > title prefix > word prefix > substring > id substring. */
+/** Rank commands against a query: exact title > title prefix > word prefix > substring > id or source substring. */
 export function searchCommands(
   registry: CommandRegistry,
   keymap: Keymap | null,
@@ -225,7 +229,7 @@ export function searchCommands(
     else if (title.startsWith(q)) score = 4;
     else if (title.split(/[\s/]+/).some((w) => w.startsWith(q))) score = 3;
     else if (title.includes(q)) score = 2;
-    else if (item.id.toLowerCase().includes(q)) score = 1;
+    else if (item.id.toLowerCase().includes(q) || item.source?.toLowerCase().includes(q)) score = 1;
     if (score > 0) scored.push({ item, score });
   }
   scored.sort((a, b) => b.score - a.score || a.item.title.localeCompare(b.item.title));

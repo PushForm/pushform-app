@@ -10,6 +10,7 @@ import { installUiCommands } from '../engine/uiCommands';
 import { useEditContext } from '../hooks/useEditContext';
 import { useAppStore } from '../store';
 import type { ContextMenuRequest } from '../store';
+import { selectionActionGroups } from '../extensions/extensionContributions';
 import { Icon } from './Icon';
 
 export interface ContextMenuProps {
@@ -34,7 +35,11 @@ export function ContextMenu({ x, y, refs, onClose }: ContextMenuProps): JSX.Elem
   const context = useEditContext();
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: x, top: y });
-  const items = contextMenu.itemsFor(app.document.doc.state, refs, { contextPath: context.path, activeToolId: app.toolManager.activeToolId, canPaste: modelClipboard.current !== null });
+  const items = [
+    ...contextMenu.itemsFor(app.document.doc.state, refs, { contextPath: context.path, activeToolId: app.toolManager.activeToolId, canPaste: modelClipboard.current !== null }),
+    // Extensions' actions for the selection, each extension's under its own name.
+    ...(refs.length ? selectionActionGroups(app.commands) : []),
+  ];
 
   useLayoutEffect(() => {
     // Keep the menu inside the window.

@@ -23,6 +23,9 @@ import { LuFolderOpen } from 'react-icons/lu';
 import { ModelObjectBrowser } from './components/ModelObjectBrowser';
 import { ExtensionManager } from './extensions/ExtensionManager';
 import { browserRunsExtensions, createBrowserExtensionPlatform, type ExtensionRuntimeSources } from './extensions/browserExtensionPlatform';
+import { ExtensionRuns } from './extensions/ExtensionActivity';
+import { isExtensionPanelId } from './extensions/extensionContributions';
+import { useExtensionWorkspace } from './extensions/useExtensionWorkspace';
 import { syncDesktopTitleBar } from './desktopShell';
 import { allowOpeningDocument, desktopUpdates } from './desktopUpdates';
 import { DesktopUpdates } from './components/DesktopUpdates';
@@ -104,7 +107,7 @@ function browserSessionStorage(ownerId: string): Pick<Storage, 'getItem' | 'setI
 }
 
 /** The editors' docked side panels. */
-type SidePanel = 'files' | 'requests' | 'objects';
+type SidePanel = 'files' | 'requests' | 'objects' | `extension:${string}`;
 const WORKSPACE_SCREEN_KEY = 'pushform:workspace-screen:v1';
 
 /**
@@ -200,6 +203,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
   const [recents, setRecents] = useState(() => readCloudRecents(ownerId));
   /** This account's extensions on this device; nothing of theirs runs until one of their contributions is used. */
   const [extensions] = useState(() => extensionRuntime ? createBrowserExtensionPlatform({ ownerId, sources: extensionRuntime }) : null);
+  const [extensionRuns] = useState(() => extensions ? new ExtensionRuns(extensions) : null);
   const [extensionsOpen, setExtensionsOpen] = useState(false);
   useEffect(() => {
     if (!extensions) return;
@@ -272,6 +276,9 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
   const modelApp = active.type === 'model' ? active.app : app;
   useGlobalKeys(modelApp, active.type === 'model' && !locked && !home);
   useModelClipboard(modelApp, active.type === 'model' ? active : null, active.type === 'model' && !locked && !home);
+  const extensionWorkspace = useExtensionWorkspace({ platform: extensions, runs: extensionRuns, ownerId, active: home || locked ? null : active,
+    openTabs: session.tabs.map(tab => tab.id), sidePanel,
+    openPanel: id => setSidePanel(id), closePanel: () => { setGuidanceBrowserTab(null); setSidePanel(null); } });
   useEffect(() => () => session.dispose(), [session]);
   // Product usage events, with AI Chat counted as open in whichever placement shows it.
   const usage = useProductUsage(usageSink, buildInfo, session,
@@ -308,7 +315,10 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
   /** A rail icon toggles its panel and replaces any other; `help.requests` only opens the chat. */
   const showSidePanel = (id: SidePanel, mode: 'toggle' | 'open'): void =>
     setSidePanel(current => current === id && mode === 'toggle' ? null : id);
-  const toggleSidePanel = (id: string): void => { setGuidanceBrowserTab(null); if (id === 'files' || id === 'requests' || id === 'objects') showSidePanel(id, 'toggle'); };
+  const toggleSidePanel = (id: string): void => {
+    setGuidanceBrowserTab(null);
+    if (id === 'files' || id === 'requests' || id === 'objects' || isExtensionPanelId(id)) showSidePanel(id, 'toggle');
+  };
   const closeSidePanel = (): void => { setGuidanceBrowserTab(null); setSidePanel(null); };
   /** The object browser hides itself on Escape; focus inside it then returns to its rail icon. */
   const closeObjects = (): void => {
@@ -348,19 +358,23 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     { id: 'files', label: 'Files', icon: <LuFolderOpen aria-hidden="true" />, ref: setFilesIcon },
     { id: 'requests', label: 'AI Chat', icon: <RiChatAiLine aria-hidden="true" />, ref: setRequestsIcon },
     { id: 'objects', label: 'Object browser', icon: <PiTreeView aria-hidden="true" />, ref: setObjectsIcon },
+    ...extensionWorkspace.railItems,
   ];
+  /** An extension panel that is no longer available (turned off, or not for this editor) counts as closed. */
+  const shownPanel = sidePanel && isExtensionPanelId(sidePanel) && !extensionWorkspace.shown ? null : sidePanel;
   /** The rail and its dock open the editor area, in the right-hand panels' band between tool row and status bar. */
   const companionBrowser = guidanceBrowserTab === active.id && sidePanel === 'requests';
   const browserVisible = sidePanel === 'objects' || companionBrowser;
   const sideBar = <>
-    <SideRail items={railItems} active={sidePanel} onToggle={toggleSidePanel} />
-    <SideDock open={sidePanel !== null}>
+    <SideRail items={railItems} active={shownPanel} onToggle={toggleSidePanel} />
+    <SideDock open={shownPanel !== null}>
       <DockSlot node={filesNode} attached={sidePanel === 'files'} />
       <DockSlot node={chatNode} attached={sidePanel === 'requests'} />
       {/* Layout portals its browser into this element; the model's renders here directly. */}
       <div ref={setObjectHost} className={`pf-side-dock-objects${companionBrowser ? ' is-guidance-companion' : ''}`} hidden={!browserVisible}>
         {active.type === 'model' && browserVisible ? <ModelObjectBrowser key={active.id} onClose={closeObjects} /> : null}
       </div>
+      {extensionWorkspace.panel}
     </SideDock>
   </>;
   const removeStarter = (): void => {
@@ -436,6 +450,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
         onRenamed={renamed} onMoved={moved} onForgetRecents={forgetRecents}
         onClose={() => { closeSidePanel(); filesIcon?.focus(); }} />, filesNode) : null}
       {dockedRequests ? createPortal(dockedRequests, chatNode) : null}
+      {extensionWorkspace.activity}
       {feedback}
     </AppContext.Provider></ThumbnailContext.Provider>
   );

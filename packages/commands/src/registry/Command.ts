@@ -61,6 +61,8 @@ export interface Command<P = unknown> {
   readonly menu?: string | undefined;
   /** Default keybinding hint for display; the Keymap is authoritative. */
   readonly keybinding?: string | undefined;
+  /** Who provides the command when it is not built in, such as an extension's name; shown beside its title. */
+  readonly source?: string | undefined;
   readonly params: z.ZodType<P>;
   readonly undoable: boolean;
   when?(ctx: CommandContext): boolean;

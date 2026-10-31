@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { useRef, useState, useSyncExternalStore, type JSX } from 'react';
+import { useMemo, useRef, useState, useSyncExternalStore, type JSX } from 'react';
 import type { ExtensionPlatform, ExtensionState, InstallRequest } from '@pushform/extensions';
 import { Dialog } from '../components/DialogParts';
 import { readFile } from './browserExtensionIo';
@@ -15,15 +15,9 @@ import { INTEGRITY_TEXT, PERMISSION_TEXT } from './permissionText';
  */
 
 function usePlatform(platform: ExtensionPlatform): ExtensionState[] {
-  const cache = useRef<{ version: number; list: ExtensionState[] }>({ version: -1, list: [] });
-  const version = useRef(0);
-  return useSyncExternalStore(
-    (notify) => platform.subscribe(() => { version.current++; notify(); }),
-    () => {
-      if (cache.current.version !== version.current) cache.current = { version: version.current, list: platform.list() };
-      return cache.current.list;
-    },
-  );
+  const revision = useSyncExternalStore((notify) => platform.subscribe(notify), () => platform.revision);
+  // The revision says when the list changed.
+  return useMemo(() => platform.list(), [platform, revision]);
 }
 
 const RUN_TEXT = { stopped: 'Not running', starting: 'Starting…', running: 'Running', failed: 'Stopped after a problem' } as const;

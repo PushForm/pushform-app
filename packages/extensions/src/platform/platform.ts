@@ -106,6 +106,7 @@ export class ExtensionPlatform {
   private readonly logs = new Map<string, { at: Date; entry: unknown }[]>();
   private readonly listeners = new Set<() => void>();
   private readonly now: () => Date;
+  private changes = 0;
 
   constructor(private readonly options: ExtensionPlatformOptions) {
     this.now = options.now ?? (() => new Date());
@@ -117,6 +118,11 @@ export class ExtensionPlatform {
     if (!this.options.developerMode.allowed())
       for (const record of [...this.records.values()]) if (record.source === 'developer') await this.remove(record.id);
     this.notify();
+  }
+
+  /** Increases on every change listeners are told about, so a view can tell whether to read the state again. */
+  get revision(): number {
+    return this.changes;
   }
 
   subscribe(listener: () => void): () => void {
@@ -344,6 +350,7 @@ export class ExtensionPlatform {
   }
 
   private notify(): void {
+    this.changes++;
     for (const listener of this.listeners) listener();
   }
 }

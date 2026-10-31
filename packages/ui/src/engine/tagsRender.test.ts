@@ -5,7 +5,7 @@ import { meshBox } from '@pushform/core';
 import type { Id, TagFolderId, TagId } from '@pushform/core';
 import { SketchGraph, bodyFromMesh, createDocument } from '@pushform/model';
 import type { Tag, TagFolder } from '@pushform/model';
-import { bodiesToRender, colorByTagOn, fogToRender, guidesToRender, shadowsToRender, sketchToRender, tagStyleToken, taggedBodyEdges, tagVisible } from './renderAdapter';
+import { bodiesToRender, colorByTagOn, fogToRender, guidesToRender, horizonColor, shadowsToRender, sketchToRender, tagStyleToken, taggedBodyEdges, tagVisible } from './renderAdapter';
 
 function docWithTaggedContent() {
   const doc = createDocument();
@@ -130,15 +130,25 @@ describe('shadowsToRender / fogToRender', () => {
 
   it('fog uses the style background color when asked, else its own', () => {
     const doc = createDocument();
-    expect(fogToRender(doc.state)).toEqual({ enabled: false, near: 0, far: 100, color: '#ffffff' });
+    // the default style draws a half-transparent beige ground, so the horizon is a little off white
+    expect(fogToRender(doc.state)).toEqual({ enabled: false, near: 0, far: 100, color: '#eeece6' });
     doc.transact('fog', (draft) => {
       draft.fog = { enabled: true, near: 1, far: 20, useBackground: false, color: [0, 0.5, 1] };
     });
     expect(fogToRender(doc.state)).toEqual({ enabled: true, near: 1, far: 20, color: '#0080ff' });
     doc.transact('bg', (draft) => {
       draft.fog = { ...draft.fog!, useBackground: true };
-      draft.styles.get(draft.activeStyleId)!.background.color = [0, 0, 0];
+      const bg = draft.styles.get(draft.activeStyleId)!.background;
+      bg.color = [0, 0, 0];
+      bg.ground = false;
     });
     expect(fogToRender(doc.state).color).toBe('#000000');
+  });
+
+  it('fades toward the ground color seen at the horizon, by how opaque the ground is', () => {
+    const b = { color: [1, 1, 1], ground: true, groundColor: [0, 0, 0], groundTransparency: 0 } as const;
+    expect(horizonColor(b)).toEqual([0.55, 0.55, 0.55]);
+    expect(horizonColor({ ...b, groundTransparency: 1 })).toEqual([1, 1, 1]);
+    expect(horizonColor({ ...b, ground: false })).toEqual([1, 1, 1]);
   });
 });

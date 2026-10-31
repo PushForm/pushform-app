@@ -8,7 +8,7 @@ import {
 } from '@pushform/layout';
 import { createDocument, ImageStore, type DocumentState } from '@pushform/model';
 import { Viewport, type CameraState, type RenderBody, type RenderDisplay, type RenderImage, type RenderSketch } from '@pushform/render';
-import { bodiesToRender, displayToRender, imagesToRender, shadowsToRender, sketchesToRender, withRenderImageStore } from '../engine/renderAdapter';
+import { bodiesToRender, displayToRender, fogToRender, imagesToRender, shadowsToRender, sketchesToRender, withRenderImageStore } from '../engine/renderAdapter';
 import { sectionsToRender } from '../engine/sectionAdapter';
 import { forgetLayoutImage, layoutImageReady, notifyLayoutImages, setLayoutCanvasPicture } from './layoutImage';
 import { layoutEmbeddedModelIdentity } from './layoutEmbeddedModelIdentity';
@@ -372,6 +372,7 @@ async function drain(): Promise<void> {
           view.setDisplay({ ...model.display, ...display });
           // The view's own sun and shadows, else the model's.
           view.setShadows(shadowsToRender(shadows ? { ...model.state, shadows } : model.state));
+          view.setFog(fogToRender(model.state));
           if (!job.preview) {
             const urls = [...model.images.entries()].map(([id]) => model.images.objectUrl(id)).filter((url): url is string => !!url);
             await view.sceneSync.textures.whenReady(30_000, urls);

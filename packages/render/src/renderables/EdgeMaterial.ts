@@ -168,6 +168,7 @@ export class EdgeMaterial extends LineMaterial {
       transparent: (opts.opacity ?? 1) < 1,
       opacity: opts.opacity ?? 1,
       vertexColors: opts.vertexColors ?? false,
+      fog: true,
     });
     this.uniforms['profileWidth'] = { value: opts.profileWidth ?? DEFAULT_PROFILE_WIDTH };
     this.uniforms['pfExtension'] = { value: 0 };

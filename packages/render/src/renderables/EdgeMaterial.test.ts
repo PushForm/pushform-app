@@ -5,6 +5,11 @@ import { GreaterDepth, ShaderLib } from 'three';
 import { createEdgeMaterial, patchEdgeShader } from './EdgeMaterial';
 
 describe('EdgeMaterial', () => {
+  it('fades with scene fog like faces do', () => {
+    expect(createEdgeMaterial().fog).toBe(true);
+    expect(createEdgeMaterial({ dashed: true, backEdges: true }).fog).toBe(true);
+  });
+
   it('patches the real three LineMaterial vertex shader with per-segment profile selection', () => {
     createEdgeMaterial(); // registers ShaderLib.line
     const line = ShaderLib['line'];

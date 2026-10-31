@@ -23,6 +23,12 @@
       "path": "packages/extensions"
     },
     {
+      "path": "packages/extension-sdk"
+    },
+    {
+      "path": "packages/extension-dev"
+    },
+    {
       "path": "packages/inference"
     },
     {

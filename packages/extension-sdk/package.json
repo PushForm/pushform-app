@@ -1,0 +1,14 @@
+{
+  "name": "@pushform/extension-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Types and helpers for building PushForm extensions",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "sideEffects": false,
+  "files": ["src", "LICENSE", "README.md"]
+}

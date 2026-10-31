@@ -332,6 +332,24 @@ importers:
 
   packages/core: {}
 
+  packages/extension-dev:
+    dependencies:
+      '@pushform/extension-protocol':
+        specifier: workspace:*
+        version: link:../extension-protocol
+      '@pushform/extension-sdk':
+        specifier: workspace:*
+        version: link:../extension-sdk
+      '@pushform/extensions':
+        specifier: workspace:*
+        version: link:../extensions
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
+      fflate:
+        specifier: ^0.8.2
+        version: 0.8.3
+
   packages/extension-protocol:
     dependencies:
       fflate:
@@ -340,6 +358,8 @@ importers:
       zod:
         specifier: ^4.6.7
         version: 4.6.7
+
+  packages/extension-sdk: {}
 
   packages/extensions:
     dependencies:

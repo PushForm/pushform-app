@@ -10,7 +10,7 @@ export default defineConfig({
           name: 'node',
           environment: 'node',
           include: [
-            'packages/{core,geom,kernel,model,layout,inference,commands,io,mcp,cloud,testing,requests-core,extension-protocol,extensions}/**/*.test.ts',
+            'packages/{core,geom,kernel,model,layout,inference,commands,io,mcp,cloud,testing,requests-core,extension-protocol,extensions,extension-sdk,extension-dev}/**/*.test.ts',
             'workers/*/src/**/*.test.ts',
             'scripts/*.test.mjs',
           ],

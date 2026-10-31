@@ -11,6 +11,10 @@ import type { RuntimePort } from '../runtime/port';
 import { ExtensionSettingsHost, type SettingsStore } from '../runtime/settings';
 import { ExtensionUiHost } from '../runtime/ui';
 import { vectorExportServices, vectorPrintServices, type ViewPrinter } from '../runtime/vector';
+import {
+  addTraffic, memoryActivityStore, type ActivityEvent, type DisabledBy, type ExtensionActivity, type ExtensionActivityStore, type StopReason,
+  type Traffic,
+} from './activity';
 import type { DeveloperModeSetting } from './developerMode';
 import type { ExtensionStore, InstalledExtension } from './store';
 
@@ -59,6 +63,8 @@ export interface ExtensionPlatformOptions {
    * check and was not started.
    */
   readonly onFailure?: (record: InstalledExtension, failure: ExtensionFailure) => void;
+  /** Where the activity record is kept; in memory when not given. */
+  readonly activity?: ExtensionActivityStore;
   readonly now?: () => Date;
 }
 
@@ -99,8 +105,10 @@ export interface ExtensionState {
   /** Increases on every restart, so open panels know to run again. */
   readonly generation: number;
   readonly lastActivity: Date | null;
-  /** Bytes sent to each destination origin during this session. */
+  /** Bytes sent to each destination origin since the app started. */
   readonly bytesSent: ReadonlyMap<string, number>;
+  /** Requests and bytes sent and received per destination origin since the app started. */
+  readonly egress: ReadonlyMap<string, Traffic>;
   /** The latest log lines it wrote. */
   readonly logs: readonly { at: Date; entry: unknown }[];
 }
@@ -152,14 +160,21 @@ export class ExtensionPlatform {
   /** Names of the contributions each extension is running, by invocation. */
   private readonly inFlight = new Map<string, Map<number, string>>();
   private invocations = 0;
-  private readonly activity = new Map<string, Date>();
+  private readonly lastUsed = new Map<string, Date>();
   private readonly logs = new Map<string, { at: Date; entry: unknown }[]>();
   private readonly listeners = new Set<() => void>();
   private readonly now: () => Date;
   private changes = 0;
+  private readonly activityStore: ExtensionActivityStore;
+  /** Activity writes, in order; reads wait for them. */
+  private writes: Promise<void> = Promise.resolve();
+  private seq = 0;
+  /** Network use per extension and destination origin since the app started, across restarts of its runtime. */
+  private readonly sessionTraffic = new Map<string, Map<string, Traffic>>();
 
   constructor(private readonly options: ExtensionPlatformOptions) {
     this.now = options.now ?? (() => new Date());
+    this.activityStore = options.activity ?? memoryActivityStore();
   }
 
   /**
@@ -169,7 +184,11 @@ export class ExtensionPlatform {
   async load(): Promise<void> {
     this.records = new Map((await this.options.store.list()).map((r) => [r.id, r] as const));
     if (!this.options.developerMode.allowed())
-      for (const record of [...this.records.values()]) if (record.source === 'developer') await this.remove(record.id);
+      for (const record of [...this.records.values()]) {
+        if (record.source !== 'developer') continue;
+        this.note(record.id, { type: 'uninstalled', name: record.manifest.name, version: record.version, settingsDeleted: false, by: 'policy' });
+        await this.remove(record.id);
+      }
     await Promise.all([...this.records.values()].map((record) => this.verified(record).catch(() => undefined)));
     this.notify();
   }
@@ -192,6 +211,7 @@ export class ExtensionPlatform {
     const record = this.records.get(id);
     if (!record) return null;
     const running = this.running.get(id);
+    const traffic = this.sessionTraffic.get(id) ?? new Map<string, Traffic>();
     return {
       record,
       run: running ? 'running' : this.starting.has(id) ? 'starting' : this.failures.has(id) ? 'failed' : 'stopped',
@@ -199,8 +219,9 @@ export class ExtensionPlatform {
       failedAction: this.failures.has(id) ? this.failedActions.get(id) ?? null : null,
       crashDisabled: this.crashDisabled.has(id),
       generation: this.generations.get(id) ?? 0,
-      lastActivity: this.activity.get(id) ?? null,
-      bytesSent: new Map(running?.fetch.bytesSent ?? []),
+      lastActivity: this.lastUsed.get(id) ?? null,
+      bytesSent: new Map([...traffic].map(([origin, t]) => [origin, t.bytesSent] as const)),
+      egress: new Map(traffic),
       logs: [...(this.logs.get(id) ?? [])],
     };
   }
@@ -250,7 +271,8 @@ export class ExtensionPlatform {
       contentHash: request.contentHash, integrity: request.integrity, source: request.source, enabled: request.replaces?.enabled ?? true,
       grants: EXTENSION_PERMISSIONS.filter((p) => requested.has(p) && grants.includes(p)), installedAt: this.now().toISOString(),
     };
-    await this.stop(record.id);
+    const previous = this.records.get(record.id) ?? request.replaces;
+    await this.stop(record.id, 'replaced');
     await this.options.store.put(record);
     this.records.set(record.id, record);
     // Files this platform just validated are not hashed again on first use; any other request is checked then.
@@ -258,18 +280,33 @@ export class ExtensionPlatform {
       this.verifications.set(record.files, Promise.resolve({ manifest: record.manifest, integrity: record.integrity, contentHash: record.contentHash }));
     this.unverified.delete(record.id);
     this.failures.delete(record.id);
+    const name = record.manifest.name;
+    if (!previous) this.note(record.id, { type: 'installed', name, version: record.version, integrity: record.integrity });
+    else if (previous.version === record.version) this.note(record.id, { type: 'reloaded', name, version: record.version });
+    else this.note(record.id, { type: 'updated', name, from: previous.version, to: record.version });
+    const before = new Set(previous?.grants ?? []);
+    const granted = record.grants.filter((p) => !before.has(p));
+    const revoked = [...before].filter((p) => !record.grants.includes(p));
+    if (granted.length) this.note(record.id, { type: 'granted', permissions: granted });
+    if (revoked.length) this.note(record.id, { type: 'revoked', permissions: revoked });
     this.notify();
     return record;
   }
 
-  async setEnabled(id: string, enabled: boolean): Promise<void> {
+  /** The user turns an extension on or off. */
+  setEnabled(id: string, enabled: boolean): Promise<void> {
+    return this.changeEnabled(id, enabled, 'user');
+  }
+
+  private async changeEnabled(id: string, enabled: boolean, by: DisabledBy): Promise<void> {
     const record = this.records.get(id);
     if (!record || record.enabled === enabled) return;
-    if (!enabled) await this.stop(id);
+    if (!enabled) await this.stop(id, 'turned-off');
     const next = { ...record, enabled };
     await this.options.store.put(next);
     this.records.set(id, next);
     this.clearFailure(id);
+    this.note(id, enabled ? { type: 'enabled' } : { type: 'disabled', by });
     this.notify();
   }
 
@@ -280,7 +317,7 @@ export class ExtensionPlatform {
   async restart(id: string): Promise<void> {
     const record = this.records.get(id);
     if (!record) return;
-    await this.stop(id);
+    await this.stop(id, 'restarted');
     if (!record.enabled) await this.setEnabled(id, true);
     this.clearFailure(id);
     this.generations.set(id, (this.generations.get(id) ?? 0) + 1);
@@ -305,12 +342,14 @@ export class ExtensionPlatform {
   async uninstall(id: string, options: { deleteSettings: boolean }): Promise<void> {
     const record = this.records.get(id);
     if (!record) return;
+    await this.stop(id, 'uninstalled');
     if (options.deleteSettings) await this.options.settingsStore(record).remove(id);
+    this.note(id, { type: 'uninstalled', name: record.manifest.name, version: record.version, settingsDeleted: options.deleteSettings, by: 'user' });
     await this.remove(id);
   }
 
   private async remove(id: string): Promise<void> {
-    await this.stop(id);
+    await this.stop(id, 'uninstalled');
     await this.options.store.delete(id);
     this.records.delete(id);
     this.unverified.delete(id);
@@ -323,7 +362,7 @@ export class ExtensionPlatform {
   async setDeveloperMode(enabled: boolean): Promise<void> {
     this.options.developerMode.set(enabled);
     if (!this.options.developerMode.enabled())
-      for (const record of [...this.records.values()]) if (record.source === 'developer' && record.enabled) await this.setEnabled(record.id, false);
+      for (const record of [...this.records.values()]) if (record.source === 'developer' && record.enabled) await this.changeEnabled(record.id, false, 'developer-mode');
     this.notify();
   }
 
@@ -343,7 +382,7 @@ export class ExtensionPlatform {
   /** Runs a contribution, starting the extension's runtime first if needed. */
   async invoke(extensionId: string, contributionId: string, params: unknown = {}, options: InvokeOptions = {}): Promise<unknown> {
     const running = await this.ensureRunning(extensionId);
-    this.activity.set(extensionId, this.now());
+    this.lastUsed.set(extensionId, this.now());
     this.notify();
     const name = running.record.manifest.contributions.find((c) => c.id === contributionId)?.name ?? contributionId;
     const token = ++this.invocations;
@@ -366,8 +405,8 @@ export class ExtensionPlatform {
     for (const running of this.running.values()) running.session.closeDocument(documentId);
   }
 
-  /** Stops an extension's runtime, letting its `deactivate` run briefly. */
-  async stop(id: string): Promise<void> {
+  /** Stops an extension's runtime, letting its `deactivate` run briefly. `reason` is what the activity record says. */
+  async stop(id: string, reason: StopReason = 'stopped'): Promise<void> {
     const running = this.running.get(id) ?? (await this.starting.get(id)?.catch(() => undefined));
     if (!running) return;
     this.running.delete(id);
@@ -375,11 +414,13 @@ export class ExtensionPlatform {
     running.compute?.terminateAll();
     running.ui.clear();
     running.runtime.terminate();
+    this.note(id, { type: 'stopped', reason });
     this.notify();
   }
 
+  /** Stops every runtime, as when the app closes. */
   async stopAll(): Promise<void> {
-    await Promise.all([...this.running.keys()].map((id) => this.stop(id)));
+    await Promise.all([...this.running.keys()].map((id) => this.stop(id, 'closed')));
   }
 
   private ensureRunning(id: string): Promise<Running> {
@@ -445,6 +486,8 @@ export class ExtensionPlatform {
   private refuse(record: InstalledExtension, error: ExtensionError): void {
     if (this.records.get(record.id) !== record) return;
     const failure: VerificationFailure = { kind: 'verification-failed', error: error.toJSON() };
+    // One activity entry per refused release, not one per attempt to use it, until it is installed again.
+    if (!this.unverified.has(record.id)) this.note(record.id, { type: 'failed', kind: 'verification-failed' });
     this.unverified.add(record.id);
     this.failures.set(record.id, failure);
     this.failedActions.delete(record.id);
@@ -463,7 +506,18 @@ export class ExtensionPlatform {
     const files = new Map(Object.entries(record.files));
     const compute = record.manifest.wasm.length && runtime.startCompute
       ? new ComputeHost({ manifest: record.manifest, files, spawn: () => runtime.startCompute!() }) : null;
-    const fetch = new FetchBroker(record.manifest, grants, this.options.fetchTransport ?? null);
+    // One activity entry per destination for this run, updated as it makes requests, plus all-time totals.
+    const run = crypto.randomUUID();
+    const runTraffic = new Map<string, Traffic>();
+    const fetch = new FetchBroker(record.manifest, grants, this.options.fetchTransport ?? null, (origin, traffic) => {
+      const session = this.sessionTraffic.get(record.id) ?? new Map<string, Traffic>();
+      this.sessionTraffic.set(record.id, session.set(origin, addTraffic(session.get(origin), traffic)));
+      const total = addTraffic(runTraffic.get(origin), traffic);
+      runTraffic.set(origin, total);
+      const at = this.note(record.id, { type: 'egress', origin, ...total }, `egress:${run}:${origin}`);
+      this.write(() => this.activityStore.addEgress(record.id, origin, traffic, at));
+      this.notify();
+    });
     const declining: FilePicker = { open: async () => null, save: async () => null };
     const services: ServiceImplementations = {
       ...ui.services(),
@@ -480,6 +534,7 @@ export class ExtensionPlatform {
     const session = ref.session = new ExtensionSession({
       manifest: record.manifest, grants, port: runtime.port, services, beforeActivate: () => settings.prepare(),
       onFailure: (failure) => this.failed(record, failure),
+      onActivated: () => this.note(record.id, { type: 'activated' }),
     });
     const running: Running = { record, runtime, session, ui, compute, fetch };
     this.running.set(record.id, running);
@@ -496,6 +551,7 @@ export class ExtensionPlatform {
       running.runtime.terminate();
     }
     this.failures.set(record.id, failure);
+    this.note(record.id, { type: 'failed', kind: failure.kind });
     const action = [...(this.inFlight.get(record.id)?.values() ?? [])][0];
     if (action) this.failedActions.set(record.id, action); else this.failedActions.delete(record.id);
     this.inFlight.delete(record.id);
@@ -508,9 +564,52 @@ export class ExtensionPlatform {
       this.records.set(record.id, off);
       this.crashDisabled.add(record.id);
       void this.options.store.put(off);
+      this.note(record.id, { type: 'disabled', by: 'crash-loop' });
     }
     this.notify();
     this.options.onFailure?.(record, failure);
+  }
+
+  /**
+   * An extension's activity record, newest first, and its all-time network use by destination. It is kept after
+   * uninstalling, until `clearActivity`.
+   */
+  async activity(id: string): Promise<ExtensionActivity> {
+    await this.writes;
+    const [entries, egress] = await Promise.all([this.activityStore.list(id), this.activityStore.egress(id)]);
+    return { entries: entries.reverse(), egress };
+  }
+
+  /** Deletes an extension's activity record and its network counts. */
+  async clearActivity(id: string): Promise<void> {
+    this.sessionTraffic.delete(id);
+    this.write(() => this.activityStore.clear(id));
+    await this.writes;
+  }
+
+  /** Extensions no longer installed whose activity record is kept, with the name they last had. */
+  async uninstalledActivity(): Promise<{ id: string; name: string }[]> {
+    await this.writes;
+    const ids = (await this.activityStore.extensions()).filter((id) => !this.records.has(id));
+    const named = await Promise.all(ids.map(async (id) => {
+      const entries = await this.activityStore.list(id);
+      const latest = entries.reverse().find((e) => 'name' in e.event);
+      return { id, name: latest && 'name' in latest.event ? latest.event.name : id };
+    }));
+    return named.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** Adds an activity entry, or replaces the one with `key`; returns its time. Writing it never blocks the caller. */
+  private note(extensionId: string, event: ActivityEvent, key: string = crypto.randomUUID()): string {
+    const at = this.now().toISOString();
+    const entry = { key, extensionId, at, seq: ++this.seq, event };
+    this.write(() => this.activityStore.put(entry));
+    return at;
+  }
+
+  private write(action: () => Promise<void>): void {
+    // A failed write loses that entry only; the record never stops an extension from working.
+    this.writes = this.writes.then(action).catch(() => {}).then(() => this.notify());
   }
 
   private log(id: string, entry: unknown): void {

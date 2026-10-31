@@ -3,10 +3,12 @@
 import { useEffect, useRef, type JSX } from 'react';
 import { createPortal } from 'react-dom';
 import { modelImportFormat, type ImportProgress, type ModelImportReport } from '@pushform/io';
+import { stallNote, useStallSeconds } from './useStallSeconds';
 
 export function ModelImportDialog({ fileName, progress, report, onClose }: {
   fileName: string; progress?: ImportProgress; report?: ModelImportReport; onClose: () => void;
 }): JSX.Element {
+  const stalled = useStallSeconds(report ? null : `${progress?.stage}:${progress?.current}:${progress?.detail}`);
   const button = useRef<HTMLButtonElement>(null), close = useRef(onClose);
   const content = useRef<HTMLDivElement>(null), format = report?.format ?? modelImportFormat(fileName).name;
   close.current = onClose;
@@ -43,7 +45,7 @@ export function ModelImportDialog({ fileName, progress, report, onClose }: {
         <p>Counts describe stored geometry; repeated instances share their definition.</p>
         {report.warnings.length ? <><h3>Import notes</h3><ul>{report.warnings.map(w => <li key={w}>{w}</li>)}</ul></> : null}
       </> : <div role="status" aria-live="polite">
-        <p>{progress?.stage ?? 'Reading file…'}{progress && progress.total > 1 ? ` ${progress.current.toLocaleString('en-US')} of ${progress.total.toLocaleString('en-US')}` : ''}{progress?.detail ? ` · ${progress.detail}` : ''}</p>
+        <p>{progress?.stage ?? 'Reading file…'}{progress && progress.total > 1 ? ` ${progress.current.toLocaleString('en-US')} of ${progress.total.toLocaleString('en-US')}` : ''}{progress?.detail ? ` · ${progress.detail}` : ''}{stallNote(stalled)}</p>
         {progress && progress.total > 0 ? <progress max={progress.total} value={progress.current} aria-label={`${format} import progress`} /> : <progress aria-label={`${format} import progress`} />}
       </div>}
       </div>

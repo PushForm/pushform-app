@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { useEffect, useRef, useState, type ChangeEvent, type DragEvent, type JSX } from 'react';
+import { stallNote, useStallSeconds } from './useStallSeconds';
 import { createPortal } from 'react-dom';
 import { LuFolderInput, LuX } from 'react-icons/lu';
 import type { CloudFilesApi, CloudFolder, CloudProject } from '@pushform/cloud';
@@ -51,6 +52,7 @@ export function ImportDialog({ api, ownerId, buildInfo, projects: initialProject
   const [rejected, setRejected] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
   const [running, setRunning] = useState<{ index: number; stage?: string | undefined } | null>(null);
+  const stalled = useStallSeconds(running ? `${running.index}:${running.stage}` : null);
   const [outcomes, setOutcomes] = useState<ImportOutcome[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [preparing, setPreparing] = useState(!currentProject && !remembered);
@@ -159,7 +161,7 @@ export function ImportDialog({ api, ownerId, buildInfo, projects: initialProject
       {files.length ? <ul className="pf-import-files" aria-label="Files to import">{files.map((file, index) => <li key={`${file.name}:${file.size}:${file.lastModified}`}>
         <Icon name={/\.layout$/i.test(file.name) ? 'document-layout' : 'document-model'} size={16} />
         <span>{file.name}</span><small>{Math.max(1, Math.round(file.size / 1024))} KiB</small>
-        {running?.index === index ? <small role="status">{running.stage ?? 'Converting'}…</small>
+        {running?.index === index ? <small role="status">{running.stage ?? 'Converting'}…{stallNote(stalled)}</small>
           : <button type="button" aria-label={`Remove ${file.name}`} disabled={busy} onClick={() => setFiles(items => items.filter((_, i) => i !== index))}><LuX /></button>}
       </li>)}</ul> : null}
       {outcomes ? <ul className="pf-import-results" aria-label="Import results">{outcomes.map((item, index) => <li key={index} className={item.status === 'failed' ? 'is-failed' : ''}>

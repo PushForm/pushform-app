@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { afterEach, describe, expect, it } from 'vitest';
-import { act, cleanup, createEvent, fireEvent, render, screen, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { fogCommands, sceneCommands, sceneRuntimeOf, shadowCommands, styleCommands, tagCommands, tagTools, viewCommands } from '@pushform/commands';
 import type { StyleId, TagId } from '@pushform/core';
 import { InlineBackend, KernelClient } from '@pushform/kernel';
@@ -20,6 +20,7 @@ import { TagsPanel } from './TagsPanel';
 
 let app: AppInstance | null = null;
 afterEach(() => {
+  vi.unstubAllGlobals();
   cleanup();
   app?.dispose();
   app = null;
@@ -183,18 +184,20 @@ describe('ScenesPanel drag to reorder', () => {
     const list = screen.getByRole('listbox', { name: 'Scenes' });
     const row = (name: string) => within(list).getByText(name).closest('.pf-scene-item') as HTMLElement;
     const rect = { left: 0, top: 0, width: 100, height: 26, right: 100, bottom: 26, x: 0, y: 0, toJSON: () => ({}) };
-    const drag = (from: string, to: string, clientY: number) => {
-      const dataTransfer = { setData: () => {}, effectAllowed: '', dropEffect: '' };
+    vi.stubGlobal('PointerEvent', MouseEvent);
+    const hit = vi.fn();
+    Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: hit });
+    const drag = (from: string, to: string, clientY: number, cancel = false) => {
+      const grip = row(from).querySelector('.pf-scene-grip') as HTMLElement;
+      grip.setPointerCapture = vi.fn();
+      grip.releasePointerCapture = vi.fn();
       const target = row(to);
       target.getBoundingClientRect = () => rect;
-      fireEvent.mouseDown(row(from).querySelector('.pf-scene-grip')!);
-      fireEvent.dragStart(row(from), { dataTransfer });
-      // jsdom's drag events carry no pointer coordinates, so set them directly.
-      const over = createEvent.dragOver(target, { dataTransfer });
-      Object.defineProperties(over, { clientX: { value: 10 }, clientY: { value: clientY } });
-      fireEvent(target, over);
-      fireEvent.drop(target, { dataTransfer });
-      fireEvent.dragEnd(row(from), { dataTransfer });
+      hit.mockReturnValue(target);
+      fireEvent.pointerDown(grip, { button: 0, clientX: 0, clientY: 0 });
+      fireEvent.pointerMove(grip, { clientX: 10, clientY });
+      if (cancel) fireEvent.pointerCancel(grip);
+      else fireEvent.pointerUp(grip, { clientX: 10, clientY });
     };
     drag('Scene 1', 'Scene 3', 20); // lower half of the last row: after it
     expect(state().sceneOrder).toEqual([s2, s3, s1]);
@@ -202,14 +205,22 @@ describe('ScenesPanel drag to reorder', () => {
     expect(state().sceneOrder).toEqual([s1, s2, s3]);
     drag('Scene 2', 'Scene 2', 2); // onto itself: nothing
     expect(state().sceneOrder).toEqual([s1, s2, s3]);
-    // only the grip arms a drag: rows are not draggable until it is pressed
-    expect(row('Scene 1').getAttribute('draggable')).not.toBe('true');
-    fireEvent.mouseDown(row('Scene 1').querySelector('.pf-scene-grip')!);
-    expect(row('Scene 1').getAttribute('draggable')).toBe('true');
-    fireEvent.mouseUp(row('Scene 1').querySelector('.pf-scene-grip')!);
-    expect(row('Scene 1').getAttribute('draggable')).not.toBe('true');
+    drag('Scene 1', 'Scene 3', 20, true);
+    expect(state().sceneOrder).toEqual([s1, s2, s3]);
     act(() => void a.commands.execute('edit.undo'));
     expect(state().sceneOrder).toEqual([s2, s3, s1]);
+    // Thumbnail tiles use the horizontal midpoint, even with a search filter.
+    act(() => void a.commands.execute('scene.rename', { id: s2, name: 'Hidden' }));
+    fireEvent.click(screen.getByLabelText('Show thumbnails'));
+    fireEvent.change(screen.getByLabelText('Search scenes'), { target: { value: 'Scene' } });
+    drag('Scene 1', 'Scene 3', 20);
+    expect(state().sceneOrder).toEqual([s2, s1, s3]);
+    const grip = row('Scene 1').querySelector('.pf-scene-grip') as HTMLElement;
+    hit.mockReturnValue(null);
+    fireEvent.pointerDown(grip, { button: 0, clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(grip, { clientX: 30, clientY: 30 });
+    fireEvent.pointerUp(grip);
+    expect(state().sceneOrder).toEqual([s2, s1, s3]);
   });
 });
 

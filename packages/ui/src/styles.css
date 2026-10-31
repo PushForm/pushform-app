@@ -1525,6 +1525,7 @@
   font-weight: 600;
 }
 .pf-scene-grip {
+  touch-action: none;
   flex: none;
   cursor: grab;
   color: var(--pf-text-muted, currentColor);

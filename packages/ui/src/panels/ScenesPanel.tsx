@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import type { SceneFlags } from '@pushform/model';
 import { useApp } from '../AppContext';
@@ -41,8 +41,7 @@ export function ScenesPanel(): JSX.Element {
   const [details, setDetails] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [dragId, setDragId] = useState<number | null>(null);
-  /** The row whose grip is pressed; only then is the row draggable, so the name and thumbnail never start a drag. */
-  const [armedId, setArmedId] = useState<number | null>(null);
+  const gesture = useRef<{ id: number; pointerId: number; x: number; y: number; moved: boolean; target: { id: number; after: boolean } | null } | null>(null);
   const [drop, setDrop] = useState<{ id: number; after: boolean } | null>(null);
 
   const run = (id: string, params?: unknown) => app.commands.tryExecute(id, params);
@@ -82,12 +81,12 @@ export function ScenesPanel(): JSX.Element {
     setSelectedId(null);
   };
   const endDrag = () => {
-    setArmedId(null);
+    gesture.current = null;
     setDragId(null);
     setDrop(null);
   };
   /** Drop the dragged scene before or after `targetId`, in the full scene order (not the filtered list). */
-  const dropOn = (targetId: number, after: boolean) => {
+  const dropOn = (dragId: number, targetId: number, after: boolean) => {
     if (dragId === null || dragId === targetId) return endDrag();
     const from = state.sceneOrder.findIndex((id) => id === dragId);
     const to = state.sceneOrder.findIndex((id) => id === targetId);
@@ -161,26 +160,7 @@ export function ScenesPanel(): JSX.Element {
                 role="option"
                 aria-selected={selected}
                 className={`pf-scene-item${selected ? ' is-selected' : ''}${active ? ' is-active' : ''}${dragId === s.id ? ' is-dragging' : ''}${dropMark}`}
-                draggable={armedId === s.id}
-                onDragStart={(e) => {
-                  e.dataTransfer.effectAllowed = 'move';
-                  e.dataTransfer.setData('text/plain', s.name);
-                  setDragId(s.id);
-                }}
-                onDragOver={(e) => {
-                  if (dragId === null) return;
-                  e.preventDefault();
-                  e.dataTransfer.dropEffect = 'move';
-                  const r = e.currentTarget.getBoundingClientRect();
-                  // Thumbnail tiles wrap in rows, so they split left/right; list rows split top/bottom.
-                  const after = thumbs ? e.clientX > r.left + r.width / 2 : e.clientY > r.top + r.height / 2;
-                  if (drop?.id !== s.id || drop.after !== after) setDrop({ id: s.id, after });
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  dropOn(s.id, drop?.id === s.id ? drop.after : false);
-                }}
-                onDragEnd={endDrag}
+                data-scene-id={s.id}
                 onClick={() => activate(s.id)}
                 title={s.description || s.name}
               >
@@ -188,8 +168,37 @@ export function ScenesPanel(): JSX.Element {
                   className="pf-scene-grip"
                   aria-hidden="true"
                   title="Drag to reorder"
-                  onMouseDown={() => setArmedId(s.id)}
-                  onMouseUp={() => setArmedId(null)}
+                  onPointerDown={(e) => {
+                    if (e.button !== 0) return;
+                    e.preventDefault();
+                    e.currentTarget.setPointerCapture(e.pointerId);
+                    gesture.current = { id: s.id, pointerId: e.pointerId, x: e.clientX, y: e.clientY, moved: false, target: null };
+                  }}
+                  onPointerMove={(e) => {
+                    const g = gesture.current;
+                    if (!g || g.pointerId !== e.pointerId) return;
+                    if (!g.moved && Math.hypot(e.clientX - g.x, e.clientY - g.y) < 4) return;
+                    g.moved = true;
+                    setDragId(g.id);
+                    const row = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('[data-scene-id]');
+                    const list = e.currentTarget.closest('.pf-scene-list');
+                    if (!row || !list?.contains(row)) {
+                      g.target = null;
+                    } else {
+                      const r = row.getBoundingClientRect();
+                      g.target = { id: Number(row.dataset.sceneId), after: thumbs ? e.clientX > r.left + r.width / 2 : e.clientY > r.top + r.height / 2 };
+                    }
+                    setDrop(g.target);
+                  }}
+                  onPointerUp={(e) => {
+                    const g = gesture.current;
+                    if (!g || g.pointerId !== e.pointerId) return;
+                    if (g.moved && g.target) dropOn(g.id, g.target.id, g.target.after);
+                    else endDrag();
+                    e.currentTarget.releasePointerCapture(e.pointerId);
+                  }}
+                  onPointerCancel={endDrag}
+                  onLostPointerCapture={endDrag}
                   onClick={(e) => e.stopPropagation()}
                 >
                   ⋮⋮

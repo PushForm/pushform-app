@@ -36,6 +36,6 @@ Read the status text for the current grip's modifier behavior. Changing the mode
 
 Scene tabs provide access to saved model views. The current camera, hidden content, styles and section display can all affect the visible result.
 
-To change the order of scenes, drag a scene by its grip (⋮⋮) in the Scenes panel to a new position. A line shows where it will land. You can also use Move Left and Move Right on a tab's context menu.
+To change the order of scenes, drag a scene by its grip (⋮⋮) in the Scenes panel to a new position. A line shows where it will land; release to move it. Releasing outside the scene list cancels the move. Use Undo to restore the previous order. You can also use Move Left and Move Right on a tab's context menu.
 
 A rendering difference does not necessarily mean the geometry changed. Inspect the relevant display or source settings before attempting geometry edits.

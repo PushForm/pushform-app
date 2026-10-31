@@ -70,7 +70,7 @@ export function ExtensionManager({ platform, developerModeAllowed, developerMode
   return (
     <Dialog title="Extensions" onClose={onClose}>
       <div className="pf-xmanager">
-        {!available ? <p className="pf-xmanager-unavailable" role="note">Extensions cannot run in this browser. Use PushForm in Chrome, Edge or the desktop app.</p> : null}
+        {!available ? <p className="pf-xmanager-unavailable" role="note">Extensions cannot run in this browser. Use PushForm in Chrome, Edge or Firefox.</p> : null}
         {error ? <p className="pf-xinstall-error" role="alert">{error}</p> : null}
         {extensions.length === 0 ? <p className="pf-xmanager-empty">No extensions are installed.</p> : (
           <ul className="pf-xmanager-list" aria-label="Installed extensions">

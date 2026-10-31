@@ -4,7 +4,7 @@
 
 Extensions add panels and commands to PushForm, such as a parts list for a model. Each one runs separately from the editor, so a slow or broken extension cannot freeze your work, and it can do only what you allowed when you installed it.
 
-Extensions run in the web editor in Chrome, Edge and other Chromium-based browsers. In Safari the Extensions window opens but says extensions cannot run there. The desktop app does not offer extensions yet.
+Extensions run in the web editor in Chrome, Edge, Firefox and other Chromium-based browsers. In Safari the Extensions window opens but says extensions cannot run there. The desktop app does not offer extensions yet.
 
 ## Open the Extensions window
 

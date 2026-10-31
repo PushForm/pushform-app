@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { catalogModelSchema, type CatalogModel } from './CommonsCatalog';
-import { commonsFileUrl } from './CommonsFiles';
+import { downloadCommonsFile } from './CommonsFiles';
 import { readStoredAttributionPackage } from '@pushform/io/attribution';
 import { parseModelAttributions, type ModelAttribution } from '@pushform/model';
 
@@ -40,20 +40,12 @@ export interface OpenedCommonsModel { bytes: Uint8Array; name: string; attributi
 /** Only the configured service receives a bearer. Its current publication gate is checked before every package. */
 export async function loadCommonsModel(base: string, token: string, intent: CommonsOpenIntent, signal: AbortSignal, fetcher: typeof fetch = fetch): Promise<OpenedCommonsModel> {
   if (!valid(intent)) throw new Error('Invalid Commons model link.');
-  const url = commonsFileUrl(base, 'downloads', intent.assetId);
-  if (!url) throw new Error('Opening Commons models is not configured for this editor.');
-  if (!token || /\s/.test(token)) throw new Error('Sign in to open this Commons model.');
-  const response = await fetcher(url, { headers: { Authorization: `Bearer ${token}` }, signal, credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer' });
-  if (!response.ok) throw new Error(response.status === 401 || response.status === 403 ? 'Sign in and accept the site Terms of Use before opening this model.' : 'This Commons model is no longer available.');
-  const reader = response.body?.getReader(); if (!reader) throw new Error('The model package is empty.');
-  const chunks: Uint8Array[] = []; let length = 0;
-  for (;;) { const part = await reader.read(); if (part.done) break; length += part.value.length;
-    if (length > 134217728 + 262144) { await reader.cancel(); throw new Error('The Commons package exceeds the size limit.'); } chunks.push(part.value); }
+  const blob = await downloadCommonsFile(base,token,intent.assetId,signal,fetcher);
+  const archive = new Uint8Array(await blob.arrayBuffer());
   signal.throwIfAborted();
-  const archive = new Uint8Array(length); let offset = 0; for (const chunk of chunks) { archive.set(chunk, offset); offset += chunk.length; }
   const files = readStoredAttributionPackage(archive);
   const record = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(files['ATTRIBUTION.json'])) as Record<string, unknown>;
-  if (record.modelId !== intent.modelId || record.revision !== intent.revision) throw new Error('The Commons model revision changed. Return to its page and try again.');
+  if (record.modelId !== intent.modelId || record.revision !== intent.revision || record.assetId !== intent.assetId) throw new Error('The Commons model revision changed. Return to its page and try again.');
   const metadata = catalogModelSchema.parse({ ...(record.metadata as object), id: intent.modelId, revision: intent.revision, files: [], publishedAt: '1970-01-01T00:00:00.000Z' });
   const [attribution] = parseModelAttributions([{ modelId: intent.modelId, revision: intent.revision, assetId: intent.assetId, title: metadata.title, creator: metadata.creator,
     source: metadata.source, licenses: metadata.licenses, credits: metadata.credits, file: record.file }]);

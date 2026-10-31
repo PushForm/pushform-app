@@ -38,7 +38,7 @@ export function PublishModel({client,session,filesUrl,profile}:PublishModelProps
       {revision.status==='published'&&<a href={`#models/${encodeURIComponent(revision.model_id)}`}>View published model</a>}
       <button disabled={busy} onClick={()=>{setCopyFrom(revision);setEditing(true);}}>Create a correction</button>
       {state?.models.find(model=>model.id===revision.model_id)?.published_revision&&<button disabled={busy} onClick={()=>void run(async()=>{
-        const model=state.models.find(item=>item.id===revision.model_id)!;await api.withdraw(model.id,model.published_revision!);await refresh();setMessage('Model withdrawn. Existing downloaded copies keep their licenses.');
+        const model=state.models.find(item=>item.id===revision.model_id)!;await api.withdraw(model.id,model.published_revision!);window.dispatchEvent(new Event('commons:catalog-changed'));await refresh();setMessage('Model withdrawn. Existing downloaded copies keep their licenses.');
       })}>Withdraw publication</button>}
     </>}
     {editing?<ModelForm key={copyFrom?.id??'new'} profile={profile} previous={copyFrom} busy={busy} save={(metadata,basis,original)=>run(async(signal)=>{
@@ -121,7 +121,7 @@ function DraftFiles({api,revision,filesUrl,busy,run,token,refresh,published,done
     }}/></label>{!filesUrl&&<p>File uploads are unavailable in this build.</p>}
       <p>Publishing makes these files and their license notices available to the community.</p>
       <label className="publish-confirm"><input type="checkbox" checked={confirmed} onChange={event=>setConfirmed(event.target.checked)} disabled={busy}/>I have permission to redistribute every included file and have preserved all required licenses, conditions and credits.</label>
-      <button disabled={busy||!confirmed||!files?.length||files.some(file=>file.status!=='ready')} onClick={()=>void run(async(signal)=>{await api.publish(revision.id,published,revision.asset_version,confirmed,signal);await reload();done('Model published.');})}>Publish model</button>
+      <button disabled={busy||!confirmed||!files?.length||files.some(file=>file.status!=='ready')} onClick={()=>void run(async(signal)=>{await api.publish(revision.id,published,revision.asset_version,confirmed,signal);window.dispatchEvent(new Event('commons:catalog-changed'));await reload();done('Model published.');})}>Publish model</button>
     </>}
   </section>;
 }

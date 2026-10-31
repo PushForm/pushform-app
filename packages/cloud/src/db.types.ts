@@ -303,14 +303,14 @@ isOneToOne: false
                   ]
                 },"commons_models": {
                   Row: {
-                    "created_at": string,"id": string,"last_number": number,"latest_submission": string | null,"published_revision": string | null
+                    "created_at": string,"id": string,"last_number": number,"latest_submission": string | null,"owner_id": string | null,"published_revision": string | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "created_at"?: string,"id": string,"last_number"?: number,"latest_submission"?: string | null,"published_revision"?: string | null
+                    "created_at"?: string,"id": string,"last_number"?: number,"latest_submission"?: string | null,"owner_id"?: string | null,"published_revision"?: string | null
                   }
                   Update: {
-                    "created_at"?: string,"id"?: string,"last_number"?: number,"latest_submission"?: string | null,"published_revision"?: string | null
+                    "created_at"?: string,"id"?: string,"last_number"?: number,"latest_submission"?: string | null,"owner_id"?: string | null,"published_revision"?: string | null
                   }
                   Relationships: [
                     {
@@ -327,19 +327,39 @@ isOneToOne: false
       referencedColumns: ["model_id","id"]
     }
                   ]
+                },"commons_profiles": {
+                  Row: {
+                    "active": boolean,"avatar_url": string | null,"bio": string,"created_at": string,"display_name": string,"handle": string,"id": string,"links": NonNullable<Json>,"public_consent_at": string,"updated_at": string,"user_id": string | null,"version": number,"commons_profile_public": Json | null
+                  }
+                  ComputedFields: "commons_profile_public"
+                  Insert: {
+                    "active"?: boolean,"avatar_url"?: string | null,"bio"?: string,"created_at"?: string,"display_name": string,"handle": string,"id"?: string,"links"?: NonNullable<Json>,"public_consent_at"?: string,"updated_at"?: string,"user_id"?: string | null,"version"?: number
+                  }
+                  Update: {
+                    "active"?: boolean,"avatar_url"?: string | null,"bio"?: string,"created_at"?: string,"display_name"?: string,"handle"?: string,"id"?: string,"links"?: NonNullable<Json>,"public_consent_at"?: string,"updated_at"?: string,"user_id"?: string | null,"version"?: number
+                  }
+                  Relationships: [
+
+                  ]
                 },"commons_revisions": {
                   Row: {
-                    "asset_version": number,"id": string,"metadata": NonNullable<Json>,"model_id": string,"number": number,"published_at": string | null,"review_note": string | null,"reviewed_at": string | null,"reviewed_by": string | null,"rights_basis": string,"status": string,"submitted_at": string,"submitted_by": string | null
+                    "asset_version": number,"creator_profile_id": string | null,"id": string,"metadata": NonNullable<Json>,"model_id": string,"number": number,"published_at": string | null,"review_note": string | null,"reviewed_at": string | null,"reviewed_by": string | null,"rights_basis": string,"self_service": boolean,"status": string,"submitted_at": string,"submitted_by": string | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "asset_version"?: number,"id"?: string,"metadata": NonNullable<Json>,"model_id": string,"number": number,"published_at"?: string | null,"review_note"?: string | null,"reviewed_at"?: string | null,"reviewed_by"?: string | null,"rights_basis": string,"status"?: string,"submitted_at"?: string,"submitted_by"?: string | null
+                    "asset_version"?: number,"creator_profile_id"?: string | null,"id"?: string,"metadata": NonNullable<Json>,"model_id": string,"number": number,"published_at"?: string | null,"review_note"?: string | null,"reviewed_at"?: string | null,"reviewed_by"?: string | null,"rights_basis": string,"self_service"?: boolean,"status"?: string,"submitted_at"?: string,"submitted_by"?: string | null
                   }
                   Update: {
-                    "asset_version"?: number,"id"?: string,"metadata"?: NonNullable<Json>,"model_id"?: string,"number"?: number,"published_at"?: string | null,"review_note"?: string | null,"reviewed_at"?: string | null,"reviewed_by"?: string | null,"rights_basis"?: string,"status"?: string,"submitted_at"?: string,"submitted_by"?: string | null
+                    "asset_version"?: number,"creator_profile_id"?: string | null,"id"?: string,"metadata"?: NonNullable<Json>,"model_id"?: string,"number"?: number,"published_at"?: string | null,"review_note"?: string | null,"reviewed_at"?: string | null,"reviewed_by"?: string | null,"rights_basis"?: string,"self_service"?: boolean,"status"?: string,"submitted_at"?: string,"submitted_by"?: string | null
                   }
                   Relationships: [
                     {
+      foreignKeyName: "commons_revisions_creator_profile_id_fkey"
+      columns: ["creator_profile_id"]
+isOneToOne: false
+      referencedRelation: "commons_profiles"
+      referencedColumns: ["id"]
+    },{
       foreignKeyName: "commons_revisions_model_id_fkey"
       columns: ["model_id"]
 isOneToOne: false
@@ -1029,6 +1049,12 @@ isOneToOne: false
 "commons_account_status":
 { Args: Record<PropertyKey, never>; Returns: Json
                            },
+"commons_assert_contributor":
+{ Args: Record<PropertyKey, never>; Returns: string
+                           },
+"commons_asset_editor":
+{ Args: { "p_revision": string }; Returns: string
+                           },
 "commons_catalog":
 { Args: Record<PropertyKey, never>; Returns: Json
                            },
@@ -1041,14 +1067,41 @@ isOneToOne: false
 "commons_finish_asset":
 { Args: { "p_asset": string,"p_sha256": string,"p_size_bytes": number }; Returns: Json
                            },
+"commons_hide_profile":
+{ Args: { "p_expected_version": number }; Returns: Json
+                           },
 "commons_metadata_valid":
 { Args: { "p_metadata": Json }; Returns: boolean
+                           },
+"commons_model_assets":
+{ Args: { "p_revision": string }; Returns: Json
+                           },
+"commons_my_models":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"commons_my_profile":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"commons_profile":
+{ Args: { "p_id": string }; Returns: Json
+                           },
+"commons_profile_public":
+{ Args: { "p": Omit<Database["public"]['Tables']["commons_profiles"]['Row'], Database["public"]['Tables']["commons_profiles"]['ComputedFields']> }; Returns: Json
+                           },
+"commons_publish_model":
+{ Args: { "p_expected_asset_version": number,"p_expected_published": string,"p_revision": string,"p_rights_confirmed": boolean }; Returns: Json
                            },
 "commons_require_download_access":
 { Args: Record<PropertyKey, never>; Returns: boolean
                            },
+"commons_save_profile":
+{ Args: { "p_avatar_url": string,"p_bio": string,"p_display_name": string,"p_expected_version": number,"p_handle": string,"p_links": Json,"p_public_consent": boolean }; Returns: Json
+                           },
 "commons_set_mailing_preference":
 { Args: { "p_opt_in": boolean }; Returns: Json
+                           },
+"commons_submit_model":
+{ Args: { "p_expected_revision"?: string,"p_id": string,"p_metadata": Json,"p_original_work": boolean,"p_rights_basis": string }; Returns: Json
                            },
 "commons_terms_accepted":
 { Args: Record<PropertyKey, never>; Returns: boolean
@@ -1058,6 +1111,9 @@ isOneToOne: false
                            },
 "commons_url_valid":
 { Args: { "p_value": Json }; Returns: boolean
+                           },
+"commons_withdraw_model":
+{ Args: { "p_expected_published": string,"p_id": string }; Returns: undefined
                            },
 "extension_settings_delete":
 { Args: { "p_extension": string }; Returns: boolean

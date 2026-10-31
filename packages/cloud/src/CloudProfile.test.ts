@@ -56,7 +56,7 @@ it('requires names, a type, company details for a company, an industry, and the 
 it('sends no company fields for an Individual and no description unless the industry is Other', () => {
   expect(cloudProfileParams({ ...input, accountType: 'individual', firstName: ' Ada ' })).toEqual({ p_first_name: 'Ada', p_last_name: 'Lovelace',
     p_account_type: 'individual', p_company_name: null, p_company_size: null, p_industry: 'engineering', p_industry_other: null,
-    p_terms_version: CLOUD_TERMS_VERSION, p_mailing_opt_in: false });
+    p_terms_version: CLOUD_TERMS_VERSION });
   expect(cloudProfileParams({ ...input, industry: 'other', industryOther: ' Theatre ', acceptTerms: false }))
     .toMatchObject({ p_company_name: 'Analytical Ltd', p_industry_other: 'Theatre', p_terms_version: null });
 });
@@ -109,4 +109,14 @@ it('drops a save that finishes after the account changed', async () => {
   expect(await saving).toBe(false);
   expect(profiles.getSnapshot()).toMatchObject({ ownerId: 'dan', profile: null });
   profiles.dispose();
+});
+
+it('keeps ordinary signup compatible with the original RPC without dropping an explicit mailing opt-in',async()=>{
+  const session=fakeSession('bob'),client=fakeClient({bob:null});const profiles=new CloudProfiles(client as never,session);await settle();
+  client.rpc.mockResolvedValueOnce({data:null,error:{code:'PGRST202',message:'Function signature not found'}} as never);
+  expect(await profiles.save({...input,mailingOptIn:true})).toBe(false);
+  expect(profiles.getSnapshot().error).toContain('Uncheck the optional email choice');
+  expect(client.rpc).toHaveBeenLastCalledWith('cloud_save_profile',expect.objectContaining({p_mailing_opt_in:true}));
+  expect(await profiles.save({...input,mailingOptIn:false})).toBe(true);
+  expect(cloudProfileParams({...input,mailingOptIn:false})).not.toHaveProperty('p_mailing_opt_in');profiles.dispose();
 });

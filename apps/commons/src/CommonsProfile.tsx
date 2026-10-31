@@ -43,9 +43,9 @@ export function CommonsProfileEditor({profiles}:{profiles:CommonsProfiles}){
     event.preventDefault();setError('');setMessage('');
     const parsed=commonsProfileFieldsSchema.safeParse(fields);if(!parsed.success){setError('Enter a valid handle, display name and HTTPS links.');return;}
     if(!consent){setError('Confirm that this profile will be public.');return;}
-    setBusy(true);void profiles.save(parsed.data,profile?.version??null,true).then(value=>{setProfile(value);setConsent(false);setMessage('Your public profile is saved.');},failure=>setError(failure instanceof Error?failure.message:'Your profile could not be saved.')).finally(()=>setBusy(false));
+    setBusy(true);void profiles.save(parsed.data,profile?.version??null,true).then(value=>{setProfile(value);setConsent(false);setMessage('Your public profile is saved.');window.dispatchEvent(new Event('commons:catalog-changed'));},failure=>setError(failure instanceof Error?failure.message:'Your profile could not be saved.')).finally(()=>setBusy(false));
   };
-  const hide=()=>{if(!profile)return;setBusy(true);setError('');setMessage('');void profiles.hide(profile.version).then(value=>{setProfile(value);setConsent(false);setMessage('Your profile is hidden. Original model attribution remains available.');},failure=>setError(failure instanceof Error?failure.message:'Your profile could not be hidden.')).finally(()=>setBusy(false));};
+  const hide=()=>{if(!profile)return;setBusy(true);setError('');setMessage('');void profiles.hide(profile.version).then(value=>{setProfile(value);setConsent(false);setMessage('Your profile is hidden. Original model attribution remains available.');window.dispatchEvent(new Event('commons:catalog-changed'));},failure=>setError(failure instanceof Error?failure.message:'Your profile could not be hidden.')).finally(()=>setBusy(false));};
   return <section className="profile-editor" aria-labelledby="profile-edit-title"><h1 id="profile-edit-title">Your public profile</h1>
     <p>Your account details stay private. Only the fields below appear on your public Commons profile. Downloading models does not require a public profile.</p>
     {error&&<p role="alert">{error}</p>}{message&&<p role="status">{message}</p>}

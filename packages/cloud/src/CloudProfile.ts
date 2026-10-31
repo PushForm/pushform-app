@@ -108,7 +108,8 @@ export function cloudProfileParams(input: CloudProfileInput): RpcArgs<'cloud_sav
     p_company_name: company ? input.companyName.trim() : null, p_company_size: company ? input.companySize : null,
     p_industry: input.industry, p_industry_other: input.industry === 'other' ? input.industryOther.trim() : null,
     p_terms_version: input.acceptTerms ? CLOUD_TERMS_VERSION : null,
-    p_mailing_opt_in: input.mailingOptIn ?? false,
+    // The default opt-out keeps the original profile RPC usable during staged backend rollout.
+    ...(input.mailingOptIn === true ? { p_mailing_opt_in: true } : {}),
   };
 }
 
@@ -208,7 +209,10 @@ export class CloudProfiles implements CloudProfileStore {
     try {
       const { data, error } = await callRpc(this.client, 'cloud_save_profile', cloudProfileParams(input));
       if (epoch !== this.epoch) return false;
-      if (error) throw error;
+      if (error) {
+        if (input.mailingOptIn && error.code === 'PGRST202') {this.update({saving:false,error:'Email updates are not available on this installation yet. Uncheck the optional email choice to continue.'});return false;}
+        throw error;
+      }
       this.update({ status: 'ready', profile: fromRow(data as ProfileRow), saving: false });
       return true;
     } catch (error) {

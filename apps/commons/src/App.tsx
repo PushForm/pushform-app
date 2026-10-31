@@ -60,6 +60,7 @@ function ModelDetail({ model, filesUrl, account, editorUrl }: { model: CatalogMo
 export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUrl }: { loadCatalog: CatalogLoader | null; filesUrl?: string | undefined; account?:CommonsAccount|null; publishPage?:ReactNode;editorUrl?:string|undefined }) {
   const [state, setState] = useState<CatalogState>({ kind: loadCatalog ? 'loading' : 'unconfigured' });
   const [attempt, setAttempt] = useState(0);
+  useEffect(()=>{const refresh=()=>setAttempt(value=>value+1);window.addEventListener('commons:catalog-changed',refresh);return()=>window.removeEventListener('commons:catalog-changed',refresh);},[]);
   const [filters, setFilters] = useState<CatalogFilters>(emptyFilters);
   const [hash,setHash]=useState(window.location.hash);
   const selectedId=modelFromHash(hash);
@@ -83,7 +84,8 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
   const shown = filterModels(models, filters);
   const selected = selectedId ? models.find((model) => model.id === selectedId) : null;
   useEffect(() => {
-    if(personId||hash==='#account'||hash==='#publish')return;
+    if(personId)return;
+    if(hash==='#account'||hash==='#publish'){document.title=hash==='#account'?'Your profile — PushForm Commons':'Publish model — PushForm Commons';heading.current?.focus({preventScroll:true});return;}
     document.title = selected ? `${selected.title} — PushForm Commons` : 'PushForm Commons — Models for your next project';
     if (state.kind !== 'ready' || !window.location.hash) return;
     heading.current?.focus({ preventScroll: true });

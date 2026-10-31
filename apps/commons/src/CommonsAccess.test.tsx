@@ -25,7 +25,7 @@ it('reuses the initial account fields, keeps mailing optional unchecked, and gat
   expect((screen.getByRole('button',{name:'Continue'}) as HTMLButtonElement).disabled).toBe(true);
   fireEvent.click(screen.getByRole('checkbox',{name:/I accept the Terms of Use/}));fireEvent.click(screen.getByRole('button',{name:'Continue'}));
   expect(await screen.findByText('Download is ready')).toBeTruthy();
-  expect(auth.rpc).toHaveBeenCalledWith('cloud_save_profile',expect.objectContaining({p_first_name:'Ada',p_terms_version:CLOUD_TERMS_VERSION,p_mailing_opt_in:false}));
+  expect(auth.rpc).toHaveBeenCalledWith('cloud_save_profile',expect.objectContaining({p_first_name:'Ada',p_terms_version:CLOUD_TERMS_VERSION}));
 });
 it('skips onboarding for an existing completed account and offers sign-in to a signed-out visitor',async()=>{
   const auth=account(row);const view=render(<CommonsAccessGate account={auth}><p>Download is ready</p></CommonsAccessGate>);

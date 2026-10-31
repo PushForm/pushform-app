@@ -102,3 +102,10 @@ it('offers a real model-specific Open in PushForm action and explains unsupporte
   view.rerender(<App loadCatalog={async () => [exampleModel({ revision, files: [{ id, name: 'original.fcstd', format: 'FCSTD', sizeBytes: 3, sha256: 'a'.repeat(64) }] })]} />);
   await screen.findByText(/A supported model file or conversion is needed/); expect(screen.queryByRole('link', { name: 'Open in PushForm ↗' })).toBeNull();
 });
+
+it('refreshes discovery after a contributor publishes without requiring a full page reload',async()=>{
+  const loader=vi.fn<CatalogLoader>().mockResolvedValueOnce([]).mockResolvedValue([exampleModel()]);
+  render(<App loadCatalog={loader}/>);await screen.findByText('The library is ready for its first models.');
+  fireEvent(window,new Event('commons:catalog-changed'));
+  expect(await screen.findByRole('link',{name:'View Workshop hinge'})).toBeTruthy();expect(loader).toHaveBeenCalledTimes(2);
+});

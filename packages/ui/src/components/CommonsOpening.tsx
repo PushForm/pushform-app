@@ -14,6 +14,25 @@ export function CommonsOpening({ intent, filesUrl, cloud, session, done, opened 
   const [stage, setStage] = useState('Downloading Commons model…'); const [attempt, setAttempt] = useState(0);
   const [unit, setUnit] = useState<MeshUnit>('mm'); const [up, setUp] = useState<'z'|'y'>('z');
   const controller = useRef<AbortController|null>(null); const alive = useRef(true);
+  const dialog = useRef<HTMLElement|null>(null); const doneRef = useRef(done); doneRef.current = done;
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement|null;
+    const root = document.getElementById('root'); const wasInert = root?.inert ?? false;
+    if (root) root.inert = true;
+    const keydown = (event: KeyboardEvent): void => {
+      event.stopImmediatePropagation();
+      if (event.key === 'Escape') { event.preventDefault(); controller.current?.abort(); doneRef.current(); }
+      if (event.key === 'Tab') {
+        const controls = [...(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), select:not(:disabled)') ?? [])];
+        if (!controls.length) return;
+        event.preventDefault(); const at = controls.indexOf(document.activeElement as HTMLElement);
+        controls[(at + (event.shiftKey ? -1 : 1) + controls.length) % controls.length]?.focus();
+      }
+    };
+    window.addEventListener('keydown', keydown, true);
+    return () => { window.removeEventListener('keydown', keydown, true); if (root) root.inert = wasInert; if (previous?.isConnected) previous.focus(); };
+  }, []);
+  useEffect(() => { dialog.current?.querySelector<HTMLElement>('select, button')?.focus(); }, [source, error]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; controller.current?.abort(); }; }, []);
   const install = async (model: OpenedCommonsModel, abort: AbortController): Promise<void> => {
     try {
@@ -37,7 +56,7 @@ export function CommonsOpening({ intent, filesUrl, cloud, session, done, opened 
     })();
     return () => abort.abort();
   }, [attempt, intent, filesUrl, cloud]);
-  return createPortal(<div className="pf-modal-backdrop"><section className="pf-modal" role="dialog" aria-modal="true" aria-label="Open Commons model">
+  return createPortal(<div className="pf-modal-backdrop"><section ref={dialog} className="pf-modal" role="dialog" aria-modal="true" aria-label="Open Commons model">
     <h2>Open in PushForm</h2>
     {error ? <><p role="alert">{error}</p><button onClick={() => setAttempt(n => n + 1)}>Try again</button></> : source ? <>
       <p>{source.attribution.title} by {source.attribution.creator}</p><p>This file does not record its units. Choose how to read its dimensions.</p>

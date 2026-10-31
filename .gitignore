@@ -20,3 +20,5 @@ apps/desktop/src-tauri/gen/
 .agentsroom/handoff-summary-*.md
 .agentsroom/fork-context-*.txt
 .agentsroom/transfer-context-*.txt
+crates/step-reader/target/
+packages/io/wasm/*.wasm

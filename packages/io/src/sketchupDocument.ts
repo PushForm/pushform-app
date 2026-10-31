@@ -148,7 +148,7 @@ export function applySketchUpImport(
       if (meshPartTriangles > MAX_DOCUMENT_MESH_PART_TRIANGLES)
         throw new Error(`The model would hold more than ${MAX_DOCUMENT_MESH_PART_TRIANGLES.toLocaleString('en-US')} triangles of mesh parts.`);
       const partId = allocId<Id>(draft);
-      container.meshParts.set(partId, { ...common(), id: partId, name: part.name, source: part.source, geometry, materialId: null } as never);
+      container.meshParts.set(partId, { ...common(), id: partId, name: part.name, source: part.source, geometry, materialId: part.material === null || part.material === undefined ? null : material(part.material) } as never);
       container.order.push(partId);
       report.meshParts = (report.meshParts ?? 0) + 1;
       report.meshPartTriangles = (report.meshPartTriangles ?? 0) + geometry.triangles.length / 3;

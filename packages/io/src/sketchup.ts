@@ -174,6 +174,8 @@ export interface ImportedMeshPart {
   /** `faceMaterials` is left zero; `faceMaterialKeys` maps each source face to the scene's material keys. */
   geometry: MeshPartGeometry;
   faceMaterialKeys: Int32Array;
+  /** The scene material key of the part as a whole (faces without a color of their own), or null. */
+  material?: number | null | undefined;
 }
 /** Files whose meshes together hold more triangles than this import as mesh parts rather than faces. */
 export const MESH_PART_THRESHOLD = 250_000;

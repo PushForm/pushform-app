@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import {
-  AREA_TOL, LENGTH_TOL, MERGE_TOL, TEXCOORD_TOL, VERTEX_NORMAL_TOL, planeBasis, v3dot, v3len, v3normalize, v3sub,
+  AREA_TOL, LENGTH_TOL, MERGE_TOL, TEXCOORD_TOL, VERTEX_NORMAL_TOL, planeBasis, v3cross, v3dot, v3len, v3normalize, v3sub,
   type Vec2, type Vec3,
 } from '@pushform/core';
 import { weldVertices } from '@pushform/geom';
 import { hashImageBytes, uvAffineLeastSquares } from '@pushform/model';
 import { unzipSync } from 'fflate';
 import type { CoEdge, Definition, Face, Material, SkpModel } from 'openskp';
-import type { MeshPartSource } from '@pushform/model';
+import type { MeshPartGeometry, MeshPartSource } from '@pushform/model';
 import { MAX_SKETCHUP_BYTES, MESH_PART_THRESHOLD, prepareSketchUp, type ImportFormat, type ImportProgress, type ImportedMeshPart, type ImportedUvMap, type SketchUpImport } from './sketchup';
 
 // Shared conversion of polygon meshes (COLLADA, OBJ, 3DS, glTF) into the reader model the SketchUp importer converts:
@@ -202,6 +202,54 @@ export function meshPartFromGeometry(source: MeshGeometry, name: string, part: M
     faceMaterials: new Uint32Array(faceMaterialKeys.length), edgeOffsets: Uint32Array.from(edgeOffsets.length > 1 ? edgeOffsets : []),
     edgePositions: Float64Array.from(edgePositions), edgeFlags: new Uint8Array(Math.max(0, edgeOffsets.length - 1)) } };
 }
+
+/**
+ * Packed geometry as polygons for the mesh converter: triangles with per-source-face vertex normals, so smooth
+ * surfaces get soft, smooth edges, and `keep` on the facets of curved faces so they stay faces of their own.
+ * With `hardEdgesAsLines`, the part's hard source edges become lines, which split faces along them.
+ */
+export function meshPartPolygons(g: MeshPartGeometry, materialKey: (faceMaterial: number) => number | null, options: { hardEdgesAsLines?: boolean } = {}): MeshGeometry {
+  const p = g.positions, tris = g.triangles, count = tris.length / 3;
+  const point = (v: number): Vec3 => [p[v * 3]!, p[v * 3 + 1]!, p[v * 3 + 2]!];
+  // Area-weighted normals per (source face, vertex), and whether each face is flat.
+  const sums = new Map<number, [number, number, number]>(), first = new Map<number, Vec3>(), flat = new Uint8Array(g.faceCount).fill(1);
+  const minCos = Math.cos(VERTEX_NORMAL_TOL), vertices = p.length / 3;
+  const normals: Vec3[] = [];
+  for (let t = 0; t < count; t++) {
+    const a = point(tris[t * 3]!), n = v3cross(v3sub(point(tris[t * 3 + 1]!), a), v3sub(point(tris[t * 3 + 2]!), a)), face = g.triangleFace[t]!;
+    normals.push(n);
+    const unit = v3len(n) > 0 ? v3normalize(n) : null;
+    const seen = first.get(face);
+    if (unit && !seen) first.set(face, unit); else if (unit && seen && v3dot(unit, seen) < minCos) flat[face] = 0;
+    for (let k = 0; k < 3; k++) {
+      const key = face * vertices + tris[t * 3 + k]!, sum = sums.get(key);
+      if (sum) { sum[0] += n[0]; sum[1] += n[1]; sum[2] += n[2]; } else sums.set(key, [n[0], n[1], n[2]]);
+    }
+  }
+  const polygons: MeshPolygon[] = [];
+  for (let t = 0; t < count; t++) {
+    const face = g.triangleFace[t]!, material = materialKey(g.faceMaterials[face]!);
+    // A corner's normal is the face's average there, given only where it agrees with this triangle's own, so the
+    // converter never turns a triangle over against a normal that a sliver or a fold made unreliable.
+    const n = normals[t]!;
+    const corner = (k: number) => {
+      const v = tris[t * 3 + k]!, sum = sums.get(face * vertices + v)!;
+      return { position: point(v), normal: v3len(sum) > 0 && v3dot(sum, n) > 0 ? v3normalize(sum) : null, uv: null };
+    };
+    // A curved face's facets stay faces of their own; a flat face's facets join into one face again.
+    polygons.push({ material, corners: [corner(0), corner(1), corner(2)], keep: !flat[face] });
+  }
+  const lines: [Vec3, Vec3][] = [];
+  if (options.hardEdgesAsLines) {
+    const edges = g.edgeOffsets.length ? g.edgeOffsets.length - 1 : 0, e = g.edgePositions;
+    for (let i = 0; i < edges; i++) {
+      if (g.edgeFlags[i]) continue;
+      for (let k = g.edgeOffsets[i]!; k + 1 < g.edgeOffsets[i + 1]!; k++) lines.push([[e[k * 3]!, e[k * 3 + 1]!, e[k * 3 + 2]!], [e[k * 3 + 3]!, e[k * 3 + 4]!, e[k * 3 + 5]!]]);
+    }
+  }
+  return { polygons, lines };
+}
+
 
 /** Give each imported definition the mesh parts read for it (by reader definition key; the root's key is `rootKey`). */
 export function attachMeshParts(scene: SketchUpImport, meshParts: Map<number, ImportedMeshPart[]>, rootKey: number): SketchUpImport {

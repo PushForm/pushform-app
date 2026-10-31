@@ -25,7 +25,8 @@
     "spdx-check": "node scripts/spdx-headers.mjs --check",
     "spec-check": "node scripts/spec-ids.mjs",
     "commons:dev": "pnpm --filter @pushform/app-commons dev",
-    "commons:build": "pnpm --filter @pushform/app-commons build"
+    "commons:build": "pnpm --filter @pushform/app-commons build",
+    "build:step-reader": "node scripts/build-step-reader.mjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.11",

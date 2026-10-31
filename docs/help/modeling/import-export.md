@@ -16,7 +16,7 @@ Read the import notes for omitted annotations, materials or unsupported objects.
 
 Open or import **.step** and **.stp** files from mechanical CAD tools. STEP files store their units, so there are no import options. Each part becomes its own group named after the part, and assemblies become groups that hold their parts. Part and face colors become materials. Curved surfaces become smoothed facets, with 24 per full circle; flat faces stay whole.
 
-The first STEP import downloads the STEP reader, about 3 MB, so it takes a little longer. The file is converted on your computer and is not uploaded for conversion. Large assemblies can take a minute or more. The desktop app opens STEP files up to 256 MB; in the browser the limit is 128 MB. Very large assemblies can still be too big for the STEP reader, and the import then stops with a message.
+The first STEP import downloads the STEP reader, about 2 MB, so it takes a little longer. A part the file places many times becomes one component placed many times. The file is converted on your computer and is not uploaded for conversion. Large assemblies can take a minute or more. The desktop app opens STEP files up to 256 MB; in the browser the limit is 128 MB. Very large assemblies can still be too big for the STEP reader, and the import then stops with a message.
 
 A part that does not form a closed solid is imported as editable faces, and the import notes name it. Very small detail, below about 0.03 mm, can be lost. Product data, tolerances and annotations are not imported.
 

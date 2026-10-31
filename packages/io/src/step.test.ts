@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { createDocument } from '@pushform/model';
 import { modelImportBaseName, modelImportFormat, probeMeshImport, readModelImport } from './modelImport';
 import { applySketchUpImport } from './sketchupDocument';
 import { readSketchUpInWorker } from './sketchupClient';
 import { MAX_DESKTOP_STEP_BYTES, isStepBytes, readStep, stepHeader } from './step';
-import * as stepModule from './stepModule';
 
 type P = [number, number, number];
 interface Box { size: P; at?: P; name?: string; color?: P }
@@ -136,15 +135,6 @@ describe('STEP import', () => {
     expect(scene.root.solids).toHaveLength(1);
   }, 60_000);
 
-  it('fails with a clear message when the reader reads the parts but divides no surface into faces', async () => {
-    const spy = vi.spyOn(stepModule, 'loadStepReader').mockResolvedValue({
-      ReadStepFile: () => ({ success: true, root: { name: '', meshes: [0], children: [] },
-        meshes: [{ name: 'Huge', brep_faces: [{ first: 0, last: -1, color: null }], attributes: { position: { array: [] } }, index: { array: [] } }] }),
-    });
-    try {
-      await expect(readStep(boxesStep([{ size: [1, 1, 1] }]))).rejects.toThrow(/could not divide their surfaces into faces/);
-    } finally { spy.mockRestore(); }
-  });
 
   it('imports a file over the mesh-part threshold as mesh parts: one per solid, colors kept per source face, no faces', async () => {
     const bytes = boxesStep([{ size: [10, 10, 10], name: 'A', color: [0.8, 0.2, 0.4] }, { size: [10, 10, 10], at: [10, 0, 0], name: 'B' }]);
@@ -152,21 +142,23 @@ describe('STEP import', () => {
     expect(scene.root.solids).toHaveLength(0);
     expect(scene.root.meshParts).toBeUndefined();
     const parts = [...scene.definitions.values()].flatMap(d => d.meshParts ?? []);
-    expect(parts.map(p => p.name)).toEqual(['Bracket 1', 'Bracket 2']);
+    expect(parts.map(p => p.name)).toEqual(['A', 'B']);
     expect(parts[0]!.geometry.triangles.length / 3).toBe(12);
     expect(parts[0]!.geometry.faceCount).toBe(6);
     expect(parts[0]!.source).toEqual({ format: 'STEP', system: 'PushForm tests' });
-    expect([...parts[0]!.faceMaterialKeys].every(key => key === 0)).toBe(true);
-    expect([...parts[1]!.faceMaterialKeys].every(key => key === -1)).toBe(true);
+    // The file colors whole solids, so the color is the part's material and no source face has one of its own.
+    expect(parts[0]!.material).toBe(0);
+    expect(parts[1]!.material).toBeNull();
+    expect([...parts[0]!.faceMaterialKeys].every(key => key === -1)).toBe(true);
     expect(scene.warnings.some(w => /imported as mesh parts/.test(w))).toBe(true);
     const doc = createDocument();
     const report = doc.transact('Open', d => applySketchUpImport(d, scene)).value;
     expect(report).toMatchObject({ bodies: 0, sheetFaces: 0, meshParts: 2, meshPartTriangles: 24, definitions: 2, instances: 2 });
     const placed = [...doc.state.definitions.values()].flatMap(d => [...d.entities.meshParts.values()]);
     expect(placed).toHaveLength(2);
-    const colored = placed.find(p => p.name === 'Bracket 1')!;
-    expect(doc.state.materials.get(colored.geometry.faceMaterials[0]! as never)?.name).toBe('Color CC3366');
-    expect(placed.find(p => p.name === 'Bracket 2')!.geometry.faceMaterials.every(id => id === 0)).toBe(true);
+    const colored = placed.find(p => p.name === 'A')!;
+    expect(doc.state.materials.get(colored.materialId!)?.name).toBe('Color CC3366');
+    expect(placed.find(p => p.name === 'B')!.materialId).toBeNull();
     // Below the threshold the same file still imports as faces.
     expect((await readStep(bytes)).root.instances).toHaveLength(2);
   });

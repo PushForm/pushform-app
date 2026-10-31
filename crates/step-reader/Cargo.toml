@@ -1,0 +1,36 @@
+[package]
+name = "pushform-step-reader"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+description = "PushForm's STEP reader: SolidCraft's STEP import and tessellation behind a small C ABI, compiled to WebAssembly"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# SolidCraft's B-rep kernel and its STEP reader (MIT OR Apache-2.0), pinned to one commit. The kernel
+# builds on patched copies of the truck crates that live in the same repository (see [patch] below).
+solidcraft-kernel = { git = "https://github.com/tangency-labs/solidcraft", rev = "55bea620c79c22feeab1cda5c3931cdf2d7f3939" }
+earcutr = "0.5"
+solidcraft-geom = { git = "https://github.com/tangency-labs/solidcraft", rev = "55bea620c79c22feeab1cda5c3931cdf2d7f3939" }
+
+[patch.crates-io]
+truck-geometry = { git = "https://github.com/tangency-labs/solidcraft", rev = "55bea620c79c22feeab1cda5c3931cdf2d7f3939" }
+truck-shapeops = { git = "https://github.com/tangency-labs/solidcraft", rev = "55bea620c79c22feeab1cda5c3931cdf2d7f3939" }
+truck-stepio = { git = "https://github.com/tangency-labs/solidcraft", rev = "55bea620c79c22feeab1cda5c3931cdf2d7f3939" }
+truck-meshalgo = { git = "https://github.com/tangency-labs/solidcraft", rev = "55bea620c79c22feeab1cda5c3931cdf2d7f3939" }
+matext4cgmath = { git = "https://github.com/tangency-labs/solidcraft", rev = "55bea620c79c22feeab1cda5c3931cdf2d7f3939" }
+
+[features]
+default = ["simplify"]
+# Re-triangulate flat faces from their outlines (off for comparing against the kernel's own meshes).
+simplify = []
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 16
+# Panics unwind through the C ABI as traps either way; abort keeps the module smaller.
+panic = "abort"

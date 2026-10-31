@@ -1,28 +1,31 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { LENGTH_TOL, VERTEX_NORMAL_TOL, v3dot, v3len, v3normalize, type Vec3 } from '@pushform/core';
+import { type Vec3 } from '@pushform/core';
 import type { Definition, Instance, Material } from 'openskp';
-import type { OcctMesh, OcctNode } from 'occt-import-js';
-import { linearToSrgb } from './gltf';
 import {
-  IDENTITY_PLACEMENT, buildMeshGeometry, finishMeshImport, meshCountNotes, meshDefinition, meshMaterial,
-  type MeshCorner, type MeshCounts, type MeshGeometry, type MeshPlacement,
+  IDENTITY_PLACEMENT, INCH, buildMeshGeometry, finishMeshImport, meshCountNotes, meshDefinition, meshMaterial, meshPartPolygons,
+  type MeshCounts, type MeshPlacement,
 } from './meshImport';
 import { MAX_SKETCHUP_BYTES, MESH_PART_THRESHOLD, type ImportFormat, type ImportProgress, type ImportedMeshPart, type SketchUpImport } from './sketchup';
 import { loadStepReader } from './stepModule';
+import { decodeStepResult, stepReaderError, type StepReaderResult } from './stepWasm';
 
-// STEP (ISO 10303-21) import. OpenCascade reads the B-rep and divides each face into triangles in meters; the parts
-// and assemblies are rebuilt as the reader model the .skp importer converts, so solids and sheets follow its rules.
+// STEP (ISO 10303-21) import. The reader module (crates/step-reader) parses the file, converts its solids one at a
+// time and meshes each distinct part once; the parts and their placements are rebuilt as the reader model the .skp
+// importer converts, so solids and sheets follow its rules, or as mesh parts when the file is large.
 
 export const STEP_FORMAT: ImportFormat = { kind: 'step', name: 'STEP', notes: [
-  'STEP import: solids and surfaces are imported with the assembly structure, part names and colors; curved surfaces are divided into smoothed facets. Product data, tolerances and annotations (PMI) are not imported.',
+  'STEP import: solids and surfaces are imported with the assembly structure, part names, colors and edges; a part placed many times becomes one component; curved surfaces are divided into smoothed facets. Product data, tolerances and annotations (PMI) are not imported.',
 ] };
 
 /**
- * The largest STEP file the desktop app reads; the browser keeps the limit every import shares. Reading takes about
- * thirteen times the file's size in memory, and the reader's wasm memory ends at 4 GiB.
+ * The largest STEP file the desktop app reads; the browser keeps the limit every import shares. The reader holds the
+ * file's text and its parsed entities together, and its wasm memory ends at 4 GiB.
  */
 export const MAX_DESKTOP_STEP_BYTES = 256 * 1024 * 1024;
+
+/** The reader's meshing (crates/step-reader mode bits): the display mesh, whose faces share their boundary points, welded at the merge tolerance, with flat faces re-triangulated from their outlines. */
+const DISPLAY_MODE = 1 | 2 | 4;
 
 export function isStepModelFile(name: string): boolean { return /\.(step|stp)$/i.test(name); }
 
@@ -30,11 +33,6 @@ export function isStepModelFile(name: string): boolean { return /\.(step|stp)$/i
 export function isStepBytes(bytes: Uint8Array): boolean {
   return /^\uFEFF?\s*ISO-10303-21\s*;/.test(new TextDecoder().decode(bytes.subarray(0, 256)));
 }
-
-/** Full turns are divided into 24 segments, as circles drawn in PushForm are. */
-const ANGULAR_DEFLECTION = Math.PI / 12;
-/** The largest gap between a curved surface and its facets, as a fraction of each part's size. */
-const LINEAR_DEFLECTION_RATIO = 0.001;
 
 const SCHEMAS: readonly [RegExp, string][] = [
   [/^AP242_/i, 'AP242'], [/^AP203_CONFIGURATION/i, 'AP203 edition 2'], [/^CONFIG_CONTROL_DESIGN/i, 'AP203'],
@@ -54,6 +52,27 @@ export function stepHeader(bytes: Uint8Array): { schema: string | null; system: 
   return { schema, system };
 }
 
+/** Run the reader module over the file: parse, convert solid by solid with progress, and decode the result. */
+async function readWithModule(bytes: Uint8Array, mode: number, threshold: number, onProgress?: (p: ImportProgress) => void): Promise<StepReaderResult> {
+  const m = await loadStepReader();
+  const ptr = m.pf_alloc(bytes.byteLength);
+  new Uint8Array(m.memory.buffer, ptr, bytes.byteLength).set(bytes);
+  onProgress?.({ stage: 'Reading STEP model', current: 0, total: 1 });
+  const handle = m.pf_step_open(ptr, bytes.byteLength, mode, Math.min(threshold, 0xffff_ffff));
+  m.pf_free(ptr, bytes.byteLength);
+  if (!handle) throw new Error(`This STEP file could not be read: ${stepReaderError(m)}`);
+  try {
+    let reported = -1;
+    while (m.pf_step_step(handle)) {
+      const packed = m.pf_step_progress(handle), done = Number(packed >> 32n), total = Number(packed & 0xffff_ffffn);
+      if (done !== reported) { reported = done; onProgress?.({ stage: 'Converting parts', current: done, total }); }
+    }
+    const len = m.pf_step_finish(handle);
+    if (!len) throw new Error(`This STEP file could not be read: ${stepReaderError(m)}`);
+    return decodeStepResult(new Uint8Array(m.memory.buffer, m.pf_step_result_ptr(handle), len));
+  } finally { m.pf_step_close(handle); }
+}
+
 /**
  * Read a STEP file of at most `maxBytes` (the shared import limit unless the desktop app allows more). A file with more
  * than `meshPartThreshold` triangles in all imports as mesh parts rather than faces.
@@ -63,123 +82,82 @@ export async function readStep(bytes: Uint8Array, onProgress?: (p: ImportProgres
   if (bytes.byteLength > maxBytes) throw new Error(`STEP files larger than ${maxBytes / (1024 * 1024)} MiB are not supported yet.`);
   if (!isStepBytes(bytes)) throw new Error('Not a STEP model: the file does not begin with ISO-10303-21.');
   onProgress?.({ stage: 'Loading the STEP reader', current: 0, total: 1 });
-  const reader = await loadStepReader();
-  onProgress?.({ stage: 'Reading STEP model', current: 0, total: 1 });
-  const result = reader.ReadStepFile(bytes, {
-    linearUnit: 'meter', linearDeflectionType: 'bounding_box_ratio', linearDeflection: LINEAR_DEFLECTION_RATIO, angularDeflection: ANGULAR_DEFLECTION,
-  });
-  if (!result.success) throw new Error('This STEP file could not be read: its data is malformed or uses a schema the reader does not support.');
-  // The reader can run out of memory dividing the surfaces of a very large model after reading its parts.
-  if (result.meshes.some(mesh => mesh.brep_faces.length) && !result.meshes.some(mesh => mesh.index.array.length))
-    throw new Error('The STEP reader read this model\'s parts but could not divide their surfaces into faces. The model may be too large for the STEP reader.');
-  onProgress?.({ stage: 'Reading STEP model', current: 1, total: 1 });
-
-  const warnings = new Set<string>(), counts: MeshCounts = { degenerate: 0, nonplanar: 0, duplicates: 0, turned: 0 };
+  // PF_STEP_MODE lets tests compare the reader's meshing modes.
+  const mode = typeof process !== 'undefined' && process.env?.PF_STEP_MODE ? Number(process.env.PF_STEP_MODE) : DISPLAY_MODE;
+  const result = await readWithModule(bytes, mode, meshPartThreshold, onProgress);
+  const warnings = new Set<string>(result.warnings.map(w => `STEP: ${w}`)), counts: MeshCounts = { degenerate: 0, nonplanar: 0, duplicates: 0, turned: 0 };
+  const header = stepHeader(bytes), system = result.system || header.system || '';
   const materials: Material[] = [], materialKeys = new Map<string, number>();
-  const materialKey = (color: readonly number[] | null | undefined): number | null => {
-    if (!color || color.length < 3) return null;
-    const srgb: Vec3 = [linearToSrgb(color[0]!), linearToSrgb(color[1]!), linearToSrgb(color[2]!)];
+  const materialKey = (color: readonly number[] | null): number | null => {
+    if (!color) return null;
+    const srgb: Vec3 = [color[0]!, color[1]!, color[2]!];
     const hex = srgb.map(c => Math.round(c * 255).toString(16).padStart(2, '0')).join('').toUpperCase();
     let key = materialKeys.get(hex);
-    if (key === undefined) {
-      key = materials.length;
-      materialKeys.set(hex, key);
-      materials.push(meshMaterial(key, `Color ${hex}`, srgb, 1, null));
-    }
+    if (key === undefined) { key = materials.length; materialKeys.set(hex, key); materials.push(meshMaterial(key, `Color ${hex}`, srgb, 1, null)); }
     return key;
   };
-
-  const geometry = (mesh: OcctMesh): MeshGeometry => {
-    const positions = mesh.attributes.position.array, normals = mesh.attributes.normal?.array, index = mesh.index.array;
-    const corner = (i: number): MeshCorner => {
-      const n: Vec3 | null = normals ? [normals[i * 3]!, normals[i * 3 + 1]!, normals[i * 3 + 2]!] : null;
-      return { position: [positions[i * 3]!, positions[i * 3 + 1]!, positions[i * 3 + 2]!], normal: n && v3len(n) > LENGTH_TOL ? v3normalize(n) : null, uv: null };
-    };
-    const out: MeshGeometry = { polygons: [], lines: [] };
-    const triangles = index.length / 3;
-    // Each B-rep face is a run of triangles, with its own color or else the part's. A flat face's triangles join into
-    // one face again; a curved face's facets stay faces of their own, since facets finer than the merge tolerance that
-    // were joined across a slight bend would no longer meet their neighbours.
-    const faces = mesh.brep_faces.length ? mesh.brep_faces : [{ first: 0, last: triangles - 1, color: null }];
-    const minCos = Math.cos(VERTEX_NORMAL_TOL);
-    for (const face of faces) {
-      const material = materialKey(face.color ?? mesh.color), first = Math.max(0, face.first), last = Math.min(face.last, triangles - 1);
-      const polygons = [];
-      for (let t = first; t <= last; t++) polygons.push([corner(index[t * 3]!), corner(index[t * 3 + 1]!), corner(index[t * 3 + 2]!)]);
-      const reference = polygons[0]?.find(c => c.normal)?.normal;
-      const flat = !!reference && polygons.every(corners => corners.every(c => !c.normal || v3dot(c.normal, reference) >= minCos));
-      for (const corners of polygons) out.polygons.push({ material, corners, keep: !flat });
-    }
-    return out;
-  };
-
-  const meshes = result.meshes;
-  const hasTriangles = (i: number): boolean => (meshes[i]?.index.array.length ?? 0) >= 3;
-  const totalTriangles = meshes.reduce((n, mesh) => n + Math.floor(mesh.index.array.length / 3), 0);
+  const totalTriangles = result.placements.reduce((n, p) => n + result.parts[p.part]!.geometry.triangles.length / 3, 0);
   const asMeshParts = totalTriangles > meshPartThreshold;
-  const header = stepHeader(bytes);
-  /** A part's arrays as a mesh part: its B-rep faces as source faces with their colors, no edges (the reader gives none). */
-  const meshPart = (mesh: OcctMesh, name: string): ImportedMeshPart => {
-    const triangles = Uint32Array.from(mesh.index.array), count = triangles.length / 3;
-    const faces = mesh.brep_faces.length ? mesh.brep_faces : [{ first: 0, last: count - 1, color: null }];
-    // A triangle outside every face range belongs to one extra, uncolored face.
-    const triangleFace = new Uint32Array(count).fill(faces.length), faceMaterialKeys = new Int32Array(faces.length + 1).fill(-1);
-    let covered = 0;
-    faces.forEach((face, f) => {
-      faceMaterialKeys[f] = materialKey(face.color ?? mesh.color) ?? -1;
-      for (let t = Math.max(0, face.first); t <= Math.min(face.last, count - 1); t++) { triangleFace[t] = f; covered++; }
-    });
-    const faceCount = covered < count ? faces.length + 1 : faces.length;
-    return { name, source: { format: 'STEP', system: header.system ?? '' }, faceMaterialKeys: faceMaterialKeys.subarray(0, faceCount),
-      geometry: { positions: Float64Array.from(mesh.attributes.position.array), triangles, triangleFace, faceCount, faceMaterials: new Uint32Array(faceCount),
-        edgeOffsets: new Uint32Array(0), edgePositions: new Float64Array(0), edgeFlags: new Uint8Array(0) } };
-  };
-  const pendingParts = new Map<number, ImportedMeshPart[]>();
-  const hasContent = (node: OcctNode): boolean => node.meshes.some(hasTriangles) || node.children.some(hasContent);
-  const placements = new Map<number, Map<number, MeshPlacement>>(), definitions = new Map<number, Definition>();
-  const root = meshDefinition(-1, '', false);
-  const build = (def: Definition, source: MeshGeometry): void => {
+
+  // The reader model: one definition per distinct part, placed by every placement, inside groups for the assemblies
+  // named by the placements' paths. A file of one part at the origin is that part itself.
+  const root = meshDefinition(-1, '', false), definitions = new Map<number, Definition>(), meshParts = new Map<number, ImportedMeshPart[]>();
+  const placements = new Map<number, Map<number, MeshPlacement>>();
+  let nextKey = 0;
+  // Parts that share a name are numbered in file order, so two unnamed solids of one product stay apart.
+  const baseNames = result.parts.map((part, index) => part.name || result.placements.find(p => p.part === index)?.name || 'Part');
+  const nameCounts = new Map<string, number>();
+  for (const name of baseNames) nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1);
+  const seen = new Map<string, number>(), names = baseNames.map(name => {
+    if (nameCounts.get(name)! < 2) return name;
+    const n = (seen.get(name) ?? 0) + 1; seen.set(name, n); return `${name} ${n}`;
+  });
+  const partName = (index: number): string => names[index]!;
+  const fill = (def: Definition, index: number): void => {
+    const part = result.parts[index]!, material = materialKey(part.color);
+    if (asMeshParts) {
+      meshParts.set(def.id, [...meshParts.get(def.id) ?? [], { name: partName(index), source: { format: 'STEP', system },
+        geometry: part.geometry, faceMaterialKeys: new Int32Array(part.geometry.faceCount).fill(-1), material }]);
+      return;
+    }
     const byFace = new Map<number, MeshPlacement>();
-    buildMeshGeometry(def, source, counts, () => false, byFace, { paintBacks: true });
+    buildMeshGeometry(def, meshPartPolygons(part.geometry, () => material), counts, () => false, byFace, { paintBacks: true });
     if (byFace.size) placements.set(def.id, byFace);
   };
-  let nextKey = 0, built = 0;
-  const total = meshes.filter((_, i) => hasTriangles(i)).length;
-  const group = (parent: Definition, name: string): Definition => {
-    const key = nextKey++, def = meshDefinition(key, name, true);
-    definitions.set(key, def);
-    const placement: Instance = { name, refIdx: key, guid: '', matrix: [...IDENTITY_PLACEMENT], materialId: null, hidden: false, layer: '', properties: {} };
-    parent.instances.push(placement);
-    return def;
-  };
-  const part = (def: Definition, mesh: OcctMesh): void => {
-    onProgress?.({ stage: 'Building parts', current: built++, total });
-    if (asMeshParts) { pendingParts.set(def.id, [...pendingParts.get(def.id) ?? [], meshPart(mesh, def.name || mesh.name || 'Part')]); return; }
-    build(def, geometry(mesh));
-  };
-  // The reader places every part in world coordinates. Each part is its own group, so parts that touch are not welded
-  // into one another; an assembly is a group of its parts and subassemblies; a part alone in its node is that node.
-  const fill = (def: Definition, node: OcctNode): void => {
-    const parts = node.meshes.filter(hasTriangles).map(i => meshes[i]!), children = node.children.filter(hasContent);
-    if (parts.length === 1 && !children.length) { part(def, parts[0]!); return; }
-    parts.forEach((mesh, i) => part(group(def, mesh.name || (node.name ? `${node.name} ${i + 1}` : `Part ${i + 1}`)), mesh));
-    children.forEach((child, i) => fill(group(def, child.name || `Assembly ${i + 1}`), child));
-  };
-  // An assembly wrapper with a single item, as most files have at the top, is the model itself.
-  let top = result.root;
-  for (let only = top.children.filter(hasContent); !top.meshes.some(hasTriangles) && only.length === 1; only = top.children.filter(hasContent)) top = only[0]!;
-  fill(root, top);
-
-  const version = [header.schema, header.system].filter(Boolean).join(', ') || 'STEP';
+  const isIdentity = (m: readonly number[]): boolean => m.every((v, i) => Math.abs(v - (i % 5 === 0 ? 1 : 0)) < 1e-12);
+  const only = result.placements.length === 1 && result.parts.length === 1 && isIdentity(result.placements[0]!.matrix);
+  if (only) fill(root, 0);
+  else {
+    const partDefs = new Map<number, number>();
+    const partDef = (index: number): number => {
+      let key = partDefs.get(index);
+      if (key === undefined) { key = nextKey++; const def = meshDefinition(key, partName(index), false); definitions.set(key, def); fill(def, index); partDefs.set(index, key); }
+      return key;
+    };
+    // Assembly groups by path prefix; the one assembly every placement shares at the top is the model itself.
+    const common = result.placements.length > 1 && result.placements.every(p => p.path.length > 1 && p.path[0] === result.placements[0]!.path[0]) ? 1 : 0;
+    const groups = new Map<string, Definition>([['', root]]);
+    const groupFor = (path: readonly string[]): Definition => {
+      const key = path.join('\u0000');
+      let def = groups.get(key);
+      if (!def) {
+        const parent = groupFor(path.slice(0, -1)), id = nextKey++;
+        def = meshDefinition(id, path.at(-1) || 'Assembly', true); definitions.set(id, def); groups.set(key, def);
+        parent.instances.push({ name: def.name, refIdx: id, guid: '', matrix: [...IDENTITY_PLACEMENT], materialId: null, hidden: false, layer: '', properties: {} });
+      }
+      return def;
+    };
+    for (const placement of result.placements) {
+      const parent = groupFor(placement.path.slice(common, Math.max(common, placement.path.length - 1)));
+      const matrix = [...placement.matrix];
+      matrix[12] = matrix[12]! / INCH; matrix[13] = matrix[13]! / INCH; matrix[14] = matrix[14]! / INCH;
+      const instance: Instance = { name: placement.instance || partName(placement.part), refIdx: partDef(placement.part), guid: '', matrix, materialId: null, hidden: false, layer: '', properties: {} };
+      parent.instances.push(instance);
+    }
+  }
+  const version = [header.schema ?? result.schema, system].filter(Boolean).join(', ') || 'STEP';
   meshCountNotes(counts, message => { warnings.add(message); });
-  if (asMeshParts) warnings.add(`${totalTriangles.toLocaleString('en-US')} triangles, more than ${meshPartThreshold.toLocaleString('en-US')}: the parts are imported as mesh parts, which are drawn and placed whole and become editable faces when edited.`);
   const model = { version, definitions, root, layers: [], pages: [], scenesUnread: 0, dimensions: [], materials,
     materialsById: new Map(materials.map(m => [m.id!, m])), styles: [], units: null, unitsOptions: null, sectionDisplay: null, renderingOptions: null };
-  const scene = await finishMeshImport(model, placements, STEP_FORMAT, warnings, onProgress, { allowEmpty: pendingParts.size > 0 });
-  for (const [key, parts] of pendingParts) {
-    const definition = key === root.id ? scene.root : scene.definitions.get(key);
-    if (!definition) throw new Error('A STEP part lost its definition.');
-    definition.meshParts = parts;
-  }
-  return scene;
+  return finishMeshImport(model, placements, STEP_FORMAT, warnings, onProgress, { meshParts, allowEmpty: asMeshParts });
 }

@@ -19,7 +19,6 @@
     "@pushform/model": "workspace:*",
     "fast-sha256": "1.3.0",
     "fflate": "^0.8.2",
-    "occt-import-js": "0.0.23",
     "openskp": "1.3.0",
     "protobufjs": "8.8.1"
   }

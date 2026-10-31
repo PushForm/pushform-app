@@ -37,13 +37,13 @@ export function ModelImportDialog({ fileName, progress, report, onClose }: {
       <div ref={content} className="pf-import-dialog-content" role="region" aria-label="Import compatibility messages" tabIndex={0}>
       <p id="model-import-description"><strong>{fileName}</strong></p>
       {report ? <>
-        <p>{report.bodies} solids · {report.sheetFaces} sheet faces · {report.looseEdges} loose edges</p>
+        <p>{report.bodies} solids · {report.sheetFaces} sheet faces · {report.looseEdges} loose edges{report.meshParts ? <> · {report.meshParts} mesh parts ({(report.meshPartTriangles ?? 0).toLocaleString('en-US')} triangles)</> : null}</p>
         <p>{report.definitions} definitions · {report.instances} instances · {report.materials} materials · {report.tags} tags{report.scenes ? <> · {report.scenes} scenes</> : null}{report.texts ? <> · {report.texts} texts</> : null}{report.images ? <> · {report.images} images</> : null}</p>
         {report.sectionPlanes || report.guides || report.dimensions ? <p>{report.sectionPlanes} section planes · {report.guides} guides · {report.dimensions} dimensions</p> : null}
         <p>Counts describe stored geometry; repeated instances share their definition.</p>
         {report.warnings.length ? <><h3>Import notes</h3><ul>{report.warnings.map(w => <li key={w}>{w}</li>)}</ul></> : null}
       </> : <div role="status" aria-live="polite">
-        <p>{progress?.stage ?? 'Reading file…'}</p>
+        <p>{progress?.stage ?? 'Reading file…'}{progress && progress.total > 1 ? ` ${progress.current.toLocaleString('en-US')} of ${progress.total.toLocaleString('en-US')}` : ''}</p>
         {progress && progress.total > 0 ? <progress max={progress.total} value={progress.current} aria-label={`${format} import progress`} /> : <progress aria-label={`${format} import progress`} />}
       </div>}
       </div>

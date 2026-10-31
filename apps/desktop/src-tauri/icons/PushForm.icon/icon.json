@@ -1,20 +1,54 @@
 {
-  "fill": { "solid": "extended-srgb:1.00000,0.99216,0.96863,1.00000" },
+  "fill": {
+    "linear-gradient": [
+      "extended-srgb:0.99216,0.97255,0.92157,1.00000",
+      "extended-srgb:0.95686,0.92157,0.84706,1.00000"
+    ]
+  },
   "groups": [
     {
-      "name": "PushForm mark",
+      "name": "Sunken PushForm mark",
       "layers": [
         {
-          "name": "PushForm mark",
+          "name": "Sunken PushForm mark",
           "image-name": "mark.svg",
           "glass": false
         }
       ],
       "specular": false,
       "blur-material": 0,
-      "translucency": { "enabled": false, "value": 0 },
-      "shadow": { "kind": "neutral", "opacity": 0 }
+      "translucency": {
+        "enabled": false,
+        "value": 0
+      },
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0
+      }
+    },
+    {
+      "name": "Figured pale oak",
+      "layers": [
+        {
+          "name": "Figured pale oak",
+          "image-name": "grain.svg",
+          "glass": false
+        }
+      ],
+      "specular": false,
+      "blur-material": 0,
+      "translucency": {
+        "enabled": false,
+        "value": 0
+      },
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0
+      }
     }
   ],
-  "supported-platforms": { "circles": [], "squares": "shared" }
+  "supported-platforms": {
+    "circles": [],
+    "squares": "shared"
+  }
 }

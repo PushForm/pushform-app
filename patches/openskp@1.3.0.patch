@@ -1,7 +1,256 @@
+diff --git a/dist/index.d.mts b/dist/index.d.mts
+index 9be1b32aa8166d5a75f3b9f2faf7a5221c1db088..473b74440eca83819fed46fd3be53e9f517136ef 100644
+--- a/dist/index.d.mts
++++ b/dist/index.d.mts
+@@ -265,12 +265,14 @@ interface SkpModel {
+      * at the top level. Corresponds to .NET/Dart's `Root`/`root`. */
+     root: Definition;
+     layers: Layer[];
+-    /** The file's saved scenes (VFF files; classic pre-2021 files import
+-     * with none). */
++    /** The file's saved scenes. */
+     pages: Page[];
++    /** Saved scenes of a pre-2021 file that the reader found but could not
++     * read (it stops at the first); 0 for 2021+ files. */
++    scenesUnread: number;
+     /** Model-level linear dimensions with world-space endpoints (VFF
+-     * files). Legacy files surface text-only dimensions per definition
+-     * instead (`Definition.dimensions`). */
++     * files). Legacy files keep their dimensions per definition instead
++     * (`Definition.dimensions`). */
+     dimensions: Dimension[];
+     materials: Material[];
+     materialsById: Map<number, Material>;
+@@ -280,6 +282,16 @@ interface SkpModel {
+      * files, which carry no equivalent container, or when the tag isn't
+      * found. */
+     units: string | null;
++    /** The model's display-unit options ("UnitsOptions": LengthUnit, LengthFormat, LengthPrecision,
++     * AreaUnit, VolumeUnit, ...) as SketchUp stores them, from legacy and VFF files; null when absent. */
++    unitsOptions: Record<string, number | boolean> | null;
++    /** PushForm patch: the model's Display Section Planes and Display Section Cuts rendering options; null when the
++     * file does not record them. */
++    sectionDisplay: { planes: boolean; cuts: boolean } | null;
++    /** PushForm patch: the model's current rendering options, as SketchUp shows the model (RenderMode, EdgeDisplayMode,
++     * BackgroundColor, ...), keyed by the names of Sketchup::RenderingOptions, as numbers, booleans or [r, g, b, a]
++     * colors in 0..255; null when the file records none. */
++    renderingOptions: Record<string, number | boolean | [number, number, number, number]> | null;
+ }
+ interface SectionPlane {
+     plane: [number, number, number, number];
+@@ -290,21 +302,47 @@ interface SectionPlane {
+ interface TextEntity {
+     text: string;
+     hidden: boolean;
++    /** Anchor point [x, y, z] in inches, in the coordinates of the
++     * definition holding the text; null for screen text and for anchors the
++     * reader does not resolve. */
++    point: [number, number, number] | null;
++    /** Leader vector from the anchor to the label, in inches, or null. */
++    vector: [number, number, number] | null;
++    /** Screen text's position as fractions of the view width and height, or
++     * null. */
++    screen: [number, number] | null;
++    /** SketchUp leader type: 0 none (screen text), 1 view based, 2 pushpin;
++     * null when not recovered. */
++    leaderType: number | null;
++    /** Whether the leader line is drawn. */
++    displayLeader: boolean;
++    /** How the anchor attaches (1 free point, 2 vertex, 4 edge midpoint,
++     * 5 on an edge, 7 on a face, 9 edge intersection), or null. */
++    anchorType: number | null;
++    /** Font: face name, point size, bold, italic, and whether it is sized in model units with that height in
++     * inches; null when not recovered. */
++    font: { name: string; size: number; bold: boolean; italic: boolean; worldSize: boolean; height: number } | null;
++    /** The text's material (its color), or null for the default. */
++    materialId: number | null;
++    /** Leader arrow: 0 none, 1 slash, 2 dot, 3 closed arrow, 4 open arrow; null when not recovered. */
++    arrowType: number | null;
++    /** Tag (layer) name, or "" when unknown. */
++    layer: string;
+ }
+ /**
+  * A linear dimension (SketchUp's Dimension tool).
+  *
+- * The legacy (pre-2021) reader recovers only `text`/`hidden`. The VFF
+- * reader (2021+) recovers the full geometry - see `SkpModel.dimensions`
+- * for the model-level, world-space list.
++ * Both readers recover the full geometry, per definition, in that
++ * definition's coordinates; see `SkpModel.dimensions` for the VFF
++ * model-level, world-space list.
+  */
+ interface Dimension {
+     /** The displayed text. Empty when the dimension shows its auto-computed
+      * measured value (the caller formats `|b - a|`). */
+     text: string;
+     hidden: boolean;
+-    /** First measured point [x, y, z] in inches (world space), or null when
+-     * only the text was recovered. */
++    /** First measured point [x, y, z] in inches, or null when the reader
++     * cannot locate it. */
+     a: [number, number, number] | null;
+     /** Second measured point. */
+     b: [number, number, number] | null;
+@@ -353,6 +391,9 @@ interface ConstructionPoint {
+ interface Page {
+     /** Scene name as shown on its tab. */
+     name: string;
++    /** PushForm patch: the style the scene saved, as rendering options keyed like `SkpModel.renderingOptions`; null when the
++     * scene saved none. Whether the scene uses it is bit 2 of `flags`. */
++    renderingOptions: Record<string, number | boolean | [number, number, number, number]> | null;
+     /** Camera position [x, y, z] in inches, or null. */
+     eye: [number, number, number] | null;
+     /** Point the camera looks at, in inches. */
+@@ -368,6 +409,10 @@ interface Page {
+     orthoHeight: number;
+     /** Names of the layers this scene hides. */
+     hiddenLayers: string[];
++    /** Which properties the scene saves (SketchUp's use flags: 1 camera,
++     * 2 style, 4 shadows, 8 axes, 16 hidden geometry, 32 tag visibility,
++     * 64 section planes), when the file stores them; else null. */
++    flags: number | null;
+ }
+ interface Definition {
+     id: number;
+@@ -699,6 +744,9 @@ interface ParsedRawData {
+     /** The model's unit-system string (e.g. "Millimeter"), read from
+      * meta/meta.dat. null for legacy files or when the tag isn't found. */
+     units: string | null;
++    unitsOptions: Record<string, number | boolean> | null;
++    sectionDisplay: { planes: boolean; cuts: boolean } | null;
++    renderingOptions: Record<string, number | boolean | [number, number, number, number]> | null;
+     layerColors: Map<string, [number, number, number]>;
+     layerHidden: Map<string, boolean>;
+     layerIdToName: Map<number, string>;
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index 9be1b32aa8166d5a75f3b9f2faf7a5221c1db088..473b74440eca83819fed46fd3be53e9f517136ef 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -265,12 +265,14 @@ interface SkpModel {
+      * at the top level. Corresponds to .NET/Dart's `Root`/`root`. */
+     root: Definition;
+     layers: Layer[];
+-    /** The file's saved scenes (VFF files; classic pre-2021 files import
+-     * with none). */
++    /** The file's saved scenes. */
+     pages: Page[];
++    /** Saved scenes of a pre-2021 file that the reader found but could not
++     * read (it stops at the first); 0 for 2021+ files. */
++    scenesUnread: number;
+     /** Model-level linear dimensions with world-space endpoints (VFF
+-     * files). Legacy files surface text-only dimensions per definition
+-     * instead (`Definition.dimensions`). */
++     * files). Legacy files keep their dimensions per definition instead
++     * (`Definition.dimensions`). */
+     dimensions: Dimension[];
+     materials: Material[];
+     materialsById: Map<number, Material>;
+@@ -280,6 +282,16 @@ interface SkpModel {
+      * files, which carry no equivalent container, or when the tag isn't
+      * found. */
+     units: string | null;
++    /** The model's display-unit options ("UnitsOptions": LengthUnit, LengthFormat, LengthPrecision,
++     * AreaUnit, VolumeUnit, ...) as SketchUp stores them, from legacy and VFF files; null when absent. */
++    unitsOptions: Record<string, number | boolean> | null;
++    /** PushForm patch: the model's Display Section Planes and Display Section Cuts rendering options; null when the
++     * file does not record them. */
++    sectionDisplay: { planes: boolean; cuts: boolean } | null;
++    /** PushForm patch: the model's current rendering options, as SketchUp shows the model (RenderMode, EdgeDisplayMode,
++     * BackgroundColor, ...), keyed by the names of Sketchup::RenderingOptions, as numbers, booleans or [r, g, b, a]
++     * colors in 0..255; null when the file records none. */
++    renderingOptions: Record<string, number | boolean | [number, number, number, number]> | null;
+ }
+ interface SectionPlane {
+     plane: [number, number, number, number];
+@@ -290,21 +302,47 @@ interface SectionPlane {
+ interface TextEntity {
+     text: string;
+     hidden: boolean;
++    /** Anchor point [x, y, z] in inches, in the coordinates of the
++     * definition holding the text; null for screen text and for anchors the
++     * reader does not resolve. */
++    point: [number, number, number] | null;
++    /** Leader vector from the anchor to the label, in inches, or null. */
++    vector: [number, number, number] | null;
++    /** Screen text's position as fractions of the view width and height, or
++     * null. */
++    screen: [number, number] | null;
++    /** SketchUp leader type: 0 none (screen text), 1 view based, 2 pushpin;
++     * null when not recovered. */
++    leaderType: number | null;
++    /** Whether the leader line is drawn. */
++    displayLeader: boolean;
++    /** How the anchor attaches (1 free point, 2 vertex, 4 edge midpoint,
++     * 5 on an edge, 7 on a face, 9 edge intersection), or null. */
++    anchorType: number | null;
++    /** Font: face name, point size, bold, italic, and whether it is sized in model units with that height in
++     * inches; null when not recovered. */
++    font: { name: string; size: number; bold: boolean; italic: boolean; worldSize: boolean; height: number } | null;
++    /** The text's material (its color), or null for the default. */
++    materialId: number | null;
++    /** Leader arrow: 0 none, 1 slash, 2 dot, 3 closed arrow, 4 open arrow; null when not recovered. */
++    arrowType: number | null;
++    /** Tag (layer) name, or "" when unknown. */
++    layer: string;
+ }
+ /**
+  * A linear dimension (SketchUp's Dimension tool).
+  *
+- * The legacy (pre-2021) reader recovers only `text`/`hidden`. The VFF
+- * reader (2021+) recovers the full geometry - see `SkpModel.dimensions`
+- * for the model-level, world-space list.
++ * Both readers recover the full geometry, per definition, in that
++ * definition's coordinates; see `SkpModel.dimensions` for the VFF
++ * model-level, world-space list.
+  */
+ interface Dimension {
+     /** The displayed text. Empty when the dimension shows its auto-computed
+      * measured value (the caller formats `|b - a|`). */
+     text: string;
+     hidden: boolean;
+-    /** First measured point [x, y, z] in inches (world space), or null when
+-     * only the text was recovered. */
++    /** First measured point [x, y, z] in inches, or null when the reader
++     * cannot locate it. */
+     a: [number, number, number] | null;
+     /** Second measured point. */
+     b: [number, number, number] | null;
+@@ -353,6 +391,9 @@ interface ConstructionPoint {
+ interface Page {
+     /** Scene name as shown on its tab. */
+     name: string;
++    /** PushForm patch: the style the scene saved, as rendering options keyed like `SkpModel.renderingOptions`; null when the
++     * scene saved none. Whether the scene uses it is bit 2 of `flags`. */
++    renderingOptions: Record<string, number | boolean | [number, number, number, number]> | null;
+     /** Camera position [x, y, z] in inches, or null. */
+     eye: [number, number, number] | null;
+     /** Point the camera looks at, in inches. */
+@@ -368,6 +409,10 @@ interface Page {
+     orthoHeight: number;
+     /** Names of the layers this scene hides. */
+     hiddenLayers: string[];
++    /** Which properties the scene saves (SketchUp's use flags: 1 camera,
++     * 2 style, 4 shadows, 8 axes, 16 hidden geometry, 32 tag visibility,
++     * 64 section planes), when the file stores them; else null. */
++    flags: number | null;
+ }
+ interface Definition {
+     id: number;
+@@ -699,6 +744,9 @@ interface ParsedRawData {
+     /** The model's unit-system string (e.g. "Millimeter"), read from
+      * meta/meta.dat. null for legacy files or when the tag isn't found. */
+     units: string | null;
++    unitsOptions: Record<string, number | boolean> | null;
++    sectionDisplay: { planes: boolean; cuts: boolean } | null;
++    renderingOptions: Record<string, number | boolean | [number, number, number, number]> | null;
+     layerColors: Map<string, [number, number, number]>;
+     layerHidden: Map<string, boolean>;
+     layerIdToName: Map<number, string>;
 diff --git a/dist/index.js b/dist/index.js
+index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a9033f6e8cbb 100644
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -172,6 +172,268 @@
+@@ -172,6 +172,268 @@ function readMetaUnits(metaBytes) {
    }
    return null;
  }
@@ -270,7 +519,7 @@ diff --git a/dist/index.js b/dist/index.js
  var MAX_UNCOMPRESSED_ENTRY_BYTES = 16 * 1024 * 1024 * 1024;
  var MAX_COMPRESSION_RATIO = 1e3;
  var RATIO_CHECK_THRESHOLD_BYTES = 1024 * 1024;
-@@ -411,23 +673,32 @@
+@@ -411,23 +673,32 @@ var SkpParseError = class _SkpParseError extends Error {
  // src/edge-flags.ts
  var EdgeFlagStore = class {
    constructor() {
@@ -308,7 +557,7 @@ diff --git a/dist/index.js b/dist/index.js
    ensureSlot(id) {
      if (!this.initialized) {
        this.baseId = id;
-@@ -436,19 +707,24 @@
+@@ -436,19 +707,24 @@ var EdgeFlagStore = class {
        this.initialized = true;
        return 0;
      }
@@ -335,7 +584,7 @@ diff --git a/dist/index.js b/dist/index.js
        this.present = nextPresent;
        this.baseId = id;
        return 0;
-@@ -466,7 +742,15 @@
+@@ -466,7 +742,15 @@ var EdgeFlagStore = class {
      return slot;
    }
    set(id, flags) {
@@ -351,7 +600,7 @@ diff --git a/dist/index.js b/dist/index.js
      if ((this.present[slot >> 3] & 1 << (slot & 7)) === 0) {
        this.present[slot >> 3] |= 1 << (slot & 7);
        this.count++;
-@@ -477,6 +761,7 @@
+@@ -477,6 +761,7 @@ var EdgeFlagStore = class {
     * matching `Map.prototype.get`, so callers' `?? 0` fallbacks behave
     * exactly as before. */
    get(id) {
@@ -359,11 +608,10 @@ diff --git a/dist/index.js b/dist/index.js
      if (!this.initialized) return void 0;
      const slot = this.slotFor(id);
      if (slot < 0 || slot >= this.flags.length) return void 0;
-@@ -640,6 +925,24 @@
-     if (t === tag) return body;
+@@ -641,6 +926,24 @@ function findFlat(seq, tag) {
    }
    return null;
-+}
+ }
 +function extractUvProjections(dc05Payload) {
 +  const dd05 = findFlat(tlvFlat(dc05Payload), "DD05");
 +  const b136 = dd05 === null ? null : findFlat(tlvFlat(dd05), "B136");
@@ -381,10 +629,11 @@ diff --git a/dist/index.js b/dist/index.js
 +    if (flags === null || flags.length < 4 || !(flags[0] & 2) || dir === null || dir.length !== 24) return null;
 +    return [readF64(dir, 0), readF64(dir, 8), readF64(dir, 16)];
 +  });
- }
++}
  function extractUvTransforms(dc05Payload) {
    const dd05 = findFlat(tlvFlat(dc05Payload), "DD05");
-@@ -671,6 +974,104 @@
+   if (dd05 === null) return [null, null];
+@@ -671,6 +974,104 @@ function extractUvTransforms(dc05Payload) {
    }
    return [result[0], result[1]];
  }
@@ -489,7 +738,7 @@ diff --git a/dist/index.js b/dist/index.js
  function extractGeometryFromNodes(elements, builder, options) {
    for (const el of elements) {
      const tag = el.tag;
-@@ -691,13 +1092,50 @@
+@@ -691,14 +1092,51 @@ function extractGeometryFromNodes(elements, builder, options) {
          const v1 = v1Node ? parseVarInt(v1Node.payload, 0, v1Node.payload.length) : null;
          const v2 = v2Node ? parseVarInt(v2Node.payload, 0, v2Node.payload.length) : null;
          builder.edges.set(eId, [v1, v2]);
@@ -509,7 +758,7 @@ diff --git a/dist/index.js b/dist/index.js
 +            (builder.edgeLayers ??= /* @__PURE__ */ new Map()).set(eId, p.length === 1 ? p[0] : parseVarInt(p, 0, p.length));
 +          }
          }
-+      }
+       }
 +    } else if (tag === "9613" || tag === "9713") {
 +      // 9713 and its records arrive as parsed containers, 9613 as one payload; read both as child lists.
 +      const items = (node) => node.children.length > 0 ? node.children : tlvFlat(node.payload).map(([t, p]) => ({ tag: t, payload: p, children: [] }));
@@ -537,10 +786,11 @@ diff --git a/dist/index.js b/dist/index.js
 +      for (const record of records) {
 +        const text = readVffText(record);
 +        if (text !== null) builder.texts.push(text);
-       }
++      }
      } else if (tag === "AC0D") {
        const fId = extractEntityId(el);
-@@ -748,7 +1186,9 @@
+       if (fId !== null) {
+@@ -748,7 +1186,9 @@ function extractGeometryFromNodes(elements, builder, options) {
          let faceMatId = null;
          let uvFront = null;
          let uvBack = null;
@@ -550,7 +800,7 @@ diff --git a/dist/index.js b/dist/index.js
          const d007 = el.children.find((c) => c.tag === "D007");
          if (d007) {
            const d107 = d007.children.find((c) => c.tag === "D107");
-@@ -758,10 +1198,16 @@
+@@ -758,11 +1198,17 @@ function extractGeometryFromNodes(elements, builder, options) {
            const dc05 = d007.children.find((c) => c.tag === "DC05");
            if (dc05) {
              [uvFront, uvBack] = extractUvTransforms(dc05.payload);
@@ -559,15 +809,16 @@ diff --git a/dist/index.js b/dist/index.js
            const d307 = d007.children.find((c) => c.tag === "D307");
            if (d307 && d307.payload.length > 0) {
              faceHidden = (d307.payload[0] & 1) !== 0;
-+          }
+           }
 +          const d207 = d007.children.find((c) => c.tag === "D207");
 +          if (d207 && d207.payload.length > 0) {
 +            const p = d207.payload;
 +            faceLayerId = p.length === 1 ? p[0] : parseVarInt(p, 0, p.length);
-           }
++          }
          }
          let backMatId = null;
-@@ -776,9 +1222,16 @@
+         const af0d = el.children.find((c) => c.tag === "AF0D");
+@@ -776,9 +1222,16 @@ function extractGeometryFromNodes(elements, builder, options) {
            backMaterialId: backMatId,
            uvTransform: uvFront,
            uvTransformBack: uvBack,
@@ -585,7 +836,7 @@ diff --git a/dist/index.js b/dist/index.js
      } else if (tag === "6419") {
        const nodesToSearch = el.children.length > 0 ? el.children : [el];
        let guid = null;
-@@ -849,7 +1302,167 @@
+@@ -849,7 +1302,167 @@ function extractGeometryFromNodes(elements, builder, options) {
      }
    }
  }
@@ -754,7 +1005,7 @@ diff --git a/dist/index.js b/dist/index.js
    for (const el of nodes) {
      if (el.tag === "993A") {
        for (const child of el.children) {
-@@ -868,23 +1481,56 @@
+@@ -868,23 +1481,56 @@ function collectLayers(nodes, layerIdToName = /* @__PURE__ */ new Map(), options
              let lName = "";
              try {
                const decoder = new TextDecoder("utf-8");
@@ -818,7 +1069,7 @@ diff --git a/dist/index.js b/dist/index.js
      }
    }
    return layerIdToName;
-@@ -895,6 +1541,7 @@
+@@ -895,6 +1541,7 @@ function collectDefs(nodes, defsDict = /* @__PURE__ */ new Map(), options) {
        let guid = null;
        let name = null;
        let isImage = false;
@@ -826,7 +1077,7 @@ diff --git a/dist/index.js b/dist/index.js
        let facesCamera = false;
        let shadowsFaceSun = false;
        for (const child of el.children) {
-@@ -915,6 +1562,7 @@
+@@ -915,6 +1562,7 @@ function collectDefs(nodes, defsDict = /* @__PURE__ */ new Map(), options) {
            }
          } else if (child.tag === "8315" && child.payload.length > 0) {
            isImage = parseVarInt(child.payload, 0, child.payload.length) === 2;
@@ -834,7 +1085,7 @@ diff --git a/dist/index.js b/dist/index.js
          } else if (child.tag === "581B") {
            let pos = 0;
            const pl = child.payload;
-@@ -938,6 +1586,7 @@
+@@ -938,6 +1586,7 @@ function collectDefs(nodes, defsDict = /* @__PURE__ */ new Map(), options) {
            guid: guid || "",
            name: name || "",
            isImage,
@@ -842,7 +1093,7 @@ diff --git a/dist/index.js b/dist/index.js
            alwaysFacesCamera: facesCamera,
            shadowsFaceSun,
            builder
-@@ -1225,23 +1874,27 @@
+@@ -1225,23 +1874,27 @@ function parseStyleXml(xmlText) {
    const nameMatch = attrsString.match(/\bname\s*=\s*(?:"([^"]*)"|'([^']*)')/);
    const name = nameMatch ? nameMatch[1] !== void 0 ? nameMatch[1] : nameMatch[2] : "";
    const colors = {};
@@ -872,7 +1123,7 @@ diff --git a/dist/index.js b/dist/index.js
    };
  }
  function lstripChars(s, chars) {
-@@ -1656,11 +2309,16 @@
+@@ -1656,11 +2309,16 @@ function buildModelFromParsed(parsed) {
    const {
      version,
      units,
@@ -889,7 +1140,7 @@ diff --git a/dist/index.js b/dist/index.js
      materialIdToName,
      materialsMap,
      materialsByFolder,
-@@ -1676,7 +2334,16 @@
+@@ -1676,7 +2334,16 @@ function buildModelFromParsed(parsed) {
      }
      materialsById.set(mId, mat);
    }
@@ -907,7 +1158,7 @@ diff --git a/dist/index.js b/dist/index.js
      name,
      color: { r: c[0], g: c[1], b: c[2] },
      hidden: layerHidden.get(name) ?? false
-@@ -1684,13 +2351,16 @@
+@@ -1684,13 +2351,16 @@ function buildModelFromParsed(parsed) {
    const finalMaterialsList = Array.from(materialsMap.values());
    const finalPagesList = pages.map((pg) => ({
      name: pg.name,
@@ -925,7 +1176,7 @@ diff --git a/dist/index.js b/dist/index.js
    }));
    const finalDimensionsList = dimensions.map((dm) => ({
      a: dm.a,
-@@ -1704,7 +2374,7 @@
+@@ -1704,7 +2374,7 @@ function buildModelFromParsed(parsed) {
    const finalDefinitions = /* @__PURE__ */ new Map();
    let rootDefinition = null;
    for (const [id, d] of defsDict.entries()) {
@@ -934,7 +1185,7 @@ diff --git a/dist/index.js b/dist/index.js
      if (typeof id === "number") {
        finalDefinitions.set(id, defn);
      } else {
-@@ -1721,15 +2391,21 @@
+@@ -1721,15 +2391,21 @@ function buildModelFromParsed(parsed) {
      // matching the .NET and Dart ports' `Root`/`root` field.
      root: rootDefinition ?? { id: 0, guid: "ROOT", name: "ROOT_MODEL", vertices: [], edges: [], faces: [], instances: [], sectionPlanes: [], texts: [], dimensions: [], constructionLines: [], constructionPoints: [], isImage: false, alwaysFacesCamera: false, shadowsFaceSun: false },
      layers: finalLayersList,
@@ -958,7 +1209,7 @@ diff --git a/dist/index.js b/dist/index.js
    const vertices = Array.from(d.builder.vertices.entries()).map(([vId, [x, y, z]]) => ({
      id: vId,
      x,
-@@ -1744,7 +2420,9 @@
+@@ -1744,7 +2420,9 @@ function buildDefinition(id, d, layerIdToName) {
        v2Id: v2 ?? 0,
        soft: (flags & 8) !== 0,
        smooth: (flags & 16) !== 0,
@@ -969,7 +1220,7 @@ diff --git a/dist/index.js b/dist/index.js
      };
    });
    const faces = Array.from(d.builder.faces.entries()).map(([fId, fData]) => ({
-@@ -1757,7 +2435,10 @@
+@@ -1757,7 +2435,10 @@ function buildDefinition(id, d, layerIdToName) {
      uvTransformBack: fData.uvTransformBack ?? null,
      uvProjected: fData.uvProjected ?? false,
      uvProjectedBack: fData.uvProjectedBack ?? false,
@@ -981,7 +1232,7 @@ diff --git a/dist/index.js b/dist/index.js
    }));
    const instances = d.builder.instances.map((inst) => ({
      name: inst.name,
-@@ -1773,29 +2454,47 @@
+@@ -1773,29 +2454,47 @@ function buildDefinition(id, d, layerIdToName) {
      plane: sp.plane || [0, 0, 1, 0],
      name: sp.name || "",
      label: sp.label || "",
@@ -1038,7 +1289,7 @@ diff --git a/dist/index.js b/dist/index.js
    }));
    return {
      id,
-@@ -1811,6 +2510,8 @@
+@@ -1811,6 +2510,8 @@ function buildDefinition(id, d, layerIdToName) {
      constructionLines,
      constructionPoints,
      isImage: d.isImage,
@@ -1047,7 +1298,7 @@ diff --git a/dist/index.js b/dist/index.js
      alwaysFacesCamera: d.alwaysFacesCamera,
      shadowsFaceSun: d.shadowsFaceSun || false
    };
-@@ -2257,6 +2958,27 @@
+@@ -2257,6 +2958,27 @@ function isClassRef(data, p, slot) {
    }
    return p + 6 <= data.length && view.getUint16(p, true) === 32767 && view.getUint32(p + 2, true) === (2147483648 | slot) >>> 0;
  }
@@ -1075,7 +1326,7 @@ diff --git a/dist/index.js b/dist/index.js
  var R = class {
    constructor(data, pos = 0) {
      this.data = data;
-@@ -2356,6 +3078,7 @@
+@@ -2356,6 +3078,7 @@ var Archive = class {
      this.ver = ver;
      this.hasPid = ver >= 17;
      this.r = new R(data);
@@ -1083,7 +1334,16 @@ diff --git a/dist/index.js b/dist/index.js
    }
    alloc(entry) {
      const s = this.nextSlot;
-@@ -2483,15 +3206,15 @@
+@@ -2425,7 +3148,7 @@ var Archive = class {
+       this.currentClass = prevClass;
+     }
+     this.slots.set(slot, ["obj", name, value]);
+-    if (name === "CDimensionLinear" || name === "CText") {
++    if (name === "CDimensionLinear" || name === "CDimensionRadial" || name === "CText") {
+       this.annotWatermark = this.nextSlot;
+     }
+     return [slot, name, value];
+@@ -2483,15 +3206,15 @@ function drawbase(ar, r) {
    const tag = r.peekU16();
    let layer;
    if (layCls !== void 0 && tag === (32768 | layCls)) {
@@ -1102,7 +1362,7 @@ diff --git a/dist/index.js b/dist/index.js
    } else {
      layer = r.u16();
    }
-@@ -2526,9 +3249,15 @@
+@@ -2526,9 +3249,15 @@ function readCurve(ar, r) {
  }
  function readArcCurve(ar, r) {
    preamble(ar, r);
@@ -1121,7 +1381,7 @@ diff --git a/dist/index.js b/dist/index.js
  }
  function registerBurn(ar, delta) {
    ar.burns.push([ar.annotWatermark + ar.cumDelta, delta]);
-@@ -2646,7 +3375,11 @@
+@@ -2646,7 +3375,11 @@ function readAttrNamed(ar, r) {
      if (key === "") break;
      entries[key] = readTyped(r.u8());
    }
@@ -1134,7 +1394,7 @@ diff --git a/dist/index.js b/dist/index.js
    return { k: "dict", name: dictname, entries };
  }
  var DYNAMIC_ATTRIBUTES_DICT_NAME = "dynamic_attributes";
-@@ -2672,10 +3405,11 @@
+@@ -2672,10 +3405,11 @@ function extractLegacyDynamicProperties(attrs) {
  function readLayer(ar, r) {
    preamble(ar, r);
    const name = r.utf16();
@@ -1150,7 +1410,7 @@ diff --git a/dist/index.js b/dist/index.js
    r.utf16();
    const flags = r.u16();
    if (flags & 255) {
-@@ -2686,11 +3420,21 @@
+@@ -2686,11 +3420,21 @@ function readLayer(ar, r) {
    const rgba = r.raw(4);
    r.utf16();
    r.raw(21);
@@ -1174,7 +1434,7 @@ diff --git a/dist/index.js b/dist/index.js
    if (!(dib && typeof dib === "object" && dib.k === "dib")) {
      throw new LegacyParseError(`texture object is not a dib ${r.ctx()}`);
    }
-@@ -2708,16 +3452,22 @@
+@@ -2708,16 +3452,22 @@ function textureBlock(ar, r) {
    const blob = r.raw(8);
    const opacity = r.f64();
    const useOp = r.u8();
@@ -1199,7 +1459,7 @@ diff --git a/dist/index.js b/dist/index.js
    };
  }
  function readMaterial(ar, r) {
-@@ -2740,10 +3490,12 @@
+@@ -2740,10 +3490,12 @@ function readMaterial(ar, r) {
      out.opacity = tex.opacity;
      out.use_opacity = tex.use_opacity;
      out.tex_dib = tex.tex_dib;
@@ -1212,21 +1472,21 @@ diff --git a/dist/index.js b/dist/index.js
    }
    return out;
  }
-@@ -2755,6 +3507,13 @@
-   }
+@@ -2756,6 +3508,13 @@ function readDib(ar, r) {
    const data = r.raw(length);
    return { k: "dib", subtype, data };
-+}
+ }
 +/** A CDib object: readDib's fields, then for a JPEG (subtype 1) its 32-bit quality, which SketchUp writes after
 + * the image data wherever the CDib appears (texture or thumbnail). SketchUp 5's inline texture image is not a CDib. */
 +function readDibObject(ar, r) {
 +  const dib = readDib(ar, r);
 +  if (dib.subtype === 1) dib.quality = r.u32();
 +  return dib;
- }
++}
  function readFtc(ar, r) {
    preamble(ar, r);
-@@ -2775,15 +3534,22 @@
+   r.u32();
+@@ -2775,15 +3534,22 @@ function readFtc(ar, r) {
      front_pins: frontPins,
      back_pins: backPins,
      front_projected: Boolean(fflags & 2),
@@ -1252,7 +1512,7 @@ diff --git a/dist/index.js b/dist/index.js
  }
  function readThumbnail(ar, r) {
    preamble(ar, r);
-@@ -2836,7 +3602,7 @@
+@@ -2836,7 +3602,7 @@ function strictNextTag(ar, data, at, allowNull = true) {
  }
  function readConstructionLine(ar, r) {
    preamble(ar, r);
@@ -1261,7 +1521,7 @@ diff --git a/dist/index.js b/dist/index.js
    const point = r.f64s(3);
    const direction = r.f64s(3);
    const [startParam, endParam] = r.f64s(2);
-@@ -2844,7 +3610,18 @@
+@@ -2844,7 +3610,18 @@ function readConstructionLine(ar, r) {
    if (k === null) {
      const dflt = ar.ver === 17 ? 7 : 4;
      const order = [dflt, ...[0, 4, 7].filter((c) => c !== dflt)];
@@ -1280,7 +1540,7 @@ diff --git a/dist/index.js b/dist/index.js
        for (const cand of order) {
          if (strictNextTag(ar, r.data, r.pos + cand, allowNull)) {
            k = cand;
-@@ -2859,7 +3636,7 @@
+@@ -2859,7 +3636,7 @@ function readConstructionLine(ar, r) {
    const huge = 1e20;
    const start = Math.abs(startParam) >= huge ? null : [point[0] + direction[0] * startParam, point[1] + direction[1] * startParam, point[2] + direction[2] * startParam];
    const end = Math.abs(endParam) >= huge ? null : [point[0] + direction[0] * endParam, point[1] + direction[1] * endParam, point[2] + direction[2] * endParam];
@@ -1289,7 +1549,7 @@ diff --git a/dist/index.js b/dist/index.js
  }
  function readConstructionPoint(ar, r) {
    preamble(ar, r);
-@@ -2887,30 +3664,36 @@
+@@ -2887,30 +3664,54 @@ function readSectionPlane(ar, r) {
    return { k: "sectionplane", plane, name, label, db };
  }
  function readSkFont(ar, r) {
@@ -1330,6 +1590,24 @@ diff --git a/dist/index.js b/dist/index.js
 +  const normal = r.f64s(3), planeX = r.f64s(3), alignment = r.u32(), offset = r.f64();
 +  r.raw(12);
 +  return { k: "dimension", db, text, points, normal, planeX, alignment, offset };
++}
++/**
++ * A radial or diameter dimension. PushForm does not import them (a standing import note says so), but the
++ * record must be walked past, and reading its arc reference keeps the archive numbering in step when the
++ * file writes that entity inline here, at its first reference.
++ */
++function readDimRadial(ar, r) {
++  preamble(ar, r);
++  const db = drawbase(ar, r);
++  const text = r.utf16();
++  ar.readObject(r, "CSkFont");
++  r.raw(5);
++  // The dimensioned entity: an edge of the arc, as a reference or written inline.
++  ar.readObject(r);
++  // Two leader parameters and a flag byte.
++  r.f64s(2);
++  r.raw(1);
++  return { k: "dimradial", db, text };
  }
  function readText(ar, r) {
    preamble(ar, r);
@@ -1340,7 +1618,7 @@ diff --git a/dist/index.js b/dist/index.js
    let p = r.pos;
    let idx;
    while (true) {
-@@ -2919,11 +3702,15 @@
+@@ -2919,11 +3720,15 @@ function readText(ar, r) {
        throw new LegacyParseError(`text delimiter not found ${r.ctx()}`);
      }
      const blk = r.data.subarray(idx - 11, idx);
@@ -1357,7 +1635,7 @@ diff --git a/dist/index.js b/dist/index.js
    r.raw(idx - r.pos);
    const text = r.utf16();
    r.raw(5);
-@@ -2939,7 +3726,98 @@
+@@ -2939,7 +3744,98 @@ function readText(ar, r) {
      r.raw(6);
      attach.push(val);
    }
@@ -1457,7 +1735,7 @@ diff --git a/dist/index.js b/dist/index.js
  }
  function readEntityList(ar, r, count, owner) {
    const ents = [];
-@@ -3029,7 +3907,9 @@
+@@ -3029,7 +3925,9 @@ function readDefinition(ar, r) {
    for (let i = 0; i < nrel; i++) {
      ar.readObject(r, "CRelationship");
    }
@@ -1468,7 +1746,7 @@ diff --git a/dist/index.js b/dist/index.js
    if (!bytesEqual(r.peek(19).subarray(16, 19), STR_MARKER)) {
      for (let skip = 1; skip <= 4; skip++) {
        const at = r.pos + skip;
-@@ -3068,6 +3948,7 @@
+@@ -3068,6 +3966,7 @@ function readDefinition(ar, r) {
      name,
      guid: toHex(guid),
      ents,
@@ -1476,7 +1754,7 @@ diff --git a/dist/index.js b/dist/index.js
      faces_camera: Boolean(behavior & 1),
      shadows_face_sun: Boolean(behavior & 2)
    };
-@@ -3082,12 +3963,33 @@
+@@ -3082,12 +3981,33 @@ function readInstance(ar, r) {
    }
    const xf = r.f64s(13);
    const name = r.utf16();
@@ -1513,7 +1791,7 @@ diff --git a/dist/index.js b/dist/index.js
    CVertex: readVertex,
    CEdge: readEdge,
    CCurve: readCurve,
-@@ -3097,7 +3999,7 @@
+@@ -3097,7 +4017,7 @@ var READERS = {
    CFace: readFace,
    CLayer: readLayer,
    CMaterial: readMaterial,
@@ -1522,7 +1800,15 @@ diff --git a/dist/index.js b/dist/index.js
    CAttributeContainer: readAttrContainer,
    CAttributeNamed: readAttrNamed,
    CCamera: readCamera,
-@@ -3281,7 +4183,9 @@
+@@ -3113,6 +4033,7 @@ var READERS = {
+   CSectionPlane: readSectionPlane,
+   CSkFont: readSkFont,
+   CDimensionLinear: readDimLinear,
++  CDimensionRadial: readDimRadial,
+   CText: readText
+ };
+ function isLegacy(data) {
+@@ -3281,7 +4202,9 @@ function walkModel(data, ver, start, matCount, base) {
      }
      break;
    }
@@ -1533,7 +1819,7 @@ diff --git a/dist/index.js b/dist/index.js
    if (dn !== "CLayer") {
      throw new LegacyParseError(`definition-list anchor is ${dn}, not a layer`);
    }
-@@ -3315,7 +4219,197 @@
+@@ -3315,7 +4238,197 @@ function walkModel(data, ver, start, matCount, base) {
      throw new LegacyParseError("implausible root entity count");
    }
    const root = readEntityList(ar, r, rootCount, "root");
@@ -1732,7 +2018,7 @@ diff --git a/dist/index.js b/dist/index.js
  }
  var LegacyBuilder = class {
    constructor() {
-@@ -3344,7 +4438,15 @@
+@@ -3344,7 +4457,15 @@ function addEdge(builder, slot, e, slots) {
      }
    }
    builder.edges.set(slot, [v1, v2]);
@@ -1748,7 +2034,7 @@ diff --git a/dist/index.js b/dist/index.js
    const flags = (db.soft ? 8 : 0) | (db.smooth ? 16 : 0) | (db.hidden ? 1 : 0);
    if (flags) {
      builder.edgeFlags.set(slot, flags);
-@@ -3378,7 +4480,8 @@
+@@ -3378,7 +4499,8 @@ function fillBuilder(builder, ents, slots) {
          uvTransformBack: null,
          uvProjected: false,
          uvProjectedBack: false,
@@ -1758,7 +2044,7 @@ diff --git a/dist/index.js b/dist/index.js
        };
        const attrs = v.attrs;
        if (attrs && typeof attrs === "object") {
-@@ -3388,6 +4491,8 @@
+@@ -3388,6 +4510,8 @@ function fillBuilder(builder, ents, slots) {
              face.uvTransformBack = [...cv.back];
              face.uvProjected = cv.front_projected;
              face.uvProjectedBack = cv.back_projected;
@@ -1767,7 +2053,7 @@ diff --git a/dist/index.js b/dist/index.js
            }
          }
        }
-@@ -3419,32 +4524,63 @@
+@@ -3419,32 +4543,63 @@ function fillBuilder(builder, ents, slots) {
          properties: {}
        });
      } else if (k === "sectionplane") {
@@ -1836,7 +2122,7 @@ diff --git a/dist/index.js b/dist/index.js
        });
      }
    }
-@@ -3477,12 +4613,19 @@
+@@ -3477,6 +4632,7 @@ function parseLegacyToRaw(data, options) {
      throw e;
    }
    const { ar, root, layers, materials } = walkResult;
@@ -1844,19 +2130,20 @@ diff --git a/dist/index.js b/dist/index.js
    const slots = ar.slots;
    emitLog(options, "debug", `Legacy walk complete: ${materials.length} materials, ${layers.length} layers`);
    const imageDefIds = /* @__PURE__ */ new Set();
-   for (const ent of slots.values()) {
-     if (ent[0] === "obj" && ent[1] === "CImage" && ent[2]) {
+@@ -3485,6 +4641,12 @@ function parseLegacyToRaw(data, options) {
        imageDefIds.add(ent[2].def);
-+    }
-+  }
+     }
+   }
 +  const groupDefIds = /* @__PURE__ */ new Set();
 +  for (const ent of slots.values()) {
 +    if (ent[0] === "obj" && ent[1] === "CGroup" && ent[2]) {
 +      groupDefIds.add(ent[2].def);
-     }
-   }
++    }
++  }
    const materialsMap = /* @__PURE__ */ new Map();
-@@ -3498,10 +4641,11 @@
+   const materialIdToName = /* @__PURE__ */ new Map();
+   for (const [s, v] of materials) {
+@@ -3498,10 +4660,11 @@ function parseLegacyToRaw(data, options) {
      const colorized = v.colorized || false;
      let texture = null;
      if ("tex_dib" in v) {
@@ -1871,7 +2158,7 @@ diff --git a/dist/index.js b/dist/index.js
        const fname = v.tex_file || `${v.name}${ext}`;
        texture = { filename: fname, width: v.tex_w, height: v.tex_h, data: texData };
      }
-@@ -3511,10 +4655,8 @@
+@@ -3511,10 +4674,8 @@ function parseLegacyToRaw(data, options) {
        transparency: trans,
        id: null,
        texture,
@@ -1883,7 +2170,7 @@ diff --git a/dist/index.js b/dist/index.js
      };
      materialsMap.set(v.name, matObj);
      materialIdToName.set(s, v.name);
-@@ -3544,10 +4686,12 @@
+@@ -3544,10 +4705,12 @@ function parseLegacyToRaw(data, options) {
          const d = ent[2];
          const b = new LegacyBuilder();
          fillBuilder(b, d.ents, slots);
@@ -1896,7 +2183,7 @@ diff --git a/dist/index.js b/dist/index.js
            alwaysFacesCamera: d.faces_camera || false,
            shadowsFaceSun: d.shadows_face_sun || false,
            builder: b
-@@ -3568,6 +4712,7 @@
+@@ -3568,6 +4731,7 @@ function parseLegacyToRaw(data, options) {
    }
    const rootBuilder = new LegacyBuilder();
    fillBuilder(rootBuilder, root, slots);
@@ -1904,7 +2191,7 @@ diff --git a/dist/index.js b/dist/index.js
    defsDict.set("ROOT", {
      guid: "ROOT",
      name: "ROOT_MODEL",
-@@ -3587,14 +4732,17 @@
+@@ -3587,14 +4751,17 @@ function parseLegacyToRaw(data, options) {
      // that's a VFF/ZIP-only construct - so there is no known source for
      // the model's unit-system string here.
      units: null,
@@ -1927,7 +2214,7 @@ diff --git a/dist/index.js b/dist/index.js
      dimensions: [],
      materialIdToName,
      materialsMap,
-@@ -3795,8 +4943,16 @@
+@@ -3795,8 +4962,16 @@ function parsePages(node) {
            fov: 35,
            parallel: false,
            orthoHeight: 0,
@@ -1945,7 +2232,7 @@ diff --git a/dist/index.js b/dist/index.js
          const head = tlvItemsInt(tlvFindInt(items, 28500));
          const name = tlvFindInt(head, 28501);
          if (name !== null && name.length > 0) {
-@@ -3823,7 +4979,9 @@
+@@ -3823,7 +4998,9 @@ function parsePages(node) {
            page.hiddenLayerIds.push(parseVarInt(hidden, off + 1, ln));
            off += 1 + ln;
          }
@@ -1956,7 +2243,7 @@ diff --git a/dist/index.js b/dist/index.js
        }
      }
    }
-@@ -13305,6 +14463,8 @@
+@@ -13305,6 +14482,8 @@ function parseToRaw(buffer, options) {
    const materialFiles = contents.materialFiles;
    emitLog(options, "debug", `Detected version ${version} (VFF/ZIP container)`);
    const units = contents.metaData ? readMetaUnits(contents.metaData) : null;
@@ -1965,7 +2252,7 @@ diff --git a/dist/index.js b/dist/index.js
    const layerColors = /* @__PURE__ */ new Map();
    const layerHidden = /* @__PURE__ */ new Map();
    const materialsMap = /* @__PURE__ */ new Map();
-@@ -13361,6 +14521,7 @@
+@@ -13361,6 +14540,7 @@ function parseToRaw(buffer, options) {
      }
    }
    const styles = [];
@@ -1973,7 +2260,7 @@ diff --git a/dist/index.js b/dist/index.js
    for (const [name, xmlBytes] of Object.entries(materialFiles)) {
      const lowerName = name.toLowerCase();
      if (lowerName.startsWith("styles/") && lowerName.endsWith("style.xml")) {
-@@ -13374,14 +14535,19 @@
+@@ -13374,14 +14554,19 @@ function parseToRaw(buffer, options) {
              frontColor: parsedStyle.frontColor,
              backColor: parsedStyle.backColor
            });
@@ -1993,7 +2280,7 @@ diff --git a/dist/index.js b/dist/index.js
    function collectMaterialIds(nodes) {
      for (const el of nodes) {
        if (el.tag === "C832") {
-@@ -13419,8 +14585,9 @@
+@@ -13419,8 +14604,9 @@ function parseToRaw(buffer, options) {
    let pageNode = null;
    for (const { index, total, node: el } of iterTopLevelLazy(modelData, 0, modelData.length)) {
      try {
@@ -2004,7 +2291,7 @@ diff --git a/dist/index.js b/dist/index.js
        collectDefs([el], defsDict, options);
        scanVertexPositions(el, vertexPositions);
        scanInstanceTransforms(el, instanceWorld);
-@@ -13466,14 +14633,21 @@
+@@ -13466,14 +14652,21 @@ function parseToRaw(buffer, options) {
      shadowsFaceSun: false,
      builder: rootBuilder
    });
@@ -2027,13 +2314,13 @@ diff --git a/dist/index.js b/dist/index.js
      materialsMap,
      materialsByFolder,
 diff --git a/dist/index.mjs b/dist/index.mjs
+index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789ec280303 100644
 --- a/dist/index.mjs
 +++ b/dist/index.mjs
-@@ -101,6 +101,268 @@
-     pos += 6 + size;
+@@ -102,6 +102,268 @@ function readMetaUnits(metaBytes) {
    }
    return null;
-+}
+ }
 +var UNITS_OPTIONS = "UnitsOptions";
 +/** The model's "UnitsOptions" dictionary (LengthUnit, LengthFormat, LengthPrecision, AreaUnit, ...) as
 + * key -> number or boolean, or null when absent. Legacy files keep it as MFC strings with typed values;
@@ -2295,10 +2582,11 @@ diff --git a/dist/index.mjs b/dist/index.mjs
 +    }
 +  }
 +  return Object.keys(out).length ? out : null;
- }
++}
  var MAX_UNCOMPRESSED_ENTRY_BYTES = 16 * 1024 * 1024 * 1024;
  var MAX_COMPRESSION_RATIO = 1e3;
-@@ -341,23 +603,32 @@
+ var RATIO_CHECK_THRESHOLD_BYTES = 1024 * 1024;
+@@ -341,23 +603,32 @@ var SkpParseError = class _SkpParseError extends Error {
  // src/edge-flags.ts
  var EdgeFlagStore = class {
    constructor() {
@@ -2336,7 +2624,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
    ensureSlot(id) {
      if (!this.initialized) {
        this.baseId = id;
-@@ -366,19 +637,24 @@
+@@ -366,19 +637,24 @@ var EdgeFlagStore = class {
        this.initialized = true;
        return 0;
      }
@@ -2363,7 +2651,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
        this.present = nextPresent;
        this.baseId = id;
        return 0;
-@@ -396,7 +672,15 @@
+@@ -396,7 +672,15 @@ var EdgeFlagStore = class {
      return slot;
    }
    set(id, flags) {
@@ -2379,7 +2667,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
      if ((this.present[slot >> 3] & 1 << (slot & 7)) === 0) {
        this.present[slot >> 3] |= 1 << (slot & 7);
        this.count++;
-@@ -407,6 +691,7 @@
+@@ -407,6 +691,7 @@ var EdgeFlagStore = class {
     * matching `Map.prototype.get`, so callers' `?? 0` fallbacks behave
     * exactly as before. */
    get(id) {
@@ -2387,11 +2675,10 @@ diff --git a/dist/index.mjs b/dist/index.mjs
      if (!this.initialized) return void 0;
      const slot = this.slotFor(id);
      if (slot < 0 || slot >= this.flags.length) return void 0;
-@@ -570,6 +855,24 @@
-     if (t === tag) return body;
+@@ -571,6 +856,24 @@ function findFlat(seq, tag) {
    }
    return null;
-+}
+ }
 +function extractUvProjections(dc05Payload) {
 +  const dd05 = findFlat(tlvFlat(dc05Payload), "DD05");
 +  const b136 = dd05 === null ? null : findFlat(tlvFlat(dd05), "B136");
@@ -2409,10 +2696,11 @@ diff --git a/dist/index.mjs b/dist/index.mjs
 +    if (flags === null || flags.length < 4 || !(flags[0] & 2) || dir === null || dir.length !== 24) return null;
 +    return [readF64(dir, 0), readF64(dir, 8), readF64(dir, 16)];
 +  });
- }
++}
  function extractUvTransforms(dc05Payload) {
    const dd05 = findFlat(tlvFlat(dc05Payload), "DD05");
-@@ -601,6 +904,104 @@
+   if (dd05 === null) return [null, null];
+@@ -601,6 +904,104 @@ function extractUvTransforms(dc05Payload) {
    }
    return [result[0], result[1]];
  }
@@ -2517,7 +2805,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
  function extractGeometryFromNodes(elements, builder, options) {
    for (const el of elements) {
      const tag = el.tag;
-@@ -621,13 +1022,50 @@
+@@ -621,14 +1022,51 @@ function extractGeometryFromNodes(elements, builder, options) {
          const v1 = v1Node ? parseVarInt(v1Node.payload, 0, v1Node.payload.length) : null;
          const v2 = v2Node ? parseVarInt(v2Node.payload, 0, v2Node.payload.length) : null;
          builder.edges.set(eId, [v1, v2]);
@@ -2537,7 +2825,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
 +            (builder.edgeLayers ??= /* @__PURE__ */ new Map()).set(eId, p.length === 1 ? p[0] : parseVarInt(p, 0, p.length));
 +          }
          }
-+      }
+       }
 +    } else if (tag === "9613" || tag === "9713") {
 +      // 9713 and its records arrive as parsed containers, 9613 as one payload; read both as child lists.
 +      const items = (node) => node.children.length > 0 ? node.children : tlvFlat(node.payload).map(([t, p]) => ({ tag: t, payload: p, children: [] }));
@@ -2565,10 +2853,11 @@ diff --git a/dist/index.mjs b/dist/index.mjs
 +      for (const record of records) {
 +        const text = readVffText(record);
 +        if (text !== null) builder.texts.push(text);
-       }
++      }
      } else if (tag === "AC0D") {
        const fId = extractEntityId(el);
-@@ -678,7 +1116,9 @@
+       if (fId !== null) {
+@@ -678,7 +1116,9 @@ function extractGeometryFromNodes(elements, builder, options) {
          let faceMatId = null;
          let uvFront = null;
          let uvBack = null;
@@ -2578,7 +2867,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
          const d007 = el.children.find((c) => c.tag === "D007");
          if (d007) {
            const d107 = d007.children.find((c) => c.tag === "D107");
-@@ -688,10 +1128,16 @@
+@@ -688,11 +1128,17 @@ function extractGeometryFromNodes(elements, builder, options) {
            const dc05 = d007.children.find((c) => c.tag === "DC05");
            if (dc05) {
              [uvFront, uvBack] = extractUvTransforms(dc05.payload);
@@ -2587,15 +2876,16 @@ diff --git a/dist/index.mjs b/dist/index.mjs
            const d307 = d007.children.find((c) => c.tag === "D307");
            if (d307 && d307.payload.length > 0) {
              faceHidden = (d307.payload[0] & 1) !== 0;
-+          }
+           }
 +          const d207 = d007.children.find((c) => c.tag === "D207");
 +          if (d207 && d207.payload.length > 0) {
 +            const p = d207.payload;
 +            faceLayerId = p.length === 1 ? p[0] : parseVarInt(p, 0, p.length);
-           }
++          }
          }
          let backMatId = null;
-@@ -706,9 +1152,16 @@
+         const af0d = el.children.find((c) => c.tag === "AF0D");
+@@ -706,9 +1152,16 @@ function extractGeometryFromNodes(elements, builder, options) {
            backMaterialId: backMatId,
            uvTransform: uvFront,
            uvTransformBack: uvBack,
@@ -2613,7 +2903,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
      } else if (tag === "6419") {
        const nodesToSearch = el.children.length > 0 ? el.children : [el];
        let guid = null;
-@@ -779,7 +1232,167 @@
+@@ -779,7 +1232,167 @@ function extractGeometryFromNodes(elements, builder, options) {
      }
    }
  }
@@ -2782,7 +3072,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
    for (const el of nodes) {
      if (el.tag === "993A") {
        for (const child of el.children) {
-@@ -798,23 +1411,56 @@
+@@ -798,23 +1411,56 @@ function collectLayers(nodes, layerIdToName = /* @__PURE__ */ new Map(), options
              let lName = "";
              try {
                const decoder = new TextDecoder("utf-8");
@@ -2846,7 +3136,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
      }
    }
    return layerIdToName;
-@@ -825,6 +1471,7 @@
+@@ -825,6 +1471,7 @@ function collectDefs(nodes, defsDict = /* @__PURE__ */ new Map(), options) {
        let guid = null;
        let name = null;
        let isImage = false;
@@ -2854,7 +3144,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
        let facesCamera = false;
        let shadowsFaceSun = false;
        for (const child of el.children) {
-@@ -845,6 +1492,7 @@
+@@ -845,6 +1492,7 @@ function collectDefs(nodes, defsDict = /* @__PURE__ */ new Map(), options) {
            }
          } else if (child.tag === "8315" && child.payload.length > 0) {
            isImage = parseVarInt(child.payload, 0, child.payload.length) === 2;
@@ -2862,7 +3152,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
          } else if (child.tag === "581B") {
            let pos = 0;
            const pl = child.payload;
-@@ -868,6 +1516,7 @@
+@@ -868,6 +1516,7 @@ function collectDefs(nodes, defsDict = /* @__PURE__ */ new Map(), options) {
            guid: guid || "",
            name: name || "",
            isImage,
@@ -2870,7 +3160,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
            alwaysFacesCamera: facesCamera,
            shadowsFaceSun,
            builder
-@@ -1155,23 +1804,27 @@
+@@ -1155,23 +1804,27 @@ function parseStyleXml(xmlText) {
    const nameMatch = attrsString.match(/\bname\s*=\s*(?:"([^"]*)"|'([^']*)')/);
    const name = nameMatch ? nameMatch[1] !== void 0 ? nameMatch[1] : nameMatch[2] : "";
    const colors = {};
@@ -2900,7 +3190,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
    };
  }
  function lstripChars(s, chars) {
-@@ -1586,11 +2239,16 @@
+@@ -1586,11 +2239,16 @@ function buildModelFromParsed(parsed) {
    const {
      version,
      units,
@@ -2917,7 +3207,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
      materialIdToName,
      materialsMap,
      materialsByFolder,
-@@ -1606,7 +2264,16 @@
+@@ -1606,7 +2264,16 @@ function buildModelFromParsed(parsed) {
      }
      materialsById.set(mId, mat);
    }
@@ -2935,7 +3225,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
      name,
      color: { r: c[0], g: c[1], b: c[2] },
      hidden: layerHidden.get(name) ?? false
-@@ -1614,13 +2281,16 @@
+@@ -1614,13 +2281,16 @@ function buildModelFromParsed(parsed) {
    const finalMaterialsList = Array.from(materialsMap.values());
    const finalPagesList = pages.map((pg) => ({
      name: pg.name,
@@ -2953,7 +3243,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
    }));
    const finalDimensionsList = dimensions.map((dm) => ({
      a: dm.a,
-@@ -1634,7 +2304,7 @@
+@@ -1634,7 +2304,7 @@ function buildModelFromParsed(parsed) {
    const finalDefinitions = /* @__PURE__ */ new Map();
    let rootDefinition = null;
    for (const [id, d] of defsDict.entries()) {
@@ -2962,7 +3252,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
      if (typeof id === "number") {
        finalDefinitions.set(id, defn);
      } else {
-@@ -1651,15 +2321,21 @@
+@@ -1651,15 +2321,21 @@ function buildModelFromParsed(parsed) {
      // matching the .NET and Dart ports' `Root`/`root` field.
      root: rootDefinition ?? { id: 0, guid: "ROOT", name: "ROOT_MODEL", vertices: [], edges: [], faces: [], instances: [], sectionPlanes: [], texts: [], dimensions: [], constructionLines: [], constructionPoints: [], isImage: false, alwaysFacesCamera: false, shadowsFaceSun: false },
      layers: finalLayersList,
@@ -2986,7 +3276,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
    const vertices = Array.from(d.builder.vertices.entries()).map(([vId, [x, y, z]]) => ({
      id: vId,
      x,
-@@ -1674,7 +2350,9 @@
+@@ -1674,7 +2350,9 @@ function buildDefinition(id, d, layerIdToName) {
        v2Id: v2 ?? 0,
        soft: (flags & 8) !== 0,
        smooth: (flags & 16) !== 0,
@@ -2997,7 +3287,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
      };
    });
    const faces = Array.from(d.builder.faces.entries()).map(([fId, fData]) => ({
-@@ -1687,7 +2365,10 @@
+@@ -1687,7 +2365,10 @@ function buildDefinition(id, d, layerIdToName) {
      uvTransformBack: fData.uvTransformBack ?? null,
      uvProjected: fData.uvProjected ?? false,
      uvProjectedBack: fData.uvProjectedBack ?? false,
@@ -3009,7 +3299,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
    }));
    const instances = d.builder.instances.map((inst) => ({
      name: inst.name,
-@@ -1703,29 +2384,47 @@
+@@ -1703,29 +2384,47 @@ function buildDefinition(id, d, layerIdToName) {
      plane: sp.plane || [0, 0, 1, 0],
      name: sp.name || "",
      label: sp.label || "",
@@ -3066,7 +3356,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
    }));
    return {
      id,
-@@ -1741,6 +2440,8 @@
+@@ -1741,6 +2440,8 @@ function buildDefinition(id, d, layerIdToName) {
      constructionLines,
      constructionPoints,
      isImage: d.isImage,
@@ -3075,7 +3365,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
      alwaysFacesCamera: d.alwaysFacesCamera,
      shadowsFaceSun: d.shadowsFaceSun || false
    };
-@@ -2187,6 +2888,27 @@
+@@ -2187,6 +2888,27 @@ function isClassRef(data, p, slot) {
    }
    return p + 6 <= data.length && view.getUint16(p, true) === 32767 && view.getUint32(p + 2, true) === (2147483648 | slot) >>> 0;
  }
@@ -3103,7 +3393,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
  var R = class {
    constructor(data, pos = 0) {
      this.data = data;
-@@ -2286,6 +3008,7 @@
+@@ -2286,6 +3008,7 @@ var Archive = class {
      this.ver = ver;
      this.hasPid = ver >= 17;
      this.r = new R(data);
@@ -3111,7 +3401,16 @@ diff --git a/dist/index.mjs b/dist/index.mjs
    }
    alloc(entry) {
      const s = this.nextSlot;
-@@ -2413,15 +3136,15 @@
+@@ -2355,7 +3078,7 @@ var Archive = class {
+       this.currentClass = prevClass;
+     }
+     this.slots.set(slot, ["obj", name, value]);
+-    if (name === "CDimensionLinear" || name === "CText") {
++    if (name === "CDimensionLinear" || name === "CDimensionRadial" || name === "CText") {
+       this.annotWatermark = this.nextSlot;
+     }
+     return [slot, name, value];
+@@ -2413,15 +3136,15 @@ function drawbase(ar, r) {
    const tag = r.peekU16();
    let layer;
    if (layCls !== void 0 && tag === (32768 | layCls)) {
@@ -3130,7 +3429,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
    } else {
      layer = r.u16();
    }
-@@ -2456,9 +3179,15 @@
+@@ -2456,9 +3179,15 @@ function readCurve(ar, r) {
  }
  function readArcCurve(ar, r) {
    preamble(ar, r);
@@ -3149,7 +3448,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
  }
  function registerBurn(ar, delta) {
    ar.burns.push([ar.annotWatermark + ar.cumDelta, delta]);
-@@ -2576,7 +3305,11 @@
+@@ -2576,7 +3305,11 @@ function readAttrNamed(ar, r) {
      if (key === "") break;
      entries[key] = readTyped(r.u8());
    }
@@ -3162,7 +3461,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
    return { k: "dict", name: dictname, entries };
  }
  var DYNAMIC_ATTRIBUTES_DICT_NAME = "dynamic_attributes";
-@@ -2602,10 +3335,11 @@
+@@ -2602,10 +3335,11 @@ function extractLegacyDynamicProperties(attrs) {
  function readLayer(ar, r) {
    preamble(ar, r);
    const name = r.utf16();
@@ -3178,7 +3477,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
    r.utf16();
    const flags = r.u16();
    if (flags & 255) {
-@@ -2616,11 +3350,21 @@
+@@ -2616,11 +3350,21 @@ function readLayer(ar, r) {
    const rgba = r.raw(4);
    r.utf16();
    r.raw(21);
@@ -3202,7 +3501,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
    if (!(dib && typeof dib === "object" && dib.k === "dib")) {
      throw new LegacyParseError(`texture object is not a dib ${r.ctx()}`);
    }
-@@ -2638,16 +3382,22 @@
+@@ -2638,16 +3382,22 @@ function textureBlock(ar, r) {
    const blob = r.raw(8);
    const opacity = r.f64();
    const useOp = r.u8();
@@ -3227,7 +3526,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
    };
  }
  function readMaterial(ar, r) {
-@@ -2670,10 +3420,12 @@
+@@ -2670,10 +3420,12 @@ function readMaterial(ar, r) {
      out.opacity = tex.opacity;
      out.use_opacity = tex.use_opacity;
      out.tex_dib = tex.tex_dib;
@@ -3240,21 +3539,21 @@ diff --git a/dist/index.mjs b/dist/index.mjs
    }
    return out;
  }
-@@ -2685,6 +3437,13 @@
-   }
+@@ -2686,6 +3438,13 @@ function readDib(ar, r) {
    const data = r.raw(length);
    return { k: "dib", subtype, data };
-+}
+ }
 +/** A CDib object: readDib's fields, then for a JPEG (subtype 1) its 32-bit quality, which SketchUp writes after
 + * the image data wherever the CDib appears (texture or thumbnail). SketchUp 5's inline texture image is not a CDib. */
 +function readDibObject(ar, r) {
 +  const dib = readDib(ar, r);
 +  if (dib.subtype === 1) dib.quality = r.u32();
 +  return dib;
- }
++}
  function readFtc(ar, r) {
    preamble(ar, r);
-@@ -2705,15 +3464,22 @@
+   r.u32();
+@@ -2705,15 +3464,22 @@ function readFtc(ar, r) {
      front_pins: frontPins,
      back_pins: backPins,
      front_projected: Boolean(fflags & 2),
@@ -3280,7 +3579,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
  }
  function readThumbnail(ar, r) {
    preamble(ar, r);
-@@ -2766,7 +3532,7 @@
+@@ -2766,7 +3532,7 @@ function strictNextTag(ar, data, at, allowNull = true) {
  }
  function readConstructionLine(ar, r) {
    preamble(ar, r);
@@ -3289,7 +3588,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
    const point = r.f64s(3);
    const direction = r.f64s(3);
    const [startParam, endParam] = r.f64s(2);
-@@ -2774,7 +3540,18 @@
+@@ -2774,7 +3540,18 @@ function readConstructionLine(ar, r) {
    if (k === null) {
      const dflt = ar.ver === 17 ? 7 : 4;
      const order = [dflt, ...[0, 4, 7].filter((c) => c !== dflt)];
@@ -3308,7 +3607,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
        for (const cand of order) {
          if (strictNextTag(ar, r.data, r.pos + cand, allowNull)) {
            k = cand;
-@@ -2789,7 +3566,7 @@
+@@ -2789,7 +3566,7 @@ function readConstructionLine(ar, r) {
    const huge = 1e20;
    const start = Math.abs(startParam) >= huge ? null : [point[0] + direction[0] * startParam, point[1] + direction[1] * startParam, point[2] + direction[2] * startParam];
    const end = Math.abs(endParam) >= huge ? null : [point[0] + direction[0] * endParam, point[1] + direction[1] * endParam, point[2] + direction[2] * endParam];
@@ -3317,7 +3616,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
  }
  function readConstructionPoint(ar, r) {
    preamble(ar, r);
-@@ -2817,30 +3594,36 @@
+@@ -2817,30 +3594,54 @@ function readSectionPlane(ar, r) {
    return { k: "sectionplane", plane, name, label, db };
  }
  function readSkFont(ar, r) {
@@ -3358,6 +3657,24 @@ diff --git a/dist/index.mjs b/dist/index.mjs
 +  const normal = r.f64s(3), planeX = r.f64s(3), alignment = r.u32(), offset = r.f64();
 +  r.raw(12);
 +  return { k: "dimension", db, text, points, normal, planeX, alignment, offset };
++}
++/**
++ * A radial or diameter dimension. PushForm does not import them (a standing import note says so), but the
++ * record must be walked past, and reading its arc reference keeps the archive numbering in step when the
++ * file writes that entity inline here, at its first reference.
++ */
++function readDimRadial(ar, r) {
++  preamble(ar, r);
++  const db = drawbase(ar, r);
++  const text = r.utf16();
++  ar.readObject(r, "CSkFont");
++  r.raw(5);
++  // The dimensioned entity: an edge of the arc, as a reference or written inline.
++  ar.readObject(r);
++  // Two leader parameters and a flag byte.
++  r.f64s(2);
++  r.raw(1);
++  return { k: "dimradial", db, text };
  }
  function readText(ar, r) {
    preamble(ar, r);
@@ -3368,7 +3685,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
    let p = r.pos;
    let idx;
    while (true) {
-@@ -2849,11 +3632,15 @@
+@@ -2849,11 +3650,15 @@ function readText(ar, r) {
        throw new LegacyParseError(`text delimiter not found ${r.ctx()}`);
      }
      const blk = r.data.subarray(idx - 11, idx);
@@ -3385,7 +3702,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
    r.raw(idx - r.pos);
    const text = r.utf16();
    r.raw(5);
-@@ -2869,7 +3656,98 @@
+@@ -2869,7 +3674,98 @@ function readText(ar, r) {
      r.raw(6);
      attach.push(val);
    }
@@ -3485,7 +3802,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
  }
  function readEntityList(ar, r, count, owner) {
    const ents = [];
-@@ -2959,7 +3837,9 @@
+@@ -2959,7 +3855,9 @@ function readDefinition(ar, r) {
    for (let i = 0; i < nrel; i++) {
      ar.readObject(r, "CRelationship");
    }
@@ -3496,7 +3813,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
    if (!bytesEqual(r.peek(19).subarray(16, 19), STR_MARKER)) {
      for (let skip = 1; skip <= 4; skip++) {
        const at = r.pos + skip;
-@@ -2998,6 +3878,7 @@
+@@ -2998,6 +3896,7 @@ function readDefinition(ar, r) {
      name,
      guid: toHex(guid),
      ents,
@@ -3504,7 +3821,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
      faces_camera: Boolean(behavior & 1),
      shadows_face_sun: Boolean(behavior & 2)
    };
-@@ -3012,12 +3893,33 @@
+@@ -3012,12 +3911,33 @@ function readInstance(ar, r) {
    }
    const xf = r.f64s(13);
    const name = r.utf16();
@@ -3541,7 +3858,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
    CVertex: readVertex,
    CEdge: readEdge,
    CCurve: readCurve,
-@@ -3027,7 +3929,7 @@
+@@ -3027,7 +3947,7 @@ var READERS = {
    CFace: readFace,
    CLayer: readLayer,
    CMaterial: readMaterial,
@@ -3550,7 +3867,15 @@ diff --git a/dist/index.mjs b/dist/index.mjs
    CAttributeContainer: readAttrContainer,
    CAttributeNamed: readAttrNamed,
    CCamera: readCamera,
-@@ -3211,7 +4113,9 @@
+@@ -3043,6 +3963,7 @@ var READERS = {
+   CSectionPlane: readSectionPlane,
+   CSkFont: readSkFont,
+   CDimensionLinear: readDimLinear,
++  CDimensionRadial: readDimRadial,
+   CText: readText
+ };
+ function isLegacy(data) {
+@@ -3211,7 +4132,9 @@ function walkModel(data, ver, start, matCount, base) {
      }
      break;
    }
@@ -3561,7 +3886,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
    if (dn !== "CLayer") {
      throw new LegacyParseError(`definition-list anchor is ${dn}, not a layer`);
    }
-@@ -3245,7 +4149,197 @@
+@@ -3245,7 +4168,197 @@ function walkModel(data, ver, start, matCount, base) {
      throw new LegacyParseError("implausible root entity count");
    }
    const root = readEntityList(ar, r, rootCount, "root");
@@ -3760,7 +4085,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
  }
  var LegacyBuilder = class {
    constructor() {
-@@ -3274,7 +4368,15 @@
+@@ -3274,7 +4387,15 @@ function addEdge(builder, slot, e, slots) {
      }
    }
    builder.edges.set(slot, [v1, v2]);
@@ -3776,7 +4101,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
    const flags = (db.soft ? 8 : 0) | (db.smooth ? 16 : 0) | (db.hidden ? 1 : 0);
    if (flags) {
      builder.edgeFlags.set(slot, flags);
-@@ -3308,7 +4410,8 @@
+@@ -3308,7 +4429,8 @@ function fillBuilder(builder, ents, slots) {
          uvTransformBack: null,
          uvProjected: false,
          uvProjectedBack: false,
@@ -3786,7 +4111,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
        };
        const attrs = v.attrs;
        if (attrs && typeof attrs === "object") {
-@@ -3318,6 +4421,8 @@
+@@ -3318,6 +4440,8 @@ function fillBuilder(builder, ents, slots) {
              face.uvTransformBack = [...cv.back];
              face.uvProjected = cv.front_projected;
              face.uvProjectedBack = cv.back_projected;
@@ -3795,7 +4120,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
            }
          }
        }
-@@ -3349,32 +4454,63 @@
+@@ -3349,32 +4473,63 @@ function fillBuilder(builder, ents, slots) {
          properties: {}
        });
      } else if (k === "sectionplane") {
@@ -3864,7 +4189,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
        });
      }
    }
-@@ -3407,12 +4543,19 @@
+@@ -3407,6 +4562,7 @@ function parseLegacyToRaw(data, options) {
      throw e;
    }
    const { ar, root, layers, materials } = walkResult;
@@ -3872,19 +4197,20 @@ diff --git a/dist/index.mjs b/dist/index.mjs
    const slots = ar.slots;
    emitLog(options, "debug", `Legacy walk complete: ${materials.length} materials, ${layers.length} layers`);
    const imageDefIds = /* @__PURE__ */ new Set();
-   for (const ent of slots.values()) {
-     if (ent[0] === "obj" && ent[1] === "CImage" && ent[2]) {
+@@ -3415,6 +4571,12 @@ function parseLegacyToRaw(data, options) {
        imageDefIds.add(ent[2].def);
-+    }
-+  }
+     }
+   }
 +  const groupDefIds = /* @__PURE__ */ new Set();
 +  for (const ent of slots.values()) {
 +    if (ent[0] === "obj" && ent[1] === "CGroup" && ent[2]) {
 +      groupDefIds.add(ent[2].def);
-     }
-   }
++    }
++  }
    const materialsMap = /* @__PURE__ */ new Map();
-@@ -3428,10 +4571,11 @@
+   const materialIdToName = /* @__PURE__ */ new Map();
+   for (const [s, v] of materials) {
+@@ -3428,10 +4590,11 @@ function parseLegacyToRaw(data, options) {
      const colorized = v.colorized || false;
      let texture = null;
      if ("tex_dib" in v) {
@@ -3899,7 +4225,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
        const fname = v.tex_file || `${v.name}${ext}`;
        texture = { filename: fname, width: v.tex_w, height: v.tex_h, data: texData };
      }
-@@ -3441,10 +4585,8 @@
+@@ -3441,10 +4604,8 @@ function parseLegacyToRaw(data, options) {
        transparency: trans,
        id: null,
        texture,
@@ -3911,7 +4237,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
      };
      materialsMap.set(v.name, matObj);
      materialIdToName.set(s, v.name);
-@@ -3474,10 +4616,12 @@
+@@ -3474,10 +4635,12 @@ function parseLegacyToRaw(data, options) {
          const d = ent[2];
          const b = new LegacyBuilder();
          fillBuilder(b, d.ents, slots);
@@ -3924,7 +4250,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
            alwaysFacesCamera: d.faces_camera || false,
            shadowsFaceSun: d.shadows_face_sun || false,
            builder: b
-@@ -3498,6 +4642,7 @@
+@@ -3498,6 +4661,7 @@ function parseLegacyToRaw(data, options) {
    }
    const rootBuilder = new LegacyBuilder();
    fillBuilder(rootBuilder, root, slots);
@@ -3932,7 +4258,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
    defsDict.set("ROOT", {
      guid: "ROOT",
      name: "ROOT_MODEL",
-@@ -3517,14 +4662,17 @@
+@@ -3517,14 +4681,17 @@ function parseLegacyToRaw(data, options) {
      // that's a VFF/ZIP-only construct - so there is no known source for
      // the model's unit-system string here.
      units: null,
@@ -3955,7 +4281,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
      dimensions: [],
      materialIdToName,
      materialsMap,
-@@ -3725,8 +4873,16 @@
+@@ -3725,8 +4892,16 @@ function parsePages(node) {
            fov: 35,
            parallel: false,
            orthoHeight: 0,
@@ -3973,7 +4299,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
          const head = tlvItemsInt(tlvFindInt(items, 28500));
          const name = tlvFindInt(head, 28501);
          if (name !== null && name.length > 0) {
-@@ -3753,7 +4909,9 @@
+@@ -3753,7 +4928,9 @@ function parsePages(node) {
            page.hiddenLayerIds.push(parseVarInt(hidden, off + 1, ln));
            off += 1 + ln;
          }
@@ -3984,7 +4310,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
        }
      }
    }
-@@ -13235,6 +14393,8 @@
+@@ -13235,6 +14412,8 @@ function parseToRaw(buffer, options) {
    const materialFiles = contents.materialFiles;
    emitLog(options, "debug", `Detected version ${version} (VFF/ZIP container)`);
    const units = contents.metaData ? readMetaUnits(contents.metaData) : null;
@@ -3993,7 +4319,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
    const layerColors = /* @__PURE__ */ new Map();
    const layerHidden = /* @__PURE__ */ new Map();
    const materialsMap = /* @__PURE__ */ new Map();
-@@ -13291,6 +14451,7 @@
+@@ -13291,6 +14470,7 @@ function parseToRaw(buffer, options) {
      }
    }
    const styles = [];
@@ -4001,7 +4327,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
    for (const [name, xmlBytes] of Object.entries(materialFiles)) {
      const lowerName = name.toLowerCase();
      if (lowerName.startsWith("styles/") && lowerName.endsWith("style.xml")) {
-@@ -13304,14 +14465,19 @@
+@@ -13304,14 +14484,19 @@ function parseToRaw(buffer, options) {
              frontColor: parsedStyle.frontColor,
              backColor: parsedStyle.backColor
            });
@@ -4021,7 +4347,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
    function collectMaterialIds(nodes) {
      for (const el of nodes) {
        if (el.tag === "C832") {
-@@ -13349,8 +14515,9 @@
+@@ -13349,8 +14534,9 @@ function parseToRaw(buffer, options) {
    let pageNode = null;
    for (const { index, total, node: el } of iterTopLevelLazy(modelData, 0, modelData.length)) {
      try {
@@ -4032,7 +4358,7 @@ diff --git a/dist/index.mjs b/dist/index.mjs
        collectDefs([el], defsDict, options);
        scanVertexPositions(el, vertexPositions);
        scanInstanceTransforms(el, instanceWorld);
-@@ -13396,14 +14563,21 @@
+@@ -13396,14 +14582,21 @@ function parseToRaw(buffer, options) {
      shadowsFaceSun: false,
      builder: rootBuilder
    });
@@ -4054,249 +4380,3 @@ diff --git a/dist/index.mjs b/dist/index.mjs
      materialIdToName,
      materialsMap,
      materialsByFolder,
-diff --git a/dist/index.d.ts b/dist/index.d.ts
---- a/dist/index.d.ts
-+++ b/dist/index.d.ts
-@@ -265,12 +265,14 @@
-      * at the top level. Corresponds to .NET/Dart's `Root`/`root`. */
-     root: Definition;
-     layers: Layer[];
--    /** The file's saved scenes (VFF files; classic pre-2021 files import
--     * with none). */
-+    /** The file's saved scenes. */
-     pages: Page[];
-+    /** Saved scenes of a pre-2021 file that the reader found but could not
-+     * read (it stops at the first); 0 for 2021+ files. */
-+    scenesUnread: number;
-     /** Model-level linear dimensions with world-space endpoints (VFF
--     * files). Legacy files surface text-only dimensions per definition
--     * instead (`Definition.dimensions`). */
-+     * files). Legacy files keep their dimensions per definition instead
-+     * (`Definition.dimensions`). */
-     dimensions: Dimension[];
-     materials: Material[];
-     materialsById: Map<number, Material>;
-@@ -280,6 +282,16 @@
-      * files, which carry no equivalent container, or when the tag isn't
-      * found. */
-     units: string | null;
-+    /** The model's display-unit options ("UnitsOptions": LengthUnit, LengthFormat, LengthPrecision,
-+     * AreaUnit, VolumeUnit, ...) as SketchUp stores them, from legacy and VFF files; null when absent. */
-+    unitsOptions: Record<string, number | boolean> | null;
-+    /** PushForm patch: the model's Display Section Planes and Display Section Cuts rendering options; null when the
-+     * file does not record them. */
-+    sectionDisplay: { planes: boolean; cuts: boolean } | null;
-+    /** PushForm patch: the model's current rendering options, as SketchUp shows the model (RenderMode, EdgeDisplayMode,
-+     * BackgroundColor, ...), keyed by the names of Sketchup::RenderingOptions, as numbers, booleans or [r, g, b, a]
-+     * colors in 0..255; null when the file records none. */
-+    renderingOptions: Record<string, number | boolean | [number, number, number, number]> | null;
- }
- interface SectionPlane {
-     plane: [number, number, number, number];
-@@ -290,21 +302,47 @@
- interface TextEntity {
-     text: string;
-     hidden: boolean;
-+    /** Anchor point [x, y, z] in inches, in the coordinates of the
-+     * definition holding the text; null for screen text and for anchors the
-+     * reader does not resolve. */
-+    point: [number, number, number] | null;
-+    /** Leader vector from the anchor to the label, in inches, or null. */
-+    vector: [number, number, number] | null;
-+    /** Screen text's position as fractions of the view width and height, or
-+     * null. */
-+    screen: [number, number] | null;
-+    /** SketchUp leader type: 0 none (screen text), 1 view based, 2 pushpin;
-+     * null when not recovered. */
-+    leaderType: number | null;
-+    /** Whether the leader line is drawn. */
-+    displayLeader: boolean;
-+    /** How the anchor attaches (1 free point, 2 vertex, 4 edge midpoint,
-+     * 5 on an edge, 7 on a face, 9 edge intersection), or null. */
-+    anchorType: number | null;
-+    /** Font: face name, point size, bold, italic, and whether it is sized in model units with that height in
-+     * inches; null when not recovered. */
-+    font: { name: string; size: number; bold: boolean; italic: boolean; worldSize: boolean; height: number } | null;
-+    /** The text's material (its color), or null for the default. */
-+    materialId: number | null;
-+    /** Leader arrow: 0 none, 1 slash, 2 dot, 3 closed arrow, 4 open arrow; null when not recovered. */
-+    arrowType: number | null;
-+    /** Tag (layer) name, or "" when unknown. */
-+    layer: string;
- }
- /**
-  * A linear dimension (SketchUp's Dimension tool).
-  *
-- * The legacy (pre-2021) reader recovers only `text`/`hidden`. The VFF
-- * reader (2021+) recovers the full geometry - see `SkpModel.dimensions`
-- * for the model-level, world-space list.
-+ * Both readers recover the full geometry, per definition, in that
-+ * definition's coordinates; see `SkpModel.dimensions` for the VFF
-+ * model-level, world-space list.
-  */
- interface Dimension {
-     /** The displayed text. Empty when the dimension shows its auto-computed
-      * measured value (the caller formats `|b - a|`). */
-     text: string;
-     hidden: boolean;
--    /** First measured point [x, y, z] in inches (world space), or null when
--     * only the text was recovered. */
-+    /** First measured point [x, y, z] in inches, or null when the reader
-+     * cannot locate it. */
-     a: [number, number, number] | null;
-     /** Second measured point. */
-     b: [number, number, number] | null;
-@@ -353,6 +391,9 @@
- interface Page {
-     /** Scene name as shown on its tab. */
-     name: string;
-+    /** PushForm patch: the style the scene saved, as rendering options keyed like `SkpModel.renderingOptions`; null when the
-+     * scene saved none. Whether the scene uses it is bit 2 of `flags`. */
-+    renderingOptions: Record<string, number | boolean | [number, number, number, number]> | null;
-     /** Camera position [x, y, z] in inches, or null. */
-     eye: [number, number, number] | null;
-     /** Point the camera looks at, in inches. */
-@@ -368,6 +409,10 @@
-     orthoHeight: number;
-     /** Names of the layers this scene hides. */
-     hiddenLayers: string[];
-+    /** Which properties the scene saves (SketchUp's use flags: 1 camera,
-+     * 2 style, 4 shadows, 8 axes, 16 hidden geometry, 32 tag visibility,
-+     * 64 section planes), when the file stores them; else null. */
-+    flags: number | null;
- }
- interface Definition {
-     id: number;
-@@ -699,6 +744,9 @@
-     /** The model's unit-system string (e.g. "Millimeter"), read from
-      * meta/meta.dat. null for legacy files or when the tag isn't found. */
-     units: string | null;
-+    unitsOptions: Record<string, number | boolean> | null;
-+    sectionDisplay: { planes: boolean; cuts: boolean } | null;
-+    renderingOptions: Record<string, number | boolean | [number, number, number, number]> | null;
-     layerColors: Map<string, [number, number, number]>;
-     layerHidden: Map<string, boolean>;
-     layerIdToName: Map<number, string>;
-diff --git a/dist/index.d.mts b/dist/index.d.mts
---- a/dist/index.d.mts
-+++ b/dist/index.d.mts
-@@ -265,12 +265,14 @@
-      * at the top level. Corresponds to .NET/Dart's `Root`/`root`. */
-     root: Definition;
-     layers: Layer[];
--    /** The file's saved scenes (VFF files; classic pre-2021 files import
--     * with none). */
-+    /** The file's saved scenes. */
-     pages: Page[];
-+    /** Saved scenes of a pre-2021 file that the reader found but could not
-+     * read (it stops at the first); 0 for 2021+ files. */
-+    scenesUnread: number;
-     /** Model-level linear dimensions with world-space endpoints (VFF
--     * files). Legacy files surface text-only dimensions per definition
--     * instead (`Definition.dimensions`). */
-+     * files). Legacy files keep their dimensions per definition instead
-+     * (`Definition.dimensions`). */
-     dimensions: Dimension[];
-     materials: Material[];
-     materialsById: Map<number, Material>;
-@@ -280,6 +282,16 @@
-      * files, which carry no equivalent container, or when the tag isn't
-      * found. */
-     units: string | null;
-+    /** The model's display-unit options ("UnitsOptions": LengthUnit, LengthFormat, LengthPrecision,
-+     * AreaUnit, VolumeUnit, ...) as SketchUp stores them, from legacy and VFF files; null when absent. */
-+    unitsOptions: Record<string, number | boolean> | null;
-+    /** PushForm patch: the model's Display Section Planes and Display Section Cuts rendering options; null when the
-+     * file does not record them. */
-+    sectionDisplay: { planes: boolean; cuts: boolean } | null;
-+    /** PushForm patch: the model's current rendering options, as SketchUp shows the model (RenderMode, EdgeDisplayMode,
-+     * BackgroundColor, ...), keyed by the names of Sketchup::RenderingOptions, as numbers, booleans or [r, g, b, a]
-+     * colors in 0..255; null when the file records none. */
-+    renderingOptions: Record<string, number | boolean | [number, number, number, number]> | null;
- }
- interface SectionPlane {
-     plane: [number, number, number, number];
-@@ -290,21 +302,47 @@
- interface TextEntity {
-     text: string;
-     hidden: boolean;
-+    /** Anchor point [x, y, z] in inches, in the coordinates of the
-+     * definition holding the text; null for screen text and for anchors the
-+     * reader does not resolve. */
-+    point: [number, number, number] | null;
-+    /** Leader vector from the anchor to the label, in inches, or null. */
-+    vector: [number, number, number] | null;
-+    /** Screen text's position as fractions of the view width and height, or
-+     * null. */
-+    screen: [number, number] | null;
-+    /** SketchUp leader type: 0 none (screen text), 1 view based, 2 pushpin;
-+     * null when not recovered. */
-+    leaderType: number | null;
-+    /** Whether the leader line is drawn. */
-+    displayLeader: boolean;
-+    /** How the anchor attaches (1 free point, 2 vertex, 4 edge midpoint,
-+     * 5 on an edge, 7 on a face, 9 edge intersection), or null. */
-+    anchorType: number | null;
-+    /** Font: face name, point size, bold, italic, and whether it is sized in model units with that height in
-+     * inches; null when not recovered. */
-+    font: { name: string; size: number; bold: boolean; italic: boolean; worldSize: boolean; height: number } | null;
-+    /** The text's material (its color), or null for the default. */
-+    materialId: number | null;
-+    /** Leader arrow: 0 none, 1 slash, 2 dot, 3 closed arrow, 4 open arrow; null when not recovered. */
-+    arrowType: number | null;
-+    /** Tag (layer) name, or "" when unknown. */
-+    layer: string;
- }
- /**
-  * A linear dimension (SketchUp's Dimension tool).
-  *
-- * The legacy (pre-2021) reader recovers only `text`/`hidden`. The VFF
-- * reader (2021+) recovers the full geometry - see `SkpModel.dimensions`
-- * for the model-level, world-space list.
-+ * Both readers recover the full geometry, per definition, in that
-+ * definition's coordinates; see `SkpModel.dimensions` for the VFF
-+ * model-level, world-space list.
-  */
- interface Dimension {
-     /** The displayed text. Empty when the dimension shows its auto-computed
-      * measured value (the caller formats `|b - a|`). */
-     text: string;
-     hidden: boolean;
--    /** First measured point [x, y, z] in inches (world space), or null when
--     * only the text was recovered. */
-+    /** First measured point [x, y, z] in inches, or null when the reader
-+     * cannot locate it. */
-     a: [number, number, number] | null;
-     /** Second measured point. */
-     b: [number, number, number] | null;
-@@ -353,6 +391,9 @@
- interface Page {
-     /** Scene name as shown on its tab. */
-     name: string;
-+    /** PushForm patch: the style the scene saved, as rendering options keyed like `SkpModel.renderingOptions`; null when the
-+     * scene saved none. Whether the scene uses it is bit 2 of `flags`. */
-+    renderingOptions: Record<string, number | boolean | [number, number, number, number]> | null;
-     /** Camera position [x, y, z] in inches, or null. */
-     eye: [number, number, number] | null;
-     /** Point the camera looks at, in inches. */
-@@ -368,6 +409,10 @@
-     orthoHeight: number;
-     /** Names of the layers this scene hides. */
-     hiddenLayers: string[];
-+    /** Which properties the scene saves (SketchUp's use flags: 1 camera,
-+     * 2 style, 4 shadows, 8 axes, 16 hidden geometry, 32 tag visibility,
-+     * 64 section planes), when the file stores them; else null. */
-+    flags: number | null;
- }
- interface Definition {
-     id: number;
-@@ -699,6 +744,9 @@
-     /** The model's unit-system string (e.g. "Millimeter"), read from
-      * meta/meta.dat. null for legacy files or when the tag isn't found. */
-     units: string | null;
-+    unitsOptions: Record<string, number | boolean> | null;
-+    sectionDisplay: { planes: boolean; cuts: boolean } | null;
-+    renderingOptions: Record<string, number | boolean | [number, number, number, number]> | null;
-     layerColors: Map<string, [number, number, number]>;
-     layerHidden: Map<string, boolean>;
-     layerIdToName: Map<number, string>;

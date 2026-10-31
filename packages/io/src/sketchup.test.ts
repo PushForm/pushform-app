@@ -218,6 +218,45 @@ describe('SketchUp import', () => {
     expect(report).toMatchObject({ definitions: 2, instances: placements + 1, sheetFaces: 1 });
   });
 
+  it('walks past a radial dimension; the rest of the model still opens', async () => {
+    // The pre-2021 walk is sequential, so a record without a reader loses the whole file, and a SketchUp 8
+    // floor plan carried a radial dimension. OpenSKP's writer does not produce one; insert the record as that
+    // file lays it out (preamble, drawbase, text, font, five bytes, the dimensioned entity, two parameters
+    // and a flag byte) at the start of the root's entity list. The last definition places an instance, so the
+    // root's instances refer only to classes and objects written before the inserted record and the store-map
+    // numbering they use is unchanged.
+    const b = create();
+    const leaf = b.addComponentDefinition('Leaf', d => { for (const points of cube) d.addFace(points); });
+    const box = b.addComponentDefinition('Box', d => d.addInstance(leaf, { translation: [0, 0, 0] }));
+    const placements = 3;
+    for (let i = 0; i < placements; i++) b.addInstance(box, { translation: [2 * i, 0, 0] });
+    const bytes = b.toBytes();
+    const name = Buffer.from(bytes).indexOf(Buffer.from([0xff, 0xfe, 0xff, 3, ...Buffer.from('Box', 'utf16le')]));
+    const at = Buffer.from(bytes).indexOf(Buffer.from([0, 0, placements, 0, 0, 0]), name);
+    expect(name).toBeGreaterThan(0);
+    expect(at).toBeGreaterThan(name);
+    const radial = [
+      0xff, 0xff, 1, 0, 16, 0, ...Buffer.from('CDimensionRadial', 'latin1'),
+      0, 0, 0, // null attribute container and an empty persistent-id mask
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // drawbase and its layer
+      0xff, 0xfe, 0xff, 0, // text
+      0, 0, // null font
+      0, 3, 0, 0, 0,
+      0, 0, // null dimensioned entity
+      ...new Array<number>(16).fill(0), // two parameters
+      0, // flag byte
+    ];
+    const file = new Uint8Array(bytes.length + radial.length);
+    file.set(bytes.subarray(0, at + 6));
+    file.set(radial, at + 6);
+    file.set(bytes.subarray(at + 6), at + 6 + radial.length);
+    file[at + 2] = placements + 1;
+    const scene = await readSketchUp(file);
+    expect(scene.root.instances).toHaveLength(placements);
+    const report = createDocument().transact('Open fixture', draft => applySketchUpImport(draft, scene)).value;
+    expect(report).toMatchObject({ definitions: 2, instances: placements + 1, dimensions: 0 });
+  });
+
   it('opens saved scenes with their cameras and hidden tags; Import leaves scenes out', async () => {
     const bytes = readFileSync(new URL('../../testing/assets/sketchup/scenes-2027.skp', import.meta.url));
     const scene = await readSketchUp(bytes), doc = createDocument();

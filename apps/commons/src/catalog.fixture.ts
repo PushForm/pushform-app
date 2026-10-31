@@ -3,7 +3,7 @@
 import type { CatalogModel } from './catalog';
 
 export function exampleModel(patch: Partial<CatalogModel> = {}): CatalogModel {
-  return { id: 'workshop-hinge', revision: '1', files: [], title: 'Workshop hinge', description: 'A small cabinet fitting.',
+  return { id: 'workshop-hinge', revision: '1', files: [], creatorProfile:null, title: 'Workshop hinge', description: 'A small cabinet fitting.',
     creator: 'Example Maker', category: 'Hardware', tags: ['cabinet'], formats: ['STEP'],
     publishedAt: '2026-10-31T12:00:00Z', imageUrl: null,
     source: { name: 'Example Library', url: 'https://example.com/model' },

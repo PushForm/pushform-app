@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { commonsFileUrl, CommonsUnavailableError } from '@pushform/cloud';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { CommonsProfileEditor, CommonsProfilePageView, CreatorCredit } from './CommonsProfile';
+import { CommonsAccessGate, CommonsDownloadButton, CommonsMailingPreference } from './CommonsAccess';
+import type { CommonsAccount } from './account';
 import { filterModels, type CatalogFilters, type CatalogLoader, type CatalogModel } from './catalog';
 
 type CatalogState = { kind: 'unconfigured' | 'loading' | 'error' } | { kind: 'ready'; models: CatalogModel[] };
 const emptyFilters: CatalogFilters = { query: '', category: '', license: '', commercial: false };
-function modelFromHash(): string | null {
-  const match = /^#models\/([a-z0-9][a-z0-9-]{0,95})$/.exec(window.location.hash);
+function modelFromHash(hash:string): string | null {
+  const match = /^#models\/([a-z0-9][a-z0-9-]{0,95})$/.exec(hash);
   return match?.[1] ?? null;
 }
 function ModelImage({ model }: { model: CatalogModel }) {
@@ -16,14 +19,14 @@ function ModelImage({ model }: { model: CatalogModel }) {
     ? <img src={model.imageUrl} alt={model.title} loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
     : <div className="missing-image"><span aria-hidden="true">◇</span><span>No preview image</span></div>;
 }
-function ModelDetail({ model, filesUrl }: { model: CatalogModel; filesUrl: string | undefined }) {
+function ModelDetail({ model, filesUrl, account }: { model: CatalogModel; filesUrl: string | undefined; account:CommonsAccount|null }) {
   return <>
     <a className="back-link" href="#browse">← All models</a>
     <article className="model-detail">
       <div className="detail-image"><ModelImage key={model.id + model.revision} model={model} /></div>
       <div>
         <p className="eyebrow">{model.category}</p>
-        <h1>{model.title}</h1><p className="creator">By {model.creator}</p>
+        <h1>{model.title}</h1><p className="creator"><CreatorCredit model={model}/></p>
         <p className="description">{model.description}</p>
         <dl className="metadata"><div><dt>Formats</dt><dd>{model.formats.join(', ')}</dd></div>
           <div><dt>Revision</dt><dd>{model.revision}</dd></div>
@@ -32,7 +35,7 @@ function ModelDetail({ model, filesUrl }: { model: CatalogModel; filesUrl: strin
         {model.files.length > 0 && <section className="downloads" aria-label="Model files"><h2>Model files</h2>
           <p>Each ZIP download includes the original file, licenses and creator credits.</p>
           <ul>{model.files.map((file) => <li key={file.id}><span>{file.name} · {(file.sizeBytes / 1024).toFixed(1)} KiB</span>
-            {commonsFileUrl(filesUrl, 'downloads', file.id) ? <a href={commonsFileUrl(filesUrl, 'downloads', file.id)!} rel="noreferrer">Download ZIP — {file.name}</a> : <span>Downloads are unavailable in this build.</span>}
+            {commonsFileUrl(filesUrl, 'downloads', file.id) ? <CommonsDownloadButton account={account??undefined} filesUrl={filesUrl} file={file}/> : <span>Downloads are unavailable in this build.</span>}
           </li>)}</ul>
         </section>}
         <section className="rights" aria-label="Licenses and attribution"><h2>Licenses & attribution</h2>
@@ -52,14 +55,16 @@ function ModelDetail({ model, filesUrl }: { model: CatalogModel; filesUrl: strin
   </>;
 }
 
-export function App({ loadCatalog, filesUrl }: { loadCatalog: CatalogLoader | null; filesUrl?: string | undefined }) {
+export function App({ loadCatalog, filesUrl, account=null, publishPage }: { loadCatalog: CatalogLoader | null; filesUrl?: string | undefined; account?:CommonsAccount|null; publishPage?:ReactNode }) {
   const [state, setState] = useState<CatalogState>({ kind: loadCatalog ? 'loading' : 'unconfigured' });
   const [attempt, setAttempt] = useState(0);
   const [filters, setFilters] = useState<CatalogFilters>(emptyFilters);
-  const [selectedId, setSelectedId] = useState(modelFromHash);
+  const [hash,setHash]=useState(window.location.hash);
+  const selectedId=modelFromHash(hash);
+  const personId=/^#people\/([a-f0-9-]{36})$/.exec(hash)?.[1]??null;
   const heading = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const update = () => setSelectedId(modelFromHash());
+    const update = () => setHash(window.location.hash);
     window.addEventListener('hashchange', update);
     return () => window.removeEventListener('hashchange', update);
   }, []);
@@ -76,21 +81,22 @@ export function App({ loadCatalog, filesUrl }: { loadCatalog: CatalogLoader | nu
   const shown = filterModels(models, filters);
   const selected = selectedId ? models.find((model) => model.id === selectedId) : null;
   useEffect(() => {
+    if(personId||hash==='#account'||hash==='#publish')return;
     document.title = selected ? `${selected.title} — PushForm Commons` : 'PushForm Commons — Models for your next project';
     if (state.kind !== 'ready' || !window.location.hash) return;
     heading.current?.focus({ preventScroll: true });
     const target = selectedId ? heading.current : document.getElementById('browse');
     target?.scrollIntoView?.({ block: 'start' });
-  }, [selected, selectedId, state.kind]);
+  }, [selected, selectedId, state.kind,personId,hash]);
   const options = (values: string[]) => [...new Set(values)].sort().map((value) => <option key={value} value={value}>{value}</option>);
   const update = (patch: Partial<CatalogFilters>) => setFilters((current) => ({ ...current, ...patch }));
   return <div className="commons">
     <a className="skip-link" href="#main">Skip to content</a>
     <header className="site-header"><a className="brand" href="#browse" aria-label="PushForm Commons home">
       <img src="/pf-logo-mark.svg" alt="" width="30" height="30" /><span>PushForm <strong>Commons</strong></span>
-    </a><a className="editor-link" href="https://app.pushform.io">Open PushForm <span aria-hidden="true">↗</span></a></header>
+    </a><nav aria-label="Commons">{account&&<><a href="#publish">Publish model</a><a href="#account">My profile</a></>}<a className="editor-link" href="https://app.pushform.io">Open PushForm <span aria-hidden="true">↗</span></a></nav></header>
     <main id="main" ref={heading} tabIndex={-1}>
-      {state.kind === 'ready' && selectedId ? selected ? <ModelDetail model={selected} filesUrl={filesUrl} /> :
+      {personId?<CommonsProfilePageView id={personId} profiles={account?.profiles??null}/>:hash==='#account'?account?<AccountPage account={account}/>:<section className="status-panel"><h1>Accounts are unavailable in this build.</h1></section>:hash==='#publish'?publishPage??<section className="status-panel"><h1>Publishing is unavailable in this build.</h1></section>:state.kind === 'ready' && selectedId ? selected ? <ModelDetail model={selected} filesUrl={filesUrl} account={account} /> :
         <section className="status-panel"><p className="eyebrow">Model unavailable</p><h1>This model isn’t in the catalog.</h1>
           <p>It may have been removed or the link may be out of date.</p><a href="#browse">Browse models</a></section> : <>
         <section className="hero"><p className="eyebrow">A shared place to start</p>
@@ -115,7 +121,7 @@ export function App({ loadCatalog, filesUrl }: { loadCatalog: CatalogLoader | nu
             {shown.length ? <div className="model-grid">{shown.map((model) => <article className="model-card" key={model.id}>
               <a href={`#models/${model.id}`} className="model-art" aria-label={`View ${model.title}`}><ModelImage key={model.id + model.revision} model={model} /></a>
               <div className="card-body"><p className="eyebrow">{model.category}</p><h3><a href={`#models/${model.id}`}>{model.title}</a></h3>
-                <p className="creator">By {model.creator}</p><p className="license-label">{model.licenses.map((license) => license.name).join(' · ')}</p>
+                <p className="creator"><CreatorCredit model={model}/></p><p className="license-label">{model.licenses.map((license) => license.name).join(' · ')}</p>
                 {model.source && <p className="source-label">From {model.source.name}</p>}</div>
             </article>)}</div> : <section className="status-panel"><h3>{models.length ? 'No models match those filters.' : 'The library is ready for its first models.'}</h3>
               <p>{models.length ? 'Try a different search or broaden your filters.' : 'Published models will appear here.'}</p>
@@ -126,4 +132,12 @@ export function App({ loadCatalog, filesUrl }: { loadCatalog: CatalogLoader | nu
     </main>
     <footer className="site-footer"><span>Good projects start with shared ideas.</span><div><a href="https://pushform.io">PushForm</a><a href="https://pushform.io/terms">Terms</a><a href="https://pushform.io/privacy">Privacy</a></div></footer>
   </div>;
+}
+
+function AccountPage({account}:{account:CommonsAccount}){
+  const state=useSyncExternalStore(account.session.subscribe,account.session.getSnapshot);
+  return <CommonsAccessGate account={account}><div key={state.user?.id??'signed-out'}>
+    <CommonsProfileEditor profiles={account.profiles}/><CommonsMailingPreference account={account}/>
+    <button onClick={()=>void account.session.signOut()} disabled={state.pending!==null}>Sign out</button>
+  </div></CommonsAccessGate>;
 }

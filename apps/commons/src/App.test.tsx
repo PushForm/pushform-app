@@ -78,11 +78,16 @@ it('shows a disabled server catalog as unavailable rather than an empty catalog 
   expect(screen.queryByRole('alert')).toBeNull();
 });
 
-it('offers an attribution package from the configured file service and explains missing configuration',async()=>{
+it('requires account access for downloads and explains missing file configuration',async()=>{
   window.history.replaceState(null,'','/#models/workshop-hinge');
   const id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   const model=exampleModel({files:[{id,name:'hinge.step',format:'STEP',sizeBytes:1234,sha256:'a'.repeat(64)}]});
   const loader=async()=>[model];const view=render(<App loadCatalog={loader} filesUrl="https://files.example"/>);
-  const link=await screen.findByRole('link',{name:'Download ZIP — hinge.step'});expect(link.getAttribute('href')).toBe('https://files.example/downloads/'+id);
+  expect(await screen.findByText('Sign-in is unavailable in this build.')).toBeTruthy();expect(screen.queryByRole('link',{name:'Download ZIP — hinge.step'})).toBeNull();
   view.rerender(<App loadCatalog={loader}/>);expect(screen.queryByRole('link',{name:'Download ZIP — hinge.step'})).toBeNull();expect(screen.getByText(/Downloads are unavailable in this build/)).toBeTruthy();
+});
+
+it('opens public profile routes independently of catalog availability',async()=>{
+  const id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';window.history.replaceState(null,'','/#people/'+id);
+  render(<App loadCatalog={null}/>);expect(await screen.findByText('Profiles are unavailable in this build.')).toBeTruthy();expect(screen.queryByText('The Commons catalog isn’t available yet.')).toBeNull();
 });

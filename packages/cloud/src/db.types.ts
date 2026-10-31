@@ -1299,6 +1299,84 @@ isOneToOne: false
                            },
 "fr_withdraw":
 { Args: { "p_id": string }; Returns: Json
+                           },
+"plugins_audit":
+{ Args: { "p_before"?: number,"p_limit"?: number }; Returns: Json
+                           },
+"plugins_authorize_signing":
+{ Args: { "p_content_hash": string,"p_release": string }; Returns: Json
+                           },
+"plugins_complete_checks":
+{ Args: { "p_full_review": boolean,"p_release": string,"p_sends_model_data": boolean }; Returns: Json
+                           },
+"plugins_create_plugin":
+{ Args: { "p_category": string,"p_icon_path"?: string,"p_id": string,"p_license": string,"p_name": string,"p_privacy_statement": string,"p_source_url": string,"p_summary": string,"p_support_contact": string }; Returns: Json
+                           },
+"plugins_create_release":
+{ Args: { "p_plugin": string,"p_release_notes"?: string,"p_version": string }; Returns: Json
+                           },
+"plugins_deprecate_release":
+{ Args: { "p_reason": string,"p_release": string }; Returns: Json
+                           },
+"plugins_grant_role":
+{ Args: { "p_email": string,"p_role": string }; Returns: Json
+                           },
+"plugins_mine":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"plugins_pause_release":
+{ Args: { "p_reason": string,"p_release": string }; Returns: Json
+                           },
+"plugins_publish_release":
+{ Args: { "p_percent"?: number,"p_release": string,"p_stage": string }; Returns: Json
+                           },
+"plugins_queue":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"plugins_record_check":
+{ Args: { "p_check": string,"p_details"?: Json,"p_outcome": string,"p_release": string,"p_summary": string }; Returns: undefined
+                           },
+"plugins_record_signature":
+{ Args: { "p_algorithm": string,"p_content_hash": string,"p_key_id": string,"p_release": string,"p_signature": string }; Returns: Json
+                           },
+"plugins_registry_source":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"plugins_reopen_review":
+{ Args: { "p_reason": string,"p_release": string }; Returns: Json
+                           },
+"plugins_resume_release":
+{ Args: { "p_release": string }; Returns: Json
+                           },
+"plugins_review_release":
+{ Args: { "p_checklist": Json,"p_content_hash": string,"p_decision": string,"p_model_data_acknowledged"?: boolean,"p_reasons"?: string,"p_release": string }; Returns: Json
+                           },
+"plugins_revoke_key":
+{ Args: { "p_key_id": string,"p_reason": string }; Returns: Json
+                           },
+"plugins_revoke_permission":
+{ Args: { "p_permission": string,"p_plugin"?: string,"p_reason": string }; Returns: Json
+                           },
+"plugins_revoke_release":
+{ Args: { "p_reason": string,"p_release": string }; Returns: Json
+                           },
+"plugins_revoke_role":
+{ Args: { "p_email": string,"p_role": string }; Returns: boolean
+                           },
+"plugins_session":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"plugins_set_rollout":
+{ Args: { "p_percent"?: number,"p_release": string,"p_stage": string }; Returns: Json
+                           },
+"plugins_submit_release":
+{ Args: { "p_content_hash": string,"p_contributors"?: (string)[],"p_manifest": Json,"p_package_size": number,"p_release": string }; Returns: Json
+                           },
+"plugins_update_plugin":
+{ Args: { "p_category": string,"p_icon_path"?: string,"p_id": string,"p_license": string,"p_name": string,"p_privacy_statement": string,"p_source_url": string,"p_summary": string,"p_support_contact": string }; Returns: Json
+                           },
+"plugins_withdraw_release":
+{ Args: { "p_reason": string,"p_release": string }; Returns: Json
                            }
           }
           Enums: {

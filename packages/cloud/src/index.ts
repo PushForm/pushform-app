@@ -16,3 +16,5 @@ export type { Database, Json } from './db.types';
 export * from './CommonsCatalog';
 export * from './CommonsClient';
 export * from './CommonsFiles';
+
+export * from './CommonsPublishing';

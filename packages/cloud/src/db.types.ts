@@ -2,7 +2,7 @@
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[]
 
 export type Database = {
-  
+
   "graphql_public": {
           Tables: {
             [_ in never]: never
@@ -35,7 +35,7 @@ export type Database = {
                     "action"?: string,"actor"?: string,"at"?: string,"id"?: never,"params"?: NonNullable<Json>
                   }
                   Relationships: [
-                    
+
                   ]
                 },"admin_inbox_messages": {
                   Row: {
@@ -49,7 +49,7 @@ export type Database = {
                     "attachments"?: NonNullable<Json>,"cc_addresses"?: (string)[],"deleted_at"?: string | null,"deleted_by"?: string | null,"from_address"?: string,"html_body"?: string | null,"id"?: string,"inbox"?: string,"message_id"?: string | null,"provider"?: string,"provider_id"?: string,"received_at"?: string,"stored_at"?: string,"subject"?: string,"text_body"?: string | null,"to_addresses"?: (string)[]
                   }
                   Relationships: [
-                    
+
                   ]
                 },"admin_roles": {
                   Row: {
@@ -63,7 +63,7 @@ export type Database = {
                     "email"?: string,"granted_at"?: string,"granted_by"?: string,"role"?: string
                   }
                   Relationships: [
-                    
+
                   ]
                 },"admin_settings": {
                   Row: {
@@ -77,7 +77,7 @@ export type Database = {
                     "default_role"?: string,"id"?: boolean,"inboxes"?: (string)[],"trusted_domains"?: (string)[],"updated_at"?: string,"updated_by"?: string
                   }
                   Relationships: [
-                    
+
                   ]
                 },"app_events": {
                   Row: {
@@ -91,7 +91,7 @@ export type Database = {
                     "app_build"?: string | null,"app_version"?: string | null,"category"?: string | null,"client_at"?: string | null,"count"?: number,"created_at"?: string,"document_type"?: string | null,"duration_seconds"?: number | null,"id"?: never,"kind"?: string,"owner_id"?: string,"tool"?: string | null
                   }
                   Relationships: [
-                    
+
                   ]
                 },"cloud_account_deletions": {
                   Row: {
@@ -105,7 +105,7 @@ export type Database = {
                     "attempts"?: number,"delete_after"?: string,"last_error"?: string | null,"owner_id"?: string,"requested_at"?: string
                   }
                   Relationships: [
-                    
+
                   ]
                 },"cloud_documents": {
                   Row: {
@@ -151,7 +151,7 @@ isOneToOne: false
                     "attempts"?: number,"document_count"?: number | null,"error"?: string | null,"expires_at"?: string | null,"finished_at"?: string | null,"id"?: string,"object_path"?: string | null,"owner_id"?: string,"requested_at"?: string,"size_bytes"?: number | null,"started_at"?: string | null,"status"?: string
                   }
                   Relationships: [
-                    
+
                   ]
                 },"cloud_folders": {
                   Row: {
@@ -191,7 +191,7 @@ isOneToOne: false
                     "app_build"?: string | null,"app_version"?: string | null,"counts"?: NonNullable<Json>,"created_at"?: string,"duration_ms"?: number | null,"error"?: string | null,"file_modified_at"?: string | null,"file_name"?: string,"id"?: string,"issues"?: NonNullable<Json>,"owner_id"?: string,"size_bytes"?: number | null,"source"?: string,"source_created_at"?: string | null,"source_modified_at"?: string | null,"source_version"?: string | null,"status"?: string
                   }
                   Relationships: [
-                    
+
                   ]
                 },"cloud_import_support": {
                   Row: {
@@ -225,7 +225,7 @@ isOneToOne: true
                     "account_type"?: string,"company_name"?: string | null,"company_size"?: string | null,"completed_at"?: string,"first_name"?: string,"industry"?: string,"industry_other"?: string | null,"last_name"?: string,"owner_id"?: string,"terms_accepted_at"?: string,"terms_version"?: string,"updated_at"?: string
                   }
                   Relationships: [
-                    
+
                   ]
                 },"cloud_projects": {
                   Row: {
@@ -239,7 +239,7 @@ isOneToOne: true
                     "created_at"?: string,"id"?: string,"name"?: string,"owner_id"?: string,"purge_after"?: string | null,"trash_op"?: string | null,"trashed_at"?: string | null
                   }
                   Relationships: [
-                    
+
                   ]
                 },"cloud_revisions": {
                   Row: {
@@ -267,6 +267,66 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"commons_models": {
+                  Row: {
+                    "created_at": string,"id": string,"last_number": number,"latest_submission": string | null,"published_revision": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "created_at"?: string,"id": string,"last_number"?: number,"latest_submission"?: string | null,"published_revision"?: string | null
+                  }
+                  Update: {
+                    "created_at"?: string,"id"?: string,"last_number"?: number,"latest_submission"?: string | null,"published_revision"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "commons_latest_revision_fk"
+      columns: ["id","latest_submission"]
+isOneToOne: false
+      referencedRelation: "commons_revisions"
+      referencedColumns: ["model_id","id"]
+    },{
+      foreignKeyName: "commons_published_revision_fk"
+      columns: ["id","published_revision"]
+isOneToOne: false
+      referencedRelation: "commons_revisions"
+      referencedColumns: ["model_id","id"]
+    }
+                  ]
+                },"commons_revisions": {
+                  Row: {
+                    "id": string,"metadata": NonNullable<Json>,"model_id": string,"number": number,"published_at": string | null,"review_note": string | null,"reviewed_at": string | null,"reviewed_by": string | null,"rights_basis": string,"status": string,"submitted_at": string,"submitted_by": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "id"?: string,"metadata": NonNullable<Json>,"model_id": string,"number": number,"published_at"?: string | null,"review_note"?: string | null,"reviewed_at"?: string | null,"reviewed_by"?: string | null,"rights_basis": string,"status"?: string,"submitted_at"?: string,"submitted_by"?: string | null
+                  }
+                  Update: {
+                    "id"?: string,"metadata"?: NonNullable<Json>,"model_id"?: string,"number"?: number,"published_at"?: string | null,"review_note"?: string | null,"reviewed_at"?: string | null,"reviewed_by"?: string | null,"rights_basis"?: string,"status"?: string,"submitted_at"?: string,"submitted_by"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "commons_revisions_model_id_fkey"
+      columns: ["model_id"]
+isOneToOne: false
+      referencedRelation: "commons_models"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"commons_settings": {
+                  Row: {
+                    "enabled": boolean,"id": boolean,"policy_version": string | null,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "enabled"?: boolean,"id"?: boolean,"policy_version"?: string | null,"updated_at"?: string
+                  }
+                  Update: {
+                    "enabled"?: boolean,"id"?: boolean,"policy_version"?: string | null,"updated_at"?: string
+                  }
+                  Relationships: [
+
+                  ]
                 },"extension_settings": {
                   Row: {
                     "extension_id": string,"owner_id": string,"revision": number,"schema_version": number,"updated_at": string,"value": NonNullable<Json>
@@ -279,7 +339,7 @@ isOneToOne: false
                     "extension_id"?: string,"owner_id"?: string,"revision"?: number,"schema_version"?: number,"updated_at"?: string,"value"?: NonNullable<Json>
                   }
                   Relationships: [
-                    
+
                   ]
                 },"fr_attachments": {
                   Row: {
@@ -397,7 +457,7 @@ isOneToOne: false
                     "builds_disabled"?: boolean,"config"?: NonNullable<Json>,"config_hash"?: string | null,"created_at"?: string,"default_role"?: string,"filing_disabled"?: boolean,"id"?: string,"name"?: string,"trials_disabled"?: boolean,"updated_at"?: string
                   }
                   Relationships: [
-                    
+
                   ]
                 },"fr_message_log": {
                   Row: {
@@ -411,7 +471,7 @@ isOneToOne: false
                     "at"?: string,"id"?: never,"owner_id"?: string
                   }
                   Relationships: [
-                    
+
                   ]
                 },"fr_orgs": {
                   Row: {
@@ -629,6 +689,24 @@ isOneToOne: false
                            },
 "admin_caller_email":
 { Args: Record<PropertyKey, never>; Returns: string
+                           },
+"admin_commons":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"admin_commons_publish":
+{ Args: { "p_expected_published": string,"p_note": string,"p_revision": string,"p_rights_confirmed": boolean }; Returns: Json
+                           },
+"admin_commons_reject":
+{ Args: { "p_reason": string,"p_revision": string }; Returns: undefined
+                           },
+"admin_commons_rollout":
+{ Args: { "p_enabled": boolean,"p_policy_version": string }; Returns: undefined
+                           },
+"admin_commons_submit":
+{ Args: { "p_expected_revision"?: string,"p_id": string,"p_metadata": Json,"p_rights_basis": string }; Returns: Json
+                           },
+"admin_commons_withdraw":
+{ Args: { "p_expected_published": string,"p_id": string,"p_reason": string }; Returns: undefined
                            },
 "admin_days":
 { Args: { "p_days": number }; Returns: string[]
@@ -895,6 +973,21 @@ isOneToOne: false
                            },
 "cloud_trashed_documents":
 { Args: { "p_ids": (string)[] }; Returns: (string)[]
+                           },
+"commons_catalog":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"commons_catalog_snapshot":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"commons_metadata_valid":
+{ Args: { "p_metadata": Json }; Returns: boolean
+                           },
+"commons_text_valid":
+{ Args: { "p_empty"?: boolean,"p_max": number,"p_value": Json }; Returns: boolean
+                           },
+"commons_url_valid":
+{ Args: { "p_value": Json }; Returns: boolean
                            },
 "extension_settings_delete":
 { Args: { "p_extension": string }; Returns: boolean
@@ -1284,11 +1377,11 @@ export type CompositeTypes<
 export const Constants = {
   "graphql_public": {
           Enums: {
-            
+
           }
         },"public": {
           Enums: {
-            
+
           }
         }
 } as const

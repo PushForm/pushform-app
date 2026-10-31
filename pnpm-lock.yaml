@@ -202,6 +202,9 @@ importers:
 
   apps/commons:
     dependencies:
+      '@pushform/cloud':
+        specifier: workspace:*
+        version: link:../../packages/cloud
       react:
         specifier: ^19.0.0
         version: 19.3.1
@@ -325,6 +328,9 @@ importers:
       '@supabase/supabase-js':
         specifier: ^2.75.0
         version: 2.118.0(@opentelemetry/api@1.10.0)
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
     devDependencies:
       '@pushform/requests-core':
         specifier: workspace:*

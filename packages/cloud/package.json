@@ -14,7 +14,8 @@
     "@pushform/core": "workspace:*",
     "@pushform/io": "workspace:*",
     "@pushform/model": "workspace:*",
-    "@supabase/supabase-js": "^2.75.0"
+    "@supabase/supabase-js": "^2.75.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@pushform/requests-core": "workspace:*"

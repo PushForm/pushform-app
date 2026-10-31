@@ -1,44 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { z } from 'zod';
+import { catalogSchema, catalogUrlSchema as link, createCommonsClient, readCommonsCatalog, type BrowserCloudConfig, type CatalogModel } from '@pushform/cloud';
+export { catalogSchema, type CatalogModel } from '@pushform/cloud';
 
-/** Public catalog metadata only. Original model files are published separately. */
-const text = z.string().trim().min(1).max(1000);
-const link = z.string().url().max(2048).refine((value) => {
-  const url = new URL(value);
-  return !url.username && !url.password && (url.protocol === 'https:' ||
-    (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)));
-}, 'Expected an HTTPS URL (HTTP is allowed on localhost).');
-
-export const catalogModelSchema = z.object({
-  id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,95}$/),
-  revision: text,
-  title: text,
-  description: z.string().max(12000),
-  creator: text,
-  category: text,
-  tags: z.array(text).max(50),
-  formats: z.array(text).min(1).max(30),
-  publishedAt: z.iso.datetime({ offset: true }),
-  imageUrl: link.nullable(),
-  source: z.object({ name: text, url: link }).nullable(),
-  licenses: z.array(z.object({
-    name: text, url: link,
-    commercialUse: z.enum(['allowed', 'restricted', 'unknown']),
-    conditions: z.array(text).max(50),
-  })).min(1).max(50),
-  credits: z.array(z.object({ name: text, url: link.nullable(), text: z.string().max(4000) })).min(1).max(100),
-});
-
-export const catalogSchema = z.object({ version: z.literal(1), models: z.array(catalogModelSchema).max(1000) })
-  .superRefine((catalog, context) => {
-    const ids = new Set<string>();
-    for (const model of catalog.models) {
-      if (ids.has(model.id)) context.addIssue({ code: 'custom', message: 'Duplicate model identifier.' });
-      ids.add(model.id);
-    }
-  });
-export type CatalogModel = z.infer<typeof catalogModelSchema>;
 export interface CatalogFilters { query: string; category: string; license: string; commercial: boolean }
 export type CatalogLoader = (signal: AbortSignal) => Promise<CatalogModel[]>;
 
@@ -82,4 +46,26 @@ export function createCatalogLoader(endpoint: string | undefined, fetcher: typeo
       signal.removeEventListener('abort', abort);
     }
   };
+}
+
+/** An explicit snapshot endpoint takes precedence; otherwise use the public database catalog RPC. */
+export function configuredCatalogLoader(env: Record<string, string | undefined>): CatalogLoader | null {
+  if (env.VITE_COMMONS_CATALOG_URL?.trim()) return createCatalogLoader(env.VITE_COMMONS_CATALOG_URL);
+  const config: BrowserCloudConfig = { url: env.VITE_SUPABASE_URL ?? '',
+    publishableKey: env.VITE_SUPABASE_PUBLISHABLE_KEY || env.VITE_SUPABASE_ANON_KEY || '' };
+  if (!config.url && !config.publishableKey) return null;
+  try {
+    const client = createCommonsClient(config);
+    return async (signal) => {
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      signal.addEventListener('abort', abort, { once: true });
+      if (signal.aborted) controller.abort();
+      const timeout = setTimeout(abort, 15000);
+      try { return await readCommonsCatalog(client, controller.signal); }
+      finally { clearTimeout(timeout); signal.removeEventListener('abort', abort); }
+    };
+  } catch {
+    return async () => { throw new Error('Invalid catalog configuration.'); };
+  }
 }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import { CommonsUnavailableError } from '@pushform/cloud';
 import { useEffect, useRef, useState } from 'react';
 import { filterModels, type CatalogFilters, type CatalogLoader, type CatalogModel } from './catalog';
 
@@ -62,7 +63,7 @@ export function App({ loadCatalog }: { loadCatalog: CatalogLoader | null }) {
     setState({ kind: 'loading' });
     void loadCatalog(controller.signal).then((models) => {
       if (!controller.signal.aborted) setState({ kind: 'ready', models });
-    }).catch(() => { if (!controller.signal.aborted) setState({ kind: 'error' }); });
+    }).catch((error: unknown) => { if (!controller.signal.aborted) setState({ kind: error instanceof CommonsUnavailableError ? 'unconfigured' : 'error' }); });
     return () => controller.abort();
   }, [loadCatalog, attempt]);
   const models = state.kind === 'ready' ? state.models : [];

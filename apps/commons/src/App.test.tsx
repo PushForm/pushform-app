@@ -70,3 +70,10 @@ it('replaces a broken preview with a labeled fallback', async () => {
   expect(screen.getByText('No preview image')).toBeTruthy();
   expect(screen.queryByRole('img', { name: 'Workshop hinge' })).toBeNull();
 });
+
+it('shows a disabled server catalog as unavailable rather than an empty catalog or generic failure', async () => {
+  const { CommonsUnavailableError } = await import('@pushform/cloud');
+  render(<App loadCatalog={async () => {throw new CommonsUnavailableError();}} />);
+  await waitFor(()=>expect(screen.getByRole('status').textContent).toContain('isn’t available yet'));
+  expect(screen.queryByRole('alert')).toBeNull();
+});

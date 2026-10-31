@@ -52,3 +52,9 @@ describe('catalog boundary', () => {
     await expect(request).rejects.toMatchObject({ name: 'AbortError' });
   });
 });
+
+it('does not fall back to an empty catalog when cloud configuration is partial or invalid', async () => {
+  const { configuredCatalogLoader } = await import('./catalog');
+  expect(configuredCatalogLoader({})).toBeNull();
+  await expect(configuredCatalogLoader({VITE_SUPABASE_URL:'https://example.com'})!(new AbortController().signal)).rejects.toThrow('Invalid catalog configuration');
+});

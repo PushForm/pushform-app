@@ -14,11 +14,13 @@ pnpm exec vitest run apps/commons
 
 Without configuration the app explains that the catalog is not available yet. It does not display sample models as published content. To connect a public read-only catalog, copy `.env.example` to `.env.local` and set `VITE_COMMONS_CATALOG_URL`. The value is public build-time configuration; never put credentials or private-file URLs in it. Cross-origin endpoints must explicitly allow the frontend origin through CORS. Requests omit cookies and credentials and do not follow redirects.
 
+Alternatively configure `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` (or a legacy anon key) to load the reviewed catalog RPC. These are public client settings. An explicit snapshot endpoint takes precedence. This read-only client does not persist a user session or consume the editor's authentication callback. A disabled catalog shows unavailable; partial/invalid configuration shows a load failure.
+
 The initial application supports search, category/license facets, a commercial-permission filter, model detail links and original license/source credits. Uploading, downloading files, 3D previews, editor insertion, accounts and social actions are not connected yet. This application has its own build output; the editor's build and deployment are separate. Production hosting is not configured here. Preview builds disallow indexing.
 
 ## Catalog contract
 
-`src/catalog.ts` defines and validates the version 1 metadata response. The response is `{ "version": 1, "models": [...] }`, with at most 1,000 models and 2 MiB of JSON text. This is an initial bounded catalog snapshot, not a pagination protocol. Each model has:
+`@pushform/cloud` exports the shared schema (`packages/cloud/src/CommonsCatalog.ts`) used by `src/catalog.ts` to validate the version 1 metadata response. The response is `{ "version": 1, "models": [...] }`, with at most 1,000 models and 2 MiB of JSON text. This is an initial bounded catalog snapshot, not a pagination protocol. Each model has:
 
 - A stable lowercase `id`, published `revision`, title/description, creator, category, tags, formats and ISO publication timestamp.
 - An HTTPS `imageUrl` or `null`, and an original `source` with name/URL or `null`.

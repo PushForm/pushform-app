@@ -16,3 +16,6 @@ export * from './runtime/web/webRuntime';
 export * from './runtime/compute';
 export * from './runtime/computeWorker';
 export * from './modelApi';
+export * from './platform/developerMode';
+export * from './platform/platform';
+export * from './platform/store';

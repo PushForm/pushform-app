@@ -385,6 +385,9 @@ importers:
       '@pushform/kernel':
         specifier: workspace:*
         version: link:../kernel
+      fflate:
+        specifier: ^0.8.2
+        version: 0.8.3
       wabt:
         specifier: ^1.0.39
         version: 1.0.39

@@ -12,7 +12,7 @@ import { displayDocumentName } from '../documentName';
 import type { BuildInfo } from '../buildInfo';
 import type { DocumentTab } from '../session';
 
-export function CloudHome({ api, cloud, recents, openTabs, ownerId, buildInfo, onResume, onOpen, onCreate, onRequests, requestsOpen = false, onForgetRecents, onRenamed, onMoved }: {
+export function CloudHome({ api, cloud, recents, openTabs, ownerId, buildInfo, onResume, onOpen, onCreate, onRequests, requestsOpen = false, onForgetRecents, onRenamed, onMoved, onExtensions }: {
   api: CloudFilesApi | undefined; cloud: CloudSession | undefined; recents: CloudFile[];
   openTabs: readonly DocumentTab[]; onResume: (tab: DocumentTab) => void;
   /** The signed-in account, which scopes the remembered import destination. */
@@ -27,6 +27,8 @@ export function CloudHome({ api, cloud, recents, openTabs, ownerId, buildInfo, o
   /** A file renamed or moved from Home, so an open editor follows it. */
   onRenamed?: ((fileId: string, name: string) => void) | undefined;
   onMoved?: ((fileId: string, projectId: string, folderId: string | null) => void) | undefined;
+  /** Opens the extension manager from the account dialog. */
+  onExtensions?: (() => void) | undefined;
 }): JSX.Element {
   const [projects, setProjects] = useState<CloudProject[]>([]);
   const [scope, setScope] = useState('');
@@ -251,7 +253,7 @@ export function CloudHome({ api, cloud, recents, openTabs, ownerId, buildInfo, o
       <div className="pf-home-header-actions">
         {onRequests ? <button ref={requestsButton} type="button" className="pf-home-requests-button" aria-label="AI Chat" title="AI Chat"
           aria-haspopup="dialog" aria-expanded={requestsOpen} onClick={() => onRequests(requestsButton.current)}><RiChatAiLine aria-hidden="true" /></button> : null}
-        <AccountControl cloud={cloud} />
+        <AccountControl cloud={cloud} onExtensions={onExtensions} />
       </div>
     </header>
     <div className="pf-home-body">

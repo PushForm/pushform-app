@@ -75,10 +75,12 @@ function download(bytes: Uint8Array, name: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome, onRequests, onObjects, onClearChat }: {
+export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome, onRequests, onObjects, onClearChat, onExtensions }: {
   session: DocumentSession; cloud?: CloudSession | undefined; cloudFiles?: CloudFilesApi | undefined;
   buildInfo?: BuildInfo | undefined;
   autosave?: CloudAutosave | undefined; onHome?: (() => void) | undefined;
+  /** Opens the extension manager, from the account dialog and command search. */
+  onExtensions?: (() => void) | undefined;
   /**
    * Toggles the AI Chat pane from command search;
    * absent when the host embeds no pipeline entry point.
@@ -221,6 +223,19 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
       run: () => objectsRef.current?.(),
     }));
   }, [session, session.activeId, !onObjects]);
+
+  const extensionsRef = useRef(onExtensions);
+  extensionsRef.current = onExtensions;
+  useEffect(() => {
+    if (!onExtensions) return;
+    const active = session.active;
+    const registry = active.type === 'model' ? active.app.commands : active.commands;
+    return registry.register(defineCommand({
+      id: 'extensions.manage', title: 'Extensions', category: 'view', menu: 'View',
+      icon: 'extensions', params: z.object({}), undoable: false,
+      run: () => extensionsRef.current?.(),
+    }));
+  }, [session, session.activeId, !onExtensions]);
 
   // Clear Chat starts the active document's conversation over from command search.
   useEffect(() => {
@@ -797,7 +812,7 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
       }} /> : null}
       <CommandSearch source={() => commandSearchSourceFor(session.active)} />
       {autosave ? <AutosaveIndicator autosave={autosave} tab={active} onSaveCopy={makeCloudCopy} /> : null}
-      <AccountControl cloud={cloud} />
+      <AccountControl cloud={cloud} onExtensions={onExtensions} />
       {aboutOpen ? <AboutDialog build={buildInfo ?? UNKNOWN_BUILD} onClose={() => setAboutOpen(false)} /> : null}
       {cloudBrowser && cloudFiles ? <CloudBrowser api={cloudFiles} session={session} owner={cloudOwner}
         saveTab={cloudBrowser.saveTab} saveAsTemplate={cloudBrowser.saveAsTemplate} forceCopy={!!autosave} onClose={closeCloudBrowser} /> : null}

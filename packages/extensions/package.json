@@ -22,6 +22,7 @@
   },
   "devDependencies": {
     "@pushform/kernel": "workspace:*",
+    "fflate": "^0.8.2",
     "wabt": "^1.0.39"
   }
 }

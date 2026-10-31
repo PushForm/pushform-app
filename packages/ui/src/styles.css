@@ -2788,3 +2788,33 @@ h4.pf-xui-text { font-size: 12px; }
   .pf-xui-message.tone-warning { border-color: #e0a040; }
   .pf-xui-text.tone-warning { color: #e0a040; }
 }
+
+/* Extension manager and install dialog. */
+.pf-xmanager, .pf-xinstall { display: flex; flex-direction: column; gap: 8px; max-width: 520px; }
+.pf-xmanager-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.pf-xmanager-row { border: 1px solid var(--pf-border); border-radius: var(--pf-radius); padding: 8px; display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.pf-xmanager-row-head { display: flex; justify-content: space-between; gap: 12px; width: 100%; }
+.pf-xmanager-muted, .pf-xinstall-meta { color: var(--pf-text-muted); margin: 0; }
+.pf-xmanager-empty, .pf-xmanager-unavailable { margin: 0; color: var(--pf-text-muted); }
+.pf-xmanager-unavailable { color: var(--pf-text); padding: 6px 8px; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); }
+.pf-xmanager-developer { border-top: 1px solid var(--pf-border); padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.pf-xmanager-confirm { border: 1px solid #b26a00; border-radius: var(--pf-radius); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.pf-xmanager-confirm p { margin: 0; }
+.pf-xmanager-details { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.pf-xmanager-logs pre { max-height: 160px; overflow: auto; font-size: 11px; margin: 4px 0 0; white-space: pre-wrap; }
+.pf-xinstall-integrity { font-size: 11px; font-weight: 600; }
+.pf-xinstall-integrity.is-official { color: var(--pf-accent); }
+.pf-xinstall-integrity.is-unsigned { color: #8a5300; }
+.pf-xinstall-warning { margin: 0; padding: 6px 8px; border-left: 3px solid #b26a00; background: var(--pf-surface-2); }
+.pf-xinstall-heading { margin: 4px 0 0; font-size: 12px; }
+.pf-xinstall-list { margin: 0; padding-inline-start: 18px; }
+.pf-xinstall-new { color: var(--pf-accent); font-size: 11px; }
+.pf-xinstall-facts { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0; }
+.pf-xinstall-facts dt { color: var(--pf-text-muted); }
+.pf-xinstall-facts dd { margin: 0; overflow-wrap: anywhere; }
+.pf-xinstall-error { margin: 0; color: var(--pf-danger); }
+.pf-xinstall-description { margin: 0; }
+@media (prefers-color-scheme: dark) {
+  .pf-xinstall-integrity.is-unsigned { color: #e0a040; }
+  .pf-xinstall-error { color: #ff8a80; }
+}

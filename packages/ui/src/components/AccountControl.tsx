@@ -11,7 +11,9 @@ import { DeletionSection, ExportSection } from './AccountLifecycle';
 import { ProfileForm } from './ProfileForm';
 import { Icon } from './Icon';
 
-export function AccountControl({ cloud: supplied }: { cloud?: CloudSession | undefined }): JSX.Element {
+export function AccountControl({ cloud: supplied, onExtensions }: { cloud?: CloudSession | undefined;
+  /** Opens the extension manager; the account dialog offers it when given. */
+  onExtensions?: (() => void) | undefined }): JSX.Element {
   const [unconfigured] = useState(() => new CloudSession(null));
   const cloud = supplied ?? unconfigured;
   const state = useSyncExternalStore(cloud.subscribe, cloud.getSnapshot);
@@ -34,14 +36,15 @@ export function AccountControl({ cloud: supplied }: { cloud?: CloudSession | und
     </button>
     {open ? <AccountDialog cloud={cloud} state={state} profiles={profile ? profiles : null} profileState={profileState}
       account={account && accountState.ownerId === state.user.id && accountState.status === 'ready' ? account : null} accountState={accountState}
-      onClose={() => { cloud.clearError(); profiles?.clearError(); account?.clearError(); setOpen(false); }} /> : null}
+      onClose={() => { cloud.clearError(); profiles?.clearError(); account?.clearError(); setOpen(false); }}
+      onExtensions={onExtensions ? () => { setOpen(false); onExtensions(); } : undefined} /> : null}
   </>;
 }
 
-function AccountDialog({ cloud, state, profiles, profileState, account, accountState, onClose }: {
+function AccountDialog({ cloud, state, profiles, profileState, account, accountState, onClose, onExtensions }: {
   cloud: CloudSession; state: CloudSessionState; profiles: CloudProfileStore | null; profileState: CloudProfileState;
   /** Only while the account's deletion and export state has loaded. */
-  account: CloudAccountStore | null; accountState: CloudAccountState; onClose: () => void;
+  account: CloudAccountStore | null; accountState: CloudAccountState; onClose: () => void; onExtensions?: (() => void) | undefined;
 }): JSX.Element {
   const dialog = useRef<HTMLDivElement>(null), close = useRef(onClose);
   close.current = onClose;
@@ -89,6 +92,11 @@ function AccountDialog({ cloud, state, profiles, profileState, account, accountS
         <ExportSection account={account} state={accountState} email={state.user?.email ?? 'your email address'} />
         <DeletionSection account={account} state={accountState} />
       </> : null}
+      {onExtensions ? <section className="pf-account-extensions" aria-labelledby="pf-account-extensions-title">
+        <h3 id="pf-account-extensions-title">Extensions</h3>
+        <p>Add features to PushForm, and see what your extensions can do.</p>
+        <button type="button" className="pf-btn" onClick={onExtensions}>Manage extensions…</button>
+      </section> : null}
       <p>Signing out returns you to the sign-in screen. Your open documents will be available when you sign back in.</p>
       <button className="pf-account-primary" type="button" disabled={pending} onClick={() => {
           void cloud.signOut().then(ok => { if (ok) close.current(); });

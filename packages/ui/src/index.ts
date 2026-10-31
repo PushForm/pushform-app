@@ -55,3 +55,4 @@ export { paintPrintPage } from './components/LayoutWorkspace';
 export { prepareLayoutFonts } from './components/layoutFonts';
 export { prepareLayoutImages } from './components/layoutImage';
 export { layoutViewportPicture, settleLayoutViewportRenders } from './components/layoutViewportRenders';
+export type { ExtensionRuntimeSources } from './extensions/browserExtensionPlatform';

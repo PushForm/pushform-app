@@ -21,6 +21,8 @@ import { DockSlot, SideDock, SideRail, type SideRailItem } from './components/Si
 import { WorkspaceFiles } from './components/WorkspaceFiles';
 import { LuFolderOpen } from 'react-icons/lu';
 import { ModelObjectBrowser } from './components/ModelObjectBrowser';
+import { ExtensionManager } from './extensions/ExtensionManager';
+import { browserRunsExtensions, createBrowserExtensionPlatform, type ExtensionRuntimeSources } from './extensions/browserExtensionPlatform';
 import { syncDesktopTitleBar } from './desktopShell';
 import { allowOpeningDocument, desktopUpdates } from './desktopUpdates';
 import { DesktopUpdates } from './components/DesktopUpdates';
@@ -83,6 +85,8 @@ export interface AppProps {
   readonly requests?: RequestsConfig | undefined;
   /** Where product usage events go; without it nothing is recorded. */
   readonly usage?: UsageSink | undefined;
+  /** The extension runtime's worker sources; without them the extension manager is not offered. */
+  readonly extensionRuntime?: ExtensionRuntimeSources | undefined;
 }
 
 function platform(): { browser: string; os: string } {
@@ -172,7 +176,7 @@ function Workspace(props: WorkspaceProps): JSX.Element | null {
 }
 
 /** Keep the document session in memory while locked; unmount all interactive workspace UI. */
-function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScreen, requests, usage: usageSink, locked, ownerId, refreshImages, nativeRefresh }: WorkspaceProps & { refreshImages: RefreshImageStore | undefined; nativeRefresh: NativeRefreshSession | undefined }): JSX.Element | null {
+function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScreen, requests, usage: usageSink, extensionRuntime, locked, ownerId, refreshImages, nativeRefresh }: WorkspaceProps & { refreshImages: RefreshImageStore | undefined; nativeRefresh: NativeRefreshSession | undefined }): JSX.Element | null {
   // Home pops the chat down under its header icon; the account email is the requester identity.
   /** Mounted on first open and kept mounted while closed, so the conversation survives closing and reopening. */
   const [requestsPanel, setRequestsPanel] = useState<{ anchor: HTMLElement | null; open: boolean } | null>(null);
@@ -194,6 +198,19 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
   const [requestsClient] = useState(() => requests && cloud
     ? new RequestsClient({ baseUrl: requests.baseUrl, apikey: requests.apikey, region: requests.region, getToken: () => cloud.getAccessToken() }) : null);
   const [recents, setRecents] = useState(() => readCloudRecents(ownerId));
+  /** This account's extensions on this device; nothing of theirs runs until one of their contributions is used. */
+  const [extensions] = useState(() => extensionRuntime ? createBrowserExtensionPlatform({ ownerId, sources: extensionRuntime }) : null);
+  const [extensionsOpen, setExtensionsOpen] = useState(false);
+  useEffect(() => {
+    if (!extensions) return;
+    void extensions.load();
+    return () => { void extensions.stopAll(); };
+  }, [extensions]);
+  const openExtensions = extensions ? () => setExtensionsOpen(true) : undefined;
+  const extensionManager = extensions && extensionsOpen
+    ? <ExtensionManager platform={extensions} available={browserRunsExtensions()} developerModeAllowed developerModeOn={localStorage.getItem('pushform:extensions:developer-mode') === 'on'}
+        onClose={() => setExtensionsOpen(false)} />
+    : null;
   const [owned] = useState<AppInstance | null>(() => (given ? null : createApp({ demo: false })));
   const app = given ?? owned!;
   const [session] = useState(
@@ -386,15 +403,18 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     <CloudHome api={cloudFiles} cloud={cloud} recents={recents} ownerId={ownerId} buildInfo={buildInfo}
       openTabs={session.tabs.filter(tab => tab.id !== 'tab-1' || tab.identity || session.isDirty(tab))}
       onResume={tab => { session.activate(tab.id); setHome(false); }} onOpen={open} onCreate={create} onRequests={toggleRequests} requestsOpen={requestsPanel?.open ?? false}
-      onForgetRecents={forgetRecents} onRenamed={renamed} onMoved={moved} />
+      onForgetRecents={forgetRecents} onRenamed={renamed} onMoved={moved} onExtensions={openExtensions} />
     {panel}
+    {extensionManager}
     {feedback}
   </ThumbnailContext.Provider>;
   return (
     <ThumbnailContext.Provider value={thumbnails}><AppContext.Provider value={modelApp}>
       <div className="pf-app">
         <TopBar session={session} cloud={cloud} cloudFiles={cloudFiles} buildInfo={buildInfo} autosave={autosave} onHome={() => setHome(true)}
-          onRequests={() => toggleSidePanel('requests')} onObjects={() => toggleSidePanel('objects')} onClearChat={requestsClient ? clearChat : undefined} />
+          onRequests={() => toggleSidePanel('requests')} onObjects={() => toggleSidePanel('objects')} onClearChat={requestsClient ? clearChat : undefined}
+          onExtensions={openExtensions} />
+        {extensionManager}
         {active.type === 'model' ? (
           <>
             <MainToolbar />

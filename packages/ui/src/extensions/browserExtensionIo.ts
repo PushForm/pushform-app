@@ -11,7 +11,7 @@ import type { ClipboardWriter, FilePicker, FileRequest } from '@pushform/extensi
 type Confirm = (request: FileRequest) => Promise<boolean>;
 
 /** A file's bytes, through FileReader where Blob.arrayBuffer is missing (older engines). */
-function readFile(file: File): Promise<ArrayBuffer> {
+export function readFile(file: File): Promise<ArrayBuffer> {
   if (typeof file.arrayBuffer === 'function') return file.arrayBuffer();
   return new Promise((resolve, reject) => {
     const reader = new FileReader();

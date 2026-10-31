@@ -8,3 +8,10 @@ declare const __PF_BUILD__: {
   readonly commit: string;
   readonly date: string;
 };
+
+/** The extension runtime's worker bootstraps as classic script strings (extensionRuntime.ts). */
+declare module 'virtual:pushform-extension-worker' {
+  const workerSource: string;
+  export default workerSource;
+  export const computeSource: string;
+}

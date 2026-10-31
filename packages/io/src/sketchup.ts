@@ -40,7 +40,11 @@ type ReaderDefinition = Definition & { isGroup?: boolean; curves?: ReaderCurve[]
 type ReaderLayer = SkpModel['layers'][number] & { folder?: number | null };
 type ReaderModel = SkpModel & { tagFolders?: { name: string; hidden: boolean; parent: number | null }[] };
 
-export interface ImportProgress { stage: string; current: number; total: number }
+export interface ImportProgress {
+  stage: string; current: number; total: number;
+  /** A short note beside the count, such as the reader's memory use. */
+  detail?: string | undefined;
+}
 /** Display flags of one source edge, its source id, and the source curve it belongs to (null when none is kept). */
 export interface ImportedEdgeFlags {
   soft: boolean; smooth: boolean; hidden: boolean; edge: number; curve: number | null;

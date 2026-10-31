@@ -54,7 +54,9 @@ async function readWithModule(bytes: Uint8Array, mode: number, threshold: number
   const m = await loadStepReader();
   const ptr = m.pf_alloc(bytes.byteLength);
   new Uint8Array(m.memory.buffer, ptr, bytes.byteLength).set(bytes);
-  onProgress?.({ stage: 'Reading STEP model', current: 0, total: 1 });
+  // The reader's memory only grows, so its size says how far a large file is pushing the 4 GiB wasm limit.
+  const memory = (): string => `${Math.round(m.memory.buffer.byteLength / 1048576).toLocaleString('en-US')} MB`;
+  onProgress?.({ stage: 'Reading STEP model', current: 0, total: 1, detail: memory() });
   const handle = m.pf_step_open(ptr, bytes.byteLength, mode, Math.min(threshold, 0xffff_ffff));
   m.pf_free(ptr, bytes.byteLength);
   if (!handle) throw new Error(`This STEP file could not be read: ${stepReaderError(m)}`);
@@ -62,9 +64,17 @@ async function readWithModule(bytes: Uint8Array, mode: number, threshold: number
     let reported = -1;
     while (m.pf_step_step(handle)) {
       const packed = m.pf_step_progress(handle), done = Number(packed >> 32n), total = Number(packed & 0xffff_ffffn);
-      if (done !== reported) { reported = done; onProgress?.({ stage: 'Converting parts', current: done, total }); }
+      if (done !== reported) { reported = done; onProgress?.({ stage: 'Converting parts', current: done, total, detail: memory() }); }
     }
-    const len = m.pf_step_finish(handle);
+    if (!m.pf_step_finish(handle)) throw new Error(`This STEP file could not be read: ${stepReaderError(m)}`);
+    // Each distinct part is meshed once; a repeated placement passes in no time, so the count moves by bodies.
+    reported = -1;
+    do {
+      const packed = m.pf_step_mesh_progress(handle), done = Number(packed >> 32n), total = Number(packed & 0xffff_ffffn);
+      if (done !== reported) { reported = done; onProgress?.({ stage: 'Meshing parts', current: done, total, detail: memory() }); }
+    } while (m.pf_step_mesh(handle));
+    { const packed = m.pf_step_mesh_progress(handle), total = Number(packed & 0xffff_ffffn); onProgress?.({ stage: 'Meshing parts', current: total, total, detail: memory() }); }
+    const len = m.pf_step_result(handle);
     if (!len) throw new Error(`This STEP file could not be read: ${stepReaderError(m)}`);
     return decodeStepResult(new Uint8Array(m.memory.buffer, m.pf_step_result_ptr(handle), len));
   } finally { m.pf_step_close(handle); }

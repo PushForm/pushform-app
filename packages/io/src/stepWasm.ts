@@ -15,7 +15,11 @@ export interface StepReaderModule {
   pf_step_open(ptr: number, len: number, mode: number, threshold: number): number;
   pf_step_progress(handle: number): bigint;
   pf_step_step(handle: number): number;
+  /** Finish the conversion; 1 on success. Then `pf_step_mesh` meshes one body per call (1 while more remain). */
   pf_step_finish(handle: number): number;
+  pf_step_mesh_progress(handle: number): bigint;
+  pf_step_mesh(handle: number): number;
+  pf_step_result(handle: number): number;
   pf_step_result_ptr(handle: number): number;
   pf_step_close(handle: number): void;
   pf_error_len(): number;

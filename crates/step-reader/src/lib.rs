@@ -28,6 +28,7 @@ const MERGE_TOL: f64 = 2.54e-5;
 
 struct Reading {
     reading: Option<StepReading>,
+    meshing: Option<Meshing>,
     mode: u32,
     threshold: u32,
     error: Option<String>,
@@ -79,11 +80,11 @@ pub unsafe extern "C" fn pf_step_open(ptr: *const u8, len: u32, mode: u32, thres
     let slot = list.len();
     match StepReading::new(&text) {
         Ok(reading) => {
-            list.push(Some(Box::new(Reading { reading: Some(reading), mode, threshold, error: None, result: None })));
+            list.push(Some(Box::new(Reading { reading: Some(reading), meshing: None, mode, threshold, error: None, result: None })));
             (slot + 1) as u32
         }
         Err(e) => {
-            list.push(Some(Box::new(Reading { reading: None, mode, threshold, error: Some(e.to_string()), result: None })));
+            list.push(Some(Box::new(Reading { reading: None, meshing: None, mode, threshold, error: Some(e.to_string()), result: None })));
             LAST_ERROR.with(|cell| *cell.borrow_mut() = Some(e.to_string()));
             0
         }
@@ -113,17 +114,17 @@ pub extern "C" fn pf_step_step(handle: u32) -> u32 {
     }
 }
 
-/// Finish the reading and build the result buffer. Returns its length, or 0 on failure (see `pf_error_*`).
+/// Finish the conversion and plan the meshing. Returns 1, or 0 on failure (see `pf_error_*`). Meshing then runs
+/// one body per `pf_step_mesh` call, so the caller can report it.
 #[unsafe(no_mangle)]
 pub extern "C" fn pf_step_finish(handle: u32) -> u32 {
     let Some(entry) = get(handle.wrapping_sub(1)) else { return 0 };
     let Some(reading) = entry.reading.take() else { return 0 };
-    let (mode, threshold) = (entry.mode, entry.threshold);
-    match reading.finish().map(|import| write_result(&import, mode, threshold)) {
-        Ok(buffer) => {
-            let len = buffer.len() as u32;
-            entry.result = Some(buffer);
-            len
+    match reading.finish() {
+        Ok(import) => {
+            let placements = body_placements(&import.tree, import.bodies.len());
+            entry.meshing = Some(Meshing { import, placements, cursor: 0, parts: Vec::new(), part_of_item: HashMap::new(), placed: Vec::new() });
+            1
         }
         Err(e) => {
             entry.error = Some(e.to_string());
@@ -131,6 +132,82 @@ pub extern "C" fn pf_step_finish(handle: u32) -> u32 {
             0
         }
     }
+}
+/// Bodies meshed so far, of the bodies to mesh: `done << 32 | total`.
+#[unsafe(no_mangle)]
+pub extern "C" fn pf_step_mesh_progress(handle: u32) -> u64 {
+    match get(handle.wrapping_sub(1)).and_then(|r| r.meshing.as_ref()) {
+        Some(m) => ((m.cursor as u64) << 32) | (m.import.bodies.len() as u64 & 0xffff_ffff),
+        None => 0,
+    }
+}
+/// Mesh the next body (a repeated item reuses its first placement's mesh). Returns 1 while bodies remain, else 0.
+#[unsafe(no_mangle)]
+pub extern "C" fn pf_step_mesh(handle: u32) -> u32 {
+    let Some(entry) = get(handle.wrapping_sub(1)) else { return 0 };
+    let mode = entry.mode;
+    let Some(m) = entry.meshing.as_mut() else { return 0 };
+    if m.cursor >= m.import.bodies.len() { return 0; }
+    let i = m.cursor;
+    m.cursor += 1;
+    let body = &m.import.bodies[i];
+    let world = m.placements[i];
+    // A repeated item is meshed once in the frame of its first rigid placement; a non-rigid placement meshes itself.
+    if let Some(&part) = m.part_of_item.get(&body.source_item) {
+        if rigid_inverse(&world).is_some() { m.placed.push((part, i, world)); return (m.cursor < m.import.bodies.len()) as u32; }
+    }
+    let inverse = rigid_inverse(&world);
+    let (to_local, placement) = match inverse { Some(inv) => (inv, world), None => (IDENTITY, IDENTITY) };
+    if let Some(mesh) = mesh_body(body, &to_local, mode) {
+        let index = m.parts.len();
+        m.parts.push(Part { mesh, placement_inverse: to_local });
+        if inverse.is_some() { m.part_of_item.insert(body.source_item, index); }
+        m.placed.push((index, i, placement));
+    }
+    (m.cursor < m.import.bodies.len()) as u32
+}
+/// Build the result buffer once every body is meshed. Returns its length, or 0 when nothing was read.
+#[unsafe(no_mangle)]
+pub extern "C" fn pf_step_result(handle: u32) -> u32 {
+    let Some(entry) = get(handle.wrapping_sub(1)) else { return 0 };
+    let (mode, threshold) = (entry.mode, entry.threshold);
+    let Some(mut m) = entry.meshing.take() else { return 0 };
+    while pf_step_mesh_more(&mut m, mode) {}
+    let buffer = write_result(&m, mode, threshold);
+    let len = buffer.len() as u32;
+    entry.result = Some(buffer);
+    len
+}
+/// Meshing not yet done by the caller's own `pf_step_mesh` loop.
+fn pf_step_mesh_more(m: &mut Meshing, mode: u32) -> bool {
+    if m.cursor >= m.import.bodies.len() { return false; }
+    let i = m.cursor;
+    m.cursor += 1;
+    let body = &m.import.bodies[i];
+    let world = m.placements[i];
+    if let Some(&part) = m.part_of_item.get(&body.source_item) {
+        if rigid_inverse(&world).is_some() { m.placed.push((part, i, world)); return true; }
+    }
+    let inverse = rigid_inverse(&world);
+    let (to_local, placement) = match inverse { Some(inv) => (inv, world), None => (IDENTITY, IDENTITY) };
+    if let Some(mesh) = mesh_body(body, &to_local, mode) {
+        let index = m.parts.len();
+        m.parts.push(Part { mesh, placement_inverse: to_local });
+        if inverse.is_some() { m.part_of_item.insert(body.source_item, index); }
+        m.placed.push((index, i, placement));
+    }
+    true
+}
+
+/// The meshing of a finished import: parts made so far and where each body was placed.
+struct Meshing {
+    import: StepImport,
+    placements: Vec<M4>,
+    cursor: usize,
+    parts: Vec<Part>,
+    part_of_item: HashMap<u64, usize>,
+    /// (part index, body index, placement)
+    placed: Vec<(usize, usize, M4)>,
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn pf_step_result_ptr(handle: u32) -> *const u8 {
@@ -412,25 +489,11 @@ fn on_segment(a: [f64; 3], b: [f64; 3], q: [f64; 3]) -> bool {
 /// Layout: magic `PFSTEP01`; u32 part count; per part: name, closed, color (f32 rgb or -1), face_count, positions,
 /// triangles, tri_face, edge_offsets, edge_positions, edge_flags; u32 placement count; per placement: part index,
 /// name, instance name, path depth and names, 16 f64 column-major meters; then the warnings and header strings.
-fn write_result(import: &StepImport, mode: u32, threshold: u32) -> Vec<u8> {
-    let placements = body_placements(&import.tree, import.bodies.len());
-    let mut parts: Vec<Part> = Vec::new();
-    let mut part_of_item: HashMap<u64, usize> = HashMap::new();
-    let mut placed: Vec<(usize, &ImportedBody, M4)> = Vec::new();
-    for (i, body) in import.bodies.iter().enumerate() {
-        let world = placements[i];
-        // A repeated item is meshed once in the frame of its first rigid placement; a non-rigid placement meshes itself.
-        if let Some(&part) = part_of_item.get(&body.source_item) {
-            if rigid_inverse(&world).is_some() { placed.push((part, body, world)); continue; }
-        }
-        let inverse = rigid_inverse(&world);
-        let (to_local, placement) = match inverse { Some(inv) => (inv, world), None => (IDENTITY, IDENTITY) };
-        let Some(mesh) = mesh_body(body, &to_local, mode) else { continue };
-        let index = parts.len();
-        parts.push(Part { mesh, placement_inverse: to_local });
-        if inverse.is_some() { part_of_item.insert(body.source_item, index); }
-        placed.push((index, body, placement));
-    }
+fn write_result(m: &Meshing, mode: u32, threshold: u32) -> Vec<u8> {
+    let import = &m.import;
+    let mut parts: Vec<Part> = m.parts.iter().map(|p| Part { mesh: Mesh { positions: p.mesh.positions.clone(), triangles: p.mesh.triangles.clone(), tri_face: p.mesh.tri_face.clone(),
+        face_count: p.mesh.face_count, edge_offsets: p.mesh.edge_offsets.clone(), edge_positions: p.mesh.edge_positions.clone(), edge_flags: p.mesh.edge_flags.clone() }, placement_inverse: p.placement_inverse }).collect();
+    let placed: Vec<(usize, &ImportedBody, M4)> = m.placed.iter().map(|&(part, body, matrix)| (part, &import.bodies[body], matrix)).collect();
     // Flat faces keep their facets below the threshold, where the app merges them into faces itself; above it the
     // parts stay meshes and every facet counts, so their flat faces are re-triangulated from their outlines.
     let placed_triangles: usize = placed.iter().map(|(part, _, _)| parts[*part].mesh.triangles.len() / 3).sum();

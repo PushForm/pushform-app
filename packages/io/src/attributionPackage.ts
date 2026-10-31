@@ -8,7 +8,7 @@ export function readStoredAttributionPackage(bytes: Uint8Array): Record<string, 
   if (bytes.length > 134217728 + 262144) throw new Error('Model package is too large.');
   let entries = 0;
   const files = unzipSync(bytes, { filter(entry) {
-    if (++entries > 3 || entry.compression !== 0 || entry.originalSize > 134217728 || entry.name.includes('..') || entry.name.includes('\\')) throw new Error('Invalid model package.');
+    if (++entries > 3 || entry.compression !== 0 || entry.originalSize > 134217728 || entry.name.startsWith('/') || entry.name.split('/').some(segment => segment === '..' || segment === '.') || entry.name.includes('\\')) throw new Error('Invalid model package.');
     return true;
   } });
   if (!files['ATTRIBUTION.json'] || files['ATTRIBUTION.json'].length > 65536 || !files['README.txt'] || files['README.txt'].length > 65536) throw new Error('Missing model notices.');

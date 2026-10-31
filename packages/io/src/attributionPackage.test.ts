@@ -28,3 +28,9 @@ it('rejects compressed service payloads and missing attribution records before i
   const compressed = zipSync({ 'ATTRIBUTION.json': strToU8('x'.repeat(10000)), 'README.txt': strToU8('notices'), 'files/part.stl': strToU8('geometry') }, { level: 6 });
   expect(() => readStoredAttributionPackage(compressed)).toThrow('Invalid model package');
 });
+
+it('accepts safe filenames containing consecutive dots while refusing traversal segments', () => {
+  const files = { 'ATTRIBUTION.json': strToU8('{}'), 'README.txt': strToU8('Keep notices.'), 'files/part..step': new Uint8Array([1]) };
+  expect(readStoredAttributionPackage(zipSync(files, { level: 0 }))['files/part..step']).toEqual(new Uint8Array([1]));
+  expect(() => readStoredAttributionPackage(zipSync({ ...files, 'files/../escape': new Uint8Array([1]) }, { level: 0 }))).toThrow();
+});

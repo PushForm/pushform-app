@@ -5,6 +5,7 @@ import { m4mul, m4scaling, m4translation, meshBox, type DefId, type Id, type Mat
 import { bodyFromMesh, createDocument, createEntityContainer, SketchGraph, type ComponentInstance, type Document, type DocumentDraft } from '@pushform/model';
 import { collectStepScene, exportStep } from './stepExport';
 import { isStepBytes, readStep } from './step';
+import { applySketchUpImport } from './sketchupDocument';
 
 function addDefinition(d: DocumentDraft, name: string): DefId {
   const root = d.definitions.get(d.rootDefinitionId)!;
@@ -64,6 +65,17 @@ describe('STEP export', () => {
     const parts = [back.root, ...back.definitions.values()].flatMap(d => d.meshParts ?? []);
     // The cube once, two bodies and the sheet in the model, and the mirrored cube.
     expect(parts.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('writes the mesh parts of an imported STEP file as faceted solids and says so', async () => {
+    const first = await exportStep(fixture().state, { name: 'Shelf.pf' });
+    const doc = createDocument();
+    const scene = await readStep(first.bytes);
+    doc.transact('Open', d => applySketchUpImport(d, scene));
+    const again = await exportStep(doc.state, { name: 'Again.pf' });
+    expect(again.notes.join(' ')).toMatch(/Mesh parts are exported as faceted solids: .*triangles\)/);
+    const back = await readStep(again.bytes);
+    expect([back.root, ...back.definitions.values()].flatMap(d => d.meshParts ?? []).length).toBeGreaterThanOrEqual(4);
   });
 
   it('says what it left out or approximated', () => {

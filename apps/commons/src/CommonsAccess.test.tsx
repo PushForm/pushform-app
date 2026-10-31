@@ -45,3 +45,35 @@ it('preserves only safe local routes through the email callback',()=>{
   window.history.replaceState(null,'','/#models/example-part');rememberCommonsReturnRoute();window.history.replaceState(null,'','/');restoreCommonsReturnRoute();expect(window.location.hash).toBe('#models/example-part');
   sessionStorage.setItem('pushform:commons:return','https://untrusted.example/');window.history.replaceState(null,'','/');restoreCommonsReturnRoute();expect(window.location.hash).toBe('');
 });
+
+it('resumes only the same pending model asset after an email callback reload and clears the intent on success',async()=>{
+  const file={id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',name:'part.step',format:'STEP',sizeBytes:3,sha256:'a'.repeat(64)};
+  window.history.replaceState(null,'','/#models/example-part');
+  const visitor=account(null,false);const first=render(<CommonsDownloadButton account={visitor} filesUrl="https://files.example" file={file}/>);
+  fireEvent.click(screen.getByRole('button',{name:'Download ZIP — part.step'}));
+  await screen.findByRole('heading',{name:'Sign in to continue'});
+  const stored=JSON.parse(sessionStorage.getItem('pushform:commons:download')!);
+  expect(stored).toMatchObject({version:1,assetId:file.id,route:'#models/example-part'});expect(Object.keys(stored).sort()).toEqual(['assetId','requestedAt','route','version']);
+  first.unmount();window.history.replaceState(null,'','/');restoreCommonsReturnRoute();expect(window.location.hash).toBe('#models/example-part');
+  const auth=account(row);const fetcher=vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response('ZIP',{headers:{'Content-Type':'application/zip'}}));
+  const create=vi.fn(()=> 'blob:callback-test');Object.defineProperty(URL,'createObjectURL',{value:create,configurable:true});Object.defineProperty(URL,'revokeObjectURL',{value:vi.fn(),configurable:true});vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(()=>{});
+  render(<CommonsDownloadButton account={auth} filesUrl="https://files.example" file={file}/>);
+  await screen.findByText('Download started. Keep the included license and attribution notices.');
+  expect(fetcher).toHaveBeenCalledOnce();expect(create).toHaveBeenCalledOnce();expect(sessionStorage.getItem('pushform:commons:download')).toBeNull();
+});
+it('does not auto-download stale, malformed, wrong-route or nonmatching asset intents',async()=>{
+  const auth=account(row);const file={id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',name:'part.step',format:'STEP',sizeBytes:3,sha256:'a'.repeat(64)};
+  const fetcher=vi.spyOn(globalThis,'fetch');window.history.replaceState(null,'','/#models/example-part');
+  const base={version:1,assetId:file.id,route:'#models/example-part',requestedAt:Date.now()};
+  for(const value of [JSON.stringify({...base,requestedAt:Date.now()-15*60*1000}),'{bad-json',JSON.stringify({...base,route:'https://untrusted.example/'}),JSON.stringify({...base,assetId:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'}),JSON.stringify({...base,route:'#models/other-model'}),JSON.stringify({...base,requestedAt:Date.now()+60000}),JSON.stringify({...base,token:'must-never-be-accepted'})]){
+    sessionStorage.setItem('pushform:commons:download',value);const view=render(<CommonsDownloadButton account={auth} filesUrl="https://files.example" file={file}/>);
+    expect(screen.queryByRole('button',{name:'Cancel download'})).toBeNull();expect(fetcher).not.toHaveBeenCalled();view.unmount();
+  }
+});
+it('lets a visitor cancel a pending authenticated download without retaining an automatic transfer intent',async()=>{
+  const auth=account(null,false);const file={id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',name:'part.step',format:'STEP',sizeBytes:3,sha256:'a'.repeat(64)};
+  window.history.replaceState(null,'','/#models/example-part');render(<CommonsDownloadButton account={auth} filesUrl="https://files.example" file={file}/>);
+  fireEvent.click(screen.getByRole('button',{name:'Download ZIP — part.step'}));await screen.findByRole('heading',{name:'Sign in to continue'});
+  expect(sessionStorage.getItem('pushform:commons:download')).not.toBeNull();fireEvent.click(screen.getByRole('button',{name:'Cancel download'}));
+  expect(sessionStorage.getItem('pushform:commons:download')).toBeNull();expect(sessionStorage.getItem('pushform:commons:return')).toBeNull();expect(screen.queryByRole('heading',{name:'Sign in to continue'})).toBeNull();
+});

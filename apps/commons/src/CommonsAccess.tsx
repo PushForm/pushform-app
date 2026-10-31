@@ -10,6 +10,39 @@ import { ProfileForm } from '@pushform/account-ui';
 
 export interface CommonsAccessAccount { session: CloudSession; client: ReturnType<typeof createBrowserRpc>['client'] }
 const RETURN_KEY = 'pushform:commons:return';
+const DOWNLOAD_KEY = 'pushform:commons:download';
+const DOWNLOAD_INTENT_AGE = 15 * 60 * 1000;
+const assetIdPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
+interface DownloadIntent { version: 1; assetId: string; route: string; requestedAt: number }
+function pendingDownload(): DownloadIntent | null {
+  try {
+    const raw=sessionStorage.getItem(DOWNLOAD_KEY);if(!raw)return null;
+    const value:unknown=raw.length<=512?JSON.parse(raw):null;
+    if(value&&typeof value==='object'&&!Array.isArray(value)){
+      const candidate=value as Record<string,unknown>;const now=Date.now();
+      if(Object.keys(candidate).length===4&&candidate.version===1&&typeof candidate.assetId==='string'&&assetIdPattern.test(candidate.assetId)&&
+        typeof candidate.route==='string'&&/^#models\/[a-z0-9][a-z0-9-]{0,95}$/.test(candidate.route)&&
+        typeof candidate.requestedAt==='number'&&Number.isSafeInteger(candidate.requestedAt)&&candidate.requestedAt<=now&&now-candidate.requestedAt<DOWNLOAD_INTENT_AGE)
+        return candidate as unknown as DownloadIntent;
+    }
+    sessionStorage.removeItem(DOWNLOAD_KEY);
+  } catch { try { sessionStorage.removeItem(DOWNLOAD_KEY); } catch { /* Storage is optional. */ } }
+  return null;
+}
+function rememberDownload(assetId:string):void {
+  const route=window.location.hash;
+  if(!assetIdPattern.test(assetId)||!/^#models\/[a-z0-9][a-z0-9-]{0,95}$/.test(route))return;
+  try { sessionStorage.setItem(DOWNLOAD_KEY,JSON.stringify({version:1,assetId,route,requestedAt:Date.now()} satisfies DownloadIntent)); } catch { /* Same-page OTP still works. */ }
+}
+function clearDownload(assetId:string):void {
+  try {
+    const pending=pendingDownload();
+    if(pending?.assetId===assetId&&pending.route===window.location.hash){sessionStorage.removeItem(DOWNLOAD_KEY);sessionStorage.removeItem(RETURN_KEY);}
+  } catch { /* Storage is optional. */ }
+}
+function shouldResumeDownload(assetId:string):boolean {
+  const pending=pendingDownload();return pending?.assetId===assetId&&pending.route===window.location.hash;
+}
 const validReturn = (value: string | null): value is string => value !== null && /^(#models\/[a-z0-9][a-z0-9-]{0,95}|#account|#publish)$/.test(value);
 /** Keep only a local Commons route while the ordinary email callback clears authentication parameters. */
 export function rememberCommonsReturnRoute(): void {
@@ -78,12 +111,13 @@ export function CommonsMailingPreference({account}:{account:CommonsAccessAccount
 }
 
 export function CommonsDownloadButton({account,filesUrl,file}:{account?:CommonsAccessAccount|undefined;filesUrl?:string|undefined;file:CommonsFile}):JSX.Element {
-  const [request,setRequest]=useState(0);
+  const [request,setRequest]=useState(()=>({count:shouldResumeDownload(file.id)?1:0,assetId:file.id,route:window.location.hash}));
+  const active=request.count>0&&request.assetId===file.id&&request.route===window.location.hash;
   if(!commonsFileUrl(filesUrl,'downloads',file.id))return <span>Downloads are unavailable in this build.</span>;
   if(!account)return <span>Sign-in is unavailable in this build.</span>;
   return <div className="commons-download">
-    <button onClick={()=>{rememberCommonsReturnRoute();setRequest(value=>value+1);}}>Download ZIP — {file.name}</button>
-    {request>0&&<CommonsAccessGate account={account}><DownloadTransfer key={`${file.id}:${request}`} account={account} filesUrl={filesUrl!} file={file}/></CommonsAccessGate>}
+    <button onClick={()=>{rememberCommonsReturnRoute();rememberDownload(file.id);setRequest(value=>({count:value.count+1,assetId:file.id,route:window.location.hash}));}}>Download ZIP — {file.name}</button>
+    {active&&<><button onClick={()=>{clearDownload(file.id);setRequest(value=>({...value,count:0}));}}>Cancel download</button><CommonsAccessGate account={account}><DownloadTransfer key={`${file.id}:${request.count}`} account={account} filesUrl={filesUrl!} file={file}/></CommonsAccessGate></>}
   </div>;
 }
 function DownloadTransfer({account,filesUrl,file}:{account:CommonsAccessAccount;filesUrl:string;file:CommonsFile}):JSX.Element {
@@ -95,7 +129,7 @@ function DownloadTransfer({account,filesUrl,file}:{account:CommonsAccessAccount;
       const blob=await downloadCommonsFile(filesUrl,token,file.id,controller.signal);
       if(!live||account.session.getSnapshot().user?.id!==owner)return;
       const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=file.name+'.zip';link.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
-      try { sessionStorage.removeItem(RETURN_KEY); } catch { /* Storage is optional. */ }
+      clearDownload(file.id);
       setResult({error:null,done:true});
     })().catch(error=>{if(live&&!controller.signal.aborted)setResult({error:error instanceof Error?error.message:'Could not download this model.',done:false});});
     return()=>{live=false;controller.abort();};

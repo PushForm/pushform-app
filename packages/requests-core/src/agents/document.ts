@@ -4,7 +4,7 @@ import { guidanceHighlightSchema, guidanceListSchema, guidanceSidebarSchema } fr
 import type Anthropic from '@anthropic-ai/sdk';
 import {
   LAYOUT_API_VERSION, LAYOUT_TOOLS, MODEL_API_VERSION, MODEL_TOOLS, layoutBatchSchema, layoutGetDocumentSchema, layoutListSchema,
-  modelBatchToolSchema, modelGetDocumentSchema, modelQuerySchema,
+  modelBatchToolSchema, modelGetDocumentSchema, modelQuerySchema, modelViewSchema,
 } from '@pushform/extension-protocol';
 import { defineLooseTool, defineTool } from './client.ts';
 import type { AgentContext } from './store.ts';
@@ -29,6 +29,7 @@ export const modelDocumentTools: readonly Anthropic.Tool[] = [
   defineTool(MODEL_TOOLS.getDocument.name, MODEL_TOOLS.getDocument.description, modelGetDocumentSchema),
   defineTool(MODEL_TOOLS.query.name, MODEL_TOOLS.query.description, modelQuerySchema),
   defineLooseTool(MODEL_TOOLS.applyOperations.name, MODEL_TOOLS.applyOperations.description, modelBatchToolSchema),
+  defineLooseTool(MODEL_TOOLS.view.name, MODEL_TOOLS.view.description, modelViewSchema),
 ];
 
 /** Which document the turn may edit: none on Home, without editing support, or for an API version this backend does not speak. */
@@ -71,6 +72,7 @@ The requester has a 3D model open in the tab this message came from, and the mod
 - Every number in the tools is meters, in the coordinates of the container being edited, with z up; angles are degrees. Talk to the requester in the model's display units (displayUnits), convert their values to meters yourself, and never read a bare number as inches. "This", "it" and "the selection" mean the selection model_get_document reports.
 - You have no picture of the model; work from what the reads report. When what the requester refers to is ambiguous, for example two walls facing the same way for "the left wall", ask which one instead of guessing. Choose sensible sizes and spacing yourself otherwise.
 - Editing a component changes every placement of it. When an edit changes a component definition, say so and name how many placements it has.
+- Scenes and the camera: scene operations in model_apply_operations add, update, delete, rename, reorder and include scenes; model_view sets the camera, goes to a scene, and plays or stops the animation, with no undo entry. Change the view only when asked, or as the first step of a requested scene. For a scene of a described view ("a front view of the cabinet"), give add_scene a framed camera (direction, subject, margin) rather than moving the requester's view, and name the new scene in your reply. Use a framed camera whenever the request names what to show; use an exact camera only for a given eye and target. "This scene" and "the current scene" mean the active scene ("active"). Name a scene by its name unless names repeat; then use its id. When you delete scenes, name each one and say Undo restores them. When you start the animation, say that View › Animation › Stop Animation stops it.
 - Drawing, push/pull and solid operations are not available yet. When the requester asks for one, or an operation fails with unavailable or invalid_geometry, say plainly what cannot be done; never work around it by converting a solid into loose geometry.
 - After a successful edit, say in one or two plain sentences what changed and that Undo reverts it. Describe only what the tool reported; never claim a change that did not happen.
 - When a batch fails, nothing was changed. On stale_revision, read the model again and retry once. On any other error, correct the operation once if the message shows how; otherwise tell the requester briefly what could not be done.

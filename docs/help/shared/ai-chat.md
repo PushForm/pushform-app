@@ -35,6 +35,16 @@ In a 3D model the agent can:
 
 It cannot draw new geometry, push or pull faces, or combine solids yet. It says so when you ask for one of these.
 
+## Ask for scenes and camera views
+
+In a 3D model the agent can also manage scenes and the camera. Ask, for example, “Add a front view of the cabinet with the doors filling the frame”, “Make a top view called Plan”, “Delete this scene” or “Play the animation.”
+
+- **Scenes:** the agent can add, update, delete, rename and reorder scenes, choose what each scene saves, and choose which scenes play in the animation. These changes are undoable like any other change; one request is one undo step.
+- **Framing:** to make a scene of a view you describe, the agent works out the camera itself: it looks from the direction you name (top, front, iso and so on, or turned by an angle) and fits what you asked to show, such as the whole model, the selection, or particular groups. It saves the scene without moving your view.
+- **The view:** the agent can also move your camera, go to a scene or the next or previous one, and start or stop the animation. Moving the view does not add an undo step. To stop the animation yourself, choose **View › Animation › Stop Animation**.
+
+“This scene” means the active scene. When two scenes share a name, the agent tells them apart by their position. When it deletes scenes, it names each one, and **Undo** restores them.
+
 ## How the agent edits a 3D model
 
 The agent edits the group or component you have open, or the whole model when none is open. Editing a component changes every copy of it, and the agent says how many copies that is. It uses the model’s units when it talks to you. The agent cannot see the model, so it reads what is there and asks when your request could mean more than one thing, such as “the left wall” when two walls face the same way.

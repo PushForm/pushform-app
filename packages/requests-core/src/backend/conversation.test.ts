@@ -707,7 +707,7 @@ describe('document tools', () => {
     await (await call(editable.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'Group the shelves', document: { type: 'model', apiVersion: 1, edit: 1 } })).text();
     const first = anthropicOf(editable).calls[0]!;
     expect(first.model).toBe('claude-sonnet-5-5');
-    expect(toolNames(editable)).toEqual(expect.arrayContaining(['model_get_document', 'model_query', 'model_apply_operations']));
+    expect(toolNames(editable)).toEqual(expect.arrayContaining(['model_get_document', 'model_query', 'model_apply_operations', 'model_view']));
     expect(toolNames(editable).some(name => name.startsWith('layout_'))).toBe(false);
     const system = (first.system as { text: string }[])[0]!.text;
     expect(system).toContain('Editing the open 3D model');

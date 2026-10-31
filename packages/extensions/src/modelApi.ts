@@ -2,12 +2,14 @@
 // Copyright 2026 PushForm contributors
 import {
   activeTagOpt, applyTransformPlan, arrayMatrices, definitionBounds, hostOf, instanceCount, kernelOf, m4rotationAbout, m4scaleAbout,
-  planTransform, runTransformKernel, type CommandRegistry, type DocumentHost, type ExplodeResult, type MakeResult, type TransformKernelWork, type TransformPlan,
+  planTransform, runTransformKernel, sceneRuntimeOf, type CameraHost, type CameraState, type CommandRegistry, type DocumentHost, type ExplodeResult,
+  type MakeResult, type TransformKernelWork, type TransformPlan,
 } from '@pushform/commands';
 import {
   LOCAL_REFERENCE, MODEL_API_VERSION, MODEL_LIMITS, MODEL_PLANNED_OPERATIONS, MODEL_TOOLS, modelBatchSchema, modelOperationSchema, modelQuerySchema,
-  type ModelApiError, type ModelApiErrorCode, type ModelBatchResult, type ModelBounds, type ModelDocumentSnapshot, type ModelEntitySummary,
-  type ModelOperation, type ModelQueryResult, type ModelRef, type ModelRefInput, type ModelVec3,
+  modelViewSchema, type ModelApiError, type ModelApiErrorCode, type ModelBatchResult, type ModelBounds, type ModelCameraInput, type ModelCameraSummary,
+  type ModelDocumentSnapshot, type ModelEntitySummary, type ModelOperation, type ModelQueryResult, type ModelRef, type ModelRefInput, type ModelSceneSaves,
+  type ModelVec3, type ModelViewResult,
 } from '@pushform/extension-protocol';
 import {
   box3Empty, box3Expand, box3IsEmpty, m4invert, m4mul, m4transformPoint, m4translation, meshBounds, planeDistance, PushFormError, v3dot,
@@ -15,9 +17,10 @@ import {
 } from '@pushform/core';
 import {
   containerAt, contextMatrix, entityCounts, sketchFaceLoops,
-  type DocumentState, type EntityContainer, type EntityRef, type FaceRecord, type Rgb,
+  type DocumentState, type EntityContainer, type EntityRef, type FaceRecord, type Rgb, type Scene, type SceneFlags,
 } from '@pushform/model';
 import type { ToolCallResult } from './layoutApi';
+import { frameCamera } from './modelCamera';
 
 /** A structured API error; the message is safe to show to the user and to a model. */
 export class ModelApiFailure extends Error {
@@ -25,7 +28,7 @@ export class ModelApiFailure extends Error {
 }
 
 /** What a batch names with `as`: the entity's kind and id, and for a group or placement its definition. */
-interface Named { kind: ModelRef['kind'] | 'tag' | 'material'; id: number; definitionId?: number }
+interface Named { kind: ModelRef['kind'] | 'tag' | 'material' | 'scene'; id: number; definitionId?: number }
 type OpResult = Omit<ModelBatchResult['results'][number], 'op'> & { named?: Named };
 
 const DEFAULT_QUERY_LIMIT = 50;
@@ -73,8 +76,116 @@ export class ModelDocumentApi {
       }),
       tags: [...state.tags.values()].map(tag => ({ id: tag.id, name: tag.name, visible: tag.visible, color: hex(tag.color), active: tag.id === activeTagId, untagged: tag.id === state.defaultTagId })),
       materials: [...state.materials.values()].map(m => ({ id: m.id, name: m.name, color: hex(m.color), opacity: m.alpha, textured: m.texture !== null, isDefault: m.id === state.defaultMaterialId })),
-      scenes: state.sceneOrder.flatMap((id, index) => { const scene = state.scenes.get(id); return scene ? [{ name: scene.name, index }] : []; }),
+      scenes: state.sceneOrder.flatMap((id, index) => {
+        const scene = state.scenes.get(id);
+        return scene ? [{ id: scene.id, name: scene.name, description: scene.description, index, active: scene.id === this.runtime.activeSceneId, saves: savesOut(scene.flags), includeInAnimation: scene.includeInAnimation ?? true }] : [];
+      }),
+      camera: this.camera ? cameraOut(this.camera.getState()) : null,
+      playing: this.runtime.playing,
     };
+  }
+
+  /** Change what the requester sees: camera, scenes and playback. Makes no undo entry; rejects with `ModelApiFailure`. */
+  view(input: unknown): ModelViewResult {
+    const parsed = modelViewSchema.safeParse(input);
+    if (!parsed.success) throw this.failure('invalid_operation', zodMessage(parsed.error));
+    const camera = this.camera;
+    if (!camera) throw this.failure('unavailable', 'There is no viewport here, so the view cannot change.');
+    const action = parsed.data.action, runtime = this.runtime, path = [...this.host.context.path] as Id[];
+    let shown: CameraState | null = null;
+    if (action.type !== 'play' && action.type !== 'stop') runtime.stop();
+    switch (action.type) {
+      case 'set_camera':
+        shown = this.cameraFor(action.camera, path, this.resolver(path, new Map()).ref);
+        runtime.animateCamera(camera, shown, action.animate ?? true ? runtime.animationSettings.transitionSeconds : 0);
+        break;
+      case 'activate_scene': {
+        const scene = this.sceneOf(this.resolveScene(action.scene, new Map()));
+        this.commands.execute('scene.activate', { id: scene.id, animate: action.animate ?? true });
+        if (scene.flags.useCamera) shown = cameraFromScene(scene);
+        break;
+      }
+      case 'next_scene':
+      case 'previous_scene': {
+        const id = this.commands.execute(action.type === 'next_scene' ? 'scene.next' : 'scene.previous', {}) as number | null;
+        if (id === null) throw this.failure('invalid_operation', 'The model has no scenes.');
+        const scene = this.sceneOf(id);
+        if (scene.flags.useCamera) shown = cameraFromScene(scene);
+        break;
+      }
+      case 'play':
+        if (!this.commands.execute('scene.play', { play: true })) throw this.failure('invalid_operation', 'No scene is included in the animation.');
+        break;
+      case 'stop': this.commands.execute('scene.stop', {}); break;
+    }
+    const active = runtime.activeSceneId === null ? undefined : this.host.doc.state.scenes.get(runtime.activeSceneId as never);
+    return { ok: true, revision: this.revision, camera: cameraOut(shown ?? camera.getState()), activeScene: active ? { id: active.id, name: active.name } : null, playing: runtime.playing };
+  }
+
+  private get camera(): CameraHost | null { return this.commands.ctx.camera ?? null; }
+  private get runtime() { return sceneRuntimeOf(this.commands.ctx); }
+
+  private sceneOf(id: number): Scene {
+    const scene = this.host.doc.state.scenes.get(id as never);
+    if (!scene) throw this.failure('invalid_reference', `There is no scene ${id}. Call ${MODEL_TOOLS.getDocument.name} for current scenes.`);
+    return scene;
+  }
+
+  /** A scene by id, name (any case), "active", or "$name" of a scene added earlier in the batch. */
+  private resolveScene(input: number | string, names: ReadonlyMap<string, Named>): number {
+    if (typeof input === 'number') return this.sceneOf(input).id;
+    const local = LOCAL_REFERENCE.exec(input)?.[1];
+    if (local !== undefined) {
+      const found = names.get(local);
+      if (found?.kind !== 'scene') throw this.failure('invalid_reference', `"${input}" does not name a scene added earlier in this batch.`);
+      return this.sceneOf(found.id).id;
+    }
+    if (input.trim().toLowerCase() === 'active') {
+      const id = this.runtime.activeSceneId;
+      if (id === null || !this.host.doc.state.scenes.has(id as never)) throw this.failure('invalid_reference', 'No scene is active.');
+      return id;
+    }
+    const state = this.host.doc.state;
+    const matches = state.sceneOrder.flatMap((id, index) => {
+      const scene = state.scenes.get(id);
+      return scene && sameName(scene.name, input) ? [{ id: scene.id, index }] : [];
+    });
+    if (matches.length === 0) throw this.failure('invalid_reference', `There is no scene named "${input.trim()}". Call ${MODEL_TOOLS.getDocument.name} for current scenes.`);
+    if (matches.length > 1) throw this.failure('invalid_reference', `${matches.length} scenes are named "${input.trim()}" (${matches.map(m => `id ${m.id} at position ${m.index}`).join(', ')}); name one by id.`);
+    return matches[0]!.id;
+  }
+
+  private uniqueSceneName(name: string, except: number | null): void {
+    const taken = [...this.host.doc.state.scenes.values()].find(scene => scene.id !== except && sameName(scene.name, name));
+    if (taken) throw this.failure('invalid_operation', `A scene named "${taken.name}" already exists (id ${taken.id}); scene names are unique.`);
+  }
+
+  /** The camera an exact or framed request describes. Framing fits world bounds in the viewport's proportions. */
+  private cameraFor(input: ModelCameraInput, path: Id[], ref: (input: ModelRefInput) => EntityRef): CameraState {
+    const host = this.camera;
+    if (input.mode === 'exact') {
+      const current = host?.getState();
+      const fov = input.fovDeg ?? current?.fov ?? 35;
+      const distance = Math.hypot(input.eye[0] - input.target[0], input.eye[1] - input.target[1], input.eye[2] - input.target[2]);
+      if (distance < 1e-6) throw this.failure('invalid_operation', 'The camera\'s eye and target must differ.');
+      return { eye: input.eye, target: input.target, up: input.up ? unit(input.up) : [0, 0, 1], fov, projection: input.projection ?? current?.projection ?? 'perspective',
+        orthoHeight: input.viewHeight ?? 2 * distance * Math.tan((fov * Math.PI) / 360) };
+    }
+    if (!host) throw this.failure('unavailable', 'There is no viewport here, so a framed camera cannot be fitted; give an exact camera.');
+    const state = this.host.doc.state, subject = input.subject ?? 'model';
+    let box: Box3 | null = null;
+    if (subject === 'model') box = host.sceneBounds() ?? definitionBounds(state, state.rootDefinitionId) ?? { min: [-5, -5, 0], max: [5, 5, 2] };
+    else if (subject !== 'target') {
+      const refs = subject === 'selection' ? this.host.selection.refs : subject.refs.map(ref);
+      if (refs.length === 0) throw this.failure('invalid_operation', 'Nothing is selected to frame.');
+      const fit = box3Empty();
+      for (const r of refs) for (const p of worldPoints(state, r)) box3Expand(fit, p);
+      box = fit;
+      if (box3IsEmpty(fit)) throw this.failure('invalid_operation', 'The subject has no extent to frame.');
+    }
+    const { width, height } = host.viewportSize();
+    return frameCamera(host.getState(), { view: input.direction && input.direction !== 'current' ? input.direction : null, horizontalDeg: input.orbitDeg?.horizontal ?? 0,
+      verticalDeg: input.orbitDeg?.vertical ?? 0, box, margin: input.margin ?? 0.05, aspect: width / Math.max(1, height), projection: input.projection, fovDeg: input.fovDeg });
   }
 
   query(input: unknown): ModelQueryResult {
@@ -146,6 +257,7 @@ export class ModelDocumentApi {
     const host = this.host, undo = host.undoStack;
     const path = (batch.container ?? [...host.context.path]) as Id[];
     this.containerOrFail(path);
+    this.runtime.stop();
     const label = `${this.client}: ${batch.label}`;
     const names = new Map<string, Named>();
     const results: ModelBatchResult['results'] = [];
@@ -192,9 +304,9 @@ export class ModelDocumentApi {
     }
   }
 
-  private async run(op: ModelOperation, path: Id[], names: ReadonlyMap<string, Named>, label: string): Promise<OpResult> {
-    const host = this.host, undo = host.undoStack;
-    const exec = <T>(command: string, params: Record<string, unknown>): T => undo.withinGroup(() => this.commands.execute(command, params) as T);
+  /** Resolves `"$name"`s and entity references of the container at `path`. */
+  private resolver(path: Id[], names: ReadonlyMap<string, Named>) {
+    const host = this.host;
     const named = (value: string): Named => {
       const name = LOCAL_REFERENCE.exec(value)?.[1];
       const found = name === undefined ? undefined : names.get(name);
@@ -221,6 +333,19 @@ export class ModelDocumentApi {
       if (!exists) throw this.failure('invalid_reference', `There is no ${shown} in the container being edited. Call ${MODEL_TOOLS.query.name} for current ids.`);
       if (target.kind === 'face') return { kind: 'face', path, id: target.id as Id, faceId: (target as { faceId: number }).faceId as never, region: null };
       return { kind: target.kind as 'instance', path, id: target.id as Id };
+    };
+    return { named, ref };
+  }
+
+  private async run(op: ModelOperation, path: Id[], names: ReadonlyMap<string, Named>, label: string): Promise<OpResult> {
+    const host = this.host, undo = host.undoStack;
+    const exec = <T>(command: string, params: Record<string, unknown>): T => undo.withinGroup(() => this.commands.execute(command, params) as T);
+    const { named, ref } = this.resolver(path, names);
+    const sceneId = (input: number | string): number => this.resolveScene(input, names);
+    const capture = (camera: ModelCameraInput | undefined, what: string): CameraState | undefined => {
+      if (camera) return this.cameraFor(camera, path, ref);
+      if (!this.camera) throw this.failure('unavailable', `There is no viewport here, so ${what} needs an exact camera.`);
+      return undefined;
     };
     const refsOf = (inputs: readonly ModelRefInput[]): EntityRef[] => inputs.map(ref);
     const only = (refs: EntityRef[], kinds: readonly EntityRef['kind'][], what: string): EntityRef[] => {
@@ -316,6 +441,40 @@ export class ModelDocumentApi {
         const refs = only(refsOf(op.refs), ['face', 'body', 'sketchFace', 'instance'], 'Only faces, solids, groups and placements can be painted');
         return { count: exec<{ painted: number }>('paint.apply', { refs, materialId, side: op.side ?? 'front' }).painted };
       }
+      case 'add_scene': {
+        if (op.name) this.uniqueSceneName(op.name, null);
+        const camera = capture(op.camera, 'adding a scene');
+        const id = exec<number>('scene.add', { ...(op.name ? { name: op.name } : {}), ...(op.description !== undefined ? { description: op.description } : {}),
+          ...(op.saves ? { flags: flagsIn(op.saves) } : {}), ...(op.includeInAnimation !== undefined ? { includeInAnimation: op.includeInAnimation } : {}), ...(camera ? { camera } : {}) });
+        return { id, name: this.sceneOf(id).name, named: { kind: 'scene', id } };
+      }
+      case 'update_scene': {
+        const id = sceneId(op.scene), recapture = op.recapture ?? true;
+        const camera = recapture ? capture(op.camera, 'updating a scene') : undefined;
+        exec('scene.update', { id, recapture, ...(op.saves ? { flags: flagsIn(op.saves) } : {}), ...(camera ? { camera } : {}) });
+        return { id, name: this.sceneOf(id).name };
+      }
+      case 'delete_scene': {
+        const id = sceneId(op.scene), name = this.sceneOf(id).name;
+        exec('scene.delete', { id });
+        return { id, name };
+      }
+      case 'rename_scene': {
+        const id = sceneId(op.scene);
+        if (op.name) this.uniqueSceneName(op.name, id);
+        exec('scene.rename', { id, name: op.name ?? this.sceneOf(id).name, ...(op.description !== undefined ? { description: op.description } : {}) });
+        return { id, name: this.sceneOf(id).name };
+      }
+      case 'move_scene': {
+        const id = sceneId(op.scene);
+        exec('scene.move', { id, toIndex: op.index });
+        return { id, name: this.sceneOf(id).name };
+      }
+      case 'set_scene_animation': {
+        const id = sceneId(op.scene);
+        exec('scene.setIncludeInAnimation', { id, value: op.include });
+        return { id, name: this.sceneOf(id).name };
+      }
     }
   }
 
@@ -338,6 +497,56 @@ function errorCode(cause: unknown): ModelApiErrorCode {
   if (/invalidSolid|invalid_geometry|kernel/i.test(code)) return 'invalid_geometry';
   if (/missing|notFound|target/i.test(code)) return 'invalid_reference';
   return 'operation_failed';
+}
+
+const sameName = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+function cameraOut(c: CameraState): ModelCameraSummary {
+  return { eye: vec(c.eye), target: vec(c.target), up: vec(c.up), projection: c.projection, fovDeg: round(c.fov), viewHeight: round(c.orthoHeight) };
+}
+function cameraFromScene(scene: Scene): CameraState {
+  const c = scene.camera;
+  return { eye: c.eye, target: c.target, up: c.up, fov: c.fov, projection: c.perspective ? 'perspective' : 'parallel', orthoHeight: c.height };
+}
+
+const SAVES: readonly [keyof ModelSceneSaves, keyof SceneFlags][] = [
+  ['camera', 'useCamera'], ['hiddenGeometry', 'useHiddenGeometry'], ['hiddenObjects', 'useHiddenObjects'], ['tags', 'useTags'],
+  ['style', 'useStyle'], ['shadows', 'useShadows'], ['sectionPlanes', 'useSectionPlanes'], ['axes', 'useAxes'],
+];
+function savesOut(flags: SceneFlags): ModelSceneSaves {
+  return Object.fromEntries(SAVES.map(([out, flag]) => [out, flags[flag]])) as unknown as ModelSceneSaves;
+}
+function flagsIn(saves: Partial<Record<keyof ModelSceneSaves, boolean | undefined>>): Partial<SceneFlags> {
+  return Object.fromEntries(SAVES.flatMap(([out, flag]) => (saves[out] === undefined ? [] : [[flag, saves[out]]])));
+}
+
+/** Points that bound an entity, in model coordinates; kinds without extent give none. */
+function worldPoints(state: DocumentState, ref: EntityRef): Vec3[] {
+  let container: EntityContainer;
+  try { container = containerAt(state, ref.path); } catch { return []; }
+  const local: Vec3[] = (() => {
+    switch (ref.kind) {
+      case 'instance': {
+        const inst = container.instances.get(ref.id);
+        const bounds = inst ? definitionBounds(state, inst.definitionId) : null;
+        return inst && bounds ? corners(bounds).map(c => m4transformPoint(inst.transform, c)) : [];
+      }
+      case 'body': { const body = container.bodies.get(ref.id); return body ? corners(meshBounds(body.mesh)) : []; }
+      case 'face': return [...(container.bodies.get(ref.id)?.faces.get(ref.faceId)?.loops[0] ?? [])];
+      case 'sketchEdge': {
+        const edge = container.sketch.edges.get(ref.id);
+        return edge ? [container.sketch.vertices.get(edge.a)!.p, container.sketch.vertices.get(edge.b)!.p] : [];
+      }
+      case 'sketchFace': { const face = container.sketch.faces.get(ref.id); return face ? [...(sketchFaceLoops(container.sketch, face)[0] ?? [])] : []; }
+      case 'guide': {
+        const guide = container.guides.get(ref.id);
+        return !guide ? [] : guide.kind === 'segment' ? [guide.origin, guide.end] : [guide.origin];
+      }
+      default: return [];
+    }
+  })();
+  const frame = contextMatrix(state, ref.path);
+  return local.map(p => m4transformPoint(frame, p));
 }
 
 /** Selections and command results may hold kinds the API does not model yet; they keep their own kind names. */
@@ -432,6 +641,7 @@ export async function runModelTool(api: ModelDocumentApi, name: string, input: u
       case MODEL_TOOLS.getDocument.name: return { content: JSON.stringify(api.getDocument()), isError: false };
       case MODEL_TOOLS.query.name: return { content: JSON.stringify(api.query(input)), isError: false };
       case MODEL_TOOLS.applyOperations.name: return { content: JSON.stringify(await api.apply(input, signal)), isError: false };
+      case MODEL_TOOLS.view.name: return { content: JSON.stringify(api.view(input)), isError: false };
       default: return { content: JSON.stringify({ ok: false, error: { code: 'invalid_operation', message: `Unknown model tool "${name}".`, revision: api.revision } }), isError: true };
     }
   } catch (cause) {

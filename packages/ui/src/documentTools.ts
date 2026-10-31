@@ -38,7 +38,7 @@ export function documentToolsFor(session: DocumentSession, tab: DocumentTab, ope
     const api = new ModelDocumentApi(tab.app.commands, CLIENT);
     return {
       document: { type: 'model', apiVersion: MODEL_API_VERSION, edit: 1, ...(guidance ? { guidance: 1 as const } : {}) },
-      progress: call => (call.name === MODEL_TOOLS.applyOperations.name ? 'Applying the change…' : undefined),
+      progress: call => (call.name === MODEL_TOOLS.applyOperations.name ? 'Applying the change…' : call.name === MODEL_TOOLS.view.name ? 'Changing the view…' : undefined),
       run: async (call, signal) => {
         if (guidance && call.name.startsWith('ui_')) return guidance(call.name, call.input, signal, call.id);
         const refused = gone(session, tab, api.revision);

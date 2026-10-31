@@ -313,6 +313,12 @@ const FlagsSchema = z.object({
   useAxes: z.boolean().optional(),
 });
 const idSchema = z.number().int().nonnegative();
+const vec3Schema = z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]);
+/** A camera to save instead of the current view (the model API saves framed cameras without moving the viewport). */
+export const SceneCameraSchema = z.object({
+  eye: vec3Schema, target: vec3Schema, up: vec3Schema, fov: z.number().min(1).max(120),
+  projection: z.enum(['perspective', 'parallel']), orthoHeight: z.number().positive(),
+});
 
 function cameraOrNull(ctx: CommandContext): CameraState | null {
   return ctx.camera ? ctx.camera.getState() : null;
@@ -348,11 +354,11 @@ export const sceneAdd = defineCommand({
   title: 'Add Scene',
   category: 'view',
   menu: 'View',
-  params: z.object({ name: z.string().optional(), description: z.string().optional(), flags: FlagsSchema.optional(), includeInAnimation: z.boolean().optional() }),
+  params: z.object({ name: z.string().optional(), description: z.string().optional(), flags: FlagsSchema.optional(), includeInAnimation: z.boolean().optional(), camera: SceneCameraSchema.optional() }),
   undoable: true,
   run(ctx, p): number {
     const host = hostOf(ctx);
-    const camera = cameraOrNull(ctx);
+    const camera = p.camera ?? cameraOrNull(ctx);
     const id = host.edit('Add Scene', (draft) => {
       const state = draftState(draft);
       const id = allocId<SceneId>(draft);
@@ -385,6 +391,8 @@ export const sceneUpdate = defineCommand({
     description: z.string().optional(),
     /** Re-capture the current view (default). False only changes flags/name/description. */
     recapture: z.boolean().default(true),
+    /** Save this camera instead of the current one when re-capturing. */
+    camera: SceneCameraSchema.optional(),
   }),
   undoable: true,
   run(ctx, p): void {
@@ -392,7 +400,7 @@ export const sceneUpdate = defineCommand({
     const runtime = sceneRuntimeOf(ctx);
     const id = p.id ?? runtime.activeSceneId;
     if (id === null) throw new PushFormError('scene.none', 'No scene to update');
-    const camera = cameraOrNull(ctx);
+    const camera = p.camera ?? cameraOrNull(ctx);
     host.edit('Update Scene', (draft) => {
       const state = draftState(draft);
       const scene = sceneOf(state, id);

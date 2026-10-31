@@ -8,7 +8,7 @@ import { useAppStore } from '../store';
 import { Icon } from './Icon';
 import { ToolButton } from './ToolButton';
 import { ToolStack } from './ToolStack';
-import { TOOLBAR_LAYOUT, resolveSlots } from './toolbarLayout';
+import { resolveGroups } from './toolbarLayout';
 
 /** Horizontal tool row beneath document tabs, ordered by `TOOLBAR_LAYOUT`. */
 export function MainToolbar(): JSX.Element {
@@ -22,8 +22,8 @@ export function MainToolbar(): JSX.Element {
     return app.commands.events.on('registered', refresh);
   }, [app]);
 
-  const slots = useMemo(
-    () => resolveSlots(TOOLBAR_LAYOUT, commands, (id) => app.keymap.label(id)),
+  const groups = useMemo(
+    () => resolveGroups(commands, (id) => app.keymap.label(id)),
     [app, commands],
   );
 
@@ -33,39 +33,57 @@ export function MainToolbar(): JSX.Element {
   };
 
   return (
-    <nav className="pf-toolbar" data-orientation="horizontal" aria-label="Tools">
-      {slots.map((slot, i) => {
-        if (slot.kind === 'sep') return <div key={`sep-${i}`} className="pf-toolbar-sep" />;
-        if (slot.kind === 'stack') {
-          return (
-            <ToolStack
-              key={slot.title}
-              title={slot.title}
-              tools={slot.tools}
-              activeId={activeToolId ?? ''}
-              onSelect={(id) => {
-                const item = slot.tools.find((t) => t.id === id);
-                if (item) activate(item.commandId);
-              }}
-            />
-          );
-        }
-        const t = slot.tool;
-        return (
-          <ToolButton
-            key={t.id}
-            data-guidance-id={`toolbar:${t.id}`}
-            type="button"
-            className={`pf-toolbtn${activeToolId === t.id ? ' is-active' : ''}`}
-            title={t.key ? `${t.title} (${t.key})` : t.title}
-            aria-label={t.title}
-            aria-pressed={activeToolId === t.id}
-            onClick={() => activate(t.commandId)}
-          >
-            <Icon name={t.icon} size={24} />
-          </ToolButton>
-        );
-      })}
+    <nav
+      className="pf-toolbar pf-modeling-ribbon pf-layout-ribbon"
+      data-orientation="horizontal"
+      aria-label="Tools"
+    >
+      {groups.map((group) => (
+        <div
+          key={group.title}
+          className="pf-layout-ribbon-group"
+          role="group"
+          aria-label={group.title}
+        >
+          <div className="pf-layout-ribbon-buttons">
+            {group.slots.map((slot, i) => {
+              if (slot.kind === 'sep') return <div key={`sep-${i}`} className="pf-toolbar-sep" />;
+              if (slot.kind === 'stack') {
+                return (
+                  <ToolStack
+                    key={slot.title}
+                    title={slot.title}
+                    tools={slot.tools}
+                    activeId={activeToolId ?? ''}
+                    onSelect={(id) => {
+                      const item = slot.tools.find((t) => t.id === id);
+                      if (item) activate(item.commandId);
+                    }}
+                  />
+                );
+              }
+              const t = slot.tool;
+              return (
+                <ToolButton
+                  key={t.id}
+                  data-guidance-id={`toolbar:${t.id}`}
+                  type="button"
+                  className={`pf-toolbtn${activeToolId === t.id ? ' is-active' : ''}`}
+                  title={t.key ? `${t.title} (${t.key})` : t.title}
+                  aria-label={t.title}
+                  aria-pressed={activeToolId === t.id}
+                  onClick={() => activate(t.commandId)}
+                >
+                  <Icon name={t.icon} size={24} />
+                </ToolButton>
+              );
+            })}
+          </div>
+          <span className="pf-layout-ribbon-caption" aria-hidden="true">
+            {group.title}
+          </span>
+        </div>
+      ))}
     </nav>
   );
 }

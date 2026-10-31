@@ -100,6 +100,25 @@ describe('MainToolbar', () => {
         <MainToolbar />
       </AppContext.Provider>,
     );
+    expect(screen.getAllByRole('group').map((group) => group.getAttribute('aria-label'))).toEqual([
+      'Transform',
+      'Draw',
+      'Modify',
+      'Measure',
+      'Organize',
+      'View',
+      'More',
+    ]);
+    expect(
+      screen
+        .getByRole('group', { name: 'Transform' })
+        .contains(screen.getByRole('button', { name: 'Move' })),
+    ).toBe(true);
+    expect(
+      screen
+        .getByRole('group', { name: 'Modify' })
+        .contains(screen.getByRole('button', { name: /^Push\/Pull/ })),
+    ).toBe(true);
     // stacked tools are not individual toolbar buttons
     const names = () => screen.getAllByRole('button').map((b) => b.getAttribute('aria-label'));
     expect(names()).not.toContain('Freehand');

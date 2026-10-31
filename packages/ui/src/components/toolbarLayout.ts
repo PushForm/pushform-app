@@ -21,38 +21,70 @@ const stack = (title: string, ...entries: SlotEntry[]): Slot => ({ kind: 'stack'
 const command = (command: string, icon: string): SlotEntry => ({ command, icon });
 const SEP: Slot = { kind: 'sep' };
 
-export const TOOLBAR_LAYOUT: readonly Slot[] = [
-  stack('Select', 'select', 'lasso'),
-  tool('eraser'),
-  SEP,
-  stack('Line', 'line', 'freehand'),
-  stack('Shape', 'rectangle', 'rotrect', 'circle', 'polygon'),
-  stack('Arc', 'arc', 'arc2', 'arc3', 'pie'),
-  SEP,
-  tool('pushpull'),
-  tool('offset'),
-  tool('move'),
-  tool('rotate'),
-  tool('scale'),
-  tool('followme'),
-  stack('Edge', 'fillet', 'chamfer'),
-  stack(
-    'Solid',
-    'solid.outerShell',
-    'solid.union',
-    'solid.subtract',
-    'solid.trim',
-    'solid.intersect',
-    'solid.split',
-  ),
-  SEP,
-  stack('Measure', 'tape', 'dimension', 'text', command('ui.text3d', 'tool-text3d'), 'protractor', 'axes'),
-  tool('paint'),
-  tool('tag'),
-  SEP,
-  stack('Camera', 'orbit', 'pan'),
-  stack('Zoom', 'zoom', 'zoomWindow', command('camera.zoomExtents', 'zoom-extents')),
+export const TOOLBAR_GROUPS: readonly { title: string; slots: readonly Slot[] }[] = [
+  {
+    title: 'Transform',
+    slots: [
+      stack('Select', 'select', 'lasso'),
+      tool('move'),
+      tool('rotate'),
+      tool('scale'),
+      tool('eraser'),
+    ],
+  },
+  {
+    title: 'Draw',
+    slots: [
+      stack('Line', 'line', 'freehand'),
+      stack('Shape', 'rectangle', 'rotrect', 'circle', 'polygon'),
+      stack('Arc', 'arc', 'arc2', 'arc3', 'pie'),
+    ],
+  },
+  {
+    title: 'Modify',
+    slots: [
+      tool('pushpull'),
+      tool('offset'),
+      tool('followme'),
+      stack('Edge', 'fillet', 'chamfer'),
+      stack(
+        'Solid',
+        'solid.outerShell',
+        'solid.union',
+        'solid.subtract',
+        'solid.trim',
+        'solid.intersect',
+        'solid.split',
+      ),
+    ],
+  },
+  {
+    title: 'Measure',
+    slots: [
+      stack(
+        'Measure',
+        'tape',
+        'dimension',
+        'text',
+        command('ui.text3d', 'tool-text3d'),
+        'protractor',
+        'axes',
+      ),
+    ],
+  },
+  { title: 'Organize', slots: [tool('paint'), tool('tag')] },
+  {
+    title: 'View',
+    slots: [
+      stack('Camera', 'orbit', 'pan'),
+      stack('Zoom', 'zoom', 'zoomWindow', command('camera.zoomExtents', 'zoom-extents')),
+    ],
+  },
 ];
+
+export const TOOLBAR_LAYOUT: readonly Slot[] = TOOLBAR_GROUPS.flatMap((group, index) =>
+  index === 0 ? [...group.slots] : [SEP, ...group.slots],
+);
 
 /** Tools reachable only from elsewhere (context menus, panels); never shown as toolbar buttons. */
 const NOT_IN_TOOLBAR: ReadonlySet<string> = new Set(['texturePosition']);
@@ -77,6 +109,7 @@ export function resolveSlots(
   layout: readonly Slot[],
   commands: readonly CommandInfo[],
   keyOf: (commandId: string) => string | null | undefined,
+  appendUnlisted = true,
 ): ResolvedSlot[] {
   const byCommand = new Map<string, CommandInfo>(commands.map((c) => [c.id, c]));
   const tools = new Map<string, ToolbarItem>();
@@ -122,10 +155,34 @@ export function resolveSlots(
     else out.push({ kind: 'stack', title: slot.title, tools });
   }
   const leftovers = [...tools.values()].filter((t) => !used.has(t.id) && !NOT_IN_TOOLBAR.has(t.id));
-  if (leftovers.length > 0) {
+  if (appendUnlisted && leftovers.length > 0) {
     pushSep();
     for (const t of leftovers) out.push({ kind: 'tool', tool: t });
   }
   while (out.length > 0 && out[out.length - 1]!.kind === 'sep') out.pop();
   return out;
+}
+
+/** Keep unlisted registered tools accessible in a final group. */
+export function resolveGroups(
+  commands: readonly CommandInfo[],
+  keyOf: (id: string) => string | null | undefined,
+): { title: string; slots: ResolvedSlot[] }[] {
+  const remaining = new Set(commands.map((c) => c.id));
+  const groups = TOOLBAR_GROUPS.map((group) => {
+    const slots = resolveSlots(group.slots, commands, keyOf, false);
+    for (const slot of slots) {
+      if (slot.kind === 'sep') continue;
+      for (const item of slot.kind === 'tool' ? [slot.tool] : slot.tools)
+        remaining.delete(item.commandId);
+    }
+    return { title: group.title, slots };
+  }).filter((group) => group.slots.length > 0);
+  const extra = resolveSlots(
+    [],
+    commands.filter((c) => remaining.has(c.id)),
+    keyOf,
+  );
+  if (extra.length > 0) groups.push({ title: 'More', slots: extra });
+  return groups;
 }

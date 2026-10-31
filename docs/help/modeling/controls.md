@@ -1,5 +1,7 @@
 # Modeling toolbar controls and their purpose
 
+The modeling ribbon groups tools into **Transform**, **Draw**, **Modify**, **Measure**, **Organize**, and **View**, with names below the buttons. Open a button’s arrow for related tools. Scroll horizontally if the ribbon does not fit your window. Additional tools appear in **More** when available.
+
 ## Select, Eraser and drawing tools
 
 **Select** chooses existing model entities. **Lasso**, in Select's stack, chooses with a drawn outline. **Eraser** removes eligible sketch entities and dividing edges; a solid's actual boundary cannot simply be erased away.

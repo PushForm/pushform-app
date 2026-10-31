@@ -13,9 +13,9 @@ import { cameraBasis, cameraDistance, cameraOrbit, DEG } from '@pushform/render'
  */
 
 /** Widget size in CSS px. */
-export const NAV_CUBE_SIZE = 132;
+export const NAV_CUBE_SIZE = 144;
 /** Pixels per cube unit inside the widget. */
-export const NAV_CUBE_SCALE = 30;
+export const NAV_CUBE_SCALE = 36;
 /** Pointer travel (px) that turns a press into an orbit drag. */
 export const NAV_CUBE_DRAG_PX = 3;
 /** Arrow step. */
@@ -113,7 +113,7 @@ export interface NavCubePicture {
 }
 
 /** Fraction of a face's half-width cut off along each edge: the bevel that is the edge's and corner's click region. */
-export const NAV_CUBE_CHAMFER = 0.17;
+export const NAV_CUBE_CHAMFER = 0.26;
 const INSET = 1 - NAV_CUBE_CHAMFER;
 
 /** The polygon of a region on the chamfered cube: an inset square, a bevel strip or a corner triangle. */

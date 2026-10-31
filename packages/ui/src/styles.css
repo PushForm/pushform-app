@@ -678,8 +678,8 @@
   position: absolute;
   top: 34px;
   right: 12px;
-  width: 132px;
-  height: 132px;
+  width: 144px;
+  height: 144px;
   z-index: 5;
   user-select: none;
   touch-action: none;
@@ -704,7 +704,7 @@
 }
 .pf-nav-cube-label {
   pointer-events: none;
-  font: 700 0.4px var(--pf-font);
+  font: 700 0.36px var(--pf-font);
   fill: #2b3440;
   text-anchor: middle;
   dominant-baseline: central;

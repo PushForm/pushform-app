@@ -19,7 +19,7 @@ describe('navigation cube regions', () => {
     expect(navCubeRegion('top+front')).toBeUndefined();
   });
 
-  it('draws the inset faces and bevels that face the viewer, each region once, and labels the visible faces', () => {
+  it('draws the faces, edge bevels and hexagonal corners that face the viewer, each once, and labels the visible faces', () => {
     const iso = navCubePicture(DEFAULT_CAMERA);
     const ids = iso.cells.map((c) => c.region.id);
     expect(new Set(ids).size).toBe(ids.length);
@@ -32,9 +32,15 @@ describe('navigation cube regions', () => {
     const front = navCubePicture(cameraStandardView(DEFAULT_CAMERA, 'front'));
     expect(front.cells).toHaveLength(9);
     expect(front.cells.every((c) => c.region.faces.some((f) => f.id === 'front'))).toBe(true);
+    // Corner cuts trim the face to an octagon; corners are hexagons and edge bevels rectangles.
     const face = front.cells.find((c) => c.region.id === 'front')!;
-    expect(face.points).toHaveLength(4);
+    expect(face.points).toHaveLength(8);
     expect(face.light).toBeGreaterThan(0.6);
+    expect(front.cells.find((c) => c.region.id === 'front+right+top')!.points).toHaveLength(6);
+    expect(front.cells.find((c) => c.region.id === 'front+top')!.points).toHaveLength(4);
+    // The corner hexagon is a real target: wider than a fifth of the face.
+    const width = (pts: readonly (readonly [number, number])[]) => Math.max(...pts.map((p) => p[0])) - Math.min(...pts.map((p) => p[0]));
+    expect(width(front.cells.find((c) => c.region.id === 'front+right+top')!.points)).toBeGreaterThan(width(face.points) / 5);
     // Seen straight on, the Front label reads left to right and upright (y down in label space).
     const m = front.labels[0]!.matrix;
     expect(m[0]).toBeCloseTo(1, 9);

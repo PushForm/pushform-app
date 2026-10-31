@@ -2,13 +2,13 @@
 // Copyright 2026 PushForm contributors
 import type { CameraState } from '@pushform/commands';
 import type { MVec3, Vec3 } from '@pushform/core';
-import { v3add, v3addScaled, v3cross, v3dot, v3normalize, v3scale } from '@pushform/core';
+import { v3add, v3addScaled, v3cross, v3dot, v3len, v3normalize, v3scale, v3sub } from '@pushform/core';
 import { cameraBasis, cameraDistance, cameraOrbit, DEG } from '@pushform/render';
 
 /**
  * Navigation cube geometry and camera moves. The cube is an orthographic picture of the unit cube
- * [-1, 1]³ with chamfered edges, drawn from the camera's direction: the six inset faces, the twelve
- * edge bevels and the eight corner bevels are the 26 click regions. Its design follows FreeCAD's
+ * [-1, 1]³ with its edges and corners cut off, drawn from the camera's direction: the six faces, the
+ * twelve edge bevels and the eight hexagonal corners are the 26 click regions. Its design follows FreeCAD's
  * navigation cube; the code is PushForm's own.
  */
 
@@ -112,29 +112,45 @@ export interface NavCubePicture {
   readonly axes: readonly NavCubeAxis[];
 }
 
-/** Fraction of a face's half-width cut off along each edge: the bevel that is the edge's and corner's click region. */
-export const NAV_CUBE_CHAMFER = 0.26;
-const INSET = 1 - NAV_CUBE_CHAMFER;
+/**
+ * The solid is the unit cube cut by 26 planes: the faces at distance 1 along their normals, the
+ * edge bevels where the two faces' coordinates sum to `EDGE_CUT`, and the corner cuts where all
+ * three sum to `CORNER_CUT`. The corner cut reaches into the faces and the edge bevels, so corners
+ * are hexagons, faces octagons and edge bevels rectangles, and every region is a comfortable target.
+ */
+export const NAV_CUBE_EDGE_CUT = 1.72;
+export const NAV_CUBE_CORNER_CUT = 2.2;
 
-/** The polygon of a region on the chamfered cube: an inset square, a bevel strip or a corner triangle. */
+/** The half-space of a region: `normal · p ≤ cut`, with the region's unnormalized normal. */
+function cutOf(r: NavCubeRegion): number {
+  return r.kind === 'face' ? 1 : r.kind === 'edge' ? NAV_CUBE_EDGE_CUT : NAV_CUBE_CORNER_CUT;
+}
+
+/** Sutherland–Hodgman clip of a convex polygon against `n · p ≤ d`. */
+function clip(poly: Vec3[], n: Vec3, d: number): Vec3[] {
+  const out: Vec3[] = [];
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i]!, b = poly[(i + 1) % poly.length]!;
+    const da = v3dot(n, a) - d, db = v3dot(n, b) - d;
+    if (da <= 0) out.push(a);
+    if ((da < 0 && db > 0) || (da > 0 && db < 0)) out.push(v3addScaled(a, v3sub(b, a), da / (da - db)));
+  }
+  return out;
+}
+
+/** The polygon of a region: its plane clipped by every other region's half-space. */
 function regionPolygon(r: NavCubeRegion): Vec3[] {
-  const n = r.faces.map((f) => f.normal);
-  if (r.kind === 'face') {
-    const f = r.faces[0]!;
-    return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([i, j]) => v3add(f.normal, v3add(v3scale(f.u, INSET * i!), v3scale(f.v, INSET * j!))));
+  const nn = v3normalize(r.normal);
+  const helper: Vec3 = Math.abs(nn[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
+  const u = v3normalize(v3cross(nn, helper));
+  const v = v3cross(nn, u);
+  const c = v3scale(nn, cutOf(r) / v3len(r.normal));
+  let poly: Vec3[] = [[3, 3], [-3, 3], [-3, -3], [3, -3]].map(([i, j]) => v3add(c, v3add(v3scale(u, i!), v3scale(v, j!))));
+  for (const o of NAV_CUBE_REGIONS) {
+    if (o === r) continue;
+    poly = clip(poly, o.normal, cutOf(o));
   }
-  if (r.kind === 'edge') {
-    const [a, b] = n as [Vec3, Vec3];
-    const t = v3cross(a, b);
-    return [
-      v3add(v3addScaled(a, b, INSET), v3scale(t, INSET)),
-      v3add(v3addScaled(a, b, INSET), v3scale(t, -INSET)),
-      v3add(v3addScaled(b, a, INSET), v3scale(t, -INSET)),
-      v3add(v3addScaled(b, a, INSET), v3scale(t, INSET)),
-    ];
-  }
-  const [a, b, c] = n as [Vec3, Vec3, Vec3];
-  return [v3add(a, v3scale(v3add(b, c), INSET)), v3add(b, v3scale(v3add(a, c), INSET)), v3add(c, v3scale(v3add(a, b), INSET))];
+  return poly;
 }
 
 /** The visible regions' polygons, the face labels and the axis triad for the camera's direction. */

@@ -20,8 +20,6 @@ interface StepChild { product: number; matrix: MMat4; name: string }
 export interface StepProduct { name: string; parts: StepPart[]; children: StepChild[] }
 export interface StepScene { name: string; products: StepProduct[]; root: number; notes: string[]; parts: number }
 
-const IDENTITY: MMat4 = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
-
 /** Whether a placement is a rotation and a translation, which STEP's item-defined transformation can state. */
 function isRigid(m: MMat4): boolean {
   const column = (c: number): Vec3 => [m[c * 4]!, m[c * 4 + 1]!, m[c * 4 + 2]!];

@@ -49,6 +49,22 @@ describe('glTF, OBJ and COLLADA export UI', () => {
     expect(strFromU8(write.mock.calls[1]![0] as Uint8Array)).toContain('<COLLADA');
   });
 
+  it('exports STEP from the Main menu, asking for the file first and keeping the dialog until it is written', async () => {
+    const { write, close, savePicker, base } = setup();
+    fireEvent.click(screen.getByRole('button', { name: 'Main menu' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Export…' }));
+    fireEvent.change(screen.getByLabelText('Format'), { target: { value: 'step' } });
+    expect(screen.queryByLabelText('Units')).toBeNull();
+    screen.getByText(/STEP files are written in millimeters/);
+    fireEvent.click(screen.getByRole('button', { name: 'Export…' }));
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
+    expect(savePicker).toHaveBeenLastCalledWith(expect.objectContaining({ suggestedName: `${base}.step` }));
+    const text = strFromU8(write.mock.calls[0]![0] as Uint8Array);
+    expect(text).toMatch(/^ISO-10303-21;/);
+    expect(text).toContain('MANIFOLD_SOLID_BREP');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Export' })).toBeNull());
+  });
+
   it('exports OBJ in the chosen unit and up axis from command search, remembering them', async () => {
     const { write, close, base } = setup();
     const search = screen.getByRole('combobox', { name: 'Search tools and commands' });
@@ -79,7 +95,7 @@ it('offers one Export menu item and switches formats inside the same dialog, ret
   expect(screen.getAllByRole('menuitem').filter(item => item.textContent?.startsWith('Export'))).toHaveLength(1);
   fireEvent.click(screen.getByRole('menuitem', { name: 'Export…' }));
   const dialog = screen.getByRole('dialog', { name: 'Export' });
-  expect([...screen.getByLabelText<HTMLSelectElement>('Format').options].map(option => option.value)).toEqual(['pf', 'stl', 'gltf', 'obj', 'collada', 'png', 'jpeg']);
+  expect([...screen.getByLabelText<HTMLSelectElement>('Format').options].map(option => option.value)).toEqual(['pf', 'stl', 'gltf', 'obj', 'collada', 'step', 'png', 'jpeg']);
   fireEvent.change(screen.getByLabelText('Format'), { target: { value: 'obj' } });
   fireEvent.change(screen.getByLabelText('Units'), { target: { value: 'cm' } });
   fireEvent.click(screen.getByLabelText('Z up'));

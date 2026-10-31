@@ -7,7 +7,7 @@ import { chooseSaveTarget } from '../saveFile';
 import { keepProportions, modelImageFileName, modelImageSize, modelImageSizeError, renderModelImage, type ModelImageChoice, type ModelImageRenderer } from './modelImageExport';
 
 export type ModelExportFormat = 'gltf' | 'obj' | 'collada';
-export type ModelExportDialogFormat = ModelExportFormat | 'pf' | 'stl' | 'png' | 'jpeg' | 'image';
+export type ModelExportDialogFormat = ModelExportFormat | 'step' | 'pf' | 'stl' | 'png' | 'jpeg' | 'image';
 export interface ModelExportChoice { unit: MeshUnit; up: 'z' | 'y'; selectionOnly: boolean }
 export interface StlExportChoice { unit: MeshUnit; format: StlFormat; selectionOnly: boolean }
 let stlRemembered: { unit: MeshUnit; format: StlFormat } = { unit: 'mm', format: 'binary' };
@@ -15,6 +15,7 @@ let objRemembered: { unit: MeshUnit; up: 'z' | 'y' } = { unit: 'm', up: 'y' };
 const HINTS = {
   gltf: 'glTF files are always in meters with Y up; textures are embedded in the .glb file.',
   obj: 'OBJ files store no unit. The .zip holds the .obj file with its .mtl material file and texture images.',
+  step: 'STEP files are written in millimeters. Parts keep their names and colors, components become assemblies, and curved surfaces are written as flat facets. Mesh parts are written as faceted solids.',
   collada: 'COLLADA files are written in meters with Z up; a model with textures is a .zip holding the .dae file and its images.',
   stl: 'STL files store no unit; most 3D printing software reads them as millimeters.',
 };
@@ -25,7 +26,7 @@ let remembered: Omit<ModelImageChoice, 'width' | 'height'> & { width: number | n
 /** One export setup for model geometry and viewport images. */
 export function ModelExportDialog({ modelName, view, render, onClose, initialFormat, hasSelection, onGeometryExport, encodeNative }: {
   initialFormat: ModelExportDialogFormat; hasSelection: boolean; encodeNative: () => Uint8Array | Promise<Uint8Array>;
-  onGeometryExport: (format: ModelExportFormat | 'stl', choice: ModelExportChoice, stlFormat: StlFormat) => void;
+  onGeometryExport: (format: ModelExportFormat | 'step' | 'stl', choice: ModelExportChoice, stlFormat: StlFormat) => void | Promise<void>;
   modelName: string; view: { width: number; height: number }; render: ModelImageRenderer; onClose: () => void;
 }): JSX.Element {
   const [format, setFormat] = useState<Exclude<ModelExportDialogFormat, 'image'>>(initialFormat === 'image' ? remembered.format : initialFormat);
@@ -101,13 +102,18 @@ export function ModelExportDialog({ modelName, view, render, onClose, initialFor
     if (image || format === 'pf') { void exportFile(); return; }
     if (format === 'stl') stlRemembered = { unit: stlUnit, format: stlFormat };
     if (format === 'obj') objRemembered = { unit: objUnit, up };
-    onGeometryExport(format, { unit: format === 'stl' ? stlUnit : objUnit, up, selectionOnly: hasSelection && selectionOnly }, stlFormat);
+    const result = onGeometryExport(format, { unit: format === 'stl' ? stlUnit : objUnit, up, selectionOnly: hasSelection && selectionOnly }, stlFormat);
+    // STEP takes a while: the dialog stays open, busy, until the file is written; Cancel stops it.
+    if (!result) return;
+    setBusy(true); setError(null);
+    result.then(() => { if (open.current) closeRef.current(); }, cause => { if (open.current) setError(cause instanceof Error ? cause.message : String(cause)); })
+      .finally(() => { if (open.current) setBusy(false); });
   };
   return createPortal(<div className="pf-modal-backdrop">
     <div ref={dialog} className="pf-modal pf-stl-export-dialog pf-image-export-dialog" role="dialog" aria-modal="true" aria-labelledby="image-export-title">
       <h2 id="image-export-title">Export</h2>
       <label>Format<select value={format} disabled={busy} onChange={event => setFormat(event.target.value as Exclude<ModelExportDialogFormat, 'image'>)}>
-        <option value="pf">PushForm Model (.pf)</option><option value="stl">STL (.stl)</option><option value="gltf">glTF (.glb)</option><option value="obj">OBJ (.zip)</option><option value="collada">COLLADA (.dae)</option><option value="png">PNG</option><option value="jpeg">JPEG</option>
+        <option value="pf">PushForm Model (.pf)</option><option value="stl">STL (.stl)</option><option value="gltf">glTF (.glb)</option><option value="obj">OBJ (.zip)</option><option value="collada">COLLADA (.dae)</option><option value="step">STEP (.step)</option><option value="png">PNG</option><option value="jpeg">JPEG</option>
       </select></label>
       {format === 'pf' ? <p>Exports the entire document as an editable PushForm Model file.</p> : image ? <><label><input type="checkbox" checked={useViewSize} disabled={busy} onChange={event => setUseViewSize(event.target.checked)} />Use view size</label>
       <div className="pf-image-export-size">

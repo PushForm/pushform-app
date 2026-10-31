@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
-import { setNativeStepReader, type ImportProgress } from '@pushform/io';
+import { setNativeStepReader, setNativeStepWriter, type ImportProgress } from '@pushform/io';
 
 /**
  * On the desktop, STEP files are converted natively by the app's own process on every core, instead of by the
@@ -28,6 +28,27 @@ export function installDesktopStepReader(): void {
       return new Uint8Array(result);
     } catch (cause) {
       if (signal?.aborted) throw new DOMException('Import cancelled.', 'AbortError');
+      throw cause;
+    } finally { signal?.removeEventListener('abort', cancel); }
+  });
+  // The same for writing: the request goes through a temporary file, and the file's text comes back as one response.
+  setNativeStepWriter(async (request, onProgress, signal) => {
+    if (signal?.aborted) throw new DOMException('Export cancelled.', 'AbortError');
+    const { tempDir, join } = await import('@tauri-apps/api/path');
+    const { writeFile } = await import('@tauri-apps/plugin-fs');
+    const path = await join(await tempDir(), `pushform-step-${crypto.randomUUID()}.request`);
+    await writeFile(path, request);
+    const channel = new Channel<{ stage: string; current: number; total: number }>();
+    channel.onmessage = p => onProgress?.({ stage: p.stage, current: p.current, total: p.total } satisfies ImportProgress);
+    const job = crypto.randomUUID();
+    const cancel = (): void => { void invoke('step_cancel', { job }); };
+    signal?.addEventListener('abort', cancel, { once: true });
+    try {
+      const result = await invoke<ArrayBuffer>('step_export', { path, job, cleanup: true, onProgress: channel });
+      if (signal?.aborted) throw new DOMException('Export cancelled.', 'AbortError');
+      return new Uint8Array(result);
+    } catch (cause) {
+      if (signal?.aborted) throw new DOMException('Export cancelled.', 'AbortError');
       throw cause;
     } finally { signal?.removeEventListener('abort', cancel); }
   });

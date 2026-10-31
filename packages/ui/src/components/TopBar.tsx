@@ -9,10 +9,11 @@ import { z } from 'zod';
 import {
   encodeLayoutSnapshot, encodeModelSnapshot, modelArchiveImages, openModelFile, openLayoutFile,
   isSketchUpLayoutFile, nativeDocumentType, type LayoutRecoveryMetadata,
-  isModelImportFile, isPictureFile, MAX_PICTURE_BYTES, pictureMime, exportStl, stlFileName, STL_EXTENSION, probeMeshImport, exportGlb, exportObj, exportCollada,
+  isModelImportFile, isPictureFile, MAX_PICTURE_BYTES, pictureMime, exportStl, stlFileName, STL_EXTENSION, probeMeshImport, exportGlb, exportObj, exportCollada, exportStep, exportFileName, STEP_EXTENSION,
   type ImportProgress, type MeshExtent, type MeshFormatKind, type MeshImportOptions, type ModelImportReport,
 } from '@pushform/io';
 import { importLayoutBytes, importSketchUpBytes, modelImportLimit, tooLarge, type PickedFile } from '../importFiles';
+import { chooseSaveTarget } from '../saveFile';
 import { useAppStore } from '../store';
 import { layoutContentKey, modelContentKey } from '../documentContent';
 import type { DocumentSession, DocumentTab } from '../session';
@@ -110,6 +111,7 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
   const modelImportInput = useRef<HTMLInputElement>(null);
   const importTarget = useRef<{ tabId: string; definitionId: DefId } | null>(null);
   const modelImportRun = useRef<AbortController | null>(null);
+  const modelExportRun = useRef<AbortController | null>(null);
   const handles = useRef(new Map<string, BrowserDocumentHandle>());
   const handleStore = useRef(defaultBrowserFileHandleStore());
   const handleLoad = useRef<Promise<void>>(Promise.resolve());
@@ -159,7 +161,7 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
   useEffect(() => {
     const active = session.active;
     if (active.type !== 'model') return;
-    const commands = ([['file.exportGltf', 'Export glTF…', 'gltf'], ['file.exportObj', 'Export OBJ…', 'obj'], ['file.exportCollada', 'Export COLLADA…', 'collada']] as const)
+    const commands = ([['file.exportGltf', 'Export glTF…', 'gltf'], ['file.exportObj', 'Export OBJ…', 'obj'], ['file.exportCollada', 'Export COLLADA…', 'collada'], ['file.exportStep', 'Export STEP…', 'step']] as const)
       .map(([id, title, format]) => active.app.commands.register(defineCommand({
         id, title, category: 'file', menu: 'File', icon: 'folder', params: z.object({}), undoable: false,
         run: () => setModelExport({ tabId: active.id, format }),
@@ -623,6 +625,28 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
     }
   };
 
+  /**
+   * Writes the model, or its selection, as a STEP file. The save location is asked first, since the conversion takes
+   * a while and browsers open their save picker only right after a click. Resolves when the file is written (or the
+   * person cancelled the save); `signal` stops the conversion.
+   */
+  const exportStepFile = async (tabId: string, choice: ModelExportChoice, signal: AbortSignal): Promise<void> => {
+    const tab = session.tabs.find(candidate => candidate.id === tabId);
+    if (tab?.type !== 'model') return;
+    setError(null);
+    const host = tab.app.document, fileName = exportFileName(tab.name, STEP_EXTENSION);
+    const target = await chooseSaveTarget(fileName, { description: 'STEP', mime: 'model/step', extension: STEP_EXTENSION.slice(1) });
+    if (!target) return;
+    try {
+      const { bytes, notes } = await exportStep(host.doc.state, { name: tab.name, selection: choice.selectionOnly ? host.selection.refs : null, signal });
+      if (signal.aborted) return;
+      await target.write(bytes);
+      setImportNotice(notes.length ? { fileName, warnings: notes, exported: true, format: 'STEP' } : null);
+    } catch (cause) {
+      if ((cause as Error).name !== 'AbortError') throw cause;
+    }
+  };
+
   const closeTab = (id: string): void => {
     const tab = session.tabs.find((candidate) => candidate.id === id);
     if (!tab) return;
@@ -839,10 +863,15 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
           encodeNative={() => encodeModelSnapshot(tab.app.document.doc.state, modelArchiveImages(tab.app.document.doc.state, tab.app.document.images))}
           view={viewport.size} render={(width, height, options) => viewport.renderImage(width, height, options)}
           onGeometryExport={(format, choice, stlFormat) => {
+            if (format === 'step') {
+              const run = new AbortController();
+              modelExportRun.current = run;
+              return exportStepFile(tab.id, choice, run.signal).finally(() => { if (modelExportRun.current === run) modelExportRun.current = null; });
+            }
             setModelExport(null);
             if (format === 'stl') void exportModelStl(tab.id, { unit: choice.unit, format: stlFormat, selectionOnly: choice.selectionOnly });
             else void exportModelFile(tab.id, format, choice);
-          }} onClose={() => setModelExport(null)} />;
+          }} onClose={() => { modelExportRun.current?.abort(); setModelExport(null); }} />;
       })()}
       {modelImportNotice ? <ModelImportDialog {...modelImportNotice} onClose={() => {
         modelImportRun.current?.abort(); setModelImportNotice(null);

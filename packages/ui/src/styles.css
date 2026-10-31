@@ -710,6 +710,9 @@
   dominant-baseline: central;
   letter-spacing: 0.02px;
 }
+.pf-nav-cube-label.is-bottom {
+  font-size: 0.25px;
+}
 .pf-nav-cube-axis {
   stroke-width: 2px;
   stroke-linecap: round;

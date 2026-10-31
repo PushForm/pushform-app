@@ -119,7 +119,7 @@ export function NavigationCube(): JSX.Element | null {
             />
           ))}
           {labels.map((l) => (
-            <text key={l.face.id} className="pf-nav-cube-label" transform={`matrix(${l.matrix.map(fmt).join(' ')})`}>
+            <text key={l.face.id} className={`pf-nav-cube-label is-${l.face.id}`} transform={`matrix(${l.matrix.map(fmt).join(' ')})`}>
               {l.text}
             </text>
           ))}

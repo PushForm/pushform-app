@@ -20,6 +20,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test
+      - run: pnpm commons:build
       - run: pnpm license-check
       # Vite's chunk rendering and hidden source maps exceed Node's ~2 GiB runner default.
       - run: pnpm build

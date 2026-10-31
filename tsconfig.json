@@ -60,6 +60,9 @@
     },
     {
       "path": "packages/requests-ui"
+    },
+    {
+      "path": "apps/commons"
     }
   ]
 }

@@ -23,7 +23,9 @@
     "format": "prettier --write .",
     "license-check": "node scripts/license-check.mjs",
     "spdx-check": "node scripts/spdx-headers.mjs --check",
-    "spec-check": "node scripts/spec-ids.mjs"
+    "spec-check": "node scripts/spec-ids.mjs",
+    "commons:dev": "pnpm --filter @pushform/app-commons dev",
+    "commons:build": "pnpm --filter @pushform/app-commons build"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.11",

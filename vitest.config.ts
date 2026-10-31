@@ -22,7 +22,7 @@ export default defineConfig({
         test: {
           name: 'dom',
           environment: 'jsdom',
-          include: ['packages/{render,ui,requests-ui}/**/*.test.{ts,tsx}', 'apps/web/**/*.test.{ts,tsx}'],
+          include: ['packages/{render,ui,requests-ui}/**/*.test.{ts,tsx}', 'apps/{web,commons}/**/*.test.{ts,tsx}'],
         },
       },
     ],

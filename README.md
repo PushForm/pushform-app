@@ -12,6 +12,8 @@ TypeScript monorepo (pnpm). Geometry kernel: [Manifold](https://github.com/elali
 corepack enable            # provides pnpm
 pnpm install
 pnpm dev                   # web app at http://localhost:5174 (uses apps/web/.env.local)
+pnpm commons:dev           # community catalog frontend at http://localhost:5176
+pnpm commons:build         # build the independent catalog frontend
 pnpm desktop               # Tauri desktop app (needs Rust)
 pnpm test                  # unit tests (vitest)
 pnpm typecheck
@@ -25,9 +27,11 @@ The app requires sign-in and stores documents in Supabase. Point `apps/web/.env.
 
 ```
 packages/   core geom kernel model inference commands render io ui mcp cloud testing
-apps/       web desktop
+apps/       web desktop commons
 docs/help/  user-facing help guides
 ```
+
+The standalone Commons frontend has its own build and catalog configuration; see [apps/commons](apps/commons/README.md).
 
 ## License
 

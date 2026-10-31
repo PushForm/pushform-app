@@ -6,6 +6,7 @@ import { CloudAccount } from './CloudAccount';
 import { CloudFiles } from './CloudFiles';
 import { CloudProfiles } from './CloudProfile';
 import { CloudSession, type AuthCallback } from './CloudSession';
+import { CloudStaff } from './CloudStaff';
 import { CloudUsage } from './CloudUsage';
 import { validateBrowserCloudConfig, type BrowserCloudConfig } from './cloudConfig';
 
@@ -40,7 +41,7 @@ function browserClient(config: BrowserCloudConfig, browser: Pick<Window, 'locati
 
 /** Construct once at app boot; SDK owns persistence, refresh, locks and cross-tab auth notifications. */
 export function createBrowserCloud(config: BrowserCloudConfig, browser: Pick<Window, 'location' | 'history'> = window): {
-  session: CloudSession; files: CloudFiles; profiles: CloudProfiles; account: CloudAccount; usage: CloudUsage;
+  session: CloudSession; files: CloudFiles; profiles: CloudProfiles; account: CloudAccount; usage: CloudUsage; staff: CloudStaff;
 } {
   const { client, callback, redirectTo } = browserClient(config, browser);
   const session = new CloudSession(client.auth, redirectTo, callback,
@@ -48,7 +49,7 @@ export function createBrowserCloud(config: BrowserCloudConfig, browser: Pick<Win
   const files = new CloudFiles(client, session);
   const profiles = new CloudProfiles(client, session);
   const account = new CloudAccount(client, session);
-  return { session, files, profiles, account, usage: new CloudUsage(client, session) };
+  return { session, files, profiles, account, usage: new CloudUsage(client, session), staff: new CloudStaff(client) };
 }
 
 /**

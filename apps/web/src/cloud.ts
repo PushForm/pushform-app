@@ -6,7 +6,7 @@ import type { RequestsConfig } from '@pushform/ui';
 export function configuredCloud() {
   const url = import.meta.env.VITE_SUPABASE_URL;
   const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY;
-  const none = { session: new CloudSession(null), files: undefined, profiles: undefined, account: undefined, usage: undefined };
+  const none = { session: new CloudSession(null), files: undefined, profiles: undefined, account: undefined, usage: undefined, staff: undefined };
   if (!url || !publishableKey) return none;
   try { return createBrowserCloud({ url, publishableKey }); }
   catch { return none; }
@@ -26,6 +26,6 @@ export function configuredRequests(): RequestsConfig | undefined {
   return { baseUrl, apikey, ...(region ? { region } : {}) };
 }
 
-export const { session: cloudSession, files: cloudFiles, profiles: cloudProfiles, account: cloudAccount, usage: cloudUsage } = configuredCloud();
+export const { session: cloudSession, files: cloudFiles, profiles: cloudProfiles, account: cloudAccount, usage: cloudUsage, staff: cloudStaff } = configuredCloud();
 export const requestsConfig = configuredRequests();
 if (import.meta.hot) import.meta.hot.dispose(() => cloudSession.dispose());

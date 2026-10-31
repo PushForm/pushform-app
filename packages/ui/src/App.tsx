@@ -90,6 +90,8 @@ export interface AppProps {
   readonly usage?: UsageSink | undefined;
   /** The extension runtime's worker sources; without them the extension manager is not offered. */
   readonly extensionRuntime?: ExtensionRuntimeSources | undefined;
+  /** Says whether the account is PushForm staff; extensions are offered only to staff until they open to everyone. */
+  readonly staff?: { isStaff(): Promise<boolean> } | undefined;
 }
 
 function platform(): { browser: string; os: string } {
@@ -179,7 +181,7 @@ function Workspace(props: WorkspaceProps): JSX.Element | null {
 }
 
 /** Keep the document session in memory while locked; unmount all interactive workspace UI. */
-function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScreen, requests, usage: usageSink, extensionRuntime, locked, ownerId, refreshImages, nativeRefresh }: WorkspaceProps & { refreshImages: RefreshImageStore | undefined; nativeRefresh: NativeRefreshSession | undefined }): JSX.Element | null {
+function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScreen, requests, usage: usageSink, extensionRuntime, staff, locked, ownerId, refreshImages, nativeRefresh }: WorkspaceProps & { refreshImages: RefreshImageStore | undefined; nativeRefresh: NativeRefreshSession | undefined }): JSX.Element | null {
   // Home pops the chat down under its header icon; the account email is the requester identity.
   /** Mounted on first open and kept mounted while closed, so the conversation survives closing and reopening. */
   const [requestsPanel, setRequestsPanel] = useState<{ anchor: HTMLElement | null; open: boolean } | null>(null);
@@ -210,7 +212,15 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     void extensions.load();
     return () => { void extensions.stopAll(); };
   }, [extensions]);
-  const openExtensions = extensions ? () => setExtensionsOpen(true) : undefined;
+  // Extensions are offered to staff first; installed ones still run for whoever installed them.
+  const [extensionsOffered, setExtensionsOffered] = useState(false);
+  useEffect(() => {
+    let live = true;
+    setExtensionsOffered(false);
+    void staff?.isStaff().then((yes) => { if (live) setExtensionsOffered(yes); });
+    return () => { live = false; };
+  }, [staff, ownerId]);
+  const openExtensions = extensions && extensionsOffered ? () => setExtensionsOpen(true) : undefined;
   const extensionManager = extensions && extensionsOpen
     ? <ExtensionManager platform={extensions} available={browserRunsExtensions()} developerModeAllowed developerModeOn={localStorage.getItem('pushform:extensions:developer-mode') === 'on'}
         onClose={() => setExtensionsOpen(false)} />

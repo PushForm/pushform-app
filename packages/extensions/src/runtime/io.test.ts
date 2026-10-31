@@ -66,6 +66,7 @@ describe('FetchBroker', () => {
     expect(new TextDecoder().decode(response.body as Uint8Array)).toBe('{"price":4.2}');
     expect(seen[0]).toMatchObject({ method: 'POST', headers: { authorization: 'Bearer own-key' }, maxResponseBytes: FETCH_LIMITS.responseBytes });
     expect(broker.bytesSent.get('https://api.example.com')).toBe(2);
+    expect(broker.traffic.get('https://api.example.com')).toEqual({ requests: 1, bytesSent: 2, bytesReceived: 13 });
   });
 
   it('follows redirects itself, checking every location, and switches to GET after 303', async () => {

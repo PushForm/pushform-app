@@ -2872,6 +2872,12 @@ h4.pf-xui-text { font-size: 12px; }
 .pf-xmanager-confirm p { margin: 0; }
 .pf-xmanager-details { display: flex; flex-direction: column; gap: 6px; width: 100%; }
 .pf-xmanager-logs pre { max-height: 160px; overflow: auto; font-size: 11px; margin: 4px 0 0; white-space: pre-wrap; }
+.pf-xmanager-network { border-collapse: collapse; width: 100%; font-size: 12px; }
+.pf-xmanager-network th, .pf-xmanager-network td { text-align: start; padding: 2px 8px 2px 0; overflow-wrap: anywhere; }
+.pf-xmanager-network thead th { color: var(--pf-text-muted); font-weight: normal; }
+.pf-xmanager-network td { font-variant-numeric: tabular-nums; }
+.pf-xmanager-activity { list-style: none; margin: 0; padding: 0; max-height: 200px; overflow: auto; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.pf-xmanager-activity time { color: var(--pf-text-muted); margin-inline-end: 6px; }
 .pf-xinstall-integrity { font-size: 11px; font-weight: 600; }
 .pf-xinstall-integrity.is-official { color: var(--pf-accent); }
 .pf-xinstall-integrity.is-unsigned { color: #8a5300; }

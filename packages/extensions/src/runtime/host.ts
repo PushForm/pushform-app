@@ -93,6 +93,8 @@ export interface ExtensionSessionOptions {
   readonly services?: ServiceImplementations;
   readonly limits?: Partial<SessionLimits>;
   readonly onFailure?: (failure: SessionFailure) => void;
+  /** Told once when the extension's `activate` succeeded. */
+  readonly onActivated?: () => void;
   /** The runtime generation this session serves; a restart creates a new session with a new generation. */
   readonly generation?: number;
   /**
@@ -136,6 +138,7 @@ export class ExtensionSession {
   private readonly services: ServiceImplementations;
   private readonly limits: SessionLimits;
   private readonly onFailure: ((failure: SessionFailure) => void) | undefined;
+  private readonly onActivated: (() => void) | undefined;
   private readonly beforeActivate: (() => Promise<void>) | undefined;
   private readonly contributions: ReadonlySet<string>;
   private currentState: SessionState = 'loading';
@@ -164,6 +167,7 @@ export class ExtensionSession {
     this.services = options.services ?? {};
     this.limits = { ...DEFAULT_SESSION_LIMITS, ...options.limits };
     this.onFailure = options.onFailure;
+    this.onActivated = options.onActivated;
     this.beforeActivate = options.beforeActivate;
     this.contributions = new Set(options.manifest.contributions.map((c) => c.id));
     let settleLoad!: { resolve(): void; reject(error: ExtensionError): void };
@@ -392,6 +396,7 @@ export class ExtensionSession {
         this.startHeartbeat();
         this.settleActivation?.resolve();
         this.settleActivation = null;
+        this.onActivated?.();
         return;
       case 'activation-failed':
         if (this.currentState !== 'activating') return;

@@ -83,7 +83,7 @@ export const MENU_COMMANDS = {
 const SOLID_PAIR_TOOLS = [['Union', 'solids.union'], ['Subtract', 'solids.subtract'], ['Trim', 'solids.trim'], ['Intersect', 'solids.intersect'], ['Split', 'solids.split']] as const;
 const FLIP_AXES = [['Red', 'x'], ['Green', 'y'], ['Blue', 'z']] as const;
 
-type RefClass = 'edge' | 'face' | 'sketch' | 'body' | 'instance' | 'sectionPlane' | 'text' | 'image' | 'other';
+type RefClass = 'edge' | 'face' | 'sketch' | 'body' | 'meshPart' | 'instance' | 'sectionPlane' | 'text' | 'image' | 'other';
 
 function classOf(ref: EntityRef): RefClass {
   switch (ref.kind) {
@@ -98,6 +98,8 @@ function classOf(ref: EntityRef): RefClass {
       return 'sketch';
     case 'body':
       return 'body';
+    case 'meshPart':
+      return 'meshPart';
     case 'instance':
       return 'instance';
     case 'sectionPlane':
@@ -145,6 +147,8 @@ function tagOf(state: DocumentState, ref: EntityRef): TagId | null {
     case 'edge':
     case 'imprintEdge':
       return c.bodies.get(ref.id)?.tagId ?? null;
+    case 'meshPart':
+      return c.meshParts.get(ref.id)?.tagId ?? null;
     case 'instance':
       return c.instances.get(ref.id)?.tagId ?? null;
     case 'sketchEdge':
@@ -417,6 +421,19 @@ function bodyItems(state: DocumentState, refs: readonly EntityRef[]): ContextMen
   ];
 }
 
+/** Mesh parts have no faces or edges to act on, and no solid operations; they are hidden, erased and grouped whole. */
+function meshPartItems(state: DocumentState, refs: readonly EntityRef[]): ContextMenuItem[] {
+  const allHidden = refs.length > 0 && refs.every((r) => containerOf(state, r)?.meshParts.get(r.id)?.hidden === true);
+  return [
+    entityInfo(),
+    erase(),
+    { label: allHidden ? 'Unhide' : 'Hide', command: MENU_COMMANDS.hideBodies, params: { refs, hidden: !allHidden } },
+    makeGroup(refs),
+    makeComponent(),
+    zoomSelection(),
+  ];
+}
+
 function instanceItems(state: DocumentState, refs: readonly EntityRef[]): ContextMenuItem[] {
   const insts = refs.map((r) => {
     try {
@@ -576,6 +593,8 @@ export const contextMenu = {
         return sketchItems(state, refs);
       case 'body':
         return bodyItems(state, refs);
+      case 'meshPart':
+        return meshPartItems(state, refs);
       case 'instance':
         return instanceItems(state, refs);
       case 'sectionPlane':

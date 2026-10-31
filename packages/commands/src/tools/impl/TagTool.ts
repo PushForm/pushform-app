@@ -41,7 +41,7 @@ export class TagTool implements Tool {
   }
 
   inferenceOptions(): InferenceOptions {
-    return { pickOnly: true, kinds: ['instance', 'body', 'face', 'edge', 'sketchEdge', 'sketchFace', 'guide'] };
+    return { pickOnly: true, kinds: ['instance', 'body', 'meshPart', 'face', 'edge', 'sketchEdge', 'sketchFace', 'guide'] };
   }
 
   onPointerMove(e: ToolPointerEvent): void {

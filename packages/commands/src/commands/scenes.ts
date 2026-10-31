@@ -195,13 +195,14 @@ export function nextSceneName(state: DocumentState): string {
   for (let n = state.scenes.size + 1; ; n++) if (!taken.has(`Scene ${n}`)) return `Scene ${n}`;
 }
 
-/** Hidden entity ids of the root container (bodies, sketch edges/faces, guides = geometry; instances = objects). */
+/** Hidden entity ids of the root container (bodies, mesh parts, sketch edges/faces, guides = geometry; instances = objects). */
 export function hiddenRootEntities(state: DocumentState): { geometry: Id[]; objects: Id[] } {
   const root = state.definitions.get(state.rootDefinitionId);
   const geometry: Id[] = [], objects: Id[] = [];
   if (!root) return { geometry, objects };
   const c = root.entities;
   for (const b of c.bodies.values()) if (b.hidden) geometry.push(b.id);
+  for (const m of c.meshParts.values()) if (m.hidden) geometry.push(m.id);
   for (const e of c.sketch.edges.values()) if (e.hidden) geometry.push(e.id);
   for (const f of c.sketch.faces.values()) if (f.hidden) geometry.push(f.id);
   for (const g of c.guides.values()) if (g.hidden) geometry.push(g.id);
@@ -238,6 +239,7 @@ export function restoreSceneProps(draft: DocumentDraft, scene: Scene): void {
     const c = root.entities;
     if (f.useHiddenGeometry) {
       for (const b of c.bodies.values()) b.hidden = hidden.has(b.id);
+      for (const m of c.meshParts.values()) m.hidden = hidden.has(m.id);
       for (const e of c.sketch.edges.values()) e.hidden = hidden.has(e.id);
       for (const fc of c.sketch.faces.values()) fc.hidden = hidden.has(fc.id);
       for (const g of c.guides.values()) g.hidden = hidden.has(g.id);

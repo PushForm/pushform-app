@@ -24,8 +24,9 @@ const KIND_ICONS: Record<ModelBrowserKind, ReactNode> = {
   group: <Icon name="outliner-group" size={18} />,
   component: <Icon name="outliner-component" size={18} />,
   solid: <PiCube />,
+  meshPart: <PiCube />,
 };
-const KIND_NAMES: Record<ModelBrowserKind, string> = { group: 'Group', component: 'Component', solid: 'Solid' };
+const KIND_NAMES: Record<ModelBrowserKind, string> = { group: 'Group', component: 'Component', solid: 'Solid', meshPart: 'Mesh Part' };
 
 /**
  * The Model object browser: the model's solids, groups and components in the left menu bar's docked
@@ -119,8 +120,8 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
     }
   };
   const startRename = (node: ModelBrowserNode): void => {
-    // Solids have no stored name to edit.
-    if (node.kind === 'solid') return;
+    // Solids have no stored name to edit; mesh part names are read-only here too.
+    if (node.kind === 'solid' || node.kind === 'meshPart') return;
     pendingFocus.current = null;
     editingRef.current = node; setEditing(node); setFocusKey(node.key);
   };
@@ -135,7 +136,7 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
     if (name ? name !== node.label : node.custom) run('instance.rename', { ref: node.ref, name });
   };
   const setHidden = (node: ModelBrowserNode, hidden: boolean): void =>
-    run(node.kind === 'solid' ? 'bodies.setHidden' : 'instance.setHidden', { refs: [node.ref], hidden });
+    run(node.kind === 'solid' || node.kind === 'meshPart' ? 'bodies.setHidden' : 'instance.setHidden', { refs: [node.ref], hidden });
   /** The modeler's own context menu for the item, which selects it first as a right-click in the viewport does. */
   const openMenu = (node: ModelBrowserNode, x: number, y: number): void => {
     setFocusKey(node.key);

@@ -10,7 +10,7 @@ import { AppContext } from '../AppContext';
 import { createApp } from '../bootstrap';
 import type { AppInstance } from '../bootstrap';
 import { useAppStore } from '../store';
-import { addInstance, stubInstanceCommands } from '../panels/instances.testutil';
+import { addInstance, addMeshPart, stubInstanceCommands } from '../panels/instances.testutil';
 import { ModelObjectBrowser } from './ModelObjectBrowser';
 import { modelBrowserTree, type ModelBrowserNode } from './modelBrowserTree';
 import * as browserModel from './modelBrowserTree';
@@ -305,5 +305,25 @@ describe('ModelObjectBrowser', () => {
     const innerNode = modelBrowserTree(a.document.doc.state, [outer, inner], new Set())[0]!.children[1]!;
     expect(innerNode.current).toBe(true);
     expect(innerNode.children[0]!.children).toEqual([]);
+  });
+
+  it('lists mesh parts under their container in creation order, named or as "Mesh Part"', () => {
+    const a = boot();
+    const solid = addSolid(a);
+    const part = addMeshPart(a, { name: 'Bracket', hidden: true });
+    const house = addInstance(a, { name: 'House' });
+    const nested = addMeshPart(a, { name: '', parent: [house] });
+    const nodes = modelBrowserTree(a.document.doc.state, [], new Set([`meshPart//${part}`]));
+    expect(nodes.map((n) => [n.kind, n.label])).toEqual([['solid', 'Solid 1'], ['meshPart', 'Bracket'], ['group', 'House']]);
+    expect(nodes[1]).toMatchObject({ kind: 'meshPart', level: 1, ref: { kind: 'meshPart', path: [], id: part }, hidden: true, selected: true, parent: null, children: [] });
+    expect(nodes[1]!.locked).toBeUndefined();
+    expect(nodes[2]!.children[0]).toMatchObject({ kind: 'meshPart', label: 'Mesh Part', level: 2, ref: { kind: 'meshPart', path: [house], id: nested } });
+    expect(nodes[0]!.ref).toEqual({ kind: 'body', path: [], id: solid });
+
+    mount(a);
+    expect(names()).toEqual(['Solid 1', 'Bracket', 'House']);
+    expect(within(row('Bracket')).getByRole('img', { name: 'Mesh Part' })).toBeTruthy();
+    expect(item('Bracket').className).toContain('is-hidden');
+    expect(within(row('Bracket')).queryByRole('button', { name: 'Lock Bracket' })).toBeNull();
   });
 });

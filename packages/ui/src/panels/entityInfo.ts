@@ -2,7 +2,7 @@
 // Copyright 2026 PushForm contributors
 import type { CurveId, DefId, Id, TagId, Vec3 } from '@pushform/core';
 import { v3dist } from '@pushform/core';
-import { containerAt, dimensionText, imageEntitySize, instanceAt, resolveDimension, sketchEdgeLengthEnds, sketchFaceLoops, walkInstances } from '@pushform/model';
+import { containerAt, dimensionText, imageEntitySize, instanceAt, meshPartEdgeCount, meshPartTriangleCount, resolveDimension, sketchEdgeLengthEnds, sketchFaceLoops, walkInstances } from '@pushform/model';
 import { entityRefKey } from '@pushform/model';
 import type { DocumentState, EntityContainer, EntityRef, Material } from '@pushform/model';
 import { surfaceRefs } from '@pushform/commands';
@@ -39,6 +39,22 @@ export type EntityInfo =
       readonly volume: number | null;
       readonly faceCount: number;
       readonly edgeCount: number;
+      readonly tagId: TagId | null;
+      readonly hidden: boolean;
+      readonly castShadows: boolean;
+      readonly receiveShadows: boolean;
+    }
+  /** A mesh part: imported geometry kept whole; `placements` counts the instances of the definition that holds it (1 at the root). */
+  | {
+      readonly kind: 'meshPart';
+      readonly title: 'Mesh Part';
+      readonly name: string;
+      readonly format: string;
+      readonly system: string;
+      readonly triangleCount: number;
+      readonly faceCount: number;
+      readonly edgeCount: number;
+      readonly placements: number;
       readonly tagId: TagId | null;
       readonly hidden: boolean;
       readonly castShadows: boolean;
@@ -209,6 +225,31 @@ export function describeRef(state: DocumentState, ref: EntityRef, counts?: Map<D
         hidden: b.hidden,
         castShadows: b.castShadows !== false,
         receiveShadows: b.receiveShadows !== false,
+      };
+    }
+    case 'meshPart': {
+      const part = container.meshParts.get(ref.id);
+      if (!part) return null;
+      let placements = 1;
+      if (ref.path.length) {
+        const definitionId = instanceAt(state, ref.path)!.definitionId;
+        placements = counts?.get(definitionId) ?? countInstances(state, definitionId);
+        counts?.set(definitionId, placements);
+      }
+      return {
+        kind: 'meshPart',
+        title: 'Mesh Part',
+        name: part.name,
+        format: part.source.format,
+        system: part.source.system,
+        triangleCount: meshPartTriangleCount(part.geometry),
+        faceCount: part.geometry.faceCount,
+        edgeCount: meshPartEdgeCount(part.geometry),
+        placements,
+        tagId: part.tagId,
+        hidden: part.hidden,
+        castShadows: part.castShadows !== false,
+        receiveShadows: part.receiveShadows !== false,
       };
     }
     case 'face': {

@@ -50,7 +50,7 @@ export interface MeshPartGeometry {
 export const MESH_PART_EDGE_SOFT = 1;
 export const MESH_PART_EDGE_SMOOTH = 2;
 
-/** Input limits for mesh parts (MOD3810.01): one part, and all the parts of a document. */
+/** Input limits for mesh parts: one part, and all the parts of a document. */
 export const MAX_MESH_PART_TRIANGLES = 16_777_216;
 export const MAX_DOCUMENT_MESH_PART_TRIANGLES = 67_108_864;
 

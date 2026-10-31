@@ -37,7 +37,7 @@ export function hitSide(hit: PickHit | null, rayDir: readonly [number, number, n
  * paints the whole selection (faces, bodies, groups/components picked with Select or a drag box).
  * Clicking an unselected entity paints only that entity and leaves the selection alone.
  */
-const PAINTABLE_KINDS: ReadonlySet<EntityRef['kind']> = new Set(['face', 'sketchFace', 'body', 'instance']);
+const PAINTABLE_KINDS: ReadonlySet<EntityRef['kind']> = new Set(['face', 'sketchFace', 'body', 'meshPart', 'instance']);
 /** Selection highlight cap while hovering (the paint itself is not capped). */
 const MAX_SELECTION_OVERLAY = 500;
 

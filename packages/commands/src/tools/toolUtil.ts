@@ -2,7 +2,7 @@
 // Copyright 2026 PushForm contributors
 import { m4mul, m4transformPoint, v3dot, v3normalize, v3sub } from '@pushform/core';
 import type { Id, Vec2, Vec3 } from '@pushform/core';
-import { containerAt, surfaceFaceIds } from '@pushform/model';
+import { containerAt, meshPartBounds, surfaceFaceIds } from '@pushform/model';
 import type { EntityRef, DocumentState, EntityContainer } from '@pushform/model';
 import type { InferenceResult, Snap, SnapKind } from '@pushform/inference';
 import type { CameraState } from '../camera/CameraHost';
@@ -78,6 +78,9 @@ export function inferenceOverlay(r: InferenceResult | null, screen?: Vec2): Over
 export function rubberBandColor(primary: Snap | null | undefined): string {
   return primary && primary.kind === 'onAxis' ? primary.color : PREVIEW_COLOR;
 }
+
+/** Corner index pairs of a bounds box (bit 0 = x max, bit 1 = y max, bit 2 = z max). */
+const BOX_EDGES: readonly [number, number][] = [[0, 1], [1, 3], [3, 2], [2, 0], [4, 5], [5, 7], [7, 6], [6, 4], [0, 4], [1, 5], [2, 6], [3, 7]];
 
 /** Overlay primitives (world space) outlining an entity of any edit context (hover / eraser highlight). */
 export function entityOverlay(state: DocumentState, ref: EntityRef, color: string): OverlayPrimitive[] {
@@ -175,14 +178,21 @@ export function entityOverlay(state: DocumentState, ref: EntityRef, color: strin
         .filter((e) => !e.soft && !e.hidden)
         .map((e): OverlayPrimitive => ({ kind: 'polyline', points: e.polyline.map(w), color, width: 2 }));
     }
+    case 'meshPart': {
+      // Outlining every packed edge of a large import is too slow: the bounds box stands in.
+      const part = root.meshParts.get(ref.id);
+      const lb = part && meshPartBounds(part.geometry);
+      if (!lb) return [];
+      const c = (i: number): Vec3 => w([i & 1 ? lb.max[0] : lb.min[0], i & 2 ? lb.max[1] : lb.min[1], i & 4 ? lb.max[2] : lb.min[2]]);
+      return BOX_EDGES.map(([a, b]): OverlayPrimitive => ({ kind: 'polyline', points: [c(a), c(b)], color, width: 2 }));
+    }
     case 'instance': {
       const inst = root.instances.get(ref.id);
       const lb = inst && definitionBounds(state, inst.definitionId);
       if (!inst || !lb) return [];
       const m = m4mul(frame.matrix, inst.transform);
       const c = (i: number): Vec3 => m4transformPoint(m, [i & 1 ? lb.max[0] : lb.min[0], i & 2 ? lb.max[1] : lb.min[1], i & 4 ? lb.max[2] : lb.min[2]]);
-      const edges: [number, number][] = [[0, 1], [1, 3], [3, 2], [2, 0], [4, 5], [5, 7], [7, 6], [6, 4], [0, 4], [1, 5], [2, 6], [3, 7]];
-      return edges.map(([a, b]): OverlayPrimitive => ({ kind: 'polyline', points: [c(a), c(b)], color, width: 2 }));
+      return BOX_EDGES.map(([a, b]): OverlayPrimitive => ({ kind: 'polyline', points: [c(a), c(b)], color, width: 2 }));
     }
     case 'guide': {
       const g = root.guides.get(ref.id);

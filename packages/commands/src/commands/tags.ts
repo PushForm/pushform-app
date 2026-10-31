@@ -50,7 +50,7 @@ export interface TagInfo {
   readonly color: Rgb;
   readonly dashes: string | null;
   readonly folderId: number | null;
-  /** Entities using the tag (bodies, instances, sketch edges/faces, guides, faces and edges of bodies). */
+  /** Entities using the tag (bodies, mesh parts, instances, sketch edges/faces, guides, faces and edges of bodies). */
   readonly uses: number;
 }
 
@@ -108,6 +108,7 @@ function* taggedEntities(state: DocumentState): Generator<{ tagId: TagId; set(id
       for (const f of b.faces.values()) yield { tagId: f.tagId, set: (id) => void (f.tagId = id), kind: 'face', container: c, id: b.id };
       for (const e of b.edges.values()) yield { tagId: e.tagId, set: (id) => void (e.tagId = id), kind: 'edge', container: c, id: b.id };
     }
+    for (const m of c.meshParts.values()) yield { tagId: m.tagId, set: (id) => void (m.tagId = id), kind: 'meshPart', container: c, id: m.id };
     for (const i of c.instances.values()) yield { tagId: i.tagId, set: (id) => void (i.tagId = id), kind: 'instance', container: c, id: i.id };
     for (const e of c.sketch.edges.values()) yield { tagId: e.tagId, set: (id) => void (e.tagId = id), kind: 'sketchEdge', container: c, id: e.id };
     for (const f of c.sketch.faces.values()) yield { tagId: f.tagId, set: (id) => void (f.tagId = id), kind: 'sketchFace', container: c, id: f.id };
@@ -133,7 +134,7 @@ export function tagUsage(state: DocumentState): Map<TagId, number> {
       out.set(body.tagId, (out.get(body.tagId) ?? 0) + 1);
       count(body.faces.values()); count(body.edges.values());
     }
-    count(c.instances.values()); count(c.sketch.edges.values()); count(c.sketch.faces.values());
+    count(c.meshParts.values()); count(c.instances.values()); count(c.sketch.edges.values()); count(c.sketch.faces.values());
     count(c.guides.values()); count(c.images.values()); count(c.sectionPlanes.values());
     count(c.texts.values()); count(c.dimensions.values());
   }
@@ -157,6 +158,8 @@ export function refsWithTag(host: DocumentHost, tagId: TagId): EntityRef[] {
     switch (r.kind) {
       case 'body':
         return c.bodies.get(r.id)?.tagId === tagId;
+      case 'meshPart':
+        return c.meshParts.get(r.id)?.tagId === tagId;
       case 'instance':
         return c.instances.get(r.id)?.tagId === tagId;
       case 'sketchEdge':
@@ -205,6 +208,7 @@ export function assignTag(draft: DocumentDraft, refs: readonly EntityRef[], tagI
         }
         break;
       }
+      case 'meshPart':
       case 'instance':
       case 'sketchEdge':
       case 'sketchFace':
@@ -214,7 +218,8 @@ export function assignTag(draft: DocumentDraft, refs: readonly EntityRef[], tagI
       case 'text':
       case 'dimension': {
         const map =
-          r.kind === 'instance' ? c.instances
+          r.kind === 'meshPart' ? c.meshParts
+          : r.kind === 'instance' ? c.instances
           : r.kind === 'sketchEdge' ? c.sketch.edges
           : r.kind === 'sketchFace' ? c.sketch.faces
           : r.kind === 'guide' ? c.guides
@@ -392,7 +397,7 @@ export const tagDelete = defineCommand({
       }
       for (const [c, ids] of toDelete) {
         for (const id of ids) {
-          if (c.bodies.delete(id) || c.instances.delete(id) || c.guides.delete(id) || c.images.delete(id) || c.sectionPlanes.delete(id) || c.texts.delete(id) || c.dimensions.delete(id)) deleted++;
+          if (c.bodies.delete(id) || c.meshParts.delete(id) || c.instances.delete(id) || c.guides.delete(id) || c.images.delete(id) || c.sectionPlanes.delete(id) || c.texts.delete(id) || c.dimensions.delete(id)) deleted++;
           else if (c.sketch.edges.has(id)) {
             // drop the faces using the edge, then the edge and orphaned vertices
             for (const f of [...c.sketch.faces.values()]) if (f.loops.some((l) => l.some((r) => r.edgeId === id))) c.sketch.faces.delete(f.id);

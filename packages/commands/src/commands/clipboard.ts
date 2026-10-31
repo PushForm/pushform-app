@@ -24,6 +24,7 @@ import {
   createEntityContainer,
   createSketch,
   definitionAt,
+  meshPartBounds,
   SketchGraph,
   textureTiles,
   uniqueMaterialName,
@@ -51,7 +52,7 @@ import { hostOf, SERVICE_DOCUMENT } from '../host/services';
 import { draftContainerAt, refsInContext, sketchGraphAt } from './context';
 import { cloneDefinition, copySketchInto, mapGuide, pointMapFromMatrix, uniqueDefinitionName } from './groups';
 import { deleteSelection, type DeleteResult } from './sketch';
-import { copyBodyRecord, definitionBounds, transformBodyAffineInPlace } from './transform';
+import { copyBodyRecord, copyMeshPartRecord, definitionBounds, transformBodyAffineInPlace, transformMeshPartGeometry } from './transform';
 
 /** Where the copied model is stored, so Layout can show it in a view. */
 export interface ModelClipboardSource {
@@ -131,6 +132,10 @@ function rewriteIds(state: DocumentState, maps: IdMaps): void {
         f.backMaterialId = maps.material(f.backMaterialId);
       }
       for (const e of b.edges.values()) e.tagId = maps.tag(e.tagId);
+    }
+    for (const part of c.meshParts.values()) {
+      part.tagId = maps.tag(part.tagId);
+      part.materialId = maps.material(part.materialId);
     }
     for (const i of c.instances.values()) {
       i.tagId = maps.tag(i.tagId);
@@ -244,6 +249,7 @@ export function clipboardRefs(clip: ModelClipboard): EntityRef[] {
   const c = containerAt(clip.state, []);
   return [
     ...[...c.bodies.keys()].map((id): EntityRef => ({ kind: 'body', path: [], id })),
+    ...[...c.meshParts.keys()].map((id): EntityRef => ({ kind: 'meshPart', path: [], id })),
     ...[...c.instances.keys()].map((id): EntityRef => ({ kind: 'instance', path: [], id })),
     ...[...c.sketch.edges.keys()].map((id): EntityRef => ({ kind: 'sketchEdge', path: [], id })),
     ...[...c.guides.keys()].map((id): EntityRef => ({ kind: 'guide', path: [], id })),
@@ -264,6 +270,10 @@ export function clipboardExtentPoints(clip: ModelClipboard): Vec3[] {
   for (const b of c.bodies.values()) {
     const mb = meshBounds(b.mesh);
     if (!box3IsEmpty(mb)) corners(mb);
+  }
+  for (const part of c.meshParts.values()) {
+    const pb = meshPartBounds(part.geometry);
+    if (pb) corners(pb);
   }
   for (const inst of c.instances.values()) {
     const lb = definitionBounds(state, inst.definitionId);
@@ -320,7 +330,7 @@ export function copyModelSelection(
   const graph = new SketchGraph(dst.sketch, <T extends number = Id>() => allocId<T>(out), out.defaultTagId);
 
   let skipped = 0;
-  const bodies = new Set<Id>(), instances = new Set<Id>(), guides = new Set<Id>();
+  const bodies = new Set<Id>(), meshParts = new Set<Id>(), instances = new Set<Id>(), guides = new Set<Id>();
   const edges = new Set<Id>(), faces = new Set<Id>();
   const parts = new Map<Id, BodyParts>();
   const partsOf = (id: Id): BodyParts => parts.get(id) ?? parts.set(id, { faces: new Set(), edges: new Set(), imprints: [] }).get(id)!;
@@ -328,6 +338,9 @@ export function copyModelSelection(
     switch (r.kind) {
       case 'body':
         if (container.bodies.has(r.id)) bodies.add(r.id);
+        break;
+      case 'meshPart':
+        if (container.meshParts.has(r.id)) meshParts.add(r.id);
         break;
       case 'face':
         if (container.bodies.has(r.id)) partsOf(r.id).faces.add(r.faceId);
@@ -373,12 +386,17 @@ export function copyModelSelection(
     out.definitions.set(id, structuredClone(def));
     for (const inst of def.entities.instances.values()) copyDefinition(inst.definitionId);
   };
-  const order = container.order.length ? container.order : [...container.bodies.keys(), ...container.instances.keys(), ...container.guides.keys()];
+  const order = container.order.length ? container.order : [...container.bodies.keys(), ...container.meshParts.keys(), ...container.instances.keys(), ...container.guides.keys()];
   for (const id of order) {
     if (bodies.has(id)) {
       const copy = copyBodyRecord(container.bodies.get(id)!, id);
       if (!identity) transformBodyAffineInPlace(copy, world, tiles);
       dst.bodies.set(id, copy);
+      dst.order.push(id);
+    } else if (meshParts.has(id)) {
+      const copy = copyMeshPartRecord(container.meshParts.get(id)!, id);
+      if (!identity) copy.geometry = transformMeshPartGeometry(copy.geometry, world);
+      dst.meshParts.set(id, copy);
       dst.order.push(id);
     } else if (instances.has(id)) {
       const inst = container.instances.get(id)!;
@@ -429,7 +447,7 @@ export function copyModelSelection(
   };
   const bounds = boundsOf(clipboardExtentPoints(clip));
   if (!bounds) return null;
-  const lone = dst.instances.size === 1 && !dst.bodies.size && !dst.sketch.edges.size && !dst.guides.size ? [...dst.instances.values()][0] : undefined;
+  const lone = dst.instances.size === 1 && !dst.bodies.size && !dst.meshParts.size && !dst.sketch.edges.size && !dst.guides.size ? [...dst.instances.values()][0] : undefined;
   const insertionPoint: Vec3 = lone ? [lone.transform[12]!, lone.transform[13]!, lone.transform[14]!] : [bounds.min[0], bounds.min[1], bounds.min[2]];
   return { ...clip, bounds, insertionPoint };
 }
@@ -547,7 +565,7 @@ export function pasteModelClipboard(draft: DocumentDraft, clip: ModelClipboard, 
   const tiles = textureTiles(target);
   const container = draftContainerAt(draft, path);
   const pasted: EntityRef[] = [];
-  const order = srcRoot.order.length ? srcRoot.order : [...srcRoot.bodies.keys(), ...srcRoot.instances.keys(), ...srcRoot.guides.keys()];
+  const order = srcRoot.order.length ? srcRoot.order : [...srcRoot.bodies.keys(), ...srcRoot.meshParts.keys(), ...srcRoot.instances.keys(), ...srcRoot.guides.keys()];
   for (const sid of order) {
     const body = srcRoot.bodies.get(sid);
     if (body) {
@@ -557,6 +575,18 @@ export function pasteModelClipboard(draft: DocumentDraft, clip: ModelClipboard, 
       container.bodies.set(copy.id, copy);
       container.order.push(copy.id);
       pasted.push({ kind: 'body', path, id: copy.id });
+      continue;
+    }
+    const part = srcRoot.meshParts.get(sid);
+    if (part) {
+      const copy = copyMeshPartRecord(part, allocId<Id>(draft));
+      copy.locked = false;
+      // the clone above copied the arrays; the pasted part shares the clipboard's immutable geometry instead
+      const geometry = containerAt(clip.state, []).meshParts.get(sid)!.geometry;
+      copy.geometry = identity ? geometry : transformMeshPartGeometry(geometry, m);
+      container.meshParts.set(copy.id, copy);
+      container.order.push(copy.id);
+      pasted.push({ kind: 'meshPart', path, id: copy.id });
       continue;
     }
     const inst = srcRoot.instances.get(sid);

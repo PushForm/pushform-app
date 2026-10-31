@@ -273,6 +273,24 @@ function Fields({ state, info, refs }: { state: DocumentState; info: EntityInfo;
           </div>
         </>
       );
+    case 'meshPart':
+      return (
+        <>
+          <Row label="Name">{info.name}</Row>
+          <Row label="Source">{info.system ? `${info.format} · ${info.system}` : info.format}</Row>
+          <Row label="Tag">
+            <TagSelect state={state} tagId={info.tagId} refs={refs} />
+          </Row>
+          <Row label="Triangles">{info.triangleCount}</Row>
+          <Row label="Faces">{info.faceCount}</Row>
+          <Row label="Edges">{info.edgeCount}</Row>
+          <Row label="Placements">{info.placements}</Row>
+          <div className="pf-ei-checks">
+            <Check label="Hidden" checked={info.hidden} onChange={(hidden) => run('bodies.setHidden', { refs, hidden })} />
+            <ShadowChecks refs={refs} cast={info.castShadows} receive={info.receiveShadows} />
+          </div>
+        </>
+      );
     case 'vertex':
       return (
         <>

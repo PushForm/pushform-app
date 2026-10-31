@@ -121,7 +121,7 @@ export interface WorldEdge {
   readonly polyline: readonly Vec3[];
 }
 
-/** A mesh part (MOD3800) in world space: picked whole, by its triangles. */
+/** A mesh part in world space: picked whole, by its triangles. */
 export interface MeshPartIndex {
   readonly id: Id;
   readonly path: readonly Id[];

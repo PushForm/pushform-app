@@ -10,6 +10,8 @@ import type { AppInstance } from '../bootstrap';
 import { formatVolume } from '../engine/format';
 import { bodiesToRender } from '../engine/renderAdapter';
 import { EntityInfoPanel } from './EntityInfoPanel';
+import { describeSelection } from './entityInfo';
+import { addInstance, addMeshPart } from './instances.testutil';
 
 let app: AppInstance | null = null;
 afterEach(() => {
@@ -232,5 +234,37 @@ describe('EntityInfoPanel', () => {
     fireEvent.change(type, { target: { value: 'diametric' } });
     expect(dims().find((d) => d.id === r)!.kind).toBe('diametric');
     expect((screen.getByRole('textbox', { name: 'Dimension text' }) as HTMLInputElement).placeholder).toMatch(/^DIA /);
+  });
+
+  it('describes a mesh part by name, source, counts and placements, and renders its rows', () => {
+    app = createApp({ demo: false, expose: false, kernel: new KernelClient(new InlineBackend()) });
+    const part = addMeshPart(app, { name: 'Bracket', format: 'STEP', system: 'FreeCAD' });
+    const state = () => app!.document.doc.state;
+    expect(describeSelection(state(), [{ kind: 'meshPart', path: [], id: part }])).toMatchObject({
+      kind: 'meshPart', title: 'Mesh Part', name: 'Bracket', format: 'STEP', system: 'FreeCAD',
+      triangleCount: 1, faceCount: 1, edgeCount: 1, placements: 1, hidden: false, castShadows: true, receiveShadows: true,
+    });
+    // A part inside a component placed twice reports both placements; an unknown id resolves to nothing.
+    const first = addInstance(app, { name: 'First', isGroup: false });
+    const second = addInstance(app, { name: 'Second', isGroup: false });
+    app.document.doc.transact('share definition', (draft) => {
+      const c = draft.definitions.get(draft.rootDefinitionId)!.entities;
+      c.instances.get(second)!.definitionId = c.instances.get(first)!.definitionId;
+    });
+    const nested = addMeshPart(app, { name: '', system: '', parent: [first] });
+    expect(describeSelection(state(), [{ kind: 'meshPart', path: [first], id: nested }])).toMatchObject({ kind: 'meshPart', name: '', system: '', placements: 2 });
+    expect(describeSelection(state(), [{ kind: 'meshPart', path: [], id: 999_999 as never }])).toMatchObject({ kind: 'empty' });
+
+    mount(app);
+    act(() => app!.document.selection.set([{ kind: 'meshPart', path: [], id: part }]));
+    expect(screen.getByText('Mesh Part')).toBeTruthy();
+    expect(screen.getByText('Bracket')).toBeTruthy();
+    expect(screen.getByText('STEP · FreeCAD')).toBeTruthy();
+    for (const label of ['Triangles', 'Faces', 'Edges', 'Placements']) expect(screen.getByText(label)).toBeTruthy();
+    expect((screen.getByLabelText('Tag') as HTMLSelectElement).disabled).toBe(false);
+    expect((screen.getByLabelText('Hidden') as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByLabelText('Cast Shadows')).toBeTruthy();
+    act(() => app!.document.selection.set([{ kind: 'meshPart', path: [first], id: nested }]));
+    expect(screen.getByText('STEP')).toBeTruthy();
   });
 });

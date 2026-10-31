@@ -41,7 +41,7 @@ export interface Axes {
 export type EntityRef =
   | { kind: 'instance'; path: readonly Id[]; id: Id }
   | { kind: 'body'; path: readonly Id[]; id: Id }
-  /** A whole mesh part (MOD3830); it has no face or edge references until made editable. */
+  /** A whole mesh part; it has no face or edge references until made editable. */
   | { kind: 'meshPart'; path: readonly Id[]; id: Id }
   /** A body face, optionally narrowed to one region of it (index into `computeRegions`). */
   | { kind: 'face'; path: readonly Id[]; id: Id; faceId: FaceLocalId; region: number | null }

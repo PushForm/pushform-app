@@ -13,7 +13,7 @@ const ERASE_COLOR = '#1e63d1';
 const BODY_MESSAGE = 'Edges of a solid cannot be erased. Shift = hide, Ctrl = soften, or Push/Pull the face.';
 
 /**
- * Eraser tool (E). Click or drag over sketch edges; everything touched is highlighted
+ * Eraser tool (E). Click or drag over sketch edges (and mesh parts, which go whole); everything touched is highlighted
  * and erased on release in one undo step. Shift = hide, Ctrl = soften + smooth,
  * Ctrl+Shift = unsoften. Body edges are a no-op with a status message in M1.
  */
@@ -43,7 +43,7 @@ export class EraserTool implements Tool {
   }
 
   inferenceOptions(): InferenceOptions {
-    return { pickOnly: true, kinds: ['sketchEdge', 'edge', 'imprintEdge', 'guide', 'dimension', 'text'] };
+    return { pickOnly: true, kinds: ['sketchEdge', 'edge', 'imprintEdge', 'meshPart', 'guide', 'dimension', 'text'] };
   }
 
   onPointerMove(e: ToolPointerEvent): void {
@@ -105,7 +105,7 @@ export class EraserTool implements Tool {
   private mark(e: ToolPointerEvent): void {
     const ref = e.inference?.hit?.ref;
     if (!ref) return;
-    if (ref.kind === 'sketchEdge' || ref.kind === 'imprintEdge' || ref.kind === 'edge' || ref.kind === 'dimension' || ref.kind === 'text') {
+    if (ref.kind === 'sketchEdge' || ref.kind === 'imprintEdge' || ref.kind === 'edge' || ref.kind === 'meshPart' || ref.kind === 'dimension' || ref.kind === 'text') {
       if (this.ctx && samePath(ref.path, hostOfTool(this.ctx).context.path)) this.marked.set(entityRefKey(ref), ref);
     } else if (ref.kind === 'face' || ref.kind === 'body') {
       this.message = BODY_MESSAGE;
@@ -124,6 +124,7 @@ export class EraserTool implements Tool {
     const bodyEdges = marked.filter((r) => r.kind === 'edge');
     const dimensions = marked.filter((r) => r.kind === 'dimension').map((r) => r.id as number);
     const texts = marked.filter((r) => r.kind === 'text');
+    const meshParts = marked.filter((r) => r.kind === 'meshPart');
     const run = (label: string, fn: () => void) => this.ctx!.commands.ctx.tx.transact(label, fn);
     run(flags ? 'Edge Flags' : 'Erase', () => {
       if (!this.ctx) return;
@@ -139,6 +140,14 @@ export class EraserTool implements Tool {
       if (dimensions.length && !flags) this.ctx.commands.execute('dimension.delete', { ids: dimensions });
       // so do texts
       if (texts.length && !flags) this.ctx.commands.execute('text.delete', { refs: texts });
+      // A mesh part goes whole: Shift hides it, Ctrl has no soft state to set, a plain stroke erases it.
+      if (meshParts.length) {
+        if (flags?.hidden) this.ctx.commands.execute('bodies.setHidden', { refs: meshParts, hidden: true });
+        else if (!flags) {
+          this.ctx.commands.execute('selection.set', { refs: meshParts });
+          this.ctx.commands.execute('edit.delete', {});
+        }
+      }
       if (bodyEdges.length) {
         if (flags) this.ctx.commands.execute('edges.setFlags', { refs: bodyEdges, ...flags });
         else {

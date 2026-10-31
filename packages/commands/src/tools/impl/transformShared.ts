@@ -4,7 +4,7 @@ import type { Mat4, MMat4, UnitSettings, Vec2, Vec3 } from '@pushform/core';
 import { formatLength, m4mul, m4transformPoint, MERGE_TOL, v3cross, v3dist, v3dot, v3len, v3normalize, v3sub } from '@pushform/core';
 import type { Axis } from '@pushform/inference';
 import { SNAP_COLORS } from '@pushform/inference';
-import type { DocumentState, EntityContainer, EntityRef, UndoEntry } from '@pushform/model';
+import type { DocumentState, EntityContainer, EntityRef, MeshPartGeometry, UndoEntry } from '@pushform/model';
 import { containerAt, entityRefKey, imageEntityCorners } from '@pushform/model';
 import { contextFrame, pathKeyOf } from '../../commands/context';
 import { surfaceRefs } from '../../commands/sketchQueries';
@@ -57,6 +57,15 @@ export function movedOutline(state: DocumentState, refs: readonly EntityRef[], m
   return out;
 }
 
+function* meshPartEdgePolylines(g: MeshPartGeometry): Generator<Vec3[]> {
+  const p = g.edgePositions;
+  for (let e = 0; e + 1 < g.edgeOffsets.length; e++) {
+    const line: Vec3[] = [];
+    for (let i = g.edgeOffsets[e]! * 3; i < g.edgeOffsets[e + 1]! * 3; i += 3) line.push([p[i]!, p[i + 1]!, p[i + 2]!]);
+    yield line;
+  }
+}
+
 function movedOutlineInContext(state: DocumentState, refs: readonly EntityRef[], m: Mat4 | MMat4, color: string): OverlayPrimitive[] {
   const path = refs[0]?.path ?? [];
   let root: EntityContainer;
@@ -87,12 +96,18 @@ function movedOutlineInContext(state: DocumentState, refs: readonly EntityRef[],
         for (const e of b.edges.values()) push(e.polyline.map(moved));
         break;
       }
+      case 'meshPart': {
+        const part = root.meshParts.get(ref.id);
+        if (part) for (const line of meshPartEdgePolylines(part.geometry)) push(line.map(moved));
+        break;
+      }
       case 'instance': {
         const inst = root.instances.get(ref.id);
         const def = inst && state.definitions.get(inst.definitionId);
         if (!inst || !def) break;
         const im = m4mul(mm, inst.transform);
         for (const b of def.entities.bodies.values()) for (const e of b.edges.values()) push(e.polyline.map((p) => m4transformPoint(im, p)));
+        for (const part of def.entities.meshParts.values()) for (const line of meshPartEdgePolylines(part.geometry)) push(line.map((p) => m4transformPoint(im, p)));
         for (const e of def.entities.sketch.edges.values()) {
           const a = def.entities.sketch.vertices.get(e.a), b = def.entities.sketch.vertices.get(e.b);
           if (a && b) push([m4transformPoint(im, a.p), m4transformPoint(im, b.p)]);

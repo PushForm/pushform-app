@@ -36,7 +36,7 @@ export interface ComponentDefinition {
 /** All entities of a definition. `order` lists entity ids in creation order (stable iteration). */
 export interface EntityContainer {
   bodies: Map<Id, Body>;
-  /** Display-only imported geometry (MOD3800), beside the editable bodies. */
+  /** Display-only imported geometry, beside the editable bodies. */
   meshParts: Map<Id, MeshPart>;
   sketch: Sketch;
   instances: Map<Id, ComponentInstance>;

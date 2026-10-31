@@ -559,7 +559,7 @@ export class PickService {
         const ref: EntityRef = { kind: 'meshPart', path: part.path, id: part.id };
         // An ignored or cut-away part does not occlude: the ray continues past it.
         if (filter.ignored(ref) || this.isClipped(part.path, hit.point)) continue;
-        // The plane of the triangle under the pointer, facing the ray (MOD3830).
+        // The plane of the triangle under the pointer, facing the ray.
         const m = part.mesh, t = hit.tri * 3, a = m.tris[t]! * 3, b = m.tris[t + 1]! * 3, c = m.tris[t + 2]! * 3;
         const pa: Vec3 = [m.verts[a]!, m.verts[a + 1]!, m.verts[a + 2]!];
         const cross = v3cross(v3sub([m.verts[b]!, m.verts[b + 1]!, m.verts[b + 2]!], pa), v3sub([m.verts[c]!, m.verts[c + 1]!, m.verts[c + 2]!], pa));
@@ -763,7 +763,7 @@ export class RefFilter {
   wants(kind: EntityRef['kind']): boolean {
     if (!this.kinds) return true;
     if (this.kinds.has(kind)) return true;
-    // A mesh part is a surface to a tool that picks faces, and a whole object to one that picks bodies (MOD3830).
+    // A mesh part is a surface to a tool that picks faces, and a whole object to one that picks bodies.
     if (kind === 'meshPart') return this.kinds.has('face') || this.kinds.has('body');
     // `body` implies its faces and edges, and vice versa for box selection
     if (kind === 'body') return BODY_KINDS.some((k) => this.kinds!.has(k));

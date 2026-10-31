@@ -51,11 +51,13 @@ import type {
   KernelFaceOrigin,
   KernelResult,
   LoopRef,
+  MeshPart,
+  MeshPartGeometry,
   Sketch,
   SketchGraph as SketchGraphType,
   TextureTileOf,
 } from '@pushform/model';
-import { allocId, applyKernelResult, bodyFromMesh, containerAt, entityRefKey, imageEntityCorners, loopPoints, loopVertexIds, planeOrigin, reconcileBody } from '@pushform/model';
+import { allocId, applyKernelResult, bodyFromMesh, containerAt, entityRefKey, imageEntityCorners, loopPoints, loopVertexIds, meshPartBounds, planeOrigin, reconcileBody } from '@pushform/model';
 import { mapNormal, mapSectionPlane } from './sectionPlanes';
 import { defineCommand } from '../registry/Command';
 import type { AnyCommand } from '../registry/Command';
@@ -106,6 +108,8 @@ export interface TransformApplyResult {
   refs: EntityRef[];
   /** Bodies created or modified by the operation. */
   bodyIds: number[];
+  /** Mesh parts created or modified by the operation. */
+  meshPartIds: number[];
 }
 
 type RefParam = z.infer<typeof EntityRefSchema>;
@@ -286,6 +290,12 @@ function* refPoints(state: DocumentState, container: EntityContainer, ref: Entit
       if (!box3IsEmpty(mb)) yield* boxCorners(mb);
       break;
     }
+    case 'meshPart': {
+      const part = container.meshParts.get(ref.id);
+      const pb = part && meshPartBounds(part.geometry);
+      if (pb) yield* boxCorners(pb);
+      break;
+    }
     case 'face': {
       const f = container.bodies.get(ref.id)?.faces.get(ref.faceId);
       for (const loop of f?.loops ?? []) yield* loop;
@@ -352,6 +362,10 @@ export function definitionBounds(state: DocumentState, definitionId: number, see
     const mb = meshBounds(body.mesh);
     if (!box3IsEmpty(mb)) for (const c of boxCorners(mb)) box3Expand(b, c);
   }
+  for (const part of def.entities.meshParts.values()) {
+    const pb = meshPartBounds(part.geometry);
+    if (pb) for (const c of boxCorners(pb)) box3Expand(b, c);
+  }
   for (const v of def.entities.sketch.vertices.values()) box3Expand(b, v.p);
   for (const image of def.entities.images.values()) for (const p of imageEntityCorners(image)) box3Expand(b, p);
   for (const g of def.entities.guides.values()) {
@@ -407,6 +421,8 @@ export interface TransformPlan {
   copy: boolean;
   /** Whole bodies with the version they had when planned (stale check). */
   bodies: Map<Id, number>;
+  /** Whole mesh parts (transformed in the model, kernel-free, mirrored or scaled alike). */
+  meshPartIds: Id[];
   instances: Id[];
   /** Sketch vertices to move (non-copy) … */
   sketchVertexIds: Id[];
@@ -478,6 +494,7 @@ export function planTransform(state: DocumentState, refs: readonly EntityRef[], 
     rigid: isRigidTransform(m),
     copy,
     bodies: new Map(),
+    meshPartIds: [],
     instances: [],
     sketchVertexIds: [],
     sketchEdgeIds: [],
@@ -504,6 +521,9 @@ export function planTransform(state: DocumentState, refs: readonly EntityRef[], 
         if (body) plan.bodies.set(ref.id, body.version);
         break;
       }
+      case 'meshPart':
+        if (container.meshParts.has(ref.id)) plan.meshPartIds.push(ref.id);
+        break;
       case 'instance':
         if (container.instances.has(ref.id)) plan.instances.push(ref.id);
         break;
@@ -558,7 +578,7 @@ export function planTransform(state: DocumentState, refs: readonly EntityRef[], 
   if (copy && plan.subEntities.size) {
     throw new PushFormError('transform.copySubEntity', 'Copying faces or edges of a solid is not supported');
   }
-  if (!copy && plan.subEntities.size === 1 && plan.bodies.size === 0 && plan.instances.length === 0 && vertexIds.size === 0) {
+  if (!copy && plan.subEntities.size === 1 && plan.bodies.size === 0 && plan.meshPartIds.length === 0 && plan.instances.length === 0 && vertexIds.size === 0) {
     plan.pushPull = pushPullRoute(container, path, unique, m);
   }
   return plan;
@@ -693,6 +713,47 @@ export function cloneBody(draft: DocumentDraft, container: EntityContainer, src:
   container.bodies.set(body.id, body);
   container.order.push(body.id);
   return body;
+}
+
+/** Copy of a mesh part under `id` sharing its (immutable) geometry; not inserted anywhere. */
+export function copyMeshPartRecord(src: MeshPart, id: Id): MeshPart {
+  return { ...src, id, source: { ...src.source }, attributes: cloneJson(src.attributes) };
+}
+
+/** Copy of a mesh part under a new id, inserted into the container. */
+export function cloneMeshPart(draft: DocumentDraft, container: EntityContainer, src: MeshPart): MeshPart {
+  const part = copyMeshPartRecord(src, allocId<Id>(draft));
+  part.locked = false;
+  container.meshParts.set(part.id, part);
+  container.order.push(part.id);
+  return part;
+}
+
+/**
+ * Geometry of a mesh part after `m` (any affine matrix): new position and edge arrays, the rest
+ * shared. A mirroring matrix reverses the triangle winding so the faces keep facing outward.
+ */
+export function transformMeshPartGeometry(g: MeshPartGeometry, m: Mat4 | MMat4): MeshPartGeometry {
+  const mapAll = (src: Float64Array): Float64Array => {
+    const out = new Float64Array(src.length);
+    for (let i = 0; i < src.length; i += 3) {
+      const p = m4transformPoint(m, [src[i]!, src[i + 1]!, src[i + 2]!]);
+      out[i] = p[0];
+      out[i + 1] = p[1];
+      out[i + 2] = p[2];
+    }
+    return out;
+  };
+  let triangles = g.triangles;
+  if (m4linearDeterminant(m) < 0) {
+    triangles = new Uint32Array(g.triangles.length);
+    for (let i = 0; i < triangles.length; i += 3) {
+      triangles[i] = g.triangles[i]!;
+      triangles[i + 1] = g.triangles[i + 2]!;
+      triangles[i + 2] = g.triangles[i + 1]!;
+    }
+  }
+  return { ...g, positions: mapAll(g.positions), edgePositions: mapAll(g.edgePositions), triangles };
 }
 
 /** Deep plain copy of a body record under `id` (same version; not inserted anywhere). */
@@ -1059,7 +1120,7 @@ export function applyTransformPlan(draft: DocumentDraft, plan: TransformPlan, wo
   const container = draftContainerAt(draft, plan.path);
   const path = plan.path;
   const refs: EntityRef[] = [];
-  const bodyIds: number[] = [];
+  const bodyIds: number[] = [], meshPartIds: number[] = [];
   const m = plan.matrix;
 
   if (plan.pushPull && work.pushPull) {
@@ -1067,7 +1128,7 @@ export function applyTransformPlan(draft: DocumentDraft, plan: TransformPlan, wo
     bodyIds.push(...r.bodyIds);
     const t = plan.pushPull.target;
     if (t.kind === 'face') refs.push({ kind: 'face', path, id: t.id as Id, faceId: t.faceId as FaceLocalId, region: t.region });
-    return { refs, bodyIds };
+    return { refs, bodyIds, meshPartIds };
   }
 
   // whole bodies
@@ -1098,6 +1159,17 @@ export function applyTransformPlan(draft: DocumentDraft, plan: TransformPlan, wo
       refs.push({ kind: 'body', path, id: extra.id });
       bodyIds.push(extra.id);
     }
+  }
+
+  // mesh parts: whole, in the model; a copy shares the source geometry until it moves
+  for (const id of plan.meshPartIds) {
+    const source = container.meshParts.get(id);
+    if (!source) continue;
+    if (source.locked && !plan.copy) throw new PushFormError('meshPart.locked', 'A locked part cannot be moved');
+    const target = plan.copy ? cloneMeshPart(draft, container, source) : source;
+    target.geometry = transformMeshPartGeometry(source.geometry, m);
+    refs.push({ kind: 'meshPart', path, id: target.id });
+    meshPartIds.push(target.id);
   }
 
   // instances
@@ -1152,7 +1224,7 @@ export function applyTransformPlan(draft: DocumentDraft, plan: TransformPlan, wo
   // dimensions: moved on their own, a dimension keeps its measured points and attachments and its dimension
   // line (or its leader) follows the move; moved with other entities, or turned or scaled, it moves whole; a copy is a
   // new dimension attached to nothing.
-  const onlyDimensions = plan.dimensionIds.length > 0 && plan.bodies.size === 0 && plan.instances.length === 0 &&
+  const onlyDimensions = plan.dimensionIds.length > 0 && plan.bodies.size === 0 && plan.meshPartIds.length === 0 && plan.instances.length === 0 &&
     plan.sketchVertexIds.length === 0 && plan.sketchEdgeIds.length === 0 && plan.subEntities.size === 0 &&
     plan.sectionPlaneIds.length === 0 && plan.imageIds.length === 0;
   for (const id of plan.dimensionIds) {
@@ -1207,7 +1279,7 @@ export function applyTransformPlan(draft: DocumentDraft, plan: TransformPlan, wo
     }
   }
 
-  return { refs, bodyIds };
+  return { refs, bodyIds, meshPartIds };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1218,13 +1290,14 @@ async function executeTransform(host: DocumentHost, kernel: KernelClient, plans:
   for (const plan of plans) requireContextPath(host, plan.path, 'Selection');
   const works: TransformKernelWork[] = [];
   for (const plan of plans) works.push(await runTransformKernel(kernel, state, plan));
-  const out: TransformApplyResult = { refs: [], bodyIds: [] };
+  const out: TransformApplyResult = { refs: [], bodyIds: [], meshPartIds: [] };
   host.transact(label, () =>
     host.edit(label, (draft) => {
       plans.forEach((plan, i) => {
         const r = applyTransformPlan(draft, plan, works[i]!);
         out.refs.push(...r.refs);
         out.bodyIds.push(...r.bodyIds);
+        out.meshPartIds.push(...r.meshPartIds);
       });
     }),
   );

@@ -20,7 +20,7 @@ import {
   v3len,
   v3normalize,
 } from '@pushform/core';
-import { allocId, containerAt, contextMatrix, createEntityContainer, DEFAULT_AXES, DEFAULT_BEHAVIORS, imageEntityCorners, loopKey, SketchGraph, textureTiles, uvRebaseSides } from '@pushform/model';
+import { allocId, containerAt, contextMatrix, createEntityContainer, DEFAULT_AXES, DEFAULT_BEHAVIORS, imageEntityCorners, loopKey, meshPartBounds, SketchGraph, textureTiles, uvRebaseSides } from '@pushform/model';
 import type {
   ComponentBehaviors,
   ComponentDefinition,
@@ -45,7 +45,7 @@ import { orthonormalAxes } from './axes';
 import { glueFaceAt } from './componentBehaviors';
 import { EntityRefSchema } from './sketch';
 import { mapNormal, mapSectionPlane } from './sectionPlanes';
-import { cloneBody, copyBodyRecord, definitionBounds, m4linearDeterminant, toEntityRefs, transformBodyAffineInPlace, transformBodyInPlace } from './transform';
+import { cloneBody, cloneMeshPart, copyBodyRecord, copyMeshPartRecord, definitionBounds, m4linearDeterminant, toEntityRefs, transformBodyAffineInPlace, transformBodyInPlace, transformMeshPartGeometry } from './transform';
 
 /**
  * Groups and components: Make Group / Make Component move the
@@ -354,6 +354,7 @@ function mapLoop(src: Sketch, dst: SketchGraph, edgeMap: Map<Id, Id[]>, map: Poi
 
 interface Collected {
   readonly bodies: Id[];
+  readonly meshParts: Id[];
   readonly instances: Id[];
   readonly guides: Id[];
   readonly images: Id[];
@@ -368,7 +369,7 @@ interface Collected {
  * only by selected edges come along).
  */
 function collect(container: EntityContainer, refs: readonly EntityRef[]): Collected {
-  const bodies = new Set<Id>(), instances = new Set<Id>(), guides = new Set<Id>(), images = new Set<Id>();
+  const bodies = new Set<Id>(), meshParts = new Set<Id>(), instances = new Set<Id>(), guides = new Set<Id>(), images = new Set<Id>();
   const edges = new Set<Id>(), faces = new Set<Id>();
   const sketch = container.sketch;
   for (const r of refs) {
@@ -378,6 +379,9 @@ function collect(container: EntityContainer, refs: readonly EntityRef[]): Collec
       case 'edge':
       case 'imprintEdge':
         if (container.bodies.has(r.id)) bodies.add(r.id);
+        break;
+      case 'meshPart':
+        if (container.meshParts.has(r.id)) meshParts.add(r.id);
         break;
       case 'instance':
         if (container.instances.has(r.id)) instances.add(r.id);
@@ -410,12 +414,13 @@ function collect(container: EntityContainer, refs: readonly EntityRef[]): Collec
   }
   return {
     bodies: [...bodies],
+    meshParts: [...meshParts],
     instances: [...instances],
     guides: [...guides],
     images: [...images],
     edges,
     faces,
-    size: bodies.size + instances.size + guides.size + images.size + edges.size,
+    size: bodies.size + meshParts.size + instances.size + guides.size + images.size + edges.size,
   };
 }
 
@@ -429,6 +434,13 @@ function collectedBounds(state: DocumentState, container: EntityContainer, c: Co
       box3Expand(b, mb.min);
       box3Expand(b, mb.max);
     }
+  }
+  for (const id of c.meshParts) {
+    const part = container.meshParts.get(id);
+    const pb = part && meshPartBounds(part.geometry);
+    if (!pb) continue;
+    box3Expand(b, pb.min);
+    box3Expand(b, pb.max);
   }
   for (const id of c.edges) {
     const e = container.sketch.edges.get(id);
@@ -509,6 +521,19 @@ function makeDefinition(host: DocumentHost, refs: readonly EntityRef[], opts: Ma
         src.bodies.delete(id);
         removed.add(id);
         dst.bodies.set(target.id, target);
+        dst.order.push(target.id);
+      }
+    }
+    // mesh parts
+    for (const id of collected.meshParts) {
+      const part = src.meshParts.get(id);
+      if (!part) continue;
+      const target = move ? copyMeshPartRecord(part, part.id) : cloneMeshPart(draft, dst, part);
+      target.geometry = transformMeshPartGeometry(part.geometry, toLocal);
+      if (move) {
+        src.meshParts.delete(id);
+        removed.add(id);
+        dst.meshParts.set(target.id, target);
         dst.order.push(target.id);
       }
     }
@@ -687,7 +712,7 @@ export const groupExplode = defineCommand({
         const sole = instanceCount(state, def.id) === 1;
         const m = inst.transform;
         const map = pointMapFromMatrix(m);
-        const defOrder = def.entities.order.length ? def.entities.order : [...def.entities.bodies.keys(), ...def.entities.instances.keys(), ...def.entities.guides.keys()];
+        const defOrder = def.entities.order.length ? def.entities.order : [...def.entities.bodies.keys(), ...def.entities.meshParts.keys(), ...def.entities.instances.keys(), ...def.entities.guides.keys()];
 
         container.instances.delete(inst.id);
         container.order = container.order.filter((x) => x !== inst.id);
@@ -701,6 +726,15 @@ export const groupExplode = defineCommand({
             container.bodies.set(copy.id, copy);
             container.order.push(copy.id);
             out.push({ kind: 'body', path, id: copy.id });
+            continue;
+          }
+          const part = def.entities.meshParts.get(id);
+          if (part) {
+            const copy = copyMeshPartRecord(part, sole ? part.id : allocId<Id>(draft));
+            copy.geometry = transformMeshPartGeometry(part.geometry, m);
+            container.meshParts.set(copy.id, copy);
+            container.order.push(copy.id);
+            out.push({ kind: 'meshPart', path, id: copy.id });
             continue;
           }
           const nested = def.entities.instances.get(id);
@@ -779,11 +813,16 @@ export function cloneDefinition(draft: DocumentDraft, src: ComponentDefinition, 
   def.axes = { origin: mv3(src.axes.origin), x: mv3(src.axes.x), y: mv3(src.axes.y), z: mv3(src.axes.z) };
   const dst = def.entities;
   const identity = pointMapFromMatrix(IDENTITY);
-  const order = src.entities.order.length ? src.entities.order : [...src.entities.bodies.keys(), ...src.entities.instances.keys(), ...src.entities.guides.keys()];
+  const order = src.entities.order.length ? src.entities.order : [...src.entities.bodies.keys(), ...src.entities.meshParts.keys(), ...src.entities.instances.keys(), ...src.entities.guides.keys()];
   for (const id of order) {
     const body = src.entities.bodies.get(id);
     if (body) {
       cloneBody(draft, dst, body);
+      continue;
+    }
+    const part = src.entities.meshParts.get(id);
+    if (part) {
+      cloneMeshPart(draft, dst, part);
       continue;
     }
     const inst = src.entities.instances.get(id);
@@ -957,7 +996,7 @@ export const instanceSetHidden = defineCommand({
   },
 });
 
-/** Hide or show loose solids; hidden ones leave the selection, as nothing hidden can stay picked. */
+/** Hide or show loose solids and mesh parts; hidden ones leave the selection, as nothing hidden can stay picked. */
 export const bodiesSetHidden = defineCommand({
   id: 'bodies.setHidden',
   title: 'Hide',
@@ -966,13 +1005,14 @@ export const bodiesSetHidden = defineCommand({
   undoable: true,
   run(ctx, p): number {
     const host = hostOf(ctx);
-    const refs = toEntityRefs(p.refs).filter((r) => r.kind === 'body');
+    const refs = toEntityRefs(p.refs).filter((r) => r.kind === 'body' || r.kind === 'meshPart');
     let n = 0;
     host.edit(p.hidden ? 'Hide' : 'Unhide', (draft) => {
       for (const r of refs) {
-        const body = draftContainerAt(draft, r.path).bodies.get(r.id);
-        if (!body) continue;
-        body.hidden = p.hidden;
+        const container = draftContainerAt(draft, r.path);
+        const target = r.kind === 'body' ? container.bodies.get(r.id) : container.meshParts.get(r.id);
+        if (!target) continue;
+        target.hidden = p.hidden;
         n++;
       }
     });
@@ -982,7 +1022,7 @@ export const bodiesSetHidden = defineCommand({
 });
 
 /**
- * Cast Shadows / Receive Shadows on solids, groups and components. An instance's setting also governs
+ * Cast Shadows / Receive Shadows on solids, mesh parts, groups and components. An instance's setting also governs
  * everything inside it.
  */
 export const entitySetShadows = defineCommand({
@@ -996,9 +1036,9 @@ export const entitySetShadows = defineCommand({
     let n = 0;
     host.edit(p.cast === false || p.receive === false ? 'Turn Off Shadows' : 'Turn On Shadows', (draft) => {
       for (const r of toEntityRefs(p.refs)) {
-        if (r.kind !== 'instance' && r.kind !== 'body') continue;
+        if (r.kind !== 'instance' && r.kind !== 'body' && r.kind !== 'meshPart') continue;
         const container = draftContainerAt(draft, r.path);
-        const target = r.kind === 'instance' ? container.instances.get(r.id) : container.bodies.get(r.id);
+        const target = r.kind === 'instance' ? container.instances.get(r.id) : r.kind === 'body' ? container.bodies.get(r.id) : container.meshParts.get(r.id);
         if (!target) continue;
         if (p.cast !== undefined) target.castShadows = p.cast;
         if (p.receive !== undefined) target.receiveShadows = p.receive;

@@ -16,6 +16,7 @@ const idList = z.array(idSchema);
 const ENTITY_KINDS = [
   'instance',
   'body',
+  'meshPart',
   'face',
   'edge',
   'imprintEdge',
@@ -79,7 +80,7 @@ function hasSelection(ctx: CommandContext): boolean {
   return h instanceof DocumentHost && !h.selection.isEmpty;
 }
 
-/** Everything selectable in the current edit context: sketch edges/faces, bodies, instances, guides. */
+/** Everything selectable in the current edit context: sketch edges/faces, bodies, mesh parts, instances, guides. */
 export function allContextRefs(host: DocumentHost): EntityRef[] {
   const path = host.context.path;
   const c = containerAt(host.doc.state, path);
@@ -87,6 +88,7 @@ export function allContextRefs(host: DocumentHost): EntityRef[] {
   for (const id of c.sketch.edges.keys()) refs.push({ kind: 'sketchEdge', path, id });
   for (const id of c.sketch.faces.keys()) refs.push({ kind: 'sketchFace', path, id });
   for (const id of c.bodies.keys()) refs.push({ kind: 'body', path, id });
+  for (const id of c.meshParts.keys()) refs.push({ kind: 'meshPart', path, id });
   for (const id of c.instances.keys()) refs.push({ kind: 'instance', path, id });
   for (const id of c.guides.keys()) refs.push({ kind: 'guide', path, id });
   return refs;
@@ -405,7 +407,7 @@ export const setGeometryHidden = defineCommand({
 
 /**
  * Erase the current selection (entities of the open context): sketch edges (with their faces),
- * sketch faces (edges kept), bodies, group/component instances, guides. Body faces / edges are
+ * sketch faces (edges kept), bodies, mesh parts, group/component instances, guides. Body faces / edges are
  * skipped (they need a boolean to stay manifold).
  */
 export const deleteSelection = defineCommand({
@@ -443,6 +445,12 @@ export const deleteSelection = defineCommand({
             break;
           case 'body':
             if (root.bodies.delete(r.id)) {
+              root.order = root.order.filter((x) => x !== r.id);
+              removed++;
+            }
+            break;
+          case 'meshPart':
+            if (root.meshParts.delete(r.id)) {
               root.order = root.order.filter((x) => x !== r.id);
               removed++;
             }

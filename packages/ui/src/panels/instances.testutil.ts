@@ -5,7 +5,7 @@ import { m4identity, meshBox } from '@pushform/core';
 import type { DefId, Id } from '@pushform/core';
 import { EntityRefSchema, hostOf } from '@pushform/commands';
 import type { Command } from '@pushform/commands';
-import { bodyFromMesh, createEntityContainer, instanceAt } from '@pushform/model';
+import { allocId, bodyFromMesh, createEntityContainer, instanceAt } from '@pushform/model';
 import type { AppInstance } from '../bootstrap';
 import { toEntityRef } from '../engine/uiCommands';
 
@@ -175,4 +175,39 @@ export function stubInstanceCommands(app: AppInstance, log: string[]): void {
     undoable: true,
     run: () => log.push('explode'),
   });
+}
+
+/**
+ * Test-only: add a one-triangle mesh part with one polyline edge to the container at `parent`
+ * (root by default) and return its id.
+ */
+export function addMeshPart(app: AppInstance, opts: { name?: string; format?: string; system?: string; parent?: readonly Id[]; hidden?: boolean } = {}): Id {
+  let id = 0 as Id;
+  app.document.doc.transact('add mesh part', (draft) => {
+    const def = opts.parent?.length ? draft.definitions.get(instanceAt(draft as never, opts.parent)!.definitionId)! : draft.definitions.get(draft.rootDefinitionId)!;
+    id = allocId<Id>(draft);
+    def.entities.meshParts.set(id, {
+      id,
+      name: opts.name ?? 'Bracket',
+      source: { format: opts.format ?? 'STEP', system: opts.system ?? 'FreeCAD' },
+      geometry: {
+        positions: new Float64Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+        triangles: new Uint32Array([0, 1, 2]),
+        triangleFace: new Uint32Array([0]),
+        faceCount: 1,
+        faceMaterials: new Uint32Array([0]),
+        edgeOffsets: new Uint32Array([0, 2]),
+        edgePositions: new Float64Array([0, 0, 0, 1, 0, 0]),
+        edgeFlags: new Uint8Array([0]),
+      },
+      materialId: null,
+      tagId: draft.defaultTagId,
+      hidden: opts.hidden ?? false,
+      locked: false,
+      castShadows: true,
+      receiveShadows: true,
+    } as never);
+    def.entities.order.push(id);
+  });
+  return id;
 }

@@ -147,7 +147,7 @@ type FaceTarget = { kind: 'face'; bodyId: Id; faceId: FaceLocalId; sides: FaceSi
  * A whole body is loose geometry (a drag-selected "shape"), so painting it paints
  * every face explicitly; only a group/component instance takes a default material.
  */
-type Target = FaceTarget | { kind: 'body'; id: Id; sides: FaceSide[] } | { kind: 'instance'; id: Id };
+type Target = FaceTarget | { kind: 'body'; id: Id; sides: FaceSide[] } | { kind: 'meshPart'; id: Id } | { kind: 'instance'; id: Id };
 
 const targetKey = (t: Target): string =>
   t.kind === 'face' ? `f/${t.bodyId}/${t.faceId}` : t.kind === 'sketchFace' ? `s/${t.id}` : `${t.kind}/${t.id}`;
@@ -261,7 +261,7 @@ function matchingTargets(c: EntityContainer, sample: MaterialId | null, scope: {
   return out;
 }
 
-/** Refs of the current context → paint targets (edges and other kinds are ignored). */
+/** Refs of the current context → paint targets (edges and other kinds are ignored). A mesh part is painted whole. */
 function targetsOf(host: DocumentHost, refs: readonly EntityRef[], side: PaintSide): Target[] {
   const c = containerAt(host.doc.state, host.context.path);
   const out: Target[] = [];
@@ -276,6 +276,9 @@ function targetsOf(host: DocumentHost, refs: readonly EntityRef[], side: PaintSi
         break;
       case 'body':
         if (c.bodies.has(r.id)) out.push({ kind: 'body', id: r.id, sides: sidesOf(side) });
+        break;
+      case 'meshPart':
+        if (c.meshParts.has(r.id)) out.push({ kind: 'meshPart', id: r.id });
         break;
       case 'instance':
         if (c.instances.has(r.id)) out.push({ kind: 'instance', id: r.id });
@@ -299,6 +302,8 @@ export function sampleTarget(c: EntityContainer, t: Target, side: FaceSide): Mat
       return c.sketch.faces.get(t.id)?.[sideKey(side)] ?? null;
     case 'body':
       return c.bodies.get(t.id)?.materialId ?? null;
+    case 'meshPart':
+      return c.meshParts.get(t.id)?.materialId ?? null;
     case 'instance':
       return c.instances.get(t.id)?.materialId ?? null;
   }
@@ -339,6 +344,14 @@ function applyTargets(draft: DocumentDraft, path: readonly number[], targets: re
         n++;
         break;
       }
+      case 'meshPart': {
+        // The part's material backs the source faces without a color of their own; `faceMaterials` stays.
+        const part = c.meshParts.get(t.id);
+        if (!part) break;
+        part.materialId = materialId;
+        n++;
+        break;
+      }
       case 'instance': {
         const inst = c.instances.get(t.id);
         if (!inst) break;
@@ -365,7 +378,7 @@ export function expandPaintTargets(host: DocumentHost, targets: readonly Target[
     } else out.set(k, t);
   };
   for (const t of targets) {
-    if (t.kind === 'body' || t.kind === 'instance') {
+    if (t.kind === 'body' || t.kind === 'meshPart' || t.kind === 'instance') {
       add(t);
       continue;
     }

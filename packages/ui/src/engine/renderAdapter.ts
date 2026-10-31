@@ -163,7 +163,7 @@ export function bodyEdgesToRender(body: Body): RenderBodyEdge[] {
 }
 
 // --- mesh parts ---------------------------------------------------------------------------------
-// A mesh part's packed arrays are drawn as a body mesh is (MOD3820). The derived objects are
+// A mesh part's packed arrays are drawn as a body mesh is. The derived objects are
 // cached per immutable geometry object, so the renderer's identity diffing sees no change until
 // the geometry is replaced.
 const meshPartMeshCache = new WeakMap<MeshPartGeometry, MeshData>();
@@ -795,7 +795,7 @@ function highlightForCached(state: DocumentState, ref: EntityRef, cache: MatrixC
     case 'body':
       return container.bodies.has(ref.id) ? { kind: 'body', key: renderKey(ref.path, ref.id) } : null;
     case 'meshPart':
-      // A mesh part highlights whole, as a body does (MOD3830).
+      // A mesh part highlights whole, as a body does.
       return container.meshParts.has(ref.id) ? { kind: 'body', key: renderKey(ref.path, ref.id) } : null;
     case 'face': {
       const face = container.bodies.get(ref.id)?.faces.get(ref.faceId);

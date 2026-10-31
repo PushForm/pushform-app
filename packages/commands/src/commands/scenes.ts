@@ -216,7 +216,7 @@ export function captureSceneProps(state: DocumentState, camera: CameraState | nu
   const style = state.styles.get(state.activeStyleId);
   const fog = fogOf(state);
   return {
-    camera: cameraToModel(camera ?? { eye: [9, -12, 7], target: [0, 0, 0.5], up: [0, 0, 1], fov: 35, projection: 'perspective', orthoHeight: 10 }),
+    camera: cameraToModel(camera ?? { eye: [4.5, -6.6, 1.9], target: [0, 0, 0.9], up: [0, 0, 1], fov: 35, projection: 'perspective', orthoHeight: 10 }),
     hiddenEntities: [...hidden.geometry, ...hidden.objects],
     hiddenTags: [...state.tags.values()].filter((t) => !t.visible).map((t) => t.id),
     hiddenTagFolders: [...state.tagFolders.values()].filter((f) => !f.visible).map((f) => f.id),

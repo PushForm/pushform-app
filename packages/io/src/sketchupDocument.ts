@@ -470,4 +470,4 @@ const DIMENSION_FONT_PT = 10;
 const IMPORTED_TEXT_FONT = { family: 'Arial', sizePt: 12, color: [0, 0, 0] as const };
 
 /** Camera kept by a scene whose saved camera the reader could not recover; its useCamera flag is off. */
-const DEFAULT_SCENE_CAMERA: CameraState = { eye: [9, -12, 7], target: [0, 0, 0.5], up: [0, 0, 1], perspective: true, fov: 35, height: 10 };
+const DEFAULT_SCENE_CAMERA: CameraState = { eye: [4.5, -6.6, 1.9], target: [0, 0, 0.9], up: [0, 0, 1], perspective: true, fov: 35, height: 10 };

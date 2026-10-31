@@ -36,7 +36,7 @@ A cutter must actually cross the outline: its ends do not extend automatically. 
 
 ## Start Shape Builder
 
-Select the lines or shapes you want to work with, then choose **Shape Builder**, the first entry in the Boolean button's arrow, or press **X**. At least one eligible path must be selected. Paths must be visible, unlocked, ungrouped, and on one editable layer.
+Select the lines or shapes you want to work with, then choose **Shape Builder**, the first entry in the Boolean button's arrow, or press **X**. Look for the overlapping outlines with a shaded region and a small pointer. At least one eligible path must be selected. Paths must be visible, unlocked, ungrouped, and on one editable layer.
 
 Other selected object types, such as images and text, are ignored and left unchanged. The right-side Shape Builder pane offers Apply, Cancel, Add, Remove, and Keep originals.
 

@@ -106,6 +106,7 @@ pub use par::{for_each_on_threads, map_on_threads, map_with_local_pools, set_thr
 #[cfg(test)]
 mod pinch_tests;
 mod planar_faces;
+mod planar_polygons;
 #[cfg(test)]
 mod planar_faces_tests;
 mod plane_fit;
@@ -197,6 +198,7 @@ pub use ops::{
     place_matrix, split_by_plane, transform, transform_matrix, union_apart, with_attempt_budget,
 };
 pub use polybool::{faceted_boolean, planar_boolean};
+pub use planar_polygons::{PolygonFace, body_from_polygons};
 pub use polyhedron::{HalfSpace, convex_polyhedron, draft, offset_faces, shell};
 pub use prism::{PLANAR_FIT_TOL, extrude_planar_regions, planar_regions_boolean};
 pub use prism_measure::certified_prism_equivalent;

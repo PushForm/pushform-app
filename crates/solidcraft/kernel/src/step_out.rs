@@ -167,6 +167,21 @@ impl Out {
         self.lines.push(text.into());
         self.lines.len() as u64
     }
+    /// PushForm: turns the copied `MANIFOLD_SOLID_BREP` entity `id` into a `SHELL_BASED_SURFACE_MODEL`
+    /// of its shell, now an `OPEN_SHELL`. False (nothing changed) when `id` is not that.
+    fn as_surface_model(&mut self, id: u64) -> bool {
+        let Some(line) = self.lines.get((id as usize).wrapping_sub(1)) else { return false };
+        let Some(rest) = line.strip_prefix("MANIFOLD_SOLID_BREP(") else { return false };
+        let Some((name, shell)) = rest.trim_end_matches(')').rsplit_once(",#") else { return false };
+        let Ok(shell) = shell.parse::<u64>() else { return false };
+        let Some(open) = self.lines.get((shell as usize).wrapping_sub(1)).and_then(|l| l.strip_prefix("CLOSED_SHELL(")).map(|r| format!("OPEN_SHELL({r}")) else {
+            return false;
+        };
+        let model = format!("SHELL_BASED_SURFACE_MODEL({name},(#{shell}))");
+        self.lines[shell as usize - 1] = open;
+        self.lines[id as usize - 1] = model;
+        true
+    }
     /// Add, or reuse an identical earlier entity (geometry only).
     fn add_shared(&mut self, text: String) -> u64 {
         if let Some(id) = self.shared.get(&text) {
@@ -1724,6 +1739,8 @@ fn products_text(products: &[ExportProduct], root: usize, header: &StepHeader, m
         }
         if !p.bodies.is_empty() {
             let mut solids = Vec::new();
+            // PushForm: surface bodies (open shells) are written as shell-based surface models.
+            let mut sheets = Vec::new();
             for b in &p.bodies {
                 for lump in export_lumps(b.body) {
                     let (ex, merged, trimmed, face_paint) = brep_exchange(&lump, merge)?;
@@ -1735,7 +1752,11 @@ fn products_text(products: &[ExportProduct], root: usize, header: &StepHeader, m
                     roots.sort();
                     for r in roots {
                         let id = o.copy_solid(&ex, r, &b.name).map_err(|e| KernelError::Failed(format!("STEP export: {e}")))?;
-                        solids.push(id);
+                        if lump.is_surface() && o.as_surface_model(id) {
+                            sheets.push(id);
+                        } else {
+                            solids.push(id);
+                        }
                         let opacity = lump.paint().map(|p| p.opacity).unwrap_or(1.0);
                         if let Some(c) = b.color {
                             styled.push(style(&mut o, id, c, opacity));
@@ -1750,9 +1771,14 @@ fn products_text(products: &[ExportProduct], root: usize, header: &StepHeader, m
                     }
                 }
             }
-            let list = solids.iter().chain(std::iter::once(&origin)).map(|i| format!("#{i}")).collect::<Vec<_>>().join(",");
-            let absr = o.add(format!("ADVANCED_BREP_SHAPE_REPRESENTATION({},({list}),#{ctx})", string(&name)));
-            o.add(format!("SHAPE_REPRESENTATION_RELATIONSHIP('','',#{srep},#{absr})"));
+            for (kind, items) in [("ADVANCED_BREP_SHAPE_REPRESENTATION", &solids), ("MANIFOLD_SURFACE_SHAPE_REPRESENTATION", &sheets)] {
+                if items.is_empty() {
+                    continue;
+                }
+                let list = items.iter().chain(std::iter::once(&origin)).map(|i| format!("#{i}")).collect::<Vec<_>>().join(",");
+                let rep = o.add(format!("{kind}({},({list}),#{ctx})", string(&name)));
+                o.add(format!("SHAPE_REPRESENTATION_RELATIONSHIP('','',#{srep},#{rep})"));
+            }
         }
     }
     if !product_ids.is_empty() {

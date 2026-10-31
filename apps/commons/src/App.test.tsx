@@ -67,7 +67,7 @@ it('replaces a broken preview with a labeled fallback', async () => {
   render(<App loadCatalog={async () => [exampleModel({ imageUrl: 'https://example.com/missing.jpg' })]} />);
   const image = await screen.findByRole('img', { name: 'Workshop hinge' });
   fireEvent.error(image);
-  expect(screen.getByText('No preview image')).toBeTruthy();
+  expect(screen.getByText('Preview unavailable')).toBeTruthy();
   expect(screen.queryByRole('img', { name: 'Workshop hinge' })).toBeNull();
 });
 

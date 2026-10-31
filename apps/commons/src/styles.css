@@ -122,3 +122,15 @@ h2 { font-size: 29px; letter-spacing: -.8px; font-weight: 500; margin: 0; }
 .open-in-pushform { margin: 24px 0; }
 .open-model { display: inline-block; background: var(--ink, #172725); color: white; padding: 12px 22px; border-radius: 5px; font-weight: 650; text-decoration: none; }
 .open-in-pushform p, .open-hint { font-size: 0.875rem; line-height: 1.6; }
+.model-preview { width: 100%; min-width: 0; align-self: start; }
+.model-preview > img, .preview-error > img { width: 100%; display: block; aspect-ratio: 6/5; object-fit: contain; background: #eef0e8; }
+.preview-viewer { width: 100%; display: block; touch-action: none; cursor: grab; background: #eef0e8; }
+.preview-viewer:active { cursor: grabbing; }
+.preview-actions, .preview-controls { display: flex; gap: 8px; flex-wrap: wrap; padding: 12px; }
+.preview-controls button { padding: 8px 12px; }
+.preview-caption, .preview-actions p, .preview-error p { font-size: 12px; color: var(--muted); padding: 0 12px; }
+.preview-loading { min-height: 300px; display: grid; place-items: center; }
+.detail-image { align-self: start; overflow: hidden; }
+.detail-image { aspect-ratio: auto; }
+.detail-image .model-preview > img, .detail-image .preview-error > img { height: auto; }
+.preview-controls button { display: inline-flex; align-items: center; justify-content: center; min-width: 40px; min-height: 40px; }

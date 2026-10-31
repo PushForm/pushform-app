@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } fro
 import { CommonsProfileEditor, CommonsProfilePageView, CreatorCredit } from './CommonsProfile';
 import { CommonsAccessGate, CommonsDownloadButton, CommonsMailingPreference } from './CommonsAccess';
 import type { CommonsAccount } from './account';
+import { CommonsModelPreview, CommonsThumbnail } from './CommonsPreview';
 import { CommonsOpenAction } from './CommonsOpenAction';
 import { filterModels, type CatalogFilters, type CatalogLoader, type CatalogModel } from './catalog';
 
@@ -14,17 +15,11 @@ function modelFromHash(hash:string): string | null {
   const match = /^#models\/([a-z0-9][a-z0-9-]{0,95})$/.exec(hash);
   return match?.[1] ?? null;
 }
-function ModelImage({ model }: { model: CatalogModel }) {
-  const [failed, setFailed] = useState(false);
-  return model.imageUrl && !failed
-    ? <img src={model.imageUrl} alt={model.title} loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
-    : <div className="missing-image"><span aria-hidden="true">◇</span><span>No preview image</span></div>;
-}
 function ModelDetail({ model, filesUrl, account, editorUrl }: { model: CatalogModel; filesUrl: string | undefined; account:CommonsAccount|null; editorUrl:string|undefined }) {
   return <>
     <a className="back-link" href="#browse">← All models</a>
     <article className="model-detail">
-      <div className="detail-image"><ModelImage key={model.id + model.revision} model={model} /></div>
+      <div className="detail-image"><CommonsModelPreview key={model.id + model.revision} model={model} filesUrl={filesUrl} /></div>
       <div>
         <p className="eyebrow">{model.category}</p>
         <h1>{model.title}</h1><p className="creator"><CreatorCredit model={model}/></p>
@@ -123,7 +118,7 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
           {state.kind === 'ready' && <>
             <p className="result-count" role="status">{shown.length} {shown.length === 1 ? 'model' : 'models'}{filters.query && ` matching “${filters.query}”`}</p>
             {shown.length ? <div className="model-grid">{shown.map((model) => <article className="model-card" key={model.id}>
-              <a href={`#models/${model.id}`} className="model-art" aria-label={`View ${model.title}`}><ModelImage key={model.id + model.revision} model={model} /></a>
+              <a href={`#models/${model.id}`} className="model-art" aria-label={`View ${model.title}`}><CommonsThumbnail key={model.id + model.revision} model={model} filesUrl={filesUrl} /></a>
               <div className="card-body"><p className="eyebrow">{model.category}</p><h3><a href={`#models/${model.id}`}>{model.title}</a></h3>
                 <p className="creator"><CreatorCredit model={model}/></p><p className="license-label">{model.licenses.map((license) => license.name).join(' · ')}</p>
                 {model.source && <p className="source-label">From {model.source.name}</p>}</div>

@@ -66,7 +66,7 @@ function ModelForm({profile,previous,busy,save}:{profile:{displayName:string};pr
     event.preventDefault();setFormError('');
     if(!original&&(!sourceName.trim()||!sourceUrl.trim()||!creator.trim()||!licenseName.trim()||!licenseUrl.trim())){setFormError('Include the original creator, source and exact upstream license.');return;}
     const name=original?profile.displayName:creator.trim();
-    const metadata:CommonsSubmission={title:title.trim(),description,category:category.trim(),creator:name,tags:tags.split(',').map(value=>value.trim()).filter(Boolean),formats:formats.split(',').map(value=>value.trim().toUpperCase()).filter(Boolean),imageUrl:null,
+    const metadata:CommonsSubmission={title:title.trim(),description,category:category.trim(),creator:name,tags:tags.split(',').map(value=>value.trim()).filter(Boolean),formats:formats.split(',').map(value=>value.trim().toUpperCase()).filter(Boolean),imageUrl:meta?.imageUrl??null,
       source:sourceUrl.trim()?{name:sourceName.trim()||'Original source',url:sourceUrl.trim()}:null,
       licenses:[...(original?[{name:license,...licenses[license]}]:[{name:licenseName.trim(),url:licenseUrl.trim(),commercialUse:commercial,conditions:conditions.split('\n').map(value=>value.trim()).filter(Boolean)}]),...extraLicenses.map(item=>({...item,conditions:item.conditions.split('\n').map(value=>value.trim()).filter(Boolean)}))],
       credits:credits.map(item=>({name:item.name.trim()||name,url:item.url?.trim()||null,text:item.text.trim()||`Original model by ${name}.`}))};
@@ -119,9 +119,12 @@ function DraftFiles({api,revision,filesUrl,busy,run,token,refresh,published,done
     {pending&&<><label>Attach model file or ZIP (up to 128 MiB)<input type="file" accept=".pf,.step,.stp,.obj,.stl,.glb,.gltf,.dae,.3ds,.zip,.fcstd,.blend,.skp" disabled={busy||!filesUrl} onChange={event=>{
       const file=event.target.files?.[0];event.target.value='';if(file)void run(async(signal)=>{setConfirmed(false);await uploadCommonsFile(filesUrl!,await token(),revision.id,file,signal);await reload();done('File uploaded and verified.');});
     }}/></label>{!filesUrl&&<p>File uploads are unavailable in this build.</p>}
+      <label>Preview image (optional PNG or JPEG, up to 8 MiB)<input type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" disabled={busy||!filesUrl||files?.some(file=>/\.(png|jpe?g)$/i.test(file.filename))} onChange={event=>{
+        const file=event.target.files?.[0];event.target.value='';if(file)void run(async(signal)=>{setConfirmed(false);await uploadCommonsFile(filesUrl!,await token(),revision.id,file,signal);await reload();done('Preview image uploaded and verified.');});
+      }}/></label><p>Commons generates a preview from supported model geometry. An uploaded image becomes the listing image. Include any required image credits and licenses in the model details.</p>
       <p>Publishing makes these files and their license notices available to the community.</p>
       <label className="publish-confirm"><input type="checkbox" checked={confirmed} onChange={event=>setConfirmed(event.target.checked)} disabled={busy}/>I have permission to redistribute every included file and have preserved all required licenses, conditions and credits.</label>
-      <button disabled={busy||!confirmed||!files?.length||files.some(file=>file.status!=='ready')} onClick={()=>void run(async(signal)=>{await api.publish(revision.id,published,revision.asset_version,confirmed,signal);window.dispatchEvent(new Event('commons:catalog-changed'));await reload();done('Model published.');})}>Publish model</button>
+      <button disabled={busy||!confirmed||!files?.some(file=>!/\.(png|jpe?g)$/i.test(file.filename))||files.some(file=>file.status!=='ready')} onClick={()=>void run(async(signal)=>{await api.publish(revision.id,published,revision.asset_version,confirmed,signal);window.dispatchEvent(new Event('commons:catalog-changed'));await reload();done('Model published.');})}>Publish model</button>
     </>}
   </section>;
 }

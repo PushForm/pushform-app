@@ -27,6 +27,7 @@ export const catalogModelSchema = z.object({
   revision: text,
   creatorProfile: z.object({id:z.uuid(),handle:z.string().regex(/^[a-z][a-z0-9-]{1,30}[a-z0-9]$/),displayName:z.string().min(1).max(100)}).strict().nullable().default(null),
   files: z.array(commonsFileSchema).max(20).default([]),
+  previewImage: commonsFileSchema.nullable().default(null),
   title: text,
   description: z.string().max(12000),
   creator: text,

@@ -4,7 +4,11 @@ PushForm Commons is a community model catalog with its own website. The hosted l
 
 Open a model to see its original creator, source, licenses and attribution notices. When files are available, choose **Download ZIP** next to a filename. The package contains the unchanged original in `files/`, an `ATTRIBUTION.json` record and a README. Keep required credits and license notices with reused files. A free download does not remove license conditions.
 
+## Open a model in PushForm
+
 Downloads require the catalog and model to remain available. If a file is unavailable, return to the catalog and try again later. Some builds may show metadata without configured downloads. A preview does not establish fabrication suitability or solid editability. Original file formats are listed; a download does not guarantee that PushForm can import that format. Extract the model file before using Open or Import. For supported files, choose **Open in PushForm** on the model page. It opens the web editor in another tab, continues through normal sign-in and initial account setup, and creates a separate model. Your current project stays open. Files without recorded units ask for units and up axis before opening. Unsupported originals remain available as downloads and may need conversion.
+
+## Preserve creator notices
 
 Model Info → Credits shows the original source, licenses, conditions and creator notices. Native saves retain those notices. Geometry and image exports from an attributed model are ZIP packages containing the exported file and attribution notices; keep the package together when sharing. Commons currently does not insert files directly into an open project.
 
@@ -17,3 +21,9 @@ Choose a public handle and display name, then optionally add a bio, avatar URL a
 Use **View your public profile** to open its shareable page. It shows your chosen public fields and published models associated with your authorship. Imported models retain their original creator credit; uploading or curating someone else's model does not make you its author.
 
 Use **Hide public profile** to make the page and its creator-account links unavailable. Model license notices and original creator credits remain. Saving with the public confirmation checked makes your profile visible again. If another tab changed the profile, reload before saving your changes.
+
+## Preview a model
+
+Commons renders thumbnails from supported model geometry on its server; a contributor does not need to upload a screenshot. An optional uploaded PNG or JPEG is used as the listing image instead. Choose **Explore in 3D** on a model page to rotate the geometry, zoom, or reset the view. Drag to orbit, use the labeled controls, or focus the viewer and use arrow keys, plus/minus, and zero to reset. Previews are available without signing in; original downloads require your PushForm account and initial account setup.
+
+The initial geometry preview supports ASCII and binary STL files up to 8 MiB and 12,000 triangles. It does not show recorded dimensions, units, textures or fabrication suitability. Other formats and models over those limits show an unavailable preview; try **Open in PushForm** or download the original where supported. A failed image falls back to the generated thumbnail when possible.

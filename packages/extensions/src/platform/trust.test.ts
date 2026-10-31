@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { zipSync } from 'fflate';
 import { ExtensionError, buildManifest, type ExtensionManifestInput } from '@pushform/extension-protocol';
 import { startGuest, type ExtensionContext } from '../runtime/guest';
@@ -183,18 +183,105 @@ describe('one extension and another', () => {
 });
 
 describe('stored releases', () => {
-  // Known gap, kept as an expected failure until it is fixed: files are verified when a package is side-loaded, but
-  // the platform starts a stored release from its stored files without checking them against its content hash again.
-  it.fails('refuses to start a stored release whose files no longer match its content hash', async () => {
+  const runs = (id: string) => ({ [id]: { activate(c: ExtensionContext) { c.commands.register(`${id}.run`, () => 'ran'); } } });
+
+  /** Installs a side-loaded release, lets `tamper` change its stored record, and loads the store in a new session. */
+  async function reload(tamper: (record: InstalledExtension) => InstalledExtension | Promise<InstalledExtension>, overrides: Partial<ExtensionPlatformOptions> = {}) {
     const store = memoryExtensionStore();
     const first = setup({}, {}, store);
     await first.platform.install(await first.platform.sideload(await archive(base('com.example.stored'))), ['settings']);
     const [record] = await store.list();
-    await store.put({ ...record!, files: { ...record!.files, 'main.js': encode('export function activate() { /* changed */ }') } });
-    const second = setup({}, {}, store);
+    await store.put(await tamper(record!));
+    const failures: string[] = [];
+    const second = setup(runs('com.example.stored'), { onFailure: (r, f) => failures.push(`${r.id}:${f.kind}`), ...overrides }, store);
     await second.platform.load();
-    await expect(second.platform.invoke('com.example.stored', 'com.example.stored.run')).rejects.toBeInstanceOf(ExtensionError);
-    expect(second.started).toEqual([]);
+    return { ...second, failures, installed: record! };
+  }
+
+  const withFiles = (record: InstalledExtension, change: (files: Record<string, Uint8Array>) => void): InstalledExtension => {
+    const files = { ...record.files };
+    change(files);
+    return { ...record, files };
+  };
+
+  /** The stored release is refused with `problem`, none of its code runs, and its commands are not listed. */
+  async function expectRefused(s: Awaited<ReturnType<typeof reload>>, problem: string) {
+    expect(s.platform.state('com.example.stored')).toMatchObject({ run: 'failed', failure: { kind: 'verification-failed', error: { details: { problem } } } });
+    expect(s.failures).toEqual(['com.example.stored:verification-failed']);
+    expect(s.platform.contributions()).toEqual([]);
+    const error = await refusal(s.platform.invoke('com.example.stored', 'com.example.stored.run'));
+    expect(error.details).toMatchObject({ problem });
+    // Dismissing the notice or restarting does not let it run either.
+    s.platform.dismissFailure('com.example.stored');
+    await s.platform.restart('com.example.stored');
+    await expect(s.platform.invoke('com.example.stored', 'com.example.stored.run')).rejects.toMatchObject({ details: { problem } });
+    expect(s.platform.state('com.example.stored')).toMatchObject({ run: 'failed', failure: { kind: 'verification-failed' } });
+    expect(s.started).toEqual([]);
+  }
+
+  it('refuses a release whose file no longer matches its hash in the manifest', async () => {
+    const s = await reload((r) => withFiles(r, (f) => { f['main.js'] = encode('export function activate() { /* changed */ }'); }));
+    await expectRefused(s, 'file.hash');
+    expect(s.platform.state('com.example.stored')!.failure!.error.message).toMatch(/"main\.js" does not match its hash/);
+  });
+
+  it('refuses a release whose manifest was replaced, even by one consistent with changed files', async () => {
+    const s = await reload(async (r) => {
+      const files = new Map(Object.entries(r.files)).set('main.js', encode('export function activate() { steal(); }'));
+      files.delete('manifest.json');
+      const manifest = await buildManifest(base('com.example.stored'), files);
+      return withFiles(r, (f) => { f['main.js'] = files.get('main.js')!; f['manifest.json'] = manifest; });
+    });
+    await expectRefused(s, 'content.hash');
+  });
+
+  it('refuses a release with a file its manifest does not list', async () => {
+    await expectRefused(await reload((r) => withFiles(r, (f) => { f['extra.js'] = encode('export const x = 1;'); })), 'file.undeclared');
+  });
+
+  it('refuses a release with a listed file missing', async () => {
+    await expectRefused(await reload((r) => withFiles(r, (f) => { delete f['main.js']; })), 'file.missing');
+  });
+
+  it('refuses a release stored as official whose signature cannot be verified', async () => {
+    const signed = (r: InstalledExtension) => ({ ...withFiles(r, (f) => { f['signature.json'] = encode('{"keyId":"k","signature":"AAAA"}'); }), integrity: 'official' as const });
+    await expectRefused(await reload(signed), 'signature.invalid');
+    await expectRefused(await reload((r) => ({ ...r, integrity: 'official' })), 'signature.invalid');
+    // With a verifier that accepts the signature, the official release starts.
+    const accepted = await reload(signed, { verifySignature: async () => true });
+    await accepted.platform.invoke('com.example.stored', 'com.example.stored.run');
+    expect(accepted.started.map((r) => r.id)).toEqual(['com.example.stored']);
+  });
+
+  it('runs a release with the manifest read from its verified files, not a changed stored copy', async () => {
+    const s = await reload((r) => ({ ...r, manifest: { ...r.manifest, name: 'Renamed', permissions: [...r.manifest.permissions, 'clipboard.write'] } }));
+    expect(s.platform.state('com.example.stored')).toMatchObject({ run: 'stopped', failure: null, record: { manifest: { name: 'stored', permissions: ['settings'] } } });
+    expect(s.platform.contributions().map((c) => c.extensionName)).toEqual(['stored']);
+  });
+
+  it('hashes a release once per session, and not at all after side-loading it', async () => {
+    const digest = vi.spyOn(globalThis.crypto.subtle, 'digest');
+    try {
+      const s = await reload((r) => r);
+      const atLoad = digest.mock.calls.length;
+      expect(atLoad).toBeGreaterThan(0);
+      for (let i = 0; i < 3; i++) await s.platform.invoke('com.example.stored', 'com.example.stored.run');
+      await s.platform.setEnabled('com.example.stored', false);
+      await s.platform.setEnabled('com.example.stored', true);
+      await s.platform.restart('com.example.stored');
+      await s.platform.invoke('com.example.stored', 'com.example.stored.run');
+      expect(digest.mock.calls.length).toBe(atLoad);
+      expect(s.started.map((r) => r.id)).toEqual(['com.example.stored', 'com.example.stored']);
+
+      const fresh = setup(runs('com.example.fresh'));
+      const request = await fresh.platform.sideload(await archive(base('com.example.fresh')));
+      const afterSideload = digest.mock.calls.length;
+      await fresh.platform.install(request, ['settings']);
+      await fresh.platform.invoke('com.example.fresh', 'com.example.fresh.run');
+      expect(digest.mock.calls.length).toBe(afterSideload);
+    } finally {
+      digest.mockRestore();
+    }
   });
 });
 

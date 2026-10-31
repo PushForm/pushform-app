@@ -34,6 +34,8 @@ If an extension breaks or stops responding, PushForm ends it and shows a notice 
 
 Choose **Restart** to try again, which also reloads its open panel. Choose **Disable** to turn it off, or the close button to hide the notice. An extension that stops 3 times within 10 minutes is turned off automatically, and the notice offers **Turn on and restart**.
 
+PushForm checks an installed extension's files before running it, once each session. If they no longer match the files that were installed, for example because the browser's storage was changed, PushForm doesn't run any of it. Its commands and panels are not listed, and a notice says that it was not started because its installed files could not be verified, and names the file or check that failed. Uninstall it and install it again from its package. **Disable** turns it off and hides the notice.
+
 ## Turn an extension off or uninstall it
 
 In the Extensions window, clear an extension's **On** checkbox to turn it off. Its panels and commands disappear and it stops running; turn it back on at any time.

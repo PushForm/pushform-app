@@ -5,6 +5,13 @@ import type { RenderAxes } from '../types';
 import { DEFAULT_RENDER_AXES } from '../types';
 
 /**
+ * Draw order of each axis line. It is set on the lines, not on this group: three.js sorts by a
+ * group's render order before any object's own, so a group order below the sky background's
+ * would draw the axes first and the sky (which ignores depth) would paint over them.
+ */
+const AXES_RENDER_ORDER = -5;
+
+/**
  * Model axes: red X, green Y, blue Z; solid positive halves, dotted negative halves.
  * `setAxes` moves/rotates the gizmo to the drawing axes; `setOrigin` applies the floating origin.
  */
@@ -25,6 +32,7 @@ export class Axes extends Group {
       pos.setAttribute('position', new Float32BufferAttribute([0, 0, 0, dir[0] * length, dir[1] * length, dir[2] * length], 3));
       const posLine = new Line(pos, new LineBasicMaterial({ color, depthTest: true }));
       posLine.frustumCulled = false;
+      posLine.renderOrder = AXES_RENDER_ORDER;
       this.add(posLine);
 
       const neg = new BufferGeometry();
@@ -32,9 +40,9 @@ export class Axes extends Group {
       const negLine = new Line(neg, new LineDashedMaterial({ color, dashSize: 0.12, gapSize: 0.12, depthTest: true }));
       negLine.computeLineDistances();
       negLine.frustumCulled = false;
+      negLine.renderOrder = AXES_RENDER_ORDER;
       this.add(negLine);
     }
-    this.renderOrder = -5;
   }
 
   /** Place the gizmo at the drawing axes (world origin + unit x/y/z). */

@@ -704,11 +704,11 @@
 }
 .pf-nav-cube-label {
   pointer-events: none;
-  font: 700 0.36px var(--pf-font);
+  font: 700 0.3px var(--pf-font);
   fill: #2b3440;
   text-anchor: middle;
   dominant-baseline: central;
-  letter-spacing: 0.03px;
+  letter-spacing: 0.02px;
 }
 .pf-nav-cube-axis {
   stroke-width: 2px;

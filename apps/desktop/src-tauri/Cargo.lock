@@ -2321,7 +2321,6 @@ dependencies = [
 [[package]]
 name = "matext4cgmath"
 version = "0.1.0"
-source = "git+https://github.com/tangency-labs/solidcraft?rev=55bea620c79c22feeab1cda5c3931cdf2d7f3939#55bea620c79c22feeab1cda5c3931cdf2d7f3939"
 dependencies = [
  "cgmath",
  "katexit",
@@ -3845,7 +3844,6 @@ dependencies = [
 [[package]]
 name = "solidcraft-geom"
 version = "0.28.0"
-source = "git+https://github.com/tangency-labs/solidcraft?rev=55bea620c79c22feeab1cda5c3931cdf2d7f3939#55bea620c79c22feeab1cda5c3931cdf2d7f3939"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
@@ -3854,7 +3852,6 @@ dependencies = [
 [[package]]
 name = "solidcraft-kernel"
 version = "0.28.0"
-source = "git+https://github.com/tangency-labs/solidcraft?rev=55bea620c79c22feeab1cda5c3931cdf2d7f3939#55bea620c79c22feeab1cda5c3931cdf2d7f3939"
 dependencies = [
  "log",
  "rayon",
@@ -4840,7 +4837,6 @@ dependencies = [
 [[package]]
 name = "truck-geometry"
 version = "0.5.0"
-source = "git+https://github.com/tangency-labs/solidcraft?rev=55bea620c79c22feeab1cda5c3931cdf2d7f3939#55bea620c79c22feeab1cda5c3931cdf2d7f3939"
 dependencies = [
  "serde",
  "thiserror 1.0.69",
@@ -4864,7 +4860,6 @@ dependencies = [
 [[package]]
 name = "truck-meshalgo"
 version = "0.4.0"
-source = "git+https://github.com/tangency-labs/solidcraft?rev=55bea620c79c22feeab1cda5c3931cdf2d7f3939#55bea620c79c22feeab1cda5c3931cdf2d7f3939"
 dependencies = [
  "array-macro",
  "derive_more 0.99.20",
@@ -4915,7 +4910,6 @@ dependencies = [
 [[package]]
 name = "truck-shapeops"
 version = "0.4.0"
-source = "git+https://github.com/tangency-labs/solidcraft?rev=55bea620c79c22feeab1cda5c3931cdf2d7f3939#55bea620c79c22feeab1cda5c3931cdf2d7f3939"
 dependencies = [
  "derive_more 0.99.20",
  "itertools 0.13.0",
@@ -4930,7 +4924,6 @@ dependencies = [
 [[package]]
 name = "truck-stepio"
 version = "0.3.0"
-source = "git+https://github.com/tangency-labs/solidcraft?rev=55bea620c79c22feeab1cda5c3931cdf2d7f3939#55bea620c79c22feeab1cda5c3931cdf2d7f3939"
 dependencies = [
  "chrono",
  "truck-geometry",

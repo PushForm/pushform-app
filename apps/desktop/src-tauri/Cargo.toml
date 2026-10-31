@@ -37,8 +37,8 @@ default-features = false
 # Cargo applies patches only from the root manifest of a build, so the STEP reader's patched truck crates
 # (SolidCraft's fixes, pinned with the reader in crates/step-reader/Cargo.toml) are repeated here.
 [patch.crates-io]
-truck-geometry = { git = "https://github.com/tangency-labs/solidcraft", rev = "55bea620c79c22feeab1cda5c3931cdf2d7f3939" }
-truck-shapeops = { git = "https://github.com/tangency-labs/solidcraft", rev = "55bea620c79c22feeab1cda5c3931cdf2d7f3939" }
-truck-stepio = { git = "https://github.com/tangency-labs/solidcraft", rev = "55bea620c79c22feeab1cda5c3931cdf2d7f3939" }
-truck-meshalgo = { git = "https://github.com/tangency-labs/solidcraft", rev = "55bea620c79c22feeab1cda5c3931cdf2d7f3939" }
-matext4cgmath = { git = "https://github.com/tangency-labs/solidcraft", rev = "55bea620c79c22feeab1cda5c3931cdf2d7f3939" }
+truck-geometry = { path = "../../../crates/solidcraft/vendor/truck-geometry" }
+truck-shapeops = { path = "../../../crates/solidcraft/vendor/truck-shapeops" }
+truck-stepio = { path = "../../../crates/solidcraft/vendor/truck-stepio" }
+truck-meshalgo = { path = "../../../crates/solidcraft/vendor/truck-meshalgo" }
+matext4cgmath = { path = "../../../crates/solidcraft/vendor/matext4cgmath" }

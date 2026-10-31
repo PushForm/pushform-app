@@ -10,18 +10,19 @@ description = "PushForm's STEP reader: SolidCraft's STEP import and tessellation
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# SolidCraft's B-rep kernel and its STEP reader (MIT OR Apache-2.0), pinned to one commit. The kernel
-# builds on patched copies of the truck crates that live in the same repository (see [patch] below).
-solidcraft-kernel = { git = "https://github.com/tangency-labs/solidcraft", rev = "55bea620c79c22feeab1cda5c3931cdf2d7f3939" }
+# SolidCraft's B-rep kernel and its STEP reader (MIT OR Apache-2.0), carried in this repository under
+# crates/solidcraft and adapted there (see its README). The kernel builds on patched copies of the truck
+# crates that live beside it (see [patch] below).
+solidcraft-kernel = { path = "../solidcraft/kernel" }
 earcutr = "0.5"
-solidcraft-geom = { git = "https://github.com/tangency-labs/solidcraft", rev = "55bea620c79c22feeab1cda5c3931cdf2d7f3939" }
+solidcraft-geom = { path = "../solidcraft/geom" }
 
 [patch.crates-io]
-truck-geometry = { git = "https://github.com/tangency-labs/solidcraft", rev = "55bea620c79c22feeab1cda5c3931cdf2d7f3939" }
-truck-shapeops = { git = "https://github.com/tangency-labs/solidcraft", rev = "55bea620c79c22feeab1cda5c3931cdf2d7f3939" }
-truck-stepio = { git = "https://github.com/tangency-labs/solidcraft", rev = "55bea620c79c22feeab1cda5c3931cdf2d7f3939" }
-truck-meshalgo = { git = "https://github.com/tangency-labs/solidcraft", rev = "55bea620c79c22feeab1cda5c3931cdf2d7f3939" }
-matext4cgmath = { git = "https://github.com/tangency-labs/solidcraft", rev = "55bea620c79c22feeab1cda5c3931cdf2d7f3939" }
+truck-geometry = { path = "../solidcraft/vendor/truck-geometry" }
+truck-shapeops = { path = "../solidcraft/vendor/truck-shapeops" }
+truck-stepio = { path = "../solidcraft/vendor/truck-stepio" }
+truck-meshalgo = { path = "../solidcraft/vendor/truck-meshalgo" }
+matext4cgmath = { path = "../solidcraft/vendor/matext4cgmath" }
 
 [features]
 default = ["simplify"]

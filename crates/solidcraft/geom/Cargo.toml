@@ -1,0 +1,25 @@
+[package]
+name = "solidcraft-geom"
+description = "SolidCraft geometry foundation: vectors, planes, frames, meshes and their measures"
+version = "0.28.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.95"
+publish = false
+
+# PushForm: copied from SolidCraft (see ../README.md); the workspace tables are spelled out here.
+[lints.rust]
+unsafe_code = "forbid"
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+too_many_arguments = "allow"
+type_complexity = "allow"
+neg_cmp_op_on_partial_ord = "allow"
+
+[dependencies]
+serde = { version = "1", features = ["derive", "rc"] }
+thiserror = "2"
+
+[dev-dependencies]
+serde_json = { version = "1", features = ["float_roundtrip"] }

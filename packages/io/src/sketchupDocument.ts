@@ -49,7 +49,9 @@ function faceUv(face: ImportedFace, basis: PlaneBasis): { uv: UvMapping; uvBack?
  */
 export function applySketchUpImport(
   draft: DocumentDraft, scene: SketchUpImport,
-  options: { definitionId?: DefId; groupName?: string; images?: ImageStore } = {},
+  options: { definitionId?: DefId; groupName?: string; images?: ImageStore;
+    /** Scene material keys that stand for materials the document already has, which are reused rather than created. */
+    materialIds?: ReadonlyMap<number, MaterialId> } = {},
 ): ModelImportReport {
   // Map boundary cast avoids immer's recursive tuple mutability instantiation.
   const destination = draft.definitions as unknown as Map<DefId, ComponentDefinition>;
@@ -71,6 +73,8 @@ export function applySketchUpImport(
     return id;
   });
   for (const [key, m] of scene.materials) {
+    const existing = options.materialIds?.get(key);
+    if (existing !== undefined && draft.materials.has(existing)) { materials.set(key, existing); continue; }
     const id = allocId<MaterialId>(draft);
     // A colorized texture keeps its image and colorizes toward the material color when drawn.
     draft.materials.set(id, { id, name: m.name, color: [...m.color], alpha: m.alpha, texture: m.texture

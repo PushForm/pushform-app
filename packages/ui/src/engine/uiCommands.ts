@@ -5,6 +5,7 @@ import { EntityRefSchema, defineCommand, hostOf } from '@pushform/commands';
 import type { AnyCommand, CommandContext, CommandRegistry } from '@pushform/commands';
 import type { EdgeKey, EntityRef } from '@pushform/model';
 import type { FaceLocalId, Id } from '@pushform/core';
+import { makeMeshPartEditable } from '@pushform/io';
 import { PANEL_IDS, useAppStore } from '../store';
 import { writeNavigationCubePreference } from '../navCubePreference';
 
@@ -65,6 +66,27 @@ export const uiCommands: readonly AnyCommand[] = [
     undoable: false,
     when: hasSelection,
     run: () => store().openDialog('makeComponent'),
+  }),
+  defineCommand({
+    id: 'ui.makeEditable',
+    title: 'Make Editable',
+    category: 'edit',
+    params: z.object({ refs: z.array(EntityRefSchema) }),
+    undoable: true,
+    run(ctx, p): { bodies: number; sheetFaces: number } {
+      const host = hostOf(ctx);
+      const refs = p.refs.map(toEntityRef).filter((r) => r.kind === 'meshPart');
+      const total = { bodies: 0, sheetFaces: 0 };
+      if (!refs.length) return total;
+      host.edit('Make Editable', (draft) => {
+        for (const r of refs) {
+          const result = makeMeshPartEditable(draft, r.path, r.id);
+          total.bodies += result.bodies; total.sheetFaces += result.sheetFaces;
+        }
+      });
+      host.selection.remove(refs);
+      return total;
+    },
   }),
   defineCommand({
     id: 'ui.text3d',

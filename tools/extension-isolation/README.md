@@ -94,26 +94,22 @@ annotation on the test.
   that cannot be verified is refused rather than loaded unsigned, turning developer mode off stops side-loaded
   extensions, and installing and running them sends nothing anywhere.
 - **Resources**: a hung extension leaves the editor responsive and is ended; heap exhaustion is noticed by the
-  heartbeat; binary allocations past the 256 MiB budget are refused; floods of well-formed messages.
+  heartbeat; binary allocations past the 256 MiB budget are refused. Floods of well-formed messages (200,000 at once,
+  a sustained flood, 400 MiB at once) fail the session and end the runtime within a bounded time while the editor
+  keeps ticking, and an extension calling the host in a tight loop is paced and keeps running.
 
 ## Known gaps
 
 These are expected failures (`test.fail`, `it.fails`), so the suite stays green while they exist and turns red when
 one is fixed; remove the marker then.
 
-1. **Message rate (Chromium).** The host caps invalid messages and concurrent requests but not the rate of
-   well-formed ones. Each is deserialized, measured and validated on the editor's thread, and Chromium delivers the
-   backlog without yielding: 200,000 `pong` messages (sent in about 150 ms) stall the editor for about 0.5 s, and a
-   sustained flood stalls it with gaps of 3 to 6 s for about 20 s until the heartbeat fails the session. Firefox stays
-   responsive but takes about a minute to work through a 4 s flood. A per-runtime rate cap that fails the session
-   would bound both.
-2. **Binary budget routes.** The budget replaces the global `ArrayBuffer` and typed array constructors, but each
+1. **Binary budget routes.** The budget replaces the global `ArrayBuffer` and typed array constructors, but each
    replacement extends the original, so `Object.getPrototypeOf(ArrayBuffer)`, `Object.getPrototypeOf(Uint8Array)`
    and any buffer's `constructor` are the uncounted originals; `ArrayBuffer.prototype.transfer` allocates its new
    length uncounted. Platform methods also make uncounted buffers larger than anything the extension holds: a `Blob`
    repeating one buffer, `DecompressionStream` (half a megabyte of gzip became 512 MiB), and `structuredClone`
    copies. Each of these allocated 512 MiB or more in both browsers.
-3. **Stored releases are not verified again.** Files are verified when a package is side-loaded, but a stored
+2. **Stored releases are not verified again.** Files are verified when a package is side-loaded, but a stored
    release starts from its stored files without being checked against its content hash again.
 
 Revocation is not implemented (there is no official install path yet); its tests are listed as pending in

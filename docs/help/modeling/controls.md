@@ -1,6 +1,6 @@
 # Modeling toolbar controls and their purpose
 
-The modeling ribbon groups tools into **Transform**, **Draw**, **Modify**, **Inspect**, **Organize**, and **View**, with names below the buttons. Open a button’s arrow for related tools. Scroll horizontally if the ribbon does not fit your window. Additional tools appear in **More** when available.
+The modeling ribbon groups tools into **Transform**, **Draw**, **Modify**, **Inspect**, **Organize**, and **Navigate**, with names below the buttons. Open a button’s arrow for related tools. Scroll horizontally if the ribbon does not fit your window. Additional tools appear in **More** when available.
 
 ## Select, Eraser and drawing tools
 

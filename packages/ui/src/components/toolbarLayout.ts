@@ -75,7 +75,7 @@ export const TOOLBAR_GROUPS: readonly { title: string; slots: readonly Slot[] }[
   },
   { title: 'Organize', slots: [tool('paint'), tool('tag')] },
   {
-    title: 'View',
+    title: 'Navigate',
     slots: [
       stack('Camera', 'orbit', 'pan'),
       stack('Zoom', 'zoom', 'zoomWindow', command('camera.zoomExtents', 'zoom-extents')),

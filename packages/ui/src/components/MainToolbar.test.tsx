@@ -106,7 +106,7 @@ describe('MainToolbar', () => {
       'Modify',
       'Inspect',
       'Organize',
-      'View',
+      'Navigate',
     ]);
     expect(
       screen

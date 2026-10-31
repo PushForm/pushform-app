@@ -430,6 +430,13 @@ export class DocumentSession {
     });
   }
 
+  /** Install a prepared model as a new unsaved document without sharing a cloud/file identity. */
+  openModelCopy(opened: Pick<OpenedModelFile, 'state' | 'images'>, name: string): ModelTab {
+    const tab = this.addModelTab(opened.state, name, '', undefined, opened.images);
+    tab.app.viewport.camera.zoomExtents();
+    return tab;
+  }
+
   /** Open a .pf decoded off the UI thread; its semantic identity is the saved baseline. */
   openModelFile(opened: OpenedModelFile, name: string, identity?: string): ModelTab {
     const existing = this.existingModelTab(identity);

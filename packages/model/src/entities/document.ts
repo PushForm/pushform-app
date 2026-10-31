@@ -11,6 +11,7 @@ import type {
   TagId,
   UnitSettings,
 } from '@pushform/core';
+import type { ModelAttribution } from '../attribution';
 import type { ComponentDefinition } from './definition';
 import type { FogSettings, ImageAsset, Material, Scene, ShadowSettings, Style, Tag, TagFolder } from './attrs';
 import type { DimensionStyle } from './misc';
@@ -18,6 +19,8 @@ import type { DimensionStyle } from './misc';
 export const FORMAT_VERSION = 1;
 
 export interface DocumentMeta {
+  /** Original source licenses and notices retained through edits, saves and exports. */
+  attributions?: ModelAttribution[];
   guid: Guid;
   formatVersion: number;
   /** Next persistent id; monotonically increasing, never reused. */

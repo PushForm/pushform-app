@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } fro
 import { CommonsProfileEditor, CommonsProfilePageView, CreatorCredit } from './CommonsProfile';
 import { CommonsAccessGate, CommonsDownloadButton, CommonsMailingPreference } from './CommonsAccess';
 import type { CommonsAccount } from './account';
+import { CommonsOpenAction } from './CommonsOpenAction';
 import { filterModels, type CatalogFilters, type CatalogLoader, type CatalogModel } from './catalog';
 
 type CatalogState = { kind: 'unconfigured' | 'loading' | 'error' } | { kind: 'ready'; models: CatalogModel[] };
@@ -19,7 +20,7 @@ function ModelImage({ model }: { model: CatalogModel }) {
     ? <img src={model.imageUrl} alt={model.title} loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
     : <div className="missing-image"><span aria-hidden="true">◇</span><span>No preview image</span></div>;
 }
-function ModelDetail({ model, filesUrl, account }: { model: CatalogModel; filesUrl: string | undefined; account:CommonsAccount|null }) {
+function ModelDetail({ model, filesUrl, account, editorUrl }: { model: CatalogModel; filesUrl: string | undefined; account:CommonsAccount|null; editorUrl:string|undefined }) {
   return <>
     <a className="back-link" href="#browse">← All models</a>
     <article className="model-detail">
@@ -32,6 +33,7 @@ function ModelDetail({ model, filesUrl, account }: { model: CatalogModel; filesU
           <div><dt>Revision</dt><dd>{model.revision}</dd></div>
           <div><dt>Published</dt><dd>{new Date(model.publishedAt).toLocaleDateString()}</dd></div></dl>
         {model.source && <p className="source">Sourced from <a href={model.source.url} rel="noreferrer" target="_blank">{model.source.name} ↗</a></p>}
+        <CommonsOpenAction model={model} editorUrl={editorUrl} />
         {model.files.length > 0 && <section className="downloads" aria-label="Model files"><h2>Model files</h2>
           <p>Each ZIP download includes the original file, licenses and creator credits.</p>
           <ul>{model.files.map((file) => <li key={file.id}><span>{file.name} · {(file.sizeBytes / 1024).toFixed(1)} KiB</span>
@@ -55,7 +57,7 @@ function ModelDetail({ model, filesUrl, account }: { model: CatalogModel; filesU
   </>;
 }
 
-export function App({ loadCatalog, filesUrl, account=null, publishPage }: { loadCatalog: CatalogLoader | null; filesUrl?: string | undefined; account?:CommonsAccount|null; publishPage?:ReactNode }) {
+export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUrl }: { loadCatalog: CatalogLoader | null; filesUrl?: string | undefined; account?:CommonsAccount|null; publishPage?:ReactNode;editorUrl?:string|undefined }) {
   const [state, setState] = useState<CatalogState>({ kind: loadCatalog ? 'loading' : 'unconfigured' });
   const [attempt, setAttempt] = useState(0);
   const [filters, setFilters] = useState<CatalogFilters>(emptyFilters);
@@ -96,7 +98,7 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage }: { load
       <img src="/pf-logo-mark.svg" alt="" width="30" height="30" /><span>PushForm <strong>Commons</strong></span>
     </a><nav aria-label="Commons">{account&&<><a href="#publish">Publish model</a><a href="#account">My profile</a></>}<a className="editor-link" href="https://app.pushform.io">Open PushForm <span aria-hidden="true">↗</span></a></nav></header>
     <main id="main" ref={heading} tabIndex={-1}>
-      {personId?<CommonsProfilePageView id={personId} profiles={account?.profiles??null}/>:hash==='#account'?account?<AccountPage account={account}/>:<section className="status-panel"><h1>Accounts are unavailable in this build.</h1></section>:hash==='#publish'?publishPage??<section className="status-panel"><h1>Publishing is unavailable in this build.</h1></section>:state.kind === 'ready' && selectedId ? selected ? <ModelDetail model={selected} filesUrl={filesUrl} account={account} /> :
+      {personId?<CommonsProfilePageView id={personId} profiles={account?.profiles??null}/>:hash==='#account'?account?<AccountPage account={account}/>:<section className="status-panel"><h1>Accounts are unavailable in this build.</h1></section>:hash==='#publish'?publishPage??<section className="status-panel"><h1>Publishing is unavailable in this build.</h1></section>:state.kind === 'ready' && selectedId ? selected ? <ModelDetail model={selected} filesUrl={filesUrl} account={account} editorUrl={editorUrl} /> :
         <section className="status-panel"><p className="eyebrow">Model unavailable</p><h1>This model isn’t in the catalog.</h1>
           <p>It may have been removed or the link may be out of date.</p><a href="#browse">Browse models</a></section> : <>
         <section className="hero"><p className="eyebrow">A shared place to start</p>

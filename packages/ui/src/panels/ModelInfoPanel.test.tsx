@@ -118,3 +118,12 @@ describe('Model Info Dimensions', () => {
     expect(screen.getByRole('status').textContent).toBe('Updated 1 dimension.');
   });
 });
+
+it('shows original source licenses and creator conditions in Model Info Credits', () => {
+  const a = mount();
+  act(() => { a.document.doc.transact('Keep source notices', draft => { draft.meta.attributions = [{ modelId: 'source-part', revision: 'revision-1', assetId: 'asset-1', title: 'Original part', creator: 'Maker', source: { name: 'Source library', url: 'https://example.com/part' },
+    licenses: [{ name: 'CC BY 3.0', url: 'https://creativecommons.org/licenses/by/3.0/', commercialUse: 'allowed', conditions: ['Keep Maker credit.'] }], credits: [{ name: 'Maker', url: null, text: 'Original source notice.' }], file: { name: 'part.stl', sizeBytes: 3, sha256: 'a'.repeat(64) } }]; }); });
+  fireEvent.click(screen.getByRole('tab', { name: 'Credits' }));
+  expect(screen.getByText('Keep Maker credit.')).toBeTruthy(); expect(screen.getByText(/Original source notice/)).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'CC BY 3.0' }).getAttribute('href')).toBe('https://creativecommons.org/licenses/by/3.0/');
+});

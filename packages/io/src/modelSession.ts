@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { FORMAT_VERSION, type DocumentState } from '@pushform/model';
+import { FORMAT_VERSION, parseModelAttributions, type DocumentState } from '@pushform/model';
 
 /**
  * Tagged JSON form of model state, shared by the browser refresh snapshot and the .pf manifest:
@@ -78,6 +78,7 @@ export function validateModelState(state: unknown): DocumentState {
       !(doc.materials instanceof Map) || !(doc.images instanceof Map) ||
       !(doc.styles instanceof Map) || !(doc.scenes instanceof Map) ||
       !Array.isArray(doc.sceneOrder)) throw new Error('Invalid model snapshot');
+  if (doc.meta.attributions !== undefined) parseModelAttributions(doc.meta.attributions);
   for (const definition of doc.definitions.values()) {
     const entities = definition?.entities;
     // Snapshots saved before mesh parts existed have no map; they hold none.

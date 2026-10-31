@@ -25,3 +25,5 @@ export * from './visibility';
 export * from './sectionPlanes';
 export * from './dimensions';
 export * from './statistics';
+
+export * from './attribution';

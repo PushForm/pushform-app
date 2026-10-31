@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import type { Guid, UnitSettings } from '@pushform/core';
-import { FORMAT_VERSION } from '@pushform/model';
+import { FORMAT_VERSION, parseModelAttributions } from '@pushform/model';
 import type { DocumentMeta, DimensionStyle } from '@pushform/model';
 import { NativeRecordCodec } from './record';
 import type { NativeField, NativeFieldKind, NativeScalar } from './record';
@@ -13,7 +13,7 @@ const unitSchema = {
   angleSnap: field(9, 'bytes'), anglePrecision: field(10, 'uint32'), displayUnitSuffix: field(11, 'bool'), forceZeroInches: field(12, 'bool'),
 } satisfies Record<keyof UnitSettings, NativeField>;
 const unitsCodec = new NativeRecordCodec(unitSchema);
-const metaCodec = new NativeRecordCodec({ guid: field(1, 'string'), nextId: field(2, 'uint53'), units: field(3, 'bytes'), dimensions: field(4, 'bytes', false) } satisfies Record<Exclude<keyof DocumentMeta, 'formatVersion'>, NativeField>);
+const metaCodec = new NativeRecordCodec({ guid: field(1, 'string'), nextId: field(2, 'uint53'), units: field(3, 'bytes'), dimensions: field(4, 'bytes', false), attributions: field(5, 'bytes', false) } satisfies Record<Exclude<keyof DocumentMeta, 'formatVersion'>, NativeField>);
 const dimensionCodec = new NativeRecordCodec({ fontSizePt: field(1, 'double'), arrow: field(2, 'uint32'), align: field(3, 'uint32') } satisfies Record<keyof DimensionStyle, NativeField>);
 const nullable = new NativeRecordCodec({ nullValue: field(2, 'bytes', false), value: field(3, 'double', false) });
 const optional = new NativeRecordCodec({ undefinedValue: field(1, 'bytes', false), value: field(3, 'bytes', false) });
@@ -56,6 +56,7 @@ export function encodeNativeModelMeta(value: DocumentMeta, extensions: ModelMeta
     fields.dimensions = write(optional, d === undefined ? { undefinedValue: write(empty, {}, 'dimensions.undefined', extensions) }
       : { value: write(dimensionCodec, { fontSizePt: finite(d.fontSizePt), arrow: ordinal('arrow', d.arrow), align: ordinal('align', d.align) }, 'dimensions.value', extensions) }, 'dimensions', extensions);
   }
+  if (value.attributions !== undefined) fields.attributions = new Uint8Array(new TextEncoder().encode(JSON.stringify(parseModelAttributions(value.attributions))));
   return write(metaCodec, fields, '', extensions);
 }
 
@@ -80,6 +81,10 @@ export function decodeNativeModelMeta(bytes: Uint8Array): { value: DocumentMeta;
       const settings = read(dimensionCodec, d.value as Uint8Array, 'dimensions.value', extensions);
       value.dimensions = { fontSizePt: finite(settings.fontSizePt), arrow: choice('arrow', settings.arrow) as DimensionStyle['arrow'], align: choice('align', settings.align) as DimensionStyle['align'] };
     }
+  }
+  if (fields.attributions !== undefined) {
+    const bytes = fields.attributions as Uint8Array; if (bytes.length > 512 * 1024) return fail();
+    value.attributions = parseModelAttributions(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)));
   }
   return { value, extensions };
 }

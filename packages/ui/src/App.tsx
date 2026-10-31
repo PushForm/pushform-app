@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { JSX } from 'react';
 import { createPortal } from 'react-dom';
+import { CommonsOpening, type CommonsOpeningConfig } from './components/CommonsOpening';
 import { AppContext } from './AppContext';
 import { createApp } from './bootstrap';
 import type { AppInstance } from './bootstrap';
@@ -73,6 +74,7 @@ export interface RequestsConfig {
 }
 
 export interface AppProps {
+  readonly commons?: CommonsOpeningConfig | undefined;
   /** Provide a pre-built instance (tests, desktop); otherwise one is created after sign-in. */
   readonly app?: AppInstance | undefined;
   readonly cloud?: CloudSession | undefined;
@@ -117,7 +119,7 @@ const WORKSPACE_SCREEN_KEY = 'pushform:workspace-screen:v1';
  * Required account gate. The document engine is first created after successful sign-in; the workspace stays locked
  * until the account's signup step is complete.
  */
-export function App({ app, cloud: supplied, cloudFiles, profiles, account, buildInfo, initialScreen, requests, usage }: AppProps = {}): JSX.Element {
+export function App({ app, cloud: supplied, cloudFiles, profiles, account, buildInfo, initialScreen, requests, usage, commons }: AppProps = {}): JSX.Element {
   const [unconfigured] = useState(() => new CloudSession(null));
   const cloud = supplied ?? unconfigured;
   const state = useSyncExternalStore(cloud.subscribe, cloud.getSnapshot);
@@ -134,7 +136,7 @@ export function App({ app, cloud: supplied, cloudFiles, profiles, account, build
   useEffect(() => desktopUpdates()?.start(), []);
   useEffect(() => { if (signedIn) setLastOwner(state.user!.id); }, [signedIn, state.user]);
   const screens = <>
-    {workspaceOwner ? <Workspace key={workspaceOwner} ownerId={workspaceOwner} app={app} cloud={cloud} cloudFiles={cloudFiles} buildInfo={buildInfo} initialScreen={initialScreen} requests={requests} usage={usage} locked={!signedIn || !profileReady} /> : null}
+    {workspaceOwner ? <Workspace key={workspaceOwner} ownerId={workspaceOwner} app={app} cloud={cloud} cloudFiles={cloudFiles} buildInfo={buildInfo} initialScreen={initialScreen} requests={requests} usage={usage} commons={commons} locked={!signedIn || !profileReady} /> : null}
     {!signedIn ? <SignInScreen cloud={cloud} state={state} /> : null}
     {signedIn && !profileReady && profiles ? <ProfileScreen cloud={cloud} session={state} profiles={profiles} state={profileState} /> : null}
     {signedIn && profileReady && account && accountState.ownerId === state.user!.id ? <DeletionBanner account={account} state={accountState} /> : null}
@@ -183,7 +185,7 @@ function Workspace(props: WorkspaceProps): JSX.Element | null {
 }
 
 /** Keep the document session in memory while locked; unmount all interactive workspace UI. */
-function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScreen, requests, usage: usageSink, extensionRuntime, staff, locked, ownerId, refreshImages, nativeRefresh }: WorkspaceProps & { refreshImages: RefreshImageStore | undefined; nativeRefresh: NativeRefreshSession | undefined }): JSX.Element | null {
+function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScreen, requests, usage: usageSink, extensionRuntime, staff, commons, locked, ownerId, refreshImages, nativeRefresh }: WorkspaceProps & { refreshImages: RefreshImageStore | undefined; nativeRefresh: NativeRefreshSession | undefined }): JSX.Element | null {
   // Home pops the chat down under its header icon; the account email is the requester identity.
   /** Mounted on first open and kept mounted while closed, so the conversation survives closing and reopening. */
   const [requestsPanel, setRequestsPanel] = useState<{ anchor: HTMLElement | null; open: boolean } | null>(null);
@@ -242,6 +244,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
       nativeRefresh,
     ),
   );
+  const [commonsIntent, setCommonsIntent] = useState(() => commons?.intent ?? null);
   const [home, setHome] = useState(() => {
     if (initialScreen) return initialScreen === 'home';
     if (given || !session.restoredForRefresh) return true;
@@ -286,6 +289,8 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     return () => window.removeEventListener('beforeunload', warn);
   }, [autosave]);
   useSyncExternalStore(session.subscribe, () => session.revision);
+  const commonsOpening = !locked && commonsIntent ? <CommonsOpening intent={commonsIntent} filesUrl={commons?.filesUrl} cloud={cloud} session={session}
+    done={() => { setCommonsIntent(null); commons?.handled(); }} opened={() => setHome(false)} /> : null;
   const active = session.active;
   const modelApp = active.type === 'model' ? active.app : app;
   useGlobalKeys(modelApp, active.type === 'model' && !locked && !home);
@@ -424,6 +429,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
   };
   /** Every document with changes is saved before restarting to update. */
   const feedback = <>
+    {commonsOpening}
     <DesktopUpdates saveAll={async () => { await autosave?.saveAll(); }} />
     <DocumentLoading loading={session.loading} />
   </>;

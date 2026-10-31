@@ -20,3 +20,4 @@ export * from './CommonsFiles';
 export * from './CommonsPublishing';
 export * from './CommonsAccess';
 export * from './CommonsProfiles';
+export * from './CommonsOpen';

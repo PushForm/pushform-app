@@ -2,7 +2,8 @@
 // Copyright 2026 PushForm contributors
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { createPortal } from 'react-dom';
-import { MESH_UNITS, type MeshUnit, type StlFormat } from '@pushform/io';
+import type { DocumentState } from '@pushform/model';
+import { packageModelExport, MESH_UNITS, type MeshUnit, type StlFormat } from '@pushform/io';
 import { chooseSaveTarget } from '../saveFile';
 import { keepProportions, modelImageFileName, modelImageSize, modelImageSizeError, renderModelImage, type ModelImageChoice, type ModelImageRenderer } from './modelImageExport';
 
@@ -24,7 +25,8 @@ const HINTS = {
 let remembered: Omit<ModelImageChoice, 'width' | 'height'> & { width: number | null } = { format: 'png', useViewSize: true, width: null, antialias: true, transparent: false };
 
 /** One export setup for model geometry and viewport images. */
-export function ModelExportDialog({ modelName, view, render, onClose, initialFormat, hasSelection, onGeometryExport, encodeNative }: {
+export function ModelExportDialog({ modelName, view, render, onClose, initialFormat, hasSelection, onGeometryExport, encodeNative, attributionState }: {
+  attributionState?: DocumentState | undefined;
   initialFormat: ModelExportDialogFormat; hasSelection: boolean; encodeNative: () => Uint8Array | Promise<Uint8Array>;
   onGeometryExport: (format: ModelExportFormat | 'step' | 'stl', choice: ModelExportChoice, stlFormat: StlFormat) => void | Promise<void>;
   modelName: string; view: { width: number; height: number }; render: ModelImageRenderer; onClose: () => void;
@@ -85,12 +87,13 @@ export function ModelExportDialog({ modelName, view, render, onClose, initialFor
     if (image) remembered = { format: choice.format, useViewSize, width: useViewSize ? remembered.width : width, antialias, transparent };
     try {
       // Ask first: browsers open their save picker only right after a click.
-      const target = await chooseSaveTarget(name, format === 'pf' ? { description: 'PushForm Model', mime: 'application/octet-stream', extension: 'pf' } : choice.format === 'png' ? { description: 'PNG image', mime: 'image/png', extension: 'png' }
+      const withNotices = image && !!attributionState?.meta.attributions?.length;
+      const target = await chooseSaveTarget(withNotices ? name.replace(/\.[^.]+$/, '.zip') : name, withNotices ? { description: 'Image with attribution', mime: 'application/zip', extension: 'zip' } : format === 'pf' ? { description: 'PushForm Model', mime: 'application/octet-stream', extension: 'pf' } : choice.format === 'png' ? { description: 'PNG image', mime: 'image/png', extension: 'png' }
         : { description: 'JPEG image', mime: 'image/jpeg', extension: 'jpg' });
       if (!target || !open.current) return;
       const bytes = format === 'pf' ? await encodeNative() : await renderModelImage(render, choice, view);
       if (!open.current) return;
-      await target.write(bytes);
+      await target.write(withNotices && attributionState ? packageModelExport(attributionState, bytes, name).bytes : bytes);
       closeRef.current();
     } catch (cause) {
       if (open.current) setError(cause instanceof Error ? cause.message : String(cause));
@@ -115,6 +118,7 @@ export function ModelExportDialog({ modelName, view, render, onClose, initialFor
       <label>Format<select value={format} disabled={busy} onChange={event => setFormat(event.target.value as Exclude<ModelExportDialogFormat, 'image'>)}>
         <option value="pf">PushForm Model (.pf)</option><option value="stl">STL (.stl)</option><option value="gltf">glTF (.glb)</option><option value="obj">OBJ (.zip)</option><option value="collada">COLLADA (.dae)</option><option value="step">STEP (.step)</option><option value="png">PNG</option><option value="jpeg">JPEG</option>
       </select></label>
+      {attributionState?.meta.attributions?.length && format !== 'pf' ? <p>Exports a ZIP containing the file and original license and creator notices.</p> : null}
       {format === 'pf' ? <p>Exports the entire document as an editable PushForm Model file.</p> : image ? <><label><input type="checkbox" checked={useViewSize} disabled={busy} onChange={event => setUseViewSize(event.target.checked)} />Use view size</label>
       <div className="pf-image-export-size">
         <label>Width<input type="number" min={1} step={1} value={useViewSize ? pixelsWide : width} disabled={busy || useViewSize}

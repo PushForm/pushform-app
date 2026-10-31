@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { CloudSession, createBrowserCloud } from '@pushform/cloud';
+import { CloudSession, createBrowserCloud, rememberCommonsOpen, forgetCommonsOpen } from '@pushform/cloud';
 import type { RequestsConfig } from '@pushform/ui';
 
 export function configuredCloud() {
@@ -26,6 +26,14 @@ export function configuredRequests(): RequestsConfig | undefined {
   return { baseUrl, apikey, ...(region ? { region } : {}) };
 }
 
+const commonsStorage = (() => { try { return window.sessionStorage; } catch { return null; } })();
+export const commonsIntent = rememberCommonsOpen(new URL(window.location.href), commonsStorage);
+export function clearCommonsIntent(): void {
+  forgetCommonsOpen(commonsStorage);
+  const url = new URL(window.location.href);
+  for (const name of ['commonsModel', 'commonsRevision', 'commonsAsset']) url.searchParams.delete(name);
+  window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
+}
 export const { session: cloudSession, files: cloudFiles, profiles: cloudProfiles, account: cloudAccount, usage: cloudUsage, staff: cloudStaff } = configuredCloud();
 export const requestsConfig = configuredRequests();
 if (import.meta.hot) import.meta.hot.dispose(() => cloudSession.dispose());

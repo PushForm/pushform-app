@@ -91,3 +91,14 @@ it('opens public profile routes independently of catalog availability',async()=>
   const id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';window.history.replaceState(null,'','/#people/'+id);
   render(<App loadCatalog={null}/>);expect(await screen.findByText('Profiles are unavailable in this build.')).toBeTruthy();expect(screen.queryByText('The Commons catalog isn’t available yet.')).toBeNull();
 });
+
+it('offers a real model-specific Open in PushForm action and explains unsupported original downloads', async () => {
+  window.history.replaceState(null, '', '/#models/workshop-hinge');
+  const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', revision = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const model = exampleModel({ revision, files: [{ id, name: 'hinge.step', format: 'STEP', sizeBytes: 3, sha256: 'a'.repeat(64) }] });
+  const view = render(<App loadCatalog={async () => [model]} editorUrl="http://localhost:5187" />);
+  const action = await screen.findByRole('link', { name: 'Open in PushForm ↗' });
+  const link = new URL(action.getAttribute('href')!); expect(link.searchParams.get('commonsModel')).toBe(model.id); expect(link.searchParams.get('commonsRevision')).toBe(revision); expect(link.searchParams.get('commonsAsset')).toBe(id); expect(action.getAttribute('target')).toBe('_blank');
+  view.rerender(<App loadCatalog={async () => [exampleModel({ revision, files: [{ id, name: 'original.fcstd', format: 'FCSTD', sizeBytes: 3, sha256: 'a'.repeat(64) }] })]} />);
+  await screen.findByText(/A supported model file or conversion is needed/); expect(screen.queryByRole('link', { name: 'Open in PushForm ↗' })).toBeNull();
+});

@@ -4,7 +4,9 @@ PushForm Commons is a community model catalog with its own website. The hosted l
 
 Open a model to see its original creator, source, licenses and attribution notices. When files are available, choose **Download ZIP** next to a filename. The package contains the unchanged original in `files/`, an `ATTRIBUTION.json` record and a README. Keep required credits and license notices with reused files. A free download does not remove license conditions.
 
-Downloads require the catalog and model to remain available. If a file is unavailable, return to the catalog and try again later. Some builds may show metadata without configured downloads. A preview does not establish fabrication suitability or solid editability. Original file formats are listed; a download does not guarantee that PushForm can import that format. Extract the model file before using Open or Import. Commons currently does not insert files directly into an open project.
+Downloads require the catalog and model to remain available. If a file is unavailable, return to the catalog and try again later. Some builds may show metadata without configured downloads. A preview does not establish fabrication suitability or solid editability. Original file formats are listed; a download does not guarantee that PushForm can import that format. Extract the model file before using Open or Import. For supported files, choose **Open in PushForm** on the model page. It opens the web editor in another tab, continues through normal sign-in and initial account setup, and creates a separate model. Your current project stays open. Files without recorded units ask for units and up axis before opening. Unsupported originals remain available as downloads and may need conversion.
+
+Model Info → Credits shows the original source, licenses, conditions and creator notices. Native saves retain those notices. Geometry and image exports from an attributed model are ZIP packages containing the exported file and attribution notices; keep the package together when sharing. Commons currently does not insert files directly into an open project.
 
 ## Your public profile
 

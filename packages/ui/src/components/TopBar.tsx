@@ -7,9 +7,9 @@ import { DEFAULT_UNITS, newGuid, type DefId } from '@pushform/core';
 import { defineCommand } from '@pushform/commands';
 import { z } from 'zod';
 import {
-  encodeLayoutSnapshot, encodeModelSnapshot, modelArchiveImages, openModelFile, openLayoutFile,
+  packageModelExport, encodeLayoutSnapshot, encodeModelSnapshot, modelArchiveImages, openModelFile, openLayoutFile,
   isSketchUpLayoutFile, nativeDocumentType, type LayoutRecoveryMetadata,
-  isModelImportFile, isPictureFile, MAX_PICTURE_BYTES, pictureMime, exportStl, stlFileName, STL_EXTENSION, probeMeshImport, exportGlb, exportObj, exportCollada, exportStep, exportFileName, STEP_EXTENSION,
+  isModelImportFile, isPictureFile, MAX_PICTURE_BYTES, pictureMime, exportStl, stlFileName, probeMeshImport, exportGlb, exportObj, exportCollada, exportStep, exportFileName, STEP_EXTENSION,
   type ImportProgress, type MeshExtent, type MeshFormatKind, type MeshImportOptions, type ModelImportReport,
 } from '@pushform/io';
 import { importLayoutBytes, importSketchUpBytes, modelImportLimit, tooLarge, type PickedFile } from '../importFiles';
@@ -569,19 +569,11 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
     try {
       const { bytes, notes } = exportStl(host.doc.state, { unit: choice.unit, format: choice.format, name: tab.name,
         selection: choice.selectionOnly ? host.selection.refs : null });
-      if (isTauri()) {
-        const { save } = await import('@tauri-apps/plugin-dialog');
-        const chosen = await save({ defaultPath: name, filters: [{ name: 'STL', extensions: ['stl'] }] });
-        if (!chosen) return;
-        const { writeFile } = await import('@tauri-apps/plugin-fs');
-        await writeFile(/\.stl$/i.test(chosen) ? chosen : `${chosen}${STL_EXTENSION}`, bytes);
-      } else if (picker.showSaveFilePicker) {
-        const handle = await picker.showSaveFilePicker({ suggestedName: name,
-          types: [{ description: 'STL', accept: { 'model/stl': [STL_EXTENSION] } }] });
-        const writable = await handle.createWritable();
-        await writable.write(bytes);
-        await writable.close();
-      } else download(bytes, name);
+      const output = packageModelExport(host.doc.state, bytes, name);
+      const target = await chooseSaveTarget(output.fileName, output.packaged ? { description: 'STL with attribution', mime: 'application/zip', extension: 'zip' }
+        : { description: 'STL', mime: 'model/stl', extension: 'stl' });
+      if (!target) return;
+      await target.write(output.bytes);
       setImportNotice(notes.length ? { fileName: name, warnings: notes, exported: true, format: 'STL' } : null);
     } catch (cause) {
       if ((cause as Error).name !== 'AbortError') setError((cause as Error).message);
@@ -605,20 +597,12 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
     try {
       const { bytes, fileName, notes } = format === 'gltf' ? exportGlb(host.doc.state, options)
         : format === 'obj' ? exportObj(host.doc.state, { ...options, unit: choice.unit, up: choice.up }) : exportCollada(host.doc.state, options);
-      const extension = fileName.slice(fileName.lastIndexOf('.'));
+      const output = packageModelExport(host.doc.state, bytes, fileName);
+      const extension = output.fileName.slice(output.fileName.lastIndexOf('.'));
       const mime = extension === '.glb' ? 'model/gltf-binary' : extension === '.zip' ? 'application/zip' : 'model/vnd.collada+xml';
-      if (isTauri()) {
-        const { save } = await import('@tauri-apps/plugin-dialog');
-        const chosen = await save({ defaultPath: fileName, filters: [{ name: label, extensions: [extension.slice(1)] }] });
-        if (!chosen) return;
-        const { writeFile } = await import('@tauri-apps/plugin-fs');
-        await writeFile(chosen.toLowerCase().endsWith(extension) ? chosen : `${chosen}${extension}`, bytes);
-      } else if (picker.showSaveFilePicker) {
-        const handle = await picker.showSaveFilePicker({ suggestedName: fileName, types: [{ description: label, accept: { [mime]: [extension] } }] });
-        const writable = await handle.createWritable();
-        await writable.write(bytes);
-        await writable.close();
-      } else download(bytes, fileName);
+      const target = await chooseSaveTarget(output.fileName, { description: label, mime, extension: extension.slice(1) });
+      if (!target) return;
+      await target.write(output.bytes);
       setImportNotice(notes.length ? { fileName, warnings: notes, exported: true, format: label } : null);
     } catch (cause) {
       if ((cause as Error).name !== 'AbortError') setError((cause as Error).message);
@@ -635,12 +619,13 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
     if (tab?.type !== 'model') return;
     setError(null);
     const host = tab.app.document, fileName = exportFileName(tab.name, STEP_EXTENSION);
-    const target = await chooseSaveTarget(fileName, { description: 'STEP', mime: 'model/step', extension: STEP_EXTENSION.slice(1) });
+    const attributed = !!host.doc.state.meta.attributions?.length;
+    const target = await chooseSaveTarget(attributed ? fileName.replace(/\.step$/i, '.zip') : fileName, attributed ? { description: 'STEP with attribution', mime: 'application/zip', extension: 'zip' } : { description: 'STEP', mime: 'model/step', extension: STEP_EXTENSION.slice(1) });
     if (!target) return;
     try {
       const { bytes, notes } = await exportStep(host.doc.state, { name: tab.name, selection: choice.selectionOnly ? host.selection.refs : null, signal });
       if (signal.aborted) return;
-      await target.write(bytes);
+      await target.write(packageModelExport(host.doc.state, bytes, fileName).bytes);
       setImportNotice(notes.length ? { fileName, warnings: notes, exported: true, format: 'STEP' } : null);
     } catch (cause) {
       if ((cause as Error).name !== 'AbortError') throw cause;
@@ -859,7 +844,7 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
         const tab = modelExport ? session.tabs.find(candidate => candidate.id === modelExport.tabId) : undefined;
         if (!modelExport || tab?.type !== 'model') return null;
         const viewport = tab.app.viewport;
-        return <ModelExportDialog modelName={tab.name} initialFormat={modelExport.format} hasSelection={!tab.app.document.selection.isEmpty}
+        return <ModelExportDialog attributionState={tab.app.document.doc.state} modelName={tab.name} initialFormat={modelExport.format} hasSelection={!tab.app.document.selection.isEmpty}
           encodeNative={() => encodeModelSnapshot(tab.app.document.doc.state, modelArchiveImages(tab.app.document.doc.state, tab.app.document.images))}
           view={viewport.size} render={(width, height, options) => viewport.renderImage(width, height, options)}
           onGeometryExport={(format, choice, stlFormat) => {

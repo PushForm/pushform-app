@@ -26,7 +26,7 @@ const decimals = (n: number): string => (n ? `0.${'0'.repeat(n)}` : '0');
 const lengthPrecisionLabel = (units: UnitSettings, n: number): string =>
   units.format === 'architectural' || units.format === 'fractional' ? (n ? `1/${2 ** n}"` : '1"') : decimals(n);
 
-const PANES = { units: 'Units', dimensions: 'Dimensions', statistics: 'Statistics' } as const;
+const PANES = { units: 'Units', dimensions: 'Dimensions', statistics: 'Statistics', credits: 'Credits' } as const;
 type Pane = keyof typeof PANES;
 
 /** Model Info panel: Units, Dimensions and Statistics panes. */
@@ -41,9 +41,24 @@ export function ModelInfoPanel(): JSX.Element {
           </button>
         ))}
       </div>
-      {pane === 'units' ? <UnitsPane /> : pane === 'dimensions' ? <DimensionsPane /> : <StatisticsPane />}
+      {pane === 'units' ? <UnitsPane /> : pane === 'dimensions' ? <DimensionsPane /> : pane === 'credits' ? <CreditsPane /> : <StatisticsPane />}
     </div>
   );
+}
+
+function CreditsPane(): JSX.Element {
+  const notices = useDocumentState().meta.attributions ?? [];
+  return <section aria-label="Model licenses and credits">
+    <p>Keep required notices with reused files. Geometry and image exports include these notices in a ZIP.</p>
+    {notices.length === 0 ? <p>No Commons attribution records in this model.</p> : notices.map(a => <article key={`${a.modelId}:${a.revision}:${a.assetId}`}>
+      <h3>{a.title}</h3><p>By {a.creator}</p>
+      {a.source && <p>Source: <a href={a.source.url} target="_blank" rel="noreferrer">{a.source.name}</a></p>}
+      {a.licenses.map((l, i) => <div key={i}><a href={l.url} target="_blank" rel="noreferrer">{l.name}</a>
+        {l.conditions.length > 0 && <ul>{l.conditions.map((condition, j) => <li key={j}>{condition}</li>)}</ul>}</div>)}
+      {a.credits.map((c, i) => <p key={i}>{c.url ? <a href={c.url} target="_blank" rel="noreferrer">{c.name}</a> : c.name}: {c.text}</p>)}
+      <small>Model {a.modelId} · Revision {a.revision}</small>
+    </article>)}
+  </section>;
 }
 
 const ALIGNMENTS: readonly [DimensionAlign, string][] = [['screen', 'Align to screen'], ['above', 'Above the line'], ['centered', 'Centered on the line'], ['outside', 'Outside the line']];

@@ -2,6 +2,7 @@
 // Copyright 2026 PushForm contributors
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from './db.types';
+import { commonsIntentFromUrl } from './CommonsOpen';
 import { CloudAccount } from './CloudAccount';
 import { CloudFiles } from './CloudFiles';
 import { CloudProfiles } from './CloudProfile';
@@ -29,14 +30,18 @@ export function authCallbackFromUrl(url: URL): AuthCallback | null {
 
 function browserClient(config: BrowserCloudConfig, browser: Pick<Window, 'location' | 'history'>): { client: SupabaseClient<Database>; callback: AuthCallback | null; redirectTo: string } {
   const checked = validateBrowserCloudConfig(config);
-  const callback = authCallbackFromUrl(new URL(browser.location.href));
+  const initialUrl = new URL(browser.location.href);
+  const callback = authCallbackFromUrl(initialUrl);
+  const commons = commonsIntentFromUrl(initialUrl);
   if (callback) browser.history.replaceState(browser.history.state, '', '/');
   const client = createClient<Database>(checked.url, checked.publishableKey, { auth: {
     flowType: 'pkce', persistSession: true, autoRefreshToken: true,
     detectSessionInUrl: false, // Explicit one-shot exchange exposes errors and removes credentials from the address bar immediately.
     storageKey: `pushform:auth:${new URL(checked.url).host}`,
   } });
-  return { client, callback, redirectTo: `${browser.location.origin}/auth/callback` };
+  const redirect = new URL('/auth/callback', browser.location.origin);
+  if (commons) { redirect.searchParams.set('commonsModel', commons.modelId); redirect.searchParams.set('commonsRevision', commons.revision); redirect.searchParams.set('commonsAsset', commons.assetId); }
+  return { client, callback, redirectTo: redirect.href };
 }
 
 /** Construct once at app boot; SDK owns persistence, refresh, locks and cross-tab auth notifications. */

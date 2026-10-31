@@ -56,7 +56,7 @@ export default defineConfig(({ mode }) => {
   // The policy names this build's own Supabase project and backends.
   const policy = () => contentSecurityPolicy('web', {
     supabaseUrls: [env.VITE_SUPABASE_URL ?? ''],
-    backendUrls: [env.VITE_FR_BACKEND_URL, env.VITE_FR_JOBS_URL],
+    backendUrls: [env.VITE_FR_BACKEND_URL, env.VITE_FR_JOBS_URL, env.VITE_COMMONS_ASSETS_URL],
     // Only built bundles send the policy, and they are production bundles (import.meta.env.PROD) in every mode.
     sentryDsn: sentryDsnFor(env, true),
   });

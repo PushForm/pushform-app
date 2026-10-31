@@ -27,4 +27,5 @@ message ModelMeta {
   required uint64 next_id = 2;
   required UnitSettings units = 3;
   optional OptionalDimensionDefaults dimensions = 4;
+  optional bytes attributions = 5; // UTF-8 JSON source, license and creator notices.
 }

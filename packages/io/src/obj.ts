@@ -4,7 +4,7 @@ import { LENGTH_TOL, v3len, v3normalize, type Vec2, type Vec3 } from '@pushform/
 import type { Material } from 'openskp';
 import {
   archiveFile, finishMeshImport, groupedMeshModel, meshCountNotes, meshMaterial, meshPointConverter,
-  type ArchiveResources, type MeshCorner, type MeshCounts, type MeshExtent, type MeshGeometry, type MeshImportOptions,
+  type ArchiveResources, type MeshCorner, type MeshCounts, type MeshExtent, type MeshGeometry, type MeshImportOptions, type MeshPartOptions,
 } from './meshImport';
 import { MAX_SKETCHUP_BYTES, type ImportFormat, type ImportProgress, type SketchUpImport } from './sketchup';
 
@@ -100,7 +100,7 @@ function parseMtl(text: string): Map<string, ObjMaterial> {
  * model came from, where its `.mtl` libraries and texture images are found.
  */
 export async function readObj(bytes: Uint8Array, options: MeshImportOptions, onProgress?: (p: ImportProgress) => void,
-  resources?: ArchiveResources): Promise<SketchUpImport> {
+  resources?: ArchiveResources, parts: MeshPartOptions = {}): Promise<SketchUpImport> {
   if (bytes.byteLength > MAX_SKETCHUP_BYTES) throw new Error('OBJ files larger than 128 MiB are not supported yet.');
   onProgress?.({ stage: 'Reading OBJ model', current: 0, total: 1 });
   const warnings = new Set<string>(), warn = (message: string): void => { warnings.add(message); };
@@ -192,7 +192,7 @@ export async function readObj(bytes: Uint8Array, options: MeshImportOptions, onP
     : `${undefinedMaterials.size} material${undefinedMaterials.size === 1 ? '' : 's'} named in the file ${undefinedMaterials.size === 1 ? 'uses' : 'use'} the default material: materials and textures are imported from a .zip archive that holds the model with its .mtl files and images.`);
   if (missingImages) warn(`${missingImages} texture image${missingImages === 1 ? ' is' : 's are'} missing from the archive; ${missingImages === 1 ? 'its material uses its' : 'their materials use their'} color.`);
   onProgress?.({ stage: 'Reading OBJ model', current: 1, total: 1 });
-  const { model, placements } = groupedMeshModel([...groups].map(([name, geometry]) => ({ name, geometry })), materials, 'OBJ', counts, onProgress);
+  const { model, placements, meshParts } = groupedMeshModel([...groups].map(([name, geometry]) => ({ name, geometry })), materials, 'OBJ', counts, onProgress, { source: { format: 'OBJ', system: '' }, ...parts });
   meshCountNotes(counts, warn);
-  return finishMeshImport(model, placements, OBJ_FORMAT, warnings, onProgress);
+  return finishMeshImport(model, placements, OBJ_FORMAT, warnings, onProgress, { meshParts });
 }

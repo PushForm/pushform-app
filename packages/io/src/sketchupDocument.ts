@@ -130,7 +130,7 @@ export function applySketchUpImport(
   const curveRecord = (c: ImportedCurve, edgeRefs: Curve['edgeRefs']): Curve => ({ id: allocId<CurveId>(draft), kind: c.kind,
     center: [...c.center], normal: [...c.normal], radius: c.radius, startAngle: c.startAngle, endAngle: c.endAngle,
     segments: c.segments, edgeRefs });
-  // Mesh parts of every definition count against the document's limit together (MOD3810.01).
+  // Mesh parts of every definition count against the document's limit together.
   let meshPartTriangles = 0;
   for (const def of draft.definitions.values()) for (const part of def.entities.meshParts.values()) meshPartTriangles += part.geometry.triangles.length / 3;
   const populate = (source: ImportedDefinition, id: DefId): void => {

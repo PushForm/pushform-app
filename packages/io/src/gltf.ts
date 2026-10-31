@@ -4,9 +4,10 @@ import { LENGTH_TOL, RATIO_TOL, m4identity, m4invert, m4mul, m4scaling, m4transl
 import type { Definition, Instance, Material, SkpModel } from 'openskp';
 import {
   INCH, archiveFile, buildMeshGeometry, finishMeshImport, meshCountNotes, meshDefinition, meshMaterial, setTextureTileSizes,
-  type ArchiveResources, type MeshCorner, type MeshGeometry, type MeshPlacement,
+  type ArchiveResources, type MeshCorner, type MeshGeometry, type MeshPlacement, meshPartFromGeometry,
+  type MeshPartOptions,
 } from './meshImport';
-import { MAX_SKETCHUP_BYTES, type ImportFormat, type ImportProgress, type SketchUpImport } from './sketchup';
+import { MAX_SKETCHUP_BYTES, MESH_PART_THRESHOLD, type ImportFormat, type ImportProgress, type SketchUpImport, type ImportedMeshPart } from './sketchup';
 
 // glTF 2.0 (.gltf, .glb) import. The scene is rebuilt as the reader model the SketchUp importer
 // converts, as COLLADA scenes are, so solids, sheets, components and materials follow the same rules.
@@ -133,7 +134,7 @@ const toZUp = (p: Vec3): Vec3 => [p[0], -p[2], p[1]];
  * Parse and prepare off the UI thread. No document is mutated until this succeeds. `resources` are the files of the
  * archive the model came from, where a `.gltf` file's buffers and images are found.
  */
-export async function readGltf(bytes: Uint8Array, onProgress?: (p: ImportProgress) => void, resources?: ArchiveResources): Promise<SketchUpImport> {
+export async function readGltf(bytes: Uint8Array, onProgress?: (p: ImportProgress) => void, resources?: ArchiveResources, parts: MeshPartOptions = {}): Promise<SketchUpImport> {
   if (bytes.byteLength > MAX_SKETCHUP_BYTES) throw new Error('glTF files larger than 128 MiB are not supported yet.');
   onProgress?.({ stage: 'Reading glTF model', current: 0, total: 1 });
   const { json, bin } = parseContainer(bytes);
@@ -142,9 +143,9 @@ export async function readGltf(bytes: Uint8Array, onProgress?: (p: ImportProgres
   const compressed = (json.extensionsRequired ?? []).filter(name => COMPRESSION_EXTENSIONS.has(name));
   if (compressed.length) throw new Error(`This glTF file's geometry is compressed (${compressed.join(', ')}), which is not supported yet.`);
   const warnings = new Set<string>();
-  const { model, placements } = gltfModel(json, bin, message => { warnings.add(message); }, resources);
+  const { model, placements, meshParts } = gltfModel(json, bin, message => { warnings.add(message); }, resources, parts);
   onProgress?.({ stage: 'Reading glTF model', current: 1, total: 1 });
-  return finishMeshImport(model, placements, GLTF_FORMAT, warnings, onProgress);
+  return finishMeshImport(model, placements, GLTF_FORMAT, warnings, onProgress, { meshParts });
 }
 
 /**
@@ -152,8 +153,8 @@ export async function readGltf(bytes: Uint8Array, onProgress?: (p: ImportProgres
  * place becomes one shared component, and each mesh's primitives become faces and edges, merged into polygons where
  * adjacent coplanar triangles share a material. Positions are converted to inches (the reader model's unit) in Z-up axes.
  */
-export function gltfModel(json: Gltf, bin: Uint8Array | null, warn: (message: string) => void, resources?: ArchiveResources):
-  { model: SkpModel; placements: Map<number, Map<number, MeshPlacement>> } {
+export function gltfModel(json: Gltf, bin: Uint8Array | null, warn: (message: string) => void, resources?: ArchiveResources, parts: MeshPartOptions = {}):
+  { model: SkpModel; placements: Map<number, Map<number, MeshPlacement>>; meshParts: Map<number, ImportedMeshPart[]> } {
   const counts = {
     degenerate: 0, nonplanar: 0, duplicates: 0, turned: 0, points: 0, malformed: 0, morphs: 0, skinned: 0, cameras: 0, lights: 0,
     transforms: 0, textured: 0, textureTransforms: 0,
@@ -312,7 +313,15 @@ export function gltfModel(json: Gltf, bin: Uint8Array | null, warn: (message: st
 
   const placements = new Map<number, Map<number, MeshPlacement>>(), definitions = new Map<number, Definition>();
   let nextKey = 0;
+  // Triangles the file's accessors promise, counted before any is read, decide between faces and mesh parts.
+  const promised = meshes.flatMap(mesh => mesh.primitives ?? []).reduce((n, primitive) => {
+    const mode = primitive.mode ?? 4, count = json.accessors?.[primitive.indices ?? primitive.attributes.POSITION ?? -1]?.count ?? 0;
+    return n + (mode === 4 ? Math.floor(count / 3) : mode === 5 || mode === 6 ? Math.max(0, count - 2) : 0);
+  }, 0);
+  const asMeshParts = promised > (parts.meshPartThreshold ?? MESH_PART_THRESHOLD), meshParts = new Map<number, ImportedMeshPart[]>();
+  const source = parts.source ?? { format: 'glTF', system: json.asset?.generator ?? '' };
   const build = (def: Definition, geometry: MeshGeometry): void => {
+    if (asMeshParts) { meshParts.set(def.id, [meshPartFromGeometry(geometry, def.name || 'Mesh', source, counts)]); return; }
     const byFace = new Map<number, MeshPlacement>();
     buildMeshGeometry(def, geometry, counts, textured, byFace, { paintBacks: true });
     if (byFace.size) placements.set(def.id, byFace);
@@ -417,7 +426,7 @@ export function gltfModel(json: Gltf, bin: Uint8Array | null, warn: (message: st
   meshCountNotes(counts, warn);
 
   const version = [json.asset?.version, json.asset?.generator].filter(Boolean).join(', ').slice(0, 100);
-  return { placements, model: {
+  return { placements, meshParts, model: {
     version, definitions, root: top, layers: [], pages: [], scenesUnread: 0, dimensions: [],
     materials, materialsById: new Map(materials.map(m => [m.id!, m])), styles: [], units: null, unitsOptions: null, sectionDisplay: null, renderingOptions: null,
   } };

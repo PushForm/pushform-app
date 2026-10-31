@@ -18,11 +18,13 @@ export function readSketchUpInWorker(bytes: Uint8Array, options: {
   onProgress?: (p: ImportProgress) => void;
   mesh?: MeshImportOptions | undefined;
   maxStepBytes?: number | undefined;
+  /** Triangle count above which the model imports as mesh parts; tests lower it. */
+  meshPartThreshold?: number | undefined;
 } = {}): Promise<SketchUpImport> {
   if (options.signal?.aborted) return Promise.reject(new DOMException('Import cancelled.', 'AbortError'));
   const step = isStepBytes(bytes), limit = step ? options.maxStepBytes ?? MAX_SKETCHUP_BYTES : MAX_SKETCHUP_BYTES;
   if (bytes.byteLength > limit) return Promise.reject(new Error(`${step ? 'STEP' : 'Model'} files larger than ${limit / (1024 * 1024)} MiB are not supported yet.`));
-  const limits = { stepBytes: options.maxStepBytes };
+  const limits = { stepBytes: options.maxStepBytes, meshPartThreshold: options.meshPartThreshold };
   // Inline path for headless callers and test environments. Browsers always use the worker.
   if (typeof Worker === 'undefined') return readModelImport(bytes, options.onProgress, options.mesh, limits).then(scene => {
     if (options.signal?.aborted) throw new DOMException('Import cancelled.', 'AbortError');

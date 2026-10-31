@@ -4,7 +4,7 @@ import type { MeshImportOptions } from './meshImport';
 import { readModelImport } from './modelImport';
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
-scope.onmessage = async (event: MessageEvent<{ bytes: Uint8Array; mesh?: MeshImportOptions | undefined; limits?: { stepBytes?: number | undefined } }>) => {
+scope.onmessage = async (event: MessageEvent<{ bytes: Uint8Array; mesh?: MeshImportOptions | undefined; limits?: { stepBytes?: number | undefined; meshPartThreshold?: number | undefined } }>) => {
   try {
     const { bytes, mesh, limits } = event.data;
     const scene = await readModelImport(bytes, progress => scope.postMessage({ type: 'progress', progress }), mesh, limits);

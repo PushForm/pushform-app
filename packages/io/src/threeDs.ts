@@ -4,7 +4,7 @@ import type { Vec2, Vec3 } from '@pushform/core';
 import type { Material } from 'openskp';
 import {
   archiveFile, finishMeshImport, groupedMeshModel, meshCountNotes, meshMaterial, meshPointConverter,
-  type ArchiveResources, type MeshCounts, type MeshExtent, type MeshGeometry, type MeshImportOptions,
+  type ArchiveResources, type MeshCounts, type MeshExtent, type MeshGeometry, type MeshImportOptions, type MeshPartOptions,
 } from './meshImport';
 import { MAX_SKETCHUP_BYTES, type ImportFormat, type ImportProgress, type SketchUpImport } from './sketchup';
 
@@ -76,7 +76,7 @@ interface ThreeDsMaterial { color: Vec3; opacity: number; map: string | null; sc
 
 /** Read a 3DS model in the given unit; `resources` are the archive's files, where textures are found. */
 export async function read3ds(bytes: Uint8Array, options: MeshImportOptions, onProgress?: (p: ImportProgress) => void,
-  resources?: ArchiveResources): Promise<SketchUpImport> {
+  resources?: ArchiveResources, parts: MeshPartOptions = {}): Promise<SketchUpImport> {
   if (bytes.byteLength > MAX_SKETCHUP_BYTES) throw new Error('3DS files larger than 128 MiB are not supported yet.');
   if (!is3dsBytes(bytes)) throw new Error('Not a 3DS model: invalid file header.');
   onProgress?.({ stage: 'Reading 3DS model', current: 0, total: 1 });
@@ -207,7 +207,7 @@ export async function read3ds(bytes: Uint8Array, options: MeshImportOptions, onP
     ? `${missingImages} texture image${missingImages === 1 ? ' is' : 's are'} missing from the archive; ${missingImages === 1 ? 'its material uses its' : 'their materials use their'} color.`
     : `${missingImages} textured material${missingImages === 1 ? ' uses its' : 's use their'} color: textures are imported from a .zip archive that holds the model with its images.`);
   // Objects that share a name stay apart, as 3DS keeps them.
-  const { model, placements } = groupedMeshModel(groups, materials, '3DS', counts, onProgress);
+  const { model, placements, meshParts } = groupedMeshModel(groups, materials, '3DS', counts, onProgress, { source: { format: '3DS', system: '' }, ...parts });
   meshCountNotes(counts, warn);
-  return finishMeshImport(model, placements, THREE_DS_FORMAT, warnings, onProgress);
+  return finishMeshImport(model, placements, THREE_DS_FORMAT, warnings, onProgress, { meshParts });
 }

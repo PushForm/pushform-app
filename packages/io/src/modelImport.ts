@@ -5,7 +5,7 @@ import { COLLADA_FORMAT, isXmlBytes, readCollada } from './collada';
 import { isDxfBytes, isDxfFile, parseDxfHeader } from './dxf';
 import { DXF_FORMAT, readDxf } from './dxfModel';
 import { GLTF_FORMAT, isGlbBytes, isGltfJson, isGltfModelFile, readGltf } from './gltf';
-import { isZipBytes, normalizePath, unpackModelArchive, type MeshExtent, type MeshImportOptions } from './meshImport';
+import { isZipBytes, normalizePath, unpackModelArchive, type MeshExtent, type MeshImportOptions, type MeshPartOptions } from './meshImport';
 import { OBJ_FORMAT, isObjModelFile, isObjText, objExtent, readObj } from './obj';
 import { SKETCHUP_FORMAT, isSketchUpModelFile, readSketchUp, type ImportFormat, type ImportProgress, type SketchUpImport } from './sketchup';
 import { STEP_FORMAT, isStepBytes, isStepModelFile, readStep } from './step';
@@ -70,7 +70,7 @@ function archiveModel(names: string[], kml: { path: string; text: string } | nul
  * Read the model in a `.zip` or `.kmz` archive with the materials and images beside it. OBJ and 3DS
  * models are read with `options`, or their format's default.
  */
-export async function readModelArchive(bytes: Uint8Array, onProgress?: (p: ImportProgress) => void, options?: MeshImportOptions): Promise<SketchUpImport> {
+export async function readModelArchive(bytes: Uint8Array, onProgress?: (p: ImportProgress) => void, options?: MeshImportOptions, limits?: ImportLimits): Promise<SketchUpImport> {
   onProgress?.({ stage: 'Unpacking archive', current: 0, total: 1 });
   const files = unpackModelArchive(bytes);
   const kmlPath = [...files.keys()].filter(name => /\.kml$/i.test(name)).sort((a, b) => a.split('/').length - b.split('/').length)[0];
@@ -78,10 +78,10 @@ export async function readModelArchive(bytes: Uint8Array, onProgress?: (p: Impor
   const found = archiveModel([...files.keys()], kml);
   if (!found) throw new Error('No COLLADA, OBJ, 3DS or glTF model (.dae, .obj, .3ds, .gltf or .glb) was found in this archive.');
   const resources = { base: found.path.split('/').slice(0, -1).join('/'), files }, model = files.get(found.path)!;
-  const scene = /\.obj$/i.test(found.path) ? await readObj(model, options ?? DEFAULT_MESH_OPTIONS.obj, onProgress, resources)
-    : /\.3ds$/i.test(found.path) ? await read3ds(model, options ?? DEFAULT_MESH_OPTIONS['3ds'], onProgress, resources)
-    : /\.(gltf|glb)$/i.test(found.path) ? await readGltf(model, onProgress, resources)
-    : await readCollada(model, onProgress, resources);
+  const scene = /\.obj$/i.test(found.path) ? await readObj(model, options ?? DEFAULT_MESH_OPTIONS.obj, onProgress, resources, parts(limits))
+    : /\.3ds$/i.test(found.path) ? await read3ds(model, options ?? DEFAULT_MESH_OPTIONS['3ds'], onProgress, resources, parts(limits))
+    : /\.(gltf|glb)$/i.test(found.path) ? await readGltf(model, onProgress, resources, parts(limits))
+    : await readCollada(model, onProgress, resources, parts(limits));
   if (found.others) scene.warnings.push(`${found.others} other model${found.others === 1 ? ' in the archive is' : 's in the archive are'} not imported.`);
   if (kml !== null) scene.warnings.push('The Google Earth location of a .kmz model is not imported.');
   return scene;
@@ -114,6 +114,10 @@ export function probeMeshImport(bytes: Uint8Array): { kind: MeshFormatKind; exte
   return null;
 }
 
+/** Per-call import limits: the largest STEP file to read, and the triangle count above which a model imports as mesh parts. */
+export interface ImportLimits { stepBytes?: number | undefined; meshPartThreshold?: number | undefined }
+const parts = (limits: ImportLimits | undefined): MeshPartOptions => limits?.meshPartThreshold === undefined ? {} : { meshPartThreshold: limits.meshPartThreshold };
+
 /**
  * Read model bytes of any supported format, told apart by their content: COLLADA is XML, archives are zip files, 3DS
  * starts with its main chunk, binary glTF with `glTF` and JSON glTF with `{`, STEP with `ISO-10303-21;`, a binary STL's
@@ -121,14 +125,14 @@ export function probeMeshImport(bytes: Uint8Array): { kind: MeshFormatKind; exte
  * statement, and anything else is read as a .skp file. `limits.stepBytes` is the largest STEP file to read.
  */
 export function readModelImport(bytes: Uint8Array, onProgress?: (p: ImportProgress) => void, options?: MeshImportOptions,
-  limits?: { stepBytes?: number | undefined }): Promise<SketchUpImport> {
-  if (isXmlBytes(bytes)) return readCollada(bytes, onProgress);
-  if (isZipBytes(bytes)) return readModelArchive(bytes, onProgress, options);
-  if (is3dsBytes(bytes)) return read3ds(bytes, options ?? DEFAULT_MESH_OPTIONS['3ds'], onProgress);
-  if (isGlbBytes(bytes) || isGltfJson(bytes)) return readGltf(bytes, onProgress);
-  if (isStepBytes(bytes)) return readStep(bytes, onProgress, limits?.stepBytes);
-  if (isStlBytes(bytes)) return readStl(bytes, options ?? DEFAULT_MESH_OPTIONS.stl, onProgress);
+  limits?: ImportLimits): Promise<SketchUpImport> {
+  if (isXmlBytes(bytes)) return readCollada(bytes, onProgress, undefined, parts(limits));
+  if (isZipBytes(bytes)) return readModelArchive(bytes, onProgress, options, limits);
+  if (is3dsBytes(bytes)) return read3ds(bytes, options ?? DEFAULT_MESH_OPTIONS['3ds'], onProgress, undefined, parts(limits));
+  if (isGlbBytes(bytes) || isGltfJson(bytes)) return readGltf(bytes, onProgress, undefined, parts(limits));
+  if (isStepBytes(bytes)) return readStep(bytes, onProgress, limits?.stepBytes, limits?.meshPartThreshold);
+  if (isStlBytes(bytes)) return readStl(bytes, options ?? DEFAULT_MESH_OPTIONS.stl, onProgress, parts(limits));
   if (isDxfBytes(bytes)) return readDxf(bytes, options ?? DEFAULT_MESH_OPTIONS.dxf, onProgress);
-  if (isObjText(bytes)) return readObj(bytes, options ?? DEFAULT_MESH_OPTIONS.obj, onProgress);
+  if (isObjText(bytes)) return readObj(bytes, options ?? DEFAULT_MESH_OPTIONS.obj, onProgress, undefined, parts(limits));
   return readSketchUp(bytes, onProgress);
 }

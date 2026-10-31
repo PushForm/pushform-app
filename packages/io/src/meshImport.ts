@@ -8,7 +8,8 @@ import { weldVertices } from '@pushform/geom';
 import { hashImageBytes, uvAffineLeastSquares } from '@pushform/model';
 import { unzipSync } from 'fflate';
 import type { CoEdge, Definition, Face, Material, SkpModel } from 'openskp';
-import { MAX_SKETCHUP_BYTES, prepareSketchUp, type ImportFormat, type ImportProgress, type ImportedUvMap, type SketchUpImport } from './sketchup';
+import type { MeshPartSource } from '@pushform/model';
+import { MAX_SKETCHUP_BYTES, MESH_PART_THRESHOLD, prepareSketchUp, type ImportFormat, type ImportProgress, type ImportedMeshPart, type ImportedUvMap, type SketchUpImport } from './sketchup';
 
 // Shared conversion of polygon meshes (COLLADA, OBJ, 3DS, glTF) into the reader model the SketchUp importer converts:
 // welding, merging triangles back into faces, two-sided faces, smoothing, texture placement and archives.
@@ -97,14 +98,17 @@ export function setTextureTileSizes(materials: Material[], placements: Map<numbe
  * outside any group, and a file's only group, are the model itself. Returns the model and each face's texture placement.
  */
 export function groupedMeshModel(groups: { name: string; geometry: MeshGeometry }[], materials: Material[], version: string,
-  counts: MeshCounts, onProgress?: (p: ImportProgress) => void):
-  { model: SkpModel; placements: Map<number, Map<number, MeshPlacement>> } {
+  counts: MeshCounts, onProgress?: (p: ImportProgress) => void, options: MeshPartOptions = {}):
+  { model: SkpModel; placements: Map<number, Map<number, MeshPlacement>>; meshParts: Map<number, ImportedMeshPart[]> } {
   const textured = (material: number | null): boolean => material !== null && !!materials[material]?.texture;
   const placements = new Map<number, Map<number, MeshPlacement>>(), definitions = new Map<number, Definition>();
   const root = meshDefinition(-1, '', false);
   const filled = groups.filter(group => group.geometry.polygons.length || group.geometry.lines.length);
   const loose = filled.filter(group => !group.name), named = filled.filter(group => group.name);
+  const meshParts = new Map<number, ImportedMeshPart[]>();
+  const asMeshParts = filled.reduce((n, group) => n + group.geometry.polygons.length, 0) > (options.meshPartThreshold ?? MESH_PART_THRESHOLD);
   const build = (def: Definition, geometry: MeshGeometry): void => {
+    if (asMeshParts) { meshParts.set(def.id, [meshPartFromGeometry(geometry, def.name || options.source?.format || 'Mesh', options.source ?? { format: version, system: '' }, counts)]); return; }
     const byFace = new Map<number, MeshPlacement>();
     buildMeshGeometry(def, geometry, counts, textured, byFace, { paintBacks: true });
     if (byFace.size) placements.set(def.id, byFace);
@@ -122,8 +126,91 @@ export function groupedMeshModel(groups: { name: string; geometry: MeshGeometry 
     });
   }
   setTextureTileSizes(materials, placements, key => key === -1 ? root : definitions.get(key));
-  return { placements, model: { version, definitions, root, layers: [], pages: [], scenesUnread: 0, dimensions: [],
+  return { placements, meshParts, model: { version, definitions, root, layers: [], pages: [], scenesUnread: 0, dimensions: [],
     materials, materialsById: new Map(materials.map(m => [m.id!, m])), styles: [], units: null, unitsOptions: null, sectionDisplay: null, renderingOptions: null } };
+}
+
+/** How a reader decides between faces and mesh parts: the triangle threshold and what the parts say they came from. */
+export interface MeshPartOptions { meshPartThreshold?: number | undefined; source?: MeshPartSource | undefined }
+
+/**
+ * Polygons as a mesh part: corners within the merge tolerance welded, polygons fanned into triangles, and the source
+ * faces found as the mesh converter finds smooth surfaces: polygons of one material joined across an edge whose vertex
+ * normals agree at both ends, or whose smoothing masks share a bit. The boundaries between source faces and the file's
+ * lines become the part's edges, so a part looks as its faces would.
+ */
+export function meshPartFromGeometry(source: MeshGeometry, name: string, part: MeshPartSource, counts: MeshCounts): ImportedMeshPart {
+  const all: Vec3[] = [...source.polygons.flatMap(p => p.corners.map(c => c.position)), ...source.lines.flat()];
+  const canonical = weldVertices(Float64Array.from(all.flat()), MERGE_TOL);
+  const ids = new Map<number, number>(), unique: number[] = [];
+  const vertexAt = (i: number): number => {
+    const c = canonical[i]!;
+    let id = ids.get(c);
+    if (id === undefined) { id = unique.length / 3; ids.set(c, id); unique.push(...all[c]!); }
+    return id;
+  };
+  // Polygon rings of welded vertex ids, with each corner's normal.
+  const rings: number[][] = [], normals: (Vec3 | null)[][] = [], polygonOf: number[] = [];
+  let at = 0;
+  for (const polygon of source.polygons) {
+    const ring: number[] = [], ns: (Vec3 | null)[] = [];
+    for (const corner of polygon.corners) { const v = vertexAt(at++); if (ring.at(-1) === v) continue; ring.push(v); ns.push(corner.normal); }
+    while (ring.length > 1 && ring[0] === ring.at(-1)) { ring.pop(); ns.pop(); }
+    if (ring.length < 3) { counts.degenerate++; rings.push([]); normals.push([]); continue; }
+    rings.push(ring); normals.push(ns);
+  }
+  const lineEnds = source.lines.map(() => [vertexAt(at++), vertexAt(at++)] as const);
+  // Union polygons across smooth edges into source faces.
+  const parent = Int32Array.from(rings, (_, i) => i);
+  const find = (i: number): number => { while (parent[i] !== i) { parent[i] = parent[parent[i]!]!; i = parent[i]!; } return i; };
+  const minCos = Math.cos(VERTEX_NORMAL_TOL), agree = (a: Vec3 | null, b: Vec3 | null): boolean => !!a && !!b && v3dot(a, b) >= minCos;
+  const edgeKey = (a: number, b: number): number => a < b ? a * 0x1_0000_0000 + b : b * 0x1_0000_0000 + a;
+  const firstAt = new Map<number, { polygon: number; low: Vec3 | null; high: Vec3 | null }>(), shared = new Set<number>();
+  rings.forEach((ring, p) => ring.forEach((a, k) => {
+    const b = ring[(k + 1) % ring.length]!, key = edgeKey(a, b), [low, high] = a < b ? [normals[p]![k]!, normals[p]![(k + 1) % ring.length]!] : [normals[p]![(k + 1) % ring.length]!, normals[p]![k]!];
+    const first = firstAt.get(key);
+    if (!first) { firstAt.set(key, { polygon: p, low, high }); return; }
+    shared.add(key);
+    const q = first.polygon, mine = source.polygons[p]!, theirs = source.polygons[q]!;
+    if (mine.material !== theirs.material) return;
+    const smooth = (mine.smoothing !== undefined && theirs.smoothing !== undefined) ? (mine.smoothing & theirs.smoothing) !== 0 : agree(low, first.low) && agree(high, first.high);
+    if (smooth) parent[find(p)] = find(q);
+  }));
+  const faceOf = new Map<number, number>(), faceMaterialKeys: number[] = [];
+  const triangles: number[] = [], triangleFace: number[] = [];
+  rings.forEach((ring, p) => {
+    if (!ring.length) return;
+    const rootIndex = find(p);
+    let face = faceOf.get(rootIndex);
+    if (face === undefined) { face = faceMaterialKeys.length; faceOf.set(rootIndex, face); faceMaterialKeys.push(source.polygons[p]!.material ?? -1); }
+    for (let i = 1; i + 1 < ring.length; i++) { triangles.push(ring[0]!, ring[i]!, ring[i + 1]!); triangleFace.push(face); polygonOf.push(p); }
+  });
+  // Edges: the file's lines, then every polygon edge on a boundary between source faces or beside no other polygon.
+  const edgePositions: number[] = [], edgeOffsets = [0];
+  const edge = (a: number, b: number): void => { edgePositions.push(...unique.slice(a * 3, a * 3 + 3), ...unique.slice(b * 3, b * 3 + 3)); edgeOffsets.push(edgePositions.length / 3); };
+  for (const [a, b] of lineEnds) if (a !== b) edge(a, b);
+  const emitted = new Set<number>();
+  rings.forEach((ring, p) => ring.forEach((a, k) => {
+    const b = ring[(k + 1) % ring.length]!, key = edgeKey(a, b);
+    if (emitted.has(key)) return;
+    const first = firstAt.get(key)!;
+    if (shared.has(key) && find(first.polygon) === find(p)) return;
+    emitted.add(key); edge(a, b);
+  }));
+  return { name, source: part, faceMaterialKeys: Int32Array.from(faceMaterialKeys), geometry: {
+    positions: Float64Array.from(unique), triangles: Uint32Array.from(triangles), triangleFace: Uint32Array.from(triangleFace), faceCount: faceMaterialKeys.length,
+    faceMaterials: new Uint32Array(faceMaterialKeys.length), edgeOffsets: Uint32Array.from(edgeOffsets.length > 1 ? edgeOffsets : []),
+    edgePositions: Float64Array.from(edgePositions), edgeFlags: new Uint8Array(Math.max(0, edgeOffsets.length - 1)) } };
+}
+
+/** Give each imported definition the mesh parts read for it (by reader definition key; the root's key is `rootKey`). */
+export function attachMeshParts(scene: SketchUpImport, meshParts: Map<number, ImportedMeshPart[]>, rootKey: number): SketchUpImport {
+  for (const [key, parts] of meshParts) {
+    const definition = key === rootKey ? scene.root : scene.definitions.get(key);
+    if (!definition) throw new Error('An imported part lost its definition.');
+    definition.meshParts = parts;
+  }
+  return scene;
 }
 
 /** Import notes for the polygons the conversion skipped or split. */
@@ -139,8 +226,13 @@ export function meshCountNotes(counts: MeshCounts, warn: (message: string) => vo
  * the file's texture coordinates and hash the images. Faces the converter turned outward have their sides swapped.
  */
 export async function finishMeshImport(model: SkpModel, placements: Map<number, Map<number, MeshPlacement>>, format: ImportFormat,
-  warnings: Set<string>, onProgress?: (p: ImportProgress) => void, options: { allowEmpty?: boolean } = {}): Promise<SketchUpImport> {
-  const scene = prepareSketchUp(model, onProgress, format, options);
+  warnings: Set<string>, onProgress?: (p: ImportProgress) => void, options: { allowEmpty?: boolean; meshParts?: Map<number, ImportedMeshPart[]> } = {}): Promise<SketchUpImport> {
+  const meshParts = options.meshParts ?? new Map<number, ImportedMeshPart[]>();
+  if (meshParts.size) {
+    const triangles = [...meshParts.values()].flat().reduce((n, part) => n + part.geometry.triangles.length / 3, 0);
+    warnings.add(`${triangles.toLocaleString('en-US')} triangles: the model is imported as mesh parts, which are drawn and placed whole and become editable faces when edited.`);
+  }
+  const scene = prepareSketchUp(model, onProgress, format, { allowEmpty: options.allowEmpty || meshParts.size > 0 });
   for (const def of [scene.root, ...scene.definitions.values()]) {
     const byFace = placements.get(def.key);
     if (byFace) for (const face of [...def.solids.flatMap(solid => solid.faces), ...def.sheets]) {
@@ -154,7 +246,7 @@ export async function finishMeshImport(model: SkpModel, placements: Map<number, 
   // The same hash as images added in the app, so a later import or library texture can share the asset.
   for (const image of scene.images) image.sha256 = await hashImageBytes(image.bytes);
   scene.warnings = [...scene.warnings, ...[...warnings].filter(w => !scene.warnings.includes(w))];
-  return scene;
+  return attachMeshParts(scene, meshParts, model.root.id);
 }
 
 /** Whether the bytes begin with a zip archive's local file header. */

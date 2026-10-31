@@ -56,7 +56,7 @@ export function stepHeader(bytes: Uint8Array): { schema: string | null; system: 
 
 /**
  * Read a STEP file of at most `maxBytes` (the shared import limit unless the desktop app allows more). A file with more
- * than `meshPartThreshold` triangles in all imports as mesh parts (MOD3810) rather than faces.
+ * than `meshPartThreshold` triangles in all imports as mesh parts rather than faces.
  */
 export async function readStep(bytes: Uint8Array, onProgress?: (p: ImportProgress) => void, maxBytes = MAX_SKETCHUP_BYTES,
   meshPartThreshold = MESH_PART_THRESHOLD): Promise<SketchUpImport> {

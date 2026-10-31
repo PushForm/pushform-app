@@ -3,7 +3,7 @@
 import type { Vec3 } from '@pushform/core';
 import {
   finishMeshImport, groupedMeshModel, meshCountNotes, meshPointConverter,
-  type MeshCounts, type MeshExtent, type MeshGeometry, type MeshImportOptions,
+  type MeshCounts, type MeshExtent, type MeshGeometry, type MeshImportOptions, type MeshPartOptions,
 } from './meshImport';
 import { MAX_SKETCHUP_BYTES, type ImportFormat, type ImportProgress, type SketchUpImport } from './sketchup';
 
@@ -79,7 +79,7 @@ export function stlExtent(bytes: Uint8Array): MeshExtent | null {
 }
 
 /** Read an STL model in the given unit and up axis. */
-export async function readStl(bytes: Uint8Array, options: MeshImportOptions, onProgress?: (p: ImportProgress) => void): Promise<SketchUpImport> {
+export async function readStl(bytes: Uint8Array, options: MeshImportOptions, onProgress?: (p: ImportProgress) => void, parts: MeshPartOptions = {}): Promise<SketchUpImport> {
   if (bytes.byteLength > MAX_SKETCHUP_BYTES) throw new Error('STL files larger than 128 MiB are not supported yet.');
   if (!isStlBytes(bytes)) throw new Error('Not an STL model: neither a binary STL nor an ASCII STL solid.');
   onProgress?.({ stage: 'Reading STL model', current: 0, total: 1 });
@@ -96,7 +96,7 @@ export async function readStl(bytes: Uint8Array, options: MeshImportOptions, onP
     return { name: solids.length > 1 ? solid.name || `Solid ${i + 1}` : '', geometry };
   });
   if (malformed + unreadable) warn(`${malformed + unreadable} triangle${malformed + unreadable === 1 ? ' with invalid data is' : 's with invalid data are'} skipped.`);
-  const { model, placements } = groupedMeshModel(groups, [], 'STL', counts, onProgress);
+  const { model, placements, meshParts } = groupedMeshModel(groups, [], 'STL', counts, onProgress, { source: { format: 'STL', system: '' }, ...parts });
   meshCountNotes(counts, warn);
-  return finishMeshImport(model, placements, STL_FORMAT, warnings, onProgress);
+  return finishMeshImport(model, placements, STL_FORMAT, warnings, onProgress, { meshParts });
 }

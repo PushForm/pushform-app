@@ -6,7 +6,7 @@ import { openNativeContainer } from './container';
 import type { NativeFileSource } from './container';
 
 export const NATIVE_ROOT_ID = 0xffff_ffff;
-/** Required document capabilities a reader must declare: 1 = mesh parts (record kind 17, MOD3850). */
+/** Required document capabilities a reader must declare: 1 = mesh parts (record kind 17). */
 export const NATIVE_CAPABILITY_MESH_PARTS = 1;
 export const NATIVE_MODEL_CAPABILITIES: ReadonlySet<number> = new Set([NATIVE_CAPABILITY_MESH_PARTS]);
 export interface NativeDocumentRoot {

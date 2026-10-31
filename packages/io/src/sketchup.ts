@@ -164,7 +164,7 @@ export interface ImportedDefinition {
     definition: number; name: string; transform: Mat4; material: number | null;
     hidden: boolean; tag: string; properties: Record<string, string>;
   }[];
-  /** Display-only parts (MOD3810) of a large import; absent for a model read as faces. */
+  /** Display-only parts of a large import; absent for a model read as faces. */
   meshParts?: ImportedMeshPart[] | undefined;
 }
 /** A mesh part as read: its packed geometry with the reader's material key per source face (−1 = none). */
@@ -175,7 +175,7 @@ export interface ImportedMeshPart {
   geometry: MeshPartGeometry;
   faceMaterialKeys: Int32Array;
 }
-/** Files whose meshes together hold more triangles than this import as mesh parts rather than faces (MOD3810). */
+/** Files whose meshes together hold more triangles than this import as mesh parts rather than faces. */
 export const MESH_PART_THRESHOLD = 250_000;
 /** Section planes, guides and dimensions keep the coordinates of the definition that holds them. */
 export interface ImportedSectionPlane {
@@ -295,7 +295,7 @@ export interface ModelImportReport {
   sectionPlanes: number; guides: number; dimensions: number; texts: number;
   /** Placed pictures (image entities). */
   images?: number | undefined;
-  /** Mesh parts made (MOD3810) and the triangles they hold. */
+  /** Mesh parts made and the triangles they hold. */
   meshParts?: number | undefined;
   meshPartTriangles?: number | undefined;
   warnings: string[];

@@ -8,9 +8,10 @@ import { signedArea, triangulatePolygon } from '@pushform/geom';
 import type { Definition, Instance, Material, SkpModel } from 'openskp';
 import {
   INCH, archiveFile, buildMeshGeometry, finishMeshImport, meshCountNotes, meshDefinition, setTextureTileSizes,
-  type ArchiveResources, type MeshCorner, type MeshGeometry, type MeshPlacement,
+  type ArchiveResources, type MeshCorner, type MeshGeometry, type MeshPlacement, meshPartFromGeometry,
+  type MeshPartOptions,
 } from './meshImport';
-import { MAX_SKETCHUP_BYTES, type ImportFormat, type ImportProgress, type SketchUpImport } from './sketchup';
+import { MAX_SKETCHUP_BYTES, MESH_PART_THRESHOLD, type ImportFormat, type ImportProgress, type SketchUpImport, type ImportedMeshPart } from './sketchup';
 import { child, childrenNamed, parseXml, type XmlElement } from './xml';
 
 // COLLADA (.dae) import. The scene is rebuilt as the reader model the .skp importer
@@ -35,7 +36,7 @@ export function isXmlBytes(bytes: Uint8Array): boolean {
  * Parse and prepare off the UI thread. No document is mutated until this succeeds. `resources` are the files of
  * the archive the model came from, where its texture images are found.
  */
-export async function readCollada(bytes: Uint8Array, onProgress?: (p: ImportProgress) => void, resources?: ArchiveResources): Promise<SketchUpImport> {
+export async function readCollada(bytes: Uint8Array, onProgress?: (p: ImportProgress) => void, resources?: ArchiveResources, parts: MeshPartOptions = {}): Promise<SketchUpImport> {
   if (bytes.byteLength > MAX_COLLADA_BYTES) throw new Error('COLLADA files larger than 128 MiB are not supported yet.');
   onProgress?.({ stage: 'Reading COLLADA model', current: 0, total: 1 });
   let root: XmlElement;
@@ -44,9 +45,9 @@ export async function readCollada(bytes: Uint8Array, onProgress?: (p: ImportProg
   }
   if (root.name !== 'COLLADA') throw new Error('Not a COLLADA model: the document root is not <COLLADA>.');
   const warnings = new Set<string>();
-  const { model, placements } = colladaModel(root, message => { warnings.add(message); }, resources);
+  const { model, placements, meshParts } = colladaModel(root, message => { warnings.add(message); }, resources, parts);
   onProgress?.({ stage: 'Reading COLLADA model', current: 1, total: 1 });
-  return finishMeshImport(model, placements, COLLADA_FORMAT, warnings, onProgress);
+  return finishMeshImport(model, placements, COLLADA_FORMAT, warnings, onProgress, { meshParts });
 }
 
 
@@ -69,8 +70,8 @@ const numbers = (text: string | undefined): number[] => {
  * coplanar triangles share a material. Positions are converted to inches (the reader model's unit) in Z-up axes.
  * `placements` holds each face's texture placement by definition key and face id.
  */
-export function colladaModel(root: XmlElement, warn: (message: string) => void, resources?: ArchiveResources):
-  { model: SkpModel; placements: Map<number, Map<number, MeshPlacement>> } {
+export function colladaModel(root: XmlElement, warn: (message: string) => void, resources?: ArchiveResources, parts: MeshPartOptions = {}):
+  { model: SkpModel; placements: Map<number, Map<number, MeshPlacement>>; meshParts: Map<number, ImportedMeshPart[]> } {
   const ids = new Map<string, XmlElement>();
   const counts = { cameras: 0, lights: 0, controllers: 0, textured: 0, degenerate: 0, nonplanar: 0, duplicates: 0, turned: 0, transforms: 0 };
   const placements = new Map<number, Map<number, MeshPlacement>>();
@@ -271,6 +272,11 @@ export function colladaModel(root: XmlElement, warn: (message: string) => void, 
   };
   const hasContent = (node: XmlElement): boolean => node.children.some(item =>
     item.name === 'instance_geometry' || item.name === 'instance_node' || (item.name === 'node' && hasContent(item)));
+  // The primitives' declared counts, read before any geometry, decide between faces and mesh parts.
+  const promised = childrenNamed(child(root, 'library_geometries') ?? root, 'geometry').flatMap(g => child(g, 'mesh')?.children ?? []).reduce((n, primitive) =>
+    ['triangles', 'polylist', 'polygons', 'trifans', 'tristrips'].includes(primitive.name) ? n + (Number(primitive.attrs.count) || 0) : n, 0);
+  const asMeshParts = promised > (parts.meshPartThreshold ?? MESH_PART_THRESHOLD), meshParts = new Map<number, ImportedMeshPart[]>();
+  const source = parts.source ?? { format: 'COLLADA', system: child(child(root, 'asset') ?? root, 'contributor')?.children.find(c => c.name === 'authoring_tool')?.text.trim() ?? '' };
   const place = (parent: Definition, node: XmlElement): void => {
     const matrix = nodeMatrix(node), nested = childrenNamed(node, 'instance_node');
     // A node holding only one instanced node is that component's placement, not a group around it.
@@ -304,9 +310,12 @@ export function colladaModel(root: XmlElement, warn: (message: string) => void, 
         uv: c.uv })) });
       for (const [a, b] of source.lines) geometry.lines.push([point(a), point(b)]);
     }
-    const byFace = new Map<number, MeshPlacement>();
-    buildMeshGeometry(def, geometry, counts, textured, byFace);
-    if (byFace.size) placements.set(def.id, byFace);
+    if (asMeshParts) { if (geometry.polygons.length || geometry.lines.length) meshParts.set(def.id, [meshPartFromGeometry(geometry, def.name || 'Mesh', source, counts)]); }
+    else {
+      const byFace = new Map<number, MeshPlacement>();
+      buildMeshGeometry(def, geometry, counts, textured, byFace);
+      if (byFace.size) placements.set(def.id, byFace);
+    }
     for (const placed of childrenNamed(node, 'instance_node')) {
       const target = lookup(placed.attrs.url, 'node');
       if (!target) { warn(`${nodeName(node) || 'A node'}: a placement of a missing node is skipped.`); continue; }
@@ -337,7 +346,7 @@ export function colladaModel(root: XmlElement, warn: (message: string) => void, 
 
   const version = [root.attrs.version, child(child(asset ?? root, 'contributor') ?? root, 'authoring_tool')?.text.trim()]
     .filter(Boolean).join(', ').slice(0, 100);
-  return { placements, model: {
+  return { placements, meshParts, model: {
     version, definitions, root: top, layers: [], pages: [], scenesUnread: 0, dimensions: [],
     materials, materialsById: new Map(materials.map(m => [m.id!, m])), styles: [], units: null, unitsOptions: null, sectionDisplay: null, renderingOptions: null,
   } };

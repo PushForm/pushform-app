@@ -91,4 +91,23 @@ describe('STL import', () => {
     expect(scene.warnings).toContain('1 triangle with invalid data is skipped.');
     expect(scene.warnings.some(w => /^1 connected part does not form a closed solid/.test(w))).toBe(true);
   });
+
+  it('imports a mesh over the mesh-part threshold as one mesh part per solid instead of faces', async () => {
+    const scene = await readStl(ascii([{ name: 'Lid', triangles: cube() }, { name: 'Ball', triangles: sphere(50) }]), { unit: 'mm', up: 'z' }, undefined, { meshPartThreshold: 100 });
+    expect(scene.root.solids).toHaveLength(0);
+    const parts = [...scene.definitions.values()].map(d => ({ name: d.name, part: d.meshParts?.[0] }));
+    expect(parts.map(p => p.name)).toEqual(['Lid', 'Ball']);
+    expect(parts[0]!.part!.geometry.triangles.length / 3).toBe(12);
+    // STL carries no normals, so every triangle is a face of its own and every triangle edge is drawn.
+    expect(parts[0]!.part!.geometry.faceCount).toBe(12);
+    expect(parts[0]!.part!.geometry.edgeOffsets.length - 1).toBe(18);
+    expect(parts[1]!.part!.geometry.triangles.length / 3).toBe(320);
+    expect(parts[1]!.part!.source).toEqual({ format: 'STL', system: '' });
+    expect(Math.max(...parts[0]!.part!.geometry.positions)).toBeCloseTo(0.01, 9);
+    expect(scene.warnings.some(w => /imported as mesh parts/.test(w))).toBe(true);
+    const report = createDocument().transact('Open', d => applySketchUpImport(d, scene)).value;
+    expect(report).toMatchObject({ bodies: 0, sheetFaces: 0, meshParts: 2, meshPartTriangles: 332 });
+    // The same file below the threshold still becomes solids.
+    expect((await readStl(ascii([{ name: 'Lid', triangles: cube() }]), { unit: 'mm', up: 'z' })).root.solids).toHaveLength(1);
+  });
 });

@@ -274,16 +274,17 @@ function smoothNormals(body: Body): (face: number, p: Vec3) => Vec3 {
 }
 
 /** Selected entities by container path key: whole placements, bodies, body faces, sheet faces and edges, and every placement a selection lies inside. */
-function selectionScope(refs: readonly EntityRef[]) {
+export function selectionScope(refs: readonly EntityRef[]) {
   const scope = {
     instances: new Set<string>(), bodies: new Set<string>(), faces: new Map<string, Set<number>>(), sketchFaces: new Set<string>(),
-    edges: new Set<string>(), within: new Set<string>(),
+    edges: new Set<string>(), meshParts: new Set<string>(), within: new Set<string>(),
   };
   for (const ref of refs) {
     const key = pathKey(ref.path);
     for (let i = 1; i <= ref.path.length; i++) scope.within.add(pathKey(ref.path.slice(0, i)));
     if (ref.kind === 'instance') scope.instances.add(pathKey([...ref.path, ref.id]));
     else if (ref.kind === 'body') scope.bodies.add(`${key}|${ref.id}`);
+    else if (ref.kind === 'meshPart') scope.meshParts.add(`${key}|${ref.id}`);
     else if (ref.kind === 'face') {
       const faces = scope.faces.get(`${key}|${ref.id}`) ?? scope.faces.set(`${key}|${ref.id}`, new Set()).get(`${key}|${ref.id}`)!;
       faces.add(ref.faceId);

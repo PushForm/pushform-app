@@ -33,6 +33,9 @@ export interface StepReaderModule {
   pf_step_result(handle: number): number;
   pf_step_result_ptr(handle: number): number;
   pf_step_close(handle: number): void;
+  /** Write the STEP file for a request (see `stepExport.ts`); the text's length, or 0 on failure. `pf_step_export_ptr` then points at it. */
+  pf_step_export(ptr: number, len: number): number;
+  pf_step_export_ptr(): number;
   pf_error_len(): number;
   pf_error_ptr(): number;
 }

@@ -33,6 +33,7 @@ export * from './modelExport';
 export * from './gltfExport';
 export * from './colladaExport';
 export * from './objExport';
+export * from './stepExport';
 export * from './sketchupLayoutClient';
 export const PACKAGE = '@pushform/io';
 export * from './layoutVector';

@@ -2872,3 +2872,9 @@ h4.pf-xui-text { font-size: 12px; }
 .pf-xui-vector-highlight .is-hover, .pf-xui-vector-highlight .is-selected { stroke: #1a73e8; }
 .pf-xui-vector-tip { position: absolute; z-index: 1; max-width: 240px; padding: 3px 6px; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); background: var(--pf-surface); box-shadow: 0 2px 8px #0002; font-size: 11px; pointer-events: none; white-space: pre-wrap; }
 .pf-xui-vector-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* PushForm's print dialog for extension pages. */
+.pf-xprint { display: flex; flex-direction: column; gap: 8px; max-width: 460px; }
+.pf-xprint-purpose { margin: 0; }
+.pf-xprint-preview { display: block; max-width: 100%; max-height: 280px; margin: 0 auto; border: 1px solid var(--pf-border); background: #ffffff; box-shadow: 0 1px 4px #0002; }
+.pf-xprint-note { margin: 0; color: var(--pf-text-muted); font-size: 11px; }

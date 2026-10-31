@@ -10,7 +10,7 @@ import { FetchBroker, clipboardServices, fileServices, type ClipboardWriter, typ
 import type { RuntimePort } from '../runtime/port';
 import { ExtensionSettingsHost, type SettingsStore } from '../runtime/settings';
 import { ExtensionUiHost } from '../runtime/ui';
-import { vectorExportServices } from '../runtime/vector';
+import { vectorExportServices, vectorPrintServices, type ViewPrinter } from '../runtime/vector';
 import type { DeveloperModeSetting } from './developerMode';
 import type { ExtensionStore, InstalledExtension } from './store';
 
@@ -38,6 +38,8 @@ export interface ExtensionPlatformOptions {
   /** Host services beyond those the platform provides, such as the model operations. */
   readonly hostServices?: (record: InstalledExtension) => ServiceImplementations;
   readonly filePicker?: FilePicker;
+  /** The host's print dialog for `ui.print`; without it printing answers `unavailable`. */
+  readonly printer?: ViewPrinter;
   readonly clipboard?: ClipboardWriter;
   /** Performs network requests; none on the web until a relay exists. */
   readonly fetchTransport?: FetchTransport | null;
@@ -370,6 +372,7 @@ export class ExtensionPlatform {
       ...(compute?.services() ?? {}),
       ...fileServices(record.manifest, this.options.filePicker ?? declining),
       ...vectorExportServices(record.manifest, () => ui, this.options.filePicker ?? declining),
+      ...vectorPrintServices(record.manifest, () => ui, this.options.printer ?? null),
       ...(this.options.clipboard ? clipboardServices(this.options.clipboard) : {}),
       ...fetch.services(),
       'log.write': (entry) => { this.log(record.id, entry); return null; },

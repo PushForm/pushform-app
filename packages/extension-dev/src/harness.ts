@@ -4,8 +4,8 @@ import {
   extensionManifestSchema, type ExtensionManifest, type ExtensionManifestInput, type ExtensionPermission, type UiEvent, type UiNode,
 } from '@pushform/extension-protocol';
 import {
-  ComputeHost, ExtensionSession, ExtensionSettingsHost, ExtensionUiHost, FetchBroker, clipboardServices, fileServices, memorySettingsStore, vectorExportServices,
-  messagePortTransport, runComputeWorker, startGuest, type FetchTransport, type FilePicker, type InvokeOptions, type ServiceImplementations,
+  ComputeHost, ExtensionSession, ExtensionSettingsHost, ExtensionUiHost, FetchBroker, clipboardServices, fileServices, memorySettingsStore, vectorExportServices, vectorPrintServices,
+  messagePortTransport, runComputeWorker, startGuest, type FetchTransport, type FilePicker, type ViewPrinter, type InvokeOptions, type ServiceImplementations,
   type SettingsStore, type SpawnComputeWorker,
 } from '@pushform/extensions';
 
@@ -31,6 +31,8 @@ export interface TestHostOptions {
   readonly settings?: SettingsStore;
   /** Answers file prompts; by default every prompt is declined. */
   readonly picker?: FilePicker;
+  /** Answers print requests; by default printing answers unavailable. */
+  readonly printer?: ViewPrinter;
   /** Performs network requests that pass the broker's checks; by default requests answer unavailable. */
   readonly fetch?: FetchTransport;
 }
@@ -87,6 +89,7 @@ export async function createTestHost(options: TestHostOptions): Promise<TestHost
     ...(compute?.services() ?? {}),
     ...fileServices(manifest, options.picker ?? declining),
     ...vectorExportServices(manifest, () => ui, options.picker ?? declining),
+    ...vectorPrintServices(manifest, () => ui, options.printer ?? null),
     ...clipboardServices({ write: async (items) => { clipboard.push(items); } }),
     ...new FetchBroker(manifest, grants, options.fetch ?? null).services(),
     'log.write': (input) => { logs.push(input); return null; },

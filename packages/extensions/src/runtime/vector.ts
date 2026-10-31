@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { ExtensionError, uiExportSchema, type ExtensionManifest, type UiNode, type UiVector, type UiVectorStyle } from '@pushform/extension-protocol';
+import { ExtensionError, uiExportSchema, uiPrintSchema, type ExtensionManifest, type UiNode, type UiVector, type UiVectorStyle } from '@pushform/extension-protocol';
 import { writeLayoutDxf, writeLayoutSvg, type LayoutVectorItem, type LayoutVectorPage, type VectorPath, type VectorPoint } from '@pushform/io/vector';
 import type { ServiceImplementations } from './host';
 import type { FilePicker } from './io';
@@ -20,10 +20,20 @@ const MM_PER_M = 1000;
 const PX_MM = 0.25;
 const HATCH_FILL = '#e6e6e6';
 
-export function vectorPage(vector: UiVector): LayoutVectorPage {
-  const scale = vector.units === 'length' ? MM_PER_M : 1;
+/**
+ * The drawing as one page in millimeters. With `paper` (millimeters), the page has that size and the drawing is
+ * centered on it: a `length` drawing at its real size when it fits and scaled down when it does not, a `plain` one
+ * scaled to fit.
+ */
+export function vectorPage(vector: UiVector, paper?: { width: number; height: number }): LayoutVectorPage {
+  const units = vector.units === 'length' ? MM_PER_M : 1;
   const { x: ox, y: oy } = vector.bounds;
-  const at = (x: number, y: number): VectorPoint => [(x - ox) * scale, (y - oy) * scale];
+  const drawn = { width: vector.bounds.width * units, height: vector.bounds.height * units };
+  const fit = paper ? Math.min(paper.width / drawn.width, paper.height / drawn.height) : 1;
+  const scale = units * (paper && vector.units === 'length' ? Math.min(1, fit) : fit);
+  const dx = paper ? (paper.width - vector.bounds.width * scale) / 2 : 0;
+  const dy = paper ? (paper.height - vector.bounds.height * scale) / 2 : 0;
+  const at = (x: number, y: number): VectorPoint => [(x - ox) * scale + dx, (y - oy) * scale + dy];
   const alpha = (color: string, style: UiVectorStyle): string =>
     style.opacity === undefined ? color : `${color}${Math.round(style.opacity * 255).toString(16).padStart(2, '0')}`;
   const items: LayoutVectorItem[] = [];
@@ -53,7 +63,8 @@ export function vectorPage(vector: UiVector): LayoutVectorPage {
       fill: fill && closed ? alpha(fill, style) : null, stroke: stroke ? alpha(stroke, style) : null,
       weight: (style.strokeWidth ?? 1) * PX_MM, dash: style.dash === 'dashed' ? [4, 2] : style.dash === 'dotted' ? [0.5, 1.5] : [] });
   }
-  return { paperUnits: 'mm', name: vector.label, width: vector.bounds.width * scale, height: vector.bounds.height * scale, background: '#ffffff', items };
+  const size = paper ?? { width: vector.bounds.width * scale, height: vector.bounds.height * scale };
+  return { paperUnits: 'mm', name: vector.label, width: size.width, height: size.height, background: '#ffffff', items };
 }
 
 export const vectorToSvg = (vector: UiVector): string => writeLayoutSvg(vectorPage(vector), 'page');
@@ -81,6 +92,43 @@ export function vectorExportServices(manifest: ExtensionManifest, ui: () => Exte
       }, new TextEncoder().encode(text));
       if (!saved) throw new ExtensionError('cancelled', 'The drawing was not saved.');
       return { name: saved.name };
+    },
+  };
+}
+
+/** What PushForm shows and prints for `ui.print`; the extension never sees the pages or the outcome's details. */
+export interface PrintRequest {
+  readonly extensionName: string;
+  readonly purpose: string;
+  readonly title: string;
+  /** Page size in millimeters. */
+  readonly page: { readonly width: number; readonly height: number };
+  readonly pages: readonly LayoutVectorPage[];
+}
+
+/** The host's print dialog: resolves with what the user did, or null when they cancelled. */
+export interface ViewPrinter {
+  print(request: PrintRequest): Promise<'printed' | 'saved' | null>;
+}
+
+/** `ui.print`: prints or saves as PDF vector views the extension has on screen, one page each. */
+export function vectorPrintServices(manifest: ExtensionManifest, ui: () => ExtensionUiHost, printer: ViewPrinter | null): ServiceImplementations {
+  return {
+    'ui.print': async (input) => {
+      const parsed = uiPrintSchema.safeParse(input);
+      if (!parsed.success) throw new ExtensionError('validation.failed', 'ui.print needs a target, vector view components, a page size in meters (0.02 to 2) and a purpose.');
+      const { target, components, page, purpose, title } = parsed.data;
+      if (!printer) throw new ExtensionError('unavailable', 'Printing is not available here.');
+      const shown = ui().get(target);
+      const paper = { width: page.width * MM_PER_M, height: page.height * MM_PER_M };
+      const pages = components.map((component) => {
+        const node: UiNode | undefined = shown ? findInTree(shown.tree, component) : undefined;
+        if (!node || node.type !== 'vector') throw new ExtensionError('validation.failed', `"${component}" is not a vector view shown in "${target}".`);
+        return vectorPage(node, paper);
+      });
+      const outcome = await printer.print({ extensionName: manifest.name, purpose, title: title ?? pages[0]!.name, page: paper, pages });
+      if (!outcome) throw new ExtensionError('cancelled', 'Nothing was printed.');
+      return { outcome };
     },
   };
 }

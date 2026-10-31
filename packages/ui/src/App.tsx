@@ -24,6 +24,7 @@ import { ModelObjectBrowser } from './components/ModelObjectBrowser';
 import { ExtensionManager } from './extensions/ExtensionManager';
 import { browserRunsExtensions, createBrowserExtensionPlatform, type ExtensionRuntimeSources } from './extensions/browserExtensionPlatform';
 import { ExtensionRuns } from './extensions/ExtensionActivity';
+import { ExtensionPrintDialog, PrintPrompts } from './extensions/extensionPrint';
 import { isExtensionPanelId } from './extensions/extensionContributions';
 import { useExtensionWorkspace } from './extensions/useExtensionWorkspace';
 import { syncDesktopTitleBar } from './desktopShell';
@@ -204,7 +205,8 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     ? new RequestsClient({ baseUrl: requests.baseUrl, apikey: requests.apikey, region: requests.region, getToken: () => cloud.getAccessToken() }) : null);
   const [recents, setRecents] = useState(() => readCloudRecents(ownerId));
   /** This account's extensions on this device; nothing of theirs runs until one of their contributions is used. */
-  const [extensions] = useState(() => extensionRuntime ? createBrowserExtensionPlatform({ ownerId, sources: extensionRuntime }) : null);
+  const [printPrompts] = useState(() => new PrintPrompts());
+  const [extensions] = useState(() => extensionRuntime ? createBrowserExtensionPlatform({ ownerId, sources: extensionRuntime, printPrompts }) : null);
   const [extensionRuns] = useState(() => extensions ? new ExtensionRuns(extensions) : null);
   const [extensionsOpen, setExtensionsOpen] = useState(false);
   useEffect(() => {
@@ -221,6 +223,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     return () => { live = false; };
   }, [staff, ownerId]);
   const openExtensions = extensions && extensionsOffered ? () => setExtensionsOpen(true) : undefined;
+  const extensionPrint = extensions ? <ExtensionPrintDialog prompts={printPrompts} /> : null;
   const extensionManager = extensions && extensionsOpen
     ? <ExtensionManager platform={extensions} available={browserRunsExtensions()} developerModeAllowed developerModeOn={localStorage.getItem('pushform:extensions:developer-mode') === 'on'}
         onClose={() => setExtensionsOpen(false)} />
@@ -430,6 +433,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
       onForgetRecents={forgetRecents} onRenamed={renamed} onMoved={moved} onExtensions={openExtensions} />
     {panel}
     {extensionManager}
+    {extensionPrint}
     {feedback}
   </ThumbnailContext.Provider>;
   return (
@@ -439,6 +443,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
           onRequests={() => toggleSidePanel('requests')} onObjects={() => toggleSidePanel('objects')} onClearChat={requestsClient ? clearChat : undefined}
           onExtensions={openExtensions} />
         {extensionManager}
+        {extensionPrint}
         {active.type === 'model' ? (
           <>
             <MainToolbar />

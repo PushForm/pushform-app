@@ -2,6 +2,7 @@
 // Copyright 2026 PushForm contributors
 import { ExtensionPlatform, localSettingsStore, startWebRuntime, storedDeveloperMode, type SessionFailure, type InstalledExtension } from '@pushform/extensions';
 import { browserClipboardWriter, browserFilePicker } from './browserExtensionIo';
+import { browserViewPrinter, type PrintPrompts } from './extensionPrint';
 import { indexedDbExtensionStore } from './indexedDbExtensionStore';
 
 /** The extension runtime's two worker bootstraps, bundled as classic scripts by the web build. */
@@ -26,6 +27,8 @@ export function createBrowserExtensionPlatform(options: {
   /** False where organization policy forbids developer mode. */
   readonly developerModeAllowed?: () => boolean;
   readonly onFailure?: (record: InstalledExtension, failure: SessionFailure) => void;
+  /** Where print requests wait for the user; without it extensions cannot print. */
+  readonly printPrompts?: PrintPrompts;
 }): ExtensionPlatform {
   const storage = options.storage ?? window.localStorage;
   return new ExtensionPlatform({
@@ -42,6 +45,7 @@ export function createBrowserExtensionPlatform(options: {
     filePicker: browserFilePicker(async (request) => window.confirm(`${request.extensionName} wants to ${request.kind === 'open' ? 'open' : 'save'} a file: ${request.purpose}\n\nChoose the file?`)),
     clipboard: browserClipboardWriter(),
     fetchTransport: null,
+    ...(options.printPrompts ? { printer: browserViewPrinter(options.printPrompts) } : {}),
     ...(options.onFailure ? { onFailure: options.onFailure } : {}),
   });
 }

@@ -43,6 +43,12 @@ export interface UiService {
    * `purpose`. PushForm writes the file from the drawing itself. Needs `file.export`; declining fails with `cancelled`.
    */
   export(input: { target: string; component: string; format: 'svg' | 'dxf'; purpose: string; suggestedName?: string }, options?: CallOptions): Promise<{ name: string }>;
+  /**
+   * Prints vector views that are on screen, one page each, at `page` size in meters, or saves them as a PDF, as the
+   * user chooses in PushForm's dialog, which states `purpose`. A view smaller than the page prints at its real size,
+   * centered; a larger one is scaled down to fit. Needs `file.export`; cancelling fails with `cancelled`.
+   */
+  print(input: { target: string; components: string[]; page: { width: number; height: number }; purpose: string; title?: string }, options?: CallOptions): Promise<{ outcome: 'printed' | 'saved' }>;
   /** Listens for user input on mounted interfaces; returns a function that stops listening. */
   onEvent(handler: (event: UiEventOnTarget) => void): () => void;
 }

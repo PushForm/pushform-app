@@ -2,17 +2,24 @@
 // Copyright 2026 PushForm contributors
 import { useEffect, useRef, useState } from 'react';
 import { commonsFileUrl, type CatalogModel } from '@pushform/cloud';
-import { DEFAULT_PREVIEW_VIEW, parsePreviewMesh, projectPreview, type PreviewMesh } from '@pushform/cloud/preview';
+import { DEFAULT_PREVIEW_VIEW, isPreviewModelFile, parsePreviewMesh, projectPreview, type PreviewMesh } from '@pushform/cloud/preview';
 
-const geometryFile = (model: CatalogModel) => model.files.find(file => /\.stl$/i.test(file.name));
+const geometryFile = (model: CatalogModel) => model.files.find(file => isPreviewModelFile(file.name));
 export function CommonsThumbnail({ model, filesUrl }: { model: CatalogModel; filesUrl: string | undefined }) {
   const generated = geometryFile(model);
+  const target = useRef<HTMLElement|null>(null);
+  const [visible,setVisible] = useState(typeof IntersectionObserver === 'undefined');
+  useEffect(()=>{if(typeof IntersectionObserver === 'undefined')return;const observer=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting)){setVisible(true);observer.disconnect();}},{rootMargin:'300px'});if(target.current)observer.observe(target.current);return()=>observer.disconnect();},[]);
+  const observe=(node:HTMLElement|null)=>{target.current=node;};
   const sources = [...new Set([model.previewImage ? commonsFileUrl(filesUrl, 'images', model.previewImage.id) : null,
     model.imageUrl, generated ? commonsFileUrl(filesUrl, 'thumbnails', generated.id) : null].filter((url): url is string => !!url))];
   const [failed, setFailed] = useState<string[]>([]);
-  const src = sources.find(url => !failed.includes(url));
-  return src ? <img src={src} alt={model.title} loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(values => [...values, src])}/>
-    : <div className="missing-image"><span aria-hidden="true">◇</span><span>Preview unavailable</span></div>;
+  const candidate = sources.find(url => !failed.includes(url));
+  const generatedUrl = generated ? commonsFileUrl(filesUrl, 'thumbnails', generated.id) : null;
+  const status = usePreviewStatus(generated ? commonsFileUrl(filesUrl, 'preview-status', generated.id) : null, candidate === generatedUrl && visible);
+  const src = candidate === generatedUrl && status.status !== 'ready' ? null : candidate;
+  return src ? <img ref={observe} src={src} alt={model.title} loading="lazy" referrerPolicy="no-referrer" onError={() => { if (src === generatedUrl && failed.filter(value => value === src + ':retry').length < 2) { setFailed(values => [...values, src + ':retry']); status.refresh(); } else setFailed(values => [...values, src]); }}/>
+    : <div ref={observe} className="missing-image"><span aria-hidden="true">◇</span><span>{candidate === generatedUrl && ['queued','rendering','loading'].includes(status.status) ? 'Rendering preview…' : 'Preview unavailable'}</span></div>;
 }
 
 export function CommonsModelPreview({ model, filesUrl }: { model: CatalogModel; filesUrl: string | undefined }) {
@@ -21,18 +28,21 @@ export function CommonsModelPreview({ model, filesUrl }: { model: CatalogModel; 
   const url = file ? commonsFileUrl(filesUrl, 'previews', file.id) : null;
   return <section className="model-preview" aria-label="Model preview">
     {active && url ? <InteractivePreview url={url} model={model}/> : <CommonsThumbnail model={model} filesUrl={filesUrl}/>}
-    <div className="preview-actions">{url ? <button onClick={() => setActive(value => !value)}>{active ? 'Show thumbnail' : 'Explore in 3D'}</button> : <p>3D preview is currently available for STL models.</p>}</div>
+    <div className="preview-actions">{url ? <button onClick={() => setActive(value => !value)}>{active ? 'Show thumbnail' : 'Explore in 3D'}</button> : <p>A 3D preview is not available for this format.</p>}</div>
   </section>;
 }
 
 function InteractivePreview({ url, model }: { url: string; model: CatalogModel }) {
+  const status = usePreviewStatus(url.replace('/previews/', '/preview-status/'), true);
   const [mesh, setMesh] = useState<PreviewMesh | null>(null), [error, setError] = useState(''), [attempt, setAttempt] = useState(0);
   const [view, setView] = useState({ ...DEFAULT_PREVIEW_VIEW });
   const drag = useRef<{ x: number; y: number } | null>(null);
   useEffect(() => {
+    if (status.status !== 'ready') return;
     const abort = new AbortController(); setMesh(null); setError('');
     void (async () => {
       const response = await fetch(url, { signal: abort.signal, credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer' });
+      if (response.status === 202) { status.refresh(); return; }
       if (!response.ok) throw new Error(response.status === 422 ? 'This model cannot be previewed yet. Try Open in PushForm.' : 'The model preview is unavailable.');
       if (response.headers.get('Content-Type')?.split(';')[0] !== 'application/json') throw new Error('The preview response is invalid.');
       if (!response.body) throw new Error('The model preview is empty.');
@@ -46,11 +56,12 @@ function InteractivePreview({ url, model }: { url: string; model: CatalogModel }
       if (!abort.signal.aborted) setMesh(parsePreviewMesh(result.mesh));
     })().catch(failure => { if (!abort.signal.aborted) setError(failure instanceof Error ? failure.message : 'The model preview is unavailable.'); });
     return () => abort.abort();
-  }, [url, model.id, model.revision, attempt]);
+  }, [url, model.id, model.revision, attempt, status.status]);
   const zoom = (factor: number) => setView(current => ({ ...current, zoom: Math.max(.4, Math.min(2.5, current.zoom * factor)) }));
   const orbit = (yaw: number, pitch = 0) => setView(current => ({ ...current, yaw: current.yaw + yaw, pitch: Math.max(-1.4, Math.min(1.4, current.pitch + pitch)) }));
-  if (error) return <div className="preview-error"><CommonsThumbnail model={model} filesUrl={new URL(url).origin}/><p role="alert">{error}</p><button onClick={() => setAttempt(value => value + 1)}>Retry preview</button></div>;
-  if (!mesh) return <div className="preview-loading" role="status">Rendering model preview…</div>;
+  if (status.status === 'failed' || status.status === 'unsupported') return <div className="preview-error"><p role="alert">{status.error || 'This model cannot be previewed yet. Try Open in PushForm.'}</p><p>Original files and license notices remain available below.</p></div>;
+  if (error) return <div className="preview-error"><CommonsThumbnail model={model} filesUrl={new URL(url).origin}/><p role="alert">{error}</p><button onClick={() => { setAttempt(value => value + 1); status.refresh(); }}>Retry preview</button></div>;
+  if (!mesh) return <div className="preview-loading" role="status">{status.status === 'queued' ? 'Model preview is queued…' : 'Rendering model preview…'}</div>;
   return <>
     <svg className="preview-viewer" viewBox="0 0 480 400" tabIndex={0} role="img" aria-label={`Interactive 3D preview of ${model.title}. Use arrow keys to rotate, plus or minus to zoom, and zero to reset.`}
       onPointerDown={event => { if(event.button!==0)return; drag.current = { x: event.clientX, y: event.clientY }; event.currentTarget.setPointerCapture(event.pointerId); }}
@@ -67,7 +78,7 @@ function InteractivePreview({ url, model }: { url: string; model: CatalogModel }
       <button aria-label="Tilt up" onClick={() => orbit(0, -.2)}>↑</button><button aria-label="Tilt down" onClick={() => orbit(0, .2)}>↓</button>
       <button aria-label="Zoom out" onClick={() => zoom(1 / 1.2)}>−</button><button aria-label="Zoom in" onClick={() => zoom(1.2)}>+</button>
       <button onClick={() => setView({ ...DEFAULT_PREVIEW_VIEW })}>Reset view</button>
-    </div><p className="preview-caption">Drag to rotate · use controls to zoom. Geometry preview; units and dimensions are not shown.</p>
+    </div><p className="preview-caption">Drag to rotate · use controls to zoom. Geometry and material colors; textures, units and dimensions are not shown.</p>
   </>;
 }
 
@@ -75,4 +86,31 @@ function RotateIcon({ clockwise = false }: { clockwise?: boolean }) {
   return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <g transform={clockwise ? 'translate(24 0) scale(-1 1)' : undefined}><path d="M3 10a9 9 0 1 1 2.7 8.4"/><path d="M3 4v6h6"/></g>
   </svg>;
+}
+
+interface PreviewStatus { status: 'loading'|'queued'|'rendering'|'ready'|'failed'|'unsupported'; error: string|null }
+function usePreviewStatus(url: string|null, enabled: boolean): PreviewStatus & {refresh:()=>void} {
+  const [state, setState] = useState<PreviewStatus>({status:'loading',error:null});
+  const [generation,setGeneration] = useState(0);
+  useEffect(() => {
+    if (!url || !enabled) return;
+    const abort = new AbortController(); let timer: ReturnType<typeof setTimeout>|undefined;
+    setState({status:'loading',error:null});
+    const poll = async () => {
+      try {
+        const response = await fetch(url,{signal:abort.signal,credentials:'omit',redirect:'error',referrerPolicy:'no-referrer'});
+        if (!response.ok) throw new Error('Preview is unavailable.');
+        if (!response.body) throw new Error('Invalid preview status.');
+        const reader=response.body.getReader();let text='',size=0;const decoder=new TextDecoder();
+        try{for(;;){const next=await reader.read();if(next.done)break;size+=next.value.length;if(size>4096){await reader.cancel();throw new Error('Invalid preview status.');}text+=decoder.decode(next.value,{stream:true});}text+=decoder.decode();}finally{reader.releaseLock();}
+        const result = JSON.parse(text) as PreviewStatus;
+        if (!['queued','rendering','ready','failed','unsupported'].includes(result.status)) throw new Error('Invalid preview status.');
+        if (abort.signal.aborted) return;
+        setState({status:result.status,error:typeof result.error==='string'?result.error.slice(0,300):null});
+        if (result.status==='queued'||result.status==='rendering') timer=setTimeout(()=>void poll(),2000);
+      } catch { if(!abort.signal.aborted) setState({status:'failed',error:'Preview is unavailable. Refresh the model page to try again.'}); }
+    };
+    void poll(); return () => { abort.abort();clearTimeout(timer); };
+  },[url,enabled,generation]);
+  return {...state,refresh:()=>setGeneration(value=>value+1)};
 }

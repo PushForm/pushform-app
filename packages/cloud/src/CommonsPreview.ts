@@ -3,7 +3,9 @@
 /** Small display derivatives only: no editor, kernel, textures, scripts or external resources. */
 export const PREVIEW_BYTE_LIMIT = 8 * 1024 * 1024;
 export const PREVIEW_TRIANGLE_LIMIT = 12000;
-export interface PreviewMesh { version: 1; positions: number[] }
+export interface PreviewMesh { version: 1; positions: number[]; colors?: number[] }
+export const COMMONS_RENDER_VERSION = 'display-2';
+export const isPreviewModelFile = (name: string): boolean => /\.(pf|step|stp|fcstd|stl|obj|glb|gltf|dae|3ds|skp|zip)$/i.test(name);
 export const DEFAULT_PREVIEW_VIEW = { yaw: -.65, pitch: .45, zoom: 1 };
 export interface PreviewView { yaw: number; pitch: number; zoom: number }
 
@@ -38,6 +40,12 @@ export function stlPreview(bytes: Uint8Array): PreviewMesh {
     }
     if (corners !== null) throw new Error('The STL contains an incomplete triangle.');
   }
+  return normalizePreview(positions);
+}
+
+export function normalizePreview(positions: number[], colors?: number[]): PreviewMesh {
+  if (positions.length % 9 || positions.length > PREVIEW_TRIANGLE_LIMIT * 9 || !positions.every(Number.isFinite)) throw new Error('Preview geometry exceeds its limit or has invalid coordinates.');
+  if (colors && (colors.length !== positions.length / 3 || !colors.every(n => Number.isFinite(n) && n >= 0 && n <= 1))) throw new Error('Invalid preview colors.');
   if (!positions.length) throw new Error('This STL contains no triangles.');
   const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
   positions.forEach((value, i) => { const axis = i % 3; min[axis] = Math.min(min[axis]!, value); max[axis] = Math.max(max[axis]!, value); });
@@ -45,21 +53,22 @@ export function stlPreview(bytes: Uint8Array): PreviewMesh {
   if (!Number.isFinite(span) || span <= 0) throw new Error('This STL has no visible geometry.');
   const center = min.map((value, i) => value + (max[i]! - value) / 2);
   const normalized = positions.map((value, i) => Number(((value - center[i % 3]!) / span).toFixed(6)));
-  const result: number[] = [];
+  const result: number[] = [], keptColors: number[] = [];
   for (let i = 0; i < normalized.length; i += 9) {
     const a = normalized.slice(i, i + 3), b = normalized.slice(i + 3, i + 6), c = normalized.slice(i + 6, i + 9);
     const u = b.map((v, k) => v - a[k]!), v = c.map((n, k) => n - a[k]!);
-    if (Math.hypot(u[1]! * v[2]! - u[2]! * v[1]!, u[2]! * v[0]! - u[0]! * v[2]!, u[0]! * v[1]! - u[1]! * v[0]!) > 0) result.push(...normalized.slice(i, i + 9));
+    if (Math.hypot(u[1]! * v[2]! - u[2]! * v[1]!, u[2]! * v[0]! - u[0]! * v[2]!, u[0]! * v[1]! - u[1]! * v[0]!) > 0) { result.push(...normalized.slice(i, i + 9)); if (colors) keptColors.push(...colors.slice(i / 3, i / 3 + 3)); }
   }
   if (!result.length) throw new Error('This STL has no visible geometry.');
-  return { version: 1, positions: result };
+  return { version: 1, positions: result, ...(colors ? { colors: keptColors } : {}) };
 }
 
 export function parsePreviewMesh(value: unknown): PreviewMesh {
   const mesh = value as Partial<PreviewMesh> | null;
   if (!mesh || mesh.version !== 1 || !Array.isArray(mesh.positions) || !mesh.positions.length || mesh.positions.length % 9 || mesh.positions.length > PREVIEW_TRIANGLE_LIMIT * 9 ||
     !mesh.positions.every(n => typeof n === 'number' && Number.isFinite(n) && Math.abs(n) <= .500001)) throw new Error('The model preview is invalid.');
-  return { version: 1, positions: mesh.positions };
+  if (mesh.colors !== undefined && (!Array.isArray(mesh.colors) || mesh.colors.length !== mesh.positions.length / 3 || !mesh.colors.every(n => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1))) throw new Error('The model preview colors are invalid.');
+  return { version: 1, positions: mesh.positions, ...(mesh.colors ? { colors: mesh.colors } : {}) };
 }
 
 export function projectPreview(mesh: PreviewMesh, view: PreviewView = DEFAULT_PREVIEW_VIEW): { points: string; fill: string; depth: number }[] {
@@ -76,8 +85,9 @@ export function projectPreview(mesh: PreviewMesh, view: PreviewView = DEFAULT_PR
     const nx = u[1]! * v[2]! - u[2]! * v[1]!, ny = u[2]! * v[0]! - u[0]! * v[2]!, nz = u[0]! * v[1]! - u[1]! * v[0]!;
     const length = Math.hypot(nx, ny, nz);
     const light = length ? .5 + .45 * Math.abs((-.4 * nx + .7 * ny + .6 * nz) / length) : .5;
+    const color = mesh.colors?.slice(i / 3, i / 3 + 3).map(n => n * 255) ?? [152, 182, 168];
     projected.push({ points: points.map(p => `${(240 + p[0]! * 265 * view.zoom).toFixed(2)},${(200 - p[1]! * 265 * view.zoom).toFixed(2)}`).join(' '),
-      fill: `rgb(${Math.round(152 * light)},${Math.round(182 * light)},${Math.round(168 * light)})`, depth: points.reduce((n, p) => n + p[2]!, 0) });
+      fill: `rgb(${Math.round(color[0]! * light)},${Math.round(color[1]! * light)},${Math.round(color[2]! * light)})`, depth: points.reduce((n, p) => n + p[2]!, 0) });
   }
   return projected.sort((a, b) => a.depth - b.depth);
 }

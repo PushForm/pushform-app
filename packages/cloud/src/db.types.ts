@@ -341,6 +341,20 @@ isOneToOne: false
                   Relationships: [
 
                   ]
+                },"commons_render_jobs": {
+                  Row: {
+                    "attempts": number,"created_at": string,"error_code": string | null,"format": string,"geometry_sha256": string | null,"geometry_size": number | null,"id": string,"lease_expires_at": string | null,"lease_token": string | null,"metrics": NonNullable<Json>,"next_attempt_at": string,"renderer_version": string,"source_sha256": string,"status": string,"thumbnail_sha256": string | null,"thumbnail_size": number | null,"updated_at": string,"warnings": NonNullable<Json>
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "attempts"?: number,"created_at"?: string,"error_code"?: string | null,"format": string,"geometry_sha256"?: string | null,"geometry_size"?: number | null,"id"?: string,"lease_expires_at"?: string | null,"lease_token"?: string | null,"metrics"?: NonNullable<Json>,"next_attempt_at"?: string,"renderer_version": string,"source_sha256": string,"status"?: string,"thumbnail_sha256"?: string | null,"thumbnail_size"?: number | null,"updated_at"?: string,"warnings"?: NonNullable<Json>
+                  }
+                  Update: {
+                    "attempts"?: number,"created_at"?: string,"error_code"?: string | null,"format"?: string,"geometry_sha256"?: string | null,"geometry_size"?: number | null,"id"?: string,"lease_expires_at"?: string | null,"lease_token"?: string | null,"metrics"?: NonNullable<Json>,"next_attempt_at"?: string,"renderer_version"?: string,"source_sha256"?: string,"status"?: string,"thumbnail_sha256"?: string | null,"thumbnail_size"?: number | null,"updated_at"?: string,"warnings"?: NonNullable<Json>
+                  }
+                  Relationships: [
+
+                  ]
                 },"commons_revisions": {
                   Row: {
                     "asset_version": number,"creator_profile_id": string | null,"id": string,"metadata": NonNullable<Json>,"model_id": string,"number": number,"published_at": string | null,"review_note": string | null,"reviewed_at": string | null,"reviewed_by": string | null,"rights_basis": string,"self_service": boolean,"status": string,"submitted_at": string,"submitted_by": string | null
@@ -1061,11 +1075,17 @@ isOneToOne: false
 "commons_catalog_snapshot":
 { Args: Record<PropertyKey, never>; Returns: Json
                            },
+"commons_claim_render":
+{ Args: { "p_version": string }; Returns: Json
+                           },
 "commons_download_asset":
 { Args: { "p_asset": string }; Returns: Json
                            },
 "commons_finish_asset":
 { Args: { "p_asset": string,"p_sha256": string,"p_size_bytes": number }; Returns: Json
+                           },
+"commons_finish_render":
+{ Args: { "p_job": string,"p_lease": string,"p_result": Json }; Returns: boolean
                            },
 "commons_hide_profile":
 { Args: { "p_expected_version": number }; Returns: Json
@@ -1090,6 +1110,15 @@ isOneToOne: false
                            },
 "commons_publish_model":
 { Args: { "p_expected_asset_version": number,"p_expected_published": string,"p_revision": string,"p_rights_confirmed": boolean }; Returns: Json
+                           },
+"commons_render_asset":
+{ Args: { "p_asset": string,"p_version": string }; Returns: Json
+                           },
+"commons_render_lease":
+{ Args: { "p_job": string,"p_lease": string }; Returns: Json
+                           },
+"commons_repair_render":
+{ Args: { "p_job": string }; Returns: boolean
                            },
 "commons_require_download_access":
 { Args: Record<PropertyKey, never>; Returns: boolean

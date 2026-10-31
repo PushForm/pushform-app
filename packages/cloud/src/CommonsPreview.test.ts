@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_PREVIEW_VIEW, parsePreviewMesh, PREVIEW_BYTE_LIMIT, PREVIEW_TRIANGLE_LIMIT, projectPreview, previewSvg, stlPreview } from './CommonsPreview';
+import { DEFAULT_PREVIEW_VIEW, normalizePreview, parsePreviewMesh, PREVIEW_BYTE_LIMIT, PREVIEW_TRIANGLE_LIMIT, projectPreview, previewSvg, stlPreview } from './CommonsPreview';
 const ascii = (vertices = 'vertex 0 0 0\nvertex 10 0 0\nvertex 0 10 10') => new TextEncoder().encode(`solid test\nfacet normal 0 0 1\nouter loop\n${vertices}\nendloop\nendfacet\nendsolid test`);
 describe('geometry display derivatives', () => {
   it('renders actual ASCII geometry and changes its projection when orbiting or zooming', () => {
@@ -28,4 +28,9 @@ describe('geometry display derivatives', () => {
   it('rejects unsafe or unbounded mesh responses', () => {
     for (const positions of [[],[0],[Infinity,...Array(8).fill(0)],[1,...Array(8).fill(0)],Array(PREVIEW_TRIANGLE_LIMIT*9+9).fill(0)]) expect(() => parsePreviewMesh({version:1,positions})).toThrow();
   });
+});
+
+it('keeps per-triangle material colors through normalization and rejects invalid color data',()=>{
+ const mesh=normalizePreview([0,0,0,10,0,0,0,10,10],[1,0,0]);expect(parsePreviewMesh(mesh).colors).toEqual([1,0,0]);expect(projectPreview(mesh)[0]!.fill).toMatch(/^rgb\(\d+,0,0\)$/);
+ expect(()=>parsePreviewMesh({...mesh,colors:[1,0]})).toThrow();expect(()=>normalizePreview([0,0,0,1,0,0,0,1,0],[2,0,0])).toThrow();
 });

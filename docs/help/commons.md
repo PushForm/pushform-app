@@ -26,4 +26,10 @@ Use **Hide public profile** to make the page and its creator-account links unava
 
 Commons renders thumbnails from supported model geometry on its server; a contributor does not need to upload a screenshot. An optional uploaded PNG or JPEG is used as the listing image instead. Choose **Explore in 3D** on a model page to rotate the geometry, zoom, or reset the view. Drag to orbit, use the labeled controls, or focus the viewer and use arrow keys, plus/minus, and zero to reset. Previews are available without signing in; original downloads require your PushForm account and initial account setup.
 
-The initial geometry preview supports ASCII and binary STL files up to 8 MiB and 12,000 triangles. It does not show recorded dimensions, units, textures or fabrication suitability. Other formats and models over those limits show an unavailable preview; try **Open in PushForm** or download the original where supported. A failed image falls back to the generated thumbnail when possible.
+Commons queues server conversion for native PushForm, STEP, FreeCAD and supported mesh files (STL, OBJ, GLB/glTF, COLLADA, 3DS, SKP and model ZIPs). It accepts originals up to 128 MiB for conversion and displays up to 12,000 triangles. It shows geometry and material colors, with no textures, annotations, recorded dimensions, units or fabrication suitability. Unsupported content and models over those limits show an unavailable preview; try **Open in PushForm** or download the original where supported. A failed image falls back to the generated thumbnail when possible.
+
+## Wait for a generated preview
+
+A new publication may show **Rendering preview…** while its server job waits or runs. Commons updates the image when rendering finishes. Identical files reuse cached geometry and thumbnails. An uploaded PNG/JPEG still takes precedence as the listing image. If a render fails, the model page explains the failure and retains its original-file and license information. Try **Open in PushForm** or download the original where supported.
+
+FreeCAD previews use visible saved BREP shapes, without running document scripts or recomputing the model. Assembly links/group placements and files without stored shape geometry are not supported by this preview converter.

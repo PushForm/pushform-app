@@ -8,7 +8,7 @@ export const COMMONS_PACKAGE_LIMIT = COMMONS_FILE_LIMIT + 256 * 1024;
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 
 /** Only configured service origins receive tokens; credentials never appear in a URL. */
-export function commonsFileUrl(base: string | undefined, operation: 'uploads'|'downloads'|'review'|'thumbnails'|'previews'|'images', id?: string): string | null {
+export function commonsFileUrl(base: string | undefined, operation: 'uploads'|'downloads'|'review'|'thumbnails'|'previews'|'images'|'preview-status', id?: string): string | null {
   const parsed = catalogUrlSchema.safeParse(base?.trim());
   if (!parsed.success || (id !== undefined && !uuid.test(id))) return null;
   const url = new URL(parsed.data);

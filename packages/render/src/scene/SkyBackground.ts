@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { BufferAttribute, BufferGeometry, Color, Matrix4, Mesh, PerspectiveCamera, ShaderMaterial, Vector3 } from 'three';
+import { BufferAttribute, BufferGeometry, Color, Matrix4, Mesh, PerspectiveCamera, SRGBColorSpace, ShaderMaterial, Vector3 } from 'three';
 import type { Camera } from 'three';
-import type { RenderBackground } from '../types';
+import { DEFAULT_RENDER_FOG } from '../types';
+import type { RenderBackground, RenderFog } from '../types';
 
 export const DEFAULT_RENDER_BACKGROUND: RenderBackground = {
   color: '#ffffff',
@@ -30,6 +31,11 @@ uniform vec3 uGroundColor;
 uniform float uSky;
 uniform float uGround;
 uniform float uGroundOpacity;
+uniform vec3 uForward;
+uniform float uFogOn;
+uniform float uFogNear;
+uniform float uFogFar;
+uniform vec3 uFogColor;
 varying vec2 vNdc;
 void main() {
   vec4 far = uInvViewProj * vec4(vNdc, 1.0, 1.0);
@@ -42,11 +48,17 @@ void main() {
     vec3 horizon = mix(uColor, uSkyColor, 0.35);
     vec3 sky = mix(horizon, uSkyColor, t);
     color = mix(uColor, sky, uSky);
+    // Fog: a haze band that is all fog color at the horizon, where the ground is infinitely far.
+    color = mix(color, uFogColor, uFogOn * uSky * (1.0 - smoothstep(0.0, 0.3, up)));
   } else {
     float t = smoothstep(0.0, 0.35, -up);
     vec3 horizon = mix(uColor, uGroundColor, 0.45);
     vec3 ground = mix(horizon, uGroundColor, t);
     color = mix(uColor, mix(uColor, ground, uGroundOpacity), uGround);
+    // Fog: depth along the view of the point where this ray meets the ground plane, as for geometry.
+    float hit = uEye.z > 0.0 ? -uEye.z / dir.z : 1.0e9;
+    float fogF = clamp((hit * dot(dir, uForward) - uFogNear) / max(uFogFar - uFogNear, 0.001), 0.0, 1.0);
+    color = mix(color, uFogColor, uFogOn * uGround * fogF);
   }
   gl_FragColor = vec4(color, 1.0);
 }`;
@@ -79,12 +91,18 @@ export class SkyBackground extends Mesh<BufferGeometry, ShaderMaterial> {
         uSky: { value: 1 },
         uGround: { value: 1 },
         uGroundOpacity: { value: 0.5 },
+        uForward: { value: new Vector3(0, 1, 0) },
+        uFogOn: { value: 0 },
+        uFogNear: { value: 0 },
+        uFogFar: { value: 100 },
+        uFogColor: { value: new Vector3() },
       },
     });
     super(geo, mat);
     this.frustumCulled = false;
     this.renderOrder = -1000;
     this.setSettings(settings);
+    this.setFog(DEFAULT_RENDER_FOG);
   }
 
   setSettings(s: RenderBackground): void {
@@ -95,6 +113,21 @@ export class SkyBackground extends Mesh<BufferGeometry, ShaderMaterial> {
     u.uSky!.value = s.sky ? 1 : 0;
     u.uGround!.value = s.ground ? 1 : 0;
     u.uGroundOpacity!.value = 1 - Math.min(1, Math.max(0, s.groundTransparency));
+  }
+
+  /**
+   * Fog on the ground and the sky: the ground fades to the fog color with its depth from the eye,
+   * like the geometry on it, and the sky takes a band of it at the horizon. The color is the one
+   * the fog draws on screen, written as it is because this pass writes its colors as they are.
+   */
+  setFog(fog: RenderFog): void {
+    const u = this.material.uniforms;
+    u.uFogOn!.value = fog.enabled && fog.far > 0 ? 1 : 0;
+    u.uFogNear!.value = fog.near;
+    u.uFogFar!.value = fog.far;
+    const rgb = { r: 0, g: 0, b: 0 };
+    new Color(fog.color).getRGB(rgb, SRGBColorSpace);
+    (u.uFogColor!.value as Vector3).set(rgb.r, rgb.g, rgb.b);
   }
 
   /** Update the per-frame view reconstruction. Call before rendering with the active camera. */
@@ -109,6 +142,7 @@ export class SkyBackground extends Mesh<BufferGeometry, ShaderMaterial> {
     (this.material.uniforms.uInvViewProj!.value as Matrix4).copy(this.inv);
     this.eye.setFromMatrixPosition(camera.matrixWorld);
     (this.material.uniforms.uEye!.value as Vector3).copy(this.eye);
+    camera.getWorldDirection((this.material.uniforms.uForward!.value as Vector3));
   }
 
   dispose(): void {

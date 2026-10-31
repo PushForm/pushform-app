@@ -63,17 +63,25 @@ export interface SessionLimits {
   readonly maxPendingRequests: number;
   /** Invalid messages tolerated before the session fails as a protocol violation and the runtime is to be ended. */
   readonly maxInvalidMessages: number;
+  /** How often an active runtime is asked to answer a heartbeat. */
+  readonly heartbeatMs: number;
+  /**
+   * How long an active runtime may go without answering before the session fails as unresponsive. A runtime that
+   * ran out of memory dies without any event, and one stuck in a loop cannot answer; this is how either is noticed.
+   */
+  readonly unresponsiveMs: number;
 }
 
 export const DEFAULT_SESSION_LIMITS: SessionLimits = {
   loadMs: 10_000, activateMs: 10_000, deactivateMs: 2_000, maxPendingRequests: 32, maxInvalidMessages: 50,
+  heartbeatMs: 2_000, unresponsiveMs: 10_000,
 };
 
 export type SessionState = 'loading' | 'loaded' | 'activating' | 'active' | 'deactivating' | 'stopped' | 'failed';
 
 /** Why a session failed, for the failure notice and for terminating the runtime. */
 export interface SessionFailure {
-  readonly kind: 'load-failed' | 'load-timeout' | 'activation-failed' | 'activation-timeout' | 'protocol-violation';
+  readonly kind: 'load-failed' | 'load-timeout' | 'activation-failed' | 'activation-timeout' | 'protocol-violation' | 'unresponsive';
   readonly error: ExtensionErrorData;
 }
 
@@ -137,6 +145,9 @@ export class ExtensionSession {
   private stopped: { resolve(): void } | null = null;
   private nextInvocation = 1;
   private lastUserAction = -Infinity;
+  private heartbeat: ReturnType<typeof setInterval> | null = null;
+  private lastPong = 0;
+  private nextPing = 1;
   private readonly invocations = new Map<number, PendingInvocation>();
   private readonly requests = new Map<number, AbortController>();
   private readonly unlisten: () => void;
@@ -286,6 +297,7 @@ export class ExtensionSession {
   async deactivate(reason: DeactivationReason): Promise<boolean> {
     if (this.currentState === 'stopped' || this.currentState === 'failed') return true;
     clearTimeout(this.loadTimer);
+    this.stopHeartbeat();
     const wasRunning = this.currentState === 'active' || this.currentState === 'activating';
     this.currentState = 'deactivating';
     this.settleActivation?.reject(new ExtensionError('cancelled', 'The extension was stopped while starting.'));
@@ -308,6 +320,23 @@ export class ExtensionSession {
     return confirmed;
   }
 
+  private startHeartbeat(): void {
+    this.lastPong = performance.now();
+    this.heartbeat = setInterval(() => {
+      if (this.currentState !== 'active') return;
+      if (performance.now() - this.lastPong > this.limits.unresponsiveMs) {
+        this.fail('unresponsive', new ExtensionError('extension.failed', 'The extension stopped responding and was ended.'), () => {});
+        return;
+      }
+      this.port.post({ type: 'ping', n: this.nextPing++ });
+    }, this.limits.heartbeatMs);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeat !== null) clearInterval(this.heartbeat);
+    this.heartbeat = null;
+  }
+
   private cancelInvocation(invocation: number): void {
     const pending = this.invocations.get(invocation);
     if (!pending) return;
@@ -319,6 +348,7 @@ export class ExtensionSession {
   private fail(kind: SessionFailure['kind'], error: ExtensionError, reject: (error: ExtensionError) => void): void {
     if (this.currentState === 'failed' || this.currentState === 'stopped') return;
     this.currentState = 'failed';
+    this.stopHeartbeat();
     this.documentOfHandle.clear();
     this.handleOfDocument.clear();
     for (const invocation of [...this.invocations.keys()]) this.cancelInvocation(invocation);
@@ -359,6 +389,7 @@ export class ExtensionSession {
       case 'activated':
         if (this.currentState !== 'activating') return;
         this.currentState = 'active';
+        this.startHeartbeat();
         this.settleActivation?.resolve();
         this.settleActivation = null;
         return;
@@ -383,6 +414,9 @@ export class ExtensionSession {
         return;
       case 'deactivated':
         this.stopped?.resolve();
+        return;
+      case 'pong':
+        this.lastPong = performance.now();
         return;
     }
   }

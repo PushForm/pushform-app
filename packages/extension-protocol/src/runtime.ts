@@ -31,6 +31,8 @@ export const hostMessageSchema = z.union([
   z.strictObject({ type: z.literal('response'), id, ok: z.literal(true), result: z.unknown() }),
   z.strictObject({ type: z.literal('response'), id, ok: z.literal(false), error: extensionErrorSchema }),
   z.strictObject({ type: z.literal('deactivate'), reason: z.enum(DEACTIVATION_REASONS) }),
+  /** A heartbeat; the runtime answers with `pong` carrying the same number. */
+  z.strictObject({ type: z.literal('ping'), n: id }),
   /** Progress of a running host call, with the best partial result so far when the service has one. */
   z.strictObject({ type: z.literal('progress'), id, value: z.number().min(0).max(1).nullable(), partial: z.unknown().optional() }),
   /** A user event on a mounted interface (see `ui.ts`): the target, the component, the event and its payload. */
@@ -49,5 +51,6 @@ export const runtimeMessageSchema = z.union([
   z.strictObject({ type: z.literal('result'), invocation: id, ok: z.literal(true), value: z.unknown() }),
   z.strictObject({ type: z.literal('result'), invocation: id, ok: z.literal(false), error: extensionErrorSchema }),
   z.strictObject({ type: z.literal('deactivated') }),
+  z.strictObject({ type: z.literal('pong'), n: id }),
 ]);
 export type RuntimeMessage = z.infer<typeof runtimeMessageSchema>;

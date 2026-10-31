@@ -230,6 +230,10 @@ export async function startGuest(port: RuntimePort, loadMain: () => Promise<unkn
       case 'deactivate':
         if (state !== 'stopped') void stop().catch(() => {});
         return;
+      case 'ping':
+        // Answered at once from the event loop: a runtime that cannot answer is dead or stuck.
+        port.post({ type: 'pong', n: (message as unknown as { n: number }).n });
+        return;
       case 'progress': {
         const update = message as unknown as { id: number; value: number | null; partial?: unknown };
         const waiter = pending.get(update.id);

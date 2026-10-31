@@ -3,13 +3,15 @@
 import { startGuest } from '../guest';
 import { messagePortTransport } from '../port';
 import { linkModules } from './link';
+import { installAllocationLimit } from './allocation';
 import { lockDownRuntime } from './lockdown';
 
 /**
  * Entry of an extension's worker, bundled as one classic script (Chromium does not start module workers from blob
  * URLs in a sandboxed frame). It accepts exactly one `init` message from the frame bootstrap, carrying the verified
  * package files, the entry path and the protocol port. It links the package's modules to blob URLs, locks the
- * runtime down so no further code can be made, and only then imports the entry module and runs the lifecycle.
+ * runtime down so no further code can be made, bounds its binary memory, and only then imports the entry module and
+ * runs the lifecycle.
  */
 
 interface InitMessage {
@@ -30,6 +32,7 @@ function onInit(event: MessageEvent): void {
   void startGuest(messagePortTransport(port), async () => {
     const mainUrl = await linkModules(files, main, (_path, source) => URL.createObjectURL(new Blob([source], { type: 'text/javascript' })));
     files.clear();
+    installAllocationLimit();
     lockDownRuntime();
     return import(/* @vite-ignore */ mainUrl);
   });

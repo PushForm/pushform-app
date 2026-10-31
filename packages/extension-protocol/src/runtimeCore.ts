@@ -93,7 +93,7 @@ export function servicePermissions(service: ExtensionServiceName): ExtensionPerm
  * Whether a message has the shape of a host message. The host is trusted, so this only guards the runtime against
  * stray messages on its port; the host checks every runtime message against the full schema.
  */
-export function isHostMessage(value: unknown): value is { type: 'activate' | 'invoke' | 'cancel' | 'response' | 'deactivate' | 'event' | 'progress' } & Record<string, unknown> {
+export function isHostMessage(value: unknown): value is { type: 'activate' | 'invoke' | 'cancel' | 'response' | 'deactivate' | 'event' | 'progress' | 'ping' } & Record<string, unknown> {
   if (typeof value !== 'object' || value === null) return false;
   const message = value as Record<string, unknown>;
   const int = (key: string) => Number.isSafeInteger(message[key]) && (message[key] as number) >= 0;
@@ -109,6 +109,8 @@ export function isHostMessage(value: unknown): value is { type: 'activate' | 'in
       return int('id') && (message.ok === true || (message.ok === false && typeof message.error === 'object' && message.error !== null));
     case 'deactivate':
       return typeof message.reason === 'string';
+    case 'ping':
+      return int('n');
     case 'progress':
       return int('id') && (message.value === null || typeof message.value === 'number');
     case 'event':

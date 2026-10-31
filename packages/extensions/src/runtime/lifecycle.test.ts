@@ -254,3 +254,34 @@ describe('deactivation', () => {
     expect(activate).not.toHaveBeenCalled();
   });
 });
+
+describe('heartbeat', () => {
+  it('keeps an extension that answers active across many beats', async () => {
+    const { session, failures } = connect({ activate() {} }, { limits: { heartbeatMs: 10, unresponsiveMs: 60 } });
+    await session.activate();
+    await new Promise((r) => setTimeout(r, 200));
+    expect(session.state).toBe('active');
+    expect(failures).toEqual([]);
+    await session.deactivate('disable');
+  });
+
+  it('fails a runtime that stops answering, as one that ran out of memory does, and cancels its work', async () => {
+    // A runtime that activates and then never answers again: the guest's port is closed after activation.
+    const channel = new MessageChannel();
+    channels.push(channel);
+    const failures: SessionFailure[] = [];
+    const session = new ExtensionSession({ manifest: manifest(), grants: [], port: messagePortTransport(channel.port1),
+      limits: { heartbeatMs: 10, unresponsiveMs: 50 }, onFailure: (f) => failures.push(f) });
+    channel.port2.onmessage = (e) => {
+      const message = e.data as { type: string; invocation?: number };
+      if (message.type === 'activate') channel.port2.postMessage({ type: 'activated' });
+    };
+    channel.port2.postMessage({ type: 'ready', v: 1 });
+    await session.activate();
+    const running = failureOf(session.invoke('com.example.stairs.generate', {}));
+    await vi.waitFor(() => expect(failures).toMatchObject([{ kind: 'unresponsive' }]), { timeout: 2000 });
+    expect(session.state).toBe('failed');
+    expect((await running).code).toBe('cancelled');
+  });
+});
+

@@ -44,9 +44,10 @@ export const IDENTITY_PLACEMENT: readonly number[] = [1, 0, 0, 0, 0, 1, 0, 0, 0,
 export interface MeshCorner { position: Vec3; normal: Vec3 | null; uv: Vec2 | null }
 /**
  * One polygon of a mesh, in meters with Z up. `smoothing` is a smoothing-group mask (3DS, OBJ `s`): two faces at an
- * angle whose masks share a bit meet at a soft, smooth edge; without masks, matching vertex normals decide.
+ * angle whose masks share a bit meet at a soft, smooth edge; without masks, matching vertex normals decide. A `keep`
+ * polygon is a face of its own, never joined with coplanar neighbours (a facet of a curved STEP surface).
  */
-export interface MeshPolygon { corners: MeshCorner[]; material: number | null; smoothing?: number | undefined }
+export interface MeshPolygon { corners: MeshCorner[]; material: number | null; smoothing?: number | undefined; keep?: boolean | undefined }
 /** What a line's edge carries besides its ends (DXF): the reader curve it is part of and its layer, by line index. */
 export interface MeshLineMeta { curve?: number; layer?: string }
 export interface MeshGeometry { polygons: MeshPolygon[]; lines: [Vec3, Vec3][]; lineMeta?: (MeshLineMeta | undefined)[] }
@@ -219,6 +220,8 @@ interface Polygon {
   uvs: (Vec2 | null)[]; backUvs: (Vec2 | null)[] | null;
   /** Smoothing-group mask from the file, when it has one. */
   smoothing: number | undefined;
+  /** Whether the polygon stays a face of its own. */
+  keep: boolean;
 }
 
 /**
@@ -288,7 +291,7 @@ export function buildMeshGeometry(def: Definition, source: MeshGeometry, counts:
     return id;
   };
   const polygons: Polygon[] = [], byVertices = new Map<string, number>();
-  const add = (ring: number[], normals: (Vec3 | null)[], uvs: (Vec2 | null)[], material: number | null, smoothing: number | undefined): void => {
+  const add = (ring: number[], normals: (Vec3 | null)[], uvs: (Vec2 | null)[], material: number | null, smoothing: number | undefined, keep = false): void => {
     const corners = ring.map(v => points[v]!), sum = newell(corners), sliver = isSliver(corners, sum);
     const normal: Vec3 = sliver ? [0, 0, 0] : v3normalize(sum), key = [...ring].sort((a, b) => a - b).join(',');
     const same = byVertices.get(key);
@@ -303,7 +306,7 @@ export function buildMeshGeometry(def: Definition, source: MeshGeometry, counts:
       return;
     }
     byVertices.set(key, polygons.length);
-    polygons.push({ ring, normals, front: material, back: null, normal, sliver, uvs, backUvs: null, smoothing });
+    polygons.push({ ring, normals, front: material, back: null, normal, sliver, uvs, backUvs: null, smoothing, keep });
   };
   let at = 0;
   for (const polygon of source.polygons) {
@@ -321,14 +324,14 @@ export function buildMeshGeometry(def: Definition, source: MeshGeometry, counts:
       if (v3dot(facing, newell(ring.map(v => points[v]!))) < 0) { ring.reverse(); normals.reverse(); uvs.reverse(); counts.turned++; }
     }
     const sum = newell(ring.map(v => points[v]!));
-    if (isSliver(ring.map(v => points[v]!), sum)) { add(ring, normals, uvs, polygon.material, polygon.smoothing); continue; }
+    if (isSliver(ring.map(v => points[v]!), sum)) { add(ring, normals, uvs, polygon.material, polygon.smoothing, polygon.keep); continue; }
     const normal = v3normalize(sum), centroid = ring.reduce<Vec3>((c, v) => [c[0] + points[v]![0] / ring.length,
       c[1] + points[v]![1] / ring.length, c[2] + points[v]![2] / ring.length], [0, 0, 0]);
     if (ring.some(v => Math.abs(v3dot(v3sub(points[v]!, centroid), normal)) > MERGE_TOL / 2)) {
       counts.nonplanar++;
       for (let i = 1; i + 1 < ring.length; i++) add([ring[0]!, ring[i]!, ring[i + 1]!], [normals[0]!, normals[i]!, normals[i + 1]!],
-        [uvs[0]!, uvs[i]!, uvs[i + 1]!], polygon.material, polygon.smoothing);
-    } else add(ring, normals, uvs, polygon.material, polygon.smoothing);
+        [uvs[0]!, uvs[i]!, uvs[i + 1]!], polygon.material, polygon.smoothing, polygon.keep);
+    } else add(ring, normals, uvs, polygon.material, polygon.smoothing, polygon.keep);
   }
   /** A polygon's own texture placement on one side, when every corner has coordinates. */
   const polygonPlacement = (polygon: Polygon, uvs: (Vec2 | null)[] | null): ImportedUvMap | null =>
@@ -365,7 +368,7 @@ export function buildMeshGeometry(def: Definition, source: MeshGeometry, counts:
     const frontMap = textured(seed.front) ? polygonPlacement(seed, seed.uvs) : null;
     const backMap = textured(seed.back) ? polygonPlacement(seed, seed.backUvs) : null;
     group[i] = groups.length;
-    for (let m = 0; m < members.length; m++) {
+    for (let m = 0; m < members.length && !seed.keep; m++) {
       const polygon = polygons[members[m]!]!;
       polygon.ring.forEach((a, k) => {
         const b = polygon.ring[(k + 1) % polygon.ring.length]!, edge = undirected(a, b);
@@ -373,7 +376,7 @@ export function buildMeshGeometry(def: Definition, source: MeshGeometry, counts:
         const j = directed.get(`${b}>${a}`);
         if (j === undefined || group[j] !== -1) return;
         const other = polygons[j]!;
-        if (other.sliver || other.front !== seed.front || other.back !== seed.back || v3dot(other.normal, seed.normal) <= 0) return;
+        if (other.sliver || other.keep || other.front !== seed.front || other.back !== seed.back || v3dot(other.normal, seed.normal) <= 0) return;
         if (other.ring.some(v => Math.abs(v3dot(seed.normal, points[v]!) - offset) > MERGE_TOL / 2)) return;
         if (textured(seed.front) && !follows(frontMap, other, other.uvs)) return;
         if (textured(seed.back) && !follows(backMap, other, other.backUvs)) return;

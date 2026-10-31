@@ -23,6 +23,7 @@ export * from './dxf';
 export * from './dxfModel';
 export * from './dxfLayout';
 export * from './threeDs';
+export * from './step';
 export * from './stl';
 export * from './gltf';
 export * from './modelImport';

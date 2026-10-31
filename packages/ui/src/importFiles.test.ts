@@ -32,7 +32,7 @@ const scene: SketchUpImport = { version: '{26.2.242}', root: { key: -1, guid: 'R
 it('recognizes SketchUp, COLLADA and LayOut files case-insensitively', () => {
   expect(['a.skp', 'B.SKB', 'c.Layout', 'd.DAE', 'e.zip', 'f.KMZ', 'g.GLB', 'h.gltf'].every(isImportableFile)).toBe(true);
   expect(['a.pf', 'b.pfl', 'c.txt', 'skp'].some(isImportableFile)).toBe(false);
-  expect(IMPORT_FILE_ACCEPT).toBe('.skp,.skb,.dae,.obj,.3ds,.stl,.dxf,.gltf,.glb,.zip,.kmz,.layout');
+  expect(IMPORT_FILE_ACCEPT).toBe('.skp,.skb,.dae,.obj,.3ds,.stl,.dxf,.gltf,.glb,.step,.stp,.zip,.kmz,.layout');
 });
 it('converts a model file to native bytes without opening a tab, with its notes, and stores a report', async () => {
   const { session, recordImport } = setup(); readModel.mockResolvedValue(scene);
@@ -71,7 +71,7 @@ it('converts a LayOut file to native drawing bytes with its limitations and stor
 it('rejects unsupported and oversized files before reading them, and reports reader failures', async () => {
   const { recordImport } = setup();
   const api = { recordImport } as unknown as CloudFilesApi;
-  await expect(convertImportFile(picked('Notes.txt'), { cloudFiles: api })).rejects.toThrow('Choose .skp, .skb, .dae, .obj, .3ds, .stl, .dxf, .gltf, .glb, .zip, .kmz, or .layout files.');
+  await expect(convertImportFile(picked('Notes.txt'), { cloudFiles: api })).rejects.toThrow('Choose .skp, .skb, .dae, .obj, .3ds, .stl, .dxf, .gltf, .glb, .step, .stp, .zip, .kmz, or .layout files.');
   const huge = picked('Huge.skp'); Object.defineProperty(huge, 'size', { value: MAX_SKETCHUP_BYTES + 1 });
   await expect(convertImportFile(huge, { cloudFiles: api })).rejects.toThrow('128 MiB');
   expect(readModel).not.toHaveBeenCalled(); expect(recordImport).not.toHaveBeenCalled();

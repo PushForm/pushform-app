@@ -30,6 +30,11 @@ it('reports glTF imports, read or failed, under their own source', () => {
   expect(modelImportReport({ ...source, fileName: 'Duck.glb' }, { scene: gltf, report }).source).toBe('gltf_model');
   expect(modelImportReport({ ...source, fileName: 'Duck.gltf' }, { error: new Error('Only glTF 2.0 files are supported.') }).source).toBe('gltf_model');
 });
+it('reports STEP imports, read or failed, under their own source with the protocol and originating system', () => {
+  const step = { ...scene, version: 'AP214, FreeCAD', format: { kind: 'step', name: 'STEP', notes: [] } } as unknown as SketchUpImport;
+  expect(modelImportReport({ ...source, fileName: 'Chair.step' }, { scene: step, report })).toMatchObject({ source: 'step_model', sourceVersion: 'AP214, FreeCAD' });
+  expect(modelImportReport({ ...source, fileName: 'Chair.STP' }, { error: new Error('Not a STEP model.') }).source).toBe('step_model');
+});
 it('describes LayOut imports with the document properties, page count, and limitations', () => {
   const properties = { version: '16.1.1449', created: '2011-12-08T21:20:31.000Z', modified: '2016-08-04T15:24:06.000Z', revision: 251, pageCount: 2 };
   expect(layoutImportReport({ ...source, fileName: 'Plan.layout' }, { properties, warnings: ['Viewports are placeholders (3×)'], pages: 2 }, build))

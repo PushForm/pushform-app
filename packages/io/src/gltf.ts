@@ -101,7 +101,8 @@ function dataUri(uri: string): { bytes: Uint8Array; mime: string } | null {
 }
 
 /** glTF base colors are linear; PushForm's material colors are sRGB. */
-function linearToSrgb(c: number): number {
+/** A linear color channel (0–1) as sRGB. */
+export function linearToSrgb(c: number): number {
   const x = Math.max(0, Math.min(1, Number.isFinite(c) ? c : 1));
   return x <= 0.0031308 ? x * 12.92 : 1.055 * x ** (1 / 2.4) - 0.055;
 }

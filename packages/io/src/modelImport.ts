@@ -8,15 +8,17 @@ import { GLTF_FORMAT, isGlbBytes, isGltfJson, isGltfModelFile, readGltf } from '
 import { isZipBytes, normalizePath, unpackModelArchive, type MeshExtent, type MeshImportOptions } from './meshImport';
 import { OBJ_FORMAT, isObjModelFile, isObjText, objExtent, readObj } from './obj';
 import { SKETCHUP_FORMAT, isSketchUpModelFile, readSketchUp, type ImportFormat, type ImportProgress, type SketchUpImport } from './sketchup';
+import { STEP_FORMAT, isStepBytes, isStepModelFile, readStep } from './step';
 import { STL_FORMAT, isStlBytes, isStlModelFile, readStl, stlExtent } from './stl';
 import { THREE_DS_FORMAT, is3dsBytes, is3dsModelFile, read3ds, threeDsExtent } from './threeDs';
 
 /**
  * Model files Open… and Import… convert: SketchUp (`.skp`, `.skb`), COLLADA (`.dae`), OBJ (`.obj`), 3DS (`.3ds`), STL
- * (`.stl`), DXF (`.dxf`), glTF (`.gltf`, `.glb`), and `.zip` or `.kmz` archives holding a COLLADA, OBJ, 3DS or glTF model
+ * (`.stl`), DXF (`.dxf`), glTF (`.gltf`, `.glb`), STEP (`.step`, `.stp`), and `.zip` or `.kmz` archives holding a COLLADA, OBJ,
+ * 3DS or glTF model
  * with its materials and images.
  */
-export function isModelImportFile(name: string): boolean { return isSketchUpModelFile(name) || /\.(dae|zip|kmz|obj|3ds|stl|dxf|gltf|glb)$/i.test(name); }
+export function isModelImportFile(name: string): boolean { return isSketchUpModelFile(name) || /\.(dae|zip|kmz|obj|3ds|stl|dxf|gltf|glb|step|stp)$/i.test(name); }
 
 /** Pictures Import… places in a model as images, by extension, with the MIME type their bytes are stored under. */
 const PICTURE_TYPES: Readonly<Record<string, string>> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', bmp: 'image/bmp', webp: 'image/webp' };
@@ -29,11 +31,11 @@ export function isPictureFile(name: string): boolean { return pictureMime(name) 
 /** The format a model import file name names, for messages, undo labels and import reports; archives read as COLLADA until opened. */
 export function modelImportFormat(name: string): ImportFormat {
   return isObjModelFile(name) ? OBJ_FORMAT : is3dsModelFile(name) ? THREE_DS_FORMAT : isStlModelFile(name) ? STL_FORMAT
-    : isDxfFile(name) ? DXF_FORMAT : isGltfModelFile(name) ? GLTF_FORMAT : /\.(dae|zip|kmz)$/i.test(name) ? COLLADA_FORMAT : SKETCHUP_FORMAT;
+    : isDxfFile(name) ? DXF_FORMAT : isGltfModelFile(name) ? GLTF_FORMAT : isStepModelFile(name) ? STEP_FORMAT : /\.(dae|zip|kmz)$/i.test(name) ? COLLADA_FORMAT : SKETCHUP_FORMAT;
 }
 
 /** The file name without its model import extension, for the converted `.pf` and the imported group. */
-export function modelImportBaseName(name: string): string { return name.replace(/\.(skp|skb|dae|zip|kmz|obj|3ds|stl|dxf|gltf|glb)$/i, ''); }
+export function modelImportBaseName(name: string): string { return name.replace(/\.(skp|skb|dae|zip|kmz|obj|3ds|stl|dxf|gltf|glb|step|stp)$/i, ''); }
 
 /**
  * Formats whose files record neither their unit nor, for OBJ and STL, their up axis, so import asks; DXF only
@@ -100,7 +102,7 @@ export function probeMeshImport(bytes: Uint8Array): { kind: MeshFormatKind; exte
     if (!found || !data || /\.(dae|gltf|glb)$/i.test(found.path)) return null;
     return /\.obj$/i.test(found.path) ? { kind: 'obj', extent: objExtent(data) } : { kind: '3ds', extent: threeDsExtent(data) };
   }
-  if (isGlbBytes(bytes) || isGltfJson(bytes)) return null;
+  if (isGlbBytes(bytes) || isGltfJson(bytes) || isStepBytes(bytes)) return null;
   if (is3dsBytes(bytes)) return { kind: '3ds', extent: threeDsExtent(bytes) };
   if (isStlBytes(bytes)) return { kind: 'stl', extent: stlExtent(bytes) };
   if (isDxfBytes(bytes)) {
@@ -114,15 +116,16 @@ export function probeMeshImport(bytes: Uint8Array): { kind: MeshFormatKind; exte
 
 /**
  * Read model bytes of any supported format, told apart by their content: COLLADA is XML, archives are zip files, 3DS
- * starts with its main chunk, binary glTF with `glTF` and JSON glTF with `{`, a binary STL's triangle count fits its size
- * and an ASCII STL starts with `solid`, DXF starts with a SECTION group, OBJ with an OBJ statement, and anything else is
- * read as a .skp file.
+ * starts with its main chunk, binary glTF with `glTF` and JSON glTF with `{`, STEP with `ISO-10303-21;`, a binary STL's
+ * triangle count fits its size and an ASCII STL starts with `solid`, DXF starts with a SECTION group, OBJ with an OBJ
+ * statement, and anything else is read as a .skp file.
  */
 export function readModelImport(bytes: Uint8Array, onProgress?: (p: ImportProgress) => void, options?: MeshImportOptions): Promise<SketchUpImport> {
   if (isXmlBytes(bytes)) return readCollada(bytes, onProgress);
   if (isZipBytes(bytes)) return readModelArchive(bytes, onProgress, options);
   if (is3dsBytes(bytes)) return read3ds(bytes, options ?? DEFAULT_MESH_OPTIONS['3ds'], onProgress);
   if (isGlbBytes(bytes) || isGltfJson(bytes)) return readGltf(bytes, onProgress);
+  if (isStepBytes(bytes)) return readStep(bytes, onProgress);
   if (isStlBytes(bytes)) return readStl(bytes, options ?? DEFAULT_MESH_OPTIONS.stl, onProgress);
   if (isDxfBytes(bytes)) return readDxf(bytes, options ?? DEFAULT_MESH_OPTIONS.dxf, onProgress);
   if (isObjText(bytes)) return readObj(bytes, options ?? DEFAULT_MESH_OPTIONS.obj, onProgress);

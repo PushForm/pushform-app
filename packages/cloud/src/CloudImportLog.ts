@@ -6,7 +6,7 @@
  * wrote them, their creation and modification times, and every conversion issue can be counted.
  */
 import type { RpcArgs } from './rpc';
-export type CloudImportSource = 'sketchup_model' | 'sketchup_layout' | 'collada_model' | 'obj_model' | '3ds_model' | 'stl_model' | 'dxf_model' | 'gltf_model';
+export type CloudImportSource = 'sketchup_model' | 'sketchup_layout' | 'collada_model' | 'obj_model' | '3ds_model' | 'stl_model' | 'dxf_model' | 'gltf_model' | 'step_model';
 export type CloudImportStatus = 'imported' | 'failed' | 'cancelled';
 
 export interface CloudImportReport {
@@ -70,7 +70,7 @@ function wholeNumber(value: number | null | undefined): number | null {
  * function enforces the same bounds, so a report that passes here is accepted by the server.
  */
 export function cloudImportParams(report: CloudImportReport): RpcArgs<'cloud_record_import'> {
-  if (!['sketchup_model', 'sketchup_layout', 'collada_model', 'obj_model', '3ds_model', 'stl_model', 'dxf_model', 'gltf_model'].includes(report.source)) throw new Error('Unknown import source.');
+  if (!['sketchup_model', 'sketchup_layout', 'collada_model', 'obj_model', '3ds_model', 'stl_model', 'dxf_model', 'gltf_model', 'step_model'].includes(report.source)) throw new Error('Unknown import source.');
   if (!['imported', 'failed', 'cancelled'].includes(report.status)) throw new Error('Unknown import status.');
   const counts: Record<string, number> = {};
   for (const [key, value] of Object.entries(report.counts ?? {})) {

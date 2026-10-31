@@ -388,7 +388,7 @@ it('validates unsupported files after selection in the unrestricted Open picker'
   app = createApp({ demo: false, expose: false }); render(<App initialScreen="workspace" app={app} cloud={signedInCloud} />);
   fireEvent.click(screen.getByRole('button', { name: 'Main menu' }));
   fireEvent.click(screen.getByRole('menuitem', { name: 'Open…' }));
-  await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Choose a .pf, .pfl, .layout, .skp, .skb, .dae, .obj, .3ds, .stl, .dxf, .gltf, .glb, .zip, or .kmz file'));
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Choose a .pf, .pfl, .layout, .skp, .skb, .dae, .obj, .3ds, .stl, .dxf, .gltf, .glb, .step, .stp, .zip, or .kmz file'));
   expect(screen.getByLabelText('3D viewport')).toBeTruthy();
 });
 

@@ -16,7 +16,7 @@ Open a project to browse its folders. **New folder** creates a folder in the cur
 
 Choose **Import files** on Home. Drop files or choose several, select the destination project and folder, then continue. The dialog converts and saves each supported file in order and reports success or a reason for failure.
 
-This import saves to the library without opening editor tabs. Supported types include SketchUp, LayOut and common model formats such as OBJ, COLLADA, STL, glTF and DXF. Unsupported extensions are reported as skipped.
+This import saves to the library without opening editor tabs. Supported types include SketchUp, LayOut and common model formats such as OBJ, COLLADA, STL, glTF, DXF and STEP. Unsupported extensions are reported as skipped.
 
 ## Understand import notes
 

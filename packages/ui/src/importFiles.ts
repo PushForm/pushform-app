@@ -23,8 +23,8 @@ export interface ImportOptions {
   picked?: PickedFile | undefined;
 }
 
-export const IMPORT_FILE_ACCEPT = '.skp,.skb,.dae,.obj,.3ds,.stl,.dxf,.gltf,.glb,.zip,.kmz,.layout';
-export const IMPORT_FILE_DESCRIPTION = 'Choose .skp, .skb, .dae, .obj, .3ds, .stl, .dxf, .gltf, .glb, .zip, .kmz, or .layout files.';
+export const IMPORT_FILE_ACCEPT = '.skp,.skb,.dae,.obj,.3ds,.stl,.dxf,.gltf,.glb,.step,.stp,.zip,.kmz,.layout';
+export const IMPORT_FILE_DESCRIPTION = 'Choose .skp, .skb, .dae, .obj, .3ds, .stl, .dxf, .gltf, .glb, .step, .stp, .zip, .kmz, or .layout files.';
 
 export function isImportableFile(name: string): boolean {
   return isModelImportFile(name) || isSketchUpLayoutFile(name);

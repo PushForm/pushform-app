@@ -286,7 +286,7 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
     if (!file || !target) return;
     try {
       if (isPictureFile(file.name)) return await importPicture(file, target.tabId);
-      if (!isModelImportFile(file.name)) throw new Error('Choose a .skp, .skb, .dae, .obj, .3ds, .stl, .dxf, .gltf, .glb, .zip, or .kmz model, or a .png, .jpg, .gif, .bmp or .webp picture.');
+      if (!isModelImportFile(file.name)) throw new Error('Choose a .skp, .skb, .dae, .obj, .3ds, .stl, .dxf, .gltf, .glb, .step, .stp, .zip, or .kmz model, or a .png, .jpg, .gif, .bmp or .webp picture.');
       if (file.size > MAX_SKETCHUP_BYTES) throw new Error(tooLarge(file.name));
       await readSketchUpFile(async () => new Uint8Array(await file.arrayBuffer()), file.name, target, file);
     } catch (cause) { if ((cause as Error).name !== 'AbortError') setError((cause as Error).message); }
@@ -349,7 +349,7 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
       await stage?.('Preparing workspace…');
       return session.openLayoutFile(opened, name, identity);
     }
-    throw new Error('Choose a .pf, .pfl, .layout, .skp, .skb, .dae, .obj, .3ds, .stl, .dxf, .gltf, .glb, .zip, or .kmz file');
+    throw new Error('Choose a .pf, .pfl, .layout, .skp, .skb, .dae, .obj, .3ds, .stl, .dxf, .gltf, .glb, .step, .stp, .zip, or .kmz file');
   };
 
   const openHandle = async (handle: BrowserDocumentHandle): Promise<void> => {
@@ -362,7 +362,7 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
       else await openBytes(new Uint8Array(await file.arrayBuffer()), handle.name, undefined, file);
       return;
     }
-    if (!nativeDocumentType(handle.name)) throw new Error('Choose a .pf, .pfl, .layout, .skp, .skb, .dae, .obj, .3ds, .stl, .dxf, .gltf, .glb, .zip, or .kmz file');
+    if (!nativeDocumentType(handle.name)) throw new Error('Choose a .pf, .pfl, .layout, .skp, .skb, .dae, .obj, .3ds, .stl, .dxf, .gltf, .glb, .step, .stp, .zip, or .kmz file');
     for (const [id, current] of handles.current) {
       if (await current.isSameEntry?.(handle)) {
         session.activate(id);
@@ -787,7 +787,7 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
           void openFallback(event);
         }}
       />
-      <input ref={modelImportInput} type="file" hidden accept=".skp,.skb,.dae,.obj,.3ds,.stl,.dxf,.gltf,.glb,.zip,.kmz,.png,.jpg,.jpeg,.gif,.bmp,.webp" aria-label="Import model file"
+      <input ref={modelImportInput} type="file" hidden accept=".skp,.skb,.dae,.obj,.3ds,.stl,.dxf,.gltf,.glb,.step,.stp,.zip,.kmz,.png,.jpg,.jpeg,.gif,.bmp,.webp" aria-label="Import model file"
         onChange={event => { void importModelFallback(event); }} />
       <DocumentTabs session={session} onClose={closeTab} onNewLayout={newLayout} />
       {choosingTemplate ? <LayoutTemplateChooser busy={templateBusy} savedTemplates={cloudFiles ?

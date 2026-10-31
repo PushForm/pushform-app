@@ -151,7 +151,7 @@ export function ImportDialog({ api, ownerId, buildInfo, projects: initialProject
       <div className={`pf-import-drop${dragging ? ' is-dragging' : ''}`} onDragOver={event => { event.preventDefault(); if (!busy) setDragging(true); }}
         onDragLeave={() => setDragging(false)} onDrop={drop} aria-label="Drop SketchUp or LayOut files here">
         <LuFolderInput size={30} aria-hidden="true" />
-        <p>Drag and drop .skp, .skb, .dae, .obj, .3ds, .stl, .dxf, .gltf, .glb, .zip, .kmz, or .layout files here</p>
+        <p>Drag and drop .skp, .skb, .dae, .obj, .3ds, .stl, .dxf, .gltf, .glb, .step, .stp, .zip, .kmz, or .layout files here</p>
         <button type="button" className="pf-account-primary" disabled={busy} onClick={() => input.current?.click()}>Choose files</button>
         <input ref={input} type="file" hidden multiple accept={IMPORT_FILE_ACCEPT} aria-label="Import SketchUp or LayOut files" onChange={pick} />
       </div>

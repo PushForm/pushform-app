@@ -67,7 +67,8 @@ export default defineConfig(({ mode }) => {
     },
     server: { port: 5174, strictPort: true },
     worker: { format: 'es' },
-    optimizeDeps: { exclude: ['manifold-3d'] },
+    // occt-import-js (the STEP reader) is CommonJS, so the dev server converts it ahead of the worker that loads it.
+    optimizeDeps: { exclude: ['manifold-3d'], include: ['occt-import-js'] },
     build: { target: 'es2022', sourcemap: 'hidden' },
     clearScreen: false,
   };

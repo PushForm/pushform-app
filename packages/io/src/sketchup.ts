@@ -273,7 +273,7 @@ export function sketchUpDisplay(options: Record<string, RenderingOption> | null 
  * The source format a converted model came from: its name in messages, and the standing limitations every
  * import of it reports.
  */
-export interface ImportFormat { kind: 'sketchup' | 'collada' | 'obj' | '3ds' | 'stl' | 'dxf' | 'gltf'; name: string; notes: readonly string[] }
+export interface ImportFormat { kind: 'sketchup' | 'collada' | 'obj' | '3ds' | 'stl' | 'dxf' | 'gltf' | 'step'; name: string; notes: readonly string[] }
 export const SKETCHUP_FORMAT: ImportFormat = { kind: 'sketchup', name: 'SketchUp', notes: [
   'SketchUp import: the model opens in its current style (face, edge, background and modeling settings); the saved style list, per-scene styles, watermarks, sketchy edges, fog, radial and diameter dimensions, and extension data are not imported.',
 ] };
@@ -745,8 +745,9 @@ function convertDefinition(source: Definition, key: number, warn: (m: string) =>
     }
     if (problems.length) {
       for (const face of componentFaces) result.sheets.push(face);
-      // Mesh formats are mostly open surfaces, so their open parts are counted together rather than listed one by one.
-      if (format.kind === 'sketchup' || format.kind === 'collada')
+      // Mesh formats are mostly open surfaces, so their open parts are counted together rather than listed one by one;
+      // SketchUp, COLLADA and STEP parts are named and expected to be solid.
+      if (format.kind === 'sketchup' || format.kind === 'collada' || format.kind === 'step')
         warn(`${source.name || 'Model'}: component at source face ${componentFaces[0]!.sourceId}, ${componentFaces.length} face(s) retained as editable sheets: ${problems[0]}.`);
       else { counts.openParts++; counts.openFaces += componentFaces.length; }
     } else {

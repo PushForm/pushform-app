@@ -13,6 +13,7 @@ import { build } from 'esbuild';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const kernelDir = join(here, '../../kernel/src');
+const ioDir = join(here, '../../io/src');
 
 const result = await build({
   entryPoints: [join(here, '../src/cli.ts')],
@@ -30,6 +31,20 @@ const result = await build({
           if (args.pluginData === 'inner') return undefined;
           // resolve as the kernel would (import conditions), then load that file at run time
           const r = await b.resolve('manifold-3d', { kind: 'import-statement', resolveDir: kernelDir, pluginData: 'inner' });
+          if (r.errors.length) return { errors: r.errors };
+          return { path: pathToFileURL(r.path).href, external: true };
+        });
+      },
+    },
+    {
+      // The STEP reader finds its wasm beside its own script, so it stays external like manifold-3d. Its `?url`
+      // import only runs in a browser.
+      name: 'step-reader-external',
+      setup(b) {
+        b.onResolve({ filter: /\?url$/ }, (args) => ({ path: args.path, external: true }));
+        b.onResolve({ filter: /^occt-import-js$/ }, async (args) => {
+          if (args.pluginData === 'inner') return undefined;
+          const r = await b.resolve('occt-import-js', { kind: 'import-statement', resolveDir: ioDir, pluginData: 'inner' });
           if (r.errors.length) return { errors: r.errors };
           return { path: pathToFileURL(r.path).href, external: true };
         });

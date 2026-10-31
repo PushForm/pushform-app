@@ -41,10 +41,10 @@ export function sketchUpVersion(version: string | null | undefined): string | nu
 }
 
 /** The report source of each model format; an archive reports the format of the model it held. */
-const MODEL_SOURCES = { sketchup: 'sketchup_model', collada: 'collada_model', obj: 'obj_model', '3ds': '3ds_model', stl: 'stl_model', dxf: 'dxf_model', gltf: 'gltf_model' } as const;
+const MODEL_SOURCES = { sketchup: 'sketchup_model', collada: 'collada_model', obj: 'obj_model', '3ds': '3ds_model', stl: 'stl_model', dxf: 'dxf_model', gltf: 'gltf_model', step: 'step_model' } as const;
 
 /**
- * A `.skp`/`.skb`, COLLADA, OBJ, 3DS, STL, DXF or glTF outcome: the scene gives the saving version (a COLLADA file's version and authoring
+ * A `.skp`/`.skb`, COLLADA, OBJ, 3DS, STL, DXF, glTF or STEP outcome: the scene gives the saving version (a COLLADA file's version and authoring
  * tool); the report gives counts and warnings.
  */
 export function modelImportReport(

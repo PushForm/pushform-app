@@ -20,6 +20,7 @@ pub fn run() {
       updates::update_fetch,
       updates::update_install,
       step::step_convert,
+      step::step_export,
       step::step_cancel
     ])
     .setup(|app| {

@@ -3,7 +3,7 @@
 import { ExtensionPlatform, localSettingsStore, startWebRuntime, storedDeveloperMode, type SessionFailure, type InstalledExtension } from '@pushform/extensions';
 import { browserClipboardWriter, browserFilePicker } from './browserExtensionIo';
 import { browserViewPrinter, type PrintPrompts } from './extensionPrint';
-import { indexedDbExtensionStore } from './indexedDbExtensionStore';
+import { indexedDbActivityStore, indexedDbExtensionStore } from './indexedDbExtensionStore';
 
 /** The extension runtime's two worker bootstraps, bundled as classic scripts by the web build. */
 export interface ExtensionRuntimeSources {
@@ -33,6 +33,7 @@ export function createBrowserExtensionPlatform(options: {
   const storage = options.storage ?? window.localStorage;
   return new ExtensionPlatform({
     store: indexedDbExtensionStore(options.ownerId),
+    activity: indexedDbActivityStore(options.ownerId),
     developerMode: storedDeveloperMode(storage, options.developerModeAllowed),
     startRuntime: (record) => startWebRuntime({
       files: new Map(Object.entries(record.files)), main: record.manifest.main, wasm: record.manifest.wasm.length > 0,

@@ -4,14 +4,15 @@ import { useMemo, useRef, useState, useSyncExternalStore, type JSX } from 'react
 import type { ExtensionPlatform, ExtensionState, InstallRequest } from '@pushform/extensions';
 import { Dialog } from '../components/DialogParts';
 import { readFile } from './browserExtensionIo';
+import { ExtensionActivityRecord, UninstalledActivity } from './ExtensionActivityRecord';
 import { ExtensionInstallDialog } from './ExtensionInstallDialog';
 import { INTEGRITY_TEXT, PERMISSION_TEXT } from './permissionText';
 
 /**
  * The extension manager: every installed extension with its publisher, version, integrity, permissions and
- * whether it is on or running, and the developer mode section for loading unsigned packages from a file. Opening it
- * never runs extension code. Memory and processor use are not measurable per extension in a browser, so they read
- * "unavailable", never zero.
+ * whether it is on or running, its activity record and network use, and the developer mode section for loading
+ * unsigned packages from a file. Opening it never runs extension code. Memory and processor use are not measurable per
+ * extension in a browser, so they read "unavailable", never zero.
  */
 
 function usePlatform(platform: ExtensionPlatform): ExtensionState[] {
@@ -77,6 +78,7 @@ export function ExtensionManager({ platform, developerModeAllowed, developerMode
             {extensions.map((state) => <ExtensionRow key={state.record.id} state={state} platform={platform} onRemove={() => setRemoving(state)} />)}
           </ul>
         )}
+        <UninstalledActivity platform={platform} />
         {developerModeAllowed ? (
           <section className="pf-xmanager-developer" aria-labelledby="pf-xmanager-developer-title">
             <h3 id="pf-xmanager-developer-title" className="pf-xinstall-heading">Developer mode</h3>
@@ -113,7 +115,6 @@ export function ExtensionManager({ platform, developerModeAllowed, developerMode
 function ExtensionRow({ state, platform, onRemove }: { state: ExtensionState; platform: ExtensionPlatform; onRemove: () => void }): JSX.Element {
   const { record } = state;
   const [details, setDetails] = useState(false);
-  const sent = [...state.bytesSent].reduce((sum, [, bytes]) => sum + bytes, 0);
   return (
     <li className="pf-xmanager-row">
       <div className="pf-xmanager-row-head">
@@ -137,9 +138,10 @@ function ExtensionRow({ state, platform, onRemove }: { state: ExtensionState; pl
           <dl className="pf-xinstall-facts">
             <dt>Memory</dt><dd>unavailable</dd>
             <dt>Processor</dt><dd>unavailable</dd>
-            <dt>Sent this session</dt><dd>{record.manifest.destinations.length ? `${sent} bytes` : 'No internet access'}</dd>
             <dt>Installed</dt><dd>{new Date(record.installedAt).toLocaleString()}</dd>
           </dl>
+          <ExtensionActivityRecord platform={platform} id={record.id} name={record.manifest.name} session={state.egress}
+            destinations={record.manifest.destinations.map((d) => new URL(d.url).origin)} />
           {record.source === 'developer' && state.logs.length ? (
             <details className="pf-xmanager-logs"><summary>Log ({state.logs.length})</summary>
               <pre>{state.logs.slice(-50).map((l) => `${l.at.toLocaleTimeString()} ${typeof l.entry === 'string' ? l.entry : JSON.stringify(l.entry)}`).join('\n')}</pre>

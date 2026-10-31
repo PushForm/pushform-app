@@ -10,7 +10,17 @@ Extensions run in the web editor in Chrome, Edge and other Chromium-based browse
 
 Open your account control in the header and, in the account dialog, choose **Manage extensions…**, or type **Extensions** in command search. The window works from Home and from both editors. Opening it never starts an extension.
 
-Each installed extension shows its name, publisher, version and whether it is **Official, countersigned by PushForm** or **Unsigned (developer)**. Below that you see whether it is running, starting, not running or stopped after a problem. Choose **Details** to see what it is allowed to do, how much it sent to the internet this session, when it was installed and, for a side-loaded extension, its log. Memory and processor use read **unavailable** in the browser, because they cannot be measured per extension.
+Each installed extension shows its name, publisher, version and whether it is **Official, countersigned by PushForm** or **Unsigned (developer)**. Below that you see whether it is running, starting, not running or stopped after a problem. Choose **Details** to see what it is allowed to do, when it was installed, its network use and activity, and, for a side-loaded extension, its log. Memory and processor use read **unavailable** in the browser, because they cannot be measured per extension.
+
+## Read an extension's activity and network use
+
+PushForm keeps a record of what happens to each extension on this device, for your account. Choose **Details** to see it.
+
+**Network** lists each internet address the extension may use, with what it sent this session, what it sent in total and what it received in total. An extension without addresses reads **No internet access**.
+
+**Activity** lists the newest events first, each with its date and time: installed, updated or reloaded, permissions allowed or removed, turned on or off and why, started, stopped and why, and uninstalled. A line such as **Sent 1.5 KB to api.example.com and received 3.0 KB (4 requests)** sums what it sent to one address while it ran. The record holds only addresses, counts and versions, never your model, file contents or the full web addresses it requested. The newest 200 events of each extension are kept.
+
+Choose **Clear activity…** to delete an extension's record and its network totals. The record stays after you uninstall an extension; it is listed under **Uninstalled extensions** until you clear it.
 
 ## Install an extension and read its permissions
 

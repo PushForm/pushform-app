@@ -10,8 +10,7 @@ import {
   allocId, bodyFromMesh, createDefaultStyle, createEntityContainer, DEFAULT_AXES, DEFAULT_BEHAVIORS, DEFAULT_SCENE_FLAGS,
   newImageEntity, overlapRatio, UV_AUTO,
   type CameraState, type ComponentDefinition, type ComponentInstance, type Curve, type DocumentDraft, type Draft, type EdgeRecord,
-  type EntityContainer, type ImageAsset, type ImageStore, type LoopRef, type Sketch, type SketchEdge, type Style, type UvMapping,
-} from '@pushform/model';
+  type EntityContainer, type ImageAsset, type ImageStore, type LoopRef, type Sketch, type SketchEdge, type Style, type UvMapping, validateMeshPartGeometry, MAX_DOCUMENT_MESH_PART_TRIANGLES, type MeshPartGeometry } from '@pushform/model';
 import { cellKey } from '@pushform/geom';
 import type {
   ImportedCurve, ImportedDefinition, ImportedDisplay, ImportedEdgeFlags, ImportedFace, ImportedScene, ImportedUvMap, ModelImportReport, SketchUpImport,
@@ -58,7 +57,7 @@ export function applySketchUpImport(
   if (!target) throw new Error('The SketchUp import destination no longer exists.');
   const report: ModelImportReport = { bodies: 0, sheetFaces: 0, looseEdges: 0,
     definitions: 0, instances: 0, materials: 0, tags: 0, scenes: 0, sectionPlanes: 0, guides: 0, dimensions: 0, texts: 0,
-    warnings: [...scene.warnings], format: scene.format?.name };
+    meshParts: 0, meshPartTriangles: 0, warnings: [...scene.warnings], format: scene.format?.name };
   const materials = new Map<number, MaterialId>(), tags = new Map<string, TagId>();
   const assets = draft.images as unknown as Map<ImageId, ImageAsset>;
   const imageIds = scene.images.map(image => {
@@ -131,8 +130,25 @@ export function applySketchUpImport(
   const curveRecord = (c: ImportedCurve, edgeRefs: Curve['edgeRefs']): Curve => ({ id: allocId<CurveId>(draft), kind: c.kind,
     center: [...c.center], normal: [...c.normal], radius: c.radius, startAngle: c.startAngle, endAngle: c.endAngle,
     segments: c.segments, edgeRefs });
+  // Mesh parts of every definition count against the document's limit together (MOD3810.01).
+  let meshPartTriangles = 0;
+  for (const def of draft.definitions.values()) for (const part of def.entities.meshParts.values()) meshPartTriangles += part.geometry.triangles.length / 3;
   const populate = (source: ImportedDefinition, id: DefId): void => {
     const container = destination.get(id)!.entities;
+    for (const part of source.meshParts ?? []) {
+      const faceMaterials = new Uint32Array(part.geometry.faceCount);
+      part.faceMaterialKeys.forEach((key, face) => { faceMaterials[face] = key < 0 ? 0 : material(key) ?? 0; });
+      const geometry: MeshPartGeometry = { ...part.geometry, faceMaterials };
+      validateMeshPartGeometry(geometry);
+      meshPartTriangles += geometry.triangles.length / 3;
+      if (meshPartTriangles > MAX_DOCUMENT_MESH_PART_TRIANGLES)
+        throw new Error(`The model would hold more than ${MAX_DOCUMENT_MESH_PART_TRIANGLES.toLocaleString('en-US')} triangles of mesh parts.`);
+      const partId = allocId<Id>(draft);
+      container.meshParts.set(partId, { ...common(), id: partId, name: part.name, source: part.source, geometry, materialId: null } as never);
+      container.order.push(partId);
+      report.meshParts = (report.meshParts ?? 0) + 1;
+      report.meshPartTriangles = (report.meshPartTriangles ?? 0) + geometry.triangles.length / 3;
+    }
     for (const [index, solid] of source.solids.entries()) {
       const body = bodyFromMesh(draft, solid.mesh, { container: container as unknown as Draft<EntityContainer>, weldTol: MERGE_TOL });
       const byId = new Map(solid.faces.map(f => [f.id, f]));

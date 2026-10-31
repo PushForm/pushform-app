@@ -20,6 +20,10 @@ The first STEP import downloads the STEP reader, about 3 MB, so it takes a littl
 
 A part that does not form a closed solid is imported as editable faces, and the import notes name it. Very small detail, below about 0.03 mm, can be lost. Product data, tolerances and annotations are not imported.
 
+## Large models import as mesh parts
+
+A model file with more than 250,000 triangles in total imports as **mesh parts** instead of editable faces, so large CAD assemblies open in seconds and stay light. A mesh part is drawn like any other object, with its colors and edges, and you can select, move, rotate, scale, copy, hide, tag and paint it as a whole, and export it. It has no individual faces or edges to pick until it is made editable. Entity Info shows that an object is a mesh part, where it came from and how many triangles it holds. Files with mesh parts need this version of PushForm or newer to open.
+
 ## Save an editable native copy
 
 Use **Main menu > Download a copy…** to keep an editable `.pf` model on your computer. Open that file through the same menu to restore its components, materials and stored images. Cloud saves and downloaded model copies use the same native format. Keep the original imported file if you also need to open it in its source application.

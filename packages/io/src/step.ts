@@ -8,7 +8,7 @@ import {
   IDENTITY_PLACEMENT, buildMeshGeometry, finishMeshImport, meshCountNotes, meshDefinition, meshMaterial,
   type MeshCorner, type MeshCounts, type MeshGeometry, type MeshPlacement,
 } from './meshImport';
-import { MAX_SKETCHUP_BYTES, type ImportFormat, type ImportProgress, type SketchUpImport } from './sketchup';
+import { MAX_SKETCHUP_BYTES, MESH_PART_THRESHOLD, type ImportFormat, type ImportProgress, type ImportedMeshPart, type SketchUpImport } from './sketchup';
 import { loadStepReader } from './stepModule';
 
 // STEP (ISO 10303-21) import. OpenCascade reads the B-rep and divides each face into triangles in meters; the parts
@@ -54,8 +54,12 @@ export function stepHeader(bytes: Uint8Array): { schema: string | null; system: 
   return { schema, system };
 }
 
-/** Read a STEP file of at most `maxBytes` (the shared import limit unless the desktop app allows more). */
-export async function readStep(bytes: Uint8Array, onProgress?: (p: ImportProgress) => void, maxBytes = MAX_SKETCHUP_BYTES): Promise<SketchUpImport> {
+/**
+ * Read a STEP file of at most `maxBytes` (the shared import limit unless the desktop app allows more). A file with more
+ * than `meshPartThreshold` triangles in all imports as mesh parts (MOD3810) rather than faces.
+ */
+export async function readStep(bytes: Uint8Array, onProgress?: (p: ImportProgress) => void, maxBytes = MAX_SKETCHUP_BYTES,
+  meshPartThreshold = MESH_PART_THRESHOLD): Promise<SketchUpImport> {
   if (bytes.byteLength > maxBytes) throw new Error(`STEP files larger than ${maxBytes / (1024 * 1024)} MiB are not supported yet.`);
   if (!isStepBytes(bytes)) throw new Error('Not a STEP model: the file does not begin with ISO-10303-21.');
   onProgress?.({ stage: 'Loading the STEP reader', current: 0, total: 1 });
@@ -111,6 +115,26 @@ export async function readStep(bytes: Uint8Array, onProgress?: (p: ImportProgres
 
   const meshes = result.meshes;
   const hasTriangles = (i: number): boolean => (meshes[i]?.index.array.length ?? 0) >= 3;
+  const totalTriangles = meshes.reduce((n, mesh) => n + Math.floor(mesh.index.array.length / 3), 0);
+  const asMeshParts = totalTriangles > meshPartThreshold;
+  const header = stepHeader(bytes);
+  /** A part's arrays as a mesh part: its B-rep faces as source faces with their colors, no edges (the reader gives none). */
+  const meshPart = (mesh: OcctMesh, name: string): ImportedMeshPart => {
+    const triangles = Uint32Array.from(mesh.index.array), count = triangles.length / 3;
+    const faces = mesh.brep_faces.length ? mesh.brep_faces : [{ first: 0, last: count - 1, color: null }];
+    // A triangle outside every face range belongs to one extra, uncolored face.
+    const triangleFace = new Uint32Array(count).fill(faces.length), faceMaterialKeys = new Int32Array(faces.length + 1).fill(-1);
+    let covered = 0;
+    faces.forEach((face, f) => {
+      faceMaterialKeys[f] = materialKey(face.color ?? mesh.color) ?? -1;
+      for (let t = Math.max(0, face.first); t <= Math.min(face.last, count - 1); t++) { triangleFace[t] = f; covered++; }
+    });
+    const faceCount = covered < count ? faces.length + 1 : faces.length;
+    return { name, source: { format: 'STEP', system: header.system ?? '' }, faceMaterialKeys: faceMaterialKeys.subarray(0, faceCount),
+      geometry: { positions: Float64Array.from(mesh.attributes.position.array), triangles, triangleFace, faceCount, faceMaterials: new Uint32Array(faceCount),
+        edgeOffsets: new Uint32Array(0), edgePositions: new Float64Array(0), edgeFlags: new Uint8Array(0) } };
+  };
+  const pendingParts = new Map<number, ImportedMeshPart[]>();
   const hasContent = (node: OcctNode): boolean => node.meshes.some(hasTriangles) || node.children.some(hasContent);
   const placements = new Map<number, Map<number, MeshPlacement>>(), definitions = new Map<number, Definition>();
   const root = meshDefinition(-1, '', false);
@@ -130,6 +154,7 @@ export async function readStep(bytes: Uint8Array, onProgress?: (p: ImportProgres
   };
   const part = (def: Definition, mesh: OcctMesh): void => {
     onProgress?.({ stage: 'Building parts', current: built++, total });
+    if (asMeshParts) { pendingParts.set(def.id, [...pendingParts.get(def.id) ?? [], meshPart(mesh, def.name || mesh.name || 'Part')]); return; }
     build(def, geometry(mesh));
   };
   // The reader places every part in world coordinates. Each part is its own group, so parts that touch are not welded
@@ -145,10 +170,16 @@ export async function readStep(bytes: Uint8Array, onProgress?: (p: ImportProgres
   for (let only = top.children.filter(hasContent); !top.meshes.some(hasTriangles) && only.length === 1; only = top.children.filter(hasContent)) top = only[0]!;
   fill(root, top);
 
-  const header = stepHeader(bytes);
   const version = [header.schema, header.system].filter(Boolean).join(', ') || 'STEP';
   meshCountNotes(counts, message => { warnings.add(message); });
+  if (asMeshParts) warnings.add(`${totalTriangles.toLocaleString('en-US')} triangles, more than ${meshPartThreshold.toLocaleString('en-US')}: the parts are imported as mesh parts, which are drawn and placed whole and become editable faces when edited.`);
   const model = { version, definitions, root, layers: [], pages: [], scenesUnread: 0, dimensions: [], materials,
     materialsById: new Map(materials.map(m => [m.id!, m])), styles: [], units: null, unitsOptions: null, sectionDisplay: null, renderingOptions: null };
-  return finishMeshImport(model, placements, STEP_FORMAT, warnings, onProgress);
+  const scene = await finishMeshImport(model, placements, STEP_FORMAT, warnings, onProgress, { allowEmpty: pendingParts.size > 0 });
+  for (const [key, parts] of pendingParts) {
+    const definition = key === root.id ? scene.root : scene.definitions.get(key);
+    if (!definition) throw new Error('A STEP part lost its definition.');
+    definition.meshParts = parts;
+  }
+  return scene;
 }

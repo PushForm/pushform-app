@@ -8,7 +8,7 @@ import {
 import { tessellateCurve, triangulatePlanarFace, weldVertices } from '@pushform/geom';
 import { meshTopologyProblems } from '@pushform/kernel';
 import { addThroughSplits, insertSplits, shadedRegion, splitSegment, type FacePiece, type ShadedRegion } from './sketchupCrossingFaces';
-import type { BackgroundStyle, CurveKind, EdgeStyle, EdgeStyleMode, FaceStyle, FaceStyleMode, ModelingColors } from '@pushform/model';
+import type { BackgroundStyle, CurveKind, EdgeStyle, EdgeStyleMode, FaceStyle, FaceStyleMode, ModelingColors, MeshPartGeometry, MeshPartSource } from '@pushform/model';
 import { fastHash, hashImageBytes, imageSizeFromHeader } from '@pushform/model';
 import { TiffError, tiffToPng } from './tiff';
 import type {
@@ -164,7 +164,19 @@ export interface ImportedDefinition {
     definition: number; name: string; transform: Mat4; material: number | null;
     hidden: boolean; tag: string; properties: Record<string, string>;
   }[];
+  /** Display-only parts (MOD3810) of a large import; absent for a model read as faces. */
+  meshParts?: ImportedMeshPart[] | undefined;
 }
+/** A mesh part as read: its packed geometry with the reader's material key per source face (−1 = none). */
+export interface ImportedMeshPart {
+  name: string;
+  source: MeshPartSource;
+  /** `faceMaterials` is left zero; `faceMaterialKeys` maps each source face to the scene's material keys. */
+  geometry: MeshPartGeometry;
+  faceMaterialKeys: Int32Array;
+}
+/** Files whose meshes together hold more triangles than this import as mesh parts rather than faces (MOD3810). */
+export const MESH_PART_THRESHOLD = 250_000;
 /** Section planes, guides and dimensions keep the coordinates of the definition that holds them. */
 export interface ImportedSectionPlane {
   name: string; symbol: string; plane: Plane; origin: Vec3; hidden: boolean; tag: string; active: boolean;
@@ -283,6 +295,9 @@ export interface ModelImportReport {
   sectionPlanes: number; guides: number; dimensions: number; texts: number;
   /** Placed pictures (image entities). */
   images?: number | undefined;
+  /** Mesh parts made (MOD3810) and the triangles they hold. */
+  meshParts?: number | undefined;
+  meshPartTriangles?: number | undefined;
   warnings: string[];
   /** The name of the format the model was read from, such as SketchUp or OBJ. */
   format?: string | undefined;
@@ -335,7 +350,8 @@ export async function readSketchUp(bytes: Uint8Array, onProgress?: (p: ImportPro
 }
 
 /** Adapter boundary: tests can exercise malformed reader output without hand-writing SKP bytes. */
-export function prepareSketchUp(model: SkpModel, onProgress?: (p: ImportProgress) => void, format: ImportFormat = SKETCHUP_FORMAT): SketchUpImport {
+export function prepareSketchUp(model: SkpModel, onProgress?: (p: ImportProgress) => void, format: ImportFormat = SKETCHUP_FORMAT,
+  options: { /** The caller adds geometry of its own (mesh parts), so a model without faces is not empty. */ allowEmpty?: boolean } = {}): SketchUpImport {
   const warnings = new Set<string>();
   const warn = (message: string): void => { warnings.add(message); };
   for (const note of format.notes) warn(note);
@@ -438,7 +454,7 @@ export function prepareSketchUp(model: SkpModel, onProgress?: (p: ImportProgress
       warn('Some faces reference unavailable materials; default material is used on those sides.');
   }
   // Section planes, guides and dimensions are model content too: a file of guide lines alone opens.
-  if (![root, ...definitions.values()].some(d => d.solids.length || d.sheets.length || d.edges.length ||
+  if (!options.allowEmpty && ![root, ...definitions.values()].some(d => d.solids.length || d.sheets.length || d.edges.length ||
     d.sectionPlanes.length || d.guides.length || d.dimensions.length))
     throw new Error(`No supported geometry was found in this ${format.name} file. It may be empty or contain records the reader cannot recover.`);
   const point = (p: [number, number, number]): Vec3 => [p[0] * INCH, p[1] * INCH, p[2] * INCH];

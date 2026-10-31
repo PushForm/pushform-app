@@ -58,7 +58,8 @@ export function modelImportReport(
     sourceVersion: sketchUpVersion(result.scene?.version), sourceCreatedAt: null, sourceModifiedAt: null,
     counts: report ? { bodies: report.bodies, sheetFaces: report.sheetFaces, looseEdges: report.looseEdges, definitions: report.definitions,
       instances: report.instances, materials: report.materials, tags: report.tags, scenes: report.scenes,
-      sectionPlanes: report.sectionPlanes, guides: report.guides, dimensions: report.dimensions, texts: report.texts } : {},
+      sectionPlanes: report.sectionPlanes, guides: report.guides, dimensions: report.dimensions, texts: report.texts,
+      ...(report.meshParts ? { meshParts: report.meshParts, meshPartTriangles: report.meshPartTriangles ?? 0 } : {}) } : {},
     issues: report?.warnings ?? result.scene?.warnings ?? [],
   };
 }

@@ -139,8 +139,8 @@ export function meshCountNotes(counts: MeshCounts, warn: (message: string) => vo
  * the file's texture coordinates and hash the images. Faces the converter turned outward have their sides swapped.
  */
 export async function finishMeshImport(model: SkpModel, placements: Map<number, Map<number, MeshPlacement>>, format: ImportFormat,
-  warnings: Set<string>, onProgress?: (p: ImportProgress) => void): Promise<SketchUpImport> {
-  const scene = prepareSketchUp(model, onProgress, format);
+  warnings: Set<string>, onProgress?: (p: ImportProgress) => void, options: { allowEmpty?: boolean } = {}): Promise<SketchUpImport> {
+  const scene = prepareSketchUp(model, onProgress, format, options);
   for (const def of [scene.root, ...scene.definitions.values()]) {
     const byFace = placements.get(def.key);
     if (byFace) for (const face of [...def.solids.flatMap(solid => solid.faces), ...def.sheets]) {

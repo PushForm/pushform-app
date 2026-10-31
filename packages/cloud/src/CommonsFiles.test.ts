@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { expect, it, vi } from 'vitest';
-import { commonsFileUrl, uploadCommonsFile, removeCommonsFile, reviewCommonsFile, downloadCommonsFile, CommonsTermsRequiredError } from './CommonsFiles';
+import { commonsFileUrl, uploadCommonsFile, removeCommonsFile, reviewCommonsFile, downloadCommonsFile, CommonsTermsRequiredError, COMMONS_PACKAGE_LIMIT } from './CommonsFiles';
 const revision='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';const id='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const signal=()=>new AbortController().signal;
 const file=Object.assign(new Blob(['abc']),{name:'part.step'});
@@ -45,4 +45,13 @@ it('downloads only with bearer credentials and distinguishes incomplete account 
   await expect(downloadCommonsFile('https://files.example','session',id,signal(),fetcher)).rejects.toBeInstanceOf(CommonsTermsRequiredError);
   fetcher.mockResolvedValueOnce(new Response('<html>unexpected</html>',{headers:{'Content-Type':'text/html'}}));
   await expect(downloadCommonsFile('https://files.example','session',id,signal(),fetcher)).rejects.toThrow('did not return a model package');
+});
+
+it('caps advertised and streamed download sizes and cancels oversized streams',async()=>{
+  const fetcher=vi.fn<typeof fetch>().mockResolvedValueOnce(new Response('ZIP',{headers:{'Content-Type':'application/zip','Content-Length':String(COMMONS_PACKAGE_LIMIT+1)}}));
+  await expect(downloadCommonsFile('https://files.example','session',id,signal(),fetcher)).rejects.toThrow('download limit');
+  const cancel=vi.fn();let sent=0;
+  const body=new ReadableStream<Uint8Array>({pull(controller){sent++;controller.enqueue(new Uint8Array(1024*1024));},cancel});
+  fetcher.mockResolvedValueOnce(new Response(body,{headers:{'Content-Type':'application/zip'}}));
+  await expect(downloadCommonsFile('https://files.example','session',id,signal(),fetcher)).rejects.toThrow('download limit');expect(cancel).toHaveBeenCalledOnce();expect(sent).toBeLessThan(132);
 });

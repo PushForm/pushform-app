@@ -3,6 +3,8 @@
 import { catalogUrlSchema, commonsUploadSchema, type CommonsUpload } from './CommonsCatalog';
 
 export const COMMONS_FILE_LIMIT = 128 * 1024 * 1024;
+/** Original file plus bounded attribution and ZIP headers. */
+export const COMMONS_PACKAGE_LIMIT = COMMONS_FILE_LIMIT + 256 * 1024;
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 
 /** Only configured service origins receive tokens; credentials never appear in a URL. */
@@ -64,6 +66,20 @@ export async function reviewCommonsFile(base: string, token: string, id: string,
 export async function downloadCommonsFile(base: string, token: string, id: string, signal: AbortSignal, fetcher: typeof fetch = fetch): Promise<Blob> {
   const url = commonsFileUrl(base, 'downloads', id); if (!url) throw new Error('Model file downloads are not configured.');
   const response = await request(fetcher, url, token, { signal });
-  if (response.headers.get('Content-Type')?.split(';')[0]?.trim() !== 'application/zip') throw new Error('The file service did not return a model package.');
-  return response.blob();
+  if (response.headers.get('Content-Type')?.split(';')[0]?.trim() !== 'application/zip') { await response.body?.cancel().catch(() => {}); throw new Error('The file service did not return a model package.'); }
+  const declared = response.headers.get('Content-Length');
+  if (declared !== null && (!/^\d+$/.test(declared) || Number(declared) > COMMONS_PACKAGE_LIMIT)) { await response.body?.cancel().catch(() => {}); throw new Error('The model package exceeds the download limit.'); }
+  if (!response.body) throw new Error('The model package is empty.');
+  const reader = response.body.getReader(); const chunks: ArrayBuffer[] = []; let size = 0;
+  try {
+    for (;;) {
+      signal.throwIfAborted();
+      const next = await reader.read(); if (next.done) break;
+      size += next.value.byteLength;
+      if (size > COMMONS_PACKAGE_LIMIT) { await reader.cancel(); throw new Error('The model package exceeds the download limit.'); }
+      chunks.push(new Uint8Array(next.value).buffer);
+    }
+  } finally { reader.releaseLock(); }
+  if (!size) throw new Error('The model package is empty.');
+  return new Blob(chunks, { type: 'application/zip' });
 }

@@ -4,12 +4,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { extensionManifestSchema, type ExtensionManifest } from '@pushform/extension-protocol';
 import { startGuest, type ExtensionContext } from './guest';
 import { ExtensionSession, type ServiceCall, type ServiceImplementations, type SessionFailure } from './host';
-import { messagePortTransport } from './port';
+import { messagePortTransport, type RuntimePort } from './port';
 
 /**
  * A compromised runtime talking to the host directly: forged message types, out-of-place lifecycle messages, claimed
- * identities and grants it does not have. The host must drop or refuse each one without effect. (Size limits,
- * pending-request limits, document handles and generations are covered in broker.test.ts.)
+ * identities and grants it does not have. The host must drop or refuse each one without effect, and a runtime that
+ * floods the host is failed and disconnected. (Size limits, pending-request limits, document handles and generations
+ * are covered in broker.test.ts.)
  */
 
 const manifest: ExtensionManifest = extensionManifestSchema.parse({
@@ -130,12 +131,136 @@ describe('identity and grants', () => {
 });
 
 describe('message rate', () => {
-  // Known gap, kept as an expected failure until it is fixed: the host caps invalid messages and concurrent requests,
-  // but not the rate of well-formed ones, each of which it handles on the editor's thread.
-  it.fails('fails a runtime that floods the host with well-formed messages', async () => {
+  it('fails and disconnects a runtime that floods the host with well-formed messages', async () => {
     const { session, failures, raw } = connect({ activate() {} });
     await session.activate();
     for (let n = 0; n < 100_000; n++) raw({ type: 'pong', n });
     await vi.waitFor(() => expect(failures.map((f) => f.kind)).toEqual(['protocol-violation']), { timeout: 3000 });
+    expect(failures[0]!.error).toMatchObject({ code: 'extension.failed', details: { limit: 'message-rate.messages' } });
+    expect(session.state).toBe('failed');
+  });
+
+  it('counts the measured bytes too', async () => {
+    const { session, failures, raw } = connect({ activate() {} }, {}, ['settings'], { messageBytesBurst: 1024 * 1024, messageBytesPerSecond: 1024 });
+    await session.activate();
+    // Results for invocations the host never made: well-formed, dropped, but each one is still paid for.
+    for (let n = 0; n < 5; n++) raw({ type: 'result', invocation: 1000 + n, ok: true, value: 'x'.repeat(128 * 1024) });
+    await vi.waitFor(() => expect(failures).toMatchObject([{ kind: 'protocol-violation', error: { details: { limit: 'message-rate.bytes' } } }]));
+  });
+
+  it('counts invalid messages against the rate as well as the invalid-message limit', async () => {
+    const { session, failures, raw } = connect({ activate() {} }, {}, ['settings'], { messageBurst: 20, messagesPerSecond: 1, maxInvalidMessages: 1000 });
+    await session.activate();
+    for (let n = 0; n < 30; n++) raw({ type: 'garbage', n });
+    await vi.waitFor(() => expect(failures).toMatchObject([{ kind: 'protocol-violation', error: { details: { limit: 'message-rate.messages' } } }]));
+  });
+
+  it('lets a runtime that stays within the rate keep running', async () => {
+    const { session, failures, raw } = connect({ activate() {} }, {}, ['settings'], { messageBurst: 100, messagesPerSecond: 1000 });
+    await session.activate();
+    for (let round = 0; round < 5; round++) {
+      for (let n = 0; n < 60; n++) raw({ type: 'pong', n });
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(failures).toEqual([]);
+    expect(session.state).toBe('active');
+  });
+
+  it('paces an extension calling the host in a tight loop, so it slows down instead of failing', async () => {
+    let calls = 0;
+    const write = vi.fn(() => { calls++; return null; });
+    const { session, failures } = connect({
+      activate(c: ExtensionContext) {
+        c.commands.register('com.example.spoof.run', async () => {
+          const log = c.log as { write(entry: unknown): Promise<unknown> };
+          const until = performance.now() + 1500;
+          const loop = async () => { while (performance.now() < until) await log.write('busy'); };
+          await Promise.all(Array.from({ length: 16 }, loop));
+          return 'done';
+        });
+      },
+    }, { 'log.write': write });
+    await expect(session.invoke('com.example.spoof.run', {})).resolves.toBe('done');
+    expect(failures).toEqual([]);
+    expect(session.state).toBe('active');
+    // The burst plus the paced rate for the run, with room for timer slack.
+    expect(calls).toBeGreaterThan(5000);
+    expect(calls).toBeLessThan(1000 + 5000 * 2);
+  });
+
+  it('never sends a paced call that was cancelled while it waited', async () => {
+    const write = vi.fn((_entry: unknown) => null);
+    const { session, failures } = connect({
+      activate(c: ExtensionContext) {
+        c.commands.register('com.example.spoof.run', async () => {
+          const log = c.log as { write(entry: unknown, options?: { signal?: AbortSignal }): Promise<unknown> };
+          // More calls than the pacing burst, so the next one has to wait its turn.
+          const burst = Array.from({ length: 3000 }, () => log.write('burst'));
+          const controller = new AbortController();
+          const late = log.write('late', { signal: controller.signal });
+          controller.abort();
+          const outcome = await late.then(() => 'sent', (e: { code?: string }) => e.code);
+          await Promise.all(burst);
+          await log.write('after');
+          return outcome;
+        });
+      },
+    }, { 'log.write': write });
+    await expect(session.invoke('com.example.spoof.run', {})).resolves.toBe('cancelled');
+    expect(write.mock.calls.map(([entry]) => entry)).not.toContain('late');
+    expect(write).toHaveBeenCalledTimes(3001);
+    expect(failures).toEqual([]);
+  });
+});
+
+describe('message backlog', () => {
+  /** A port the test drives by hand: what the host posts is recorded, and messages are delivered when the test says. */
+  function manual(limits = {}) {
+    const posted: Record<string, unknown>[] = [];
+    let handler: (message: unknown) => void = () => {};
+    let closed = false;
+    const port: RuntimePort = { post: (m) => posted.push(m as Record<string, unknown>), listen: (h) => { handler = h; return () => { handler = () => {}; }; }, close: () => { closed = true; } };
+    const failures: SessionFailure[] = [];
+    const session = new ExtensionSession({ manifest, grants: [], port, limits: { backlogProbeMessages: 10, backlogMs: 50, ...limits }, onFailure: (f) => failures.push(f) });
+    const pings = () => posted.filter((m) => m.type === 'ping');
+    return { session, failures, pings, deliver: (m: unknown) => handler(m), closed: () => closed };
+  }
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  it('asks for a heartbeat after a run of messages, with a number that cannot be guessed', () => {
+    const { pings, deliver } = manual();
+    for (let n = 0; n < 10; n++) deliver({ type: 'pong', n });
+    expect(pings()).toHaveLength(1);
+    expect(pings()[0]!.n).not.toBeLessThan(10);
+  });
+
+  it('fails a runtime whose answer stays queued behind its own messages, and closes its port', async () => {
+    const { failures, pings, deliver, closed } = manual();
+    for (let n = 0; n < 10; n++) deliver({ type: 'pong', n });
+    expect(pings()).toHaveLength(1);
+    await wait(60);
+    for (let n = 0; n < 10; n++) deliver({ type: 'pong', n });
+    expect(failures).toMatchObject([{ kind: 'protocol-violation', error: { details: { limit: 'message-rate.backlog' } } }]);
+    expect(closed()).toBe(true);
+  });
+
+  it('keeps a runtime that answers in time, and asks again after the next run', async () => {
+    const { failures, pings, deliver } = manual();
+    for (let n = 0; n < 10; n++) deliver({ type: 'pong', n });
+    deliver({ type: 'pong', n: pings()[0]!.n });
+    await wait(60);
+    for (let n = 0; n < 9; n++) deliver({ type: 'pong', n });
+    expect(pings()).toHaveLength(1);
+    deliver({ type: 'pong', n: 9 });
+    expect(pings()).toHaveLength(2);
+    expect(failures).toEqual([]);
+  });
+
+  it('tolerates a slow answer while few messages arrive, as from a runtime busy with its own work', async () => {
+    const { failures, deliver } = manual();
+    for (let n = 0; n < 10; n++) deliver({ type: 'pong', n });
+    await wait(60);
+    for (let n = 0; n < 5; n++) deliver({ type: 'pong', n });
+    expect(failures).toEqual([]);
   });
 });

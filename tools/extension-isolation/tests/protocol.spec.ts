@@ -34,7 +34,7 @@ for (let i = 0; i < 100; i++) deep = { deeper: deep };
 const SPOOFER = {
   id: 'com.example.spoofer',
   permissions: ['settings', 'model.read'] as const,
-  commands: ['spoof', 'flood', 'haunt', 'flood-valid', 'flood-sustained'],
+  commands: ['spoof', 'flood', 'haunt', 'flood-valid', 'flood-sustained', 'flood-bytes'],
   files: {
     'main.js': `${CAPTURE}
 export function activate(context) {
@@ -81,10 +81,38 @@ export function activate(context) {
     }
     return bursts;
   });
+  context.commands.register('com.example.spoofer.flood-bytes', async (params) => {
+    // Results for invocations the host never made: well-formed and dropped, but each is received and measured.
+    const value = 'x'.repeat(params.chars);
+    const started = Date.now();
+    for (let n = 0; n < params.count; n++) send({ type: 'result', invocation: 900000 + n, ok: true, value });
+    return Date.now() - started;
+  });
   context.commands.register('com.example.spoofer.flood-valid', async (params) => {
     const started = Date.now();
     for (let n = 0; n < params.count; n++) send({ type: 'pong', n });
     return Date.now() - started;
+  });
+}`,
+  },
+};
+
+/**
+ * A well-behaved extension that calls the host in a tight loop, one call after another or many at once. The runtime
+ * paces its calls below the host's budget, so it slows down and keeps running.
+ */
+const BUSY = {
+  id: 'com.example.busy',
+  commands: ['calls'],
+  files: {
+    'main.js': `
+export function activate(context) {
+  context.commands.register('com.example.busy.calls', async (params) => {
+    const until = performance.now() + params.ms;
+    let calls = 0;
+    const loop = async () => { while (performance.now() < until) { await context.log.write('busy'); calls++; } };
+    await Promise.all(Array.from({ length: params.width }, loop));
+    return calls;
   });
 }`,
   },
@@ -178,40 +206,74 @@ test.describe('Forged handshakes from other windows', () => {
 });
 
 /**
- * Known gap in Chromium, kept as an expected failure until it is fixed (remove the marker then): the host has no cap
- * on the rate of well-formed messages. Each one is deserialized, measured and validated on the editor's thread, and
- * Chromium delivers a runtime's backlog without yielding to the editor's other work, so a runtime posting hundreds of
- * thousands of them (for example `pong`) stalls the editor until the backlog is handled; only the heartbeat ends a
- * sustained flood, after many seconds. Firefox handles the same flood slowly but stays responsive.
+ * A runtime may send at most 5,000 messages at once and 10,000 a second, and 64 MiB at once and 32 MiB a second.
+ * Past either, the session fails as a protocol violation and the runtime is ended, which drops its backlog, so the
+ * editor stalls for at most the time it takes to handle the burst. Without the budget, Chromium handled a backlog of
+ * 200,000 messages without yielding (a stall of about half a second) and a sustained flood froze the editor for
+ * seconds at a time until the heartbeat ended it; Firefox stayed responsive but took about a minute to drain it.
  */
-const KNOWN_FLOOD_GAP = 'Known gap: no cap on the rate of well-formed runtime messages (see README.md).';
+async function flood(page: Page, command: string, params: Record<string, number>) {
+  const handle = await page.evaluate((spec) => window.isolation.start(spec), SPOOFER);
+  await page.evaluate((h) => window.isolation.invoke(h, 'spoof', {}, { document: 'doc-a' }), handle);
+  // The ticks keep running for a second after the invocation ends, to show the editor stays responsive afterwards too.
+  const measured = await page.evaluate(({ h, command, params }) => window.isolation.ticksDuring(1000, () => window.isolation.invoke(h, command, params, { timeoutMs: 150_000 })), { h: handle, command, params });
+  const after = await page.evaluate((h) => window.isolation.info(h), handle);
+  const endedMs = measured.elapsedMs - 1000;
+  test.info().annotations.push({ type: 'flood', description: `${command} ${JSON.stringify(params)}: invocation ${JSON.stringify(measured.value)} after ${endedMs} ms; ${measured.ticks} editor ticks of 10 ms, longest gap ${measured.longestGapMs} ms; session ${after.state} ${after.failures.join(',')} ${after.failureDetails.join(',')}, ${after.frames} frames` });
+  return { measured, after, endedMs };
+}
 
 test.describe('Flooding the host with valid messages', () => {
-  test('keeps the editor thread responsive during a sustained flood', async ({ browser, browserName }, info) => {
-    test.fail(browserName === 'chromium', KNOWN_FLOOD_GAP);
-    // Firefox stays responsive but works through the backlog slowly.
-    test.setTimeout(180_000);
+  test('a sustained flood is ended within seconds, and the editor stays responsive throughout', async ({ browser }, info) => {
     const page = await openHarness(browser, info);
-    const handle = await page.evaluate((spec) => window.isolation.start(spec), SPOOFER);
-    await page.evaluate((h) => window.isolation.invoke(h, 'spoof', {}, { document: 'doc-a' }), handle);
-    const measured = await page.evaluate((h) => window.isolation.ticksDuring(0, () => window.isolation.invoke(h, 'flood-sustained', { ms: 4000, burst: 100_000, pause: 100 }, { timeoutMs: 150_000 })), handle);
-    const after = await page.evaluate((h) => window.isolation.info(h), handle);
-    test.info().annotations.push({ type: 'flood', description: `bursts of 100000 for 4 s: invocation ${JSON.stringify(measured.value)}, ${measured.elapsedMs} ms; ${measured.ticks} editor ticks of 10 ms, longest gap ${measured.longestGapMs} ms; session ${after.state} ${after.failures.join(',')}` });
+    const { measured, after, endedMs } = await flood(page, 'flood-sustained', { ms: 4000, burst: 100_000, pause: 100 });
+    expect(after).toMatchObject({ state: 'failed', failures: ['protocol-violation'], frames: 0 });
+    expect(measured.value).toMatchObject({ ok: false, error: { code: 'cancelled' } });
+    expect(endedMs).toBeLessThan(3000);
+    // An editor that froze while handling the flood shows a long gap between its ticks.
     expect(measured.longestGapMs).toBeLessThan(250);
     await page.close();
   });
-  for (const count of [20_000, 200_000]) {
-    test(`keeps the editor thread responsive while ${count} well-formed messages arrive`, async ({ browser, browserName }, info) => {
-      test.fail(browserName === 'chromium' && count > 100_000, KNOWN_FLOOD_GAP);
+  test('200000 well-formed messages at once end the runtime, and the editor stays responsive', async ({ browser }, info) => {
+    const page = await openHarness(browser, info);
+    const { measured, after, endedMs } = await flood(page, 'flood-valid', { count: 200_000 });
+    expect(after).toMatchObject({ state: 'failed', failures: ['protocol-violation'], frames: 0 });
+    expect(endedMs).toBeLessThan(3000);
+    expect(measured.longestGapMs).toBeLessThan(250);
+    await page.close();
+  });
+  test('400 MiB of well-formed messages at once end the runtime, and the editor stays responsive', async ({ browser }, info) => {
+    const page = await openHarness(browser, info);
+    const { measured, after, endedMs } = await flood(page, 'flood-bytes', { count: 400, chars: 512 * 1024 });
+    expect(after).toMatchObject({ state: 'failed', failures: ['protocol-violation'], frames: 0 });
+    expect(endedMs).toBeLessThan(3000);
+    expect(measured.longestGapMs).toBeLessThan(250);
+    await page.close();
+  });
+  test('2000 well-formed messages at once are within the budget', async ({ browser }, info) => {
+    const page = await openHarness(browser, info);
+    const { measured, after } = await flood(page, 'flood-valid', { count: 2000 });
+    expect(measured.value).toMatchObject({ ok: true });
+    expect(after).toMatchObject({ state: 'active', failures: [] });
+    expect(measured.longestGapMs).toBeLessThan(250);
+    await page.close();
+  });
+});
+
+test.describe('A busy extension within the message budget', () => {
+  for (const width of [1, 32]) {
+    test(`keeps running while it makes host calls as fast as it can, ${width} at a time`, async ({ browser }, info) => {
       const page = await openHarness(browser, info);
-      const handle = await page.evaluate((spec) => window.isolation.start(spec), SPOOFER);
-      await page.evaluate((h) => window.isolation.invoke(h, 'spoof', {}, { document: 'doc-a' }), handle);
-      const measured = await page.evaluate(({ h, count }) => window.isolation.ticksDuring(0, () => window.isolation.invoke(h, 'flood-valid', { count }, { timeoutMs: 40_000 })), { h: handle, count });
+      const handle = await page.evaluate((spec) => window.isolation.start(spec), BUSY);
+      const measured = await page.evaluate(({ h, width }) => window.isolation.ticksDuring(0, () => window.isolation.invoke(h, 'calls', { ms: 3000, width })), { h: handle, width });
       const after = await page.evaluate((h) => window.isolation.info(h), handle);
-      test.info().annotations.push({ type: 'flood', description: `${count} messages: invocation ${JSON.stringify(measured.value)}, handled in ${measured.elapsedMs} ms; longest gap between 10 ms editor ticks ${measured.longestGapMs} ms; session ${after.state} ${after.failures.join(',')}` });
-      // An editor that froze while handling the flood shows a long gap between its ticks.
+      const calls = (measured.value as { value?: number }).value ?? 0;
+      test.info().annotations.push({ type: 'busy', description: `${calls} calls in 3 s (${Math.round(calls / 3)} per second), ${width} at a time; longest gap between 10 ms editor ticks ${measured.longestGapMs} ms; session ${after.state} ${after.failures.join(',')}` });
+      expect(measured.value, JSON.stringify(measured.value)).toMatchObject({ ok: true });
+      expect(after.state).toBe('active');
       expect(measured.longestGapMs).toBeLessThan(250);
       await page.close();
     });
   }
 });
+

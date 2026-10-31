@@ -43,6 +43,8 @@ interface Started {
   readonly session: ExtensionSession;
   readonly calls: ServiceCallRecord[];
   readonly failures: SessionFailure['kind'][];
+  /** The limit each failure names, if any, such as `message-rate.messages`. */
+  readonly failureDetails: string[];
   readonly errors: string[];
 }
 
@@ -92,16 +94,18 @@ async function start(spec: PackageSpec, options: StartOptions = {}): Promise<num
   });
   const calls: ServiceCallRecord[] = [];
   const failures: SessionFailure['kind'][] = [];
+  const failureDetails: string[] = [];
   const session = new ExtensionSession({
     manifest, grants: options.grants ?? manifest.permissions, port: runtime.port, services: recordingServices(calls),
     limits: options.limits ?? {},
     onFailure: (failure) => {
       failures.push(failure.kind);
+      if (typeof failure.error.details?.limit === 'string') failureDetails.push(failure.error.details.limit);
       if (options.terminateOnFailure !== false) runtime.terminate();
     },
   });
   const handle = nextHandle++;
-  started.set(handle, { runtime, session, calls, failures, errors });
+  started.set(handle, { runtime, session, calls, failures, failureDetails, errors });
   return handle;
 }
 
@@ -123,8 +127,8 @@ async function invoke(handle: number, command: string, params: unknown = {}, opt
 }
 
 function info(handle: number) {
-  const { session, calls, failures, errors } = get(handle);
-  return { state: session.state, generation: session.generation, invalidMessages: session.invalidMessages, calls: [...calls], failures: [...failures], errors: [...errors], frames: document.querySelectorAll('iframe').length };
+  const { session, calls, failures, failureDetails, errors } = get(handle);
+  return { state: session.state, generation: session.generation, invalidMessages: session.invalidMessages, calls: [...calls], failures: [...failures], failureDetails: [...failureDetails], errors: [...errors], frames: document.querySelectorAll('iframe').length };
 }
 
 async function stop(handle: number) {

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import {
-  ExtensionError, RUNTIME_PROTOCOL_VERSION, measureMessage, methodPermission, runtimeMessageSchema, serviceAvailable,
-  type DeactivationReason, type ExtensionErrorData, type ExtensionManifest, type ExtensionPermission,
-  type ExtensionServiceName, type RuntimeMessage,
+  ExtensionError, MESSAGE_RATE_LIMITS, RUNTIME_PROTOCOL_VERSION, TokenBucket, measureMessage, methodPermission,
+  runtimeMessageSchema, serviceAvailable, type DeactivationReason, type ExtensionErrorData, type ExtensionManifest,
+  type ExtensionPermission, type ExtensionServiceName, type RuntimeMessage,
 } from '@pushform/extension-protocol';
 import type { RuntimePort } from './port';
 
@@ -63,6 +63,27 @@ export interface SessionLimits {
   readonly maxPendingRequests: number;
   /** Invalid messages tolerated before the session fails as a protocol violation and the runtime is to be ended. */
   readonly maxInvalidMessages: number;
+  /**
+   * How many messages the runtime may send at once and per second, of any kind, before the session fails as a
+   * protocol violation and the runtime is to be ended. Counted before a message is measured or parsed.
+   */
+  readonly messageBurst: number;
+  readonly messagesPerSecond: number;
+  /** The same for the measured size of the messages, in bytes. */
+  readonly messageBytesBurst: number;
+  readonly messageBytesPerSecond: number;
+  /**
+   * After this many messages, the host asks the runtime for a heartbeat answer, whatever its state. The runtime
+   * answers at once, but the answer queues behind everything it sent before, so a late answer measures how far
+   * behind the host is on this runtime's messages.
+   */
+  readonly backlogProbeMessages: number;
+  /**
+   * How long that answer may take while the runtime keeps sending (at least `backlogProbeMessages` more) before the
+   * session fails as a protocol violation. This ends a flood that the rate alone would let drain for a long time,
+   * where the browser handles messages more slowly than the rate allows.
+   */
+  readonly backlogMs: number;
   /** How often an active runtime is asked to answer a heartbeat. */
   readonly heartbeatMs: number;
   /**
@@ -74,7 +95,9 @@ export interface SessionLimits {
 
 export const DEFAULT_SESSION_LIMITS: SessionLimits = {
   loadMs: 10_000, activateMs: 10_000, deactivateMs: 2_000, maxPendingRequests: 32, maxInvalidMessages: 50,
-  heartbeatMs: 2_000, unresponsiveMs: 10_000,
+  heartbeatMs: 2_000, unresponsiveMs: 10_000, backlogProbeMessages: 1_000, backlogMs: 1_000,
+  messageBurst: MESSAGE_RATE_LIMITS.messages.burst, messagesPerSecond: MESSAGE_RATE_LIMITS.messages.perSecond,
+  messageBytesBurst: MESSAGE_RATE_LIMITS.bytes.burst, messageBytesPerSecond: MESSAGE_RATE_LIMITS.bytes.perSecond,
 };
 
 export type SessionState = 'loading' | 'loaded' | 'activating' | 'active' | 'deactivating' | 'stopped' | 'failed';
@@ -150,11 +173,15 @@ export class ExtensionSession {
   private lastUserAction = -Infinity;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private lastPong = 0;
-  private nextPing = 1;
+  /** The heartbeat the runtime has not answered yet: its random number, when it was sent, messages received since. */
+  private ping: { n: number; sentAt: number; received: number } | null = null;
+  private sinceAnswer = 0;
   private readonly invocations = new Map<number, PendingInvocation>();
   private readonly requests = new Map<number, AbortController>();
   private readonly unlisten: () => void;
   private readonly loadTimer: ReturnType<typeof setTimeout>;
+  private readonly messageBudget: TokenBucket;
+  private readonly byteBudget: TokenBucket;
   /** Messages from the runtime that failed validation and were dropped without effect. */
   invalidMessages = 0;
 
@@ -170,6 +197,9 @@ export class ExtensionSession {
     this.onActivated = options.onActivated;
     this.beforeActivate = options.beforeActivate;
     this.contributions = new Set(options.manifest.contributions.map((c) => c.id));
+    const now = performance.now();
+    this.messageBudget = new TokenBucket(this.limits.messageBurst, this.limits.messagesPerSecond, now);
+    this.byteBudget = new TokenBucket(this.limits.messageBytesBurst, this.limits.messageBytesPerSecond, now);
     let settleLoad!: { resolve(): void; reject(error: ExtensionError): void };
     this.loaded = new Promise<void>((resolve, reject) => { settleLoad = { resolve, reject }; });
     this.loaded.catch(() => {});
@@ -332,8 +362,18 @@ export class ExtensionSession {
         this.fail('unresponsive', new ExtensionError('extension.failed', 'The extension stopped responding and was ended.'), () => {});
         return;
       }
-      this.port.post({ type: 'ping', n: this.nextPing++ });
+      if (!this.ping) this.sendPing(performance.now());
     }, this.limits.heartbeatMs);
+  }
+
+  /**
+   * Asks the runtime to answer. The number is random, so only a runtime that read this ping can answer it, and only
+   * one ping is outstanding at a time: the runtime answers each at once, and its answers arrive in order.
+   */
+  private sendPing(now: number): void {
+    const [high, low] = crypto.getRandomValues(new Uint32Array(2));
+    this.ping = { n: (high! & 0x1f_ffff) * 0x1_0000_0000 + low!, sentAt: now, received: 0 };
+    this.port.post({ type: 'ping', n: this.ping.n });
   }
 
   private stopHeartbeat(): void {
@@ -360,14 +400,27 @@ export class ExtensionSession {
     this.requests.clear();
     reject(error);
     this.unlisten();
+    // Closing the port also drops whatever the runtime has queued, so a flood ends here rather than when it drains.
+    this.port.close();
     this.onFailure?.({ kind, error: error.toJSON() });
   }
 
   private receive(raw: unknown, lifecycle: (message: RuntimeMessage) => void): void {
     if (this.currentState === 'stopped' || this.currentState === 'failed') return;
-    // Size first, before anything reads the message. An oversized request or result still gets its structured
+    // The rate first, before the message is looked at: a flooding runtime costs the editor one count per message
+    // until its budget runs out, and then nothing.
+    const now = performance.now();
+    if (!this.messageBudget.take(1, now)) return this.flooded('messages', `more than ${this.limits.messagesPerSecond} messages a second`);
+    if (this.ping) {
+      if (++this.ping.received >= this.limits.backlogProbeMessages && now - this.ping.sentAt > this.limits.backlogMs)
+        return this.flooded('backlog', 'messages faster than PushForm could handle them');
+    } else if (++this.sinceAnswer >= this.limits.backlogProbeMessages) this.sendPing(now);
+    // Size next, before anything reads the message. An oversized request or result still gets its structured
     // answer, so the extension learns why instead of waiting forever.
-    if (measureMessage(raw) === null) {
+    const bytes = measureMessage(raw);
+    if (bytes !== null && !this.byteBudget.take(bytes, now))
+      return this.flooded('bytes', `more than ${Math.round(this.limits.messageBytesPerSecond / (1024 * 1024))} MiB of messages a second`);
+    if (bytes === null) {
       this.invalid();
       const fields = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : {};
       const tooLarge = new ExtensionError('limit.exceeded', 'The message is larger than an extension may send.');
@@ -421,9 +474,18 @@ export class ExtensionSession {
         this.stopped?.resolve();
         return;
       case 'pong':
-        this.lastPong = performance.now();
+        // Only the answer to the outstanding ping counts; any other pong is well-formed and ignored.
+        if (message.n !== this.ping?.n) return;
+        this.lastPong = now;
+        this.ping = null;
+        this.sinceAnswer = 0;
         return;
     }
+  }
+
+  /** The runtime sent faster than its budget allows: the session fails, and the runtime is to be ended. */
+  private flooded(limit: 'messages' | 'bytes' | 'backlog', rate: string): void {
+    this.fail('protocol-violation', new ExtensionError('extension.failed', `The extension sent ${rate} and was stopped.`, { limit: `message-rate.${limit}` }), () => {});
   }
 
   /** Counts a dropped message; a runtime that keeps sending them is treated as hostile and its session fails. */

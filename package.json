@@ -18,6 +18,7 @@
     "dev:local": "pnpm --filter @pushform/app-web exec vite --mode localdb",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:isolation": "pnpm --filter @pushform/extension-isolation test",
     "typecheck": "tsc -b tsconfig.json",
     "lint": "eslint .",
     "format": "prettier --write .",

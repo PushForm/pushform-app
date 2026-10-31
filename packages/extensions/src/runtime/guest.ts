@@ -2,8 +2,8 @@
 // Copyright 2026 PushForm contributors
 // Only the dependency-free core: this file runs inside every extension runtime, where size matters.
 import {
-  EXTENSION_SERVICES, ExtensionError, RUNTIME_PROTOCOL_VERSION, isHostMessage, methodPermission, serviceAvailable,
-  servicePermissions, type ExtensionErrorData, type ExtensionServiceName, type ServiceAccess,
+  EXTENSION_SERVICES, ExtensionError, MESSAGE_RATE_LIMITS, RUNTIME_PROTOCOL_VERSION, TokenBucket, isHostMessage,
+  methodPermission, serviceAvailable, servicePermissions, type ExtensionErrorData, type ExtensionServiceName, type ServiceAccess,
 } from '@pushform/extension-protocol/runtime-core';
 import type { ExtensionPermission, HostMessage } from '@pushform/extension-protocol';
 import type { RuntimePort } from './port';
@@ -89,14 +89,43 @@ export async function startGuest(port: RuntimePort, loadMain: () => Promise<unkn
   let contributions = new Set<string>();
   let state: 'loaded' | 'activating' | 'active' | 'stopped' = 'loaded';
 
+  // Host calls are paced below the host's message budget, so an extension calling in a tight loop waits for its
+  // turn instead of being failed for flooding. Calls keep their order; a call cancelled while waiting is never sent.
+  const pace = new TokenBucket(MESSAGE_RATE_LIMITS.requests.burst, MESSAGE_RATE_LIMITS.requests.perSecond, performance.now());
+  let waiting: (() => void)[] = [];
+  let next = 0;
+  let drainTimer: ReturnType<typeof setTimeout> | null = null;
+  const drain = () => {
+    drainTimer = null;
+    while (next < waiting.length) {
+      const wait = pace.wait(1, performance.now());
+      if (wait > 0) {
+        drainTimer = setTimeout(drain, Math.max(1, Math.ceil(wait)));
+        return;
+      }
+      pace.take(1, performance.now());
+      const send = waiting[next]!;
+      waiting[next++] = () => {};
+      send();
+    }
+    waiting = [];
+    next = 0;
+  };
+  const paced = (send: () => void) => {
+    if (next === waiting.length && pace.take(1, performance.now())) return send();
+    waiting.push(send);
+    if (drainTimer === null) drain();
+  };
+
   const request = (service: string, method: string, input: unknown, options: CallOptions = {}): Promise<unknown> => {
     const signal = options.signal ? AbortSignal.any([options.signal, lifetime.signal]) : lifetime.signal;
     if (signal.aborted) return Promise.reject(cancelled());
     const id = nextRequest++;
     return new Promise((resolve, reject) => {
+      let sent = false;
       const onAbort = () => {
         if (!pending.delete(id)) return;
-        port.post({ type: 'cancel-request', id });
+        if (sent) port.post({ type: 'cancel-request', id });
         reject(cancelled());
       };
       signal.addEventListener('abort', onAbort, { once: true });
@@ -105,7 +134,18 @@ export async function startGuest(port: RuntimePort, loadMain: () => Promise<unkn
         reject: (error) => { signal.removeEventListener('abort', onAbort); reject(error); },
         ...(typeof options.onProgress === 'function' ? { progress: options.onProgress } : {}),
       });
-      port.post({ type: 'request', id, service, method, input });
+      paced(() => {
+        const waiter = pending.get(id);
+        if (!waiter) return;
+        try {
+          port.post({ type: 'request', id, service, method, input });
+          sent = true;
+        } catch (error) {
+          // Input that cannot be cloned fails the call, as it would have failed sending it.
+          pending.delete(id);
+          waiter.reject(error as Error);
+        }
+      });
     });
   };
 

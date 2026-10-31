@@ -141,6 +141,7 @@ export class Viewport {
   /** Linear fog between `near` and `far` meters from the eye; `enabled: false` removes it. */
   setFog(settings: RenderFog): void {
     this.fogSettings = settings;
+    this.sky.setFog(settings);
     if (!settings.enabled || settings.far <= 0) {
       this.scene.fog = null;
     } else {

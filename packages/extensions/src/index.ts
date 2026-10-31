@@ -10,3 +10,5 @@ export * from './runtime/web/frameBootstrap';
 export * from './runtime/web/link';
 export * from './runtime/web/lockdown';
 export * from './runtime/web/webRuntime';
+export * from './runtime/compute';
+export * from './runtime/computeWorker';

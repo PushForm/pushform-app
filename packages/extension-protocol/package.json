@@ -7,7 +7,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./runtime-core": "./src/runtimeCore.ts"
+    "./runtime-core": "./src/runtimeCore.ts",
+    "./wasm": "./src/wasm.ts"
   },
   "types": "./src/index.ts",
   "sideEffects": false,

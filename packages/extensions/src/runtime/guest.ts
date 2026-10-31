@@ -18,6 +18,8 @@ import type { RuntimePort } from './port';
 
 export interface CallOptions {
   readonly signal?: AbortSignal;
+  /** Progress of a long host call, such as a compute job: a fraction (or null) and the best partial result so far. */
+  readonly onProgress?: (update: { value: number | null; partial?: unknown }) => void;
 }
 
 /** Passed to every contribution handler with its parameters. */
@@ -79,7 +81,7 @@ export async function startGuest(port: RuntimePort, loadMain: () => Promise<unkn
   }
 
   let nextRequest = 1;
-  const pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>();
+  const pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void; progress?: CallOptions['onProgress'] }>();
   const handlers = new Map<string, ContributionHandler>();
   const invocations = new Map<number, AbortController>();
   const uiHandlers = new Set<UiEventHandler>();
@@ -101,6 +103,7 @@ export async function startGuest(port: RuntimePort, loadMain: () => Promise<unkn
       pending.set(id, {
         resolve: (value) => { signal.removeEventListener('abort', onAbort); resolve(value); },
         reject: (error) => { signal.removeEventListener('abort', onAbort); reject(error); },
+        ...(typeof options.onProgress === 'function' ? { progress: options.onProgress } : {}),
       });
       port.post({ type: 'request', id, service, method, input });
     });
@@ -227,6 +230,16 @@ export async function startGuest(port: RuntimePort, loadMain: () => Promise<unkn
       case 'deactivate':
         if (state !== 'stopped') void stop().catch(() => {});
         return;
+      case 'progress': {
+        const update = message as unknown as { id: number; value: number | null; partial?: unknown };
+        const waiter = pending.get(update.id);
+        try {
+          waiter?.progress?.('partial' in update ? { value: update.value, partial: update.partial } : { value: update.value });
+        } catch {
+          // A failing progress handler must not end the call.
+        }
+        return;
+      }
       case 'event': {
         if (state !== 'active') return;
         const { type: _type, ...event } = message as unknown as { type: string; target: string; component: string; event: string };

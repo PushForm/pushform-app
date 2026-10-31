@@ -58,7 +58,7 @@ export const EXTENSION_SERVICES = {
   clipboard: { write: 'clipboard.write' },
   http: { fetch: 'network' },
   compute: { run: null },
-  wasm: { load: null },
+  wasm: { load: null, call: null, unload: null },
   log: { write: null },
 } as const satisfies Record<string, Record<string, ExtensionPermission | null>>;
 export type ExtensionServiceName = keyof typeof EXTENSION_SERVICES;
@@ -93,7 +93,7 @@ export function servicePermissions(service: ExtensionServiceName): ExtensionPerm
  * Whether a message has the shape of a host message. The host is trusted, so this only guards the runtime against
  * stray messages on its port; the host checks every runtime message against the full schema.
  */
-export function isHostMessage(value: unknown): value is { type: 'activate' | 'invoke' | 'cancel' | 'response' | 'deactivate' | 'event' } & Record<string, unknown> {
+export function isHostMessage(value: unknown): value is { type: 'activate' | 'invoke' | 'cancel' | 'response' | 'deactivate' | 'event' | 'progress' } & Record<string, unknown> {
   if (typeof value !== 'object' || value === null) return false;
   const message = value as Record<string, unknown>;
   const int = (key: string) => Number.isSafeInteger(message[key]) && (message[key] as number) >= 0;
@@ -109,6 +109,8 @@ export function isHostMessage(value: unknown): value is { type: 'activate' | 'in
       return int('id') && (message.ok === true || (message.ok === false && typeof message.error === 'object' && message.error !== null));
     case 'deactivate':
       return typeof message.reason === 'string';
+    case 'progress':
+      return int('id') && (message.value === null || typeof message.value === 'number');
     case 'event':
       return typeof message.target === 'string' && typeof message.component === 'string' && typeof message.event === 'string';
     default:

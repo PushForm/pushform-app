@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { ExtensionError } from '@pushform/extension-protocol';
+import type { ComputeWorkerHandle } from '../compute';
 import { messagePortTransport, type RuntimePort } from '../port';
 import { runtimeFrameDocument } from './frameBootstrap';
 
@@ -20,6 +21,8 @@ export interface WebRuntimeOptions {
   readonly wasm: boolean;
   /** Source of the worker bootstrap, a classic script (see `workerBootstrap.ts`). */
   readonly workerSource: string;
+  /** Source of the compute bootstrap (see `computeBootstrap.ts`); used only when `wasm` is true. */
+  readonly computeSource?: string;
   /** Where the hidden frame is attached; the document body by default. */
   readonly container?: HTMLElement;
   /** Time allowed for the frame to answer the handshake. */
@@ -33,6 +36,11 @@ export interface WebRuntime {
   readonly port: RuntimePort;
   /** Stops the worker and removes the frame. Safe to call more than once. */
   terminate(): void;
+  /**
+   * Starts a compute worker in the runtime's frame, under the same policy and origin but apart from the extension's
+   * worker. Fails when the package declares no WebAssembly modules or the browser refuses the worker.
+   */
+  startCompute(): Promise<ComputeWorkerHandle>;
 }
 
 export const DEFAULT_HANDSHAKE_MS = 5000;
@@ -71,8 +79,15 @@ export function startWebRuntime(options: WebRuntimeOptions): Promise<WebRuntime>
       cleanup();
       const [protocol, control] = event.ports as unknown as [MessagePort, MessagePort];
       let reported = false;
+      let nextCompute = 1;
+      const computeRequests = new Map<number, { resolve(port: MessagePort): void; reject(error: ExtensionError): void }>();
+      const computeErrors = new Map<number, () => void>();
       control.onmessage = (message: MessageEvent) => {
-        const report = message.data as { type?: unknown; message?: unknown } | null;
+        const report = message.data as { type?: unknown; message?: unknown; id?: unknown } | null;
+        const id = typeof report?.id === 'number' ? report.id : -1;
+        if (report?.type === 'compute' && message.ports[0]) { computeRequests.get(id)?.resolve(message.ports[0]); computeRequests.delete(id); return; }
+        if (report?.type === 'compute-failed') { computeRequests.get(id)?.reject(new ExtensionError('unavailable', 'The compute worker could not start.')); computeRequests.delete(id); return; }
+        if (report?.type === 'compute-error') { computeErrors.get(id)?.(); return; }
         if (report?.type !== 'error' || reported) return;
         reported = true;
         options.onError?.(new ExtensionError('extension.failed', typeof report.message === 'string' ? report.message.slice(0, 500) : 'The extension runtime failed.'));
@@ -84,7 +99,34 @@ export function startWebRuntime(options: WebRuntimeOptions): Promise<WebRuntime>
           control.postMessage({ type: 'terminate' });
           protocol.close();
           control.close();
+          for (const pending of computeRequests.values()) pending.reject(new ExtensionError('cancelled', 'The extension stopped.'));
+          computeRequests.clear();
           remove();
+        },
+        startCompute() {
+          if (removed) return Promise.reject(new ExtensionError('unavailable', 'The extension runtime has stopped.'));
+          const id = nextCompute++;
+          return new Promise<MessagePort>((resolveCompute, rejectCompute) => {
+            computeRequests.set(id, { resolve: resolveCompute, reject: rejectCompute });
+            control.postMessage({ type: 'compute', id });
+          }).then((port): ComputeWorkerHandle => {
+            let ended = false;
+            const end = () => {
+              if (ended) return;
+              ended = true;
+              computeErrors.delete(id);
+              port.close();
+              if (!removed) control.postMessage({ type: 'compute-terminate', id });
+            };
+            let listener: ((message: unknown) => void) | null = null;
+            // A worker that fails to load reports an error event; tell the listener as the module failing to start.
+            computeErrors.set(id, () => listener?.({ type: 'failed', message: 'The compute worker could not start in this browser.' }));
+            return {
+              post: (message, transfer) => { if (!ended) port.postMessage(message, transfer ?? []); },
+              listen: (handler) => { listener = handler; port.onmessage = (e) => handler(e.data); },
+              terminate: end,
+            };
+          });
         },
       });
     };
@@ -92,7 +134,8 @@ export function startWebRuntime(options: WebRuntimeOptions): Promise<WebRuntime>
     frame.addEventListener('load', () => {
       const files: Record<string, ArrayBuffer> = {};
       for (const [path, bytes] of options.files) files[path] = bytes.slice().buffer;
-      frame.contentWindow?.postMessage({ type: 'load', nonce, worker: options.workerSource, main: options.main, files }, '*', Object.values(files));
+      const compute = options.wasm && options.computeSource !== undefined ? { compute: options.computeSource } : {};
+      frame.contentWindow?.postMessage({ type: 'load', nonce, worker: options.workerSource, main: options.main, files, ...compute }, '*', Object.values(files));
     }, { once: true });
     (options.container ?? document.body).append(frame);
   });

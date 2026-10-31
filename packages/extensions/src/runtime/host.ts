@@ -31,6 +31,11 @@ export interface ServiceCall {
    * including handles of closed documents, so services never resolve a document id the extension supplied itself.
    */
   document(handle: unknown): string;
+  /**
+   * Reports progress of this call to the extension: a fraction from 0 to 1 (or null when only a partial result is
+   * new), and optionally the best partial result so far. Dropped once the call has ended or been cancelled.
+   */
+  progress(value: number | null, partial?: unknown): void;
 }
 
 /** Implements one host service method for extensions. Must return structured-cloneable data, never live objects. */
@@ -373,6 +378,11 @@ export class ExtensionSession {
       const result = await implementation(message.input, {
         signal: controller.signal, extensionId: this.manifest.id, generation: this.generation,
         document: (handle) => this.resolveDocument(handle),
+        progress: (value, partial) => {
+          if (this.requests.get(message.id) !== controller || controller.signal.aborted) return;
+          const update = { type: 'progress', id: message.id, value: value === null ? null : Math.min(1, Math.max(0, value)), ...(partial === undefined ? {} : { partial }) };
+          if (measureMessage(update) !== null) this.port.post(update);
+        },
       });
       reply = { type: 'response', id: message.id, ok: true, result: result ?? null };
     } catch (error) {

@@ -17,5 +17,8 @@
     "@pushform/extension-protocol": "workspace:*",
     "@pushform/layout": "workspace:*",
     "es-module-lexer": "^2.3.2"
+  },
+  "devDependencies": {
+    "wabt": "^1.0.39"
   }
 }

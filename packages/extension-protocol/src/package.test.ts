@@ -9,7 +9,13 @@ import {
 } from './package.ts';
 
 const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
-const WASM = new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
+/** The smallest module following the compute interface: it imports pf.memory and exports the three ABI functions. */
+export const COMPUTE_MODULE = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 16, 3, 96, 0, 1, 127, 96, 1, 127, 1, 127, 96, 2, 127, 127, 1, 127,
+  2, 14, 1, 2, 112, 102, 6, 109, 101, 109, 111, 114, 121, 2, 0, 1, 3, 4, 3, 0, 1, 2, 7, 38, 3, 14, 112, 102, 95, 97, 98, 105, 95, 118, 101,
+  114, 115, 105, 111, 110, 0, 0, 8, 112, 102, 95, 97, 108, 108, 111, 99, 0, 1, 6, 112, 102, 95, 114, 117, 110, 0, 2, 10, 17, 3, 4, 0, 65,
+  1, 11, 5, 0, 65, 128, 8, 11, 4, 0, 65, 0, 11]);
+const WASM = COMPUTE_MODULE;
+const BARE_WASM = new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
 
 const baseManifest = {
   id: 'com.example.stairs',
@@ -117,6 +123,10 @@ describe('validatePackage', () => {
     const wasm = [{ name: 'packer', file: 'wasm/packer.wasm', maxMemoryPages: 1024, timeoutMs: 60000 }];
     await expect(validatePackage(await makePackage({ wasm }, { 'wasm/packer.wasm': WASM }))).resolves.toBeDefined();
     expect(await problemOf(validatePackage(await makePackage({ wasm })))).toMatchObject({ problem: 'wasm.missing' });
+    const bare = await makePackage({ wasm }, { 'wasm/packer.wasm': BARE_WASM });
+    expect(await problemOf(validatePackage(bare))).toMatchObject({ problem: 'wasm.abi', path: 'wasm/packer.wasm' });
+    const tooSmall = await makePackage({ wasm: [{ ...wasm[0]!, maxMemoryPages: 1 }] }, { 'wasm/packer.wasm': WASM });
+    await expect(validatePackage(tooSmall)).resolves.toBeDefined();
     const notWasm = await makePackage({ wasm }, { 'wasm/packer.wasm': encode('hello') });
     expect((await problemOf(validatePackage(notWasm))).problem).toBe('wasm.invalid');
     const undeclared = await makePackage({}, { 'wasm/packer.wasm': WASM });

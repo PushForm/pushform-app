@@ -5,6 +5,7 @@ import {
   EXTENSION_API_VERSION, MANIFEST_LIMITS, extensionManifestSchema, isPackagePath, satisfiesRange,
   type ExtensionManifest, type ExtensionManifestInput,
 } from './manifest.ts';
+import { computeModuleProblems } from './wasm.ts';
 
 /**
  * Extension packages. A package is a zip archive holding `manifest.json`, the ES-module entry point and any other
@@ -37,7 +38,7 @@ const PLAIN_TEXT_NAMES = new Set(['LICENSE', 'COPYING', 'NOTICE', 'README', 'AUT
 export type PackageProblem =
   | 'archive.invalid' | 'archive.duplicate' | 'path.invalid' | 'path.case-collision' | 'file.type' | 'file.native'
   | 'manifest.missing' | 'manifest.json' | 'manifest.schema' | 'api.unsupported' | 'file.undeclared' | 'file.missing'
-  | 'file.hash' | 'main.missing' | 'main.not-module' | 'wasm.missing' | 'wasm.invalid' | 'icon.missing'
+  | 'file.hash' | 'main.missing' | 'main.not-module' | 'wasm.missing' | 'wasm.invalid' | 'wasm.abi' | 'icon.missing'
   | 'locale.missing' | 'limit.exceeded' | 'signature.invalid';
 
 /** A structured failure: a stable `code`, a readable message, and the specific problem and file. */
@@ -148,6 +149,8 @@ export async function validatePackage(files: PackageFiles, options: ValidatePack
     const bytes = files.get(module.file);
     if (!bytes) throw new ExtensionPackageError('wasm.missing', `The WASM module "${module.name}" has no file "${module.file}".`, { path: module.file });
     if (!isWasm(bytes)) throw new ExtensionPackageError('wasm.invalid', `"${module.file}" is not a WebAssembly module.`, { path: module.file });
+    const abi = computeModuleProblems(bytes, module.maxMemoryPages);
+    if (abi.length) throw new ExtensionPackageError('wasm.abi', `The WASM module "${module.name}" does not follow the compute interface: ${abi[0]}.`, { path: module.file, issues: abi });
   }
   for (const path of files.keys())
     if (path.endsWith('.wasm') && !manifest.wasm.some((m) => m.file === path))

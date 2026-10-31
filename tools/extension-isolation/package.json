@@ -1,0 +1,21 @@
+{
+  "name": "@pushform/extension-isolation",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Attack tests of the isolated web extension runtime in real browsers. Development tooling, not part of the app.",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "install-browsers": "playwright install chromium firefox webkit"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@pushform/extension-protocol": "workspace:*",
+    "@pushform/extensions": "workspace:*",
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.28.2",
+    "fflate": "^0.8.2",
+    "wabt": "^1.0.39"
+  }
+}

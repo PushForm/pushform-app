@@ -79,3 +79,32 @@ describe('installAllocationLimit', () => {
     expect(limit.live()).toBe(1000);
   });
 });
+
+describe('routes around the budget', () => {
+  // Known gaps, kept as expected failures until they are fixed (remove `.fails` then). The real-browser suite measures
+  // the same routes, together with the platform methods (structuredClone, Blob, DecompressionStream) that make
+  // uncounted buffers.
+  it.fails('keeps the original ArrayBuffer constructor out of reach of the prototype chain', () => {
+    const { scope } = limited(MiB);
+    const Original = Object.getPrototypeOf(scope.ArrayBuffer) as ArrayBufferConstructor;
+    expect(() => new Original(2 * MiB)).toThrow(RangeError);
+  });
+
+  it.fails('keeps the original ArrayBuffer constructor out of reach through a buffer', () => {
+    const { scope } = limited(MiB);
+    const Original = new scope.Uint8Array(1).buffer.constructor as ArrayBufferConstructor;
+    expect(() => new Original(2 * MiB)).toThrow(RangeError);
+  });
+
+  it.fails('keeps the original typed array constructors out of reach of the prototype chain', () => {
+    const { scope } = limited(MiB);
+    const Original = Object.getPrototypeOf(scope.Uint8Array) as Uint8ArrayConstructor;
+    expect(() => new Original(2 * MiB)).toThrow(RangeError);
+  });
+
+  it.fails('counts the new length of ArrayBuffer.prototype.transfer', () => {
+    const { scope } = limited(MiB);
+    const buffer = new scope.ArrayBuffer(8) as ArrayBuffer & { transfer(length: number): ArrayBuffer };
+    expect(() => buffer.transfer(2 * MiB)).toThrow(RangeError);
+  });
+});

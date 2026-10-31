@@ -5,18 +5,12 @@ import { browserClipboardWriter, browserFilePicker } from './browserExtensionIo'
 import { browserViewPrinter, type PrintPrompts } from './extensionPrint';
 import { indexedDbExtensionStore } from './indexedDbExtensionStore';
 
+export { browserRunsExtensions } from './browserRunsExtensions';
+
 /** The extension runtime's two worker bootstraps, bundled as classic scripts by the web build. */
 export interface ExtensionRuntimeSources {
   readonly workerSource: string;
   readonly computeSource: string;
-}
-
-/**
- * Whether this browser can run the isolated extension runtime. WebKit refuses the runtime's workers while the page is
- * cross-origin isolated, as PushForm's is, so Safari is excluded.
- */
-export function browserRunsExtensions(userAgent: string = typeof navigator === 'undefined' ? '' : navigator.userAgent): boolean {
-  return !/AppleWebKit/.test(userAgent) || /Chrome\/|Chromium\/|Edg\//.test(userAgent);
 }
 
 /** The extension platform of a signed-in account in this browser. */

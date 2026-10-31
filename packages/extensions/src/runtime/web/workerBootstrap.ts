@@ -3,7 +3,7 @@
 import { startGuest } from '../guest';
 import { messagePortTransport } from '../port';
 import { linkModules } from './link';
-import { installAllocationLimit } from './allocation';
+import { admitHostMessages, installAllocationLimit, type AllocationLimit } from './allocation';
 import { lockDownRuntime } from './lockdown';
 
 /**
@@ -11,7 +11,7 @@ import { lockDownRuntime } from './lockdown';
  * URLs in a sandboxed frame). It accepts exactly one `init` message from the frame bootstrap, carrying the verified
  * package files, the entry path and the protocol port. It links the package's modules to blob URLs, locks the
  * runtime down so no further code can be made, bounds its binary memory, and only then imports the entry module and
- * runs the lifecycle.
+ * runs the lifecycle. Binary data in the host's messages counts against the same budget.
  */
 
 interface InitMessage {
@@ -29,10 +29,11 @@ function onInit(event: MessageEvent): void {
   scope.removeEventListener('message', onInit);
   const files = new Map(Object.entries(data.files).map(([path, buffer]) => [path, new Uint8Array(buffer)] as const));
   const main = data.main;
-  void startGuest(messagePortTransport(port), async () => {
+  let limit: AllocationLimit | null = null;
+  void startGuest(admitHostMessages(messagePortTransport(port), port, () => limit), async () => {
     const mainUrl = await linkModules(files, main, (_path, source) => URL.createObjectURL(new Blob([source], { type: 'text/javascript' })));
     files.clear();
-    installAllocationLimit();
+    limit = installAllocationLimit();
     lockDownRuntime();
     return import(/* @vite-ignore */ mainUrl);
   });

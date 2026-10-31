@@ -24,6 +24,12 @@ export const UI_LIMITS = {
   tabs: 50,
   /** Items of one tree component, counting every level. */
   treeItems: 5000,
+  /** Shapes of one vector view, and coordinates (two per point) across all its polylines. */
+  vectorShapes: 20_000,
+  vectorCoordinates: 400_000,
+  vectorStyles: 64,
+  /** Characters of one vector text label. */
+  vectorTextChars: 200,
 } as const;
 
 const id = z.string().regex(/^[A-Za-z0-9_.:-]{1,100}$/, 'must be 1-100 letters, digits, or _ . : -');
@@ -43,6 +49,26 @@ const quantity = z.enum(UI_QUANTITIES);
 const finite = z.number().finite();
 
 const children = z.array(z.unknown()).max(UI_LIMITS.nodes);
+
+/** A paint style of a vector view, referred to by index. Stroke widths are screen pixels, so they stay crisp at any zoom. */
+const vectorStyle = z.strictObject({
+  fill: color.optional(), stroke: color.optional(), strokeWidth: z.number().min(0).max(20).optional(),
+  dash: z.enum(['solid', 'dashed', 'dotted']).optional(), hatch: z.boolean().optional(), opacity: z.number().min(0).max(1).optional(),
+  fontWeight: z.enum(['normal', 'bold']).optional(),
+});
+const vectorItem = { style: z.number().int().min(0), item: id.optional(), tip: z.string().max(UI_LIMITS.vectorTextChars).optional() };
+/**
+ * Vector shapes. `item` makes a shape hoverable and clickable and names it in events; several shapes may share an
+ * item. `tip` is shown on hover. Text `size` is in drawing units, and `angle` in degrees, counterclockwise.
+ */
+export const vectorShapeSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('rect'), x: finite, y: finite, width: finite.nonnegative(), height: finite.nonnegative(), ...vectorItem }),
+  z.strictObject({ kind: z.literal('polyline'), points: z.array(finite).min(4).max(UI_LIMITS.vectorCoordinates), closed: z.boolean().optional(), ...vectorItem }),
+  z.strictObject({ kind: z.literal('text'), x: finite, y: finite, text: z.string().min(1).max(UI_LIMITS.vectorTextChars), size: finite.positive(),
+    anchor: z.enum(['start', 'middle', 'end']).optional(), angle: finite.optional(), ...vectorItem }),
+]);
+export type UiVectorShape = z.infer<typeof vectorShapeSchema>;
+export type UiVectorStyle = z.infer<typeof vectorStyle>;
 
 const component = {
   stack: z.strictObject({ type: z.literal('stack'), id, children,
@@ -99,21 +125,36 @@ const component = {
     selected: z.array(id).max(UI_LIMITS.tableRows).optional(),
     hiddenColumns: z.array(id).max(UI_LIMITS.tableColumns).optional(),
   }),
+  vector: z.strictObject({
+    type: z.literal('vector'), id, label,
+    /** The drawing's extent, in its own units; x grows rightwards and y downwards. */
+    bounds: z.strictObject({ x: finite, y: finite, width: finite.positive(), height: finite.positive() }),
+    /** `length` coordinates are meters, which sets the scale of SVG and DXF exports; `plain` ones have no unit. */
+    units: z.enum(['length', 'plain']),
+    /** On-screen height in pixels; 300 when absent. */
+    height: z.number().int().min(80).max(2000).optional(),
+    styles: z.array(vectorStyle).min(1).max(UI_LIMITS.vectorStyles),
+    shapes: z.array(z.unknown()).max(UI_LIMITS.vectorShapes),
+    /** Items shown highlighted. */
+    selected: z.array(id).max(UI_LIMITS.vectorShapes).optional(),
+  }),
 };
 
 export const UI_COMPONENTS = Object.keys(component) as (keyof typeof component)[];
 const nodeSchema = z.discriminatedUnion('type', Object.values(component) as unknown as [z.ZodObject, ...z.ZodObject[]]);
 
-type Base<K extends keyof typeof component> = Omit<z.infer<(typeof component)[K]>, 'children' | 'items'>;
+type Base<K extends keyof typeof component> = Omit<z.infer<(typeof component)[K]>, 'children' | 'items' | 'shapes'>;
 export interface UiTreeItem { id: string; label: string; children?: UiTreeItem[] }
 export type UiNode =
   | (Base<'stack'> & { children: UiNode[] })
   | Base<'divider'> | Base<'text'> | Base<'message'> | Base<'progress'> | Base<'button'> | Base<'textField'>
   | Base<'numberField'> | Base<'checkbox'> | Base<'choice'> | Base<'colorField'> | Base<'table'>
   | (Base<'tabs'> & { children: UiNode[] })
-  | (Base<'tree'> & { items: UiTreeItem[] });
+  | (Base<'tree'> & { items: UiTreeItem[] })
+  | (Base<'vector'> & { shapes: UiVectorShape[] });
 export type UiNodeOf<T extends UiNode['type']> = Extract<UiNode, { type: T }>;
 export type UiTable = UiNodeOf<'table'>;
+export type UiVector = UiNodeOf<'vector'>;
 
 const treeItemSchema = z.strictObject({ id, label, children: z.array(z.unknown()).optional() });
 
@@ -170,6 +211,7 @@ export function validateUiTree(input: unknown): UiNode {
     }
     if (node.type === 'tree') return { ...node, items: checkTreeItems(node.items as unknown[], path) } as unknown as UiNode;
     if (node.type === 'table') checkTable(node as unknown as UiTable, path);
+    if (node.type === 'vector') return { ...node, shapes: checkVector(node as unknown as UiVector, node.shapes as unknown[], path) } as unknown as UiNode;
     if (node.type === 'choice') {
       const choice = node as unknown as UiNodeOf<'choice'>;
       if (choice.value !== null && !choice.options.some((o) => o.value === choice.value))
@@ -211,6 +253,28 @@ function checkTreeItems(items: unknown[], path: string): UiTreeItem[] {
   return walk(items, 0);
 }
 
+function checkVector(vector: UiVector, raw: unknown[], path: string): UiVectorShape[] {
+  // Coordinates are counted before any shape is parsed, so an oversized drawing is refused cheaply.
+  let coordinates = 0;
+  for (const shape of raw) {
+    const points = (shape as { points?: unknown } | null)?.points;
+    if (Array.isArray(points)) coordinates += points.length;
+  }
+  if (coordinates > UI_LIMITS.vectorCoordinates)
+    throw new UiTreeError('limit.exceeded', `${path}: the drawing has more than ${UI_LIMITS.vectorCoordinates} coordinates.`);
+  return raw.map((value, i) => {
+    const parsed = vectorShapeSchema.safeParse(value);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      throw new UiTreeError('validation.failed', `${path}.shapes.${i}${issue?.path.length ? '.' + issue.path.join('.') : ''}: ${issue?.message ?? 'invalid shape'}`);
+    }
+    const shape = parsed.data;
+    if (shape.style >= vector.styles.length) throw new UiTreeError('validation.failed', `${path}.shapes.${i}: there is no style ${shape.style}.`);
+    if (shape.kind === 'polyline' && shape.points.length % 2) throw new UiTreeError('validation.failed', `${path}.shapes.${i}: points must be x, y pairs.`);
+    return shape;
+  });
+}
+
 function checkTable(table: UiTable, path: string): void {
   const columns = new Map(table.columns.map((c) => [c.id, c] as const));
   if (columns.size !== table.columns.length) throw new UiTreeError('validation.failed', `${path}: column ids must be unique.`);
@@ -247,8 +311,12 @@ export type UiEvent =
   | { component: string; event: 'cellEdit'; row: string; column: string; value: string | number | boolean | null }
   | { component: string; event: 'sort'; column: string; direction: 'ascending' | 'descending' }
   | { component: string; event: 'rowSelect'; rows: string[] }
-  | { component: string; event: 'columns'; hidden: string[] };
+  | { component: string; event: 'columns'; hidden: string[] }
+  | { component: string; event: 'hover'; item: string | null };
 
 /** Requests of the `ui` service: mount or replace the tree of a target, or remove it. */
 export const uiMountSchema = z.strictObject({ target: z.string().min(1).max(200), seq: z.number().int().nonnegative(), tree: z.unknown() });
 export const uiUnmountSchema = z.strictObject({ target: z.string().min(1).max(200) });
+/** Exports a vector view on screen as SVG or DXF, written where the user chooses. */
+export const uiExportSchema = z.strictObject({ target: z.string().min(1).max(200), component: id, format: z.enum(['svg', 'dxf']),
+  purpose: z.string().trim().min(1).max(200), suggestedName: z.string().max(200).optional() });

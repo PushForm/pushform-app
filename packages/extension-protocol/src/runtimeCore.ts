@@ -50,7 +50,7 @@ export class ExtensionError extends Error {
  * `compute` and `wasm` exist only for packages that declare WASM modules.
  */
 export const EXTENSION_SERVICES = {
-  ui: { mount: null, update: null, unmount: null },
+  ui: { mount: null, update: null, unmount: null, export: 'file.export' },
   model: { read: 'model.read', query: 'model.read', subscribe: 'model.read', apply: 'model.write' },
   selection: { get: 'selection.read', set: 'selection.write', frame: 'viewport.presentation' },
   settings: { get: 'settings', set: 'settings' },

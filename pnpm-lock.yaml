@@ -372,6 +372,9 @@ importers:
       '@pushform/extension-protocol':
         specifier: workspace:*
         version: link:../extension-protocol
+      '@pushform/io':
+        specifier: workspace:*
+        version: link:../io
       '@pushform/layout':
         specifier: workspace:*
         version: link:../layout

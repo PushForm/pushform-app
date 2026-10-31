@@ -8,6 +8,7 @@ export * from './runtime/host';
 export * from './runtime/io';
 export * from './runtime/settings';
 export * from './runtime/ui';
+export * from './runtime/vector';
 export * from './runtime/web/allocation';
 export * from './runtime/web/frameBootstrap';
 export * from './runtime/web/link';

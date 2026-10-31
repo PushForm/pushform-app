@@ -4,7 +4,7 @@ import {
   extensionManifestSchema, type ExtensionManifest, type ExtensionManifestInput, type ExtensionPermission, type UiEvent, type UiNode,
 } from '@pushform/extension-protocol';
 import {
-  ComputeHost, ExtensionSession, ExtensionSettingsHost, ExtensionUiHost, FetchBroker, clipboardServices, fileServices, memorySettingsStore,
+  ComputeHost, ExtensionSession, ExtensionSettingsHost, ExtensionUiHost, FetchBroker, clipboardServices, fileServices, memorySettingsStore, vectorExportServices,
   messagePortTransport, runComputeWorker, startGuest, type FetchTransport, type FilePicker, type InvokeOptions, type ServiceImplementations,
   type SettingsStore, type SpawnComputeWorker,
 } from '@pushform/extensions';
@@ -86,6 +86,7 @@ export async function createTestHost(options: TestHostOptions): Promise<TestHost
     ...settings.services(),
     ...(compute?.services() ?? {}),
     ...fileServices(manifest, options.picker ?? declining),
+    ...vectorExportServices(manifest, () => ui, options.picker ?? declining),
     ...clipboardServices({ write: async (items) => { clipboard.push(items); } }),
     ...new FetchBroker(manifest, grants, options.fetch ?? null).services(),
     'log.write': (input) => { logs.push(input); return null; },

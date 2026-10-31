@@ -139,6 +139,7 @@ function accepts(node: UiNode, event: UiEvent): boolean {
       }
     case 'select':
       if (node.type === 'tabs') return node.tabs.some((t) => t.id === event.value);
+      if (node.type === 'vector') return event.value === null || node.shapes.some((shape) => shape.item === event.value);
       if (node.type === 'tree') return event.value === null || hasItem(node.items, event.value);
       return false;
     case 'toggle':
@@ -160,6 +161,8 @@ function accepts(node: UiNode, event: UiEvent): boolean {
         && event.rows.every((row) => node.rows.some((r) => r.id === row));
     case 'columns':
       return node.type === 'table' && event.hidden.every((col) => node.columns.some((c) => c.id === col && c.hideable));
+    case 'hover':
+      return node.type === 'vector' && (event.item === null || node.shapes.some((shape) => shape.item === event.item));
   }
 }
 

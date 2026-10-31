@@ -38,6 +38,11 @@ export interface UiService {
   /** Replaces the tree; `seq` must be higher than the one shown, or the shown tree is kept and the call fails. */
   update(input: { target: string; seq: number; tree: UiNode }, options?: CallOptions): Promise<{ seq: number }>;
   unmount(input: { target: string }, options?: CallOptions): Promise<null>;
+  /**
+   * Saves a vector view that is on screen as SVG or DXF where the user chooses, after PushForm's prompt states
+   * `purpose`. PushForm writes the file from the drawing itself. Needs `file.export`; declining fails with `cancelled`.
+   */
+  export(input: { target: string; component: string; format: 'svg' | 'dxf'; purpose: string; suggestedName?: string }, options?: CallOptions): Promise<{ name: string }>;
   /** Listens for user input on mounted interfaces; returns a function that stops listening. */
   onEvent(handler: (event: UiEventOnTarget) => void): () => void;
 }

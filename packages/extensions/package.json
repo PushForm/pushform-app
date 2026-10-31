@@ -16,6 +16,7 @@
     "@pushform/commands": "workspace:*",
     "@pushform/core": "workspace:*",
     "@pushform/extension-protocol": "workspace:*",
+    "@pushform/io": "workspace:*",
     "@pushform/layout": "workspace:*",
     "@pushform/model": "workspace:*",
     "es-module-lexer": "^2.3.2"

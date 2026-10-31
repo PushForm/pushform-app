@@ -5,6 +5,7 @@ import { formatAngleDeg, parseLength, typedLengthUnit, type UnitSettings } from 
 import type { UiEvent, UiNode, UiNodeOf, UiQuantity, UiTable, UiTreeItem } from '@pushform/extension-protocol';
 import type { ExtensionUiHost } from '@pushform/extensions';
 import { formatArea, formatLength, formatVolume } from '../engine/format';
+import { VectorView } from './VectorView';
 
 /**
  * Renders an extension's interface tree with the editor's own components. Nothing in the tree reaches the DOM except
@@ -104,6 +105,8 @@ function Node({ node, units, onEvent }: NodeProps): JSX.Element | null {
       return <TreeView node={node} onEvent={onEvent} />;
     case 'table':
       return <Table node={node} units={units} onEvent={onEvent} />;
+    case 'vector':
+      return <VectorView node={node} onEvent={onEvent} />;
   }
 }
 

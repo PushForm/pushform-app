@@ -69,8 +69,44 @@ export interface UiTable {
   hiddenColumns?: string[] | undefined;
 }
 
+/**
+ * A paint style of a vector view, referred to by its index in `styles`. Colors are `#rrggbb`; stroke widths are screen
+ * pixels. A shape with neither fill nor stroke is drawn with a thin line in the text color.
+ */
+export interface UiVectorStyle {
+  fill?: string | undefined; stroke?: string | undefined; strokeWidth?: number | undefined;
+  dash?: 'solid' | 'dashed' | 'dotted' | undefined; hatch?: boolean | undefined; opacity?: number | undefined;
+  fontWeight?: 'normal' | 'bold' | undefined;
+}
+/**
+ * A shape of a vector view. `item` makes it hoverable and clickable and names it in `hover` and `select` events
+ * (several shapes may share one); `tip` is shown on hover. Text `size` is in drawing units; `angle` is in degrees,
+ * counterclockwise. Polyline `points` are x, y pairs.
+ */
+export type UiVectorShape =
+  | { kind: 'rect'; x: number; y: number; width: number; height: number; style: number; item?: string | undefined; tip?: string | undefined }
+  | { kind: 'polyline'; points: number[]; closed?: boolean | undefined; style: number; item?: string | undefined; tip?: string | undefined }
+  | { kind: 'text'; x: number; y: number; text: string; size: number; anchor?: 'start' | 'middle' | 'end' | undefined; angle?: number | undefined;
+    style: number; item?: string | undefined; tip?: string | undefined };
+/**
+ * A read-only drawing, such as a cutting diagram, that the user can zoom, pan, hover and click. x grows rightwards
+ * and y downwards. With `units: 'length'` coordinates are meters, which sets the scale of `ui.export`. Up to 20,000
+ * shapes, 400,000 polyline coordinates and 64 styles.
+ */
+export interface UiVector {
+  type: 'vector'; id: string; label: string;
+  bounds: { x: number; y: number; width: number; height: number };
+  units: 'length' | 'plain';
+  /** On-screen height in pixels, 80 to 2000; 300 when absent. */
+  height?: number | undefined;
+  styles: UiVectorStyle[];
+  shapes: UiVectorShape[];
+  /** Items shown highlighted. */
+  selected?: string[] | undefined;
+}
+
 export type UiNode = UiStack | UiDivider | UiText | UiMessage | UiProgress | UiButton | UiTextField | UiNumberField | UiCheckbox | UiChoice
-  | UiColorField | UiTabs | UiTree | UiTable;
+  | UiColorField | UiTabs | UiTree | UiTable | UiVector;
 
 /** User input on a mounted interface. Sorting and selection are reported; send the updated tree in reply. */
 export type UiEvent =
@@ -81,7 +117,9 @@ export type UiEvent =
   | { component: string; event: 'cellEdit'; row: string; column: string; value: string | number | boolean | null }
   | { component: string; event: 'sort'; column: string; direction: 'ascending' | 'descending' }
   | { component: string; event: 'rowSelect'; rows: string[] }
-  | { component: string; event: 'columns'; hidden: string[] };
+  | { component: string; event: 'columns'; hidden: string[] }
+  /** The pointer moved onto a vector view item, or off every item. Clicking one sends `select`. */
+  | { component: string; event: 'hover'; item: string | null };
 
 /** An event with the target (panel, inspector or settings contribution id) it happened on. */
 export type UiEventOnTarget = { target: string } & UiEvent;

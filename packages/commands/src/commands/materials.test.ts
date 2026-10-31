@@ -17,7 +17,7 @@ import { materialCommands } from './materials';
 import type { PaintResult } from './materials';
 import { modelCommands } from './model';
 import { sketchCommands } from './sketch';
-import { PaintTool, paintModeOf, hitSide } from '../tools/impl/Paint';
+import { PaintTool, paintModeOf, paintModifierKeys, hitSide } from '../tools/impl/Paint';
 import { PositionTextureTool, reflectionAcross, rotationAbout, similarityAbout } from '../tools/impl/PositionTexture';
 import { ToolManager } from '../tools/ToolManager';
 import type { CameraHost } from '../camera/CameraHost';
@@ -345,13 +345,26 @@ describe('texture.* commands', () => {
 describe('Paint tool helpers', () => {
   it('maps modifiers to paint modes and the hit normal to a side', () => {
     const m = (p: Partial<{ shift: boolean; ctrl: boolean; alt: boolean; meta: boolean }>) => ({ shift: false, ctrl: false, alt: false, meta: false, ...p });
-    expect(paintModeOf(m({}))).toBe('single');
-    expect(paintModeOf(m({ ctrl: true }))).toBe('adjacent');
-    expect(paintModeOf(m({ shift: true }))).toBe('replaceAll');
-    expect(paintModeOf(m({ ctrl: true, shift: true }))).toBe('replaceOnObject');
-    expect(paintModeOf(m({ alt: true }))).toBe('sample');
-    expect(paintModeOf(m({ meta: true }))).toBe('sample');
-    expect(paintModeOf(m({}), true)).toBe('sample');
+    for (const platform of ['win', 'linux'] as const) {
+      expect(paintModeOf(m({}), false, platform)).toBe('single');
+      expect(paintModeOf(m({ ctrl: true }), false, platform)).toBe('adjacent');
+      expect(paintModeOf(m({ shift: true }), false, platform)).toBe('replaceAll');
+      expect(paintModeOf(m({ ctrl: true, shift: true }), false, platform)).toBe('replaceOnObject');
+      expect(paintModeOf(m({ alt: true }), false, platform)).toBe('sample');
+      expect(paintModeOf(m({ meta: true }), false, platform)).toBe('sample');
+      expect(paintModeOf(m({}), true, platform)).toBe('sample');
+      expect(paintModifierKeys(platform)).toEqual({ ctrl: 'Ctrl', sample: 'Alt' });
+    }
+    // A Mac: Ctrl+click is the context menu, so Option stands in for Ctrl and Cmd samples.
+    expect(paintModeOf(m({}), false, 'mac')).toBe('single');
+    expect(paintModeOf(m({ alt: true }), false, 'mac')).toBe('adjacent');
+    expect(paintModeOf(m({ ctrl: true }), false, 'mac')).toBe('adjacent');
+    expect(paintModeOf(m({ shift: true }), false, 'mac')).toBe('replaceAll');
+    expect(paintModeOf(m({ alt: true, shift: true }), false, 'mac')).toBe('replaceOnObject');
+    expect(paintModeOf(m({ meta: true }), false, 'mac')).toBe('sample');
+    expect(paintModeOf(m({ meta: true, alt: true }), false, 'mac')).toBe('sample');
+    expect(paintModeOf(m({}), true, 'mac')).toBe('sample');
+    expect(paintModifierKeys('mac')).toEqual({ ctrl: 'Option', sample: 'Cmd' });
     const hit = { ref: { kind: 'body', path: [], id: 1 as Id } as EntityRef, point: [0, 0, 0] as const, t: 1, screenDist: 0, normal: [0, 0, 1] as const };
     expect(hitSide(hit, [0, 0, -1])).toBe('front');
     expect(hitSide(hit, [0, 0, 1])).toBe('back');

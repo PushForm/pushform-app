@@ -131,10 +131,10 @@ export const TOOL_HELP: Readonly<Record<string, ToolHelp>> = {
     summary:
       'Pick a material in the Materials panel, then click a face or an object to paint it. Painting a group or component sets its default material; faces with their own material keep it.',
     keys: [
-      ['Ctrl', 'Fill adjacent faces with the same material'],
+      ['Ctrl (Mac: Option)', 'Fill adjacent faces with the same material'],
       ['Shift', 'Replace that material everywhere in the context'],
-      ['Ctrl+Shift', 'Replace on the same object only'],
-      ['Alt', 'Sample a material'],
+      ['Ctrl+Shift (Mac: Option+Shift)', 'Replace on the same object only'],
+      ['Alt (Mac: Cmd)', 'Sample a material'],
     ],
   },
   orbit: { summary: 'Drag to orbit the camera around the model. The middle mouse button orbits from any tool.', keys: [['Shift', 'Pan instead of orbit']] },

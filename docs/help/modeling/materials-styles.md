@@ -10,6 +10,8 @@ On a face, the side facing the camera is painted. Painting a group or component 
 
 Use **Sample** in Materials or hold Alt with Paint Bucket and click to sample a material. Choose the replacement material, then hold Ctrl and click to fill edge-connected faces with the same material. Shift+click replaces the clicked material throughout the current editing context; Ctrl+Shift+click replaces it on the clicked object.
 
+On a Mac, Ctrl+click opens the context menu, so the keys differ: Option+click fills edge-connected faces, Option+Shift+click replaces on the clicked object, and Cmd+click samples. The status bar names the keys for your platform.
+
 Check the tool's status and active mode before clicking when you want only one face painted. A broad replacement is different from ordinary painting; Undo reverses the applied change.
 
 ## Organize visibility with tags

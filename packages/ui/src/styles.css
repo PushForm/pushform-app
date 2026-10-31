@@ -431,6 +431,35 @@
 .pf-topbar-menu {
   position: relative;
 }
+/* Desktop: the top bar is the title bar. Leave room for the macOS traffic lights; other platforms draw their own controls. */
+[data-desktop-shell='mac'] .pf-topbar {
+  padding-left: 80px;
+}
+[data-desktop-shell] .pf-topbar {
+  user-select: none;
+}
+.pf-window-controls {
+  display: flex;
+  align-self: stretch;
+  margin: 0 -8px 0 4px;
+}
+.pf-window-controls button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  border: 0;
+  background: transparent;
+  color: var(--pf-text);
+  cursor: pointer;
+}
+.pf-window-controls button:hover {
+  background: var(--pf-surface-2);
+}
+.pf-window-controls button.is-close:hover {
+  background: var(--pf-danger);
+  color: #fff;
+}
 .pf-brand {
   display: flex;
   align-items: center;

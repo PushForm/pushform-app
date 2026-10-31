@@ -24,7 +24,7 @@ export function DocumentTabs({
     setEditing(null);
   };
   return (
-    <nav className="pf-document-tabs" aria-label="Open documents">
+    <nav className="pf-document-tabs" aria-label="Open documents" data-tauri-drag-region>
       <NewDocumentButton onNewModel={() => { if (allowOpeningDocument()) session.newModel(); }} onNewLayout={onNewLayout} />
       {session.tabs.map((tab) => {
         const name = displayDocumentName(tab);

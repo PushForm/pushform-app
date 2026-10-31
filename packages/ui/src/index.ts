@@ -9,7 +9,7 @@ export { createToastStore, showToast, toasts } from './toasts';
 export type { Toast, ToastStore } from './toasts';
 export type { AppProps, RequestsConfig } from './App';
 export type { BuildInfo } from './buildInfo';
-export { syncDesktopTitleBar, desktopTitleBarColor } from './desktopShell';
+export { syncDesktopTitleBar, desktopTitleBarColor, desktopPlatform, markDesktopShell } from './desktopShell';
 export { createApp, loadDemo } from './bootstrap';
 export type { AppInstance, CreateAppOptions } from './bootstrap';
 export { useAppStore } from './store';

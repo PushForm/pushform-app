@@ -27,7 +27,7 @@ import { ExtensionRuns } from './extensions/ExtensionActivity';
 import { ExtensionPrintDialog, PrintPrompts } from './extensions/extensionPrint';
 import { isExtensionPanelId } from './extensions/extensionContributions';
 import { useExtensionWorkspace } from './extensions/useExtensionWorkspace';
-import { syncDesktopTitleBar } from './desktopShell';
+import { markDesktopShell, syncDesktopTitleBar } from './desktopShell';
 import { allowOpeningDocument, desktopUpdates } from './desktopUpdates';
 import { DesktopUpdates } from './components/DesktopUpdates';
 import { DocumentSession, type DocumentTab } from './session';
@@ -130,6 +130,7 @@ export function App({ app, cloud: supplied, cloudFiles, profiles, account, build
   const workspaceOwner = signedIn ? state.user!.id : lastOwner;
   useEffect(() => { void cloud.start(); }, [cloud]);
   useEffect(() => syncDesktopTitleBar(), []);
+  useEffect(() => markDesktopShell(), []);
   useEffect(() => desktopUpdates()?.start(), []);
   useEffect(() => { if (signedIn) setLastOwner(state.user!.id); }, [signedIn, state.user]);
   const screens = <>

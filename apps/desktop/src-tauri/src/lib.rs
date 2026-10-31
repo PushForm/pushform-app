@@ -20,6 +20,14 @@ pub fn run() {
       updates::update_install
     ])
     .setup(|app| {
+      // macOS keeps its traffic lights over the overlay title bar; elsewhere the top bar draws its own window controls.
+      #[cfg(not(target_os = "macos"))]
+      {
+        use tauri::Manager;
+        if let Some(window) = app.get_webview_window("main") {
+          window.set_decorations(false)?;
+        }
+      }
       if cfg!(debug_assertions) {
         app.handle().plugin(
           tauri_plugin_log::Builder::default()

@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import type { JSX } from 'react';
 import type { SceneFlags } from '@pushform/model';
 import { useApp } from '../AppContext';
+import { IoPlayOutline, IoStopOutline } from 'react-icons/io5';
+import { MdOutlineUpdate } from 'react-icons/md';
 import { Icon } from '../components/Icon';
 import { installUiServices } from '../engine/uiServices';
 import { useDocumentState, useSceneRuntime } from '../hooks/useDocument';
@@ -24,8 +26,8 @@ const FLAG_LABELS: readonly (readonly [keyof SceneFlags, string])[] = [
 ];
 
 /**
- * Scenes panel: scene list (or thumbnails), Add / Update / Remove / Move Up / Move
- * Down, Show Details (name, description, Include in Animation, saved properties), search, play.
+ * Scenes panel: scene list (or thumbnails), Add / Update / Remove, Show Details (name, description,
+ * Include in Animation, saved properties), search, play. Drag a scene by its grip to reorder.
  * Thumbnails are captured from the viewport and kept in the UI store (not in the document).
  */
 export function ScenesPanel(): JSX.Element {
@@ -38,6 +40,10 @@ export function ScenesPanel(): JSX.Element {
   const [thumbs, setThumbs] = useState(false);
   const [details, setDetails] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [dragId, setDragId] = useState<number | null>(null);
+  /** The row whose grip is pressed; only then is the row draggable, so the name and thumbnail never start a drag. */
+  const [armedId, setArmedId] = useState<number | null>(null);
+  const [drop, setDrop] = useState<{ id: number; after: boolean } | null>(null);
 
   const run = (id: string, params?: unknown) => app.commands.tryExecute(id, params);
   /** Run and return a numeric result (new entity id), or undefined on failure. */
@@ -49,7 +55,6 @@ export function ScenesPanel(): JSX.Element {
   // The active scene (tabs, activation) wins; the panel's own selection survives deletion/stop.
   const current = runtime.activeSceneId ?? selectedId;
   const scene = current !== null ? state.scenes.get(current as never) : undefined;
-  const index = scene ? state.sceneOrder.indexOf(scene.id) : -1;
   const needle = search.trim().toLowerCase();
   const shown = scenes.filter((s) => !needle || s.name.toLowerCase().includes(needle) || s.description.toLowerCase().includes(needle));
 
@@ -76,9 +81,21 @@ export function ScenesPanel(): JSX.Element {
     useAppStore.getState().setSceneThumbnail(scene.id, null);
     setSelectedId(null);
   };
-  const move = (dir: -1 | 1) => {
-    if (!scene || index < 0) return;
-    run('scene.move', { id: scene.id, toIndex: index + dir });
+  const endDrag = () => {
+    setArmedId(null);
+    setDragId(null);
+    setDrop(null);
+  };
+  /** Drop the dragged scene before or after `targetId`, in the full scene order (not the filtered list). */
+  const dropOn = (targetId: number, after: boolean) => {
+    if (dragId === null || dragId === targetId) return endDrag();
+    const from = state.sceneOrder.findIndex((id) => id === dragId);
+    const to = state.sceneOrder.findIndex((id) => id === targetId);
+    if (from < 0 || to < 0) return endDrag();
+    let toIndex = to + (after ? 1 : 0);
+    if (from < toIndex) toIndex -= 1;
+    if (toIndex !== from) run('scene.move', { id: dragId, toIndex });
+    endDrag();
   };
   const activate = (id: number) => {
     setSelectedId(id);
@@ -92,23 +109,10 @@ export function ScenesPanel(): JSX.Element {
           <Icon name="plus" size={16} />
         </button>
         <button type="button" className="pf-iconbtn" aria-label="Update Scene" title="Update Scene" disabled={!scene} onClick={update}>
-          <Icon name="refresh" size={16} />
+          <MdOutlineUpdate size={16} aria-hidden />
         </button>
         <button type="button" className="pf-iconbtn" aria-label="Remove Scene" title="Remove Scene" disabled={!scene} onClick={remove}>
-          <Icon name="trash" size={16} />
-        </button>
-        <button type="button" className="pf-iconbtn" aria-label="Move Scene Up" title="Move Up" disabled={!scene || index <= 0} onClick={() => move(-1)}>
-          <Icon name="arrow-up" size={16} />
-        </button>
-        <button
-          type="button"
-          className="pf-iconbtn"
-          aria-label="Move Scene Down"
-          title="Move Down"
-          disabled={!scene || index < 0 || index >= scenes.length - 1}
-          onClick={() => move(1)}
-        >
-          <Icon name="arrow-down" size={16} />
+          <Icon name="minus" size={16} />
         </button>
         <button
           type="button"
@@ -138,7 +142,7 @@ export function ScenesPanel(): JSX.Element {
           disabled={scenes.length === 0}
           onClick={() => run('scene.play', { play: !runtime.playing })}
         >
-          <Icon name={runtime.playing ? 'stop' : 'play'} size={16} />
+          {runtime.playing ? <IoStopOutline size={16} aria-hidden /> : <IoPlayOutline size={16} aria-hidden />}
         </button>
       </div>
       <input className="pf-outliner-filter" placeholder="Search" aria-label="Search scenes" value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -150,15 +154,46 @@ export function ScenesPanel(): JSX.Element {
             const active = s.id === runtime.activeSceneId;
             const selected = s.id === current;
             const thumb = thumbnails[s.id as number];
+            const dropMark = drop && drop.id === s.id && dragId !== s.id ? (drop.after ? ' is-drop-after' : ' is-drop-before') : '';
             return (
               <div
                 key={s.id}
                 role="option"
                 aria-selected={selected}
-                className={`pf-scene-item${selected ? ' is-selected' : ''}${active ? ' is-active' : ''}`}
+                className={`pf-scene-item${selected ? ' is-selected' : ''}${active ? ' is-active' : ''}${dragId === s.id ? ' is-dragging' : ''}${dropMark}`}
+                draggable={armedId === s.id}
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = 'move';
+                  e.dataTransfer.setData('text/plain', s.name);
+                  setDragId(s.id);
+                }}
+                onDragOver={(e) => {
+                  if (dragId === null) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  const r = e.currentTarget.getBoundingClientRect();
+                  // Thumbnail tiles wrap in rows, so they split left/right; list rows split top/bottom.
+                  const after = thumbs ? e.clientX > r.left + r.width / 2 : e.clientY > r.top + r.height / 2;
+                  if (drop?.id !== s.id || drop.after !== after) setDrop({ id: s.id, after });
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  dropOn(s.id, drop?.id === s.id ? drop.after : false);
+                }}
+                onDragEnd={endDrag}
                 onClick={() => activate(s.id)}
                 title={s.description || s.name}
               >
+                <span
+                  className="pf-scene-grip"
+                  aria-hidden="true"
+                  title="Drag to reorder"
+                  onMouseDown={() => setArmedId(s.id)}
+                  onMouseUp={() => setArmedId(null)}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  ⋮⋮
+                </span>
                 {thumbs ? (
                   thumb ? (
                     <img className="pf-scene-thumb" src={thumb} alt="" width={THUMB_W / 2} height={THUMB_H / 2} />

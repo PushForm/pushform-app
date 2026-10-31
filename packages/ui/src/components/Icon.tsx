@@ -2,6 +2,7 @@
 // Copyright 2026 PushForm contributors
 import { MdUpdate } from 'react-icons/md';
 import { AiOutlineTable } from 'react-icons/ai';
+import { BsCloudFog2 } from 'react-icons/bs';
 import type { JSX } from 'react';
 import type { IconType } from 'react-icons';
 import { PiAngle, PiBezierCurve, PiTreeView } from 'react-icons/pi';
@@ -77,6 +78,9 @@ import {
   LuZoomIn,
 } from 'react-icons/lu';
 
+/** Filled glyph: the shared stroke width would thicken it, so it draws with fill only. */
+const FogIcon: IconType = (props) => <BsCloudFog2 {...props} strokeWidth={0} />;
+
 /** Shared outline icons for the tool and panel strips. */
 const REACT_ICONS: Record<string, IconType> = {
   'tool-shape-builder': LayoutShapeBuilderIcon,
@@ -146,6 +150,7 @@ const REACT_ICONS: Record<string, IconType> = {
   'panel-tags': LuTags,
   'panel-scenes': LuClapperboard,
   'panel-shadows': LuSun,
+  'panel-fog': FogIcon,
   'panel-display': LuMonitor,
   'panel-modelInfo': LuFileText,
   'page-add': LuFilePlus2,

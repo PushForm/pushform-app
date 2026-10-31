@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { afterEach, describe, expect, it } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, createEvent, fireEvent, render, screen, within } from '@testing-library/react';
 import { fogCommands, sceneCommands, sceneRuntimeOf, shadowCommands, styleCommands, tagCommands, tagTools, viewCommands } from '@pushform/commands';
 import type { StyleId, TagId } from '@pushform/core';
 import { InlineBackend, KernelClient } from '@pushform/kernel';
@@ -136,8 +136,9 @@ describe('ScenesPanel and SceneTabs', () => {
     fireEvent.click(within(tabs).getByText('Scene 1'));
     expect(sceneRuntimeOf(a.commands.ctx).activeSceneId).toBe(s1);
     expect(within(tabs).getByText('Scene 1').getAttribute('aria-selected')).toBe('true');
-    // move down through the panel (Scene 1 selected)
-    fireEvent.click(screen.getByLabelText('Move Scene Down'));
+    // move through the tab context menu (Scene 1 selected)
+    fireEvent.contextMenu(within(tabs).getByText('Scene 1'));
+    fireEvent.click(screen.getByText('Move Right'));
     expect(state().sceneOrder).toEqual([s2, s1]);
     // details
     fireEvent.click(screen.getByLabelText('Show Details'));
@@ -169,6 +170,46 @@ describe('ScenesPanel and SceneTabs', () => {
     expect(screen.getByRole('listbox', { name: 'Scenes' }).className).toContain('is-thumbs');
     fireEvent.change(screen.getByLabelText('Search scenes'), { target: { value: 'zzz' } });
     expect(screen.getByText('No scenes match.')).toBeTruthy();
+  });
+});
+
+describe('ScenesPanel drag to reorder', () => {
+  it('moves a scene to where it is dropped, before or after the target', () => {
+    const a = boot();
+    mount(a, <ScenesPanel />);
+    const state = () => a.document.doc.state;
+    for (let i = 0; i < 3; i++) fireEvent.click(screen.getByLabelText('Add Scene'));
+    const [s1, s2, s3] = state().sceneOrder;
+    const list = screen.getByRole('listbox', { name: 'Scenes' });
+    const row = (name: string) => within(list).getByText(name).closest('.pf-scene-item') as HTMLElement;
+    const rect = { left: 0, top: 0, width: 100, height: 26, right: 100, bottom: 26, x: 0, y: 0, toJSON: () => ({}) };
+    const drag = (from: string, to: string, clientY: number) => {
+      const dataTransfer = { setData: () => {}, effectAllowed: '', dropEffect: '' };
+      const target = row(to);
+      target.getBoundingClientRect = () => rect;
+      fireEvent.mouseDown(row(from).querySelector('.pf-scene-grip')!);
+      fireEvent.dragStart(row(from), { dataTransfer });
+      // jsdom's drag events carry no pointer coordinates, so set them directly.
+      const over = createEvent.dragOver(target, { dataTransfer });
+      Object.defineProperties(over, { clientX: { value: 10 }, clientY: { value: clientY } });
+      fireEvent(target, over);
+      fireEvent.drop(target, { dataTransfer });
+      fireEvent.dragEnd(row(from), { dataTransfer });
+    };
+    drag('Scene 1', 'Scene 3', 20); // lower half of the last row: after it
+    expect(state().sceneOrder).toEqual([s2, s3, s1]);
+    drag('Scene 1', 'Scene 2', 2); // upper half of the first row: before it
+    expect(state().sceneOrder).toEqual([s1, s2, s3]);
+    drag('Scene 2', 'Scene 2', 2); // onto itself: nothing
+    expect(state().sceneOrder).toEqual([s1, s2, s3]);
+    // only the grip arms a drag: rows are not draggable until it is pressed
+    expect(row('Scene 1').getAttribute('draggable')).not.toBe('true');
+    fireEvent.mouseDown(row('Scene 1').querySelector('.pf-scene-grip')!);
+    expect(row('Scene 1').getAttribute('draggable')).toBe('true');
+    fireEvent.mouseUp(row('Scene 1').querySelector('.pf-scene-grip')!);
+    expect(row('Scene 1').getAttribute('draggable')).not.toBe('true');
+    act(() => void a.commands.execute('edit.undo'));
+    expect(state().sceneOrder).toEqual([s2, s3, s1]);
   });
 });
 

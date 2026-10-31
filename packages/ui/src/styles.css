@@ -1523,6 +1523,29 @@
 .pf-scene-item.is-active .pf-scene-name {
   font-weight: 600;
 }
+.pf-scene-grip {
+  flex: none;
+  cursor: grab;
+  color: var(--pf-text-muted, currentColor);
+  opacity: 0.6;
+  letter-spacing: -2px;
+  user-select: none;
+}
+.pf-scene-item:hover .pf-scene-grip {
+  opacity: 1;
+}
+.pf-scene-list.is-thumbs .pf-scene-grip {
+  align-self: flex-start;
+}
+.pf-scene-item.is-dragging {
+  opacity: 0.5;
+}
+.pf-scene-item.is-drop-before {
+  box-shadow: inset 0 2px 0 var(--pf-accent);
+}
+.pf-scene-item.is-drop-after {
+  box-shadow: inset 0 -2px 0 var(--pf-accent);
+}
 .pf-scene-name {
   flex: 1;
   min-width: 0;

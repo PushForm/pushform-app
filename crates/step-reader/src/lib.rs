@@ -10,6 +10,9 @@
 
 use std::collections::{HashMap, VecDeque};
 
+mod export;
+pub use export::export_step;
+
 #[cfg(all(target_arch = "wasm32", feature = "threads"))]
 mod alloc;
 #[cfg(all(target_arch = "wasm32", feature = "threads"))]

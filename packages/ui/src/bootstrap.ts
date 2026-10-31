@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import { installDesktopStepReader } from './desktopStepReader';
 import { meshBox } from '@pushform/core';
 import {
   CommandRegistry,
@@ -179,6 +180,7 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
   commands.registerAll(componentCommands);
   installUiServices(commands);
   installUiCommands(commands);
+  installDesktopStepReader();
   const toolManager = new ToolManager(commands, viewport.camera);
   commands.ctx.tools = toolManager;
   const isWeb = typeof window !== 'undefined' && !('__TAURI_INTERNALS__' in window);

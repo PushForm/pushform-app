@@ -19,7 +19,19 @@
     "fs:allow-write-file",
     {
       "identifier": "opener:allow-open-path",
-      "allow": [{ "path": "**" }]
+      "allow": [
+        {
+          "path": "**"
+        }
+      ]
+    },
+    {
+      "identifier": "fs:allow-write-file",
+      "allow": [
+        {
+          "path": "$TEMP/**"
+        }
+      ]
     }
   ]
 }

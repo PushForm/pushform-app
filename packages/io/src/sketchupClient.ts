@@ -3,7 +3,7 @@
 import type { MeshImportOptions } from './meshImport';
 import { readModelImport } from './modelImport';
 import { MAX_SKETCHUP_BYTES, type ImportProgress, type SketchUpImport } from './sketchup';
-import { isStepBytes } from './step';
+import { hasNativeStepReader, isStepBytes } from './step';
 
 type WorkerMessage = { type: 'progress'; progress: ImportProgress } |
   { type: 'result'; scene: SketchUpImport } | { type: 'error'; message: string };
@@ -25,8 +25,9 @@ export function readSketchUpInWorker(bytes: Uint8Array, options: {
   const step = isStepBytes(bytes), limit = step ? options.maxStepBytes ?? MAX_SKETCHUP_BYTES : MAX_SKETCHUP_BYTES;
   if (bytes.byteLength > limit) return Promise.reject(new Error(`${step ? 'STEP' : 'Model'} files larger than ${limit / (1024 * 1024)} MiB are not supported yet.`));
   const limits = { stepBytes: options.maxStepBytes, meshPartThreshold: options.meshPartThreshold };
-  // Inline path for headless callers and test environments. Browsers always use the worker.
-  if (typeof Worker === 'undefined') return readModelImport(bytes, options.onProgress, options.mesh, limits).then(scene => {
+  // Inline path for headless callers and test environments. Browsers use the worker, except for a STEP file the host
+  // converts natively: that call is made from the window and does its work outside the page.
+  if (typeof Worker === 'undefined' || (step && hasNativeStepReader())) return readModelImport(bytes, options.onProgress, options.mesh, limits).then(scene => {
     if (options.signal?.aborted) throw new DOMException('Import cancelled.', 'AbortError');
     return scene;
   });

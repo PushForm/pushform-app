@@ -49,6 +49,15 @@ export function stepHeader(bytes: Uint8Array): { schema: string | null; system: 
   return { schema, system };
 }
 
+/**
+ * A host that converts STEP files outside the wasm module (the desktop app, natively on every core). It takes the
+ * file's bytes and the reader's mode and threshold, reports progress, and answers the reader's result buffer.
+ */
+export type NativeStepReader = (bytes: Uint8Array, mode: number, threshold: number, onProgress?: (p: ImportProgress) => void) => Promise<Uint8Array>;
+let nativeStepReader: NativeStepReader | null = null;
+export function setNativeStepReader(reader: NativeStepReader | null): void { nativeStepReader = reader; }
+export function hasNativeStepReader(): boolean { return nativeStepReader !== null; }
+
 /** Run the reader module over the file: parse, convert solid by solid with progress, and decode the result. */
 async function readWithModule(bytes: Uint8Array, mode: number, threshold: number, onProgress?: (p: ImportProgress) => void): Promise<StepReaderResult> {
   const m = await loadStepReader();
@@ -90,7 +99,7 @@ export async function readStep(bytes: Uint8Array, onProgress?: (p: ImportProgres
   onProgress?.({ stage: 'Loading the STEP reader', current: 0, total: 1 });
   // PF_STEP_MODE lets tests compare the reader's meshing modes.
   const mode = typeof process !== 'undefined' && process.env?.PF_STEP_MODE ? Number(process.env.PF_STEP_MODE) : DISPLAY_MODE;
-  const result = await readWithModule(bytes, mode, 0, onProgress);
+  const result = nativeStepReader ? decodeStepResult(await nativeStepReader(bytes, mode, 0, onProgress)) : await readWithModule(bytes, mode, 0, onProgress);
   const warnings = new Set<string>(result.warnings.map(w => `STEP: ${w}`));
   const header = stepHeader(bytes), system = result.system || header.system || '';
   const materials: Material[] = [], materialKeys = new Map<string, number>();

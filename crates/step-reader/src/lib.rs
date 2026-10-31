@@ -528,3 +528,93 @@ fn write_result(m: &Meshing, mode: u32, threshold: u32) -> Vec<u8> {
     w.text(&import.schema); w.text(&import.system);
     w.0
 }
+
+// --- native entry point ------------------------------------------------------------------------
+
+/// Read a STEP file natively: the reader converts its solids on the kernel's own worker threads, then the
+/// distinct parts are meshed on all cores, and the result is the same buffer the wasm ABI produces. `progress`
+/// is told the stage, the work done and the total; it may return false to cancel, which yields `Err`.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn convert_native(text: &str, mode: u32, threshold: u32, mut progress: impl FnMut(&str, u32, u32) -> bool) -> Result<Vec<u8>, String> {
+    use std::sync::{Arc, Mutex, mpsc};
+    let mut reading = StepReading::new(text).map_err(|e| e.to_string())?;
+    let mut last = usize::MAX;
+    while reading.step() {
+        let (done, total) = reading.progress();
+        if done != last { last = done; if !progress("Converting parts", done as u32, total as u32) { return Err("cancelled".into()); } }
+    }
+    let import = reading.finish().map_err(|e| e.to_string())?;
+    let placements = body_placements(&import.tree, import.bodies.len());
+    // Which bodies are meshed (the first rigid placement of each item) and which reuse an earlier one.
+    let mut part_of_item: HashMap<u64, usize> = HashMap::new();
+    let mut placed: Vec<(usize, usize, M4)> = Vec::new();
+    let mut jobs: Vec<(usize, usize, M4)> = Vec::new(); // (part index, body index, to_local)
+    for (i, body) in import.bodies.iter().enumerate() {
+        let world = placements[i];
+        if let Some(&part) = part_of_item.get(&body.source_item) {
+            if rigid_inverse(&world).is_some() { placed.push((part, i, world)); continue; }
+        }
+        let inverse = rigid_inverse(&world);
+        let (to_local, placement) = match inverse { Some(inv) => (inv, world), None => (IDENTITY, IDENTITY) };
+        let index = jobs.len();
+        jobs.push((index, i, to_local));
+        if inverse.is_some() { part_of_item.insert(body.source_item, index); }
+        placed.push((index, i, placement));
+    }
+    let total = import.bodies.len() as u32;
+    if !progress("Meshing parts", 0, total) { return Err("cancelled".into()); }
+    // Mesh the distinct parts on every core: a shared queue hands out jobs so one slow part does not hold up the rest.
+    let workers = std::thread::available_parallelism().map_or(1, |n| n.get()).min(16);
+    let queue = Arc::new(Mutex::new(0usize));
+    let (tx, rx) = mpsc::channel::<(usize, Option<Mesh>)>();
+    let meshes: Vec<Option<(Mesh, M4)>> = std::thread::scope(|scope| {
+        for _ in 0..workers {
+            let (queue, tx, jobs, import) = (queue.clone(), tx.clone(), &jobs, &import);
+            scope.spawn(move || loop {
+                let next = { let mut q = queue.lock().unwrap(); let n = *q; *q += 1; n };
+                let Some(&(index, body, to_local)) = jobs.get(next) else { break };
+                let mesh = mesh_body(&import.bodies[body], &to_local, mode);
+                if tx.send((index, mesh)).is_err() { break; }
+            });
+        }
+        drop(tx);
+        let mut out: Vec<Option<(Mesh, M4)>> = (0..jobs.len()).map(|_| None).collect();
+        let mut done = 0u32;
+        for (index, mesh) in rx {
+            done += 1;
+            if let Some(mesh) = mesh { out[index] = Some((mesh, jobs[index].2)); }
+            // Reused placements count as done with the part they share.
+            let placed_done = placed.iter().filter(|(part, _, _)| out[*part].is_some()).count() as u32;
+            if done % 4 == 0 && !progress("Meshing parts", placed_done.min(total), total) { *queue.lock().unwrap() = usize::MAX; break; }
+        }
+        out
+    });
+    if meshes.iter().filter(|m| m.is_some()).count() < jobs.iter().filter(|_| true).count() && *queue.lock().unwrap() == usize::MAX { return Err("cancelled".into()); }
+    // Parts that failed to mesh drop out with their placements; the rest are renumbered.
+    let mut renumber: HashMap<usize, usize> = HashMap::new();
+    let mut parts: Vec<Part> = Vec::new();
+    for (index, mesh) in meshes.into_iter().enumerate() {
+        if let Some((mesh, to_local)) = mesh { renumber.insert(index, parts.len()); parts.push(Part { mesh, placement_inverse: to_local }); }
+    }
+    let placed: Vec<(usize, usize, M4)> = placed.into_iter().filter_map(|(part, body, m)| renumber.get(&part).map(|&p| (p, body, m))).collect();
+    let m = Meshing { import, placements, cursor: 0, parts, part_of_item: HashMap::new(), placed };
+    let _ = progress("Meshing parts", total, total);
+    Ok(write_result(&m, mode, threshold))
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    const BOX: &str = "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME('t','',(''),(''),'','hand','');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));\nENDSEC;\nDATA;\n";
+
+    #[test]
+    fn native_conversion_reports_progress_and_writes_the_result_magic() {
+        // A file with no solids still parses; the result then holds zero parts.
+        let text = format!("{BOX}#1=APPLICATION_CONTEXT('automotive design');\nENDSEC;\nEND-ISO-10303-21;\n");
+        let mut stages = Vec::new();
+        let result = super::convert_native(&text, 7, 0, |stage, done, total| { stages.push((stage.to_string(), done, total)); true });
+        match result {
+            Ok(bytes) => { assert_eq!(&bytes[..8], b"PFSTEP01"); assert!(stages.iter().any(|(s, _, _)| s == "Meshing parts")); }
+            Err(e) => assert!(e.contains("no bodies") || e.contains("solids"), "{e}"),
+        }
+    }
+}

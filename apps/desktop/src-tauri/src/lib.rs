@@ -2,6 +2,7 @@
 // Copyright 2026 PushForm contributors
 mod updates;
 mod clipboard;
+mod step;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -17,7 +18,8 @@ pub fn run() {
       clipboard::layout_clipboard_read,
       updates::update_enabled,
       updates::update_fetch,
-      updates::update_install
+      updates::update_install,
+      step::step_convert
     ])
     .setup(|app| {
       // macOS keeps its traffic lights over the overlay title bar; elsewhere the top bar draws its own window controls.

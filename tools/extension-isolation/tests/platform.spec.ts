@@ -15,8 +15,11 @@ const ALPHA = {
   context.commands.register('com.example.alpha.plant', async (params) => {
     await context.settings.set({ value: { secret: params.secret } });
     self.__secret = params.secret;
-    const channel = new BroadcastChannel('extensions');
-    setInterval(() => channel.postMessage({ secret: params.secret }), 20);
+    // Extensions have no BroadcastChannel; if one ever appears, it must still not reach the other extension.
+    if (typeof BroadcastChannel === 'function') {
+      const channel = new BroadcastChannel('extensions');
+      setInterval(() => channel.postMessage({ secret: params.secret }), 20);
+    }
     await context.ui.mount({ target: 'com.example.alpha.panel', seq: 1, tree: { type: 'stack', id: 'root', children: [{ type: 'button', id: 'go', label: params.secret }] } });
     return { module: import.meta.url, settings: await context.settings.get() };
   });

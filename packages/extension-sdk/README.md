@@ -70,6 +70,17 @@ Interfaces are trees of PushForm's own components: `stack`, `divider`, `text`, `
 time, with a higher `seq`; a tree that is invalid or too large is refused and the previous one stays on screen. There
 is no HTML, CSS or script.
 
+## The runtime
+
+Your code runs in a worker of its own with no network, no DOM and no way to load code beyond your package. It may
+hold at most 256 MiB of binary data at once: buffers, typed arrays, Blobs and Files, including copies and data that
+arrives from PushForm. Past that, the allocation (or the call that would deliver the data) fails with a `RangeError`
+or an error with code `limit.exceeded`. Memory comes back once the garbage collector has freed it, so a loop that
+allocates large buffers without yielding counts everything it made. The worker has no `MessageChannel`,
+`BroadcastChannel`, `Response` or `Request`, no readable byte streams, and no canvas, image, media, font,
+notification or user timing interfaces. Compression streams, `TextEncoder`, `structuredClone` and Blob reading work
+as usual.
+
 ## WebAssembly compute
 
 Declare each module in the manifest with its memory maximum (in 64 KiB pages) and time limit. A module imports its

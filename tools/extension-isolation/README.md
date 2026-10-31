@@ -94,24 +94,36 @@ annotation on the test.
   that cannot be verified is refused rather than loaded unsigned, turning developer mode off stops side-loaded
   extensions, and installing and running them sends nothing anywhere.
 - **Resources**: a hung extension leaves the editor responsive and is ended; heap exhaustion is noticed by the
-  heartbeat; binary allocations past the 256 MiB budget are refused. Floods of well-formed messages (200,000 at once,
-  a sustained flood, 400 MiB at once) fail the session and end the runtime within a bounded time while the editor
-  keeps ticking, and an extension calling the host in a tight loop is paced and keeps running.
+  heartbeat. Floods of well-formed messages (200,000 at once, a sustained flood, 400 MiB at once) fail the session
+  and end the runtime within a bounded time while the editor keeps ticking, and an extension calling the host in a
+  tight loop is paced and keeps running. Binary memory past the 256 MiB budget is refused by every route an
+  extension has: the constructors and the originals behind them (through prototypes and `constructor`), species
+  tricks, look-alike buffers and changed getters, `transfer`, `resize`, `SharedArrayBuffer` (Firefox), typed array
+  copies, `fromBase64`, `TextEncoder`, `structuredClone`, Blobs built from repeated parts and read back (whole, as a
+  stream, through file readers), gzip decompression, and readable byte streams. Interfaces that keep copies the
+  budget cannot see must be absent: message and broadcast channels inside the worker, `postMessage` to the frame,
+  `Response` and `Request`, canvas, image and media interfaces, font faces, notifications and user timing marks.
+  Ordinary binary work within the budget keeps working.
 
 ## Known gaps
 
-These are expected failures (`test.fail`, `it.fails`), so the suite stays green while they exist and turns red when
-one is fixed; remove the marker then.
-
-1. **Binary budget routes.** The budget replaces the global `ArrayBuffer` and typed array constructors, but each
-   replacement extends the original, so `Object.getPrototypeOf(ArrayBuffer)`, `Object.getPrototypeOf(Uint8Array)`
-   and any buffer's `constructor` are the uncounted originals; `ArrayBuffer.prototype.transfer` allocates its new
-   length uncounted. Platform methods also make uncounted buffers larger than anything the extension holds: a `Blob`
-   repeating one buffer, `DecompressionStream` (half a megabyte of gzip became 512 MiB), and `structuredClone`
-   copies. Each of these allocated 512 MiB or more in both browsers.
+None are open as expected failures. When one is found, mark its test with `test.fail` or `it.fails`, so the suite
+stays green while it exists and turns red when it is fixed; remove the marker then.
 
 Revocation is not implemented (there is no official install path yet); its tests are listed as pending in
 `packages/extensions/src/platform/trust.test.ts`.
+
+### Binary memory budget
+
+What the budget leaves open by design, with no test marker. Bytes return to the budget only when the garbage collector
+has collected their buffer and the finalization task has run, so everything allocated within one synchronous run
+counts, even if it is garbage by then. In Chromium, large buffers dropped between tasks also come back late: with a
+timer between each, only 5 of 40 allocations of 64 MiB succeeded (Firefox: 40 of 40; 16 KiB buffers: 38,096 of 40,000
+in Chromium). The error is always on the side of refusing. Where a platform method's result size is known only once it
+has finished (`structuredClone`, `TextEncoder`, `fromBase64`, typed array `filter`, Web Crypto results), the result is
+refused afterwards, so up to the size of data the extension already holds (or of a string in its heap) can exist for a
+moment. Messages the extension sends are copied for the host, which bounds them; strings and objects are in the heap,
+which the heartbeat covers.
 
 ### Frame layer
 

@@ -40,20 +40,6 @@ test('an extension that exhausts its heap is noticed by the heartbeat and ended'
   await page.close();
 });
 
-/**
- * Known gaps, kept as expected failures until they are fixed (remove the marker then). The budget replaces the
- * global constructors, but the originals stay reachable, and some platform methods make large buffers on request.
- */
-const BUDGET_GAPS: Record<string, string> = {
-  nativeArrayBufferFromPrototype: 'the replacement ArrayBuffer extends the original, so Object.getPrototypeOf(ArrayBuffer) is the uncounted original',
-  nativeArrayBufferFromInstance: 'buffers keep the original ArrayBuffer as their constructor',
-  nativeTypedArrayFromPrototype: 'each replacement typed array extends the original, which is reachable the same way',
-  transfer: 'ArrayBuffer.prototype.transfer allocates the new length without counting it',
-  structuredCloneCopies: 'structuredClone copies are not counted (documented: platform copies of data the extension holds)',
-  blobAmplification: 'a Blob repeating one buffer reads back as a much larger uncounted buffer',
-  decompression: 'DecompressionStream output is not counted, so a small input becomes a large buffer',
-};
-
 test.describe('Binary memory budget (256 MiB per extension)', () => {
   // Each attack runs in its own runtime: counted buffers are returned to the budget only once collected.
   let page: Page;
@@ -61,17 +47,39 @@ test.describe('Binary memory budget (256 MiB per extension)', () => {
   test.afterAll(async () => { await page?.close(); });
   for (const [key, attack] of Object.entries(BINARY_BUDGET)) {
     test(`refuses: ${attack.title}`, async () => {
-      test.fail(key in BUDGET_GAPS, `Known gap: ${BUDGET_GAPS[key]}`);
       const outcome = await page.evaluate((spec) => window.isolation.run(spec, 'run', { timeoutMs: 15_000 }, { timeoutMs: 60_000 }),
         hostilePackage('com.example.hostile-memory', { [key]: attack }));
       expect(outcome, JSON.stringify(outcome)).toMatchObject({ started: true, ok: true });
       expectBlocked((outcome as unknown as { value: Attempts }).value, key);
     });
   }
+  test('offers none of the interfaces that keep copies the budget cannot see', async () => {
+    const names = ['MessageChannel', 'BroadcastChannel', 'Response', 'Request', 'OffscreenCanvas', 'ImageData', 'createImageBitmap',
+      'VideoFrame', 'AudioData', 'VideoDecoder', 'ImageDecoder', 'MediaSource', 'FontFace', 'Notification', 'PerformanceMark', 'postMessage'];
+    const outcome = await page.evaluate((spec) => window.isolation.run(spec), hostilePackage('com.example.removed', {
+      globals: { title: 'the removed globals', code: `() => ${JSON.stringify(names)}.filter((n) => self[n] !== undefined).join(',') || 'none'` },
+      members: { title: 'removed members', code: `() => [typeof performance.mark, typeof performance.measure, typeof navigator.gpu].join(',')` },
+    }));
+    const value = (outcome as unknown as { value: Attempts }).value;
+    expect(value.globals).toMatchObject({ outcome: 'allowed', detail: 'none' });
+    expect(value.members).toMatchObject({ outcome: 'allowed', detail: 'undefined,undefined,undefined' });
+  });
   test('allows ordinary allocations within the budget', async () => {
     const outcome = await page.evaluate((spec) => window.isolation.run(spec), hostilePackage('com.example.modest', {
       sixtyFour: { title: 'a 64 MiB buffer', code: `() => new Uint8Array(64 * 1024 * 1024).length` },
+      everyday: { title: 'everyday binary work', code: `async () => {
+        const bytes = new TextEncoder().encode('{"parts":[1,2,3]}');
+        const blob = new Blob([bytes, ' tail'], { type: 'application/json' });
+        const gz = new Blob([blob]).stream().pipeThrough(new CompressionStream('gzip')).pipeThrough(new DecompressionStream('gzip'));
+        const chunks = []; for await (const chunk of gz) chunks.push(chunk);
+        const copy = structuredClone({ data: new Float64Array([1.5, 2.5]) });
+        const moved = new ArrayBuffer(8).transfer(16);
+        class Points extends Float32Array {}
+        return [new TextDecoder().decode(await blob.arrayBuffer()), chunks.reduce((n, c) => n + c.byteLength, 0), copy.data[1], moved.byteLength,
+          new Points([1, 2]).map((v) => v * 2) instanceof Points, Uint8Array.from([1, 2]).toReversed().join('-'), new File(['x'], 'a.txt').name].join(' ');
+      }` },
     }));
     expect((outcome as unknown as { value: Attempts }).value.sixtyFour).toMatchObject({ outcome: 'allowed', detail: String(64 * 1024 * 1024) });
+    expect((outcome as unknown as { value: Attempts }).value.everyday).toMatchObject({ outcome: 'allowed', detail: '{"parts":[1,2,3]} tail 22 2.5 16 true 2-1 a.txt' });
   });
 });

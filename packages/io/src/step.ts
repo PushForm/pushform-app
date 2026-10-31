@@ -66,34 +66,44 @@ async function readWithModule(bytes: Uint8Array, mode: number, threshold: number
   // The reader's memory only grows, so its size says how far a large file is pushing the 4 GiB wasm limit.
   const memory = (): string => `${Math.round(m.memory.buffer.byteLength / 1048576).toLocaleString('en-US')} MB`;
   onProgress?.({ stage: 'Reading STEP model', current: 0, total: 1, detail: memory() });
-  const handle = m.pf_step_open(ptr, bytes.byteLength, mode, Math.min(threshold, 0xffff_ffff));
+  const threads = m.threads?.count ?? 1;
+  const handle = m.pf_step_open(ptr, bytes.byteLength, mode, Math.min(threshold, 0xffff_ffff), threads);
   m.pf_free(ptr, bytes.byteLength);
   if (!handle) throw new Error(`This STEP file could not be read: ${stepReaderError(m)}`);
   try {
-    let reported = -1;
+    // With threads, the distinct parts are meshed while the rest convert, so both counts move during the conversion.
+    const meshed = (): { done: number; total: number } => { const packed = m.pf_step_mesh_progress(handle); return { done: Number(packed >> 32n), total: Number(packed & 0xffff_ffffn) }; };
+    const failed = (): void => { if (m.threads?.failure) throw new Error(`The STEP reader stopped: ${m.threads.failure}`); };
+    let reported = '';
     while (m.pf_step_step(handle)) {
+      failed();
       const packed = m.pf_step_progress(handle), done = Number(packed >> 32n), total = Number(packed & 0xffff_ffffn);
-      if (done !== reported) { reported = done; onProgress?.({ stage: 'Converting parts', current: done, total, detail: memory() }); }
+      const detail = threads > 1 ? `${meshed().done.toLocaleString('en-US')} meshed · ${memory()}` : memory();
+      const key = `${done}:${detail}`;
+      if (key !== reported) { reported = key; onProgress?.({ stage: 'Converting parts', current: done, total, detail }); }
+      // Let the thread pool take in its workers' replies between steps (a step blocks this thread while the kernel's threads work).
+      if (threads > 1) await new Promise(resolve => setTimeout(resolve, 0));
     }
     if (!m.pf_step_finish(handle)) throw new Error(`This STEP file could not be read: ${stepReaderError(m)}`);
     // Each distinct part is meshed once; a repeated placement passes in no time, so the count moves by bodies.
-    reported = -1;
+    reported = '';
     const report = (): void => {
-      const packed = m.pf_step_mesh_progress(handle), done = Number(packed >> 32n), total = Number(packed & 0xffff_ffffn);
-      if (done !== reported) { reported = done; onProgress?.({ stage: 'Meshing parts', current: done, total, detail: memory() }); }
+      const { done, total } = meshed();
+      const key = `${done}`;
+      if (key !== reported) { reported = key; onProgress?.({ stage: 'Meshing parts', current: done, total, detail: memory() }); }
     };
-    if (m.threads && m.pf_step_mesh_start(handle, m.threads.count)) {
-      // The threads mesh while this thread only watches; a worker that stopped fails the read, since its part never finishes.
-      report();
+    report();
+    if (threads > 1) {
+      // The threads finish what the conversion left them; a worker that stopped fails the read, since its part never finishes.
       while (!m.pf_step_mesh_done(handle)) {
-        if (m.threads.failure) throw new Error(`The STEP reader stopped: ${m.threads.failure}`);
+        failed();
         await new Promise(resolve => setTimeout(resolve, 100));
         report();
       }
     } else {
-      do report(); while (m.pf_step_mesh(handle));
+      while (m.pf_step_mesh(handle)) report();
     }
-    { const packed = m.pf_step_mesh_progress(handle), total = Number(packed & 0xffff_ffffn); onProgress?.({ stage: 'Meshing parts', current: total, total, detail: memory() }); }
+    { const { total } = meshed(); onProgress?.({ stage: 'Meshing parts', current: total, total, detail: memory() }); }
     const len = m.pf_step_result(handle);
     if (!len) throw new Error(`This STEP file could not be read: ${stepReaderError(m)}`);
     // The result is decoded in place, except from the threaded build's shared memory, whose views browsers will not decode text from.

@@ -7,7 +7,7 @@ use array_macro::array;
 use itertools::Itertools;
 use rustc_hash::FxHashMap as HashMap;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "threads")]
 use rayon::prelude::*;
 
 type SPoint2 = spade::Point2<f64>;
@@ -202,7 +202,7 @@ fn bounded_projection<S: ParametricSurface3D>(surface: &S, point: Point3, start:
 }
 
 /// Tessellates faces
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "threads")]
 pub(super) fn shell_tessellation<'a, C, S>(
     shell: &Shell<Point3, C, S>,
     tol: Deflection,
@@ -326,7 +326,7 @@ fn relax_crowded_faces<C, S>(
 }
 
 /// Tessellates faces
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(any(not(feature = "threads"), test))]
 pub(super) fn shell_tessellation_single_thread<'a, C, S>(
     shell: &'a Shell<Point3, C, S>,
     tol: Deflection,
@@ -419,9 +419,9 @@ where
             curve: bounded_polyline(curve, curve.range_tuple(), tol),
         }
     };
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(feature = "threads")]
     let edges: Vec<_> = shell.edges.par_iter().map(tessellate_edge).collect();
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(not(feature = "threads"))]
     let edges: Vec<_> = shell.edges.iter().map(tessellate_edge).collect();
     let tessellate_face = |face: &CompressedFace<S>| {
         let boundaries = face.boundaries.clone();
@@ -449,9 +449,9 @@ where
             surface: polygon,
         }
     };
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(feature = "threads")]
     let faces = shell.faces.par_iter().map(tessellate_face).collect();
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(not(feature = "threads"))]
     let faces = shell.faces.iter().map(tessellate_face).collect();
     MeshedCShell {
         vertices,
@@ -1653,7 +1653,7 @@ fn halved_while_turning(curve: impl Fn(f64) -> Point3, params: Vec<f64>, d: Defl
 
 #[test]
 #[ignore]
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "threads")]
 fn par_bench() {
     use std::time::Instant;
     use truck_modeling::*;

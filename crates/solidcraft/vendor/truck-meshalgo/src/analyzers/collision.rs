@@ -244,13 +244,13 @@ fn collision(poly0: &PolygonMesh, poly1: &PolygonMesh) -> Vec<(Point3, Point3)> 
     let (tris0, tris1) = (boxed_triangles(poly0), boxed_triangles(poly1));
     let pairs = candidate_pairs(&tris0, &tris1, unit);
     let test = |&(i, j): &(usize, usize)| collide_triangles(tris0[i].0, tris1[j].0);
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(feature = "threads")]
     {
         use rayon::prelude::*;
         // Indexed parallel collect: results in the same order as the sequential loop.
         pairs.par_iter().filter_map(test).collect()
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(not(feature = "threads"))]
     {
         pairs.iter().filter_map(test).collect()
     }
@@ -264,13 +264,13 @@ fn are_colliding(poly0: &PolygonMesh, poly1: &PolygonMesh) -> Option<(Point3, Po
     let (tris0, tris1) = (boxed_triangles(poly0), boxed_triangles(poly1));
     let pairs = candidate_pairs(&tris0, &tris1, unit);
     let test = |&(i, j): &(usize, usize)| collide_triangles(tris0[i].0, tris1[j].0);
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(feature = "threads")]
     {
         use rayon::prelude::*;
         // The first collision in sweep order, as the sequential search returns.
         pairs.par_iter().find_map_first(test)
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(not(feature = "threads"))]
     {
         pairs.iter().find_map(test)
     }

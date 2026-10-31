@@ -53,14 +53,8 @@ pub(super) struct Failure {
 type Prepared = std::result::Result<Made, Failure>;
 
 pub(super) fn workers() -> usize {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        std::thread::available_parallelism().map_or(1, |n| n.get().min(8))
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        1
-    }
+    // PushForm: the thread count the host set (`crate::set_threads`), else the cores.
+    crate::par::threads().min(8)
 }
 
 fn prepare(ex: &Exchange, job: &Job) -> Prepared {

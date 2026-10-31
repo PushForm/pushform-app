@@ -2,14 +2,14 @@ use crate::*;
 use spade::{iterators::*, *};
 use truck_topology::{compress::*, *};
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "threads")]
 mod parallelizable {
     /// Parallelizable by `rayon`.
     pub trait Parallelizable: Send + Sync {}
     impl<T: Send + Sync> Parallelizable for T {}
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(not(feature = "threads"))]
 mod parallelizable {
     /// No parallelization in the case of wasm.
     pub trait Parallelizable {}
@@ -397,13 +397,13 @@ impl<C: PolylineableCurve, S: MeshableSurface> MeshableShape for Shell<Point3, C
     type MeshedShape = Shell<Point3, PolylineCurve, Option<PolygonMesh>>;
     fn triangulation(&self, tol: f64) -> Self::MeshedShape {
         nonpositive_tolerance!(tol);
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(feature = "threads")]
         let res = triangulation::shell_tessellation(
             self,
             Deflection::chord(tol),
             triangulation::by_search_parameter,
         );
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(not(feature = "threads"))]
         let res = triangulation::shell_tessellation_single_thread(
             self,
             Deflection::chord(tol),
@@ -439,13 +439,13 @@ impl<C: PolylineableCurve, S: RobustMeshableSurface> RoundMeshableShape for Shel
     type MeshedShape = Shell<Point3, PolylineCurve, Option<PolygonMesh>>;
     fn robust_triangulation_within(&self, deflection: Deflection) -> Self::MeshedShape {
         nonpositive_tolerance!(deflection.chord);
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(feature = "threads")]
         let res = triangulation::shell_tessellation(
             self,
             deflection,
             triangulation::by_search_nearest_parameter,
         );
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(not(feature = "threads"))]
         let res = triangulation::shell_tessellation_single_thread(
             self,
             deflection,

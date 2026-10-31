@@ -31,8 +31,13 @@ truck-topology = "0.6"
 spade = { version = "2.15", default-features = false, features = ["std"] }
 web-time = "1"
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-rayon = "1.12"
+# PushForm: worker threads behind the `threads` feature (on by default) instead of "not wasm32", so the
+# WebAssembly build for wasm32-wasip1-threads converts and meshes on threads too.
+rayon = { version = "1.12", optional = true }
+
+[features]
+default = ["threads"]
+threads = ["dep:rayon", "truck-meshalgo/threads"]
 
 [dev-dependencies]
 # The vendored crate tests never build in CI, so its equivalence checks run from kernel tests.

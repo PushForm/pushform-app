@@ -314,9 +314,14 @@ struct Reader {
     plan: Vec<Planned>,
     /// What the solids of one batch (consecutive solids of one representation) share.
     batches: Vec<Batch>,
-    /// Planned solids converted so far.
+    /// Planned solids converted so far (positions of `order`).
     converted: usize,
-    /// The body each converted planned solid became (`None`: it failed).
+    /// PushForm: the order the planned solids are converted in (indices into `plan`): the
+    /// heaviest items first when workers share the work, so one large part runs beside the rest
+    /// instead of after them; the lightest first on one thread, so a caller that shows parts as
+    /// they come sees most of them early.
+    order: Vec<usize>,
+    /// The body each planned solid became (`None`: not converted yet, or it failed).
     made: Vec<Option<usize>>,
     workers: usize,
     /// Whoever waits for the import (progress, Cancel).
@@ -353,6 +358,7 @@ impl Reader {
             plan: Vec::new(),
             batches: Vec::new(),
             converted: 0,
+            order: Vec::new(),
             made: Vec::new(),
             workers,
             watch: None,
@@ -756,10 +762,13 @@ impl Reader {
         // The next solids, across instances and parts, converted together: parts still to
         // orient are shared out between the workers. A part that comes back within the window
         // waits for the next one, which places the orientation its first instance found.
+        // PushForm: positions are taken through `order`.
+        let order = self.order.clone();
+        let planned = |pos: usize| order.get(pos).copied().unwrap_or(pos);
         let mut last = first + 1;
         if !single {
-            let mut fresh: HashSet<u64> = self.plan.get(first).map(|p| p.item).into_iter().collect();
-            while let Some(p) = self.plan.get(last)
+            let mut fresh: HashSet<u64> = self.plan.get(planned(first)).map(|p| p.item).into_iter().collect();
+            while let Some(p) = self.plan.get(planned(last))
                 && last - first < MAX_WINDOW
             {
                 if !self.oriented.contains_key(&p.item) && !fresh.insert(p.item) {
@@ -772,8 +781,11 @@ impl Reader {
         let ex = self.ex.clone();
         let mut sources = Vec::new();
         let mut jobs = Vec::new();
-        for i in first..last {
-            self.made.push(None);
+        for pos in first..last {
+            let i = planned(pos);
+            if self.made.len() <= i {
+                self.made.resize(i + 1, None);
+            }
             let Some(p) = self.plan.get(i) else { continue };
             let (item, units) = (p.item, p.units);
             if let Some(again) = self.unreadable.get(&item) {
@@ -1213,6 +1225,19 @@ fn step_import_with_workers(text: &str, workers: usize) -> Result<StepImport> {
     reading.finish()
 }
 
+/// PushForm: the faces a solid item lists, through its shells (0 when it is none of the known kinds).
+fn solid_faces(ex: &Exchange, item: u64) -> usize {
+    let shell_faces = |shell: &Param| shell.as_ref_id().and_then(|s| ex.get(s)).and_then(|e| e.params().get(1)).and_then(Param::as_list).map_or(0, |l| l.len());
+    let Some(e) = ex.get(item) else { return 0 };
+    let p = e.params();
+    match e.name() {
+        "MANIFOLD_SOLID_BREP" | "FACETED_BREP" => p.get(1).map_or(0, shell_faces),
+        "BREP_WITH_VOIDS" => p.get(1).map_or(0, shell_faces) + p.get(2).and_then(Param::as_list).map_or(0, |voids| voids.iter().map(shell_faces).sum()),
+        "SHELL_BASED_SURFACE_MODEL" => p.get(1).and_then(Param::as_list).map_or(0, |shells| shells.iter().map(shell_faces).sum()),
+        _ => 0,
+    }
+}
+
 /// A STEP file being read a piece at a time, for a caller that can't wait for the whole read
 /// in one go (the web app, which has one thread and must keep drawing): [`StepReading::new`]
 /// parses the file and walks its structure, each [`StepReading::step`] converts the next few
@@ -1233,7 +1258,8 @@ impl StepReading {
         Self::with_workers(text, parallel::workers())
     }
 
-    fn with_workers(text: &str, workers: usize) -> Result<StepReading> {
+    /// PushForm: [`Self::new`] with the worker threads given (the host's count in the browser).
+    pub fn with_workers(text: &str, workers: usize) -> Result<StepReading> {
         let key = text_key(text);
         let watch = crate::watch::current();
         let cancelled = || watch.as_ref().is_some_and(|w| w.cancelled());
@@ -1285,7 +1311,34 @@ impl StepReading {
             tree.push(StepNode { name: "Import".into(), transform: to_array(&identity), bodies, children: Vec::new() });
         }
         let single = workers <= 1;
+        // PushForm: conversion order by the solids' face counts (see `Reader::order`).
+        rd.made = vec![None; rd.plan.len()];
+        let faces: Vec<usize> = rd.plan.iter().map(|p| solid_faces(&ex, p.item)).collect();
+        let mut order: Vec<usize> = (0..rd.plan.len()).collect();
+        if single {
+            order.sort_by_key(|&i| faces[i]);
+        } else {
+            order.sort_by_key(|&i| std::cmp::Reverse(faces[i]));
+        }
+        rd.order = order;
         Ok(StepReading { rd, tree, key, small: text.len() <= KEEP_SMALL_BYTES, single })
+    }
+
+    /// PushForm: the assembly tree as planned, before [`Self::finish`] renumbers it: its nodes list
+    /// planned solids by index, the indices [`Self::converted_bodies`] reports.
+    pub fn tree(&self) -> &[StepNode] {
+        &self.tree
+    }
+
+    /// PushForm: how many solids are planned (the planned indices run below this).
+    pub fn planned(&self) -> usize {
+        self.rd.plan.len()
+    }
+
+    /// PushForm: the bodies converted so far, each with its planned index, so a caller can mesh or
+    /// show parts while [`Self::step`] converts the rest. A planned solid that failed never appears.
+    pub fn converted_bodies(&self) -> impl Iterator<Item = (usize, &ImportedBody)> + '_ {
+        self.rd.made.iter().enumerate().filter_map(|(i, m)| m.and_then(|b| self.rd.bodies.get(b)).map(|b| (i, b)))
     }
 
     /// Convert the next solid (or batch of solids); false once all are converted (or the

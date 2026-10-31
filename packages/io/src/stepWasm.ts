@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import type { MeshPartGeometry } from '@pushform/model';
+import { threadTableBytes } from './stepThreads';
 
 /**
  * The STEP reader module (`crates/step-reader`, SolidCraft's reader compiled to `wasm32-wasip1`), loaded once on the
@@ -13,16 +14,21 @@ export interface StepReaderModule {
   threads?: StepThreadPool;
   pf_alloc(len: number): number;
   pf_free(ptr: number, len: number): void;
-  /** `mode` 0: plain triangles for files that become faces; 1: the display mesh for files that stay mesh parts. */
-  pf_step_open(ptr: number, len: number, mode: number, threshold: number): number;
+  /**
+   * `mode` 0: plain triangles for files that become faces; 1: the display mesh for files that stay mesh parts.
+   * `threads`: the threads the host offers (1: none); the conversion and the meshing use them where the build can.
+   */
+  pf_step_open(ptr: number, len: number, mode: number, threshold: number, threads: number): number;
   pf_step_progress(handle: number): bigint;
   pf_step_step(handle: number): number;
-  /** Finish the conversion; 1 on success. Then `pf_step_mesh` meshes one body per call (1 while more remain). */
+  /**
+   * Finish the conversion; 1 on success. With threads the parts were meshed as they were converted (poll
+   * `pf_step_mesh_done`); without, `pf_step_mesh` meshes one part per call (1 while more remain).
+   */
   pf_step_finish(handle: number): number;
+  /** Bodies whose part is meshed, of the bodies planned; moves during the conversion too. */
   pf_step_mesh_progress(handle: number): bigint;
   pf_step_mesh(handle: number): number;
-  /** Mesh every body on up to `workers` threads; 1 when running (poll `pf_step_mesh_done`), 0 when this build cannot. */
-  pf_step_mesh_start(handle: number, workers: number): number;
   pf_step_mesh_done(handle: number): number;
   pf_step_result(handle: number): number;
   pf_step_result_ptr(handle: number): number;
@@ -40,6 +46,9 @@ export interface StepThreadPool {
   readonly memory: WebAssembly.Memory;
   readonly count: number;
   spawn(start: number): number;
+  /** Workers to make: `start` gets the address of their thread table (see `threadTableBytes`), once the module is instantiated, and resolves when they are ready. */
+  readonly capacity: number;
+  start(table: number): Promise<void>;
   readonly failure?: string | undefined;
 }
 
@@ -94,8 +103,10 @@ export async function instantiateStepReader(source: BufferSource | WebAssembly.M
   const exports = instance.exports as unknown as StepReaderModule & { _initialize?: () => void; pf_init?: () => void };
   holder.memory = exports.memory;
   exports._initialize?.();
-  // The threaded build's main thread is set up by the host (a library has no start function to do it).
+  // The threaded build's main thread is set up by the host (a library has no start function to do it), and its
+  // threads number themselves from a counter in the shared memory.
   exports.pf_init?.();
+  if (threads) await threads.start(exports.pf_alloc(threadTableBytes(threads.capacity)));
   // The exports object is frozen, so the module handed out is a copy that can carry the thread pool.
   return { ...exports, memory: exports.memory, threads } as StepReaderModule;
 }

@@ -13,7 +13,7 @@ const BOX = ['ISO-10303-21;', 'HEADER;', "FILE_DESCRIPTION((''),'2;1');", "FILE_
 async function fakeNative(bytes: Uint8Array, mode: number, threshold: number): Promise<Uint8Array> {
   const m = await loadStepReader();
   const ptr = m.pf_alloc(bytes.length); new Uint8Array(m.memory.buffer, ptr, bytes.length).set(bytes);
-  const handle = m.pf_step_open(ptr, bytes.length, mode, threshold); m.pf_free(ptr, bytes.length);
+  const handle = m.pf_step_open(ptr, bytes.length, mode, threshold, 1); m.pf_free(ptr, bytes.length);
   if (!handle) throw new Error('open failed');
   while (m.pf_step_step(handle));
   m.pf_step_finish(handle); while (m.pf_step_mesh(handle));

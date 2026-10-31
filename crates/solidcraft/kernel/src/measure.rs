@@ -142,9 +142,9 @@ fn mass(b: &Body, topology: bool) -> Result<(MassMeasure, Option<Mesh>)> {
     // profile counting their wall time once as tessellation. Not from inside a worker pool: a
     // pool thread blocked on threads of its own could leave their meshing (which runs on the
     // shared pool) without a worker.
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(feature = "threads")]
     let threads = if rayon::current_thread_index().is_none() { jobs.len() } else { 1 };
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(not(feature = "threads"))]
     let threads = 1;
     let made = crate::profile::timed(crate::profile::Kind::Tessellate, || {
         crate::par::map_on_threads(&jobs, threads, |&(tol, refine)| b.tessellate_with(tol, refine))

@@ -38,7 +38,7 @@ async function instantiateThreaded(bytes: Uint8Array, module: WebAssembly.Module
   if (!limits?.shared) throw new Error('The threaded STEP reader does not import a shared memory.');
   const memory = sharedStepMemory(limits);
   if (!memory) throw new Error('No shared memory large enough for the STEP reader.');
-  const pool = await createStepThreadPool(module, memory, threads.count, threads.makeWorker);
+  const pool = createStepThreadPool(module, memory, threads.count, threads.makeWorker);
   return instantiateStepReader(module, pool);
 }
 

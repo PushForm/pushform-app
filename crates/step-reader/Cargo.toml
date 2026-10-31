@@ -13,9 +13,13 @@ crate-type = ["cdylib", "rlib"]
 # SolidCraft's B-rep kernel and its STEP reader (MIT OR Apache-2.0), carried in this repository under
 # crates/solidcraft and adapted there (see its README). The kernel builds on patched copies of the truck
 # crates that live beside it (see [patch] below).
-solidcraft-kernel = { path = "../solidcraft/kernel" }
+solidcraft-kernel = { path = "../solidcraft/kernel", default-features = false }
 earcutr = "0.5"
 solidcraft-geom = { path = "../solidcraft/geom" }
+
+# Natively the kernel always has its worker threads; in WebAssembly only the `threads` build does.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+solidcraft-kernel = { path = "../solidcraft/kernel", features = ["threads"] }
 
 [patch.crates-io]
 truck-geometry = { path = "../solidcraft/vendor/truck-geometry" }
@@ -30,7 +34,7 @@ default = ["simplify"]
 simplify = []
 # Mesh on threads in WebAssembly: build with `--target wasm32-wasip1-threads --features threads` (the single-threaded
 # module leaves it off and the host meshes one part per call).
-threads = []
+threads = ["solidcraft-kernel/threads"]
 
 [profile.release]
 opt-level = 3

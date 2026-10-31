@@ -23,4 +23,22 @@ builds it natively, `pnpm build:step-reader` for WebAssembly.
 
 ## PushForm changes
 
-None yet beyond the manifests (workspace tables spelled out, lints inlined).
+Marked `PushForm:` in the source.
+
+- Manifests: workspace tables spelled out, lints inlined, `rust-version` kept.
+- **Threads behind a feature, not the target.** The kernel's parallel helpers (`kernel/src/par.rs`,
+  `step_in/parallel.rs`, `measure.rs`) and the tessellator's rayon use (`vendor/truck-meshalgo`) were gated on
+  `not(target_arch = "wasm32")`. They are now behind a `threads` feature (on by default; `truck-meshalgo/threads`),
+  so the WebAssembly build for `wasm32-wasip1-threads` converts on threads too, and the plain wasm build turns it off.
+- **`set_threads` / `threads`** (`par.rs`): the host tells the kernel how many threads it offers, since
+  `available_parallelism` knows nothing in WebAssembly. Natively it also sizes rayon's global pool; in the browser the
+  pool is left alone (its threads left the main instance waiting forever under Chromium and WebKit; the plain threads
+  of `map_on_threads` run fine), so `map` runs serially there.
+- **Reading a piece at a time, with the bodies on the way** (`step_in/mod.rs`): `StepReading::with_workers` is
+  public; `tree()` and `planned()` expose the assembly as planned, by planned solid index, before anything is
+  converted; `converted_bodies()` yields the bodies converted so far with those indices, so a caller can mesh or show
+  parts while the rest convert. `ImportedBody` already shared its solid, so handing bodies out is cheap.
+- **Conversion order** (`step_in/mod.rs`, `Reader::order`): the planned solids are converted by face count, the
+  heaviest first when workers share the work (one large part runs beside the rest instead of after them), the
+  lightest first on one thread (a caller showing parts as they come sees most of them early). `solid_faces` counts a
+  solid's faces through its shells from the parsed file.

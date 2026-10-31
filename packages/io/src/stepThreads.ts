@@ -3,19 +3,24 @@
 import { wasiImports, type StepThreadPool } from './stepWasm';
 
 /**
- * Threads for the threaded STEP reader build (`wasm32-wasip1-threads`). The module imports a shared memory and, when
- * it meshes parts on threads, calls `wasi.thread-spawn` once per thread; the host answers by running
- * `wasi_thread_start` on a worker that instantiated the same module over the same memory. The workers are started
- * ahead of time, so a spawn only posts a message, and the thread that spawned never has to block for it.
+ * Threads for the threaded STEP reader build (`wasm32-wasip1-threads`). The module imports a shared memory and
+ * calls `wasi.thread-spawn` for every thread it starts: the kernel's conversion workers, its tessellation pools and
+ * the meshing threads. The host answers each spawn by running `wasi_thread_start` on a worker that instantiated the
+ * same module over the same memory.
+ *
+ * Threads are spawned from threads too (a conversion worker starts its own tessellation pool), and the spawning
+ * thread blocks right after, waiting for the new one. A browser starts a new worker only once the thread that made
+ * it returns to its event loop, so a spawn can never make a worker: all workers are made ahead of time by the main
+ * instance, and each waits in the shared memory for work. A spawn, from any thread, claims an idle worker's slot with
+ * an atomic exchange, writes the thread id and start argument into it and wakes the worker; nothing passes through
+ * an event loop. Thread ids come from a counter in the same table.
  *
  * The host side is platform-neutral: a browser worker and a Node worker thread both fit `StepThreadWorker`.
  */
 
 /** Messages a thread worker receives and sends. */
-export type StepThreadRequest =
-  | { type: 'init'; module: WebAssembly.Module; memory: WebAssembly.Memory }
-  | { type: 'start'; tid: number; start: number };
-export type StepThreadReply = { type: 'ready' } | { type: 'done'; tid: number } | { type: 'error'; message: string };
+export type StepThreadRequest = { type: 'init'; module: WebAssembly.Module; memory: WebAssembly.Memory; table: number; index: number };
+export type StepThreadReply = { type: 'ready' } | { type: 'error'; message: string };
 
 export interface StepThreadWorker {
   post(message: StepThreadRequest): void;
@@ -61,59 +66,93 @@ export function sharedStepMemory(limits: { min: number; max?: number }): WebAsse
 }
 
 /**
- * The pool: `count` workers started now (each instantiates the module over `memory`), one thread per spawn. A spawn
- * beyond the ready workers starts another worker, which runs the thread as soon as it is ready.
+ * The thread table in the shared memory, in 32-bit words: the thread id counter, the number of worker slots, then
+ * one slot of four words per worker (state, thread id, start argument, unused).
  */
-export async function createStepThreadPool(module: WebAssembly.Module, memory: WebAssembly.Memory, count: number, makeWorker: () => StepThreadWorker): Promise<StepThreadPool> {
-  interface Slot { worker: StepThreadWorker; ready: boolean; busy: boolean; queued: { tid: number; start: number }[] }
-  const slots: Slot[] = [];
-  let nextTid = 1;
+const TABLE_HEADER = 2, SLOT = 4;
+const IDLE = 0, CLAIMED = 1, REQUESTED = 2, RUNNING = 3;
+/** Bytes a table of `capacity` slots takes. */
+export function threadTableBytes(capacity: number): number { return (TABLE_HEADER + SLOT * capacity) * 4; }
+
+/**
+ * Start a thread from any instance: claim an idle worker's slot, hand it the thread and wake it. Returns the thread
+ * id, or -1 when every worker is busy (the module treats that as a thread that could not start).
+ */
+export function spawnThread(memory: WebAssembly.Memory, table: number, start: number): number {
+  const words = new Int32Array(memory.buffer), base = table >> 2, count = Atomics.load(words, base + 1);
+  for (let i = 0; i < count; i++) {
+    const slot = base + TABLE_HEADER + i * SLOT;
+    if (Atomics.compareExchange(words, slot, IDLE, CLAIMED) !== IDLE) continue;
+    const tid = Atomics.add(words, base, 1) + 1;
+    Atomics.store(words, slot + 1, tid);
+    Atomics.store(words, slot + 2, start);
+    Atomics.store(words, slot, REQUESTED);
+    Atomics.notify(words, slot, 1);
+    return tid;
+  }
+  return -1;
+}
+
+/**
+ * How many workers to make for a module told it has `threads` threads: the kernel's pool, its conversion workers
+ * and their tessellation pools, and the meshing threads can all be alive at once.
+ */
+export function threadWorkerCapacity(threads: number): number { return threads * 4 + 4; }
+
+/**
+ * The main instance's pool. `start` gets the address of the thread table (zeroed, `threadTableBytes(capacity)` long,
+ * allocated by the main instance once its module is instantiated) and makes the workers; `count` is what the module
+ * is told it may use.
+ */
+export function createStepThreadPool(module: WebAssembly.Module, memory: WebAssembly.Memory, count: number, makeWorker: () => StepThreadWorker): StepThreadPool {
+  const workers: StepThreadWorker[] = [];
+  let table = -1;
   const pool = {
-    memory, count, failure: undefined as string | undefined,
-    spawn(start: number): number {
-      if (pool.failure) return -1;
-      const tid = nextTid++;
-      const slot = slots.find(s => s.ready && !s.busy) ?? slots.find(s => !s.ready && !s.queued.length) ?? add();
-      if (slot.ready) { slot.busy = true; slot.worker.post({ type: 'start', tid, start }); } else slot.queued.push({ tid, start });
-      return tid;
+    memory, count, capacity: threadWorkerCapacity(count), failure: undefined as string | undefined,
+    start(at: number): Promise<void> {
+      table = at;
+      new Int32Array(memory.buffer, at, TABLE_HEADER + SLOT * pool.capacity).fill(0);
+      Atomics.store(new Int32Array(memory.buffer), (at >> 2) + 1, pool.capacity);
+      // Resolves once every worker holds its instance: a browser loads a worker's script through the thread that made
+      // it, so the workers must be ready before that thread blocks in the module waiting for one of them.
+      const ready: Promise<void>[] = [];
+      for (let index = 0; index < pool.capacity; index++) {
+        const worker = makeWorker();
+        ready.push(new Promise<void>((resolve, reject) => worker.onMessage(message => {
+          if (message.type === 'ready') resolve();
+          else { pool.failure ??= message.message; reject(new Error(message.message)); }
+        })));
+        worker.post({ type: 'init', module, memory, table: at, index });
+        workers.push(worker);
+      }
+      return Promise.all(ready).then(() => undefined);
     },
-    terminate(): void { for (const slot of slots) slot.worker.terminate(); slots.length = 0; },
+    spawn(start: number): number { return pool.failure || table < 0 ? -1 : spawnThread(memory, table, start); },
+    terminate(): void { for (const worker of workers) worker.terminate(); workers.length = 0; },
   };
-  const add = (): Slot => {
-    const slot: Slot = { worker: makeWorker(), ready: false, busy: false, queued: [] };
-    slot.worker.onMessage(message => {
-      if (message.type === 'ready') {
-        slot.ready = true;
-        const next = slot.queued.shift();
-        if (next) { slot.busy = true; slot.worker.post({ type: 'start', ...next }); }
-      } else if (message.type === 'done') {
-        slot.busy = false;
-        const next = slot.queued.shift();
-        if (next) { slot.busy = true; slot.worker.post({ type: 'start', ...next }); }
-      } else pool.failure ??= message.message;
-    });
-    slot.worker.post({ type: 'init', module, memory });
-    slots.push(slot);
-    return slot;
-  };
-  for (let i = 0; i < count; i++) add();
   return pool;
 }
 
-/** The worker side: instantiate the module over the shared memory, then run each thread it is asked to. */
+/**
+ * The worker side: instantiate the module over the shared memory, report ready, then serve the worker's slot of the
+ * thread table for good: wait for a thread, run it, go idle again. The wait blocks this worker, which is what it is for.
+ */
 export function runStepThread(port: { post(message: StepThreadReply): void; onMessage(handler: (message: StepThreadRequest) => void): void }): void {
-  let exports: { wasi_thread_start(tid: number, start: number): void } | undefined;
   port.onMessage(async message => {
     try {
-      if (message.type === 'init') {
-        const { module, memory } = message;
-        const imports: WebAssembly.Imports = { wasi_snapshot_preview1: wasiImports(() => memory), env: { memory }, wasi: { 'thread-spawn': () => -1 } };
-        exports = (await WebAssembly.instantiate(module, imports)).exports as unknown as typeof exports;
-        port.post({ type: 'ready' });
-      } else if (message.type === 'start') {
-        if (!exports) throw new Error('The STEP reader thread was started before its module.');
-        exports.wasi_thread_start(message.tid, message.start);
-        port.post({ type: 'done', tid: message.tid });
+      const { module, memory, table, index } = message;
+      const imports: WebAssembly.Imports = { wasi_snapshot_preview1: wasiImports(() => memory), env: { memory }, wasi: { 'thread-spawn': (start: number) => spawnThread(memory, table, start) } };
+      const exports = (await WebAssembly.instantiate(module, imports)).exports as unknown as { wasi_thread_start(tid: number, start: number): void };
+      port.post({ type: 'ready' });
+      const slot = (table >> 2) + TABLE_HEADER + index * SLOT;
+      for (;;) {
+        // A fresh view each time: the shared memory's buffer object changes when the module grows it.
+        let words = new Int32Array(memory.buffer);
+        while (Atomics.load(words, slot) !== REQUESTED) { Atomics.wait(words, slot, Atomics.load(words, slot)); words = new Int32Array(memory.buffer); }
+        const tid = Atomics.load(words, slot + 1), start = Atomics.load(words, slot + 2);
+        Atomics.store(words, slot, RUNNING);
+        exports.wasi_thread_start(tid, start);
+        Atomics.store(new Int32Array(memory.buffer), slot, IDLE);
       }
     } catch (cause) {
       port.post({ type: 'error', message: cause instanceof Error ? cause.message : String(cause) });

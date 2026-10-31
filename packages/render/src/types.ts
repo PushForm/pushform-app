@@ -347,8 +347,8 @@ export interface RenderSketch {
 export type EntityHighlight =
   | { readonly kind: 'face'; readonly key: string; readonly faceId: number; readonly loops: readonly (readonly Vec3[])[] }
   | { readonly kind: 'edge'; readonly points: readonly Vec3[] }
-  /** Whole-body tint; `key` is the body's render key. */
-  | { readonly kind: 'body'; readonly key: string }
+  /** A whole body: every face tinted and its visible edges drawn in the selection color; `key` is the body's render key. */
+  | { readonly kind: 'body'; readonly key: string; readonly edges?: readonly (readonly Vec3[])[] | undefined }
   /** A component instance: its world bounding box drawn as a box, every body inside it tinted. `key` is the instance's path key. */
   | { readonly kind: 'instance'; readonly key: string; readonly bounds: Box3 }
   | { readonly kind: 'sketchFace'; readonly id: number; readonly loops: readonly (readonly Vec3[])[] }

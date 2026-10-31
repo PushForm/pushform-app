@@ -12,15 +12,15 @@ describe('buildHighlightGeometry', () => {
         { kind: 'edge', points: [[0, 0, 0], [1, 0, 0], [1, 1, 0]] },
         { kind: 'sketchEdge', id: 7, a: [0, 0, 1], b: [1, 0, 1] },
         { kind: 'sketchVertex', p: [3, 3, 3] },
-        { kind: 'body', key: '/9' },
+        { kind: 'body', key: '/9', edges: [[[0, 0, 3], [1, 0, 3]], [[1, 0, 3], [1, 1, 3], [0, 1, 3]]] },
         { kind: 'instance', key: '3', bounds: { min: [0, 0, 0], max: [1, 1, 1] } },
         { kind: 'sketchFace', id: 4, loops: [[[0, 0, 2], [1, 0, 2], [0, 1, 2]]] },
       ],
       [1, 0, 0],
     );
     expect(g.facePositions.length).toBe((6 + 3) * 3);
-    // 2 polyline segments + 1 sketch edge + the 12 edges of the instance box
-    expect(g.edgePositions.length / 6).toBe(3 + 12);
+    // 2 polyline segments + 1 sketch edge + the body's 3 edge segments + the 12 edges of the instance box
+    expect(g.edgePositions.length / 6).toBe(3 + 3 + 12);
     expect(Array.from(g.vertexPositions)).toEqual([2, 3, 3]);
     expect([...g.bodyKeys]).toEqual(['/9']);
     expect([...g.instanceKeys]).toEqual(['3']);

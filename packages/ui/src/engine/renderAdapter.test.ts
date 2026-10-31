@@ -79,7 +79,10 @@ describe('highlightsFor', () => {
     expect(h.hover?.kind === 'face' && h.hover.loops[0]!.length).toBe(4);
     expect(h.selected).toHaveLength(2);
     expect(h.selected[0]).toEqual({ kind: 'edge', points: body.edges.get(edgeKey)!.polyline });
-    expect(h.selected[1]).toEqual({ kind: 'body', key: renderKey([], body.id) });
+    const whole = h.selected[1]!;
+    expect(whole).toMatchObject({ kind: 'body', key: renderKey([], body.id) });
+    // a selected solid outlines every one of its edges
+    expect(whole.kind === 'body' && whole.edges).toEqual([...body.edges.values()].map((e) => e.polyline));
     // stale refs disappear instead of throwing
     expect(highlightFor(doc.state, { kind: 'body', path: [], id: 9999 as Id })).toBeNull();
   });
@@ -468,7 +471,14 @@ describe('highlightsFor with paths', () => {
     const faceRef: EntityRef = { kind: 'face', path: [ids.outer, ids.inner], id: ids.bBody, faceId, region: null };
     const h = highlightsFor(doc.state, instRef, [bodyRef, faceRef, { kind: 'instance', path: [], id: ids.outer }]);
     expect(h.hover).toEqual({ kind: 'instance', key: pathKey([ids.outer, ids.inner]), bounds: { min: [10, 5, 0], max: [11, 6, 1] } });
-    expect(h.selected[0]).toEqual({ kind: 'body', key: renderKey([ids.outer, ids.inner], ids.bBody) });
+    expect(h.selected[0]).toMatchObject({ kind: 'body', key: renderKey([ids.outer, ids.inner], ids.bBody) });
+    // its edges are outlined in world coordinates
+    const whole = h.selected[0]!;
+    expect(whole.kind === 'body' && whole.edges?.length).toBe(bBody.edges.size);
+    for (const p of whole.kind === 'body' ? whole.edges!.flat() : []) {
+      expect(p[0]).toBeGreaterThanOrEqual(10 - 1e-9); expect(p[0]).toBeLessThanOrEqual(11 + 1e-9);
+      expect(p[1]).toBeGreaterThanOrEqual(5 - 1e-9); expect(p[1]).toBeLessThanOrEqual(6 + 1e-9);
+    }
     const face = h.selected[1]!;
     expect(face.kind).toBe('face');
     if (face.kind === 'face') {

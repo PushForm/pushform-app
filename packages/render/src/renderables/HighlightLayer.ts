@@ -101,6 +101,8 @@ export function buildHighlightGeometry(items: readonly EntityHighlight[], origin
         break;
       case 'body':
         bodyKeys.add(h.key);
+        // The tint alone is faint on light faces; the body's edges make a selected solid read as selected.
+        for (const edge of h.edges ?? []) addPolyline(edge);
         break;
       case 'instance':
         instanceKeys.add(h.key);

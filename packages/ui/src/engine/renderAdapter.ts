@@ -792,8 +792,14 @@ function highlightForCached(state: DocumentState, ref: EntityRef, cache: MatrixC
       const bounds = instanceWorldBounds(state, full);
       return bounds ? { kind: 'instance', key: pathKey(full), bounds } : null;
     }
-    case 'body':
-      return container.bodies.has(ref.id) ? { kind: 'body', key: renderKey(ref.path, ref.id) } : null;
+    case 'body': {
+      const body = container.bodies.get(ref.id);
+      if (!body) return null;
+      // Hidden and soft edges are not drawn, so they are not outlined either.
+      const edges: (readonly Vec3[])[] = [];
+      for (const edge of body.edges.values()) if (!edge.hidden && !edge.soft) edges.push(tpoly(edge.polyline));
+      return { kind: 'body', key: renderKey(ref.path, ref.id), edges };
+    }
     case 'meshPart':
       // A mesh part highlights whole, as a body does.
       return container.meshParts.has(ref.id) ? { kind: 'body', key: renderKey(ref.path, ref.id) } : null;

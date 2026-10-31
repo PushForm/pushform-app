@@ -6,6 +6,7 @@ import type { AnyCommand, CommandContext, CommandRegistry } from '@pushform/comm
 import type { EdgeKey, EntityRef } from '@pushform/model';
 import type { FaceLocalId, Id } from '@pushform/core';
 import { PANEL_IDS, useAppStore } from '../store';
+import { writeNavigationCubePreference } from '../navCubePreference';
 
 function selectionOf(ctx: CommandContext): EntityRef[] {
   try {
@@ -40,6 +41,20 @@ const store = () => useAppStore.getState();
  * `contextMenu.itemsFor` in `@pushform/commands`.
  */
 export const uiCommands: readonly AnyCommand[] = [
+  defineCommand({
+    id: 'view.navigationCube',
+    title: 'Navigation Cube',
+    category: 'view',
+    menu: 'View',
+    params: z.object({ value: z.boolean().optional() }),
+    undoable: false,
+    run: (_ctx, p): boolean => {
+      const visible = p.value ?? !store().navigationCube;
+      store().setNavigationCube(visible);
+      writeNavigationCubePreference(visible);
+      return visible;
+    },
+  }),
   defineCommand({
     id: 'ui.makeComponent',
     title: 'Make Component…',

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { create } from 'zustand';
+import { readNavigationCubePreference } from './navCubePreference';
 import { DEFAULT_DISPLAY } from '@pushform/commands';
 import type { DisplayState } from '@pushform/commands';
 import type { EntityRef } from '@pushform/model';
@@ -56,6 +57,8 @@ export interface AppState {
   selectionVersion: number;
   /** Display toggles; written by `view.*` commands, read by the renderer. */
   display: DisplayState;
+  /** Whether the viewport's navigation cube is shown (View › Navigation Cube); a per-browser preference. */
+  navigationCube: boolean;
   /** Status-bar notice: a command error or a tool message (e.g. Select's delete message). */
   notice: string | null;
   /** Open modal dialog, if any; `dialogRef` is its subject (e.g. the instance being renamed). */
@@ -79,6 +82,7 @@ export interface AppState {
   setDocumentName(name: string): void;
   bumpSelectionVersion(): void;
   setDisplay(patch: Partial<DisplayState>): void;
+  setNavigationCube(visible: boolean): void;
   setNotice(notice: string | null): void;
   showPanel(id: PanelId): void;
   openDialog(id: DialogId, ref?: EntityRef | null): void;
@@ -110,6 +114,7 @@ export const useAppStore = create<AppState>()((set) => ({
   menuOpen: false,
   selectionVersion: 0,
   display: DEFAULT_DISPLAY,
+  navigationCube: readNavigationCubePreference(),
   notice: null,
   dialog: null,
   dialogRef: null,
@@ -129,6 +134,7 @@ export const useAppStore = create<AppState>()((set) => ({
   setDocumentName: (documentName) => set({ documentName }),
   bumpSelectionVersion: () => set((s) => ({ selectionVersion: s.selectionVersion + 1 })),
   setDisplay: (patch) => set((s) => ({ display: { ...s.display, ...patch } })),
+  setNavigationCube: (navigationCube) => set({ navigationCube }),
   setNotice: (notice) => set({ notice }),
   showPanel: (openPanel) => set({ openPanel }),
   openDialog: (dialog, ref = null) => set({ dialog, dialogRef: ref, contextMenu: null }),

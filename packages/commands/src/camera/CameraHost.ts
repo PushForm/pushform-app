@@ -33,7 +33,8 @@ export interface CameraHost {
   /** Bounds of everything drawable, or null when the scene is empty. */
   sceneBounds(): Box3 | null;
 
-  orbitStart(screen: Vec2, opts?: { free?: boolean }): void;
+  /** Begin an orbit drag. `pivot` overrides the point under `screen` (the navigation cube orbits the model's center). */
+  orbitStart(screen: Vec2, opts?: { free?: boolean; pivot?: Vec3 }): void;
   orbitDrag(screen: Vec2): void;
   orbitEnd(): void;
 

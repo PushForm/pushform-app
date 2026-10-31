@@ -117,9 +117,9 @@ export class CameraController implements CameraHost {
     return this.hooks.sceneBounds?.() ?? null;
   }
 
-  orbitStart(screen: Vec2, opts: { free?: boolean } = {}): void {
+  orbitStart(screen: Vec2, opts: { free?: boolean; pivot?: Vec3 } = {}): void {
     this.pushHistory();
-    const pivot = this.pick(screen) ?? this.defaultPivot();
+    const pivot = opts.pivot ?? this.pick(screen) ?? this.defaultPivot();
     this.drag = { kind: 'orbit', last: screen, pivot, free: !!opts.free };
   }
 
@@ -238,7 +238,8 @@ export class CameraController implements CameraHost {
 
   // --- internals ------------------------------------------------------------------------------
 
-  private defaultPivot(): Vec3 {
+  /** Center of the model's bounds, or the target when the model is empty: the pivot of a drag that picks nothing. */
+  defaultPivot(): Vec3 {
     const box = this.sceneBounds();
     if (box) {
       return [(box.min[0] + box.max[0]) / 2, (box.min[1] + box.max[1]) / 2, (box.min[2] + box.max[2]) / 2];

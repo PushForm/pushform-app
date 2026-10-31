@@ -29,6 +29,7 @@ const FACE_STYLE_LABELS: readonly (readonly [FaceStyle, string])[] = [
 export function DisplayPanel(): JSX.Element {
   const app = useApp();
   const display = useAppStore((s) => s.display);
+  const navigationCube = useAppStore((s) => s.navigationCube);
   useEffect(() => installUiServices(app.commands), [app]);
   const set = (key: DisplayKey, value: boolean | FaceStyle): void => {
     app.commands.tryExecute('view.set', { key, value });
@@ -42,6 +43,10 @@ export function DisplayPanel(): JSX.Element {
           {label}
         </label>
       ))}
+      <label className="pf-form-check">
+        <input type="checkbox" checked={navigationCube} onChange={(e) => app.commands.tryExecute('view.navigationCube', { value: e.target.checked })} />
+        Navigation Cube
+      </label>
       <div className="pf-form-section">Face Style</div>
       <div role="radiogroup" aria-label="Face style" className="pf-form">
         {FACE_STYLE_LABELS.map(([style, label]) => (

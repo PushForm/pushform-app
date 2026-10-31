@@ -674,6 +674,42 @@
 .pf-text-editor.is-screen {
   transform: none;
 }
+.pf-nav-cube {
+  position: absolute;
+  top: 34px;
+  right: 12px;
+  width: 132px;
+  height: 132px;
+  z-index: 5;
+  user-select: none;
+  touch-action: none;
+}
+.pf-nav-cube svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.pf-nav-cube-cell {
+  cursor: pointer;
+}
+.pf-nav-cube-label {
+  pointer-events: none;
+  font: 700 0.42px var(--pf-font);
+  fill: #1f2328;
+  text-anchor: middle;
+  dominant-baseline: central;
+  letter-spacing: 0.02px;
+}
+.pf-nav-cube-arrow {
+  cursor: pointer;
+  fill: var(--pf-text-muted);
+  opacity: 0.7;
+}
+.pf-nav-cube-arrow:hover {
+  fill: var(--pf-accent);
+  opacity: 1;
+}
 .pf-cursor-hint {
   position: absolute;
   pointer-events: none;

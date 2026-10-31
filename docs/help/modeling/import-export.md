@@ -22,7 +22,7 @@ A part that does not form a closed solid is imported as editable faces, and the 
 
 ## Large models import as mesh parts
 
-A model file with more than 250,000 triangles in total imports as **mesh parts** instead of editable faces, so large CAD assemblies open in seconds and stay light. A mesh part is drawn like any other object, with its colors and edges, and you can select, move, rotate, scale, copy, hide, tag and paint it as a whole, and export it. It has no individual faces or edges to pick until it is made editable. Entity Info shows that an object is a mesh part, where it came from and how many triangles it holds. Files with mesh parts need this version of PushForm or newer to open.
+A model file with more than 250,000 triangles in total imports as **mesh parts** instead of editable faces, so large CAD assemblies open in seconds and stay light. A mesh part is drawn like any other object, with its colors and edges, and you can select, move, rotate, scale, copy, hide, tag and paint it as a whole, and export it. It has no individual faces or edges to pick until it is made editable: right-click it and choose **Make Editable** to turn that part into ordinary faces and edges (solids where it is closed, loose faces where it is not), keeping its colors, tag and material. Only that part is converted, so a large assembly stays light. Entity Info shows that an object is a mesh part, where it came from and how many triangles it holds. Files with mesh parts need this version of PushForm or newer to open.
 
 ## Save an editable native copy
 

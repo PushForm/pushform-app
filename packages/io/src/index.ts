@@ -15,6 +15,7 @@ export { modelContentIdentity } from './native/modelIdentity';
 export { layoutContentIdentity } from './native/layoutIdentity';
 export * from './sketchup';
 export * from './sketchupDocument';
+export * from './meshPartEditable';
 export * from './sketchupClient';
 export * from './collada';
 export * from './meshImport';

@@ -143,12 +143,13 @@ describe('mesh parts behave like bodies', () => {
     expect(host.selection.has(ref)).toBe(true);
   });
 
-  it('context menu: Entity Info, Erase, Hide/Unhide, Make Group, Make Component…, Zoom Selection', () => {
+  it('context menu: Entity Info, Erase, Hide/Unhide, Make Editable, Make Group, Make Component…, Zoom Selection', () => {
     const { registry, host, ref } = setup();
     const items = contextMenu.itemsFor(host.doc.state, [ref]);
-    expect(items.map((i) => i.label)).toEqual(['Entity Info', 'Erase', 'Hide', 'Make Group', 'Make Component…', 'Zoom Selection']);
+    expect(items.map((i) => i.label)).toEqual(['Entity Info', 'Erase', 'Hide', 'Make Editable', 'Make Group', 'Make Component…', 'Zoom Selection']);
     expect(items[2]).toMatchObject({ command: 'bodies.setHidden', params: { refs: [ref], hidden: true } });
-    expect(items[3]).toMatchObject({ command: 'group.make', params: { refs: [ref] } });
+    expect(items[3]).toMatchObject({ command: 'ui.makeEditable', params: { refs: [ref] } });
+    expect(items[4]).toMatchObject({ command: 'group.make', params: { refs: [ref] } });
     registry.execute('bodies.setHidden', { refs: [ref], hidden: true });
     expect(contextMenu.itemsFor(host.doc.state, [ref])[2]).toMatchObject({ label: 'Unhide', params: { hidden: false } });
     // mixed with a body: the shared items only

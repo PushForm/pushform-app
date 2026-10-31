@@ -50,7 +50,7 @@ pub(super) struct Failure {
     pub msg: String,
 }
 
-type Prepared = std::result::Result<Made, Failure>;
+pub(super) type Prepared = std::result::Result<Made, Failure>;
 
 pub(super) fn workers() -> usize {
     // PushForm: the thread count the host set (`crate::set_threads`), else the cores.
@@ -88,13 +88,36 @@ fn prepare(ex: &Exchange, job: &Job) -> Prepared {
 /// Prepare `jobs`, the results in the jobs' order. Solids still to read and orient (the slow
 /// part) are shared out between up to `workers` threads, each taking the next job when it is
 /// done with one, so one large part does not hold up the rest.
-pub(super) fn bodies(ex: &Exchange, jobs: &[Job], workers: usize) -> Vec<Prepared> {
+/// PushForm: [`bodies`], but each prepared instance goes to `on_done` (with its job's index) as soon as it is
+/// ready, in completion order, so the caller can hand bodies on while the slow parts are still being read.
+pub(super) fn bodies_each(ex: &Exchange, jobs: &[Job], workers: usize, done: &std::sync::atomic::AtomicUsize, mut on_done: impl FnMut(usize, Prepared)) {
+    let one = |job: &Job| {
+        let made = prepare(ex, job);
+        done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        made
+    };
     let to_orient = jobs.iter().filter(|j| matches!(j.source, Source::Item { .. })).count();
     if to_orient > 1 && workers > 1 {
-        return crate::par::map_on_threads(jobs, workers.min(8).min(to_orient), |job| prepare(ex, job))
+        crate::par::for_each_completed(jobs, workers.min(8).min(to_orient), one, |k, r| on_done(k, r.unwrap_or_else(|| Err(Failure { read: false, msg: "STEP body worker panicked".into() }))));
+        return;
+    }
+    for (k, job) in jobs.iter().enumerate() { on_done(k, one(job)); }
+}
+
+#[allow(dead_code)]
+pub(super) fn bodies(ex: &Exchange, jobs: &[Job], workers: usize, done: &std::sync::atomic::AtomicUsize) -> Vec<Prepared> {
+    // PushForm: `done` counts each job as it finishes, for progress from another thread.
+    let one = |job: &Job| {
+        let made = prepare(ex, job);
+        done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        made
+    };
+    let to_orient = jobs.iter().filter(|j| matches!(j.source, Source::Item { .. })).count();
+    if to_orient > 1 && workers > 1 {
+        return crate::par::map_on_threads(jobs, workers.min(8).min(to_orient), one)
             .into_iter()
             .map(|r| r.unwrap_or_else(|| Err(Failure { read: false, msg: "STEP body worker panicked".into() })))
             .collect();
     }
-    jobs.iter().map(|job| prepare(ex, job)).collect()
+    jobs.iter().map(one).collect()
 }

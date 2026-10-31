@@ -13,8 +13,9 @@ pub(crate) mod p21;
 mod parallel;
 pub(crate) mod split;
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mt::EuclideanSpace as _;
 use serde::{Deserialize, Serialize};
@@ -33,6 +34,7 @@ const MAX_BODIES: usize = 10_000;
 /// twice at every level would otherwise grow exponentially).
 const MAX_VISITS: usize = 100_000;
 /// Most planned solids converted in one go (bounds the geometry held at once).
+#[allow(dead_code)] // PushForm: passes are no longer bounded (see convert_next)
 const MAX_WINDOW: usize = 64;
 /// Most representation entries walked while deciding which items are converted exactly once. A
 /// larger file keeps every conversion instead of paying for the walk.
@@ -314,13 +316,16 @@ struct Reader {
     plan: Vec<Planned>,
     /// What the solids of one batch (consecutive solids of one representation) share.
     batches: Vec<Batch>,
-    /// Planned solids converted so far (positions of `order`).
+    /// Planned solids taken for conversion so far.
     converted: usize,
-    /// PushForm: the order the planned solids are converted in (indices into `plan`): the
+    /// PushForm: planned solids still to convert (indices into `plan`), in conversion order: the
     /// heaviest items first when workers share the work, so one large part runs beside the rest
     /// instead of after them; the lightest first on one thread, so a caller that shows parts as
     /// they come sees most of them early.
-    order: Vec<usize>,
+    pending: VecDeque<usize>,
+    /// PushForm: solids converted (or given up on) so far, counted as each one finishes, so progress
+    /// moves inside a pass; shared with whoever reports it from another thread.
+    done: Arc<AtomicUsize>,
     /// The body each planned solid became (`None`: not converted yet, or it failed).
     made: Vec<Option<usize>>,
     workers: usize,
@@ -358,7 +363,8 @@ impl Reader {
             plan: Vec::new(),
             batches: Vec::new(),
             converted: 0,
-            order: Vec::new(),
+            pending: VecDeque::new(),
+            done: Arc::new(AtomicUsize::new(0)),
             made: Vec::new(),
             workers,
             watch: None,
@@ -751,38 +757,35 @@ impl Reader {
 
     /// Convert the next batch of planned solids into bodies; false once every one is done.
     /// `single`: one solid at a time (the caller wants short steps and has no worker threads).
-    fn convert_next(&mut self, single: bool) -> bool {
-        if self.converted >= self.plan.len() {
+    fn convert_next(&mut self, single: bool, on_body: &mut dyn FnMut(usize, &ImportedBody)) -> bool {
+        if self.pending.is_empty() {
             return false;
         }
         if self.stop() {
             return false;
         }
-        let first = self.converted;
-        // The next solids, across instances and parts, converted together: parts still to
-        // orient are shared out between the workers. A part that comes back within the window
-        // waits for the next one, which places the orientation its first instance found.
-        // PushForm: positions are taken through `order`.
-        let order = self.order.clone();
-        let planned = |pos: usize| order.get(pos).copied().unwrap_or(pos);
-        let mut last = first + 1;
-        if !single {
-            let mut fresh: HashSet<u64> = self.plan.get(planned(first)).map(|p| p.item).into_iter().collect();
-            while let Some(p) = self.plan.get(planned(last))
-                && last - first < MAX_WINDOW
-            {
-                if !self.oriented.contains_key(&p.item) && !fresh.insert(p.item) {
-                    break;
-                }
-                last += 1;
+        // PushForm: one pass takes every pending solid whose part is oriented already or comes up
+        // for the first time in the pass; a repeat of a part still being read waits for the next
+        // pass, which places it from the orientation its first instance found. So the first pass
+        // reads every distinct part, shared out between the workers, and the next one places the
+        // repeats, which is cheap. On one thread, one solid per step.
+        let mut taken: Vec<usize> = Vec::new();
+        if single {
+            taken.extend(self.pending.pop_front());
+        } else {
+            let mut fresh: HashSet<u64> = HashSet::new();
+            let mut rest = VecDeque::new();
+            while let Some(i) = self.pending.pop_front() {
+                let item = self.plan.get(i).map_or(0, |p| p.item);
+                if self.oriented.contains_key(&item) || fresh.insert(item) { taken.push(i); } else { rest.push_back(i); }
             }
+            self.pending = rest;
         }
-        self.converted = last;
+        self.converted += taken.len();
         let ex = self.ex.clone();
         let mut sources = Vec::new();
         let mut jobs = Vec::new();
-        for pos in first..last {
-            let i = planned(pos);
+        for i in taken {
             if self.made.len() <= i {
                 self.made.resize(i + 1, None);
             }
@@ -793,6 +796,7 @@ impl Reader {
                     let label = self.label(item);
                     self.warn(format!("{label}: not imported: {msg}"));
                 }
+                self.done.fetch_add(1, Ordering::Relaxed);
                 continue;
             }
             let source = match self.oriented.get(&item) {
@@ -804,87 +808,97 @@ impl Reader {
             jobs.push(parallel::Job { source, placement, check_mesh: !self.unmeshed_checked.contains(&item), tol: units.tol });
         }
         // Reading and orienting new parts is shared out between the workers.
-        let prepared = parallel::bodies(&ex, &jobs, self.workers);
-        for ((i, item), made) in sources.into_iter().zip(prepared) {
-            let Some(e) = ex.get(item) else { continue };
-            let Some(batch) = self.plan.get(i).and_then(|p| self.batches.get(p.batch)) else { continue };
-            let (m, path, product, instance) = (batch.m, batch.path.clone(), batch.product.clone(), batch.instance.clone());
-            match made {
-                Ok(parallel::Made { body, missing, part, read }) => {
-                    // What the read of the item found, reported once.
-                    if let Some(failed) = read {
-                        let label = self.label(item);
-                        for f in &failed {
-                            self.warn(format!("{label}: {f}"));
-                        }
-                        if !part.closed {
-                            self.warn(format!("{label}: imported as an open body (the shell is not closed)"));
-                        }
-                    }
-                    if !self.once.contains(&item) {
-                        self.oriented.entry(item).or_insert_with(|| part.clone());
-                    }
-                    let (closed, file_faces, face_origin) = (part.closed, part.file_faces, part.face_origin.clone());
-                    let own = e.params().first().and_then(Param::as_str).unwrap_or("").trim().to_string();
-                    let name = if own.is_empty() { product.clone() } else { own };
-                    // Faces the mesher gives up on (or that the budget cut short) are reported.
-                    if self.unmeshed_checked.insert(item) && missing > 0 {
-                        self.warn(format!("solid '{name}': {missing} face(s) could not be meshed and are not shown"));
-                    }
-                    if let Some(slot) = self.made.get_mut(i) {
-                        *slot = Some(self.bodies.len());
-                    }
-                    let color = self.colors.get(&item).copied();
-                    // See-through bodies and faces with colours of their own.
-                    let faces = face_origin
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(i, f)| {
-                            let c = self.colors.get(f)?;
-                            Some(crate::FacePaint { face: i, color: *c, opacity: self.opacity.get(f).copied().unwrap_or(1.0) })
-                        })
-                        .collect();
-                    let paint = crate::Paint { opacity: self.opacity.get(&item).copied().unwrap_or(1.0), faces };
-                    let body = body.with_color(color).with_paint(Some(paint));
-                    let identities = face_origin
-                        .iter()
-                        .map(|face| Some(crate::FaceSource::Imported { item, face: *face, payload_sha256: None, producer: None }))
-                        .collect();
-                    let body = body.with_face_sources(Some(std::sync::Arc::new(identities)));
-                    // Every instance of a part placed more than once shows its first instance's
-                    // mesh, placed (the first one too: meshing its own would mesh the part twice).
-                    let body = match self.shown.get(&item) {
-                        Some((shared, first)) => body.with_display_of(shared.clone(), to_array(&mat_mul(&m, &rigid_inverse(first)))),
-                        None if self.uses.get(&item).is_some_and(|n| *n > 1) => {
-                            let shared = Arc::new(crate::body::SharedDisplay::new(body.clone()));
-                            self.shown.insert(item, (shared.clone(), m));
-                            body.with_display_of(shared, to_array(&mt::Matrix4::from_scale(1.0)))
-                        }
-                        None => body,
-                    };
-                    self.bodies.push(ImportedBody {
-                        name,
-                        body,
-                        color,
-                        path: path.clone(),
-                        instance: instance.clone(),
-                        closed,
-                        file_faces,
-                        source_item: item,
-                        face_origin,
-                    });
-                }
-                Err(parallel::Failure { read, msg }) => {
+        // PushForm: each prepared instance is taken up as it comes in, and its body handed to `on_body`.
+        parallel::bodies_each(&ex, &jobs, self.workers, &self.done.clone(), |k, made| {
+            let (i, item) = sources[k];
+            self.take_made(&ex, i, item, made, on_body);
+        });
+        true
+    }
+
+    /// PushForm: what [`Self::convert_next`] did for each prepared instance, as one method: the body of planned
+    /// solid `i` (item `item`) is recorded and handed to `on_body`; a failure is reported.
+    fn take_made(&mut self, ex: &Exchange, i: usize, item: u64, made: parallel::Prepared, on_body: &mut dyn FnMut(usize, &ImportedBody)) {
+        let Some(e) = ex.get(item) else { return };
+        let Some(batch) = self.plan.get(i).and_then(|p| self.batches.get(p.batch)) else { return };
+        let (m, path, product, instance) = (batch.m, batch.path.clone(), batch.product.clone(), batch.instance.clone());
+        match made {
+            Ok(parallel::Made { body, missing, part, read }) => {
+                // What the read of the item found, reported once.
+                if let Some(failed) = read {
                     let label = self.label(item);
-                    self.warn(format!("{label}: not imported: {msg}"));
-                    // Later instances don't read the item again.
-                    if !self.oriented.contains_key(&item) {
-                        self.unreadable.insert(item, (!read).then_some(msg));
+                    for f in &failed {
+                        self.warn(format!("{label}: {f}"));
                     }
+                    if !part.closed {
+                        self.warn(format!("{label}: imported as an open body (the shell is not closed)"));
+                    }
+                }
+                if !self.once.contains(&item) {
+                    self.oriented.entry(item).or_insert_with(|| part.clone());
+                }
+                let (closed, file_faces, face_origin) = (part.closed, part.file_faces, part.face_origin.clone());
+                let own = e.params().first().and_then(Param::as_str).unwrap_or("").trim().to_string();
+                let name = if own.is_empty() { product.clone() } else { own };
+                // Faces the mesher gives up on (or that the budget cut short) are reported.
+                if self.unmeshed_checked.insert(item) && missing > 0 {
+                    self.warn(format!("solid '{name}': {missing} face(s) could not be meshed and are not shown"));
+                }
+                if let Some(slot) = self.made.get_mut(i) {
+                    *slot = Some(self.bodies.len());
+                }
+                let color = self.colors.get(&item).copied();
+                // See-through bodies and faces with colours of their own.
+                let faces = face_origin
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, f)| {
+                        let c = self.colors.get(f)?;
+                        Some(crate::FacePaint { face: i, color: *c, opacity: self.opacity.get(f).copied().unwrap_or(1.0) })
+                    })
+                    .collect();
+                let paint = crate::Paint { opacity: self.opacity.get(&item).copied().unwrap_or(1.0), faces };
+                let body = body.with_color(color).with_paint(Some(paint));
+                let identities = face_origin
+                    .iter()
+                    .map(|face| Some(crate::FaceSource::Imported { item, face: *face, payload_sha256: None, producer: None }))
+                    .collect();
+                let body = body.with_face_sources(Some(std::sync::Arc::new(identities)));
+                // Every instance of a part placed more than once shows its first instance's
+                // mesh, placed (the first one too: meshing its own would mesh the part twice).
+                let body = match self.shown.get(&item) {
+                    Some((shared, first)) => body.with_display_of(shared.clone(), to_array(&mat_mul(&m, &rigid_inverse(first)))),
+                    None if self.uses.get(&item).is_some_and(|n| *n > 1) => {
+                        let shared = Arc::new(crate::body::SharedDisplay::new(body.clone()));
+                        self.shown.insert(item, (shared.clone(), m));
+                        body.with_display_of(shared, to_array(&mt::Matrix4::from_scale(1.0)))
+                    }
+                    None => body,
+                };
+                self.bodies.push(ImportedBody {
+                    name,
+                    body,
+                    color,
+                    path: path.clone(),
+                    instance: instance.clone(),
+                    closed,
+                    file_faces,
+                    source_item: item,
+                    face_origin,
+                });
+            }
+            Err(parallel::Failure { read, msg }) => {
+                let label = self.label(item);
+                self.warn(format!("{label}: not imported: {msg}"));
+                // Later instances don't read the item again.
+                if !self.oriented.contains_key(&item) {
+                    self.unreadable.insert(item, (!read).then_some(msg));
                 }
             }
         }
-        true
+        if let Some(Some(b)) = self.made.get(i) {
+            if let Some(body) = self.bodies.get(*b) { on_body(i, body); }
+        }
     }
 
     /// Planned-solid indices (a node's `bodies` after the walk) as body indices, leaving out
@@ -1320,7 +1334,7 @@ impl StepReading {
         } else {
             order.sort_by_key(|&i| std::cmp::Reverse(faces[i]));
         }
-        rd.order = order;
+        rd.pending = order.into();
         Ok(StepReading { rd, tree, key, small: text.len() <= KEEP_SMALL_BYTES, single })
     }
 
@@ -1344,12 +1358,23 @@ impl StepReading {
     /// Convert the next solid (or batch of solids); false once all are converted (or the
     /// watch cancelled the import).
     pub fn step(&mut self) -> bool {
-        self.rd.convert_next(self.single)
+        self.rd.convert_next(self.single, &mut |_, _| {})
     }
 
-    /// Solids converted, of the solids to convert.
+    /// PushForm: [`Self::step`], with every body made during the step handed to `on_body` (with its planned
+    /// index) the moment it is, so a caller can mesh or show parts while the rest of the pass converts.
+    pub fn step_with(&mut self, on_body: &mut dyn FnMut(usize, &ImportedBody)) -> bool {
+        self.rd.convert_next(self.single, on_body)
+    }
+
+    /// Solids converted, of the solids to convert. PushForm: counted as each solid finishes, not per step.
     pub fn progress(&self) -> (usize, usize) {
-        (self.rd.converted, self.rd.plan.len())
+        (self.rd.done.load(Ordering::Relaxed).min(self.rd.plan.len()), self.rd.plan.len())
+    }
+
+    /// PushForm: the counter behind [`Self::progress`], for a thread other than the one stepping.
+    pub fn done_counter(&self) -> Arc<AtomicUsize> {
+        self.rd.done.clone()
     }
 
     /// The import, once [`Self::step`] has converted every solid.

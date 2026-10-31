@@ -19,7 +19,8 @@ pub fn run() {
       updates::update_enabled,
       updates::update_fetch,
       updates::update_install,
-      step::step_convert
+      step::step_convert,
+      step::step_cancel
     ])
     .setup(|app| {
       // macOS keeps its traffic lights over the overlay title bar; elsewhere the top bar draws its own window controls.

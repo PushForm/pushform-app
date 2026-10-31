@@ -27,7 +27,7 @@ export function readSketchUpInWorker(bytes: Uint8Array, options: {
   const limits = { stepBytes: options.maxStepBytes, meshPartThreshold: options.meshPartThreshold };
   // Inline path for headless callers and test environments. Browsers use the worker, except for a STEP file the host
   // converts natively: that call is made from the window and does its work outside the page.
-  if (typeof Worker === 'undefined' || (step && hasNativeStepReader())) return readModelImport(bytes, options.onProgress, options.mesh, limits).then(scene => {
+  if (typeof Worker === 'undefined' || (step && hasNativeStepReader())) return readModelImport(bytes, options.onProgress, options.mesh, limits, options.signal).then(scene => {
     if (options.signal?.aborted) throw new DOMException('Import cancelled.', 'AbortError');
     return scene;
   });

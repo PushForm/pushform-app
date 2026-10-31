@@ -125,12 +125,13 @@ const parts = (limits: ImportLimits | undefined): MeshPartOptions => limits?.mes
  * statement, and anything else is read as a .skp file. `limits.stepBytes` is the largest STEP file to read.
  */
 export function readModelImport(bytes: Uint8Array, onProgress?: (p: ImportProgress) => void, options?: MeshImportOptions,
-  limits?: ImportLimits): Promise<SketchUpImport> {
+  limits?: ImportLimits, signal?: AbortSignal): Promise<SketchUpImport> {
   if (isXmlBytes(bytes)) return readCollada(bytes, onProgress, undefined, parts(limits));
   if (isZipBytes(bytes)) return readModelArchive(bytes, onProgress, options, limits);
   if (is3dsBytes(bytes)) return read3ds(bytes, options ?? DEFAULT_MESH_OPTIONS['3ds'], onProgress, undefined, parts(limits));
   if (isGlbBytes(bytes) || isGltfJson(bytes)) return readGltf(bytes, onProgress, undefined, parts(limits));
-  if (isStepBytes(bytes)) return readStep(bytes, onProgress, limits?.stepBytes);
+  // The signal reaches the host's native STEP reader; the other readers run in a worker the caller terminates.
+  if (isStepBytes(bytes)) return readStep(bytes, onProgress, limits?.stepBytes, signal);
   if (isStlBytes(bytes)) return readStl(bytes, options ?? DEFAULT_MESH_OPTIONS.stl, onProgress, parts(limits));
   if (isDxfBytes(bytes)) return readDxf(bytes, options ?? DEFAULT_MESH_OPTIONS.dxf, onProgress);
   if (isObjText(bytes)) return readObj(bytes, options ?? DEFAULT_MESH_OPTIONS.obj, onProgress, undefined, parts(limits));

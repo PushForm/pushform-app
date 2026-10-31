@@ -53,7 +53,7 @@ export function stepHeader(bytes: Uint8Array): { schema: string | null; system: 
  * A host that converts STEP files outside the wasm module (the desktop app, natively on every core). It takes the
  * file's bytes and the reader's mode and threshold, reports progress, and answers the reader's result buffer.
  */
-export type NativeStepReader = (bytes: Uint8Array, mode: number, threshold: number, onProgress?: (p: ImportProgress) => void) => Promise<Uint8Array>;
+export type NativeStepReader = (bytes: Uint8Array, mode: number, threshold: number, onProgress?: (p: ImportProgress) => void, signal?: AbortSignal) => Promise<Uint8Array>;
 let nativeStepReader: NativeStepReader | null = null;
 export function setNativeStepReader(reader: NativeStepReader | null): void { nativeStepReader = reader; }
 export function hasNativeStepReader(): boolean { return nativeStepReader !== null; }
@@ -81,8 +81,8 @@ async function readWithModule(bytes: Uint8Array, mode: number, threshold: number
       const detail = threads > 1 ? `${meshed().done.toLocaleString('en-US')} meshed · ${memory()}` : memory();
       const key = `${done}:${detail}`;
       if (key !== reported) { reported = key; onProgress?.({ stage: 'Converting parts', current: done, total, detail }); }
-      // Let the thread pool take in its workers' replies between steps (a step blocks this thread while the kernel's threads work).
-      if (threads > 1) await new Promise(resolve => setTimeout(resolve, 0));
+      // With threads the conversion runs on its own thread and each step only takes in what it converted: poll, don't spin.
+      if (threads > 1) await new Promise(resolve => setTimeout(resolve, 100));
     }
     if (!m.pf_step_finish(handle)) throw new Error(`This STEP file could not be read: ${stepReaderError(m)}`);
     // Each distinct part is meshed once; a repeated placement passes in no time, so the count moves by bodies.
@@ -116,13 +116,13 @@ async function readWithModule(bytes: Uint8Array, mode: number, threshold: number
  * Read a STEP file of at most `maxBytes` (the shared import limit unless the desktop app allows more). A STEP file
  * always imports as mesh parts, made editable on demand.
  */
-export async function readStep(bytes: Uint8Array, onProgress?: (p: ImportProgress) => void, maxBytes = MAX_SKETCHUP_BYTES): Promise<SketchUpImport> {
+export async function readStep(bytes: Uint8Array, onProgress?: (p: ImportProgress) => void, maxBytes = MAX_SKETCHUP_BYTES, signal?: AbortSignal): Promise<SketchUpImport> {
   if (bytes.byteLength > maxBytes) throw new Error(`STEP files larger than ${maxBytes / (1024 * 1024)} MiB are not supported yet.`);
   if (!isStepBytes(bytes)) throw new Error('Not a STEP model: the file does not begin with ISO-10303-21.');
   onProgress?.({ stage: 'Loading the STEP reader', current: 0, total: 1 });
   // PF_STEP_MODE lets tests compare the reader's meshing modes.
   const mode = typeof process !== 'undefined' && process.env?.PF_STEP_MODE ? Number(process.env.PF_STEP_MODE) : DISPLAY_MODE;
-  const result = nativeStepReader ? decodeStepResult(await nativeStepReader(bytes, mode, 0, onProgress)) : await readWithModule(bytes, mode, 0, onProgress);
+  const result = nativeStepReader ? decodeStepResult(await nativeStepReader(bytes, mode, 0, onProgress, signal)) : await readWithModule(bytes, mode, 0, onProgress);
   const warnings = new Set<string>(result.warnings.map(w => `STEP: ${w}`));
   const header = stepHeader(bytes), system = result.system || header.system || '';
   const materials: Material[] = [], materialKeys = new Map<string, number>();

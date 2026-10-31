@@ -34,11 +34,30 @@ const MM: f64 = 1e-3;
 const MERGE_TOL: f64 = 2.54e-5;
 
 struct Reading {
+    /// The reading, stepped by the caller (no threads); or on its own thread, which sends what it converts.
     reading: Option<StepReading>,
+    converter: Option<Converter>,
     pipe: Pipeline,
     mode: u32,
     threshold: u32,
     result: Option<Vec<u8>>,
+}
+
+/// What the reading ends with: the import's warnings, schema and system, or why it failed.
+type Ended = Result<(Vec<String>, String, String), String>;
+/// What the conversion thread sends: each body as it is converted, then the end of the reading.
+#[allow(clippy::large_enum_variant)] // a body is a few words of handles; the end comes once
+enum Converted { Body(usize, ImportedBody), Done(Box<Ended>) }
+
+/// The conversion on its own thread, so the caller never waits on a pass: it polls `done` for progress and takes
+/// the bodies from `rx` as they come. The caller's thread is the browser's import worker (or the desktop command),
+/// and a pass of the heaviest parts can take minutes.
+struct Converter {
+    rx: std::sync::mpsc::Receiver<Converted>,
+    done: Arc<std::sync::atomic::AtomicUsize>,
+    total: usize,
+    /// The end of the reading has come in.
+    ended: Option<Ended>,
 }
 
 impl Reading {
@@ -47,22 +66,76 @@ impl Reading {
         solidcraft_kernel::set_threads(threads);
         let reading = StepReading::with_workers(text, threads).map_err(|e| e.to_string())?;
         let pipe = Pipeline::new(&reading, mode, threads);
-        Ok(Reading { reading: Some(reading), pipe, mode, threshold, result: None })
+        let mut out = Reading { reading: Some(reading), converter: None, pipe, mode, threshold, result: None };
+        if has_threads() && threads > 1 {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let mut reading = out.reading.take().expect("reading");
+            let (done, total) = (reading.done_counter(), reading.planned());
+            let spawned = std::thread::Builder::new().name("pushform-convert".into()).stack_size(8 << 20).spawn(move || {
+                let _ = total;
+                let mut gone = false;
+                loop {
+                    let more = reading.step_with(&mut |i, body| { if !gone && tx.send(Converted::Body(i, body.clone())).is_err() { gone = true; } });
+                    if gone { return; }
+                    if !more { break; }
+                }
+                let ended = reading.finish().map(|import| (import.warnings, import.schema, import.system)).map_err(|e| e.to_string());
+                let _ = tx.send(Converted::Done(Box::new(ended)));
+            });
+            match spawned {
+                Ok(_) => out.converter = Some(Converter { rx, done, total, ended: None }),
+                // No thread for it: the caller steps the reading itself, as without threads.
+                Err(_) => { drop(rx); out.reading = Some(StepReading::with_workers(text, threads).map_err(|e| e.to_string())?); }
+            }
+        }
+        Ok(out)
     }
-    /// Convert the next solids and hand the bodies they made to the meshing. False once every solid is converted.
+    /// Solids converted, of the solids planned.
+    fn progress(&self) -> (usize, usize) {
+        match (&self.reading, &self.converter) {
+            (Some(reading), _) => reading.progress(),
+            (None, Some(c)) => (c.done.load(std::sync::atomic::Ordering::Relaxed).min(c.total), c.total),
+            (None, None) => (self.pipe.planned, self.pipe.planned),
+        }
+    }
+    /// Convert the next solids (or take what the conversion thread has converted since the last call) and hand the
+    /// bodies to the meshing. False once every solid is converted.
     fn step(&mut self) -> bool {
-        let Some(reading) = self.reading.as_mut() else { return false };
-        let more = reading.step();
-        self.pipe.absorb(reading);
-        more
+        if let Some(reading) = self.reading.as_mut() {
+            let more = reading.step();
+            self.pipe.absorb(reading);
+            return more;
+        }
+        let Some(c) = self.converter.as_mut() else { return false };
+        if c.ended.is_some() { return false; }
+        while let Ok(message) = c.rx.try_recv() {
+            match message {
+                Converted::Body(i, body) => self.pipe.absorb_one(i, &body),
+                Converted::Done(ended) => { c.ended = Some(*ended); return false; }
+            }
+        }
+        true
     }
-    /// Finish the conversion (converting whatever is left) and close the meshing queue.
+    /// Finish the conversion (converting, or waiting for, whatever is left) and close the meshing queue.
     fn finish(&mut self) -> Result<(), String> {
-        let Some(mut reading) = self.reading.take() else { return Err("the reading is finished".into()) };
-        while reading.step() { self.pipe.absorb(&reading); }
-        self.pipe.absorb(&reading);
-        let import = reading.finish().map_err(|e| e.to_string())?;
-        self.pipe.finish(import.warnings, import.schema, import.system);
+        if let Some(mut reading) = self.reading.take() {
+            while reading.step() { self.pipe.absorb(&reading); }
+            self.pipe.absorb(&reading);
+            let import = reading.finish().map_err(|e| e.to_string())?;
+            self.pipe.finish(import.warnings, import.schema, import.system);
+            return Ok(());
+        }
+        let Some(mut c) = self.converter.take() else { return Err("the reading is finished".into()) };
+        let ended = loop {
+            if let Some(ended) = c.ended.take() { break ended; }
+            match c.rx.recv() {
+                Ok(Converted::Body(i, body)) => self.pipe.absorb_one(i, &body),
+                Ok(Converted::Done(ended)) => break *ended,
+                Err(_) => break Err("the conversion thread stopped".into()),
+            }
+        };
+        let (warnings, schema, system) = ended?;
+        self.pipe.finish(warnings, schema, system);
         Ok(())
     }
     fn result(&mut self) -> Result<Vec<u8>, String> {
@@ -148,10 +221,7 @@ thread_local! { static LAST_ERROR: std::cell::RefCell<Option<String>> = const { 
 #[unsafe(no_mangle)]
 pub extern "C" fn pf_step_progress(handle: u32) -> u64 {
     match get(handle.wrapping_sub(1)) {
-        Some(r) => {
-            let (done, total) = r.reading.as_ref().map_or((r.pipe.planned, r.pipe.planned), |reading| reading.progress());
-            ((done as u64) << 32) | (total as u64 & 0xffff_ffff)
-        }
+        Some(r) => { let (done, total) = r.progress(); ((done as u64) << 32) | (total as u64 & 0xffff_ffff) }
         None => 0,
     }
 }
@@ -313,8 +383,12 @@ impl Pipeline {
     }
     /// Take up the bodies the reader converted since the last call.
     fn absorb(&mut self, reading: &StepReading) {
-        for (i, body) in reading.converted_bodies() {
-            if i >= self.planned || self.seen[i] { continue; }
+        for (i, body) in reading.converted_bodies() { self.absorb_one(i, body); }
+    }
+    /// Take up one converted body (planned index `i`); a body seen before is ignored.
+    fn absorb_one(&mut self, i: usize, body: &ImportedBody) {
+        {
+            if i >= self.planned || self.seen[i] { return; }
             self.seen[i] = true;
             let world = self.placements[i];
             // A repeated item is meshed once in the frame of its first rigid placement; a non-rigid placement meshes itself.
@@ -323,7 +397,7 @@ impl Pipeline {
             {
                 self.placed.push((job, i, world));
                 self.bodies[i] = Some(body.clone());
-                continue;
+                return;
             }
             let inverse = rigid_inverse(&world);
             let (to_local, placement) = match inverse { Some(inv) => (inv, world), None => (IDENTITY, IDENTITY) };
@@ -692,9 +766,10 @@ pub fn convert_native(text: &str, mode: u32, threshold: u32, mut progress: impl 
     let mut last = usize::MAX;
     loop {
         let more = r.step();
-        let (done, total) = r.reading.as_ref().map_or((r.pipe.planned, r.pipe.planned), |reading| reading.progress());
+        let (done, total) = r.progress();
         if done != last { last = done; if !progress("Converting parts", done as u32, total as u32) { return Err("cancelled".into()); } }
         if !more { break; }
+        if r.converter.is_some() { std::thread::sleep(std::time::Duration::from_millis(50)); }
     }
     r.finish()?;
     let total = r.pipe.planned as u32;

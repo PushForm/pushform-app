@@ -99,6 +99,47 @@ pub fn map_with_local_pools<T: Sync, R: Send>(items: &[T], max_threads: usize, f
         .collect()
 }
 
+/// PushForm: `f` over `items` on threads (one per core, at most `max_threads`), each result handed to
+/// `on_done` on the calling thread as soon as it is in, in completion order, with its item's index;
+/// `None` where an item panicked. Without threads, one item at a time on the calling thread.
+pub fn for_each_completed<T: Sync, R: Send>(items: &[T], max_threads: usize, f: impl Fn(&T) -> R + Sync, mut on_done: impl FnMut(usize, Option<R>)) {
+    let one = |item: &T| guard("parallel item", || Ok(f(item))).ok();
+    #[cfg(feature = "threads")]
+    {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let threads = self::threads().min(max_threads).min(items.len());
+        if threads > 1 {
+            let next = AtomicUsize::new(0);
+            let (tx, rx) = std::sync::mpsc::channel::<(usize, Option<R>)>();
+            let work = |tx: std::sync::mpsc::Sender<(usize, Option<R>)>| {
+                loop {
+                    let i = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(item) = items.get(i) else { break };
+                    if tx.send((i, one(item))).is_err() { break; }
+                }
+            };
+            std::thread::scope(|scope| {
+                let started: Vec<_> = (0..threads)
+                    .filter_map(|_| {
+                        let tx = tx.clone();
+                        std::thread::Builder::new().name("solidcraft-each".into()).stack_size(4 << 20).spawn_scoped(scope, move || work(tx)).ok()
+                    })
+                    .collect();
+                drop(tx);
+                if started.is_empty() {
+                    // No thread could start: every item here, one at a time.
+                    for (i, item) in items.iter().enumerate() { on_done(i, one(item)); }
+                    return;
+                }
+                for (i, r) in rx { on_done(i, r); }
+            });
+            return;
+        }
+    }
+    let _ = max_threads;
+    for (i, item) in items.iter().enumerate() { on_done(i, one(item)); }
+}
+
 /// `f` over `items` as [`for_each_on_threads`] runs it, results in item order (`None` where an
 /// item panicked).
 pub fn map_on_threads<T: Sync, R: Send>(items: &[T], max_threads: usize, f: impl Fn(&T) -> R + Sync) -> Vec<Option<R>> {

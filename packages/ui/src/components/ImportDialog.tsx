@@ -57,7 +57,9 @@ export function ImportDialog({ api, ownerId, buildInfo, projects: initialProject
   const [error, setError] = useState<string | null>(null);
   const [preparing, setPreparing] = useState(!currentProject && !remembered);
   const dialog = useRef<HTMLDivElement>(null), input = useRef<HTMLInputElement>(null), alive = useRef(true);
-  const state = useRef({ onClose, running: false }); state.current.onClose = onClose;
+  const state = useRef({ onClose, running: false, abort: null as AbortController | null }); state.current.onClose = onClose;
+  // Cancel while importing stops the running conversion and closes; a finished import closes at once.
+  const cancel = (): void => { state.current.abort?.abort(); onClose(); };
   const busy = running !== null || preparing;
   useEffect(() => {
     alive.current = true;
@@ -67,7 +69,7 @@ export function ImportDialog({ api, ownerId, buildInfo, projects: initialProject
     dialog.current?.querySelector<HTMLElement>('button')?.focus();
     const key = (event: KeyboardEvent): void => {
       event.stopImmediatePropagation();
-      if (event.type === 'keydown' && event.key === 'Escape' && !state.current.running) { event.preventDefault(); state.current.onClose(); }
+      if (event.type === 'keydown' && event.key === 'Escape') { event.preventDefault(); state.current.abort?.abort(); state.current.onClose(); }
       if (event.type === 'keydown' && event.key === 'Tab') {
         event.preventDefault();
         const targets = [...dialog.current!.querySelectorAll<HTMLElement>(':is(button,input,select):not(:disabled):not([hidden])')];
@@ -123,22 +125,24 @@ export function ImportDialog({ api, ownerId, buildInfo, projects: initialProject
   };
   const start = async (): Promise<void> => {
     if (!files.length || !projectId || state.current.running) return;
-    state.current.running = true; setError(null); setOutcomes(null);
+    const controller = new AbortController();
+    state.current.running = true; state.current.abort = controller; setError(null); setOutcomes(null);
     writeImportDestination(ownerId, { projectId, folderId: effectiveFolder });
     const results: ImportOutcome[] = [];
     for (const [index, file] of files.entries()) {
-      if (!alive.current) break;
+      if (!alive.current || controller.signal.aborted) break;
       setRunning({ index });
       try {
-        const converted = await convertImportFile(file, { cloudFiles: api, buildInfo,
+        const converted = await convertImportFile(file, { cloudFiles: api, buildInfo, signal: controller.signal,
           onProgress: progress => { if (alive.current) setRunning({ index, stage: [progress.total > 1 ? `${progress.stage} ${progress.current.toLocaleString('en-US')} of ${progress.total.toLocaleString('en-US')}` : progress.stage, progress.detail].filter(Boolean).join(' · ') }); } });
         await api.save({ projectId, folderId: effectiveFolder, name: converted.name, kind: converted.kind, bytes: converted.bytes });
         results.push({ name: file.name, status: 'imported', detail: converted.notes.length ? `Saved as ${converted.name} with ${converted.notes.length} note${converted.notes.length === 1 ? '' : 's'}.` : `Saved as ${converted.name}.` });
       } catch (cause) {
+        if (controller.signal.aborted) break;
         results.push({ name: file.name, status: 'failed', detail: (cause as Error).message || 'Import failed.' });
       }
     }
-    state.current.running = false;
+    state.current.running = false; state.current.abort = null;
     if (!alive.current) return;
     setRunning(null); setOutcomes(results); setFiles([]);
     if (results.some(item => item.status === 'imported')) onImported(projectId, effectiveFolder);
@@ -148,7 +152,7 @@ export function ImportDialog({ api, ownerId, buildInfo, projects: initialProject
   return createPortal(<div className="pf-modal-backdrop">
     <div ref={dialog} className="pf-modal pf-import-dialog" role="dialog" aria-modal="true" aria-labelledby="pf-import-title" aria-busy={busy}>
       <div className="pf-account-heading"><div><h2 id="pf-import-title">Import files</h2><p className="pf-cloud-privacy">SketchUp and COLLADA models and LayOut drawings are converted and saved to your library.</p></div>
-        <button type="button" className="pf-iconbtn" aria-label="Close import" disabled={running !== null} onClick={onClose}><Icon name="close" /></button></div>
+        <button type="button" className="pf-iconbtn" aria-label="Close import" onClick={cancel}><Icon name="close" /></button></div>
       {error ? <p className="pf-account-error" role="alert">{error}</p> : null}
       <div className={`pf-import-drop${dragging ? ' is-dragging' : ''}`} onDragOver={event => { event.preventDefault(); if (!busy) setDragging(true); }}
         onDragLeave={() => setDragging(false)} onDrop={drop} aria-label="Drop SketchUp or LayOut files here">
@@ -182,7 +186,7 @@ export function ImportDialog({ api, ownerId, buildInfo, projects: initialProject
       </div>
       <footer className="pf-cloud-footer">
         <span role="status">{running ? `Importing ${running.index + 1} of ${files.length}…` : preparing ? 'Preparing your library…' : destination ? `Saving to ${destination}` : ''}</span>
-        <button type="button" disabled={running !== null} onClick={onClose}>{outcomes ? 'Done' : 'Cancel'}</button>
+        <button type="button" onClick={cancel}>{outcomes ? 'Done' : 'Cancel'}</button>
         <button type="button" className="pf-account-primary" disabled={busy || !files.length || !projectId} onClick={() => { void start(); }}>
           {files.length > 1 ? `Import ${files.length} files` : 'Import'}</button>
       </footer>

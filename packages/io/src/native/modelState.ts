@@ -2,7 +2,8 @@
 // Copyright 2026 PushForm contributors
 import type { CurveId, FaceLocalId, Id, MaterialId, SurfaceId, TagId, Vec3 } from '@pushform/core';
 import { createSketch, makeEdgeKey } from '@pushform/model';
-import type { Body, Curve, DocumentState, Sketch, ImprintGraph } from '@pushform/model';
+import type { Body, Curve, DocumentState, MeshPart, Sketch, ImprintGraph } from '@pushform/model';
+import type { NativePackedMeshPart } from './meshPart';
 import type { NativePackedModel } from './modelReader';
 import type { NativePackedSketch } from './sketch';
 import type { NativePackedBody } from './body';
@@ -79,6 +80,11 @@ export function nativeBodyState(t: NativePackedBody): Body {
   }
   return body;
 }
+export function nativeMeshPartState(t: NativePackedMeshPart): MeshPart {
+  const part: MeshPart = { ...t.common, id: t.id, name: t.name, source: t.source, geometry: t.geometry, materialId: t.materialId };
+  if (t.unknownFields.length) part.nativeUnknownFields = { extensions: new Map([['', t.unknownFields]]) };
+  return part;
+}
 export function nativeModelState(model: NativePackedModel): DocumentState {
   // Reject extension scopes not yet connected to editable ownership before installation.
   // Supported root/settings/catalog/definition fields are installed with their owners below.
@@ -91,6 +97,11 @@ export function nativeModelState(model: NativePackedModel): DocumentState {
       attachEnvelope(body, model.extras.get(`body/${key}`));
       return [key, body] as const;
     }));
+    const meshParts = new Map([...d.meshParts].map(([key, packed]) => {
+      const part = nativeMeshPartState(packed);
+      attachEnvelope(part, model.extras.get(`meshPart/${key}`));
+      return [key, part] as const;
+    }));
     attachEnvelope(sketch, model.extras.get(`sketch/${id}`));
     const extra = model.extras.get(`definition/${id}`);
     const nativeUnknownFields = {
@@ -100,7 +111,7 @@ export function nativeModelState(model: NativePackedModel): DocumentState {
     };
     definitions.set(id, { ...d.metadata, bounds: null,
       ...(Object.keys(nativeUnknownFields).length ? { nativeUnknownFields } : {}), entities: {
-    bodies, sketch,
+    bodies, meshParts, sketch,
     instances: d.instances, guides: d.guides, images: d.images, sectionPlanes: d.sectionPlanes, texts: d.texts, dimensions: d.dimensions,
     activeSectionPlaneId: d.activeSectionPlaneId, order: Array.from(d.order) as Id[],
     } });
@@ -122,7 +133,7 @@ export function nativeModelState(model: NativePackedModel): DocumentState {
     ...(model.rootExtensions.length ? { nativeRootUnknownFields: model.rootExtensions } : {}) };
 }
 
-function attachEnvelope(owner: Body | Sketch, extra: { required?: boolean; envelopeUnknown?: Uint8Array[] } | undefined): void {
+function attachEnvelope(owner: Body | Sketch | MeshPart, extra: { required?: boolean; envelopeUnknown?: Uint8Array[] } | undefined): void {
   if (extra?.required === false || extra?.envelopeUnknown?.length) owner.nativeUnknownFields = {
     ...owner.nativeUnknownFields,
     ...(extra.required === false ? { required: false } : {}),

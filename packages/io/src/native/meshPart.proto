@@ -1,0 +1,20 @@
+syntax = "proto2";
+package pushform.native;
+import "meshReference.proto";
+// Record kind 17: a mesh part (display-only imported geometry) of a definition. Requires document capability 1.
+message MeshPart {
+  required uint32 id = 1;
+  required uint32 properties = 2;
+  required string name = 3;
+  required string source_format = 4;
+  required string source_system = 5;
+  optional uint32 material_id = 6; // Absent means null
+  required uint32 face_count = 7;
+  required uint32 edge_count = 8;
+  required uint32 edge_point_count = 9;
+  required MeshReference mesh = 10; // positions, triangles, source face per triangle
+  required bytes face_material_chunks = 11; // Little-endian uint32 chunk ids; Uint32 material id per source face, 0 = none
+  required bytes edge_offset_chunks = 12; // Little-endian uint32 chunk ids; Uint32 edge_count + 1 offsets in points
+  required bytes edge_position_chunks = 13; // Little-endian uint32 chunk ids; Float64 xyz per edge point
+  required bytes edge_flag_chunks = 14; // Little-endian uint32 chunk ids; Uint8 flags per edge (1 soft, 2 smooth)
+}

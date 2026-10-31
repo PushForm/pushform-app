@@ -80,8 +80,12 @@ export function nativeFileTransferables(result: unknown): ArrayBuffer[] {
   if (result instanceof Uint8Array) add(result);
   else if (result && typeof result === 'object' && 'images' in result) {
     const file = result as OpenedModelFile;
-    for (const definition of file.state.definitions.values()) for (const body of definition.entities.bodies.values()) {
-      add(body.mesh.verts); add(body.mesh.tris); add(body.mesh.faceId);
+    for (const definition of file.state.definitions.values()) {
+      for (const body of definition.entities.bodies.values()) { add(body.mesh.verts); add(body.mesh.tris); add(body.mesh.faceId); }
+      for (const part of definition.entities.meshParts.values()) {
+        const g = part.geometry;
+        add(g.positions); add(g.triangles); add(g.triangleFace); add(g.faceMaterials); add(g.edgeOffsets); add(g.edgePositions); add(g.edgeFlags);
+      }
     }
     for (const image of file.images.values()) add(image.bytes);
   }

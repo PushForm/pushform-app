@@ -23,8 +23,12 @@ import { encodeNativeText, decodeNativeText } from './text';
 import type { NativeText } from './text';
 import { encodeNativeDimension, decodeNativeDimension } from './dimension';
 import type { NativeDimensionRecord, DimensionExtensions } from './dimension';
+import { encodeNativeMeshPartReference, decodeNativeMeshPartReference } from './meshPart';
+import type { NativeMeshPartReference } from './meshPart';
 
 interface Extras { required?: boolean; envelopeUnknown?: Uint8Array[] }
+/** Record kinds this reader knows (`modelRecord.proto`); 17 is the mesh part, gated by capability 1. */
+const LAST_KNOWN_KIND = 17;
 export type NativeModelRecord = Exclude<NativeCatalogEntry, { kind: 'unknown' }>
   | (Extras & { kind: 'definition'; value: NativeDefinitionRecord; extensions?: DefinitionExtensions })
   | (Extras & { kind: 'commonProperty'; value: NativeCommonProperty })
@@ -36,12 +40,13 @@ export type NativeModelRecord = Exclude<NativeCatalogEntry, { kind: 'unknown' }>
   | (Extras & { kind: 'sectionPlane'; ownerDefinitionId: DefId; value: NativePlacement<NativeSectionPlane> })
   | (Extras & { kind: 'text'; ownerDefinitionId: DefId; value: NativePlacement<NativeText> })
   | (Extras & { kind: 'dimension'; ownerDefinitionId: DefId; value: NativeDimensionRecord; extensions?: DimensionExtensions })
+  | (Extras & { kind: 'meshPart'; ownerDefinitionId: DefId; value: NativeMeshPartReference })
   | { kind: 'unknown'; wireKind: number; schemaMajor: number; required: false; ownerDefinitionId?: DefId; payload: Uint8Array; envelopeUnknown?: Uint8Array[] };
 const codec = new NativeRecordCodec({ kind: { id: 1, kind: 'uint32', required: true }, schemaMajor: { id: 2, kind: 'uint32', required: true },
   required: { id: 3, kind: 'bool', required: true }, payload: { id: 4, kind: 'bytes', required: true }, ownerDefinitionId: { id: 5, kind: 'uint32', required: false } });
 function envelope(kind: number, schemaMajor: number, required: boolean, payload: Uint8Array, unknownFields: Uint8Array[], ownerDefinitionId?: DefId): Uint8Array {
   if (!Number.isInteger(kind) || kind < 1 || !Number.isInteger(schemaMajor) || schemaMajor < 1) throw new NativeChunkError('Invalid native model record kind/schema');
-  if (schemaMajor === 1 && kind <= 16 && (ownerDefinitionId !== undefined) !== (kind >= 9)) throw new NativeChunkError('Invalid native model record owner');
+  if (schemaMajor === 1 && kind <= LAST_KNOWN_KIND && (ownerDefinitionId !== undefined) !== (kind >= 9)) throw new NativeChunkError('Invalid native model record owner');
   return codec.encode({ fields: { kind, schemaMajor, required, payload, ...(ownerDefinitionId === undefined ? {} : { ownerDefinitionId }) }, unknownFields });
 }
 
@@ -58,8 +63,9 @@ export function encodeNativeModelRecord(record: NativeModelRecord): Uint8Array {
     case 'sectionPlane': return envelope(14, 1, required, encodeNativeSectionPlane(record.value), unknown, record.ownerDefinitionId);
     case 'text': return envelope(15, 1, required, encodeNativeText(record.value), unknown, record.ownerDefinitionId);
     case 'dimension': return envelope(16, 1, required, encodeNativeDimension(record.value, record.extensions), unknown, record.ownerDefinitionId);
+    case 'meshPart': return envelope(17, 1, required, encodeNativeMeshPartReference(record.value), unknown, record.ownerDefinitionId);
     case 'unknown':
-      if (record.schemaMajor === 1 && record.wireKind <= 16) throw new NativeChunkError('Known native record cannot be opaque');
+      if (record.schemaMajor === 1 && record.wireKind <= LAST_KNOWN_KIND) throw new NativeChunkError('Known native record cannot be opaque');
       return envelope(record.wireKind, record.schemaMajor, false, record.payload, unknown, record.ownerDefinitionId);
     default: {
       const bytes = encodeNativeCatalogEntry(record), checked = codec.decode(bytes);
@@ -80,7 +86,7 @@ export function decodeNativeModelRecord(bytes: Uint8Array): NativeModelRecord {
   const hasOwner = Object.hasOwn(f, 'ownerDefinitionId'), ownerDefinitionId = f.ownerDefinitionId as DefId;
   if (!kind || !schemaMajor) throw new NativeChunkError('Invalid native model record kind/schema');
   const extras = { required, envelopeUnknown: decoded.unknownFields };
-  if (schemaMajor === 1 && kind <= 16) {
+  if (schemaMajor === 1 && kind <= LAST_KNOWN_KIND) {
     if (hasOwner !== (kind >= 9)) throw new NativeChunkError('Invalid native model record owner');
     if (kind <= 6) return decodeNativeCatalogEntry(bytes) as Exclude<NativeCatalogEntry, { kind: 'unknown' }>;
     if (kind === 7) return { kind: 'definition', ...decodeNativeDefinition(payload), ...extras };
@@ -92,6 +98,7 @@ export function decodeNativeModelRecord(bytes: Uint8Array): NativeModelRecord {
     if (kind === 14) return { kind: 'sectionPlane', ownerDefinitionId, value: decodeNativeSectionPlane(payload), ...extras };
     if (kind === 15) return { kind: 'text', ownerDefinitionId, value: decodeNativeText(payload), ...extras };
     if (kind === 16) return { kind: 'dimension', ownerDefinitionId, ...decodeNativeDimension(payload), ...extras };
+    if (kind === 17) return { kind: 'meshPart', ownerDefinitionId, value: decodeNativeMeshPartReference(payload), ...extras };
     return { kind: 'instance', ownerDefinitionId, ...decodeNativeInstance(payload), ...extras };
   }
   if (required) throw new NativeChunkError(`Unsupported required native model record: ${kind}/${schemaMajor}`);

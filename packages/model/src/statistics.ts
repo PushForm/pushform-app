@@ -65,6 +65,11 @@ export function modelStatistics(state: DocumentState): ModelStatistics {
       for (let i = 0; i < body.mesh.verts.length; i += 3)
         include(m4transformPoint(matrix, [body.mesh.verts[i]!, body.mesh.verts[i + 1]!, body.mesh.verts[i + 2]!]) as Vec3);
     }
+    for (const part of entities.meshParts.values()) {
+      const p = part.geometry.positions;
+      stats.vertices += p.length / 3;
+      for (let i = 0; i < p.length; i += 3) include(m4transformPoint(matrix, [p[i]!, p[i + 1]!, p[i + 2]!]) as Vec3);
+    }
     const sketch = entities.sketch;
     stats.faces += sketch.faces.size;
     stats.edges += sketch.edges.size;
@@ -72,7 +77,7 @@ export function modelStatistics(state: DocumentState): ModelStatistics {
     for (const face of sketch.faces.values()) stats.area += faceArea(sketchFaceLoops(sketch, face), matrix);
     for (const vertex of sketch.vertices.values()) include(m4transformPoint(matrix, vertex.p) as Vec3);
     const solid = placed && entities.bodies.size > 0 && sketch.faces.size === 0 && sketch.edges.size === 0 && entities.instances.size === 0 &&
-      entities.images.size === 0 && [...entities.bodies.values()].every(body => body.valid);
+      entities.images.size === 0 && entities.meshParts.size === 0 && [...entities.bodies.values()].every(body => body.valid);
     if (solid) for (const body of entities.bodies.values()) stats.volume += body.props.volume * scale;
   };
   const root = state.definitions.get(state.rootDefinitionId);
@@ -106,6 +111,9 @@ export interface EntityCounts {
   texts: number;
   images: number;
   sectionPlanes: number;
+  /** Mesh parts (display-only imported geometry) and the triangles they hold. */
+  meshParts: number;
+  meshPartTriangles: number;
   /** Component definitions in the model, placed or not. */
   componentDefinitions: number;
   /** Materials other than the default material. */
@@ -123,7 +131,7 @@ export interface EntityCounts {
  */
 export function entityCounts(state: DocumentState, nested: boolean, definitionId: DefId = state.rootDefinitionId): EntityCounts {
   const counts: EntityCounts = { solids: 0, solidFaces: 0, sheetFaces: 0, edges: 0, groups: 0, componentInstances: 0, guides: 0,
-    dimensions: 0, texts: 0, images: 0, sectionPlanes: 0,
+    dimensions: 0, texts: 0, images: 0, sectionPlanes: 0, meshParts: 0, meshPartTriangles: 0,
     componentDefinitions: [...state.definitions.values()].filter(d => d.id !== state.rootDefinitionId && !d.isGroup).length,
     materials: [...state.materials.keys()].filter(id => id !== state.defaultMaterialId).length,
     tags: [...state.tags.keys()].filter(id => id !== state.defaultTagId).length, styles: state.styles.size, scenes: state.scenes.size };
@@ -141,6 +149,8 @@ export function entityCounts(state: DocumentState, nested: boolean, definitionId
     counts.texts += entities.texts.size;
     counts.images += entities.images.size;
     counts.sectionPlanes += entities.sectionPlanes.size;
+    counts.meshParts += entities.meshParts.size;
+    for (const part of entities.meshParts.values()) counts.meshPartTriangles += part.geometry.triangles.length / 3;
   };
   const placement = (definition: ComponentDefinition): void => { if (definition.isGroup) counts.groups++; else counts.componentInstances++; };
   const top = state.definitions.get(definitionId);

@@ -2,6 +2,7 @@
 // Copyright 2026 PushForm contributors
 export * from './common';
 export * from './body';
+export * from './meshPart';
 export * from './sketch';
 export * from './attrs';
 export * from './misc';

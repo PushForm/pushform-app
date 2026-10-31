@@ -94,6 +94,10 @@ export function materialsInUse(state: DocumentState): Set<MaterialId> {
       add(f.backMaterialId);
     }
     for (const inst of c.instances.values()) add(inst.materialId);
+    for (const part of c.meshParts.values()) {
+      add(part.materialId);
+      for (const id of part.geometry.faceMaterials) if (id) add(id as MaterialId);
+    }
   }
   return used;
 }
@@ -145,6 +149,20 @@ export function replaceMaterialRefs(draft: DocumentDraft, from: MaterialId, to: 
       if (inst.materialId === from) {
         inst.materialId = to;
         n++;
+      }
+    }
+    for (const part of c.meshParts.values()) {
+      if (part.materialId === from) {
+        part.materialId = to;
+        n++;
+      }
+      // Face materials are a packed column: a changed column replaces the geometry object.
+      let hits = 0;
+      for (const id of part.geometry.faceMaterials) if (id === from) hits++;
+      if (hits) {
+        const faceMaterials = part.geometry.faceMaterials.map(id => (id === from ? to ?? 0 : id));
+        part.geometry = { ...part.geometry, faceMaterials };
+        n += hits;
       }
     }
   }

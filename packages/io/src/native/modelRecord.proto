@@ -3,7 +3,8 @@ package pushform.native;
 message ModelRecord {
   // 1 material, 2 tag, 3 tag folder, 4 style, 5 scene, 6 image asset,
   // 7 definition, 8 common property, 9 instance, 10 sketch, 11 body,
-  // 12 guide, 13 image placement, 14 section plane, 15 text, 16 dimension. Further kinds are unassigned.
+  // 12 guide, 13 image placement, 14 section plane, 15 text, 16 dimension, 17 mesh part (needs capability 1).
+  // Further kinds are unassigned.
   required uint32 kind = 1;
   required uint32 schema_major = 2;
   required bool required = 3;

@@ -4,6 +4,7 @@ import { basisToWorld, box3Empty, box3Expand, box3IsEmpty, m4invert, m4transform
 import type { Box3, Id, Mat4, MMat4, Vec3 } from '@pushform/core';
 import { contextMatrix, definitionAt, walkInstances } from './context';
 import { imageEntityCorners } from './imageEntities';
+import { meshPartBounds } from './entities/meshPart';
 import type { ComponentDefinition, DocumentState, EntityContainer, SectionPlane } from './entities';
 
 /**
@@ -20,6 +21,13 @@ function expandContainer(b: { min: [number, number, number]; max: [number, numbe
   for (const body of container.bodies.values()) {
     const local = meshBounds(body.mesh);
     if (box3IsEmpty(local)) continue;
+    for (let i = 0; i < 8; i++) {
+      box3Expand(b, m4transformPoint(matrix, [i & 1 ? local.max[0] : local.min[0], i & 2 ? local.max[1] : local.min[1], i & 4 ? local.max[2] : local.min[2]]));
+    }
+  }
+  for (const part of container.meshParts.values()) {
+    const local = meshPartBounds(part.geometry);
+    if (!local) continue;
     for (let i = 0; i < 8; i++) {
       box3Expand(b, m4transformPoint(matrix, [i & 1 ? local.max[0] : local.min[0], i & 2 ? local.max[1] : local.min[1], i & 4 ? local.max[2] : local.min[2]]));
     }

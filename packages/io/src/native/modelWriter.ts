@@ -7,7 +7,7 @@ import type { NativeChunkOptions } from './chunks';
 import { describeNativeChunk } from './chunkDescriptor';
 import { writeNativeContainer } from './container';
 import type { NativeFileSink, NativeStoredChunk } from './container';
-import { encodeNativeDocumentRoot, NATIVE_ROOT_ID } from './documentRoot';
+import { encodeNativeDocumentRoot, NATIVE_ROOT_ID, NATIVE_CAPABILITY_MESH_PARTS } from './documentRoot';
 import { encodeNativeModelSettings, validateNativeModelCatalogs } from './modelSettings';
 import { encodeNativeModelRecord, encodeNativePropertyModelRecord } from './modelRecord';
 import type { NativeModelRecord } from './modelRecord';
@@ -17,6 +17,7 @@ import { streamNativeImageAsset } from './imageAsset';
 import { streamNativeDefinitionOrder } from './definitionOrder';
 import { streamNativeSketch } from './sketch';
 import { streamNativeBody } from './body';
+import { streamNativeMeshPart } from './meshPart';
 import { packNativeNumericPages } from './numericPages';
 
 /** The captured revision and asset bytes must remain immutable until writing finishes. */
@@ -29,6 +30,8 @@ export async function writeNativeModel(state: DocumentState, sink: NativeFileSin
   let next = 1;
   const nextId = (): number => { if (next >= NATIVE_ROOT_ID) throw new NativeChunkError('Native chunk ID space exhausted'); return next++; };
   const pool = new NativeCommonPropertyWriter(), recordChunks: number[] = [];
+  // A document with mesh parts needs a reader that knows them; older readers refuse it with a clear message.
+  const capabilities = [...state.definitions.values()].some(d => d.entities.meshParts.size) ? [NATIVE_CAPABILITY_MESH_PARTS] : [];
   const propertyId = (value: CommonAttrs): number => pool.intern(value).id;
   let pending: Uint8Array[] = [], pendingBytes = 0, recordCount = 0;
   async function* flush(): AsyncGenerator<NativeStoredChunk> {
@@ -74,6 +77,10 @@ export async function writeNativeModel(state: DocumentState, sink: NativeFileSin
         if (id !== body.id) throw new NativeChunkError('Mismatched native body ID');
         const value = yield* streamNativeBody(body, propertyId, nextId, options, body.nativeUnknownFields?.extensions); yield* record({ kind: 'body', ownerDefinitionId, ...body.nativeUnknownFields, value });
       }
+      for (const [id, part] of entities.meshParts) {
+        if (id !== part.id) throw new NativeChunkError('Mismatched native mesh part ID');
+        const value = yield* streamNativeMeshPart(part, propertyId, nextId, options); yield* record({ kind: 'meshPart', ownerDefinitionId, ...part.nativeUnknownFields, value });
+      }
       for (const [id, instance] of entities.instances) {
         if (id !== instance.id) throw new NativeChunkError('Mismatched native instance ID');
         yield* record({ kind: 'instance', ownerDefinitionId, ...instance.nativeUnknownFields, value: { value: instance, properties: propertyId(instance) } });
@@ -86,7 +93,7 @@ export async function writeNativeModel(state: DocumentState, sink: NativeFileSin
     }
     for (let id = 1; id <= pool.size; id++) yield* enqueue(encodeNativePropertyModelRecord(pool.encodeRecord(id), pool.envelope(id)));
     yield* flush();
-    yield* single(encodeNativeDocumentRoot({ schemaMajor: 1, documentKind: 1, metadataChunk, recordChunks, requiredCapabilities: [], unknownFields: state.nativeRootUnknownFields ?? [] }), NATIVE_ROOT_ID, 1);
+    yield* single(encodeNativeDocumentRoot({ schemaMajor: 1, documentKind: 1, metadataChunk, recordChunks, requiredCapabilities: capabilities, unknownFields: state.nativeRootUnknownFields ?? [] }), NATIVE_ROOT_ID, 1);
   }
   return writeNativeContainer({ kind: 1, root: NATIVE_ROOT_ID }, packNativeNumericPages(chunks(), options), sink, options.signal);
 }

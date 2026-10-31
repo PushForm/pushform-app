@@ -10,7 +10,7 @@ function* persistentIds(model: ModelIds): Generator<number> {
   yield* model.definitions.keys();
   for (const map of Object.values(model.catalogs.values)) yield* map.keys();
   for (const definition of model.definitions.values()) {
-    for (const map of [definition.bodies, definition.instances, definition.guides, definition.images,
+    for (const map of [definition.bodies, definition.meshParts, definition.instances, definition.guides, definition.images,
       definition.sectionPlanes, definition.texts, definition.dimensions]) yield* map.keys();
     const sketch = definition.sketch;
     if (sketch) for (const table of [sketch.vertices, sketch.edges, sketch.faces, sketch.curves]) yield* table.ids;

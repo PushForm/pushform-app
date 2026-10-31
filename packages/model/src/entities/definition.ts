@@ -4,6 +4,7 @@ import type { Box3, DefId, Guid, Id, Mat4, MaterialId, Plane } from '@pushform/c
 import type { Axes, CommonAttrs } from './common';
 import type { NativeCatalogUnknownFields } from './document';
 import type { Body } from './body';
+import type { MeshPart } from './meshPart';
 import type { Sketch } from './sketch';
 import { createSketch } from './sketch';
 import type { Dimension, Guide, ImageEntity, SectionPlane, TextEntity } from './misc';
@@ -35,6 +36,8 @@ export interface ComponentDefinition {
 /** All entities of a definition. `order` lists entity ids in creation order (stable iteration). */
 export interface EntityContainer {
   bodies: Map<Id, Body>;
+  /** Display-only imported geometry (MOD3800), beside the editable bodies. */
+  meshParts: Map<Id, MeshPart>;
   sketch: Sketch;
   instances: Map<Id, ComponentInstance>;
   guides: Map<Id, Guide>;
@@ -65,6 +68,7 @@ export interface ComponentInstance extends CommonAttrs {
 export function createEntityContainer(): EntityContainer {
   return {
     bodies: new Map(),
+    meshParts: new Map(),
     sketch: createSketch(),
     instances: new Map(),
     guides: new Map(),

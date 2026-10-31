@@ -5,7 +5,7 @@ import type { CommonAttrs, ComponentInstance, Guide, ImageEntity, SectionPlane, 
 import { nativeAttributeScope } from '@pushform/model';
 import { NativeChunkError } from './chunks';
 import type { NativeFileSource } from './container';
-import { openNativeDocumentIndex } from './documentRoot';
+import { openNativeDocumentIndex, NATIVE_MODEL_CAPABILITIES } from './documentRoot';
 import { decodeNativeModelSettings, validateNativeModelCatalogs } from './modelSettings';
 import { decodeNativeModelRecord } from './modelRecord';
 import type { NativeModelRecord } from './modelRecord';
@@ -19,12 +19,14 @@ import { readNativeSketch } from './sketch';
 import type { NativePackedSketch } from './sketch';
 import { readNativeBody } from './body';
 import type { NativePackedBody } from './body';
+import { readNativeMeshPart } from './meshPart';
+import type { NativePackedMeshPart } from './meshPart';
 import { readNativeImageAsset } from './imageAsset';
 import { validateNativeModelIds } from './modelIds';
 
 export interface NativePackedDefinition {
   metadata: NativeDefinitionMetadata; order: Uint32Array; activeSectionPlaneId: Id | null; extensions: DefinitionExtensions;
-  sketch: NativePackedSketch | undefined; bodies: Map<Id, NativePackedBody>; instances: Map<Id, ComponentInstance>;
+  sketch: NativePackedSketch | undefined; bodies: Map<Id, NativePackedBody>; meshParts: Map<Id, NativePackedMeshPart>; instances: Map<Id, ComponentInstance>;
   guides: Map<Id, Guide>; images: Map<Id, ImageEntity>; sectionPlanes: Map<Id, SectionPlane>; texts: Map<Id, TextEntity>; dimensions: Map<Id, Dimension>;
 }
 const fail = (message: string): never => { throw new NativeChunkError(message); };
@@ -40,7 +42,7 @@ function hasExtensions(value: unknown): boolean {
 function insert<K, V>(map: Map<K, V>, key: K, value: V): void { if (map.has(key)) fail('Duplicate native entity ID'); map.set(key, value); }
 /** Stage a model in packed storage. Does not install legacy DocumentState or rebuild spatial indexes. */
 export async function readNativeModel(source: NativeFileSource, options: { signal?: AbortSignal; budget?: NativeColumnBudget } = {}) {
-  const signal = options.signal, index = await openNativeDocumentIndex(source, new Set(), (kind, schema) => (schema === 1 && [2, 3, 4].includes(kind)) || (kind === 2 && schema === 2), signal);
+  const signal = options.signal, index = await openNativeDocumentIndex(source, NATIVE_MODEL_CAPABILITIES, (kind, schema) => (schema === 1 && [2, 3, 4].includes(kind)) || (kind === 2 && schema === 2), signal);
   if (index.root.documentKind !== 1) return fail('Expected native Modeling document');
   const settings = decodeNativeModelSettings(await index.container.read(index.metadata)), catalogs = new NativeCatalogStore(), properties = new NativeCommonPropertyReader();
   let hasUnsupportedExtensions =
@@ -69,7 +71,7 @@ export async function readNativeModel(source: NativeFileSource, options: { signa
         for (const path of record.value.extensions.attributes.keys()) if (nativeAttributeScope(record.value.value.attributes, path) !== 'present') hasUnsupportedExtensions = true;
         yield record; continue;
       }
-      if (!['sketch', 'body', 'dimension', 'instance', 'definition', 'style', 'scene', 'image', 'material', 'tag', 'tagFolder', 'guide', 'imagePlacement', 'sectionPlane', 'text'].includes(record.kind) &&
+      if (!['sketch', 'body', 'dimension', 'instance', 'definition', 'style', 'scene', 'image', 'material', 'tag', 'tagFolder', 'guide', 'imagePlacement', 'sectionPlane', 'text', 'meshPart'].includes(record.kind) &&
           (record.kind === 'unknown' || hasExtensions(record))) hasUnsupportedExtensions = true;
       yield record;
     }
@@ -83,7 +85,7 @@ export async function readNativeModel(source: NativeFileSource, options: { signa
       case 'definition': {
         const d = r.value, id = d.metadata.id;
         insert(definitions, id, { metadata: d.metadata, order: await readNativeDefinitionOrder(d.entityOrder, columns, signal), activeSectionPlaneId: d.activeSectionPlaneId,
-          extensions: r.extensions ?? new Map(), sketch: undefined, bodies: new Map(), instances: new Map(), guides: new Map(), images: new Map(), sectionPlanes: new Map(), texts: new Map(), dimensions: new Map() });
+          extensions: r.extensions ?? new Map(), sketch: undefined, bodies: new Map(), meshParts: new Map(), instances: new Map(), guides: new Map(), images: new Map(), sectionPlanes: new Map(), texts: new Map(), dimensions: new Map() });
         remember(`definition/${id}`, r); break;
       }
     }
@@ -102,6 +104,9 @@ export async function readNativeModel(source: NativeFileSource, options: { signa
     }
     if (r.kind === 'body') {
       const body = await readNativeBody(r.value, columns, properties, hasMaterial, hasTag, undefined, signal); insert(d.bodies, body.id as Id, body); remember(`body/${body.id}`, r); continue;
+    }
+    if (r.kind === 'meshPart') {
+      const part = await readNativeMeshPart(r.value, columns, properties, hasMaterial, hasTag, signal); insert(d.meshParts, part.id, part); remember(`meshPart/${part.id}`, r); continue;
     }
     const id = r.value.value.id, value = { ...common(r.value.properties), ...r.value.value };
     if ('unknownFields' in r.value && (r.required === false || r.envelopeUnknown?.length || r.value.unknownFields.length)) {
@@ -149,7 +154,7 @@ export async function readNativeModel(source: NativeFileSource, options: { signa
     if (!d.sketch) return fail('Missing native definition sketch');
     if (d.activeSectionPlaneId !== null && !d.sectionPlanes.has(d.activeSectionPlaneId)) return fail('Missing native active section plane');
     const seen = new Set<Id>();
-    for (const map of [d.bodies, d.instances, d.guides, d.images, d.sectionPlanes, d.texts, d.dimensions]) for (const id of map.keys()) {
+    for (const map of [d.bodies, d.meshParts, d.instances, d.guides, d.images, d.sectionPlanes, d.texts, d.dimensions]) for (const id of map.keys()) {
       if (seen.has(id) || d.sketch.indexes.vertices.has(id) || d.sketch.indexes.edges.has(id) || d.sketch.indexes.faces.has(id)) return fail('Native entity ID collision'); seen.add(id);
     }
     columns.validateUniqueIds(d.order, signal);

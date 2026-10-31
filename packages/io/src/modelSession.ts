@@ -80,7 +80,9 @@ export function validateModelState(state: unknown): DocumentState {
       !Array.isArray(doc.sceneOrder)) throw new Error('Invalid model snapshot');
   for (const definition of doc.definitions.values()) {
     const entities = definition?.entities;
-    if (!entities || !(entities.bodies instanceof Map) ||
+    // Snapshots saved before mesh parts existed have no map; they hold none.
+    if (entities && !('meshParts' in entities)) (entities as { meshParts?: Map<unknown, unknown> }).meshParts = new Map();
+    if (!entities || !(entities.bodies instanceof Map) || !(entities.meshParts instanceof Map) ||
         !(entities.sketch?.vertices instanceof Map) ||
         !(entities.sketch.edges instanceof Map) ||
         !(entities.sketch.faces instanceof Map) ||
@@ -94,6 +96,13 @@ export function validateModelState(state: unknown): DocumentState {
           mesh.verts.length % 3 !== 0 || mesh.tris.length % 3 !== 0 ||
           mesh.faceId.length !== mesh.tris.length / 3 ||
           !(body.faces instanceof Map) || !(body.edges instanceof Map))
+        throw new Error('Invalid model snapshot');
+    }
+    for (const part of entities.meshParts.values()) {
+      const g = part?.geometry;
+      if (!g || !(g.positions instanceof Float64Array) || !(g.triangles instanceof Uint32Array) || !(g.triangleFace instanceof Uint32Array) ||
+          !(g.faceMaterials instanceof Uint32Array) || !(g.edgeOffsets instanceof Uint32Array) || !(g.edgePositions instanceof Float64Array) ||
+          !(g.edgeFlags instanceof Uint8Array) || typeof part.name !== 'string' || typeof part.source?.format !== 'string')
         throw new Error('Invalid model snapshot');
     }
   }

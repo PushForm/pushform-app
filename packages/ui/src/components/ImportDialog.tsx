@@ -129,7 +129,7 @@ export function ImportDialog({ api, ownerId, buildInfo, projects: initialProject
       setRunning({ index });
       try {
         const converted = await convertImportFile(file, { cloudFiles: api, buildInfo,
-          onProgress: progress => { if (alive.current) setRunning({ index, stage: progress.stage }); } });
+          onProgress: progress => { if (alive.current) setRunning({ index, stage: progress.total > 1 ? `${progress.stage} ${progress.current.toLocaleString('en-US')} of ${progress.total.toLocaleString('en-US')}` : progress.stage }); } });
         await api.save({ projectId, folderId: effectiveFolder, name: converted.name, kind: converted.kind, bytes: converted.bytes });
         results.push({ name: file.name, status: 'imported', detail: converted.notes.length ? `Saved as ${converted.name} with ${converted.notes.length} note${converted.notes.length === 1 ? '' : 's'}.` : `Saved as ${converted.name}.` });
       } catch (cause) {

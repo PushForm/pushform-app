@@ -18,6 +18,7 @@ import {
   type Body,
   type ComponentDefinition,
   type Curve,
+  type MeshPart,
   type DocumentState,
   type EdgeKey,
   type EdgeRecord,
@@ -120,6 +121,18 @@ export interface WorldEdge {
   readonly polyline: readonly Vec3[];
 }
 
+/** A mesh part (MOD3800) in world space: picked whole, by its triangles. */
+export interface MeshPartIndex {
+  readonly id: Id;
+  readonly path: readonly Id[];
+  readonly part: MeshPart;
+  readonly matrix: MMat4 | null;
+  readonly inverse: MMat4 | null;
+  /** Triangles in world space (the part's own arrays at the root). */
+  readonly mesh: MeshData;
+  readonly triBVH: BVH;
+}
+
 export interface BodyIndex {
   readonly id: Id;
   readonly version: number;
@@ -214,6 +227,8 @@ interface ContainerState {
   matrixKey: string;
   bodyIndices: Map<Id, BodyIndex>;
   bodyKeyed: Map<Id, Body>;
+  meshPartIndices: Map<Id, MeshPartIndex>;
+  meshPartKeyed: Map<Id, MeshPart>;
   sketchIndex: SketchIndex | null;
   sketchKeyed: Sketch | null;
   guides: IndexedGuide[];
@@ -260,6 +275,7 @@ export class SpatialIndex {
 
   private containers = new Map<string, ContainerState>();
   private bodyList: readonly BodyIndex[] = [];
+  private meshPartList: readonly MeshPartIndex[] = [];
   private sketchList: readonly SketchIndex[] = [];
   private guideList: readonly IndexedGuide[] = [];
   private dimensionList: readonly IndexedDimension[] = [];
@@ -424,6 +440,8 @@ export class SpatialIndex {
         matrixKey,
         bodyIndices: new Map(),
         bodyKeyed: new Map(),
+        meshPartIndices: new Map(),
+        meshPartKeyed: new Map(),
         sketchIndex: null,
         sketchKeyed: null,
         guides: [],
@@ -475,6 +493,33 @@ export class SpatialIndex {
         continue;
       }
       cs.bodyKeyed.set(id, body);
+    }
+    // mesh parts: rebuild when the geometry object changes, drop removed / hidden
+    for (const id of [...cs.meshPartIndices.keys()]) {
+      const part = container.meshParts.get(id);
+      if (!part || part.hidden || !tagVisible(state, part.tagId)) {
+        cs.meshPartIndices.delete(id);
+        cs.meshPartKeyed.delete(id);
+        changed = true;
+      }
+    }
+    for (const [id, part] of container.meshParts) {
+      if (part.hidden || !tagVisible(state, part.tagId)) continue;
+      const prev = cs.meshPartKeyed.get(id);
+      if (prev === part) continue;
+      const prevIdx = cs.meshPartIndices.get(id);
+      if (prevIdx && prev && prev.geometry === part.geometry) {
+        cs.meshPartIndices.set(id, { ...prevIdx, part });
+      } else {
+        const local: MeshData = { verts: part.geometry.positions, tris: part.geometry.triangles, faceId: part.geometry.triangleFace };
+        const mesh = matrix ? transformMesh(matrix, local) : local;
+        cs.meshPartIndices.set(id, { id, path, part, matrix, inverse, mesh, triBVH: buildTriBVH(mesh) });
+        cs.meshPartKeyed.set(id, part);
+        changed = true;
+        yield;
+        continue;
+      }
+      cs.meshPartKeyed.set(id, part);
     }
     // sketch
     if (cs.sketchKeyed !== container.sketch) {
@@ -534,6 +579,7 @@ export class SpatialIndex {
   private *publish(changed: boolean): Generator<void, void, void> {
     if (!changed && this.vertexIndex && this.centerIndex && this.sketchFaceTree) return;
     const bodies: BodyIndex[] = [];
+    const meshParts: MeshPartIndex[] = [];
     const sketches: SketchIndex[] = [];
     const withFaces: SketchIndex[] = [];
     const guides: IndexedGuide[] = [];
@@ -550,6 +596,7 @@ export class SpatialIndex {
         append(verts, b.corners);
         for (const c of b.curves.values()) centers.push(centerEntry(c, b.id, path));
       }
+      append(meshParts, [...cs.meshPartIndices.values()]);
       if (cs.sketchIndex) {
         sketches.push(cs.sketchIndex);
         if (cs.sketchIndex.faces.length) withFaces.push(cs.sketchIndex);
@@ -569,6 +616,7 @@ export class SpatialIndex {
     withFaces.forEach((sk, i) => boxes.set(sk.faceBVH.bounds.subarray(0, 6), i * 6));
     // Published together, so that no query sees lists of one rebuild with trees of another.
     this.bodyList = bodies;
+    this.meshPartList = meshParts;
     this.sketchList = sketches;
     this.guideList = guides;
     this.dimensionList = dimensions;
@@ -606,6 +654,12 @@ export class SpatialIndex {
   bodies(): readonly BodyIndex[] {
     if (!this.ensure()) return [];
     return this.bodyList;
+  }
+
+  /** All visible mesh parts of the whole model (world space). */
+  meshParts(): readonly MeshPartIndex[] {
+    if (!this.ensure()) return [];
+    return this.meshPartList;
   }
 
   /** Indexed bodies of one container. */

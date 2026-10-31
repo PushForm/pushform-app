@@ -63,12 +63,14 @@ describe('native mesh part records', () => {
     doc.transact('mesh part', d => {
       const e = d.definitions.get(d.rootDefinitionId)!.entities;
       const red = allocId<MaterialId>(d), blue = allocId<MaterialId>(d);
-      for (const [id, name] of [[red, 'Red'], [blue, 'Blue']] as const) d.materials.set(id, { ...d.materials.get(d.defaultMaterialId)!, id, name });
+      const base = d.materials.get(d.defaultMaterialId)!;
+      d.materials.set(red, { ...base, id: red, name: 'Red' });
+      d.materials.set(blue, { ...base, id: blue, name: 'Blue' });
       const id = allocId<Id>(d);
       const part: MeshPart = { tagId: d.defaultTagId, hidden: false, locked: false, castShadows: true, receiveShadows: true, attributes: {},
         id, name: 'Leg', source: { format: 'STEP', system: 'FreeCAD' }, geometry: boxGeometry([red, blue]), materialId: blue };
       validateMeshPartGeometry(part.geometry);
-      e.meshParts.set(id, part); e.order.push(id);
+      e.meshParts.set(id, part as never); e.order.push(id);
     });
     const output = sink();
     await writeNativeModel(doc.state, output, { pageBytes: 64 });

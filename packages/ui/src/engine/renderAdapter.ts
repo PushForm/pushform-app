@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { M4_IDENTITY, basisToWorld, m4invert, m4mul, m4transformDir, m4transformPoint, planeBasis, v3cross, v3dot, v3len, v3normalize, v3scale, v3sub } from '@pushform/core';
-import type { Box3, Id, Mat4, MMat4, MaterialId, PlaneBasis, TagId, Vec3 } from '@pushform/core';
+import type { Box3, Id, Mat4, MMat4, MaterialId, MeshData, PlaneBasis, TagId, Vec3 } from '@pushform/core';
 import { DEFAULT_FOG, DEFAULT_SHADOWS } from '@pushform/model';
 import { solarPosition, sunDirection } from '@pushform/render';
 import type { RenderFog, RenderShadows } from '@pushform/render';
 import { containerAt, contentWorldBounds, contextMatrix, dimensionDrawing, dimensionText, imageEntityCorners, imprintEdgesWorld, pathKey, resolveDimension, sketchFaceLoops, tagVisible, walkInstances } from '@pushform/model';
-import type { Body, ComponentDefinition, DocumentState, EntityContainer, EntityRef, ImageEntity, ImageStore, Material, Sketch, Style, UvMapping } from '@pushform/model';
+import type { Body, ComponentDefinition, DocumentState, EntityContainer, EntityRef, ImageEntity, ImageStore, Material, MeshPart, MeshPartGeometry, Sketch, Style, UvMapping } from '@pushform/model';
 import { DEFAULT_RENDER_BACKGROUND, renderKey } from '@pushform/render';
 import type {
   EntityHighlight,
@@ -162,6 +162,67 @@ export function bodyEdgesToRender(body: Body): RenderBodyEdge[] {
   return out;
 }
 
+// --- mesh parts ---------------------------------------------------------------------------------
+// A mesh part's packed arrays are drawn as a body mesh is (MOD3820). The derived objects are
+// cached per immutable geometry object, so the renderer's identity diffing sees no change until
+// the geometry is replaced.
+const meshPartMeshCache = new WeakMap<MeshPartGeometry, MeshData>();
+const meshPartEdgeCache = new WeakMap<MeshPartGeometry, RenderBodyEdge[]>();
+const meshPartSurfaceCache = new WeakMap<MeshPartGeometry, RenderBodySurface[]>();
+interface MeshPartMaterialsEntry { materials: DocumentState['materials']; partMaterial: MaterialId | null; inherited: RenderMaterial | null; images: ImageStore | null; out: ReadonlyMap<number, RenderFaceMaterial> }
+const meshPartMaterialCache = new WeakMap<MeshPartGeometry, MeshPartMaterialsEntry>();
+const UNIT_BASIS: PlaneBasis = { origin: [0, 0, 0], u: [1, 0, 0], v: [0, 1, 0], n: [0, 0, 1] };
+
+export function meshPartMeshToRender(g: MeshPartGeometry): MeshData {
+  let out = meshPartMeshCache.get(g);
+  if (!out) { out = { verts: g.positions, tris: g.triangles, faceId: g.triangleFace }; meshPartMeshCache.set(g, out); }
+  return out;
+}
+/** The part's source edges as renderer polylines; soft and smooth come from the packed flags, and no face pair is known. */
+export function meshPartEdgesToRender(g: MeshPartGeometry): RenderBodyEdge[] {
+  let out = meshPartEdgeCache.get(g);
+  if (!out) {
+    out = [];
+    const edges = g.edgeOffsets.length ? g.edgeOffsets.length - 1 : 0;
+    for (let e = 0; e < edges; e++) {
+      const points: Vec3[] = [];
+      for (let i = g.edgeOffsets[e]!; i < g.edgeOffsets[e + 1]!; i++) points.push([g.edgePositions[i * 3]!, g.edgePositions[i * 3 + 1]!, g.edgePositions[i * 3 + 2]!]);
+      const flags = g.edgeFlags[e]!;
+      out.push({ points, soft: !!(flags & 1), smooth: !!(flags & 2), hidden: false, faceA: -1, faceB: -1 });
+    }
+    meshPartEdgeCache.set(g, out);
+  }
+  return out;
+}
+/** Each source face shades smoothly across its own facets (a curved surface's facets average; a flat face is unchanged). */
+export function meshPartSurfacesToRender(g: MeshPartGeometry): RenderBodySurface[] {
+  let out = meshPartSurfaceCache.get(g);
+  if (!out) {
+    const counts = new Uint32Array(g.faceCount);
+    for (const f of g.triangleFace) counts[f]!++;
+    out = [];
+    for (let f = 0; f < g.faceCount; f++) if (counts[f]! > 1) out.push({ faceIds: [f] });
+    meshPartSurfaceCache.set(g, out);
+  }
+  return out;
+}
+/** Per source face materials of a mesh part: faces with a color of their own, both sides alike, with no texture placement. */
+export function meshPartFaceMaterialsToRender(state: DocumentState, part: MeshPart, inherited: RenderMaterial | null, opts: RenderAdapterOptions = {}): ReadonlyMap<number, RenderFaceMaterial> {
+  const g = part.geometry, images = opts.images ?? renderImages;
+  const cached = meshPartMaterialCache.get(g);
+  if (cached && cached.materials === state.materials && cached.partMaterial === part.materialId && cached.inherited === inherited && cached.images === images) return cached.out;
+  const partMaterial = renderMaterial(state, part.materialId, images) ?? inherited;
+  const out = new Map<number, RenderFaceMaterial>();
+  for (let f = 0; f < g.faceCount; f++) {
+    const id = g.faceMaterials[f]!;
+    if (!id) continue;
+    const material = renderMaterial(state, id as MaterialId, images) ?? partMaterial;
+    if (material) out.set(f, { front: material, back: material, uv: { kind: 'auto' }, basis: UNIT_BASIS });
+  }
+  meshPartMaterialCache.set(g, { materials: state.materials, partMaterial: part.materialId, inherited, images, out });
+  return out;
+}
+
 /** Body `SurfaceRecord`s → smooth face groups (cached per map). */
 export function bodySurfacesToRender(body: Body): RenderBodySurface[] {
   let out = surfaceCache.get(body.surfaces);
@@ -287,6 +348,24 @@ function pushBodies(
       defaultColor: (colorByTagOn(state) ? tagColor(state, body.tagId) : undefined) ?? materialColor(state, body.materialId) ?? inherited,
       castShadows: shadows.cast && body.castShadows !== false,
       receiveShadows: shadows.receive && body.receiveShadows !== false,
+      ...(faceCamera ? { faceCamera } : {}),
+    });
+  }
+  for (const part of container.meshParts.values()) {
+    if (part.hidden || !tagVisible(state, part.tagId)) continue;
+    out.push({
+      faceMaterials: meshPartFaceMaterialsToRender(state, part, inheritedMaterial, opts),
+      id: renderKey(path, part.id),
+      path,
+      entityId: part.id,
+      mesh: meshPartMeshToRender(part.geometry),
+      transform,
+      // Without source edges the renderer draws the boundaries between source faces instead.
+      edges: part.geometry.edgeFlags.length ? meshPartEdgesToRender(part.geometry) : undefined,
+      surfaces: meshPartSurfacesToRender(part.geometry),
+      defaultColor: (colorByTagOn(state) ? tagColor(state, part.tagId) : undefined) ?? materialColor(state, part.materialId) ?? inherited,
+      castShadows: shadows.cast && part.castShadows !== false,
+      receiveShadows: shadows.receive && part.receiveShadows !== false,
       ...(faceCamera ? { faceCamera } : {}),
     });
   }
@@ -715,6 +794,9 @@ function highlightForCached(state: DocumentState, ref: EntityRef, cache: MatrixC
     }
     case 'body':
       return container.bodies.has(ref.id) ? { kind: 'body', key: renderKey(ref.path, ref.id) } : null;
+    case 'meshPart':
+      // A mesh part highlights whole, as a body does (MOD3830).
+      return container.meshParts.has(ref.id) ? { kind: 'body', key: renderKey(ref.path, ref.id) } : null;
     case 'face': {
       const face = container.bodies.get(ref.id)?.faces.get(ref.faceId);
       return face ? { kind: 'face', key: renderKey(ref.path, ref.id), faceId: ref.faceId, loops: tloops(face.loops) } : null;

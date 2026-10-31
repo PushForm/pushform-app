@@ -74,9 +74,31 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
+  # The STEP reader is Rust compiled to WebAssembly, the same on every platform, so it is built once here for the checks
+  # and for each platform's web bundle.
+  step-reader:
+    needs: prepare
+    if: needs.prepare.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: 24 }
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: 'wasm32-wasip1, wasm32-wasip1-threads' }
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: crates/step-reader }
+      - run: node scripts/build-step-reader.mjs
+      - uses: actions/upload-artifact@v7
+        with:
+          name: step-reader-wasm
+          path: packages/io/wasm/*.wasm
+          if-no-files-found: error
+          retention-days: 1
+
   # A stable release ships only a commit that passes the same checks as ci.yml.
   check:
-    needs: prepare
+    needs: [prepare, step-reader]
     if: needs.prepare.outputs.channel == 'stable'
     runs-on: ubuntu-24.04
     steps:
@@ -85,13 +107,15 @@ jobs:
       - uses: actions/setup-node@v7
         with: { node-version: 24, cache: pnpm }
       - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v8
+        with: { name: step-reader-wasm, path: packages/io/wasm }
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm license-check
 
   build:
-    needs: [prepare, check]
+    needs: [prepare, step-reader, check]
     # `check` is skipped for nightlies; run unless something actually failed.
     if: ${{ !failure() && !cancelled() && needs.prepare.outputs.build == 'true' }}
     strategy:
@@ -120,6 +144,8 @@ jobs:
       - uses: actions/setup-node@v7
         with: { node-version: 24, cache: pnpm }
       - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v8
+        with: { name: step-reader-wasm, path: packages/io/wasm }
       # The version, and with the updater key its public key and updater artifacts, reach Tauri as a config file merged
       # over tauri.conf.json (no shell quoting of JSON on Windows).
       - shell: bash

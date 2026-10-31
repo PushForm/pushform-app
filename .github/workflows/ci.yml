@@ -23,6 +23,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: crates/step-reader }
       - run: pnpm build:step-reader
+      # The deploy job bundles the same modules rather than building them again.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: step-reader-wasm
+          path: packages/io/wasm/*.wasm
+          if-no-files-found: error
+          retention-days: 1
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test
@@ -51,6 +58,9 @@ jobs:
       - uses: actions/setup-node@v7
         with: { node-version: 24, cache: pnpm }
       - run: pnpm install --frozen-lockfile
+      # The web bundle includes the STEP reader the test job built.
+      - uses: actions/download-artifact@v8
+        with: { name: step-reader-wasm, path: packages/io/wasm }
       - run: echo "VITE_RELEASE=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
       # The cloud configuration is baked into public assets, so it is checked before the build and in the built files
       # before anything is uploaded.

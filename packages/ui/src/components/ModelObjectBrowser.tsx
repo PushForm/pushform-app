@@ -39,7 +39,9 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
   useEffect(() => installUiCommands(app.commands), [app]);
   const idPrefix = useId();
   const state = app.document.doc.state;
-  const selectedKeys = useMemo(() => new Set(refs.map(entityRefKey)), [refs]);
+  // A viewport click selects a solid's face or edge; the tree lists the solid, so those mark its row.
+  const selectedKeys = useMemo(() => new Set(refs.map(ref =>
+    ref.kind === 'face' || ref.kind === 'edge' || ref.kind === 'imprintEdge' ? entityRefKey({ kind: 'body', path: ref.path, id: ref.id }) : entityRefKey(ref))), [refs]);
   const { definitions, rootDefinitionId } = state;
   // Selection and edit context decorate rows; neither changes the model hierarchy.
   const tree = useMemo(() => modelBrowserTree({ definitions, rootDefinitionId }, [], new Set()), [definitions, rootDefinitionId]);

@@ -4,7 +4,7 @@
 
 Open **Object browser** in the left menu bar. It lists loose solids, groups and components. Groups and components start collapsed. Expand the ones you want to inspect; selecting an item elsewhere reveals its ancestors. Loose solids appear as **Solid N** in creation order; those numbers can change as the model changes.
 
-Click an item, or focus it and press Enter, to select it. The viewport shows the selection: a selected solid is outlined in the selection color with its faces tinted, and a selected group or component shows its bounding box. Shift-click selects the range from the last clicked item and all children, including children inside collapsed items; Ctrl/Cmd-click adds, and Ctrl/Cmd+Shift-click removes. Selecting something elsewhere reveals it in the browser.
+Click an item, or focus it and press Enter, to select it. The viewport shows the selection: a selected solid is outlined in the selection color with its faces tinted, and a selected group or component shows its bounding box. Shift-click selects the range from the last clicked item and all children, including children inside collapsed items; Ctrl/Cmd-click adds, and Ctrl/Cmd+Shift-click removes. Selecting something elsewhere reveals it in the browser: clicking a solid in the viewport, or one of its faces or edges, marks that solid, and clicking a group or component marks that item.
 
 ## Rename or edit a group
 

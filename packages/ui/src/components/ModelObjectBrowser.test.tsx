@@ -213,6 +213,28 @@ describe('ModelObjectBrowser', () => {
     expect(item('Door').getAttribute('aria-selected')).toBe('true');
   });
 
+  it('marks a solid selected when the viewport selects one of its faces or edges', () => {
+    const a = boot();
+    const solid = addSolid(a);
+    const house = addInstance(a, { name: 'House' });
+    const inner = addSolid(a, [house]);
+    mount(a);
+    const body = containerAt(a.document.doc.state, []).bodies.get(solid)!;
+    const faceId = body.faces.keys().next().value!, edgeKey = body.edges.keys().next().value!;
+    act(() => a.document.selection.set([{ kind: 'face', path: [], id: solid, faceId, region: null }]));
+    expect(item('Solid 1').getAttribute('aria-selected')).toBe('true');
+    act(() => a.document.selection.set([{ kind: 'edge', path: [], id: solid, edgeKey }]));
+    expect(item('Solid 1').getAttribute('aria-selected')).toBe('true');
+    act(() => a.document.selection.set([]));
+    expect(item('Solid 1').getAttribute('aria-selected')).toBe('false');
+    // A face inside a group reveals and marks that solid, not the loose one.
+    const innerBody = containerAt(a.document.doc.state, [house]).bodies.get(inner)!;
+    act(() => a.document.selection.set([{ kind: 'face', path: [house], id: inner, faceId: innerBody.faces.keys().next().value!, region: null }]));
+    expect(item('House').getAttribute('aria-expanded')).toBe('true');
+    expect(item('Solid 2').getAttribute('aria-selected')).toBe('true');
+    expect(item('Solid 1').getAttribute('aria-selected')).toBe('false');
+  });
+
   it('hides and shows solids, groups and components, and locks groups and components', () => {
     const log: string[] = [];
     const a = boot(log);

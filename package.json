@@ -12,6 +12,7 @@
     "dev": "pnpm --filter @pushform/app-web dev",
     "build": "pnpm --filter @pushform/app-web build",
     "desktop": "pnpm --filter @pushform/app-desktop tauri dev",
+    "desktop:local": "pnpm --filter @pushform/app-desktop tauri dev --config src-tauri/tauri.localdb.conf.json",
     "deploy:pages": "node scripts/deploy.mjs",
     "verify-deploy": "node scripts/verify-deploy.mjs",
     "dev:local": "pnpm --filter @pushform/app-web exec vite --mode localdb",

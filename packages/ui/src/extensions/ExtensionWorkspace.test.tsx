@@ -8,6 +8,7 @@ import { DEFAULT_UNITS } from '@pushform/core';
 import { buildManifest, type ExtensionManifestInput } from '@pushform/extension-protocol';
 import {
   ExtensionPlatform, memoryDeveloperMode, memoryExtensionStore, memorySettingsStore, messagePortTransport, startGuest, type ExtensionContext,
+  type ExtensionStore,
 } from '@pushform/extensions';
 import { searchCommands } from '../components/CommandSearch';
 import { ExtensionActivity, ExtensionRuns } from './ExtensionActivity';
@@ -29,10 +30,10 @@ const channels: MessageChannel[] = [];
 afterEach(() => { cleanup(); for (const c of channels.splice(0)) { c.port1.close(); c.port2.close(); } });
 
 /** A platform with the Parts extension installed, running `module` in this process. */
-async function setup(module: unknown = { activate() {} }) {
+async function setup(module: unknown = { activate() {} }, store: ExtensionStore = memoryExtensionStore()) {
   const terminated: string[] = [];
   const platform = new ExtensionPlatform({
-    store: memoryExtensionStore(), developerMode: memoryDeveloperMode(true), settingsStore: () => memorySettingsStore(),
+    store, developerMode: memoryDeveloperMode(true), settingsStore: () => memorySettingsStore(),
     startRuntime: async () => {
       const channel = new MessageChannel();
       channels.push(channel);
@@ -130,6 +131,32 @@ describe('extension failures', () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Turn on and restart' })); });
     expect(platform.state('com.example.parts')).toMatchObject({ run: 'stopped', record: { enabled: true } });
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('says when an installed extension was not started because its files changed, and lists none of its commands', async () => {
+    const store = memoryExtensionStore();
+    const { platform: first } = await setup(undefined, store);
+    const [record] = await store.list();
+    await store.put({ ...record!, files: { ...record!.files, 'main.js': encode('export function activate() { /* changed */ }') } });
+    let started = false;
+    const platform = new ExtensionPlatform({
+      store, developerMode: memoryDeveloperMode(true), settingsStore: () => memorySettingsStore(),
+      startRuntime: async () => { started = true; throw new Error('must not start'); },
+    });
+    await first.stopAll();
+    await platform.load();
+    const commands = registry();
+    syncExtensionCommands(commands, platform, 'modeling', () => {});
+    expect(commands.list().filter((c) => c.id.startsWith('extension:'))).toEqual([]);
+    render(<ExtensionActivity runs={new ExtensionRuns(platform)} platform={platform} />);
+    const notice = screen.getByRole('alert');
+    expect(notice.textContent).toMatch(/Parts was not started because its installed files could not be verified/);
+    expect(notice.textContent).toContain('"main.js" does not match its hash in the manifest.');
+    expect(screen.queryByRole('button', { name: 'Restart' })).toBeNull();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Disable' })); });
+    expect(platform.state('com.example.parts')!.record.enabled).toBe(false);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(started).toBe(false);
   });
 });
 

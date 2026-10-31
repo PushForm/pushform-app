@@ -58,7 +58,7 @@ export function ExtensionPanel({ platform, entry, units, documentId, onClose }: 
       <div className="pf-xpanel-body">
         {failure ? <div className="pf-xpanel-failed">
             <p className="pf-xinstall-error" role="alert">{failure}</p>
-            {state?.run === 'failed' ? <button type="button" className="pf-btn" onClick={() => void platform.restart(entry.extensionId)}>Restart {entry.extensionName}</button> : null}
+            {state?.run === 'failed' && state.failure?.kind !== 'verification-failed' ? <button type="button" className="pf-btn" onClick={() => void platform.restart(entry.extensionId)}>Restart {entry.extensionName}</button> : null}
           </div>
           : host ? <ExtensionTarget host={host} target={entry.id} units={units} empty={<p className="pf-xpanel-status" role="status">{status}</p>} />
           : <p className="pf-xpanel-status" role="status">{status}</p>}

@@ -127,7 +127,7 @@ function ExtensionRow({ state, platform, onRemove }: { state: ExtensionState; pl
           <span>{record.enabled ? 'On' : 'Off'}</span>
         </label>
       </div>
-      <p className="pf-xmanager-muted">{RUN_TEXT[state.run]}{state.lastActivity ? ` · last used ${state.lastActivity.toLocaleTimeString()}` : ''}</p>
+      <p className="pf-xmanager-muted">{state.failure?.kind === 'verification-failed' ? 'Not started: its installed files could not be verified' : RUN_TEXT[state.run]}{state.lastActivity ? ` · last used ${state.lastActivity.toLocaleTimeString()}` : ''}</p>
       {state.run === 'failed' && state.failure ? <p className="pf-xinstall-error" role="status">{state.failure.error.message}</p> : null}
       <button type="button" className="pf-btn" aria-expanded={details} onClick={() => setDetails(!details)}>{details ? 'Hide details' : 'Details'}</button>
       {details ? (

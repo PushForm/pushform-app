@@ -22,10 +22,14 @@ import type { CameraState, Projection, StandardView } from '@pushform/commands';
 
 export type { CameraState, Projection, StandardView };
 
-/** Default: 35° vertical FOV, iso-ish view from +X/−Y/+Z, Z up. */
+/**
+ * Default: 35° vertical FOV, Z up, a standing viewpoint from +X/−Y about 8 m from the origin at
+ * eye height, looking slightly down. The horizon sits about a third of the way down the view
+ * and the origin about two thirds down, so the sky fills the top of a new model.
+ */
 export const DEFAULT_CAMERA: CameraState = {
-  eye: [9, -12, 7],
-  target: [0, 0, 0.5],
+  eye: [4.5, -6.6, 1.9],
+  target: [0, 0, 0.9],
   up: [0, 0, 1],
   fov: 35,
   projection: 'perspective',

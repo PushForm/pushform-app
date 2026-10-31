@@ -79,6 +79,11 @@ export interface ExtensionSessionOptions {
   readonly onFailure?: (failure: SessionFailure) => void;
   /** The runtime generation this session serves; a restart creates a new session with a new generation. */
   readonly generation?: number;
+  /**
+   * Runs before the extension activates, after its module loaded, such as migrating its settings to this release.
+   * If it fails, activation fails and no extension code runs.
+   */
+  readonly beforeActivate?: () => Promise<void>;
 }
 
 export interface InvokeOptions {
@@ -113,6 +118,7 @@ export class ExtensionSession {
   private readonly services: ServiceImplementations;
   private readonly limits: SessionLimits;
   private readonly onFailure: ((failure: SessionFailure) => void) | undefined;
+  private readonly beforeActivate: (() => Promise<void>) | undefined;
   private readonly contributions: ReadonlySet<string>;
   private currentState: SessionState = 'loading';
   private loaded: Promise<void>;
@@ -136,6 +142,7 @@ export class ExtensionSession {
     this.services = options.services ?? {};
     this.limits = { ...DEFAULT_SESSION_LIMITS, ...options.limits };
     this.onFailure = options.onFailure;
+    this.beforeActivate = options.beforeActivate;
     this.contributions = new Set(options.manifest.contributions.map((c) => c.id));
     let settleLoad!: { resolve(): void; reject(error: ExtensionError): void };
     this.loaded = new Promise<void>((resolve, reject) => { settleLoad = { resolve, reject }; });
@@ -162,7 +169,17 @@ export class ExtensionSession {
     if (this.activation) return this.activation;
     if (this.currentState === 'deactivating' || this.currentState === 'stopped' || this.currentState === 'failed')
       return Promise.reject(new ExtensionError('unavailable', 'The extension is not running.'));
-    this.activation = this.loaded.then(() => new Promise<void>((resolve, reject) => {
+    const prepared = this.loaded.then(async () => {
+      if (!this.beforeActivate) return;
+      try {
+        await this.beforeActivate();
+      } catch (error) {
+        const failure = error instanceof ExtensionError ? error : new ExtensionError('extension.failed', 'The extension could not be prepared to start.');
+        this.fail('activation-failed', failure, () => {});
+        throw failure;
+      }
+    });
+    this.activation = prepared.then(() => new Promise<void>((resolve, reject) => {
       this.currentState = 'activating';
       const timer = setTimeout(() => this.fail('activation-timeout', new ExtensionError('extension.failed', 'The extension did not start in time.'), reject), this.limits.activateMs);
       this.settleActivation = {

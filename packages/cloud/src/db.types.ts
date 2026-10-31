@@ -267,6 +267,20 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"extension_settings": {
+                  Row: {
+                    "extension_id": string,"owner_id": string,"revision": number,"schema_version": number,"updated_at": string,"value": NonNullable<Json>
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "extension_id": string,"owner_id": string,"revision"?: number,"schema_version": number,"updated_at"?: string,"value": NonNullable<Json>
+                  }
+                  Update: {
+                    "extension_id"?: string,"owner_id"?: string,"revision"?: number,"schema_version"?: number,"updated_at"?: string,"value"?: NonNullable<Json>
+                  }
+                  Relationships: [
+                    
+                  ]
                 },"fr_attachments": {
                   Row: {
                     "conversation_id": string | null,"created_at": string,"id": string,"kind": string | null,"mime": string | null,"name": string | null,"request_id": string | null,"sha256": string | null,"size": number,"storage_path": string,"uploaded_at": string | null,"uploaded_by": string | null
@@ -881,6 +895,15 @@ isOneToOne: false
                            },
 "cloud_trashed_documents":
 { Args: { "p_ids": (string)[] }; Returns: (string)[]
+                           },
+"extension_settings_delete":
+{ Args: { "p_extension": string }; Returns: boolean
+                           },
+"extension_settings_get":
+{ Args: { "p_extension": string }; Returns: Json
+                           },
+"extension_settings_put":
+{ Args: { "p_expected_revision"?: number,"p_extension": string,"p_value": Json,"p_version": number }; Returns: number
                            },
 "fr_apply_config":
 { Args: { "p_admins": (string)[],"p_config"?: Json,"p_config_hash": string,"p_default_role": string,"p_host": string,"p_maintainers": (string)[],"p_name": string }; Returns: Json

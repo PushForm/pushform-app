@@ -82,11 +82,32 @@ const wasmModule = z.strictObject({
   outputSchema: z.record(z.string(), z.unknown()).optional(),
 });
 
+const settingKey = z.string().min(1).max(100);
+/**
+ * One step of settings migration, from version `from` to `from + 1`. The host applies it to the stored settings
+ * before the release that declares it activates, so no extension code runs to migrate: keys are renamed, removed and
+ * given new default values, in that order.
+ */
+const settingsMigration = z.strictObject({
+  from: z.number().int().min(1),
+  rename: z.record(settingKey, settingKey).optional(),
+  remove: z.array(settingKey).max(200).optional(),
+  set: z.record(settingKey, z.unknown()).optional(),
+});
+
 const settings = z.strictObject({
   /** Increases when the stored shape changes; the host runs the declared migration before activation. */
   version: z.number().int().min(1),
   schema: z.record(z.string(), z.unknown()),
   defaults: z.record(z.string(), z.unknown()),
+  migrations: z.array(settingsMigration).max(100).optional(),
+}).superRefine((value, ctx) => {
+  const steps = new Set<number>();
+  value.migrations?.forEach((step, i) => {
+    if (step.from >= value.version) ctx.addIssue({ code: 'custom', path: ['migrations', i, 'from'], message: `must be below the settings version ${value.version}` });
+    if (steps.has(step.from)) ctx.addIssue({ code: 'custom', path: ['migrations', i, 'from'], message: 'is declared twice' });
+    steps.add(step.from);
+  });
 });
 
 export const extensionManifestSchema = z.strictObject({

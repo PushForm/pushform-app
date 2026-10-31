@@ -9,5 +9,6 @@ export * from './CloudImportLog';
 export * from './CloudProfile';
 export * from './CloudAccount';
 export * from './CloudUsage';
+export * from './CloudExtensionSettings';
 export * from './rpc';
 export type { Database, Json } from './db.types';

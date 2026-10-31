@@ -2,7 +2,7 @@
 
 This directory holds a copy of the B-rep kernel of **SolidCraft** (https://github.com/tangency-labs/solidcraft),
 taken from commit `55bea620c79c22feeab1cda5c3931cdf2d7f3939` (version 0.28.0, 2026-10) and adapted here
-from that point on. PushForm uses it for reading STEP files (`crates/step-reader`) and does not track
+from that point on. PushForm uses it for reading and writing STEP files (`crates/step-reader`) and does not track
 SolidCraft's later development: changes are made in this copy and marked `PushForm:` in the source and in
 each crate's manifest, as SolidCraft marks its own changes to the truck crates with `SolidCraft:`.
 
@@ -42,3 +42,9 @@ Marked `PushForm:` in the source.
   heaviest first when workers share the work (one large part runs beside the rest instead of after them), the
   lightest first on one thread (a caller showing parts as they come sees most of them early). `solid_faces` counts a
   solid's faces through its shells from the parsed file.
+- **Bodies from planar polygon faces** (`kernel/src/planar_polygons.rs`): `body_from_polygons` sews polygon faces over
+  shared vertices (an outline and holes each) into a solid when they close and a surface body when they do not, which
+  is what PushForm's face layer has to give the STEP writer.
+- **Surface bodies written as surface models** (`kernel/src/step_out.rs`): the writer gave an open shell the
+  `CLOSED_SHELL` of a `MANIFOLD_SOLID_BREP`; it now writes `SHELL_BASED_SURFACE_MODEL` of an `OPEN_SHELL`, in a
+  `MANIFOLD_SURFACE_SHAPE_REPRESENTATION`.

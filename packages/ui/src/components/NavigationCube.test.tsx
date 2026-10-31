@@ -31,7 +31,7 @@ it('turns the camera to a clicked face, edge or corner and records the move for 
   fireEvent.click(screen.getByRole('button', { name: 'Front' }));
   expect(dir().map((x) => Math.round(x * 1e6) / 1e6)).toEqual([0, 1, 0]);
   expect(app.viewport.camera.getState().target).toEqual(before.target);
-  // The picture follows the camera: straight on, only the Front face and its regions are drawn.
+  // The picture follows the camera: straight on, only the Front face and its bevels are drawn.
   expect(screen.getAllByRole('button').filter((b) => !b.getAttribute('aria-label')?.startsWith('Turn'))).toHaveLength(9);
   expect(screen.queryByRole('button', { name: 'Top' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Front Right Top' }));

@@ -18,12 +18,15 @@ import {
 import type { NavCubeTurn } from '../engine/navCube';
 
 const HALF = NAV_CUBE_SIZE / 2;
+/** Axis triad: its origin's inset from the widget's bottom left corner and its arm length, in px. */
+const AXES_AT = 16;
+const AXES_LEN = 12;
 /** Arrow triangles beyond the cube's four sides, in widget px. */
 const ARROWS: readonly { turn: NavCubeTurn; label: string; points: string }[] = [
-  { turn: 'up', label: 'Turn up', points: `${HALF},3 ${HALF - 7},12 ${HALF + 7},12` },
-  { turn: 'down', label: 'Turn down', points: `${HALF},${NAV_CUBE_SIZE - 3} ${HALF - 7},${NAV_CUBE_SIZE - 12} ${HALF + 7},${NAV_CUBE_SIZE - 12}` },
-  { turn: 'left', label: 'Turn left', points: `3,${HALF} 12,${HALF - 7} 12,${HALF + 7}` },
-  { turn: 'right', label: 'Turn right', points: `${NAV_CUBE_SIZE - 3},${HALF} ${NAV_CUBE_SIZE - 12},${HALF - 7} ${NAV_CUBE_SIZE - 12},${HALF + 7}` },
+  { turn: 'up', label: 'Turn up', points: `${HALF},6 ${HALF - 5},13 ${HALF + 5},13` },
+  { turn: 'down', label: 'Turn down', points: `${HALF},${NAV_CUBE_SIZE - 6} ${HALF - 5},${NAV_CUBE_SIZE - 13} ${HALF + 5},${NAV_CUBE_SIZE - 13}` },
+  { turn: 'left', label: 'Turn left', points: `6,${HALF} 13,${HALF - 5} 13,${HALF + 5}` },
+  { turn: 'right', label: 'Turn right', points: `${NAV_CUBE_SIZE - 6},${HALF} ${NAV_CUBE_SIZE - 13},${HALF - 5} ${NAV_CUBE_SIZE - 13},${HALF + 5}` },
 ];
 
 interface Press {
@@ -80,7 +83,7 @@ export function NavigationCube(): JSX.Element | null {
   }, [app]);
 
   if (!visible) return null;
-  const { cells, labels } = navCubePicture(cam);
+  const { cells, labels, axes } = navCubePicture(cam);
   const camera = app.viewport.camera;
 
   const onPointerDown = (e: ReactPointerEvent<SVGElement>) => {
@@ -101,19 +104,15 @@ export function NavigationCube(): JSX.Element | null {
     <div className="pf-nav-cube" data-testid="nav-cube" onPointerLeave={() => setHover(null)}>
       <svg viewBox={`0 0 ${NAV_CUBE_SIZE} ${NAV_CUBE_SIZE}`} aria-label="Navigation cube" role="group">
         <g transform={`translate(${HALF} ${HALF}) scale(${NAV_CUBE_SCALE})`}>
-          {cells.map((c, i) => (
+          {cells.map((c) => (
             <polygon
-              key={`${c.face.id}:${i}`}
+              key={c.region.id}
               className="pf-nav-cube-cell"
               role="button"
               aria-label={c.region.label}
               data-region={c.region.id}
               points={c.points.map(([x, y]) => `${fmt(x)},${fmt(y)}`).join(' ')}
-              fill={navCubeFill(c.facing, hover === c.region.id)}
-              stroke="#1f2328"
-              strokeWidth={c.region.kind === 'face' ? 0.6 : 0.3}
-              strokeOpacity={c.region.kind === 'face' ? 0.9 : 0.25}
-              vectorEffect="non-scaling-stroke"
+              fill={navCubeFill(c.light, hover === c.region.id)}
               onPointerEnter={() => setHover(c.region.id)}
               onPointerDown={onPointerDown}
               onClick={() => activate(c.region.id)}
@@ -123,6 +122,11 @@ export function NavigationCube(): JSX.Element | null {
             <text key={l.face.id} className="pf-nav-cube-label" transform={`matrix(${l.matrix.map(fmt).join(' ')})`}>
               {l.text}
             </text>
+          ))}
+        </g>
+        <g className="pf-nav-cube-axes" transform={`translate(${AXES_AT} ${NAV_CUBE_SIZE - AXES_AT})`} aria-hidden="true">
+          {axes.map((a) => (
+            <line key={a.axis} className={`pf-nav-cube-axis is-${a.axis}`} x1={0} y1={0} x2={fmt(a.dx * AXES_LEN)} y2={fmt(a.dy * AXES_LEN)} />
           ))}
         </g>
         {ARROWS.map((a) => (

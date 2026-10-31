@@ -683,6 +683,11 @@
   z-index: 5;
   user-select: none;
   touch-action: none;
+  opacity: 0.72;
+  transition: opacity 120ms ease;
+}
+.pf-nav-cube:hover {
+  opacity: 1;
 }
 .pf-nav-cube svg {
   display: block;
@@ -692,19 +697,36 @@
 }
 .pf-nav-cube-cell {
   cursor: pointer;
+  stroke: rgba(31, 35, 40, 0.38);
+  stroke-width: 1px;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
 }
 .pf-nav-cube-label {
   pointer-events: none;
-  font: 700 0.42px var(--pf-font);
-  fill: #1f2328;
+  font: 700 0.4px var(--pf-font);
+  fill: #2b3440;
   text-anchor: middle;
   dominant-baseline: central;
-  letter-spacing: 0.02px;
+  letter-spacing: 0.03px;
+}
+.pf-nav-cube-axis {
+  stroke-width: 2px;
+  stroke-linecap: round;
+}
+.pf-nav-cube-axis.is-x {
+  stroke: #d04040;
+}
+.pf-nav-cube-axis.is-y {
+  stroke: #3a9a3a;
+}
+.pf-nav-cube-axis.is-z {
+  stroke: #3a62d0;
 }
 .pf-nav-cube-arrow {
   cursor: pointer;
-  fill: var(--pf-text-muted);
-  opacity: 0.7;
+  fill: #5b6672;
+  opacity: 0.55;
 }
 .pf-nav-cube-arrow:hover {
   fill: var(--pf-accent);

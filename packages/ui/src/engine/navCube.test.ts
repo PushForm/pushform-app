@@ -19,28 +19,38 @@ describe('navigation cube regions', () => {
     expect(navCubeRegion('top+front')).toBeUndefined();
   });
 
-  it('draws nine cells per visible face, three faces from the default view and one from a standard view', () => {
+  it('draws the inset faces and bevels that face the viewer, each region once, and labels the visible faces', () => {
     const iso = navCubePicture(DEFAULT_CAMERA);
-    expect(iso.cells).toHaveLength(27);
-    expect(new Set(iso.cells.map((c) => c.face.id))).toEqual(new Set(['front', 'right', 'top']));
+    const ids = iso.cells.map((c) => c.region.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const id of ['front', 'right', 'top', 'front+right', 'front+top', 'right+top', 'front+right+top']) expect(ids).toContain(id);
+    for (const id of ['back', 'left', 'bottom', 'back+left+bottom']) expect(ids).not.toContain(id);
     expect(iso.labels.map((l) => l.text).sort()).toEqual(['FRONT', 'RIGHT', 'TOP']);
-    // An edge shared by two visible faces is one region drawn on both.
-    expect(iso.cells.filter((c) => c.region.id === 'front+right')).toHaveLength(2);
-    expect(iso.cells.filter((c) => c.region.id === 'front+right+top')).toHaveLength(3);
+    // Far polygons come first so nearer ones paint over them.
+    expect(iso.cells.map((c) => c.depth)).toEqual([...iso.cells.map((c) => c.depth)].sort((a, b) => a - b));
+    // Straight on: the face, its four edge bevels and four corner bevels, all of them Front's.
     const front = navCubePicture(cameraStandardView(DEFAULT_CAMERA, 'front'));
     expect(front.cells).toHaveLength(9);
-    expect(front.cells[0]!.facing).toBeCloseTo(1, 9);
+    expect(front.cells.every((c) => c.region.faces.some((f) => f.id === 'front'))).toBe(true);
+    const face = front.cells.find((c) => c.region.id === 'front')!;
+    expect(face.points).toHaveLength(4);
+    expect(face.light).toBeGreaterThan(0.6);
     // Seen straight on, the Front label reads left to right and upright (y down in label space).
     const m = front.labels[0]!.matrix;
     expect(m[0]).toBeCloseTo(1, 9);
     expect(m[1]).toBeCloseTo(0, 9);
     expect(m[3]).toBeCloseTo(1, 9);
+    // The triad: from the front, red points right, blue up and green away (no screen extent).
+    const ax = Object.fromEntries(front.axes.map((a) => [a.axis, [a.dx, a.dy]]));
+    expect(ax['x']![0]).toBeCloseTo(1, 9);
+    expect(ax['z']![1]).toBeCloseTo(-1, 9);
+    expect(Math.hypot(...(ax['y'] as [number, number]))).toBeCloseTo(0, 9);
   });
 
-  it('shades faces by how squarely they face the viewer and highlights the hovered one', () => {
-    expect(navCubeFill(1, false)).toBe('rgb(226, 232, 239)');
-    expect(navCubeFill(0, false)).toBe('rgb(163, 167, 172)');
-    expect(navCubeFill(0, true)).toBe('rgb(170, 226, 255)');
+  it('shades regions by their lighting and highlights the hovered one', () => {
+    expect(navCubeFill(1, false)).toBe('rgb(228, 233, 240)');
+    expect(navCubeFill(0, false)).toBe('rgb(155, 158, 163)');
+    expect(navCubeFill(1, true)).toBe('rgb(160, 214, 255)');
   });
 });
 

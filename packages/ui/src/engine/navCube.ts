@@ -2,22 +2,20 @@
 // Copyright 2026 PushForm contributors
 import type { CameraState } from '@pushform/commands';
 import type { MVec3, Vec3 } from '@pushform/core';
-import { v3add, v3addScaled, v3dot, v3normalize, v3scale } from '@pushform/core';
+import { v3add, v3addScaled, v3cross, v3dot, v3normalize, v3scale } from '@pushform/core';
 import { cameraBasis, cameraDistance, cameraOrbit, DEG } from '@pushform/render';
 
 /**
  * Navigation cube geometry and camera moves. The cube is an orthographic picture of the unit cube
- * [-1, 1]³ drawn from the camera's direction: each visible face is split into nine click regions
- * (center = the face, side strips = its edges, corner squares = its corners), 26 regions in all.
- * Its design follows FreeCAD's navigation cube; the code is PushForm's own.
+ * [-1, 1]³ with chamfered edges, drawn from the camera's direction: the six inset faces, the twelve
+ * edge bevels and the eight corner bevels are the 26 click regions. Its design follows FreeCAD's
+ * navigation cube; the code is PushForm's own.
  */
 
 /** Widget size in CSS px. */
 export const NAV_CUBE_SIZE = 132;
 /** Pixels per cube unit inside the widget. */
 export const NAV_CUBE_SCALE = 30;
-/** Half-extent of a face's center region; the rest is edge and corner strips. */
-const INNER = 0.6;
 /** Pointer travel (px) that turns a press into an orbit drag. */
 export const NAV_CUBE_DRAG_PX = 3;
 /** Arrow step. */
@@ -86,11 +84,12 @@ export const navCubeRegion = (id: string): NavCubeRegion | undefined => NAV_CUBE
 
 export interface NavCubeCell {
   readonly region: NavCubeRegion;
-  readonly face: NavCubeFace;
   /** Screen polygon in cube units, y down, centered on the widget's center. */
   readonly points: readonly (readonly [number, number])[];
-  /** 0..1: how squarely the face faces the viewer, for shading. */
-  readonly facing: number;
+  /** 0..1 lighting of the polygon, from a light above and left of the viewer. */
+  readonly light: number;
+  /** Depth of the polygon's center along the view direction, for painter's ordering (far first). */
+  readonly depth: number;
 }
 
 export interface NavCubeLabel {
@@ -100,44 +99,73 @@ export interface NavCubeLabel {
   readonly matrix: readonly [number, number, number, number, number, number];
 }
 
+export interface NavCubeAxis {
+  readonly axis: 'x' | 'y' | 'z';
+  /** Screen direction of the positive axis in cube units (y down). */
+  readonly dx: number;
+  readonly dy: number;
+}
+
 export interface NavCubePicture {
   readonly cells: readonly NavCubeCell[];
   readonly labels: readonly NavCubeLabel[];
+  readonly axes: readonly NavCubeAxis[];
 }
 
-const SPAN: Record<number, readonly [number, number]> = { [-1]: [-1, -INNER], 0: [-INNER, INNER], 1: [INNER, 1] };
+/** Fraction of a face's half-width cut off along each edge: the bevel that is the edge's and corner's click region. */
+export const NAV_CUBE_CHAMFER = 0.17;
+const INSET = 1 - NAV_CUBE_CHAMFER;
 
-/** The visible faces' cells and labels for the camera's direction. */
+/** The polygon of a region on the chamfered cube: an inset square, a bevel strip or a corner triangle. */
+function regionPolygon(r: NavCubeRegion): Vec3[] {
+  const n = r.faces.map((f) => f.normal);
+  if (r.kind === 'face') {
+    const f = r.faces[0]!;
+    return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([i, j]) => v3add(f.normal, v3add(v3scale(f.u, INSET * i!), v3scale(f.v, INSET * j!))));
+  }
+  if (r.kind === 'edge') {
+    const [a, b] = n as [Vec3, Vec3];
+    const t = v3cross(a, b);
+    return [
+      v3add(v3addScaled(a, b, INSET), v3scale(t, INSET)),
+      v3add(v3addScaled(a, b, INSET), v3scale(t, -INSET)),
+      v3add(v3addScaled(b, a, INSET), v3scale(t, -INSET)),
+      v3add(v3addScaled(b, a, INSET), v3scale(t, INSET)),
+    ];
+  }
+  const [a, b, c] = n as [Vec3, Vec3, Vec3];
+  return [v3add(a, v3scale(v3add(b, c), INSET)), v3add(b, v3scale(v3add(a, c), INSET)), v3add(c, v3scale(v3add(a, b), INSET))];
+}
+
+/** The visible regions' polygons, the face labels and the axis triad for the camera's direction. */
 export function navCubePicture(cam: CameraState): NavCubePicture {
   const b = cameraBasis(cam);
   const project = (p: Vec3): readonly [number, number] => [v3dot(p, b.right), -v3dot(p, b.up)];
+  // Key light above and to the left of the viewer, a little in front.
+  const light = v3normalize(v3add(v3add(v3scale(b.right, -0.35), v3scale(b.up, 0.55)), v3scale(b.forward, -0.76)));
   const cells: NavCubeCell[] = [];
+  for (const r of NAV_CUBE_REGIONS) {
+    const normal = v3normalize(r.normal);
+    if (-v3dot(normal, b.forward) < 1e-3) continue;
+    const poly = regionPolygon(r);
+    const center = v3scale(poly.reduce<MVec3>((acc, p) => v3add(acc, p), [0, 0, 0]), 1 / poly.length);
+    cells.push({ region: r, points: poly.map(project), light: Math.max(0, Math.min(1, v3dot(normal, light))), depth: v3dot(center, b.forward) });
+  }
+  cells.sort((p, q) => p.depth - q.depth);
   const labels: NavCubeLabel[] = [];
   for (const f of NAV_CUBE_FACES) {
-    const facing = -v3dot(f.normal, b.forward);
-    if (facing < 0.02) continue;
-    const at = (u: number, v: number): Vec3 => v3add(v3add(f.normal, v3scale(f.u, u)), v3scale(f.v, v));
-    for (const i of [-1, 0, 1]) {
-      for (const j of [-1, 0, 1]) {
-        const [u0, u1] = SPAN[i]!;
-        const [v0, v1] = SPAN[j]!;
-        const faces = [f];
-        if (i !== 0) faces.push(faceByNormal(v3scale(f.u, i)));
-        if (j !== 0) faces.push(faceByNormal(v3scale(f.v, j)));
-        cells.push({
-          region: navCubeRegion(regionOf(faces).id)!,
-          face: f,
-          facing,
-          points: [project(at(u0, v0)), project(at(u1, v0)), project(at(u1, v1)), project(at(u0, v1))],
-        });
-      }
-    }
+    if (-v3dot(f.normal, b.forward) < 1e-3) continue;
     const [ux, uy] = project(f.u);
     const [vx, vy] = project(f.v);
     const [cx, cy] = project(f.normal);
     labels.push({ face: f, text: f.label.toUpperCase(), matrix: [ux, uy, -vx, -vy, cx, cy] });
   }
-  return { cells, labels };
+  const axes: NavCubeAxis[] = (['x', 'y', 'z'] as const).map((axis, i) => {
+    const dir: Vec3 = [i === 0 ? 1 : 0, i === 1 ? 1 : 0, i === 2 ? 1 : 0];
+    const [dx, dy] = project(dir);
+    return { axis, dx, dy };
+  });
+  return { cells, labels, axes };
 }
 
 /**
@@ -169,10 +197,9 @@ export function navCubeTurn(cam: CameraState, turn: NavCubeTurn): CameraState {
   return cameraOrbit(cam, cam.target, yaw, pitch);
 }
 
-/** Fill for a face: light grey, darker the more it turns away; light blue under the pointer. */
-export function navCubeFill(facing: number, hovered: boolean): string {
-  if (hovered) return 'rgb(170, 226, 255)';
-  const k = 0.72 + 0.28 * Math.max(0, Math.min(1, facing));
-  const c = (v: number) => Math.round(v * k);
-  return `rgb(${c(226)}, ${c(232)}, ${c(239)})`;
+/** Fill for a region: a light grey-blue lit by `light` (0..1); light blue under the pointer. */
+export function navCubeFill(light: number, hovered: boolean): string {
+  const k = 0.68 + 0.32 * Math.max(0, Math.min(1, light));
+  const base: [number, number, number] = hovered ? [160, 214, 255] : [228, 233, 240];
+  return `rgb(${base.map((v) => Math.round(v * k)).join(', ')})`;
 }

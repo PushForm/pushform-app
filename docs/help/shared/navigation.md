@@ -16,7 +16,7 @@ Exact command names appear before longer matches. For example, typing **Save As*
 
 ## Use side panels
 
-The left menu bar opens **Files** at the top, followed by **AI Chat** and the **Object browser**. Choosing one replaces the other in that dock. Drag the dock's right edge to resize it; the width is remembered by the browser.
+The left menu bar opens **Files** at the top, followed by **AI Chat**, the **Object browser** and a button for each panel of an extension you have turned on. Choosing one replaces the other in that dock. Drag the dock's right edge to resize it; the width is remembered by the browser.
 
 A focused panel resize handle also responds to Left and Right arrows. Holding Shift makes larger steps. Escape within the Object browser closes it and returns focus to its menu-bar button.
 

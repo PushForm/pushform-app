@@ -8,6 +8,7 @@ PushForm has two editors: **Modeling** for 3D work and **Layout** for drawings o
 - [Navigation, command search, side panels and Undo](shared/navigation.md)
 - [AI Chat, on-screen guidance and reporting problems](shared/ai-chat.md)
 - [Version information and desktop updates](shared/about-updates.md)
+- [Extensions: install, use, turn off and developer mode](shared/extensions.md)
 
 ## Layout drawing tools
 

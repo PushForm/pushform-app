@@ -68,6 +68,12 @@ export interface ExtensionState {
   readonly run: RunState;
   /** Why it last failed, while `run` is 'failed'. */
   readonly failure: SessionFailure | null;
+  /** The command or panel that was running when it failed, if any. */
+  readonly failedAction: string | null;
+  /** It was turned off because it kept failing (`CRASH_LIMIT`); turning it on or restarting clears this. */
+  readonly crashDisabled: boolean;
+  /** Increases on every restart, so open panels know to run again. */
+  readonly generation: number;
   readonly lastActivity: Date | null;
   /** Bytes sent to each destination origin during this session. */
   readonly bytesSent: ReadonlyMap<string, number>;
@@ -95,6 +101,9 @@ interface Running {
 }
 
 const LOG_LINES = 200;
+/** An extension that fails this many times within `CRASH_WINDOW_MS` is turned off until the user turns it on. */
+export const CRASH_LIMIT = 3;
+export const CRASH_WINDOW_MS = 10 * 60_000;
 const isReservedNamespace = (id: string): boolean => id === 'io.pushform' || id.startsWith('io.pushform.');
 
 export class ExtensionPlatform {
@@ -102,6 +111,13 @@ export class ExtensionPlatform {
   private readonly running = new Map<string, Running>();
   private readonly starting = new Map<string, Promise<Running>>();
   private readonly failures = new Map<string, SessionFailure>();
+  private readonly failedActions = new Map<string, string>();
+  private readonly crashes = new Map<string, number[]>();
+  private readonly crashDisabled = new Set<string>();
+  private readonly generations = new Map<string, number>();
+  /** Names of the contributions each extension is running, by invocation. */
+  private readonly inFlight = new Map<string, Map<number, string>>();
+  private invocations = 0;
   private readonly activity = new Map<string, Date>();
   private readonly logs = new Map<string, { at: Date; entry: unknown }[]>();
   private readonly listeners = new Set<() => void>();
@@ -142,6 +158,9 @@ export class ExtensionPlatform {
       record,
       run: running ? 'running' : this.starting.has(id) ? 'starting' : this.failures.has(id) ? 'failed' : 'stopped',
       failure: this.failures.get(id) ?? null,
+      failedAction: this.failures.has(id) ? this.failedActions.get(id) ?? null : null,
+      crashDisabled: this.crashDisabled.has(id),
+      generation: this.generations.get(id) ?? 0,
       lastActivity: this.activity.get(id) ?? null,
       bytesSent: new Map(running?.fetch.bytesSent ?? []),
       logs: [...(this.logs.get(id) ?? [])],
@@ -206,8 +225,36 @@ export class ExtensionPlatform {
     const next = { ...record, enabled };
     await this.options.store.put(next);
     this.records.set(id, next);
-    this.failures.delete(id);
+    this.clearFailure(id);
     this.notify();
+  }
+
+  /**
+   * After a failure: forgets it and its crash history, turns the extension back on if it was turned off for failing,
+   * and lets open panels run again. The runtime itself starts on the next use.
+   */
+  async restart(id: string): Promise<void> {
+    const record = this.records.get(id);
+    if (!record) return;
+    await this.stop(id);
+    if (!record.enabled) await this.setEnabled(id, true);
+    this.clearFailure(id);
+    this.generations.set(id, (this.generations.get(id) ?? 0) + 1);
+    this.notify();
+  }
+
+  /** The user dismissed the failure notice; the extension stays as it is. */
+  dismissFailure(id: string): void {
+    if (!this.failures.delete(id)) return;
+    this.failedActions.delete(id);
+    this.notify();
+  }
+
+  private clearFailure(id: string): void {
+    this.failures.delete(id);
+    this.failedActions.delete(id);
+    this.crashes.delete(id);
+    this.crashDisabled.delete(id);
   }
 
   /** Uninstalls; the extension's settings are deleted only when asked. Document content is never touched. */
@@ -222,7 +269,7 @@ export class ExtensionPlatform {
     await this.stop(id);
     await this.options.store.delete(id);
     this.records.delete(id);
-    this.failures.delete(id);
+    this.clearFailure(id);
     this.logs.delete(id);
     this.notify();
   }
@@ -252,7 +299,15 @@ export class ExtensionPlatform {
     const running = await this.ensureRunning(extensionId);
     this.activity.set(extensionId, this.now());
     this.notify();
-    return running.session.invoke(contributionId, params, options);
+    const name = running.record.manifest.contributions.find((c) => c.id === contributionId)?.name ?? contributionId;
+    const token = ++this.invocations;
+    const inFlight = this.inFlight.get(extensionId) ?? new Map<number, string>();
+    this.inFlight.set(extensionId, inFlight.set(token, name));
+    try {
+      return await running.session.invoke(contributionId, params, options);
+    } finally {
+      inFlight.delete(token);
+    }
   }
 
   /** The interface host of a running extension, for rendering its panels; null when it is not running. */
@@ -337,6 +392,19 @@ export class ExtensionPlatform {
       running.runtime.terminate();
     }
     this.failures.set(record.id, failure);
+    const action = [...(this.inFlight.get(record.id)?.values() ?? [])][0];
+    if (action) this.failedActions.set(record.id, action); else this.failedActions.delete(record.id);
+    this.inFlight.delete(record.id);
+    // Repeated failures turn the extension off, so a crash loop cannot keep restarting it.
+    const now = this.now().getTime();
+    const recent = [...(this.crashes.get(record.id) ?? []), now].filter((t) => now - t < CRASH_WINDOW_MS);
+    this.crashes.set(record.id, recent);
+    if (recent.length >= CRASH_LIMIT && record.enabled) {
+      const off = { ...record, enabled: false };
+      this.records.set(record.id, off);
+      this.crashDisabled.add(record.id);
+      void this.options.store.put(off);
+    }
     this.notify();
     this.options.onFailure?.(record, failure);
   }

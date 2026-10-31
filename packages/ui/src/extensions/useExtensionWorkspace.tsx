@@ -73,7 +73,7 @@ export function useExtensionWorkspace({ platform, runs, ownerId, active, openTab
     panel: platform && panel && active
       ? <ExtensionPanel key={`${panel.id}:${active.id}`} platform={platform} entry={panel} units={unitsFor(active)} documentId={active.id} onClose={closePanel} />
       : null,
-    activity: runs ? <ExtensionActivity runs={runs} /> : null,
+    activity: runs && platform ? <ExtensionActivity runs={runs} platform={platform} /> : null,
   };
 }
 

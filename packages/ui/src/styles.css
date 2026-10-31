@@ -2845,7 +2845,13 @@ h4.pf-xui-text { font-size: 12px; }
 .pf-xactivity { position: fixed; left: 56px; bottom: calc(var(--pf-statusbar-h) + 16px); z-index: 1900; display: flex; flex-direction: column; gap: 6px; width: min(420px, calc(100vw - 72px)); font: 12px/1.4 var(--pf-font); color: var(--pf-text); pointer-events: none; }
 .pf-xactivity-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 10px; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); background: var(--pf-surface); box-shadow: 0 4px 20px #0003; pointer-events: auto; animation: pf-xactivity-in 0s 400ms both; }
 .pf-xactivity-item.is-failed { border-left: 3px solid var(--pf-danger, #c62828); animation: none; }
-.pf-xactivity-item > span:not(.pf-xactivity-spinner) { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.pf-xactivity-runs { display: contents; }
+.pf-xactivity-item.is-notice { align-items: flex-start; }
+.pf-xactivity-detail { display: block; margin-top: 2px; color: var(--pf-text-muted); font-size: 11px; }
+.pf-xactivity-actions { flex: none; display: flex; align-items: center; gap: 4px; }
+.pf-xactivity-dismiss { font-size: 16px; line-height: 1; padding: 0 4px; }
+.pf-xpanel-failed { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.pf-xactivity-item > span:not(.pf-xactivity-spinner):not(.pf-xactivity-actions) { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .pf-xactivity-source { color: var(--pf-text-muted); }
 .pf-xactivity-spinner { flex: none; width: 12px; height: 12px; border: 2px solid var(--pf-border); border-top-color: var(--pf-accent); border-radius: 50%; animation: pf-xactivity-spin 0.8s linear infinite; }
 @keyframes pf-xactivity-in { from { visibility: hidden; } to { visibility: visible; } }

@@ -154,6 +154,31 @@ describe('running', () => {
     expect(started).toEqual(['com.example.stairs', 'com.example.stairs']);
   });
 
+  it('names the action that was running, turns off an extension that keeps failing, and restarts it on request', async () => {
+    let clock = 0;
+    const { platform, store } = setup({ 'com.example.stairs': { activate() { throw new Error('broken start'); } } }, { now: () => new Date(clock) });
+    await platform.install(await platform.sideload(await archive()), []);
+    await failure(platform.invoke('com.example.stairs', 'com.example.stairs.make'));
+    expect(platform.state('com.example.stairs')).toMatchObject({ run: 'failed', failedAction: 'Make stairs', crashDisabled: false });
+    platform.dismissFailure('com.example.stairs');
+    expect(platform.state('com.example.stairs')).toMatchObject({ run: 'stopped', failure: null, failedAction: null });
+    // Failures far apart do not count together.
+    clock += 11 * 60_000;
+    await failure(platform.invoke('com.example.stairs', 'com.example.stairs.make'));
+    clock += 1000;
+    await failure(platform.invoke('com.example.stairs', 'com.example.stairs.make'));
+    expect(platform.state('com.example.stairs')!.record.enabled).toBe(true);
+    clock += 1000;
+    await failure(platform.invoke('com.example.stairs', 'com.example.stairs.make'));
+    expect(platform.state('com.example.stairs')).toMatchObject({ run: 'failed', crashDisabled: true, record: { enabled: false } });
+    expect((await store.list())[0]!.enabled).toBe(false);
+    expect((await failure(platform.invoke('com.example.stairs', 'com.example.stairs.make'))).message).toMatch(/turned off/);
+
+    await platform.restart('com.example.stairs');
+    expect(platform.state('com.example.stairs')).toMatchObject({ run: 'stopped', failure: null, crashDisabled: false, generation: 1, record: { enabled: true } });
+    expect((await failure(platform.invoke('com.example.stairs', 'com.example.stairs.make'))).message).toBe('broken start');
+  });
+
   it('keeps the latest log lines of each extension', async () => {
     const { platform } = setup({ 'com.example.stairs': { activate(c: { log: { write(e: unknown): Promise<unknown> }; commands: { register(i: string, h: () => unknown): void } }) {
       c.commands.register('com.example.stairs.make', async () => { await c.log.write({ step: 'made' }); });

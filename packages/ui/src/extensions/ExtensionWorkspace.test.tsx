@@ -90,7 +90,7 @@ describe('extension commands', () => {
       },
     });
     const runs = new ExtensionRuns(platform);
-    render(<ExtensionActivity runs={runs} />);
+    render(<ExtensionActivity runs={runs} platform={platform} />);
     const entry = (target: string) => platform.contributions('modeling').find((e) => e.target === target)!;
     const exporter = entry('model.command'), label = entry('model.selection.action');
     void runs.start(exporter, 'tab-1');
@@ -102,6 +102,34 @@ describe('extension commands', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
     expect(screen.queryByRole('status')).toBeNull();
     release();
+  });
+});
+
+describe('extension failures', () => {
+  it('names the extension and action, and offers Restart and Disable', async () => {
+    const { platform } = await setup({ activate() { throw new Error('Out of memory'); } });
+    const runs = new ExtensionRuns(platform);
+    render(<ExtensionActivity runs={runs} platform={platform} />);
+    const exporter = platform.contributions('modeling').find((e) => e.target === 'model.command')!;
+    await act(() => runs.start(exporter, 'tab-1'));
+    const notice = screen.getByRole('alert');
+    expect(notice.textContent).toMatch(/Parts stopped while running Export parts\. Work it had not finished was discarded/);
+    expect(notice.textContent).toContain('Out of memory');
+    // The failed command is not listed a second time.
+    expect(screen.queryByRole('button', { name: 'Dismiss' })).toBeNull();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Disable' })); });
+    expect(platform.state('com.example.parts')!.record.enabled).toBe(false);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('says when an extension was turned off for failing repeatedly, and turns it back on', async () => {
+    const { platform } = await setup({ activate() { throw new Error('broken'); } });
+    for (let i = 0; i < 3; i++) await platform.invoke('com.example.parts', 'com.example.parts.export').catch(() => {});
+    render(<ExtensionActivity runs={new ExtensionRuns(platform)} platform={platform} />);
+    expect(screen.getByRole('alert').textContent).toMatch(/Parts stopped 3 times in 10 minutes and was turned off/);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Turn on and restart' })); });
+    expect(platform.state('com.example.parts')).toMatchObject({ run: 'stopped', record: { enabled: true } });
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });
 
@@ -133,5 +161,21 @@ describe('extension panels', () => {
     const [entry] = extensionPanels(platform, 'modeling');
     render(<ExtensionPanel platform={platform} entry={entry!} units={DEFAULT_UNITS} documentId='tab-1' onClose={() => {}} />);
     await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/No model open/));
+  });
+
+  it('offers Restart after the extension failed, and runs the panel again', async () => {
+    let starts = 0;
+    const { platform } = await setup({
+      activate(context: ExtensionContext) {
+        if (++starts === 1) throw new Error('First start failed');
+        const ui = context.ui as { mount(i: unknown): Promise<unknown> };
+        context.commands.register('com.example.parts.panel', () =>
+          ui.mount({ target: 'com.example.parts.panel', seq: 1, tree: { type: 'text', id: 't', text: 'Back again' } }));
+      },
+    });
+    const [entry] = extensionPanels(platform, 'modeling');
+    render(<ExtensionPanel platform={platform} entry={entry!} units={DEFAULT_UNITS} documentId="tab-1" onClose={() => {}} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Restart Parts' }));
+    expect(await screen.findByText('Back again')).toBeTruthy();
   });
 });

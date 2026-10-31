@@ -37,7 +37,8 @@ export function ExtensionPanel({ platform, entry, units, documentId, onClose }: 
       controller.abort();
       platform.ui(entry.extensionId)?.close(entry.id);
     };
-  }, [platform, entry.extensionId, entry.id, documentId]);
+    // A restart (a new generation) runs the panel again.
+  }, [platform, entry.extensionId, entry.id, documentId, state?.generation]);
 
   const failure = state?.run === 'failed' ? state.failure?.error.message ?? 'The extension stopped.' : error;
   const status = state?.run === 'starting' || !host ? 'Starting…' : 'Loading…';
@@ -55,7 +56,10 @@ export function ExtensionPanel({ platform, entry, units, documentId, onClose }: 
         </button>
       </header>
       <div className="pf-xpanel-body">
-        {failure ? <p className="pf-xinstall-error" role="alert">{failure}</p>
+        {failure ? <div className="pf-xpanel-failed">
+            <p className="pf-xinstall-error" role="alert">{failure}</p>
+            {state?.run === 'failed' ? <button type="button" className="pf-btn" onClick={() => void platform.restart(entry.extensionId)}>Restart {entry.extensionName}</button> : null}
+          </div>
           : host ? <ExtensionTarget host={host} target={entry.id} units={units} empty={<p className="pf-xpanel-status" role="status">{status}</p>} />
           : <p className="pf-xpanel-status" role="status">{status}</p>}
       </div>

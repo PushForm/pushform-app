@@ -48,6 +48,14 @@
     ],
     "android": {
       "debugApplicationIdSuffix": ".debug"
+    },
+    "macOS": {
+      "dmg": {
+        "background": "images/dmg-background.png",
+        "windowSize": { "width": 720, "height": 502 },
+        "appPosition": { "x": 190, "y": 303 },
+        "applicationFolderPosition": { "x": 530, "y": 303 }
+      }
     }
   }
 }

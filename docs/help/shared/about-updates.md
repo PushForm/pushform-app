@@ -1,5 +1,9 @@
 # About PushForm and desktop updates
 
+## Install on macOS
+
+Open the downloaded `.dmg` file. In the PushForm window with the oak joinery background, drag **PushForm** onto **Applications**. When copying finishes, eject the disk image and open PushForm from your Applications folder.
+
 ## Find the app version
 
 Run **About PushForm** from command search to see the running version and build information. This is useful when reporting a problem. Closing About returns to the document without changing it.

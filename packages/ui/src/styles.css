@@ -232,17 +232,9 @@
   overflow-y: auto;
   background: var(--pf-surface);
 }
-.pf-layout-controls button {
-  padding: 5px 7px;
-  border: 1px solid var(--pf-border);
-  border-radius: var(--pf-radius);
-  background: var(--pf-surface);
-  color: var(--pf-text);
-  cursor: pointer;
-}
 .pf-layout-controls {
   flex: none;
-  width: 230px;
+  width: var(--pf-panel-w);
   border-left: 1px solid var(--pf-border);
   font-size: 12px;
 }
@@ -257,8 +249,9 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  height: auto;
   width: 100%;
-  padding: 9px 10px;
+  padding: 9px 12px;
   border: 0;
   border-radius: 0;
   background: var(--pf-surface-2);
@@ -280,20 +273,8 @@
 .pf-layout-accordion-content {
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  padding: 9px;
-}
-.pf-layout-controls button:disabled {
-  cursor: default;
-  opacity: 0.5;
-}
-.pf-layout-controls label {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-.pf-layout-controls input[type='number'] {
-  width: 55px;
+  gap: 6px;
+  padding: 12px;
 }
 .pf-layout-footer {
   display: flex;
@@ -961,7 +942,8 @@
   flex-direction: column;
   gap: 6px;
 }
-.pf-form-section {
+.pf-form-section,
+.pf-layout-controls :is(legend, .pf-layout-panel-section h3) {
   margin: 8px 0 4px;
   font-size: 11px;
   font-weight: 600;
@@ -969,9 +951,10 @@
   text-transform: uppercase;
   color: var(--pf-text-muted);
 }
-.pf-form-row {
+.pf-form-row,
+.pf-layout-controls label:not(.pf-layout-text-size):has(> input:not([type='checkbox']), > select) {
   display: grid;
-  grid-template-columns: 96px 1fr;
+  grid-template-columns: 96px minmax(0, 1fr);
   align-items: center;
   gap: 6px;
 }
@@ -981,14 +964,18 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.pf-form-check {
+.pf-form-check,
+.pf-layout-controls label:has(> input[type='checkbox']) {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 .pf-form-input,
 .pf-form-select,
-.pf-form-textarea {
+.pf-form-textarea,
+.pf-layout-controls :is(input:where(:not([type='checkbox']):not([type='file'])), select, textarea) {
+  box-sizing: border-box;
+  min-width: 0;
   width: 100%;
   min-height: 22px;
   padding: 0 6px;
@@ -1044,7 +1031,8 @@
   gap: 6px;
   padding-top: 8px;
 }
-.pf-btn {
+.pf-btn,
+.pf-layout-controls button {
   height: 24px;
   padding: 0 10px;
   font: inherit;
@@ -1054,10 +1042,12 @@
   border-radius: var(--pf-radius);
   cursor: pointer;
 }
-.pf-btn:hover:not(:disabled) {
+.pf-btn:hover:not(:disabled),
+.pf-layout-controls button:hover:not(:disabled) {
   background: var(--pf-accent-bg);
 }
-.pf-btn:disabled {
+.pf-btn:disabled,
+.pf-layout-controls button:disabled {
   opacity: 0.6;
   cursor: default;
 }
@@ -1097,22 +1087,33 @@
   margin: 0;
 }
 
+/* Layout uses the same panel form metrics and theme tokens as Modeling. */
+.pf-layout-controls label { color: var(--pf-text-muted); }
+.pf-layout-controls label:has(> input[type='checkbox']) { color: var(--pf-text); }
+.pf-layout-controls label:has(> textarea) { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
 .pf-layout-controls fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   min-width: 0;
-  margin: 8px 0;
-  padding: 8px;
-  border: 1px solid var(--pf-border, #d5dbe3);
+  margin: 8px 0 0;
+  padding: 0;
+  border: 0;
 }
-.pf-layout-controls textarea {
-  box-sizing: border-box;
-  display: block;
-  width: 100%;
-  min-height: 84px;
-  resize: vertical;
-  font: inherit;
-}
-.pf-layout-controls fieldset input:not([type='checkbox']):not([type='color']),
-.pf-layout-controls fieldset select { min-width: 0; max-width: 100%; }
+.pf-layout-controls legend { padding: 0; }
+.pf-layout-controls input[type='file'] { min-width: 0; width: 100%; font: inherit; color: var(--pf-text); }
+.pf-layout-controls textarea { min-height: 84px; padding: 4px 6px; resize: vertical; }
+.pf-layout-controls input[type='color'] { height: 22px; padding: 3px; cursor: pointer; }
+.pf-layout-controls input[type='color']::-webkit-color-swatch-wrapper { padding: 0; }
+.pf-layout-controls input[type='color']::-webkit-color-swatch { border: 0; border-radius: 2px; }
+.pf-layout-controls input[type='color']::-moz-color-swatch { border: 0; border-radius: 2px; }
+.pf-layout-controls :is(input, select, textarea):disabled { opacity: 0.6; }
+.pf-layout-controls :is(input, select, textarea, button):focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 1px; }
+.pf-layout-controls :is(small, p, [role='status']) { color: var(--pf-text-muted); }
+.pf-layout-controls [role='alert'] { color: var(--pf-danger); }
+.pf-layout-controls .pf-form-note { margin: 0 0 6px; }
+.pf-layout-arrange-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.pf-layout-controls :is(.pf-layout-table-line, .pf-layout-inline-formatting) { display: flex; flex-direction: column; gap: 6px; }
 
 /* List panels (Tags, Scenes): filter head, details menu, bordered list, rename field and eye buttons */
 .pf-outliner {
@@ -1942,10 +1943,7 @@
 .pf-layout-tool-option {
   display: flex; flex: none; align-items: center; gap: 6px; margin-left: 8px; white-space: nowrap;
 }
-.pf-layout-tool-option input {
-  width: 65px; padding: 3px 5px; border: 1px solid var(--pf-border); border-radius: var(--pf-radius);
-  background: var(--pf-surface-2); color: var(--pf-text); font: inherit;
-}
+
 
 .pf-layout-rotation-angle {
   position: absolute;
@@ -2089,16 +2087,15 @@
 .pf-layout-print-actions button:disabled { opacity: .5; cursor: default; }
 .pf-layout-print-dialog :focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 2px; }
 
-.pf-layout-text-toolbar { display: flex; align-items: center; gap: 3px; flex: none; margin-left: 10px; padding-left: 10px; border-left: 1px solid var(--pf-border); }
-.pf-layout-text-toolbar select, .pf-layout-text-size { color: var(--pf-text); background: var(--pf-surface); border: 1px solid var(--pf-border); border-radius: var(--pf-radius); height: 29px; font: 12px system-ui, sans-serif; }
-.pf-layout-text-toolbar select { width: 126px; padding: 3px 5px; }
-.pf-layout-text-size { display: flex; align-items: center; gap: 2px; padding-right: 5px; }
-.pf-layout-text-size input { width: 43px; min-width: 0; padding: 3px; background: transparent; border: 0; color: inherit; font: inherit; }
-.pf-layout-text-toolbar button { display: flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 29px; padding: 3px; color: var(--pf-text); background: transparent; border: 1px solid transparent; border-radius: var(--pf-radius); cursor: pointer; }
-.pf-layout-text-toolbar button:hover { background: var(--pf-surface-2); }
+.pf-layout-text-toolbar { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); align-items: center; gap: 6px; }
+.pf-layout-text-toolbar > select:first-child { grid-column: span 4; }
+.pf-layout-text-toolbar > select:last-child { grid-column: span 3; }
+.pf-layout-text-size { grid-column: span 2; display: flex; align-items: center; gap: 4px; }
+.pf-layout-controls .pf-layout-text-size input { width: 100%; min-width: 0; }
+.pf-layout-text-toolbar button { display: flex; align-items: center; justify-content: center; width: 100%; padding: 0; }
 .pf-layout-text-toolbar button[aria-pressed='true'] { background: color-mix(in srgb, var(--pf-accent) 18%, var(--pf-surface)); border-color: var(--pf-accent); }
-.pf-layout-text-toolbar-divider { height: 20px; width: 1px; margin: 0 3px; background: var(--pf-border); }
-.pf-layout-text-color { width: 27px; height: 27px; padding: 3px; border: 0; background: transparent; cursor: pointer; }
+.pf-layout-text-toolbar-divider { display: none; }
+.pf-layout-text-color { grid-column: span 3; }
 .pf-layout-text-toolbar :focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 1px; }
 
 .pf-layout-marquee {
@@ -2506,13 +2503,13 @@ button.pf-brand { border: 0; background: transparent; color: inherit; font: inhe
 .pf-layout-accordion-content .pf-layout-table-panel { padding: 0 0 8px; }
 .pf-layout-accordion-content .pf-layout-table-panel > h3 { display: none; }
 .pf-layout-panel-section { display: flex; flex-direction: column; gap: inherit; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--pf-border, #d6dce5); }
-.pf-layout-panel-section h3 { margin: 0 0 4px; font-size: 12px; font-weight: 600; }
-.pf-layout-panel-note { margin: 0; font-size: 11px; color: var(--pf-muted, #5b6573); }
+.pf-layout-panel-section h3 { margin: 0 0 4px; }
+.pf-layout-panel-note { margin: 0; font-size: 11px; color: var(--pf-text-muted); }
 .pf-layout-view-buttons { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
 .pf-layout-view-buttons button { min-width: 0; padding-inline: 2px; }
 .pf-layout-table-panel textarea { width: 100%; min-height: 55px; box-sizing: border-box; resize: vertical; }
-.pf-layout-table-actions { display: flex; gap: 4px; flex-wrap: wrap; margin: 8px 0; }
-.pf-layout-table-actions button { font-size: 11px; padding: 4px 6px; }
+.pf-layout-table-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin: 6px 0; }
+.pf-layout-table-actions button { padding-inline: 6px; }
 .pf-layout-table-cell-editor { position: absolute; box-sizing: border-box; border: 1px solid #1e63d1; border-radius: 0; outline: none; resize: none; z-index: 3; line-height: 1.25; }
 .pf-table-grid { position: absolute; z-index: 2; outline: none; user-select: none; }
 .pf-table-grid-row { display: contents; }
@@ -2626,8 +2623,8 @@ button.pf-brand { border: 0; background: transparent; color: inherit; font: inhe
 .pf-layout-shape-builder-controls > label { display: inline-flex; align-items: center; gap: 6px; }
 .pf-layout-shape-builder-controls input[type='checkbox'] { width: auto; }
 .pf-layout-shape-builder-controls > button[aria-pressed='true'] { background: var(--pf-accent-bg); color: var(--pf-accent); }
-.pf-layout-tool-panel { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-bottom: 1px solid var(--pf-border); }
-.pf-layout-tool-panel h2 { margin: 0; font-size: 13px; font-weight: 600; }
+.pf-layout-tool-panel { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-bottom: 1px solid var(--pf-border); }
+.pf-layout-tool-panel h2 { margin: 0 0 6px; font-size: 13px; font-weight: 600; }
 .pf-layout-tool-panel .pf-layout-tool-option { margin: 0; padding: 0; border: 0; flex-wrap: wrap; white-space: normal; }
 .pf-layout-tool-panel .pf-layout-boolean-options { align-items: stretch; flex-direction: column; gap: 8px; }
 .pf-layout-tool-actions { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 6px; }

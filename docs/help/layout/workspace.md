@@ -6,6 +6,10 @@ Layout is the page-based drawing editor. Its toolbar is organized into **Transfo
 
 Tool settings appear in a temporary pane at the top of the right-side panel. For example, Polygon shows **Sides**, and Table shows row and column counts. Look there for the active tool's options.
 
+## Edit properties in the side panel
+
+The right-side panel uses the same aligned fields and control styling as the 3D workspace. With nothing selected, **Default Style** sets the stroke and fill for new shapes. Select one object to see its properties and **Arrange** controls for rotation, scaling, flipping, and stacking order. Flip and stacking-order actions appear in paired columns.
+
 ## Use the Object browser
 
 Open **Object browser** from the left menu bar. It shows document settings, pages, layers, and objects. Expand an item to see what it contains. Clicking an object selects it in the drawing. A selected item can also be revealed when selected from the page.

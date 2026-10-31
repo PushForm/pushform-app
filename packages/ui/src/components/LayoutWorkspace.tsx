@@ -3834,7 +3834,7 @@ export function LayoutWorkspace({
             onConvert={(source, name) => { if (cloud) convertEmbeddedModel(tab, source, name, cloud).catch(error => setVcbError(error instanceof Error ? error.message : 'The model could not be converted.')); }} /> : null}
           <LayoutAccordion title={layoutSelectionTitle(selectedEntity, selectionIds.length)} id={`layout-selection-${tab.id}`} open={openSections.selection}
             onToggle={() => toggleSection('selection')}>
-          <div>
+          <div className="pf-form-note">
             {selectedEntity
               ? `${selectedEntity.kind === 'table' ? 'Table' : selectedEntity.kind === 'path' ? 'Path' : selectedEntity.kind === 'image' ? 'Image' : selectedEntity.kind === 'text' ? 'Text' : selectedEntity.kind === 'dimension' || selectedEntity.kind === 'angular-dimension' ? 'Dimension' : 'Label'} #${selectedEntity.id} · ${selectedEntity.points.length} points`
               : selectionIds.length > 1 ? `${selectionIds.length} objects selected` : 'No selection · editing default style'}
@@ -3985,30 +3985,32 @@ export function LayoutWorkspace({
                 pageId: page.id, entityId: selectedEntity!.id,
                 scaleX: Number(scalePercent) / 100, scaleY: Number(scalePercent) / 100,
               })}>Apply scale</button>
-            <button type="button" disabled={!canTransform}
-              onClick={() => tab.commands.execute('layout.shape.flip', {
-                pageId: page.id, entityId: selectedEntity!.id, axis: 'horizontal',
-              })}>Flip horizontally</button>
-            <button type="button" disabled={!canTransform}
-              onClick={() => tab.commands.execute('layout.shape.flip', {
-                pageId: page.id, entityId: selectedEntity!.id, axis: 'vertical',
-              })}>Flip vertically</button>
-            <button type="button" disabled={!canTransform}
-              onClick={() => tab.commands.execute('layout.shape.order', {
-                pageId: page.id, entityId: selectedEntity!.id, direction: 'front',
-              })}>Bring to front</button>
-            <button type="button" disabled={!canTransform}
-              onClick={() => tab.commands.execute('layout.shape.order', {
-                pageId: page.id, entityId: selectedEntity!.id, direction: 'forward',
-              })}>Bring forward</button>
-            <button type="button" disabled={!canTransform}
-              onClick={() => tab.commands.execute('layout.shape.order', {
-                pageId: page.id, entityId: selectedEntity!.id, direction: 'backward',
-              })}>Send backward</button>
-            <button type="button" disabled={!canTransform}
-              onClick={() => tab.commands.execute('layout.shape.order', {
-                pageId: page.id, entityId: selectedEntity!.id, direction: 'back',
-              })}>Send to back</button>
+            <div className="pf-layout-arrange-actions">
+              <button type="button" disabled={!canTransform}
+                onClick={() => tab.commands.execute('layout.shape.flip', {
+                  pageId: page.id, entityId: selectedEntity!.id, axis: 'horizontal',
+                })}>Flip horizontally</button>
+              <button type="button" disabled={!canTransform}
+                onClick={() => tab.commands.execute('layout.shape.flip', {
+                  pageId: page.id, entityId: selectedEntity!.id, axis: 'vertical',
+                })}>Flip vertically</button>
+              <button type="button" disabled={!canTransform}
+                onClick={() => tab.commands.execute('layout.shape.order', {
+                  pageId: page.id, entityId: selectedEntity!.id, direction: 'front',
+                })}>Bring to front</button>
+              <button type="button" disabled={!canTransform}
+                onClick={() => tab.commands.execute('layout.shape.order', {
+                  pageId: page.id, entityId: selectedEntity!.id, direction: 'forward',
+                })}>Bring forward</button>
+              <button type="button" disabled={!canTransform}
+                onClick={() => tab.commands.execute('layout.shape.order', {
+                  pageId: page.id, entityId: selectedEntity!.id, direction: 'backward',
+                })}>Send backward</button>
+              <button type="button" disabled={!canTransform}
+                onClick={() => tab.commands.execute('layout.shape.order', {
+                  pageId: page.id, entityId: selectedEntity!.id, direction: 'back',
+                })}>Send to back</button>
+            </div>
           </section> : null}
           </LayoutAccordion>
         </aside>
@@ -4166,7 +4168,7 @@ function LayoutTextEditor({ entity, disabled, onChange, onBounds, fields, state,
     <legend>{entity.kind === 'label' ? 'Label' : 'Text'}</legend>
     <label>Text content<textarea ref={contentRef} aria-label="Text content" value={text.content}
       onChange={(event) => onChange(editLayoutTextContent(text, event.target.value))} /></label>
-    <div aria-label="Inline formatting">
+    <div className="pf-layout-inline-formatting" aria-label="Inline formatting">
       {(['bold', 'italic', 'underline'] as const).map((key) => <button type="button" key={key}
         onClick={() => {
           const input = contentRef.current;

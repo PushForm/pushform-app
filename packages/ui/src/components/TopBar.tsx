@@ -9,10 +9,10 @@ import { z } from 'zod';
 import {
   encodeLayoutSnapshot, encodeModelSnapshot, modelArchiveImages, openModelFile, openLayoutFile,
   isSketchUpLayoutFile, nativeDocumentType, type LayoutRecoveryMetadata,
-  isModelImportFile, isPictureFile, MAX_PICTURE_BYTES, pictureMime, MAX_SKETCHUP_BYTES, exportStl, stlFileName, STL_EXTENSION, probeMeshImport, exportGlb, exportObj, exportCollada,
+  isModelImportFile, isPictureFile, MAX_PICTURE_BYTES, pictureMime, exportStl, stlFileName, STL_EXTENSION, probeMeshImport, exportGlb, exportObj, exportCollada,
   type ImportProgress, type MeshExtent, type MeshFormatKind, type MeshImportOptions, type ModelImportReport,
 } from '@pushform/io';
-import { importLayoutBytes, importSketchUpBytes, tooLarge, type PickedFile } from '../importFiles';
+import { importLayoutBytes, importSketchUpBytes, modelImportLimit, tooLarge, type PickedFile } from '../importFiles';
 import { useAppStore } from '../store';
 import { layoutContentKey, modelContentKey } from '../documentContent';
 import type { DocumentSession, DocumentTab } from '../session';
@@ -287,7 +287,7 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
     try {
       if (isPictureFile(file.name)) return await importPicture(file, target.tabId);
       if (!isModelImportFile(file.name)) throw new Error('Choose a .skp, .skb, .dae, .obj, .3ds, .stl, .dxf, .gltf, .glb, .step, .stp, .zip, or .kmz model, or a .png, .jpg, .gif, .bmp or .webp picture.');
-      if (file.size > MAX_SKETCHUP_BYTES) throw new Error(tooLarge(file.name));
+      if (file.size > modelImportLimit(file.name)) throw new Error(tooLarge(file.name));
       await readSketchUpFile(async () => new Uint8Array(await file.arrayBuffer()), file.name, target, file);
     } catch (cause) { if ((cause as Error).name !== 'AbortError') setError((cause as Error).message); }
   };
@@ -357,7 +357,7 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
     if (isSketchUpLayoutFile(handle.name) || isModelImportFile(handle.name)) {
       // Converted documents save as .pf/.pfl, so the original source handle is not kept.
       const file = await handle.getFile();
-      if (isModelImportFile(file.name) && file.size > MAX_SKETCHUP_BYTES) throw new Error(tooLarge(file.name));
+      if (isModelImportFile(file.name) && file.size > modelImportLimit(file.name)) throw new Error(tooLarge(file.name));
       if (isModelImportFile(file.name)) await readSketchUpFile(async () => new Uint8Array(await file.arrayBuffer()), file.name, undefined, file);
       else await openBytes(new Uint8Array(await file.arrayBuffer()), handle.name, undefined, file);
       return;
@@ -430,7 +430,7 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
     event.target.value = '';
     if (!file) return;
     try {
-      if (isModelImportFile(file.name) && file.size > MAX_SKETCHUP_BYTES) throw new Error(tooLarge(file.name));
+      if (isModelImportFile(file.name) && file.size > modelImportLimit(file.name)) throw new Error(tooLarge(file.name));
       if (isModelImportFile(file.name)) await readSketchUpFile(async () => new Uint8Array(await file.arrayBuffer()), file.name, undefined, file);
       else if (nativeDocumentType(file.name)) await session.loading.run(file.name, 'Reading file…', async stage => openBytes(new Uint8Array(await file.arrayBuffer()), file.name, undefined, file, stage));
       else await openBytes(new Uint8Array(await file.arrayBuffer()), file.name, undefined, file);

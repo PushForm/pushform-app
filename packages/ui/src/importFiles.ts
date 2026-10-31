@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import { isTauri } from '@tauri-apps/api/core';
 import type { DefId } from '@pushform/core';
 import type { CloudFilesApi } from '@pushform/cloud';
 import { createDocument, ImageStore } from '@pushform/model';
 import {
   applySketchUpImport, encodeLayoutSnapshot, encodeModelSnapshot, modelArchiveImages, importSketchUpLayoutInWorker,
   isModelImportFile, isSketchUpLayoutFile, modelImportBaseName, modelImportFormat, readSketchUpInWorker, LAYOUT_FILE_EXTENSION, MAX_SKETCHUP_BYTES,
-  MODEL_FILE_EXTENSION, SKETCHUP_LAYOUT_EXTENSION, probeMeshImport,
+  MAX_DESKTOP_STEP_BYTES, MODEL_FILE_EXTENSION, isStepModelFile, SKETCHUP_LAYOUT_EXTENSION, probeMeshImport,
   type ImportProgress, type MeshImportOptions, type ModelImportReport, type SketchUpImport, type SketchUpLayoutProperties,
 } from '@pushform/io';
 import type { BuildInfo } from './buildInfo';
@@ -30,9 +31,17 @@ export function isImportableFile(name: string): boolean {
   return isModelImportFile(name) || isSketchUpLayoutFile(name);
 }
 
-/** The size limit message for a model file. */
-export function tooLarge(name: string): string {
-  return `${modelImportFormat(name).name} files larger than 128 MiB are not supported yet.`;
+const MIB = 1024 * 1024;
+
+/** The largest model file an import reads: the desktop app reads larger STEP files than the browser. */
+export function modelImportLimit(name: string, desktop: boolean = isTauri()): number {
+  return desktop && isStepModelFile(name) ? MAX_DESKTOP_STEP_BYTES : MAX_SKETCHUP_BYTES;
+}
+
+/** The size limit message for a model file; in the browser, a STEP file's names the desktop app's larger limit. */
+export function tooLarge(name: string, desktop: boolean = isTauri()): string {
+  const message = `${modelImportFormat(name).name} files larger than ${modelImportLimit(name, desktop) / MIB} MiB are not supported yet.`;
+  return !desktop && isStepModelFile(name) ? `${message} The desktop app opens STEP files up to ${MAX_DESKTOP_STEP_BYTES / MIB} MiB.` : message;
 }
 
 /**
@@ -52,8 +61,8 @@ export async function importSketchUpBytes(
   const source: ImportSource = { fileName: name, sizeBytes: bytes.byteLength, startedAt: importClock(), fileModifiedAt: options.picked?.lastModified };
   let scene: SketchUpImport | null = null;
   try {
-    if (bytes.byteLength > MAX_SKETCHUP_BYTES) throw new Error(tooLarge(name));
-    scene = await readSketchUpInWorker(bytes, { mesh: options.mesh,
+    if (bytes.byteLength > modelImportLimit(name)) throw new Error(tooLarge(name));
+    scene = await readSketchUpInWorker(bytes, { mesh: options.mesh, maxStepBytes: modelImportLimit(name),
       ...(options.signal ? { signal: options.signal } : {}), ...(options.onProgress ? { onProgress: options.onProgress } : {}) });
     if (options.signal?.aborted) throw new DOMException('Import cancelled.', 'AbortError');
     const target = options.target;
@@ -106,7 +115,7 @@ export async function convertImportFile(
   file: File, options: Omit<ImportOptions, 'picked'> & { signal?: AbortSignal | undefined; onProgress?: ((progress: ImportProgress) => void) | undefined } = {},
 ): Promise<ConvertedImport> {
   if (!isImportableFile(file.name)) throw new Error(IMPORT_FILE_DESCRIPTION);
-  if (isModelImportFile(file.name) && file.size > MAX_SKETCHUP_BYTES) throw new Error(tooLarge(file.name));
+  if (isModelImportFile(file.name) && file.size > modelImportLimit(file.name)) throw new Error(tooLarge(file.name));
   const bytes = new Uint8Array(await file.arrayBuffer());
   const source: ImportSource = { fileName: file.name, sizeBytes: bytes.byteLength, startedAt: importClock(), fileModifiedAt: file.lastModified };
   if (isModelImportFile(file.name)) {
@@ -114,7 +123,7 @@ export async function convertImportFile(
     try {
       // Several files import at once without asking, so OBJ, 3DS and unitless DXF files use the options last chosen.
       const probe = probeMeshImport(bytes);
-      scene = await readSketchUpInWorker(bytes, { mesh: probe ? rememberedMeshOptions(probe.kind) : undefined,
+      scene = await readSketchUpInWorker(bytes, { mesh: probe ? rememberedMeshOptions(probe.kind) : undefined, maxStepBytes: modelImportLimit(file.name),
         ...(options.signal ? { signal: options.signal } : {}), ...(options.onProgress ? { onProgress: options.onProgress } : {}) });
       if (options.signal?.aborted) throw new DOMException('Import cancelled.', 'AbortError');
       const doc = createDocument(), images = new ImageStore();

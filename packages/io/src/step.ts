@@ -18,6 +18,12 @@ export const STEP_FORMAT: ImportFormat = { kind: 'step', name: 'STEP', notes: [
   'STEP import: solids and surfaces are imported with the assembly structure, part names and colors; curved surfaces are divided into smoothed facets. Product data, tolerances and annotations (PMI) are not imported.',
 ] };
 
+/**
+ * The largest STEP file the desktop app reads; the browser keeps the limit every import shares. Reading takes about
+ * thirteen times the file's size in memory, and the reader's wasm memory ends at 4 GiB.
+ */
+export const MAX_DESKTOP_STEP_BYTES = 256 * 1024 * 1024;
+
 export function isStepModelFile(name: string): boolean { return /\.(step|stp)$/i.test(name); }
 
 /** A STEP physical file: `ISO-10303-21;` after an optional byte order mark and white space. */
@@ -48,8 +54,9 @@ export function stepHeader(bytes: Uint8Array): { schema: string | null; system: 
   return { schema, system };
 }
 
-export async function readStep(bytes: Uint8Array, onProgress?: (p: ImportProgress) => void): Promise<SketchUpImport> {
-  if (bytes.byteLength > MAX_SKETCHUP_BYTES) throw new Error('STEP files larger than 128 MiB are not supported yet.');
+/** Read a STEP file of at most `maxBytes` (the shared import limit unless the desktop app allows more). */
+export async function readStep(bytes: Uint8Array, onProgress?: (p: ImportProgress) => void, maxBytes = MAX_SKETCHUP_BYTES): Promise<SketchUpImport> {
+  if (bytes.byteLength > maxBytes) throw new Error(`STEP files larger than ${maxBytes / (1024 * 1024)} MiB are not supported yet.`);
   if (!isStepBytes(bytes)) throw new Error('Not a STEP model: the file does not begin with ISO-10303-21.');
   onProgress?.({ stage: 'Loading the STEP reader', current: 0, total: 1 });
   const reader = await loadStepReader();
@@ -58,6 +65,9 @@ export async function readStep(bytes: Uint8Array, onProgress?: (p: ImportProgres
     linearUnit: 'meter', linearDeflectionType: 'bounding_box_ratio', linearDeflection: LINEAR_DEFLECTION_RATIO, angularDeflection: ANGULAR_DEFLECTION,
   });
   if (!result.success) throw new Error('This STEP file could not be read: its data is malformed or uses a schema the reader does not support.');
+  // The reader can run out of memory dividing the surfaces of a very large model after reading its parts.
+  if (result.meshes.some(mesh => mesh.brep_faces.length) && !result.meshes.some(mesh => mesh.index.array.length))
+    throw new Error('The STEP reader read this model\'s parts but could not divide their surfaces into faces. The model may be too large for the STEP reader.');
   onProgress?.({ stage: 'Reading STEP model', current: 1, total: 1 });
 
   const warnings = new Set<string>(), counts: MeshCounts = { degenerate: 0, nonplanar: 0, duplicates: 0, turned: 0 };

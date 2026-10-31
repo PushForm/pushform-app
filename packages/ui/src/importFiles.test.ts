@@ -9,7 +9,7 @@ import {
 import type * as IoModule from '@pushform/io';
 import { createLayoutDocument } from '@pushform/layout';
 import { createApp } from './bootstrap';
-import { convertImportFile, importSketchUpBytes, importLayoutBytes, isImportableFile, IMPORT_FILE_ACCEPT } from './importFiles';
+import { convertImportFile, importSketchUpBytes, importLayoutBytes, isImportableFile, modelImportLimit, tooLarge, IMPORT_FILE_ACCEPT } from './importFiles';
 import { DocumentSession } from './session';
 
 vi.mock('@pushform/io', async original => ({ ...await original<typeof IoModule>(), readSketchUpInWorker: vi.fn(), importSketchUpLayoutInWorker: vi.fn() }));
@@ -67,6 +67,15 @@ it('converts a LayOut file to native drawing bytes with its limitations and stor
   expect(result.kind).toBe('layout'); expect(result.name).toBe('Plan.pfl'); expect(result.notes).toEqual(['Viewports are placeholders']);
   expect((await openLayoutFile(result.bytes)).state.pageOrder).toHaveLength(1);
   expect(recordImport).toHaveBeenCalledWith(expect.objectContaining({ source: 'sketchup_layout', sourceVersion: '16.1.1449', counts: { pages: 1, sourceRevision: 2 } }));
+});
+it('reads STEP files up to 256 MiB in the desktop app and keeps every other limit at 128 MiB', () => {
+  const MIB = 1024 * 1024;
+  expect(modelImportLimit('Trident.step', true)).toBe(256 * MIB);
+  expect(modelImportLimit('Trident.STP', false)).toBe(128 * MIB);
+  expect(modelImportLimit('House.skp', true)).toBe(128 * MIB);
+  expect(tooLarge('Trident.step', true)).toBe('STEP files larger than 256 MiB are not supported yet.');
+  expect(tooLarge('Trident.step', false)).toBe('STEP files larger than 128 MiB are not supported yet. The desktop app opens STEP files up to 256 MiB.');
+  expect(tooLarge('House.skp', false)).toBe('SketchUp files larger than 128 MiB are not supported yet.');
 });
 it('rejects unsupported and oversized files before reading them, and reports reader failures', async () => {
   const { recordImport } = setup();

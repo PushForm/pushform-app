@@ -118,14 +118,15 @@ export function probeMeshImport(bytes: Uint8Array): { kind: MeshFormatKind; exte
  * Read model bytes of any supported format, told apart by their content: COLLADA is XML, archives are zip files, 3DS
  * starts with its main chunk, binary glTF with `glTF` and JSON glTF with `{`, STEP with `ISO-10303-21;`, a binary STL's
  * triangle count fits its size and an ASCII STL starts with `solid`, DXF starts with a SECTION group, OBJ with an OBJ
- * statement, and anything else is read as a .skp file.
+ * statement, and anything else is read as a .skp file. `limits.stepBytes` is the largest STEP file to read.
  */
-export function readModelImport(bytes: Uint8Array, onProgress?: (p: ImportProgress) => void, options?: MeshImportOptions): Promise<SketchUpImport> {
+export function readModelImport(bytes: Uint8Array, onProgress?: (p: ImportProgress) => void, options?: MeshImportOptions,
+  limits?: { stepBytes?: number | undefined }): Promise<SketchUpImport> {
   if (isXmlBytes(bytes)) return readCollada(bytes, onProgress);
   if (isZipBytes(bytes)) return readModelArchive(bytes, onProgress, options);
   if (is3dsBytes(bytes)) return read3ds(bytes, options ?? DEFAULT_MESH_OPTIONS['3ds'], onProgress);
   if (isGlbBytes(bytes) || isGltfJson(bytes)) return readGltf(bytes, onProgress);
-  if (isStepBytes(bytes)) return readStep(bytes, onProgress);
+  if (isStepBytes(bytes)) return readStep(bytes, onProgress, limits?.stepBytes);
   if (isStlBytes(bytes)) return readStl(bytes, options ?? DEFAULT_MESH_OPTIONS.stl, onProgress);
   if (isDxfBytes(bytes)) return readDxf(bytes, options ?? DEFAULT_MESH_OPTIONS.dxf, onProgress);
   if (isObjText(bytes)) return readObj(bytes, options ?? DEFAULT_MESH_OPTIONS.obj, onProgress);

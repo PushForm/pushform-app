@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createDocument } from '@pushform/model';
 import { modelImportBaseName, modelImportFormat, probeMeshImport, readModelImport } from './modelImport';
 import { applySketchUpImport } from './sketchupDocument';
-import { isStepBytes, readStep, stepHeader } from './step';
+import { readSketchUpInWorker } from './sketchupClient';
+import { MAX_DESKTOP_STEP_BYTES, isStepBytes, readStep, stepHeader } from './step';
+import * as stepModule from './stepModule';
 
 type P = [number, number, number];
 interface Box { size: P; at?: P; name?: string; color?: P }
@@ -120,5 +122,27 @@ describe('STEP import', () => {
   it('fails without changes on a file that is not readable STEP', async () => {
     await expect(readStep(new TextEncoder().encode('not a step file'))).rejects.toThrow(/Not a STEP model/);
     await expect(readStep(new TextEncoder().encode('ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\n#1=GARBAGE(;\nENDSEC;\nEND-ISO-10303-21;\n'))).rejects.toThrow();
+  });
+
+  it('reads files over the shared limit only when the caller allows more, as the desktop app does', async () => {
+    const MIB = 1024 * 1024;
+    // A valid file padded past 128 MiB with a trailing comment, which Part 21 allows after END-ISO-10303-21.
+    const box = boxesStep([{ size: [10, 10, 10] }]), big = new Uint8Array(128 * MIB + 1);
+    big.set(box); big.fill(0x20, box.length);
+    await expect(readStep(big)).rejects.toThrow('STEP files larger than 128 MiB are not supported yet.');
+    await expect(readSketchUpInWorker(big)).rejects.toThrow('STEP files larger than 128 MiB are not supported yet.');
+    expect(MAX_DESKTOP_STEP_BYTES).toBe(256 * MIB);
+    const scene = await readSketchUpInWorker(big, { maxStepBytes: MAX_DESKTOP_STEP_BYTES });
+    expect(scene.root.solids).toHaveLength(1);
+  }, 60_000);
+
+  it('fails with a clear message when the reader reads the parts but divides no surface into faces', async () => {
+    const spy = vi.spyOn(stepModule, 'loadStepReader').mockResolvedValue({
+      ReadStepFile: () => ({ success: true, root: { name: '', meshes: [0], children: [] },
+        meshes: [{ name: 'Huge', brep_faces: [{ first: 0, last: -1, color: null }], attributes: { position: { array: [] } }, index: { array: [] } }] }),
+    });
+    try {
+      await expect(readStep(boxesStep([{ size: [1, 1, 1] }]))).rejects.toThrow(/could not divide their surfaces into faces/);
+    } finally { spy.mockRestore(); }
   });
 });

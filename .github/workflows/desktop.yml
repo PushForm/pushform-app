@@ -218,6 +218,18 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && secrets.APPLE_SIGNING_IDENTITY || '' }}
           APPLE_API_ISSUER: ${{ runner.os == 'macOS' && secrets.APPLE_API_ISSUER || '' }}
           APPLE_API_KEY: ${{ runner.os == 'macOS' && secrets.APPLE_API_KEY || '' }}
+      - name: Verify macOS vector icon
+        if: runner.os == 'macOS'
+        run: |
+          app=apps/desktop/src-tauri/target/release/bundle/macos/PushForm.app
+          test -n "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIconName' "$app/Contents/Info.plist")"
+          xcrun assetutil --info "$app/Contents/Resources/Assets.car" | node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const assets = JSON.parse(readFileSync(0, "utf8"));
+            if (!assets.some(asset => asset.AssetType === "Vector" && asset.Name.endsWith("_Assets/mark"))) {
+              throw new Error("The macOS app must contain the vector logo artwork");
+            }
+          '
       - name: Verify macOS signature and notarization
         if: runner.os == 'macOS'
         run: |

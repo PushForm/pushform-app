@@ -38,9 +38,23 @@ You can export only selected geometry when a selection exists. Check the export 
 
 ## Export a model to another 3D application
 
-In Export, choose **glTF**, **OBJ**, or **COLLADA**. The dialog offers the format's options and a save destination. Supported visible geometry and materials are exported; guides, dimensions, model text and section planes are not part of these geometry exports.
+In Export, choose **glTF**, **OBJ**, or **COLLADA** (see below for STEP). The dialog offers the format's options and a save destination. Supported visible geometry and materials are exported; guides, dimensions, model text and section planes are not part of these geometry exports.
 
 Review export notes for unavailable textures or other omissions. Exporting does not replace the native document or change its saved identity.
+
+## Export a STEP file for CAD tools
+
+In Export, choose **STEP** to write a **.step** file that FreeCAD and other CAD tools open. Parts keep their names and colors, components become assemblies with their placements, and a component placed many times is written once. The file is in millimeters. Check **Export selected geometry only** to write just the selection.
+
+The file is written on your computer and is not uploaded. The first STEP export in the browser downloads the converter, about 2 MB; the desktop app converts with code built into the app. The dialog stays open while the model is converted, and Cancel stops it.
+
+STEP exports are approximate in a few ways, and the export notes list them:
+
+- Curved surfaces are written as flat facets, as they are drawn, so a cylinder is a ring of narrow strips rather than a true cylinder. CAD tools can measure and cut it, but cannot edit it as a cylinder.
+- Mesh parts, such as imported STEP parts that were not made editable, are written as faceted solids. The notes name them and give their triangle counts, and large ones make large files.
+- Solids that close are written as solids. Faces that do not close, such as sheet faces, are written as surfaces.
+- A component placed with a mirror or a different scale is written already moved, so it is no longer shared with the component it came from.
+- Guides, dimensions, model text, section planes and loose edges are not exported.
 
 ## Export the current model view as a picture
 

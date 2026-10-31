@@ -988,9 +988,30 @@ export function shadowsToRender(state: DocumentState): RenderShadows {
   };
 }
 
-/** Document fog → viewport fog (background color when "use background" is on). */
+type Rgb = readonly [number, number, number];
+
+const srgbToLinear = (c: number): number => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+const mixRgb = (a: Rgb, b: Rgb, t: number): Rgb => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+
+/**
+ * The color the ground shows at the horizon, where distant things should end up: the ground color
+ * blended toward the background the way the sky pass blends it, or the background itself when the
+ * ground is off. The sky pass blends in linear color and writes the result as it is, so this does
+ * the same and the fog lands on the pixels behind it. Fog that takes the style's background color
+ * uses this, so a far object fades into what is drawn there and not into a color that appears
+ * nowhere on screen.
+ */
+export function horizonColor(b: { color: Rgb; ground: boolean; groundColor: Rgb; groundTransparency: number }): Rgb {
+  const lin = (c: Rgb): Rgb => [srgbToLinear(c[0]), srgbToLinear(c[1]), srgbToLinear(c[2])];
+  const color = lin(b.color);
+  if (!b.ground) return color;
+  const opacity = 1 - Math.min(1, Math.max(0, b.groundTransparency));
+  return mixRgb(color, mixRgb(color, lin(b.groundColor), 0.45), opacity);
+}
+
+/** Document fog → viewport fog (the horizon color of the style's background when "use background" is on). */
 export function fogToRender(state: DocumentState): RenderFog {
   const f = state.fog ?? DEFAULT_FOG;
-  const bg = state.styles.get(state.activeStyleId)?.background.color;
-  return { enabled: f.enabled, near: f.near, far: f.far, color: rgbToCss(f.useBackground && bg ? bg : f.color) };
+  const bg = state.styles.get(state.activeStyleId)?.background;
+  return { enabled: f.enabled, near: f.near, far: f.far, color: rgbToCss(f.useBackground && bg ? horizonColor(bg) : f.color) };
 }

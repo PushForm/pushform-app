@@ -8,7 +8,7 @@ import type { ImageId } from '@pushform/core';
 import { allocId, createDocument, ImageStore, DEFAULT_SHADOWS } from '@pushform/model';
 
 const rendered = vi.hoisted(() => ({ snapshots: [] as [number, number][], previews: [] as [number, number][], ready: new Set<string>(),
-  displays: [] as unknown[], shadows: [] as unknown[], texturesReady: vi.fn(async () => {}) }));
+  displays: [] as unknown[], shadows: [] as unknown[], fog: [] as unknown[], texturesReady: vi.fn(async () => {}) }));
 
 vi.mock('@pushform/io', () => ({
   readPreservedSketchUpModel: () => new Uint8Array(1),
@@ -21,6 +21,7 @@ vi.mock('@pushform/io', () => ({
 vi.mock('../engine/renderAdapter', () => ({
   bodiesToRender: () => [], sketchesToRender: () => [], imagesToRender: () => [], displayToRender: () => ({}),
   shadowsToRender: (state: { shadows: unknown }) => state.shadows,
+  fogToRender: () => ({ enabled: true, near: 1, far: 20, color: '#eeece6' }),
   withRenderImageStore: (_images: unknown, run: () => unknown) => run(),
 }));
 vi.mock('../engine/sectionAdapter', () => ({ sectionsToRender: () => null }));
@@ -34,6 +35,7 @@ vi.mock('@pushform/render', () => ({
     setSections(): void {}
     setDisplay(display: unknown): void { rendered.displays.push(display); }
     setShadows(shadows: unknown): void { rendered.shadows.push(shadows); }
+    setFog(fog: unknown): void { rendered.fog.push(fog); }
     snapshot(width: number, height: number): string {
       rendered.snapshots.push([width, height]);
       return `data:image/png;base64,${rendered.snapshots.length}`;
@@ -145,6 +147,12 @@ describe('Layout model view renders', () => {
     layoutViewportPicture(state, { ...view(), points: [[0, 0], [90, 0], [90, 50], [0, 50]] });
     await settle();
     expect(rendered.shadows.at(-1)).toEqual(DEFAULT_SHADOWS);
+  });
+
+  it("draws the model's fog", async () => {
+    layoutViewportPicture(state, view());
+    await settle();
+    expect(rendered.fog.at(-1)).toEqual({ enabled: true, near: 1, far: 20, color: '#eeece6' });
   });
 });
 

@@ -3,6 +3,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import { carryOver, renderBriefMarkdown } from './brief.ts';
+import { editableDocument } from './document.ts';
 import { defineTool, withSchema, type ToolHandler } from './client.ts';
 import { FRAMING_RULE, withScreenArea, reportEnvironment, type AgentContext, type ConversationAgent, type ConversationStore } from './store.ts';
 import { FEEDBACK_RULES, contextBlock, hostName, searchDocsHandler, searchDocsTool, startOverHandler, startOverTool } from './intake.ts';
@@ -42,7 +43,7 @@ Rules:
 - ${HELP_PROCEDURE_RULES}
 - Never ask for anything in <context>: the account email, the document type, the build, the browser or the time.
 - ${FRAMING_RULE}
-- ${ctx.document?.guidance ? 'You file nothing; temporary UI guidance is allowed as the guidance rules below describe. You edit a Layout document only as the document rules allow.' : ctx.document ? 'You file nothing, and you change nothing except the open document, only as the document rules below describe.' : 'You file nothing and change nothing.'} When the question is not resolved, because the behavior does not exist, works differently from what the user needs, or does not work as the help describes, say so in one sentence and ask whether they want to report a problem or request a feature or change; call switch_path only after their latest message says yes. For procedural help, end with the next useful instruction or wait for the interaction; do not append a generic "Did that answer your question?" or ask permission to look up routine steps.
+- ${ctx.document?.guidance ? `You file nothing; temporary UI guidance is allowed as the guidance rules below describe.${editableDocument(ctx.document) ? ' You edit the open document only as the document rules allow.' : ''}` : editableDocument(ctx.document) ? 'You file nothing, and you change nothing except the open document, only as the document rules below describe.' : 'You file nothing and change nothing.'} When the question is not resolved, because the behavior does not exist, works differently from what the user needs, or does not work as the help describes, say so in one sentence and ask whether they want to report a problem or request a feature or change; call switch_path only after their latest message says yes. For procedural help, end with the next useful instruction or wait for the interaction; do not append a generic "Did that answer your question?" or ask permission to look up routine steps.
 - Starting over: when the user clearly asks to start over or drop this conversation, call start_over and say in one sentence that their next message starts fresh.
 - Do not promise fixes or features.`;
 

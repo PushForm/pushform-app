@@ -8,7 +8,7 @@ import { briefSchema, completeness, emptyBriefFor, type Brief, type DeclineReaso
 import { answerPending, runTurn, type AnthropicLike, type ClientToolCall, type PendingClientTools, type ToolCallEvent, type ToolHandler, type ToolResult } from '../agents/client.ts';
 import { retrieveUserHelp, USER_HELP_RULES } from '../agents/digest.ts';
 import { GUIDANCE_RULES } from '../guidance.ts';
-import { DOCUMENT_RULES, documentTools, type DocumentCapability } from '../agents/document.ts';
+import { DOCUMENT_RULES, MODEL_DOCUMENT_RULES, documentTools, editableDocument, type DocumentCapability } from '../agents/document.ts';
 import type { DigestSection } from '../agents/digest.ts';
 import { helpAgent } from '../agents/help.ts';
 import { intakeAgent } from '../agents/intake.ts';
@@ -92,7 +92,7 @@ const startSchema = z.object({ kind: z.enum(['help', 'intake']), path: z.enum(['
   .refine(b => (b.kind === 'help') === (b.path === 'help'), { message: 'kind help pairs with path help; kind intake with open, problem or feature', path: ['path'] });
 /** `intent` is the card the requester clicked; it settles an open conversation's path before the agent runs and is ignored once a path is set. */
 /** `document` is what the sending tab can edit this turn; absent or null offers no document tools. */
-const documentSchema = z.object({ type: z.enum(['layout', 'model']), apiVersion: z.int().min(1), guidance: z.literal(1).optional() });
+const documentSchema = z.object({ type: z.enum(['layout', 'model']), apiVersion: z.int().min(1), guidance: z.literal(1).optional(), edit: z.literal(1).optional() });
 const messageSchema = z.object({ text: z.string().min(1).max(MESSAGE_MAX_CHARS), intent: z.enum(['help', 'problem', 'feature']).optional(), document: documentSchema.nullable().optional() });
 /** The editor's answers to a suspended turn; a call left out is answered as not run. */
 const toolResultsSchema = z.object({ results: z.array(z.object({ toolUseId: z.string().min(1).max(200), content: z.string().max(TOOL_RESULT_MAX_CHARS), isError: z.boolean().default(false) })).max(20) });
@@ -731,7 +731,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       leading: [...closers, { role: 'user', text: body.text, at: base.now }],
       setup: {
         model: tools.length ? config.models.document : config.models.conversation,
-        system: [agent.system(ctx), USER_HELP_RULES, ...(document?.type === 'layout' ? [DOCUMENT_RULES(ctx)] : []), ...(document?.guidance ? [GUIDANCE_RULES] : [])].join('\n\n'),
+        system: [agent.system(ctx), USER_HELP_RULES, ...(editableDocument(document) === 'layout' ? [DOCUMENT_RULES(ctx)] : editableDocument(document) === 'model' ? [MODEL_DOCUMENT_RULES(ctx)] : []), ...(document?.guidance ? [GUIDANCE_RULES] : [])].join('\n\n'),
         tools: [...agent.tools(ctx), ...tools], context, historyLength: prior.length, messages: historyOf(prior, context, body.text), document, resume: undefined,
       },
     });

@@ -123,6 +123,49 @@ describe('Document', () => {
   });
 });
 
+describe('exclusive undo groups', () => {
+  const rename = (name: string) => (draft: { definitions: Map<unknown, { name: string }> }) => {
+    for (const def of draft.definitions.values()) def.name = name;
+  };
+
+  it('records the owner\'s edits as one entry and refuses other edits, undo and redo meanwhile', () => {
+    const doc = createDocument();
+    const undo = new UndoStack(doc);
+    undo.transact('before', rename('Before'));
+    undo.beginGroup('AI Chat: Batch');
+    undo.withinGroup(() => undo.transact('a', rename('A')));
+    expect(() => undo.transact('outside', rename('Outside'))).toThrow(/being applied/);
+    expect(undo.undo()).toBe(false);
+    expect(() => undo.beginGroup('second')).toThrow(/still being applied/);
+    undo.withinGroup(() => undo.transact('b', rename('B')));
+    undo.endGroup(true);
+    expect(undo.length).toBe(2);
+    expect(undo.peek()!.label).toBe('AI Chat: Batch');
+    expect(doc.rootDefinition.name).toBe('B');
+    expect(undo.undo()).toBe(true);
+    expect(doc.rootDefinition.name).toBe('Before');
+    expect(undo.redo()).toBe(true);
+    expect(doc.rootDefinition.name).toBe('B');
+  });
+
+  it('reverts every edit of a group that does not commit and records nothing', () => {
+    const doc = createDocument();
+    const sel = new Selection();
+    const undo = new UndoStack(doc, sel);
+    const picked: EntityRef = { kind: 'body', path: [], id: 3 as Id };
+    sel.set([picked]);
+    undo.beginGroup('AI Chat: Batch');
+    undo.withinGroup(() => { undo.transact('a', rename('A')); sel.clear(); undo.transact('b', rename('B')); });
+    undo.endGroup(false);
+    expect(doc.rootDefinition.name).toBe('Model');
+    expect(undo.length).toBe(0);
+    expect(sel.refs).toEqual([picked]);
+    expect(undo.grouped).toBe(false);
+    undo.transact('after', rename('After'));
+    expect(undo.length).toBe(1);
+  });
+});
+
 describe('persistent ids across undo', () => {
   it('does not reuse ids after an undo', async () => {
     const { createDocument } = await import('./Document');

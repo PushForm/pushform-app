@@ -103,7 +103,8 @@ export interface ToolCall { readonly id: string; readonly name: string; readonly
 /** The editor's answer to one `ToolCall`. */
 export interface ToolCallResult { readonly toolUseId: string; readonly content: string; readonly isError: boolean }
 /** What the sending tab can edit this turn; the backend offers matching document tools. */
-export interface DocumentDescriptor { readonly type: 'layout' | 'model'; readonly apiVersion: number; readonly guidance?: 1 | undefined }
+/** `edit: 1` marks a model tab whose model the agent may edit; a model tab without it offers guidance alone. */
+export interface DocumentDescriptor { readonly type: 'layout' | 'model'; readonly apiVersion: number; readonly guidance?: 1 | undefined; readonly edit?: 1 | undefined }
 
 /** A problem report's attachment as the panel shows it. */
 export type AttachmentKind = 'screenshot' | 'document';

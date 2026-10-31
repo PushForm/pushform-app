@@ -346,16 +346,25 @@ importers:
       '@pushform/commands':
         specifier: workspace:*
         version: link:../commands
+      '@pushform/core':
+        specifier: workspace:*
+        version: link:../core
       '@pushform/extension-protocol':
         specifier: workspace:*
         version: link:../extension-protocol
       '@pushform/layout':
         specifier: workspace:*
         version: link:../layout
+      '@pushform/model':
+        specifier: workspace:*
+        version: link:../model
       es-module-lexer:
         specifier: ^2.3.2
         version: 2.3.2
     devDependencies:
+      '@pushform/kernel':
+        specifier: workspace:*
+        version: link:../kernel
       wabt:
         specifier: ^1.0.39
         version: 1.0.39

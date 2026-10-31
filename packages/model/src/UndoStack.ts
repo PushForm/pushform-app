@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { Emitter } from '@pushform/core';
+import { Emitter, PushFormError } from '@pushform/core';
 import type { Patch } from 'immer';
 import type { Document, DocumentDraft } from './Document';
 import type { EntityRef } from './entities/common';
@@ -19,6 +19,14 @@ export interface UndoEntry {
 
 export type UndoEvents = { change: { canUndo: boolean; canRedo: boolean } };
 
+/** An open exclusive group: the patches of every entry recorded by its owner, oldest first. */
+interface UndoGroup {
+  label: string;
+  patches: Patch[][];
+  inverse: Patch[][];
+  selectionBefore: EntityRef[];
+}
+
 /**
  * Linear undo/redo over document patches.
  *
@@ -29,6 +37,8 @@ export type UndoEvents = { change: { canUndo: boolean; canRedo: boolean } };
 export class UndoStack {
   private undoStack: UndoEntry[] = [];
   private redoStack: UndoEntry[] = [];
+  private group: UndoGroup | null = null;
+  private groupOwner = false;
   readonly events = new Emitter<UndoEvents>();
 
   constructor(
@@ -57,6 +67,12 @@ export class UndoStack {
   /** Record an already-applied transaction. Entries without patches are ignored. Clears redo. */
   push(entry: UndoEntry): void {
     if (entry.patches.length === 0) return;
+    if (this.group) {
+      this.requireGroupOwner();
+      this.group.patches.push(entry.patches);
+      this.group.inverse.push(entry.inverse);
+      return;
+    }
     this.undoStack.push(entry);
     if (this.undoStack.length > this.cap) this.undoStack.splice(0, this.undoStack.length - this.cap);
     this.redoStack = [];
@@ -72,6 +88,7 @@ export class UndoStack {
     fn: (draft: DocumentDraft) => T,
     opts: { commandId?: string; params?: unknown } = {},
   ): T {
+    if (this.group && !this.doc.inTransaction) this.requireGroupOwner();
     const selectionBefore = this.selection?.snapshot() ?? [];
     const tx = this.doc.transact(label, fn);
     if (!tx.nested) {
@@ -89,6 +106,7 @@ export class UndoStack {
   }
 
   undo(): boolean {
+    if (this.group) return false;
     const e = this.undoStack.pop();
     if (!e) return false;
     this.doc.applyPatches(e.inverse, e.patches, 'undo', e.label);
@@ -99,6 +117,7 @@ export class UndoStack {
   }
 
   redo(): boolean {
+    if (this.group) return false;
     const e = this.redoStack.pop();
     if (!e) return false;
     this.doc.applyPatches(e.patches, e.inverse, 'redo', e.label);
@@ -117,6 +136,55 @@ export class UndoStack {
     if (!e) return;
     fn(e);
     this.emit();
+  }
+
+  /** True while an exclusive group is open (`beginGroup`). */
+  get grouped(): boolean {
+    return this.group !== null;
+  }
+
+  /**
+   * Open an exclusive group. Edits made inside `withinGroup` collect into one entry labelled `label`, recorded when
+   * the group commits. Until it ends, every other edit is refused with `document.busy`, and undo and redo do
+   * nothing, so asynchronous work between the owner's edits never interleaves with anyone else's.
+   */
+  beginGroup(label: string): void {
+    if (this.group) throw new PushFormError('document.busy', 'Another change is still being applied');
+    this.group = { label, patches: [], inverse: [], selectionBefore: this.selection?.snapshot() ?? [] };
+  }
+
+  /** Run the group owner's synchronous edits; only edits made inside `fn` may join the open group. */
+  withinGroup<T>(fn: () => T): T {
+    if (!this.group) throw new Error('withinGroup() requires an open group');
+    const outer = this.groupOwner;
+    this.groupOwner = true;
+    try {
+      return fn();
+    } finally {
+      this.groupOwner = outer;
+    }
+  }
+
+  /**
+   * Close the open group. Committing records its edits as one entry (none when nothing changed) and clears redo;
+   * otherwise its edits are reverted and the selection restored, leaving the document as it was before the group.
+   */
+  endGroup(commit: boolean): void {
+    const group = this.group;
+    if (!group) return;
+    this.group = null;
+    if (!group.patches.length) return;
+    const patches = group.patches.flat(), inverse = [...group.inverse].reverse().flat();
+    if (commit) {
+      this.push({ label: group.label, commandId: null, params: null, patches, inverse, selectionBefore: group.selectionBefore, selectionAfter: this.selection?.snapshot() ?? [] });
+      return;
+    }
+    this.doc.applyPatches(inverse, patches, 'undo', group.label);
+    this.selection?.restore(group.selectionBefore);
+  }
+
+  private requireGroupOwner(): void {
+    if (!this.groupOwner) throw new PushFormError('document.busy', 'Wait until the change being applied finishes');
   }
 
   clear(): void {

@@ -102,7 +102,7 @@ it('docks the chat beside the editor from the left menu bar icon, sends the sess
   fireEvent.click(within(await cards()).getByRole('button', { name: /^Request a feature or change/ }));
   await waitFor(() => expect(calls.find(call => call.path === '/conversations/conv-1/messages')).toBeTruthy());
   expect(calls.find(call => call.path === '/conversations')?.body).toMatchObject({ kind: 'intake', path: 'open', screen: { editor: 'model', documentType: 'model', build: { version: '1.2.3', commit: 'abc1234' } } });
-  expect(calls.find(call => call.path === '/conversations/conv-1/messages')?.body).toEqual({ text: 'Request a feature or change', intent: 'feature', document: { type: 'model', apiVersion: 1, guidance: 1 } });
+  expect(calls.find(call => call.path === '/conversations/conv-1/messages')?.body).toEqual({ text: 'Request a feature or change', intent: 'feature', document: { type: 'model', apiVersion: 1, edit: 1, guidance: 1 } });
   await waitFor(() => expect(screen.getByRole('log', { name: 'Conversation' }).textContent).toContain('What are you trying to do?'));
   expect(screen.queryByRole('button', { name: 'File request' })).toBeNull();
   expect(screen.queryByText(/preview/i)).toBeNull();
@@ -249,13 +249,13 @@ it('reaches the pop-down from the Home header icon, has no requests card or list
   expect(screen.queryByRole('dialog')).toBeNull();
 });
 
-it('keeps a separate conversation for each document tab, offering guidance in both editors and document edits in Layout', async () => {
+it('keeps a separate conversation for each document tab, offering guidance and document edits in both editors', async () => {
   render(<App initialScreen="workspace" app={app} cloud={cloud} buildInfo={build} requests={requests} />);
   fireEvent.click(icon());
   fireEvent.change(await screen.findByLabelText('Your message'), { target: { value: 'hello from the model' } });
   fireEvent.click(screen.getByRole('button', { name: 'Send' }));
   await screen.findByText('What are you trying to do?');
-  expect(calls.find(call => call.path === '/conversations/conv-1/messages')?.body).toEqual({ text: 'hello from the model', document: { type: 'model', apiVersion: 1, guidance: 1 } });
+  expect(calls.find(call => call.path === '/conversations/conv-1/messages')?.body).toEqual({ text: 'hello from the model', document: { type: 'model', apiVersion: 1, edit: 1, guidance: 1 } });
   fireEvent.click(icon());
   fireEvent.click(screen.getByRole('button', { name: 'New document' }));
   fireEvent.click(screen.getByRole('menuitem', { name: 'Layout' }));

@@ -15,11 +15,35 @@ afterEach(() => {
 const open = (): DocumentSession => (session = new DocumentSession(createApp({ demo: false, expose: false }), () => createApp({ demo: false, expose: false }), true, null));
 
 describe('documentToolsFor', () => {
-  it('offers nothing for a model tab and the Layout API for a Layout tab', () => {
+  it('offers the model API for a model tab and the Layout API for a Layout tab', () => {
     const s = open();
     expect(s.active.type).toBe('model');
-    expect(documentToolsFor(s, s.active)).toBeNull();
+    expect(documentToolsFor(s, s.active)?.document).toEqual({ type: 'model', apiVersion: 1, edit: 1 });
     expect(documentToolsFor(s, s.newLayout())?.document).toEqual({ type: 'layout', apiVersion: 1 });
+  });
+
+  it('edits the model tab it was bound to as one undo entry, shows progress and stops after a tab switch', async () => {
+    const s = open();
+    const tab = s.active;
+    if (tab.type !== 'model') throw new Error('expected a model tab');
+    const tools = documentToolsFor(s, tab)!;
+    const bodyId = tab.app.commands.execute('model.addBox', { min: [0, 0, 0], max: [1, 1, 1] }) as number;
+    const revision = JSON.parse((await tools.run({ id: 'a', name: 'model_get_document', input: {} })).content).revision as number;
+    const call = { id: 'b', name: 'model_apply_operations', input: { expectedRevision: revision, label: 'Group it', operations: [{ op: 'make_group', refs: [{ kind: 'body', id: bodyId }] }] } };
+    expect(tools.progress?.(call)).toBe('Applying the change…');
+    expect(tools.progress?.({ id: 'a', name: 'model_get_document', input: {} })).toBeUndefined();
+    const outcome = await tools.run(call);
+    expect(outcome.isError).toBe(false);
+    expect(outcome.notice).toBe('Changed the document: Group it. Undo reverts it.');
+    const root = () => tab.app.document.doc.rootDefinition.entities;
+    expect(root().instances.size).toBe(1);
+    expect(tab.app.document.undoStack.peek()?.label).toBe('AI Chat: Group it');
+    expect(tab.app.commands.execute('edit.undo')).toBe(true);
+    expect(root().instances.size).toBe(0);
+    s.newLayout();
+    const switched = await tools.run({ ...call, input: { ...call.input, expectedRevision: tab.app.document.doc.version } });
+    expect(JSON.parse(switched.content).error.code).toBe('unavailable');
+    expect(root().instances.size).toBe(0);
   });
 
   it('edits the tab it was bound to as one undo entry and returns a transcript line', async () => {

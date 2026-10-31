@@ -2,6 +2,7 @@
 // Copyright 2026 PushForm contributors
 import type Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
+import { editableDocument } from './document.ts';
 import { defineTool, withSchema, type ToolHandler, type ToolResult } from './client.ts';
 import { DECLINE_MESSAGES, carryOver, completeness, renderBriefMarkdown, setChoiceSection, setEstimatedClass, setTextSection, validateTitle } from './brief.ts';
 import { retrieveUserHelp } from './digest.ts';
@@ -167,7 +168,7 @@ export function contextBlock(ctx: AgentContext): string {
   const brief = ctx.brief ? `\n${frameRequesterText(renderBriefMarkdown(ctx.brief, ctx.title), 'brief')}` : '';
   return [
     '<context>', `host: ${ctx.host}`, `account_email: ${ctx.accountEmail}`, `roles: ${ctx.roles.join(', ') || 'user'}`, `filing_allowed: ${ctx.filingAllowed}`,
-    `screen: ${screen}`, ...(ctx.document ? [`open_document: ${ctx.document.type}${ctx.document.type === 'layout' ? ' (the layout_* tools read and edit it)' : ' (UI guidance only)'}`] : []),
+    `screen: ${screen}`, ...(ctx.document ? [`open_document: ${ctx.document.type}${editableDocument(ctx.document) ? ` (the ${editableDocument(ctx.document)}_* tools read and edit it)` : ' (UI guidance only)'}`] : []),
     `build: ${ctx.build.version} (${ctx.build.commit})`, `time: ${ctx.now}`, `path: ${ctx.path}`,
     `requester_messages_so_far: ${ctx.messageCount} of ${ctx.limits.messagesPerConversation}`,
     `open_requests_filed_by_this_account: ${ctx.openRequestCount} of ${ctx.limits.openRequestsPerAccount}`,

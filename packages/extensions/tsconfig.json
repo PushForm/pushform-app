@@ -5,5 +5,5 @@
     "outDir": "dist/types"
   },
   "include": ["src"],
-  "references": [{ "path": "../extension-protocol" }, { "path": "../layout" }, { "path": "../commands" }]
+  "references": [{ "path": "../extension-protocol" }, { "path": "../layout" }, { "path": "../commands" }, { "path": "../core" }, { "path": "../model" }]
 }

@@ -50,6 +50,8 @@ export interface DocumentToolSession {
   readonly document: DocumentDescriptor;
   /** Runs one call; failures are error results, never exceptions. `notice` is a transcript line for a change to the document. */
   run(call: ToolCall, signal?: AbortSignal): Promise<DocumentToolOutcome> | DocumentToolOutcome;
+  /** What the chat shows while a call runs, for a call that takes noticeable time; undefined keeps the usual placeholder. */
+  progress?(call: ToolCall): string | undefined;
 }
 export interface DocumentToolOutcome { readonly content: string; readonly isError: boolean; readonly notice?: string | undefined }
 
@@ -110,6 +112,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [waitingForGuidance, setWaitingForGuidance] = useState(false);
+  const [toolProgress, setToolProgress] = useState<string | null>(null);
   const [error, setError] = useState<{ code: string; message: string; retry?: (() => void) | undefined } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [retryTick, setRetryTick] = useState(0);
@@ -283,7 +286,8 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
             let outcome: DocumentToolOutcome;
             if (!live()) return;
             if (call.name === 'ui_highlight') setWaitingForGuidance(true);
-            try { outcome = await tools.run(call, controller.signal); } catch (cause) { outcome = { content: `The editor could not run ${call.name}: ${errorText(cause)}`, isError: true }; }
+            setToolProgress(tools.progress?.(call) ?? null);
+            try { outcome = await tools.run(call, controller.signal); } catch (cause) { outcome = { content: `The editor could not run ${call.name}: ${errorText(cause)}`, isError: true }; } finally { if (alive.current) setToolProgress(null); }
             if (!live()) return;
             setWaitingForGuidance(false);
             results.push({ toolUseId: call.id, content: outcome.content, isError: outcome.isError });
@@ -421,7 +425,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
             : <span className="pf-fr-role">{entry.role === 'user' ? 'You' : 'Agent'}</span>}
             {/* The requester's own words stay as typed; the agent's replies are Markdown. */}
             {entry.role === 'user' ? <p>{entry.text}</p> : <MessageMarkdown text={entry.text} />}</div>)}
-        {current.streaming !== null && !waitingForGuidance ? <div className="pf-fr-message is-assistant is-streaming">{current.transcript.at(-1)?.role === 'assistant' ? null : <span className="pf-fr-role">Agent</span>}{current.streaming ? <MessageMarkdown text={current.streaming} /> : <p>…</p>}</div> : null}
+        {current.streaming !== null && !waitingForGuidance ? <div className="pf-fr-message is-assistant is-streaming">{current.transcript.at(-1)?.role === 'assistant' ? null : <span className="pf-fr-role">Agent</span>}{current.streaming ? <MessageMarkdown text={current.streaming} /> : <p>{toolProgress ?? '…'}</p>}</div> : null}
         <div ref={transcriptEnd} />
       </div>
       {current.limitReached ? <p className="pf-fr-muted pf-fr-limit" role="status">This conversation reached its {messageLimit}-message limit.</p> : null}

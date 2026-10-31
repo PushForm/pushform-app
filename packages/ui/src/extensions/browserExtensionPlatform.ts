@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { ExtensionPlatform, localSettingsStore, startWebRuntime, storedDeveloperMode, type SessionFailure, type InstalledExtension } from '@pushform/extensions';
+import { ExtensionPlatform, localSettingsStore, startWebRuntime, storedDeveloperMode, type ExtensionFailure, type InstalledExtension } from '@pushform/extensions';
 import { browserClipboardWriter, browserFilePicker } from './browserExtensionIo';
 import { browserViewPrinter, type PrintPrompts } from './extensionPrint';
 import { indexedDbExtensionStore } from './indexedDbExtensionStore';
@@ -20,7 +20,7 @@ export function createBrowserExtensionPlatform(options: {
   readonly storage?: Storage;
   /** False where organization policy forbids developer mode. */
   readonly developerModeAllowed?: () => boolean;
-  readonly onFailure?: (record: InstalledExtension, failure: SessionFailure) => void;
+  readonly onFailure?: (record: InstalledExtension, failure: ExtensionFailure) => void;
   /** Where print requests wait for the user; without it extensions cannot print. */
   readonly printPrompts?: PrintPrompts;
 }): ExtensionPlatform {

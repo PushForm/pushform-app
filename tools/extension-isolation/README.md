@@ -113,8 +113,6 @@ one is fixed; remove the marker then.
    length uncounted. Platform methods also make uncounted buffers larger than anything the extension holds: a `Blob`
    repeating one buffer, `DecompressionStream` (half a megabyte of gzip became 512 MiB), and `structuredClone`
    copies. Each of these allocated 512 MiB or more in both browsers.
-3. **Stored releases are not verified again.** Files are verified when a package is side-loaded, but a stored
-   release starts from its stored files without being checked against its content hash again.
 
 Revocation is not implemented (there is no official install path yet); its tests are listed as pending in
 `packages/extensions/src/platform/trust.test.ts`.

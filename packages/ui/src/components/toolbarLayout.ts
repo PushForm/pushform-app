@@ -59,7 +59,7 @@ export const TOOLBAR_GROUPS: readonly { title: string; slots: readonly Slot[] }[
     ],
   },
   {
-    title: 'Measure',
+    title: 'Inspect',
     slots: [
       stack(
         'Measure',
@@ -70,6 +70,7 @@ export const TOOLBAR_GROUPS: readonly { title: string; slots: readonly Slot[] }[
         'protractor',
         'axes',
       ),
+      tool('sectionPlane'),
     ],
   },
   { title: 'Organize', slots: [tool('paint'), tool('tag')] },

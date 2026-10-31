@@ -104,10 +104,9 @@ describe('MainToolbar', () => {
       'Transform',
       'Draw',
       'Modify',
-      'Measure',
+      'Inspect',
       'Organize',
       'View',
-      'More',
     ]);
     expect(
       screen
@@ -118,6 +117,10 @@ describe('MainToolbar', () => {
       screen
         .getByRole('group', { name: 'Modify' })
         .contains(screen.getByRole('button', { name: /^Push\/Pull/ })),
+    ).toBe(true);
+    expect(
+      screen.getByRole('group', { name: 'Inspect' })
+        .contains(screen.getByRole('button', { name: 'Section Plane' })),
     ).toBe(true);
     // stacked tools are not individual toolbar buttons
     const names = () => screen.getAllByRole('button').map((b) => b.getAttribute('aria-label'));

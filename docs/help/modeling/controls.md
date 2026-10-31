@@ -1,6 +1,6 @@
 # Modeling toolbar controls and their purpose
 
-The modeling ribbon groups tools into **Transform**, **Draw**, **Modify**, **Measure**, **Organize**, and **View**, with names below the buttons. Open a button’s arrow for related tools. Scroll horizontally if the ribbon does not fit your window. Additional tools appear in **More** when available.
+The modeling ribbon groups tools into **Transform**, **Draw**, **Modify**, **Inspect**, **Organize**, and **View**, with names below the buttons. Open a button’s arrow for related tools. Scroll horizontally if the ribbon does not fit your window. Additional tools appear in **More** when available.
 
 ## Select, Eraser and drawing tools
 
@@ -20,7 +20,9 @@ The Solid stack includes **Outer Shell**, **Union**, **Subtract**, **Trim**, **I
 
 The inputs and the result must be valid solids in the current editing context. With no preselection, click the first solid then the second to apply. For Subtract and Trim, pick the cutter first and the target second. Subtract consumes the cutter; Trim keeps it. Two preselected solids apply on activation. A loose edge or zero-thickness sheet is not a solid operand. Undo restores a completed operation.
 
-## Measure, Text, Paint and Tag
+## Inspect, Paint and Tag
+
+The **Inspect** group contains the **Measure** dropdown and a **Section Plane** button. Section Plane creates a cutaway view to inspect the model’s interior.
 
 **Tape Measure** and **Protractor** help measure distances and angles. **Dimension** adds measured annotations. **Text** annotates the model; **3D Text** creates letter geometry. **Axes** works with the coordinate reference rather than placing ordinary text or geometry.
 

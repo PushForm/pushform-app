@@ -14,7 +14,7 @@ Shift and arrow-key locks remain available in these modes. If expected snaps dis
 
 ## Add a section plane
 
-Find **Section Plane** in command search. Point to a face to orient the preview, then click to place the plane. Shift holds the current orientation. Right, Left and Up constrain to the red, green and blue axes; Down releases that constraint. Undo removes a plane you have placed.
+Choose **Section Plane** in the **Inspect** toolbar group or find it in command search. Point to a face to orient the preview, then click to place the plane. Shift holds the current orientation. Right, Left and Up constrain to the red, green and blue axes; Down releases that constraint. Undo removes a plane you have placed.
 
 A section plane belongs to the model or to the group or component you are editing. Each such context has at most one active cut.
 

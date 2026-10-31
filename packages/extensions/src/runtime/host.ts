@@ -36,7 +36,15 @@ export interface ServiceCall {
    * new), and optionally the best partial result so far. Dropped once the call has ended or been cancelled.
    */
   progress(value: number | null, partial?: unknown): void;
+  /**
+   * Whether the user acted on this extension within the last `withinMs` milliseconds: pressed or edited one of its
+   * controls, or ran one of its commands. Gates what browsers and the platform allow only on a user gesture.
+   */
+  userActivated(withinMs?: number): boolean;
 }
+
+/** How long a user action keeps gesture-gated services such as the clipboard available, as browsers allow. */
+export const USER_ACTIVATION_MS = 5000;
 
 /** Implements one host service method for extensions. Must return structured-cloneable data, never live objects. */
 export type ServiceMethod = (input: unknown, call: ServiceCall) => unknown;
@@ -91,6 +99,8 @@ export interface InvokeOptions {
   readonly signal?: AbortSignal;
   /** Scopes such as `panel:<id>`; `cancelScope` cancels every invocation carrying the scope. */
   readonly scopes?: readonly string[];
+  /** The user started this invocation (a command, a menu or context action), which counts as a user gesture. */
+  readonly userAction?: boolean;
   /**
    * The id of the document the invocation acts on. The runtime receives this session's handle for it, never the id,
    * and closing the document (`closeDocument`) cancels the invocation.
@@ -126,6 +136,7 @@ export class ExtensionSession {
   private settleActivation: { resolve(): void; reject(error: ExtensionError): void } | null = null;
   private stopped: { resolve(): void } | null = null;
   private nextInvocation = 1;
+  private lastUserAction = -Infinity;
   private readonly invocations = new Map<number, PendingInvocation>();
   private readonly requests = new Map<number, AbortController>();
   private readonly unlisten: () => void;
@@ -206,6 +217,7 @@ export class ExtensionSession {
     if (this.currentState !== 'active') throw new ExtensionError('unavailable', 'The extension is not running.');
     if (options.signal?.aborted) throw new ExtensionError('cancelled', 'The operation was cancelled.');
     const invocation = this.nextInvocation++;
+    if (options.userAction) this.noteUserAction();
     const scopes = options.document === undefined ? options.scopes ?? [] : [...(options.scopes ?? []), `document:${options.document}`];
     const document = options.document === undefined ? undefined : this.openDocument(options.document);
     return new Promise((resolve, reject) => {
@@ -224,7 +236,15 @@ export class ExtensionSession {
 
   /** Sends a user event on a mounted interface to the runtime; dropped unless the extension is active. */
   postEvent(event: { readonly target: string; readonly component: string; readonly event: string }): void {
-    if (this.currentState === 'active') this.port.post({ ...event, type: 'event' });
+    if (this.currentState !== 'active') return;
+    // Events come only from the user's input on the extension's own interface.
+    this.noteUserAction();
+    this.port.post({ ...event, type: 'event' });
+  }
+
+  /** Records that the user just acted on this extension. */
+  noteUserAction(): void {
+    this.lastUserAction = performance.now();
   }
 
   /** Cancels every running invocation that carries `scope`, as closing its panel does. */
@@ -395,6 +415,7 @@ export class ExtensionSession {
       const result = await implementation(message.input, {
         signal: controller.signal, extensionId: this.manifest.id, generation: this.generation,
         document: (handle) => this.resolveDocument(handle),
+        userActivated: (withinMs = USER_ACTIVATION_MS) => performance.now() - this.lastUserAction <= withinMs,
         progress: (value, partial) => {
           if (this.requests.get(message.id) !== controller || controller.signal.aborted) return;
           const update = { type: 'progress', id: message.id, value: value === null ? null : Math.min(1, Math.max(0, value)), ...(partial === undefined ? {} : { partial }) };

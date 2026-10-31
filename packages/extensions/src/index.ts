@@ -5,6 +5,7 @@ export * from './layoutApi';
 export * from './runtime/port';
 export * from './runtime/guest';
 export * from './runtime/host';
+export * from './runtime/io';
 export * from './runtime/settings';
 export * from './runtime/ui';
 export * from './runtime/web/frameBootstrap';

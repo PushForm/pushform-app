@@ -278,7 +278,8 @@ export async function finishMeshImport(model: SkpModel, placements: Map<number, 
   const meshParts = options.meshParts ?? new Map<number, ImportedMeshPart[]>();
   if (meshParts.size) {
     const triangles = [...meshParts.values()].flat().reduce((n, part) => n + part.geometry.triangles.length / 3, 0);
-    warnings.add(`${triangles.toLocaleString('en-US')} triangles: the model is imported as mesh parts, which are drawn and placed whole and become editable faces when edited.`);
+    warnings.add(format.kind === 'step' ? `${triangles.toLocaleString('en-US')} triangles in mesh parts, which are drawn and placed whole; Make Editable turns a part into faces.`
+      : `${triangles.toLocaleString('en-US')} triangles: the model is imported as mesh parts, which are drawn and placed whole and become editable faces when edited.`);
   }
   const scene = prepareSketchUp(model, onProgress, format, { allowEmpty: options.allowEmpty || meshParts.size > 0 });
   for (const def of [scene.root, ...scene.definitions.values()]) {

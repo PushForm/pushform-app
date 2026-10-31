@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { createDocument } from '@pushform/model';
 import { modelImportBaseName, modelImportFormat, probeMeshImport, readModelImport } from './modelImport';
 import { applySketchUpImport } from './sketchupDocument';
+import { makeMeshPartEditable } from './meshPartEditable';
 import { readSketchUpInWorker } from './sketchupClient';
 import { MAX_DESKTOP_STEP_BYTES, isStepBytes, readStep, stepHeader } from './step';
 
@@ -88,34 +89,49 @@ describe('STEP import', () => {
     expect(stepHeader(bytes)).toEqual({ schema: 'AP214', system: 'PushForm tests' });
   });
 
-  it('imports a part as one closed solid in meters, its planar B-rep faces whole and its color kept', async () => {
+  it('imports a lone part as one mesh part of the model in meters, its flat faces whole and its color as its material', async () => {
     const scene = await readModelImport(boxesStep([{ size: [100, 200, 300], color: [0.8, 0.2, 0.4] }]));
     expect(scene.format?.kind).toBe('step');
     expect(scene.version).toBe('AP214, PushForm tests');
-    expect(scene.root.solids).toHaveLength(1);
-    expect(scene.root.sheets).toHaveLength(0);
-    const faces = scene.root.solids[0]!.faces;
-    expect(faces).toHaveLength(6);
-    expect(highest(faces.flatMap(f => f.loops[0]!))).toBeCloseTo(0.3, 9);
-    const material = scene.materials.get(faces[0]!.front!);
-    expect(material?.name).toBe('Color CC3366');
-    expect(createDocument().transact('Open', d => applySketchUpImport(d, scene)).value).toMatchObject({ format: 'STEP', bodies: 1, sheetFaces: 0 });
+    expect(scene.root.solids).toHaveLength(0);
+    expect(scene.root.meshParts).toHaveLength(1);
+    const part = scene.root.meshParts![0]!;
+    expect(part.geometry.triangles.length / 3).toBe(12);
+    expect(part.geometry.faceCount).toBe(6);
+    expect(part.geometry.edgeOffsets.length - 1).toBe(12);
+    expect(highest([...Array(part.geometry.positions.length / 3).keys()].map(i => [...part.geometry.positions.subarray(i * 3, i * 3 + 3)]))).toBeCloseTo(0.3, 9);
+    expect(scene.materials.get(part.material!)?.name).toBe('Color CC3366');
+    expect(part.source).toEqual({ format: 'STEP', system: 'PushForm tests' });
+    const doc = createDocument();
+    expect(doc.transact('Open', d => applySketchUpImport(d, scene)).value).toMatchObject({ format: 'STEP', bodies: 0, meshParts: 1, meshPartTriangles: 12 });
+    // Make Editable builds the solid straight from the mesh: six faces, the color as the body's material.
+    const id = [...doc.rootDefinition.entities.meshParts.keys()][0]!;
+    expect(doc.transact('Make Editable', d => makeMeshPartEditable(d, [], id)).value).toMatchObject({ bodies: 1, sheetFaces: 0 });
+    const body = [...doc.rootDefinition.entities.bodies.values()][0]!;
+    expect(body.faces.size).toBe(6);
+    expect(body.valid).toBe(true);
+    expect(doc.state.materials.get(body.materialId!)?.name).toBe('Color CC3366');
   });
 
   it('converts the file unit to meters', async () => {
     const scene = await readStep(boxesStep([{ size: [1, 2, 3] }], 'in'));
-    expect(highest(scene.root.solids[0]!.faces.flatMap(f => f.loops[0]!))).toBeCloseTo(3 * 0.0254, 9);
+    expect(Math.max(...scene.root.meshParts![0]!.geometry.positions)).toBeCloseTo(3 * 0.0254, 9);
   });
 
-  it('keeps the solids of one part apart in their own groups, even where they touch', async () => {
+  it('places the solids of one product as separate parts, numbered, even where they touch', async () => {
     const scene = await readStep(boxesStep([{ size: [10, 10, 10] }, { size: [10, 10, 10], at: [10, 0, 0], color: [0, 0, 1] }]));
-    expect(scene.root.solids).toHaveLength(0);
+    expect(scene.root.meshParts).toBeUndefined();
     expect(scene.root.instances.map(i => i.name)).toEqual(['Bracket 1', 'Bracket 2']);
-    for (const def of scene.definitions.values()) {
-      expect(def.solids).toHaveLength(1);
-      expect(def.solids[0]!.faces).toHaveLength(6);
+    const parts = [...scene.definitions.values()].map(d => d.meshParts![0]!);
+    expect(parts.map(p => p.name)).toEqual(['Bracket 1', 'Bracket 2']);
+    expect(parts[0]!.material).toBeNull();
+    expect(scene.materials.get(parts[1]!.material!)?.name).toBe('Color 0000FF');
+    const doc = createDocument();
+    expect(doc.transact('Import', d => applySketchUpImport(d, scene)).value).toMatchObject({ meshParts: 2, meshPartTriangles: 24, definitions: 2, instances: 2 });
+    for (const def of doc.state.definitions.values()) for (const id of [...def.entities.meshParts.keys()]) {
+      const instance = [...doc.rootDefinition.entities.instances.values()].find(i => i.definitionId === def.id)!;
+      expect(doc.transact('Make Editable', d => makeMeshPartEditable(d, [instance.id], id)).value).toMatchObject({ bodies: 1, sheetFaces: 0 });
     }
-    expect(createDocument().transact('Import', d => applySketchUpImport(d, scene)).value).toMatchObject({ bodies: 2, sheetFaces: 0 });
   });
 
   it('fails without changes on a file that is not readable STEP', async () => {
@@ -125,41 +141,13 @@ describe('STEP import', () => {
 
   it('reads files over the shared limit only when the caller allows more, as the desktop app does', async () => {
     const MIB = 1024 * 1024;
-    // A valid file padded past 128 MiB with a trailing comment, which Part 21 allows after END-ISO-10303-21.
+    // A valid file padded past 128 MiB with trailing white space, which Part 21 allows after END-ISO-10303-21.
     const box = boxesStep([{ size: [10, 10, 10] }]), big = new Uint8Array(128 * MIB + 1);
     big.set(box); big.fill(0x20, box.length);
     await expect(readStep(big)).rejects.toThrow('STEP files larger than 128 MiB are not supported yet.');
     await expect(readSketchUpInWorker(big)).rejects.toThrow('STEP files larger than 128 MiB are not supported yet.');
     expect(MAX_DESKTOP_STEP_BYTES).toBe(256 * MIB);
     const scene = await readSketchUpInWorker(big, { maxStepBytes: MAX_DESKTOP_STEP_BYTES });
-    expect(scene.root.solids).toHaveLength(1);
+    expect(scene.root.meshParts).toHaveLength(1);
   }, 60_000);
-
-
-  it('imports a file over the mesh-part threshold as mesh parts: one per solid, colors kept per source face, no faces', async () => {
-    const bytes = boxesStep([{ size: [10, 10, 10], name: 'A', color: [0.8, 0.2, 0.4] }, { size: [10, 10, 10], at: [10, 0, 0], name: 'B' }]);
-    const scene = await readStep(bytes, undefined, undefined, 0);
-    expect(scene.root.solids).toHaveLength(0);
-    expect(scene.root.meshParts).toBeUndefined();
-    const parts = [...scene.definitions.values()].flatMap(d => d.meshParts ?? []);
-    expect(parts.map(p => p.name)).toEqual(['A', 'B']);
-    expect(parts[0]!.geometry.triangles.length / 3).toBe(12);
-    expect(parts[0]!.geometry.faceCount).toBe(6);
-    expect(parts[0]!.source).toEqual({ format: 'STEP', system: 'PushForm tests' });
-    // The file colors whole solids, so the color is the part's material and no source face has one of its own.
-    expect(parts[0]!.material).toBe(0);
-    expect(parts[1]!.material).toBeNull();
-    expect([...parts[0]!.faceMaterialKeys].every(key => key === -1)).toBe(true);
-    expect(scene.warnings.some(w => /imported as mesh parts/.test(w))).toBe(true);
-    const doc = createDocument();
-    const report = doc.transact('Open', d => applySketchUpImport(d, scene)).value;
-    expect(report).toMatchObject({ bodies: 0, sheetFaces: 0, meshParts: 2, meshPartTriangles: 24, definitions: 2, instances: 2 });
-    const placed = [...doc.state.definitions.values()].flatMap(d => [...d.entities.meshParts.values()]);
-    expect(placed).toHaveLength(2);
-    const colored = placed.find(p => p.name === 'A')!;
-    expect(doc.state.materials.get(colored.materialId!)?.name).toBe('Color CC3366');
-    expect(placed.find(p => p.name === 'B')!.materialId).toBeNull();
-    // Below the threshold the same file still imports as faces.
-    expect((await readStep(bytes)).root.instances).toHaveLength(2);
-  });
 });

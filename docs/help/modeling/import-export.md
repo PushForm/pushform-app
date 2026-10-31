@@ -14,7 +14,7 @@ Read the import notes for omitted annotations, materials or unsupported objects.
 
 ## Import STEP files from CAD tools
 
-Open or import **.step** and **.stp** files from mechanical CAD tools. STEP files store their units, so there are no import options. Each part becomes its own group named after the part, and assemblies become groups that hold their parts. Part and face colors become materials. Curved surfaces become smoothed facets, with 24 per full circle; flat faces stay whole.
+Open or import **.step** and **.stp** files from mechanical CAD tools. STEP files store their units, so there are no import options. Each distinct part becomes a component named after the part, placed wherever the file places it, and assemblies become groups that hold their parts. Part colors become materials. STEP parts always come in as mesh parts (see below), so even large assemblies open quickly; right-click a part and choose **Make Editable** when you want to push/pull or paint its faces. Curved surfaces become smoothed facets, with 24 per full circle; flat faces stay whole.
 
 The first STEP import downloads the STEP reader, about 2 MB, so it takes a little longer. A part the file places many times becomes one component placed many times. The file is converted on your computer and is not uploaded for conversion. Large assemblies can take a minute or more. The desktop app opens STEP files up to 256 MB; in the browser the limit is 128 MB. Very large assemblies can still be too big for the STEP reader, and the import then stops with a message.
 
@@ -22,7 +22,7 @@ A part that does not form a closed solid is imported as editable faces, and the 
 
 ## Large models import as mesh parts
 
-A model file with more than 250,000 triangles in total imports as **mesh parts** instead of editable faces, so large CAD assemblies open in seconds and stay light. A mesh part is drawn like any other object, with its colors and edges, and you can select, move, rotate, scale, copy, hide, tag and paint it as a whole, and export it. It has no individual faces or edges to pick until it is made editable: right-click it and choose **Make Editable** to turn that part into ordinary faces and edges (solids where it is closed, loose faces where it is not), keeping its colors, tag and material. Only that part is converted, so a large assembly stays light. Entity Info shows that an object is a mesh part, where it came from and how many triangles it holds. Files with mesh parts need this version of PushForm or newer to open.
+A STEP file, and any other model file with more than 250,000 triangles in total, imports as **mesh parts** instead of editable faces, so large CAD assemblies open in seconds and stay light. A mesh part is drawn like any other object, with its colors and edges, and you can select, move, rotate, scale, copy, hide, tag and paint it as a whole, and export it. It has no individual faces or edges to pick until it is made editable: right-click it and choose **Make Editable** to turn that part into ordinary faces and edges (solids where it is closed, loose faces where it is not), keeping its colors, tag and material. Only that part is converted, so a large assembly stays light. Entity Info shows that an object is a mesh part, where it came from and how many triangles it holds. Files with mesh parts need this version of PushForm or newer to open.
 
 ## Save an editable native copy
 

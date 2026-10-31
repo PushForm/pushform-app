@@ -371,15 +371,42 @@ fn simplify_planar_faces(positions: &[f64], triangles: &mut Vec<u32>, tri_face: 
         }
         let Ok(indices) = earcutr::earcut(&points, &holes, 2) else { keep(&mut out_tris, &mut out_faces); continue; };
         if indices.is_empty() || indices.len() / 3 > tris.len() { keep(&mut out_tris, &mut out_faces); continue; }
+        let mut new_tris: Vec<[u32; 3]> = Vec::with_capacity(indices.len() / 3);
         for tri in indices.chunks(3) {
             let (a, b, c) = (order[tri[0]], order[tri[1]], order[tri[2]]);
             // The facets' winding is kept: earcut answers in the outline's own orientation.
-            if outer_ccw { out_tris.extend_from_slice(&[a, b, c]); } else { out_tris.extend_from_slice(&[a, c, b]); }
-            out_faces.push(face as u32);
+            new_tris.push(if outer_ccw { [a, b, c] } else { [a, c, b] });
         }
+        // Earcut leaves out outline vertices that lie straight between their neighbours. A neighbouring face still
+        // uses them, so each goes back onto the triangle edge it lies on, dividing that triangle.
+        let used: std::collections::HashSet<u32> = new_tris.iter().flatten().copied().collect();
+        for &vertex in &order {
+            if used.contains(&vertex) { continue; }
+            let q = p(vertex);
+            let found = new_tris.iter().enumerate().find_map(|(i, tri)| (0..3).find(|&k| on_segment(p(tri[k]), p(tri[(k + 1) % 3]), q)).map(|k| (i, k)));
+            if let Some((i, k)) = found {
+                let tri = new_tris[i];
+                let (a, b, c) = (tri[k], tri[(k + 1) % 3], tri[(k + 2) % 3]);
+                new_tris[i] = [a, vertex, c];
+                new_tris.push([vertex, b, c]);
+            }
+        }
+        for tri in new_tris { out_tris.extend_from_slice(&tri); out_faces.push(face as u32); }
     }
     *triangles = out_tris;
     *tri_face = out_faces;
+}
+
+/// Whether `q` lies strictly inside the segment `a`–`b`, within a hair of the line.
+fn on_segment(a: [f64; 3], b: [f64; 3], q: [f64; 3]) -> bool {
+    let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    let aq = [q[0] - a[0], q[1] - a[1], q[2] - a[2]];
+    let len2 = ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2];
+    if len2 == 0.0 { return false; }
+    let t = (aq[0] * ab[0] + aq[1] * ab[1] + aq[2] * ab[2]) / len2;
+    if t <= 1e-9 || t >= 1.0 - 1e-9 { return false; }
+    let off = [aq[0] - t * ab[0], aq[1] - t * ab[1], aq[2] - t * ab[2]];
+    (off[0] * off[0] + off[1] * off[1] + off[2] * off[2]).sqrt() <= 1e-7 * len2.sqrt()
 }
 
 /// Layout: magic `PFSTEP01`; u32 part count; per part: name, closed, color (f32 rgb or -1), face_count, positions,

@@ -2,11 +2,8 @@
 // Copyright 2026 PushForm contributors
 import { type Vec3 } from '@pushform/core';
 import type { Definition, Instance, Material } from 'openskp';
-import {
-  IDENTITY_PLACEMENT, INCH, buildMeshGeometry, finishMeshImport, meshCountNotes, meshDefinition, meshMaterial, meshPartPolygons,
-  type MeshCounts, type MeshPlacement,
-} from './meshImport';
-import { MAX_SKETCHUP_BYTES, MESH_PART_THRESHOLD, type ImportFormat, type ImportProgress, type ImportedMeshPart, type SketchUpImport } from './sketchup';
+import { IDENTITY_PLACEMENT, INCH, finishMeshImport, meshDefinition, meshMaterial, type MeshPlacement } from './meshImport';
+import { MAX_SKETCHUP_BYTES, type ImportFormat, type ImportProgress, type ImportedMeshPart, type SketchUpImport } from './sketchup';
 import { loadStepReader } from './stepModule';
 import { decodeStepResult, stepReaderError, type StepReaderResult } from './stepWasm';
 
@@ -74,18 +71,17 @@ async function readWithModule(bytes: Uint8Array, mode: number, threshold: number
 }
 
 /**
- * Read a STEP file of at most `maxBytes` (the shared import limit unless the desktop app allows more). A file with more
- * than `meshPartThreshold` triangles in all imports as mesh parts rather than faces.
+ * Read a STEP file of at most `maxBytes` (the shared import limit unless the desktop app allows more). A STEP file
+ * always imports as mesh parts, made editable on demand.
  */
-export async function readStep(bytes: Uint8Array, onProgress?: (p: ImportProgress) => void, maxBytes = MAX_SKETCHUP_BYTES,
-  meshPartThreshold = MESH_PART_THRESHOLD): Promise<SketchUpImport> {
+export async function readStep(bytes: Uint8Array, onProgress?: (p: ImportProgress) => void, maxBytes = MAX_SKETCHUP_BYTES): Promise<SketchUpImport> {
   if (bytes.byteLength > maxBytes) throw new Error(`STEP files larger than ${maxBytes / (1024 * 1024)} MiB are not supported yet.`);
   if (!isStepBytes(bytes)) throw new Error('Not a STEP model: the file does not begin with ISO-10303-21.');
   onProgress?.({ stage: 'Loading the STEP reader', current: 0, total: 1 });
   // PF_STEP_MODE lets tests compare the reader's meshing modes.
   const mode = typeof process !== 'undefined' && process.env?.PF_STEP_MODE ? Number(process.env.PF_STEP_MODE) : DISPLAY_MODE;
-  const result = await readWithModule(bytes, mode, meshPartThreshold, onProgress);
-  const warnings = new Set<string>(result.warnings.map(w => `STEP: ${w}`)), counts: MeshCounts = { degenerate: 0, nonplanar: 0, duplicates: 0, turned: 0 };
+  const result = await readWithModule(bytes, mode, 0, onProgress);
+  const warnings = new Set<string>(result.warnings.map(w => `STEP: ${w}`));
   const header = stepHeader(bytes), system = result.system || header.system || '';
   const materials: Material[] = [], materialKeys = new Map<string, number>();
   const materialKey = (color: readonly number[] | null): number | null => {
@@ -96,8 +92,6 @@ export async function readStep(bytes: Uint8Array, onProgress?: (p: ImportProgres
     if (key === undefined) { key = materials.length; materialKeys.set(hex, key); materials.push(meshMaterial(key, `Color ${hex}`, srgb, 1, null)); }
     return key;
   };
-  const totalTriangles = result.placements.reduce((n, p) => n + result.parts[p.part]!.geometry.triangles.length / 3, 0);
-  const asMeshParts = totalTriangles > meshPartThreshold;
 
   // The reader model: one definition per distinct part, placed by every placement, inside groups for the assemblies
   // named by the placements' paths. A file of one part at the origin is that part itself.
@@ -114,15 +108,9 @@ export async function readStep(bytes: Uint8Array, onProgress?: (p: ImportProgres
   });
   const partName = (index: number): string => names[index]!;
   const fill = (def: Definition, index: number): void => {
-    const part = result.parts[index]!, material = materialKey(part.color);
-    if (asMeshParts) {
-      meshParts.set(def.id, [...meshParts.get(def.id) ?? [], { name: partName(index), source: { format: 'STEP', system },
-        geometry: part.geometry, faceMaterialKeys: new Int32Array(part.geometry.faceCount).fill(-1), material }]);
-      return;
-    }
-    const byFace = new Map<number, MeshPlacement>();
-    buildMeshGeometry(def, meshPartPolygons(part.geometry, () => material), counts, () => false, byFace, { paintBacks: true });
-    if (byFace.size) placements.set(def.id, byFace);
+    const part = result.parts[index]!;
+    meshParts.set(def.id, [...meshParts.get(def.id) ?? [], { name: partName(index), source: { format: 'STEP', system },
+      geometry: part.geometry, faceMaterialKeys: new Int32Array(part.geometry.faceCount).fill(-1), material: materialKey(part.color) }]);
   };
   const isIdentity = (m: readonly number[]): boolean => m.every((v, i) => Math.abs(v - (i % 5 === 0 ? 1 : 0)) < 1e-12);
   const only = result.placements.length === 1 && result.parts.length === 1 && isIdentity(result.placements[0]!.matrix);
@@ -156,8 +144,7 @@ export async function readStep(bytes: Uint8Array, onProgress?: (p: ImportProgres
     }
   }
   const version = [header.schema ?? result.schema, system].filter(Boolean).join(', ') || 'STEP';
-  meshCountNotes(counts, message => { warnings.add(message); });
   const model = { version, definitions, root, layers: [], pages: [], scenesUnread: 0, dimensions: [], materials,
     materialsById: new Map(materials.map(m => [m.id!, m])), styles: [], units: null, unitsOptions: null, sectionDisplay: null, renderingOptions: null };
-  return finishMeshImport(model, placements, STEP_FORMAT, warnings, onProgress, { meshParts, allowEmpty: asMeshParts });
+  return finishMeshImport(model, placements, STEP_FORMAT, warnings, onProgress, { meshParts, allowEmpty: true });
 }

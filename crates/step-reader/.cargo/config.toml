@@ -1,0 +1,4 @@
+# The threaded build shares its memory with the host's workers, so the linker fixes its maximum size. The target's
+# default of 1 GiB is too small for large assemblies; wasm32 allows 4 GiB.
+[target.wasm32-wasip1-threads]
+rustflags = ["-C", "link-arg=--max-memory=4294967296"]

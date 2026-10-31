@@ -27,6 +27,9 @@ matext4cgmath = { git = "https://github.com/tangency-labs/solidcraft", rev = "55
 default = ["simplify"]
 # Re-triangulate flat faces from their outlines (off for comparing against the kernel's own meshes).
 simplify = []
+# Mesh on threads in WebAssembly: build with `--target wasm32-wasip1-threads --features threads` (the single-threaded
+# module leaves it off and the host meshes one part per call).
+threads = []
 
 [profile.release]
 opt-level = 3

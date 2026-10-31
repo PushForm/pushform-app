@@ -78,14 +78,27 @@ async function readWithModule(bytes: Uint8Array, mode: number, threshold: number
     if (!m.pf_step_finish(handle)) throw new Error(`This STEP file could not be read: ${stepReaderError(m)}`);
     // Each distinct part is meshed once; a repeated placement passes in no time, so the count moves by bodies.
     reported = -1;
-    do {
+    const report = (): void => {
       const packed = m.pf_step_mesh_progress(handle), done = Number(packed >> 32n), total = Number(packed & 0xffff_ffffn);
       if (done !== reported) { reported = done; onProgress?.({ stage: 'Meshing parts', current: done, total, detail: memory() }); }
-    } while (m.pf_step_mesh(handle));
+    };
+    if (m.threads && m.pf_step_mesh_start(handle, m.threads.count)) {
+      // The threads mesh while this thread only watches; a worker that stopped fails the read, since its part never finishes.
+      report();
+      while (!m.pf_step_mesh_done(handle)) {
+        if (m.threads.failure) throw new Error(`The STEP reader stopped: ${m.threads.failure}`);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        report();
+      }
+    } else {
+      do report(); while (m.pf_step_mesh(handle));
+    }
     { const packed = m.pf_step_mesh_progress(handle), total = Number(packed & 0xffff_ffffn); onProgress?.({ stage: 'Meshing parts', current: total, total, detail: memory() }); }
     const len = m.pf_step_result(handle);
     if (!len) throw new Error(`This STEP file could not be read: ${stepReaderError(m)}`);
-    return decodeStepResult(new Uint8Array(m.memory.buffer, m.pf_step_result_ptr(handle), len));
+    // The result is decoded in place, except from the threaded build's shared memory, whose views browsers will not decode text from.
+    const result = new Uint8Array(m.memory.buffer, m.pf_step_result_ptr(handle), len);
+    return decodeStepResult(typeof SharedArrayBuffer !== 'undefined' && m.memory.buffer instanceof SharedArrayBuffer ? result.slice() : result);
   } finally { m.pf_step_close(handle); }
 }
 

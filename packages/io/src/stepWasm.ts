@@ -9,6 +9,8 @@ import type { MeshPartGeometry } from '@pushform/model';
  */
 export interface StepReaderModule {
   memory: WebAssembly.Memory;
+  /** The host's threads for `pf_step_mesh_start` (the threaded build, where the host could start workers). */
+  threads?: StepThreadPool;
   pf_alloc(len: number): number;
   pf_free(ptr: number, len: number): void;
   /** `mode` 0: plain triangles for files that become faces; 1: the display mesh for files that stay mesh parts. */
@@ -19,6 +21,9 @@ export interface StepReaderModule {
   pf_step_finish(handle: number): number;
   pf_step_mesh_progress(handle: number): bigint;
   pf_step_mesh(handle: number): number;
+  /** Mesh every body on up to `workers` threads; 1 when running (poll `pf_step_mesh_done`), 0 when this build cannot. */
+  pf_step_mesh_start(handle: number, workers: number): number;
+  pf_step_mesh_done(handle: number): number;
   pf_step_result(handle: number): number;
   pf_step_result_ptr(handle: number): number;
   pf_step_close(handle: number): void;
@@ -26,11 +31,23 @@ export interface StepReaderModule {
   pf_error_ptr(): number;
 }
 
+/**
+ * Threads for the threaded build (`wasm32-wasip1-threads`): the module's memory is shared, and `spawn` runs
+ * `wasi_thread_start(tid, start)` on a worker for each thread the module starts, returning the thread id (or -1).
+ * `failure` holds the message of a worker that stopped, which fails the read it was part of.
+ */
+export interface StepThreadPool {
+  readonly memory: WebAssembly.Memory;
+  readonly count: number;
+  spawn(start: number): number;
+  readonly failure?: string | undefined;
+}
+
 const ENOSYS = 52, EBADF = 8, ESUCCESS = 0;
 let stderr = '';
 
 /** The WASI preview 1 calls the reader can make, served without a file system; the rest fail with ENOSYS. */
-function wasiImports(getMemory: () => WebAssembly.Memory): WebAssembly.ModuleImports {
+export function wasiImports(getMemory: () => WebAssembly.Memory): WebAssembly.ModuleImports {
   const view = () => new DataView(getMemory().buffer);
   const bytes = () => new Uint8Array(getMemory().buffer);
   const known: Record<string, (...args: number[]) => number> = {
@@ -38,7 +55,8 @@ function wasiImports(getMemory: () => WebAssembly.Memory): WebAssembly.ModuleImp
       const v = view(); let total = 0;
       for (let i = 0; i < count; i++) {
         const ptr = v.getUint32(iovs + i * 8, true), len = v.getUint32(iovs + i * 8 + 4, true);
-        if (fd === 2) stderr += new TextDecoder().decode(bytes().subarray(ptr, ptr + len));
+        // Copied out first: browsers refuse to decode (or fill) a view of a shared memory.
+        if (fd === 2) stderr += new TextDecoder().decode(bytes().slice(ptr, ptr + len));
         total += len;
       }
       v.setUint32(written!, total, true);
@@ -54,7 +72,7 @@ function wasiImports(getMemory: () => WebAssembly.Memory): WebAssembly.ModuleImp
     args_sizes_get: (count, size) => { const v = view(); v.setUint32(count!, 0, true); v.setUint32(size!, 0, true); return ESUCCESS; },
     args_get: () => ESUCCESS,
     clock_time_get: (_id, _precision, out) => { view().setBigUint64(out!, BigInt(Math.round(performance.now() * 1e6)), true); return ESUCCESS; },
-    random_get: (ptr, len) => { crypto.getRandomValues(bytes().subarray(ptr!, ptr! + len!)); return ESUCCESS; },
+    random_get: (ptr, len) => { const random = new Uint8Array(len!); crypto.getRandomValues(random); bytes().set(random, ptr); return ESUCCESS; },
     sched_yield: () => ESUCCESS,
     poll_oneoff: () => ENOSYS,
     proc_exit: (code) => { throw new Error(`The STEP reader stopped (exit ${code}).${stderr ? ` ${stderr.trim()}` : ''}`); },
@@ -62,22 +80,30 @@ function wasiImports(getMemory: () => WebAssembly.Memory): WebAssembly.ModuleImp
   return new Proxy(known, { get: (target, name: string) => target[name] ?? (() => ENOSYS) });
 }
 
-export async function instantiateStepReader(source: BufferSource | WebAssembly.Module): Promise<StepReaderModule> {
+/**
+ * Instantiate the reader. The single-threaded build exports its memory; the threaded build imports the shared memory
+ * of `threads` and asks it for workers, and runs single-threaded (one part per `pf_step_mesh` call) without them.
+ */
+export async function instantiateStepReader(source: BufferSource | WebAssembly.Module, threads?: StepThreadPool): Promise<StepReaderModule> {
   // The imports need the memory the instance exports, so they read it through a holder filled in after instantiation.
-  const holder: { memory?: WebAssembly.Memory } = {};
-  const imports = { wasi_snapshot_preview1: wasiImports(() => holder.memory!) };
+  const holder: { memory?: WebAssembly.Memory | undefined } = { memory: threads?.memory };
+  const imports: WebAssembly.Imports = { wasi_snapshot_preview1: wasiImports(() => holder.memory!) };
+  if (threads) { imports.env = { memory: threads.memory }; imports.wasi = { 'thread-spawn': (start: number) => threads.spawn(start) }; }
   const module = source instanceof WebAssembly.Module ? source : await WebAssembly.compile(source);
   const instance = await WebAssembly.instantiate(module, imports);
-  const exports = instance.exports as unknown as StepReaderModule & { _initialize?: () => void };
+  const exports = instance.exports as unknown as StepReaderModule & { _initialize?: () => void; pf_init?: () => void };
   holder.memory = exports.memory;
   exports._initialize?.();
-  return exports;
+  // The threaded build's main thread is set up by the host (a library has no start function to do it).
+  exports.pf_init?.();
+  // The exports object is frozen, so the module handed out is a copy that can carry the thread pool.
+  return { ...exports, memory: exports.memory, threads } as StepReaderModule;
 }
 
 /** The reader's last error message. */
 export function stepReaderError(m: StepReaderModule): string {
   const len = m.pf_error_len(), ptr = m.pf_error_ptr();
-  return len && ptr ? new TextDecoder().decode(new Uint8Array(m.memory.buffer, ptr, len)) : (stderr.trim() || 'The STEP reader failed.');
+  return len && ptr ? new TextDecoder().decode(new Uint8Array(m.memory.buffer, ptr, len).slice()) : (stderr.trim() || 'The STEP reader failed.');
 }
 
 export interface StepReaderPart { name: string; closed: boolean; color: [number, number, number] | null; geometry: MeshPartGeometry }

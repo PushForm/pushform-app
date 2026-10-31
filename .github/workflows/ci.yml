@@ -19,7 +19,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # The STEP reader is Rust compiled to WebAssembly; the desktop build needs the same toolchain.
       - uses: dtolnay/rust-toolchain@stable
-        with: { targets: wasm32-wasip1 }
+        with: { targets: 'wasm32-wasip1, wasm32-wasip1-threads' }
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: crates/step-reader }
       - run: pnpm build:step-reader

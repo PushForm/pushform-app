@@ -10,6 +10,14 @@
 
 use std::collections::HashMap;
 
+#[cfg(all(target_arch = "wasm32", feature = "threads"))]
+mod alloc;
+#[cfg(all(target_arch = "wasm32", feature = "threads"))]
+#[global_allocator]
+static ALLOC: alloc::CachingAlloc = alloc::CachingAlloc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+
 use solidcraft_geom::Vec3;
 use solidcraft_kernel::{ImportedBody, StepImport, StepNode, StepReading};
 
@@ -44,6 +52,19 @@ fn readings() -> &'static mut Vec<Option<Box<Reading>>> {
 }
 fn get(handle: u32) -> Option<&'static mut Reading> {
     readings().get_mut(handle as usize).and_then(|r| r.as_deref_mut())
+}
+
+/// Threaded build: set up the main thread for the C library's threads (its thread descriptor), which a command does on
+/// start but a library leaves to the host. Call it once after instantiation, before anything else; without it the
+/// first thread-local key the program makes walks an unmade thread list and never returns.
+///
+/// # Safety
+/// Call it once, on the instantiating thread, before any other export.
+#[cfg(all(target_arch = "wasm32", feature = "threads"))]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pf_init() {
+    unsafe extern "C" { fn __wasi_init_tp(); }
+    unsafe { __wasi_init_tp() };
 }
 
 /// Allocate `len` bytes the caller fills with the file's text; freed by `pf_free`.
@@ -123,7 +144,7 @@ pub extern "C" fn pf_step_finish(handle: u32) -> u32 {
     match reading.finish() {
         Ok(import) => {
             let placements = body_placements(&import.tree, import.bodies.len());
-            entry.meshing = Some(Meshing { import, placements, cursor: 0, parts: Vec::new(), part_of_item: HashMap::new(), placed: Vec::new() });
+            entry.meshing = Some(Meshing { import: Arc::new(import), placements, cursor: 0, parts: Vec::new(), part_of_item: HashMap::new(), placed: Vec::new(), pool: None });
             1
         }
         Err(e) => {
@@ -137,7 +158,10 @@ pub extern "C" fn pf_step_finish(handle: u32) -> u32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn pf_step_mesh_progress(handle: u32) -> u64 {
     match get(handle.wrapping_sub(1)).and_then(|r| r.meshing.as_ref()) {
-        Some(m) => ((m.cursor as u64) << 32) | (m.import.bodies.len() as u64 & 0xffff_ffff),
+        Some(m) => {
+            let done = m.pool.as_ref().map_or(m.cursor, |pool| pool.placed_done());
+            ((done as u64) << 32) | (m.import.bodies.len() as u64 & 0xffff_ffff)
+        }
         None => 0,
     }
 }
@@ -147,7 +171,7 @@ pub extern "C" fn pf_step_mesh(handle: u32) -> u32 {
     let Some(entry) = get(handle.wrapping_sub(1)) else { return 0 };
     let mode = entry.mode;
     let Some(m) = entry.meshing.as_mut() else { return 0 };
-    if m.cursor >= m.import.bodies.len() { return 0; }
+    if m.pool.is_some() || m.cursor >= m.import.bodies.len() { return 0; }
     let i = m.cursor;
     m.cursor += 1;
     let body = &m.import.bodies[i];
@@ -172,6 +196,17 @@ pub extern "C" fn pf_step_result(handle: u32) -> u32 {
     let Some(entry) = get(handle.wrapping_sub(1)) else { return 0 };
     let (mode, threshold) = (entry.mode, entry.threshold);
     let Some(mut m) = entry.meshing.take() else { return 0 };
+    if let Some(pool) = m.pool.take() {
+        if !pool.is_done() {
+            LAST_ERROR.with(|cell| *cell.borrow_mut() = Some("the meshing threads have not finished".into()));
+            entry.meshing = Some(Meshing { pool: Some(pool), ..m });
+            return 0;
+        }
+        let (parts, placed) = pool.collect();
+        m.parts = parts;
+        m.placed = placed;
+        m.cursor = m.import.bodies.len();
+    }
     while pf_step_mesh_more(&mut m, mode) {}
     let buffer = write_result(&m, mode, threshold);
     let len = buffer.len() as u32;
@@ -201,13 +236,116 @@ fn pf_step_mesh_more(m: &mut Meshing, mode: u32) -> bool {
 
 /// The meshing of a finished import: parts made so far and where each body was placed.
 struct Meshing {
-    import: StepImport,
+    import: Arc<StepImport>,
     placements: Vec<M4>,
     cursor: usize,
     parts: Vec<Part>,
     part_of_item: HashMap<u64, usize>,
     /// (part index, body index, placement)
     placed: Vec<(usize, usize, M4)>,
+    /// Meshing on threads (`pf_step_mesh_start`), instead of the caller's `pf_step_mesh` loop.
+    pool: Option<Arc<Pool>>,
+}
+
+/// The distinct parts of an import and where each body places them: `jobs` are (part index, body index, frame of the
+/// part) for the bodies to mesh, `placed` is (part index, body index, placement) for every body. A repeated item is
+/// meshed once in the frame of its first rigid placement; a non-rigid placement meshes itself.
+fn plan_parts(import: &StepImport, placements: &[M4]) -> (Vec<(usize, usize, M4)>, Vec<(usize, usize, M4)>) {
+    let mut part_of_item: HashMap<u64, usize> = HashMap::new();
+    let mut placed: Vec<(usize, usize, M4)> = Vec::new();
+    let mut jobs: Vec<(usize, usize, M4)> = Vec::new();
+    for (i, body) in import.bodies.iter().enumerate() {
+        let world = placements[i];
+        if let Some(&part) = part_of_item.get(&body.source_item) {
+            if rigid_inverse(&world).is_some() { placed.push((part, i, world)); continue; }
+        }
+        let inverse = rigid_inverse(&world);
+        let (to_local, placement) = match inverse { Some(inv) => (inv, world), None => (IDENTITY, IDENTITY) };
+        let index = jobs.len();
+        jobs.push((index, i, to_local));
+        if inverse.is_some() { part_of_item.insert(body.source_item, index); }
+        placed.push((index, i, placement));
+    }
+    (jobs, placed)
+}
+
+/// Meshing shared with worker threads: each thread takes the next job, meshes it and stores the mesh; the host polls
+/// `done` through `pf_step_mesh_progress` and `pf_step_mesh_done`, and `pf_step_result` collects the meshes.
+struct Pool {
+    import: Arc<StepImport>,
+    mode: u32,
+    jobs: Vec<(usize, usize, M4)>,
+    placed: Vec<(usize, usize, M4)>,
+    next: AtomicUsize,
+    done: AtomicUsize,
+    finished: Vec<AtomicBool>,
+    results: Mutex<Vec<Option<Mesh>>>,
+}
+impl Pool {
+    fn work(&self) {
+        loop {
+            let next = self.next.fetch_add(1, Ordering::Relaxed);
+            let Some(&(index, body, to_local)) = self.jobs.get(next) else { break };
+            let mesh = mesh_body(&self.import.bodies[body], &to_local, self.mode);
+            self.results.lock().unwrap()[index] = mesh;
+            self.finished[index].store(true, Ordering::Release);
+            self.done.fetch_add(1, Ordering::Release);
+        }
+    }
+    fn is_done(&self) -> bool { self.done.load(Ordering::Acquire) >= self.jobs.len() }
+    /// Bodies whose part is meshed (a reused placement counts with the part it shares).
+    fn placed_done(&self) -> usize { self.placed.iter().filter(|(part, _, _)| self.finished[*part].load(Ordering::Acquire)).count() }
+    /// The meshed parts and the placements, renumbered past the parts that failed to mesh.
+    fn collect(&self) -> (Vec<Part>, Vec<(usize, usize, M4)>) {
+        let mut results = self.results.lock().unwrap();
+        let mut renumber: HashMap<usize, usize> = HashMap::new();
+        let mut parts: Vec<Part> = Vec::new();
+        for (index, mesh) in results.iter_mut().enumerate() {
+            if let Some(mesh) = mesh.take() { renumber.insert(index, parts.len()); parts.push(Part { mesh, placement_inverse: self.jobs[index].2 }); }
+        }
+        let placed = self.placed.iter().filter_map(|&(part, body, m)| renumber.get(&part).map(|&p| (p, body, m))).collect();
+        (parts, placed)
+    }
+}
+
+/// Whether this build can mesh on threads: natively, and in WebAssembly built for `wasm32-wasip1-threads` with the
+/// `threads` feature, when the host spawns the threads it asks for.
+const fn has_threads() -> bool { cfg!(any(not(target_arch = "wasm32"), feature = "threads")) }
+
+/// Mesh every body on up to `workers` threads instead of the `pf_step_mesh` loop (call it before that loop). Returns 1
+/// when the threads are running (poll `pf_step_mesh_done`, then `pf_step_result`), 0 when this build has no threads
+/// or none could be started, in which case the caller meshes with `pf_step_mesh` as before.
+#[unsafe(no_mangle)]
+pub extern "C" fn pf_step_mesh_start(handle: u32, workers: u32) -> u32 {
+    if !has_threads() { return 0; }
+    let Some(entry) = get(handle.wrapping_sub(1)) else { return 0 };
+    let mode = entry.mode;
+    let Some(m) = entry.meshing.as_mut() else { return 0 };
+    if m.cursor != 0 || m.pool.is_some() { return 0; }
+    let (jobs, placed) = plan_parts(&m.import, &m.placements);
+    let count = jobs.len();
+    let pool = Arc::new(Pool { import: m.import.clone(), mode, jobs, placed, next: AtomicUsize::new(0), done: AtomicUsize::new(0),
+        finished: (0..count).map(|_| AtomicBool::new(false)).collect(), results: Mutex::new((0..count).map(|_| None).collect()) });
+    let mut started = 0;
+    for _ in 0..(workers as usize).clamp(1, 64).min(count.max(1)) {
+        let worker = pool.clone();
+        // Meshing recurses into the kernel; a thread's stack lives in linear memory, so give it room.
+        if std::thread::Builder::new().stack_size(8 << 20).spawn(move || worker.work()).is_ok() { started += 1; } else { break; }
+    }
+    if started == 0 && count > 0 {
+        LAST_ERROR.with(|cell| *cell.borrow_mut() = Some("no meshing thread could be started".into()));
+        return 0;
+    }
+    m.pool = Some(pool);
+    1
+}
+/// 1 when no threaded meshing is pending (finished, or never started), else 0.
+#[unsafe(no_mangle)]
+pub extern "C" fn pf_step_mesh_done(handle: u32) -> u32 {
+    match get(handle.wrapping_sub(1)).and_then(|r| r.meshing.as_ref()).and_then(|m| m.pool.as_ref()) {
+        Some(pool) => pool.is_done() as u32,
+        None => 1,
+    }
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn pf_step_result_ptr(handle: u32) -> *const u8 {
@@ -536,7 +674,7 @@ fn write_result(m: &Meshing, mode: u32, threshold: u32) -> Vec<u8> {
 /// is told the stage, the work done and the total; it may return false to cancel, which yields `Err`.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn convert_native(text: &str, mode: u32, threshold: u32, mut progress: impl FnMut(&str, u32, u32) -> bool) -> Result<Vec<u8>, String> {
-    use std::sync::{Arc, Mutex, mpsc};
+    use std::sync::mpsc;
     let mut reading = StepReading::new(text).map_err(|e| e.to_string())?;
     let mut last = usize::MAX;
     while reading.step() {
@@ -545,22 +683,7 @@ pub fn convert_native(text: &str, mode: u32, threshold: u32, mut progress: impl 
     }
     let import = reading.finish().map_err(|e| e.to_string())?;
     let placements = body_placements(&import.tree, import.bodies.len());
-    // Which bodies are meshed (the first rigid placement of each item) and which reuse an earlier one.
-    let mut part_of_item: HashMap<u64, usize> = HashMap::new();
-    let mut placed: Vec<(usize, usize, M4)> = Vec::new();
-    let mut jobs: Vec<(usize, usize, M4)> = Vec::new(); // (part index, body index, to_local)
-    for (i, body) in import.bodies.iter().enumerate() {
-        let world = placements[i];
-        if let Some(&part) = part_of_item.get(&body.source_item) {
-            if rigid_inverse(&world).is_some() { placed.push((part, i, world)); continue; }
-        }
-        let inverse = rigid_inverse(&world);
-        let (to_local, placement) = match inverse { Some(inv) => (inv, world), None => (IDENTITY, IDENTITY) };
-        let index = jobs.len();
-        jobs.push((index, i, to_local));
-        if inverse.is_some() { part_of_item.insert(body.source_item, index); }
-        placed.push((index, i, placement));
-    }
+    let (jobs, placed) = plan_parts(&import, &placements);
     let total = import.bodies.len() as u32;
     if !progress("Meshing parts", 0, total) { return Err("cancelled".into()); }
     // Mesh the distinct parts on every core: a shared queue hands out jobs so one slow part does not hold up the rest.
@@ -597,7 +720,7 @@ pub fn convert_native(text: &str, mode: u32, threshold: u32, mut progress: impl 
         if let Some((mesh, to_local)) = mesh { renumber.insert(index, parts.len()); parts.push(Part { mesh, placement_inverse: to_local }); }
     }
     let placed: Vec<(usize, usize, M4)> = placed.into_iter().filter_map(|(part, body, m)| renumber.get(&part).map(|&p| (p, body, m))).collect();
-    let m = Meshing { import, placements, cursor: 0, parts, part_of_item: HashMap::new(), placed };
+    let m = Meshing { import: Arc::new(import), placements, cursor: 0, parts, part_of_item: HashMap::new(), placed, pool: None };
     let _ = progress("Meshing parts", total, total);
     Ok(write_result(&m, mode, threshold))
 }

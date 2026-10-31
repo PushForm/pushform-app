@@ -195,24 +195,27 @@ export function nextSceneName(state: DocumentState): string {
   for (let n = state.scenes.size + 1; ; n++) if (!taken.has(`Scene ${n}`)) return `Scene ${n}`;
 }
 
-/** Hidden entity ids of the root container (bodies, mesh parts, sketch edges/faces, guides = geometry; instances = objects). */
-export function hiddenRootEntities(state: DocumentState): { geometry: Id[]; objects: Id[] } {
-  const root = state.definitions.get(state.rootDefinitionId);
+/**
+ * Hidden entity ids of every container, so items hidden inside groups and components are saved too (ids are unique
+ * in the document): bodies, mesh parts, sketch edges/faces and guides are geometry; instances are objects.
+ */
+export function hiddenEntities(state: DocumentState): { geometry: Id[]; objects: Id[] } {
   const geometry: Id[] = [], objects: Id[] = [];
-  if (!root) return { geometry, objects };
-  const c = root.entities;
-  for (const b of c.bodies.values()) if (b.hidden) geometry.push(b.id);
-  for (const m of c.meshParts.values()) if (m.hidden) geometry.push(m.id);
-  for (const e of c.sketch.edges.values()) if (e.hidden) geometry.push(e.id);
-  for (const f of c.sketch.faces.values()) if (f.hidden) geometry.push(f.id);
-  for (const g of c.guides.values()) if (g.hidden) geometry.push(g.id);
-  for (const i of c.instances.values()) if (i.hidden) objects.push(i.id);
+  for (const def of state.definitions.values()) {
+    const c = def.entities;
+    for (const b of c.bodies.values()) if (b.hidden) geometry.push(b.id);
+    for (const m of c.meshParts.values()) if (m.hidden) geometry.push(m.id);
+    for (const e of c.sketch.edges.values()) if (e.hidden) geometry.push(e.id);
+    for (const f of c.sketch.faces.values()) if (f.hidden) geometry.push(f.id);
+    for (const g of c.guides.values()) if (g.hidden) geometry.push(g.id);
+    for (const i of c.instances.values()) if (i.hidden) objects.push(i.id);
+  }
   return { geometry, objects };
 }
 
 /** Snapshot the current view into scene fields (everything; `flags` decide what is restored). */
 export function captureSceneProps(state: DocumentState, camera: CameraState | null): Omit<Scene, 'id' | 'name' | 'description' | 'flags'> {
-  const hidden = hiddenRootEntities(state);
+  const hidden = hiddenEntities(state);
   const style = state.styles.get(state.activeStyleId);
   const fog = fogOf(state);
   return {
@@ -233,18 +236,19 @@ export function captureSceneProps(state: DocumentState, camera: CameraState | nu
 export function restoreSceneProps(draft: DocumentDraft, scene: Scene): void {
   const state = draftState(draft);
   const f = scene.flags;
-  const root = state.definitions.get(state.rootDefinitionId);
-  if (root && (f.useHiddenGeometry || f.useHiddenObjects)) {
+  if (f.useHiddenGeometry || f.useHiddenObjects) {
     const hidden = new Set<number>(scene.hiddenEntities);
-    const c = root.entities;
-    if (f.useHiddenGeometry) {
-      for (const b of c.bodies.values()) b.hidden = hidden.has(b.id);
-      for (const m of c.meshParts.values()) m.hidden = hidden.has(m.id);
-      for (const e of c.sketch.edges.values()) e.hidden = hidden.has(e.id);
-      for (const fc of c.sketch.faces.values()) fc.hidden = hidden.has(fc.id);
-      for (const g of c.guides.values()) g.hidden = hidden.has(g.id);
+    for (const def of state.definitions.values()) {
+      const c = def.entities;
+      if (f.useHiddenGeometry) {
+        for (const b of c.bodies.values()) b.hidden = hidden.has(b.id);
+        for (const m of c.meshParts.values()) m.hidden = hidden.has(m.id);
+        for (const e of c.sketch.edges.values()) e.hidden = hidden.has(e.id);
+        for (const fc of c.sketch.faces.values()) fc.hidden = hidden.has(fc.id);
+        for (const g of c.guides.values()) g.hidden = hidden.has(g.id);
+      }
+      if (f.useHiddenObjects) for (const i of c.instances.values()) i.hidden = hidden.has(i.id);
     }
-    if (f.useHiddenObjects) for (const i of c.instances.values()) i.hidden = hidden.has(i.id);
   }
   if (f.useTags) {
     const hiddenTags = new Set<number>(scene.hiddenTags);

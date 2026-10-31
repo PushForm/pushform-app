@@ -2,14 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 import process from 'node:process';
 
-// Regenerate the legacy macOS fallback from the same SVG used by the native icon.
-// Tauri compiles PushForm.icon with actool when bundling on macOS with Xcode 26+.
+// Regenerate the macOS icons from PushForm.icon: the native icon compiled to Assets.car, and the legacy icon.icns
+// fallback. Tauri's bundler copies a .icon directory without its Assets folder, which makes actool fail, so the icon is
+// compiled here (macOS with Xcode 26+) and Tauri bundles the committed Assets.car. Run it after changing PushForm.icon.
 const desktop = fileURLToPath(new URL('../apps/desktop/', import.meta.url));
 const output = mkdtempSync(join(tmpdir(), 'pushform-macos-icon-'));
 try {
@@ -50,6 +51,22 @@ try {
     { cwd: desktop, stdio: 'inherit' },
   );
   copyFileSync(join(output, 'icon.icns'), join(desktop, 'src-tauri/icons/icon.icns'));
+  // The same arguments Tauri passes to actool. The catalog must be named Icon.icon for the app icon name Icon.
+  const catalog = join(output, 'Icon.icon');
+  cpSync(icon, catalog, { recursive: true });
+  const compiled = join(output, 'compiled');
+  mkdirSync(compiled);
+  execFileSync(
+    'xcrun',
+    [
+      'actool', catalog, '--compile', compiled, '--output-format', 'human-readable-text', '--notices', '--warnings',
+      '--output-partial-info-plist', join(output, 'assetcatalog_generated_info.plist'), '--app-icon', 'Icon',
+      '--include-all-app-icons', '--enable-on-demand-resources', 'NO', '--development-region', 'en',
+      '--target-device', 'mac', '--minimum-deployment-target', '10.13', '--platform', 'macosx',
+    ],
+    { stdio: 'inherit' },
+  );
+  copyFileSync(join(compiled, 'Assets.car'), join(desktop, 'src-tauri/icons/Assets.car'));
 } finally {
   rmSync(output, { recursive: true, force: true });
 }

@@ -49,6 +49,7 @@ export interface ImageOptions {
 export interface ViewportOptions {
   readonly camera?: CameraState;
   readonly background?: number;
+  /** Draw the ground plane grid; off unless asked for. */
   readonly grid?: boolean;
 }
 
@@ -99,7 +100,7 @@ export class Viewport {
     // Redraw when a texture image finished loading (materials agent).
     this.sceneSync.textures.onLoad = () => this.requestRender();
     this.grid = new GroundGrid();
-    this.grid.visible = opts.grid ?? true;
+    this.grid.visible = opts.grid ?? false;
     this.axes = new Axes();
     this.scene.add(this.grid, this.axes);
     this.sky = new SkyBackground(DEFAULT_RENDER_BACKGROUND);

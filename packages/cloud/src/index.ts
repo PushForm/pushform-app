@@ -15,3 +15,4 @@ export * from './rpc';
 export type { Database, Json } from './db.types';
 export * from './CommonsCatalog';
 export * from './CommonsClient';
+export * from './CommonsFiles';

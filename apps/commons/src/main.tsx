@@ -8,4 +8,4 @@ import './styles.css';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Missing application root.');
-createRoot(root).render(<StrictMode><App loadCatalog={configuredCatalogLoader(import.meta.env)} /></StrictMode>);
+createRoot(root).render(<StrictMode><App loadCatalog={configuredCatalogLoader(import.meta.env)} filesUrl={import.meta.env.VITE_COMMONS_ASSETS_URL} /></StrictMode>);

@@ -10,9 +10,22 @@ export const catalogUrlSchema = z.string().url().max(2048).refine((value) => {
     (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)));
 }, 'Expected an HTTPS URL (HTTP is allowed on localhost).');
 
+export const commonsFileSchema = z.object({
+  id: z.uuid(), name: z.string().min(1).max(180), format: z.string().min(1).max(16),
+  sizeBytes: z.number().int().min(1).max(134217728), sha256: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict();
+export type CommonsFile = z.infer<typeof commonsFileSchema>;
+export const commonsUploadSchema = z.object({
+  id: z.uuid(), revision_id: z.uuid(), filename: z.string().min(1).max(180), format: z.string(),
+  size_bytes: z.number().int().min(1).max(134217728), sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  status: z.enum(['pending','ready','removed']), created_at: z.string(), verified_at: z.string().nullable(),
+});
+export type CommonsUpload = z.infer<typeof commonsUploadSchema>;
+
 export const catalogModelSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,95}$/),
   revision: text,
+  files: z.array(commonsFileSchema).max(20).default([]),
   title: text,
   description: z.string().max(12000),
   creator: text,

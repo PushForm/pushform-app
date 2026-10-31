@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { CommonsUnavailableError } from '@pushform/cloud';
+import { commonsFileUrl, CommonsUnavailableError } from '@pushform/cloud';
 import { useEffect, useRef, useState } from 'react';
 import { filterModels, type CatalogFilters, type CatalogLoader, type CatalogModel } from './catalog';
 
@@ -16,7 +16,7 @@ function ModelImage({ model }: { model: CatalogModel }) {
     ? <img src={model.imageUrl} alt={model.title} loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
     : <div className="missing-image"><span aria-hidden="true">◇</span><span>No preview image</span></div>;
 }
-function ModelDetail({ model }: { model: CatalogModel }) {
+function ModelDetail({ model, filesUrl }: { model: CatalogModel; filesUrl: string | undefined }) {
   return <>
     <a className="back-link" href="#browse">← All models</a>
     <article className="model-detail">
@@ -29,6 +29,12 @@ function ModelDetail({ model }: { model: CatalogModel }) {
           <div><dt>Revision</dt><dd>{model.revision}</dd></div>
           <div><dt>Published</dt><dd>{new Date(model.publishedAt).toLocaleDateString()}</dd></div></dl>
         {model.source && <p className="source">Sourced from <a href={model.source.url} rel="noreferrer" target="_blank">{model.source.name} ↗</a></p>}
+        {model.files.length > 0 && <section className="downloads" aria-label="Model files"><h2>Model files</h2>
+          <p>Each ZIP download includes the original file, licenses and creator credits.</p>
+          <ul>{model.files.map((file) => <li key={file.id}><span>{file.name} · {(file.sizeBytes / 1024).toFixed(1)} KiB</span>
+            {commonsFileUrl(filesUrl, 'downloads', file.id) ? <a href={commonsFileUrl(filesUrl, 'downloads', file.id)!} rel="noreferrer">Download ZIP — {file.name}</a> : <span>Downloads are unavailable in this build.</span>}
+          </li>)}</ul>
+        </section>}
         <section className="rights" aria-label="Licenses and attribution"><h2>Licenses & attribution</h2>
           {model.licenses.map((license, index) => <div key={index}>
             <h3><a href={license.url} rel="noreferrer" target="_blank">{license.name} ↗</a></h3>
@@ -46,7 +52,7 @@ function ModelDetail({ model }: { model: CatalogModel }) {
   </>;
 }
 
-export function App({ loadCatalog }: { loadCatalog: CatalogLoader | null }) {
+export function App({ loadCatalog, filesUrl }: { loadCatalog: CatalogLoader | null; filesUrl?: string | undefined }) {
   const [state, setState] = useState<CatalogState>({ kind: loadCatalog ? 'loading' : 'unconfigured' });
   const [attempt, setAttempt] = useState(0);
   const [filters, setFilters] = useState<CatalogFilters>(emptyFilters);
@@ -84,7 +90,7 @@ export function App({ loadCatalog }: { loadCatalog: CatalogLoader | null }) {
       <img src="/pf-logo-mark.svg" alt="" width="30" height="30" /><span>PushForm <strong>Commons</strong></span>
     </a><a className="editor-link" href="https://app.pushform.io">Open PushForm <span aria-hidden="true">↗</span></a></header>
     <main id="main" ref={heading} tabIndex={-1}>
-      {state.kind === 'ready' && selectedId ? selected ? <ModelDetail model={selected} /> :
+      {state.kind === 'ready' && selectedId ? selected ? <ModelDetail model={selected} filesUrl={filesUrl} /> :
         <section className="status-panel"><p className="eyebrow">Model unavailable</p><h1>This model isn’t in the catalog.</h1>
           <p>It may have been removed or the link may be out of date.</p><a href="#browse">Browse models</a></section> : <>
         <section className="hero"><p className="eyebrow">A shared place to start</p>

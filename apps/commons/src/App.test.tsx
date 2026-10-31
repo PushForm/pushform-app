@@ -77,3 +77,12 @@ it('shows a disabled server catalog as unavailable rather than an empty catalog 
   await waitFor(()=>expect(screen.getByRole('status').textContent).toContain('isn’t available yet'));
   expect(screen.queryByRole('alert')).toBeNull();
 });
+
+it('offers an attribution package from the configured file service and explains missing configuration',async()=>{
+  window.history.replaceState(null,'','/#models/workshop-hinge');
+  const id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const model=exampleModel({files:[{id,name:'hinge.step',format:'STEP',sizeBytes:1234,sha256:'a'.repeat(64)}]});
+  const loader=async()=>[model];const view=render(<App loadCatalog={loader} filesUrl="https://files.example"/>);
+  const link=await screen.findByRole('link',{name:'Download ZIP — hinge.step'});expect(link.getAttribute('href')).toBe('https://files.example/downloads/'+id);
+  view.rerender(<App loadCatalog={loader}/>);expect(screen.queryByRole('link',{name:'Download ZIP — hinge.step'})).toBeNull();expect(screen.getByText(/Downloads are unavailable in this build/)).toBeTruthy();
+});

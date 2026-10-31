@@ -175,6 +175,9 @@ interface RefreshSnapshot {
  * asynchronous, so only a completed checkpoint is guaranteed to survive an immediate shutdown.
  */
 export const REFRESH_PERSIST_DELAY_MS = 300;
+/** A refresh checkpoint waits at least this many times as long as the last one took to encode, so a large document
+ * is not re-encoded continuously while it is edited; never longer than a minute. */
+export const REFRESH_PERSIST_COST_FACTOR = 5, REFRESH_PERSIST_MAX_DELAY_MS = 60_000;
 
 /** One tab's entry of the refresh snapshot, already serialized, with the inputs it was built from. */
 interface RefreshFragment {
@@ -214,6 +217,8 @@ export class DocumentSession {
   /** Refresh persistence: pending flush, per-tab serialized entries, and the last assembled snapshot. */
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
   private refreshStale = false;
+  /** How long the last checkpoint's slowest document took to encode (ms). */
+  private refreshCostMs = 0;
   private refreshFragments = new Map<string, RefreshFragment>();
   private lastRefreshSnapshot: { parts: readonly string[]; activeIndex: number; text: string } | null = null;
   /** The snapshot the storage accepted, and the tab contents it rejected (not retried until one changes). */
@@ -839,15 +844,25 @@ export class DocumentSession {
     }
   }
 
-  /** Mark the refresh snapshot stale and flush it once, after `REFRESH_PERSIST_DELAY_MS`. */
+  /** Mark the refresh snapshot stale and flush it once, after `REFRESH_PERSIST_DELAY_MS` or longer for a document
+   * that is slow to encode (`REFRESH_PERSIST_COST_FACTOR`). */
   private scheduleRefreshPersistence(): void {
     if (!this.refreshStorage) return;
     this.refreshStale = true;
     if (this.refreshTimer !== null) return;
+    const delay = Math.min(REFRESH_PERSIST_MAX_DELAY_MS, Math.max(REFRESH_PERSIST_DELAY_MS, this.refreshCostMs * REFRESH_PERSIST_COST_FACTOR));
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = null;
       this.flushRefreshPersistence();
-    }, REFRESH_PERSIST_DELAY_MS);
+    }, delay);
+  }
+
+  /** `encode`, timed: the slowest document of a checkpoint sets how soon the next one may start. */
+  private timedEncode(encode: () => Promise<Uint8Array>): () => Promise<Uint8Array> {
+    return async () => {
+      const began = performance.now();
+      try { return await encode(); } finally { this.refreshCostMs = Math.max(this.refreshCostMs, performance.now() - began); }
+    };
   }
 
   /**
@@ -870,10 +885,10 @@ export class DocumentSession {
           ...(tab.identity ? { identity: tab.identity } : {}), ...(tab.cloudDraft ? { cloudDraft: tab.cloudDraft } : {}) });
         if (tab.type === 'model') {
           const state = tab.app.document.doc.state, images = modelArchiveImages(state, tab.app.document.images);
-          return { key: tab.id, state, metadata, encode: () => encodeModelSnapshot(state, images) };
+          return { key: tab.id, state, metadata, encode: this.timedEncode(() => encodeModelSnapshot(state, images)) };
         }
         const state = tab.doc.state;
-        return { key: tab.id, state, metadata, encode: () => encodeLayoutSnapshot(state) };
+        return { key: tab.id, state, metadata, encode: this.timedEncode(() => encodeLayoutSnapshot(state)) };
       }) });
       return;
     }

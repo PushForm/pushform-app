@@ -41,6 +41,14 @@ export async function layoutThumbnail(state: LayoutDocumentState): Promise<Uint8
   return jpeg(picture);
 }
 
+/** Models with more triangles than this in mesh parts are not rebuilt in a viewport of their own for a picture. */
+const THUMBNAIL_REBUILD_TRIANGLES = 500_000;
+function modelTriangles(state: DocumentState): number {
+  let count = 0;
+  for (const definition of state.definitions.values()) for (const part of definition.entities.meshParts.values()) count += part.geometry.triangles.length / 3;
+  return count;
+}
+
 /** An independent viewport: never changes the editor's camera, selection, tools, or document. */
 async function modelThumbnail(state: DocumentState, images: ImageStore, camera?: CameraState): Promise<Uint8Array | null> {
   await document.fonts?.ready;
@@ -68,24 +76,36 @@ async function modelThumbnail(state: DocumentState, images: ImageStore, camera?:
   }
 }
 
-/** Use an exact, clean local revision when available (also offline), otherwise load saved bytes. */
+/** Saved documents larger than this are not fetched and rebuilt for a thumbnail; the previous one stays. */
+export const THUMBNAIL_FETCH_LIMIT = 16 * 1024 * 1024;
+
+/**
+ * Picture the document from an open tab when there is one (also offline), otherwise from the saved bytes. An open
+ * 3D model is drawn by its own editor viewport, which already holds the scene, so a save never rebuilds the model
+ * to picture it; the picture shows the model as the editor shows it, edits since the save included.
+ */
 export async function renderCloudThumbnail(api: CloudFilesApi, session: DocumentSession, ownerId: string, file: CloudFile): Promise<Uint8Array | null> {
   const local = session.tabs.find(tab => {
     const location = cloudLocation(tab.identity);
-    return location?.ownerId === ownerId && location.fileId === file.id && location.revisionId === file.current_revision_id && !session.isDirty(tab);
+    return location?.ownerId === ownerId && location.fileId === file.id;
   });
   if (local?.type === 'layout') return layoutThumbnail(local.doc.state);
   const images = new ImageStore();
   try {
     if (local?.type === 'model') {
-      const state = local.app.document.doc.state, camera = local.app.viewport.camera.getState();
+      const viewport = local.app.viewport, picture = document.createElement('canvas');
+      await viewport.sceneSync.textures.whenReady();
+      if (viewport.snapshotInto(picture, THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT, viewport.camera.getState(), { background: '#ffffff' })) return await jpeg(picture);
+      // No renderer (a parked tab): a small model is drawn by a viewport of its own; a large one keeps its picture.
+      if (modelTriangles(local.app.document.doc.state) > THUMBNAIL_REBUILD_TRIANGLES) return null;
+      const state = local.app.document.doc.state, camera = viewport.camera.getState();
       for (const [id, asset] of state.images) {
         const blob = local.app.document.images.get(id);
         if (blob) images.register(asset, blob.bytes, blob.mime);
       }
       return await modelThumbnail(state, images, camera);
     }
-    if (navigator.onLine === false) return null;
+    if (navigator.onLine === false || file.size_bytes > THUMBNAIL_FETCH_LIMIT) return null;
     const opened = await api.openRevision(file.current_revision_id);
     if (opened.file.id !== file.id || opened.revision.id !== file.current_revision_id) return null;
     if (file.kind === 'layout') return layoutThumbnail((await openLayoutFile(opened.bytes)).state);

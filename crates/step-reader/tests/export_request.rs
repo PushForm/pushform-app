@@ -15,7 +15,7 @@ fn string(out: &mut Vec<u8>, s: &str) {
 fn block(out: &mut Vec<u8>) {
     string(out, "Block");
     out.push(1);
-    for c in [1.0f32, 0.0, 0.0] {
+    for c in [1.0f32, 0.0, 0.0, 1.0] {
         out.extend(c.to_le_bytes());
     }
     out.extend(8u32.to_le_bytes());
@@ -26,7 +26,14 @@ fn block(out: &mut Vec<u8>) {
     }
     let faces: [[u32; 4]; 6] = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]];
     out.extend(6u32.to_le_bytes());
-    for f in faces {
+    for (k, f) in faces.into_iter().enumerate() {
+        // The top face (the second) is blue.
+        out.push((k == 1) as u8);
+        if k == 1 {
+            for c in [0.0f32, 0.0, 1.0, 1.0] {
+                out.extend(c.to_le_bytes());
+            }
+        }
         out.extend(1u32.to_le_bytes());
         out.extend(4u32.to_le_bytes());
         f.iter().for_each(|i| out.extend(i.to_le_bytes()));
@@ -72,6 +79,8 @@ fn a_request_with_two_placements_of_one_part_reads_back_as_two_bodies() {
     assert!(back.warnings.is_empty(), "{:?}", back.warnings);
     assert_eq!(back.bodies.len(), 2, "one body per placement");
     assert!(back.bodies.iter().all(|b| b.name == "Block" && b.color.is_some()));
+    // The red part keeps one face of its own, blue.
+    assert!(text.contains("COLOUR_RGB('',1.0,0.0,0.0)") && text.contains("COLOUR_RGB('',0.0,0.0,1.0)"), "{text}");
     assert_eq!(back.tree.len(), 1);
     let xs: Vec<f64> = back.tree[0].children.iter().map(|c| c.transform[3][0]).collect();
     assert!(xs.iter().any(|x| x.abs() < 1e-9) && xs.iter().any(|x| (x - 1000.0).abs() < 1e-9), "{xs:?}");

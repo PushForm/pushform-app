@@ -13,14 +13,14 @@
 //! root: u32 (the top product)
 //! products: u32 count, each:
 //!   name (string)
-//!   parts: u32 count, each: name (string), colour u8 (0 none, 1 follows) [f32 r, g, b, 0..1],
-//!     vertices u32 count + 3 × f64 each, faces u32 count, each: loops u32 count (the outline first, then holes),
-//!     each loop: u32 count + u32 vertex indices
+//!   parts: u32 count, each: name (string), colour u8 (0 none, 1 follows) [f32 r, g, b, 0..1], opacity f32,
+//!     vertices u32 count + 3 × f64 each, faces u32 count, each: colour u8 (0 none, 1 follows) [f32 r, g, b, opacity],
+//!     loops u32 count (the outline first, then holes), each loop: u32 count + u32 vertex indices
 //!   children: u32 count, each: product u32, matrix 16 × f64 (by columns, translation last), name (string)
 //! ```
 
 use solidcraft_geom::Vec3;
-use solidcraft_kernel::{Body, ExportBody, ExportProduct, PolygonFace, StepHeader, body_from_polygons, step_export_products};
+use solidcraft_kernel::{Body, FacePaint, Paint, ExportBody, ExportProduct, PolygonFace, StepHeader, body_from_polygons, step_export_products};
 
 const MAGIC: &[u8; 8] = b"PFSTEPX1";
 /// Meters to the file's millimeters.
@@ -69,6 +69,9 @@ impl<'a> Reader<'a> {
 struct Part {
     name: String,
     color: Option<[f32; 3]>,
+    opacity: f32,
+    /// Faces with a colour of their own: (face, colour, opacity).
+    painted: Vec<FacePaint>,
     vertices: Vec<Vec3>,
     faces: Vec<PolygonFace>,
 }
@@ -99,12 +102,17 @@ fn parse(bytes: &[u8]) -> Result<(StepHeader, usize, Vec<Product>), String> {
         for _ in 0..r.count(4)? {
             let name = r.string()?;
             let color = if r.u8()? == 1 { Some([r.f32()?, r.f32()?, r.f32()?]) } else { None };
+            let opacity = r.f32()?;
+            let mut painted = Vec::new();
             let mut vertices = Vec::new();
             for _ in 0..r.count(24)? {
                 vertices.push(Vec3::new(r.f64()? * TO_MM, r.f64()? * TO_MM, r.f64()? * TO_MM));
             }
             let mut faces = Vec::new();
-            for _ in 0..r.count(4)? {
+            for face in 0..r.count(4)? {
+                if r.u8()? == 1 {
+                    painted.push(FacePaint { face, color: [r.f32()?, r.f32()?, r.f32()?], opacity: r.f32()? });
+                }
                 let mut loops = Vec::new();
                 for _ in 0..r.count(4)? {
                     let mut l = Vec::new();
@@ -117,7 +125,7 @@ fn parse(bytes: &[u8]) -> Result<(StepHeader, usize, Vec<Product>), String> {
                 let outline = it.next().ok_or("a face has no outline")?;
                 faces.push(PolygonFace { outline, holes: it.collect() });
             }
-            parts.push(Part { name, color, vertices, faces });
+            parts.push(Part { name, color, opacity, painted, vertices, faces });
         }
         let mut children = Vec::new();
         for _ in 0..r.count(4)? {
@@ -154,7 +162,10 @@ pub fn export_step(request: &[u8], mut progress: impl FnMut(u32, u32) -> bool) -
             if !progress(done, total) {
                 return Err("cancelled".into());
             }
-            let body = body_from_polygons(&part.vertices, &part.faces).map_err(|e| format!("{}: {e}", part.name))?;
+            let mut body = body_from_polygons(&part.vertices, &part.faces).map_err(|e| format!("{}: {e}", part.name))?;
+            if part.opacity < 1.0 || !part.painted.is_empty() {
+                body = body.with_paint(Some(Paint { opacity: part.opacity, faces: part.painted.clone() }));
+            }
             made.push(body);
             done += 1;
         }

@@ -39,6 +39,7 @@ import {
   type LayoutPage,
   type LayoutPathHandle,
   type LayoutText,
+  type LayoutViewportCamera,
 } from '@pushform/layout';
 import { newGuid, type LengthFormat } from '@pushform/core';
 import { DEFAULT_SHADOWS, type ShadowSettings } from '@pushform/model';
@@ -553,9 +554,13 @@ class Importer {
       case 'rtfText':
         return this.text(element, layerId, context);
       case 'linearDimension':
-        return this.linearDimension(element, layerId, context) ?? this.dimension(element, layerId, context);
-      case 'angularDimension':
-        return this.angularDimension(element, layerId, context) ?? this.dimension(element, layerId, context);
+      case 'angularDimension': {
+        // Some files store a dimension's line as NaN; there is nothing to rebuild or draw.
+        const line = child(element, 'dimensionLine');
+        if (line && !parsePath(line).every(finiteSubpath)) { this.warn('dimensions LayOut saved without a valid position were skipped'); return []; }
+        const rebuilt = element.name === 'linearDimension' ? this.linearDimension(element, layerId, context) : this.angularDimension(element, layerId, context);
+        return rebuilt ?? this.dimension(element, layerId, context);
+      }
       case 'label':
         return this.label(element, layerId, context);
       case 'image':
@@ -788,7 +793,8 @@ class Importer {
     const extension = child(element, 'extensionLine1');
     const extensionPath = extension ? parsePath(extension)[0] : undefined;
     const extensionArrows = extension && child(extension, 'arrowData');
-    const gap = extensionPath?.points[0] ? Math.hypot(extensionPath.points[0][0] - a[0], extensionPath.points[0][1] - a[1]) : 0.125;
+    const measuredGap = extensionPath?.points[0] ? Math.hypot(extensionPath.points[0][0] - a[0], extensionPath.points[0][1] - a[1]) : NaN;
+    const gap = Number.isFinite(measuredGap) ? measuredGap : 0.125;
     // A blank body that is not automatic is custom text the author cleared.
     const template = (element.attrs.dimensionString ?? (element.attrs.autoText === '1' || !rtf ? '<>' : shown ?? '')).replace(/\r\n?/g, '\n');
     return {
@@ -1044,9 +1050,13 @@ class Importer {
       raster ? { href: raster, ...(imageRect ? { x: num(imageRect, 'x', 0), y: num(imageRect, 'y', 0), width: num(imageRect, 'width', 0), height: num(imageRect, 'height', 0) } : rectangle(base)) } : undefined);
     // A model that is only linked externally is still preserved for export; PushForm cannot render it.
     const camera = child(element, 'camera') ?? { name: 'camera', attrs: {}, children: [], text: '' };
-    if (renderable && modelReferenceId) {
-      const { width, height } = rectangle(base);
-      const viewportCamera = viewportCameraFromLayOut(readLayOutCamera(camera), width, height);
+    const frame = rectangle(base);
+    const modelCamera = renderable && modelReferenceId ? viewportCameraFromLayOut(readLayOutCamera(camera), frame.width, frame.height) : null;
+    // A camera LayOut saved unusable (a parallel view with zero height) cannot show the model; keep what LayOut cached.
+    if (modelCamera && !finiteCamera(modelCamera)) this.warn('a SketchUp viewport whose saved camera cannot show the model keeps only its cached render');
+    if (modelCamera && finiteCamera(modelCamera) && modelReferenceId) {
+      const { width, height } = frame;
+      const viewportCamera = modelCamera;
       // A blank raster render is stale even beside vector edges: the model is rendered instead.
       const picture = blank ? null : vector ?? raster;
       const entity = this.imageEntity(base, picture ?? '', placed, layerId);
@@ -1193,6 +1203,10 @@ interface Subpath {
   handles: LayoutPathHandle[];
   closed: boolean;
 }
+
+const finiteSubpath = (subpath: Subpath): boolean => subpath.points.every(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
+const finiteCamera = (camera: LayoutViewportCamera): boolean =>
+  [...camera.eye, ...camera.target, ...camera.up, camera.fov, camera.scale, ...(camera.shift ?? [])].every(Number.isFinite);
 
 function parsePath(element: XmlElement): Subpath[] {
   const ops = (child(element, 'elements')?.text ?? '').split(',').filter((value) => value.trim()).map(Number);

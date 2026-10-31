@@ -884,6 +884,55 @@ describe('SketchUp LayOut import', () => {
     expect(decodeLayoutDocument(encodeLayoutDocument(doc)).state.pages.get(doc.state.pageOrder[0]!)).toEqual(doc.state.pages.get(doc.state.pageOrder[0]!));
   });
 
+  it('skips dimensions LayOut saved with NaN lines and keeps the rest of the page', () => {
+    const dimension = (id: string, line: string, extension = '1,1.875,1,1.5') => `
+      <e:linearDimension id="${id}">
+        <e:dimensionText id="${id}t" anchorType="5" growMode="0">
+          <e:placedFileReference><e:rectangleBase x="-nan(ind)" y="nan" width="nan" height="nan" /></e:placedFileReference>
+          <e:rtfTextRep>${RTF('&lt;&gt;')}</e:rtfTextRep>
+        </e:dimensionText>
+        <ld:startConnectionPoint x="1" y="2" /><ld:endConnectionPoint x="3" y="2" />
+        <e:extensionLine1 id="${id}e"><e:elements>0,1</e:elements><e:points2f>${extension}</e:points2f></e:extensionLine1>
+        <e:dimensionLine id="${id}l"><e:graphicEntity shouldFill="0" />
+          <e:elements>0,1</e:elements><e:points2f>${line}</e:points2f></e:dimensionLine>
+      </e:linearDimension>`;
+    const entities = dimension('id90', '-nan(ind),-nan(ind),-nan(ind),-nan(ind)')
+      + dimension('id91', '1,1.5,3,1.5', '-nan(ind),-nan(ind),-nan(ind),-nan(ind)')
+      + '<e:path id="id92"><e:elements>0,1</e:elements><e:points2f>0,0,1,1</e:points2f></e:path>';
+    const { doc, warnings } = importSketchUpLayout(layoutFile(page(entities, onLayer('id10', ['id90', 'id91', 'id92']))));
+    expect(warnings).toContain('dimensions LayOut saved without a valid position were skipped');
+    expect(warnings).not.toContain('dimensions were imported as lines and text');
+    const pageState = doc.state.pages.get(doc.state.pageOrder[0]!)!;
+    const kept = pageState.entityOrder.map(id => pageState.entities.get(id)!);
+    expect(kept.map(entity => entity.kind)).toEqual(['dimension', 'path']);
+    // Only the extension line is unusable: the dimension keeps the default gap.
+    expect(kept[0]!.dimension!.extensionGapMm).toBeCloseTo(0.125 * 25.4);
+    expect(kept[0]!.dimension!.cachedValueMm).toBeCloseTo(2 * 25.4);
+  });
+
+  it('keeps only the cached render of a model view whose saved camera cannot show the model', () => {
+    const model = (id: string, height: string, cached: boolean) => `<e:skpModelRef id="${id}" defaultPageName="Plan" cameraModified="0">
+      <e:placedFileReference><e:rectangleBase x="1" y="1" width="2" height="1" /></e:placedFileReference>
+      <e:camera projection="1" height="${height}" fov="30" twoDCamera="1" twoDScale="0.7" twoDxCenter="0" twoDyCenter="0" aspectRatio="0">
+        <e:eye x="10" y="20" z="500" /><e:target x="10" y="20" z="0" /><e:up x="0" y="1" z="0" />
+      </e:camera>
+      <r:skpFileReference r:id="idModel" />${cached ? '<r:imageFileReference r:id="id2" />' : ''}
+    </e:skpModelRef>`;
+    const files = unzipSync(layoutFile(page(model('id40', '0', true) + model('id41', '0', false) + model('id42', '48', true), onLayer('id10', ['id40', 'id41', 'id42']))));
+    files['references.xml'] = strToU8(strFromU8(files['references.xml']!).replace('</references>',
+      '<r:skpFileReference r:id="idModel" internalTarget="ref/model.skp" /></references>'));
+    const { doc, warnings } = importSketchUpLayout(zipSync(files));
+    expect(warnings).toContain('a SketchUp viewport whose saved camera cannot show the model keeps only its cached render (2×)');
+    const pageState = doc.state.pages.get(doc.state.pageOrder[0]!)!;
+    const [cached, empty, live] = pageState.entityOrder.map(id => pageState.entities.get(id)!);
+    expect(cached!.kind).toBe('image');
+    expect(cached!.image!.viewport).toBeUndefined();
+    expect(cached!.image!.src).toMatch(/^data:image\/png;base64,/);
+    expect(empty!.kind).toBe('path');
+    expect(warnings).toContain('a SketchUp viewport without a cached render was shown as an empty frame');
+    expect(live!.image!.viewport!.camera.scale).toBeCloseTo(1 / (48 * 0.7));
+  });
+
   it('keeps dimension ends and label tips LayOut connects to path and rectangle vertices attached', () => {
     const dimension = (id: string, [ax, ay]: [number, number], [bx, by]: [number, number]) => `
       <e:linearDimension id="${id}">

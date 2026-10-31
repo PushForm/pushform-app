@@ -12,7 +12,9 @@ Open a SketchUp **.layout** file to bring its pages and supported content into L
 
 An imported model viewport can retain a saved LayOut picture while offering model-view editing where its source is available. Do not assume an external model link is accessible just because its picture appears.
 
-If import reports invalid or nonfinite numeric data, repair the source drawing and save a new copy in SketchUp LayOut before trying again. The failed import leaves your open drawings unchanged.
+Some LayOut files contain objects saved with unusable numbers. A dimension saved without a valid position is skipped, and a model viewport whose saved camera cannot show the model keeps only its saved picture (or an empty frame). The import notes list what was skipped; the rest of the document opens normally.
+
+If import still reports invalid or nonfinite numeric data, repair the source drawing and save a new copy in SketchUp LayOut before trying again. The failed import leaves your open drawings unchanged.
 
 ## Import DXF into a drawing
 

@@ -63,6 +63,9 @@
     },
     {
       "path": "apps/commons"
+    },
+    {
+      "path": "packages/account-ui"
     }
   ]
 }

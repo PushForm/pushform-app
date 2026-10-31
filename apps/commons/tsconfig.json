@@ -13,6 +13,9 @@
   "references": [
     {
       "path": "../../packages/cloud"
+    },
+    {
+      "path": "../../packages/account-ui"
     }
   ]
 }

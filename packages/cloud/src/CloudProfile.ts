@@ -55,6 +55,8 @@ export interface CloudProfileInput {
   industry: CloudIndustry | null;
   industryOther: string;
   acceptTerms: boolean;
+  /** Optional mailing-list choice on initial account setup; independent of accepting the Terms. */
+  mailingOptIn?: boolean;
 }
 export type CloudProfileField = 'firstName' | 'lastName' | 'accountType' | 'companyName' | 'companySize' | 'industry' | 'industryOther' | 'acceptTerms';
 
@@ -106,6 +108,7 @@ export function cloudProfileParams(input: CloudProfileInput): RpcArgs<'cloud_sav
     p_company_name: company ? input.companyName.trim() : null, p_company_size: company ? input.companySize : null,
     p_industry: input.industry, p_industry_other: input.industry === 'other' ? input.industryOther.trim() : null,
     p_terms_version: input.acceptTerms ? CLOUD_TERMS_VERSION : null,
+    p_mailing_opt_in: input.mailingOptIn ?? false,
   };
 }
 

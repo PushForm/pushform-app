@@ -55,6 +55,7 @@ it('holds a new account on the signup step, then opens the workspace once it is 
 
   const submit = within(step).getByRole('button', { name: 'Continue' }) as HTMLButtonElement;
   expect(submit.disabled).toBe(true);
+  expect((within(step).getByRole('checkbox',{name:/Send me PushForm news/}) as HTMLInputElement).checked).toBe(false);
   expect(within(step).getByRole('link', { name: 'Terms of Use' }).getAttribute('href')).toBe('https://pushform.io/terms.html');
   fireEvent.click(within(step).getByRole('checkbox', { name: /I accept the Terms of Use/ }));
   expect(submit.disabled).toBe(false);
@@ -83,7 +84,7 @@ it('holds a new account on the signup step, then opens the workspace once it is 
   fireEvent.change(within(step).getByLabelText(/Your industry/), { target: { value: 'Theatre' } });
   await act(async () => { fireEvent.click(submit); });
   expect(rpc).toHaveBeenCalledWith('cloud_save_profile', { p_first_name: 'Ada', p_last_name: 'Lovelace', p_account_type: 'company',
-    p_company_name: 'Analytical Ltd', p_company_size: '11-50', p_industry: 'other', p_industry_other: 'Theatre', p_terms_version: CLOUD_TERMS_VERSION });
+    p_company_name: 'Analytical Ltd', p_company_size: '11-50', p_industry: 'other', p_industry_other: 'Theatre', p_terms_version: CLOUD_TERMS_VERSION, p_mailing_opt_in: false });
   expect(await screen.findByRole('banner')).toBeTruthy();
   expect(screen.queryByRole('main', { name: 'Set up your account' })).toBeNull();
   // The profile fills the account auto-text.

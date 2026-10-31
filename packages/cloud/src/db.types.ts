@@ -213,6 +213,20 @@ isOneToOne: true
       referencedColumns: ["id"]
     }
                   ]
+                },"cloud_mailing_preferences": {
+                  Row: {
+                    "consent_version": string | null,"opt_in": boolean,"owner_id": string,"source": string,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "consent_version"?: string | null,"opt_in"?: boolean,"owner_id": string,"source": string,"updated_at"?: string
+                  }
+                  Update: {
+                    "consent_version"?: string | null,"opt_in"?: boolean,"owner_id"?: string,"source"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+
+                  ]
                 },"cloud_profiles": {
                   Row: {
                     "account_type": string,"company_name": string | null,"company_size": string | null,"completed_at": string,"first_name": string,"industry": string,"industry_other": string | null,"last_name": string,"owner_id": string,"terms_accepted_at": string,"terms_version": string,"updated_at": string
@@ -984,6 +998,9 @@ isOneToOne: false
 { Args: { "p_id": string,"p_kind": string }; Returns: Json
                            },
 "cloud_save_profile":
+{ Args: { "p_account_type": string,"p_company_name": string,"p_company_size": string,"p_first_name": string,"p_industry": string,"p_industry_other": string,"p_last_name": string,"p_mailing_opt_in"?: boolean,"p_terms_version": string }; Returns: Json
+                           },
+"cloud_save_profile_fields":
 { Args: { "p_account_type": string,"p_company_name": string,"p_company_size": string,"p_first_name": string,"p_industry": string,"p_industry_other": string,"p_last_name": string,"p_terms_version": string }; Returns: Json
                            },
 "cloud_schedule_sweeper":
@@ -1009,6 +1026,9 @@ isOneToOne: false
 "cloud_trashed_documents":
 { Args: { "p_ids": (string)[] }; Returns: (string)[]
                            },
+"commons_account_status":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
 "commons_catalog":
 { Args: Record<PropertyKey, never>; Returns: Json
                            },
@@ -1023,6 +1043,15 @@ isOneToOne: false
                            },
 "commons_metadata_valid":
 { Args: { "p_metadata": Json }; Returns: boolean
+                           },
+"commons_require_download_access":
+{ Args: Record<PropertyKey, never>; Returns: boolean
+                           },
+"commons_set_mailing_preference":
+{ Args: { "p_opt_in": boolean }; Returns: Json
+                           },
+"commons_terms_accepted":
+{ Args: Record<PropertyKey, never>; Returns: boolean
                            },
 "commons_text_valid":
 { Args: { "p_empty"?: boolean,"p_max": number,"p_value": Json }; Returns: boolean

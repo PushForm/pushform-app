@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { expect, it, vi } from 'vitest';
-import { commonsFileUrl, uploadCommonsFile, removeCommonsFile, reviewCommonsFile } from './CommonsFiles';
+import { commonsFileUrl, uploadCommonsFile, removeCommonsFile, reviewCommonsFile, downloadCommonsFile, CommonsTermsRequiredError } from './CommonsFiles';
 const revision='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';const id='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const signal=()=>new AbortController().signal;
 const file=Object.assign(new Blob(['abc']),{name:'part.step'});
@@ -33,4 +33,16 @@ it('supports idempotent retries, aborts before networking, and sanitizes service
   const controller=new AbortController();controller.abort();fetcher.mockClear();await expect(uploadCommonsFile('https://files.example','session',revision,file,controller.signal,fetcher)).rejects.toThrow();expect(fetcher).not.toHaveBeenCalled();
   fetcher.mockResolvedValueOnce(new Response('private backend detail',{status:409}));await expect(removeCommonsFile('https://files.example','session',id,signal(),fetcher)).rejects.toThrow('Refresh');
   fetcher.mockResolvedValueOnce(new Response('ZIP'));expect(await (await reviewCommonsFile('https://files.example','session',id,signal(),fetcher)).text()).toBe('ZIP');
+});
+
+it('downloads only with bearer credentials and distinguishes incomplete account setup',async()=>{
+  const fetcher=vi.fn<typeof fetch>().mockResolvedValueOnce(new Response('ZIP',{headers:{'Content-Type':'application/zip'}}));
+  expect(await (await downloadCommonsFile('https://files.example','session',id,signal(),fetcher)).text()).toBe('ZIP');
+  expect(fetcher.mock.calls[0]![0]).toBe('https://files.example/downloads/'+id);
+  expect(new Headers(fetcher.mock.calls[0]![1]!.headers).get('Authorization')).toBe('Bearer session');
+  expect(fetcher.mock.calls[0]![1]).toMatchObject({credentials:'omit',redirect:'error',referrerPolicy:'no-referrer'});
+  fetcher.mockResolvedValueOnce(Response.json({code:'commons_terms_required'},{status:403}));
+  await expect(downloadCommonsFile('https://files.example','session',id,signal(),fetcher)).rejects.toBeInstanceOf(CommonsTermsRequiredError);
+  fetcher.mockResolvedValueOnce(new Response('<html>unexpected</html>',{headers:{'Content-Type':'text/html'}}));
+  await expect(downloadCommonsFile('https://files.example','session',id,signal(),fetcher)).rejects.toThrow('did not return a model package');
 });

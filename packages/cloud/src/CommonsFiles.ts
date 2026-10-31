@@ -13,13 +13,22 @@ export function commonsFileUrl(base: string | undefined, operation: 'uploads'|'d
   if (url.search || url.hash || url.pathname !== '/') return null;
   return `${url.origin}/${operation}${id ? '/' + id : ''}`;
 }
+export class CommonsTermsRequiredError extends Error {
+  constructor() { super('Complete your account setup and accept the site Terms of Use before downloading.'); this.name = 'CommonsTermsRequiredError'; }
+}
 async function request(fetcher: typeof fetch, url: string, token: string, init: RequestInit): Promise<Response> {
   if (!token || /\s/.test(token)) throw new Error('Sign in to manage model files.');
   const headers = new Headers(init.headers); headers.set('Authorization', `Bearer ${token}`);
   const response = await fetcher(url, { ...init, headers, credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer' });
-  if (!response.ok) throw new Error(response.status === 409 ? 'This revision changed. Refresh before trying again.' :
+  if (!response.ok) {
+    if (response.status === 403) {
+      const detail = await response.clone().json().catch(() => null) as {code?:unknown}|null;
+      if (detail?.code === 'commons_terms_required') throw new CommonsTermsRequiredError();
+    }
+    throw new Error(response.status === 409 ? 'This revision changed. Refresh before trying again.' :
     response.status === 401 || response.status === 403 ? 'Your account cannot manage these model files.' :
     response.status === 422 ? 'The file failed its size, type or checksum checks.' : 'The file service could not complete this request.');
+  }
   return response;
 }
 export async function uploadCommonsFile(base: string, token: string, revision: string, file: Blob & { name: string }, signal: AbortSignal, fetcher: typeof fetch = fetch): Promise<CommonsUpload> {
@@ -49,4 +58,12 @@ export async function removeCommonsFile(base: string, token: string, id: string,
 export async function reviewCommonsFile(base: string, token: string, id: string, signal: AbortSignal, fetcher: typeof fetch = fetch): Promise<Blob> {
   const url = commonsFileUrl(base, 'review', id); if (!url) throw new Error('Model file downloads are not configured.');
   return (await request(fetcher, url, token, { signal })).blob();
+}
+
+/** Downloads use the current session only; access tokens never appear in links or referrers. */
+export async function downloadCommonsFile(base: string, token: string, id: string, signal: AbortSignal, fetcher: typeof fetch = fetch): Promise<Blob> {
+  const url = commonsFileUrl(base, 'downloads', id); if (!url) throw new Error('Model file downloads are not configured.');
+  const response = await request(fetcher, url, token, { signal });
+  if (response.headers.get('Content-Type')?.split(';')[0]?.trim() !== 'application/zip') throw new Error('The file service did not return a model package.');
+  return response.blob();
 }

@@ -56,7 +56,7 @@ it('requires names, a type, company details for a company, an industry, and the 
 it('sends no company fields for an Individual and no description unless the industry is Other', () => {
   expect(cloudProfileParams({ ...input, accountType: 'individual', firstName: ' Ada ' })).toEqual({ p_first_name: 'Ada', p_last_name: 'Lovelace',
     p_account_type: 'individual', p_company_name: null, p_company_size: null, p_industry: 'engineering', p_industry_other: null,
-    p_terms_version: CLOUD_TERMS_VERSION });
+    p_terms_version: CLOUD_TERMS_VERSION, p_mailing_opt_in: false });
   expect(cloudProfileParams({ ...input, industry: 'other', industryOther: ' Theatre ', acceptTerms: false }))
     .toMatchObject({ p_company_name: 'Analytical Ltd', p_industry_other: 'Theatre', p_terms_version: null });
 });

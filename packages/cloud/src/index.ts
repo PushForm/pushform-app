@@ -18,3 +18,4 @@ export * from './CommonsClient';
 export * from './CommonsFiles';
 
 export * from './CommonsPublishing';
+export * from './CommonsAccess';

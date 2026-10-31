@@ -88,3 +88,12 @@ h2 { font-size: 29px; letter-spacing: -.8px; font-weight: 500; margin: 0; }
 .publish-files label.publish-confirm { display: flex; align-items: flex-start; gap: 10px; margin: 24px 0; }
 .publish-confirm input { margin-top: 4px; }
 .own-models li { margin: 10px 0; }
+.commons-account { max-width: 640px; margin: 20px 0; padding: 20px; border: 1px solid var(--line); border-radius: 12px; }
+.commons-account form, .commons-account label { display: grid; gap: 8px; }
+.commons-account form { gap: 16px; }
+.commons-account .pf-profile-names { display: flex; gap: 16px; flex-wrap: wrap; }
+.commons-account input, .commons-account select { font: inherit; padding: 8px; min-width: 0; }
+.commons-account label:has(input[type=checkbox]), .commons-account .pf-profile-check { display: flex; align-items: flex-start; gap: 10px; }
+.commons-account .pf-profile-choice label { display: flex; gap: 10px; margin: 8px 0; }
+.commons-account button, .commons-download button { font: inherit; cursor: pointer; padding: 8px 12px; }
+.commons-account [role=alert], .commons-account .pf-profile-field-error { color: #a42d24; }

@@ -202,6 +202,9 @@ importers:
 
   apps/commons:
     dependencies:
+      '@pushform/account-ui':
+        specifier: workspace:*
+        version: link:../../packages/account-ui
       '@pushform/cloud':
         specifier: workspace:*
         version: link:../../packages/cloud
@@ -313,6 +316,19 @@ importers:
       vite:
         specifier: ^7.1.0
         version: 7.3.7(@types/node@24.19.2)
+
+  packages/account-ui:
+    dependencies:
+      '@pushform/cloud':
+        specifier: workspace:*
+        version: link:../cloud
+      react:
+        specifier: ^19.0.0
+        version: 19.3.1
+    devDependencies:
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.3.0
 
   packages/cloud:
     dependencies:
@@ -675,6 +691,9 @@ importers:
       '@pdf-lib/fontkit':
         specifier: ^1.1.1
         version: 1.1.1
+      '@pushform/account-ui':
+        specifier: workspace:*
+        version: link:../account-ui
       '@pushform/cloud':
         specifier: workspace:*
         version: link:../cloud

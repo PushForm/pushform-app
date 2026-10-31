@@ -130,6 +130,53 @@ export const MESSAGE_LIMITS = {
 } as const;
 
 /**
+ * How fast a runtime may send messages to the host, as token buckets: each holds up to `burst` and refills at
+ * `perSecond`. The host receives every message on the editor's thread, and a browser delivers a runtime's backlog
+ * either without pausing for the editor's other work (Chromium) or for as long as the backlog lasts (Firefox), so a
+ * runtime that outruns these is failed and ended, which drops its backlog with it.
+ *
+ * The rates are far above what an extension needs: a panel updating on every frame sends about 60 messages a second,
+ * and a host call is one message each way. Tripping the message burst costs the editor well under 100 ms in Chromium.
+ * Bytes are measured as `measureMessage` does; the byte rate admits a full-size message (4 MiB) every 125 ms.
+ */
+export const MESSAGE_RATE_LIMITS = {
+  /** Messages of any kind, valid or not, counted before anything else looks at them. */
+  messages: { burst: 5_000, perSecond: 10_000 },
+  bytes: { burst: 64 * 1024 * 1024, perSecond: 32 * 1024 * 1024 },
+  /**
+   * The runtime's own pacing of host calls, at half the host's message rate, so an extension calling the host in a
+   * tight loop is slowed down instead of failed. Only the host's limits are enforced; this one is a courtesy.
+   */
+  requests: { burst: 1_000, perSecond: 5_000 },
+} as const;
+
+/** A token bucket: up to `burst` tokens, refilled continuously at `perSecond`. Times are milliseconds. */
+export class TokenBucket {
+  private tokens: number;
+  private last: number;
+  constructor(readonly burst: number, readonly perSecond: number, now: number) {
+    this.tokens = burst;
+    this.last = now;
+  }
+  /** Takes `amount` tokens if there are that many by `now`; otherwise takes none. */
+  take(amount: number, now: number): boolean {
+    this.refill(now);
+    if (this.tokens < amount) return false;
+    this.tokens -= amount;
+    return true;
+  }
+  /** Milliseconds from `now` until `amount` tokens are there (0 when they already are). */
+  wait(amount: number, now: number): number {
+    this.refill(now);
+    return this.tokens >= amount ? 0 : ((amount - this.tokens) * 1000) / this.perSecond;
+  }
+  private refill(now: number): void {
+    if (now > this.last) this.tokens = Math.min(this.burst, this.tokens + ((now - this.last) * this.perSecond) / 1000);
+    this.last = Math.max(this.last, now);
+  }
+}
+
+/**
  * Measures a structured-cloned value without serializing it, stopping as soon as a bound is passed. Returns the
  * approximate size in bytes, or `null` when the value exceeds `limits` or holds anything a message must not
  * (functions, symbols, a cycle deeper than the depth bound).

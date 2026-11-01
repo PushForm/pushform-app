@@ -209,7 +209,7 @@ describe('documents', () => {
     const open = new Map([['tab-a', units('mm')], ['tab-b', units('in')]]);
     const documents = { get: (id: string) => {
       const u = open.get(id);
-      return u ? { units: () => u, model: () => null, listen: () => () => {} } : null;
+      return u ? { name: () => 'Stairs', units: () => u, model: () => null, listen: () => () => {} } : null;
     } };
     const module = { activate(context: { commands: { register(id: string, h: () => unknown): void }; document: { units(): Promise<unknown> } }) {
       context.commands.register('com.example.stairs.make', () => context.document.units());

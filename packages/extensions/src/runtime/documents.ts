@@ -3,7 +3,7 @@
 import { hostOf, type CommandRegistry } from '@pushform/commands';
 import {
   ExtensionError, HOST_EVENTS, documentHandleSchema, documentTargetSchema, modelBatchSchema, modelQuerySchema, selectionFrameSchema,
-  selectionSetSchema, type DocumentUnits, type DocumentUnitsEvent, type ExtensionErrorCode, type ExtensionManifest, type ExtensionPermission,
+  selectionSetSchema, type DocumentInfo, type DocumentInfoEvent, type DocumentUnits, type DocumentUnitsEvent, type ExtensionErrorCode, type ExtensionManifest, type ExtensionPermission,
   type ModelApiErrorCode, type ModelBatchResult, type ModelChangeEvent, type ModelDocumentSnapshot, type ModelQuery, type ModelQueryResult,
   type ModelRef, type ModelRefInput,
 } from '@pushform/extension-protocol';
@@ -17,9 +17,9 @@ import type { ExtensionSession, ServiceCall, ServiceImplementations } from './ho
  * session resolves it, so an extension can never name a document by id. The model operations are those of the model
  * document API, with the same validation and bounds; a batch is one undo entry named after the extension.
  *
- * The session also tells the extension about changes, as host events: the units of any document it acted on, when
- * they change or when it starts acting on another document, and model and selection changes of documents it
- * subscribed to. Events are coalesced, and stop when the document closes or the session ends.
+ * The session also tells the extension about changes, as host events: the name and units of any document it acted
+ * on, when they change or when it starts acting on another document, and model and selection changes of documents it
+ * subscribed to. Model events are coalesced, and every event stops when the document closes or the session ends.
  */
 
 /** The model operations of one open model, as the services use them. `ModelDocumentApi` is the real one. */
@@ -30,16 +30,18 @@ export interface ExtensionModelAccess {
   /** Validates and applies a batch as one undo entry. */
   apply(input: unknown, signal?: AbortSignal): Promise<ModelBatchResult>;
   selection(): ModelRef[];
-  /** Replaces the selection; returns it as it is now. */
+  /** Replaces the selection, in place for entities of other containers; returns it as it is now. */
   select(refs: readonly ModelRefInput[]): ModelRef[];
-  /** Frames the camera on the entities. */
+  /** Frames the camera on the entities' world bounds. */
   frame(refs: readonly ModelRefInput[]): unknown;
 }
 
-export type DocumentChange = 'model' | 'selection' | 'units';
+export type DocumentChange = 'model' | 'selection' | 'units' | 'name';
 
 /** One open document as extensions reach it. */
 export interface ExtensionDocument {
+  /** The document's name as the user sees it: its tab's title. */
+  name(): string;
   /** The units PushForm formats this document's quantities in. */
   units(): DocumentUnits;
   /** The model operations, acting for `client` (the name undo entries carry); null when it is not a 3D model. */
@@ -68,11 +70,18 @@ export function documentUnitsOf(units: Pick<UnitSettings, 'format' | 'lengthUnit
 const sameUnits = (a: DocumentUnits, b: DocumentUnits): boolean =>
   a.system === b.system && a.lengthUnit === b.lengthUnit && a.format === b.format && a.lengthPrecision === b.lengthPrecision;
 
-/** The open model of a command registry, as extensions reach it. */
-export function commandsDocument(commands: CommandRegistry): ExtensionDocument {
+/** The name a model has before anything names it; the app names documents after their tabs. */
+export const UNNAMED_DOCUMENT = 'Untitled';
+
+/**
+ * The open model of a command registry, as extensions reach it. `name` is the document's name as the user sees it;
+ * the caller reports renames by wrapping `listen`, as a registry does not know its document's name.
+ */
+export function commandsDocument(commands: CommandRegistry, name: () => string = () => UNNAMED_DOCUMENT): ExtensionDocument {
   const host = hostOf(commands.ctx);
   const units = () => documentUnitsOf(host.doc.state.meta.units);
   return {
+    name,
     units,
     model: (client) => new ModelDocumentApi(commands, client),
     listen(listener) {
@@ -187,18 +196,23 @@ export class ExtensionDocumentHost {
         const { document } = this.target(parse(documentTargetSchema, input, 'document.units'), call);
         return document.units();
       },
+      'document.info': (input, call) => {
+        const { document } = this.target(parse(documentTargetSchema, input, 'document.info'), call);
+        return infoOf(document);
+      },
     };
   }
 
   /**
-   * The extension started acting on `documentId` (the session's `onDocument`): it hears that document's units, and
-   * from now on about changes to them.
+   * The extension started acting on `documentId` (the session's `onDocument`): it hears that document's name and
+   * units, and from now on about changes to them.
    */
   documentChanged(documentId: string): void {
     const document = this.options.documents.get(documentId);
     if (!document) return;
     this.watch(documentId, document);
     this.sendUnits(documentId, document.units());
+    this.sendInfo(documentId, document);
   }
 
   /** The document closed: no more events about it. */
@@ -251,7 +265,8 @@ export class ExtensionDocumentHost {
     this.watches.set(documentId, watch);
     const stop = document.listen((change) => {
       if (this.watches.get(documentId) !== watch) return;
-      if (change === 'units') return this.sendUnits(documentId, document.units());
+      if (change === 'units') { this.sendUnits(documentId, document.units()); return this.sendInfo(documentId, document); }
+      if (change === 'name') return this.sendInfo(documentId, document);
       if (!watch.subscribed || (change === 'selection' && !this.options.grants.has('selection.read'))) return;
       watch.pending.add(change);
       watch.timer ??= setTimeout(() => {
@@ -273,4 +288,13 @@ export class ExtensionDocumentHost {
     const event: DocumentUnitsEvent = { document: session.openDocument(documentId), units };
     session.notify(HOST_EVENTS.units.component, HOST_EVENTS.units.event, { ...event });
   }
+
+  private sendInfo(documentId: string, document: ExtensionDocument): void {
+    const session = this.options.session();
+    if (!session || session.state !== 'active') return;
+    const event: DocumentInfoEvent = { document: session.openDocument(documentId), ...infoOf(document) };
+    session.notify(HOST_EVENTS.documentInfo.component, HOST_EVENTS.documentInfo.event, { ...event });
+  }
 }
+
+const infoOf = (document: ExtensionDocument): DocumentInfo => ({ name: document.name(), units: document.units() });

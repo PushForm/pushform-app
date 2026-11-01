@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   CommandRegistry, DocumentHost, SERVICE_DOCUMENT, SERVICE_KERNEL, componentCommands, contextCommands, editCommands, groupCommands,
-  materialCommands, modelCommands, sketchCommands, tagCommands, transformCommands,
+  materialCommands, modelCommands, sketchCommands, tagCommands, transformCommands, type CameraHost, type CameraState,
 } from '@pushform/commands';
 import { MODEL_TOOLS, type ModelBatchResult } from '@pushform/extension-protocol';
 import { InlineBackend, KernelClient } from '@pushform/kernel';
@@ -12,11 +12,24 @@ import { ModelApiFailure, ModelDocumentApi, runModelTool } from './modelApi';
 const kernels: KernelClient[] = [];
 afterEach(() => { for (const kernel of kernels.splice(0)) kernel.dispose(); });
 
-function setup() {
+/** The parts of a viewport framing uses: a camera looking at the origin from the front right, in a 16:9 view. */
+function fakeCamera(): CameraHost & { state: CameraState } {
+  const camera = {
+    state: { eye: [10, -10, 5], target: [0, 0, 0], up: [0, 0, 1], fov: 35, projection: 'perspective', orthoHeight: 10 } as CameraState,
+    getState: () => camera.state,
+    setState: (state: CameraState) => { camera.state = state; },
+    viewportSize: () => ({ width: 1600, height: 900 }),
+    sceneBounds: () => null,
+  };
+  return camera as unknown as CameraHost & { state: CameraState };
+}
+
+function setup(options: { camera?: CameraHost } = {}) {
   const host = new DocumentHost();
   const kernel = new KernelClient(new InlineBackend());
   kernels.push(kernel);
-  const commands = new CommandRegistry({ tx: host, services: new Map<string, unknown>([[SERVICE_DOCUMENT, host], [SERVICE_KERNEL, kernel]]) });
+  const commands = new CommandRegistry({ tx: host, ...(options.camera ? { camera: options.camera } : {}),
+    services: new Map<string, unknown>([[SERVICE_DOCUMENT, host], [SERVICE_KERNEL, kernel]]) });
   for (const group of [editCommands, modelCommands, sketchCommands, transformCommands, groupCommands, componentCommands, contextCommands, tagCommands, materialCommands])
     commands.registerAll(group);
   const api = new ModelDocumentApi(commands, 'AI Chat');
@@ -220,6 +233,68 @@ describe('ModelDocumentApi batches', () => {
     expect((await failure(() => stopped)).error.code).toBe('cancelled');
     expect(root().bodies.get(id as never)!.props.volume).toBeCloseTo(2);
     expect(api.getDocument().tags.some(tag => tag.name === 'Never')).toBe(false);
+  });
+});
+
+describe('ModelDocumentApi selection and framing', () => {
+  /** A box at the root, and a box inside a group inside another group, with the editor back at the root. */
+  async function nested(options: { camera?: CameraHost } = {}) {
+    const made = setup(options);
+    const { api, host, addBox } = made;
+    const loose = addBox([0, 0, 0], [1, 1, 1]), grouped = addBox([5, 0, 0], [6, 1, 1]);
+    const outer = (await api.apply({ expectedRevision: api.revision, label: 'Outer', operations: [{ op: 'make_group', as: 'g', refs: [box(grouped)] }] })).created.g!;
+    host.setContext([outer as never]);
+    const insideId = addBox([0, 0, 0], [1, 1, 1]);
+    const inner = (await api.apply({ expectedRevision: api.revision, label: 'Inner', operations: [{ op: 'make_group', as: 'n', refs: [box(insideId)] }] })).created.n!;
+    host.setContext([]);
+    const path = [outer, inner];
+    const part = api.query({ container: path, kinds: ['body'], ids: null, facing: null, containing: null, fields: ['bounds'], offset: null, limit: null }).entities[0]!;
+    return { ...made, loose, outer, inner, path, part };
+  }
+
+  it('selects entities inside groups by their instance path, in place, and leaves the open container alone', async () => {
+    const { api, host, loose, path, part } = await nested();
+    const selected = api.select([{ kind: 'body', id: part.ref.id, path }, { kind: 'body', id: loose }, { kind: 'instance', id: path[1]!, path: [path[0]!] }]);
+    expect(selected).toEqual([{ path, kind: 'body', id: part.ref.id }, { path: [], kind: 'body', id: loose }, { path: [path[0]], kind: 'instance', id: path[1] }]);
+    expect(host.selection.refs).toEqual(selected);
+    expect(host.context.path).toEqual([]);
+    expect(api.getDocument().selection).toEqual(selected);
+    // A ref carrying the open container's own path is the plain form.
+    expect(api.select([{ kind: 'body', id: loose, path: [] }])).toEqual([{ path: [], kind: 'body', id: loose }]);
+  });
+
+  it('refuses entities that are not at their path, or paths that lead nowhere, selecting nothing', async () => {
+    const { api, host, loose, path, part } = await nested();
+    api.select([{ kind: 'body', id: loose }]);
+    const missing = await failure(async () => api.select([{ kind: 'body', id: part.ref.id, path }, { kind: 'body', id: 999, path }]));
+    expect(missing.error).toMatchObject({ code: 'invalid_reference' });
+    expect(missing.error.message).toContain(`at instance path [${path.join(', ')}]`);
+    const nowhere = await failure(async () => api.select([{ kind: 'body', id: part.ref.id, path: [999] }]));
+    expect(nowhere.error.message).toContain('No group or component at instance path [999]');
+    expect(host.selection.refs).toEqual([{ kind: 'body', path: [], id: loose }]);
+  });
+
+  it('frames the world bounds of nested entities', async () => {
+    const camera = fakeCamera();
+    const { api, path, part, outer } = await nested({ camera });
+    await api.apply({ expectedRevision: api.revision, label: 'Shift', operations: [{ op: 'move', refs: [{ kind: 'instance', id: outer }], offset: [10, 20, 0] }] });
+    api.frame([{ kind: 'body', id: part.ref.id, path }], false);
+    // The part is a unit box at the origin of the inner group; its world center is where that container's transform puts it.
+    expect(part.bounds).toEqual({ min: [0, 0, 0], max: [1, 1, 1] });
+    const m = api.query({ container: path, kinds: ['body'], ids: null, facing: null, containing: null, fields: null, offset: null, limit: null }).worldTransform;
+    const center = [0, 1, 2].map(i => m[i]! * 0.5 + m[4 + i]! * 0.5 + m[8 + i]! * 0.5 + m[12 + i]!);
+    expect(center[0]).toBeGreaterThan(10);
+    expect(center[1]).toBeGreaterThan(20);
+    for (const i of [0, 1, 2]) expect(camera.state.target[i]).toBeCloseTo(center[i]!);
+  });
+
+  it('keeps a batch to its own container: a ref of another container names it and fails', async () => {
+    const { api, path, part } = await nested();
+    const error = await failure(() => api.apply({ expectedRevision: api.revision, label: 'Hide', operations: [{ op: 'set_hidden', refs: [{ kind: 'body', id: part.ref.id, path }], hidden: true }] }));
+    expect(error.error).toMatchObject({ code: 'invalid_reference', operationIndex: 0 });
+    expect(error.error.message).toContain(`[${path.join(', ')}]`);
+    await api.apply({ expectedRevision: api.revision, container: path, label: 'Hide', operations: [{ op: 'set_hidden', refs: [{ kind: 'body', id: part.ref.id, path }], hidden: true }] });
+    expect(api.query({ container: path, kinds: ['body'], ids: null, facing: null, containing: null, fields: null, offset: null, limit: null }).entities[0]!.hidden).toBe(true);
   });
 });
 

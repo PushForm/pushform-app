@@ -58,12 +58,14 @@ describe('createTestHost', () => {
 /** A parts list written against the SDK: it reads the model and units, selects and frames parts, and follows changes. */
 const parts = {
   activate(context: ExtensionContext) {
-    const seen: { units: DocumentUnits[]; changes: number[] } = { units: [], changes: [] };
+    const seen: { units: DocumentUnits[]; names: string[]; changes: number[] } = { units: [], names: [], changes: [] };
     context.document.onUnitsChange((event) => seen.units.push(event.units));
+    context.document.onChange((event) => seen.names.push(event.name));
     context.model!.onChange((event) => seen.changes.push(event.revision));
     context.commands.register('com.example.parts.panel', async (_params, { document }) => {
       const snapshot = await context.model!.read({});
       const units = await context.document.units({ document });
+      const info = await context.document.info({ document });
       const query = await context.model!.query({ kinds: ['instance'] });
       const refs: ModelRefInput[] = query.entities.map((e) => ({ kind: 'instance', id: e.ref.id }));
       const selected = await context.selection!.set({ refs });
@@ -71,7 +73,7 @@ const parts = {
       const applied = await context.model!.apply({ expectedRevision: snapshot.revision, label: 'Name parts',
         operations: [{ op: 'rename_instance', ref: refs[0]!, name: 'Shelf' }] });
       await context.model!.subscribe();
-      return { revision: snapshot.revision, units, selected: selected.refs, applied: applied.label, seen };
+      return { revision: snapshot.revision, units, info, selected: selected.refs, applied: applied.label, seen };
     });
   },
 };
@@ -100,19 +102,22 @@ describe('createTestHost with a document', () => {
 
   it('serves the model, selection and units of the document, through the real document services', async () => {
     const model = fakeModel();
-    const host = await createTestHost({ manifest: partsManifest, module: parts, document: { model } });
+    const host = await createTestHost({ manifest: partsManifest, module: parts, document: { model, name: 'Bookcase' } });
     const result = await host.invoke('com.example.parts.panel') as Record<string, unknown>;
     expect(result).toMatchObject({ revision: 7, units: { system: 'metric', lengthUnit: 'mm', format: 'decimal', lengthPrecision: 1 },
-      selected: [{ path: [], kind: 'instance', id: 3 }], applied: 'Parts: Name parts' });
+      info: { name: 'Bookcase', units: TEST_DOCUMENT_UNITS }, selected: [{ path: [], kind: 'instance', id: 3 }], applied: 'Parts: Name parts' });
     expect(model.query).toHaveBeenCalledWith(expect.objectContaining({ kinds: ['instance'], container: null, limit: null }));
     expect(model.frame).toHaveBeenCalledWith([{ kind: 'instance', id: 3 }]);
     const inches: DocumentUnits = { system: 'imperial', lengthUnit: 'in', format: 'fractional', lengthPrecision: 3 };
     host.document!.setUnits(inches);
+    host.document!.setName('Bookcase v2');
     host.document!.changed('model');
     await new Promise((resolve) => setTimeout(resolve, 20)); // changes are coalesced before they are sent
-    const again = await host.invoke('com.example.parts.panel') as { seen: { units: DocumentUnits[]; changes: number[] } };
-    // Told of the document's units when the first invocation started acting on it, then of the change.
+    const again = await host.invoke('com.example.parts.panel') as { info: unknown; seen: { units: DocumentUnits[]; names: string[]; changes: number[] } };
+    // Told of the document's name and units when the first invocation started acting on it, then of each change.
     expect(again.seen.units).toEqual([TEST_DOCUMENT_UNITS, inches]);
+    expect(again.seen.names).toEqual(['Bookcase', 'Bookcase', 'Bookcase v2']);
+    expect(again.info).toEqual({ name: 'Bookcase v2', units: inches });
     expect(again.seen.changes).toEqual([7]);
     host.document!.close();
     await expect(host.invoke('com.example.parts.panel', {}, { document: 'test-document' })).rejects.toMatchObject({ code: 'document.closed' });

@@ -6,9 +6,9 @@ import {
 } from '@pushform/extension-protocol';
 import {
   ComputeHost, ExtensionDocumentHost, ExtensionSession, type DocumentChange, type ExtensionDocument, type ExtensionDocuments,
-  type ExtensionModelAccess, ExtensionSettingsHost, ExtensionUiHost, FetchBroker, clipboardServices, fileServices, memorySettingsStore, vectorExportServices, vectorPrintServices,
-  messagePortTransport, runComputeWorker, startGuest, type FetchTransport, type FilePicker, type ViewPrinter, type InvokeOptions, type ServiceImplementations,
-  type SettingsStore, type SpawnComputeWorker,
+  type ExtensionModelAccess, ExtensionSettingsHost, ExtensionUiHost, FetchBroker, UNNAMED_DOCUMENT, clipboardServices, fileServices, memorySettingsStore,
+  vectorExportServices, vectorPrintServices, messagePortTransport, runComputeWorker, startGuest, type FetchTransport, type FilePicker, type ViewPrinter,
+  type InvokeOptions, type ServiceImplementations, type SettingsStore, type SpawnComputeWorker,
 } from '@pushform/extensions';
 
 /**
@@ -27,6 +27,8 @@ import {
 export interface TestDocumentOptions {
   /** The id `invoke` passes; `"test-document"` by default. */
   readonly id?: string;
+  /** The document's name as the user sees it; `"Untitled"` by default. */
+  readonly name?: string;
   /** Millimeters, decimal, one place, by default. */
   readonly units?: DocumentUnits;
   /**
@@ -39,7 +41,9 @@ export interface TestDocumentOptions {
 /** The test host's document, for changing it from the test. */
 export interface TestDocument {
   readonly id: string;
-  /** Changes the units; the extension hears of it through `context.document.onUnitsChange`. */
+  /** Renames the document; the extension hears of it through `context.document.onChange`. */
+  setName(name: string): void;
+  /** Changes the units; the extension hears of it through `context.document.onUnitsChange` and `onChange`. */
   setUnits(units: DocumentUnits): void;
   /** Reports that the model or the selection changed, as an edit by the user would. */
   changed(change: 'model' | 'selection'): void;
@@ -111,8 +115,9 @@ const inProcessCompute: SpawnComputeWorker = async () => {
 
 const declining: FilePicker = { open: async () => null, save: async () => null };
 
-function fakeDocument(options: TestDocumentOptions): ExtensionDocument & { setUnits(units: DocumentUnits): void; emit(change: DocumentChange): void } {
+function fakeDocument(options: TestDocumentOptions): ExtensionDocument & { setName(name: string): void; setUnits(units: DocumentUnits): void; emit(change: DocumentChange): void } {
   let units = options.units ?? TEST_DOCUMENT_UNITS;
+  let name = options.name ?? UNNAMED_DOCUMENT;
   const listeners = new Set<(change: DocumentChange) => void>();
   const fake = options.model;
   const missing = (name: string) => () => { throw new ExtensionError('unavailable', `The test document's model has no ${name}.`); };
@@ -126,9 +131,11 @@ function fakeDocument(options: TestDocumentOptions): ExtensionDocument & { setUn
     frame: fake.frame?.bind(fake) ?? missing('frame'),
   } : null;
   return {
+    name: () => name,
     units: () => units,
     model: () => model,
     listen(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+    setName(next) { name = next; for (const listener of [...listeners]) listener('name'); },
     setUnits(next) { units = next; for (const listener of [...listeners]) listener('units'); },
     emit(change) { for (const listener of [...listeners]) listener(change); },
   };
@@ -170,6 +177,7 @@ export async function createTestHost(options: TestHostOptions): Promise<TestHost
   });
   const document: TestDocument | null = opened && documentId !== null ? {
     id: documentId,
+    setName: (name) => opened.setName(name),
     setUnits: (units) => opened.setUnits(units),
     changed: (change) => opened.emit(change),
     close() {

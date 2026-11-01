@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 PushForm contributors
 import type {
-  DocumentUnits, DocumentUnitsEvent, ModelBatch, ModelBatchResult, ModelChangeEvent, ModelDocumentSnapshot, ModelQuery, ModelQueryResult,
-  ModelRef, ModelRefInput,
+  DocumentInfo, DocumentInfoEvent, DocumentUnits, DocumentUnitsEvent, ModelBatch, ModelBatchResult, ModelChangeEvent, ModelDocumentSnapshot,
+  ModelQuery, ModelQueryResult, ModelRef, ModelRefInput,
 } from './model.ts';
 import type { UiEventOnTarget, UiNode, UiPresentation } from './ui.ts';
 
@@ -145,20 +145,32 @@ export interface ModelService {
   onChange(handler: (event: ModelChangeEvent) => void): () => void;
 }
 
-/** The selection, as model references in the container open in the editor. */
+/**
+ * The selection, as model references. Each carries the instance path of its container, so a ref from a read names
+ * the same entity when passed back, wherever it is nested.
+ */
 export interface SelectionService {
   /** Needs `selection.read`. */
   get(input?: DocumentTarget, options?: CallOptions): Promise<{ refs: ModelRef[] }>;
-  /** Replaces the selection; an empty list clears it. Needs `selection.write`. Returns the selection now. */
+  /**
+   * Replaces the selection; an empty list clears it. Needs `selection.write`. Returns the selection now. A ref
+   * without a path names an entity of the container open in the editor; one with a path names an entity inside a
+   * group or component, which is highlighted in place, as choosing it in the Object browser does: the editor's open
+   * container is left as it is, and the selection stays until the user or the extension changes it.
+   */
   set(input: { refs: ModelRefInput[] } & DocumentTarget, options?: CallOptions): Promise<{ refs: ModelRef[] }>;
-  /** Frames the camera on the entities, keeping the view direction. Needs `viewport.presentation`. */
+  /** Frames the camera on the entities' world bounds, nested or not, keeping the view direction. Needs `viewport.presentation`. */
   frame(input: { refs: ModelRefInput[] } & DocumentTarget, options?: CallOptions): Promise<null>;
 }
 
 /** The document itself; needs no permission. */
 export interface DocumentService {
+  /** The document's name as the user sees it, and its units. Name exported files after `name`. */
+  info(input?: DocumentTarget, options?: CallOptions): Promise<DocumentInfo>;
   /** The units PushForm shows this document's lengths in. Format quantities with them; values stay meters. */
   units(input?: DocumentTarget, options?: CallOptions): Promise<DocumentUnits>;
+  /** Told when the name or units change, or when the extension starts acting on another document; returns a function that stops. */
+  onChange(handler: (event: DocumentInfoEvent) => void): () => void;
   /** Told when the units change, or when the extension starts acting on another document; returns a function that stops. */
   onUnitsChange(handler: (event: DocumentUnitsEvent) => void): () => void;
 }

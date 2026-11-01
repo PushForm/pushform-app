@@ -120,7 +120,7 @@ const WORKSPACE_SCREEN_KEY = 'pushform:workspace-screen:v1';
  * Required account gate. The document engine is first created after successful sign-in; the workspace stays locked
  * until the account's signup step is complete.
  */
-export function App({ app, cloud: supplied, cloudFiles, profiles, account, buildInfo, initialScreen, requests, usage, commons }: AppProps = {}): JSX.Element {
+export function App({ app, cloud: supplied, cloudFiles, profiles, account, buildInfo, initialScreen, requests, usage, commons, extensionRuntime, staff }: AppProps = {}): JSX.Element {
   const [unconfigured] = useState(() => new CloudSession(null));
   const cloud = supplied ?? unconfigured;
   const state = useSyncExternalStore(cloud.subscribe, cloud.getSnapshot);
@@ -137,7 +137,7 @@ export function App({ app, cloud: supplied, cloudFiles, profiles, account, build
   useEffect(() => desktopUpdates()?.start(), []);
   useEffect(() => { if (signedIn) setLastOwner(state.user!.id); }, [signedIn, state.user]);
   const screens = <>
-    {workspaceOwner ? <Workspace key={workspaceOwner} ownerId={workspaceOwner} app={app} cloud={cloud} cloudFiles={cloudFiles} buildInfo={buildInfo} initialScreen={initialScreen} requests={requests} usage={usage} commons={commons} locked={!signedIn || !profileReady} /> : null}
+    {workspaceOwner ? <Workspace key={workspaceOwner} ownerId={workspaceOwner} app={app} cloud={cloud} cloudFiles={cloudFiles} buildInfo={buildInfo} initialScreen={initialScreen} requests={requests} usage={usage} commons={commons} extensionRuntime={extensionRuntime} staff={staff} locked={!signedIn || !profileReady} /> : null}
     {!signedIn ? <SignInScreen cloud={cloud} state={state} /> : null}
     {signedIn && !profileReady && profiles ? <ProfileScreen cloud={cloud} session={state} profiles={profiles} state={profileState} /> : null}
     {signedIn && profileReady && account && accountState.ownerId === state.user!.id ? <DeletionBanner account={account} state={accountState} /> : null}

@@ -16,13 +16,13 @@ To hide or show the cube, choose **View › Navigation Cube**, or tick **Navigat
 
 ## Move geometry from a base point
 
-Select the geometry, choose **Move**, and click a base point. Move the pointer to preview the destination, then click again to finish. You can also press, drag and release. While positioning, enter a distance in Measurements and press Enter for an exact move along the current direction. Escape cancels the preview.
+Select the geometry, choose **Move**, and click a base point. Move the pointer to preview the destination, then click again to finish. You can also press, drag and release. While positioning, type a distance and press Enter for an exact move along the current direction. Escape cancels the preview.
 
 Tap Ctrl to toggle copying before placement; check for **Copy** in the status. Work inside the group or component you intend to edit. Moving a component instance differs from editing the geometry shared by its instances.
 
 ## Rotate geometry around a pivot
 
-Select the geometry and choose **Rotate**. Hover a face to align the protractor, then click the center of rotation. Click a point away from the center to set the baseline. Move to preview the angle, then click again to commit, or type an angle in Measurements and press Enter. Escape cancels the pending rotation.
+Select the geometry and choose **Rotate**. Hover a face to align the protractor, then click the center of rotation. Click a point away from the center to set the baseline. Move to preview the angle, then click again to commit, or type an angle and press Enter. Escape cancels the pending rotation.
 
 Before setting the center, arrow keys can lock the rotation axis. Tap Ctrl to toggle copying if you want the original to stay in place. Work in the intended editing context and check the preview before the final click.
 

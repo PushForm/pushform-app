@@ -41,7 +41,7 @@ PushForm has two editors: **Modeling** for 3D work and **Layout** for drawings o
 - [Navigation, Move, Rotate and Scale](modeling/transforms-navigation.md)
 - [Follow Me, Offset and solid combinations and cuts](modeling/shaping.md)
 - [Tape Measure, guide lines, Protractor and Axes](modeling/construction.md)
-- [Precise values in Measurements](modeling/measurements.md)
+- [Typing exact values](modeling/measurements.md)
 - [Delete objects and erase sketch geometry](modeling/deleting.md)
 - [Selection, Object browser and Entity Info](modeling/selection.md)
 - [Materials, tags, hidden geometry and styles](modeling/materials-styles.md)

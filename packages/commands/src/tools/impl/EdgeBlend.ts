@@ -38,7 +38,7 @@ interface Preview {
  * Fillet and Chamfer. While active, hovering a solid of the open context
  * highlights the hard edge under the cursor (a curve's edge highlights its whole curve). Click adds
  * it to the edge set, Shift-click toggles it; edges selected when the tool starts are the starting
- * set. The Measurements box takes the radius (Fillet) or distance (Chamfer), remembered for the
+ * set. The value field takes the radius (Fillet) or distance (Chamfer), remembered for the
  * session, and `Ns` the fillet segments. Enter or double-click commits one `fillet.apply` /
  * `chamfer.apply`; Esc clears the set, a second Esc returns to Select. A kernel preview of the
  * result replaces the solid while edges are picked.
@@ -348,7 +348,7 @@ export class EdgeBlendTool implements Tool {
     }
     const p = this.params();
     if (!p) {
-      this.error = `Type the ${this.kind === 'fillet' ? 'radius' : 'distance'} in the Measurements box first.`;
+      this.error = `Type the ${this.kind === 'fillet' ? 'radius' : 'distance'} first.`;
       ctx.statusChanged();
       return;
     }

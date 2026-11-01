@@ -10,7 +10,7 @@ A disconnected edge cannot extend the path. If the sweep cannot form a valid sol
 
 ## Offset a face or connected edges in Modeling
 
-Choose **Offset** and click the face whose boundary you want to offset. Move inside or outside the face to preview the inset or outset, then click again to commit. While positioning, type a positive length in Measurements and press Enter to use that distance on the previewed side. Escape cancels the pending offset.
+Choose **Offset** and click the face whose boundary you want to offset. Move inside or outside the face to preview the inset or outset, then click again to commit. While positioning, type a positive length and press Enter to use that distance on the previewed side. Escape cancels the pending offset.
 
 To offset an open chain, preselect at least two connected coplanar sketch edges before activating Offset, click to start, then set the distance. Double-click another face with Offset to repeat the last distance.
 
@@ -40,7 +40,7 @@ With no solids preselected, choose **Intersect** or **Split** from the Solid dro
 
 Choose **Fillet** (rounded edge) or **Chamfer** (flat bevel) from the Edge dropdown in the toolbar, or search for it by name. Hover a solid in the group or component you are editing: the edge under the pointer highlights. Click edges to add them to the set; picked edges stay highlighted. Shift+click a picked edge to remove it again. Clicking any segment of a circle or arc, such as the rim of a cylinder, picks the whole curve.
 
-Type the fillet radius or the chamfer distance in Measurements, for example `5mm`, and press Enter. A preview of the result replaces the solid while you pick. Then press Enter, or double-click, to apply. The whole operation is one Undo step.
+Type the fillet radius or the chamfer distance, for example `5mm`, and press Enter. A preview of the result replaces the solid while you pick. Then press Enter, or double-click, to apply. The whole operation is one Undo step.
 
 Edges you selected before choosing the tool start out picked. Escape clears the picked edges; a second Escape returns to Select. Only hard edges are offered: soft, smooth and hidden edges cannot be rounded.
 

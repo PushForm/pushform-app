@@ -22,7 +22,7 @@ export const TOOL_HELP: Readonly<Record<string, ToolHelp>> = {
   },
   line: {
     summary:
-      'Click to start a line and click again to end it; the tool keeps chaining from the last point until Esc. Type a length in the Measurements box at any time. Lines split the edges and faces they cross, and a closed loop of coplanar lines makes a face.',
+      'Click to start a line and click again to end it; the tool keeps chaining from the last point until Esc. Type a length, and Tab to an angle, at any time; Tab locks the value into the preview. Lines split the edges and faces they cross, and a closed loop of coplanar lines makes a face.',
     keys: [
       ['Shift', 'Lock the current inference'],
       ['↑ / → / ←', 'Lock to the blue, red or green axis'],
@@ -32,7 +32,7 @@ export const TOOL_HELP: Readonly<Record<string, ToolHelp>> = {
   },
   rectangle: {
     summary:
-      'Click a corner, move diagonally and click the opposite corner; the plane follows the hovered face or the drawing axes. Type length,width (either value may be left out) and negative values flip the direction. Blue dots and a tip show Square and Golden Section inferences.',
+      'Click a corner, move diagonally and click the opposite corner; the plane follows the hovered face or the drawing axes. Type the width, Tab, then the height; a value left with Tab is locked, and negative values flip the side. Blue dots and a tip show Square and Golden Section inferences.',
     keys: [
       ['Shift', 'Hold the Square / Golden Section inference'],
       ['Ctrl', 'Draw from the center'],
@@ -41,7 +41,7 @@ export const TOOL_HELP: Readonly<Record<string, ToolHelp>> = {
   },
   circle: {
     summary:
-      'Click the center, move to set the radius and click. Before the first click, type the number of sides (24 or 24s); afterwards type a radius. Edit radius and segments later in Entity Info.',
+      'Click the center, move to set the radius and click. Before the first click, type the number of sides (24 or 24s); afterwards type a diameter, or a radius as 12r. Edit radius and segments later in Entity Info.',
     keys: [
       ['↑ / → / ←', 'Pick the circle normal'],
       ['Shift', 'Lock the drawing plane'],
@@ -49,7 +49,7 @@ export const TOOL_HELP: Readonly<Record<string, ToolHelp>> = {
   },
   arc2: {
     summary:
-      'Click the two endpoints of the arc, then move to set the bulge and click. Half-circle and tangent inferences snap the bulge; type a bulge distance, radius (r) or segment count (s) in the Measurements box.',
+      'Click the two endpoints of the arc, then move to set the bulge and click. Half-circle and tangent inferences snap the bulge; type a bulge distance, radius (r) or segment count (s).',
     keys: [
       ['Shift', 'Lock the inferred bulge or tangency'],
       ['↑ / → / ←', 'Lock the arc plane'],
@@ -57,7 +57,7 @@ export const TOOL_HELP: Readonly<Record<string, ToolHelp>> = {
   },
   arc: {
     summary:
-      'Click the center, click to set the radius and start angle, then move and click to set the end angle. Type a radius (r) or segment count (s) in the Measurements box.',
+      'Click the center, click to set the radius and start angle, then move and click to set the end angle. Type the diameter, a radius (r) or segment count (s), then the angle.',
     keys: [
       ['Shift', 'Lock the arc plane'],
       ['↑ / → / ←', 'Lock the arc plane to an axis'],

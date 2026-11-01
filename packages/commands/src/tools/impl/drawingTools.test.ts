@@ -19,6 +19,8 @@ import { NO_MODIFIERS } from '../Tool';
 import type { Modifiers, ToolPointerEvent } from '../Tool';
 import { parseVcb } from '../../vcb/parse';
 import { drawingTools } from '../drawingTools';
+import { LineTool } from './Line';
+import { RectangleTool } from './Rectangle';
 import type { CircleTool } from './Circle';
 import type { PolygonTool } from './Polygon';
 import type { TwoPointArcTool } from './TwoPointArc';
@@ -83,6 +85,8 @@ function setup() {
   const tools = new ToolManager(registry, camera);
   registry.ctx.tools = tools;
   for (const t of drawingTools()) tools.register(t);
+  tools.register(new LineTool());
+  tools.register(new RectangleTool());
   const sketch = (): Sketch => host.doc.rootDefinition.entities.sketch;
   const bodies = (): Body[] => [...host.doc.rootDefinition.entities.bodies.values()];
   return { host, registry, tools, sketch, bodies };
@@ -130,7 +134,7 @@ describe('CircleTool', () => {
     expect(tools.status()).toMatchObject({ instructor: 'Select center point.', vcbLabel: 'Sides', vcbValue: '24' });
     tools.click(at([0, 0, 0]));
     tools.pointerMove(at([1, 0, 0]));
-    expect(tools.status()).toMatchObject({ instructor: 'Select point on circle or enter value.', vcbLabel: 'Radius' });
+    expect(tools.status()).toMatchObject({ instructor: 'Select point on circle or enter value.', vcbLabel: 'Diameter' });
     expect(tools.overlay().some((o) => o.kind === 'polyline' && o.closed && o.points.length === 24)).toBe(true);
     tools.click(at([1, 0, 0]));
     expect(sketch().edges.size).toBe(24);
@@ -150,18 +154,22 @@ describe('CircleTool', () => {
     expect(sketch().faces.size).toBe(1);
     expect(host.undoStack.length).toBe(1);
     expect((tools.get('circle') as CircleTool).segments).toBe(12);
-    vcb(tools, '2m');
+    // a bare length is the diameter, `r` a radius
+    vcb(tools, '4m');
     expect(hasVertex(sketch(), [2, 0, 0])).toBe(true);
     expect([...sketch().curves.values()][0]).toMatchObject({ radius: 2, segments: 12 });
+    vcb(tools, '2mr');
+    expect([...sketch().curves.values()][0]).toMatchObject({ radius: 2, segments: 12 });
 
-    // `8s` re-edits the last circle too; a bare `8` would be a radius re-edit now that a circle exists
+    // `8s` re-edits the last circle too; a bare `8` would be a diameter re-edit now that a circle exists
     vcb(tools, '8s');
     expect(sketch().edges.size).toBe(8);
     expect(host.undoStack.length).toBe(1);
-    // the session setting carries to the next circle; a radius via the VCB while dragging
+    // the session setting carries to the next circle; a diameter typed while dragging
     tools.click(at([5, 5, 0]));
     tools.pointerMove(at([5, 6, 0]));
-    vcb(tools, '50cm');
+    expect(tools.status().fields).toMatchObject([{ id: 'diameter', label: 'Diameter', kind: 'length' }]);
+    vcb(tools, '1m');
     expect(sketch().curves.size).toBe(2);
     expect([...sketch().curves.values()][1]).toMatchObject({ radius: 0.5, segments: 8 });
     expect(sketch().faces.size).toBe(2);
@@ -229,11 +237,11 @@ describe('PolygonTool', () => {
 });
 
 describe('ArcTool / PieTool', () => {
-  it('center, radius point, end angle → 12 edges and no face; VCB radius then angle', () => {
+  it('center, radius point, end angle → 12 edges and no face; typed diameter then angle', () => {
     const { tools, sketch } = setup();
     tools.activate('arc');
     tools.click(at([0, 0, 0]));
-    expect(tools.status()).toMatchObject({ instructor: 'Select point on arc or enter radius.', vcbLabel: 'Radius' });
+    expect(tools.status()).toMatchObject({ instructor: 'Select point on arc or enter diameter.', vcbLabel: 'Diameter' });
     tools.click(at([1, 0, 0]));
     expect(tools.status().vcbLabel).toBe('Angle');
     tools.pointerMove(at([0, 1, 0]));
@@ -243,10 +251,10 @@ describe('ArcTool / PieTool', () => {
     expect(sketch().faces.size).toBe(0);
     expect([...sketch().curves.values()][0]).toMatchObject({ kind: 'arc', radius: 1, segments: 12 });
     expect(hasVertex(sketch(), [0, 1, 0])).toBe(true);
-    // typed radius then typed angle
+    // typed diameter then typed angle
     tools.click(at([5, 5, 0]));
     tools.pointerMove(at([6, 5, 0]));
-    vcb(tools, '2m');
+    vcb(tools, '4m');
     expect(tools.status().vcbLabel).toBe('Angle');
     vcb(tools, '180');
     expect(sketch().curves.size).toBe(2);
@@ -489,5 +497,93 @@ describe('curve commands', () => {
     for (const e of sketch().edges.values()) expect(e.curveId).toBe(welded);
     registry.execute('sketch.addEdge', { a: [5, 5, 0], b: [6, 6, 0] });
     expect(() => registry.execute('sketch.weld', { edgeIds: [...sketch().edges.keys()] })).toThrow(/chain/);
+  });
+});
+
+describe('value fields', () => {
+  const entry = (tools: ToolManager, values: Record<string, string>) =>
+    tools.onEntry(Object.fromEntries(Object.entries(values).map(([k, t]) => {
+      const v = parseVcb(t, 'in');
+      if (!v.ok) throw new Error(t);
+      return [k, v.value];
+    })));
+  const ids = (tools: ToolManager) => (tools.status().fields ?? []).map((f) => f.id);
+
+  it('Line shows Length and Angle fields and takes either or both', () => {
+    const { tools, sketch } = setup();
+    tools.activate('line');
+    expect(ids(tools)).toEqual([]);
+    tools.click(at([0, 0, 0]));
+    tools.pointerMove(at([1, 1, 0]));
+    expect(ids(tools)).toEqual(['length', 'angle']);
+    expect(tools.status().fields![1]!.value).toBe('45.0°');
+    expect(tools.overlay().filter((o) => o.kind === 'polyline').length).toBeGreaterThan(3); // dimension lines and arc
+    // angle only keeps the pointer's distance
+    entry(tools, { angle: '90' });
+    expect(hasVertex(sketch(), [0, Math.SQRT2, 0])).toBe(true);
+    // both from the new start point
+    tools.pointerMove(at([3, 3, 0]));
+    entry(tools, { length: '2m', angle: '-90' });
+    expect(hasVertex(sketch(), [0, Math.SQRT2 - 2, 0])).toBe(true);
+  });
+
+  it('Line locks a length left with Tab and keeps it while the pointer sets the angle', () => {
+    const { tools, sketch } = setup();
+    tools.activate('line');
+    tools.click(at([0, 0, 0]));
+    const v = parseVcb('3m', 'in');
+    if (v.ok) tools.lockEntry('length', v.value);
+    tools.pointerMove(at([0, 5, 0]));
+    expect(tools.status().fields![0]).toMatchObject({ id: 'length', locked: true });
+    tools.click(at([0, 5, 0]));
+    expect(hasVertex(sketch(), [0, 3, 0])).toBe(true);
+    expect(tools.status().fields?.[0]?.locked).toBe(false);
+  });
+
+  it('Line drops the Angle field when the end leaves the drawing plane', () => {
+    const { tools } = setup();
+    tools.activate('line');
+    tools.click(at([0, 0, 0]));
+    tools.pointerMove(at([0, 0, 2]));
+    expect(ids(tools)).toEqual(['length']);
+  });
+
+  it('Rectangle shows Width and Height, keeps the pointer side and locks a typed width', () => {
+    const { tools, sketch } = setup();
+    tools.activate('rectangle');
+    tools.click(at([0, 0, 0]));
+    tools.pointerMove(at([-1, 2, 0]));
+    expect(tools.status().fields!.map((f) => f.label)).toEqual(['Width', 'Height']);
+    entry(tools, { width: '3m' });
+    expect(hasVertex(sketch(), [-3, 2, 0])).toBe(true);
+    tools.click(at([10, 0, 0]));
+    const w = parseVcb('4m', 'in');
+    if (w.ok) tools.lockEntry('width', w.value);
+    tools.pointerMove(at([11, 1, 0]));
+    tools.click(at([11, 1, 0]));
+    expect(hasVertex(sketch(), [14, 1, 0])).toBe(true);
+  });
+
+  it('Arc takes a diameter and then shows the Angle field on the sweep', () => {
+    const { tools } = setup();
+    tools.activate('pie');
+    tools.click(at([0, 0, 0]));
+    tools.pointerMove(at([1, 0, 0]));
+    expect(ids(tools)).toEqual(['diameter']);
+    vcb(tools, '4m');
+    tools.pointerMove(at([0, 3, 0]));
+    const f = tools.status().fields![0]!;
+    expect(f).toMatchObject({ id: 'angle', value: '90.0°' });
+    expect(f.at![0]).toBeGreaterThan(0);
+    expect(f.at![1]).toBeGreaterThan(0);
+  });
+
+  it('a single-value tool without onEntry receives the typed value through onVcb', () => {
+    const { tools, sketch } = setup();
+    tools.activate('circle');
+    tools.click(at([0, 0, 0]));
+    tools.pointerMove(at([1, 0, 0]));
+    entry(tools, { diameter: '6m' });
+    expect([...sketch().curves.values()][0]).toMatchObject({ radius: 3 });
   });
 });

@@ -191,7 +191,7 @@ describe('Fillet and Chamfer tools', () => {
     expect([...fillet.edgeSet].sort()).toEqual([e1.key, e2.key].sort());
   });
 
-  it('takes the radius and segments in the Measurements box, remembers them, previews and commits as one undo step', async () => {
+  it('takes the radius and segments as typed values, remembers them, previews and commits as one undo step', async () => {
     const { host, registry, tools, body, fillet } = setup();
     const id = addBox(registry);
     const e1 = edgeAt(body(id), [0, 0, 1], [1, 0, 1]);

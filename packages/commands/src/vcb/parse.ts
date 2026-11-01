@@ -4,7 +4,7 @@ import { METERS_PER, parseLength } from '@pushform/core';
 import type { LengthUnit } from '@pushform/core';
 
 /**
- * Measurements box (VCB) grammar.
+ * Typed value (VCB) grammar, read by the viewport's value fields.
  *
  *   3'6"  2.5m  1 1/2"  10          length (bare number = default unit)
  *   35deg 35°                       angle in degrees

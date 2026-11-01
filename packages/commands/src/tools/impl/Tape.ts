@@ -49,7 +49,7 @@ const IDLE: State = { kind: 'idle' };
  *   guide parallel to the edge through the offset point. Clicking a point instead starts a guide
  *   point with a dashed leader.
  * - Guide Points: click a point, click (or type the distance) → guide point + leader.
- * - Measure: click two points; the Measurements box reads the live length; hovering an edge shows
+ * - Measure: click two points; the value field reads the live length; hovering an edge shows
  *   its length. Typing a new length after a measurement proposes resizing the whole model: the
  *   tool exposes `pendingResize` and the UI confirms with `confirmResize()` (`model.resize`).
  * Arrow keys lock an axis; Shift holds the current inference.

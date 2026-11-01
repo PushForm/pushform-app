@@ -19,6 +19,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type CSSProperties,
   type JSX,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
@@ -451,6 +452,9 @@ function pickEntity(p: Point, page: LayoutPage, state: LayoutDocumentState, incl
   return null;
 }
 
+/** The visible workspace around the page, in paper millimetres from the page's top-left corner. */
+interface LayoutSurround { x: number; y: number; width: number; height: number; pxPerMm: number }
+
 function paintPage(
   canvas: HTMLCanvasElement,
   page: LayoutPage,
@@ -480,6 +484,7 @@ function paintPage(
   viewportPreview: { entityId: number; camera: LayoutViewportCamera } | null = null,
   polygonSides = 6,
   tableResizePreview: LayoutEntity | null = null,
+  surround: LayoutSurround | null = null,
 ): void {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
@@ -487,13 +492,29 @@ function paintPage(
   void prepareLayoutFonts(visibleEntities).catch(() => { /* Keep the readable fallback when offline. */ });
   const renderScale = outputDpi ? outputDpi / 25.4 : thumbnail
     ? THUMBNAIL_MAX_PX * window.devicePixelRatio / Math.max(...page.size)
+    : surround ? surround.pxPerMm * Math.min(window.devicePixelRatio, 2)
     : PX_PER_MM * Math.max(1, Math.min(zoom * window.devicePixelRatio, 4));
-  canvas.width = Math.round(page.size[0] * renderScale);
-  canvas.height = Math.round(page.size[1] * renderScale);
-  ctx.setTransform(renderScale, 0, 0, renderScale, 0, 0);
-  ctx.fillStyle = page.background;
-  ctx.fillRect(0, 0, page.size[0], page.size[1]);
-  if (!thumbnail && !presentation && state.settings.grid.show && state.settings.grid.spacingMm > 0) {
+  if (surround) {
+    // The surround shows objects past the paper edge; the paper canvas above it covers the page itself.
+    canvas.width = Math.round(surround.width * renderScale);
+    canvas.height = Math.round(surround.height * renderScale);
+    ctx.setTransform(renderScale, 0, 0, renderScale, -surround.x * renderScale, -surround.y * renderScale);
+    // The paper's shadow is drawn here, below the objects, so it never darkens their off-page parts.
+    ctx.save();
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.18)';
+    ctx.shadowBlur = 18 * renderScale / surround.pxPerMm;
+    ctx.shadowOffsetY = 3 * renderScale / surround.pxPerMm;
+    ctx.fillStyle = page.background;
+    ctx.fillRect(0, 0, page.size[0], page.size[1]);
+    ctx.restore();
+  } else {
+    canvas.width = Math.round(page.size[0] * renderScale);
+    canvas.height = Math.round(page.size[1] * renderScale);
+    ctx.setTransform(renderScale, 0, 0, renderScale, 0, 0);
+    ctx.fillStyle = page.background;
+    ctx.fillRect(0, 0, page.size[0], page.size[1]);
+  }
+  if (!surround && !thumbnail && !presentation && state.settings.grid.show && state.settings.grid.spacingMm > 0) {
     const spacing = state.settings.grid.spacingMm;
     const left = page.margin.left;
     const top = page.margin.top;
@@ -518,7 +539,7 @@ function paintPage(
     ctx.stroke();
     ctx.restore();
   }
-  if (!thumbnail && !presentation) {
+  if (!surround && !thumbnail && !presentation) {
     ctx.setLineDash([1.5 / zoom, 1.5 / zoom]);
     ctx.strokeStyle = '#b5bdc7';
     ctx.lineWidth = 0.3 / zoom;
@@ -1001,6 +1022,7 @@ export function LayoutWorkspace({
     panOffset.current = [x, y];
     workspaceRef.current?.style.setProperty('--pf-layout-pan-x', `${x}px`);
     workspaceRef.current?.style.setProperty('--pf-layout-pan-y', `${y}px`);
+    paintSurround.current();
   };
   const [tableCellsActive, setTableCellsActive] = useState(false);
   const [tableResizePreview, setTableResizePreview] = useState<LayoutEntity | null>(null);
@@ -1013,6 +1035,8 @@ export function LayoutWorkspace({
   const tableCell = tableSelection.focus;
   const setTableCell = (cell: TableCellAddress, extend = false) => setTableSelection(current => ({ anchor: extend ? current.anchor : cell, focus: cell }));
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const surroundRef = useRef<HTMLCanvasElement>(null);
+  const paintSurround = useRef<() => void>(() => {});
   const inlineTextRef = useRef<HTMLDivElement>(null);
   const [textSelection, setTextSelectionState] = useState({ start: 0, end: 0 });
   const textSelectionRef = useRef(textSelection);
@@ -1361,17 +1385,38 @@ export function LayoutWorkspace({
   }, [tab]);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (canvas) paintPage(canvas, page, state, anchor, cursor, polygonTool, selectedSet,
+    const paint = (canvas: HTMLCanvasElement, surround: LayoutSurround | null = null) => paintPage(canvas, page, state, anchor, cursor, polygonTool, selectedSet,
       movePreview, rotationPreview ?? scalePreview ?? (editingPathId === null ? null : {
         entityId: editingPathId, points: editPoints, handles: editHandles, activeIndex: activePointIndex,
       }), freehand, zoom, false, dimensionDraft, rectangleAmountMm, arcDraft,
       tool === 'bezier' && bezierDraft ? previewLayoutBezier(bezierDraft, bezierPress.current ? null : cursor) : offsetResult.shape ?? cornerResult.shape, activeRotation, labelDraft,
       false, undefined, initialLabelEdit ? editingTextId : null, tool === 'offset' ? offsetSource ?? null : null,
       tool === 'move' && moveDraft ? { base: moveDraft.base, target: cursor ?? moveDraft.base } : null, { rows: tableRows, columns: tableColumns }, placementModifiers,
-      navigatingViewportId !== null && viewportCameraPreview ? { entityId: navigatingViewportId, camera: viewportCameraPreview } : null, polygonSides, tableResizePreview);
+      navigatingViewportId !== null && viewportCameraPreview ? { entityId: navigatingViewportId, camera: viewportCameraPreview } : null, polygonSides, tableResizePreview, surround);
+    if (canvasRef.current) paint(canvasRef.current);
+    paintSurround.current = () => {
+      const canvas = canvasRef.current, surround = surroundRef.current;
+      if (!canvas || !surround) return;
+      const pageRect = canvas.getBoundingClientRect(), frame = surround.getBoundingClientRect();
+      const pxPerMm = pageRect.width / page.size[0];
+      if (!(pxPerMm > 0) || frame.width <= 0 || frame.height <= 0) { surround.width = 0; surround.height = 0; return; }
+      paint(surround, { x: (frame.left - pageRect.left) / pxPerMm, y: (frame.top - pageRect.top) / pxPerMm,
+        width: frame.width / pxPerMm, height: frame.height / pxPerMm, pxPerMm });
+    };
+    paintSurround.current();
   }, [version, imageLoads, page, state, anchor, cursor, tool, selectedSet, movePreview, moveDraft,
     editingPathId, editPoints, editHandles, activePointIndex, freehand, zoom, dimensionDraft, scalePreview, rectangleAmountMm, arcDraft, offsetResult.shape, offsetSource, cornerResult.shape, activeRotation, rotationPreview, labelDraft, initialLabelEdit, editingTextId, tableRows, tableColumns, placementModifiers, polygonTool, polygonSides, navigatingViewportId, viewportCameraPreview, bezierDraft, tableResizePreview]);
+  // Objects past the paper edge follow scrolling and workspace resizing.
+  useEffect(() => {
+    const workspace = workspaceRef.current, surround = surroundRef.current;
+    if (!workspace || !surround) return;
+    let frame = 0;
+    const schedule = () => { if (!frame) frame = requestAnimationFrame(() => { frame = 0; paintSurround.current(); }); };
+    workspace.addEventListener('scroll', schedule, { passive: true });
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(schedule);
+    observer?.observe(surround);
+    return () => { cancelAnimationFrame(frame); workspace.removeEventListener('scroll', schedule); observer?.disconnect(); };
+  }, []);
   // Navigation ends when its view is deleted, undone away, or left on another page.
   useEffect(() => {
     if (navigatingViewportId !== null && !isViewport(entityOnPage(page, state, navigatingViewportId))) endViewportNavigationRef.current();
@@ -2818,6 +2863,16 @@ export function LayoutWorkspace({
       else if (moved) commit(down.point, pointFromEvent(event));
     } else if (moved || tool === 'text') commit(down.point, pointFromEvent(event), undefined, tool === 'text' ? moved : undefined);
   };
+  // Tools work past the paper edge: presses on the workspace around the page reach the page's handlers,
+  // with page coordinates measured from the page canvas.
+  const offPage = <E extends ReactMouseEvent<HTMLElement>>(handler: (event: never) => void) => (event: E): void => {
+    const canvas = canvasRef.current;
+    if (!canvas || (event.target !== event.currentTarget && !(event.target instanceof Element && event.target.classList.contains('pf-layout-page-wrap')))) return;
+    // A press beside the page gives the page keyboard focus, as a press on the page does.
+    if (event.type === 'pointerup' && document.activeElement !== canvas) canvas.focus({ preventScroll: true });
+    handler(Object.create(event, { currentTarget: { value: canvas } }) as never);
+  };
+  const pageCursor: CSSProperties | undefined = tool === 'shape-builder' ? { cursor: shapeBuilder.session?.busy ? 'wait' : shapeBuilder.effectiveMode === 'add' ? 'copy' : 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'24\' height=\'24\'%3E%3Cpath d=\'M8 1v14M1 8h14M16 19h7\' stroke=\'white\' stroke-width=\'3\'/%3E%3Cpath d=\'M8 1v14M1 8h14M16 19h7\' stroke=\'%23d62975\' stroke-width=\'1.5\'/%3E%3C/svg%3E") 8 8, crosshair' } : tool === 'move' && !moveDraft ? { cursor: 'move' } : undefined;
   const onDoubleClick = (event: ReactMouseEvent<HTMLCanvasElement>): void => {
     if (tool === 'lasso') { if (lasso && !lasso.freehand) finishLasso(lasso.points, event); return; }
     if (tool === 'line') { setAnchor(null); setCursor(null); pointerDown.current = null; return; }
@@ -3527,7 +3582,12 @@ export function LayoutWorkspace({
         </nav>
       <div className="pf-layout-main">
         {leading}
-        <main ref={workspaceRef} className="pf-layout-workspace" aria-label="Layout workspace" onContextMenu={openContextMenu}>
+        <div className="pf-layout-workspace-frame">
+        <canvas ref={surroundRef} className="pf-layout-surround" aria-hidden="true" />
+        <main ref={workspaceRef} className="pf-layout-workspace" aria-label="Layout workspace" onContextMenu={openContextMenu}
+          data-tool={polygonTool} style={pageCursor}
+          onPointerDown={offPage(onPointerDown)} onPointerMove={offPage(onPointerMove)} onPointerUp={offPage(onPointerUp)}
+          onDoubleClick={offPage(onDoubleClick)}>
           <div className="pf-layout-page-wrap" style={{ width: page.size[0] * PX_PER_MM * zoom }}>
           {tool === 'shape-builder' ? <LayoutShapeBuilderPreview builder={shapeBuilder} size={page.size} defaultStyle={state.defaultStyle} /> : null}
           {booleanPreview?.shapes.length ? <svg className="pf-layout-boolean-preview" aria-label="Boolean result preview" viewBox={`0 0 ${page.size[0]} ${page.size[1]}`}>
@@ -3578,7 +3638,7 @@ export function LayoutWorkspace({
             tabIndex={-1}
             className="pf-layout-page"
             data-tool={polygonTool}
-            style={tool === 'shape-builder' ? { cursor: shapeBuilder.session?.busy ? 'wait' : shapeBuilder.effectiveMode === 'add' ? 'copy' : 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'24\' height=\'24\'%3E%3Cpath d=\'M8 1v14M1 8h14M16 19h7\' stroke=\'white\' stroke-width=\'3\'/%3E%3Cpath d=\'M8 1v14M1 8h14M16 19h7\' stroke=\'%23d62975\' stroke-width=\'1.5\'/%3E%3C/svg%3E") 8 8, crosshair' } : tool === 'move' && !moveDraft ? { cursor: 'move' } : undefined}
+            style={pageCursor}
             aria-label={`${page.name} canvas`}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
@@ -3762,6 +3822,7 @@ export function LayoutWorkspace({
           })() : null}
           </div>
         </main>
+        </div>
         <aside className="pf-layout-controls" aria-label="Layout settings">
       <input ref={imageImportInput} type="file" hidden aria-label="Import image or DXF file"
         accept=".svg,.png,.jpg,.jpeg,.dxf,image/svg+xml,image/png,image/jpeg" onChange={event => {

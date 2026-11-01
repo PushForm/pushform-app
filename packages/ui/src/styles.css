@@ -151,13 +151,30 @@
   background: var(--pf-accent-bg);
 }
 
+/* The surround canvas sits under the scrolling workspace and shows objects that extend past the paper edge. */
+.pf-layout-workspace-frame {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  background: var(--pf-bg);
+}
+.pf-layout-surround {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
 .pf-layout-workspace {
   flex: 1;
   min-width: 0;
   min-height: 0;
   overflow: auto;
   padding: 24px;
-  background: var(--pf-bg);
   text-align: center;
 }
 .pf-layout-page {
@@ -165,7 +182,11 @@
   width: 100%;
   max-width: none;
   height: auto;
-  box-shadow: 0 3px 18px rgba(0, 0, 0, 0.18);
+}
+/* The page takes keyboard focus for shortcuts; it never draws a focus ring over the paper edge. */
+.pf-layout-page:focus,
+.pf-layout-page:focus-visible {
+  outline: none;
 }
 .pf-layout-page-wrap {
   position: relative;
@@ -351,7 +372,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.pf-layout-page {
+.pf-layout-page,
+.pf-layout-workspace[data-tool] {
   touch-action: none;
   cursor: url('./assets/layout-pencil-cursor.svg') 0 25, crosshair;
 }
@@ -1945,7 +1967,8 @@
   font-size: 11px;
 }
 
-.pf-layout-page[data-tool='select'], .pf-layout-page[data-tool='lasso'] { cursor: default; }
+.pf-layout-page[data-tool='select'], .pf-layout-page[data-tool='lasso'],
+.pf-layout-workspace[data-tool='select'], .pf-layout-workspace[data-tool='lasso'] { cursor: default; }
 .pf-layout-selection-box {
   position: absolute; box-sizing: border-box; border: 1px dashed #1e63d1;
   pointer-events: none; z-index: 1;
@@ -2646,11 +2669,11 @@ button.pf-brand { border: 0; background: transparent; color: inherit; font: inhe
 .pf-layout-ribbon > .pf-layout-tool-option,
 .pf-layout-ribbon > .pf-layout-text-toolbar { align-self: center; }
 
-.pf-layout-page[data-tool='scale'] { cursor: nwse-resize; }
-.pf-layout-page[data-tool='move'] { cursor: move; }
-.pf-layout-page[data-tool='rotate'] { cursor: url('./assets/layout-rotate-cursor.svg') 12 12, crosshair; }
+.pf-layout-page[data-tool='scale'], .pf-layout-workspace[data-tool='scale'] { cursor: nwse-resize; }
+.pf-layout-page[data-tool='move'], .pf-layout-workspace[data-tool='move'] { cursor: move; }
+.pf-layout-page[data-tool='rotate'], .pf-layout-workspace[data-tool='rotate'] { cursor: url('./assets/layout-rotate-cursor.svg') 12 12, crosshair; }
 
-.pf-layout-page[data-tool^='boolean-'] { cursor: crosshair; }
+.pf-layout-page[data-tool^='boolean-'], .pf-layout-workspace[data-tool^='boolean-'] { cursor: crosshair; }
 .pf-layout-boolean-preview { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 4; overflow: visible; }
 .pf-layout-shape-builder-preview { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 4; overflow: visible; }
 .pf-layout-boolean-preview path { fill: #1e63d133; stroke: #1e63d1; stroke-width: 2px; vector-effect: non-scaling-stroke; stroke-dasharray: 5 3; }

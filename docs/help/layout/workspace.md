@@ -20,6 +20,12 @@ Use **Document Settings** in the Object browser to configure the document. New p
 
 A new drawing starts with Snap to Grid enabled. Grid visibility and grid snapping are separate settings: hiding the grid does not turn snapping off. You can find **Toggle Grid** in command search.
 
+## Objects past the page edge
+
+An object that runs off the paper is still drawn in full: the part past the edge shows on the gray area around the page. It is drawn and highlighted the same way as the part on the paper, and moves with zoom and panning. Printing, exporting and presentation show only what is on the paper.
+
+Your tools also work on the gray area around the page. You can draw past the edge or entirely off the paper, click an off-page part to select an object, and start a selection box there.
+
 ## Undo changes
 
 Use Undo to reverse a document edit and Redo to restore it. Temporary previews do not change the drawing until you finish the operation.

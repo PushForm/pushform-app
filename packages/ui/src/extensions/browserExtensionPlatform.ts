@@ -3,6 +3,7 @@
 import {
   ExtensionPlatform, localSettingsStore, startWebRuntime, storedDeveloperMode, type ExtensionDocuments, type ExtensionFailure, type InstalledExtension,
 } from '@pushform/extensions';
+import type { UnitSettings } from '@pushform/core';
 import { browserClipboardWriter, browserFilePicker } from './browserExtensionIo';
 import { browserViewPrinter, type PrintPrompts } from './extensionPrint';
 import { indexedDbActivityStore, indexedDbExtensionStore } from './indexedDbExtensionStore';
@@ -27,6 +28,8 @@ export function createBrowserExtensionPlatform(options: {
   readonly printPrompts?: PrintPrompts;
   /** The open documents, for the model, selection and document services. */
   readonly documents?: ExtensionDocuments;
+  /** The units of an open document, so printed tables show quantities as its panels do. */
+  readonly units?: (documentId: string) => UnitSettings | null;
 }): ExtensionPlatform {
   const storage = options.storage ?? window.localStorage;
   return new ExtensionPlatform({
@@ -44,7 +47,7 @@ export function createBrowserExtensionPlatform(options: {
     filePicker: browserFilePicker(async (request) => window.confirm(`${request.extensionName} wants to ${request.kind === 'open' ? 'open' : 'save'} a file: ${request.purpose}\n\nChoose the file?`)),
     clipboard: browserClipboardWriter(),
     fetchTransport: null,
-    ...(options.printPrompts ? { printer: browserViewPrinter(options.printPrompts) } : {}),
+    ...(options.printPrompts ? { printer: browserViewPrinter(options.printPrompts, undefined, options.units) } : {}),
     ...(options.documents ? { documents: options.documents } : {}),
     ...(options.onFailure ? { onFailure: options.onFailure } : {}),
   });

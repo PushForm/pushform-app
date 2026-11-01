@@ -122,6 +122,25 @@ export class ModelDocumentApi {
     return { ok: true, revision: this.revision, camera: cameraOut(shown ?? camera.getState()), activeScene: active ? { id: active.id, name: active.name } : null, playing: runtime.playing };
   }
 
+  /** The selection, as references carrying the instance path of their container. */
+  selection(): ModelRef[] { return this.host.selection.refs.map(refOut); }
+
+  /**
+   * Replaces the selection with entities of the container open in the editor; an empty list clears it. Makes no
+   * undo entry. Rejects with `ModelApiFailure` naming the first reference that does not exist, selecting nothing.
+   */
+  select(refs: readonly ModelRefInput[]): ModelRef[] {
+    const { ref } = this.resolver([...this.host.context.path] as Id[], new Map());
+    const resolved = refs.map(ref);
+    this.host.selection.set(resolved);
+    return this.selection();
+  }
+
+  /** Frames the camera on entities of the container open in the editor, keeping the view direction. */
+  frame(refs: readonly ModelRefInput[], animate = true): ModelViewResult {
+    return this.view({ action: { type: 'set_camera', camera: { mode: 'framed', subject: { refs: [...refs] } }, animate } });
+  }
+
   private get camera(): CameraHost | null { return this.commands.ctx.camera ?? null; }
   private get runtime() { return sceneRuntimeOf(this.commands.ctx); }
 

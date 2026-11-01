@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2026 PushForm contributors
+import type {
+  DocumentUnits, DocumentUnitsEvent, ModelBatch, ModelBatchResult, ModelChangeEvent, ModelDocumentSnapshot, ModelQuery, ModelQueryResult,
+  ModelRef, ModelRefInput,
+} from './model.ts';
 import type { UiEventOnTarget, UiNode } from './ui.ts';
 
 /**
@@ -8,6 +12,11 @@ import type { UiEventOnTarget, UiNode } from './ui.ts';
  * only when the user granted the permission it needs: reading a missing one throws a `permission.denied` error
  * naming the permissions to request. Every call is asynchronous, takes and returns plain data, and fails with an
  * `ExtensionErrorData`-shaped error.
+ *
+ * `model`, `selection` and `document` act on one open document. Pass `document`, the handle a contribution handler
+ * receives, to name it; without one, a call acts on the document of the extension's latest invocation that acted on
+ * one, which for a panel is the document it is shown with. A handle stays bound to its document when the user switches
+ * tabs; once that document closes, calls with it fail with `document.closed`.
  */
 
 /** Permissions an extension can request in its manifest. */
@@ -106,8 +115,50 @@ export interface WasmService {
   unload(input: { instance: string }, options?: CallOptions): Promise<null>;
 }
 
-/** Model and selection services take and return plain data; their shapes are described with the model operations. */
+/** A service that takes and returns plain data. */
 export type DataService<M extends string> = Readonly<Record<M, (input?: unknown, options?: CallOptions) => Promise<unknown>>>;
+
+/** Names the document a call acts on; see `ExtensionContext`. */
+export interface DocumentTarget {
+  /** The handle from `InvocationContext.document`. Default: the document of the latest invocation. */
+  document?: string | undefined;
+}
+
+/** The 3D model. Every method but `apply` needs `model.read`; `apply` needs `model.write`. */
+export interface ModelService {
+  /** The document's revision, units, open container, definitions with bounds, tags, materials, scenes and camera. */
+  read(input?: DocumentTarget, options?: CallOptions): Promise<ModelDocumentSnapshot>;
+  /** One page of a container's entities. Fields left out are null: the open container, every kind but faces, 50 entities. */
+  query(input: Partial<ModelQuery> & DocumentTarget, options?: CallOptions): Promise<ModelQueryResult>;
+  /**
+   * Applies a batch atomically as one undo entry named after the extension. Fails with `revision.stale` when the
+   * model changed since `expectedRevision`, and `validation.failed` for an operation that cannot apply; `details`
+   * carries the model's own error code and the failing operation's index. Nothing changes when a batch fails.
+   */
+  apply(input: ModelBatch & DocumentTarget, options?: CallOptions): Promise<ModelBatchResult>;
+  /** Asks to be told about changes to the document through `onChange`, until it closes. */
+  subscribe(input?: DocumentTarget, options?: CallOptions): Promise<{ document: string; revision: number }>;
+  /** Listens for changes to subscribed documents, at most one event per document every 50 ms; returns a function that stops. */
+  onChange(handler: (event: ModelChangeEvent) => void): () => void;
+}
+
+/** The selection, as model references in the container open in the editor. */
+export interface SelectionService {
+  /** Needs `selection.read`. */
+  get(input?: DocumentTarget, options?: CallOptions): Promise<{ refs: ModelRef[] }>;
+  /** Replaces the selection; an empty list clears it. Needs `selection.write`. Returns the selection now. */
+  set(input: { refs: ModelRefInput[] } & DocumentTarget, options?: CallOptions): Promise<{ refs: ModelRef[] }>;
+  /** Frames the camera on the entities, keeping the view direction. Needs `viewport.presentation`. */
+  frame(input: { refs: ModelRefInput[] } & DocumentTarget, options?: CallOptions): Promise<null>;
+}
+
+/** The document itself; needs no permission. */
+export interface DocumentService {
+  /** The units PushForm shows this document's lengths in. Format quantities with them; values stay meters. */
+  units(input?: DocumentTarget, options?: CallOptions): Promise<DocumentUnits>;
+  /** Told when the units change, or when the extension starts acting on another document; returns a function that stops. */
+  onUnitsChange(handler: (event: DocumentUnitsEvent) => void): () => void;
+}
 
 export interface ExtensionContext {
   readonly extensionId: string;
@@ -119,8 +170,11 @@ export interface ExtensionContext {
   readonly signal: AbortSignal;
   readonly ui: UiService;
   readonly log: DataService<'write'>;
-  readonly model?: DataService<'read' | 'query' | 'subscribe' | 'apply'>;
-  readonly selection?: DataService<'get' | 'set' | 'frame'>;
+  readonly document: DocumentService;
+  /** Present with `model.read` or `model.write`. */
+  readonly model?: ModelService;
+  /** Present with `selection.read`, `selection.write` or `viewport.presentation`. */
+  readonly selection?: SelectionService;
   readonly settings?: SettingsService;
   readonly files?: FilesService;
   readonly clipboard?: ClipboardService;

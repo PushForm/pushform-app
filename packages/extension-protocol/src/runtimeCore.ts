@@ -56,7 +56,7 @@ export const EXTENSION_SERVICES = {
   ui: { mount: null, update: null, unmount: null, export: 'file.export', print: 'file.export' },
   model: { read: 'model.read', query: 'model.read', subscribe: 'model.read', apply: 'model.write' },
   selection: { get: 'selection.read', set: 'selection.write', frame: 'viewport.presentation' },
-  document: { units: null },
+  document: { units: null, info: null },
   settings: { get: 'settings', set: 'settings' },
   files: { open: 'file.read', save: 'file.export' },
   clipboard: { write: 'clipboard.write' },

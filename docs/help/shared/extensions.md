@@ -34,6 +34,12 @@ An extension's panel gets its own button on the left menu bar, next to Files, AI
 
 Extension commands appear in command search with the extension's name beside them. Typing the extension's name lists its commands. When something is selected in Modeling, right-click to find the extension's actions in a submenu named after the extension.
 
+## Print from an extension
+
+When an extension offers to print, for example a parts list or a sheet of labels, PushForm shows its own print dialog. It names the extension and what it wants to print, the number of pages and the page size, with a preview of the first page. Choose **Print…** to open your browser's print dialog, **Save as PDF…** to save the pages as a PDF file, or **Cancel** to print nothing. The extension learns only whether you printed or saved.
+
+PushForm draws the pages itself from what the panel shows. Drawings print one per page. Tables continue over as many pages as they need, with the column headings repeated at the top of each page and the page number at the bottom. Columns you hid in the panel are left out, and lengths, areas and volumes use the document's units, as in the panel. Printed text uses Latin letters only: a symbol such as Σ is spelled out (**Sum**), and characters from other alphabets print as **?**. Set the paper size in your printer settings to match the page size in the dialog, and print at 100 % scale.
+
 ## Cancel an extension command that is running
 
 A command that takes a moment shows its name and the extension's name above the status bar, with **Cancel**. You can keep editing while it runs. **Cancel** stops it. If the command fails, its message stays there until you choose **Dismiss**.

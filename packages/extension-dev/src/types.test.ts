@@ -19,6 +19,7 @@ describe('SDK types', () => {
     expect(same<Sdk.UiEvent, Protocol.UiEvent>(true)).toBe(true);
     expect(same<Sdk.UiTreeItem, Protocol.UiTreeItem>(true)).toBe(true);
     expect(same<Sdk.UiQuantity, Protocol.UiQuantity>(true)).toBe(true);
+    expect(same<Sdk.UiPrintRequest, Protocol.UiPrintRequest>(true)).toBe(true);
     expect(same<Sdk.ExtensionPermission, Protocol.ExtensionPermission>(true)).toBe(true);
     expect(same<Sdk.ExtensionErrorCode, Protocol.ExtensionErrorCode>(true)).toBe(true);
     expect(same<Sdk.ExtensionErrorData, Protocol.ExtensionErrorData>(true)).toBe(true);

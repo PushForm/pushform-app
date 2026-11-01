@@ -47,6 +47,19 @@ describe('SketchUp import', () => {
     expect(definition?.sheets).toHaveLength(1);
     expect(scene.root.instances).toHaveLength(1);
   });
+  it('reads a 2020-format model without components, whose definition count sits behind the filler', async () => {
+    // The filler's definition count is 0; reading past it took the root entity count for it and lost the geometry.
+    const fixture = (name: string) => new Uint8Array(readFileSync(new URL(`../../testing/assets/sketchup/${name}`, import.meta.url)));
+    const [older, filler] = await Promise.all([readSketchUp(fixture('scene-styles-2017.skp')), readSketchUp(fixture('scene-styles-2020.skp'))]);
+    const counts = (scene: Awaited<ReturnType<typeof readSketchUp>>) => {
+      const doc = createDocument();
+      return doc.transact('import', draft => applySketchUpImport(draft, scene)).value;
+    };
+    const [a, b] = [counts(older), counts(filler)];
+    expect(b.bodies).toBe(1);
+    expect({ bodies: b.bodies, sheetFaces: b.sheetFaces, looseEdges: b.looseEdges, scenes: b.scenes }).toEqual({ bodies: a.bodies, sheetFaces: a.sheetFaces, looseEdges: a.looseEdges, scenes: a.scenes });
+  });
+
   it('reads the committed fixture with analytical one-meter volume and holed sheet area', async () => {
     const bytes = readFileSync(new URL('../../testing/assets/sketchup/import-basics.skp', import.meta.url));
     const scene = await readSketchUp(bytes), doc = createDocument();

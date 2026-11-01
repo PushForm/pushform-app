@@ -163,7 +163,7 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  openskp@1.3.0: 5642fc32d1fc897dc06c63514e6567a8d997eea712002011d43504508538d395
+  openskp@1.3.0: c46d32459ab67ee6994fdd1b45ed9da86c019d456f8ffd72b74b9e8ce236bfb5
 
 importers:
 
@@ -507,7 +507,7 @@ importers:
         version: 0.8.3
       openskp:
         specifier: 1.3.0
-        version: 1.3.0(patch_hash=5642fc32d1fc897dc06c63514e6567a8d997eea712002011d43504508538d395)
+        version: 1.3.0(patch_hash=c46d32459ab67ee6994fdd1b45ed9da86c019d456f8ffd72b74b9e8ce236bfb5)
       protobufjs:
         specifier: 8.8.1
         version: 8.8.1
@@ -5864,7 +5864,7 @@ snapshots:
     dependencies:
       wrappy: 1.0.2
 
-  openskp@1.3.0(patch_hash=5642fc32d1fc897dc06c63514e6567a8d997eea712002011d43504508538d395):
+  openskp@1.3.0(patch_hash=c46d32459ab67ee6994fdd1b45ed9da86c019d456f8ffd72b74b9e8ce236bfb5):
     dependencies:
       earcut: 3.2.4
       fflate: 0.8.3

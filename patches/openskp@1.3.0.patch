@@ -1,5 +1,5 @@
 diff --git a/dist/index.d.mts b/dist/index.d.mts
-index 9be1b32aa8166d5a75f3b9f2faf7a5221c1db088..473b74440eca83819fed46fd3be53e9f517136ef 100644
+index 9be1b32aa8166d5a75f3b9f2faf7a5221c1db088..2593927c9ddbb93af9a5bf924db34418b285436c 100644
 --- a/dist/index.d.mts
 +++ b/dist/index.d.mts
 @@ -265,12 +265,14 @@ interface SkpModel {
@@ -122,8 +122,26 @@ index 9be1b32aa8166d5a75f3b9f2faf7a5221c1db088..473b74440eca83819fed46fd3be53e9f
      layerColors: Map<string, [number, number, number]>;
      layerHidden: Map<string, boolean>;
      layerIdToName: Map<number, string>;
+@@ -1591,6 +1639,8 @@ declare class ComponentDefinitionBuilder {
+     addFace(points: readonly Point3[], options?: AddFaceOptions): void;
+     addCircle(center: Point3, normal: Point3, radius: number, options?: AddCircleOptions): void;
+     addArc(center: Point3, normal: Point3, radius: number, startAngle: number, endAngle: number, options?: AddArcOptions): void;
++    /** Add straight edges joining consecutive points, with no curve; an edge already written is reused with its flags. */
++    addEdges(points: readonly Point3[], options?: AddPolylineOptions): void;
+     addPolyline(points: readonly Point3[], options?: AddPolylineOptions): void;
+     /** Place one instance of another, already-closed component definition
+      * inside this one - the same nesting real SketchUp supports.
+@@ -1774,6 +1824,8 @@ declare class SkpBuilder {
+     addArc(center: Point3, normal: Point3, radius: number, startAngle: number, endAngle: number, options?: AddArcOptions): void;
+     /** Add one freeform polyline curve - a chain of straight edges grouped
+      * into one genuine SketchUp "Curve" entity, no face. */
++    /** Add straight edges joining consecutive points, with no curve; an edge already written is reused with its flags. */
++    addEdges(points: readonly Point3[], options?: AddPolylineOptions): void;
+     addPolyline(points: readonly Point3[], options?: AddPolylineOptions): void;
+     /** Add a FREE linear dimension between two explicit points (inches,
+      * world space). `offset` is the dimension line's offset from the
 diff --git a/dist/index.d.ts b/dist/index.d.ts
-index 9be1b32aa8166d5a75f3b9f2faf7a5221c1db088..473b74440eca83819fed46fd3be53e9f517136ef 100644
+index 9be1b32aa8166d5a75f3b9f2faf7a5221c1db088..2593927c9ddbb93af9a5bf924db34418b285436c 100644
 --- a/dist/index.d.ts
 +++ b/dist/index.d.ts
 @@ -265,12 +265,14 @@ interface SkpModel {
@@ -246,8 +264,26 @@ index 9be1b32aa8166d5a75f3b9f2faf7a5221c1db088..473b74440eca83819fed46fd3be53e9f
      layerColors: Map<string, [number, number, number]>;
      layerHidden: Map<string, boolean>;
      layerIdToName: Map<number, string>;
+@@ -1591,6 +1639,8 @@ declare class ComponentDefinitionBuilder {
+     addFace(points: readonly Point3[], options?: AddFaceOptions): void;
+     addCircle(center: Point3, normal: Point3, radius: number, options?: AddCircleOptions): void;
+     addArc(center: Point3, normal: Point3, radius: number, startAngle: number, endAngle: number, options?: AddArcOptions): void;
++    /** Add straight edges joining consecutive points, with no curve; an edge already written is reused with its flags. */
++    addEdges(points: readonly Point3[], options?: AddPolylineOptions): void;
+     addPolyline(points: readonly Point3[], options?: AddPolylineOptions): void;
+     /** Place one instance of another, already-closed component definition
+      * inside this one - the same nesting real SketchUp supports.
+@@ -1774,6 +1824,8 @@ declare class SkpBuilder {
+     addArc(center: Point3, normal: Point3, radius: number, startAngle: number, endAngle: number, options?: AddArcOptions): void;
+     /** Add one freeform polyline curve - a chain of straight edges grouped
+      * into one genuine SketchUp "Curve" entity, no face. */
++    /** Add straight edges joining consecutive points, with no curve; an edge already written is reused with its flags. */
++    addEdges(points: readonly Point3[], options?: AddPolylineOptions): void;
+     addPolyline(points: readonly Point3[], options?: AddPolylineOptions): void;
+     /** Add a FREE linear dimension between two explicit points (inches,
+      * world space). `offset` is the dimension line's offset from the
 diff --git a/dist/index.js b/dist/index.js
-index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a9033f6e8cbb 100644
+index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9ae6c8de9c 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -172,6 +172,268 @@ function readMetaUnits(metaBytes) {
@@ -1298,7 +1334,32 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
      alwaysFacesCamera: d.alwaysFacesCamera,
      shadowsFaceSun: d.shadowsFaceSun || false
    };
-@@ -2257,6 +2958,27 @@ function isClassRef(data, p, slot) {
+@@ -2192,6 +2893,24 @@ function findCountAfterV20Filler(data, countPos, limit, ar) {
+   }
+   return null;
+ }
++/** The position after an empty definition list behind a v20 filler: the filler, the definition count 0 where a model
++ * with components stores its count (9 bytes after the marker), and a plausible root entity count after it. */
++function emptyDefinitionListAfterV20Filler(data, countPos, ar) {
++  let markerAt = -1;
++  for (let i = countPos; i < countPos + 12 && i + 4 <= data.length; i++) {
++    if (data[i] === 255 && data[i + 1] === 254 && data[i + 2] === 255) {
++      markerAt = i;
++      break;
++    }
++  }
++  if (markerAt < 0 || data[markerAt + 3] !== 0) return null;
++  const at = markerAt + 4 + 9;
++  if (at + 8 > data.length) return null;
++  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
++  if (view.getUint32(at, true) !== 0) return null;
++  const roots = view.getUint32(at + 4, true);
++  return roots > 0 && roots <= 5e6 && plausibleListTag(ar, data, at + 8) ? at + 4 : null;
++}
+ function retryCountAfterV20Filler(r, countPos, limit, ar) {
+   const hit = findCountAfterV20Filler(r.data, countPos, limit, ar);
+   if (hit === null) return null;
+@@ -2257,6 +2976,27 @@ function isClassRef(data, p, slot) {
    }
    return p + 6 <= data.length && view.getUint16(p, true) === 32767 && view.getUint32(p + 2, true) === (2147483648 | slot) >>> 0;
  }
@@ -1326,7 +1387,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
  var R = class {
    constructor(data, pos = 0) {
      this.data = data;
-@@ -2356,6 +3078,7 @@ var Archive = class {
+@@ -2356,6 +3096,7 @@ var Archive = class {
      this.ver = ver;
      this.hasPid = ver >= 17;
      this.r = new R(data);
@@ -1334,7 +1395,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
    }
    alloc(entry) {
      const s = this.nextSlot;
-@@ -2425,7 +3148,7 @@ var Archive = class {
+@@ -2425,7 +3166,7 @@ var Archive = class {
        this.currentClass = prevClass;
      }
      this.slots.set(slot, ["obj", name, value]);
@@ -1343,7 +1404,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
        this.annotWatermark = this.nextSlot;
      }
      return [slot, name, value];
-@@ -2483,15 +3206,15 @@ function drawbase(ar, r) {
+@@ -2483,15 +3224,15 @@ function drawbase(ar, r) {
    const tag = r.peekU16();
    let layer;
    if (layCls !== void 0 && tag === (32768 | layCls)) {
@@ -1362,7 +1423,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
    } else {
      layer = r.u16();
    }
-@@ -2526,9 +3249,15 @@ function readCurve(ar, r) {
+@@ -2526,9 +3267,15 @@ function readCurve(ar, r) {
  }
  function readArcCurve(ar, r) {
    preamble(ar, r);
@@ -1381,7 +1442,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
  }
  function registerBurn(ar, delta) {
    ar.burns.push([ar.annotWatermark + ar.cumDelta, delta]);
-@@ -2646,7 +3375,11 @@ function readAttrNamed(ar, r) {
+@@ -2646,7 +3393,11 @@ function readAttrNamed(ar, r) {
      if (key === "") break;
      entries[key] = readTyped(r.u8());
    }
@@ -1394,7 +1455,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
    return { k: "dict", name: dictname, entries };
  }
  var DYNAMIC_ATTRIBUTES_DICT_NAME = "dynamic_attributes";
-@@ -2672,10 +3405,11 @@ function extractLegacyDynamicProperties(attrs) {
+@@ -2672,10 +3423,11 @@ function extractLegacyDynamicProperties(attrs) {
  function readLayer(ar, r) {
    preamble(ar, r);
    const name = r.utf16();
@@ -1410,7 +1471,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
    r.utf16();
    const flags = r.u16();
    if (flags & 255) {
-@@ -2686,11 +3420,21 @@ function readLayer(ar, r) {
+@@ -2686,11 +3438,21 @@ function readLayer(ar, r) {
    const rgba = r.raw(4);
    r.utf16();
    r.raw(21);
@@ -1434,7 +1495,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
    if (!(dib && typeof dib === "object" && dib.k === "dib")) {
      throw new LegacyParseError(`texture object is not a dib ${r.ctx()}`);
    }
-@@ -2708,16 +3452,22 @@ function textureBlock(ar, r) {
+@@ -2708,16 +3470,22 @@ function textureBlock(ar, r) {
    const blob = r.raw(8);
    const opacity = r.f64();
    const useOp = r.u8();
@@ -1459,7 +1520,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
    };
  }
  function readMaterial(ar, r) {
-@@ -2740,10 +3490,12 @@ function readMaterial(ar, r) {
+@@ -2740,10 +3508,12 @@ function readMaterial(ar, r) {
      out.opacity = tex.opacity;
      out.use_opacity = tex.use_opacity;
      out.tex_dib = tex.tex_dib;
@@ -1472,7 +1533,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
    }
    return out;
  }
-@@ -2756,6 +3508,13 @@ function readDib(ar, r) {
+@@ -2756,6 +3526,13 @@ function readDib(ar, r) {
    const data = r.raw(length);
    return { k: "dib", subtype, data };
  }
@@ -1486,7 +1547,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
  function readFtc(ar, r) {
    preamble(ar, r);
    r.u32();
-@@ -2775,15 +3534,22 @@ function readFtc(ar, r) {
+@@ -2775,15 +3552,22 @@ function readFtc(ar, r) {
      front_pins: frontPins,
      back_pins: backPins,
      front_projected: Boolean(fflags & 2),
@@ -1512,7 +1573,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
  }
  function readThumbnail(ar, r) {
    preamble(ar, r);
-@@ -2836,7 +3602,7 @@ function strictNextTag(ar, data, at, allowNull = true) {
+@@ -2836,7 +3620,7 @@ function strictNextTag(ar, data, at, allowNull = true) {
  }
  function readConstructionLine(ar, r) {
    preamble(ar, r);
@@ -1521,7 +1582,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
    const point = r.f64s(3);
    const direction = r.f64s(3);
    const [startParam, endParam] = r.f64s(2);
-@@ -2844,7 +3610,18 @@ function readConstructionLine(ar, r) {
+@@ -2844,7 +3628,18 @@ function readConstructionLine(ar, r) {
    if (k === null) {
      const dflt = ar.ver === 17 ? 7 : 4;
      const order = [dflt, ...[0, 4, 7].filter((c) => c !== dflt)];
@@ -1540,7 +1601,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
        for (const cand of order) {
          if (strictNextTag(ar, r.data, r.pos + cand, allowNull)) {
            k = cand;
-@@ -2859,7 +3636,7 @@ function readConstructionLine(ar, r) {
+@@ -2859,7 +3654,7 @@ function readConstructionLine(ar, r) {
    const huge = 1e20;
    const start = Math.abs(startParam) >= huge ? null : [point[0] + direction[0] * startParam, point[1] + direction[1] * startParam, point[2] + direction[2] * startParam];
    const end = Math.abs(endParam) >= huge ? null : [point[0] + direction[0] * endParam, point[1] + direction[1] * endParam, point[2] + direction[2] * endParam];
@@ -1549,7 +1610,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
  }
  function readConstructionPoint(ar, r) {
    preamble(ar, r);
-@@ -2887,30 +3664,54 @@ function readSectionPlane(ar, r) {
+@@ -2887,30 +3682,54 @@ function readSectionPlane(ar, r) {
    return { k: "sectionplane", plane, name, label, db };
  }
  function readSkFont(ar, r) {
@@ -1618,7 +1679,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
    let p = r.pos;
    let idx;
    while (true) {
-@@ -2919,11 +3720,15 @@ function readText(ar, r) {
+@@ -2919,11 +3738,15 @@ function readText(ar, r) {
        throw new LegacyParseError(`text delimiter not found ${r.ctx()}`);
      }
      const blk = r.data.subarray(idx - 11, idx);
@@ -1635,7 +1696,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
    r.raw(idx - r.pos);
    const text = r.utf16();
    r.raw(5);
-@@ -2939,7 +3744,98 @@ function readText(ar, r) {
+@@ -2939,7 +3762,98 @@ function readText(ar, r) {
      r.raw(6);
      attach.push(val);
    }
@@ -1735,7 +1796,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
  }
  function readEntityList(ar, r, count, owner) {
    const ents = [];
-@@ -3029,7 +3925,9 @@ function readDefinition(ar, r) {
+@@ -3029,7 +3943,9 @@ function readDefinition(ar, r) {
    for (let i = 0; i < nrel; i++) {
      ar.readObject(r, "CRelationship");
    }
@@ -1746,7 +1807,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
    if (!bytesEqual(r.peek(19).subarray(16, 19), STR_MARKER)) {
      for (let skip = 1; skip <= 4; skip++) {
        const at = r.pos + skip;
-@@ -3068,6 +3966,7 @@ function readDefinition(ar, r) {
+@@ -3068,6 +3984,7 @@ function readDefinition(ar, r) {
      name,
      guid: toHex(guid),
      ents,
@@ -1754,7 +1815,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
      faces_camera: Boolean(behavior & 1),
      shadows_face_sun: Boolean(behavior & 2)
    };
-@@ -3082,12 +3981,33 @@ function readInstance(ar, r) {
+@@ -3082,12 +3999,33 @@ function readInstance(ar, r) {
    }
    const xf = r.f64s(13);
    const name = r.utf16();
@@ -1791,7 +1852,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
    CVertex: readVertex,
    CEdge: readEdge,
    CCurve: readCurve,
-@@ -3097,7 +4017,7 @@ var READERS = {
+@@ -3097,7 +4035,7 @@ var READERS = {
    CFace: readFace,
    CLayer: readLayer,
    CMaterial: readMaterial,
@@ -1800,7 +1861,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
    CAttributeContainer: readAttrContainer,
    CAttributeNamed: readAttrNamed,
    CCamera: readCamera,
-@@ -3113,6 +4033,7 @@ var READERS = {
+@@ -3113,6 +4051,7 @@ var READERS = {
    CSectionPlane: readSectionPlane,
    CSkFont: readSkFont,
    CDimensionLinear: readDimLinear,
@@ -1808,7 +1869,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
    CText: readText
  };
  function isLegacy(data) {
-@@ -3281,7 +4202,9 @@ function walkModel(data, ver, start, matCount, base) {
+@@ -3281,14 +4220,24 @@ function walkModel(data, ver, start, matCount, base) {
      }
      break;
    }
@@ -1819,7 +1880,24 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
    if (dn !== "CLayer") {
      throw new LegacyParseError(`definition-list anchor is ${dn}, not a layer`);
    }
-@@ -3315,7 +4238,197 @@ function walkModel(data, ver, start, matCount, base) {
+   let defCount = r.u32();
+   if (defCount > 1e6) {
+-    const retry = retryCountAfterV20Filler(r, r.pos - 4, 1e6, ar);
+-    if (retry !== null) defCount = retry;
++    // A model without components stores 0 where the filler's definition count goes; the retry skips zero counts
++    // and would take the root entity count that follows for the definition count.
++    const empty = emptyDefinitionListAfterV20Filler(r.data, r.pos - 4, ar);
++    if (empty !== null) {
++      r.pos = empty;
++      defCount = 0;
++    } else {
++      const retry = retryCountAfterV20Filler(r, r.pos - 4, 1e6, ar);
++      if (retry !== null) defCount = retry;
++    }
+   }
+   if (defCount > 1e6) {
+     throw new LegacyParseError("implausible definition count");
+@@ -3315,7 +4264,197 @@ function walkModel(data, ver, start, matCount, base) {
      throw new LegacyParseError("implausible root entity count");
    }
    const root = readEntityList(ar, r, rootCount, "root");
@@ -2018,7 +2096,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
  }
  var LegacyBuilder = class {
    constructor() {
-@@ -3344,7 +4457,15 @@ function addEdge(builder, slot, e, slots) {
+@@ -3344,7 +4483,15 @@ function addEdge(builder, slot, e, slots) {
      }
    }
    builder.edges.set(slot, [v1, v2]);
@@ -2034,7 +2112,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
    const flags = (db.soft ? 8 : 0) | (db.smooth ? 16 : 0) | (db.hidden ? 1 : 0);
    if (flags) {
      builder.edgeFlags.set(slot, flags);
-@@ -3378,7 +4499,8 @@ function fillBuilder(builder, ents, slots) {
+@@ -3378,7 +4525,8 @@ function fillBuilder(builder, ents, slots) {
          uvTransformBack: null,
          uvProjected: false,
          uvProjectedBack: false,
@@ -2044,7 +2122,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
        };
        const attrs = v.attrs;
        if (attrs && typeof attrs === "object") {
-@@ -3388,6 +4510,8 @@ function fillBuilder(builder, ents, slots) {
+@@ -3388,6 +4536,8 @@ function fillBuilder(builder, ents, slots) {
              face.uvTransformBack = [...cv.back];
              face.uvProjected = cv.front_projected;
              face.uvProjectedBack = cv.back_projected;
@@ -2053,7 +2131,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
            }
          }
        }
-@@ -3419,32 +4543,63 @@ function fillBuilder(builder, ents, slots) {
+@@ -3419,32 +4569,63 @@ function fillBuilder(builder, ents, slots) {
          properties: {}
        });
      } else if (k === "sectionplane") {
@@ -2122,7 +2200,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
        });
      }
    }
-@@ -3477,6 +4632,7 @@ function parseLegacyToRaw(data, options) {
+@@ -3477,6 +4658,7 @@ function parseLegacyToRaw(data, options) {
      throw e;
    }
    const { ar, root, layers, materials } = walkResult;
@@ -2130,7 +2208,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
    const slots = ar.slots;
    emitLog(options, "debug", `Legacy walk complete: ${materials.length} materials, ${layers.length} layers`);
    const imageDefIds = /* @__PURE__ */ new Set();
-@@ -3485,6 +4641,12 @@ function parseLegacyToRaw(data, options) {
+@@ -3485,6 +4667,12 @@ function parseLegacyToRaw(data, options) {
        imageDefIds.add(ent[2].def);
      }
    }
@@ -2143,7 +2221,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
    const materialsMap = /* @__PURE__ */ new Map();
    const materialIdToName = /* @__PURE__ */ new Map();
    for (const [s, v] of materials) {
-@@ -3498,10 +4660,11 @@ function parseLegacyToRaw(data, options) {
+@@ -3498,10 +4686,11 @@ function parseLegacyToRaw(data, options) {
      const colorized = v.colorized || false;
      let texture = null;
      if ("tex_dib" in v) {
@@ -2158,7 +2236,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
        const fname = v.tex_file || `${v.name}${ext}`;
        texture = { filename: fname, width: v.tex_w, height: v.tex_h, data: texData };
      }
-@@ -3511,10 +4674,8 @@ function parseLegacyToRaw(data, options) {
+@@ -3511,10 +4700,8 @@ function parseLegacyToRaw(data, options) {
        transparency: trans,
        id: null,
        texture,
@@ -2170,7 +2248,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
      };
      materialsMap.set(v.name, matObj);
      materialIdToName.set(s, v.name);
-@@ -3544,10 +4705,12 @@ function parseLegacyToRaw(data, options) {
+@@ -3544,10 +4731,12 @@ function parseLegacyToRaw(data, options) {
          const d = ent[2];
          const b = new LegacyBuilder();
          fillBuilder(b, d.ents, slots);
@@ -2183,7 +2261,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
            alwaysFacesCamera: d.faces_camera || false,
            shadowsFaceSun: d.shadows_face_sun || false,
            builder: b
-@@ -3568,6 +4731,7 @@ function parseLegacyToRaw(data, options) {
+@@ -3568,6 +4757,7 @@ function parseLegacyToRaw(data, options) {
    }
    const rootBuilder = new LegacyBuilder();
    fillBuilder(rootBuilder, root, slots);
@@ -2191,7 +2269,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
    defsDict.set("ROOT", {
      guid: "ROOT",
      name: "ROOT_MODEL",
-@@ -3587,14 +4751,17 @@ function parseLegacyToRaw(data, options) {
+@@ -3587,14 +4777,17 @@ function parseLegacyToRaw(data, options) {
      // that's a VFF/ZIP-only construct - so there is no known source for
      // the model's unit-system string here.
      units: null,
@@ -2214,7 +2292,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
      dimensions: [],
      materialIdToName,
      materialsMap,
-@@ -3795,8 +4962,16 @@ function parsePages(node) {
+@@ -3795,8 +4988,16 @@ function parsePages(node) {
            fov: 35,
            parallel: false,
            orthoHeight: 0,
@@ -2232,7 +2310,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
          const head = tlvItemsInt(tlvFindInt(items, 28500));
          const name = tlvFindInt(head, 28501);
          if (name !== null && name.length > 0) {
-@@ -3823,7 +4998,9 @@ function parsePages(node) {
+@@ -3823,7 +5024,9 @@ function parsePages(node) {
            page.hiddenLayerIds.push(parseVarInt(hidden, off + 1, ln));
            off += 1 + ln;
          }
@@ -2243,7 +2321,39 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
        }
      }
    }
-@@ -13305,6 +14482,8 @@ function parseToRaw(buffer, options) {
+@@ -12319,6 +13522,15 @@ var ComponentDefinitionBuilder = class {
+       options.smoothEdges ?? false
+     );
+   }
++  /** Add straight edges joining consecutive points, with no curve. An edge already written (by a face or an earlier
++   * call) is reused, keeping its flags, so writing flagged edges before the faces they bound sets those faces' edges. */
++  addEdges(points, options = {}) {
++    this.checkWritable("edges");
++    const pts = points.map(toPoint3);
++    if (pts.length < 2) throw new SkpWriteError("edges need at least 2 points");
++    const [, , newEntities] = this._skp._definitionWriter().writeEdgeChain(pts, this.vertexSlots, this.edgeRegistry, options.closed ?? false, options.hiddenEdges ?? false, options.softEdges ?? false, options.smoothEdges ?? false);
++    this.newEntityCount += newEntities;
++  }
+   addPolyline(points, options = {}) {
+     this.checkWritable("polylines");
+     const pts = points.map(toPoint3);
+@@ -12854,6 +14066,15 @@ var SkpBuilder = class {
+   }
+   /** Add one freeform polyline curve - a chain of straight edges grouped
+    * into one genuine SketchUp "Curve" entity, no face. */
++  /** Add straight edges joining consecutive points, with no curve. An edge already written (by a face or an earlier
++   * call) is reused, keeping its flags, so writing flagged edges before the faces they bound sets those faces' edges. */
++  addEdges(points, options = {}) {
++    const pts = points.map(toPoint3);
++    if (pts.length < 2) throw new SkpWriteError("edges need at least 2 points");
++    this.ensureGeometryWriter();
++    const [, , newEntities] = this.geometryWriter.writeEdgeChain(pts, this.vertexSlots, this.edgeRegistry, options.closed ?? false, options.hiddenEdges ?? false, options.softEdges ?? false, options.smoothEdges ?? false);
++    this.newEntityCount += newEntities;
++  }
+   addPolyline(points, options = {}) {
+     const pts = points.map(toPoint3);
+     if (pts.length < 2) throw new SkpWriteError("a polyline needs at least 2 points");
+@@ -13305,6 +14526,8 @@ function parseToRaw(buffer, options) {
    const materialFiles = contents.materialFiles;
    emitLog(options, "debug", `Detected version ${version} (VFF/ZIP container)`);
    const units = contents.metaData ? readMetaUnits(contents.metaData) : null;
@@ -2252,7 +2362,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
    const layerColors = /* @__PURE__ */ new Map();
    const layerHidden = /* @__PURE__ */ new Map();
    const materialsMap = /* @__PURE__ */ new Map();
-@@ -13361,6 +14540,7 @@ function parseToRaw(buffer, options) {
+@@ -13361,6 +14584,7 @@ function parseToRaw(buffer, options) {
      }
    }
    const styles = [];
@@ -2260,7 +2370,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
    for (const [name, xmlBytes] of Object.entries(materialFiles)) {
      const lowerName = name.toLowerCase();
      if (lowerName.startsWith("styles/") && lowerName.endsWith("style.xml")) {
-@@ -13374,14 +14554,19 @@ function parseToRaw(buffer, options) {
+@@ -13374,14 +14598,19 @@ function parseToRaw(buffer, options) {
              frontColor: parsedStyle.frontColor,
              backColor: parsedStyle.backColor
            });
@@ -2280,7 +2390,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
    function collectMaterialIds(nodes) {
      for (const el of nodes) {
        if (el.tag === "C832") {
-@@ -13419,8 +14604,9 @@ function parseToRaw(buffer, options) {
+@@ -13419,8 +14648,9 @@ function parseToRaw(buffer, options) {
    let pageNode = null;
    for (const { index, total, node: el } of iterTopLevelLazy(modelData, 0, modelData.length)) {
      try {
@@ -2291,7 +2401,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
        collectDefs([el], defsDict, options);
        scanVertexPositions(el, vertexPositions);
        scanInstanceTransforms(el, instanceWorld);
-@@ -13466,14 +14652,21 @@ function parseToRaw(buffer, options) {
+@@ -13466,14 +14696,21 @@ function parseToRaw(buffer, options) {
      shadowsFaceSun: false,
      builder: rootBuilder
    });
@@ -2314,7 +2424,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..df69fceb3654032962b35747abf4a903
      materialsMap,
      materialsByFolder,
 diff --git a/dist/index.mjs b/dist/index.mjs
-index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789ec280303 100644
+index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c97401623bee5873 100644
 --- a/dist/index.mjs
 +++ b/dist/index.mjs
 @@ -102,6 +102,268 @@ function readMetaUnits(metaBytes) {
@@ -3365,7 +3475,32 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
      alwaysFacesCamera: d.alwaysFacesCamera,
      shadowsFaceSun: d.shadowsFaceSun || false
    };
-@@ -2187,6 +2888,27 @@ function isClassRef(data, p, slot) {
+@@ -2122,6 +2823,24 @@ function findCountAfterV20Filler(data, countPos, limit, ar) {
+   }
+   return null;
+ }
++/** The position after an empty definition list behind a v20 filler: the filler, the definition count 0 where a model
++ * with components stores its count (9 bytes after the marker), and a plausible root entity count after it. */
++function emptyDefinitionListAfterV20Filler(data, countPos, ar) {
++  let markerAt = -1;
++  for (let i = countPos; i < countPos + 12 && i + 4 <= data.length; i++) {
++    if (data[i] === 255 && data[i + 1] === 254 && data[i + 2] === 255) {
++      markerAt = i;
++      break;
++    }
++  }
++  if (markerAt < 0 || data[markerAt + 3] !== 0) return null;
++  const at = markerAt + 4 + 9;
++  if (at + 8 > data.length) return null;
++  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
++  if (view.getUint32(at, true) !== 0) return null;
++  const roots = view.getUint32(at + 4, true);
++  return roots > 0 && roots <= 5e6 && plausibleListTag(ar, data, at + 8) ? at + 4 : null;
++}
+ function retryCountAfterV20Filler(r, countPos, limit, ar) {
+   const hit = findCountAfterV20Filler(r.data, countPos, limit, ar);
+   if (hit === null) return null;
+@@ -2187,6 +2906,27 @@ function isClassRef(data, p, slot) {
    }
    return p + 6 <= data.length && view.getUint16(p, true) === 32767 && view.getUint32(p + 2, true) === (2147483648 | slot) >>> 0;
  }
@@ -3393,7 +3528,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
  var R = class {
    constructor(data, pos = 0) {
      this.data = data;
-@@ -2286,6 +3008,7 @@ var Archive = class {
+@@ -2286,6 +3026,7 @@ var Archive = class {
      this.ver = ver;
      this.hasPid = ver >= 17;
      this.r = new R(data);
@@ -3401,7 +3536,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
    }
    alloc(entry) {
      const s = this.nextSlot;
-@@ -2355,7 +3078,7 @@ var Archive = class {
+@@ -2355,7 +3096,7 @@ var Archive = class {
        this.currentClass = prevClass;
      }
      this.slots.set(slot, ["obj", name, value]);
@@ -3410,7 +3545,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
        this.annotWatermark = this.nextSlot;
      }
      return [slot, name, value];
-@@ -2413,15 +3136,15 @@ function drawbase(ar, r) {
+@@ -2413,15 +3154,15 @@ function drawbase(ar, r) {
    const tag = r.peekU16();
    let layer;
    if (layCls !== void 0 && tag === (32768 | layCls)) {
@@ -3429,7 +3564,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
    } else {
      layer = r.u16();
    }
-@@ -2456,9 +3179,15 @@ function readCurve(ar, r) {
+@@ -2456,9 +3197,15 @@ function readCurve(ar, r) {
  }
  function readArcCurve(ar, r) {
    preamble(ar, r);
@@ -3448,7 +3583,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
  }
  function registerBurn(ar, delta) {
    ar.burns.push([ar.annotWatermark + ar.cumDelta, delta]);
-@@ -2576,7 +3305,11 @@ function readAttrNamed(ar, r) {
+@@ -2576,7 +3323,11 @@ function readAttrNamed(ar, r) {
      if (key === "") break;
      entries[key] = readTyped(r.u8());
    }
@@ -3461,7 +3596,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
    return { k: "dict", name: dictname, entries };
  }
  var DYNAMIC_ATTRIBUTES_DICT_NAME = "dynamic_attributes";
-@@ -2602,10 +3335,11 @@ function extractLegacyDynamicProperties(attrs) {
+@@ -2602,10 +3353,11 @@ function extractLegacyDynamicProperties(attrs) {
  function readLayer(ar, r) {
    preamble(ar, r);
    const name = r.utf16();
@@ -3477,7 +3612,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
    r.utf16();
    const flags = r.u16();
    if (flags & 255) {
-@@ -2616,11 +3350,21 @@ function readLayer(ar, r) {
+@@ -2616,11 +3368,21 @@ function readLayer(ar, r) {
    const rgba = r.raw(4);
    r.utf16();
    r.raw(21);
@@ -3501,7 +3636,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
    if (!(dib && typeof dib === "object" && dib.k === "dib")) {
      throw new LegacyParseError(`texture object is not a dib ${r.ctx()}`);
    }
-@@ -2638,16 +3382,22 @@ function textureBlock(ar, r) {
+@@ -2638,16 +3400,22 @@ function textureBlock(ar, r) {
    const blob = r.raw(8);
    const opacity = r.f64();
    const useOp = r.u8();
@@ -3526,7 +3661,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
    };
  }
  function readMaterial(ar, r) {
-@@ -2670,10 +3420,12 @@ function readMaterial(ar, r) {
+@@ -2670,10 +3438,12 @@ function readMaterial(ar, r) {
      out.opacity = tex.opacity;
      out.use_opacity = tex.use_opacity;
      out.tex_dib = tex.tex_dib;
@@ -3539,7 +3674,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
    }
    return out;
  }
-@@ -2686,6 +3438,13 @@ function readDib(ar, r) {
+@@ -2686,6 +3456,13 @@ function readDib(ar, r) {
    const data = r.raw(length);
    return { k: "dib", subtype, data };
  }
@@ -3553,7 +3688,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
  function readFtc(ar, r) {
    preamble(ar, r);
    r.u32();
-@@ -2705,15 +3464,22 @@ function readFtc(ar, r) {
+@@ -2705,15 +3482,22 @@ function readFtc(ar, r) {
      front_pins: frontPins,
      back_pins: backPins,
      front_projected: Boolean(fflags & 2),
@@ -3579,7 +3714,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
  }
  function readThumbnail(ar, r) {
    preamble(ar, r);
-@@ -2766,7 +3532,7 @@ function strictNextTag(ar, data, at, allowNull = true) {
+@@ -2766,7 +3550,7 @@ function strictNextTag(ar, data, at, allowNull = true) {
  }
  function readConstructionLine(ar, r) {
    preamble(ar, r);
@@ -3588,7 +3723,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
    const point = r.f64s(3);
    const direction = r.f64s(3);
    const [startParam, endParam] = r.f64s(2);
-@@ -2774,7 +3540,18 @@ function readConstructionLine(ar, r) {
+@@ -2774,7 +3558,18 @@ function readConstructionLine(ar, r) {
    if (k === null) {
      const dflt = ar.ver === 17 ? 7 : 4;
      const order = [dflt, ...[0, 4, 7].filter((c) => c !== dflt)];
@@ -3607,7 +3742,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
        for (const cand of order) {
          if (strictNextTag(ar, r.data, r.pos + cand, allowNull)) {
            k = cand;
-@@ -2789,7 +3566,7 @@ function readConstructionLine(ar, r) {
+@@ -2789,7 +3584,7 @@ function readConstructionLine(ar, r) {
    const huge = 1e20;
    const start = Math.abs(startParam) >= huge ? null : [point[0] + direction[0] * startParam, point[1] + direction[1] * startParam, point[2] + direction[2] * startParam];
    const end = Math.abs(endParam) >= huge ? null : [point[0] + direction[0] * endParam, point[1] + direction[1] * endParam, point[2] + direction[2] * endParam];
@@ -3616,7 +3751,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
  }
  function readConstructionPoint(ar, r) {
    preamble(ar, r);
-@@ -2817,30 +3594,54 @@ function readSectionPlane(ar, r) {
+@@ -2817,30 +3612,54 @@ function readSectionPlane(ar, r) {
    return { k: "sectionplane", plane, name, label, db };
  }
  function readSkFont(ar, r) {
@@ -3685,7 +3820,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
    let p = r.pos;
    let idx;
    while (true) {
-@@ -2849,11 +3650,15 @@ function readText(ar, r) {
+@@ -2849,11 +3668,15 @@ function readText(ar, r) {
        throw new LegacyParseError(`text delimiter not found ${r.ctx()}`);
      }
      const blk = r.data.subarray(idx - 11, idx);
@@ -3702,7 +3837,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
    r.raw(idx - r.pos);
    const text = r.utf16();
    r.raw(5);
-@@ -2869,7 +3674,98 @@ function readText(ar, r) {
+@@ -2869,7 +3692,98 @@ function readText(ar, r) {
      r.raw(6);
      attach.push(val);
    }
@@ -3802,7 +3937,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
  }
  function readEntityList(ar, r, count, owner) {
    const ents = [];
-@@ -2959,7 +3855,9 @@ function readDefinition(ar, r) {
+@@ -2959,7 +3873,9 @@ function readDefinition(ar, r) {
    for (let i = 0; i < nrel; i++) {
      ar.readObject(r, "CRelationship");
    }
@@ -3813,7 +3948,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
    if (!bytesEqual(r.peek(19).subarray(16, 19), STR_MARKER)) {
      for (let skip = 1; skip <= 4; skip++) {
        const at = r.pos + skip;
-@@ -2998,6 +3896,7 @@ function readDefinition(ar, r) {
+@@ -2998,6 +3914,7 @@ function readDefinition(ar, r) {
      name,
      guid: toHex(guid),
      ents,
@@ -3821,7 +3956,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
      faces_camera: Boolean(behavior & 1),
      shadows_face_sun: Boolean(behavior & 2)
    };
-@@ -3012,12 +3911,33 @@ function readInstance(ar, r) {
+@@ -3012,12 +3929,33 @@ function readInstance(ar, r) {
    }
    const xf = r.f64s(13);
    const name = r.utf16();
@@ -3858,7 +3993,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
    CVertex: readVertex,
    CEdge: readEdge,
    CCurve: readCurve,
-@@ -3027,7 +3947,7 @@ var READERS = {
+@@ -3027,7 +3965,7 @@ var READERS = {
    CFace: readFace,
    CLayer: readLayer,
    CMaterial: readMaterial,
@@ -3867,7 +4002,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
    CAttributeContainer: readAttrContainer,
    CAttributeNamed: readAttrNamed,
    CCamera: readCamera,
-@@ -3043,6 +3963,7 @@ var READERS = {
+@@ -3043,6 +3981,7 @@ var READERS = {
    CSectionPlane: readSectionPlane,
    CSkFont: readSkFont,
    CDimensionLinear: readDimLinear,
@@ -3875,7 +4010,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
    CText: readText
  };
  function isLegacy(data) {
-@@ -3211,7 +4132,9 @@ function walkModel(data, ver, start, matCount, base) {
+@@ -3211,14 +4150,24 @@ function walkModel(data, ver, start, matCount, base) {
      }
      break;
    }
@@ -3886,7 +4021,24 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
    if (dn !== "CLayer") {
      throw new LegacyParseError(`definition-list anchor is ${dn}, not a layer`);
    }
-@@ -3245,7 +4168,197 @@ function walkModel(data, ver, start, matCount, base) {
+   let defCount = r.u32();
+   if (defCount > 1e6) {
+-    const retry = retryCountAfterV20Filler(r, r.pos - 4, 1e6, ar);
+-    if (retry !== null) defCount = retry;
++    // A model without components stores 0 where the filler's definition count goes; the retry skips zero counts
++    // and would take the root entity count that follows for the definition count.
++    const empty = emptyDefinitionListAfterV20Filler(r.data, r.pos - 4, ar);
++    if (empty !== null) {
++      r.pos = empty;
++      defCount = 0;
++    } else {
++      const retry = retryCountAfterV20Filler(r, r.pos - 4, 1e6, ar);
++      if (retry !== null) defCount = retry;
++    }
+   }
+   if (defCount > 1e6) {
+     throw new LegacyParseError("implausible definition count");
+@@ -3245,7 +4194,197 @@ function walkModel(data, ver, start, matCount, base) {
      throw new LegacyParseError("implausible root entity count");
    }
    const root = readEntityList(ar, r, rootCount, "root");
@@ -4085,7 +4237,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
  }
  var LegacyBuilder = class {
    constructor() {
-@@ -3274,7 +4387,15 @@ function addEdge(builder, slot, e, slots) {
+@@ -3274,7 +4413,15 @@ function addEdge(builder, slot, e, slots) {
      }
    }
    builder.edges.set(slot, [v1, v2]);
@@ -4101,7 +4253,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
    const flags = (db.soft ? 8 : 0) | (db.smooth ? 16 : 0) | (db.hidden ? 1 : 0);
    if (flags) {
      builder.edgeFlags.set(slot, flags);
-@@ -3308,7 +4429,8 @@ function fillBuilder(builder, ents, slots) {
+@@ -3308,7 +4455,8 @@ function fillBuilder(builder, ents, slots) {
          uvTransformBack: null,
          uvProjected: false,
          uvProjectedBack: false,
@@ -4111,7 +4263,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
        };
        const attrs = v.attrs;
        if (attrs && typeof attrs === "object") {
-@@ -3318,6 +4440,8 @@ function fillBuilder(builder, ents, slots) {
+@@ -3318,6 +4466,8 @@ function fillBuilder(builder, ents, slots) {
              face.uvTransformBack = [...cv.back];
              face.uvProjected = cv.front_projected;
              face.uvProjectedBack = cv.back_projected;
@@ -4120,7 +4272,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
            }
          }
        }
-@@ -3349,32 +4473,63 @@ function fillBuilder(builder, ents, slots) {
+@@ -3349,32 +4499,63 @@ function fillBuilder(builder, ents, slots) {
          properties: {}
        });
      } else if (k === "sectionplane") {
@@ -4189,7 +4341,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
        });
      }
    }
-@@ -3407,6 +4562,7 @@ function parseLegacyToRaw(data, options) {
+@@ -3407,6 +4588,7 @@ function parseLegacyToRaw(data, options) {
      throw e;
    }
    const { ar, root, layers, materials } = walkResult;
@@ -4197,7 +4349,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
    const slots = ar.slots;
    emitLog(options, "debug", `Legacy walk complete: ${materials.length} materials, ${layers.length} layers`);
    const imageDefIds = /* @__PURE__ */ new Set();
-@@ -3415,6 +4571,12 @@ function parseLegacyToRaw(data, options) {
+@@ -3415,6 +4597,12 @@ function parseLegacyToRaw(data, options) {
        imageDefIds.add(ent[2].def);
      }
    }
@@ -4210,7 +4362,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
    const materialsMap = /* @__PURE__ */ new Map();
    const materialIdToName = /* @__PURE__ */ new Map();
    for (const [s, v] of materials) {
-@@ -3428,10 +4590,11 @@ function parseLegacyToRaw(data, options) {
+@@ -3428,10 +4616,11 @@ function parseLegacyToRaw(data, options) {
      const colorized = v.colorized || false;
      let texture = null;
      if ("tex_dib" in v) {
@@ -4225,7 +4377,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
        const fname = v.tex_file || `${v.name}${ext}`;
        texture = { filename: fname, width: v.tex_w, height: v.tex_h, data: texData };
      }
-@@ -3441,10 +4604,8 @@ function parseLegacyToRaw(data, options) {
+@@ -3441,10 +4630,8 @@ function parseLegacyToRaw(data, options) {
        transparency: trans,
        id: null,
        texture,
@@ -4237,7 +4389,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
      };
      materialsMap.set(v.name, matObj);
      materialIdToName.set(s, v.name);
-@@ -3474,10 +4635,12 @@ function parseLegacyToRaw(data, options) {
+@@ -3474,10 +4661,12 @@ function parseLegacyToRaw(data, options) {
          const d = ent[2];
          const b = new LegacyBuilder();
          fillBuilder(b, d.ents, slots);
@@ -4250,7 +4402,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
            alwaysFacesCamera: d.faces_camera || false,
            shadowsFaceSun: d.shadows_face_sun || false,
            builder: b
-@@ -3498,6 +4661,7 @@ function parseLegacyToRaw(data, options) {
+@@ -3498,6 +4687,7 @@ function parseLegacyToRaw(data, options) {
    }
    const rootBuilder = new LegacyBuilder();
    fillBuilder(rootBuilder, root, slots);
@@ -4258,7 +4410,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
    defsDict.set("ROOT", {
      guid: "ROOT",
      name: "ROOT_MODEL",
-@@ -3517,14 +4681,17 @@ function parseLegacyToRaw(data, options) {
+@@ -3517,14 +4707,17 @@ function parseLegacyToRaw(data, options) {
      // that's a VFF/ZIP-only construct - so there is no known source for
      // the model's unit-system string here.
      units: null,
@@ -4281,7 +4433,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
      dimensions: [],
      materialIdToName,
      materialsMap,
-@@ -3725,8 +4892,16 @@ function parsePages(node) {
+@@ -3725,8 +4918,16 @@ function parsePages(node) {
            fov: 35,
            parallel: false,
            orthoHeight: 0,
@@ -4299,7 +4451,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
          const head = tlvItemsInt(tlvFindInt(items, 28500));
          const name = tlvFindInt(head, 28501);
          if (name !== null && name.length > 0) {
-@@ -3753,7 +4928,9 @@ function parsePages(node) {
+@@ -3753,7 +4954,9 @@ function parsePages(node) {
            page.hiddenLayerIds.push(parseVarInt(hidden, off + 1, ln));
            off += 1 + ln;
          }
@@ -4310,7 +4462,39 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
        }
      }
    }
-@@ -13235,6 +14412,8 @@ function parseToRaw(buffer, options) {
+@@ -12249,6 +13452,15 @@ var ComponentDefinitionBuilder = class {
+       options.smoothEdges ?? false
+     );
+   }
++  /** Add straight edges joining consecutive points, with no curve. An edge already written (by a face or an earlier
++   * call) is reused, keeping its flags, so writing flagged edges before the faces they bound sets those faces' edges. */
++  addEdges(points, options = {}) {
++    this.checkWritable("edges");
++    const pts = points.map(toPoint3);
++    if (pts.length < 2) throw new SkpWriteError("edges need at least 2 points");
++    const [, , newEntities] = this._skp._definitionWriter().writeEdgeChain(pts, this.vertexSlots, this.edgeRegistry, options.closed ?? false, options.hiddenEdges ?? false, options.softEdges ?? false, options.smoothEdges ?? false);
++    this.newEntityCount += newEntities;
++  }
+   addPolyline(points, options = {}) {
+     this.checkWritable("polylines");
+     const pts = points.map(toPoint3);
+@@ -12784,6 +13996,15 @@ var SkpBuilder = class {
+   }
+   /** Add one freeform polyline curve - a chain of straight edges grouped
+    * into one genuine SketchUp "Curve" entity, no face. */
++  /** Add straight edges joining consecutive points, with no curve. An edge already written (by a face or an earlier
++   * call) is reused, keeping its flags, so writing flagged edges before the faces they bound sets those faces' edges. */
++  addEdges(points, options = {}) {
++    const pts = points.map(toPoint3);
++    if (pts.length < 2) throw new SkpWriteError("edges need at least 2 points");
++    this.ensureGeometryWriter();
++    const [, , newEntities] = this.geometryWriter.writeEdgeChain(pts, this.vertexSlots, this.edgeRegistry, options.closed ?? false, options.hiddenEdges ?? false, options.softEdges ?? false, options.smoothEdges ?? false);
++    this.newEntityCount += newEntities;
++  }
+   addPolyline(points, options = {}) {
+     const pts = points.map(toPoint3);
+     if (pts.length < 2) throw new SkpWriteError("a polyline needs at least 2 points");
+@@ -13235,6 +14456,8 @@ function parseToRaw(buffer, options) {
    const materialFiles = contents.materialFiles;
    emitLog(options, "debug", `Detected version ${version} (VFF/ZIP container)`);
    const units = contents.metaData ? readMetaUnits(contents.metaData) : null;
@@ -4319,7 +4503,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
    const layerColors = /* @__PURE__ */ new Map();
    const layerHidden = /* @__PURE__ */ new Map();
    const materialsMap = /* @__PURE__ */ new Map();
-@@ -13291,6 +14470,7 @@ function parseToRaw(buffer, options) {
+@@ -13291,6 +14514,7 @@ function parseToRaw(buffer, options) {
      }
    }
    const styles = [];
@@ -4327,7 +4511,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
    for (const [name, xmlBytes] of Object.entries(materialFiles)) {
      const lowerName = name.toLowerCase();
      if (lowerName.startsWith("styles/") && lowerName.endsWith("style.xml")) {
-@@ -13304,14 +14484,19 @@ function parseToRaw(buffer, options) {
+@@ -13304,14 +14528,19 @@ function parseToRaw(buffer, options) {
              frontColor: parsedStyle.frontColor,
              backColor: parsedStyle.backColor
            });
@@ -4347,7 +4531,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
    function collectMaterialIds(nodes) {
      for (const el of nodes) {
        if (el.tag === "C832") {
-@@ -13349,8 +14534,9 @@ function parseToRaw(buffer, options) {
+@@ -13349,8 +14578,9 @@ function parseToRaw(buffer, options) {
    let pageNode = null;
    for (const { index, total, node: el } of iterTopLevelLazy(modelData, 0, modelData.length)) {
      try {
@@ -4358,7 +4542,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..ec6c09facd15b4f93fcfb72b84bfc789
        collectDefs([el], defsDict, options);
        scanVertexPositions(el, vertexPositions);
        scanInstanceTransforms(el, instanceWorld);
-@@ -13396,14 +14582,21 @@ function parseToRaw(buffer, options) {
+@@ -13396,14 +14626,21 @@ function parseToRaw(buffer, options) {
      shadowsFaceSun: false,
      builder: rootBuilder
    });

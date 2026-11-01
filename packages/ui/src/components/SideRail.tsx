@@ -6,7 +6,9 @@ import { ToolButton } from './ToolButton';
 
 export interface SideRailItem {
   readonly id: string;
+  /** Shown as the button's tooltip, and its accessible name unless `accessibleLabel` gives another. */
   readonly label: string;
+  readonly accessibleLabel?: string | undefined;
   readonly icon: ReactNode;
   readonly ref?: Ref<HTMLButtonElement> | undefined;
 }
@@ -19,7 +21,7 @@ export function SideRail({ items, active, onToggle }: {
 }): JSX.Element {
   return <nav className="pf-side-rail" aria-label="Left menu bar" data-orientation="vertical">
     {items.map(item => <ToolButton key={item.id} data-guidance-id={`sidebar:${item.id}`} ref={item.ref} type="button" className={`pf-toolbtn pf-side-rail-button${active === item.id ? ' is-active' : ''}`}
-      aria-label={item.label} title={item.label} aria-pressed={active === item.id} onClick={() => onToggle(item.id)}>{item.icon}</ToolButton>)}
+      aria-label={item.accessibleLabel ?? item.label} title={item.label} aria-pressed={active === item.id} onClick={() => onToggle(item.id)}>{item.icon}</ToolButton>)}
   </nav>;
 }
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { afterEach, describe, expect, it } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { zipSync } from 'fflate';
 import { CommandRegistry, MemoryTransactionHost } from '@pushform/commands';
 import { DEFAULT_UNITS } from '@pushform/core';
@@ -14,6 +14,7 @@ import { searchCommands } from '../components/CommandSearch';
 import { ExtensionActivity, ExtensionRuns } from './ExtensionActivity';
 import { ExtensionPanel } from './ExtensionPanel';
 import { extensionPanels, selectionActionGroups, syncExtensionCommands } from './extensionContributions';
+import { railLabel } from './useExtensionWorkspace';
 
 const encode = (s: string) => new TextEncoder().encode(s);
 const manifest = {
@@ -204,5 +205,83 @@ describe('extension panels', () => {
     render(<ExtensionPanel platform={platform} entry={entry!} units={DEFAULT_UNITS} documentId="tab-1" onClose={() => {}} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Restart Parts' }));
     expect(await screen.findByText('Back again')).toBeTruthy();
+  });
+
+  /** A panel with a counter button, mounted with `presentation` when one is given. */
+  const counter = (presentation?: 'dock' | 'window') => ({
+    activate(context: ExtensionContext) {
+      const ui = context.ui as unknown as { mount(i: unknown): Promise<unknown>; update(i: unknown): Promise<unknown>; onEvent(h: (e: { component: string }) => void): void };
+      const tree = (n: number) => ({ type: 'button', id: 'count', label: `Pressed ${n}` });
+      let presses = 0;
+      ui.onEvent((e) => { if (e.component === 'count') void ui.update({ target: 'com.example.parts.panel', seq: ++presses + 1, tree: tree(presses) }); });
+      context.commands.register('com.example.parts.panel', () =>
+        ui.mount({ target: 'com.example.parts.panel', seq: 1, tree: tree(0), ...(presentation ? { presentation } : {}) }));
+    },
+  });
+
+  it('opens in a large window with PushForm\'s header, keeps the same live interface, and returns to the dock on Escape', async () => {
+    const { platform } = await setup(counter());
+    const [entry] = extensionPanels(platform, 'modeling');
+    render(<ExtensionPanel platform={platform} entry={entry!} units={DEFAULT_UNITS} documentId="tab-1" onClose={() => {}} />);
+    await screen.findByRole('button', { name: 'Pressed 0' });
+    const open = screen.getByRole('button', { name: 'Open Parts list in a window' });
+    open.focus();
+    fireEvent.click(open);
+    const window = screen.getByRole('dialog', { name: 'Parts list, from Parts' });
+    expect(window.getAttribute('aria-modal')).toBe('true');
+    expect(window.textContent).toContain('Unsigned (developer)');
+    // The interface moved: the dock keeps a note and a way back, and focus starts in the window.
+    expect(screen.getByRole('region', { name: 'Parts list, from Parts' }).textContent).toContain('Parts list is open in a window.');
+    const button = within(window).getByRole('button', { name: 'Pressed 0' });
+    expect(document.activeElement).toBe(button);
+    // Tab stays in the window.
+    const returnButton = within(window).getByRole('button', { name: /Return to side panel/ });
+    returnButton.focus();
+    fireEvent.keyDown(returnButton, { key: 'Tab', shiftKey: true });
+    expect(window.contains(document.activeElement)).toBe(true);
+    // It is the same mounted interface: events reach the extension and its update shows.
+    fireEvent.click(button);
+    expect(await within(window).findByRole('button', { name: 'Pressed 1' })).toBeTruthy();
+    // Keys do not reach the editor's shortcuts.
+    let reached = false;
+    const listener = () => { reached = true; };
+    globalThis.addEventListener('keydown', listener);
+    fireEvent.keyDown(within(window).getByRole('button', { name: 'Pressed 1' }), { key: 'p' });
+    globalThis.removeEventListener('keydown', listener);
+    expect(reached).toBe(false);
+    fireEvent.keyDown(within(window).getByRole('button', { name: 'Pressed 1' }), { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Pressed 1' })).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open Parts list in a window' }));
+  });
+
+  it('opens in the window when the extension asks, until the user moves it, and remembers their choice', async () => {
+    localStorage.clear();
+    const key = 'pushform:extensions:presentation:me:modeling:com.example.parts.panel';
+    const { platform } = await setup(counter('window'));
+    const [entry] = extensionPanels(platform, 'modeling');
+    const first = render(<ExtensionPanel platform={platform} entry={entry!} units={DEFAULT_UNITS} documentId="tab-1" onClose={() => {}} presentationKey={key} />);
+    const window = await screen.findByRole('dialog', { name: 'Parts list, from Parts' });
+    fireEvent.click(within(window).getByRole('button', { name: /Return to side panel/ }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(localStorage.getItem(key)).toBe('dock');
+    first.unmount();
+    // Opened again, the extension still asks for the window, but the user's choice wins.
+    render(<ExtensionPanel platform={platform} entry={entry!} units={DEFAULT_UNITS} documentId="tab-1" onClose={() => {}} presentationKey={key} />);
+    await screen.findByRole('button', { name: 'Pressed 0' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    // The dock's note brings a windowed panel back too.
+    fireEvent.click(screen.getByRole('button', { name: 'Open Parts list in a window' }));
+    expect(localStorage.getItem(key)).toBe('window');
+    fireEvent.click(within(screen.getByRole('region', { name: 'Parts list, from Parts' })).getByRole('button', { name: 'Return to side panel' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    localStorage.clear();
+  });
+});
+
+describe('side rail names', () => {
+  it('name the panel and its extension, or just the panel when the names are the same', () => {
+    expect(railLabel('Parts list', 'Parts')).toEqual({ label: 'Parts list (Parts)', accessibleLabel: 'Parts list, from Parts' });
+    expect(railLabel('Cut List', 'Cut List')).toEqual({ label: 'Cut List', accessibleLabel: 'Cut List extension' });
   });
 });

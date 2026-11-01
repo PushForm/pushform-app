@@ -2757,6 +2757,9 @@ html.pf-document-loading, html.pf-document-loading * { cursor: progress !importa
 .pf-xui-stack { display: flex; }
 .pf-xui-stack.is-vertical { flex-direction: column; }
 .pf-xui-stack.is-horizontal { flex-direction: row; flex-wrap: wrap; }
+/* Nothing an extension shows may run out of a narrow panel: children shrink, long labels and toolbars wrap. */
+.pf-xui-stack > *, .pf-xui-field, .pf-xui-input, .pf-xui-select { min-width: 0; max-width: 100%; }
+.pf-xui-button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: center; }
 .pf-xui-stack.gap-none { gap: 0; }
 .pf-xui-stack.gap-small { gap: 4px; }
 .pf-xui-stack.gap-medium { gap: 8px; }
@@ -2797,6 +2800,9 @@ h4.pf-xui-text { font-size: 12px; }
 .pf-xui-button.is-danger { border-color: var(--pf-danger); color: var(--pf-danger); }
 .pf-xui-progress { display: flex; flex-direction: column; gap: 2px; }
 .pf-xui-progress progress { width: 100%; }
+.pf-xui-tablist { flex-wrap: wrap; row-gap: 2px; }
+.pf-xui-tablist .pf-tab { max-width: 100%; overflow-wrap: anywhere; text-align: start; }
+.pf-xui-tablist .pf-tab:focus-visible { outline-offset: -2px; }
 .pf-xui-tabpanel { padding-top: 8px; }
 .pf-xui-tree, .pf-xui-tree ul { margin: 0; padding: 0; list-style: none; }
 .pf-xui-tree-row { display: flex; align-items: center; gap: 2px; border-radius: var(--pf-radius); }
@@ -2804,13 +2810,13 @@ h4.pf-xui-text { font-size: 12px; }
 .pf-xui-tree-toggle { width: 16px; padding: 0; font: inherit; color: var(--pf-text-muted); background: none; border: 0; cursor: pointer; }
 .pf-xui-tree-label { flex: 1; padding: 2px 4px; font: inherit; color: inherit; text-align: start; background: none; border: 0; cursor: pointer; }
 .pf-xui-table-wrap { display: flex; flex-direction: column; gap: 4px; }
-.pf-xui-table-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pf-xui-table-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; }
 .pf-xui-columns { position: relative; }
 .pf-xui-columns-menu {
   position: absolute; inset-inline-end: 0; z-index: 2; margin: 2px 0 0; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px;
   background: var(--pf-surface); border: 1px solid var(--pf-border); border-radius: var(--pf-radius);
 }
-.pf-xui-table-scroll { overflow: auto; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); }
+.pf-xui-table-scroll { --pf-xui-table-max: 360px; max-height: var(--pf-xui-table-max); overflow: auto; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); }
 .pf-xui-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .pf-xui-table th, .pf-xui-table td { padding: 0 6px; border-bottom: 1px solid var(--pf-border); text-align: start; white-space: nowrap; }
 .pf-xui-table thead th { position: sticky; top: 0; z-index: 1; background: var(--pf-surface-2); font-weight: 600; height: 26px; }
@@ -2876,6 +2882,26 @@ h4.pf-xui-text { font-size: 12px; }
 .pf-xpanel-unsigned { color: #8a5300; }
 .pf-xpanel-body { flex: 1; overflow: auto; padding: 10px 12px; }
 .pf-xpanel-status { margin: 0; color: var(--pf-text-muted); }
+.pf-xpanel-head .pf-iconbtn { flex: none; }
+.pf-xpanel-away { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+
+/* An extension panel in its large window: most of the viewport, for wide tables and drawings. */
+.pf-xwindow-backdrop { position: fixed; inset: 0; z-index: 150; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgb(0 0 0 / 30%); }
+.pf-xwindow {
+  display: flex; flex-direction: column; width: min(1600px, 100%); height: 100%; min-height: 0;
+  background: var(--pf-surface); color: var(--pf-text); border: 1px solid var(--pf-border); border-radius: 6px;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 30%); font: 12px/1.4 var(--pf-font);
+}
+.pf-xwindow:focus { outline: none; }
+.pf-xwindow .pf-xpanel-head { padding: 8px 10px 8px 14px; }
+.pf-xwindow .pf-xpanel-title h2 { font-size: 13px; }
+.pf-xwindow-return { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+.pf-xwindow-body { flex: 1; min-height: 0; overflow: auto; padding: 12px 16px; }
+/* Tables in the window show as many rows as fit. */
+.pf-xwindow .pf-xui-table-scroll { --pf-xui-table-max: max(240px, calc(100vh - 260px)); }
+/* A drawing sized from its proportions stays within the window's height; the drawing keeps its proportions in it. */
+.pf-xwindow .pf-xui-vector-frame.is-auto-height { max-height: max(200px, calc(100vh - 280px)); }
+@media (max-width: 600px) { .pf-xwindow-backdrop { padding: 8px; } }
 @media (prefers-color-scheme: dark) { .pf-xpanel-unsigned { color: #e0a040; } }
 
 /* Extension commands that are running or failed, above the status bar. Short runs finish before they show. */
@@ -2897,7 +2923,7 @@ h4.pf-xui-text { font-size: 12px; }
 
 /* Extension vector views: a drawing PushForm renders from the extension's shapes. */
 .pf-xui-vector { display: flex; flex-direction: column; gap: 4px; }
-.pf-xui-vector-tools { display: flex; align-items: center; gap: 4px; }
+.pf-xui-vector-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .pf-xui-vector-tools .pf-xui-label { flex: 1; }
 .pf-xui-vector-tool { min-width: 28px; padding: 2px 8px; }
 .pf-xui-vector-frame { position: relative; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); background: #ffffff; overflow: hidden; }

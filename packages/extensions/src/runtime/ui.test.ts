@@ -48,6 +48,21 @@ describe('ExtensionUiHost', () => {
     expect(host.get(PANEL)).toMatchObject({ seq: 5, tree: { children: [{ label: 'Kept' }] } });
   });
 
+  it('records where a panel asked to be shown, keeping it through updates that do not name one', () => {
+    const host = new ExtensionUiHost(manifest, () => {});
+    const ui = host.services();
+    ui['ui.mount']!({ target: PANEL, seq: 1, tree: button('One') }, {} as never);
+    expect(host.get(PANEL)?.presentation).toBe('dock');
+    ui['ui.mount']!({ target: PANEL, seq: 2, tree: button('Two'), presentation: 'window' }, {} as never);
+    expect(host.get(PANEL)?.presentation).toBe('window');
+    ui['ui.update']!({ target: PANEL, seq: 3, tree: button('Three') }, {} as never);
+    expect(host.get(PANEL)?.presentation).toBe('window');
+    ui['ui.update']!({ target: PANEL, seq: 4, tree: button('Four'), presentation: 'dock' }, {} as never);
+    expect(host.get(PANEL)?.presentation).toBe('dock');
+    expect(failure(() => ui['ui.update']!({ target: PANEL, seq: 5, tree: button('x'), presentation: 'floating' }, {} as never)).message).toMatch(/"dock" or "window"/);
+    expect(host.get(PANEL)).toMatchObject({ seq: 4, presentation: 'dock' });
+  });
+
   it('accepts only the extension own panel, inspector or settings targets', () => {
     const ui = new ExtensionUiHost(manifest, () => {}).services();
     expect(failure(() => ui['ui.mount']!({ target: 'com.example.parts.open', seq: 1, tree: button('x') }, {} as never)).message).toMatch(/not a panel/);

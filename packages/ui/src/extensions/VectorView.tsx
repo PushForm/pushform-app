@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { memo, useEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent, type PointerEvent } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent, type PointerEvent, type RefObject } from 'react';
 import type { UiEvent, UiVector, UiVectorShape, UiVectorStyle } from '@pushform/extension-protocol';
 
 /**
@@ -9,7 +9,8 @@ import type { UiEvent, UiVector, UiVectorShape, UiVectorStyle } from '@pushform/
  * dragging pans, and Fit shows the whole drawing. Pointing at a shape with an item reports `hover` and shows its tip;
  * clicking reports `select`. From the keyboard, arrows pan, + and − zoom, 0 fits, ] and [ step through the items,
  * Enter selects the current one and Escape clears it. Drawings show on white paper in both themes, as they print and
- * export, so the extension's colors keep their contrast.
+ * export, so the extension's colors keep their contrast. Without a height from the extension, the frame takes the
+ * drawing's proportions at the width it has (within `AUTO_HEIGHT_PX`), so the drawing fills it.
  */
 
 interface ViewBox { x: number; y: number; width: number; height: number }
@@ -17,10 +18,36 @@ interface ViewBox { x: number; y: number; width: number; height: number }
 const ZOOM_STEP = 1.25;
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 200;
+/** The frame's height range when it follows the drawing's proportions, and its height before the width is known. */
+export const AUTO_HEIGHT_PX = { min: 120, max: 800, unmeasured: 300 } as const;
+
+/** The frame height that shows a drawing of `bounds` whole at `width` pixels, within `AUTO_HEIGHT_PX`. */
+export function autoVectorHeight(bounds: { width: number; height: number }, width: number): number {
+  if (!(width > 0)) return AUTO_HEIGHT_PX.unmeasured;
+  return Math.round(Math.min(AUTO_HEIGHT_PX.max, Math.max(AUTO_HEIGHT_PX.min, (width * bounds.height) / bounds.width)));
+}
+
+/** The width of `element`'s content box, followed as it resizes; 0 until measured. */
+function useWidth(element: RefObject<HTMLElement | null>, active: boolean): number {
+  const [width, setWidth] = useState(0);
+  useLayoutEffect(() => {
+    const el = element.current;
+    if (!active || !el) return;
+    setWidth(el.clientWidth);
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => setWidth(el.clientWidth));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [element, active]);
+  return width;
+}
 
 export function VectorView({ node, onEvent }: { readonly node: UiVector; readonly onEvent: (event: UiEvent) => void }): JSX.Element {
   const svg = useRef<SVGSVGElement>(null);
+  const frame = useRef<HTMLDivElement>(null);
   const { bounds } = node;
+  const frameWidth = useWidth(frame, node.height === undefined);
+  const height = node.height ?? autoVectorHeight(bounds, frameWidth);
   const fit = useMemo<ViewBox>(() => ({ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }), [bounds.x, bounds.y, bounds.width, bounds.height]);
   const [view, setView] = useState<ViewBox>(fit);
   useEffect(() => setView(fit), [fit]);
@@ -137,7 +164,7 @@ export function VectorView({ node, onEvent }: { readonly node: UiVector; readonl
         <button type="button" className="pf-btn pf-xui-vector-tool" aria-label="Zoom out" onClick={() => zoom(1 / ZOOM_STEP)}>−</button>
         <button type="button" className="pf-btn pf-xui-vector-tool" onClick={() => setView(fit)}>Fit</button>
       </div>
-      <div className="pf-xui-vector-frame" style={{ height: node.height ?? 300 }}>
+      <div ref={frame} className={`pf-xui-vector-frame${node.height === undefined ? ' is-auto-height' : ''}`} style={{ height }}>
         <svg ref={svg} className="pf-xui-vector-canvas" role="img" tabIndex={0}
           aria-label={`${node.label}. Arrow keys pan, plus and minus zoom, 0 fits, ] and [ step through items, Enter selects.`}
           viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`} preserveAspectRatio="xMidYMid meet"

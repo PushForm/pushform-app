@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type JSX, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { formatAngleDeg, parseLength, typedLengthUnit, type UnitSettings } from '@pushform/core';
 import type { UiEvent, UiNode, UiNodeOf, UiQuantity, UiTable, UiTreeItem } from '@pushform/extension-protocol';
 import type { ExtensionUiHost } from '@pushform/extensions';
@@ -191,7 +191,7 @@ function NumberField({ node, units, onEvent }: NodeProps<UiNodeOf<'numberField'>
     <input id={id} className="pf-xui-input is-number" inputMode="decimal" value={draft} disabled={node.disabled}
       aria-invalid={error ? true : undefined} aria-describedby={errorId}
       onFocus={() => setEditing(true)} onChange={(e) => setDraft(e.target.value)} onBlur={commit}
-      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { setDraft(shown); setProblem(null); } }} />
+      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape' && (draft !== shown || problem)) { e.preventDefault(); setDraft(shown); setProblem(null); } }} />
   )}</Field>;
 }
 
@@ -208,8 +208,10 @@ function ChoiceField({ node, onEvent }: Omit<NodeProps<UiNodeOf<'choice'>>, 'uni
 function Tabs({ node, units, onEvent }: NodeProps<UiNodeOf<'tabs'>>): JSX.Element {
   const base = useId();
   const index = Math.max(0, node.tabs.findIndex((t) => t.id === node.selected));
+  const count = node.tabs.length;
   const move = (e: KeyboardEvent, i: number) => {
-    const next = e.key === 'ArrowRight' ? (i + 1) % node.tabs.length : e.key === 'ArrowLeft' ? (i - 1 + node.tabs.length) % node.tabs.length : -1;
+    const next = e.key === 'ArrowRight' ? (i + 1) % count : e.key === 'ArrowLeft' ? (i - 1 + count) % count
+      : e.key === 'Home' ? 0 : e.key === 'End' ? count - 1 : -1;
     if (next < 0) return;
     e.preventDefault();
     onEvent({ component: node.id, event: 'select', value: node.tabs[next]!.id });
@@ -218,7 +220,8 @@ function Tabs({ node, units, onEvent }: NodeProps<UiNodeOf<'tabs'>>): JSX.Elemen
   const panel = node.children[index];
   return (
     <div className="pf-xui-tabs">
-      <div className="pf-tabs" role="tablist" aria-label={node.label}>
+      {/* The tabs wrap onto more rows rather than running out of a narrow panel. */}
+      <div className="pf-tabs pf-xui-tablist" role="tablist" aria-label={node.label}>
         {node.tabs.map((tab, i) => (
           <button key={tab.id} id={`${base}-tab-${i}`} type="button" role="tab" className={`pf-tab${i === index ? ' is-active' : ''}`}
             aria-selected={i === index} aria-controls={`${base}-panel`} tabIndex={i === index ? 0 : -1}
@@ -260,8 +263,40 @@ function TreeView({ node, onEvent }: Omit<NodeProps<UiNodeOf<'tree'>>, 'units'>)
 
 /** Height of one table row in pixels, fixed so that only the rows in view need rendering. */
 export const TABLE_ROW_PX = 26;
+/** The rows' viewport before it is measured; the stylesheet sets its real maximum height. */
 const TABLE_VIEW_PX = 360;
 const OVERSCAN = 8;
+/** Room kept below the last row for a scrollbar the browser draws over the content rather than beside it. */
+export const OVERLAY_SCROLLBAR_PX = 14;
+
+/**
+ * The height of the rows' viewport (without the header or a scrollbar), and whether a horizontal scrollbar would be
+ * drawn over the last row, so the table keeps room for it.
+ */
+function useTableViewport(scroller: RefObject<HTMLDivElement | null>, deps: readonly unknown[]): { view: number; overlayBar: boolean } {
+  const [measured, setMeasured] = useState({ view: TABLE_VIEW_PX, overlayBar: false });
+  useLayoutEffect(() => {
+    const element = scroller.current;
+    if (!element) return;
+    const measure = (): void => {
+      const style = getComputedStyle(element);
+      const borders = (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0);
+      const wide = element.scrollWidth > element.clientWidth + 1;
+      // A scrollbar beside the content takes height from the box; one drawn over it takes none.
+      const overlayBar = wide && element.offsetHeight > 0 && element.offsetHeight - borders - element.clientHeight < 1;
+      const view = element.clientHeight > 0 ? Math.max(TABLE_ROW_PX, element.clientHeight - TABLE_ROW_PX) : TABLE_VIEW_PX;
+      setMeasured((m) => (m.view === view && m.overlayBar === overlayBar ? m : { view, overlayBar }));
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    if (element.firstElementChild) observer.observe(element.firstElementChild);
+    return () => observer.disconnect();
+    // The rows and columns shown change what overflows.
+  }, deps);
+  return measured;
+}
 
 function Table({ node, units, onEvent }: NodeProps<UiTable>): JSX.Element {
   const hidden = new Set(node.hiddenColumns ?? []);
@@ -271,8 +306,9 @@ function Table({ node, units, onEvent }: NodeProps<UiTable>): JSX.Element {
   const [editing, setEditing] = useState<{ row: string; column: string } | null>(null);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
+  const { view, overlayBar } = useTableViewport(scroller, [node.rows.length, columns.length]);
   const first = Math.max(0, Math.floor(scrollTop / TABLE_ROW_PX) - OVERSCAN);
-  const last = Math.min(node.rows.length, Math.ceil((scrollTop + TABLE_VIEW_PX) / TABLE_ROW_PX) + OVERSCAN);
+  const last = Math.min(node.rows.length, Math.ceil((scrollTop + view) / TABLE_ROW_PX) + OVERSCAN);
   const hideable = node.columns.filter((c) => c.hideable);
 
   const select = (row: string, additive: boolean) => {
@@ -309,7 +345,8 @@ function Table({ node, units, onEvent }: NodeProps<UiTable>): JSX.Element {
           </div>
         ) : null}
       </div>
-      <div ref={scroller} className="pf-xui-table-scroll" style={{ maxHeight: TABLE_VIEW_PX }} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
+      <div ref={scroller} className={`pf-xui-table-scroll${overlayBar ? ' has-overlay-scrollbar' : ''}`}
+        style={overlayBar ? { paddingBottom: OVERLAY_SCROLLBAR_PX } : undefined} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
         <table className="pf-xui-table" role="grid" aria-label={node.label} aria-rowcount={node.rows.length + 1}
           aria-multiselectable={node.selection === 'multiple' ? true : undefined}>
           <thead>

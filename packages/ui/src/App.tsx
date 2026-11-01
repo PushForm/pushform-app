@@ -26,7 +26,7 @@ import { browserRunsExtensions, createBrowserExtensionPlatform, type ExtensionRu
 import { ExtensionRuns } from './extensions/ExtensionActivity';
 import { ExtensionPrintDialog, PrintPrompts } from './extensions/extensionPrint';
 import { isExtensionPanelId } from './extensions/extensionContributions';
-import { sessionExtensionDocuments } from './extensions/extensionDocuments';
+import { sessionExtensionDocuments, sessionExtensionUnits } from './extensions/extensionDocuments';
 import { useExtensionWorkspace } from './extensions/useExtensionWorkspace';
 import { markDesktopShell, syncDesktopTitleBar } from './desktopShell';
 import { allowOpeningDocument, desktopUpdates } from './desktopUpdates';
@@ -211,7 +211,8 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
   // The platform exists before the document session; extensions reach the session's tabs once it does.
   const sessionRef = useRef<DocumentSession | null>(null);
   const [extensions] = useState(() => extensionRuntime
-    ? createBrowserExtensionPlatform({ ownerId, sources: extensionRuntime, printPrompts, documents: sessionExtensionDocuments(() => sessionRef.current) }) : null);
+    ? createBrowserExtensionPlatform({ ownerId, sources: extensionRuntime, printPrompts,
+      documents: sessionExtensionDocuments(() => sessionRef.current), units: sessionExtensionUnits(() => sessionRef.current) }) : null);
   const [extensionRuns] = useState(() => extensions ? new ExtensionRuns(extensions) : null);
   const [extensionsOpen, setExtensionsOpen] = useState(false);
   useEffect(() => {

@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { useEffect, useMemo, useState, useSyncExternalStore, type JSX } from 'react';
+import { DEFAULT_UNITS, type UnitSettings } from '@pushform/core';
 import { writeLayoutSvg } from '@pushform/io/vector';
 import type { PrintRequest, ViewPrinter } from '@pushform/extensions';
 import { Dialog } from '../components/DialogParts';
 import { browserFilePicker } from './browserExtensionIo';
+import { formatQuantity } from './ExtensionUi';
 
 /**
- * Printing for extensions. An extension asks to print some of its vector views; PushForm shows its own dialog naming
- * the extension, its stated purpose, the page count and size, with a preview of the first page, and the user chooses
- * Print, Save as PDF or Cancel. Pages are drawn from PushForm's own SVG of each view, shown as images, so nothing the
- * extension sent becomes markup in the print document. The extension learns only whether the pages were printed or
+ * Printing for extensions. An extension asks to print some of its vector views, tables and text; PushForm lays out
+ * the pages itself, then shows its own dialog naming the extension, its stated purpose, the page count and size, with
+ * a preview of the first page, and the user chooses Print, Save as PDF or Cancel. Pages are drawn from PushForm's own
+ * SVG of each page, shown as images, so nothing the extension sent becomes markup in the print document. The extension learns only whether the pages were printed or
  * saved.
  */
 
@@ -57,9 +59,17 @@ export interface PrintOutput {
   savePdf(request: PrintRequest): Promise<boolean>;
 }
 
-/** The `ui.print` host: the user's choice in the dialog, then printing or a PDF. */
-export function browserViewPrinter(prompts: PrintPrompts, output: PrintOutput = browserPrintOutput()): ViewPrinter {
+/**
+ * The `ui.print` host: the user's choice in the dialog, then printing or a PDF. Printed tables show quantities in
+ * `units` of the document the extension acts on, as its panels do; the defaults when that is unknown.
+ */
+export function browserViewPrinter(prompts: PrintPrompts, output: PrintOutput = browserPrintOutput(),
+  units: (documentId: string) => UnitSettings | null = () => null): ViewPrinter {
   return {
+    formatter(documentId) {
+      const settings = (documentId !== null ? units(documentId) : null) ?? DEFAULT_UNITS;
+      return (value, quantity) => formatQuantity(value, quantity, settings);
+    },
     async print(request) {
       const choice = await prompts.ask(request);
       if (choice === 'print') { await output.print(request); return 'printed'; }

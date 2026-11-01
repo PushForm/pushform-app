@@ -134,3 +134,19 @@ export type UiPresentation = 'dock' | 'window';
 
 /** An event with the target (panel, inspector or settings contribution id) it happened on. */
 export type UiEventOnTarget = { target: string } & UiEvent;
+
+/**
+ * What `ui.print` prints: components of `target` on screen, in order, at `page` size in meters (0.02 to 2 a side;
+ * landscape when wider than tall). A `vector` view is one page, at its real size when it fits. Tables, text and
+ * dividers, and stacks holding only printable components, flow over as many pages as they need, under `title` (the
+ * first component's label when absent) and with page numbers; any other component is refused. Tables print without
+ * their hidden columns, with the header row on every page and numbers in the document's units, as the panel shows
+ * them. At most 200 components and 500 pages.
+ */
+export interface UiPrintRequest {
+  target: string;
+  components: string[];
+  page: { width: number; height: number };
+  purpose: string;
+  title?: string | undefined;
+}

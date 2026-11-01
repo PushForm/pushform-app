@@ -77,21 +77,23 @@ shown with. Calls on a document that has closed fail with `document.closed`.
 
 ```ts
 context.commands.register('com.example.parts.panel', async (_params, { document }) => {
-  const units = await context.document.units({ document }); // { system, lengthUnit, format, lengthPrecision }
+  const { name, units } = await context.document.info({ document }); // the tab's title; { system, lengthUnit, format, lengthPrecision }
   const { revision } = await context.model!.read({ document });
   const page = await context.model!.query({ document, kinds: ['instance'], fields: ['bounds'] });
   await context.selection!.set({ document, refs: page.entities.map((e) => ({ kind: 'instance', id: e.ref.id })) });
   await context.model!.apply({ document, expectedRevision: revision, label: 'Name the shelf',
     operations: [{ op: 'rename_instance', ref: { kind: 'instance', id: page.entities[0]!.ref.id }, name: 'Shelf' }] });
 });
-context.document.onUnitsChange(({ units }) => render(units));
+context.document.onChange(({ name, units }) => render(name, units)); // renamed, units changed, or another document
 context.model!.onChange(({ revision, changes }) => refresh(revision, changes)); // after model.subscribe
 ```
 
 A query returns one page of at most 200 entities; fields you leave out are null (the open container, every kind but
 faces, 50 entities). A batch applies every operation or none and is one undo entry named after your extension; it
 fails with `revision.stale` when the model changed since the revision you read. References name entities of the
-container open in the editor.
+container open in the editor, or, with the `path` a read reports, entities inside a group or component: `selection.set`
+highlights those in place without opening the group, as choosing them in the Object browser does, and `selection.frame`
+fits the camera to their world bounds. A batch's operations take only entities of the batch's own container.
 
 ## Interfaces
 

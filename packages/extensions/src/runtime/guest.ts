@@ -45,9 +45,9 @@ export type HostEventHandler = (event: Record<string, unknown>) => void;
  * Listeners the guest adds to a service for host events: the method name, and the host event's component and name.
  * Kept here, not in the runtime core, as only this file needs them.
  */
-const HOST_LISTENERS: Partial<Record<ExtensionServiceName, { method: string; component: string; event: string }>> = {
-  document: { method: 'onUnitsChange', component: 'document', event: 'units' },
-  model: { method: 'onChange', component: 'model', event: 'change' },
+const HOST_LISTENERS: Partial<Record<ExtensionServiceName, readonly { method: string; component: string; event: string }[]>> = {
+  document: [{ method: 'onUnitsChange', component: 'document', event: 'units' }, { method: 'onChange', component: 'document', event: 'change' }],
+  model: [{ method: 'onChange', component: 'model', event: 'change' }],
 };
 
 type ServiceProxy = Readonly<Record<string, (input?: unknown, options?: CallOptions) => Promise<unknown>>>;
@@ -192,8 +192,7 @@ export async function startGuest(port: RuntimePort, loadMain: () => Promise<unkn
           return () => uiHandlers.delete(handler);
         };
       }
-      const listener = HOST_LISTENERS[service];
-      if (listener) {
+      for (const listener of HOST_LISTENERS[service] ?? []) {
         // Host events about documents; returns a function that stops listening.
         (methods as Record<string, unknown>)[listener.method] = (handler: HostEventHandler) => {
           if (typeof handler !== 'function') throw new ExtensionError('validation.failed', `${listener.method} needs a function.`);

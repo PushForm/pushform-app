@@ -96,7 +96,7 @@ export class ModelDocumentApi {
     if (action.type !== 'play' && action.type !== 'stop') runtime.stop();
     switch (action.type) {
       case 'set_camera':
-        shown = this.cameraFor(action.camera, path, this.resolver(path, new Map()).ref);
+        shown = this.cameraFor(action.camera, path, this.resolver(path, new Map(), 'any').ref);
         runtime.animateCamera(camera, shown, action.animate ?? true ? runtime.animationSettings.transitionSeconds : 0);
         break;
       case 'activate_scene': {
@@ -126,17 +126,22 @@ export class ModelDocumentApi {
   selection(): ModelRef[] { return this.host.selection.refs.map(refOut); }
 
   /**
-   * Replaces the selection with entities of the container open in the editor; an empty list clears it. Makes no
-   * undo entry. Rejects with `ModelApiFailure` naming the first reference that does not exist, selecting nothing.
+   * Replaces the selection; an empty list clears it. A reference without a path names an entity of the container
+   * open in the editor; one with a path names an entity inside a group or component, which is selected in place, as
+   * the Object browser selects a nested entity: the editor's open container stays as it is. Makes no undo entry.
+   * Rejects with `ModelApiFailure` naming the first reference that does not exist, selecting nothing.
    */
   select(refs: readonly ModelRefInput[]): ModelRef[] {
-    const { ref } = this.resolver([...this.host.context.path] as Id[], new Map());
+    const { ref } = this.resolver([...this.host.context.path] as Id[], new Map(), 'any');
     const resolved = refs.map(ref);
     this.host.selection.set(resolved);
     return this.selection();
   }
 
-  /** Frames the camera on entities of the container open in the editor, keeping the view direction. */
+  /**
+   * Frames the camera on the world bounds of entities, keeping the view direction; with a path, an entity inside a
+   * group or component.
+   */
   frame(refs: readonly ModelRefInput[], animate = true): ModelViewResult {
     return this.view({ action: { type: 'set_camera', camera: { mode: 'framed', subject: { refs: [...refs] } }, animate } });
   }
@@ -323,8 +328,12 @@ export class ModelDocumentApi {
     }
   }
 
-  /** Resolves `"$name"`s and entity references of the container at `path`. */
-  private resolver(path: Id[], names: ReadonlyMap<string, Named>) {
+  /**
+   * Resolves `"$name"`s and entity references of the container at `path`. A reference may carry its own path:
+   * `containers` says whether any container is accepted (selecting and framing) or only `path` itself (a batch,
+   * whose operations act on one container).
+   */
+  private resolver(path: Id[], names: ReadonlyMap<string, Named>, containers: 'batch' | 'any' = 'batch') {
     const host = this.host;
     const named = (value: string): Named => {
       const name = LOCAL_REFERENCE.exec(value)?.[1];
@@ -333,8 +342,20 @@ export class ModelDocumentApi {
       return found;
     };
     const ref = (input: ModelRefInput): EntityRef => {
-      const state = host.doc.state, container = containerAt(state, path);
+      const state = host.doc.state;
       const target = typeof input === 'string' ? named(input) : input;
+      const own = typeof input === 'string' ? undefined : input.path;
+      let at = path;
+      if (own && !samePath(own, path)) {
+        if (containers === 'batch') throw this.failure('invalid_reference', `${target.kind} ${target.id} is at instance path [${own.join(', ')}], not in the container this batch edits [${path.join(', ')}]; set the batch's container to edit it.`);
+        at = [...own] as Id[];
+      }
+      let container: EntityContainer;
+      try {
+        container = containerAt(state, at);
+      } catch {
+        throw this.failure('invalid_reference', `No group or component at instance path [${at.join(', ')}]. Call ${MODEL_TOOLS.query.name} for current ids.`);
+      }
       const exists = (() => {
         switch (target.kind) {
           case 'instance': return container.instances.has(target.id as Id);
@@ -349,9 +370,10 @@ export class ModelDocumentApi {
         }
       })();
       const shown = typeof input === 'string' ? input : `${input.kind} ${input.id}${'faceId' in input ? ` face ${input.faceId}` : ''}`;
-      if (!exists) throw this.failure('invalid_reference', `There is no ${shown} in the container being edited. Call ${MODEL_TOOLS.query.name} for current ids.`);
-      if (target.kind === 'face') return { kind: 'face', path, id: target.id as Id, faceId: (target as { faceId: number }).faceId as never, region: null };
-      return { kind: target.kind as 'instance', path, id: target.id as Id };
+      const where = at === path ? 'in the container being edited' : `at instance path [${at.join(', ')}]`;
+      if (!exists) throw this.failure('invalid_reference', `There is no ${shown} ${where}. Call ${MODEL_TOOLS.query.name} for current ids.`);
+      if (target.kind === 'face') return { kind: 'face', path: at, id: target.id as Id, faceId: (target as { faceId: number }).faceId as never, region: null };
+      return { kind: target.kind as 'instance', path: at, id: target.id as Id };
     };
     return { named, ref };
   }

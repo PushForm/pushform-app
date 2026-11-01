@@ -7,7 +7,7 @@ import {
 import { MODEL_LIMITS, extensionManifestSchema, type ExtensionError, type ExtensionPermission } from '@pushform/extension-protocol';
 import { InlineBackend, KernelClient } from '@pushform/kernel';
 import { ModelDocumentApi } from '../modelApi';
-import { commandsDocument, documentUnitsOf, ExtensionDocumentHost, type ExtensionDocument, type ExtensionDocuments } from './documents';
+import { commandsDocument, documentUnitsOf, ExtensionDocumentHost, type DocumentChange, type ExtensionDocument, type ExtensionDocuments } from './documents';
 import { startGuest, type ExtensionContext } from './guest';
 import { ExtensionSession } from './host';
 import { messagePortTransport } from './port';
@@ -40,8 +40,20 @@ type Call = (input?: unknown) => Promise<unknown>;
 interface Services {
   model: Record<'read' | 'query' | 'apply' | 'subscribe', Call> & { onChange(handler: (event: unknown) => void): () => void };
   selection: Record<'get' | 'set' | 'frame', Call>;
-  document: { units: Call; onUnitsChange(handler: (event: unknown) => void): () => void };
+  document: { units: Call; info: Call; onUnitsChange(handler: (event: unknown) => void): () => void; onChange(handler: (event: unknown) => void): () => void };
 }
+
+/** A document whose name the test changes, as a tab rename does. */
+const named = (document: ExtensionDocument, initial: string) => {
+  let name = initial;
+  const listeners = new Set<(change: DocumentChange) => void>();
+  const out: ExtensionDocument = { ...document, name: () => name, listen(listener) {
+    listeners.add(listener);
+    const off = document.listen(listener);
+    return () => { off(); listeners.delete(listener); };
+  } };
+  return { document: out, rename(next: string) { name = next; for (const l of [...listeners]) l('name'); } };
+};
 
 /**
  * An extension whose command runs `body` with its context and invocation; the services are the real document
@@ -123,9 +135,20 @@ describe('model services', () => {
   });
 
   it('answers unavailable for a document that is not a 3D model', async () => {
-    const layout: ExtensionDocument = { units: () => documentUnitsOf({ format: 'decimal', lengthUnit: 'mm', lengthPrecision: 1 }), model: () => null, listen: () => () => {} };
+    const layout: ExtensionDocument = { name: () => 'Plan', units: () => documentUnitsOf({ format: 'decimal', lengthUnit: 'mm', lengthPrecision: 1 }), model: () => null, listen: () => () => {} };
     const { run } = connect(openDocuments({ 'doc-l': layout }));
     expect(await run(({ model: m, document }) => Promise.all([codeOf(m!.read()), codeOf(document!.units())]), 'doc-l')).toEqual(['unavailable', 'ok']);
+    expect(await run(({ document }) => document!.info(), 'doc-l')).toEqual({ name: 'Plan', units: layout.units() });
+  });
+});
+
+describe('document services', () => {
+  it('tell the document\'s name and units, without any permission', async () => {
+    const a = model();
+    const { run } = connect(openDocuments({ 'doc-a': named(a.document, 'Bookcase').document }), []);
+    expect(await run(({ document }) => document!.info(), 'doc-a')).toEqual({ name: 'Bookcase', units: a.document.units() });
+    expect(await run(({ document }) => codeOf(document!.info({ revision: 1 })), 'doc-a')).toBe('validation.failed');
+    expect(commandsDocument(a.commands).name()).toBe('Untitled');
   });
 });
 
@@ -154,6 +177,31 @@ describe('selection services', () => {
     expect(out.cleared).toEqual({ refs: [] });
     expect(a.host.selection.refs).toEqual([]);
     expect(first).not.toBe(second);
+    frame.mockRestore();
+  });
+
+  it('selects and frames entities inside groups by their path, without opening the group', async () => {
+    const a = model();
+    const loose = a.addBox([0, 0, 0], [1, 1, 1]);
+    const grouped = a.addBox([3, 0, 0], [4, 1, 1]);
+    const frame = vi.spyOn(ModelDocumentApi.prototype, 'frame').mockReturnValue(null as never);
+    const { run } = connect(openDocuments({ 'doc-a': a.document }));
+    const out = await run(async ({ model: m, selection }) => {
+      const revision = (await m!.read() as { revision: number }).revision;
+      const group = await m!.apply({ expectedRevision: revision, label: 'Group', operations: [{ op: 'make_group', as: 'g', refs: [{ kind: 'body', id: grouped }] }] }) as { created: { g: number } };
+      const path = [group.created.g];
+      const inside = await m!.query({ container: path, kinds: ['body'] }) as { entities: { ref: { path: number[]; kind: string; id: number } }[] };
+      const refs = [inside.entities[0]!.ref, { kind: 'body', id: loose }];
+      const set = await selection!.set({ refs });
+      await selection!.frame({ refs: [inside.entities[0]!.ref] });
+      const missing = await codeOf(selection!.set({ refs: [{ kind: 'body', id: 999, path }] }));
+      const context = (await m!.read() as { editContext: { path: number[] } }).editContext.path;
+      return { path, set, missing, context, part: inside.entities[0]!.ref };
+    }, 'doc-a');
+    expect(out.set).toEqual({ refs: [{ path: out.path, kind: 'body', id: out.part.id }, { path: [], kind: 'body', id: loose }] });
+    expect(out.missing).toBe('validation.failed');
+    expect(out.context).toEqual([]);
+    expect(frame).toHaveBeenCalledWith([{ path: out.path, kind: 'body', id: out.part.id }]);
     frame.mockRestore();
   });
 
@@ -241,6 +289,31 @@ describe('notifications', () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(events).toHaveLength(2);
     expect(context().document).toBeDefined();
+  });
+
+  it('tells the extension the name and units when they change, when it starts acting on another document, and not on renames of other documents', async () => {
+    const a = model(), b = model();
+    const docA = named(a.document, 'Bookcase'), docB = named(b.document, 'Bench');
+    const { run } = connect(openDocuments({ 'doc-a': docA.document, 'doc-b': docB.document }));
+    const events: { document: string; name: string; units: unknown }[] = [];
+    const unitEvents: unknown[] = [];
+    const handleA = await run(({ document }, invocation) => {
+      document!.onChange((e) => events.push(e as never));
+      document!.onUnitsChange((e) => unitEvents.push(e));
+      return invocation.document!;
+    }, 'doc-a');
+    docA.rename('Bookcase v2');
+    await vi.waitFor(() => expect(events).toHaveLength(1));
+    expect(events[0]).toEqual({ document: handleA, name: 'Bookcase v2', units: a.document.units() });
+    expect(unitEvents).toEqual([]);
+    a.commands.execute('model.setUnits', { patch: { format: 'decimal', lengthUnit: 'mm', lengthPrecision: 0 } });
+    await vi.waitFor(() => expect(events).toHaveLength(2));
+    expect(events[1]).toMatchObject({ document: handleA, name: 'Bookcase v2', units: { lengthUnit: 'mm' } });
+    expect(unitEvents).toHaveLength(1);
+    const handleB = await run((_c, invocation) => invocation.document!, 'doc-b');
+    await vi.waitFor(() => expect(events).toHaveLength(3));
+    expect(events[2]).toEqual({ document: handleB, name: 'Bench', units: b.document.units() });
+    expect(await run(({ document }) => document!.info({ document: handleA }), 'doc-b')).toMatchObject({ name: 'Bookcase v2' });
   });
 
   it('notifies subscribers of model and selection changes, coalesced, and selection only with selection.read', async () => {

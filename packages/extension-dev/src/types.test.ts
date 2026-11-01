@@ -38,6 +38,8 @@ describe('SDK types', () => {
     expect(same<Sdk.ModelBatchResult, Protocol.ModelBatchResult>(true)).toBe(true);
     expect(same<Sdk.DocumentUnits, Protocol.DocumentUnits>(true)).toBe(true);
     expect(same<Sdk.DocumentUnitsEvent, Protocol.DocumentUnitsEvent>(true)).toBe(true);
+    expect(same<Sdk.DocumentInfo, Protocol.DocumentInfo>(true)).toBe(true);
+    expect(same<Sdk.DocumentInfoEvent, Protocol.DocumentInfoEvent>(true)).toBe(true);
     expect(same<Sdk.ModelChangeEvent, Protocol.ModelChangeEvent>(true)).toBe(true);
   });
 

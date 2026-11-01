@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { formatAngleDeg, parseLength, typedLengthUnit, type UnitSettings } from '@pushform/core';
-import type { UiEvent, UiNode, UiNodeOf, UiQuantity, UiTable, UiTreeItem } from '@pushform/extension-protocol';
-import type { ExtensionUiHost } from '@pushform/extensions';
+import type { UiEvent, UiIcon, UiNode, UiNodeOf, UiQuantity, UiTable, UiTreeItem } from '@pushform/extension-protocol';
+import { Icon } from '../components/Icon';
 import { formatArea, formatLength, formatVolume } from '../engine/format';
 import { VectorView } from './VectorView';
 
@@ -25,19 +25,23 @@ export function ExtensionUiView({ tree, units, onEvent }: ExtensionUiProps): JSX
   return <div className="pf-xui"><Node node={tree} units={units} onEvent={onEvent} /></div>;
 }
 
-/** The interface an extension mounted for `target`, kept current as the extension updates it. */
-export function ExtensionTarget({ host, target, units, empty }: {
-  readonly host: ExtensionUiHost;
-  readonly target: string;
-  readonly units: UnitSettings;
-  readonly empty?: ReactNode;
-}): JSX.Element | null {
-  const shown = useSyncExternalStore(
-    (notify) => host.subscribe((changed) => { if (changed === target) notify(); }),
-    () => host.get(target),
-  );
-  if (!shown) return <>{empty ?? null}</>;
-  return <ExtensionUiView tree={shown.tree} units={units} onEvent={(event) => host.dispatch(target, event)} />;
+/** The host's icon for each icon name an extension may use. Only these names reach the icon component. */
+export const UI_ICON_NAMES: Readonly<Record<UiIcon, string>> = {
+  add: 'plus', remove: 'minus', delete: 'page-delete', edit: 'page-rename', copy: 'page-duplicate', save: 'save', print: 'print',
+  download: 'download', upload: 'upload', search: 'search', filter: 'filter', refresh: 'refresh', settings: 'settings', help: 'help',
+  info: 'panel-entityInfo', warning: 'warning', check: 'check', close: 'close', more: 'more', menu: 'menu', expand: 'chevron-down',
+  collapse: 'chevron-up', up: 'page-up', down: 'page-down', show: 'eye', hide: 'eye-off', lock: 'lock', unlock: 'unlock', undo: 'undo',
+  redo: 'redo', folder: 'folder', document: 'layer-page', tag: 'tool-tag', tags: 'panel-tags', palette: 'panel-styles', box: 'outliner-group',
+  component: 'outliner-component', table: 'tool-table', ruler: 'tool-dimension',
+};
+
+function UiIconGlyph({ icon }: { icon: UiIcon }): JSX.Element {
+  return <span className="pf-xui-icon" aria-hidden="true"><Icon name={UI_ICON_NAMES[icon]} size={14} /></span>;
+}
+
+/** A button's contents: its icon, if any, and its label unless the button shows only the icon. */
+function ButtonFace({ label, icon, iconOnly }: { label: string; icon: UiIcon | undefined; iconOnly: boolean }): JSX.Element {
+  return <>{icon ? <UiIconGlyph icon={icon} /> : null}{iconOnly ? null : <span>{label}</span>}</>;
 }
 
 interface NodeProps<T extends UiNode = UiNode> {
@@ -75,11 +79,20 @@ function Node({ node, units, onEvent }: NodeProps): JSX.Element | null {
           <progress aria-label={node.label} {...(node.value === null ? {} : { value: node.value, max: 1 })} />
         </div>
       );
-    case 'button':
+    case 'button': {
+      const iconOnly = node.variant === 'icon';
       return (
         <button type="button" className={`pf-btn pf-xui-button is-${node.variant ?? 'secondary'}`} disabled={node.disabled}
-          onClick={() => onEvent({ component: node.id, event: 'press' })}>{node.label}</button>
+          {...(iconOnly ? { 'aria-label': node.label, title: node.label } : {})}
+          onClick={() => onEvent({ component: node.id, event: 'press' })}>
+          <ButtonFace label={node.label} icon={node.icon} iconOnly={iconOnly} />
+        </button>
       );
+    }
+    case 'section':
+      return <Section node={node} units={units} onEvent={onEvent} />;
+    case 'menu':
+      return <Menu node={node} onEvent={onEvent} />;
     case 'textField':
       return <TextField node={node} units={units} onEvent={onEvent} />;
     case 'numberField':
@@ -203,6 +216,133 @@ function ChoiceField({ node, onEvent }: Omit<NodeProps<UiNodeOf<'choice'>>, 'uni
       {node.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
     </select>
   )}</Field>;
+}
+
+/**
+ * A disclosure. The header button reports the state the user asked for and the extension sends the tree back with
+ * `collapsed` set; header actions are buttons of their own, so they do not toggle the section.
+ */
+function Section({ node, units, onEvent }: NodeProps<UiNodeOf<'section'>>): JSX.Element {
+  const base = useId();
+  const open = !node.collapsed;
+  return (
+    <section className={`pf-xui-section${open ? ' is-open' : ''}`} aria-labelledby={`${base}-title`}>
+      <div className="pf-xui-section-head">
+        <button type="button" className="pf-xui-section-toggle" aria-expanded={open} aria-controls={`${base}-body`}
+          aria-labelledby={`${base}-title`} aria-describedby={node.subtitle || node.badge ? `${base}-detail` : undefined}
+          onClick={() => onEvent({ component: node.id, event: 'collapse', collapsed: open })}>
+          <span className="pf-xui-section-chevron" aria-hidden="true"><Icon name={open ? 'chevron-down' : 'chevron-right'} size={14} /></span>
+          <span id={`${base}-title`} className="pf-xui-section-title">{node.title}</span>
+          {node.subtitle || node.badge ? (
+            <span id={`${base}-detail`} className="pf-xui-section-detail">
+              {node.badge ? <span className="pf-xui-section-badge">{node.badge}</span> : null}
+              {node.subtitle ? <span className="pf-xui-section-subtitle">{node.subtitle}</span> : null}
+            </span>
+          ) : null}
+        </button>
+        {node.actions?.length ? (
+          <div className="pf-xui-section-actions" role="group" aria-label={`${node.title} actions`}>
+            {node.actions.map((action) => (
+              <button key={action.id} type="button" className={`pf-btn pf-xui-button is-${action.icon ? 'icon' : 'secondary'} is-action`} disabled={action.disabled}
+                {...(action.icon ? { 'aria-label': action.label, title: action.label } : {})}
+                onClick={() => onEvent({ component: node.id, event: 'press', action: action.id })}>
+                <ButtonFace label={action.label} icon={action.icon} iconOnly={action.icon !== undefined} />
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+      {open ? (
+        <div id={`${base}-body`} className="pf-xui-section-body">
+          {node.children.map((child) => <Node key={child.id} node={child} units={units} onEvent={onEvent} />)}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * A dropdown menu drawn by the host. The button opens it (a click, Enter, Space or an arrow key) with focus on the
+ * first item; arrows move through the enabled items and wrap, Home and End jump, Escape or Tab closes and returns
+ * focus to the button, and so does choosing an item, which is reported as `select`. A click elsewhere closes it.
+ */
+function Menu({ node, onEvent }: Omit<NodeProps<UiNodeOf<'menu'>>, 'units'>): JSX.Element {
+  const base = useId();
+  const [open, setOpen] = useState(false);
+  const [alignEnd, setAlignEnd] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const enabled = node.items.map((item, i) => (item.disabled ? -1 : i)).filter((i) => i >= 0);
+  const iconOnly = node.variant === 'icon';
+
+  const close = (refocus: boolean): void => {
+    setOpen(false);
+    if (refocus) button.current?.focus();
+  };
+  const focusItem = (index: number): void => { document.getElementById(`${base}-item-${index}`)?.focus(); };
+  const openAt = (index: number): void => { setOpen(true); setTimeout(() => focusItem(index), 0); };
+
+  useLayoutEffect(() => {
+    if (!open || !list.current) return;
+    // A menu near the right edge opens leftwards rather than running out of the panel.
+    const rect = list.current.getBoundingClientRect();
+    setAlignEnd(rect.right > (document.documentElement.clientWidth || window.innerWidth) - 4);
+    focusItem(enabled[0] ?? 0);
+    const outside = (e: PointerEvent): void => { if (!wrap.current?.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('pointerdown', outside);
+    return () => document.removeEventListener('pointerdown', outside);
+    // Only opening positions the list and moves focus.
+  }, [open]);
+
+  const buttonKey = (e: KeyboardEvent<HTMLButtonElement>): void => {
+    if (node.disabled) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); openAt(e.key === 'ArrowDown' ? enabled[0] ?? 0 : enabled[enabled.length - 1] ?? 0); }
+  };
+  const itemKey = (e: KeyboardEvent<HTMLDivElement>): void => {
+    const current = Number((e.target as HTMLElement).id.replace(`${base}-item-`, ''));
+    const at = enabled.indexOf(current);
+    const step = (delta: number): void => { if (enabled.length) focusItem(enabled[(Math.max(at, 0) + delta + enabled.length) % enabled.length]!); };
+    switch (e.key) {
+      case 'ArrowDown': step(at < 0 ? 0 : 1); break;
+      case 'ArrowUp': step(at < 0 ? 0 : -1); break;
+      case 'Home': if (enabled.length) focusItem(enabled[0]!); break;
+      case 'End': if (enabled.length) focusItem(enabled[enabled.length - 1]!); break;
+      case 'Escape': close(true); break;
+      case 'Tab': close(true); return;
+      default: return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  const choose = (id: string): void => {
+    close(true);
+    onEvent({ component: node.id, event: 'select', value: id });
+  };
+
+  return (
+    <div ref={wrap} className="pf-xui-menu">
+      <button ref={button} type="button" id={`${base}-button`} className={`pf-btn pf-xui-button is-${iconOnly ? 'icon' : 'secondary'}`}
+        aria-haspopup="menu" aria-expanded={open} aria-controls={open ? `${base}-list` : undefined} disabled={node.disabled}
+        {...(iconOnly ? { 'aria-label': node.label, title: node.label } : {})}
+        onClick={() => (open ? close(false) : openAt(enabled[0] ?? 0))} onKeyDown={buttonKey}>
+        <ButtonFace label={node.label} icon={node.icon} iconOnly={iconOnly} />
+        {iconOnly ? null : <span className="pf-xui-menu-caret" aria-hidden="true"><Icon name="chevron-down" size={12} /></span>}
+      </button>
+      {open ? (
+        <div ref={list} id={`${base}-list`} className={`pf-xui-menu-list${alignEnd ? ' is-end' : ''}`} role="menu" aria-labelledby={`${base}-button`} onKeyDown={itemKey}>
+          {node.items.map((item, i) => (
+            <div key={item.id} className={item.separator ? 'has-separator' : undefined}>
+              <button type="button" id={`${base}-item-${i}`} role="menuitem" className="pf-xui-menu-item" tabIndex={-1}
+                disabled={item.disabled} aria-disabled={item.disabled ? true : undefined} onClick={() => choose(item.id)}>
+                {item.label}
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function Tabs({ node, units, onEvent }: NodeProps<UiNodeOf<'tabs'>>): JSX.Element {

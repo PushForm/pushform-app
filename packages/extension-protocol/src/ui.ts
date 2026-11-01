@@ -30,6 +30,9 @@ export const UI_LIMITS = {
   vectorStyles: 64,
   /** Characters of one vector text label. */
   vectorTextChars: 200,
+  /** Header action buttons of one section, and items of one menu. */
+  sectionActions: 8,
+  menuItems: 50,
 } as const;
 
 const id = z.string().regex(/^[A-Za-z0-9_.:-]{1,100}$/, 'must be 1-100 letters, digits, or _ . : -');
@@ -38,6 +41,18 @@ const label = z.string().trim().min(1).max(200);
 const tone = z.enum(['default', 'muted', 'info', 'success', 'warning', 'error']);
 const option = z.strictObject({ value: z.string().max(200), label });
 const color = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+
+/**
+ * Icons a button, menu or section action may show, drawn by the host from its own icon set. The names say what the
+ * control does rather than what the glyph looks like, so the host can keep them consistent with its own controls.
+ */
+export const UI_ICONS = [
+  'add', 'remove', 'delete', 'edit', 'copy', 'save', 'print', 'download', 'upload', 'search', 'filter', 'refresh', 'settings',
+  'help', 'info', 'warning', 'check', 'close', 'more', 'menu', 'expand', 'collapse', 'up', 'down', 'show', 'hide', 'lock', 'unlock',
+  'undo', 'redo', 'folder', 'document', 'tag', 'tags', 'palette', 'box', 'component', 'table', 'ruler',
+] as const;
+export type UiIcon = (typeof UI_ICONS)[number];
+const icon = z.enum(UI_ICONS);
 
 /**
  * What a number means, so the host can show it in the document's units: `length` values are meters, `area` square
@@ -81,8 +96,24 @@ const component = {
   progress: z.strictObject({ type: z.literal('progress'), id, label,
     /** 0 to 1, or null while the amount is unknown. */
     value: z.number().min(0).max(1).nullable() }),
-  button: z.strictObject({ type: z.literal('button'), id, label, variant: z.enum(['primary', 'secondary', 'danger']).optional(),
-    disabled: z.boolean().optional() }),
+  /** `variant: 'icon'` shows only the icon, with the label as the accessible name and tooltip, for compact toolbars; it needs an icon. */
+  button: z.strictObject({ type: z.literal('button'), id, label, variant: z.enum(['primary', 'secondary', 'danger', 'icon']).optional(),
+    icon: icon.optional(), disabled: z.boolean().optional() }),
+  /**
+   * A disclosure: a header with a title, an optional subtitle and badge, and header action buttons, over children
+   * that are shown unless `collapsed`. The header reports `collapse`; an action reports `press` with its id.
+   */
+  section: z.strictObject({ type: z.literal('section'), id, title: label, subtitle: z.string().max(200).optional(),
+    badge: z.string().max(40).optional(), collapsed: z.boolean().optional(),
+    actions: z.array(z.strictObject({ id, label, icon: icon.optional(), disabled: z.boolean().optional() })).max(UI_LIMITS.sectionActions).optional(),
+    children }),
+  /**
+   * A button that opens a dropdown of items; choosing one reports `select` with its id. A `separator` item is drawn
+   * with a line above it. `variant: 'icon'` shows only the icon, with the label as the accessible name.
+   */
+  menu: z.strictObject({ type: z.literal('menu'), id, label, icon: icon.optional(), variant: z.enum(['secondary', 'icon']).optional(),
+    disabled: z.boolean().optional(),
+    items: z.array(z.strictObject({ id, label, disabled: z.boolean().optional(), separator: z.boolean().optional() })).min(1).max(UI_LIMITS.menuItems) }),
   textField: z.strictObject({ type: z.literal('textField'), id, label, value: text, placeholder: z.string().max(200).optional(),
     multiline: z.boolean().optional(), maxLength: z.number().int().min(1).max(UI_LIMITS.textChars).optional(), disabled: z.boolean().optional(),
     error: z.string().max(500).optional() }),
@@ -136,6 +167,12 @@ const component = {
      * from 120 to 800 pixels, so the whole drawing shows without empty space above and below it.
      */
     height: z.number().int().min(80).max(2000).optional(),
+    /**
+     * Sizes the drawing as if it were this wide, in drawing units, so that several drawings share one scale: an
+     * off-cut given a full sheet's `fitWidth` draws smaller than the sheet. A value under the drawing's width is
+     * taken as the drawing's width.
+     */
+    fitWidth: finite.positive().optional(),
     styles: z.array(vectorStyle).min(1).max(UI_LIMITS.vectorStyles),
     shapes: z.array(z.unknown()).max(UI_LIMITS.vectorShapes),
     /** Items shown highlighted. */
@@ -146,14 +183,15 @@ const component = {
 export const UI_COMPONENTS = Object.keys(component) as (keyof typeof component)[];
 const nodeSchema = z.discriminatedUnion('type', Object.values(component) as unknown as [z.ZodObject, ...z.ZodObject[]]);
 
-type Base<K extends keyof typeof component> = Omit<z.infer<(typeof component)[K]>, 'children' | 'items' | 'shapes'>;
+type Base<K extends keyof typeof component> = Omit<z.infer<(typeof component)[K]>, 'children' | 'shapes'>;
 export interface UiTreeItem { id: string; label: string; children?: UiTreeItem[] }
 export type UiNode =
   | (Base<'stack'> & { children: UiNode[] })
   | Base<'divider'> | Base<'text'> | Base<'message'> | Base<'progress'> | Base<'button'> | Base<'textField'>
-  | Base<'numberField'> | Base<'checkbox'> | Base<'choice'> | Base<'colorField'> | Base<'table'>
+  | Base<'numberField'> | Base<'checkbox'> | Base<'choice'> | Base<'colorField'> | Base<'table'> | Base<'menu'>
   | (Base<'tabs'> & { children: UiNode[] })
-  | (Base<'tree'> & { items: UiTreeItem[] })
+  | (Base<'section'> & { children: UiNode[] })
+  | (Omit<Base<'tree'>, 'items'> & { items: UiTreeItem[] })
   | (Base<'vector'> & { shapes: UiVectorShape[] });
 export type UiNodeOf<T extends UiNode['type']> = Extract<UiNode, { type: T }>;
 export type UiTable = UiNodeOf<'table'>;
@@ -207,11 +245,17 @@ export function validateUiTree(input: unknown): UiNode {
     const node = parsed.data as Record<string, unknown> & { type: string; id: string };
     if (ids.has(node.id)) throw new UiTreeError('validation.failed', `${path}: the id "${node.id}" is used twice.`);
     ids.add(node.id);
-    if (node.type === 'stack' || node.type === 'tabs') {
+    if (node.type === 'stack' || node.type === 'tabs' || node.type === 'section') {
       const kids = (node.children as unknown[]).map((child, i) => check(child, `${path}.children.${i}`));
       if (node.type === 'tabs') checkTabs(node as unknown as UiNodeOf<'tabs'>, kids, path);
+      if (node.type === 'section') checkUnique((node as unknown as UiNodeOf<'section'>).actions ?? [], `${path}: action`);
       return { ...node, children: kids } as unknown as UiNode;
     }
+    if (node.type === 'menu') checkUnique((node as unknown as UiNodeOf<'menu'>).items, `${path}: item`);
+    if (node.type === 'button' && node.variant === 'icon' && node.icon === undefined)
+      throw new UiTreeError('validation.failed', `${path}: an icon button needs an icon.`);
+    if (node.type === 'menu' && node.variant === 'icon' && node.icon === undefined)
+      throw new UiTreeError('validation.failed', `${path}: an icon menu needs an icon.`);
     if (node.type === 'tree') return { ...node, items: checkTreeItems(node.items as unknown[], path) } as unknown as UiNode;
     if (node.type === 'table') checkTable(node as unknown as UiTable, path);
     if (node.type === 'vector') return { ...node, shapes: checkVector(node as unknown as UiVector, node.shapes as unknown[], path) } as unknown as UiNode;
@@ -228,6 +272,14 @@ export function validateUiTree(input: unknown): UiNode {
     return node as unknown as UiNode;
   };
   return check(input, 'root');
+}
+
+function checkUnique(list: readonly { id: string }[], what: string): void {
+  const seen = new Set<string>();
+  for (const { id: itemId } of list) {
+    if (seen.has(itemId)) throw new UiTreeError('validation.failed', `${what} id "${itemId}" is used twice.`);
+    seen.add(itemId);
+  }
 }
 
 function checkTabs(node: UiNodeOf<'tabs'>, kids: UiNode[], path: string): void {
@@ -307,10 +359,16 @@ function checkTable(table: UiTable, path: string): void {
 
 /** Events the host sends for user input, with their payloads. */
 export type UiEvent =
-  | { component: string; event: 'press' }
+  /** A button was pressed; or, with `action`, a section's header action. */
+  | { component: string; event: 'press'; action?: string }
   | { component: string; event: 'change'; value: string | number | boolean | null }
+  /** A tab, a tree item, a vector item, or a menu item was chosen. */
   | { component: string; event: 'select'; value: string | null }
   | { component: string; event: 'toggle'; item: string; expanded: boolean }
+  /** A section's header was used to collapse or expand it. */
+  | { component: string; event: 'collapse'; collapsed: boolean }
+  /** The user closed a dialog (Escape or its Close button); `component` is the dialog tree's root. The dialog is gone already. */
+  | { component: string; event: 'dialogClose' }
   | { component: string; event: 'cellEdit'; row: string; column: string; value: string | number | boolean | null }
   | { component: string; event: 'sort'; column: string; direction: 'ascending' | 'descending' }
   | { component: string; event: 'rowSelect'; rows: string[] }
@@ -332,6 +390,14 @@ export const uiMountSchema = z.strictObject({ target: z.string().min(1).max(200)
 /** What `ui.mount` and `ui.update` take; the tree is validated separately, by `validateUiTree`. */
 export type UiMountInput = { target: string; seq: number; tree: UiNode; presentation?: UiPresentation };
 export const uiUnmountSchema = z.strictObject({ target: z.string().min(1).max(200) });
+/**
+ * Shows a modal dialog over a mounted target, with a title and its own tree, or replaces an open one's title and
+ * tree with a higher `seq`. Each target has at most one dialog; it closes with `ui.closeDialog`, when the user
+ * dismisses it (reported as `dialogClose`), or with the target.
+ */
+export const uiDialogSchema = z.strictObject({ target: z.string().min(1).max(200), seq: z.number().int().nonnegative(), title: label, tree: z.unknown() });
+export type UiDialogInput = { target: string; seq: number; title: string; tree: UiNode };
+export const uiCloseDialogSchema = z.strictObject({ target: z.string().min(1).max(200) });
 /**
  * Prints, or saves as PDF, vector views on screen: one page per view, at a page size in meters (20 mm to 2 m a side).
  * The user chooses in PushForm's own dialog; the extension learns only the outcome.

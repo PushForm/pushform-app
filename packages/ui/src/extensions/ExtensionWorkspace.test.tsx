@@ -12,7 +12,7 @@ import {
 } from '@pushform/extensions';
 import { searchCommands } from '../components/CommandSearch';
 import { ExtensionActivity, ExtensionRuns } from './ExtensionActivity';
-import { ExtensionPanel } from './ExtensionPanel';
+import { ExtensionPanel, readSize } from './ExtensionPanel';
 import { extensionPanels, selectionActionGroups, syncExtensionCommands } from './extensionContributions';
 import { railLabel } from './useExtensionWorkspace';
 
@@ -276,6 +276,153 @@ describe('extension panels', () => {
     fireEvent.click(within(screen.getByRole('region', { name: 'Parts list, from Parts' })).getByRole('button', { name: 'Return to side panel' }));
     expect(screen.queryByRole('dialog')).toBeNull();
     localStorage.clear();
+  });
+});
+
+describe('extension panels keep their state between the dock and the window', () => {
+  const editor = {
+    activate(context: ExtensionContext) {
+      const ui = context.ui as unknown as { mount(i: unknown): Promise<unknown> };
+      context.commands.register('com.example.parts.panel', () => ui.mount({ target: 'com.example.parts.panel', seq: 1, tree: { type: 'stack', id: 'root', children: [
+        { type: 'textField', id: 'name', label: 'Job name', value: 'Kitchen' },
+        { type: 'table', id: 'parts', label: 'Parts', columns: [{ id: 'n', label: 'Name', kind: 'text' }, { id: 'm', label: 'Material', kind: 'text', hideable: true }], rows: [{ id: 'a', cells: { n: 'Side', m: 'Oak' } }] },
+      ] } }));
+    },
+  };
+
+  it('moves the same rendered interface, with typing in progress and open menus, rather than drawing it again', async () => {
+    const { platform } = await setup(editor);
+    const [entry] = extensionPanels(platform, 'modeling');
+    render(<ExtensionPanel platform={platform} entry={entry!} units={DEFAULT_UNITS} documentId="tab-1" onClose={() => {}} />);
+    const field = await screen.findByLabelText('Job name') as HTMLInputElement;
+    fireEvent.focus(field);
+    fireEvent.change(field, { target: { value: 'Kitchen, north wall' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Columns' }));
+    expect(screen.getByText('Shown columns')).toBeTruthy();
+    const table = screen.getByRole('grid', { name: 'Parts' });
+    fireEvent.click(screen.getByRole('button', { name: 'Open Parts list in a window' }));
+    const window = screen.getByRole('dialog', { name: 'Parts list, from Parts' });
+    // The very same elements are in the window, with the draft and the menu as they were.
+    const moved = within(window).getByLabelText('Job name') as HTMLInputElement;
+    expect(moved).toBe(field);
+    expect(moved.value).toBe('Kitchen, north wall');
+    expect(within(window).getByRole('grid', { name: 'Parts' })).toBe(table);
+    expect(within(window).getByText('Shown columns')).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Parts list, from Parts' }).contains(field)).toBe(false);
+    // And back again.
+    fireEvent.click(within(window).getByRole('button', { name: /Return to side panel/ }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    const back = screen.getByLabelText('Job name') as HTMLInputElement;
+    expect(back).toBe(field);
+    expect(back.value).toBe('Kitchen, north wall');
+    expect(screen.getByRole('region', { name: 'Parts list, from Parts' }).contains(field)).toBe(true);
+    expect(screen.getByText('Shown columns')).toBeTruthy();
+  });
+
+  it('remembers the window size the user set, within sensible bounds', async () => {
+    localStorage.clear();
+    const key = 'pushform:extensions:presentation:me:modeling:com.example.parts.panel';
+    localStorage.setItem(`${key}:size`, JSON.stringify({ width: 900, height: 600 }));
+    expect(readSize(`${key}:size`)).toEqual({ width: 900, height: 600 });
+    localStorage.setItem('bad', '{"width":"wide"}');
+    expect(readSize('bad')).toBeNull();
+    localStorage.setItem('tiny', JSON.stringify({ width: 10, height: 10 }));
+    expect(readSize('tiny')).toEqual({ width: 360, height: 240 });
+    const { platform } = await setup(editor);
+    const [entry] = extensionPanels(platform, 'modeling');
+    render(<ExtensionPanel platform={platform} entry={entry!} units={DEFAULT_UNITS} documentId="tab-1" onClose={() => {}} presentationKey={key} />);
+    await screen.findByLabelText('Job name');
+    fireEvent.click(screen.getByRole('button', { name: 'Open Parts list in a window' }));
+    const window = screen.getByRole('dialog', { name: 'Parts list, from Parts' });
+    expect(window.style.width).toBe('900px');
+    expect(window.style.height).toBe('600px');
+    localStorage.clear();
+  });
+});
+
+describe('extension dialogs', () => {
+  type Ui = { mount(i: unknown): Promise<unknown>; dialog(i: unknown): Promise<unknown>; closeDialog(i: unknown): Promise<unknown>; onEvent(h: (e: Record<string, unknown>) => void): void };
+  const target = 'com.example.parts.panel';
+  const heard: Record<string, unknown>[] = [];
+  const materials = {
+    activate(context: ExtensionContext) {
+      const ui = context.ui as unknown as Ui;
+      let seq = 0;
+      const dialog = (name: string) => ui.dialog({ target, seq: ++seq, title: 'Edit material', tree: { type: 'stack', id: 'editor', children: [
+        { type: 'textField', id: 'name', label: 'Material name', value: name },
+        { type: 'stack', id: 'buttons', direction: 'horizontal', children: [{ type: 'button', id: 'save', label: 'Save', variant: 'primary' }, { type: 'button', id: 'cancel', label: 'Cancel' }] },
+      ] } });
+      ui.onEvent((e) => {
+        heard.push(e);
+        if (e.component === 'edit') void dialog('Oak');
+        if (e.component === 'name' && e.event === 'change') void dialog(String(e.value));
+        if (e.component === 'cancel' || e.component === 'save') void ui.closeDialog({ target });
+      });
+      context.commands.register(target, () => ui.mount({ target, seq: 1, tree: { type: 'stack', id: 'root', children: [
+        { type: 'text', id: 't', text: '2 materials' }, { type: 'button', id: 'edit', label: 'Edit Oak' },
+      ] } }));
+    },
+  };
+
+  it('shows a modal dialog drawn by PushForm over the panel, routes its events, and reports the user closing it', async () => {
+    heard.length = 0;
+    const { platform } = await setup(materials);
+    const [entry] = extensionPanels(platform, 'modeling');
+    render(<ExtensionPanel platform={platform} entry={entry!} units={DEFAULT_UNITS} documentId="tab-1" onClose={() => {}} />);
+    const edit = await screen.findByRole('button', { name: 'Edit Oak' });
+    edit.focus();
+    fireEvent.click(edit);
+    const dialog = await screen.findByRole('dialog', { name: 'Edit material' });
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(dialog.closest('.pf-xdialog-backdrop')).toBeTruthy();
+    // Focus starts on the first field and Tab cycles inside.
+    const name = within(dialog).getByLabelText('Material name') as HTMLInputElement;
+    await waitFor(() => expect(document.activeElement).toBe(name));
+    fireEvent.keyDown(name, { key: 'Tab', shiftKey: true });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    // Its events reach the extension, which replaces the tree in place.
+    fireEvent.focus(name);
+    fireEvent.change(name, { target: { value: 'Oak, quarter sawn' } });
+    fireEvent.blur(name);
+    await waitFor(() => expect(heard.at(-1)).toEqual({ target, component: 'name', event: 'change', value: 'Oak, quarter sawn' }));
+    await waitFor(() => expect((within(screen.getByRole('dialog', { name: 'Edit material' })).getByLabelText('Material name') as HTMLInputElement).value).toBe('Oak, quarter sawn'));
+    expect(screen.getByRole('dialog', { name: 'Edit material' })).toBe(dialog);
+    // Escape closes it at once, the extension hears dialogClose, and focus returns.
+    fireEvent.keyDown(within(dialog).getByRole('button', { name: 'Save' }), { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(edit);
+    await waitFor(() => expect(heard.at(-1)).toEqual({ target, component: 'editor', event: 'dialogClose' }));
+    // The extension closes it too.
+    fireEvent.click(edit);
+    const again = await screen.findByRole('dialog', { name: 'Edit material' });
+    fireEvent.click(within(again).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(heard.filter((e) => e.event === 'dialogClose')).toHaveLength(1);
+    // The Close button closes it as well.
+    fireEvent.click(edit);
+    const third = await screen.findByRole('dialog', { name: 'Edit material' });
+    fireEvent.click(within(third).getByRole('button', { name: 'Close dialog' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(heard.filter((e) => e.event === 'dialogClose')).toHaveLength(2));
+  });
+
+  it('stays above the panel window, and Escape in it closes only the dialog', async () => {
+    heard.length = 0;
+    const { platform } = await setup(materials);
+    const [entry] = extensionPanels(platform, 'modeling');
+    render(<ExtensionPanel platform={platform} entry={entry!} units={DEFAULT_UNITS} documentId="tab-1" onClose={() => {}} />);
+    await screen.findByRole('button', { name: 'Edit Oak' });
+    fireEvent.click(screen.getByRole('button', { name: 'Open Parts list in a window' }));
+    const window = screen.getByRole('dialog', { name: 'Parts list, from Parts' });
+    fireEvent.click(within(window).getByRole('button', { name: 'Edit Oak' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Edit material' });
+    // The dialog is a sibling of the window's backdrop in the app root, not inside the window.
+    expect(window.contains(dialog)).toBe(false);
+    expect(dialog.closest('.pf-xdialog-backdrop')?.parentElement).toBe(window.closest('.pf-xwindow-backdrop')?.parentElement);
+    fireEvent.keyDown(within(dialog).getByRole('button', { name: 'Save' }), { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Edit material' })).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Parts list, from Parts' })).toBeTruthy();
+    await waitFor(() => expect(heard.at(-1)).toEqual({ target, component: 'editor', event: 'dialogClose' }));
   });
 });
 

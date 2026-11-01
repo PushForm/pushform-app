@@ -10,9 +10,9 @@ Run **About PushForm** from command search to see the running version and build 
 
 A browser refresh can load a newer web build. Your document session is restored when the browser's saved session is available.
 
-## Read the planned open-source license
+## Read the license and find the source code
 
-In **About PushForm**, choose **GNU GPLv3 license** to read the license in a new tab. The dialog identifies this as the planned open-source release; it does not mean the public source repository is available yet. Use Tab to reach the link, or Shift+Tab to move back. Escape closes About.
+PushForm is open source. In **About PushForm**, choose **GNU GPLv3 license** to read the license in a new tab, or **Source code on GitHub** to open the public repository. Use Tab to reach the links, or Shift+Tab to move back. Escape closes About.
 
 ## Check for desktop updates
 

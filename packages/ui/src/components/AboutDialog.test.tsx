@@ -28,9 +28,15 @@ describe('AboutDialog', () => {
     expect(license.getAttribute('target')).toBe('_blank');
     expect(license.getAttribute('rel')).toBe('noopener noreferrer');
     fireEvent.keyDown(window, { key: 'Tab' });
+    const source = screen.getByRole('link', { name: 'Source code on GitHub' });
+    expect(document.activeElement).toBe(source);
+    expect(source.getAttribute('href')).toBe('https://github.com/PushForm/pushform-app');
+    expect(source.getAttribute('target')).toBe('_blank');
+    expect(source.getAttribute('rel')).toBe('noopener noreferrer');
+    fireEvent.keyDown(window, { key: 'Tab' });
     expect(document.activeElement).toBe(close);
     fireEvent.keyDown(window, { key: 'Tab', shiftKey: true });
-    expect(document.activeElement).toBe(license);
+    expect(document.activeElement).toBe(source);
     fireEvent.keyDown(window, { key: 'Tab' });
     expect(document.activeElement).toBe(close);
     fireEvent.click(close);

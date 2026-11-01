@@ -30,7 +30,7 @@ export function AboutDialog({ build, onClose }: { build: BuildInfo; onClose: () 
         {updates ? <UpdateChannel updates={updates} /> : null}
       </dl>
       <p className="pf-about-copyright">© 2026 JobCraft, Inc.</p>
-      <p>Planned open-source release: <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener noreferrer">GNU GPLv3 license</a></p>
+      <p>Open source under the <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener noreferrer">GNU GPLv3 license</a>. <a href="https://github.com/PushForm/pushform-app" target="_blank" rel="noopener noreferrer">Source code on GitHub</a></p>
     </div>
   </div>, document.body);
 }

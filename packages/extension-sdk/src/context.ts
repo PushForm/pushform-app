@@ -4,7 +4,7 @@ import type {
   DocumentUnits, DocumentUnitsEvent, ModelBatch, ModelBatchResult, ModelChangeEvent, ModelDocumentSnapshot, ModelQuery, ModelQueryResult,
   ModelRef, ModelRefInput,
 } from './model.ts';
-import type { UiEventOnTarget, UiNode } from './ui.ts';
+import type { UiEventOnTarget, UiNode, UiPresentation } from './ui.ts';
 
 /**
  * What an extension's entry module receives. The module exports `activate(context)` and, optionally,
@@ -42,10 +42,13 @@ export interface InvocationContext {
 export type ContributionHandler = (params: unknown, invocation: InvocationContext) => unknown;
 
 export interface UiService {
-  /** Shows `tree` for one of the extension's panel, inspector or settings contributions. */
-  mount(input: { target: string; seq: number; tree: UiNode }, options?: CallOptions): Promise<{ seq: number }>;
+  /**
+   * Shows `tree` for one of the extension's panel, inspector or settings contributions. A panel can ask to open in a
+   * large window with `presentation: 'window'`; it opens docked otherwise, and the user can move it either way.
+   */
+  mount(input: { target: string; seq: number; tree: UiNode; presentation?: UiPresentation }, options?: CallOptions): Promise<{ seq: number }>;
   /** Replaces the tree; `seq` must be higher than the one shown, or the shown tree is kept and the call fails. */
-  update(input: { target: string; seq: number; tree: UiNode }, options?: CallOptions): Promise<{ seq: number }>;
+  update(input: { target: string; seq: number; tree: UiNode; presentation?: UiPresentation }, options?: CallOptions): Promise<{ seq: number }>;
   unmount(input: { target: string }, options?: CallOptions): Promise<null>;
   /**
    * Saves a vector view that is on screen as SVG or DXF where the user chooses, after PushForm's prompt states

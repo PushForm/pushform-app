@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { DEFAULT_UNITS } from '@pushform/core';
 import { validateUiTree, type UiEvent } from '@pushform/extension-protocol';
 import { ExtensionUiView } from './ExtensionUi';
+import { AUTO_HEIGHT_PX, autoVectorHeight } from './VectorView';
 
 afterEach(cleanup);
 
@@ -72,5 +73,25 @@ describe('vector views', () => {
     ]);
     fireEvent.keyDown(canvas, { key: 'ArrowRight' });
     expect(canvas.getAttribute('viewBox')!.startsWith('0.244')).toBe(true);
+  });
+
+  it('size the frame from the drawing at the width available when no height is given, within limits', () => {
+    expect(autoVectorHeight({ width: 2.44, height: 1.22 }, 300)).toBe(150);
+    expect(autoVectorHeight({ width: 10, height: 0.1 }, 300)).toBe(AUTO_HEIGHT_PX.min);
+    expect(autoVectorHeight({ width: 1, height: 10 }, 300)).toBe(AUTO_HEIGHT_PX.max);
+    expect(autoVectorHeight({ width: 1, height: 1 }, 0)).toBe(AUTO_HEIGHT_PX.unmeasured);
+    const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('pf-xui-vector-frame') ? 316 : 0;
+    });
+    try {
+      const { view } = show();
+      expect((view.container.querySelector('.pf-xui-vector-frame') as HTMLElement).style.height).toBe('158px');
+    } finally { width.mockRestore(); }
+  });
+
+  it('keep an explicit height', () => {
+    const events: UiEvent[] = [];
+    const view = render(<ExtensionUiView tree={validateUiTree({ ...sheet, height: 436 })} units={DEFAULT_UNITS} onEvent={(e) => events.push(e)} />);
+    expect((view.container.querySelector('.pf-xui-vector-frame') as HTMLElement).style.height).toBe('436px');
   });
 });

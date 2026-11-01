@@ -97,7 +97,10 @@ export interface UiVector {
   type: 'vector'; id: string; label: string;
   bounds: { x: number; y: number; width: number; height: number };
   units: 'length' | 'plain';
-  /** On-screen height in pixels, 80 to 2000; 300 when absent. */
+  /**
+   * On-screen height in pixels, 80 to 2000. When absent, the frame follows the drawing's proportions at the width
+   * available, from 120 to 800 pixels, so the whole drawing shows without empty space above and below it.
+   */
   height?: number | undefined;
   styles: UiVectorStyle[];
   shapes: UiVectorShape[];
@@ -120,6 +123,14 @@ export type UiEvent =
   | { component: string; event: 'columns'; hidden: string[] }
   /** The pointer moved onto a vector view item, or off every item. Clicking one sends `select`. */
   | { component: string; event: 'hover'; item: string | null };
+
+/**
+ * Where a panel is shown: `dock` in the side panel beside the editor, or `window` in a large window over the editor,
+ * for wide tables and drawings. Pass it to `context.ui.mount` (a panel starts docked when it is absent); `update`
+ * keeps the presentation shown unless it names one. Once the user moves the panel themselves, their choice is kept
+ * and later requests do not move it. Inspector and settings blocks are always shown in place and ignore it.
+ */
+export type UiPresentation = 'dock' | 'window';
 
 /** An event with the target (panel, inspector or settings contribution id) it happened on. */
 export type UiEventOnTarget = { target: string } & UiEvent;

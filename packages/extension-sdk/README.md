@@ -38,6 +38,10 @@ export function activate(context: ExtensionContext): void {
 Every contribution (a command, a panel, a selection action and so on) is declared in the manifest and wired up here
 by its id. Contribution ids start with the extension id.
 
+A panel opens in the side panel. One with wide tables or drawings can ask to open in a large window instead by
+passing `presentation: 'window'` to `ui.mount`; `ui.update` keeps the presentation unless it names one. The user can
+move the panel either way from its header, and once they do, their choice wins over the request.
+
 ## Services and permissions
 
 Everything PushForm offers is on `context`, and only what the user granted is there. Reading a service you lack

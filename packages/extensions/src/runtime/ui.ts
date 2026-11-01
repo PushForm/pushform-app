@@ -2,7 +2,7 @@
 // Copyright 2026 PushForm contributors
 import {
   ExtensionError, UiTreeError, uiMountSchema, uiUnmountSchema, validateUiTree, type ExtensionManifest, type UiEvent,
-  type UiNode, type UiNodeOf, type UiTreeItem,
+  type UiNode, type UiNodeOf, type UiPresentation, type UiTreeItem,
 } from '@pushform/extension-protocol';
 import type { ServiceImplementations } from './host';
 
@@ -12,7 +12,8 @@ import type { ServiceImplementations } from './host';
  * one (a higher sequence number), and `ui.unmount` removes it. A tree that fails validation or arrives out of order
  * is refused with a structured error and the previous tree stays on screen. Events from the user are checked
  * against the tree currently shown before they are sent, so the extension never hears about a component it did not
- * show, or about a target that is no longer mounted.
+ * show, or about a target that is no longer mounted. A panel's mount can ask to be shown in a large window rather
+ * than docked; an update keeps the presentation shown unless it names another.
  */
 
 const UI_TARGETS = new Set(['model.panel', 'model.inspector.block', 'app.settings.block']);
@@ -21,6 +22,8 @@ export interface MountedUi {
   readonly target: string;
   readonly seq: number;
   readonly tree: UiNode;
+  /** Where the extension asked for the panel to be shown; the user can move it either way. */
+  readonly presentation: UiPresentation;
 }
 
 export type UiEventMessage = { readonly target: string } & UiEvent;
@@ -85,7 +88,8 @@ export class ExtensionUiHost {
 
   private show(input: unknown, kind: 'mount' | 'update'): { seq: number } {
     const parsed = uiMountSchema.safeParse(input);
-    if (!parsed.success) throw new ExtensionError('validation.failed', `ui.${kind} needs a target, a sequence number and a tree.`);
+    if (!parsed.success) throw new ExtensionError('validation.failed', parsed.error.issues.some((issue) => issue.path[0] === 'presentation')
+      ? `ui.${kind}: presentation is "dock" or "window".` : `ui.${kind} needs a target, a sequence number and a tree.`);
     const { target, seq } = parsed.data;
     if (!this.targets.has(target))
       throw new ExtensionError('validation.failed', `"${target}" is not a panel, inspector or settings contribution of this extension.`);
@@ -100,7 +104,8 @@ export class ExtensionUiHost {
       if (error instanceof UiTreeError) throw new ExtensionError(error.code, `${error.message} The previous interface is kept.`);
       throw error;
     }
-    this.mounted.set(target, { target, seq, tree });
+    const presentation = parsed.data.presentation ?? (kind === 'update' ? current?.presentation : undefined) ?? 'dock';
+    this.mounted.set(target, { target, seq, tree, presentation });
     this.notify(target);
     return { seq };
   }

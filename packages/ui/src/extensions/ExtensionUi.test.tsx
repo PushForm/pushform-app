@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { DEFAULT_UNITS, type UnitSettings } from '@pushform/core';
 import { validateUiTree, type UiEvent } from '@pushform/extension-protocol';
-import { ExtensionUiView, TABLE_ROW_PX, formatQuantity, parseQuantity } from './ExtensionUi';
+import { ExtensionUiView, OVERLAY_SCROLLBAR_PX, TABLE_ROW_PX, formatQuantity, parseQuantity } from './ExtensionUi';
 
 afterEach(cleanup);
 
@@ -78,6 +78,31 @@ describe('ExtensionUiView', () => {
     expect(events).toEqual([{ component: 'views', event: 'select', value: 'b' }]);
   });
 
+  it('lets tabs wrap onto more rows and reach every tab from the keyboard, Home and End included', () => {
+    const labels = ['Parts', 'Materials', 'Sheets', 'Bars', 'Edges', 'Estimate', 'Export'];
+    const { events, view } = show({ type: 'tabs', id: 'views', label: 'Views', selected: 't6',
+      tabs: labels.map((label, i) => ({ id: `t${i}`, label })), children: labels.map((label, i) => ({ type: 'text', id: `c${i}`, text: `${label} view` })) });
+    const list = screen.getByRole('tablist', { name: 'Views' });
+    expect(list.classList.contains('pf-xui-tablist')).toBe(true);
+    expect(within(list).getAllByRole('tab').map((t) => t.textContent)).toEqual(labels);
+    const last = screen.getByRole('tab', { name: 'Export' });
+    fireEvent.keyDown(last, { key: 'ArrowRight' });
+    fireEvent.keyDown(last, { key: 'Home' });
+    fireEvent.keyDown(last, { key: 'End' });
+    expect(events.map((e) => (e as { value: string }).value)).toEqual(['t0', 't0', 't6']);
+    expect(view.container.querySelector('.pf-xui-tablist')).toBe(list);
+  });
+
+  it('keeps Escape in a number field when it undoes typing, and lets it through otherwise', () => {
+    show({ type: 'numberField', id: 'kerf', label: 'Kerf', value: 0.003, quantity: 'length' });
+    const input = screen.getByLabelText('Kerf') as HTMLInputElement;
+    fireEvent.focus(input);
+    expect(fireEvent.keyDown(input, { key: 'Escape' })).toBe(true);
+    fireEvent.change(input, { target: { value: '9' } });
+    expect(fireEvent.keyDown(input, { key: 'Escape' })).toBe(false);
+    expect(input.value).toBe(formatQuantity(0.003, 'length', metric));
+  });
+
   it('reports tree expansion and selection', () => {
     const { events } = show({ type: 'tree', id: 'outline', label: 'Outline', items: [{ id: 'cab', label: 'Cabinet', children: [{ id: 'door', label: 'Door' }] }] });
     expect(screen.queryByText('Door')).toBeNull();
@@ -108,6 +133,35 @@ describe('table', () => {
     expect(screen.queryByText('Part 4999')).toBeNull();
     fireEvent.scroll(grid.parentElement!, { target: { scrollTop: 4990 * TABLE_ROW_PX } });
     expect(screen.getByText('Part 4999')).toBeTruthy();
+  });
+
+  it('keeps room below the last row for a scrollbar drawn over the rows, so the last row stays clickable', () => {
+    // A wide table in a narrow panel, in a browser whose scrollbars overlay the content (they take no height).
+    const geometry = {
+      scrollWidth: { get(this: HTMLElement) { return this.classList.contains('pf-xui-table-scroll') ? 900 : 0; } },
+      clientWidth: { get(this: HTMLElement) { return this.classList.contains('pf-xui-table-scroll') ? 300 : 0; } },
+      clientHeight: { get(this: HTMLElement) { return this.classList.contains('pf-xui-table-scroll') ? 160 : 0; } },
+      offsetHeight: { get(this: HTMLElement) { return this.classList.contains('pf-xui-table-scroll') ? 160 : 0; } },
+    };
+    const saved = Object.fromEntries(Object.keys(geometry).map((k) => [k, Object.getOwnPropertyDescriptor(HTMLElement.prototype, k)]));
+    Object.defineProperties(HTMLElement.prototype, geometry);
+    try {
+      const { events } = show(table());
+      const scroller = screen.getByRole('grid', { name: 'Parts' }).parentElement!;
+      expect(scroller.classList.contains('has-overlay-scrollbar')).toBe(true);
+      expect(scroller.style.paddingBottom).toBe(`${OVERLAY_SCROLLBAR_PX}px`);
+      fireEvent.click(screen.getByText('Part 4'));
+      expect(events).toEqual([{ component: 'parts', event: 'rowSelect', rows: ['r4'] }]);
+    } finally {
+      for (const [k, d] of Object.entries(saved)) if (d) Object.defineProperty(HTMLElement.prototype, k, d);
+    }
+  });
+
+  it('adds no room when the scrollbar sits beside the rows or nothing overflows', () => {
+    show(table());
+    const scroller = screen.getByRole('grid', { name: 'Parts' }).parentElement!;
+    expect(scroller.classList.contains('has-overlay-scrollbar')).toBe(false);
+    expect(scroller.style.paddingBottom).toBe('');
   });
 
   it('reports sorting and shows the current sort to assistive technology', () => {

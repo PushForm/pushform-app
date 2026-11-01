@@ -131,7 +131,10 @@ const component = {
     bounds: z.strictObject({ x: finite, y: finite, width: finite.positive(), height: finite.positive() }),
     /** `length` coordinates are meters, which sets the scale of SVG and DXF exports; `plain` ones have no unit. */
     units: z.enum(['length', 'plain']),
-    /** On-screen height in pixels; 300 when absent. */
+    /**
+     * On-screen height in pixels. When absent, the frame follows the drawing's proportions at the width available,
+     * from 120 to 800 pixels, so the whole drawing shows without empty space above and below it.
+     */
     height: z.number().int().min(80).max(2000).optional(),
     styles: z.array(vectorStyle).min(1).max(UI_LIMITS.vectorStyles),
     shapes: z.array(z.unknown()).max(UI_LIMITS.vectorShapes),
@@ -314,8 +317,20 @@ export type UiEvent =
   | { component: string; event: 'columns'; hidden: string[] }
   | { component: string; event: 'hover'; item: string | null };
 
+/**
+ * Where a panel's interface is shown: `dock` in the side panel beside the editor, or `window` in a large window over
+ * the editor, for wide tables and drawings. A panel starts docked unless its `ui.mount` asks for `window`; `ui.update`
+ * keeps the presentation shown unless it names one. Once the user moves the panel themselves, their choice is kept
+ * and later requests do not move it. Inspector and settings blocks are always shown in place and ignore it.
+ */
+export const UI_PRESENTATIONS = ['dock', 'window'] as const;
+export type UiPresentation = (typeof UI_PRESENTATIONS)[number];
+
 /** Requests of the `ui` service: mount or replace the tree of a target, or remove it. */
-export const uiMountSchema = z.strictObject({ target: z.string().min(1).max(200), seq: z.number().int().nonnegative(), tree: z.unknown() });
+export const uiMountSchema = z.strictObject({ target: z.string().min(1).max(200), seq: z.number().int().nonnegative(), tree: z.unknown(),
+  presentation: z.enum(UI_PRESENTATIONS).optional() });
+/** What `ui.mount` and `ui.update` take; the tree is validated separately, by `validateUiTree`. */
+export type UiMountInput = { target: string; seq: number; tree: UiNode; presentation?: UiPresentation };
 export const uiUnmountSchema = z.strictObject({ target: z.string().min(1).max(200) });
 /**
  * Prints, or saves as PDF, vector views on screen: one page per view, at a page size in meters (20 mm to 2 m a side).

@@ -9,6 +9,7 @@ import { LayoutWorkspace } from './LayoutWorkspace';
 import { LAYOUT_CLIPBOARD_TYPE, readLayoutClipboard } from './layoutClipboard';
 import { layoutTextStyleAt, tableCells } from '@pushform/layout';
 import { setLayoutTextSelection } from './LayoutTextEditor';
+import { openLayoutEntry } from './layoutEntryTesting';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 function clipboard(values: Record<string, string> = {}, files: File[] = []) {
@@ -263,8 +264,11 @@ it('leaves paste inside the text editor and editable fields to normal text editi
   fireEvent.paste(editor, { clipboardData: clipboard({ 'text/plain': 'Replacement' }) });
   expect(entities()).toHaveLength(1); expect(entities()[0]!.text?.content).toBe('Replacement');
   fireEvent.keyDown(editor, { key: 'Escape' });
-  const event = createEvent.paste(screen.getByLabelText('Layout Measurements'), { clipboardData: clipboard({ 'text/plain': '100' }) });
-  fireEvent(screen.getByLabelText('Layout Measurements'), event);
+  // Pasting into a value field pastes text there, not objects onto the page.
+  fireEvent.click(screen.getByRole('button', { name: 'Line' }));
+  const field = openLayoutEntry('');
+  const event = createEvent.paste(field, { clipboardData: clipboard({ 'text/plain': '100' }) });
+  fireEvent(field, event);
   expect(event.defaultPrevented).toBe(false); expect(entities()).toHaveLength(1);
   dispose();
 });

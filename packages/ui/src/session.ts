@@ -126,11 +126,10 @@ export interface LayoutWorkspaceState {
   zoomToPageOnOpen?: boolean;
   selectedEntityId: number | null;
   anchor: [number, number] | null;
-  vcbDraft: string;
 }
 
 function createLayoutWorkspaceState(): LayoutWorkspaceState {
-  return { tool: 'select', zoom: 1, selectedEntityId: null, anchor: null, vcbDraft: '' };
+  return { tool: 'select', zoom: 1, selectedEntityId: null, anchor: null };
 }
 
 export type DocumentTab = ModelTab | LayoutTab;

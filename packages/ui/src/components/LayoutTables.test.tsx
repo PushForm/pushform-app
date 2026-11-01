@@ -7,6 +7,7 @@ import { openLayoutFile } from '@pushform/io';
 import { createApp } from '../bootstrap';
 import { DocumentSession } from '../session';
 import { LayoutWorkspace } from './LayoutWorkspace';
+import { enterLayoutValue } from './layoutEntryTesting';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 function mount() {
@@ -82,8 +83,7 @@ it('supports precise table placement and cancellation', () => {
   fireEvent.click(screen.getByRole('button', { name: 'Table' })); down(10, 10); up(10, 10);
   fireEvent.keyDown(window, { key: 'Escape' }); expect(page().entities.size).toBe(0);
   down(10, 10); up(10, 10);
-  const measurements = screen.getByLabelText('Layout Measurements');
-  fireEvent.change(measurements, { target: { value: '60mm,30mm' } }); fireEvent.keyDown(measurements, { key: 'Enter' });
+  enterLayoutValue('60mm,30mm');
   expect([...page().entities.values()][0]!.points).toEqual([[10, 10], [70, 10], [70, 40], [10, 40]]);
   expect(canvas.getAttribute('data-tool')).toBe('select'); dispose();
 });

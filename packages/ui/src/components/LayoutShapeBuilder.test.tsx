@@ -146,8 +146,9 @@ it('rejects empty selection, enters with X after selection, and never activates 
   expect(screen.getByText('You must select some object to use with the Shape Builder tool.')).toBeTruthy();
   expect(screen.queryByRole('alert')).toBeNull();
   t.click(25, 25);
-  const input = screen.getByLabelText('Measurements');
+  const input = document.body.appendChild(document.createElement('input'));
   fireEvent.keyDown(input, { key: 'x', code: 'KeyX' });
+  input.remove();
   expect(t.canvas.getAttribute('data-tool')).toBe('select');
   fireEvent.keyDown(window, { key: 'x', code: 'KeyX' });
   await screen.findByLabelText('Shape Builder preview');

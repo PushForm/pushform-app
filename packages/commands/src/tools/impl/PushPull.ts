@@ -266,13 +266,16 @@ export class PushPullTool implements Tool {
 
   onVcb(v: VcbValue): void {
     if (v.kind !== 'length') return;
-    const distance = v.meters;
-    if (this.state.kind === 'dragging') {
-      this.commit(distance);
+    const s = this.state;
+    if (s.kind === 'dragging') {
+      // A loose face takes the distance in the direction it is being pulled; a solid's face along its front.
+      this.commit(isLoose(s.target.ref) ? (s.distance !== 0 ? Math.sign(s.distance) : this.viewerSide(s.target)) * v.meters : v.meters);
       return;
     }
     const last = this.lastCommit;
     if (!last) return;
+    // Re-editing a loose face's pull keeps its direction.
+    const distance = isLoose(last.params.target) ? (Math.sign(last.params.distance) || 1) * v.meters : v.meters;
     const params: PushPullApplyParams = { target: last.params.target, distance, mode: last.params.mode };
     last.params = params;
     this.lastDistance = distance;
@@ -317,14 +320,23 @@ export class PushPullTool implements Tool {
     const fmt = (d: number): string => (units ? formatLength(d, units) : d.toString());
     const modeHint = this.mode === 'newBody' ? ' [New body]' : '';
     if (s.kind === 'dragging') {
-      return { instructor: `Click or type distance.${modeHint}`, vcbLabel: 'Distance', vcbValue: fmt(s.distance), fields: [pointerField('Distance', 'length', fmt(s.distance))] };
+      // A loose face has no inside: its distance is how far it is pulled, whichever way. A solid's face is signed along its front.
+      const shown = isLoose(s.target.ref) ? Math.abs(s.distance) : s.distance;
+      return { instructor: `Click or type distance.${modeHint}`, vcbLabel: 'Distance', vcbValue: fmt(shown), fields: [pointerField('Distance', 'length', fmt(shown))] };
     }
     const instructor = this.lastError ? `Push/Pull failed: ${this.lastError}` : `Select face to push or pull.${modeHint}`;
-    const last = this.lastCommit?.params.distance ?? this.lastDistance;
+    const last = this.lastCommit ? (isLoose(this.lastCommit.params.target) ? Math.abs(this.lastCommit.params.distance) : this.lastCommit.params.distance) : this.lastDistance;
     return { instructor, vcbLabel: 'Distance', vcbValue: last === null ? undefined : fmt(last) };
   }
 
   // --- internals ------------------------------------------------------------------------------
+
+  /** +1 when the face's front looks toward the camera, else -1: the side a loose face is pulled to before the pointer moves. */
+  private viewerSide(target: Target): number {
+    const cam = this.ctx?.camera.getState();
+    if (!cam) return 1;
+    return v3dot(target.normal, v3sub(cam.eye, cam.target)) < 0 ? -1 : 1;
+  }
 
   private hover(hit: PickHit | null): void {
     const target = this.resolveTarget(hit);
@@ -553,4 +565,9 @@ function ghostPrism(loops: readonly (readonly Vec3[])[], n: Vec3, distance: numb
 /** Tools contributed by this module, for the bootstrap's `ToolManager.register` loop. */
 export function pushPullTools(): Tool[] {
   return [new PushPullTool()];
+}
+
+/** A loose (sketch) face, not yet part of a solid: pulled either way, it becomes one. */
+function isLoose(ref: PushPullTarget): boolean {
+  return ref.kind === 'sketchFace';
 }

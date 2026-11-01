@@ -6,13 +6,14 @@ import { openLayoutFile } from '@pushform/io';
 import { createApp } from '../bootstrap';
 import { DocumentSession } from '../session';
 import { LayoutWorkspace } from './LayoutWorkspace';
+import { enterLayoutValue, layoutEntryField } from './layoutEntryTesting';
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
 
-describe('Layout Measurements', () => {
+describe('Layout value fields', () => {
   it('chains line segments from the last endpoint until Escape', () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
     vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockReturnValue({
@@ -336,9 +337,7 @@ describe('Layout Measurements', () => {
     fireEvent.pointerDown(canvas, { button: 0, pointerId: 2, clientX: 181, clientY: 31 });
     fireEvent.pointerUp(canvas, { button: 0, pointerId: 2, clientX: 181, clientY: 31 });
     fireEvent.pointerMove(canvas, { pointerId: 2, clientX: 180, clientY: 90 });
-    const measurements = screen.getByRole('textbox', { name: 'Layout Measurements' });
-    fireEvent.change(measurements, { target: { value: '100' } });
-    fireEvent.keyDown(measurements, { key: 'Enter' });
+    enterLayoutValue('100');
 
     const page = tab.doc.state.pages.get(tab.activePageId)!;
     const measured = page.entities.get(page.entityOrder[1]!)!;
@@ -351,6 +350,78 @@ describe('Layout Measurements', () => {
     expect(tab.commands.execute('edit.undo')).toBe(true);
     expect(tab.doc.state.pages.get(tab.activePageId)?.entityOrder).toHaveLength(1);
     expect(app.document.doc.version).toBe(0);
+    session.dispose();
+    app.dispose();
+  });
+
+  it('shows value fields on the page; Tab locks a value into the preview and Enter applies the rest', () => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+    vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      left: 0, top: 0, width: 891, height: 630, right: 891, bottom: 630,
+      x: 0, y: 0, toJSON: () => ({}),
+    });
+    const app = createApp({ demo: false, expose: false });
+    const session = new DocumentSession(app, () => createApp({ demo: false, expose: false }), false, null);
+    const tab = session.newLayout();
+    tab.commands.execute('layout.grid.set', { snap: false }); tab.commands.execute('layout.snap.set', { enabled: false });
+    render(<LayoutWorkspace tab={tab} session={session} />);
+    const canvas = screen.getByLabelText('Page 1 canvas');
+    const click = (x: number, y: number) => {
+      fireEvent.pointerDown(canvas, { button: 0, pointerId: 1, clientX: x * 3, clientY: y * 3 });
+      fireEvent.pointerUp(canvas, { button: 0, pointerId: 1, clientX: x * 3, clientY: y * 3 });
+    };
+    const move = (x: number, y: number) => fireEvent.pointerMove(canvas, { pointerId: 1, clientX: x * 3, clientY: y * 3 });
+    const page = () => tab.doc.state.pages.get(tab.activePageId)!;
+    const last = () => page().entities.get(page().entityOrder.at(-1)!)!;
+
+    // Line: Length and Angle fields beside the preview, the first with focus, and no box in the status bar.
+    fireEvent.click(screen.getByRole('button', { name: 'Line' }));
+    click(10, 10); move(60, 10);
+    expect(document.activeElement).toBe(layoutEntryField('Length'));
+    expect(layoutEntryField('Angle').value).toBe('0.0°');
+    expect(screen.queryByLabelText('Layout Measurements')).toBeNull();
+    // Tab from the page, and Shift+Tab from the first field, stay among the fields.
+    act(() => { layoutEntryField('Length').blur(); });
+    fireEvent.keyDown(document.body, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(layoutEntryField('Angle'));
+    fireEvent.keyDown(layoutEntryField('Angle'), { key: 'Tab' });
+    expect(document.activeElement).toBe(layoutEntryField('Length'));
+    fireEvent.keyDown(layoutEntryField('Length'), { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(layoutEntryField('Angle'));
+    fireEvent.keyDown(window, { key: '2' });
+    expect(document.activeElement).toBe(layoutEntryField('Length'));
+    fireEvent.change(layoutEntryField('Length'), { target: { value: '20mm' } });
+    fireEvent.keyDown(layoutEntryField('Length'), { key: 'Tab' });
+    expect(layoutEntryField('Length').classList.contains('is-locked')).toBe(true);
+    expect(document.activeElement).toBe(layoutEntryField('Angle'));
+    // The pointer turns the line but the locked length holds; the focused Angle field shows it live.
+    move(10, 70);
+    expect(layoutEntryField('Angle').value).toBe('90.0°');
+    fireEvent.keyDown(layoutEntryField('Angle'), { key: 'Enter' });
+    expect(last().points[1]![0]).toBeCloseTo(10);
+    expect(last().points[1]![1]).toBeCloseTo(30);
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    // Rectangle: Width locked with Tab, Height typed, Enter draws it on the pointer's side.
+    act(() => { tab.commands.execute('tool.rectangle'); });
+    click(100, 100); move(60, 130);
+    fireEvent.keyDown(window, { key: '4' });
+    expect(document.activeElement).toBe(layoutEntryField('Width'));
+    fireEvent.change(layoutEntryField('Width'), { target: { value: '40mm' } });
+    fireEvent.keyDown(layoutEntryField('Width'), { key: 'Tab' });
+    fireEvent.change(layoutEntryField('Height'), { target: { value: '15mm' } });
+    fireEvent.keyDown(layoutEntryField('Height'), { key: 'Enter' });
+    const xs = last().points.map(p => p[0]), ys = last().points.map(p => p[1]);
+    expect([Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)]).toEqual([60, 100, 100, 115]);
+
+    // Escape in a field discards it and cancels the shape.
+    const count = page().entities.size;
+    click(150, 50); move(170, 70);
+    fireEvent.keyDown(window, { key: '9' });
+    fireEvent.keyDown(layoutEntryField('Width'), { key: 'Escape' });
+    move(180, 80);
+    expect(document.querySelector('input.pf-entry')).toBeNull();
+    expect(page().entities.size).toBe(count);
     session.dispose();
     app.dispose();
   });
@@ -369,10 +440,10 @@ describe('Layout Measurements', () => {
     const canvas = screen.getByLabelText('Page 1 canvas');
     fireEvent.pointerDown(canvas, { button: 0, pointerId: 1, clientX: 30, clientY: 30 });
     fireEvent.pointerUp(canvas, { button: 0, pointerId: 1, clientX: 30, clientY: 30 });
-    const input = screen.getByRole('textbox', { name: 'Layout Measurements' });
-    fireEvent.change(input, { target: { value: 'oops' } });
-    fireEvent.keyDown(input, { key: 'Enter' });
+    enterLayoutValue('oops');
     expect(screen.getByRole('alert').textContent).toContain('Cannot parse');
+    const input = layoutEntryField('Length');
+    expect(input.getAttribute('aria-invalid')).toBe('true');
     expect(tab.doc.state.pages.get(tab.activePageId)?.entityOrder).toHaveLength(0);
     fireEvent.change(input, { target: { value: '100mm,90deg' } });
     fireEvent.keyDown(input, { key: 'Enter' });

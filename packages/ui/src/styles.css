@@ -353,16 +353,20 @@
   color: var(--pf-text-muted);
   cursor: default;
 }
-.pf-layout-vcb {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  flex: none;
-  padding: 0 8px;
-  font-size: 12px;
+/* Value field dimension lines over the Layout page, in page millimeters. */
+.pf-layout-entry-dimensions {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 5;
 }
-.pf-layout-vcb input {
-  width: 110px;
+.pf-layout-entry-dimensions line {
+  stroke: #9aa0a6;
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
 }
 .pf-layout-vcb-error {
   max-width: 180px;
@@ -885,12 +889,15 @@
   position: absolute;
   z-index: 6;
   transform: translate(-50%, -50%);
-  width: 9em;
-  padding: 6px 12px;
+  /* Width follows the text (set inline in ch); the minimum keeps short values easy to click. */
+  box-sizing: content-box;
+  min-width: 3ch;
+  padding: 4px 7px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 4px;
-  background: rgba(28, 30, 34, 0.94);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  background: rgba(28, 30, 34, 0.6);
+  backdrop-filter: blur(2px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
   color: #e8eaed;
   font: inherit;
   font-size: 14px;
@@ -903,7 +910,7 @@
 }
 .pf-entry.is-locked {
   border-color: var(--pf-accent);
-  background: rgba(28, 30, 34, 0.98);
+  background: rgba(28, 30, 34, 0.72);
 }
 .pf-entry.is-error {
   border-color: var(--pf-danger);
@@ -2634,10 +2641,10 @@ button.pf-brand { border: 0; background: transparent; color: inherit; font: inhe
 .pf-model-browser-toggle-gap { flex: none; width: 26px; }
 .pf-model-browser-empty { margin: 0; padding: 4px 12px 12px; font-size: 13px; color: var(--pf-text-muted); }
 
-.pf-layout-references ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.pf-layout-references li { display: flex; flex-direction: column; gap: 4px; }
-.pf-layout-references li > span:first-child { display: flex; flex-direction: column; }
-.pf-layout-references small { color: var(--pf-text-muted, #6b7280); }
+.pf-layout-references ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.pf-layout-references li { display: flex; flex-direction: column; gap: 6px; }
+.pf-layout-references li > span:first-child { display: flex; flex-direction: column; gap: 2px; }
+.pf-layout-references small { color: var(--pf-text-muted, #6b7280); font-size: 12px; }
 .pf-layout-reference-actions { display: flex; gap: 4px; flex-wrap: wrap; }
 .pf-layout-model-picker { width: min(480px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 8px; }
 .pf-layout-model-picker > div:first-child { display: flex; align-items: center; justify-content: space-between; }

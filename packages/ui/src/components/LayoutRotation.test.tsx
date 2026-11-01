@@ -7,6 +7,7 @@ import { rotateLayoutEntity, rotateLayoutPath } from '@pushform/layout';
 import { createApp } from '../bootstrap';
 import { DocumentSession } from '../session';
 import { LayoutWorkspace } from './LayoutWorkspace';
+import { enterLayoutValue } from './layoutEntryTesting';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 function setup() {
@@ -64,8 +65,7 @@ it('rotates a line about a point on it, tracks either direction continuously, an
   click(30, 70); click(50, 70);
   move(30, 90); move(10, 70); move(30, 50);
   expect(screen.getByLabelText('Rotation angle preview').textContent).toBe('270.0°');
-  const input = screen.getByLabelText('Layout Measurements');
-  fireEvent.change(input, { target: { value: '-90deg' } }); fireEvent.keyDown(input, { key: 'Enter' });
+  enterLayoutValue('-90deg');
   expect(page().entities.get(lineId)!.points[0]![0]).toBeCloseTo(30);
   expect(page().entities.get(lineId)!.points[0]![1]).toBeCloseTo(90);
   expect(page().entities.get(lineId)!.points[1]![1]).toBeCloseTo(50);
@@ -160,10 +160,9 @@ it('holds pointer rotation at quarter-turn detents relative to a diagonal refere
   const free = (Math.atan2(35, -20) - Math.PI / 4) * 180 / Math.PI;
   expect(page().entities.get(sourceId)!.points).toEqual(rotateLayoutPath(source, [40, 30], free).points);
   act(() => { tab.commands.execute('edit.undo'); });
-  // Measurements bypasses the pointer's detents.
+  // A typed angle bypasses the pointer's detents.
   click(40, 30); click(80, 70);
-  const input = screen.getByLabelText('Layout Measurements');
-  fireEvent.change(input, { target: { value: '88deg' } }); fireEvent.keyDown(input, { key: 'Enter' });
+  enterLayoutValue('88deg');
   expect(page().entities.get(sourceId)).toEqual({ ...source, ...rotateLayoutPath(source, [40, 30], 88) });
   session.dispose(); app.dispose();
 });

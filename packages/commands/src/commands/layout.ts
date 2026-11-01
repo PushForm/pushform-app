@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { cloneLayoutValue, layoutValuesEqual } from '@pushform/layout';
+import { cloneLayoutValue, layoutDimensionUnits, layoutValuesEqual, setLayoutGridUnits } from '@pushform/layout';
 import { operateLayoutPaths, LAYOUT_PATH_OPERATIONS, createLayoutShapeRegions, replayLayoutShapeBuild, layoutShapeBuildSnapshot, retainedLayoutShapeSources, retainLayoutShapeOpenSource } from '@pushform/layout';
 import { LENGTH_TOL } from '@pushform/core';
 import { resizedViewportCamera } from '@pushform/layout';
@@ -888,7 +888,8 @@ export const layoutCommands: readonly AnyCommand[] = [
       const layer = draft.layers.get(draft.activeLayerId);
       if (!layer || layer.locked || !isLayoutLayerVisible(page(draft, params.pageId), draft, layer.id)) throw new Error('Active layer is unavailable');
       const target = page(draft, params.pageId);
-      const dimension = createLinearDimension();
+      // New dimensions measure in the drawing units unless a style says otherwise.
+      const dimension = { ...createLinearDimension(), ...layoutDimensionUnits(draft) };
       Object.assign(dimension, params.style);
       dimension.anchors = params.anchors ?? [null, null];
       for (const anchor of dimension.anchors) {
@@ -1146,12 +1147,14 @@ export const layoutCommands: readonly AnyCommand[] = [
     category: 'layout',
     menu: 'Pages',
     // Paper size and margin belong to the document, so every page changes together.
+    // `units` are the page size units; `gridUnits` set the grid's, which drawing values follow (a paper preset sets both).
     params: z.object({ widthMm: finite.positive().optional(), heightMm: finite.positive().optional(), marginMm: finite.min(0).optional(),
-      units: z.enum(['mm', 'in']).optional() }),
+      units: z.enum(['mm', 'in']).optional(), gridUnits: z.enum(['mm', 'in']).optional() }),
     undoable: true,
     run: (ctx, params) =>
       host(ctx).edit('Document Setup', (draft) => {
         if (params.units !== undefined) draft.settings.paperUnits = params.units;
+        if (params.gridUnits !== undefined) setLayoutGridUnits(draft.settings, params.gridUnits);
         const reference = page(draft, draft.pageOrder[0]!);
         const width = params.widthMm ?? reference.size[0];
         const height = params.heightMm ?? reference.size[1];
@@ -1433,7 +1436,8 @@ export const layoutCommands: readonly AnyCommand[] = [
     undoable: true,
     run: (ctx, params) =>
       host(ctx).edit('Grid Settings', (draft) => {
-        if (params.units !== undefined) draft.settings.grid.units = params.units;
+        // Drawing values follow the grid units; a change of units also rounds the grid size unless one is given.
+        if (params.units !== undefined) setLayoutGridUnits(draft.settings, params.units);
         if (params.show !== undefined) draft.settings.grid.show = params.show;
         if (params.snap !== undefined) draft.settings.grid.snap = params.snap;
         if (params.spacingMm !== undefined) draft.settings.grid.spacingMm = params.spacingMm;

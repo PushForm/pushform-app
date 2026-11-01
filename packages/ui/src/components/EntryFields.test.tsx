@@ -9,7 +9,7 @@ import { AppContext } from '../AppContext';
 import { createApp } from '../bootstrap';
 import type { AppInstance } from '../bootstrap';
 import { useAppStore } from '../store';
-import { beginEntry, EntryFields } from './EntryFields';
+import { beginEntry, clearOf, EntryFields } from './EntryFields';
 
 let app: AppInstance | null = null;
 afterEach(() => {
@@ -93,4 +93,24 @@ it('sends values other than lengths and angles to the tool as typed', () => {
   act(() => beginEntry('8s'));
   fireEvent.keyDown(screen.getByRole('textbox', { name: 'Width' }), { key: 'Enter' });
   expect(vcb).toHaveBeenCalledWith({ kind: 'segments', count: 8 });
+});
+
+it('places a field wholly past the dimension line it labels, so it covers neither the line nor the shape', () => {
+  const size: [number, number] = [78, 26];
+  // Straight up from a horizontal line: the box's bottom edge sits the gap above it.
+  const up = clearOf([100, 100], [100, 90], size);
+  expect(up[0]).toBe(100);
+  expect(up[1] + size[1] / 2).toBeCloseTo(100 - 4);
+  // Left of a vertical line: its right edge clears the line.
+  const left = clearOf([100, 100], [90, 100], size);
+  expect(left[0] + size[0] / 2).toBeCloseTo(100 - 4);
+  // Diagonally, every corner of the box lies past the line through the anchor square to the direction.
+  const [ux, uy] = [Math.SQRT1_2, -Math.SQRT1_2];
+  const c = clearOf([0, 0], [ux, uy], size);
+  for (const [sx, sy] of [[-1, -1], [-1, 1], [1, -1], [1, 1]] as const) {
+    const corner = [c[0] + sx * size[0] / 2, c[1] + sy * size[1] / 2] as const;
+    expect(corner[0] * ux + corner[1] * uy).toBeGreaterThanOrEqual(4 - 1e-9);
+  }
+  // No direction on screen: centred on the anchor.
+  expect(clearOf([5, 5], [5, 5], size)).toEqual([5, 5]);
 });

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { entitiesForLayer, isLayoutLayerVisible, layoutPathArrows, layoutPathContours, pathSegment, type LayoutDocumentState, type LayoutPage } from '@pushform/layout';
+import { entitiesForLayer, layoutPaperUnits, isLayoutLayerVisible, layoutPathArrows, layoutPathContours, pathSegment, type LayoutDocumentState, type LayoutPage } from '@pushform/layout';
 import { vectorPoint, type LayoutVectorIdentity, type LayoutVectorItem, type LayoutVectorPage, type VectorMatrix, type VectorPath } from '@pushform/io';
 import { paintLayoutText, type LayoutPaintedGlyph } from './layoutText';
 import { paintLayoutDimension, paintAngularDimension } from './layoutDimension';
@@ -168,5 +168,5 @@ export function drawLayoutVectorPage(state: LayoutDocumentState, page: LayoutPag
     }
     for (let i = firstItem; i < recorder.items.length; i++) recorder.items[i]!.layerVisible = visible;
   }
-  return { name: page.name, paperUnits: state.settings.paperUnits ?? 'mm', width: page.size[0], height: page.size[1], background: page.background, items: recorder.items };
+  return { name: page.name, paperUnits: layoutPaperUnits(state), width: page.size[0], height: page.size[1], background: page.background, items: recorder.items };
 }

@@ -6,6 +6,7 @@ import { openLayoutFile } from '@pushform/io';
 import { createApp } from '../bootstrap';
 import { DocumentSession } from '../session';
 import { LayoutWorkspace } from './LayoutWorkspace';
+import { enterLayoutValue } from './layoutEntryTesting';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 function setup() {
@@ -44,8 +45,7 @@ it('stacks Fillet and Chamfer after Offset and edits native corners using toolba
   expect(page().entities.get(sourceId)!.points).toEqual([[20, 20], [75, 20], [80, expect.closeTo(25, 8)], [80, 60], [20, 60]]);
   expect(page().entities.get(sourceId)!.handles![1]!.out).toBeDefined();
   choose('Chamfer');
-  fireEvent.change(screen.getByLabelText('Layout Measurements'), { target: { value: '4mm' } });
-  fireEvent.keyDown(screen.getByLabelText('Layout Measurements'), { key: 'Enter' });
+  enterLayoutValue('4mm');
   expect((screen.getByLabelText('Chamfer distance (mm)') as HTMLInputElement).value).toBe('4');
   click(80, 45); click(50, 60);
   expect(page().entities.get(sourceId)!.points).toContainEqual([80, 56]);

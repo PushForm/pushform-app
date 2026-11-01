@@ -287,10 +287,10 @@ export class ArcTool implements Tool {
     const value = formatLen(this.ctx, 2 * r);
     if (!this.center || !this.plane || !this.cursorInference || r <= MERGE_TOL) return { overlay: [], fields: [field('diameter', 'Diameter', 'length', value, undefined)] };
     const dir = v3normalize(v3sub(onPlane(this.plane, this.cursorInference.point), this.center));
-    const far = v3add(this.center, v3scale(dir, r + pxAt(this.ctx, this.center, 70)));
+    const far = v3add(this.center, v3scale(dir, r + pxAt(this.ctx, this.center, 16)));
     return {
       overlay: [{ kind: 'polyline', points: [v3add(this.center, v3scale(dir, -r)), far], color: DIMENSION_COLOR, width: 1 }],
-      fields: [field('diameter', 'Diameter', 'length', value, far)],
+      fields: [field('diameter', 'Diameter', 'length', value, far, false, dir)],
     };
   }
 
@@ -300,7 +300,7 @@ export class ArcTool implements Tool {
     if (!this.center || !this.basis || this.radius === null || Math.abs(sweep) < 1e-9) return { overlay: [], fields: [field('angle', 'Angle', 'angle', value, undefined)] };
     const r = Math.min(this.radius * 0.6, Math.max(this.radius * 0.3, pxAt(this.ctx, this.center, 60)));
     const dim = angleDimension(this.center, this.basis.u, this.basis.v, r, this.startAngle, sweep);
-    return { overlay: dim.overlay, fields: [field('angle', 'Angle', 'angle', value, dim.at)] };
+    return { overlay: dim.overlay, fields: [field('angle', 'Angle', 'angle', value, dim.at, false, dim.away)] };
   }
 
   private cursorRadius(): number {

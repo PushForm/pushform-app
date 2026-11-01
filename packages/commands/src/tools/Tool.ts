@@ -53,8 +53,14 @@ export interface EntryField {
   readonly kind: EntryFieldKind;
   /** Live value shown while the field is not being typed in. */
   readonly value: string;
-  /** World point the field is centred on; beside the pointer when omitted. */
+  /** World point the field is anchored on; beside the pointer when omitted. */
   readonly at?: Vec3 | undefined;
+  /**
+   * World direction, away from the geometry, in which the field is drawn clear of `at`: the field
+   * sits wholly on that side of the point instead of centred on it, so it does not cover the
+   * geometry or its dimension line. Its length only needs to show on screen. Centred when omitted.
+   */
+  readonly away?: Vec3 | undefined;
   /** True while a typed value is locked into the preview (`onEntryLock`). */
   readonly locked?: boolean | undefined;
 }

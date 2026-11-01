@@ -6,6 +6,7 @@ import { openLayoutFile } from '@pushform/io';
 import { createApp } from '../bootstrap';
 import { DocumentSession } from '../session';
 import { LayoutWorkspace } from './LayoutWorkspace';
+import { enterLayoutValue } from './layoutEntryTesting';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -28,10 +29,7 @@ function setupLineConstraint() {
     fireEvent.pointerUp(canvas, pointer(x, y, shiftKey));
   };
   const entity = () => [...tab.doc.state.pages.get(tab.activePageId)!.entities.values()][0]!;
-  const measure = (value: string) => {
-    const input = screen.getByLabelText('Layout Measurements');
-    fireEvent.change(input, { target: { value } }); fireEvent.keyDown(input, { key: 'Enter' });
-  };
+  const measure = (value: string) => enterLayoutValue(value);
   return { tab, session, canvas, pointer, click, entity, measure, dispose: () => { cleanup(); session.dispose(); app.dispose(); } };
 }
 

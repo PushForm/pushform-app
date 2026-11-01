@@ -6,6 +6,7 @@ import { openLayoutFile } from '@pushform/io';
 import { createApp } from '../bootstrap';
 import { DocumentSession } from '../session';
 import { LayoutWorkspace } from './LayoutWorkspace';
+import { enterLayoutValue, layoutEntryField } from './layoutEntryTesting';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 function setup() {
@@ -24,10 +25,7 @@ function setup() {
     fireEvent.pointerUp(canvas, { pointerId: 1, clientX: x * 3, clientY: y * 3 });
   };
   const move = (x: number, y: number) => fireEvent.pointerMove(canvas, { pointerId: 1, clientX: x * 3, clientY: y * 3 });
-  const measure = (value: string) => {
-    fireEvent.change(screen.getByLabelText('Layout Measurements'), { target: { value } });
-    fireEvent.keyDown(screen.getByLabelText('Layout Measurements'), { key: 'Enter' });
-  };
+  const measure = (value: string) => enterLayoutValue(value);
   return { app, session, tab, canvas, click, move, measure, sourceId, page: () => tab.doc.state.pages.get(tab.activePageId)! };
 }
 
@@ -52,8 +50,8 @@ it('places Offset after Polygon, previews without mutation, and commits independ
   // The outer filled offset must not steal a click on the original boundary.
   click(80, 40);
   fireEvent.keyDown(window, { key: '-' });
-  expect(document.activeElement).toBe(screen.getByLabelText('Layout Measurements'));
-  expect((screen.getByLabelText('Layout Measurements') as HTMLInputElement).value).toBe('-');
+  expect(document.activeElement).toBe(layoutEntryField('Distance'));
+  expect(layoutEntryField('Distance').value).toBe('-');
   measure('-3mm');
   expect(page().entities.get(page().entityOrder[2]!)!.points).toEqual([[23, 23], [77, 23], [77, 57], [23, 57]]);
   const reopened = (await openLayoutFile((await session.saveLayoutBytes(tab.id))));
@@ -72,7 +70,7 @@ it('rejects invalid offsets without mutation and cancels drafts with Escape or t
   move(82, 40); click(82, 40); expect(page().entities.size).toBe(2);
   click(80, 40); move(75, 40); fireEvent.keyDown(window, { key: 'Escape' });
   click(100, 100); expect(page().entities.size).toBe(2);
-  click(80, 40); fireEvent.keyDown(screen.getByLabelText('Layout Measurements'), { key: 'Escape' });
+  click(80, 40); fireEvent.keyDown(layoutEntryField('Distance'), { key: 'Escape' });
   expect(screen.getByRole('status').textContent).toContain('Click a path to offset');
   click(80, 40); fireEvent.click(screen.getByRole('button', { name: 'Select' }));
   fireEvent.click(screen.getByRole('button', { name: 'Offset' }));

@@ -54,8 +54,11 @@ export function createLayoutTemplateState(templateId: string): LayoutDocumentSta
   if (!template) throw new Error(`Unknown Layout template: ${templateId}`);
   const state = createLayoutDocumentState(), page = state.pages.get(state.pageOrder[0]!)!;
   page.size = [...template.size]; state.settings.units = template.units;
+  // Paper, grid and drawing values all use the template's units: inches for US paper, millimeters otherwise.
+  const unit = template.units === 'mm' ? 'mm' : 'in';
+  state.settings.paperUnits = unit; state.settings.grid.units = unit;
   state.settings.grid.show = template.gridMm !== null;
-  state.settings.grid.spacingMm = template.gridMm ?? 10;
+  state.settings.grid.spacingMm = template.gridMm ?? (unit === 'in' ? 6.35 : 10);
   if (template.category === 'Paper') return state;
   const layerId = allocId(state);
   state.layers.set(layerId, { id: layerId, name: 'Frame', visible: true, locked: false, shared: true });

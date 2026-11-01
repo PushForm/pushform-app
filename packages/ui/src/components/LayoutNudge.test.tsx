@@ -85,9 +85,6 @@ it('preserves arrow-key behavior in text editing, fields, other tools, vertex ed
   const { tab, canvas, click, entity, dispose } = setup();
   click(30, 25);
   const original = entity().points;
-  const field = screen.getByLabelText('Layout Measurements');
-  const fieldEvent = createEvent.keyDown(field, { key: 'ArrowRight' }); fireEvent(field, fieldEvent);
-  expect(fieldEvent.defaultPrevented).toBe(false); expect(entity().points).toEqual(original);
   for (const modifier of ['shiftKey', 'ctrlKey', 'metaKey', 'altKey']) fireEvent.keyDown(window, { key: 'ArrowRight', [modifier]: true });
   expect(entity().points).toEqual(original);
   fireEvent.doubleClick(canvas, { clientX: 90, clientY: 75 });

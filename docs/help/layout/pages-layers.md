@@ -26,6 +26,10 @@ A selection made on the page expands its ancestors and reveals it in the browser
 
 ## Set paper, units and grid
 
-Open **Document Settings** in the Object browser. Configure the paper size, margin and supported unit/grid settings there. Tool-specific settings live separately in the temporary pane at the top of the right-side panel.
+Open **Document Settings** in the Object browser. Configure the paper size, orientation, margin, units and grid there. Tool-specific settings live separately in the temporary pane at the top of the right-side panel.
 
-Changing drawing units affects how values are shown and entered; check paper size and export settings when you need a particular physical output scale.
+Choosing a paper size sets it in landscape. Use **Orientation** to turn the page to portrait. A US size such as Letter also switches the page size, the grid and drawing values to inches; an international size such as A4 switches them to millimeters.
+
+**Grid units** decide the units of drawing values: the fields you type sizes into while drawing, and new dimensions. With the grid in millimeters, drawing gives metric values. Changing the grid units rounds the grid size to a usual size in the new units, such as 1/4 in or 5 mm. **Page size units** change only how the page size and margin are shown.
+
+Check paper size and export settings when you need a particular physical output scale.

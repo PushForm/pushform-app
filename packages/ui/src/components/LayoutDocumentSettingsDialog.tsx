@@ -2,7 +2,7 @@
 // Copyright 2026 PushForm contributors
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { createPortal } from 'react-dom';
-import type { LayoutDocumentState } from '@pushform/layout';
+import { layoutGridUnits, layoutPaperUnits, type LayoutDocumentState } from '@pushform/layout';
 import { PAPER_PRESETS, formatPaperLength, paperPresetFor, presetSizeMm, toMm, type PaperUnit } from './layoutPaper';
 
 /**
@@ -42,7 +42,8 @@ export function LayoutDocumentSettingsDialog({ state, onCommand, onClose }: {
     };
   }, []);
   const paper = state.pages.get(state.pageOrder[0]!)!;
-  const paperUnit: PaperUnit = state.settings.paperUnits ?? 'mm', gridUnit: PaperUnit = state.settings.grid.units ?? 'mm';
+  const paperUnit: PaperUnit = layoutPaperUnits(state), gridUnit: PaperUnit = layoutGridUnits(state);
+  const portrait = paper.size[1] > paper.size[0];
   const preset = paperPresetFor(paper.size);
   return createPortal(<div className="pf-layer-scope-backdrop" onPointerDown={event => { if (event.target === event.currentTarget) onClose(); }}>
     <div ref={dialog} className="pf-layer-scope-dialog pf-document-settings" role="dialog" aria-modal="true" aria-labelledby="pf-document-settings-title">
@@ -50,16 +51,23 @@ export function LayoutDocumentSettingsDialog({ state, onCommand, onClose }: {
       <fieldset>
         <legend>Paper</legend>
         <label>Paper size<select value={preset?.id ?? 'custom'} onChange={event => {
-          // A preset fills in the size, in the page's current orientation, and its standard's units.
+          // A preset fills in its landscape size and sets its standard's units for the paper, the grid and drawing values.
           const chosen = PAPER_PRESETS.find(item => item.id === event.target.value);
           if (!chosen) return;
-          const [widthMm, heightMm] = presetSizeMm(chosen, paper.size);
-          onCommand('layout.document.setup', { widthMm, heightMm, units: chosen.unit });
+          const [widthMm, heightMm] = presetSizeMm(chosen);
+          onCommand('layout.document.setup', { widthMm, heightMm, units: chosen.unit, gridUnits: chosen.unit });
         }}>
           <option value="custom" disabled>Custom</option>
           {(['US', 'International'] as const).map(standard => <optgroup key={standard} label={standard}>
             {PAPER_PRESETS.filter(item => item.standard === standard).map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
           </optgroup>)}
+        </select></label>
+        <label>Orientation<select value={portrait ? 'portrait' : 'landscape'} disabled={paper.size[0] === paper.size[1]} onChange={event => {
+          // Turning the page swaps its width and height.
+          if ((event.target.value === 'portrait') !== portrait) onCommand('layout.document.setup', { widthMm: paper.size[1], heightMm: paper.size[0] });
+        }}>
+          <option value="landscape">Landscape</option>
+          <option value="portrait">Portrait</option>
         </select></label>
         <LengthField label="Page width" mm={paper.size[0]} unit={paperUnit} onCommit={widthMm => onCommand('layout.document.setup', { widthMm })} />
         <LengthField label="Page height" mm={paper.size[1]} unit={paperUnit} onCommit={heightMm => onCommand('layout.document.setup', { heightMm })} />

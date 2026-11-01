@@ -6,6 +6,7 @@ import { openLayoutFile } from '@pushform/io';
 import { createApp } from '../bootstrap';
 import { DocumentSession } from '../session';
 import { LayoutWorkspace } from './LayoutWorkspace';
+import { enterLayoutValue, openLayoutEntry } from './layoutEntryTesting';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -95,8 +96,7 @@ it('defaults to inscribed polygons and offers circumscribed drawing, typed radiu
   const version = tab.doc.version;
   fireEvent.pointerMove(canvas, at(120, 100));
   expect(tab.doc.version).toBe(version);
-  const measurements = screen.getByLabelText('Layout Measurements');
-  fireEvent.change(measurements, { target: { value: '30mm' } });
+  const measurements = openLayoutEntry('30mm');
   fireEvent.keyDown(measurements, { key: 'Alt', altKey: true });
   expect(canvas.getAttribute('data-tool')).toBe('polygon');
   expect((measurements as HTMLInputElement).value).toBe('30mm');
@@ -147,12 +147,10 @@ it('sets the side count from Measurements or the toolbar and keeps it for later 
   const sides = screen.getByLabelText('Sides') as HTMLInputElement;
   expect(sides.value).toBe('6');
   expect(screen.getByText(/followed by s to set the sides/)).toBeTruthy();
-  const measurements = screen.getByLabelText('Layout Measurements');
   // Typed before the first click: no shape is needed.
-  fireEvent.change(measurements, { target: { value: '8s' } });
-  fireEvent.keyDown(measurements, { key: 'Enter' });
+  enterLayoutValue('8s');
   expect(sides.value).toBe('8');
-  expect((measurements as HTMLInputElement).value).toBe('');
+  expect(document.querySelector('input.pf-entry')).toBeNull();
   draw(50);
   expect(latest().points).toHaveLength(8);
   for (const p of latest().points) expect(Math.hypot(p[0] - 50, p[1] - 50)).toBeCloseTo(20);
@@ -163,8 +161,7 @@ it('sets the side count from Measurements or the toolbar and keeps it for later 
   expect(latest().points).toHaveLength(5);
   // Out of range counts are reported and change nothing.
   const version = tab.doc.version;
-  fireEvent.change(measurements, { target: { value: '2s' } });
-  fireEvent.keyDown(measurements, { key: 'Enter' });
+  enterLayoutValue('2s');
   expect(screen.getByRole('alert').textContent).toContain('3 to 100 sides');
   fireEvent.change(screen.getByLabelText('Sides'), { target: { value: '101' } });
   expect((screen.getByLabelText('Sides') as HTMLInputElement).value).toBe('5');

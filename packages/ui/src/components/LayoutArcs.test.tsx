@@ -6,6 +6,7 @@ import { openLayoutFile } from '@pushform/io';
 import { createApp } from '../bootstrap';
 import { DocumentSession } from '../session';
 import { LayoutWorkspace } from './LayoutWorkspace';
+import { enterLayoutValue, layoutEntryField } from './layoutEntryTesting';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 function setup() {
@@ -107,4 +108,39 @@ it('previews and commits sweeps beyond a semicircle in either direction', () => 
   expect(negative.points).toHaveLength(4);
   expect(negative.points[1]![1]).toBeCloseTo(80);
   session.dispose(); app.dispose();
+});
+
+it('takes an arc radius and angle, and a 2 point arc chord and bulge, in value fields beside the preview', () => {
+  const { session, app, tab, canvas, click, choose, page } = setup();
+  act(() => { tab.commands.execute('layout.grid.set', { snap: false }); tab.commands.execute('layout.snap.set', { enabled: false }); });
+  const move = (x: number, y: number) => fireEvent.pointerMove(canvas, { pointerId: 1, clientX: x * 3, clientY: y * 3 });
+  // A click on the page focuses it, as a browser does; the first field then takes focus from it.
+  const press = (x: number, y: number) => { act(() => { canvas.focus(); }); click(x, y); };
+  const last = () => page().entities.get(page().entityOrder.at(-1)!)!;
+  const near = (points: readonly (readonly number[])[], p: readonly number[]) => points.some(q => Math.hypot(q[0]! - p[0]!, q[1]! - p[1]!) < 1e-6);
+  choose('Arc');
+  press(30, 30); move(50, 40);
+  expect(document.activeElement).toBe(layoutEntryField('Radius'));
+  enterLayoutValue('20mm');
+  expect(page().entities.size).toBe(0);
+  // The radius is set toward the pointer; the Angle field follows the sweep.
+  move(30, 60);
+  expect(layoutEntryField('Angle')).toBeTruthy();
+  enterLayoutValue('45');
+  expect(page().entities.size).toBe(1);
+  const start = [30 + 20 * 20 / Math.hypot(20, 10), 30 + 20 * 10 / Math.hypot(20, 10)];
+  expect(near(last().points, start)).toBe(true);
+  const a = Math.atan2(10, 20) + Math.PI / 4;
+  expect(near(last().points, [30 + 20 * Math.cos(a), 30 + 20 * Math.sin(a)])).toBe(true);
+
+  choose('2 Point Arc');
+  press(70, 30); move(100, 30);
+  enterLayoutValue('40mm');
+  move(90, 45);
+  expect(document.activeElement).toBe(layoutEntryField('Bulge'));
+  enterLayoutValue('10mm');
+  expect(page().entities.size).toBe(2);
+  expect(near(last().points, [110, 30])).toBe(true);
+  expect(near(last().points, [90, 40])).toBe(true);
+  cleanup(); session.dispose(); app.dispose();
 });

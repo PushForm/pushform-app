@@ -296,13 +296,13 @@ export class RotatedRectangleTool implements Tool {
     const side = this.plane ? leftOf(this.a, end, this.plane.n) : null;
     if (!side) return { overlay: [], fields: [field('length', 'Length', 'length', value, undefined)] };
     const dim = lengthDimension(this.a, end, side, pxAt(this.ctx, this.a, DIMENSION_OFFSET_PX));
-    return { overlay: dim.overlay, fields: [field('length', 'Length', 'length', value, dim.at)] };
+    return { overlay: dim.overlay, fields: [field('length', 'Length', 'length', value, dim.at, false, dim.away)] };
   }
 
   /** Width field on the dimension beside the second edge, and the Angle field beside the pointer. */
   private widthFields(width: number, angleDeg: number): EntryField[] {
-    const at = width > MERGE_TOL ? lengthDimension(this.b!, this.corners(width, angleDeg).c, this.frame()!.u, pxAt(this.ctx, this.b!, DIMENSION_OFFSET_PX)).at : undefined;
-    return [field('width', 'Width', 'length', formatLen(this.ctx, width), at), field('angle', 'Angle', 'angle', formatDeg(angleDeg), undefined)];
+    const dim = width > MERGE_TOL ? lengthDimension(this.b!, this.corners(width, angleDeg).c, this.frame()!.u, pxAt(this.ctx, this.b!, DIMENSION_OFFSET_PX)) : null;
+    return [field('width', 'Width', 'length', formatLen(this.ctx, width), dim?.at, false, dim?.away), field('angle', 'Angle', 'angle', formatDeg(angleDeg), undefined)];
   }
 
   private pickB(p: Vec3): void {

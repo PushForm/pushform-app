@@ -7,6 +7,7 @@ import { createLayoutRectangle } from '@pushform/layout';
 import { createApp } from '../bootstrap';
 import { DocumentSession } from '../session';
 import { LayoutWorkspace } from './LayoutWorkspace';
+import { enterLayoutValue } from './layoutEntryTesting';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -90,8 +91,7 @@ it.each([
   // Full typed dimensions win over Shift and are halved only to construct center extents.
   fireEvent.pointerDown(canvas, { button: 0, ...at(80, 80) }); fireEvent.pointerUp(canvas, at(80, 80));
   fireEvent.keyDown(window, { key: 'Control', ctrlKey: true, shiftKey: true });
-  const measurements = screen.getByLabelText('Layout Measurements');
-  fireEvent.change(measurements, { target: { value: '60mm,20mm' } }); fireEvent.keyDown(measurements, { key: 'Enter', ctrlKey: true, shiftKey: true });
+  enterLayoutValue('60mm,20mm', { ctrlKey: true, shiftKey: true });
   check([50, 70], [110, 90]);
   cleanup(); session.dispose(); app.dispose();
 });
@@ -126,8 +126,7 @@ it('chooses rectangle variants from one stack, draws them, accepts measurements,
   expect(page().entities.get(page().entityOrder[1]!)!.handles![1]!.out![0]).toBe(134);
   choose('Lozenge');
   down(10, 70); up(10, 70);
-  fireEvent.change(screen.getByLabelText('Layout Measurements'), { target: { value: '60mm,20mm' } });
-  fireEvent.keyDown(screen.getByLabelText('Layout Measurements'), { key: 'Enter' });
+  enterLayoutValue('60mm,20mm');
   expect(page().entities.size).toBe(3);
   for (const entity of page().entities.values()) expect(entity.style?.fillColor).toBe('#ffffff');
   const lozengeId = page().entityOrder[2]!;

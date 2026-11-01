@@ -20,8 +20,8 @@ export function LayoutReferencesPanel({ state, sources, statuses, cloud, onUpdat
   onEdit: (reference: CloudModelReference) => void;
   onConvert: (source: { archiveId: string; modelReferenceId: string }, name: string) => void;
 }): JSX.Element {
-  return <section className="pf-layout-panel-section pf-layout-references" aria-label="Model references">
-    <h3>Models</h3>
+  // The panel's Models section supplies the heading; this is its content.
+  return <div className="pf-layout-references" role="region" aria-label="Model references">
     <ul>
       {sources.map(source => {
         if (isCloudSource(source.source)) {
@@ -51,5 +51,5 @@ export function LayoutReferencesPanel({ state, sources, statuses, cloud, onUpdat
         </li>;
       })}
     </ul>
-  </section>;
+  </div>;
 }

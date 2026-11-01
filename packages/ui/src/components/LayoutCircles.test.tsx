@@ -7,6 +7,7 @@ import { flattenLayoutPath, type LayoutEntity } from '@pushform/layout';
 import { createApp } from '../bootstrap';
 import { DocumentSession } from '../session';
 import { LayoutWorkspace } from './LayoutWorkspace';
+import { enterLayoutValue } from './layoutEntryTesting';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -53,9 +54,7 @@ it('draws a circle as four Bézier curves from its center and radius, undoably a
   fireEvent.pointerDown(screen.getByLabelText('Page 1 canvas'), { button: 0, pointerId: 1, clientX: 450, clientY: 300 });
   fireEvent.pointerUp(screen.getByLabelText('Page 1 canvas'), { pointerId: 1, clientX: 450, clientY: 300 });
   fireEvent.pointerMove(screen.getByLabelText('Page 1 canvas'), { pointerId: 1, clientX: 450, clientY: 330 });
-  const measurements = screen.getByLabelText('Layout Measurements');
-  fireEvent.change(measurements, { target: { value: '15mm' } });
-  fireEvent.keyDown(measurements, { key: 'Enter' });
+  enterLayoutValue('15mm');
   expectOnEllipse(latest(), [150, 100], 15, 15);
   expect(latest().points[1]).toEqual([150, 115]);
   act(() => { tab.commands.execute('edit.undo'); });
@@ -83,9 +82,7 @@ it('draws an ellipse in the box between two corners, from the center with Ctrl, 
   fireEvent.pointerDown(screen.getByLabelText('Page 1 canvas'), { button: 0, pointerId: 1, clientX: 600, clientY: 300 });
   fireEvent.pointerUp(screen.getByLabelText('Page 1 canvas'), { pointerId: 1, clientX: 600, clientY: 300 });
   fireEvent.pointerMove(screen.getByLabelText('Page 1 canvas'), { pointerId: 1, clientX: 630, clientY: 330 });
-  const measurements = screen.getByLabelText('Layout Measurements');
-  fireEvent.change(measurements, { target: { value: '40mm,10mm' } });
-  fireEvent.keyDown(measurements, { key: 'Enter' });
+  enterLayoutValue('40mm,10mm');
   expectOnEllipse(latest(), [220, 105], 20, 5);
   cleanup(); session.dispose(); app.dispose();
 });

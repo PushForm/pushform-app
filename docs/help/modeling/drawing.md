@@ -2,7 +2,7 @@
 
 ## Draw a face and make it solid
 
-Use Rectangle or Line to create a closed boundary on a plane. Choose **Push/Pull**, click the face or region, move outward to preview its depth, then click again to commit. You can also drag the face and release. While positioning, type a distance and press Enter for an exact depth. Escape cancels the preview.
+Use Rectangle or Line to create a closed boundary on a plane. Choose **Push/Pull**, click the face or region, move outward to preview its depth, then click again to commit. You can also drag the face and release. While positioning, type a distance and press Enter for an exact depth. For a face that isn't part of a solid yet, the distance is how far you pull it, positive in either direction, and a typed distance goes the way you are pulling; type a negative distance for the other way. On a solid's face, a negative distance pushes into the solid. Escape cancels the preview.
 
 Keep the face planar and the boundary closed. A loose line does not provide a filled face to push. Push/Pull on an existing solid changes its face while keeping the solid valid; an operation that cannot make a valid result is rejected.
 

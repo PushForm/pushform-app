@@ -8,6 +8,7 @@ import { createApp } from '../bootstrap';
 import { DocumentSession } from '../session';
 import { Icon } from './Icon';
 import { LayoutWorkspace } from './LayoutWorkspace';
+import { enterLayoutValue, layoutEntryField } from './layoutEntryTesting';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -32,10 +33,7 @@ function setup() {
     fireEvent.pointerUp(canvas, { ...at(x, y), ...options });
   };
   const move = (x: number, y: number, options: { shiftKey?: boolean } = {}) => fireEvent.pointerMove(canvas, { ...at(x, y), ...options });
-  const measure = (value: string) => {
-    const input = screen.getByLabelText('Layout Measurements');
-    fireEvent.change(input, { target: { value } }); fireEvent.keyDown(input, { key: 'Enter' });
-  };
+  const measure = (value: string) => enterLayoutValue(value);
   const page = () => tab.doc.state.pages.get(tab.activePageId)!;
   const points = (id: number) => page().entities.get(id)!.points;
   const readout = () => screen.queryByLabelText('Move offset preview')?.textContent ?? null;
@@ -276,10 +274,10 @@ describe('Layout Move tool', () => {
     fireEvent.keyUp(window, { key: 'z', ctrlKey: true }); fireEvent.keyUp(window, { key: 'Control' });
     expect(status()).toMatch(/^Move:/);
     act(() => { tab.commands.execute('edit.redo'); });
-    // A tap still toggles while Measurements has focus after typing a length.
+    // A tap still toggles while a value field has focus after typing a length.
     move(40, 40);
     fireEvent.keyDown(window, { key: '5', code: 'Digit5' });
-    const input = screen.getByLabelText('Layout Measurements');
+    const input = layoutEntryField('Distance');
     expect(document.activeElement).toBe(input);
     tap('Alt', input);
     expect(status()).toMatch(/^Copy:/);
@@ -294,7 +292,7 @@ describe('Layout Move tool', () => {
     dispose();
   });
 
-  it('commits exact distances and x, y offsets from Measurements, rejecting bad input while the move stays pending', () => {
+  it('commits exact distances and x, y offsets typed in a value field, rejecting bad input while the move stays pending', () => {
     const { tab, a, click, move, measure, points, readout, alert, useMove, dispose } = setup();
     useMove();
     click(40, 30); move(43, 34);

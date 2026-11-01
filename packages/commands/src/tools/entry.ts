@@ -21,8 +21,10 @@ export function pxAt(ctx: ToolContext | null, p: Vec3, px: number): number {
 
 export interface Dimension {
   readonly overlay: OverlayPrimitive[];
-  /** Centre of the dimension line, where the field sits. */
+  /** Centre of the dimension line, where the field is anchored. */
   readonly at: Vec3;
+  /** Direction from the geometry toward the field (see `EntryField.away`). */
+  readonly away: Vec3;
 }
 
 /**
@@ -41,6 +43,7 @@ export function lengthDimension(a: Vec3, b: Vec3, side: Vec3, offset: number): D
       { kind: 'polyline', points: [da, db], color: DIMENSION_COLOR, width: 1 },
     ],
     at: v3scale(v3add(da, db), 0.5),
+    away: shift,
   };
 }
 
@@ -54,19 +57,21 @@ export function leftOf(a: Vec3, b: Vec3, n: Vec3): Vec3 | null {
 /**
  * Angle dimension about `center` in the plane spanned by unit vectors `u` and `v`: an arc of
  * `radius` from angle `start` through `sweep` (radians, counterclockwise from u toward v), with the
- * field centred at the arc's middle angle, `labelRadius` from the centre (the arc itself by default).
+ * field anchored at the arc's middle angle, `labelRadius` from the centre (the arc itself by default)
+ * and drawn outside it.
  */
 export function angleDimension(center: Vec3, u: Vec3, v: Vec3, radius: number, start: number, sweep: number, labelRadius = radius): Dimension {
   const at = (t: number, r: number): Vec3 => v3add(center, v3add(v3scale(u, Math.cos(t) * r), v3scale(v, Math.sin(t) * r)));
   const n = Math.max(2, Math.ceil(Math.abs(sweep) / (Math.PI / 32)));
   const pts: Vec3[] = [];
   for (let i = 0; i <= n; i++) pts.push(at(start + (sweep * i) / n, radius));
-  return { overlay: [{ kind: 'polyline', points: pts, color: DIMENSION_COLOR, width: 1 }], at: at(start + sweep / 2, labelRadius) };
+  const mid = at(start + sweep / 2, labelRadius);
+  return { overlay: [{ kind: 'polyline', points: pts, color: DIMENSION_COLOR, width: 1 }], at: mid, away: v3sub(mid, center) };
 }
 
 /** Field helper: a length or angle field with the given live value. */
-export function field(id: string, label: string, kind: EntryField['kind'], value: string | undefined, at: Vec3 | undefined, locked = false): EntryField {
-  return { id, label, kind, value: value ?? '', at, locked };
+export function field(id: string, label: string, kind: EntryField['kind'], value: string | undefined, at: Vec3 | undefined, locked = false, away?: Vec3): EntryField {
+  return { id, label, kind, value: value ?? '', at, away, locked };
 }
 
 /** The single value of a tool that measures with one number, shown beside the pointer. */

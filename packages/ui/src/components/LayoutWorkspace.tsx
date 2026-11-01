@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { operateLayoutPaths, validateLayoutPathOperand, type LayoutPathOperation } from '@pushform/layout';
+import { layoutDimensionUnits, layoutDrawingUnits, operateLayoutPaths, validateLayoutPathOperand, type LayoutPathOperation } from '@pushform/layout';
 import { resizedViewportCamera, layoutModelFields, viewportSourceKey as modelSourceRevisionKey, previewLayoutModelAnnotation, type LayoutModelAttachment } from '@pushform/layout';
 import { LayoutDocumentHost } from '@pushform/commands';
 import { snapLayoutModelVertex } from './layoutModelSnaps';
@@ -66,6 +66,8 @@ import { currentModelClipboardView, readModelClipboardView } from '../modelClipb
 import { checkLayoutReferences, convertEmbeddedModel, layoutClipboardEntity, linkCloudModel, openReferencedModel, pasteModelView, persistLayoutViewportRenders, updateLayoutReference,
   type LayoutCloudAccess, type LayoutReferenceStatus } from './layoutCloudModels';
 import { LayoutCloudModelPicker } from './LayoutCloudModelPicker';
+import { LayoutEntryFields } from './LayoutEntryFields';
+import { entryDeg, entryMm, LAYOUT_POINTER_FIELD, layoutEntryFields, layoutEntryKind, lockedPoint, type LayoutEntryField, type LayoutEntryLocks } from './layoutEntry';
 import { LayoutReferencesPanel } from './LayoutReferencesPanel';
 import { LayoutObjectBrowser, layoutBrowserPassesKey, type LayoutBrowserDrop, type LayoutBrowserSelectMode, type LayoutBrowserTarget } from './LayoutObjectBrowser';
 
@@ -799,7 +801,7 @@ function paintPage(
       ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...guideEnd);
       ctx.strokeStyle = '#1e63d1'; ctx.lineWidth = 0.4; ctx.stroke();
     } else if (points.length === 2) {
-      const dimension = createLinearDimension();
+      const dimension = { ...createLinearDimension(), ...layoutDimensionUnits(state) };
       dimension.alignment = inferLinearDimensionAlignment(points[0]!, points[1]!);
       dimension.cachedValueMm = linearMeasurement(points[0]!, points[1]!, dimension.alignment);
       const attachments = dimensionDraft.modelAttachments?.filter((a): a is LayoutModelAttachment => a !== null);
@@ -1184,7 +1186,20 @@ export function LayoutWorkspace({
   const [editPoints, setEditPoints] = useState<Point[] | null>(null);
   const [editHandles, setEditHandles] = useState<LayoutPathHandle[] | null>(null);
   const [activePointIndex, setActivePointIndex] = useState<number | null>(null);
-  const [vcb, setVcb] = useState(tab.workspace.vcbDraft);
+  // Value fields on the page: what is typed in each, the field with focus, the one that could not be read,
+  // and the values held in the preview with Tab.
+  const [entryDrafts, setEntryDrafts] = useState<Readonly<Record<string, string>>>({});
+  const [entryFocus, setEntryFocus] = useState<string | null>(null);
+  const [entryError, setEntryError] = useState<string | null>(null);
+  const [entryLocks, setEntryLocks] = useState<LayoutEntryLocks>({});
+  const entryLocksRef = useRef<LayoutEntryLocks>({});
+  entryLocksRef.current = entryLocks;
+  const clearEntry = (): void => { setEntryDrafts({}); setEntryFocus(null); setEntryError(null); setEntryLocks({}); entryLocksRef.current = {}; };
+  const entryKind = layoutEntryKind(tool, usesPlacementModifiers(tool) || tool === 'table', tool === 'circle' || isPolygonTool(tool), isLayoutArcTool(tool));
+  /** Start typing into the first field (from the window key handler, which outlives renders). */
+  const beginEntryRef = useRef<(text: string) => void>(() => {});
+  const entryTabRef = useRef<(back: boolean) => boolean>(() => false);
+  useEffect(() => { clearEntry(); }, [tool, tab.activePageId]);
   const [vcbError, setVcbError] = useState<string | null>(null);
   /** What the last DXF import did: its scale and anything it left out. */
   const [importNote, setImportNote] = useState<string | null>(null);
@@ -1197,7 +1212,7 @@ export function LayoutWorkspace({
   const [zoom, setZoom] = useState(tab.workspace.zoom);
   const [zoomMenuOpen, setZoomMenuOpen] = useState(false);
   const [zoomRequest, setZoomRequest] = useState(0);
-  const [openSections, setOpenSections] = useState({ selection: true });
+  const [openSections, setOpenSections] = useState({ models: true, selection: true });
   // The Document Settings dialog, opened from the object browser or the `layout.document.settings` command.
   const [settingsOpen, setSettingsOpen] = useState(false);
   // A model view whose camera is being navigated, and the camera previewed during a drag or zoom.
@@ -1374,8 +1389,7 @@ export function LayoutWorkspace({
     tab.workspace.zoom = zoom;
     tab.workspace.selectedEntityId = selectionId;
     tab.workspace.anchor = anchor;
-    tab.workspace.vcbDraft = vcb;
-  }, [tab, tool, zoom, selectionId, anchor, vcb]);
+  }, [tab, tool, zoom, selectionId, anchor]);
 
   useEffect(() => () => {
     if (pointerDown.current || moveStart.current || pointEditStart.current) tab.workspace.anchor = null;
@@ -1716,6 +1730,8 @@ export function LayoutWorkspace({
       }
       if (target instanceof Element && target.closest('.pf-layout-context-menu')) return;
       if (target instanceof Element && target.closest('input, textarea, select, [contenteditable="true"]')) return;
+      // Tab cycles only through the value fields while a tool shows them.
+      if (event.key === 'Tab' && !event.ctrlKey && !event.metaKey && !event.altKey && entryTabRef.current(event.shiftKey)) { event.preventDefault(); return; }
       if (!presenting && !printing && shapeBuilder.keyDown(event)) return;
       const nudge: Point | undefined = ({ ArrowLeft: [-0.2, 0], ArrowRight: [0.2, 0], ArrowUp: [0, -0.2], ArrowDown: [0, 0.2] } as Record<string, Point>)[event.key];
       if (nudge && tool === 'select' && selectionIds.length && editingTextId === null && editingPathId === null &&
@@ -1847,10 +1863,8 @@ export function LayoutWorkspace({
         return;
       }
       if (!event.metaKey && !event.ctrlKey && !event.altKey && (/^[0-9.]$/.test(event.key) || (tool === 'offset' || tool === 'rotate') && event.key === '-' || tool === 'move' && /^[-*/]$/.test(event.key))) {
-        const input = document.getElementById('pf-layout-vcb') as HTMLInputElement | null;
-        if (input) {
-          input.focus();
-          setVcb(event.key);
+        if (entryKind !== 'none') {
+          beginEntryRef.current(event.key);
           event.preventDefault();
         }
       }
@@ -1865,7 +1879,7 @@ export function LayoutWorkspace({
     const validTarget = (event: KeyboardEvent) => {
       const target = event.target;
       return !(target instanceof Element && (target.closest('[role="menu"], [role="dialog"]') ||
-        target.closest('input, textarea, select, [contenteditable="true"]') && target.id !== 'pf-layout-vcb'));
+        target.closest('input, textarea, select, [contenteditable="true"]') && !target.classList.contains('pf-entry')));
     };
     const down = (event: KeyboardEvent) => {
       if (event.key !== 'Alt' || !validTarget(event) || event.ctrlKey || event.metaKey) return;
@@ -1900,7 +1914,7 @@ export function LayoutWorkspace({
     return () => { window.removeEventListener('keydown', onModifier); window.removeEventListener('keyup', onModifier); };
   }, []);
 
-  // A tap of Ctrl or Alt (Option) toggles copying, also while Measurements has focus. A chord such as Ctrl+Z
+  // A tap of Ctrl or Alt (Option) toggles copying, also while a value field has focus. A chord such as Ctrl+Z
   // or Ctrl+wheel zoom is not a tap: any other key, wheel or pointer press while the modifier is down cancels it.
   const copyTap = useRef<string | null>(null);
   useEffect(() => {
@@ -1908,7 +1922,7 @@ export function LayoutWorkspace({
     const tapTarget = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       return !(target instanceof Element && (target.closest('.pf-layout-context-menu, .pf-layout-object-browser') ||
-        (target.closest('input, textarea, select, [contenteditable="true"]') && target.id !== 'pf-layout-vcb')));
+        (target.closest('input, textarea, select, [contenteditable="true"]') && !target.classList.contains('pf-entry'))));
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Control' && event.key !== 'Alt') { copyTap.current = null; return; }
@@ -1968,7 +1982,15 @@ export function LayoutWorkspace({
       ((event.clientY - bounds.top) * page.size[1]) / bounds.height,
     ];
   };
-  const pointFromEvent = (event: { currentTarget: HTMLCanvasElement; clientX: number; clientY: number; shiftKey: boolean; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean }): Point => {
+  /** The pointer's point, held to the values locked into the line or box with Tab. */
+  const pointFromEvent = (event: Parameters<typeof snappedPointFromEvent>[0]): Point => {
+    const point = snappedPointFromEvent(event);
+    if (!anchor || (entryKind !== 'line' && entryKind !== 'box') || !Object.keys(entryLocksRef.current).length) return point;
+    return lockedPoint(entryKind, anchor, point, entryLocksRef.current, entryDivisor());
+  };
+  /** A box drawn from its center has the pointer set half of each side. */
+  const entryDivisor = (): number => usesPlacementModifiers(tool) && placementModifiersRef.current.center ? 2 : 1;
+  const snappedPointFromEvent = (event: { currentTarget: HTMLCanvasElement; clientX: number; clientY: number; shiftKey: boolean; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean }): Point => {
     if (isPolygonTool(tool)) updatePolygonAlt(!!event.altKey);
     if (usesPlacementModifiers(tool) || tool === 'text') updatePlacementModifiers({ center: !!(event.ctrlKey || event.metaKey), square: tool !== 'text' && event.shiftKey });
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -2043,7 +2065,7 @@ export function LayoutWorkspace({
       if (Math.abs(angleDeg % 360) > 1e-10) tab.commands.execute('layout.shape.rotate', {
         pageId: page.id, entityId: rotationDraft.entityId, pivot: rotationDraft.pivot, angleDeg,
       });
-      setRotationDraft(null); setCursor(null); setSnapKind(null); setVcb(''); setVcbError(null);
+      setRotationDraft(null); setCursor(null); setSnapKind(null); clearEntry(); setVcbError(null);
     } catch (error) { setVcbError(error instanceof Error ? error.message : 'Cannot rotate this object.'); }
   };
   /** The page point under a pointer event on a grip (the grips sit over the page canvas). */
@@ -2084,7 +2106,7 @@ export function LayoutWorkspace({
     return constrain ? Math.abs(delta[0]) >= Math.abs(delta[1]) ? [delta[0], 0] : [0, delta[1]] : delta;
   };
   const endMove = (): void => {
-    setMoveDraft(null); setMovePreview(null); setCursor(null); setSnapKind(null); setVcb(''); setVcbError(null);
+    setMoveDraft(null); setMovePreview(null); setCursor(null); setSnapKind(null); clearEntry(); setVcbError(null);
   };
   const commitMove = (delta: Point): void => {
     if (!moveDraft) return;
@@ -2115,7 +2137,7 @@ export function LayoutWorkspace({
         pageId: page.id, entityIds: last.entityIds, delta, copy: true, whole: true, count,
       }) as number[];
       last.entry = tab.doc.undoStack.peek();
-      setSelectionIds(ids); setVcb(''); setVcbError(null);
+      setSelectionIds(ids); clearEntry(); setVcbError(null);
     } catch (error) {
       tab.commands.execute('edit.redo');
       setVcbError(error instanceof Error ? error.message : 'Cannot make this array.');
@@ -2125,7 +2147,7 @@ export function LayoutWorkspace({
     if (!offsetDraft) return;
     try {
       const id = tab.commands.execute('layout.path.offset', { pageId: page.id, entityId: offsetDraft.entityId, distanceMm }) as number;
-      setSelectionId(id); setOffsetDraft(null); setCornerFirst(null); setCornerHover(null); setRotationDraft(null); setLabelDraft(null); setCursor(null); setVcb(''); setVcbError(null);
+      setSelectionId(id); setOffsetDraft(null); setCornerFirst(null); setCornerHover(null); setRotationDraft(null); setLabelDraft(null); setCursor(null); clearEntry(); setVcbError(null);
     } catch (error) { setVcbError(error instanceof Error ? error.message : 'Cannot offset this path.'); }
   };
   const previewViewportCamera = (camera: LayoutViewportCamera | null): void => {
@@ -2191,14 +2213,14 @@ export function LayoutWorkspace({
   };
   const commit = (a: Point, b: Point, override?: LayoutRectanglePath, textBounded?: boolean, modifiers = placementModifiersRef.current): void => {
     if (tool === 'viewport') {
-      setAnchor(null); setCursor(null); setVcb('');
+      setAnchor(null); setCursor(null); clearEntry();
       if (Math.abs(a[0] - b[0]) >= 1 && Math.abs(a[1] - b[1]) >= 1) void placeViewport(a, b);
       return;
     }
     if (tool === 'table') {
       if (Math.abs(a[0] - b[0]) < LENGTH_TOL * 1000 || Math.abs(a[1] - b[1]) < LENGTH_TOL * 1000) return;
       const id = tab.commands.execute('layout.table.add', { pageId: page.id, first: a, second: b, rows: tableRows, columns: tableColumns }) as number;
-      setSelectionId(id); setTableCell({ row: 0, column: 0 }); setTool('select'); setAnchor(null); setCursor(null); setVcb(''); return;
+      setSelectionId(id); setTableCell({ row: 0, column: 0 }); setTool('select'); setAnchor(null); setCursor(null); clearEntry(); return;
     }
     if (tool === 'text') {
       const bounded = textBounded ?? Math.hypot(b[0] - a[0], b[1] - a[1]) > 2;
@@ -2236,7 +2258,7 @@ export function LayoutWorkspace({
     setAnchor(tool === 'line' && !closed ? b : null);
     setCursor(tool === 'line' && !closed ? b : null);
     setFreehand([]);
-    setVcb('');
+    clearEntry();
     setVcbError(null);
   };
   /**
@@ -2421,7 +2443,7 @@ export function LayoutWorkspace({
       } else {
         try {
           const id = tab.commands.execute('layout.path.corner', { pageId: page.id, kind: tool, amountMm: cornerAmountMm, first: cornerFirst, second: picked }) as number;
-          setSelectionId(id); setCornerFirst(null); setCornerHover(null); setCursor(null); setVcb('');
+          setSelectionId(id); setCornerFirst(null); setCornerHover(null); setCursor(null); clearEntry();
         } catch (error) { setVcbError(error instanceof Error ? error.message : 'Cannot edit this corner.'); }
       }
       return;
@@ -2456,20 +2478,8 @@ export function LayoutWorkspace({
       return;
     }
     if (isLayoutArcTool(tool)) {
-      setCursor(p); setArcError(null);
-      const points = arcDraft?.points ?? [];
-      if (points.length < 2) {
-        if (points[0] && Math.hypot(p[0] - points[0][0], p[1] - points[0][1]) < 1e-6) {
-          setArcError('Choose a different second point.'); return;
-        }
-        setArcDraft({ points: [...points, p], sweep: 0 });
-      } else {
-        try {
-          const sweep = tool === 'arc' || tool === 'pie' ? layoutArcSweep(points[0]!, points[1]!, p, arcDraft!.sweep) : undefined;
-          const id = tab.commands.execute('layout.arc.add', { pageId: page.id, kind: tool, points: [...points, p], sweep }) as number;
-          setSelectionId(id); setArcDraft(null);
-        } catch (error) { setArcError(error instanceof Error ? error.message : 'Unable to create arc.'); }
-      }
+      setCursor(p);
+      placeArcPoint(p);
       return;
     }
     if (tool === 'angular-dimension' && (dimensionDraft?.points.length ?? 0) < 2) {
@@ -2878,7 +2888,7 @@ export function LayoutWorkspace({
     if (tool === 'line') { setAnchor(null); setCursor(null); pointerDown.current = null; return; }
     if (isRepeatableShapeTool(tool)) {
       // The double-click's own clicks draw nothing; the tool's last shape is drawn again from the click.
-      setAnchor(null); setCursor(null); setVcb(''); pointerDown.current = null;
+      setAnchor(null); setCursor(null); clearEntry(); pointerDown.current = null;
       const repeat = shapeRepeats.current.get(tool);
       if (!repeat) return;
       const { id, params } = repeatLayoutShape(repeat, page.id, pointFromEvent(event));
@@ -2886,7 +2896,7 @@ export function LayoutWorkspace({
       return;
     }
     if (tool === 'table' || tool === 'freehand' || isLayoutArcTool(tool) || tool === 'label' || tool === 'viewport' || tool === 'dimension' || tool === 'angular-dimension') {
-      setAnchor(null); setCursor(null); setVcb(''); pointerDown.current = null;
+      setAnchor(null); setCursor(null); clearEntry(); pointerDown.current = null;
       setTableCounting(false); setArcDraft(null); setLabelDraft(null); setDimensionDraft(null); setAngularEdgeFirst(null); setFreehand([]);
       setDimensionError(null); setSnapKind(null);
       if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return;
@@ -2954,10 +2964,209 @@ export function LayoutWorkspace({
     });
     setActivePointIndex(best.index + 1);
   };
-  const applyVcb = (): void => {
-    if (!vcb.trim()) return;
+  // --- Value fields ---------------------------------------------------------------------------
+  /** Drawing values are shown and typed in the grid's units. */
+  const drawingUnits = layoutDrawingUnits(state);
+  const entryUnit = drawingUnits === 'mm' ? 'mm' : 'in';
+  const formatEntryLength = (mm: number): string => formatLayoutLength(mm / 25.4, {
+    units: drawingUnits === 'mm' ? 'mm' : 'inch', format: drawingUnits === 'architectural' ? 'architectural' : 'decimal',
+    precision: state.settings.precision, showUnits: true });
+  const entrySingle = ((): { label: string; value?: string | undefined } => {
+    if (tool === 'move') return { label: 'Distance', value: moveDraft ? formatEntryLength(Math.hypot(...(movePreview?.delta ?? [0, 0]))) : undefined };
+    if (tool === 'rotate') return { label: 'Angle', value: rotationDraft?.reference ? `${rotationDraft.angleDeg.toFixed(1)}°` : undefined };
+    if (tool === 'offset') return { label: 'Distance', value: offsetDraft ? formatEntryLength(offsetDraft.distanceMm) : undefined };
+    if (tool === 'fillet') return { label: 'Radius' };
+    if (tool === 'chamfer') return { label: 'Distance' };
+    if (entryKind === 'arc') return { label: tool === 'arc' || tool === 'pie' ? (arcDraft?.points.length === 2 ? 'Angle' : 'Radius') : 'Length' };
+    return { label: entryKind === 'line' ? 'Length' : entryKind === 'box' ? 'Width, height' : 'Radius' };
+  })();
+  const entryCorners = entryKind === 'box' && anchor && cursor
+    ? placementCorners(anchor, cursor, usesPlacementModifiers(tool) ? placementModifiers : NO_PLACEMENT_MODIFIERS) : undefined;
+  const entry = presenting || printing ? { fields: [], segments: [] } : layoutEntryFields({
+    kind: entryKind, anchor, cursor, corners: entryCorners, label: entrySingle.label, value: entrySingle.value,
+    arc: arcDraft && isLayoutArcTool(tool) ? { tool, points: arcDraft.points, sweep: arcDraft.sweep } : undefined,
+    locks: entryLocks, mmPerPx: 1 / (PX_PER_MM * zoom), formatLength: formatEntryLength,
+  });
+  // With no field of its own, typing opens one beside the pointer.
+  const entryFields: readonly LayoutEntryField[] = entry.fields.length ? entry.fields
+    : entryFocus === LAYOUT_POINTER_FIELD || LAYOUT_POINTER_FIELD in entryDrafts ? [{ id: LAYOUT_POINTER_FIELD, label: entrySingle.label, value: '' }] : [];
+  // While a tool shows fields, one of them has focus: the first when they appear, or again after a
+  // click on the page takes focus away. A text field, menu or dialog the user moved to keeps it.
+  const entryFieldKey = entryFields.map(f => f.id).join(' ');
+  useEffect(() => {
+    if (!entryFieldKey || entryFocus) return;
+    const active = document.activeElement;
+    const onPage = active instanceof Element && workspaceRef.current?.contains(active) &&
+      !active.closest('input, textarea, select, [contenteditable="true"], [role="menu"], [role="dialog"]');
+    if (active && active !== document.body && !onPage) return;
+    setEntryFocus(entryFieldKey.split(' ')[0]!);
+  }, [entryFieldKey, entryFocus]);
+  /** Tab from the page goes to the fields while there are any; true when it did. */
+  entryTabRef.current = (back: boolean) => {
+    if (!entryFields.length) return false;
+    setEntryFocus(entryFields[back ? entryFields.length - 1 : 0]!.id);
+    return true;
+  };
+  beginEntryRef.current = (text: string) => {
+    const first = entryFields[0]?.id ?? LAYOUT_POINTER_FIELD;
+    setEntryDrafts({ [first]: text }); setEntryFocus(first); setEntryError(null); setVcbError(null);
+  };
+  const lockable = (id: string): id is keyof LayoutEntryLocks =>
+    entryKind === 'line' ? id === 'length' || id === 'angle' : entryKind === 'box' ? id === 'width' || id === 'height' : false;
+  /** The value typed in a line or box field, or an error message, or null when it is something else to apply as entered. */
+  const readEntry = (id: keyof LayoutEntryLocks, text: string): number | string | null => {
+    const parsed = parseVcb(text, entryUnit);
+    if (!parsed.ok) return parsed.error.error;
+    const value = id === 'angle' ? entryDeg(parsed.value) : entryMm(parsed.value);
+    if (value !== undefined) return value;
+    return parsed.value.kind === 'length' || parsed.value.kind === 'angle' ? id === 'angle' ? 'Enter an angle in degrees.' : 'Enter a length.' : null;
+  };
+  const leaveEntry = (): void => {
+    clearEntry();
+    if (document.activeElement instanceof HTMLElement && document.activeElement.classList.contains('pf-entry')) document.activeElement.blur();
+  };
+  const tabEntry = (id: string, back: boolean): void => {
+    if (lockable(id)) {
+      const text = entryDrafts[id] ?? '';
+      const next: { -readonly [K in keyof LayoutEntryLocks]: LayoutEntryLocks[K] } = { ...entryLocks };
+      if (!text.trim()) delete next[id];
+      else {
+        const value = readEntry(id, text);
+        if (typeof value === 'string') { setEntryError(id); setVcbError(value); return; }
+        if (value !== null) next[id] = value;
+      }
+      setEntryLocks(next); entryLocksRef.current = next;
+      if (anchor && cursor && (entryKind === 'line' || entryKind === 'box')) setCursor(lockedPoint(entryKind, anchor, cursor, next, entryDivisor()));
+    }
+    const i = entryFields.findIndex(f => f.id === id);
+    const target = entryFields[(i + (back ? entryFields.length - 1 : 1)) % entryFields.length]!;
+    if (target.id === id) return;
+    setEntryFocus(target.id);
+  };
+  /** Add an arc tool's next point, by a click or a typed value; the last one draws the arc. */
+  const placeArcPoint = (p: Point): void => {
+    if (!isLayoutArcTool(tool)) return;
+    setArcError(null);
+    const points = arcDraft?.points ?? [];
+    if (points.length < 2) {
+      if (points[0] && Math.hypot(p[0] - points[0][0], p[1] - points[0][1]) < 1e-6) {
+        setArcError('Choose a different second point.'); return;
+      }
+      setArcDraft({ points: [...points, p], sweep: 0 });
+      return;
+    }
+    commitArc([...points, p], tool === 'arc' || tool === 'pie' ? layoutArcSweep(points[0]!, points[1]!, p, arcDraft!.sweep) : undefined);
+  };
+  const commitArc = (points: Point[], sweep: number | undefined): void => {
+    try {
+      const id = tab.commands.execute('layout.arc.add', { pageId: page.id, kind: tool, points, sweep }) as number;
+      setSelectionId(id); setArcDraft(null);
+    } catch (error) { setArcError(error instanceof Error ? error.message : 'Unable to create arc.'); }
+  };
+  /**
+   * A value typed for an arc's current step: the radius or chord length sets the next point toward
+   * the pointer; an Arc or Pie's angle keeps the way it is swept (negative turns the other way); a
+   * 2 Point Arc's bulge keeps the pointer's side of the chord.
+   */
+  const applyArcEntry = (id: string, text: string): void => {
+    const parsed = parseVcb(text, entryUnit);
+    const fail = (message: string): void => { setEntryError(id); setVcbError(message); };
+    if (!parsed.ok) { fail(parsed.error.error); return; }
+    const points = arcDraft?.points ?? [];
+    const [a, b] = points;
+    if (!a || !cursor) { fail('Click to start the arc before entering a value.'); return; }
+    if (!b) {
+      const mm = entryMm(parsed.value);
+      if (mm === undefined || mm <= 0) { fail('Enter a positive length.'); return; }
+      const dx = cursor[0] - a[0], dy = cursor[1] - a[1], length = Math.hypot(dx, dy);
+      const [ux, uy] = length > 1e-9 ? [dx / length, dy / length] : [1, 0];
+      leaveEntry();
+      placeArcPoint([a[0] + ux * mm, a[1] + uy * mm]);
+      return;
+    }
+    if (tool === 'arc' || tool === 'pie') {
+      const deg = entryDeg(parsed.value);
+      if (deg === undefined || deg === 0 || Math.abs(deg) >= 360) { fail('Enter an angle between 0° and 360°.'); return; }
+      const sweep = (Math.sign(arcDraft!.sweep) || 1) * deg * Math.PI / 180;
+      const radius = Math.hypot(b[0] - a[0], b[1] - a[1]), start = Math.atan2(b[1] - a[1], b[0] - a[0]);
+      leaveEntry();
+      commitArc([a, b, [a[0] + radius * Math.cos(start + sweep), a[1] + radius * Math.sin(start + sweep)]], sweep);
+      return;
+    }
+    if (tool === 'arc2') {
+      const mm = entryMm(parsed.value);
+      if (mm === undefined || mm === 0) { fail('Enter a bulge length.'); return; }
+      const dx = b[0] - a[0], dy = b[1] - a[1], length = Math.hypot(dx, dy);
+      const n: Point = [-dy / length, dx / length], mid: Point = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+      const side = (cursor[0] - mid[0]) * n[0] + (cursor[1] - mid[1]) * n[1] < 0 ? -1 : 1;
+      leaveEntry();
+      commitArc([a, b, [mid[0] + n[0] * side * mm, mid[1] + n[1] * side * mm]], undefined);
+      return;
+    }
+    fail('Click the last point of the arc.');
+  };
+  /** Enter: apply every field, typed or locked values where given and live values for the rest. */
+  const applyEntry = (): void => {
+    const typed = entryFields.filter(f => entryDrafts[f.id]?.trim());
+    if (entryKind === 'arc') {
+      const f = typed[0];
+      if (f) applyArcEntry(f.id, entryDrafts[f.id]!);
+      return;
+    }
+    // A single value, or anything the fields do not read as their own, goes to the tool as entered.
+    const passThrough = (entryKind !== 'line' && entryKind !== 'box') || typed.some(f => !lockable(f.id) || readEntry(f.id, entryDrafts[f.id]!) === null);
+    if (passThrough) {
+      const f = typed.find(g => !lockable(g.id) || readEntry(g.id, entryDrafts[g.id]!) === null) ?? typed[0];
+      if (!f) return;
+      const parsed = parseVcb(entryDrafts[f.id]!, entryUnit);
+      if (!parsed.ok) { setEntryError(f.id); setVcbError(parsed.error.error); return; }
+      // The tool clears the fields when the value applies; an error keeps them for correction.
+      setEntryError(null);
+      applyVcbText(entryDrafts[f.id]!);
+      return;
+    }
+    const values: { -readonly [K in keyof LayoutEntryLocks]: LayoutEntryLocks[K] } = { ...entryLocks };
+    for (const f of typed) {
+      if (!lockable(f.id)) continue;
+      const value = readEntry(f.id, entryDrafts[f.id]!);
+      if (typeof value === 'string') { setEntryError(f.id); setVcbError(value); return; }
+      if (value !== null) values[f.id] = value;
+    }
+    if (!Object.keys(values).length) return;
+    if (!anchor) { setVcbError('Start a shape before entering a measurement'); return; }
+    const pointer = cursor ?? [anchor[0] + 1, anchor[1]];
+    if (entryKind === 'line') {
+      const dx = pointer[0] - anchor[0], dy = pointer[1] - anchor[1];
+      const live = Math.hypot(dx, dy);
+      const length = values.length ?? live;
+      leaveEntry();
+      // Only a length keeps the pointer's direction exactly; an angle sets it.
+      if (values.angle === undefined && live > 1e-9) commit(anchor, [anchor[0] + length * dx / live, anchor[1] + length * dy / live]);
+      else {
+        const radians = (values.angle ?? 0) * Math.PI / 180;
+        commit(anchor, [anchor[0] + length * Math.cos(radians), anchor[1] + length * Math.sin(radians)]);
+      }
+      return;
+    }
+    const modifiers = usesPlacementModifiers(tool) ? { ...placementModifiersRef.current, square: false } : NO_PLACEMENT_MODIFIERS;
+    const divisor = modifiers.center ? 2 : 1;
+    const [a, b] = placementCorners(anchor, pointer, usesPlacementModifiers(tool) ? placementModifiersRef.current : NO_PLACEMENT_MODIFIERS);
+    const side = (v: number): number => v < 0 ? -1 : 1;
+    const width = values.width !== undefined ? side(pointer[0] - anchor[0]) * values.width : b[0] - a[0];
+    const height = values.height !== undefined ? side(pointer[1] - anchor[1]) * values.height : b[1] - a[1];
+    leaveEntry();
+    commit(anchor, [anchor[0] + width / divisor, anchor[1] + height / divisor], undefined, undefined, modifiers);
+  };
+  const escapeEntry = (): void => {
+    leaveEntry();
+    // Cancel the tool's operation as Escape on the page does.
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  };
+  /** Apply a value typed in a field as entered, as the tool reads it. */
+  const applyVcbText = (text: string): void => {
+    if (!text.trim()) return;
     if (tool === 'move') {
-      const parsed = parseVcb(vcb, state.settings.units === 'mm' ? 'mm' : 'in');
+      const parsed = parseVcb(text, drawingUnits === 'mm' ? 'mm' : 'in');
       if (!parsed.ok) { setVcbError(parsed.error.error); return; }
       const value = parsed.value;
       if (value.kind === 'array') { arrayMoveCopy(value.count, value.mode); return; }
@@ -2976,7 +3185,7 @@ export function LayoutWorkspace({
     }
     if (tool === 'rotate') {
       if (!rotationDraft?.reference) { setVcbError('Choose the rotation point and reference direction first.'); return; }
-      const parsed = parseVcb(vcb, state.settings.units === 'mm' ? 'mm' : 'in');
+      const parsed = parseVcb(text, drawingUnits === 'mm' ? 'mm' : 'in');
       if (!parsed.ok) { setVcbError(parsed.error.error); return; }
       const angle = parsed.value.kind === 'angle' ? parsed.value.degrees
         : parsed.value.kind === 'length' && parsed.value.unit === null ? parsed.value.raw : NaN;
@@ -2984,34 +3193,34 @@ export function LayoutWorkspace({
       commitRotation(angle); return;
     }
     if (isLayoutCornerTool(tool)) {
-      const parsed = parseVcb(vcb, state.settings.units === 'mm' ? 'mm' : 'in');
+      const parsed = parseVcb(text, drawingUnits === 'mm' ? 'mm' : 'in');
       if (!parsed.ok) { setVcbError(parsed.error.error); return; }
       if (parsed.value.kind !== 'length' || parsed.value.meters <= 0) { setVcbError('Enter a positive corner size.'); return; }
       const amount = parsed.value.meters * 1000;
       if (tool === 'fillet') setFilletRadiusMm(amount); else setChamferDistanceMm(amount);
-      setVcb(''); setVcbError(null); return;
+      clearEntry(); setVcbError(null); return;
     }
     if (tool === 'offset') {
       if (!offsetDraft || !offsetSource) { setVcbError('Click a path before entering its offset distance.'); return; }
-      const parsed = parseVcb(vcb, state.settings.units === 'mm' ? 'mm' : 'in');
+      const parsed = parseVcb(text, drawingUnits === 'mm' ? 'mm' : 'in');
       if (!parsed.ok) { setVcbError(parsed.error.error); return; }
       if (parsed.value.kind !== 'length') { setVcbError('Enter an offset distance.'); return; }
       const direction = offsetSource.closed ? 1 : Math.sign(offsetDraft.distanceMm) || 1;
       commitOffset(parsed.value.meters * 1000 * direction); return;
     }
     if (isPolygonTool(tool)) {
-      const sides = parseVcb(vcb);
+      const sides = parseVcb(text);
       if (sides.ok && sides.value.kind === 'segments') {
         const count = sides.value.count;
         if (count < LAYOUT_POLYGON_MIN_SIDES || count > LAYOUT_POLYGON_MAX_SIDES) { setVcbError(`Enter ${LAYOUT_POLYGON_MIN_SIDES} to ${LAYOUT_POLYGON_MAX_SIDES} sides.`); return; }
-        setPolygonSides(count); setVcb(''); setVcbError(null); return;
+        setPolygonSides(count); clearEntry(); setVcbError(null); return;
       }
     }
     if (!anchor) {
       setVcbError('Start a shape before entering a measurement');
       return;
     }
-    const parsed = parseVcb(vcb, state.settings.units === 'mm' ? 'mm' : 'in');
+    const parsed = parseVcb(text, drawingUnits === 'mm' ? 'mm' : 'in');
     if (!parsed.ok) {
       setVcbError(parsed.error.error);
       return;
@@ -3029,7 +3238,7 @@ export function LayoutWorkspace({
     } else if (value.kind === 'angle' && tool === 'line') {
       const radians = value.degrees * Math.PI / 180;
       setCursor([anchor[0] + magnitude * Math.cos(radians), anchor[1] + magnitude * Math.sin(radians)]);
-      setVcb('');
+      clearEntry();
       setVcbError(null);
     } else if (value.kind === 'list' && tool === 'line' &&
       value.values[0]?.kind === 'length' && value.values[1]?.kind === 'angle') {
@@ -3601,6 +3810,16 @@ export function LayoutWorkspace({
                 return d + (contour.closed ? 'Z' : '');
               }).join(' ')} fillRule="evenodd" />)}
           </svg> : null}
+          {editingTextId === null ? <LayoutEntryFields fields={entryFields} segments={entry.segments} pageSize={page.size} scale={PX_PER_MM * zoom}
+            pointer={cursor} drafts={entryDrafts} focus={entryFocus} error={entryError}
+            onDraft={(id, text) => { setEntryDrafts(d => ({ ...d, [id]: text })); setEntryError(null); setVcbError(null); }}
+            onFocus={setEntryFocus}
+            onBlur={(id) => {
+              // A value that is not locked into the preview does not outlive its field's focus.
+              if (!(lockable(id) && entryLocksRef.current[id] !== undefined)) setEntryDrafts(d => { const { [id]: _, ...rest } = d; return rest; });
+              setEntryFocus(f => f === id ? null : f);
+            }}
+            onTab={tabEntry} onEnter={applyEntry} onEscape={escapeEntry} /> : null}
           {tool === 'line' && lineGuide && cursor ? <LayoutAlignmentGuide axis={lineGuide.axis}
             from={[lineGuide.reference[0] * PX_PER_MM * zoom, lineGuide.reference[1] * PX_PER_MM * zoom]}
             to={[cursor[0] * PX_PER_MM * zoom, cursor[1] * PX_PER_MM * zoom]} /> : null}
@@ -3627,7 +3846,7 @@ export function LayoutWorkspace({
             style={{ left: Math.max(0, Math.min(page.size[0] * PX_PER_MM * zoom - 160, cursor[0] * PX_PER_MM * zoom + 14)),
               top: Math.max(0, Math.min(page.size[1] * PX_PER_MM * zoom - 28, cursor[1] * PX_PER_MM * zoom + 14)) }}>
             {moveDraft.copy ? 'Copy ' : ''}{(movePreview?.delta ?? [0, 0]).map((offset) => formatLayoutLength(offset / 25.4, {
-              units: state.settings.units === 'mm' ? 'mm' : 'inch', format: state.settings.units === 'architectural' ? 'architectural' : 'decimal',
+              units: drawingUnits === 'mm' ? 'mm' : 'inch', format: drawingUnits === 'architectural' ? 'architectural' : 'decimal',
               precision: state.settings.precision, showUnits: true })).join(', ')}
           </output> : null}
           {angularPreview && cursor ? <output className="pf-layout-rotation-angle" aria-label="Angular dimension preview"
@@ -3888,11 +4107,14 @@ export function LayoutWorkspace({
             onChange={formatEditingText} onReturnToText={returnToText} onFinish={() => setEditingTextId(null)} /> : null}
           </section> : null}
 
-          {viewportSources.length ? <LayoutReferencesPanel state={state} sources={viewportSources} statuses={referenceStatuses} cloud={cloud}
+          {viewportSources.length ? <LayoutAccordion title="Models" id={`layout-models-${tab.id}`} open={openSections.models} count={viewportSources.length}
+            onToggle={() => toggleSection('models')}>
+          <LayoutReferencesPanel state={state} sources={viewportSources} statuses={referenceStatuses} cloud={cloud}
             onUpdate={(referenceId, head) => updateLayoutReference(tab, referenceId, head)}
             onPin={(referenceId, pinned) => tab.commands.execute('layout.reference.pin', { referenceId, pinned })}
             onEdit={reference => { if (cloud) openReferencedModel(reference, cloud).catch(error => setVcbError(error instanceof Error ? error.message : 'The model could not be opened.')); }}
-            onConvert={(source, name) => { if (cloud) convertEmbeddedModel(tab, source, name, cloud).catch(error => setVcbError(error instanceof Error ? error.message : 'The model could not be converted.')); }} /> : null}
+            onConvert={(source, name) => { if (cloud) convertEmbeddedModel(tab, source, name, cloud).catch(error => setVcbError(error instanceof Error ? error.message : 'The model could not be converted.')); }} />
+          </LayoutAccordion> : null}
           <LayoutAccordion title={layoutSelectionTitle(selectedEntity, selectionIds.length)} id={`layout-selection-${tab.id}`} open={openSections.selection}
             onToggle={() => toggleSection('selection')}>
           <div className="pf-form-note">
@@ -4086,16 +4308,16 @@ export function LayoutWorkspace({
             : booleanOperation(tool) ? booleanIds.length ? 'Pick more shapes. Enter to apply; Escape to cancel.' : 'Click the target first, then the other shapes.'
             : tool === 'scale' ? 'Click an object, then drag a resize handle. Hold Shift to maintain aspect ratio and Alt to keep the center.'
             : tool === 'move' ? moveDraft
-              ? `${moveDraft.copy ? 'Copy' : 'Move'}: click the destination, or enter a distance or x, y offsets in Measurements. Tap ${COPY_TOGGLE_KEYS} to toggle copying; hold Shift to move only horizontally or vertically. Esc cancels.`
-              : 'Click an object, or anywhere to move the selection, to choose the base point. After a copy, enter Nx or /N in Measurements for an array.'
+              ? `${moveDraft.copy ? 'Copy' : 'Move'}: click the destination, or type a distance or x, y offsets. Tap ${COPY_TOGGLE_KEYS} to toggle copying; hold Shift to move only horizontally or vertically. Esc cancels.`
+              : 'Click an object, or anywhere to move the selection, to choose the base point. After a copy, type Nx or /N for an array.'
             : tool === 'rotate' ? rotationDraft?.reference
-              ? `Rotation: ${rotationDraft.angleDeg.toFixed(1)}°. Click to finish, or enter an angle in Measurements. Esc cancels.`
+              ? `Rotation: ${rotationDraft.angleDeg.toFixed(1)}°. Click to finish, or type an angle. Esc cancels.`
               : rotationDraft ? 'Click a second point to establish the reference line.' : 'Click within a shape or on a line to choose the rotation point.'
             : isLayoutCornerTool(tool) ? cornerResult.error ?? (cornerFirst
               ? `Click the second adjoining segment to ${tool === 'fillet' ? 'round' : 'bevel'} the corner. Size: ${cornerAmountMm} mm. Esc cancels.`
-              : `Click the first straight segment. Set the ${tool === 'fillet' ? 'radius' : 'setback'} in the toolbar or Measurements.`)
+              : `Click the first straight segment. Set the ${tool === 'fillet' ? 'radius' : 'setback'} in the toolbar, or type it.`)
             : tool === 'offset' ? offsetResult.error ?? (offsetDraft
-              ? `Click to place the offset (${offsetDraft.distanceMm.toFixed(2)} mm), or enter a distance in Measurements. Negative values inset closed shapes. Esc cancels.`
+              ? `Click to place the offset (${offsetDraft.distanceMm.toFixed(2)} mm), or type a distance. Negative values inset closed shapes. Esc cancels.`
               : 'Click a path to offset, then move and click to place its copy.')
             : isLayoutArcTool(tool) ? arcError ?? (arcDraft?.points.length === 2
               ? tool === 'arc2' ? 'Click to set the bulge.' : tool === 'arc3' ? 'Click the arc endpoint.' : 'Move around the center and click the arc endpoint.'
@@ -4113,7 +4335,7 @@ export function LayoutWorkspace({
             : tool === 'viewport' ? vcbError ?? `Drag or click two corners to place a view of ${viewportSource?.name ?? 'the model'}.`
             : tool === 'table' ? !anchor ? 'Press and drag to choose rows and columns, or set them in the toolbar and click the first corner.'
               : tableCounting ? `Drag right or left for columns, up or down for rows: ${tableRows} ${tableRows === 1 ? 'row' : 'rows'} × ${tableColumns} ${tableColumns === 1 ? 'column' : 'columns'}. Release to keep them.`
-              : `Move to size the table (${tableRows} × ${tableColumns}), then click to place it. Enter width,height in Measurements for an exact size. Esc cancels.`
+              : `Move to size the table (${tableRows} × ${tableColumns}), then click to place it. Type the width and height for an exact size. Esc cancels.`
             : tool === 'line' ? 'Click or drag to draw. Hold Shift for horizontal or vertical. Esc or double-click ends the chain.'
             : tool === 'bezier' ? bezierDraft
               ? 'Click for a corner or drag to pull out handles. Click the first point to close; Enter, Esc or double-click ends the curve.'
@@ -4152,29 +4374,6 @@ export function LayoutWorkspace({
             {Math.round(zoom * 100)}% <span aria-hidden="true">⌄</span>
           </button>
         </div>
-        <label className="pf-layout-vcb">
-          Measurements
-          <input
-            id="pf-layout-vcb"
-            aria-label="Layout Measurements"
-            aria-invalid={Boolean(vcbError)}
-            value={vcb}
-            onChange={(event) => {
-              setVcb(event.target.value);
-              setVcbError(null);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape' && (tool === 'offset' || tool === 'rotate' || tool === 'move' || isLayoutCornerTool(tool))) {
-                setMoveDraft(null); setMovePreview(null); setCursor(null);
-                setOffsetDraft(null); setCornerFirst(null); setCornerHover(null); setRotationDraft(null); setLabelDraft(null); setVcb(''); setVcbError(null); event.currentTarget.blur(); event.preventDefault(); return;
-              }
-              if (event.key === 'Enter') {
-                applyVcb();
-                event.preventDefault();
-              }
-            }}
-          />
-        </label>
         {vcbError ? <span className="pf-layout-vcb-error" role="alert">{vcbError}</span> : null}
       </div>
     </>

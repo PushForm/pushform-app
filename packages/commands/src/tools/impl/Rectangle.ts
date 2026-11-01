@@ -268,8 +268,8 @@ export class RectangleTool implements Tool {
     return {
       overlay: [...wd.overlay, ...hd.overlay],
       fields: [
-        field('width', 'Width', 'length', fmt(w), wd.at, this.lockedW !== null),
-        field('height', 'Height', 'length', fmt(h), hd.at, this.lockedH !== null),
+        field('width', 'Width', 'length', fmt(w), wd.at, this.lockedW !== null, wd.away),
+        field('height', 'Height', 'length', fmt(h), hd.at, this.lockedH !== null, hd.away),
       ],
     };
   }

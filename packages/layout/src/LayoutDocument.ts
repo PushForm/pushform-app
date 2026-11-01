@@ -566,6 +566,53 @@ export function createLayoutDocumentState(): LayoutDocumentState {
   };
 }
 
+export type LayoutUnit = 'mm' | 'in';
+type LayoutSettings = LayoutDocumentState['settings'];
+
+const unitOf = (units: LayoutSettings['units']): LayoutUnit => units === 'mm' ? 'mm' : 'in';
+
+/** Units paper sizes and margins are shown in; a document without its own uses its drawing units. */
+export function layoutPaperUnits(state: Pick<LayoutDocumentState, 'settings'>): LayoutUnit {
+  return state.settings.paperUnits ?? unitOf(state.settings.units);
+}
+
+/** Units the grid is shown in; a document without its own uses its drawing units. */
+export function layoutGridUnits(state: Pick<LayoutDocumentState, 'settings'>): LayoutUnit {
+  return state.settings.grid.units ?? unitOf(state.settings.units);
+}
+
+/** Units drawing values are shown and typed in: the grid's, architectural when the document's inches are. */
+export function layoutDrawingUnits(state: Pick<LayoutDocumentState, 'settings'>): LayoutSettings['units'] {
+  return layoutGridUnits(state) === 'mm' ? 'mm' : state.settings.units === 'architectural' ? 'architectural' : 'inch';
+}
+
+/** Units of a new linear dimension: the drawing units, to 1/16 in when architectural, 0.01 in in decimal inches. */
+export function layoutDimensionUnits(state: Pick<LayoutDocumentState, 'settings'>): Pick<LayoutLinearDimension, 'units' | 'precision' | 'format'> {
+  const units = layoutDrawingUnits(state);
+  if (units === 'mm') return { units: 'mm', precision: 1, format: 'decimal' };
+  return units === 'architectural' ? { units: 'inch', precision: 4, format: 'architectural' } : { units: 'inch', precision: 2, format: 'decimal' };
+}
+
+/** Grid sizes a change of grid units rounds to, in millimeters. */
+const GRID_SIZES_MM: Record<LayoutUnit, readonly number[]> = {
+  in: [1 / 16, 1 / 8, 1 / 4, 1 / 2, 1, 2].map(inches => Number((inches * 25.4).toFixed(4))),
+  mm: [1, 2, 2.5, 5, 10, 20, 25, 50],
+};
+
+/**
+ * Set the grid units, which drawing values follow too. A change of units rounds the grid size to the
+ * nearest of the usual sizes in the new units (1/4 in, 5 mm, …), so it reads as a whole value.
+ */
+export function setLayoutGridUnits(settings: LayoutSettings, unit: LayoutUnit): void {
+  const previous = settings.grid.units ?? unitOf(settings.units);
+  settings.grid.units = unit;
+  settings.units = unit === 'mm' ? 'mm' : settings.units === 'architectural' ? 'architectural' : 'inch';
+  if (previous === unit) return;
+  const spacing = settings.grid.spacingMm;
+  settings.grid.spacingMm = GRID_SIZES_MM[unit].reduce((best, size) =>
+    Math.abs(Math.log(size / spacing)) < Math.abs(Math.log(best / spacing)) ? size : best);
+}
+
 export function createLayoutDocument(): LayoutDocument {
   return new LayoutDocument();
 }

@@ -314,7 +314,7 @@ export class LineTool implements Tool {
     if (side) {
       const dim = lengthDimension(from, to, side, pxAt(this.ctx, from, DIMENSION_OFFSET_PX));
       overlay.push(...dim.overlay);
-      fields.push(field('length', 'Length', 'length', lengthValue, dim.at, this.lockedLength !== null));
+      fields.push(field('length', 'Length', 'length', lengthValue, dim.at, this.lockedLength !== null, dim.away));
     } else fields.push(field('length', 'Length', 'length', lengthValue, undefined, this.lockedLength !== null));
     const angle = this.angleOf(to);
     if (angle !== null) {
@@ -322,9 +322,9 @@ export class LineTool implements Tool {
       const r = Math.min(len * 0.5, pxAt(this.ctx, from, 60));
       if (r > 0) {
         overlay.push({ kind: 'polyline', points: [from, basisToWorld(b, r * 1.2, 0)], color: DIMENSION_COLOR, width: 1, dashed: true });
-        const dim = angleDimension(from, b.u, b.v, r, 0, angle, r + pxAt(this.ctx, from, 44));
+        const dim = angleDimension(from, b.u, b.v, r, 0, angle, r + pxAt(this.ctx, from, 6));
         overlay.push(...dim.overlay);
-        fields.push(field('angle', 'Angle', 'angle', formatDeg((angle * 180) / Math.PI), dim.at, this.lockedAngle !== null));
+        fields.push(field('angle', 'Angle', 'angle', formatDeg((angle * 180) / Math.PI), dim.at, this.lockedAngle !== null, dim.away));
       }
     }
     return { overlay, fields };

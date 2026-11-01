@@ -226,11 +226,11 @@ export class CircleTool implements Tool {
     const value = formatLen(this.ctx, 2 * r);
     if (!this.center || !this.plane || !this.cursorInference || r <= MERGE_TOL) return { overlay: [], fields: [field('diameter', 'Diameter', 'length', value, undefined)] };
     const dir = v3normalize(v3sub(onPlane(this.plane, this.cursorInference.point), this.center));
-    const far = v3add(this.center, v3scale(dir, r + pxAt(this.ctx, this.center, 70)));
+    const far = v3add(this.center, v3scale(dir, r + pxAt(this.ctx, this.center, 16)));
     const near = v3add(this.center, v3scale(dir, -r));
     return {
       overlay: [{ kind: 'polyline', points: [near, far], color: DIMENSION_COLOR, width: 1 }],
-      fields: [field('diameter', 'Diameter', 'length', value, far)],
+      fields: [field('diameter', 'Diameter', 'length', value, far, false, dir)],
     };
   }
   protected onExtraKey(_e: ToolKeyEvent): boolean {

@@ -16,8 +16,8 @@ describe('paper presets', () => {
     expect(paperPresetFor([215.9, 279.4])?.id).toBe('letter');
     expect(paperPresetFor([300, 200])).toBeUndefined();
     const letter = PAPER_PRESETS[0]!;
-    expect(presetSizeMm(letter, [297, 210])).toEqual([279.4, 215.9]);
-    expect(presetSizeMm(letter, [210, 297])).toEqual([215.9, 279.4]);
+    // Presets apply landscape, whatever the current page.
+    expect(presetSizeMm(letter)).toEqual([279.4, 215.9]);
   });
 
   it('formats and converts lengths', () => {

@@ -4,7 +4,7 @@ import { browserSelectionRange } from './browserSelectionRange';
 import { useGuidanceBrowser } from '../hooks/useGuidanceBrowser';
 import { memo, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type { CSSProperties, JSX, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
-import { LAYOUT_OBJECT_NAME_MAX, isCloudSource, isLayoutLayerVisible, layoutDefaultObjectNames, layoutObjectKind, layoutObjectName } from '@pushform/layout';
+import { LAYOUT_OBJECT_NAME_MAX, layoutGridUnits, layoutPaperUnits, isCloudSource, isLayoutLayerVisible, layoutDefaultObjectNames, layoutObjectKind, layoutObjectName } from '@pushform/layout';
 import { MdOutlinePushPin } from 'react-icons/md';
 import { layoutViewportSources } from './layoutViewportRenders';
 import type { LayoutDocumentState, LayoutEntity, LayoutObjectKind, LayoutPage } from '@pushform/layout';
@@ -198,7 +198,7 @@ function buildTree(state: LayoutDocumentState, activePageId: number, selected: R
   });
   // Under Document Settings, the document's paper (named by its preset, else Custom) and its units and grid.
   const paper = state.pages.get(state.pageOrder[0]!);
-  const unit = state.settings.paperUnits ?? 'mm', gridUnit = state.settings.grid.units ?? 'mm';
+  const unit = layoutPaperUnits(state), gridUnit = layoutGridUnits(state);
   const size: BrowserNode[] = paper ? [{ key: PAGE_SIZE_KEY, level: 2,
     label: `${paperPresetFor(paper.size)?.name ?? 'Custom'}: ${formatPaperLength(paper.size[0], unit)} × ${formatPaperLength(paper.size[1], unit)} ${unit}`,
     icon: <PiFrameCorners />, target: null, parent: SETTINGS_KEY, children: [] }, { key: UNITS_KEY, level: 2,

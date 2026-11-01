@@ -553,7 +553,7 @@ describe('Layout object browser', () => {
     expect(paper.value).toBe('A4');
     expect([...paper.querySelectorAll('optgroup')].map(group => group.label)).toEqual(['US', 'International']);
     expect(paper.querySelector('optgroup')!.querySelector('option')!.textContent).toBe('Letter (8.5 × 11 in)');
-    // Letter on a landscape document: landscape Letter, shown in inches, as one undoable change.
+    // Letter: landscape Letter, with the page, the grid and drawing values in inches, as one undoable change.
     const newest = t.tab.doc.undoStack.peek();
     fireEvent.change(paper, { target: { value: 'letter' } });
     expect(t.tab.doc.state.pages.get(t.pageId)!.size).toEqual([279.4, 215.9]);
@@ -562,7 +562,10 @@ describe('Layout object browser', () => {
     expect(field('Page height (in)').value).toBe('8.5');
     expect(field('Margin (in)').value).toBe('0.394');
     expect((within(dialog).getByRole('combobox', { name: 'Page size units' }) as HTMLSelectElement).value).toBe('in');
-    expect(t.children(t.items(1)[0]!)).toEqual(['Letter: 11 × 8.5 in', 'Units: in · Grid: 10 mm']);
+    expect((within(dialog).getByRole('combobox', { name: 'Grid units' }) as HTMLSelectElement).value).toBe('in');
+    expect(t.tab.doc.state.settings.units).toBe('inch');
+    // The 10 mm grid rounds to the nearest usual size in inches.
+    expect(t.children(t.items(1)[0]!)).toEqual(['Letter: 11 × 8.5 in', 'Units: in · Grid: 0.5 in']);
     // Typing in inches keeps partial input and stores millimeters.
     act(() => { field('Page width (in)').focus(); });
     fireEvent.change(field('Page width (in)'), { target: { value: '12.' } });
@@ -576,15 +579,30 @@ describe('Layout object browser', () => {
     fireEvent.change(paper, { target: { value: 'A3' } });
     expect(t.tab.doc.state.pages.get(t.pageId)!.size).toEqual([420, 297]);
     expect(t.tab.doc.state.settings.paperUnits).toBe('mm');
+    expect(t.tab.doc.state.settings.grid).toMatchObject({ units: 'mm', spacingMm: 10 });
+    expect(t.tab.doc.state.settings.units).toBe('mm');
     // Letter, 12, 12.5, mm and A3 are five undoable steps.
     for (let i = 0; i < 5; i++) act(() => { t.tab.commands.execute('edit.undo'); });
     expect(t.tab.doc.undoStack.peek()).toBe(newest);
-    // Grid size is shown in the grid's own units.
+    // Grid size is shown in the grid's own units; changing them rounds it and sets the drawing units.
     expect(field('Grid size (mm)').value).toBe('10');
     fireEvent.change(within(dialog).getByRole('combobox', { name: 'Grid units' }), { target: { value: 'in' } });
-    expect(field('Grid size (in)').value).toBe('0.394');
-    fireEvent.change(field('Grid size (in)'), { target: { value: '0.5' } });
-    expect(t.tab.doc.state.settings.grid.spacingMm).toBeCloseTo(12.7, 9);
+    expect(field('Grid size (in)').value).toBe('0.5');
+    expect(t.tab.doc.state.settings.units).toBe('inch');
+    fireEvent.change(field('Grid size (in)'), { target: { value: '0.25' } });
+    expect(t.tab.doc.state.settings.grid.spacingMm).toBeCloseTo(6.35, 9);
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'Grid units' }), { target: { value: 'mm' } });
+    expect(field('Grid size (mm)').value).toBe('5');
+    expect(t.tab.doc.state.settings.units).toBe('mm');
+    // Orientation turns the page; a preset chosen on a portrait page is landscape.
+    const orientation = within(dialog).getByRole('combobox', { name: 'Orientation' }) as HTMLSelectElement;
+    expect(orientation.value).toBe('landscape');
+    fireEvent.change(orientation, { target: { value: 'portrait' } });
+    expect(t.tab.doc.state.pages.get(t.pageId)!.size).toEqual([210, 297]);
+    expect(paper.value).toBe('A4');
+    fireEvent.change(paper, { target: { value: 'letter' } });
+    expect(t.tab.doc.state.pages.get(t.pageId)!.size).toEqual([279.4, 215.9]);
+    expect(orientation.value).toBe('landscape');
     t.dispose();
   });
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { useEffect, useReducer, useRef } from 'react';
+import { useEffect, useLayoutEffect, useReducer, useRef } from 'react';
 import type { JSX, KeyboardEvent, RefObject } from 'react';
 import { parseVcb } from '@pushform/commands';
 import type { EntryField, VcbValue } from '@pushform/commands';
@@ -16,6 +16,33 @@ export const entryInputId = (id: string): string => `pf-entry-${id}`;
 
 /** Offset of a field shown beside the pointer, clear of the inference tooltip below it. */
 const POINTER_OFFSET: readonly [number, number] = [70, -34];
+
+/** Size of a field before it is measured in the page, matching `.pf-entry`. */
+const FIELD_SIZE: readonly [number, number] = [78, 26];
+
+/** Screen gap between a field and the point it is anchored on. */
+const FIELD_GAP = 4;
+
+/**
+ * Centre of a `size` box placed beside screen point `at` in the direction of `toward`, wholly past
+ * the line through `at` square to that direction and `FIELD_GAP` clear of it, so the box covers
+ * neither the point nor a dimension line drawn through it. Centred on `at` when the direction does
+ * not show on screen.
+ */
+export function clearOf(at: readonly [number, number], toward: readonly [number, number], size: readonly [number, number]): readonly [number, number] {
+  const dx = toward[0] - at[0], dy = toward[1] - at[1];
+  const len = Math.hypot(dx, dy);
+  if (!(len > 1e-6)) return at;
+  const ux = dx / len, uy = dy / len;
+  // How far the box reaches back toward `at` from its centre, measured along (ux, uy).
+  const d = (Math.abs(ux) * size[0] + Math.abs(uy) * size[1]) / 2 + FIELD_GAP;
+  return [at[0] + ux * d, at[1] + uy * d];
+}
+
+/** Width of a field that fits `text`, in the `ch` of its digits plus room for the caret. */
+export function entryWidth(text: string): string {
+  return `${Math.max(3, text.length) + 1}ch`;
+}
 
 /** Kinds a field reads as its own value; anything else typed (`8s`, `[x,y,z]`, `24r`, lists) goes to the tool as entered. */
 const FIELD_KINDS = new Set<VcbValue['kind']>(['length', 'angle', 'slope']);
@@ -50,6 +77,12 @@ export function EntryFields({ pointer }: { pointer: RefObject<readonly [number, 
   // Fields are anchored to world points: place them again whenever the view renders.
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   useEffect(() => app.viewport.events.on('render', rerender), [app]);
+  // Fields grow with their text: place them again when a field's measured size changes.
+  const sizes = useRef('');
+  useLayoutEffect(() => {
+    const now = [...inputs.current].map(([id, el]) => `${id}:${el.offsetWidth}x${el.offsetHeight}`).join(' ');
+    if (now !== sizes.current) { sizes.current = now; rerender(); }
+  });
 
   const shown = visibleFields(fields, label, drafts, focus);
 
@@ -65,7 +98,13 @@ export function EntryFields({ pointer }: { pointer: RefObject<readonly [number, 
   if (!shown.length) return null;
 
   const position = (f: EntryField): readonly [number, number] => {
-    if (f.at) return app.viewport.project(f.at);
+    if (f.at) {
+      const at = app.viewport.project(f.at);
+      if (!f.away) return at;
+      const el = inputs.current.get(f.id);
+      const size: readonly [number, number] = el ? [el.offsetWidth, el.offsetHeight] : FIELD_SIZE;
+      return clearOf(at, app.viewport.project([f.at[0] + f.away[0], f.at[1] + f.away[1], f.at[2] + f.away[2]]), size);
+    }
     const p = pointer.current ?? [0, 0];
     return [p[0] + POINTER_OFFSET[0], p[1] + POINTER_OFFSET[1]];
   };
@@ -105,7 +144,7 @@ export function EntryFields({ pointer }: { pointer: RefObject<readonly [number, 
               else inputs.current.delete(f.id);
             }}
             className={cls}
-            style={{ left: x, top: y }}
+            style={{ left: x, top: y, width: entryWidth(editing ? draft : f.value) }}
             type="text"
             autoComplete="off"
             spellCheck={false}

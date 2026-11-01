@@ -55,10 +55,10 @@ export function paperPresetFor(sizeMm: readonly [number, number]): PaperPreset |
   return PAPER_PRESETS.find(preset => Math.abs(preset.sizeMm[0] - short) <= PAPER_MATCH_MM && Math.abs(preset.sizeMm[1] - long) <= PAPER_MATCH_MM);
 }
 
-/** A preset's size in the orientation of `current`: landscape when the current page is wider than tall. */
-export function presetSizeMm(preset: PaperPreset, current: readonly [number, number]): [number, number] {
-  const [width, height] = preset.sizeMm;
-  return current[0] > current[1] ? [height, width] : [width, height];
+/** A preset's size, landscape: the long side across. */
+export function presetSizeMm(preset: PaperPreset): [number, number] {
+  const [short, long] = preset.sizeMm;
+  return [long, short];
 }
 
 /** A length in millimeters shown in `unit`: up to three decimals for inches, two for millimeters. */

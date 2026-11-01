@@ -4,7 +4,7 @@
 
 Choose **Table** in Insert. Set the rows and columns in its temporary pane, from 1 to 100 each. Press on the page to set the first corner. Release without dragging to keep those counts, move the pointer to size the table, then click to place it.
 
-You can choose counts while holding the mouse: drag horizontally to add columns and vertically to add rows. Release to lock the counts, then size and click to place. Measurements accepts width and height after the first corner. Escape cancels.
+You can choose counts while holding the mouse: drag horizontally to add columns and vertically to add rows. Release to lock the counts, then size and click to place. After the first corner, type the width and height in the fields beside the preview. Escape cancels.
 
 ## Edit table cells
 

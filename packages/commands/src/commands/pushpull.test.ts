@@ -244,6 +244,45 @@ describe('PushPullTool', () => {
     camera: { eye: [0, 0, 5], target: [0, 0, 0], up: [0, 1, 0], fov: 35, projection: 'perspective', orthoHeight: 1 },
   });
 
+  it('shows a loose face pulled either way as a positive distance and applies a typed one the way it is pulled', async () => {
+    const { host, tools, root, bodies } = setup();
+    host.edit('Rectangle', (draft) => {
+      const g = SketchGraph.for(draft);
+      g.addEdge([0, 0, 0], [2, 0, 0]);
+      g.addEdge([2, 0, 0], [2, 1, 0]);
+      g.addEdge([2, 1, 0], [0, 1, 0]);
+      g.addEdge([0, 1, 0], [0, 0, 0]);
+    });
+    const face = [...root().sketch.faces.values()][0]!;
+    // A face drawn on the ground has its front facing down, so pulling up moves against its normal.
+    expect(face.plane.n[2]).toBeCloseTo(-1, 9);
+    const hit: PickHit = { ref: { kind: 'sketchFace', path: [], id: face.id }, point: [1, 0.5, 0], t: 1, normal: face.plane.n, screenDist: 0 };
+    tools.activate('pushpull');
+    const tool = tools.activeTool as PushPullTool;
+    const shown = (): string => tools.status().fields![0]!.value;
+    tools.pointerDown(pe([100, 100], 0, freeInference([1, 0.5, 0], GROUND_PLANE, hit)));
+    // Up and down both read as a positive distance, whichever way the face's front points.
+    tools.pointerMove(pe([100, 80], -1, freeInference([1, 0.5, 0.5], GROUND_PLANE)));
+    expect(Math.abs(tool.dragDistance!)).toBeCloseTo(0.5, 9);
+    expect(shown()).not.toMatch(/^-/);
+    tools.pointerMove(pe([100, 120], -1, freeInference([1, 0.5, -0.25], GROUND_PLANE)));
+    expect(shown()).not.toMatch(/^-/);
+    // Pulled up again, a typed 2 makes a box 2 high above the ground, not below it.
+    tools.pointerMove(pe([100, 80], -1, freeInference([1, 0.5, 0.5], GROUND_PLANE)));
+    tools.onVcb({ kind: 'length', meters: 2, raw: 2, unit: 'm' });
+    await tool.settled;
+    await vi.waitFor(() => expect(bodies()).toHaveLength(1));
+    const zs = () => { const v = bodies()[0]!.mesh.verts; const out: number[] = []; for (let i = 2; i < v.length; i += 3) out.push(v[i]!); return out; };
+    expect(Math.min(...zs())).toBeCloseTo(0, 6);
+    expect(Math.max(...zs())).toBeCloseTo(2, 6);
+    expect(tools.status().vcbValue).not.toMatch(/^-/);
+    // Re-editing keeps the direction.
+    tools.onVcb({ kind: 'length', meters: 3, raw: 3, unit: 'm' });
+    await tool.settled;
+    await vi.waitFor(() => expect(Math.max(...zs())).toBeCloseTo(3, 6));
+    expect(Math.min(...zs())).toBeCloseTo(0, 6);
+  });
+
   it('drag-release pulls 0.5, VCB re-edits to 2 with one undo entry, Esc cancels a drag', async () => {
     const { host, registry, tools, root } = setup();
     const bodyId = addBox(registry);

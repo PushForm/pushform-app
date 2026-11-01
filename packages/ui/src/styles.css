@@ -410,6 +410,11 @@
 .pf-import-dialog-content:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: -2px; }
 .pf-modal:is(.pf-layout-import-dialog, .pf-model-import-dialog) > .pf-modal-actions { flex-shrink: 0; }
 .pf-modal:is(.pf-layout-import-dialog, .pf-model-import-dialog) li { margin-bottom: 8px; line-height: 1.5; }
+.pf-import-panel { position: fixed; right: 16px; bottom: calc(var(--pf-statusbar-h) + 16px); z-index: 90; box-sizing: border-box; width: min(340px, calc(100vw - 32px)); padding: 14px 16px; border: 1px solid var(--pf-border); border-radius: 10px; color: var(--pf-text); background: var(--pf-surface); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22); font: 13px/1.5 var(--pf-font); overflow-wrap: anywhere; }
+.pf-import-panel h2 { margin: 0 0 4px; font-size: 14px; }
+.pf-import-panel p { margin: 0 0 6px; }
+.pf-import-panel progress { width: 100%; }
+.pf-import-panel button { min-width: 80px; padding: 5px 14px; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); color: inherit; background: var(--pf-surface-2); font: inherit; cursor: pointer; }
 .pf-modal:is(.pf-layout-import-dialog, .pf-model-import-dialog, .pf-stl-export-dialog, .pf-mesh-import-dialog) button { min-width: 92px; padding: 7px 16px; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); color: inherit; background: var(--pf-surface-2); font: inherit; cursor: pointer; }
 .pf-modal:is(.pf-layout-import-dialog, .pf-model-import-dialog, .pf-stl-export-dialog, .pf-mesh-import-dialog) button:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 3px; }
 .pf-modal:is(.pf-stl-export-dialog, .pf-mesh-import-dialog) > label, .pf-modal:is(.pf-stl-export-dialog, .pf-mesh-import-dialog) fieldset { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 0 0 14px; }

@@ -25,6 +25,7 @@ export * from './dxfModel';
 export * from './dxfLayout';
 export * from './threeDs';
 export * from './step';
+export { decodeStepPreview, type StepPreview, type StepPreviewPart, type StepPreviewPlacement } from './stepWasm';
 export * from './stl';
 export * from './gltf';
 export * from './modelImport';

@@ -8,7 +8,7 @@ import { GLTF_FORMAT, isGlbBytes, isGltfJson, isGltfModelFile, readGltf } from '
 import { isZipBytes, normalizePath, unpackModelArchive, type MeshExtent, type MeshImportOptions, type MeshPartOptions } from './meshImport';
 import { OBJ_FORMAT, isObjModelFile, isObjText, objExtent, readObj } from './obj';
 import { SKETCHUP_FORMAT, isSketchUpModelFile, readSketchUp, type ImportFormat, type ImportProgress, type SketchUpImport } from './sketchup';
-import { STEP_FORMAT, isStepBytes, isStepModelFile, readStep } from './step';
+import { STEP_FORMAT, isStepBytes, isStepModelFile, readStep, type StepPreviewListener } from './step';
 import { STL_FORMAT, isStlBytes, isStlModelFile, readStl, stlExtent } from './stl';
 import { THREE_DS_FORMAT, is3dsBytes, is3dsModelFile, read3ds, threeDsExtent } from './threeDs';
 
@@ -122,16 +122,17 @@ const parts = (limits: ImportLimits | undefined): MeshPartOptions => limits?.mes
  * Read model bytes of any supported format, told apart by their content: COLLADA is XML, archives are zip files, 3DS
  * starts with its main chunk, binary glTF with `glTF` and JSON glTF with `{`, STEP with `ISO-10303-21;`, a binary STL's
  * triangle count fits its size and an ASCII STL starts with `solid`, DXF starts with a SECTION group, OBJ with an OBJ
- * statement, and anything else is read as a .skp file. `limits.stepBytes` is the largest STEP file to read.
+ * statement, and anything else is read as a .skp file. `limits.stepBytes` is the largest STEP file to read. A STEP read
+ * hands its parts to `onPreview` as they are meshed; the other readers have nothing to show before they finish.
  */
 export function readModelImport(bytes: Uint8Array, onProgress?: (p: ImportProgress) => void, options?: MeshImportOptions,
-  limits?: ImportLimits, signal?: AbortSignal): Promise<SketchUpImport> {
+  limits?: ImportLimits, signal?: AbortSignal, onPreview?: StepPreviewListener): Promise<SketchUpImport> {
   if (isXmlBytes(bytes)) return readCollada(bytes, onProgress, undefined, parts(limits));
   if (isZipBytes(bytes)) return readModelArchive(bytes, onProgress, options, limits);
   if (is3dsBytes(bytes)) return read3ds(bytes, options ?? DEFAULT_MESH_OPTIONS['3ds'], onProgress, undefined, parts(limits));
   if (isGlbBytes(bytes) || isGltfJson(bytes)) return readGltf(bytes, onProgress, undefined, parts(limits));
   // The signal reaches the host's native STEP reader; the other readers run in a worker the caller terminates.
-  if (isStepBytes(bytes)) return readStep(bytes, onProgress, limits?.stepBytes, signal);
+  if (isStepBytes(bytes)) return readStep(bytes, onProgress, limits?.stepBytes, signal, onPreview);
   if (isStlBytes(bytes)) return readStl(bytes, options ?? DEFAULT_MESH_OPTIONS.stl, onProgress, parts(limits));
   if (isDxfBytes(bytes)) return readDxf(bytes, options ?? DEFAULT_MESH_OPTIONS.dxf, onProgress);
   if (isObjText(bytes)) return readObj(bytes, options ?? DEFAULT_MESH_OPTIONS.obj, onProgress, undefined, parts(limits));

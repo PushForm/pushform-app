@@ -3,7 +3,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { meshBox } from '@pushform/core';
-import { openModelFile, readSketchUpInWorker, type SketchUpImport } from '@pushform/io';
+import { openModelFile, readSketchUpInWorker, type SketchUpImport, type StepPreview } from '@pushform/io';
 import type * as IoModule from '@pushform/io';
 import { createApp } from '../bootstrap';
 import { DocumentSession } from '../session';
@@ -29,7 +29,75 @@ function file(name: string): File {
 }
 afterEach(() => { cleanup(); session?.dispose(); vi.restoreAllMocks(); vi.unstubAllGlobals(); readModel.mockReset(); });
 
+/** A file that begins like STEP, so the import draws its parts as they are read. */
+function stepFile(name: string): File {
+  const bytes = new TextEncoder().encode('ISO-10303-21;\nHEADER;\nENDSEC;\n');
+  const f = new File([bytes], name);
+  Object.defineProperty(f, 'arrayBuffer', { value: async () => bytes.slice().buffer });
+  return f;
+}
+/** One cube part placed twice, 2 m apart, as a STEP read hands it out. */
+const cubePreview = (): StepPreview => ({
+  parts: [{ id: 0, color: [0, 0, 1], positions: new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 1]), triangles: new Uint32Array([0, 1, 2]), edges: new Float32Array(0) }],
+  placements: [{ part: 0, matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] }, { part: 0, matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 2, 0, 0, 1] }],
+});
+/** A read that hands out one preview, then waits to be finished (or cancelled through its signal). */
+function pendingRead(): { finish: (scene: SketchUpImport) => void } {
+  let finish: (scene: SketchUpImport) => void = () => {};
+  readModel.mockImplementation((_bytes, options) => new Promise((resolve, reject) => {
+    finish = resolve;
+    options?.signal?.addEventListener('abort', () => reject(new DOMException('Import cancelled.', 'AbortError')));
+    options?.onPreview?.(cubePreview());
+  }));
+  return { finish: scene => finish(scene) };
+}
+
 describe('Model import UI', () => {
+  it('opens a STEP file in a tab named after it that draws the parts as they are read, then opens the model', async () => {
+    const read = pendingRead(); setup();
+    const original = session.active;
+    fireEvent.change(screen.getByLabelText('Open PushForm file'), { target: { files: [stepFile('Bracket.step')] } });
+    const panel = await screen.findByRole('region', { name: 'Importing STEP model' });
+    expect(panel.textContent).toContain('Bracket.step');
+    // No modal: the viewport stays usable while the parts come in.
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.querySelector<HTMLElement>('.pf-app')!.inert).toBe(false);
+    const drawing = session.active;
+    if (drawing.type !== 'model') throw new Error('Expected model');
+    expect(drawing).not.toBe(original);
+    expect(drawing.name).toBe('Bracket.pf');
+    expect(drawing.app.viewport.sceneBounds()).toEqual({ min: [0, 0, 0], max: [3, 1, 1] });
+    expect(drawing.app.document.doc.rootDefinition.entities.instances.size).toBe(0);
+    await act(async () => { read.finish(scene()); });
+    await screen.findByRole('dialog', { name: 'STEP import report' });
+    // The placeholder made way for the model's own tab.
+    expect(session.tabs.includes(drawing)).toBe(false);
+    expect(session.tabs).toHaveLength(2);
+    const opened = session.active;
+    if (opened.type !== 'model') throw new Error('Expected model');
+    expect(opened.name).toBe('Bracket.pf');
+    expect(opened.app.document.undoStack.length).toBe(0);
+  });
+
+  it('draws a STEP import in the current model, and Cancel removes it and leaves the model unchanged', async () => {
+    pendingRead(); setup();
+    const original = session.active;
+    if (original.type !== 'model') throw new Error('Expected model');
+    const before = original.app.viewport.sceneBounds();
+    vi.spyOn(screen.getByLabelText('Import model file') as HTMLInputElement, 'click').mockImplementation(() => {});
+    fireEvent.click(screen.getByRole('button', { name: 'Main menu' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Import...' }));
+    fireEvent.change(screen.getByLabelText('Import model file'), { target: { files: [stepFile('Bracket.stp')] } });
+    await screen.findByRole('region', { name: 'Importing STEP model' });
+    expect(session.tabs).toHaveLength(1);
+    expect(original.app.viewport.sceneBounds()!.max[0]).toBe(3);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Importing STEP model' })).toBeNull());
+    expect(original.app.viewport.sceneBounds()).toEqual(before);
+    expect(original.app.document.doc.rootDefinition.entities.instances.size).toBe(0);
+    expect(original.app.document.undoStack.length).toBe(0);
+  });
+
   it('imports into the current model through the menu and command search, reports limitations, and undoes once', async () => {
     readModel.mockResolvedValue(scene());
     setup();

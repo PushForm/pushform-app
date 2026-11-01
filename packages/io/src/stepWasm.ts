@@ -32,6 +32,12 @@ export interface StepReaderModule {
   pf_step_mesh_done(handle: number): number;
   pf_step_result(handle: number): number;
   pf_step_result_ptr(handle: number): number;
+  /**
+   * The parts meshed, and the placements whose part is meshed, since the last call, as a preview buffer
+   * (`decodeStepPreview`); its length, or 0 when nothing new is ready. Absent from modules built before previews.
+   */
+  pf_step_preview?(handle: number): number;
+  pf_step_preview_ptr?(handle: number): number;
   pf_step_close(handle: number): void;
   /** Write the STEP file for a request (see `stepExport.ts`); the text's length, or 0 on failure. `pf_step_export_ptr` then points at it. */
   pf_step_export(ptr: number, len: number): number;
@@ -159,4 +165,55 @@ export function decodeStepResult(buffer: Uint8Array): StepReaderResult {
   const warnings: string[] = [];
   for (let i = 0; i < warningCount; i++) warnings.push(text());
   return { parts, placements, warnings, schema: text(), system: text() };
+}
+
+/** A part in a preview: its mesh in its own frame (meters, Float32 for drawing), color, and hard edges as segments. */
+export interface StepPreviewPart {
+  /** Number of the part within its read; placements name it. */
+  id: number;
+  color: [number, number, number] | null;
+  positions: Float32Array;
+  triangles: Uint32Array;
+  /** Hard edges, two end points (six numbers) per segment. */
+  edges: Float32Array;
+}
+/** A placement in a preview: the part it places and its column-major matrix in meters. */
+export interface StepPreviewPlacement { part: number; matrix: number[] }
+/**
+ * What a STEP read hands out while it runs: the parts meshed since the last preview and the placements whose part is
+ * now meshed (a placement comes in the same preview as its part, or a later one). For drawing only; the result
+ * carries the model.
+ */
+export interface StepPreview { parts: StepPreviewPart[]; placements: StepPreviewPlacement[] }
+
+/** Decode a preview buffer (`write_preview` in the crate); every array is copied out of `buffer`. */
+export function decodeStepPreview(buffer: Uint8Array): StepPreview {
+  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  if (new TextDecoder().decode(buffer.slice(0, 8)) !== 'PFPREV01') throw new Error('The STEP reader returned a preview this app does not understand.');
+  let at = 8;
+  const pad = (): void => { at = (at + 7) & ~7; };
+  const u32 = (): number => { const v = view.getUint32(at, true); at += 4; return v; };
+  const f32 = (): number => { const v = view.getFloat32(at, true); at += 4; return v; };
+  const f32s = (): Float32Array => { const len = u32(); const out = new Float32Array(len); for (let i = 0; i < len; i++) out[i] = view.getFloat32(at + i * 4, true); at += len * 4; pad(); return out; };
+  const u32s = (): Uint32Array => { const len = u32(); const out = new Uint32Array(len); for (let i = 0; i < len; i++) out[i] = view.getUint32(at + i * 4, true); at += len * 4; pad(); return out; };
+  const partCount = u32(); pad();
+  const parts: StepPreviewPart[] = [];
+  for (let i = 0; i < partCount; i++) {
+    const id = u32(), r = f32(), g = f32(), b = f32(); pad();
+    parts.push({ id, color: r < 0 ? null : [r, g, b], positions: f32s(), triangles: u32s(), edges: f32s() });
+  }
+  const placementCount = u32(); pad();
+  const placements: StepPreviewPlacement[] = [];
+  for (let i = 0; i < placementCount; i++) {
+    const part = u32(); pad();
+    const matrix: number[] = [];
+    for (let k = 0; k < 16; k++) { matrix.push(view.getFloat64(at, true)); at += 8; }
+    placements.push({ part, matrix });
+  }
+  return { parts, placements };
+}
+
+/** The buffers a preview owns, to transfer it between threads without copying. */
+export function stepPreviewTransfer(preview: StepPreview): ArrayBuffer[] {
+  return preview.parts.flatMap(p => [p.positions.buffer as ArrayBuffer, p.triangles.buffer as ArrayBuffer, p.edges.buffer as ArrayBuffer]);
 }

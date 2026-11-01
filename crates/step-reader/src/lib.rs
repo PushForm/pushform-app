@@ -44,6 +44,8 @@ struct Reading {
     mode: u32,
     threshold: u32,
     result: Option<Vec<u8>>,
+    /// The last preview buffer handed out (`pf_step_preview`), kept until the next call.
+    preview: Option<Vec<u8>>,
 }
 
 /// What the reading ends with: the import's warnings, schema and system, or why it failed.
@@ -69,7 +71,7 @@ impl Reading {
         solidcraft_kernel::set_threads(threads);
         let reading = StepReading::with_workers(text, threads).map_err(|e| e.to_string())?;
         let pipe = Pipeline::new(&reading, mode, threads);
-        let mut out = Reading { reading: Some(reading), converter: None, pipe, mode, threshold, result: None };
+        let mut out = Reading { reading: Some(reading), converter: None, pipe, mode, threshold, result: None, preview: None };
         if has_threads() && threads > 1 {
             let (tx, rx) = std::sync::mpsc::channel();
             let mut reading = out.reading.take().expect("reading");
@@ -277,6 +279,19 @@ pub extern "C" fn pf_step_result(handle: u32) -> u32 {
 pub extern "C" fn pf_step_result_ptr(handle: u32) -> *const u8 {
     get(handle.wrapping_sub(1)).and_then(|r| r.result.as_ref()).map_or(std::ptr::null(), |b| b.as_ptr())
 }
+/// The parts meshed, and the placements of converted bodies whose part is meshed, since the last call, as a preview
+/// buffer (`write_preview`), so the host can draw the model while it is still being read. Returns its length, or 0
+/// when nothing new is ready; `pf_step_preview_ptr` then points at it until the next call.
+#[unsafe(no_mangle)]
+pub extern "C" fn pf_step_preview(handle: u32) -> u32 {
+    let Some(entry) = get(handle.wrapping_sub(1)) else { return 0 };
+    entry.preview = entry.pipe.take_preview();
+    entry.preview.as_ref().map_or(0, |b| b.len() as u32)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn pf_step_preview_ptr(handle: u32) -> *const u8 {
+    get(handle.wrapping_sub(1)).and_then(|r| r.preview.as_ref()).map_or(std::ptr::null(), |b| b.as_ptr())
+}
 /// Drop a reading and everything it holds; meshing threads still at work stop after their part.
 #[unsafe(no_mangle)]
 pub extern "C" fn pf_step_close(handle: u32) {
@@ -364,6 +379,10 @@ struct Pipeline {
     schema: String,
     system: String,
     finished: bool,
+    /// Per job: handed over in a preview (or dropped there because it could not be meshed).
+    previewed_jobs: Vec<bool>,
+    /// Per entry of `placed`: handed over in a preview (or dropped with its part).
+    previewed_placed: Vec<bool>,
 }
 impl Pipeline {
     fn new(reading: &StepReading, mode: u32, threads: usize) -> Pipeline {
@@ -382,7 +401,7 @@ impl Pipeline {
         }
         Pipeline { mode, planned, placements: body_placements(reading.tree(), planned), seen: vec![false; planned], bodies: (0..planned).map(|_| None).collect(),
             part_of_item: HashMap::new(), jobs: Vec::new(), placed: Vec::new(), meshes: Vec::new(), meshed: 0, pool, threads: started, inline: VecDeque::new(),
-            warnings: Vec::new(), schema: String::new(), system: String::new(), finished: false }
+            warnings: Vec::new(), schema: String::new(), system: String::new(), finished: false, previewed_jobs: Vec::new(), previewed_placed: Vec::new() }
     }
     /// Take up the bodies the reader converted since the last call.
     fn absorb(&mut self, reading: &StepReading) {
@@ -399,6 +418,7 @@ impl Pipeline {
                 && rigid_inverse(&world).is_some()
             {
                 self.placed.push((job, i, world));
+                self.previewed_placed.push(false);
                 self.bodies[i] = Some(body.clone());
                 return;
             }
@@ -407,8 +427,10 @@ impl Pipeline {
             let job = self.jobs.len();
             self.jobs.push((i, to_local));
             self.meshes.push(None);
+            self.previewed_jobs.push(false);
             if inverse.is_some() { self.part_of_item.insert(body.source_item, job); }
             self.placed.push((job, i, placement));
+            self.previewed_placed.push(false);
             if self.threads > 0 { self.pool.push(job, body.clone(), to_local); } else { self.inline.push_back(job); }
             self.bodies[i] = Some(body.clone());
         }
@@ -434,6 +456,33 @@ impl Pipeline {
     fn placed_done(&mut self) -> usize {
         self.poll();
         self.placed.iter().filter(|(job, _, _)| self.meshes[*job].is_some()).count()
+    }
+    /// The parts meshed since the last call and the placements, converted since or waiting for their part, whose part
+    /// is now meshed, encoded by `write_preview`; None when nothing new is ready. Parts that could not be meshed drop
+    /// out with their placements, as they do from the result.
+    fn take_preview(&mut self) -> Option<Vec<u8>> {
+        self.poll();
+        let mut parts = Vec::new();
+        for job in 0..self.jobs.len() {
+            if self.previewed_jobs[job] { continue; }
+            match &self.meshes[job] {
+                Some(Some(_)) => { self.previewed_jobs[job] = true; parts.push(job); }
+                Some(None) => self.previewed_jobs[job] = true,
+                None => {}
+            }
+        }
+        let mut placements = Vec::new();
+        for (k, &(job, _, matrix)) in self.placed.iter().enumerate() {
+            if self.previewed_placed[k] || !self.previewed_jobs[job] { continue; }
+            self.previewed_placed[k] = true;
+            if matches!(self.meshes[job], Some(Some(_))) { placements.push((job, matrix)); }
+        }
+        if parts.is_empty() && placements.is_empty() { return None; }
+        let meshes: Vec<(usize, &Mesh, Option<[f32; 3]>)> = parts.iter().filter_map(|&job| match &self.meshes[job] {
+            Some(Some(mesh)) => Some((job, mesh, self.bodies[self.jobs[job].0].as_ref().and_then(|b| b.color))),
+            _ => None,
+        }).collect();
+        Some(write_preview(&meshes, &placements))
     }
     fn finish(&mut self, warnings: Vec<String>, schema: String, system: String) {
         self.warnings = warnings;
@@ -472,6 +521,36 @@ impl Writer {
     fn pad(&mut self) { while self.0.len() % 8 != 0 { self.0.push(0); } }
     fn u32s(&mut self, v: &[u32]) { self.u32(v.len() as u32); for x in v { self.u32(*x); } self.pad(); }
     fn f64s(&mut self, v: &[f64]) { self.u32(v.len() as u32); self.pad(); for x in v { self.f64(*x); } }
+    fn f32s(&mut self, v: &[f64]) { self.u32(v.len() as u32); for x in v { self.f32(*x as f32); } self.pad(); }
+}
+
+/// Layout: magic `PFPREV01`; u32 part count; per part: job number, color (f32 rgb or -1), positions as f32 meters in
+/// the part's frame, triangles, and the hard edges as f32 segment end points; u32 placement count; per placement: the
+/// job of its part and 16 f64 column-major meters. A preview is for drawing only (Float32 is the GPU's precision);
+/// the result buffer carries the model.
+fn write_preview(parts: &[(usize, &Mesh, Option<[f32; 3]>)], placements: &[(usize, M4)]) -> Vec<u8> {
+    let mut w = Writer(Vec::new());
+    w.0.extend_from_slice(b"PFPREV01");
+    w.u32(parts.len() as u32); w.pad();
+    for (job, mesh, color) in parts {
+        w.u32(*job as u32);
+        match color { Some(c) => { w.f32(c[0]); w.f32(c[1]); w.f32(c[2]); } None => { w.f32(-1.0); w.f32(-1.0); w.f32(-1.0); } }
+        w.pad();
+        w.f32s(&mesh.positions); w.u32s(&mesh.triangles);
+        let mut segments = Vec::new();
+        for (e, &flag) in mesh.edge_flags.iter().enumerate() {
+            if flag != 0 { continue; }
+            let (from, to) = (mesh.edge_offsets[e] as usize, mesh.edge_offsets[e + 1] as usize);
+            for v in from..to.saturating_sub(1) { segments.extend_from_slice(&mesh.edge_positions[v * 3..v * 3 + 6]); }
+        }
+        w.f32s(&segments);
+    }
+    w.u32(placements.len() as u32); w.pad();
+    for (job, matrix) in placements {
+        w.u32(*job as u32); w.pad();
+        for c in 0..4 { for r in 0..4 { w.f64(if r == 3 || c < 3 { matrix[c][r] } else { matrix[c][r] * MM }); } }
+    }
+    w.0
 }
 
 type M4 = [[f64; 4]; 4];
@@ -762,13 +841,15 @@ fn write_result(mut parts: Vec<Part>, placed: &[(usize, &ImportedBody, M4)], war
 /// Read a STEP file natively: the reader converts its solids on the kernel's worker threads while the meshing threads
 /// mesh each distinct part as soon as it is converted, and the result is the same buffer the wasm ABI produces.
 /// `progress` is told the stage, the work done and the total; it may return false to cancel, which yields `Err`.
+/// `preview` gets each preview buffer (`write_preview`) as parts are meshed, so the model can be drawn while it is read.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn convert_native(text: &str, mode: u32, threshold: u32, mut progress: impl FnMut(&str, u32, u32) -> bool) -> Result<Vec<u8>, String> {
+pub fn convert_native(text: &str, mode: u32, threshold: u32, mut progress: impl FnMut(&str, u32, u32) -> bool, mut preview: impl FnMut(Vec<u8>)) -> Result<Vec<u8>, String> {
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(16);
     let mut r = Reading::open(text, mode, threshold, threads)?;
     let mut last = usize::MAX;
     loop {
         let more = r.step();
+        if let Some(buffer) = r.pipe.take_preview() { preview(buffer); }
         let (done, total) = r.progress();
         if done != last { last = done; if !progress("Converting parts", done as u32, total as u32) { return Err("cancelled".into()); } }
         if !more { break; }
@@ -778,6 +859,7 @@ pub fn convert_native(text: &str, mode: u32, threshold: u32, mut progress: impl 
     let total = r.pipe.planned as u32;
     loop {
         let done = (r.pipe.placed_done() as u32).min(total);
+        if let Some(buffer) = r.pipe.take_preview() { preview(buffer); }
         if !progress("Meshing parts", done, total) { return Err("cancelled".into()); }
         if r.pipe.is_done() { break; }
         if r.pipe.threads == 0 { r.pipe.mesh_one(); } else { std::thread::sleep(std::time::Duration::from_millis(50)); }
@@ -795,7 +877,7 @@ mod tests {
         // A file with no solids still parses; the result then holds zero parts.
         let text = format!("{BOX}#1=APPLICATION_CONTEXT('automotive design');\nENDSEC;\nEND-ISO-10303-21;\n");
         let mut stages = Vec::new();
-        let result = super::convert_native(&text, 7, 0, |stage, done, total| { stages.push((stage.to_string(), done, total)); true });
+        let result = super::convert_native(&text, 7, 0, |stage, done, total| { stages.push((stage.to_string(), done, total)); true }, |_| {});
         match result {
             Ok(bytes) => { assert_eq!(&bytes[..8], b"PFSTEP01"); assert!(stages.iter().any(|(s, _, _)| s == "Meshing parts")); }
             Err(e) => assert!(e.contains("no bodies") || e.contains("solids"), "{e}"),

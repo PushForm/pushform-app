@@ -10,13 +10,17 @@ import {
   packageModelExport, encodeLayoutSnapshot, encodeModelSnapshot, modelArchiveImages, openModelFile, openLayoutFile,
   isSketchUpLayoutFile, nativeDocumentType, type LayoutRecoveryMetadata,
   isModelImportFile, isPictureFile, MAX_PICTURE_BYTES, pictureMime, exportStl, stlFileName, probeMeshImport, exportGlb, exportObj, exportCollada, exportSkp, exportStep, exportFileName, STEP_EXTENSION,
-  type ImportProgress, type MeshExtent, type MeshFormatKind, type MeshImportOptions, type ModelImportReport,
+  isStepBytes, modelImportBaseName,
+  type ImportProgress, type MeshExtent, type MeshFormatKind, type MeshImportOptions, type ModelImportReport, type StepPreview,
 } from '@pushform/io';
+import { contextMatrix } from '@pushform/model';
+import type { Mat4 } from '@pushform/core';
+import { ImportPreview } from '../importPreview';
 import { importLayoutBytes, importSketchUpBytes, modelImportLimit, tooLarge, type PickedFile } from '../importFiles';
 import { chooseSaveTarget } from '../saveFile';
 import { useAppStore } from '../store';
 import { layoutContentKey, modelContentKey } from '../documentContent';
-import type { DocumentSession, DocumentTab } from '../session';
+import type { DocumentSession, DocumentTab, ModelTab } from '../session';
 import { CommandSearch } from './CommandSearch';
 import { commandSearchSourceFor } from './commandSearchSource';
 import { DocumentTabs } from './DocumentTabs';
@@ -124,7 +128,7 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
     destination: string | undefined; resolve: (options: MeshImportOptions | null) => void } | null>(null);
   const [modelExport, setModelExport] = useState<{ tabId: string; format: ModelExportDialogFormat } | null>(null);
   const [modelImportNotice, setModelImportNotice] = useState<{
-    fileName: string; progress?: ImportProgress; report?: ModelImportReport;
+    fileName: string; progress?: ImportProgress; report?: ModelImportReport; previewing?: boolean;
   } | null>(null);
   const [recoveries, setRecoveries] = useState<LayoutRecoveryMetadata[]>([]);
   const picker = window as unknown as FilePickerWindow;
@@ -262,8 +266,31 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
     modelImportRun.current = controller;
     setError(null);
     setModelImportNotice({ fileName: name });
+    // A STEP file is drawn as it is read: into the destination tab when importing, or into a placeholder tab
+    // named after the file when opening, which closes once the model's own tab opens (unless it was drawn in).
+    let preview: ImportPreview | null = null, previewTab: ModelTab | null = null, placeholder: ModelTab | null = null;
+    let previewing = false;
     try {
       const bytes = await readBytes();
+      const onPreview = isStepBytes(bytes) ? (batch: StepPreview): void => {
+        if (controller.signal.aborted) return;
+        if (!preview) {
+          let base: Mat4 | undefined;
+          if (target) {
+            const tab = session.tabs.find(t => t.id === target.tabId);
+            if (tab?.type !== 'model') return;
+            previewTab = tab;
+            base = contextMatrix(tab.app.document.doc.state, tab.app.document.context.path) as unknown as Mat4;
+          } else {
+            placeholder = previewTab = session.newModel({ placeholder: true, name: modelImportBaseName(name) });
+          }
+          preview = new ImportPreview(previewTab.app.viewport, base);
+          previewing = true;
+          setModelImportNotice(notice => notice && !notice.report ? { ...notice, previewing: true } : notice);
+        }
+        // A destination closed while importing draws nothing more.
+        if (previewTab && session.tabs.includes(previewTab)) preview.add(batch);
+      } : undefined;
       // OBJ and 3DS files record no unit (OBJ no up axis either), nor do some DXF files, so import asks first.
       const probe = probeMeshImport(bytes);
       let mesh: MeshImportOptions | undefined;
@@ -276,14 +303,18 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
         mesh = chosen;
         setModelImportNotice({ fileName: name });
       }
-      const result = await importSketchUpBytes(session, bytes, name, { target, signal: controller.signal, cloudFiles, buildInfo, picked, mesh,
-        onProgress: progress => { if (!controller.signal.aborted) setModelImportNotice({ fileName: name, progress }); } });
+      const result = await importSketchUpBytes(session, bytes, name, { target, signal: controller.signal, cloudFiles, buildInfo, picked, mesh, onPreview,
+        onProgress: progress => { if (!controller.signal.aborted) setModelImportNotice({ fileName: name, progress, previewing }); } });
       setModelImportNotice({ fileName: name, report: result.report });
       return result.tab;
     } catch (cause) {
       setModelImportNotice(null);
       throw cause;
     } finally {
+      (preview as ImportPreview | null)?.clear();
+      const spare = placeholder as ModelTab | null;
+      // Drawn in while the model was read: it stays, as an ordinary document.
+      if (spare && session.tabs.includes(spare) && !session.close(spare.id)) session.keepPlaceholder(spare.id);
       if (modelImportRun.current === controller) modelImportRun.current = null;
     }
   };

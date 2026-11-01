@@ -5,7 +5,7 @@ import type { Definition, Instance, Material } from 'openskp';
 import { IDENTITY_PLACEMENT, INCH, finishMeshImport, meshDefinition, meshMaterial, type MeshPlacement } from './meshImport';
 import { MAX_SKETCHUP_BYTES, type ImportFormat, type ImportProgress, type ImportedMeshPart, type SketchUpImport } from './sketchup';
 import { loadStepReader } from './stepModule';
-import { decodeStepResult, stepReaderError, type StepReaderResult } from './stepWasm';
+import { decodeStepPreview, decodeStepResult, stepReaderError, type StepPreview, type StepReaderModule, type StepReaderResult } from './stepWasm';
 
 // STEP (ISO 10303-21) import. The reader module (crates/step-reader) parses the file, converts its solids one at a
 // time and meshes each distinct part once; the parts and their placements are rebuilt as the reader model the .skp
@@ -51,15 +51,31 @@ export function stepHeader(bytes: Uint8Array): { schema: string | null; system: 
 
 /**
  * A host that converts STEP files outside the wasm module (the desktop app, natively on every core). It takes the
- * file's bytes and the reader's mode and threshold, reports progress, and answers the reader's result buffer.
+ * file's bytes and the reader's mode and threshold, reports progress, hands each preview buffer to `onPreview` (raw,
+ * see `decodeStepPreview`) and answers the reader's result buffer.
  */
-export type NativeStepReader = (bytes: Uint8Array, mode: number, threshold: number, onProgress?: (p: ImportProgress) => void, signal?: AbortSignal) => Promise<Uint8Array>;
+export type NativeStepReader = (bytes: Uint8Array, mode: number, threshold: number, onProgress?: (p: ImportProgress) => void, signal?: AbortSignal,
+  onPreview?: (buffer: Uint8Array) => void) => Promise<Uint8Array>;
+/** Receives the parts of a STEP read as they are meshed, so the model can be drawn before the read finishes. */
+export type StepPreviewListener = (preview: StepPreview) => void;
+
+/** How often a single-threaded read hands out a preview while it meshes (the threaded read polls at the same pace). */
+const PREVIEW_INTERVAL_MS = 100;
+
+/** Take the module's next preview, if one is ready, copied out of its memory. */
+function takePreview(m: StepReaderModule, handle: number, onPreview: StepPreviewListener | undefined): void {
+  if (!onPreview || !m.pf_step_preview || !m.pf_step_preview_ptr) return;
+  const len = m.pf_step_preview(handle);
+  if (!len) return;
+  // Decoding copies every array, so the view into the module's (possibly shared) memory is not kept.
+  onPreview(decodeStepPreview(new Uint8Array(m.memory.buffer, m.pf_step_preview_ptr(handle), len).slice()));
+}
 let nativeStepReader: NativeStepReader | null = null;
 export function setNativeStepReader(reader: NativeStepReader | null): void { nativeStepReader = reader; }
 export function hasNativeStepReader(): boolean { return nativeStepReader !== null; }
 
 /** Run the reader module over the file: parse, convert solid by solid with progress, and decode the result. */
-async function readWithModule(bytes: Uint8Array, mode: number, threshold: number, onProgress?: (p: ImportProgress) => void): Promise<StepReaderResult> {
+async function readWithModule(bytes: Uint8Array, mode: number, threshold: number, onProgress?: (p: ImportProgress) => void, onPreview?: StepPreviewListener): Promise<StepReaderResult> {
   const m = await loadStepReader();
   const ptr = m.pf_alloc(bytes.byteLength);
   new Uint8Array(m.memory.buffer, ptr, bytes.byteLength).set(bytes);
@@ -77,6 +93,7 @@ async function readWithModule(bytes: Uint8Array, mode: number, threshold: number
     let reported = '';
     while (m.pf_step_step(handle)) {
       failed();
+      takePreview(m, handle, onPreview);
       const packed = m.pf_step_progress(handle), done = Number(packed >> 32n), total = Number(packed & 0xffff_ffffn);
       const detail = threads > 1 ? `${meshed().done.toLocaleString('en-US')} meshed · ${memory()}` : memory();
       const key = `${done}:${detail}`;
@@ -99,10 +116,18 @@ async function readWithModule(bytes: Uint8Array, mode: number, threshold: number
         failed();
         await new Promise(resolve => setTimeout(resolve, 100));
         report();
+        takePreview(m, handle, onPreview);
       }
     } else {
-      while (m.pf_step_mesh(handle)) report();
+      // One part per call on this thread. Previews are taken at most every PREVIEW_INTERVAL_MS, so a file of many small
+      // parts is not slowed by encoding one per part; a worker's messages reach the page without it yielding.
+      let previewed = performance.now();
+      while (m.pf_step_mesh(handle)) {
+        report();
+        if (onPreview && performance.now() - previewed >= PREVIEW_INTERVAL_MS) { takePreview(m, handle, onPreview); previewed = performance.now(); }
+      }
     }
+    takePreview(m, handle, onPreview);
     { const { total } = meshed(); onProgress?.({ stage: 'Meshing parts', current: total, total, detail: memory() }); }
     const len = m.pf_step_result(handle);
     if (!len) throw new Error(`This STEP file could not be read: ${stepReaderError(m)}`);
@@ -116,13 +141,15 @@ async function readWithModule(bytes: Uint8Array, mode: number, threshold: number
  * Read a STEP file of at most `maxBytes` (the shared import limit unless the desktop app allows more). A STEP file
  * always imports as mesh parts, made editable on demand.
  */
-export async function readStep(bytes: Uint8Array, onProgress?: (p: ImportProgress) => void, maxBytes = MAX_SKETCHUP_BYTES, signal?: AbortSignal): Promise<SketchUpImport> {
+export async function readStep(bytes: Uint8Array, onProgress?: (p: ImportProgress) => void, maxBytes = MAX_SKETCHUP_BYTES, signal?: AbortSignal,
+  onPreview?: StepPreviewListener): Promise<SketchUpImport> {
   if (bytes.byteLength > maxBytes) throw new Error(`STEP files larger than ${maxBytes / (1024 * 1024)} MiB are not supported yet.`);
   if (!isStepBytes(bytes)) throw new Error('Not a STEP model: the file does not begin with ISO-10303-21.');
   onProgress?.({ stage: 'Loading the STEP reader', current: 0, total: 1 });
   // PF_STEP_MODE lets tests compare the reader's meshing modes.
   const mode = typeof process !== 'undefined' && process.env?.PF_STEP_MODE ? Number(process.env.PF_STEP_MODE) : DISPLAY_MODE;
-  const result = nativeStepReader ? decodeStepResult(await nativeStepReader(bytes, mode, 0, onProgress, signal)) : await readWithModule(bytes, mode, 0, onProgress);
+  const native = onPreview ? (buffer: Uint8Array): void => onPreview(decodeStepPreview(buffer)) : undefined;
+  const result = nativeStepReader ? decodeStepResult(await nativeStepReader(bytes, mode, 0, onProgress, signal, native)) : await readWithModule(bytes, mode, 0, onProgress, onPreview);
   const warnings = new Set<string>(result.warnings.map(w => `STEP: ${w}`));
   const header = stepHeader(bytes), system = result.system || header.system || '';
   const materials: Material[] = [], materialKeys = new Map<string, number>();

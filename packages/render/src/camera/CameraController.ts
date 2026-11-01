@@ -176,8 +176,9 @@ export class CameraController implements CameraHost {
     this.commit(cameraFrameBox(this.state, box, this.aspect));
   }
 
-  zoomBox(box: Box3): void {
-    this.pushHistory();
+  /** Frame `box`; `history: false` keeps the change out of Previous View (an import keeping its model in view). */
+  zoomBox(box: Box3, opts: { history?: boolean } = {}): void {
+    if (opts.history !== false) this.pushHistory();
     this.commit(cameraFrameBox(this.state, box, this.aspect));
   }
 

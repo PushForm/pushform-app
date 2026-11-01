@@ -7,6 +7,7 @@ import { applySketchUpImport } from './sketchupDocument';
 import { makeMeshPartEditable } from './meshPartEditable';
 import { readSketchUpInWorker } from './sketchupClient';
 import { MAX_DESKTOP_STEP_BYTES, isStepBytes, readStep, stepHeader } from './step';
+import type { StepPreview } from './stepWasm';
 
 type P = [number, number, number];
 interface Box { size: P; at?: P; name?: string; color?: P }
@@ -132,6 +133,44 @@ describe('STEP import', () => {
       const instance = [...doc.rootDefinition.entities.instances.values()].find(i => i.definitionId === def.id)!;
       expect(doc.transact('Make Editable', d => makeMeshPartEditable(d, [instance.id], id)).value).toMatchObject({ bodies: 1, sheetFaces: 0 });
     }
+  });
+
+  it('hands out every part and placement in previews while it reads, matching the result', async () => {
+    const bytes = boxesStep([{ size: [10, 10, 10] }, { size: [20, 10, 10], at: [30, 0, 0], color: [0, 0, 1] }, { size: [5, 5, 5], at: [0, 40, 0] }]);
+    const previews: StepPreview[] = [];
+    const scene = await readStep(bytes, undefined, undefined, undefined, p => previews.push(p));
+    const parts = previews.flatMap(p => p.parts), placements = previews.flatMap(p => p.placements);
+    expect(new Set(parts.map(p => p.id)).size).toBe(parts.length);
+    expect(parts).toHaveLength(scene.definitions.size);
+    expect(placements).toHaveLength(scene.root.instances.length);
+    // A placement never comes before its part.
+    const seen = new Set<number>();
+    for (const preview of previews) {
+      for (const part of preview.parts) seen.add(part.id);
+      for (const placement of preview.placements) expect(seen.has(placement.part)).toBe(true);
+    }
+    const blue = parts.find(p => p.color?.[2] === 1)!;
+    expect(blue.color).toEqual([0, 0, 1]);
+    for (const part of parts) {
+      expect(part.positions.length % 3).toBe(0);
+      expect(part.triangles.length).toBeGreaterThanOrEqual(36);
+      expect(Math.max(...part.triangles)).toBeLessThan(part.positions.length / 3);
+      // A box's twelve hard edges, as one or more segments each.
+      expect(part.edges.length % 6).toBe(0);
+      expect(part.edges.length).toBeGreaterThanOrEqual(12 * 6);
+    }
+    // Placed, in meters, the parts span the boxes: x to 50 mm, y to 45 mm, z to 10 mm.
+    const max = [-Infinity, -Infinity, -Infinity];
+    for (const placement of placements) {
+      const part = parts.find(p => p.id === placement.part)!, m = placement.matrix;
+      for (let i = 0; i < part.positions.length; i += 3) {
+        const [x, y, z] = [part.positions[i]!, part.positions[i + 1]!, part.positions[i + 2]!];
+        for (let k = 0; k < 3; k++) max[k] = Math.max(max[k]!, m[k]! * x + m[4 + k]! * y + m[8 + k]! * z + m[12 + k]!);
+      }
+    }
+    expect(max[0]).toBeCloseTo(0.05, 6);
+    expect(max[1]).toBeCloseTo(0.045, 6);
+    expect(max[2]).toBeCloseTo(0.01, 6);
   });
 
   it('fails without changes on a file that is not readable STEP', async () => {

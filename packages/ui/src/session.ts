@@ -55,6 +55,11 @@ interface TabBase {
    * a retried first save continue the same cloud document.
    */
   cloudDraft?: CloudDraft | undefined;
+  /**
+   * A tab that only shows a model while it is being opened: it is never saved to the cloud nor kept across
+   * refresh, and closes when the model's own tab opens. `keepPlaceholder` makes it an ordinary document.
+   */
+  placeholder?: boolean | undefined;
 }
 
 export interface ModelTab extends TabBase {
@@ -307,17 +312,22 @@ export class DocumentSession {
     this.emit();
   }
 
-  newModel(): ModelTab {
+  /** A new empty model tab; `placeholder` makes it one that only shows a model being opened (see `TabBase.placeholder`). */
+  newModel(options: { placeholder?: boolean; name?: string } = {}): ModelTab {
     this.parkActive();
     const app = this.createModelApp();
+    // The id first: the default name numbers the tab by the sequence its id advanced.
+    const id = this.nextId();
+    const name = options.name ?? `Untitled ${this.sequence - 1}`;
     const tab: ModelTab = {
-      id: this.nextId(),
+      id,
       type: 'model',
-      name: `Untitled ${this.sequence - 1}${MODEL_FILE_EXTENSION}`,
+      name: name.endsWith(MODEL_FILE_EXTENSION) ? name : `${name}${MODEL_FILE_EXTENSION}`,
       app,
       initialVersion: app.document.doc.version,
       workspace: { ...useAppStore.getState() },
       savedContent: modelContentKey(app.document.doc),
+      ...(options.placeholder ? { placeholder: true } : {}),
     };
     this._tabs = [...this._tabs, tab];
     this.watch(tab);
@@ -626,6 +636,14 @@ export class DocumentSession {
     return true;
   }
 
+  /** Make a placeholder tab an ordinary document (it was drawn in while the model it showed was being opened). */
+  keepPlaceholder(id: string): void {
+    const tab = this._tabs.find(t => t.id === id);
+    if (!tab?.placeholder) return;
+    tab.placeholder = undefined;
+    this.emit();
+  }
+
   /** The caller must resolve the save/discard decision before passing discardChanges. */
   close(id: string, discardChanges = false): boolean {
     const index = this._tabs.findIndex((t) => t.id === id);
@@ -885,7 +903,9 @@ export class DocumentSession {
     if (!this.refreshStorage || !this.refreshStale) return;
     this.refreshStale = false;
     if (this.nativeWriter) {
-      this.nativeWriter.request({ activeIndex: this._tabs.indexOf(this.active), entries: this._tabs.map(tab => {
+      // Placeholder tabs only show a model being opened, so a refresh does not bring them back.
+      const kept = this._tabs.filter(tab => !tab.placeholder);
+      this.nativeWriter.request({ activeIndex: Math.max(0, kept.indexOf(this.active)), entries: kept.map(tab => {
         const metadata = JSON.stringify({ type: tab.type, name: tab.name, dirty: this.isDirty(tab),
           ...(tab.type === 'layout' ? { recoveryId: tab.recoveryId, activePageId: tab.activePageId, savedContent: '' } : {}),
           ...(tab.identity ? { identity: tab.identity } : {}), ...(tab.cloudDraft ? { cloudDraft: tab.cloudDraft } : {}) });
@@ -899,13 +919,14 @@ export class DocumentSession {
       return;
     }
     try {
-      const fragments = this._tabs.map((tab) => this.refreshFragment(tab));
+      const kept = this._tabs.filter((tab) => !tab.placeholder);
+      const fragments = kept.map((tab) => this.refreshFragment(tab));
       for (const id of [...this.refreshFragments.keys()]) {
         if (!this._tabs.some((tab) => tab.id === id)) this.refreshFragments.delete(id);
       }
       // Unchanged tabs keep their fragment string, so these comparisons are by reference.
       const parts = fragments.map((fragment) => fragment.json);
-      const activeIndex = this._tabs.indexOf(this.active);
+      const activeIndex = Math.max(0, kept.indexOf(this.active));
       const sameParts = (other: readonly string[]): boolean =>
         other.length === parts.length && other.every((part, index) => part === parts[index]);
       const written = this.refreshWritten;

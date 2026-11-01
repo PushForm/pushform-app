@@ -45,6 +45,8 @@ export class CloudAutosave {
   }
   private emit(): void { this.revision++; this.listeners.forEach(listener => listener()); }
   private needed(tab: DocumentTab, entry: Entry): boolean {
+    // A placeholder only shows a model being opened; it saves once it becomes a document.
+    if (tab.placeholder) return false;
     return entry.savedName !== tab.name || this.session.isDirty(tab) || (entry.initial && !cloudLocation(tab.identity));
   }
   private scan(): void {
@@ -56,6 +58,7 @@ export class CloudAutosave {
       let entry = this.entries.get(tab.id);
       const fresh = !entry;
       if (!entry) { entry = this.entry(tab, !cloudLocation(tab.identity)); this.entries.set(tab.id, entry); }
+      if (tab.placeholder) continue;
       if (fresh && entry.initial && !tab.cloudDraft) this.session.setCloudDraft(tab.id);
       // An edited document that was never saved (the startup document) has a first save pending too. Its draft,
       // with the key that keeps a retried first save on one document, reaches the refresh snapshot before the

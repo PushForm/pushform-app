@@ -475,6 +475,27 @@ describe('DocumentSession', () => {
     expect(session.tabs[1]?.name).toBe(layout.name);
   });
 
+  it('does not bring back a placeholder tab showing a model being opened after refresh', () => {
+    const storage = new MemoryStorage();
+    const makeSession = () => new DocumentSession(
+      createApp({ demo: false, expose: false }),
+      () => createApp({ demo: false, expose: false }),
+      true,
+      null,
+      storage,
+    );
+    session = makeSession();
+    const layout = session.newLayout();
+    session.newModel({ placeholder: true, name: 'Bracket' });
+    expect(session.tabs).toHaveLength(3);
+    session.dispose();
+
+    session = makeSession();
+    expect(session.tabs.map(tab => tab.name)).not.toContain('Bracket.pf');
+    expect(session.tabs).toHaveLength(2);
+    expect(session.tabs[1]?.name).toBe(layout.name);
+  });
+
   it('does not reopen a Modeling tab that was closed before refresh', () => {
     const storage = new MemoryStorage();
     const makeSession = () => new DocumentSession(

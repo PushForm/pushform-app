@@ -7,13 +7,17 @@ fn main() {
     let text = std::fs::read_to_string(&path).expect("read");
     let t = Instant::now();
     let mut last = String::new();
+    let mut previews = 0;
     let result = pushform_step_reader::convert_native(&text, 7, 0, |stage, done, total| {
         let line = format!("{stage} {done}/{total}");
         if stage != last || done == total { eprintln!("{:>7} ms  {line}", t.elapsed().as_millis()); last = stage.to_string(); }
         true
+    }, |buffer| {
+        previews += 1;
+        if previews == 1 { eprintln!("{:>7} ms  first preview ({} bytes)", t.elapsed().as_millis(), buffer.len()); }
     });
     match result {
-        Ok(bytes) => eprintln!("done in {} ms: {} bytes of result", t.elapsed().as_millis(), bytes.len()),
+        Ok(bytes) => eprintln!("done in {} ms: {} bytes of result, {previews} previews", t.elapsed().as_millis(), bytes.len()),
         Err(e) => eprintln!("failed: {e}"),
     }
 }

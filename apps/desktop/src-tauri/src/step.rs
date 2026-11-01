@@ -3,12 +3,13 @@
 //! Native STEP conversion for the desktop app: the same reader the web app runs as WebAssembly, run on the
 //! machine's cores. The webview writes the file to a temporary path, calls `step_convert` with a job id, receives
 //! progress on a channel and the result buffer as the response; the temporary file is removed when `cleanup` is
-//! set. `step_cancel` with the same id stops the conversion at its next progress report.
+//! set. `step_cancel` with the same id stops the conversion at its next progress report. `on_preview` receives each
+//! preview buffer (parts meshed so far, as raw bytes) so the webview can draw the model as it is read.
 use std::collections::HashSet;
 use std::sync::Mutex;
 
 use serde::Serialize;
-use tauri::ipc::{Channel, Response};
+use tauri::ipc::{Channel, InvokeResponseBody, Response};
 
 #[derive(Clone, Serialize)]
 pub struct StepProgress {
@@ -25,7 +26,8 @@ fn cancelled(job: &str) -> bool {
 }
 
 #[tauri::command]
-pub async fn step_convert(path: String, job: String, mode: u32, threshold: u32, cleanup: bool, on_progress: Channel<StepProgress>) -> Result<Response, String> {
+pub async fn step_convert(path: String, job: String, mode: u32, threshold: u32, cleanup: bool, on_progress: Channel<StepProgress>,
+  on_preview: Channel<InvokeResponseBody>) -> Result<Response, String> {
   let id = job.clone();
   let result = tauri::async_runtime::spawn_blocking(move || {
     let text = std::fs::read_to_string(&path).map_err(|e| format!("Could not read {path}: {e}"));
@@ -33,6 +35,9 @@ pub async fn step_convert(path: String, job: String, mode: u32, threshold: u32, 
     let text = text?;
     pushform_step_reader::convert_native(&text, mode, threshold, |stage, current, total| {
       !cancelled(&job) && on_progress.send(StepProgress { stage: stage.to_string(), current, total }).is_ok()
+    }, |buffer| {
+      // A preview the webview cannot take is only a missed picture, not a failed import.
+      let _ = on_preview.send(InvokeResponseBody::Raw(buffer));
     })
   })
   .await

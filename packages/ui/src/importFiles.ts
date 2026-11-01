@@ -8,7 +8,7 @@ import {
   applySketchUpImport, encodeLayoutSnapshot, encodeModelSnapshot, modelArchiveImages, importSketchUpLayoutInWorker,
   isModelImportFile, isSketchUpLayoutFile, modelImportBaseName, modelImportFormat, readSketchUpInWorker, LAYOUT_FILE_EXTENSION, MAX_SKETCHUP_BYTES,
   MAX_DESKTOP_STEP_BYTES, MODEL_FILE_EXTENSION, isStepModelFile, SKETCHUP_LAYOUT_EXTENSION, probeMeshImport,
-  type ImportProgress, type MeshImportOptions, type ModelImportReport, type SketchUpImport, type SketchUpLayoutProperties,
+  type ImportProgress, type MeshImportOptions, type ModelImportReport, type SketchUpImport, type SketchUpLayoutProperties, type StepPreview,
 } from '@pushform/io';
 import type { BuildInfo } from './buildInfo';
 import { importClock, layoutImportReport, logImport, modelImportReport, type ImportSource } from './importLog';
@@ -56,6 +56,8 @@ export async function importSketchUpBytes(
     onProgress?: ((progress: ImportProgress) => void) | undefined;
     /** How to read an OBJ or 3DS file's unit and up axis. */
     mesh?: MeshImportOptions | undefined;
+    /** Parts of a STEP file as they are read, to draw before the import is applied. */
+    onPreview?: ((preview: StepPreview) => void) | undefined;
   } = {},
 ): Promise<{ tab: ModelTab; report: ModelImportReport }> {
   const source: ImportSource = { fileName: name, sizeBytes: bytes.byteLength, startedAt: importClock(), fileModifiedAt: options.picked?.lastModified };
@@ -63,7 +65,8 @@ export async function importSketchUpBytes(
   try {
     if (bytes.byteLength > modelImportLimit(name)) throw new Error(tooLarge(name));
     scene = await readSketchUpInWorker(bytes, { mesh: options.mesh, maxStepBytes: modelImportLimit(name),
-      ...(options.signal ? { signal: options.signal } : {}), ...(options.onProgress ? { onProgress: options.onProgress } : {}) });
+      ...(options.signal ? { signal: options.signal } : {}), ...(options.onProgress ? { onProgress: options.onProgress } : {}),
+      ...(options.onPreview ? { onPreview: options.onPreview } : {}) });
     if (options.signal?.aborted) throw new DOMException('Import cancelled.', 'AbortError');
     const target = options.target;
     const result = target

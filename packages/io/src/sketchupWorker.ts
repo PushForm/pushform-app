@@ -2,12 +2,14 @@
 // Copyright 2026 PushForm contributors
 import type { MeshImportOptions } from './meshImport';
 import { readModelImport } from './modelImport';
+import { stepPreviewTransfer } from './stepWasm';
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
-scope.onmessage = async (event: MessageEvent<{ bytes: Uint8Array; mesh?: MeshImportOptions | undefined; limits?: { stepBytes?: number | undefined; meshPartThreshold?: number | undefined } }>) => {
+scope.onmessage = async (event: MessageEvent<{ bytes: Uint8Array; preview?: boolean; mesh?: MeshImportOptions | undefined; limits?: { stepBytes?: number | undefined; meshPartThreshold?: number | undefined } }>) => {
   try {
-    const { bytes, mesh, limits } = event.data;
-    const scene = await readModelImport(bytes, progress => scope.postMessage({ type: 'progress', progress }), mesh, limits);
+    const { bytes, mesh, limits, preview } = event.data;
+    const scene = await readModelImport(bytes, progress => scope.postMessage({ type: 'progress', progress }), mesh, limits, undefined,
+      preview ? p => scope.postMessage({ type: 'preview', preview: p }, stepPreviewTransfer(p)) : undefined);
     const transfer: Transferable[] = [];
     for (const def of [scene.root, ...scene.definitions.values()]) for (const solid of def.solids)
       transfer.push(solid.mesh.verts.buffer as ArrayBuffer, solid.mesh.tris.buffer as ArrayBuffer, solid.mesh.faceId.buffer as ArrayBuffer);

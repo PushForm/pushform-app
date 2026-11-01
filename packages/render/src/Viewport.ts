@@ -16,6 +16,7 @@ import { DEFAULT_RENDER_BACKGROUND, SkyBackground } from './scene/SkyBackground'
 import type { RenderBackground } from './types';
 import { SceneSync } from './SceneSync';
 import type { EdgeStyle } from './SceneSync';
+import type { ImportPreviewBatch } from './renderables/ImportPreviewLayer';
 import type { HighlightState, RenderAxes, RenderBody, RenderDimensions, RenderDisplay, RenderEditContext, RenderGuides, RenderImage, RenderSections, RenderSketch, RenderTexts } from './types';
 import { DEFAULT_RENDER_FOG, DEFAULT_RENDER_SHADOWS } from './types';
 import type { RenderFog, RenderShadows } from './types';
@@ -84,7 +85,7 @@ export class Viewport {
   constructor(opts: ViewportOptions = {}) {
     this.camera = new CameraController(opts.camera ?? DEFAULT_CAMERA, {
       pick: (s) => this.pick(s),
-      sceneBounds: () => this.sceneSync.sceneBounds(),
+      sceneBounds: () => this.sceneBounds(),
     });
     this.camera.events.on('changed', (s) => {
       this.events.emit('cameraChanged', s);
@@ -465,6 +466,26 @@ export class Viewport {
     if (this.sceneSync.setPreview(meshes, transform)) this.requestRender();
   }
 
+  /**
+   * Start drawing a model that is being imported; its placements are relative to `base`, the world matrix of
+   * the context it goes into. Clears any earlier import preview.
+   */
+  beginImportPreview(base?: Mat4): void {
+    this.sceneSync.importPreview.begin(base);
+    this.requestRender();
+  }
+
+  /** Draw the parts and placements an import read since the last batch; returns the world bounds placed so far. */
+  addImportPreview(batch: ImportPreviewBatch): Box3 | null {
+    if (this.sceneSync.importPreview.add(batch)) this.requestRender();
+    return this.sceneSync.importPreview.worldBounds();
+  }
+
+  /** Remove the import preview (the import was applied, failed or was cancelled). */
+  clearImportPreview(): void {
+    if (this.sceneSync.importPreview.clear()) this.requestRender();
+  }
+
   /** Hidden-geometry display mode: soft/hidden edges dashed, hidden faces drawn. */
   get showHiddenGeometry(): boolean {
     return this.sceneSync.showHiddenGeometry;
@@ -611,8 +632,15 @@ export class Viewport {
     return [hit.point.x + o[0], hit.point.y + o[1], hit.point.z + o[2]];
   }
 
+  /** World bounds of the model, and of the parts of a model still being imported (so Zoom Extents finds them). */
   sceneBounds(): Box3 | null {
-    return this.sceneSync.sceneBounds();
+    const scene = this.sceneSync.sceneBounds(), preview = this.sceneSync.importPreview.worldBounds();
+    if (!preview) return scene;
+    if (!scene) return preview;
+    return {
+      min: [Math.min(scene.min[0], preview.min[0]), Math.min(scene.min[1], preview.min[1]), Math.min(scene.min[2], preview.min[2])],
+      max: [Math.max(scene.max[0], preview.max[0]), Math.max(scene.max[1], preview.max[1]), Math.max(scene.max[2], preview.max[2])],
+    };
   }
 
   requestRender(): void {

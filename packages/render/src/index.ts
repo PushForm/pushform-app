@@ -76,6 +76,8 @@ export {
 } from './renderables/BodyRenderable';
 export type { BodyMaterials, BodyMaterialOptions } from './renderables/BodyRenderable';
 export { EdgeBatch } from './renderables/EdgeBatch';
+export { ImportPreviewLayer } from './renderables/ImportPreviewLayer';
+export type { ImportPreviewBatch, ImportPreviewPart, ImportPreviewPlacement } from './renderables/ImportPreviewLayer';
 export { EdgeMaterial, createEdgeMaterial, patchEdgeShader, DEFAULT_EDGE_WIDTH, DEFAULT_PROFILE_WIDTH } from './renderables/EdgeMaterial';
 export type { EdgeMaterialOptions, EdgeShaderSource } from './renderables/EdgeMaterial';
 export { buildFaceGeometry, buildFaceArrays, buildBodyEdgeSegments, extractEdges, extractEdgeSegments, meshFaceNormals, transformedVerts } from './renderables/buildGeometry';

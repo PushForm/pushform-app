@@ -58,6 +58,21 @@ it('automatically creates native revisions for new documents in the selected pro
   expect(api.save.mock.calls[0]![0]).toMatchObject({ projectId: 'selected-project', kind: 'layout' });
   expect((await openLayoutFile(api.save.mock.calls[0]![0].bytes)).state.pageOrder).toHaveLength(1);
 });
+it('never saves a placeholder tab showing a model being opened, unless it is kept as a document', async () => {
+  const { session, api, autosave } = setup();
+  const placeholder = session.newModel({ placeholder: true, name: 'Bracket' });
+  expect(placeholder.name).toBe('Bracket.pf');
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(api.save).not.toHaveBeenCalled();
+  expect(placeholder.cloudDraft).toBeUndefined();
+  expect(autosave.state(placeholder).status).toBe('saved');
+  // Drawn in while the model was read, it stays open as an ordinary document and saves.
+  edit(placeholder, 'Sketch'); session.keepPlaceholder(placeholder.id);
+  expect(placeholder.placeholder).toBeUndefined();
+  await vi.advanceTimersByTimeAsync(100);
+  expect(api.save).toHaveBeenCalledOnce();
+  expect(api.save.mock.calls[0]![0]).toMatchObject({ name: 'Bracket.pf', kind: 'model' });
+});
 it('cancels a queued revision when undo restores the previously saved content', async () => {
   const { session, api, autosave } = setup(); const tab = session.active;
   tab.identity = 'cloud:alice:project:file:revision'; edit(tab, 'Temporary edit');

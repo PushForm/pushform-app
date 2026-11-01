@@ -15,6 +15,7 @@ import { applyFaceCamera, type FaceCameraView } from './renderables/faceCamera';
 import { HighlightLayer, box3Segments } from './renderables/HighlightLayer';
 import { ImageLayer, imageCorners } from './renderables/ImageLayer';
 import { PreviewLayer } from './renderables/PreviewLayer';
+import { ImportPreviewLayer } from './renderables/ImportPreviewLayer';
 import { SketchRenderable, createSketchMaterials } from './renderables/SketchRenderable';
 import { TextureCache, TexturedMaterialCache } from './materials/TextureCache';
 import type { SketchMaterials } from './renderables/SketchRenderable';
@@ -76,6 +77,8 @@ export class SceneSync {
   /** Placed pictures. */
   readonly images = new ImageLayer(this.textures);
   readonly preview: PreviewLayer;
+  /** Parts of a model still being imported, outside the document. */
+  readonly importPreview = new ImportPreviewLayer();
   readonly guides = new GuideLayer();
   readonly dimensions = new DimensionLayer();
   readonly texts = new TextLayer();
@@ -119,7 +122,7 @@ export class SceneSync {
     this.contextBox = new EdgeBatch(this.contextBoxMaterial);
     this.contextBox.name = 'ContextBox';
     this.contextBox.visible = false;
-    this.root.add(this.batches.group, this.images.group, this.highlight.group, this.preview.group, this.guides.group, this.dimensions.group, this.texts.group, this.sections.group, this.contextBox);
+    this.root.add(this.batches.group, this.images.group, this.highlight.group, this.preview.group, this.importPreview.group, this.guides.group, this.dimensions.group, this.texts.group, this.sections.group, this.contextBox);
   }
 
   /** Face meshes for picking (visible bodies and sketch faces, merged where they are batched). */
@@ -681,6 +684,7 @@ export class SceneSync {
     }
     this.highlight.set(this.highlightState, origin);
     this.preview.set(this.preview.meshes, origin);
+    this.importPreview.setOrigin(origin);
     this.guides.set(this.guides.guides, origin);
     this.images.setOrigin(origin);
     this.dimensions.set(this.dimensions.dimensions, origin);
@@ -741,6 +745,7 @@ export class SceneSync {
     this.sketches.clear();
     this.highlight.dispose();
     this.preview.dispose();
+    this.importPreview.dispose();
     this.guides.dispose();
     this.images.dispose();
     this.dimensions.dispose();

@@ -2823,6 +2823,8 @@ h4.pf-xui-text { font-size: 12px; }
 .pf-xui-color { width: 48px; height: 24px; padding: 0; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); }
 .pf-xui-check { display: flex; align-items: center; gap: 6px; }
 .pf-xui-button.is-primary { background: var(--pf-accent); border-color: var(--pf-accent); color: #fff; }
+/* The shared button hover paints the light accent background, under which a primary button's text cannot be read. */
+.pf-xui-button.is-primary:hover:not(:disabled) { background: var(--pf-accent); filter: brightness(0.92); }
 .pf-xui-button.is-danger { border-color: var(--pf-danger); color: var(--pf-danger); }
 .pf-xui-progress { display: flex; flex-direction: column; gap: 2px; }
 .pf-xui-progress progress { width: 100%; }

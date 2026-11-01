@@ -51,6 +51,15 @@ export interface UiService {
   update(input: { target: string; seq: number; tree: UiNode; presentation?: UiPresentation }, options?: CallOptions): Promise<{ seq: number }>;
   unmount(input: { target: string }, options?: CallOptions): Promise<null>;
   /**
+   * Shows a modal dialog over a mounted target, drawn by PushForm with `title` and your `tree` (a material editor, a
+   * confirmation), or replaces the open one's title and tree with a higher `seq`. Events from its components arrive
+   * through `onEvent` like the target's own. Each target has at most one dialog. It closes with `closeDialog`, when
+   * the user dismisses it with Escape or its Close button (you hear `dialogClose`), or when the target is unmounted.
+   */
+  dialog(input: { target: string; seq: number; title: string; tree: UiNode }, options?: CallOptions): Promise<{ seq: number }>;
+  /** Closes the target's dialog, if one is open. */
+  closeDialog(input: { target: string }, options?: CallOptions): Promise<null>;
+  /**
    * Saves a vector view that is on screen as SVG or DXF where the user chooses, after PushForm's prompt states
    * `purpose`. PushForm writes the file from the drawing itself. Needs `file.export`; declining fails with `cancelled`.
    */

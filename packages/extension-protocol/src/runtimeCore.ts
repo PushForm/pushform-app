@@ -53,7 +53,7 @@ export class ExtensionError extends Error {
  * the document of the extension's latest invocation that acts on one (the panel or command the user just used).
  */
 export const EXTENSION_SERVICES = {
-  ui: { mount: null, update: null, unmount: null, export: 'file.export', print: 'file.export' },
+  ui: { mount: null, update: null, unmount: null, dialog: null, closeDialog: null, export: 'file.export', print: 'file.export' },
   model: { read: 'model.read', query: 'model.read', subscribe: 'model.read', apply: 'model.write' },
   selection: { get: 'selection.read', set: 'selection.write', frame: 'viewport.presentation' },
   document: { units: null, info: null },

@@ -96,6 +96,92 @@ describe('ExtensionUiHost', () => {
   });
 });
 
+describe('ExtensionUiHost events for sections and menus', () => {
+  it('sends section header actions as presses with the action, collapse requests, and menu choices', () => {
+    const sent: UiEventMessage[] = [];
+    const host = new ExtensionUiHost(manifest, (e) => sent.push(e));
+    host.services()['ui.mount']!({ target: PANEL, seq: 1, tree: { type: 'section', id: 'oak', title: 'Oak', collapsed: false,
+      actions: [{ id: 'hide', label: 'Hide' }, { id: 'off', label: 'Off', disabled: true }],
+      children: [
+        { type: 'menu', id: 'more', label: 'More', items: [{ id: 'expand', label: 'Expand all' }, { id: 'reset', label: 'Reset', disabled: true }] },
+        { type: 'button', id: 'go', label: 'Go' },
+      ] } }, {} as never);
+    expect(host.dispatch(PANEL, { component: 'oak', event: 'press', action: 'hide' })).toBe(true);
+    expect(host.dispatch(PANEL, { component: 'oak', event: 'press', action: 'off' })).toBe(false);
+    expect(host.dispatch(PANEL, { component: 'oak', event: 'press', action: 'nope' })).toBe(false);
+    expect(host.dispatch(PANEL, { component: 'oak', event: 'press' })).toBe(false);
+    expect(host.dispatch(PANEL, { component: 'go', event: 'press', action: 'hide' })).toBe(false);
+    expect(host.dispatch(PANEL, { component: 'oak', event: 'collapse', collapsed: true })).toBe(true);
+    expect(host.dispatch(PANEL, { component: 'oak', event: 'collapse', collapsed: false })).toBe(false);
+    expect(host.dispatch(PANEL, { component: 'go', event: 'collapse', collapsed: true })).toBe(false);
+    // Components inside a section are found.
+    expect(host.dispatch(PANEL, { component: 'more', event: 'select', value: 'expand' })).toBe(true);
+    expect(host.dispatch(PANEL, { component: 'more', event: 'select', value: 'reset' })).toBe(false);
+    expect(host.dispatch(PANEL, { component: 'more', event: 'select', value: null })).toBe(false);
+    expect(host.dispatch(PANEL, { component: 'go', event: 'press' })).toBe(true);
+    expect(sent.map((e) => e.event)).toEqual(['press', 'collapse', 'select', 'press']);
+    expect(sent[0]).toEqual({ target: PANEL, component: 'oak', event: 'press', action: 'hide' });
+  });
+});
+
+describe('ExtensionUiHost dialogs', () => {
+  const dialog = (label: string) => ({ type: 'stack', id: 'dialog', children: [{ type: 'button', id: 'ok', label }] });
+
+  it('shows one dialog over a mounted target, replaces it with a newer sequence, and closes it', () => {
+    const host = new ExtensionUiHost(manifest, () => {});
+    const ui = host.services();
+    const seen: string[] = [];
+    host.subscribe((target) => seen.push(target));
+    expect(failure(() => ui['ui.dialog']!({ target: PANEL, seq: 1, title: 'Edit', tree: dialog('OK') }, {} as never)).message).toMatch(/not mounted/);
+    ui['ui.mount']!({ target: PANEL, seq: 1, tree: button('One') }, {} as never);
+    expect(ui['ui.dialog']!({ target: PANEL, seq: 1, title: 'Edit material', tree: dialog('OK') }, {} as never)).toEqual({ seq: 1 });
+    expect(host.get(PANEL)?.dialog).toMatchObject({ seq: 1, title: 'Edit material', tree: { children: [{ label: 'OK' }] } });
+    expect(failure(() => ui['ui.dialog']!({ target: PANEL, seq: 1, title: 'Edit', tree: dialog('Same') }, {} as never)).message).toMatch(/not newer/);
+    expect(failure(() => ui['ui.dialog']!({ target: PANEL, seq: 2, title: 'Edit', tree: { type: 'script', id: 'x' } }, {} as never)).code).toBe('validation.failed');
+    expect(failure(() => ui['ui.dialog']!({ target: PANEL, seq: 2, title: '', tree: dialog('x') }, {} as never)).code).toBe('validation.failed');
+    expect(host.get(PANEL)?.dialog?.tree).toMatchObject({ children: [{ label: 'OK' }] });
+    ui['ui.dialog']!({ target: PANEL, seq: 2, title: 'Edit material', tree: dialog('Save') }, {} as never);
+    expect(host.get(PANEL)?.dialog).toMatchObject({ seq: 2, tree: { children: [{ label: 'Save' }] } });
+    // The panel's own tree is untouched, and its updates leave the dialog in place.
+    expect(host.get(PANEL)).toMatchObject({ seq: 1, tree: { children: [{ label: 'One' }] } });
+    ui['ui.update']!({ target: PANEL, seq: 2, tree: button('Two') }, {} as never);
+    expect(host.get(PANEL)?.dialog?.seq).toBe(2);
+    ui['ui.closeDialog']!({ target: PANEL }, {} as never);
+    expect(host.get(PANEL)?.dialog).toBeUndefined();
+    ui['ui.closeDialog']!({ target: PANEL }, {} as never);
+    // A stale request after closing cannot reopen it.
+    expect(failure(() => ui['ui.dialog']!({ target: PANEL, seq: 2, title: 'Edit', tree: dialog('Stale') }, {} as never)).message).toMatch(/not newer/);
+    ui['ui.dialog']!({ target: PANEL, seq: 3, title: 'Again', tree: dialog('Again') }, {} as never);
+    ui['ui.unmount']!({ target: PANEL }, {} as never);
+    expect(host.get(PANEL)).toBeUndefined();
+    expect(seen).toEqual([PANEL, PANEL, PANEL, PANEL, PANEL, PANEL, PANEL]);
+  });
+
+  it('routes events to the dialog while it is open, and reports the user closing it', () => {
+    const sent: UiEventMessage[] = [];
+    const host = new ExtensionUiHost(manifest, (e) => sent.push(e));
+    const ui = host.services();
+    ui['ui.mount']!({ target: PANEL, seq: 1, tree: { type: 'stack', id: 'root', children: [{ type: 'button', id: 'go', label: 'Go' }, { type: 'button', id: 'ok', label: 'Panel OK', disabled: true }] } }, {} as never);
+    expect(host.dispatch(PANEL, { component: 'dialog', event: 'dialogClose' })).toBe(false);
+    ui['ui.dialog']!({ target: PANEL, seq: 1, title: 'Edit', tree: dialog('OK') }, {} as never);
+    // The dialog's components, and the panel's, are reachable; a shared id goes to the dialog.
+    expect(host.dispatch(PANEL, { component: 'ok', event: 'press' })).toBe(true);
+    expect(host.dispatch(PANEL, { component: 'go', event: 'press' })).toBe(true);
+    expect(host.dispatch(PANEL, { component: 'root', event: 'dialogClose' })).toBe(false);
+    host.closeDialog(PANEL);
+    expect(host.get(PANEL)?.dialog).toBeUndefined();
+    host.closeDialog(PANEL);
+    expect(sent).toEqual([
+      { target: PANEL, component: 'ok', event: 'press' }, { target: PANEL, component: 'go', event: 'press' }, { target: PANEL, component: 'dialog', event: 'dialogClose' },
+    ]);
+    expect(host.dispatch(PANEL, { component: 'ok', event: 'press' })).toBe(false);
+    ui['ui.dialog']!({ target: PANEL, seq: 2, title: 'Edit', tree: dialog('OK') }, {} as never);
+    expect(host.dispatch(PANEL, { component: 'dialog', event: 'dialogClose' })).toBe(true);
+    expect(host.get(PANEL)?.dialog).toBeUndefined();
+    expect(sent.at(-1)).toEqual({ target: PANEL, component: 'dialog', event: 'dialogClose' });
+  });
+});
+
 describe('interface round trip', () => {
   const channels: MessageChannel[] = [];
   afterEach(() => { for (const c of channels.splice(0)) { c.port1.close(); c.port2.close(); } });

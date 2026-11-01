@@ -2798,7 +2798,36 @@ h4.pf-xui-text { font-size: 12px; }
 /* The shared button hover paints the light accent background, under which a primary button's text cannot be read. */
 .pf-xui-button.is-primary:hover:not(:disabled) { background: var(--pf-accent); filter: brightness(0.92); }
 .pf-xui-button.is-danger { border-color: var(--pf-danger); color: var(--pf-danger); }
+.pf-xui-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+.pf-xui-button.is-icon { width: 26px; height: 26px; padding: 0; }
+.pf-xui-icon { display: inline-flex; flex: none; }
 .pf-xui-progress { display: flex; flex-direction: column; gap: 2px; }
+/* A section: a disclosure header with a title, badge, subtitle and actions, over its children. */
+.pf-xui-section { display: flex; flex-direction: column; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); }
+.pf-xui-section-head { display: flex; align-items: center; gap: 4px; padding: 2px 4px 2px 2px; background: var(--pf-surface-2); border-radius: var(--pf-radius); }
+.pf-xui-section.is-open > .pf-xui-section-head { border-bottom: 1px solid var(--pf-border); border-radius: var(--pf-radius) var(--pf-radius) 0 0; }
+.pf-xui-section-toggle { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; padding: 3px 4px; font: inherit; font-weight: 600; color: inherit; text-align: start; background: none; border: 0; border-radius: var(--pf-radius); cursor: pointer; }
+.pf-xui-section-toggle:hover { background: var(--pf-accent-bg); }
+.pf-xui-section-chevron { display: inline-flex; flex: none; color: var(--pf-text-muted); }
+.pf-xui-section-title { overflow-wrap: anywhere; }
+.pf-xui-section-badge { flex: none; padding: 0 6px; border-radius: 9px; background: var(--pf-accent-bg); color: var(--pf-text); font-size: 11px; font-weight: 600; line-height: 18px; }
+.pf-xui-section-detail { display: contents; }
+.pf-xui-section-subtitle { flex-basis: 100%; min-width: 0; font-weight: 400; font-size: 11px; color: var(--pf-text-muted); overflow-wrap: anywhere; }
+.pf-xui-section-actions { flex: none; display: flex; align-items: center; gap: 2px; }
+.pf-xui-section-actions .pf-xui-button.is-action:not(.is-icon) { padding: 2px 8px; }
+.pf-xui-section-body { display: flex; flex-direction: column; gap: 8px; padding: 8px; }
+/* A menu button and its dropdown, drawn by the host. */
+.pf-xui-menu { position: relative; display: inline-flex; max-width: 100%; }
+.pf-xui-menu-caret { display: inline-flex; margin-inline-start: -2px; color: var(--pf-text-muted); }
+.pf-xui-menu-list {
+  position: absolute; top: calc(100% + 2px); left: 0; z-index: 20; min-width: 160px; max-width: min(320px, calc(100vw - 16px)); padding: 4px;
+  background: var(--pf-surface); color: var(--pf-text); border: 1px solid var(--pf-border); border-radius: var(--pf-radius); box-shadow: 0 6px 20px rgb(0 0 0 / 20%);
+}
+.pf-xui-menu-list.is-end { left: auto; right: 0; }
+.pf-xui-menu-list .has-separator { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--pf-border); }
+.pf-xui-menu-item { display: block; width: 100%; padding: 4px 8px; font: inherit; color: inherit; text-align: start; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: none; border: 0; border-radius: var(--pf-radius); cursor: pointer; }
+.pf-xui-menu-item:hover:not(:disabled), .pf-xui-menu-item:focus-visible { background: var(--pf-accent-bg); outline: none; }
+.pf-xui-menu-item:disabled { color: var(--pf-text-muted); cursor: default; }
 .pf-xui-progress progress { width: 100%; }
 .pf-xui-tablist { flex-wrap: wrap; row-gap: 2px; }
 .pf-xui-tablist .pf-tab { max-width: 100%; overflow-wrap: anywhere; text-align: start; }
@@ -2884,13 +2913,17 @@ h4.pf-xui-text { font-size: 12px; }
 .pf-xpanel-status { margin: 0; color: var(--pf-text-muted); }
 .pf-xpanel-head .pf-iconbtn { flex: none; }
 .pf-xpanel-away { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+/* The panel's content is one element that the dock's body or the window's body adopts; neither adds a box. */
+.pf-xpanel-slot, .pf-xpanel-content { display: contents; }
 
 /* An extension panel in its large window: most of the viewport, for wide tables and drawings. */
 .pf-xwindow-backdrop { position: fixed; inset: 0; z-index: 150; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgb(0 0 0 / 30%); }
 .pf-xwindow {
-  display: flex; flex-direction: column; width: min(1600px, 100%); height: 100%; min-height: 0;
+  display: flex; flex-direction: column; width: min(1600px, 100%); height: 100%; min-width: min(360px, 100%); min-height: min(240px, 100%); max-width: 100%; max-height: 100%;
   background: var(--pf-surface); color: var(--pf-text); border: 1px solid var(--pf-border); border-radius: 6px;
   box-shadow: 0 12px 40px rgb(0 0 0 / 30%); font: 12px/1.4 var(--pf-font);
+  /* The corner resizes it; the size is remembered. */
+  resize: both; overflow: hidden;
 }
 .pf-xwindow:focus { outline: none; }
 .pf-xwindow .pf-xpanel-head { padding: 8px 10px 8px 14px; }
@@ -2902,6 +2935,18 @@ h4.pf-xui-text { font-size: 12px; }
 /* A drawing sized from its proportions stays within the window's height; the drawing keeps its proportions in it. */
 .pf-xwindow .pf-xui-vector-frame.is-auto-height { max-height: max(200px, calc(100vh - 280px)); }
 @media (max-width: 600px) { .pf-xwindow-backdrop { padding: 8px; } }
+
+/* A dialog an extension shows over its panel: above the panel's window, below PushForm's own prompts (z-index 200). */
+.pf-xdialog-backdrop { position: fixed; inset: 0; z-index: 160; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgb(0 0 0 / 25%); }
+.pf-xdialog {
+  display: flex; flex-direction: column; width: min(480px, 100%); max-height: 100%; min-height: 0;
+  background: var(--pf-surface); color: var(--pf-text); border: 1px solid var(--pf-border); border-radius: 6px;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 25%); font: 12px/1.4 var(--pf-font);
+}
+.pf-xdialog:focus { outline: none; }
+.pf-xdialog-head { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 14px; border-bottom: 1px solid var(--pf-border); }
+.pf-xdialog-title { flex: 1; min-width: 0; margin: 0; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.pf-xdialog-body { flex: 1; min-height: 0; overflow: auto; padding: 12px 14px; }
 @media (prefers-color-scheme: dark) { .pf-xpanel-unsigned { color: #e0a040; } }
 
 /* Extension commands that are running or failed, above the status bar. Short runs finish before they show. */

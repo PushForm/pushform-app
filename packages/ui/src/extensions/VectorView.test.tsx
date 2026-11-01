@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { DEFAULT_UNITS } from '@pushform/core';
 import { validateUiTree, type UiEvent } from '@pushform/extension-protocol';
 import { ExtensionUiView } from './ExtensionUi';
-import { AUTO_HEIGHT_PX, autoVectorHeight } from './VectorView';
+import { AUTO_HEIGHT_PX, autoVectorHeight, fittedWidth } from './VectorView';
 
 afterEach(cleanup);
 
@@ -86,6 +86,29 @@ describe('vector views', () => {
     try {
       const { view } = show();
       expect((view.container.querySelector('.pf-xui-vector-frame') as HTMLElement).style.height).toBe('158px');
+    } finally { width.mockRestore(); }
+  });
+
+  it('size a drawing as if it were as wide as its fit width, so several drawings share one scale', () => {
+    const offcut = { ...sheet, id: 'offcut', label: 'Off-cut', bounds: { x: 0, y: 0, width: 0.61, height: 0.61 }, fitWidth: 2.44 };
+    expect(fittedWidth({ bounds: offcut.bounds, fitWidth: 2.44 })).toBe(2.44);
+    expect(fittedWidth({ bounds: offcut.bounds, fitWidth: 0.1 })).toBe(0.61);
+    const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('pf-xui-vector-frame') ? 488 : 0;
+    });
+    try {
+      const events: UiEvent[] = [];
+      const view = render(<ExtensionUiView tree={validateUiTree(offcut)} units={DEFAULT_UNITS} onEvent={(e) => events.push(e)} />);
+      // The frame is as tall as the off-cut at the sheet's scale (488 px for 2.44 m, so 122 px for 0.61 m), not a square.
+      expect((view.container.querySelector('.pf-xui-vector-frame') as HTMLElement).style.height).toBe('122px');
+      const canvas = screen.getByRole('img', { name: /Off-cut/ });
+      expect(canvas.getAttribute('viewBox')).toBe('0 0 2.44 0.61');
+      expect(canvas.getAttribute('preserveAspectRatio')).toBe('xMinYMid meet');
+      // Fit restores that view after zooming.
+      fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+      expect(canvas.getAttribute('viewBox')).not.toBe('0 0 2.44 0.61');
+      fireEvent.click(screen.getByRole('button', { name: 'Fit' }));
+      expect(canvas.getAttribute('viewBox')).toBe('0 0 2.44 0.61');
     } finally { width.mockRestore(); }
   });
 

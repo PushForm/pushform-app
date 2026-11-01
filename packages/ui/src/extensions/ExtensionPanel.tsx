@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX, type KeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { UnitSettings } from '@pushform/core';
 import type { UiPresentation } from '@pushform/extension-protocol';
 import type { ContributionEntry, ExtensionPlatform, ExtensionUiHost } from '@pushform/extensions';
 import { Icon } from '../components/Icon';
-import { ExtensionTarget } from './ExtensionUi';
+import { ExtensionTarget } from './ExtensionTarget';
+import { firstFocusable, trapTab } from './modalFocus';
 import { INTEGRITY_TEXT } from './permissionText';
 
 /**
@@ -20,6 +21,10 @@ import { INTEGRITY_TEXT } from './permissionText';
  * header moves it either way; once the user has moved it, that choice is remembered under `presentationKey` and the
  * extension's request no longer applies. While it is in the window, the dock keeps a short note with a button that
  * brings it back. Escape, or the window's own button, returns it to the dock.
+ *
+ * The interface is one live subtree wherever it is shown: moving the panel moves its rendered content between the
+ * dock and the window rather than drawing it again, so typing in progress, open menus and other local state survive
+ * the move. The window can be resized from its corner, and its size is remembered with the presentation choice.
  */
 export function ExtensionPanel({ platform, entry, units, documentId, onClose, presentationKey }: {
   readonly platform: ExtensionPlatform;
@@ -66,6 +71,8 @@ export function ExtensionPanel({ platform, entry, units, documentId, onClose, pr
     : host ? <ExtensionTarget host={host} target={entry.id} units={units} empty={<p className="pf-xpanel-status" role="status">{status}</p>} />
     : <p className="pf-xpanel-status" role="status">{status}</p>;
   const inWindow = presentation === 'window';
+  // The content renders once, into this element, which the dock or the window adopts.
+  const slot = useMemo(() => { const el = document.createElement('div'); el.className = 'pf-xpanel-content'; return el; }, []);
   return (
     <section className="pf-xpanel" aria-label={`${entry.name}, from ${entry.extensionName}`} data-extension={entry.extensionId}>
       <PanelHeader entry={entry}>
@@ -86,11 +93,19 @@ export function ExtensionPanel({ platform, entry, units, documentId, onClose, pr
               <p className="pf-xpanel-status">{entry.name} is open in a window.</p>
               <button type="button" className="pf-btn" onClick={() => choose('dock')}>Return to side panel</button>
             </div>
-          : content}
+          : <ContentSlot content={slot} />}
       </div>
-      {inWindow ? <ExtensionWindow entry={entry} onReturn={() => choose('dock')}>{content}</ExtensionWindow> : null}
+      {inWindow ? <ExtensionWindow entry={entry} sizeKey={presentationKey ? `${presentationKey}:size` : undefined} onReturn={() => choose('dock')}><ContentSlot content={slot} /></ExtensionWindow> : null}
+      {createPortal(content, slot)}
     </section>
   );
+}
+
+/** Adopts the panel's content element: the dock's body or the window's body shows it, whichever is on screen. */
+function ContentSlot({ content }: { content: HTMLElement }): JSX.Element {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => { ref.current?.appendChild(content); }, [content]);
+  return <div ref={ref} className="pf-xpanel-slot" />;
 }
 
 function PanelHeader({ entry, children }: { entry: ContributionEntry; children: ReactNode }): JSX.Element {
@@ -107,42 +122,52 @@ function PanelHeader({ entry, children }: { entry: ContributionEntry; children: 
   );
 }
 
-const FOCUSABLE = 'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])';
+/** The smallest window the user can resize to, in pixels. */
+export const WINDOW_MIN_PX = { width: 360, height: 240 } as const;
 
 /**
  * The large window an extension panel can be shown in: nearly the whole viewport, over the editor, with PushForm's
  * header. It is modal: focus starts inside it and Tab and Shift+Tab cycle through its controls, keys do not reach the editor's shortcuts, and
- * Escape (unless a field inside used it) returns the panel to the dock and focus to where it was.
+ * Escape (unless a field inside used it) returns the panel to the dock and focus to where it was. Its corner resizes
+ * it; a size the user set is kept under `sizeKey` and used the next time, within the viewport.
  */
-function ExtensionWindow({ entry, onReturn, children }: { entry: ContributionEntry; onReturn: () => void; children: ReactNode }): JSX.Element {
+function ExtensionWindow({ entry, sizeKey, onReturn, children }: { entry: ContributionEntry; sizeKey?: string | undefined; onReturn: () => void; children: ReactNode }): JSX.Element {
   const dialog = useRef<HTMLDivElement>(null);
+  const [size] = useState(() => (sizeKey ? readSize(sizeKey) : null));
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const first = (within: Element | null | undefined): HTMLElement | undefined =>
-      [...(within?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])].find((el) => el.tabIndex >= 0);
-    (first(dialog.current?.querySelector('.pf-xwindow-body')) ?? first(dialog.current) ?? dialog.current)?.focus();
+    (firstFocusable(dialog.current?.querySelector('.pf-xwindow-body')) ?? firstFocusable(dialog.current) ?? dialog.current)?.focus();
     return () => { if (previous?.isConnected && previous !== document.body) previous.focus(); };
   }, []);
+  useEffect(() => {
+    const element = dialog.current;
+    if (!sizeKey || !element || typeof ResizeObserver === 'undefined') return;
+    // The first measurement is the size given by the stylesheet or the stored size; only a change after it is the user's.
+    let initial: { width: number; height: number } | null = null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const observer = new ResizeObserver(() => {
+      const measured = { width: Math.round(element.offsetWidth), height: Math.round(element.offsetHeight) };
+      if (!initial) { initial = measured; return; }
+      if (measured.width === initial.width && measured.height === initial.height) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => writeSize(sizeKey, measured), 250);
+    });
+    observer.observe(element);
+    return () => { observer.disconnect(); clearTimeout(timer); };
+  }, [sizeKey]);
   const keyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
     // The editor's shortcuts must not act on keys meant for the panel.
     e.stopPropagation();
     if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); onReturn(); return; }
-    if (e.key !== 'Tab' || !dialog.current) return;
     // Tab moves through the window's controls in order and wraps, whatever the browser's own Tab order would skip.
-    e.preventDefault();
-    const controls = [...dialog.current.querySelectorAll<HTMLElement>(FOCUSABLE)]
-      .filter((el) => el.tabIndex >= 0 && (el.getClientRects().length > 0 || el === document.activeElement));
-    if (!controls.length) return;
-    const at = controls.indexOf(document.activeElement as HTMLElement);
-    const next = at < 0 ? (e.shiftKey ? controls.length - 1 : 0) : (at + (e.shiftKey ? -1 : 1) + controls.length) % controls.length;
-    controls[next]!.focus();
+    trapTab(e, dialog.current);
   };
   // Inside the app's root, so PushForm's own prompts (print, export) still show above it.
   const root = document.querySelector('.pf-app') ?? document.body;
   return createPortal(
     <div className="pf-xwindow-backdrop">
       <div ref={dialog} className="pf-xwindow" role="dialog" aria-modal="true" aria-label={`${entry.name}, from ${entry.extensionName}`} tabIndex={-1}
-        data-extension={entry.extensionId} onKeyDown={keyDown}>
+        data-extension={entry.extensionId} onKeyDown={keyDown} style={size ? { width: size.width, height: size.height } : undefined}>
         <PanelHeader entry={entry}>
           <button type="button" className="pf-btn pf-xwindow-return" onClick={onReturn}>
             <Icon name="dock-side" size={14} /> Return to side panel
@@ -172,4 +197,19 @@ function readPresentation(key: string): UiPresentation | null {
 
 function writePresentation(key: string, value: UiPresentation): void {
   try { localStorage.setItem(key, value); } catch { /* Storage may be blocked; the choice lasts while the panel is open. */ }
+}
+
+/** A window size the user set, if a sensible one is stored. */
+export function readSize(key: string): { width: number; height: number } | null {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(key) ?? 'null');
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    const { width, height } = parsed as { width?: unknown; height?: unknown };
+    if (typeof width !== 'number' || typeof height !== 'number' || !Number.isFinite(width) || !Number.isFinite(height)) return null;
+    return { width: Math.max(WINDOW_MIN_PX.width, Math.round(width)), height: Math.max(WINDOW_MIN_PX.height, Math.round(height)) };
+  } catch { return null; }
+}
+
+function writeSize(key: string, size: { width: number; height: number }): void {
+  try { localStorage.setItem(key, JSON.stringify(size)); } catch { /* Storage may be blocked; the size lasts while the window is open. */ }
 }

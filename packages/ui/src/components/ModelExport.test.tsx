@@ -95,7 +95,7 @@ it('offers one Export menu item and switches formats inside the same dialog, ret
   expect(screen.getAllByRole('menuitem').filter(item => item.textContent?.startsWith('Export'))).toHaveLength(1);
   fireEvent.click(screen.getByRole('menuitem', { name: 'Export…' }));
   const dialog = screen.getByRole('dialog', { name: 'Export' });
-  expect([...screen.getByLabelText<HTMLSelectElement>('Format').options].map(option => option.value)).toEqual(['pf', 'stl', 'gltf', 'obj', 'collada', 'step', 'png', 'jpeg']);
+  expect([...screen.getByLabelText<HTMLSelectElement>('Format').options].map(option => option.value)).toEqual(['pf', 'stl', 'gltf', 'obj', 'collada', 'skp', 'step', 'png', 'jpeg']);
   fireEvent.change(screen.getByLabelText('Format'), { target: { value: 'obj' } });
   fireEvent.change(screen.getByLabelText('Units'), { target: { value: 'cm' } });
   fireEvent.click(screen.getByLabelText('Z up'));
@@ -140,4 +140,15 @@ it('exports a complete native model without changing its saved identity, and all
   expect(tab).toMatchObject(before);
   expect(tab.app.document.doc.version).toBe(version);
   expect(session.isDirty(tab)).toBe(true);
+});
+
+it('exports SKP from the combined dialog', async () => {
+  const { write, close, savePicker, base } = setup();
+  fireEvent.click(screen.getByRole('button', { name: 'Main menu' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Export…' }));
+  fireEvent.change(screen.getByLabelText('Format'), { target: { value: 'skp' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Export…' }));
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  expect(savePicker).toHaveBeenCalledWith(expect.objectContaining({ suggestedName: `${base}.skp` }));
+  expect(write.mock.calls[0]![0]).toBeInstanceOf(Uint8Array);
 });

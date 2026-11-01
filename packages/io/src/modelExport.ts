@@ -162,6 +162,25 @@ export function collectExportScene(state: DocumentState, options: ModelExportOpt
         if (behind !== front) add(behind, p, r, q, [back, back, back], placement(behind, face.basis, face.uvBack ?? face.uv));
       }
     }
+    for (const part of entities.meshParts.values()) {
+      if (part.hidden || !tagVisible(state, part.tagId)) continue;
+      if (!whole && !selected?.meshParts.has(`${key}|${part.id}`)) continue;
+      const g = part.geometry;
+      for (let t = 0; t < g.triangles.length; t += 3) {
+        const at = (k: number): Vec3 => {
+          const i = g.triangles[t + k]! * 3;
+          return [g.positions[i]!, g.positions[i + 1]!, g.positions[i + 2]!];
+        };
+        const a = at(0), b = at(1), c = at(2);
+        const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+        const n: Vec3 = [u[1]! * v[2]! - u[2]! * v[1]!, u[2]! * v[0]! - u[0]! * v[2]!, u[0]! * v[1]! - u[1]! * v[0]!];
+        const length = Math.hypot(...n);
+        if (!length) continue;
+        const normal: Vec3 = [n[0] / length, n[1] / length, n[2] / length];
+        const material = g.faceMaterials[g.triangleFace[t / 3]!] || part.materialId || inherited;
+        add(material as MaterialId | null, a, b, c, [normal, normal, normal], null);
+      }
+    }
     // Edges that bound no face (lines, arcs) are lines.
     const bounding = new Set<number>();
     for (const face of entities.sketch.faces.values()) for (const loop of face.loops) for (const ref of loop) bounding.add(ref.edgeId);

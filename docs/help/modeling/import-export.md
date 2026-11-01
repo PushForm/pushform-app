@@ -69,3 +69,7 @@ Choose **Main menu → Export…**, select **PushForm Model (.pf)** in **Format*
 ### Failed imports
 
 If a supported file fails during import, PushForm automatically saves the original file and import report in a hidden, private folder on your account and queues a support ticket. Your file stays in PushForm and can be retrieved only by you and authorized administrators; it is not attached to the ticket or shared with other users. Cancelled imports do not create tickets. If you are offline or the upload cannot finish, the original error still appears, but the file may not be saved for support.
+
+## Export a SketchUp model
+
+Choose **Export… → SketchUp (.skp)** to write visible geometry, or check **Export selected geometry only**. The file is written locally in the 2017 format, with meters converted to inches. Components retain placements and names; colors and PNG/JPEG textures are included. Faces become editable triangles and curves become segments. Hidden content is omitted. Tags, scenes, display settings, guides, dimensions, text and section planes are not preserved; review the export notes. Exporting keeps the native document and its saved state.

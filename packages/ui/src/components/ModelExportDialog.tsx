@@ -7,13 +7,14 @@ import { packageModelExport, MESH_UNITS, type MeshUnit, type StlFormat } from '@
 import { chooseSaveTarget } from '../saveFile';
 import { keepProportions, modelImageFileName, modelImageSize, modelImageSizeError, renderModelImage, type ModelImageChoice, type ModelImageRenderer } from './modelImageExport';
 
-export type ModelExportFormat = 'gltf' | 'obj' | 'collada';
+export type ModelExportFormat = 'gltf' | 'obj' | 'collada' | 'skp';
 export type ModelExportDialogFormat = ModelExportFormat | 'step' | 'pf' | 'stl' | 'png' | 'jpeg' | 'image';
 export interface ModelExportChoice { unit: MeshUnit; up: 'z' | 'y'; selectionOnly: boolean }
 export interface StlExportChoice { unit: MeshUnit; format: StlFormat; selectionOnly: boolean }
 let stlRemembered: { unit: MeshUnit; format: StlFormat } = { unit: 'mm', format: 'binary' };
 let objRemembered: { unit: MeshUnit; up: 'z' | 'y' } = { unit: 'm', up: 'y' };
 const HINTS = {
+  skp: 'Writes an editable SketchUp 2017 file locally. Faces are triangulated; export notes list unsupported content.',
   gltf: 'glTF files are always in meters with Y up; textures are embedded in the .glb file.',
   obj: 'OBJ files store no unit. The .zip holds the .obj file with its .mtl material file and texture images.',
   step: 'STEP files are written in millimeters. Parts keep their names and colors, components become assemblies, and curved surfaces are written as flat facets. Mesh parts are written as faceted solids.',
@@ -116,7 +117,7 @@ export function ModelExportDialog({ modelName, view, render, onClose, initialFor
     <div ref={dialog} className="pf-modal pf-stl-export-dialog pf-image-export-dialog" role="dialog" aria-modal="true" aria-labelledby="image-export-title">
       <h2 id="image-export-title">Export</h2>
       <label>Format<select value={format} disabled={busy} onChange={event => setFormat(event.target.value as Exclude<ModelExportDialogFormat, 'image'>)}>
-        <option value="pf">PushForm Model (.pf)</option><option value="stl">STL (.stl)</option><option value="gltf">glTF (.glb)</option><option value="obj">OBJ (.zip)</option><option value="collada">COLLADA (.dae)</option><option value="step">STEP (.step)</option><option value="png">PNG</option><option value="jpeg">JPEG</option>
+        <option value="pf">PushForm Model (.pf)</option><option value="stl">STL (.stl)</option><option value="gltf">glTF (.glb)</option><option value="obj">OBJ (.zip)</option><option value="collada">COLLADA (.dae)</option><option value="skp">SketchUp (.skp)</option><option value="step">STEP (.step)</option><option value="png">PNG</option><option value="jpeg">JPEG</option>
       </select></label>
       {attributionState?.meta.attributions?.length && format !== 'pf' ? <p>Exports a ZIP containing the file and original license and creator notices.</p> : null}
       {format === 'pf' ? <p>Exports the entire document as an editable PushForm Model file.</p> : image ? <><label><input type="checkbox" checked={useViewSize} disabled={busy} onChange={event => setUseViewSize(event.target.checked)} />Use view size</label>

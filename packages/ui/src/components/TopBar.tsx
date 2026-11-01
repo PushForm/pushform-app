@@ -9,7 +9,7 @@ import { z } from 'zod';
 import {
   packageModelExport, encodeLayoutSnapshot, encodeModelSnapshot, modelArchiveImages, openModelFile, openLayoutFile,
   isSketchUpLayoutFile, nativeDocumentType, type LayoutRecoveryMetadata,
-  isModelImportFile, isPictureFile, MAX_PICTURE_BYTES, pictureMime, exportStl, stlFileName, probeMeshImport, exportGlb, exportObj, exportCollada, exportStep, exportFileName, STEP_EXTENSION,
+  isModelImportFile, isPictureFile, MAX_PICTURE_BYTES, pictureMime, exportStl, stlFileName, probeMeshImport, exportGlb, exportObj, exportCollada, exportSkp, exportStep, exportFileName, STEP_EXTENSION,
   type ImportProgress, type MeshExtent, type MeshFormatKind, type MeshImportOptions, type ModelImportReport,
 } from '@pushform/io';
 import { importLayoutBytes, importSketchUpBytes, modelImportLimit, tooLarge, type PickedFile } from '../importFiles';
@@ -161,7 +161,7 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
   useEffect(() => {
     const active = session.active;
     if (active.type !== 'model') return;
-    const commands = ([['file.exportGltf', 'Export glTF…', 'gltf'], ['file.exportObj', 'Export OBJ…', 'obj'], ['file.exportCollada', 'Export COLLADA…', 'collada'], ['file.exportStep', 'Export STEP…', 'step']] as const)
+    const commands = ([['file.exportSkp', 'Export SketchUp…', 'skp'], ['file.exportGltf', 'Export glTF…', 'gltf'], ['file.exportObj', 'Export OBJ…', 'obj'], ['file.exportCollada', 'Export COLLADA…', 'collada'], ['file.exportStep', 'Export STEP…', 'step']] as const)
       .map(([id, title, format]) => active.app.commands.register(defineCommand({
         id, title, category: 'file', menu: 'File', icon: 'folder', params: z.object({}), undoable: false,
         run: () => setModelExport({ tabId: active.id, format }),
@@ -593,13 +593,13 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
       const blob = host.images.get(id as never), asset = host.images.asset(id as never) ?? host.doc.state.images.get(id as never);
       return blob ? { bytes: blob.bytes, mime: blob.mime, name: asset?.name ?? `image${id}` } : undefined;
     } };
-    const label = { gltf: 'glTF', obj: 'OBJ', collada: 'COLLADA' }[format];
+    const label = { skp: 'SketchUp', gltf: 'glTF', obj: 'OBJ', collada: 'COLLADA' }[format];
     try {
-      const { bytes, fileName, notes } = format === 'gltf' ? exportGlb(host.doc.state, options)
+      const { bytes, fileName, notes } = format === 'skp' ? exportSkp(host.doc.state, options) : format === 'gltf' ? exportGlb(host.doc.state, options)
         : format === 'obj' ? exportObj(host.doc.state, { ...options, unit: choice.unit, up: choice.up }) : exportCollada(host.doc.state, options);
       const output = packageModelExport(host.doc.state, bytes, fileName);
       const extension = output.fileName.slice(output.fileName.lastIndexOf('.'));
-      const mime = extension === '.glb' ? 'model/gltf-binary' : extension === '.zip' ? 'application/zip' : 'model/vnd.collada+xml';
+      const mime = extension === '.skp' ? 'application/octet-stream' : extension === '.glb' ? 'model/gltf-binary' : extension === '.zip' ? 'application/zip' : 'model/vnd.collada+xml';
       const target = await chooseSaveTarget(output.fileName, { description: label, mime, extension: extension.slice(1) });
       if (!target) return;
       await target.write(output.bytes);

@@ -188,3 +188,25 @@ describe('running', () => {
     expect(platform.state('com.example.stairs')?.logs.map((l) => l.entry)).toEqual([{ step: 'made' }]);
   });
 });
+
+describe('documents', () => {
+  it('serves the document services over the documents it is given, scoped to each invocation, until the document closes', async () => {
+    const units = (lengthUnit: 'mm' | 'in') => ({ system: lengthUnit === 'mm' ? 'metric' as const : 'imperial' as const, lengthUnit, format: 'decimal' as const, lengthPrecision: 2 });
+    const open = new Map([['tab-a', units('mm')], ['tab-b', units('in')]]);
+    const documents = { get: (id: string) => {
+      const u = open.get(id);
+      return u ? { units: () => u, model: () => null, listen: () => () => {} } : null;
+    } };
+    const module = { activate(context: { commands: { register(id: string, h: () => unknown): void }; document: { units(): Promise<unknown> } }) {
+      context.commands.register('com.example.stairs.make', () => context.document.units());
+    } };
+    const { platform } = setup({ 'com.example.stairs': module }, { documents });
+    await platform.install(await platform.sideload(await archive()), ['settings']);
+    expect(await platform.invoke('com.example.stairs', 'com.example.stairs.make', {}, { document: 'tab-a' })).toEqual(units('mm'));
+    expect(await platform.invoke('com.example.stairs', 'com.example.stairs.make', {}, { document: 'tab-b' })).toEqual(units('in'));
+    open.delete('tab-b');
+    platform.closeDocument('tab-b');
+    expect((await failure(platform.invoke('com.example.stairs', 'com.example.stairs.make', {}))).code).toBe('document.closed');
+    await platform.stopAll();
+  });
+});

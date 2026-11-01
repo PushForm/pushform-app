@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import {
-  extensionManifestSchema, type ExtensionManifest, type ExtensionManifestInput, type ExtensionPermission, type UiEvent, type UiNode,
+  ExtensionError, extensionManifestSchema, type DocumentUnits, type ExtensionManifest, type ExtensionManifestInput, type ExtensionPermission,
+  type UiEvent, type UiNode,
 } from '@pushform/extension-protocol';
 import {
-  ComputeHost, ExtensionSession, ExtensionSettingsHost, ExtensionUiHost, FetchBroker, clipboardServices, fileServices, memorySettingsStore, vectorExportServices, vectorPrintServices,
+  ComputeHost, ExtensionDocumentHost, ExtensionSession, type DocumentChange, type ExtensionDocument, type ExtensionDocuments,
+  type ExtensionModelAccess, ExtensionSettingsHost, ExtensionUiHost, FetchBroker, clipboardServices, fileServices, memorySettingsStore, vectorExportServices, vectorPrintServices,
   messagePortTransport, runComputeWorker, startGuest, type FetchTransport, type FilePicker, type ViewPrinter, type InvokeOptions, type ServiceImplementations,
   type SettingsStore, type SpawnComputeWorker,
 } from '@pushform/extensions';
@@ -15,7 +17,37 @@ import {
  * over a MessageChannel in the same process. What the isolated runtime adds in the app (its sandbox, content
  * security policy and lockdown) is not reproduced here. Host services the harness does not provide, such as the
  * model, can be supplied as fakes through `services`.
+ *
+ * With `document`, the harness opens one document that invocations act on by default, and the `model`, `selection`
+ * and `document` services reach it through the same handles, permission checks and validation as in PushForm. Its
+ * model is a fake the test supplies; `documents` replaces the whole set of open documents.
  */
+
+/** A document for the test host: its units, and a fake of the model operations the extension calls. */
+export interface TestDocumentOptions {
+  /** The id `invoke` passes; `"test-document"` by default. */
+  readonly id?: string;
+  /** Millimeters, decimal, one place, by default. */
+  readonly units?: DocumentUnits;
+  /**
+   * The model operations; methods left out answer `unavailable`. Without `model` the document is not a 3D model, as
+   * a Layout document is not.
+   */
+  readonly model?: Partial<ExtensionModelAccess>;
+}
+
+/** The test host's document, for changing it from the test. */
+export interface TestDocument {
+  readonly id: string;
+  /** Changes the units; the extension hears of it through `context.document.onUnitsChange`. */
+  setUnits(units: DocumentUnits): void;
+  /** Reports that the model or the selection changed, as an edit by the user would. */
+  changed(change: 'model' | 'selection'): void;
+  /** Closes the document: its handles stop working and invocations on it are cancelled. */
+  close(): void;
+}
+
+export const TEST_DOCUMENT_UNITS: DocumentUnits = { system: 'metric', lengthUnit: 'mm', format: 'decimal', lengthPrecision: 1 };
 
 export interface TestHostOptions {
   /** The manifest, as in `manifest.json`; the `files` list may be left out. */
@@ -35,6 +67,10 @@ export interface TestHostOptions {
   readonly printer?: ViewPrinter;
   /** Performs network requests that pass the broker's checks; by default requests answer unavailable. */
   readonly fetch?: FetchTransport;
+  /** Opens one document that invocations act on by default. */
+  readonly document?: TestDocumentOptions;
+  /** The open documents, replacing `document`. */
+  readonly documents?: ExtensionDocuments;
 }
 
 export interface TestHost {
@@ -45,7 +81,9 @@ export interface TestHost {
   readonly logs: unknown[];
   /** What the extension wrote to the clipboard. */
   readonly clipboard: { text?: string; html?: string; png?: Uint8Array }[];
-  /** Runs a contribution, as a user-started action by default. */
+  /** The document opened with the `document` option, or null. */
+  readonly document: TestDocument | null;
+  /** Runs a contribution, as a user-started action by default, on the test document when there is one. */
   invoke(contributionId: string, params?: unknown, options?: InvokeOptions): Promise<unknown>;
   /** The tree the extension shows for a target, if any. */
   tree(target: string): UiNode | undefined;
@@ -73,6 +111,29 @@ const inProcessCompute: SpawnComputeWorker = async () => {
 
 const declining: FilePicker = { open: async () => null, save: async () => null };
 
+function fakeDocument(options: TestDocumentOptions): ExtensionDocument & { setUnits(units: DocumentUnits): void; emit(change: DocumentChange): void } {
+  let units = options.units ?? TEST_DOCUMENT_UNITS;
+  const listeners = new Set<(change: DocumentChange) => void>();
+  const fake = options.model;
+  const missing = (name: string) => () => { throw new ExtensionError('unavailable', `The test document's model has no ${name}.`); };
+  const model: ExtensionModelAccess | null = fake ? {
+    get revision() { return fake.revision ?? 0; },
+    getDocument: fake.getDocument?.bind(fake) ?? missing('getDocument'),
+    query: fake.query?.bind(fake) ?? missing('query'),
+    apply: fake.apply?.bind(fake) ?? (async () => missing('apply')()),
+    selection: fake.selection?.bind(fake) ?? missing('selection'),
+    select: fake.select?.bind(fake) ?? missing('select'),
+    frame: fake.frame?.bind(fake) ?? missing('frame'),
+  } : null;
+  return {
+    units: () => units,
+    model: () => model,
+    listen(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+    setUnits(next) { units = next; for (const listener of [...listeners]) listener('units'); },
+    emit(change) { for (const listener of [...listeners]) listener(change); },
+  };
+}
+
 export async function createTestHost(options: TestHostOptions): Promise<TestHost> {
   const manifest = extensionManifestSchema.parse({ ...options.manifest, files: options.manifest.files ?? {} });
   const grants = new Set(options.grants ?? manifest.permissions);
@@ -80,6 +141,13 @@ export async function createTestHost(options: TestHostOptions): Promise<TestHost
   const logs: unknown[] = [];
   const clipboard: TestHost['clipboard'] = [];
   const ref: { session?: ExtensionSession } = {};
+  const documentId = options.document ? options.document.id ?? 'test-document' : null;
+  const opened = options.document ? fakeDocument(options.document) : null;
+  let open = true;
+  const documents: ExtensionDocuments | null = options.documents
+    ?? (opened ? { get: (id) => (open && id === documentId ? opened : null) } : null);
+  const documentHost = documents
+    ? new ExtensionDocumentHost({ manifest, grants, documents, session: () => ref.session, coalesceMs: 0 }) : null;
   const ui = new ExtensionUiHost(manifest, (event) => ref.session?.postEvent(event));
   const settings = new ExtensionSettingsHost(manifest, options.settings ?? memorySettingsStore());
   const compute = manifest.wasm.length ? new ComputeHost({ manifest, files: options.files ?? new Map(), spawn: inProcessCompute }) : null;
@@ -93,20 +161,34 @@ export async function createTestHost(options: TestHostOptions): Promise<TestHost
     ...clipboardServices({ write: async (items) => { clipboard.push(items); } }),
     ...new FetchBroker(manifest, grants, options.fetch ?? null).services(),
     'log.write': (input) => { logs.push(input); return null; },
+    ...documentHost?.services(),
     ...options.services,
   };
   const session = ref.session = new ExtensionSession({
     manifest, grants, port: messagePortTransport(channel.port1), services, beforeActivate: () => settings.prepare(),
+    ...(documentHost ? { onDocument: (id: string) => documentHost.documentChanged(id) } : {}),
   });
+  const document: TestDocument | null = opened && documentId !== null ? {
+    id: documentId,
+    setUnits: (units) => opened.setUnits(units),
+    changed: (change) => opened.emit(change),
+    close() {
+      open = false;
+      session.closeDocument(documentId);
+      documentHost?.closed(documentId);
+    },
+  } : null;
   void startGuest(messagePortTransport(channel.port2), async () => options.module);
   return {
-    manifest, session, ui, logs, clipboard,
-    invoke: (id, params = {}, invokeOptions = {}) => session.invoke(id, params, { userAction: true, ...invokeOptions }),
+    manifest, session, ui, logs, clipboard, document,
+    invoke: (id, params = {}, invokeOptions = {}) => session.invoke(id, params,
+      { userAction: true, ...(documentId !== null && open ? { document: documentId } : {}), ...invokeOptions }),
     tree: (target) => ui.get(target)?.tree,
     dispatch: (target, event) => ui.dispatch(target, event),
     press: (target, component) => ui.dispatch(target, { component, event: 'press' }),
     async close() {
       await session.deactivate('shutdown');
+      documentHost?.dispose();
       compute?.terminateAll();
       channel.port1.close();
       channel.port2.close();

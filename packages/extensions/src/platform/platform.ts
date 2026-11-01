@@ -5,6 +5,7 @@ import {
   type ExtensionManifest, type ExtensionPermission, type ExtensionTarget, type ValidatedPackage, type ValidatePackageOptions,
 } from '@pushform/extension-protocol';
 import { ComputeHost, type ComputeWorkerHandle } from '../runtime/compute';
+import { ExtensionDocumentHost, type ExtensionDocuments } from '../runtime/documents';
 import { ExtensionSession, type InvokeOptions, type ServiceImplementations, type SessionFailure } from '../runtime/host';
 import { FetchBroker, clipboardServices, fileServices, type ClipboardWriter, type FetchTransport, type FilePicker } from '../runtime/io';
 import type { RuntimePort } from '../runtime/port';
@@ -43,7 +44,12 @@ export interface ExtensionPlatformOptions {
   readonly startRuntime: (record: InstalledExtension) => Promise<RuntimeHandle>;
   /** Where a release keeps its settings: the account for official ones, the device for side-loaded ones. */
   readonly settingsStore: (record: InstalledExtension) => SettingsStore;
-  /** Host services beyond those the platform provides, such as the model operations. */
+  /**
+   * The open documents, for the `model`, `selection` and `document` services; without them those services answer
+   * `unavailable`.
+   */
+  readonly documents?: ExtensionDocuments;
+  /** Host services beyond those the platform provides, or replacements for them. */
   readonly hostServices?: (record: InstalledExtension) => ServiceImplementations;
   readonly filePicker?: FilePicker;
   /** The host's print dialog for `ui.print`; without it printing answers `unavailable`. */
@@ -130,6 +136,7 @@ interface Running {
   readonly ui: ExtensionUiHost;
   readonly compute: ComputeHost | null;
   readonly fetch: FetchBroker;
+  readonly documents: ExtensionDocumentHost | null;
 }
 
 const LOG_LINES = 200;
@@ -402,7 +409,10 @@ export class ExtensionPlatform {
 
   /** Tells running extensions that a document closed, cancelling work on it. */
   closeDocument(documentId: string): void {
-    for (const running of this.running.values()) running.session.closeDocument(documentId);
+    for (const running of this.running.values()) {
+      running.session.closeDocument(documentId);
+      running.documents?.closed(documentId);
+    }
   }
 
   /** Stops an extension's runtime, letting its `deactivate` run briefly. `reason` is what the activity record says. */
@@ -411,6 +421,7 @@ export class ExtensionPlatform {
     if (!running) return;
     this.running.delete(id);
     await running.session.deactivate('disable');
+    running.documents?.dispose();
     running.compute?.terminateAll();
     running.ui.clear();
     running.runtime.terminate();
@@ -519,6 +530,8 @@ export class ExtensionPlatform {
       this.notify();
     });
     const declining: FilePicker = { open: async () => null, save: async () => null };
+    const documents = this.options.documents
+      ? new ExtensionDocumentHost({ manifest: record.manifest, grants, documents: this.options.documents, session: () => ref.session }) : null;
     const services: ServiceImplementations = {
       ...ui.services(),
       ...settings.services(),
@@ -529,14 +542,16 @@ export class ExtensionPlatform {
       ...(this.options.clipboard ? clipboardServices(this.options.clipboard) : {}),
       ...fetch.services(),
       'log.write': (entry) => { this.log(record.id, entry); return null; },
+      ...documents?.services(),
       ...this.options.hostServices?.(record),
     };
     const session = ref.session = new ExtensionSession({
       manifest: record.manifest, grants, port: runtime.port, services, beforeActivate: () => settings.prepare(),
       onFailure: (failure) => this.failed(record, failure),
       onActivated: () => this.note(record.id, { type: 'activated' }),
+      ...(documents ? { onDocument: (id: string) => documents.documentChanged(id) } : {}),
     });
-    const running: Running = { record, runtime, session, ui, compute, fetch };
+    const running: Running = { record, runtime, session, ui, compute, fetch, documents };
     this.running.set(record.id, running);
     ui.subscribe(() => this.notify());
     return running;
@@ -546,6 +561,7 @@ export class ExtensionPlatform {
     const running = this.running.get(record.id);
     this.running.delete(record.id);
     if (running) {
+      running.documents?.dispose();
       running.compute?.terminateAll();
       running.ui.clear();
       running.runtime.terminate();

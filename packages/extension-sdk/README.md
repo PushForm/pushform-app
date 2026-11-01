@@ -47,8 +47,9 @@ throws an error naming the permission to request.
 | --- | --- | --- |
 | `ui` | none | Show and update panels, inspectors and settings blocks; hear user input |
 | `log` | none | Write diagnostic lines |
-| `model` | `model.read`, `model.write` | Read the document and change it in undoable batches |
-| `selection` | `selection.read`, `selection.write`, `viewport.presentation` | Read and set the selection; frame it in the view |
+| `document` | none | The units the document's lengths are shown in, and when they change |
+| `model` | `model.read`, `model.write` | Read and query the model, follow its changes, and change it in undoable batches |
+| `selection` | `selection.read`, `selection.write`, `viewport.presentation` | Read and set the selection; frame entities in the view |
 | `settings` | `settings` | One JSON object of settings, kept with the user's account |
 | `files` | `file.read`, `file.export` | Ask the user for a file to open, or where to save one |
 | `clipboard` | `clipboard.write` | Write text, HTML or a PNG, right after the user acts on your extension |
@@ -57,11 +58,36 @@ throws an error naming the permission to request.
 
 Every call is asynchronous and takes plain data. A failure has a stable `code` (`permission.denied`,
 `revision.stale`, `limit.exceeded`, `validation.failed`, `cancelled`, `unavailable`, `extension.unsupported`,
-`extension.failed`); test it with `isExtensionError(error, 'cancelled')`. Long calls accept a `signal` and an
-`onProgress` callback.
+`extension.failed`, `document.closed`); test it with `isExtensionError(error, 'cancelled')`. Long calls accept a
+`signal` and an `onProgress` callback.
 
 Lengths are meters, areas square meters, volumes cubic meters and angles degrees. `units` converts common workshop
 units, and number fields and table columns with a `quantity` are shown in the document's own units.
+
+## The document
+
+`model`, `selection` and `document` act on one open document. A contribution handler receives its document's handle
+as `invocation.document`; pass it as `document` to name that document, which stays bound to it when the user switches
+tabs. Without it, a call acts on the document of your latest invocation, which for a panel is the document it is
+shown with. Calls on a document that has closed fail with `document.closed`.
+
+```ts
+context.commands.register('com.example.parts.panel', async (_params, { document }) => {
+  const units = await context.document.units({ document }); // { system, lengthUnit, format, lengthPrecision }
+  const { revision } = await context.model!.read({ document });
+  const page = await context.model!.query({ document, kinds: ['instance'], fields: ['bounds'] });
+  await context.selection!.set({ document, refs: page.entities.map((e) => ({ kind: 'instance', id: e.ref.id })) });
+  await context.model!.apply({ document, expectedRevision: revision, label: 'Name the shelf',
+    operations: [{ op: 'rename_instance', ref: { kind: 'instance', id: page.entities[0]!.ref.id }, name: 'Shelf' }] });
+});
+context.document.onUnitsChange(({ units }) => render(units));
+context.model!.onChange(({ revision, changes }) => refresh(revision, changes)); // after model.subscribe
+```
+
+A query returns one page of at most 200 entities; fields you leave out are null (the open container, every kind but
+faces, 50 entities). A batch applies every operation or none and is one undo entry named after your extension; it
+fails with `revision.stale` when the model changed since the revision you read. References name entities of the
+container open in the editor.
 
 ## Interfaces
 
@@ -105,6 +131,9 @@ const host = await createTestHost({ manifest, module: await import('./dist/main.
 await host.invoke('com.example.counter.panel');
 host.press('com.example.counter.panel', 'add');
 ```
+
+Pass `document: { model, units }` to give invocations a document whose model operations are a fake of your own;
+`host.document` then changes its units, reports changes and closes it.
 
 ## License
 

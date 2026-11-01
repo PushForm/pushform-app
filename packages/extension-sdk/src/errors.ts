@@ -3,10 +3,10 @@
 
 /** Stable error codes of host calls. */
 export type ExtensionErrorCode = 'permission.denied' | 'revision.stale' | 'limit.exceeded' | 'validation.failed' | 'cancelled'
-  | 'unavailable' | 'extension.unsupported' | 'extension.failed';
+  | 'unavailable' | 'extension.unsupported' | 'extension.failed' | 'document.closed';
 
 export const EXTENSION_ERROR_CODES: readonly ExtensionErrorCode[] = ['permission.denied', 'revision.stale', 'limit.exceeded',
-  'validation.failed', 'cancelled', 'unavailable', 'extension.unsupported', 'extension.failed'];
+  'validation.failed', 'cancelled', 'unavailable', 'extension.unsupported', 'extension.failed', 'document.closed'];
 
 /** How a failed host call reports itself. */
 export interface ExtensionErrorData {

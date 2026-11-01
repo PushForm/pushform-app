@@ -3,6 +3,7 @@
 // @pushform/extension-sdk: types and small helpers for PushForm extensions. MIT licensed, so extensions under any
 // license can use it.
 export type * from './context.ts';
+export type * from './model.ts';
 export type * from './ui.ts';
 export * from './errors.ts';
 export * from './units.ts';

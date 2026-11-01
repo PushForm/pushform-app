@@ -15,7 +15,7 @@ export type DeactivationReason = (typeof DEACTIVATION_REASONS)[number];
 
 /** Stable error codes. Messages are safe to show; no error carries host internals or another extension's ids. */
 export const EXTENSION_ERROR_CODES = ['permission.denied', 'revision.stale', 'limit.exceeded', 'validation.failed',
-  'cancelled', 'unavailable', 'extension.unsupported', 'extension.failed'] as const;
+  'cancelled', 'unavailable', 'extension.unsupported', 'extension.failed', 'document.closed'] as const;
 export type ExtensionErrorCode = (typeof EXTENSION_ERROR_CODES)[number];
 
 /** An error as it crosses between host and runtime. */
@@ -48,11 +48,15 @@ export class ExtensionError extends Error {
  * only when at least one of its methods is allowed; a method whose permission was not granted fails with
  * `permission.denied` naming the permission. `null` means no permission beyond the extension being active.
  * `compute` and `wasm` exist only for packages that declare WASM modules.
+ *
+ * `model`, `selection` and `document` act on one open document: the one a call's `document` handle names, or else
+ * the document of the extension's latest invocation that acts on one (the panel or command the user just used).
  */
 export const EXTENSION_SERVICES = {
   ui: { mount: null, update: null, unmount: null, export: 'file.export', print: 'file.export' },
   model: { read: 'model.read', query: 'model.read', subscribe: 'model.read', apply: 'model.write' },
   selection: { get: 'selection.read', set: 'selection.write', frame: 'viewport.presentation' },
+  document: { units: null },
   settings: { get: 'settings', set: 'settings' },
   files: { open: 'file.read', save: 'file.export' },
   clipboard: { write: 'clipboard.write' },
@@ -64,6 +68,12 @@ export const EXTENSION_SERVICES = {
 export type ExtensionServiceName = keyof typeof EXTENSION_SERVICES;
 export type ExtensionServiceMethod<S extends ExtensionServiceName> = keyof (typeof EXTENSION_SERVICES)[S] & string;
 export const WASM_SERVICES: ReadonlySet<ExtensionServiceName> = new Set(['compute', 'wasm']);
+
+/**
+ * The `target` of events the host itself sends to a runtime, such as a document's units changing. No contribution id
+ * can take it, so these never mix with user events on an extension's interfaces.
+ */
+export const HOST_EVENT_TARGET = '$host';
 
 /** The permission one service method needs, `null` when none, or `undefined` when there is no such method. */
 export function methodPermission(service: string, method: string): ExtensionPermission | null | undefined {

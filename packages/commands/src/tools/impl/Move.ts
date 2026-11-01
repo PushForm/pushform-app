@@ -88,6 +88,10 @@ export class MoveTool extends TransformToolBase {
     this.copy = false;
     this.autofold = false;
   }
+  hasPendingWork(): boolean {
+    return this.state.kind !== 'idle';
+  }
+
   protected override onDeactivate(): void {
     this.state = IDLE;
     this.hover = null;

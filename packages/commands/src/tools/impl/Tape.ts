@@ -112,6 +112,10 @@ export class TapeTool implements Tool {
     this.ctx?.statusChanged();
   }
 
+  hasPendingWork(): boolean {
+    return this.state.kind !== 'idle';
+  }
+
   activate(ctx: ToolContext): void {
     this.ctx = ctx;
     this.state = IDLE;

@@ -13,6 +13,7 @@ export class ZoomTool implements Tool {
   readonly id = 'zoom';
   readonly title = 'Zoom';
   readonly cursor = 'zoom-in';
+  readonly role = 'camera' as const;
   readonly vcbSchema: readonly VcbKind[] = ['angle', 'length'];
   private ctx: ToolContext | null = null;
   private anchor: Vec2 | null = null;

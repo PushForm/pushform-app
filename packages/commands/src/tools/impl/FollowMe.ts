@@ -53,6 +53,10 @@ export class FollowMeTool implements Tool {
     return this.queue;
   }
 
+  hasPendingWork(): boolean {
+    return this.state.kind !== 'pickProfile';
+  }
+
   activate(ctx: ToolContext): void {
     this.ctx = ctx;
     this.state = { kind: 'pickProfile' };

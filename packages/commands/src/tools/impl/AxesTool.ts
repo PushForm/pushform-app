@@ -57,6 +57,10 @@ export class AxesTool implements Tool {
     return this.state.kind === 'idle' ? null : this.state.origin;
   }
 
+  hasPendingWork(): boolean {
+    return this.state.kind !== 'idle';
+  }
+
   activate(ctx: ToolContext): void {
     this.ctx = ctx;
     this.state = IDLE;

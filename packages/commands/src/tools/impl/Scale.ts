@@ -162,6 +162,10 @@ export class ScaleTool extends TransformToolBase {
     this.box = null;
     this.refresh();
   }
+  hasPendingWork(): boolean {
+    return this.state.kind !== 'idle';
+  }
+
   protected override onDeactivate(): void {
     this.state = IDLE;
     this.box = null;

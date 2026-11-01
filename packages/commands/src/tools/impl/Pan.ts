@@ -8,6 +8,7 @@ export class PanTool implements Tool {
   readonly id = 'pan';
   readonly title = 'Pan';
   readonly cursor = 'move';
+  readonly role = 'camera' as const;
   private ctx: ToolContext | null = null;
   private dragging = false;
 

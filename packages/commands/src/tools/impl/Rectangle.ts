@@ -80,6 +80,10 @@ export class RectangleTool implements Tool {
     return this.last ? cornersOf(this.last.basis, this.last.w, this.last.h) : null;
   }
 
+  hasPendingWork(): boolean {
+    return this.corner !== null;
+  }
+
   activate(ctx: ToolContext): void {
     this.ctx = ctx;
   }

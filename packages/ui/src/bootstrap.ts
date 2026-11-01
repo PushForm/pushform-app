@@ -275,7 +275,7 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
   offs.push(tx.selection.events.on('change', syncHighlights));
   // Tool-driven visuals: hover highlight (Select/Eraser) and push/pull real preview.
   const syncToolVisuals = () => {
-    const tool = toolManager.activeTool as
+    const tool = toolManager.visualTool as
       | (Tool & { hoverRef?: EntityRef | null; previewMeshes?: readonly MeshData[]; previewReplacesBodyId?: number | null; previewMatrix?: Mat4 })
       | null;
     const nextHover = tool?.hoverRef ?? null;

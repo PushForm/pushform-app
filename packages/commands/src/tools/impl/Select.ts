@@ -66,6 +66,7 @@ export class SelectTool implements Tool {
   readonly id = 'select';
   readonly title = 'Select';
   readonly cursor = 'default';
+  readonly role = 'select' as const;
 
   private ctx: ToolContext | null = null;
   private hover: EntityRef | null = null;

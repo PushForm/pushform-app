@@ -65,6 +65,10 @@ export class LineTool implements Tool {
     return this.lockAxis;
   }
 
+  hasPendingWork(): boolean {
+    return this.from !== null;
+  }
+
   activate(ctx: ToolContext): void {
     this.ctx = ctx;
     this.modeIndex = 0;

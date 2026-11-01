@@ -263,8 +263,13 @@ describe('LineTool', () => {
     tools.keyDown(key('Alt'));
     expect(tools.activeTool?.inferenceOptions?.().snapping).toBe('all');
     expect(tools.status().instructor).toBe('Select end point or enter value.');
-    // Choosing the tool again starts with all inferences.
+    // Choosing the tool again starts with all inferences once no line is in progress; a line in
+    // progress continues as it was.
     tools.keyDown(key('Alt'));
+    tools.activate('select');
+    tools.activate('line');
+    expect(tools.activeTool?.inferenceOptions?.().snapping).toBe('none');
+    tools.keyDown(key('Escape'));
     tools.activate('select');
     tools.activate('line');
     expect(tools.activeTool?.inferenceOptions?.().snapping).toBe('all');

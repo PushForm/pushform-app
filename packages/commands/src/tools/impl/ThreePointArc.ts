@@ -67,6 +67,10 @@ export class ThreePointArcTool implements Tool {
     return this.last?.params ?? null;
   }
 
+  hasPendingWork(): boolean {
+    return this.start !== null;
+  }
+
   activate(ctx: ToolContext): void {
     this.ctx = ctx;
   }

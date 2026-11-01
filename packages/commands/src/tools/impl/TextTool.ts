@@ -90,6 +90,10 @@ export class TextTool implements Tool {
   private cursorInference: InferenceResult | null = null;
   private cursorScreen: Vec2 | null = null;
 
+  hasPendingWork(): boolean {
+    return this.state.kind !== 'idle';
+  }
+
   activate(ctx: ToolContext): void {
     this.ctx = ctx;
     this.state = IDLE;

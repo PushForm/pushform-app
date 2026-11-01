@@ -49,6 +49,10 @@ export class FreehandTool implements Tool {
     return this.lastResult;
   }
 
+  hasPendingWork(): boolean {
+    return this.drawing;
+  }
+
   activate(ctx: ToolContext): void {
     this.ctx = ctx;
   }

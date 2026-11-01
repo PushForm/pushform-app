@@ -8,6 +8,7 @@ export class OrbitTool implements Tool {
   readonly id = 'orbit';
   readonly title = 'Orbit';
   readonly cursor = 'grab';
+  readonly role = 'camera' as const;
   private ctx: ToolContext | null = null;
   private dragging = false;
 

@@ -97,9 +97,22 @@ export interface Tool {
   deactivate(): void;
   /** What the tool wants from inference for the next pointer event (anchor, plane, locks, filters). */
   inferenceOptions?(): InferenceOptions;
-  /** Called when a temporary tool (middle-drag orbit) takes over; `resume` when it ends. */
+  /**
+   * Called when another tool takes over without ending this one (a middle-drag orbit, or a camera
+   * tool or Select chosen while this tool is active); `resume` when this tool takes over again.
+   */
   suspend?(): void;
   resume?(): void;
+  /**
+   * Camera tools (Orbit, Pan, Zoom, Zoom Window) and Select set the active tool aside instead of
+   * ending it; choosing the set-aside tool again, or Esc in the camera tool or Select, returns to it.
+   */
+  readonly role?: 'camera' | 'select' | undefined;
+  /**
+   * Whether an operation is in progress. Returning from Select continues a tool that has one and
+   * restarts any other, since the selection it started from may have changed.
+   */
+  hasPendingWork?(): boolean;
 
   onPointerMove?(e: ToolPointerEvent): void;
   onPointerDown?(e: ToolPointerEvent): void;

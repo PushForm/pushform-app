@@ -61,6 +61,10 @@ export class ProtractorTool implements Tool {
     return this.state.kind === 'baseline' && this.cursorInference ? this.angleFor(this.cursorInference.point, this.cursorCamera) : null;
   }
 
+  hasPendingWork(): boolean {
+    return this.state.kind !== 'idle';
+  }
+
   activate(ctx: ToolContext): void {
     this.ctx = ctx;
     this.state = IDLE;

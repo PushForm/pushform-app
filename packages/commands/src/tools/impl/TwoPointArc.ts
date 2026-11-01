@@ -93,6 +93,10 @@ export class TwoPointArcTool implements Tool {
     return this.tangent;
   }
 
+  hasPendingWork(): boolean {
+    return this.start !== null;
+  }
+
   activate(ctx: ToolContext): void {
     this.ctx = ctx;
   }

@@ -33,6 +33,13 @@ const EMPTY_STATUS: ToolStatus = { instructor: '', vcbLabel: '' };
  * Owns the active tool, dispatches viewport events to it, and implements the universal
  * interactions: Space → Select, Esc → cancel, middle-drag → orbit (Shift+middle → pan) while
  * suspending the active tool, wheel → zoom toward the cursor.
+ *
+ * Choosing a camera tool while another tool is active sets that tool aside (suspended, its state
+ * kept) instead of ending it; Select does the same for a tool with an operation in progress. A tool
+ * that switches tools from its own event handler is finishing and is never set aside. Choosing it again returns to it, as does Esc in the camera
+ * tool or Select; while a camera tool is active the set-aside tool's overlay and preview stay visible and it
+ * still receives keys and typed values the camera tool does not take, so Enter applies its
+ * operation. Choosing any other tool ends the set-aside tool.
  */
 export class ToolManager implements ToolHost {
   readonly events = new Emitter<ToolManagerEvents>();
@@ -40,6 +47,10 @@ export class ToolManager implements ToolHost {
   private active: Tool | null = null;
   /** Temporary camera tool while the middle button is held. */
   private temp: Tool | null = null;
+  /** Tool set aside while a camera tool or Select is active. */
+  private parked: Tool | null = null;
+  /** Depth of calls into a tool's event handlers; a tool switch requested inside one ends that tool. */
+  private inTool = 0;
   private readonly selectToolId: string;
   private readonly wheelZoomFactor: number;
   private readonly registerCommands: boolean;
@@ -87,6 +98,19 @@ export class ToolManager implements ToolHost {
     return this.active;
   }
 
+  /** The tool set aside while a camera tool or Select is active, if any. */
+  get parkedToolId(): string | null {
+    return this.parked?.id ?? null;
+  }
+
+  /**
+   * The tool whose visuals (hover, preview) the viewport shows: the set-aside tool while a camera
+   * tool is active, so a preview stays on screen while orbiting, else the active tool.
+   */
+  get visualTool(): Tool | null {
+    return this.camerasParked() ? this.parked : this.active;
+  }
+
   list(): readonly Tool[] {
     return [...this.tools.values()];
   }
@@ -120,9 +144,38 @@ export class ToolManager implements ToolHost {
     if (this.active === tool) return;
     this.endTemp();
     const previous = this.active?.id ?? null;
-    this.active?.deactivate();
-    this.active = tool;
-    tool.activate(this.ctx);
+    const current = this.active;
+    const finishing = this.inTool > 0;
+    if (tool.role && !finishing) {
+      // camera tool or Select: set a working tool aside, or replace another camera tool / Select
+      if (current && !current.role && (tool.role === 'camera' || current.hasPendingWork?.() === true)) {
+        this.parked?.deactivate();
+        this.parked = current;
+        current.suspend?.();
+      } else {
+        current?.deactivate();
+      }
+      this.active = tool;
+      tool.activate(this.ctx);
+    } else if (tool === this.parked && !finishing) {
+      // back to the set-aside tool: it continues unless Select ran and it had nothing in progress
+      const fromSelect = current?.role === 'select';
+      current?.deactivate();
+      this.parked = null;
+      this.active = tool;
+      if (fromSelect && !tool.hasPendingWork?.()) {
+        tool.deactivate();
+        tool.activate(this.ctx);
+      } else {
+        tool.resume?.();
+      }
+    } else {
+      current?.deactivate();
+      this.parked?.deactivate();
+      this.parked = null;
+      this.active = tool;
+      tool.activate(this.ctx);
+    }
     this.events.emit('toolChanged', { id: tool.id, previous });
     this.emitStatus();
     this.overlayChanged();
@@ -133,7 +186,12 @@ export class ToolManager implements ToolHost {
       this.endTemp();
       return;
     }
-    this.active?.onCancel();
+    if (this.active?.role && this.parked && !this.active.hasPendingWork?.()) {
+      // Esc in a camera tool or Select goes back to the set-aside tool (after ending its own drag)
+      this.activate(this.parked.id);
+      return;
+    }
+    this.call(() => this.active?.onCancel());
     this.emitStatus();
     this.overlayChanged();
   }
@@ -144,44 +202,44 @@ export class ToolManager implements ToolHost {
     if (e.button === 1) {
       // Middle button: temporary orbit, or pan with Shift.
       this.beginTemp(e.modifiers.shift ? new PanTool() : new OrbitTool());
-      this.temp?.onPointerDown?.(e);
+      this.call(() => this.temp?.onPointerDown?.(e));
       this.overlayChanged();
       return;
     }
-    (this.temp ?? this.active)?.onPointerDown?.(e);
+    this.call(() => (this.temp ?? this.active)?.onPointerDown?.(e));
     this.afterInteraction();
   }
 
   pointerMove(e: ToolPointerEvent): void {
-    (this.temp ?? this.active)?.onPointerMove?.(e);
+    this.call(() => (this.temp ?? this.active)?.onPointerMove?.(e));
     this.afterInteraction();
   }
 
   pointerUp(e: ToolPointerEvent): void {
     if (this.temp) {
-      this.temp.onPointerUp?.(e);
+      this.call(() => this.temp?.onPointerUp?.(e));
       if (e.button === 1 || (e.buttons & 4) === 0) this.endTemp();
       this.overlayChanged();
       return;
     }
-    this.active?.onPointerUp?.(e);
+    this.call(() => this.active?.onPointerUp?.(e));
     this.afterInteraction();
   }
 
   click(e: ToolPointerEvent): void {
     if (this.temp || e.button === 1) return;
-    this.active?.onClick?.(e);
+    this.call(() => this.active?.onClick?.(e));
     this.afterInteraction();
   }
 
   doubleClick(e: ToolPointerEvent): void {
     if (this.temp || e.button === 1) return;
-    this.active?.onDoubleClick?.(e);
+    this.call(() => this.active?.onDoubleClick?.(e));
     this.afterInteraction();
   }
 
   wheel(e: ToolWheelEvent): void {
-    const consumed = (this.temp ?? this.active)?.onWheel?.(e);
+    const consumed = this.call(() => (this.temp ?? this.active)?.onWheel?.(e));
     if (consumed) {
       this.afterInteraction();
       return;
@@ -198,7 +256,7 @@ export class ToolManager implements ToolHost {
       this.cancel();
       return true;
     }
-    if (this.active?.onKeyDown?.(e)) {
+    if (this.call(() => this.active?.onKeyDown?.(e) || (this.camerasParked() && this.parked!.onKeyDown?.(e)))) {
       this.afterInteraction();
       return true;
     }
@@ -212,38 +270,40 @@ export class ToolManager implements ToolHost {
   }
 
   keyUp(e: ToolKeyEvent): boolean {
-    const consumed = !!this.active?.onKeyUp?.(e);
+    const consumed = this.call(() => !!this.active?.onKeyUp?.(e) || (this.camerasParked() && !!this.parked!.onKeyUp?.(e)));
     if (consumed) this.afterInteraction();
     return consumed;
   }
 
   onVcb(value: VcbValue): void {
     if (value.kind === 'empty') return;
-    this.active?.onVcb?.(value);
+    this.call(() => this.entryTool()?.onVcb?.(value));
     this.afterInteraction();
   }
 
   /** Apply typed field values (see `Tool.onEntry`); a tool without `onEntry` gets the single value through `onVcb`. */
   onEntry(values: Readonly<Record<string, VcbValue>>): void {
     const entries = Object.entries(values).filter(([, v]) => v.kind !== 'empty');
-    if (!entries.length || !this.active) return;
-    if (this.active.onEntry) this.active.onEntry(Object.fromEntries(entries));
-    else this.active.onVcb?.(entries[0]![1]);
+    const tool = this.entryTool();
+    if (!entries.length || !tool) return;
+    this.call(() => (tool.onEntry ? tool.onEntry(Object.fromEntries(entries)) : tool.onVcb?.(entries[0]![1])));
     this.afterInteraction();
   }
 
   lockEntry(id: string, value: VcbValue | null): void {
-    if (!this.active?.onEntryLock) return;
-    this.active.onEntryLock(id, value && value.kind !== 'empty' ? value : null);
+    const tool = this.entryTool();
+    if (!tool?.onEntryLock) return;
+    this.call(() => tool.onEntryLock?.(id, value && value.kind !== 'empty' ? value : null));
     this.afterInteraction();
   }
 
   // --- derived state --------------------------------------------------------------------------
 
   overlay(): readonly OverlayPrimitive[] {
+    const p = this.camerasParked() ? this.parked!.overlay() : [];
     const a = this.active?.overlay() ?? [];
     const t = this.temp?.overlay() ?? [];
-    return t.length ? [...a, ...t] : a;
+    return p.length || t.length ? [...p, ...a, ...t] : a;
   }
 
   status(): ToolStatus {
@@ -251,6 +311,28 @@ export class ToolManager implements ToolHost {
   }
 
   // --- internals ------------------------------------------------------------------------------
+
+  /** Run a tool event handler, marking tool switches it requests as the tool finishing. */
+  private call<T>(fn: () => T): T {
+    this.inTool++;
+    try {
+      return fn();
+    } finally {
+      this.inTool--;
+    }
+  }
+
+  /** A camera tool is active with a working tool set aside behind it. */
+  private camerasParked(): boolean {
+    return this.active?.role === 'camera' && this.parked !== null;
+  }
+
+  /** The tool typed values go to: the active tool, or the set-aside one behind a camera tool that takes none. */
+  private entryTool(): Tool | null {
+    const a = this.active;
+    if (a && this.camerasParked() && !a.onVcb && !a.onEntry) return this.parked;
+    return a;
+  }
 
   private beginTemp(tool: Tool): void {
     this.endTemp();

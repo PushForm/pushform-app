@@ -94,6 +94,10 @@ export class RotateTool extends TransformToolBase {
     this.copy = false;
     this.hover = null;
   }
+  hasPendingWork(): boolean {
+    return this.state.kind !== 'idle';
+  }
+
   protected override onDeactivate(): void {
     this.state = IDLE;
     this.hover = null;

@@ -119,6 +119,10 @@ export class EdgeBlendTool implements Tool {
 
   // --- lifecycle ------------------------------------------------------------------------------
 
+  hasPendingWork(): boolean {
+    return this.picked.length > 0;
+  }
+
   activate(ctx: ToolContext): void {
     this.ctx = ctx;
     this.clearSet();

@@ -145,6 +145,10 @@ export class PushPullTool implements Tool {
 
   // --- lifecycle ------------------------------------------------------------------------------
 
+  hasPendingWork(): boolean {
+    return this.state.kind !== 'idle';
+  }
+
   activate(ctx: ToolContext): void {
     this.ctx = ctx;
     this.state = IDLE;

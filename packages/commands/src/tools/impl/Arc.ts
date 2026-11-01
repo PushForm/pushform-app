@@ -85,6 +85,10 @@ export class ArcTool implements Tool {
     return this.last?.params ?? null;
   }
 
+  hasPendingWork(): boolean {
+    return this.center !== null;
+  }
+
   activate(ctx: ToolContext): void {
     this.ctx = ctx;
   }

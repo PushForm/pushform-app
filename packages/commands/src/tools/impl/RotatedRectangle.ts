@@ -75,6 +75,10 @@ export class RotatedRectangleTool implements Tool {
     return this.lockNormal;
   }
 
+  hasPendingWork(): boolean {
+    return this.a !== null;
+  }
+
   activate(ctx: ToolContext): void {
     this.ctx = ctx;
   }

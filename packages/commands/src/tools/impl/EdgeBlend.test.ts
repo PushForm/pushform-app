@@ -20,6 +20,7 @@ import { edgeBlendCommands } from '../../commands/edgeBlend';
 import { ToolManager } from '../ToolManager';
 import { NO_MODIFIERS, type Modifiers, type Tool, type ToolPointerEvent } from '../Tool';
 import { edgeBlendTools, type EdgeBlendTool } from './EdgeBlend';
+import { OrbitTool } from './Orbit';
 
 class FakeCamera implements CameraHost {
   state: CameraState = { eye: [10, -10, 10], target: [0, 0, 0], up: [0, 0, 1], fov: 35, projection: 'perspective', orthoHeight: 10 };
@@ -85,6 +86,7 @@ function setup() {
   registry.ctx.tools = tools;
   tools.register(selectStub);
   for (const t of edgeBlendTools()) tools.register(t);
+  tools.register(new OrbitTool());
   const root = (): EntityContainer => host.doc.rootDefinition.entities;
   const body = (id: number): Body => root().bodies.get(id as never)!;
   const fillet = tools.get('fillet') as EdgeBlendTool;
@@ -250,5 +252,32 @@ describe('Fillet and Chamfer tools', () => {
     expect(chamfer.edgeSet).toEqual([e1.key]);
     expect(body(id).version).toBe(version);
     expect(host.undoStack.length).toBe(entries);
+  });
+
+  it('keeps the picked edges and preview while Orbit is chosen; Esc returns and Enter in Orbit applies', async () => {
+    const { registry, tools, body, chamfer } = setup();
+    const id = addBox(registry);
+    const e1 = edgeAt(body(id), [0, 0, 1], [1, 0, 1]);
+    const e2 = edgeAt(body(id), [1, 0, 1], [1, 1, 1]);
+    tools.activate('chamfer');
+    tools.click(at(edgeRef(id, e1)));
+    tools.click(at(edgeRef(id, e2)));
+    tools.onVcb({ kind: 'length', meters: 0.1, raw: 0.1, unit: null });
+    await chamfer.previewSettled();
+    expect(chamfer.previewMeshes.length).toBeGreaterThan(0);
+    tools.activate('orbit');
+    expect(tools.activeToolId).toBe('orbit');
+    expect(tools.visualTool).toBe(chamfer);
+    expect(chamfer.edgeSet).toEqual([e1.key, e2.key]);
+    expect(chamfer.previewMeshes.length).toBeGreaterThan(0);
+    tools.keyDown({ key: 'Escape', code: 'Escape', modifiers: NO_MODIFIERS, repeat: false });
+    expect(tools.activeToolId).toBe('chamfer');
+    expect(chamfer.edgeSet).toEqual([e1.key, e2.key]);
+    tools.activate('orbit');
+    expect(tools.keyDown({ key: 'Enter', code: 'Enter', modifiers: NO_MODIFIERS, repeat: false })).toBe(true);
+    await chamfer.settled;
+    expect(body(id).props.volume).toBeLessThan(1);
+    expect(meshTopologyProblems(body(id).mesh)).toEqual([]);
+    expect(chamfer.edgeSet).toEqual([]);
   });
 });

@@ -9,9 +9,14 @@ export class ZoomWindowTool implements Tool {
   readonly id = 'zoomWindow';
   readonly title = 'Zoom Window';
   readonly cursor = 'crosshair';
+  readonly role = 'camera' as const;
   private ctx: ToolContext | null = null;
   private a: Vec2 | null = null;
   private b: Vec2 | null = null;
+
+  hasPendingWork(): boolean {
+    return this.a !== null;
+  }
 
   activate(ctx: ToolContext): void {
     this.ctx = ctx;

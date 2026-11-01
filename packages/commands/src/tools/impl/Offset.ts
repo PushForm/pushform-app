@@ -79,6 +79,10 @@ export class OffsetTool implements Tool {
     return this.overlaps;
   }
 
+  hasPendingWork(): boolean {
+    return this.state.kind !== 'idle';
+  }
+
   activate(ctx: ToolContext): void {
     this.ctx = ctx;
     this.state = IDLE;

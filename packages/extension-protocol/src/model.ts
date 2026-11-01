@@ -40,14 +40,18 @@ const instancePath = z.array(id).max(64).describe('Instance ids from the model d
 export const MODEL_ENTITY_KINDS = ['instance', 'body', 'face', 'sketchEdge', 'sketchFace', 'guide', 'text', 'dimension'] as const;
 export type ModelEntityKind = (typeof MODEL_ENTITY_KINDS)[number];
 
+const refPath = instancePath.optional()
+  .describe('The instance path of the entity\'s container, as reads report it. Default: the container of the request. Selecting and framing accept entities of any container; a batch\'s operations accept only its own.');
+
 /**
- * An entity of the batch's container. A face is a face of a body: `id` is the body and `faceId` the face.
- * `"$name"` refers to an instance, body or other entity created earlier in the batch.
+ * An entity of the batch's container, or, with `path`, of the container at that instance path. A face is a face of
+ * a body: `id` is the body and `faceId` the face. `"$name"` refers to an instance, body or other entity created
+ * earlier in the batch.
  */
 export const modelRefSchema = z.union([
   z.string().regex(LOCAL_REFERENCE),
-  z.object({ kind: z.enum(['instance', 'body', 'sketchEdge', 'sketchFace', 'guide', 'text', 'dimension']), id }),
-  z.object({ kind: z.literal('face'), id: id.describe('The body.'), faceId: id }),
+  z.object({ kind: z.enum(['instance', 'body', 'sketchEdge', 'sketchFace', 'guide', 'text', 'dimension']), id, path: refPath }),
+  z.object({ kind: z.literal('face'), id: id.describe('The body.'), faceId: id, path: refPath }),
 ]);
 export type ModelRefInput = z.infer<typeof modelRefSchema>;
 const refs = z.array(modelRefSchema).min(1).max(1000);
@@ -273,6 +277,6 @@ export const MODEL_TOOLS = {
   },
   view: {
     name: 'model_view',
-    description: 'Change what the requester sees, with no undo entry: set the camera (exact, or framed around the model, the selection or entities from a view direction), go to a scene or the next or previous one, or play and stop the animation. Returns the camera, the active scene and whether the animation is playing. Fails with unavailable where there is no viewport.',
+    description: 'Change what the requester sees, with no undo entry: set the camera (exact, or framed around the model, the selection or entities from a view direction; an entity of another container is named with its path), go to a scene or the next or previous one, or play and stop the animation. Returns the camera, the active scene and whether the animation is playing. Fails with unavailable where there is no viewport.',
   },
 } as const;

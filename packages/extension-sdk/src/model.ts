@@ -12,13 +12,15 @@ export type ModelVec3 = [number, number, number];
 export type ModelEntityKind = 'instance' | 'body' | 'face' | 'sketchEdge' | 'sketchFace' | 'guide' | 'text' | 'dimension';
 
 /**
- * An entity of the container being edited, as requests name it. A face is a face of a body: `id` is the body and
- * `faceId` the face. `"$name"` refers to an entity created earlier in the same batch. The refs reads return
- * (`ModelRef`) are accepted too; their `path` is ignored.
+ * An entity, as requests name it. Without `path` it is an entity of the container being edited; with one, an entity
+ * of the group or component at that instance path, as reads report it, so the refs reads return (`ModelRef`) are
+ * accepted as they are. `context.selection.set` and `frame` take entities of any container; a batch's operations
+ * take only entities of the batch's own container. A face is a face of a body: `id` is the body and `faceId` the
+ * face. `"$name"` refers to an entity created earlier in the same batch.
  */
 export type ModelRefInput = string
-  | { kind: 'instance' | 'body' | 'sketchEdge' | 'sketchFace' | 'guide' | 'text' | 'dimension'; id: number }
-  | { kind: 'face'; id: number; faceId: number };
+  | { kind: 'instance' | 'body' | 'sketchEdge' | 'sketchFace' | 'guide' | 'text' | 'dimension'; id: number; path?: number[] | undefined }
+  | { kind: 'face'; id: number; faceId: number; path?: number[] | undefined };
 
 /** An entity as reads report it: the instance path of its container, its kind and id (and face id for faces). */
 export interface ModelRef { path: number[]; kind: ModelEntityKind; id: number; faceId?: number }
@@ -205,6 +207,19 @@ export interface DocumentUnitsEvent {
   /** The handle of the document whose units these are. */
   document: string;
   units: DocumentUnits;
+}
+
+/** What `context.document.info` returns: the document as the user sees it. */
+export interface DocumentInfo {
+  /** The document's name as its tab shows it: the file name without its extension, or an untitled name. */
+  name: string;
+  units: DocumentUnits;
+}
+
+/** Told when a document's name or units change, or the extension starts acting on another document. */
+export interface DocumentInfoEvent extends DocumentInfo {
+  /** The handle of the document this describes. */
+  document: string;
 }
 
 /** Told when a document the extension subscribed to changes. */

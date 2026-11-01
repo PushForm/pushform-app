@@ -21,7 +21,8 @@ const manifest = (overrides: Record<string, unknown> = {}): ExtensionManifest =>
 
 const call = (overrides: Partial<ServiceCall> = {}): ServiceCall => ({
   signal: new AbortController().signal, extensionId: 'com.example.prices', generation: 1,
-  document: () => { throw new Error('no documents'); }, progress: () => {}, userActivated: () => true, ...overrides,
+  document: () => { throw new Error('no documents'); }, currentDocument: () => { throw new Error('no documents'); },
+  progress: () => {}, userActivated: () => true, ...overrides,
 });
 const failure = async (promise: unknown): Promise<ExtensionError> => {
   try { await promise; } catch (error) { if (error instanceof ExtensionError) return error; throw error; }

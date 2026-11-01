@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import {
-  ExtensionError, MESSAGE_RATE_LIMITS, RUNTIME_PROTOCOL_VERSION, TokenBucket, measureMessage, methodPermission,
+  ExtensionError, HOST_EVENT_TARGET, MESSAGE_RATE_LIMITS, RUNTIME_PROTOCOL_VERSION, TokenBucket, measureMessage, methodPermission,
   runtimeMessageSchema, serviceAvailable, type DeactivationReason, type ExtensionErrorData, type ExtensionManifest,
   type ExtensionPermission, type ExtensionServiceName, type RuntimeMessage,
 } from '@pushform/extension-protocol';
@@ -27,10 +27,16 @@ export interface ServiceCall {
   readonly extensionId: string;
   readonly generation: number;
   /**
-   * The document a handle from the input names. Throws `permission.denied` for anything this session did not issue,
-   * including handles of closed documents, so services never resolve a document id the extension supplied itself.
+   * The document a handle from the input names. Throws `document.closed` for a handle this session issued whose
+   * document has closed, and `permission.denied` for anything else it did not issue, so services never resolve a
+   * document id the extension supplied itself.
    */
   document(handle: unknown): string;
+  /**
+   * The document of the extension's latest invocation that acts on one, for calls that name no handle. Throws
+   * `document.closed` when that document has closed, and `unavailable` when no invocation acted on a document yet.
+   */
+  currentDocument(): string;
   /**
    * Reports progress of this call to the extension: a fraction from 0 to 1 (or null when only a partial result is
    * new), and optionally the best partial result so far. Dropped once the call has ended or been cancelled.
@@ -125,6 +131,11 @@ export interface ExtensionSessionOptions {
    * If it fails, activation fails and no extension code runs.
    */
   readonly beforeActivate?: () => Promise<void>;
+  /**
+   * Told when an invocation starts acting on a different document than the latest one did, just before the runtime
+   * receives the invocation, so the host can tell the extension about the document first.
+   */
+  readonly onDocument?: (documentId: string) => void;
 }
 
 export interface InvokeOptions {
@@ -142,6 +153,8 @@ export interface InvokeOptions {
 }
 
 let nextGeneration = 1;
+/** Handles of closed documents remembered, so a late call learns the document closed rather than that it never existed. */
+const CLOSED_HANDLES = 256;
 const randomHandle = (): string => `doc_${crypto.randomUUID().replaceAll('-', '')}`;
 
 interface PendingInvocation {
@@ -157,6 +170,11 @@ export class ExtensionSession {
   readonly generation: number;
   private readonly documentOfHandle = new Map<string, string>();
   private readonly handleOfDocument = new Map<string, string>();
+  private readonly closedHandles = new Set<string>();
+  /** The document of the latest invocation that acted on one. */
+  private lastDocument: string | null = null;
+  private lastDocumentClosed = false;
+  private readonly onDocument: ((documentId: string) => void) | undefined;
   private readonly port: RuntimePort;
   private readonly services: ServiceImplementations;
   private readonly limits: SessionLimits;
@@ -196,6 +214,7 @@ export class ExtensionSession {
     this.onFailure = options.onFailure;
     this.onActivated = options.onActivated;
     this.beforeActivate = options.beforeActivate;
+    this.onDocument = options.onDocument;
     this.contributions = new Set(options.manifest.contributions.map((c) => c.id));
     const now = performance.now();
     this.messageBudget = new TokenBucket(this.limits.messageBurst, this.limits.messagesPerSecond, now);
@@ -265,6 +284,11 @@ export class ExtensionSession {
     if (options.userAction) this.noteUserAction();
     const scopes = options.document === undefined ? options.scopes ?? [] : [...(options.scopes ?? []), `document:${options.document}`];
     const document = options.document === undefined ? undefined : this.openDocument(options.document);
+    if (options.document !== undefined && (options.document !== this.lastDocument || this.lastDocumentClosed)) {
+      this.lastDocument = options.document;
+      this.lastDocumentClosed = false;
+      try { this.onDocument?.(options.document); } catch { /* telling the extension about the document is best effort */ }
+    }
     return new Promise((resolve, reject) => {
       const onAbort = () => this.cancelInvocation(invocation);
       options.signal?.addEventListener('abort', onAbort, { once: true });
@@ -285,6 +309,15 @@ export class ExtensionSession {
     // Events come only from the user's input on the extension's own interface.
     this.noteUserAction();
     this.port.post({ ...event, type: 'event' });
+  }
+
+  /**
+   * Sends an event of the host's own to the runtime, such as a document change. Unlike `postEvent` it is not the
+   * user's input and counts as no user gesture. Dropped unless the extension is active.
+   */
+  notify(component: string, event: string, payload: Record<string, unknown>): void {
+    if (this.currentState !== 'active') return;
+    this.port.post({ ...payload, type: 'event', target: HOST_EVENT_TARGET, component, event });
   }
 
   /** Records that the user just acted on this extension. */
@@ -314,14 +347,25 @@ export class ExtensionSession {
     if (handle !== undefined) {
       this.handleOfDocument.delete(documentId);
       this.documentOfHandle.delete(handle);
+      this.closedHandles.add(handle);
+      if (this.closedHandles.size > CLOSED_HANDLES) this.closedHandles.delete(this.closedHandles.values().next().value!);
     }
+    if (documentId === this.lastDocument) this.lastDocumentClosed = true;
     this.cancelScope(`document:${documentId}`);
   }
 
   private resolveDocument(handle: unknown): string {
     const documentId = typeof handle === 'string' ? this.documentOfHandle.get(handle) : undefined;
-    if (documentId === undefined) throw new ExtensionError('permission.denied', 'The document handle is not valid for this extension; the document may have closed.');
-    return documentId;
+    if (documentId !== undefined) return documentId;
+    if (typeof handle === 'string' && this.closedHandles.has(handle)) throw new ExtensionError('document.closed', 'The document has closed.');
+    throw new ExtensionError('permission.denied', 'The document handle is not valid for this extension.');
+  }
+
+  private currentDocument(): string {
+    if (this.lastDocument === null)
+      throw new ExtensionError('unavailable', 'No document yet: call this from a command or panel that acts on a document, or pass its handle.');
+    if (this.lastDocumentClosed || !this.handleOfDocument.has(this.lastDocument)) throw new ExtensionError('document.closed', 'The document has closed.');
+    return this.lastDocument;
   }
 
   /**
@@ -516,6 +560,7 @@ export class ExtensionSession {
       const result = await implementation(message.input, {
         signal: controller.signal, extensionId: this.manifest.id, generation: this.generation,
         document: (handle) => this.resolveDocument(handle),
+        currentDocument: () => this.currentDocument(),
         userActivated: (withinMs = USER_ACTIVATION_MS) => performance.now() - this.lastUserAction <= withinMs,
         progress: (value, partial) => {
           if (this.requests.get(message.id) !== controller || controller.signal.aborted) return;

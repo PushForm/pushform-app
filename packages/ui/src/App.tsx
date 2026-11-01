@@ -27,6 +27,7 @@ import { browserRunsExtensions, createBrowserExtensionPlatform, type ExtensionRu
 import { ExtensionRuns } from './extensions/ExtensionActivity';
 import { ExtensionPrintDialog, PrintPrompts } from './extensions/extensionPrint';
 import { isExtensionPanelId } from './extensions/extensionContributions';
+import { sessionExtensionDocuments } from './extensions/extensionDocuments';
 import { useExtensionWorkspace } from './extensions/useExtensionWorkspace';
 import { markDesktopShell, syncDesktopTitleBar } from './desktopShell';
 import { allowOpeningDocument, desktopUpdates } from './desktopUpdates';
@@ -209,7 +210,10 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
   const [recents, setRecents] = useState(() => readCloudRecents(ownerId));
   /** This account's extensions on this device; nothing of theirs runs until one of their contributions is used. */
   const [printPrompts] = useState(() => new PrintPrompts());
-  const [extensions] = useState(() => extensionRuntime ? createBrowserExtensionPlatform({ ownerId, sources: extensionRuntime, printPrompts }) : null);
+  // The platform exists before the document session; extensions reach the session's tabs once it does.
+  const sessionRef = useRef<DocumentSession | null>(null);
+  const [extensions] = useState(() => extensionRuntime
+    ? createBrowserExtensionPlatform({ ownerId, sources: extensionRuntime, printPrompts, documents: sessionExtensionDocuments(() => sessionRef.current) }) : null);
   const [extensionRuns] = useState(() => extensions ? new ExtensionRuns(extensions) : null);
   const [extensionsOpen, setExtensionsOpen] = useState(false);
   useEffect(() => {
@@ -245,6 +249,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     ),
   );
   const [commonsIntent, setCommonsIntent] = useState(() => commons?.intent ?? null);
+  sessionRef.current = session;
   const [home, setHome] = useState(() => {
     if (initialScreen) return initialScreen === 'home';
     if (given || !session.restoredForRefresh) return true;

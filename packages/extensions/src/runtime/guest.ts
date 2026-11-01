@@ -2,7 +2,7 @@
 // Copyright 2026 PushForm contributors
 // Only the dependency-free core: this file runs inside every extension runtime, where size matters.
 import {
-  EXTENSION_SERVICES, ExtensionError, MESSAGE_RATE_LIMITS, RUNTIME_PROTOCOL_VERSION, TokenBucket, isHostMessage,
+  EXTENSION_SERVICES, ExtensionError, HOST_EVENT_TARGET, MESSAGE_RATE_LIMITS, RUNTIME_PROTOCOL_VERSION, TokenBucket, isHostMessage,
   methodPermission, serviceAvailable, servicePermissions, type ExtensionErrorData, type ExtensionServiceName, type ServiceAccess,
 } from '@pushform/extension-protocol/runtime-core';
 import type { ExtensionPermission, HostMessage } from '@pushform/extension-protocol';
@@ -37,6 +37,18 @@ export type ContributionHandler = (params: unknown, invocation: InvocationContex
 
 /** A user event on an interface the extension mounted: the target, the component, the event and its payload. */
 export type UiEventHandler = (event: { target: string; component: string; event: string } & Record<string, unknown>) => void;
+
+/** An event the host sends about a document, such as its units changing; the payload depends on the event. */
+export type HostEventHandler = (event: Record<string, unknown>) => void;
+
+/**
+ * Listeners the guest adds to a service for host events: the method name, and the host event's component and name.
+ * Kept here, not in the runtime core, as only this file needs them.
+ */
+const HOST_LISTENERS: Partial<Record<ExtensionServiceName, { method: string; component: string; event: string }>> = {
+  document: { method: 'onUnitsChange', component: 'document', event: 'units' },
+  model: { method: 'onChange', component: 'model', event: 'change' },
+};
 
 type ServiceProxy = Readonly<Record<string, (input?: unknown, options?: CallOptions) => Promise<unknown>>>;
 
@@ -85,6 +97,7 @@ export async function startGuest(port: RuntimePort, loadMain: () => Promise<unkn
   const handlers = new Map<string, ContributionHandler>();
   const invocations = new Map<number, AbortController>();
   const uiHandlers = new Set<UiEventHandler>();
+  const hostHandlers = new Map<string, Set<HostEventHandler>>();
   const lifetime = new AbortController();
   let contributions = new Set<string>();
   let state: 'loaded' | 'activating' | 'active' | 'stopped' = 'loaded';
@@ -177,6 +190,17 @@ export async function startGuest(port: RuntimePort, loadMain: () => Promise<unkn
           if (typeof handler !== 'function') throw new ExtensionError('validation.failed', 'onEvent needs a function.');
           uiHandlers.add(handler);
           return () => uiHandlers.delete(handler);
+        };
+      }
+      const listener = HOST_LISTENERS[service];
+      if (listener) {
+        // Host events about documents; returns a function that stops listening.
+        (methods as Record<string, unknown>)[listener.method] = (handler: HostEventHandler) => {
+          if (typeof handler !== 'function') throw new ExtensionError('validation.failed', `${listener.method} needs a function.`);
+          const key = `${listener.component}.${listener.event}`;
+          const set = hostHandlers.get(key) ?? new Set<HostEventHandler>();
+          hostHandlers.set(key, set.add(handler));
+          return () => set.delete(handler);
         };
       }
       context[service] = Object.freeze(methods) satisfies ServiceProxy;
@@ -287,6 +311,17 @@ export async function startGuest(port: RuntimePort, loadMain: () => Promise<unkn
       case 'event': {
         if (state !== 'active') return;
         const { type: _type, ...event } = message as unknown as { type: string; target: string; component: string; event: string };
+        if (event.target === HOST_EVENT_TARGET) {
+          const { target: _target, component, event: name, ...payload } = event;
+          for (const handler of hostHandlers.get(`${component}.${name}`) ?? []) {
+            try {
+              handler(payload);
+            } catch {
+              // As for interface events, one failing handler must not stop the others.
+            }
+          }
+          return;
+        }
         for (const handler of uiHandlers) {
           try {
             handler(event);

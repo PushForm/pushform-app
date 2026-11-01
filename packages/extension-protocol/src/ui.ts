@@ -317,13 +317,20 @@ export type UiEvent =
 /** Requests of the `ui` service: mount or replace the tree of a target, or remove it. */
 export const uiMountSchema = z.strictObject({ target: z.string().min(1).max(200), seq: z.number().int().nonnegative(), tree: z.unknown() });
 export const uiUnmountSchema = z.strictObject({ target: z.string().min(1).max(200) });
+/** Pages one print request may produce. */
+export const UI_PRINT_MAX_PAGES = 500;
 /**
- * Prints, or saves as PDF, vector views on screen: one page per view, at a page size in meters (20 mm to 2 m a side).
- * The user chooses in PushForm's own dialog; the extension learns only the outcome.
+ * Prints, or saves as PDF, components on screen, in order, at a page size in meters (20 mm to 2 m a side; landscape
+ * when wider than tall). A `vector` view is one page. `table`, `text` and `divider` components, and `stack`s holding
+ * only printable components, flow onto as many pages as they need, under the title and with page numbers. Any other
+ * component is refused. The user chooses in PushForm's own dialog; the extension learns only the outcome.
  */
 export const uiPrintSchema = z.strictObject({ target: z.string().min(1).max(200), components: z.array(id).min(1).max(200),
   page: z.strictObject({ width: z.number().min(0.02).max(2), height: z.number().min(0.02).max(2) }),
   purpose: z.string().trim().min(1).max(200), title: z.string().trim().min(1).max(200).optional() });
+export type UiPrintRequest = z.infer<typeof uiPrintSchema>;
+/** Components `ui.print` accepts, directly or inside a stack. */
+export const UI_PRINTABLE = ['vector', 'table', 'text', 'divider', 'stack'] as const satisfies readonly UiNode['type'][];
 /** Exports a vector view on screen as SVG or DXF, written where the user chooses. */
 export const uiExportSchema = z.strictObject({ target: z.string().min(1).max(200), component: id, format: z.enum(['svg', 'dxf']),
   purpose: z.string().trim().min(1).max(200), suggestedName: z.string().max(200).optional() });

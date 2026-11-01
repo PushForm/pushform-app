@@ -121,7 +121,11 @@ describe('ui.print', () => {
     expect(requests[0]!.pages).toHaveLength(2);
     outcome = null;
     await expect(print(input)).rejects.toMatchObject({ code: 'cancelled' });
-    await expect(print({ ...input, components: ['r'] })).rejects.toThrow(/not a vector view/);
+    outcome = 'printed';
+    // A stack of vector views prints each of them.
+    expect(await print({ ...input, components: ['r'] })).toEqual({ outcome: 'printed' });
+    expect(requests.at(-1)!.pages).toHaveLength(2);
+    await expect(print({ ...input, components: ['nope'] })).rejects.toThrow(/not shown/);
     await expect(print({ ...input, page: { width: 5, height: 1 } })).rejects.toMatchObject({ code: 'validation.failed' });
     await expect(vectorPrintServices(manifest, () => ui, null)['ui.print']!(input, {} as never)).rejects.toMatchObject({ code: 'unavailable' });
     expect(methodPermission('ui', 'print')).toBe('file.export');

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import type { UnitSettings } from '@pushform/core';
 import { commandsDocument, documentUnitsOf, type ExtensionDocument, type ExtensionDocuments } from '@pushform/extensions';
 import type { DocumentSession, DocumentTab } from '../session';
 import { unitsFor } from './useExtensionWorkspace';
@@ -19,6 +20,14 @@ export function sessionExtensionDocuments(session: () => DocumentSession | null)
       if (!document) documents.set(tab, document = tabDocument(tab));
       return document;
     },
+  };
+}
+
+/** The units extension panels show quantities in for an open tab, by tab id; null when it is not open. */
+export function sessionExtensionUnits(session: () => DocumentSession | null): (documentId: string) => UnitSettings | null {
+  return (documentId) => {
+    const tab = session()?.tabs.find((t) => t.id === documentId);
+    return tab ? unitsFor(tab) : null;
   };
 }
 

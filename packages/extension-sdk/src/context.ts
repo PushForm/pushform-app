@@ -4,7 +4,7 @@ import type {
   DocumentUnits, DocumentUnitsEvent, ModelBatch, ModelBatchResult, ModelChangeEvent, ModelDocumentSnapshot, ModelQuery, ModelQueryResult,
   ModelRef, ModelRefInput,
 } from './model.ts';
-import type { UiEventOnTarget, UiNode } from './ui.ts';
+import type { UiEventOnTarget, UiNode, UiPrintRequest } from './ui.ts';
 
 /**
  * What an extension's entry module receives. The module exports `activate(context)` and, optionally,
@@ -53,11 +53,12 @@ export interface UiService {
    */
   export(input: { target: string; component: string; format: 'svg' | 'dxf'; purpose: string; suggestedName?: string }, options?: CallOptions): Promise<{ name: string }>;
   /**
-   * Prints vector views that are on screen, one page each, at `page` size in meters, or saves them as a PDF, as the
-   * user chooses in PushForm's dialog, which states `purpose`. A view smaller than the page prints at its real size,
-   * centered; a larger one is scaled down to fit. Needs `file.export`; cancelling fails with `cancelled`.
+   * Prints components that are on screen at `page` size in meters, or saves them as a PDF, as the user chooses in
+   * PushForm's dialog, which states `purpose`. Vector views print one page each: at their real size, centered, when
+   * they fit, and scaled down to fit when not. Tables and text flow over as many pages as they need; see
+   * `UiPrintRequest`. Needs `file.export`; cancelling fails with `cancelled`.
    */
-  print(input: { target: string; components: string[]; page: { width: number; height: number }; purpose: string; title?: string }, options?: CallOptions): Promise<{ outcome: 'printed' | 'saved' }>;
+  print(input: UiPrintRequest, options?: CallOptions): Promise<{ outcome: 'printed' | 'saved' }>;
   /** Listens for user input on mounted interfaces; returns a function that stops listening. */
   onEvent(handler: (event: UiEventOnTarget) => void): () => void;
 }

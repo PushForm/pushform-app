@@ -287,6 +287,8 @@ export class ExtensionPlatform {
       this.verifications.set(record.files, Promise.resolve({ manifest: record.manifest, integrity: record.integrity, contentHash: record.contentHash }));
     this.unverified.delete(record.id);
     this.failures.delete(record.id);
+    // Panels open on the replaced release run the new one, as after a restart.
+    if (previous) this.generations.set(record.id, (this.generations.get(record.id) ?? 0) + 1);
     const name = record.manifest.name;
     if (!previous) this.note(record.id, { type: 'installed', name, version: record.version, integrity: record.integrity });
     else if (previous.version === record.version) this.note(record.id, { type: 'reloaded', name, version: record.version });

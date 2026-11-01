@@ -89,6 +89,20 @@ describe('side-loading', () => {
     expect(reload.replaces?.version).toBe('1.0.0');
     expect(reload.newPermissions).toEqual(['file.export']);
   });
+
+  it('a reload stops the running release and lets open panels run the new one', async () => {
+    const { platform, started, terminated } = setup({ 'com.example.stairs': { activate(c: { commands: { register(i: string, h: () => unknown): void } }) {
+      c.commands.register('com.example.stairs.make', () => 'made');
+    } } });
+    await platform.install(await platform.sideload(await archive()), []);
+    expect(platform.state('com.example.stairs')!.generation).toBe(0);
+    await platform.invoke('com.example.stairs', 'com.example.stairs.make');
+    await platform.install(await platform.sideload(await archive({ version: '1.0.1' })), []);
+    expect(terminated).toEqual(['com.example.stairs']);
+    expect(platform.state('com.example.stairs')).toMatchObject({ run: 'stopped', generation: 1, record: { version: '1.0.1' } });
+    expect(await platform.invoke('com.example.stairs', 'com.example.stairs.make')).toBe('made');
+    expect(started).toEqual(['com.example.stairs', 'com.example.stairs']);
+  });
 });
 
 describe('running', () => {

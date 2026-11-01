@@ -222,12 +222,77 @@ describe('fillet.apply / chamfer.apply', () => {
     expect(body(id).props.volume).toBeCloseTo(1 - 2 * 0.08, 6);
   });
 
-  it('refuses three picked edges meeting at a corner', async () => {
+  it('refuses to fillet three picked edges meeting at a corner', async () => {
     const { registry, body } = setupEdgeBlend();
     const id = addBox(registry);
     const b = body(id);
     const keys = [edgeAt(b, [1, 1, 1], [0, 1, 1]).key, edgeAt(b, [1, 1, 1], [1, 0, 1]).key, edgeAt(b, [1, 1, 1], [1, 1, 0]).key];
     await expect(run(registry, 'fillet', id, keys, 0.1)).rejects.toThrow(/three or more picked edges/);
+  });
+
+  // Three chamfers of distance d meeting at a right-angled corner overlap there by 3·d³/3 pairwise
+  // and d³/4 all together, so the corner gives back 3·d³/3 − d³/4 = 0.75·d³ of the removed volume.
+  it('chamfers three picked edges meeting at a corner, the bevels cutting into each other', async () => {
+    const { registry, body } = setupEdgeBlend();
+    const id = addBox(registry);
+    const b0 = body(id);
+    const keys = [edgeAt(b0, [1, 1, 1], [0, 1, 1]).key, edgeAt(b0, [1, 1, 1], [1, 0, 1]).key, edgeAt(b0, [1, 1, 1], [1, 1, 0]).key];
+    const d = 0.2;
+    const res = await run(registry, 'chamfer', id, keys, d);
+    const b = body(id);
+    expect(meshTopologyProblems(b.mesh)).toEqual([]);
+    expect(b.props.volume).toBeCloseTo(1 - (3 * (d * d) / 2 - 0.75 * d ** 3), 6);
+    expect(res.faceIds).toHaveLength(3);
+    expect(b.faces.size).toBe(9);
+  });
+
+  it('chamfers all twelve edges of a box', async () => {
+    const { registry, body } = setupEdgeBlend();
+    const id = addBox(registry);
+    const keys = [...body(id).edges.keys()];
+    expect(keys).toHaveLength(12);
+    const d = 0.2;
+    const res = await run(registry, 'chamfer', id, keys, d);
+    const b = body(id);
+    expect(meshTopologyProblems(b.mesh)).toEqual([]);
+    expect(b.props.volume).toBeCloseTo(1 - (12 * (d * d) / 2 - 8 * 0.75 * d ** 3), 6);
+    expect(res.faceIds).toHaveLength(12);
+    expect(b.faces.size).toBe(18);
+  });
+
+  it('chamfers a mitred chain that ends at a corner of three picked edges', async () => {
+    const { registry, body } = setupEdgeBlend();
+    const id = addBox(registry);
+    const b0 = body(id);
+    const keys = [
+      edgeAt(b0, [0, 0, 1], [1, 0, 1]).key,
+      edgeAt(b0, [1, 0, 1], [1, 1, 1]).key,
+      edgeAt(b0, [1, 1, 1], [0, 1, 1]).key,
+      edgeAt(b0, [0, 1, 1], [0, 0, 1]).key,
+      edgeAt(b0, [0, 0, 1], [0, 0, 0]).key,
+    ];
+    const d = 0.2;
+    await run(registry, 'chamfer', id, keys, d);
+    const b = body(id);
+    expect(meshTopologyProblems(b.mesh)).toEqual([]);
+    // five edge strips, three mitred corners that overlap by d³/3 each and one three-edge corner
+    expect(b.props.volume).toBeCloseTo(1 - (5 * (d * d) / 2 - 3 * (d ** 3 / 3) - 0.75 * d ** 3), 6);
+  });
+
+  it('chamfers the three inside edges of a notched corner by adding material', async () => {
+    const { registry, root, body } = setupEdgeBlend();
+    const a = addBox(registry, [0, 0, 0], [2, 2, 2]);
+    const notch = addBox(registry, [1, 1, 1], [3, 3, 3]);
+    await registry.execute('solids.subtract', { a: { kind: 'body', path: [], id: notch }, b: { kind: 'body', path: [], id: a } });
+    const id = [...root().bodies.keys()][0]! as number;
+    const b0 = body(id);
+    expect(b0.props.volume).toBeCloseTo(7, 6);
+    const keys = [edgeAt(b0, [1, 1, 1], [2, 1, 1]).key, edgeAt(b0, [1, 1, 1], [1, 2, 1]).key, edgeAt(b0, [1, 1, 1], [1, 1, 2]).key];
+    const d = 0.2;
+    await run(registry, 'chamfer', id, keys, d);
+    const b = body(id);
+    expect(meshTopologyProblems(b.mesh)).toEqual([]);
+    expect(b.props.volume).toBeCloseTo(7 + 3 * (d * d) / 2 - 0.75 * d ** 3, 6);
   });
 
   it('refuses soft edges', async () => {

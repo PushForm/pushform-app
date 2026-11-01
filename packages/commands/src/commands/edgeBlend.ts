@@ -38,8 +38,11 @@ import { draftContainerAt, requireContextPath } from './context';
  * chamfer triangle) swept along the edge. A convex edge's prism is cut from the solid, a concave
  * edge's prism is added. Where two picked edges meet, both prisms end on the mitre plane between
  * them and share its vertices; a prism that ends at an unpicked corner ends on the third face
- * there. The kernel runs `body − cut + add` in one op (`edgeBlend`), and the fillet faces of every
- * chain of picked edges become one smooth surface with soft, smooth edges between them.
+ * there. A chamfer may also bevel three picked edges that meet at a corner of three faces: each of
+ * their prisms ends on the third face as at an unpicked corner, and the union of the overlapping
+ * prisms makes the chamfer planes cut into each other there. The kernel runs `body − cut + add` in
+ * one op (`edgeBlend`), and the fillet faces of every chain of picked edges become one smooth
+ * surface with soft, smooth edges between them.
  */
 
 export type EdgeBlendKind = 'fillet' | 'chamfer';
@@ -414,8 +417,19 @@ export function planEdgeBlend(state: DocumentState, kind: EdgeBlendKind, params:
   edges.forEach((e, i) => {
     for (const v of [e.i0, e.i1]) (incident.get(v) ?? incident.set(v, []).get(v)!).push(i);
   });
-  for (const list of incident.values()) {
-    if (list.length > 2) fail('corner', `${title} cannot round a corner where three or more picked edges meet.`);
+  // Chamfer corners: three picked edges meeting where three faces meet. Each edge ends freely on
+  // the third face there and the chamfer planes cut into each other; no mitre chain runs through.
+  const corners = new Set<number>();
+  for (const [v, list] of incident) {
+    if (list.length <= 2) continue;
+    if (kind === 'fillet') fail('corner', `${title} cannot round a corner where three or more picked edges meet.`);
+    if (list.length !== 3 || facesAt(body, vertices[v]!).size !== 3) {
+      fail('corner', `${title} can only bevel picked edges that meet three at a corner where three faces meet.`);
+    }
+    if (list.some((i) => edges[i]!.convex !== edges[list[0]!]!.convex)) {
+      fail('corner', `${title} cannot bevel a corner where outside and inside picked edges meet.`);
+    }
+    corners.add(v);
   }
   const reverse = (e: EdgeInfo): void => {
     [e.v0, e.v1] = [e.v1, e.v0];
@@ -434,17 +448,18 @@ export function planEdgeBlend(state: DocumentState, kind: EdgeBlendKind, params:
       if (e.i0 !== at) reverse(e);
       chain.push(e);
       at = e.i1;
-      const next = (incident.get(at) ?? []).find((j) => j !== cur && !used.has(j));
+      const next = corners.has(at) ? undefined : (incident.get(at) ?? []).find((j) => j !== cur && !used.has(j));
       if (next === undefined) break;
       cur = next;
     }
-    const closed = chain.length > 1 && chain[chain.length - 1]!.i1 === chain[0]!.i0;
+    const closed = chain.length > 1 && chain[chain.length - 1]!.i1 === chain[0]!.i0 && !corners.has(chain[0]!.i0);
     chains.push({ edges: chain, closed });
   };
+  const chainEnd = (v: number): boolean => corners.has(v) || (incident.get(v) ?? []).length === 1;
   edges.forEach((e, i) => {
     if (used.has(i)) return;
-    if ((incident.get(e.i0) ?? []).length === 1) walk(i, e.i0);
-    else if ((incident.get(e.i1) ?? []).length === 1) walk(i, e.i1);
+    if (chainEnd(e.i0)) walk(i, e.i0);
+    else if (chainEnd(e.i1)) walk(i, e.i1);
   });
   edges.forEach((e, i) => {
     if (!used.has(i)) walk(i, e.i0); // closed loops

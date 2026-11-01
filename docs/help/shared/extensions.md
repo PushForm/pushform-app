@@ -32,6 +32,10 @@ Choose **Install** to allow exactly what is listed, or **Cancel** to install not
 
 An extension's panel gets its own button on the left menu bar, next to Files, AI Chat and the Object browser. Hover over it to see the panel and extension name. Choose it to open the panel; choose it again or the panel's close button to close it. The panel header always names the extension, so you can tell its content from PushForm's own. A panel appears only in the editors the extension supports, and PushForm reopens the last extension panel you had open in that editor.
 
+A panel with wide tables or drawings can be opened in a large window over the editor: choose **Open in window** in the panel header. The window shows the same panel with the same header, and the side panel keeps a short note while it is open. Choose **Return to side panel**, or press Escape, to bring it back. Some extensions open their panel in the window to begin with. Once you move a panel either way, PushForm remembers your choice for that editor.
+
+In a narrow side panel, a panel's tabs and buttons wrap onto more rows, and its tables scroll sideways. A drawing without a set height is sized to fit the panel's width.
+
 Extension commands appear in command search with the extension's name beside them. Typing the extension's name lists its commands. When something is selected in Modeling, right-click to find the extension's actions in a submenu named after the extension.
 
 ## Cancel an extension command that is running

@@ -13,7 +13,8 @@ import { extensionPanelId, extensionPanels, isExtensionPanelId, syncExtensionCom
 /**
  * What enabled extensions add to the open editor: a side rail tab per panel that supports the editor, the panel shown
  * in the side dock, their commands in the document's registry (and so in command search and the context menu), and
- * the status of commands that are running. Which extension panel is open is remembered per account and editor.
+ * the status of commands that are running. Which extension panel is open is remembered per account and editor, and
+ * so is whether the user moved a panel into its window or back to the dock.
  */
 export function useExtensionWorkspace({ platform, runs, ownerId, active, openTabs, sidePanel, openPanel, closePanel }: {
   readonly platform: ExtensionPlatform | null;
@@ -66,15 +67,26 @@ export function useExtensionWorkspace({ platform, runs, ownerId, active, openTab
     writeStorage(storageKey, panel?.id ?? null);
   }, [storageKey, panel?.id]);
 
-  const railItems = panels.map((p): SideRailItem => ({ id: extensionPanelId(p.id), label: `${p.name} (${p.extensionName})`, icon: <LuPuzzle aria-hidden="true" /> }));
+  const railItems = panels.map((p): SideRailItem => ({ id: extensionPanelId(p.id), ...railLabel(p.name, p.extensionName), icon: <LuPuzzle aria-hidden="true" /> }));
   return {
     railItems,
     shown: !!panel,
     panel: platform && panel && active
-      ? <ExtensionPanel key={`${panel.id}:${active.id}`} platform={platform} entry={panel} units={unitsFor(active)} documentId={active.id} onClose={closePanel} />
+      ? <ExtensionPanel key={`${panel.id}:${active.id}`} platform={platform} entry={panel} units={unitsFor(active)} documentId={active.id} onClose={closePanel}
+          presentationKey={editor ? `pushform:extensions:presentation:${ownerId}:${editor}:${panel.id}` : undefined} />
       : null,
     activity: runs && platform ? <ExtensionActivity runs={runs} platform={platform} /> : null,
   };
+}
+
+/**
+ * The side rail's names for an extension panel: the panel and the extension it comes from, or just the panel's name
+ * when the two are the same, so the rail never says "Cut List (Cut List)". Assistive technology still hears that the
+ * panel comes from an extension.
+ */
+export function railLabel(panel: string, extension: string): { label: string; accessibleLabel: string } {
+  const same = panel.trim().toLocaleLowerCase() === extension.trim().toLocaleLowerCase();
+  return same ? { label: panel, accessibleLabel: `${panel} extension` } : { label: `${panel} (${extension})`, accessibleLabel: `${panel}, from ${extension}` };
 }
 
 /** The units extension panels show quantities in: the model's own, or the closest to a Layout document's. */

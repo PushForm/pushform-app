@@ -96,9 +96,23 @@ container open in the editor.
 ## Interfaces
 
 Interfaces are trees of PushForm's own components: `stack`, `divider`, `text`, `message`, `progress`, `button`,
-`textField`, `numberField`, `checkbox`, `choice`, `colorField`, `tabs`, `tree` and `table`. Send the whole tree each
-time, with a higher `seq`; a tree that is invalid or too large is refused and the previous one stays on screen. There
-is no HTML, CSS or script.
+`textField`, `numberField`, `checkbox`, `choice`, `colorField`, `tabs`, `tree`, `table`, `vector`, `section` and
+`menu`. Send the whole tree each time, with a higher `seq`; a tree that is invalid or too large is refused and the
+previous one stays on screen. There is no HTML, CSS or script.
+
+Dense interfaces have a few more tools. A `section` is a collapsible group with a title, an optional subtitle and
+badge, and up to eight header action buttons; its header reports `collapse` and an action reports `press` with its
+id in `action`. A `menu` is a button that opens a dropdown of up to fifty items and reports `select` with the chosen
+item's id. Buttons, menus and section actions can carry an `icon` from PushForm's own set (`add`, `delete`, `print`,
+`more` and so on, listed in `UiIcon`), and `variant: 'icon'` shows just the icon for compact toolbars, with the label
+as the accessible name. A vector view's `fitWidth` sizes it as if the drawing were that wide, so an off-cut given a
+full sheet's width draws smaller than the sheet.
+
+`ui.dialog({ target, seq, title, tree })` shows a modal dialog over a mounted target, drawn by PushForm with its own
+frame and Close button; a higher `seq` replaces its title and tree in place. Events from its components arrive like
+the target's own. `ui.closeDialog({ target })` closes it; so does the user, with Escape or the Close button, which you
+hear as a `dialogClose` event naming the dialog tree's root. A target has one dialog at a time, and it goes with the
+target when that is unmounted.
 
 ## The runtime
 

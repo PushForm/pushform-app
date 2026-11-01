@@ -21,6 +21,8 @@ describe('SDK types', () => {
     expect(same<Sdk.UiQuantity, Protocol.UiQuantity>(true)).toBe(true);
     expect(same<Sdk.UiPresentation, Protocol.UiPresentation>(true)).toBe(true);
     expect(same<Parameters<Sdk.UiService['mount']>[0], Omit<Protocol.UiMountInput, 'tree'> & { tree: Sdk.UiNode }>(true)).toBe(true);
+    expect(same<Parameters<Sdk.UiService['dialog']>[0], Omit<Protocol.UiDialogInput, 'tree'> & { tree: Sdk.UiNode }>(true)).toBe(true);
+    expect(same<Sdk.UiIcon, Protocol.UiIcon>(true)).toBe(true);
     expect(same<Sdk.ExtensionPermission, Protocol.ExtensionPermission>(true)).toBe(true);
     expect(same<Sdk.ExtensionErrorCode, Protocol.ExtensionErrorCode>(true)).toBe(true);
     expect(same<Sdk.ExtensionErrorData, Protocol.ExtensionErrorData>(true)).toBe(true);

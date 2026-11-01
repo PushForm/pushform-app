@@ -14,6 +14,14 @@ import { LayoutFilletIcon } from './LayoutFilletIcon';
 import { LayoutShapeBuilderIcon } from './LayoutShapeBuilderIcon';
 import {
   LuSave,
+  LuCheck,
+  LuChevronUp,
+  LuDownload,
+  LuFilter,
+  LuRefreshCw,
+  LuSettings,
+  LuTriangleAlert,
+  LuUpload,
   LuArrowDown,
   LuBold,
   LuItalic,
@@ -174,6 +182,15 @@ const REACT_ICONS: Record<string, IconType> = {
   lock: LuLock,
   unlock: LuLockOpen,
   more: LuEllipsisVertical,
+  // Shared with extension interfaces, which name icons by purpose.
+  check: LuCheck,
+  'chevron-up': LuChevronUp,
+  download: LuDownload,
+  upload: LuUpload,
+  filter: LuFilter,
+  refresh: LuRefreshCw,
+  settings: LuSettings,
+  warning: LuTriangleAlert,
 };
 
 /** Custom modeling glyphs and shell icons; unknown names fall back to initials. */

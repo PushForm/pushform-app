@@ -10,7 +10,9 @@ import type { UiEvent, UiVector, UiVectorShape, UiVectorStyle } from '@pushform/
  * clicking reports `select`. From the keyboard, arrows pan, + and − zoom, 0 fits, ] and [ step through the items,
  * Enter selects the current one and Escape clears it. Drawings show on white paper in both themes, as they print and
  * export, so the extension's colors keep their contrast. Without a height from the extension, the frame takes the
- * drawing's proportions at the width it has (within `AUTO_HEIGHT_PX`), so the drawing fills it.
+ * drawing's proportions at the width it has (within `AUTO_HEIGHT_PX`), so the drawing fills it. With `fitWidth`, the
+ * drawing is sized as if it were that wide, so several drawings share one scale: the fitted view spans `fitWidth`
+ * drawing units, and a narrower drawing sits at its left with the rest left blank.
  */
 
 interface ViewBox { x: number; y: number; width: number; height: number }
@@ -20,6 +22,11 @@ const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 200;
 /** The frame's height range when it follows the drawing's proportions, and its height before the width is known. */
 export const AUTO_HEIGHT_PX = { min: 120, max: 800, unmeasured: 300 } as const;
+
+/** The width the fitted view spans: the drawing's own, or `fitWidth` when that is wider. */
+export function fittedWidth(node: Pick<UiVector, 'bounds' | 'fitWidth'>): number {
+  return Math.max(node.bounds.width, node.fitWidth ?? 0);
+}
 
 /** The frame height that shows a drawing of `bounds` whole at `width` pixels, within `AUTO_HEIGHT_PX`. */
 export function autoVectorHeight(bounds: { width: number; height: number }, width: number): number {
@@ -46,9 +53,10 @@ export function VectorView({ node, onEvent }: { readonly node: UiVector; readonl
   const svg = useRef<SVGSVGElement>(null);
   const frame = useRef<HTMLDivElement>(null);
   const { bounds } = node;
+  const fitWidth = fittedWidth(node);
   const frameWidth = useWidth(frame, node.height === undefined);
-  const height = node.height ?? autoVectorHeight(bounds, frameWidth);
-  const fit = useMemo<ViewBox>(() => ({ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }), [bounds.x, bounds.y, bounds.width, bounds.height]);
+  const height = node.height ?? autoVectorHeight({ width: fitWidth, height: bounds.height }, frameWidth);
+  const fit = useMemo<ViewBox>(() => ({ x: bounds.x, y: bounds.y, width: fitWidth, height: bounds.height }), [bounds.x, bounds.y, fitWidth, bounds.height]);
   const [view, setView] = useState<ViewBox>(fit);
   useEffect(() => setView(fit), [fit]);
   const [hover, setHover] = useState<{ item: string; x: number; y: number } | null>(null);
@@ -167,7 +175,7 @@ export function VectorView({ node, onEvent }: { readonly node: UiVector; readonl
       <div ref={frame} className={`pf-xui-vector-frame${node.height === undefined ? ' is-auto-height' : ''}`} style={{ height }}>
         <svg ref={svg} className="pf-xui-vector-canvas" role="img" tabIndex={0}
           aria-label={`${node.label}. Arrow keys pan, plus and minus zoom, 0 fits, ] and [ step through items, Enter selects.`}
-          viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`} preserveAspectRatio="xMidYMid meet"
+          viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`} preserveAspectRatio={fitWidth > bounds.width ? 'xMinYMid meet' : 'xMidYMid meet'}
           onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp}
           onPointerLeave={() => { if (!drag.current) { setHover(null); reportHover(cursor); } }} onKeyDown={keyDown}>
           <Patterns styles={node.styles} bounds={bounds} />

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import {
-  ExtensionError, UiTreeError, uiMountSchema, uiUnmountSchema, validateUiTree, type ExtensionManifest, type UiEvent,
-  type UiNode, type UiNodeOf, type UiPresentation, type UiTreeItem,
+  ExtensionError, UiTreeError, uiCloseDialogSchema, uiDialogSchema, uiMountSchema, uiUnmountSchema, validateUiTree, type ExtensionManifest,
+  type UiEvent, type UiNode, type UiNodeOf, type UiPresentation, type UiTreeItem,
 } from '@pushform/extension-protocol';
 import type { ServiceImplementations } from './host';
 
@@ -14,9 +14,19 @@ import type { ServiceImplementations } from './host';
  * against the tree currently shown before they are sent, so the extension never hears about a component it did not
  * show, or about a target that is no longer mounted. A panel's mount can ask to be shown in a large window rather
  * than docked; an update keeps the presentation shown unless it names another.
+ *
+ * A mounted target can show one modal dialog with its own tree (`ui.dialog`), replaced by a newer sequence number
+ * and closed by `ui.closeDialog`, by the user (reported as `dialogClose`) or with the target. While it is open, the
+ * dialog's components take precedence over the target's for events with the same component id.
  */
 
 const UI_TARGETS = new Set(['model.panel', 'model.inspector.block', 'app.settings.block']);
+
+export interface MountedUiDialog {
+  readonly seq: number;
+  readonly title: string;
+  readonly tree: UiNode;
+}
 
 export interface MountedUi {
   readonly target: string;
@@ -24,6 +34,10 @@ export interface MountedUi {
   readonly tree: UiNode;
   /** Where the extension asked for the panel to be shown; the user can move it either way. */
   readonly presentation: UiPresentation;
+  /** The dialog open over the target, if any. */
+  readonly dialog?: MountedUiDialog;
+  /** The sequence number of the last dialog shown for this target, so a stale `ui.dialog` cannot reopen one. */
+  readonly dialogSeq?: number;
 }
 
 export type UiEventMessage = { readonly target: string } & UiEvent;
@@ -48,7 +62,22 @@ export class ExtensionUiHost {
         if (this.mounted.delete(parsed.data.target)) this.notify(parsed.data.target);
         return null;
       },
+      'ui.dialog': (input) => this.showDialog(input),
+      'ui.closeDialog': (input) => {
+        const parsed = uiCloseDialogSchema.safeParse(input);
+        if (!parsed.success) throw new ExtensionError('validation.failed', 'ui.closeDialog needs a target.');
+        this.removeDialog(parsed.data.target);
+        return null;
+      },
     };
+  }
+
+  /** The user dismissed the dialog of `target`: it is removed, then the extension hears `dialogClose`. */
+  closeDialog(target: string): void {
+    const dialog = this.mounted.get(target)?.dialog;
+    if (!dialog) return;
+    this.removeDialog(target);
+    this.send({ target, component: dialog.tree.id, event: 'dialogClose' });
   }
 
   get(target: string): MountedUi | undefined {
@@ -80,10 +109,43 @@ export class ExtensionUiHost {
   dispatch(target: string, event: UiEvent): boolean {
     const shown = this.mounted.get(target);
     if (!shown) return false;
-    const node = findNode(shown.tree, event.component);
+    if (event.event === 'dialogClose') {
+      if (shown.dialog?.tree.id !== event.component) return false;
+      this.closeDialog(target);
+      return true;
+    }
+    const node = (shown.dialog && findNode(shown.dialog.tree, event.component)) || findNode(shown.tree, event.component);
     if (!node || !accepts(node, event)) return false;
     this.send({ target, ...event });
     return true;
+  }
+
+  private showDialog(input: unknown): { seq: number } {
+    const parsed = uiDialogSchema.safeParse(input);
+    if (!parsed.success) throw new ExtensionError('validation.failed', 'ui.dialog needs a target, a sequence number, a title and a tree.');
+    const { target, seq, title } = parsed.data;
+    const current = this.mounted.get(target);
+    if (!current) throw new ExtensionError('validation.failed', `"${target}" is not mounted; call ui.mount first.`);
+    if (seq <= (current.dialogSeq ?? -1))
+      throw new ExtensionError('validation.failed', `Sequence ${seq} is not newer than the last dialog (${current.dialogSeq}); the dialog shown is kept.`);
+    let tree: UiNode;
+    try {
+      tree = validateUiTree(parsed.data.tree);
+    } catch (error) {
+      if (error instanceof UiTreeError) throw new ExtensionError(error.code, `${error.message} The dialog shown is kept.`);
+      throw error;
+    }
+    this.mounted.set(target, { ...current, dialog: { seq, title, tree }, dialogSeq: seq });
+    this.notify(target);
+    return { seq };
+  }
+
+  private removeDialog(target: string): void {
+    const current = this.mounted.get(target);
+    if (!current?.dialog) return;
+    const { dialog: _gone, ...rest } = current;
+    this.mounted.set(target, rest);
+    this.notify(target);
   }
 
   private show(input: unknown, kind: 'mount' | 'update'): { seq: number } {
@@ -105,7 +167,8 @@ export class ExtensionUiHost {
       throw error;
     }
     const presentation = parsed.data.presentation ?? (kind === 'update' ? current?.presentation : undefined) ?? 'dock';
-    this.mounted.set(target, { target, seq, tree, presentation });
+    // A new tree does not touch the dialog open over it.
+    this.mounted.set(target, { ...current, target, seq, tree, presentation });
     this.notify(target);
     return { seq };
   }
@@ -118,7 +181,7 @@ export class ExtensionUiHost {
 /** The node with `id` in the tree, searching every child, including tabs that are not selected. */
 export function findNode(node: UiNode, id: string): UiNode | undefined {
   if (node.id === id) return node;
-  if (node.type === 'stack' || node.type === 'tabs')
+  if (node.type === 'stack' || node.type === 'tabs' || node.type === 'section')
     for (const child of node.children) {
       const found = findNode(child, id);
       if (found) return found;
@@ -132,7 +195,8 @@ const hasItem = (items: readonly UiTreeItem[], id: string): boolean =>
 function accepts(node: UiNode, event: UiEvent): boolean {
   switch (event.event) {
     case 'press':
-      return node.type === 'button' && !node.disabled;
+      if (node.type === 'section') return event.action !== undefined && (node.actions ?? []).some((a) => a.id === event.action && !a.disabled);
+      return node.type === 'button' && !node.disabled && event.action === undefined;
     case 'change':
       switch (node.type) {
         case 'textField': return !node.disabled && typeof event.value === 'string' && event.value.length <= (node.maxLength ?? Infinity);
@@ -146,9 +210,14 @@ function accepts(node: UiNode, event: UiEvent): boolean {
       if (node.type === 'tabs') return node.tabs.some((t) => t.id === event.value);
       if (node.type === 'vector') return event.value === null || node.shapes.some((shape) => shape.item === event.value);
       if (node.type === 'tree') return event.value === null || hasItem(node.items, event.value);
+      if (node.type === 'menu') return !node.disabled && node.items.some((item) => item.id === event.value && !item.disabled);
       return false;
     case 'toggle':
       return node.type === 'tree' && hasItem(node.items, event.item);
+    case 'collapse':
+      return node.type === 'section' && event.collapsed !== (node.collapsed ?? false);
+    case 'dialogClose':
+      return false;
     case 'cellEdit': {
       if (node.type !== 'table') return false;
       const column = node.columns.find((c) => c.id === event.column);

@@ -2,6 +2,31 @@
 
 Notable changes in each PushForm desktop release. Versions are `<year>.<week>.<build>`.
 
+## 26.44.367
+
+### Import and export
+
+- **SketchUp export.** Choose **Export… → SketchUp (.skp)** to save the visible model, or only the selected geometry. The file is written on your device in the 2017 format. Each face is written as one face with its holes, and soft, smooth and hidden edges keep their settings, so curved surfaces stay smooth and flat faces show no diagonals. Components keep their placements, names and per-placement paint. Every material is included, with colours and PNG/JPEG textures. Tags, scenes, guides, dimensions, text and section planes are not exported; the export notes list what was left out or simplified.
+- Older `.skp` files saved in the 2020 format without components now open with their geometry. Before, they could open empty.
+
+### Typing values in the viewport
+
+- **Value fields replace the Measurements box.** Drawing tools show their values in fields next to the geometry, linked to it by gray dimension lines. Line takes a length and an angle, Rectangle a width and height, Circle and Polygon a diameter, and Arc and Pie a diameter and then an angle. Start typing to fill the first field. Tab moves to the next field and locks the value you leave, Enter applies and Escape cancels.
+- **The same fields in Layout.** Line, the rectangle tools, Ellipse, Table, Circle, Polygon and the arc tools take values on the page. Move, Rotate and Offset show their value next to the pointer.
+- Fields size to their text, sit outside the shape they label so they don't cover it, and have a translucent background.
+- Push/Pull shows a loose face's distance as positive in either direction, and a typed distance goes the way you are pulling.
+
+### Modeling
+
+- **Chamfer all edges of a box.** Chamfer now works where three picked edges meet at a corner, and the three bevels meet in a point. Fillet still can't round such a corner.
+- **Orbit without losing your work.** Choosing Orbit, Pan, Zoom or Zoom Window no longer ends the tool you're using. Picked edges, a line in progress and previews all stay, and Esc or choosing the tool again takes you back. Enter still applies, so you can orbit while picking chamfer edges. Select and Space set a tool aside the same way when it has an operation in progress.
+
+### Layout
+
+- **Draw past the page edge.** Objects that run off the paper are drawn in full on the gray area around the page, and every tool works there. Printing, export and presentation still show only what's on the paper.
+- **Linked units.** A paper preset sets the page to landscape and picks inches for US sizes or millimeters for international ones. A new Orientation option turns the page. The grid units now set the units of drawing values and new dimensions, and templates start in their paper's units.
+- The Models list in the Layout panel can now be collapsed like the other sections.
+
 ## 26.44.356
 
 ### Import and export

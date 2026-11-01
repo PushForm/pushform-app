@@ -5,7 +5,6 @@ import type { JSX } from 'react';
 import { AppContext } from '../AppContext';
 import { useCommandNotices } from '../hooks/useCommandNotices';
 import { useAppStore } from '../store';
-import { MeasurementsBox } from './MeasurementsBox';
 
 export function StatusBar(): JSX.Element {
   const app = useContext(AppContext);
@@ -21,11 +20,6 @@ export function StatusBar(): JSX.Element {
       <div className={`pf-status-mid${notice ? ' pf-status-notice' : ''}`} role="status">
         {notice ?? instructor}
       </div>
-      {app ? (
-        <div className="pf-status-right">
-          <MeasurementsBox />
-        </div>
-      ) : null}
     </footer>
   );
 }

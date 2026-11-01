@@ -19,6 +19,7 @@ import {
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
 import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import { pointerField } from '../entry';
 import { HOVER_COLOR, hostOfTool } from '../toolUtil';
 import { fmtLength } from './constructionUtil';
 
@@ -221,9 +222,9 @@ export class EdgeBlendTool implements Tool {
     let instructor: string;
     if (failed) instructor = `${this.title}: ${failed}`;
     else if (!this.picked.length) instructor = `Click edges of a solid to ${this.kind === 'fillet' ? 'round' : 'bevel'} (Shift-click toggles).`;
-    else if (this.size === null) instructor = `Type the ${label.toLowerCase()} in the Measurements box.`;
+    else if (this.size === null) instructor = `Type the ${label.toLowerCase()}.`;
     else instructor = `${this.picked.length} edge${this.picked.length === 1 ? '' : 's'} picked. Press Enter or double-click to apply, Esc to clear.`;
-    return { instructor, vcbLabel: label, vcbValue: value };
+    return { instructor, vcbLabel: label, vcbValue: value, fields: this.picked.length ? [pointerField(label, 'length', value)] : [] };
   }
 
   // --- internals ------------------------------------------------------------------------------

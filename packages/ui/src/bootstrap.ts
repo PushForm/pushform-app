@@ -210,6 +210,7 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
   offs.push(
     toolManager.events.on('toolChanged', ({ id }) => {
       store.getState().setActiveTool(id);
+      store.getState().clearEntry();
       // Picking up the Paint Bucket opens the Materials panel.
       if (id === 'paint') store.getState().showPanel('materials');
     }),

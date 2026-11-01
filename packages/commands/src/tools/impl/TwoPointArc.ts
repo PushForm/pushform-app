@@ -10,6 +10,7 @@ import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { AddCurveInput, AddCurveResult, FilletResult } from '../../commands/curves';
 import type { OverlayPrimitive } from '../overlay';
 import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import { pointerField } from '../entry';
 import { hostOfTool, inferenceOverlay, PREVIEW_COLOR } from '../toolUtil';
 import { ARC_SEGMENTS } from './Arc';
 import {
@@ -268,11 +269,12 @@ export class TwoPointArcTool implements Tool {
         return { instructor: 'Select start point of arc, or double-click a corner to fillet it.', vcbLabel: 'Length' };
       case 'end': {
         const len = this.start && this.cursorInference ? v3dist(this.start, onPlane(this.plane, this.cursorInference.point)) : 0;
-        return { instructor: 'Select end point of arc or enter length.', vcbLabel: 'Length', vcbValue: formatLen(this.ctx, len) };
+        return { instructor: 'Select end point of arc or enter length.', vcbLabel: 'Length', vcbValue: formatLen(this.ctx, len), fields: [pointerField('Length', 'length', formatLen(this.ctx, len))] };
       }
       default: {
         const b = this.currentBulge();
-        return { instructor: 'Select bulge or enter value.', vcbLabel: 'Bulge', vcbValue: formatLen(this.ctx, Math.abs(b?.sagitta ?? 0)) };
+        const value = formatLen(this.ctx, Math.abs(b?.sagitta ?? 0));
+        return { instructor: 'Select bulge or enter value.', vcbLabel: 'Bulge', vcbValue: value, fields: [pointerField('Bulge', 'length', value)] };
       }
     }
   }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import type { Ray, Vec2 } from '@pushform/core';
+import type { Ray, Vec2, Vec3 } from '@pushform/core';
 import type { InferenceOptions, InferenceResult } from '@pushform/inference';
 import type { CameraHost, CameraState } from '../camera/CameraHost';
 import type { CommandRegistry } from '../registry/CommandRegistry';
@@ -42,13 +42,32 @@ export interface ToolWheelEvent {
   readonly modifiers: Modifiers;
 }
 
+export type EntryFieldKind = 'length' | 'angle' | 'number';
+
+/** A value the tool takes, drawn as a field in the viewport beside the geometry it sets. */
+export interface EntryField {
+  /** Stable id within the tool (`length`, `angle`, `width`, …); keys `onEntry` values. */
+  readonly id: string;
+  /** Accessible name, e.g. "Width". */
+  readonly label: string;
+  readonly kind: EntryFieldKind;
+  /** Live value shown while the field is not being typed in. */
+  readonly value: string;
+  /** World point the field is centred on; beside the pointer when omitted. */
+  readonly at?: Vec3 | undefined;
+  /** True while a typed value is locked into the preview (`onEntryLock`). */
+  readonly locked?: boolean | undefined;
+}
+
 export interface ToolStatus {
   /** Instructor / status bar text. */
   readonly instructor: string;
-  /** Measurements box label, e.g. "Length". */
+  /** What the tool takes as a typed value, e.g. "Length"; labels the field opened by typing. */
   readonly vcbLabel: string;
-  /** Live value shown in the Measurements box while not typing. */
+  /** Live value of the tool's single value, when it has one. */
   readonly vcbValue?: string | undefined;
+  /** Value fields to draw in the viewport, in Tab order. None: typing opens one beside the pointer. */
+  readonly fields?: readonly EntryField[] | undefined;
 }
 
 export interface ToolContext {
@@ -92,6 +111,13 @@ export interface Tool {
   onKeyUp?(e: ToolKeyEvent): boolean | void;
   onWheel?(e: ToolWheelEvent): boolean | void;
   onVcb?(value: VcbValue): void;
+  /**
+   * Apply the typed values of the tool's fields, keyed by field id; fields left out keep their live
+   * value. Values whose kind the field does not take (`8s`, `[x,y,z]`) go to `onVcb` instead.
+   */
+  onEntry?(values: Readonly<Record<string, VcbValue>>): void;
+  /** Hold (or with null, release) a typed field value in the preview while the others are set. */
+  onEntryLock?(id: string, value: VcbValue | null): void;
   onCancel(): void;
   overlay(): readonly OverlayPrimitive[];
   status(): ToolStatus;

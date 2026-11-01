@@ -7,6 +7,7 @@ import type { EntityRef } from '@pushform/model';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
 import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import { pointerField } from '../entry';
 import { EdgeLock } from '../edgeLock';
 import { inferenceOverlay, PREVIEW_COLOR } from '../toolUtil';
 import { AXIS_NORMAL, closestOnLine, edgeSegment, fmtLength, GUIDE_COLOR, stateOf } from './constructionUtil';
@@ -284,7 +285,7 @@ export class TapeTool implements Tool {
         : s.kind === 'fromEdge' && this.mode === 'guideLine'
           ? `Select offset for the guide line or enter value.${tail}`
           : `Select the guide point position or enter value.${tail}`;
-    return { instructor, vcbLabel: 'Length', vcbValue: fmtLength(this.ctx, live) };
+    return { instructor, vcbLabel: 'Length', vcbValue: fmtLength(this.ctx, live), fields: [pointerField('Length', 'length', fmtLength(this.ctx, live))] };
   }
 
   // --- internals ------------------------------------------------------------------------------

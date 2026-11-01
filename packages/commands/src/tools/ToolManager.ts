@@ -223,6 +223,21 @@ export class ToolManager implements ToolHost {
     this.afterInteraction();
   }
 
+  /** Apply typed field values (see `Tool.onEntry`); a tool without `onEntry` gets the single value through `onVcb`. */
+  onEntry(values: Readonly<Record<string, VcbValue>>): void {
+    const entries = Object.entries(values).filter(([, v]) => v.kind !== 'empty');
+    if (!entries.length || !this.active) return;
+    if (this.active.onEntry) this.active.onEntry(Object.fromEntries(entries));
+    else this.active.onVcb?.(entries[0]![1]);
+    this.afterInteraction();
+  }
+
+  lockEntry(id: string, value: VcbValue | null): void {
+    if (!this.active?.onEntryLock) return;
+    this.active.onEntryLock(id, value && value.kind !== 'empty' ? value : null);
+    this.afterInteraction();
+  }
+
   // --- derived state --------------------------------------------------------------------------
 
   overlay(): readonly OverlayPrimitive[] {
@@ -262,7 +277,7 @@ export class ToolManager implements ToolHost {
   private emitStatus(): void {
     const s = this.status();
     const prev = this.lastStatus;
-    if (s.instructor === prev.instructor && s.vcbLabel === prev.vcbLabel && s.vcbValue === prev.vcbValue) return;
+    if (s.instructor === prev.instructor && s.vcbLabel === prev.vcbLabel && s.vcbValue === prev.vcbValue && sameFields(s.fields, prev.fields)) return;
     this.lastStatus = s;
     this.events.emit('statusChanged', s);
   }
@@ -270,4 +285,13 @@ export class ToolManager implements ToolHost {
   private overlayChanged(): void {
     this.events.emit('overlayChanged', undefined);
   }
+}
+
+function sameFields(a: ToolStatus['fields'], b: ToolStatus['fields']): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  return a.every((f, i) => {
+    const g = b[i]!;
+    return f.id === g.id && f.label === g.label && f.value === g.value && f.locked === g.locked && f.at?.[0] === g.at?.[0] && f.at?.[1] === g.at?.[1] && f.at?.[2] === g.at?.[2];
+  });
 }

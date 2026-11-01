@@ -15,7 +15,8 @@ import { SNAP_COLORS } from '@pushform/inference';
 import type { UndoEntry } from '@pushform/model';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
-import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import type { EntryField, Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import { DIMENSION_OFFSET_PX, entryLength, field, lengthDimension, pxAt } from '../entry';
 import { DRAG_PX, hostOfTool, inferenceOverlay, PREVIEW_COLOR, screenDist, worldPerPixelAt } from '../toolUtil';
 
 const GOLDEN = (1 + Math.sqrt(5)) / 2;
@@ -44,7 +45,9 @@ const AXIS_NORMAL: Record<Axis, Vec3> = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 
  * Rectangle tool (R). Idle → Corner1 → Dragging → commit. The drawing plane comes
  * from the hovered face at the first click, an arrow-key lock, or the inference plane (ground).
  * Width/height run along the plane basis (`planeBasis`). VCB `w,h` (either
- * omitted), negative flips; typing after the commit re-applies to the last rectangle.
+ * omitted), negative flips; typing after the commit re-applies to the last rectangle. Width and
+ * Height fields keep the pointer's side of the first corner unless typed negative; a value left
+ * with Tab is locked into the preview.
  */
 export class RectangleTool implements Tool {
   readonly id = 'rectangle';
@@ -63,6 +66,8 @@ export class RectangleTool implements Tool {
   private last: LastRectangle | null = null;
   private downScreen: Vec2 | null = null;
   private suppressNextClick = false;
+  private lockedW: number | null = null;
+  private lockedH: number | null = null;
 
   get firstCorner(): Vec3 | null {
     return this.corner;
@@ -170,6 +175,25 @@ export class RectangleTool implements Tool {
     }
   }
 
+  onEntry(values: Readonly<Record<string, VcbValue>>): void {
+    if (!this.corner || !this.basis) {
+      const w = entryLength(values.width), h = entryLength(values.height);
+      if (w !== null || h !== null) this.onVcb({ kind: 'list', values: [values.width?.kind === 'length' ? values.width : null, values.height?.kind === 'length' ? values.height : null] });
+      return;
+    }
+    const cur = this.dims();
+    if (!cur) return;
+    const w = entryLength(values.width), h = entryLength(values.height);
+    this.commit(this.basis, w === null ? cur.w : sideOf(cur.w) * w, h === null ? cur.h : sideOf(cur.h) * h);
+  }
+
+  onEntryLock(id: string, value: VcbValue | null): void {
+    if (id === 'width') this.lockedW = entryLength(value);
+    else if (id === 'height') this.lockedH = entryLength(value);
+    this.ctx?.requestRender();
+    this.ctx?.statusChanged();
+  }
+
   onCancel(): void {
     this.reset();
     this.ctx?.requestRender();
@@ -183,6 +207,7 @@ export class RectangleTool implements Tool {
       const { a, b, c, d } = cornersOf(this.basis, dims.w, dims.h);
       out.push({ kind: 'polygon', points: [a, b, c, d], color: SNAP_COLORS.onFace, opacity: 0.12 });
       out.push({ kind: 'polyline', points: [a, b, c, d], color: PREVIEW_COLOR, closed: true, width: 2 });
+      out.push(...this.dimensions(dims.w, dims.h).overlay);
       if (dims.hint) {
         out.push({ kind: 'polyline', points: [a, c], color: SNAP_COLORS.onFace, dashed: true });
         out.push({ kind: 'cursorHint', text: dims.hint, screen: this.cursorScreen ?? undefined });
@@ -200,6 +225,7 @@ export class RectangleTool implements Tool {
       instructor: 'Select opposite corner or enter value.',
       vcbLabel: 'Dimensions',
       vcbValue: units && dims ? `${formatLength(dims.w, units)}, ${formatLength(dims.h, units)}` : undefined,
+      fields: dims ? this.dimensions(dims.w, dims.h).fields : [],
     };
   }
 
@@ -225,12 +251,36 @@ export class RectangleTool implements Tool {
     this.ctx?.statusChanged();
   }
 
-  /** Current width/height along the basis from the cursor, with Square / Golden snapping. */
+  /** Width and Height dimensions outside the preview's first two edges, with their fields. */
+  private dimensions(w: number, h: number): { overlay: OverlayPrimitive[]; fields: EntryField[] } {
+    const basis = this.basis!;
+    const units = this.ctx ? hostOfTool(this.ctx).doc.state.meta.units : null;
+    const { a, b, d } = cornersOf(basis, w, h);
+    const off = pxAt(this.ctx, a, DIMENSION_OFFSET_PX);
+    const neg = (v: Vec3, s: number): Vec3 => [-v[0] * s, -v[1] * s, -v[2] * s];
+    const wd = lengthDimension(a, b, neg(basis.v, sideOf(h)), off);
+    const hd = lengthDimension(a, d, neg(basis.u, sideOf(w)), off);
+    const fmt = (m: number) => (units ? formatLength(Math.abs(m), units) : undefined);
+    return {
+      overlay: [...wd.overlay, ...hd.overlay],
+      fields: [
+        field('width', 'Width', 'length', fmt(w), wd.at, this.lockedW !== null),
+        field('height', 'Height', 'length', fmt(h), hd.at, this.lockedH !== null),
+      ],
+    };
+  }
+
+  /** Current width/height along the basis from the cursor, with Square / Golden snapping and locked values. */
   private dims(): { w: number; h: number; hint: ShapeHint } | null {
     if (!this.corner || !this.plane || !this.basis || !this.cursorInference) return null;
     const p = planeProject(this.plane, this.cursorInference.point);
     const l = basisToLocal(this.basis, p);
     let w = l[0], h = l[1];
+    if (this.lockedW !== null || this.lockedH !== null) {
+      if (this.lockedW !== null) w = sideOf(w) * this.lockedW;
+      if (this.lockedH !== null) h = sideOf(h) * this.lockedH;
+      return { w, h, hint: null };
+    }
     let hint: ShapeHint = null;
     const tol = this.shapeTolerance(p);
     const aw = Math.abs(w), ah = Math.abs(h);
@@ -290,7 +340,14 @@ export class RectangleTool implements Tool {
     this.lockNormal = null;
     this.downScreen = null;
     this.suppressNextClick = false;
+    this.lockedW = null;
+    this.lockedH = null;
   }
+}
+
+/** Sign of the pointer's side along an axis, positive when on the axis itself. */
+function sideOf(x: number): number {
+  return x < 0 ? -1 : 1;
 }
 
 function cornersOf(basis: PlaneBasis, w: number, h: number): RectangleParams {

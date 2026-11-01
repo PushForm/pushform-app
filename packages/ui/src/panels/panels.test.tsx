@@ -127,15 +127,12 @@ describe('SoftenEdgesPanel', () => {
   });
 });
 
-describe('StatusBar Measurements box', () => {
-  it('shows the Measurements box at the end of the status bar, labelled for the active tool', () => {
+describe('StatusBar value entry', () => {
+  it('has no Measurements box: values are typed into fields in the viewport', () => {
     const a = boot();
     mount(a, <StatusBar />);
-    const box = screen.getByLabelText('Measurements') as HTMLInputElement;
-    expect(box.id).toBe('pf-vcb-input');
-    expect(box.closest('.pf-status-right')).not.toBeNull();
-    act(() => useAppStore.setState({ vcbLabel: 'Distance' }));
-    expect(screen.getByLabelText('Distance (Measurements)')).toBe(box);
+    expect(screen.queryByLabelText(/Measurements/)).toBeNull();
+    expect(document.querySelector('.pf-status-right input')).toBeNull();
   });
 });
 

@@ -9,6 +9,7 @@ import { m4scaleAbout, refsBounds } from '../../commands/transform';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
 import type { ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import { pointerField } from '../entry';
 import { DRAG_PX, entityOverlay, HOVER_COLOR, inferenceOverlay, screenDist } from '../toolUtil';
 import { AXIS_COLOR, AXIS_DIR, movedOutline, refsKey, TransformToolBase, worldToScreen } from './transformShared';
 
@@ -343,6 +344,7 @@ export class ScaleTool extends TransformToolBase {
           : 'Drag the grip or enter a scale factor. Hold Shift to maintain aspect ratio, Alt (or Ctrl) to keep the centre.',
         vcbLabel: 'Scale',
         vcbValue: this.fmtFactors(s.factors, s.box.dims),
+        fields: [pointerField('Scale', 'number', this.fmtFactors(s.factors, s.box.dims))],
       };
     }
     const instructor = this.lastError

@@ -6,6 +6,7 @@ import type { Axis, InferenceOptions, InferenceResult } from '@pushform/inferenc
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
 import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import { pointerField } from '../entry';
 import { inferenceOverlay, PREVIEW_COLOR, worldPerPixelAt } from '../toolUtil';
 import { AXIS_COLORS, AXIS_NORMAL, fmtAngle, GUIDE_COLOR, projectToPlane } from './constructionUtil';
 
@@ -208,7 +209,7 @@ export class ProtractorTool implements Tool {
     if (s.kind === 'idle') return { instructor: `Click to place the protractor (hover a face to align it).${guide}`, vcbLabel: 'Angle' };
     if (s.kind === 'center') return { instructor: `Click to set the baseline.${guide}`, vcbLabel: 'Angle' };
     const deg = this.cursorInference ? this.angleFor(this.cursorInference.point, this.cursorCamera) : (this.lastAngle ?? 0);
-    return { instructor: `Click to set the angle or enter value (degrees or rise:run).${guide}`, vcbLabel: 'Angle', vcbValue: fmtAngle(deg) };
+    return { instructor: `Click to set the angle or enter value (degrees or rise:run).${guide}`, vcbLabel: 'Angle', vcbValue: fmtAngle(deg), fields: [pointerField('Angle', 'angle', fmtAngle(deg))] };
   }
 
   // --- internals ------------------------------------------------------------------------------

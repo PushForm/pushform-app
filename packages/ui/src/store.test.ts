@@ -14,13 +14,19 @@ describe('useAppStore', () => {
     expect(useAppStore.getState().openPanel).toBeNull();
   });
 
-  it('tracks VCB editing state', () => {
+  it('tracks typed value fields', () => {
     const s = useAppStore.getState();
-    s.setVcbInput('12', true);
-    expect(useAppStore.getState().vcbEditing).toBe(true);
-    s.setVcbInput('', false);
-    expect(useAppStore.getState().vcbEditing).toBe(false);
-    s.setStatus({ instructor: 'hi', vcbLabel: 'Length', vcbValue: '1 m' });
+    s.setEntryDraft('width', '12');
+    expect(useAppStore.getState().entryDrafts).toEqual({ width: '12' });
+    expect(useAppStore.getState().entryFocus).toBe('width');
+    s.clearEntryDraft('width');
+    expect(useAppStore.getState().entryDrafts).toEqual({});
+    s.setEntryDraft('height', '3');
+    s.clearEntry();
+    expect(useAppStore.getState()).toMatchObject({ entryDrafts: {}, entryFocus: null, entryError: null });
+    const fields = [{ id: 'length', label: 'Length', kind: 'length' as const, value: '1 m' }];
+    s.setStatus({ instructor: 'hi', vcbLabel: 'Length', vcbValue: '1 m', fields });
     expect(useAppStore.getState().vcbValue).toBe('1 m');
+    expect(useAppStore.getState().entryFields).toEqual(fields);
   });
 });

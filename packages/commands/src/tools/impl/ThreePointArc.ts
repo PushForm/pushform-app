@@ -9,6 +9,7 @@ import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { AddCurveInput, AddCurveResult } from '../../commands/curves';
 import type { OverlayPrimitive } from '../overlay';
 import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import { pointerField } from '../entry';
 import { hostOfTool, inferenceOverlay, PREVIEW_COLOR } from '../toolUtil';
 import { ARC_SEGMENTS } from './Arc';
 import {
@@ -191,7 +192,7 @@ export class ThreePointArcTool implements Tool {
         return { instructor: 'Select start point of arc.', vcbLabel: 'Length' };
       case 'pivot': {
         const len = this.start && this.cursorInference ? v3dist(this.start, onPlane(this.plane, this.cursorInference.point)) : 0;
-        return { instructor: 'Select second point on arc or enter length.', vcbLabel: 'Length', vcbValue: formatLen(this.ctx, len) };
+        return { instructor: 'Select second point on arc or enter length.', vcbLabel: 'Length', vcbValue: formatLen(this.ctx, len), fields: [pointerField('Length', 'length', formatLen(this.ctx, len))] };
       }
       default: {
         const tess = this.cursorInference ? this.tessellation(onPlane(this.plane, this.cursorInference.point)) : null;

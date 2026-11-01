@@ -3,7 +3,7 @@
 import { create } from 'zustand';
 import { readNavigationCubePreference } from './navCubePreference';
 import { DEFAULT_DISPLAY } from '@pushform/commands';
-import type { DisplayState } from '@pushform/commands';
+import type { DisplayState, EntryField } from '@pushform/commands';
 import type { EntityRef } from '@pushform/model';
 
 export const PANEL_IDS = [
@@ -46,9 +46,14 @@ export interface AppState {
   instructor: string;
   vcbLabel: string;
   vcbValue: string;
-  vcbInput: string;
-  vcbEditing: boolean;
-  vcbError: boolean;
+  /** Value fields the active tool draws in the viewport (`ToolStatus.fields`). */
+  entryFields: readonly EntryField[];
+  /** Text typed into value fields, by field id; a field without a draft shows its live value. */
+  entryDrafts: Readonly<Record<string, string>>;
+  /** Field being typed in, or null. `value` is the field typing opens beside the pointer. */
+  entryFocus: string | null;
+  /** Field whose text could not be read. */
+  entryError: string | null;
   canUndo: boolean;
   canRedo: boolean;
   cursorHint: CursorHint | null;
@@ -73,9 +78,15 @@ export interface AppState {
   setActiveTool(id: string | null): void;
   togglePanel(id: PanelId): void;
   closePanel(): void;
-  setStatus(s: { instructor: string; vcbLabel: string; vcbValue?: string | undefined }): void;
-  setVcbInput(input: string, editing?: boolean): void;
-  setVcbError(error: boolean): void;
+  setStatus(s: { instructor: string; vcbLabel: string; vcbValue?: string | undefined; fields?: readonly EntryField[] | undefined }): void;
+  /** Start or continue typing in field `id` with `text`. */
+  setEntryDraft(id: string, text: string): void;
+  /** Drop a field's typed text. */
+  clearEntryDraft(id: string): void;
+  setEntryFocus(id: string | null): void;
+  setEntryError(id: string | null): void;
+  /** Drop every typed value and leave the fields. */
+  clearEntry(): void;
   setUndoState(canUndo: boolean, canRedo: boolean): void;
   setCursorHint(hint: CursorHint | null): void;
   setMenuOpen(open: boolean): void;
@@ -105,9 +116,10 @@ export const useAppStore = create<AppState>()((set) => ({
   instructor: '',
   vcbLabel: '',
   vcbValue: '',
-  vcbInput: '',
-  vcbEditing: false,
-  vcbError: false,
+  entryFields: [],
+  entryDrafts: {},
+  entryFocus: null,
+  entryError: null,
   canUndo: false,
   canRedo: false,
   cursorHint: null,
@@ -125,9 +137,17 @@ export const useAppStore = create<AppState>()((set) => ({
   setActiveTool: (activeToolId) => set({ activeToolId }),
   togglePanel: (id) => set((s) => ({ openPanel: s.openPanel === id ? null : id })),
   closePanel: () => set({ openPanel: null }),
-  setStatus: (st) => set({ instructor: st.instructor, vcbLabel: st.vcbLabel, vcbValue: st.vcbValue ?? '' }),
-  setVcbInput: (vcbInput, editing = vcbInput.length > 0) => set({ vcbInput, vcbEditing: editing, vcbError: false }),
-  setVcbError: (vcbError) => set({ vcbError }),
+  setStatus: (st) => set({ instructor: st.instructor, vcbLabel: st.vcbLabel, vcbValue: st.vcbValue ?? '', entryFields: st.fields ?? [] }),
+  setEntryDraft: (id, text) => set((s) => ({ entryDrafts: { ...s.entryDrafts, [id]: text }, entryFocus: id, entryError: s.entryError === id ? null : s.entryError })),
+  clearEntryDraft: (id) =>
+    set((s) => {
+      if (!(id in s.entryDrafts)) return {};
+      const { [id]: _dropped, ...rest } = s.entryDrafts;
+      return { entryDrafts: rest, entryError: s.entryError === id ? null : s.entryError };
+    }),
+  setEntryFocus: (entryFocus) => set({ entryFocus }),
+  setEntryError: (entryError) => set({ entryError }),
+  clearEntry: () => set({ entryDrafts: {}, entryFocus: null, entryError: null }),
   setUndoState: (canUndo, canRedo) => set({ canUndo, canRedo }),
   setCursorHint: (cursorHint) => set({ cursorHint }),
   setMenuOpen: (menuOpen) => set({ menuOpen }),

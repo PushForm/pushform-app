@@ -15,6 +15,7 @@ import { planPushPull, runPushPullKernel, type PushPullApplyParams, type PushPul
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
 import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import { pointerField } from '../entry';
 
 /** Pointer travel (CSS px) that turns a press into a drag-release gesture. */
 const DRAG_PX = 4;
@@ -312,7 +313,7 @@ export class PushPullTool implements Tool {
     const fmt = (d: number): string => (units ? formatLength(d, units) : d.toString());
     const modeHint = this.mode === 'newBody' ? ' [New body]' : '';
     if (s.kind === 'dragging') {
-      return { instructor: `Click or type distance.${modeHint}`, vcbLabel: 'Distance', vcbValue: fmt(s.distance) };
+      return { instructor: `Click or type distance.${modeHint}`, vcbLabel: 'Distance', vcbValue: fmt(s.distance), fields: [pointerField('Distance', 'length', fmt(s.distance))] };
     }
     const instructor = this.lastError ? `Push/Pull failed: ${this.lastError}` : `Select face to push or pull.${modeHint}`;
     const last = this.lastCommit?.params.distance ?? this.lastDistance;

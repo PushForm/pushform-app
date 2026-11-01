@@ -2,14 +2,13 @@
 // Copyright 2026 PushForm contributors
 import { useEffect } from 'react';
 import type { AppInstance } from './bootstrap';
-import { VCB_INPUT_ID } from './components/MeasurementsBox';
-import { useAppStore } from './store';
+import { beginEntry } from './components/EntryFields';
 
 const VCB_START = /^[0-9.,'"\-+[\]<>:*/a-zA-Z°]$/;
 
 /**
  * Global keyboard routing: tool keys (Esc/Space/arrows) → keymap shortcuts →
- * printable characters go to the Measurements box without clicking it.
+ * printable characters start a value in the viewport's value fields without clicking one.
  */
 export function useGlobalKeys(app: AppInstance, enabled = true): void {
   useEffect(() => {
@@ -17,7 +16,7 @@ export function useGlobalKeys(app: AppInstance, enabled = true): void {
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && isTextField(target)) {
-        return; // the field (including the Measurements box) handles its own keys
+        return; // the field (including a value field) handles its own keys
       }
       const modifiers = { shift: e.shiftKey, ctrl: e.ctrlKey, alt: e.altKey, meta: e.metaKey };
       if (app.toolManager.keyDown({ key: e.key, code: e.code, modifiers, repeat: e.repeat })) {
@@ -31,15 +30,8 @@ export function useGlobalKeys(app: AppInstance, enabled = true): void {
         return;
       }
       if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1 && VCB_START.test(e.key)) {
-        const input = document.getElementById(VCB_INPUT_ID) as HTMLInputElement | null;
-        if (input) {
-          e.preventDefault();
-          useAppStore.getState().setVcbInput(e.key, true);
-          input.focus();
-          requestAnimationFrame(() =>
-            input.setSelectionRange(input.value.length, input.value.length),
-          );
-        }
+        e.preventDefault();
+        beginEntry(e.key);
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {

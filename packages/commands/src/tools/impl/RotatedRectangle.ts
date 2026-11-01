@@ -6,7 +6,8 @@ import type { Axis, InferenceOptions, InferenceResult, Snap } from '@pushform/in
 import { SNAP_COLORS } from '@pushform/inference';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
-import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import type { EntryField, Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import { DIMENSION_OFFSET_PX, field, leftOf, lengthDimension, pxAt } from '../entry';
 import { hostOfTool, inferenceOverlay, PREVIEW_COLOR, rubberBandColor } from '../toolUtil';
 import {
   AXIS_NORMAL,
@@ -185,6 +186,17 @@ export class RotatedRectangleTool implements Tool {
     }
   }
 
+  onEntry(values: Readonly<Record<string, VcbValue>>): void {
+    if (this.stage !== 'width') {
+      const v = values.length ?? values.width;
+      if (v) this.onVcb(v);
+      return;
+    }
+    const w = values.width?.kind === 'length' ? values.width : null;
+    const a = values.angle && (values.angle.kind === 'length' || values.angle.kind === 'angle' || values.angle.kind === 'slope') ? values.angle : null;
+    if (w || a) this.onVcb({ kind: 'list', values: [w, a] });
+  }
+
   onCancel(): void {
     this.reset();
     this.ctx?.requestRender();
@@ -197,6 +209,7 @@ export class RotatedRectangleTool implements Tool {
     if (this.a) out.push({ kind: 'point', position: this.a, color: PREVIEW_COLOR, shape: 'square', size: 6 });
     if (this.a && inf && this.stage === 'edge') {
       out.push({ kind: 'polyline', points: [this.a, this.edgeEnd()], color: rubberBandColor(this.lockSnap ?? inf.primary), width: 2 });
+      out.push(...this.edgeDimension().overlay);
     } else if (this.a && this.b && this.stage === 'width') {
       out.push({ kind: 'polyline', points: [this.a, this.b], color: PREVIEW_COLOR, width: 2 });
       const wa = this.widthAngle();
@@ -205,7 +218,7 @@ export class RotatedRectangleTool implements Tool {
         out.push({ kind: 'polygon', points: [this.a, this.b, c, d], color: SNAP_COLORS.onFace, opacity: 0.12 });
         out.push({ kind: 'polyline', points: [this.a, this.b, c, d], color: PREVIEW_COLOR, closed: true, width: 2 });
         out.push(...this.protractor(wa.width));
-        out.push({ kind: 'cursorHint', text: formatDeg(wa.angleDeg), screen: this.cursorScreen ?? undefined });
+        out.push(...lengthDimension(this.b, c, this.frame()!.u, pxAt(this.ctx, this.b, DIMENSION_OFFSET_PX)).overlay);
       }
     }
     out.push(...inferenceOverlay(inf, this.cursorScreen ?? undefined));
@@ -221,6 +234,7 @@ export class RotatedRectangleTool implements Tool {
           instructor: 'Select second corner or enter length.',
           vcbLabel: 'Length',
           vcbValue: this.a ? formatLen(this.ctx, v3dist(this.a, this.edgeEnd())) : undefined,
+          fields: this.edgeDimension().fields,
         };
       default: {
         const wa = this.widthAngle();
@@ -229,6 +243,7 @@ export class RotatedRectangleTool implements Tool {
           instructor: 'Set width and angle, or enter width,angle.',
           vcbLabel: 'Width, Angle',
           vcbValue: wa && w ? `${w}, ${formatDeg(wa.angleDeg)}` : undefined,
+          fields: wa && this.b ? this.widthFields(wa.width, wa.angleDeg) : [],
         };
       }
     }
@@ -267,6 +282,23 @@ export class RotatedRectangleTool implements Tool {
       return v3addScaled(this.a, dir, v3dot(v3sub(p, this.a), dir));
     }
     return p;
+  }
+
+  /** Length dimension beside the first edge while it is drawn, with its field. */
+  private edgeDimension(): { overlay: OverlayPrimitive[]; fields: EntryField[] } {
+    if (!this.a || !this.cursorInference) return { overlay: [], fields: [] };
+    const end = this.edgeEnd();
+    const value = formatLen(this.ctx, v3dist(this.a, end));
+    const side = this.plane ? leftOf(this.a, end, this.plane.n) : null;
+    if (!side) return { overlay: [], fields: [field('length', 'Length', 'length', value, undefined)] };
+    const dim = lengthDimension(this.a, end, side, pxAt(this.ctx, this.a, DIMENSION_OFFSET_PX));
+    return { overlay: dim.overlay, fields: [field('length', 'Length', 'length', value, dim.at)] };
+  }
+
+  /** Width field on the dimension beside the second edge, and the Angle field beside the pointer. */
+  private widthFields(width: number, angleDeg: number): EntryField[] {
+    const at = width > MERGE_TOL ? lengthDimension(this.b!, this.corners(width, angleDeg).c, this.frame()!.u, pxAt(this.ctx, this.b!, DIMENSION_OFFSET_PX)).at : undefined;
+    return [field('width', 'Width', 'length', formatLen(this.ctx, width), at), field('angle', 'Angle', 'angle', formatDeg(angleDeg), undefined)];
   }
 
   private pickB(p: Vec3): void {

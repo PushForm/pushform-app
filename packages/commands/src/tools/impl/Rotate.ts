@@ -22,6 +22,7 @@ import { m4rotationAbout } from '../../commands/transform';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
 import type { ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import { pointerField } from '../entry';
 import { DRAG_PX, entityOverlay, HOVER_COLOR, inferenceOverlay, screenDist, worldPerPixelAt } from '../toolUtil';
 import { AXIS_COLOR, AXIS_DIR, movedOutline, TransformToolBase, worldToScreen } from './transformShared';
 
@@ -269,7 +270,7 @@ export class RotateTool extends TransformToolBase {
     const copyHint = this.copy ? ' [Copy]' : '';
     const s = this.state;
     if (s.kind === 'rotating') {
-      return { instructor: `Pick second point or enter angle. Ctrl = copy.${copyHint}`, vcbLabel: 'Angle', vcbValue: this.fmtAngle(s.angle) };
+      return { instructor: `Pick second point or enter angle. Ctrl = copy.${copyHint}`, vcbLabel: 'Angle', vcbValue: this.fmtAngle(s.angle), fields: [pointerField('Angle', 'angle', this.fmtAngle(s.angle))] };
     }
     if (s.kind === 'center') return { instructor: `Pick first point of the baseline.${copyHint}`, vcbLabel: 'Angle' };
     const instructor = this.lastError ? `Rotate failed: ${this.lastError}` : `Pick the centre of rotation. Hover a face to align the protractor, arrows lock an axis.${copyHint}`;

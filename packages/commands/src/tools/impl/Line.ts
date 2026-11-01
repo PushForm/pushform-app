@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { formatLength, MERGE_TOL, planeFromPointNormal, v3addScaled, v3dist, v3normalize, v3sub } from '@pushform/core';
+import { basisToWorld, formatLength, MERGE_TOL, planeBasis, planeFromPointNormal, v3add, v3addScaled, v3dist, v3dot, v3normalize, v3scale, v3sub } from '@pushform/core';
 import type { Plane, Vec2, Vec3 } from '@pushform/core';
 import type { Axis, InferenceMode, InferenceOptions, InferenceResult, Snap } from '@pushform/inference';
 import type { UndoEntry } from '@pushform/model';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
-import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import type { EntryField, Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import { angleDimension, DIMENSION_COLOR, DIMENSION_OFFSET_PX, entryDegrees, entryLength, field, leftOf, lengthDimension, pxAt } from '../entry';
+import { formatDeg } from './drawingUtil';
 import { EdgeLock } from '../edgeLock';
 import { DRAG_PX, hostOfTool, inferenceOverlay, rubberBandColor, screenDist } from '../toolUtil';
 
@@ -29,7 +31,8 @@ interface LastSegment {
  * chains from the last end point until Esc or until the end lands on an existing vertex (loop
  * closed). Arrow keys lock an axis (↓ parallel/perpendicular to the last inferred edge), Shift holds the
  * current inference, Alt cycles the inference modes, VCB sets the length
- * (`[x,y,z]` absolute, `<x,y,z>` relative).
+ * (`[x,y,z]` absolute, `<x,y,z>` relative). Value fields take the length and the angle in the
+ * drawing plane, measured from the plane's first axis; a value left with Tab is locked into the preview.
  */
 export class LineTool implements Tool {
   readonly id = 'line';
@@ -50,6 +53,9 @@ export class LineTool implements Tool {
   private movedSinceCommit = false;
   private downScreen: Vec2 | null = null;
   private suppressNextClick = false;
+  private lockedLength: number | null = null;
+  /** Locked angle in the drawing plane, radians. */
+  private lockedAngle: number | null = null;
 
   /** Current anchor (start of the rubber band) or null when idle. */
   get anchor(): Vec3 | null {
@@ -180,6 +186,37 @@ export class LineTool implements Tool {
     if (to) this.commit(to, false);
   }
 
+  onEntry(values: Readonly<Record<string, VcbValue>>): void {
+    if (!this.from) return;
+    const typedLength = entryLength(values.length);
+    const typedDeg = entryDegrees(values.angle);
+    const angle = typedDeg !== null ? (typedDeg * Math.PI) / 180 : this.lockedAngle;
+    if (angle === null) {
+      const length = typedLength ?? this.lockedLength;
+      if (length === null) return;
+      if (this.lockedLength === null && typedLength !== null && values.length) {
+        this.onVcb(values.length);
+        return;
+      }
+      const to = this.endAt(length, null);
+      if (to) this.commit(to, false);
+      return;
+    }
+    const length = typedLength ?? this.lockedLength ?? this.cursorLength();
+    const to = this.endAt(length, angle);
+    if (to) this.commit(to, false);
+  }
+
+  onEntryLock(id: string, value: VcbValue | null): void {
+    if (id === 'length') this.lockedLength = entryLength(value);
+    else if (id === 'angle') {
+      const deg = entryDegrees(value);
+      this.lockedAngle = deg === null ? null : (deg * Math.PI) / 180;
+    }
+    this.ctx?.requestRender();
+    this.ctx?.statusChanged();
+  }
+
   onCancel(): void {
     // Esc cancels the current segment only; the tool stays active and earlier edges remain.
     this.reset();
@@ -190,9 +227,11 @@ export class LineTool implements Tool {
   overlay(): readonly OverlayPrimitive[] {
     const inf = this.cursorInference;
     const out: OverlayPrimitive[] = [];
-    if (this.from && inf) {
-      out.push({ kind: 'polyline', points: [this.from, inf.point], color: rubberBandColor(inf.primary), width: 2 });
+    const to = this.target();
+    if (this.from && inf && to) {
+      out.push({ kind: 'polyline', points: [this.from, to], color: rubberBandColor(inf.primary), width: 2 });
       out.push({ kind: 'point', position: this.from, color: '#111111', shape: 'square', size: 6 });
+      out.push(...this.dimensions(to).overlay);
     }
     out.push(...inferenceOverlay(inf, this.cursorScreen ?? undefined));
     return out;
@@ -202,15 +241,90 @@ export class LineTool implements Tool {
     const mode = MODES[this.modeIndex]!.status;
     if (!this.from) return { instructor: mode ? `Select start point. ${mode}` : 'Select start point.', vcbLabel: 'Length' };
     const units = this.ctx ? hostOfTool(this.ctx).doc.state.meta.units : null;
-    const len = this.cursorInference ? v3dist(this.from, this.cursorInference.point) : 0;
+    const to = this.target();
+    const len = to ? v3dist(this.from, to) : 0;
+    const value = units ? formatLength(len, units) : undefined;
     return {
       instructor: mode ? `Select end point or enter value. ${mode}` : 'Select end point or enter value.',
       vcbLabel: 'Length',
-      vcbValue: units ? formatLength(len, units) : undefined,
+      vcbValue: value,
+      fields: to ? this.dimensions(to).fields : [],
     };
   }
 
   // --- internals ------------------------------------------------------------------------------
+
+  /** Preview end point: the cursor, with any locked length or angle applied. */
+  private target(): Vec3 | null {
+    if (!this.from || !this.cursorInference) return null;
+    if (this.lockedLength === null && this.lockedAngle === null) return this.cursorInference.point;
+    const length = this.lockedLength ?? (this.lockedAngle !== null ? this.cursorLengthAlong(this.lockedAngle) : this.cursorLength());
+    return this.endAt(length, this.lockedAngle) ?? this.cursorInference.point;
+  }
+
+  /** End point `length` from the start, at `angle` in the drawing plane, or along the pointer / locked direction when null. */
+  private endAt(length: number, angle: number | null): Vec3 | null {
+    if (!this.from) return null;
+    if (angle !== null) {
+      const b = planeBasis(this.from, this.drawingPlane().n);
+      return basisToWorld(b, Math.cos(angle) * length, Math.sin(angle) * length);
+    }
+    const dir = this.lockDirection() ?? (this.cursorInference ? v3sub(this.cursorInference.point, this.from) : null);
+    if (!dir || Math.hypot(dir[0], dir[1], dir[2]) < MERGE_TOL) return null;
+    return v3addScaled(this.from, v3normalize(dir), length);
+  }
+
+  private cursorLength(): number {
+    return this.from && this.cursorInference ? v3dist(this.from, this.cursorInference.point) : 0;
+  }
+
+  /** Distance of the pointer along the direction at `angle` in the drawing plane. */
+  private cursorLengthAlong(angle: number): number {
+    if (!this.from || !this.cursorInference) return 0;
+    const b = planeBasis(this.from, this.drawingPlane().n);
+    const dir = v3add(v3scale(b.u, Math.cos(angle)), v3scale(b.v, Math.sin(angle)));
+    return v3dot(v3sub(this.cursorInference.point, this.from), dir);
+  }
+
+  /** Angle of `to` in the drawing plane, or null when the segment leaves the plane. */
+  private angleOf(to: Vec3): number | null {
+    if (!this.from) return null;
+    const b = planeBasis(this.from, this.drawingPlane().n);
+    const d = v3sub(to, this.from);
+    const x = v3dot(d, b.u), y = v3dot(d, b.v), z = v3dot(d, b.n);
+    const len = Math.hypot(x, y, z);
+    if (len < MERGE_TOL || Math.abs(z) > MERGE_TOL + len * 1e-6) return null;
+    return Math.atan2(y, x);
+  }
+
+  /** Length dimension beside the rubber band and the angle arc at its start, with their fields. */
+  private dimensions(to: Vec3): { overlay: OverlayPrimitive[]; fields: EntryField[] } {
+    const from = this.from!;
+    const n = this.drawingPlane().n;
+    const units = this.ctx ? hostOfTool(this.ctx).doc.state.meta.units : null;
+    const overlay: OverlayPrimitive[] = [];
+    const fields: EntryField[] = [];
+    const len = v3dist(from, to);
+    const side = leftOf(from, to, n);
+    const lengthValue = units ? formatLength(len, units) : undefined;
+    if (side) {
+      const dim = lengthDimension(from, to, side, pxAt(this.ctx, from, DIMENSION_OFFSET_PX));
+      overlay.push(...dim.overlay);
+      fields.push(field('length', 'Length', 'length', lengthValue, dim.at, this.lockedLength !== null));
+    } else fields.push(field('length', 'Length', 'length', lengthValue, undefined, this.lockedLength !== null));
+    const angle = this.angleOf(to);
+    if (angle !== null) {
+      const b = planeBasis(from, n);
+      const r = Math.min(len * 0.5, pxAt(this.ctx, from, 60));
+      if (r > 0) {
+        overlay.push({ kind: 'polyline', points: [from, basisToWorld(b, r * 1.2, 0)], color: DIMENSION_COLOR, width: 1, dashed: true });
+        const dim = angleDimension(from, b.u, b.v, r, 0, angle, r + pxAt(this.ctx, from, 44));
+        overlay.push(...dim.overlay);
+        fields.push(field('angle', 'Angle', 'angle', formatDeg((angle * 180) / Math.PI), dim.at, this.lockedAngle !== null));
+      }
+    }
+    return { overlay, fields };
+  }
 
   private start(inf: InferenceResult): void {
     this.from = inf.point;
@@ -224,6 +338,11 @@ export class LineTool implements Tool {
   }
 
   private commitAt(inf: InferenceResult): void {
+    if (this.lockedLength !== null || this.lockedAngle !== null) {
+      const to = this.target();
+      if (to) this.commit(to, false);
+      return;
+    }
     // The chain ends when the end point lands on an existing vertex (loop closed).
     const endsChain = inf.primary.kind === 'endpoint';
     this.commit(inf.point, endsChain);
@@ -237,6 +356,8 @@ export class LineTool implements Tool {
     const ids = this.ctx.commands.execute('sketch.addEdge', { a: from, b: to }) as number[];
     this.lastSegment = ids.length ? { from, to, entry: host.undoStack.peek() } : null;
     this.movedSinceCommit = false;
+    this.lockedLength = null;
+    this.lockedAngle = null;
     if (endChain) {
       this.from = null;
       this.lockAxis = null;
@@ -294,5 +415,7 @@ export class LineTool implements Tool {
     this.downScreen = null;
     this.suppressNextClick = false;
     this.movedSinceCommit = false;
+    this.lockedLength = null;
+    this.lockedAngle = null;
   }
 }

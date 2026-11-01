@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { basisToLocal, MERGE_TOL, planeBasis, planeFromPointNormal, v3dist } from '@pushform/core';
+import { basisToLocal, MERGE_TOL, planeBasis, planeFromPointNormal, v3add, v3dist, v3normalize, v3scale, v3sub } from '@pushform/core';
 import type { Plane, PlaneBasis, Vec2, Vec3 } from '@pushform/core';
 import { tessellateCircle } from '@pushform/geom';
 import type { Tessellation } from '@pushform/geom';
@@ -9,7 +9,8 @@ import { SNAP_COLORS } from '@pushform/inference';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { AddCurveInput, AddCurveResult } from '../../commands/curves';
 import type { OverlayPrimitive } from '../overlay';
-import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import type { EntryField, Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import { DIMENSION_COLOR, field, pxAt } from '../entry';
 import { hostOfTool, inferenceOverlay, PREVIEW_COLOR } from '../toolUtil';
 import {
   AXIS_NORMAL,
@@ -39,7 +40,8 @@ export interface CircleParams {
 
 /**
  * Circle tool (C). Idle → Center → Radius → commit. Before the first click the VCB sets
- * the number of sides (`24` / `24s`); after it the radius (`Ns` still changes the sides). The
+ * the number of sides (`24` / `24s`); after it the Diameter field takes a length, `24r` a radius
+ * (`Ns` still changes the sides). The
  * drawing plane comes from the hovered face, an arrow-key lock, or Shift (holds the plane under
  * the cursor). `segments` persists for the session; typing after the commit re-edits the last
  * circle. Commits through `sketch.addCurve`, so the edges carry a Curve record.
@@ -176,7 +178,7 @@ export class CircleTool implements Tool {
       if (r > MERGE_TOL) {
         const tess = this.tessellate(this.center, this.plane.n, r, this.segments, this.currentStartAngle());
         out.push(...shapePreview(tess.points, true, PREVIEW_COLOR, SNAP_COLORS.onFace));
-        out.push({ kind: 'polyline', points: [this.center, onPlane(this.plane, inf.point)], color: PREVIEW_COLOR, dashed: true });
+        out.push(...this.diameterDimension(r).overlay);
       }
       out.push({ kind: 'point', position: this.center, color: PREVIEW_COLOR, shape: 'square', size: 6 });
     }
@@ -186,10 +188,12 @@ export class CircleTool implements Tool {
 
   status(): ToolStatus {
     if (!this.center) return { instructor: 'Select center point.', vcbLabel: 'Sides', vcbValue: String(this.segments) };
+    const r = this.currentRadius();
     return {
       instructor: `Select point on ${this.shapeName} or enter value.`,
-      vcbLabel: 'Radius',
-      vcbValue: formatLen(this.ctx, this.currentRadius()),
+      vcbLabel: 'Diameter',
+      vcbValue: formatLen(this.ctx, 2 * r),
+      fields: this.diameterDimension(r).fields,
     };
   }
 
@@ -204,8 +208,26 @@ export class CircleTool implements Tool {
   protected tessellate(center: Vec3, normal: Vec3, radius: number, segments: number, startAngle: number): Tessellation {
     return tessellateCircle(center, normal, radius, segments, startAngle);
   }
+  /** A bare length is the diameter; `24r` is a radius. */
   protected radiusFromVcb(v: VcbValue): number | null {
-    return v.kind === 'length' || v.kind === 'radius' ? v.meters : null;
+    if (v.kind === 'length') return v.meters / 2;
+    return v.kind === 'radius' ? v.meters : null;
+  }
+
+  /**
+   * Diameter dimension through the centre along the pointer's direction, running on past the
+   * shape to the field beside it.
+   */
+  protected diameterDimension(r: number): { overlay: OverlayPrimitive[]; fields: EntryField[] } {
+    const value = formatLen(this.ctx, 2 * r);
+    if (!this.center || !this.plane || !this.cursorInference || r <= MERGE_TOL) return { overlay: [], fields: [field('diameter', 'Diameter', 'length', value, undefined)] };
+    const dir = v3normalize(v3sub(onPlane(this.plane, this.cursorInference.point), this.center));
+    const far = v3add(this.center, v3scale(dir, r + pxAt(this.ctx, this.center, 70)));
+    const near = v3add(this.center, v3scale(dir, -r));
+    return {
+      overlay: [{ kind: 'polyline', points: [near, far], color: DIMENSION_COLOR, width: 1 }],
+      fields: [field('diameter', 'Diameter', 'length', value, far)],
+    };
   }
   protected onExtraKey(_e: ToolKeyEvent): boolean {
     return false;

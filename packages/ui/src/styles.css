@@ -881,33 +881,31 @@
 .pf-status-credit:hover {
   text-decoration: underline;
 }
-.pf-vcb {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.pf-vcb-label {
-  color: var(--pf-text-muted);
-  min-width: 60px;
-  text-align: right;
-}
-.pf-vcb-input {
-  width: 150px;
-  height: 20px;
-  padding: 0 6px;
-  border: 1px solid var(--pf-border);
-  border-radius: 3px;
-  background: var(--pf-surface-2);
-  color: var(--pf-text);
+.pf-entry {
+  position: absolute;
+  z-index: 6;
+  transform: translate(-50%, -50%);
+  width: 9em;
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  background: rgba(28, 30, 34, 0.94);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  color: #e8eaed;
   font: inherit;
-  text-align: right;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
   outline: none;
 }
-.pf-vcb-input:focus {
+.pf-entry:focus,
+.pf-entry.is-editing {
   border-color: var(--pf-accent);
-  background: var(--pf-surface);
 }
-.pf-vcb.is-error .pf-vcb-input {
+.pf-entry.is-locked {
+  border-color: var(--pf-accent);
+  background: rgba(28, 30, 34, 0.98);
+}
+.pf-entry.is-error {
   border-color: var(--pf-danger);
 }
 

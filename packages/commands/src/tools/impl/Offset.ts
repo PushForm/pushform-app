@@ -9,6 +9,7 @@ import type { UndoEntry } from '@pushform/model';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
 import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import { pointerField } from '../entry';
 import { HOVER_COLOR, hostOfTool, PREVIEW_COLOR } from '../toolUtil';
 import {
   orderSketchEdgeChain,
@@ -208,7 +209,7 @@ export class OffsetTool implements Tool {
     const s = this.state;
     const hint = this.overlaps ? ' [Overlaps allowed]' : '';
     if (s.kind === 'dragging') {
-      return { instructor: `Click or type the offset distance (negative = inward).${hint}`, vcbLabel: 'Distance', vcbValue: fmtLength(this.ctx, s.distance) };
+      return { instructor: `Click or type the offset distance (negative = inward).${hint}`, vcbLabel: 'Distance', vcbValue: fmtLength(this.ctx, s.distance), fields: [pointerField('Distance', 'length', fmtLength(this.ctx, s.distance))] };
     }
     const instructor = this.lastError
       ? `Offset failed: ${this.lastError}`

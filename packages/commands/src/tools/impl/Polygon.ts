@@ -37,7 +37,7 @@ export class PolygonTool extends CircleTool {
       this.circumscribed = false;
       return v.meters;
     }
-    return v.kind === 'length' ? v.meters : null;
+    return v.kind === 'length' ? v.meters / 2 : null;
   }
 
   protected override onExtraKey(e: ToolKeyEvent): boolean {
@@ -52,7 +52,7 @@ export class PolygonTool extends CircleTool {
 
   override status(): ToolStatus {
     const s = super.status();
-    return this.center && this.circumscribed ? { ...s, vcbLabel: 'Radius (circumscribed)' } : s;
+    return this.center && this.circumscribed ? { ...s, vcbLabel: 'Diameter (circumscribed)' } : s;
   }
 
   /** Radius of the vertex circle for a picked radius. */

@@ -10,6 +10,7 @@ import { contextFrame } from '../../commands/context';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
 import type { ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import { pointerField } from '../entry';
 import { EdgeLock } from '../edgeLock';
 import { DRAG_PX, entityOverlay, HOVER_COLOR, inferenceOverlay, rubberBandColor, screenDist } from '../toolUtil';
 import { AXIS_DIR, movedOutline, TransformToolBase } from './transformShared';
@@ -268,6 +269,7 @@ export class MoveTool extends TransformToolBase {
           : `Pick end point or enter distance. Ctrl = copy, arrows lock an axis.${copyHint}`,
         vcbLabel: 'Length',
         vcbValue: this.fmtLength(v3len(this.state.delta)),
+        fields: [pointerField('Length', 'length', this.fmtLength(v3len(this.state.delta)))],
       };
     }
     const host = this.host();

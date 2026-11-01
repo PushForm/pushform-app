@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { basisToLocal, MERGE_TOL, planeBasis, planeFromPointNormal, v3dist } from '@pushform/core';
+import { basisToLocal, MERGE_TOL, planeBasis, planeFromPointNormal, v3add, v3dist, v3normalize, v3scale, v3sub } from '@pushform/core';
 import type { Plane, PlaneBasis, Vec2, Vec3 } from '@pushform/core';
 import { tessellateArc } from '@pushform/geom';
 import type { Axis, InferenceOptions, InferenceResult, Snap } from '@pushform/inference';
@@ -8,7 +8,8 @@ import { SNAP_COLORS } from '@pushform/inference';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { AddCurveInput, AddCurveResult } from '../../commands/curves';
 import type { OverlayPrimitive } from '../overlay';
-import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import type { EntryField, Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import { angleDimension, DIMENSION_COLOR, field, pxAt } from '../entry';
 import { hostOfTool, inferenceOverlay, PREVIEW_COLOR } from '../toolUtil';
 import {
   AXIS_NORMAL,
@@ -42,8 +43,9 @@ export interface ArcParams {
 export const ARC_SEGMENTS = 12;
 
 /**
- * Arc tool (centre arc): Idle → Center → Radius point → End angle → commit. VCB: radius in the
- * radius stage, angle (degrees, `45` or `45deg`) in the angle stage, `Ns` segments any time; typing
+ * Arc tool (centre arc): Idle → Center → Radius point → End angle → commit. VCB: the circle's
+ * diameter (or `24r` a radius) in the radius stage, angle (degrees, `45` or `45deg`) in the angle
+ * stage, `Ns` segments any time; typing
  * after the commit re-edits the last arc. The plane comes from the hovered face / arrow lock /
  * Shift. Pie (`pie: true`) closes the arc back through the centre with two edges so a face forms.
  */
@@ -169,7 +171,7 @@ export class ArcTool implements Tool {
     switch (this.stage) {
       case 'center': {
         if (!this.last) return;
-        if (v.kind === 'length' || v.kind === 'radius') this.reapplyLast({ radius: v.meters });
+        if (v.kind === 'length' || v.kind === 'radius') this.reapplyLast({ radius: v.kind === 'length' ? v.meters / 2 : v.meters });
         else {
           const deg = degreesFromVcb(v);
           if (deg !== null) this.reapplyLast({ sweep: (deg * Math.PI) / 180 });
@@ -178,8 +180,9 @@ export class ArcTool implements Tool {
       }
       case 'radius': {
         if (v.kind !== 'length' && v.kind !== 'radius') return;
-        if (v.meters <= MERGE_TOL) return;
-        this.radius = v.meters;
+        const r = v.kind === 'length' ? v.meters / 2 : v.meters;
+        if (r <= MERGE_TOL) return;
+        this.radius = r;
         this.startAngle = this.cursorAngle() ?? 0;
         this.sweep = 0;
         this.ctx?.statusChanged();
@@ -207,6 +210,9 @@ export class ArcTool implements Tool {
       const cursor = onPlane(this.plane, inf.point);
       if (this.stage === 'radius') {
         out.push({ kind: 'polyline', points: [this.center, cursor], color: PREVIEW_COLOR, width: 2 });
+        const r = this.cursorRadius();
+        if (r > MERGE_TOL) out.push({ kind: 'circle', center: this.center, normal: this.plane.n, radius: r, color: DIMENSION_COLOR, dashed: true, width: 1 });
+        out.push(...this.radiusDimension().overlay);
       } else if (this.radius !== null) {
         const sweep = this.currentSweep();
         const pts = this.points(this.center, this.plane.n, this.radius, this.startAngle, sweep, this.segments);
@@ -218,7 +224,7 @@ export class ArcTool implements Tool {
           out.push({ kind: 'polyline', points: [this.center, pts[0]!], color: PREVIEW_COLOR, dashed: true });
           out.push({ kind: 'polyline', points: [this.center, pts[pts.length - 1]!], color: PREVIEW_COLOR, dashed: true });
         }
-        out.push({ kind: 'cursorHint', text: formatDeg((sweep * 180) / Math.PI), screen: this.cursorScreen ?? undefined });
+        out.push(...this.angleDimension(sweep).overlay);
       }
     }
     out.push(...inferenceOverlay(inf, this.cursorScreen ?? undefined));
@@ -231,16 +237,20 @@ export class ArcTool implements Tool {
         return { instructor: 'Select center point.', vcbLabel: 'Sides', vcbValue: String(this.segments) };
       case 'radius':
         return {
-          instructor: 'Select point on arc or enter radius.',
-          vcbLabel: 'Radius',
-          vcbValue: formatLen(this.ctx, this.cursorRadius()),
+          instructor: 'Select point on arc or enter diameter.',
+          vcbLabel: 'Diameter',
+          vcbValue: formatLen(this.ctx, 2 * this.cursorRadius()),
+          fields: this.radiusDimension().fields,
         };
-      default:
+      default: {
+        const sweep = this.currentSweep();
         return {
           instructor: 'Select end of arc or enter angle.',
           vcbLabel: 'Angle',
-          vcbValue: formatDeg((this.currentSweep() * 180) / Math.PI),
+          vcbValue: formatDeg((sweep * 180) / Math.PI),
+          fields: this.angleDimension(sweep).fields,
         };
+      }
     }
   }
 
@@ -265,6 +275,28 @@ export class ArcTool implements Tool {
     this.radius = null;
     this.sweep = 0;
     this.ctx?.statusChanged();
+  }
+
+  /** Diameter dimension through the centre toward the pointer, running on to the field beside the circle. */
+  private radiusDimension(): { overlay: OverlayPrimitive[]; fields: EntryField[] } {
+    const r = this.cursorRadius();
+    const value = formatLen(this.ctx, 2 * r);
+    if (!this.center || !this.plane || !this.cursorInference || r <= MERGE_TOL) return { overlay: [], fields: [field('diameter', 'Diameter', 'length', value, undefined)] };
+    const dir = v3normalize(v3sub(onPlane(this.plane, this.cursorInference.point), this.center));
+    const far = v3add(this.center, v3scale(dir, r + pxAt(this.ctx, this.center, 70)));
+    return {
+      overlay: [{ kind: 'polyline', points: [v3add(this.center, v3scale(dir, -r)), far], color: DIMENSION_COLOR, width: 1 }],
+      fields: [field('diameter', 'Diameter', 'length', value, far)],
+    };
+  }
+
+  /** Gray arc inside the arc's radius over the swept angle, with the Angle field on it. */
+  private angleDimension(sweep: number): { overlay: OverlayPrimitive[]; fields: EntryField[] } {
+    const value = formatDeg((sweep * 180) / Math.PI);
+    if (!this.center || !this.basis || this.radius === null || Math.abs(sweep) < 1e-9) return { overlay: [], fields: [field('angle', 'Angle', 'angle', value, undefined)] };
+    const r = Math.min(this.radius * 0.6, Math.max(this.radius * 0.3, pxAt(this.ctx, this.center, 60)));
+    const dim = angleDimension(this.center, this.basis.u, this.basis.v, r, this.startAngle, sweep);
+    return { overlay: dim.overlay, fields: [field('angle', 'Angle', 'angle', value, dim.at)] };
   }
 
   private cursorRadius(): number {

@@ -6,6 +6,7 @@ import type { Modifiers, ToolPointerEvent } from '@pushform/commands';
 import { GROUND_PLANE, freeInference, hitSelectable } from '@pushform/inference';
 import { ContextMenuHost } from './ContextMenu';
 import { DialogHost } from './MakeComponentDialog';
+import { EntryFields } from './EntryFields';
 import { NavigationCube } from './NavigationCube';
 import { SceneTabs } from './SceneTabs';
 import type { InferenceResult } from '@pushform/inference';
@@ -120,6 +121,7 @@ export function ViewportView(): JSX.Element {
       <NavigationCube />
       <DialogHost />
       <ContextMenuHost />
+      <EntryFields pointer={pointer} />
       {hint ? (
         <div className="pf-cursor-hint" style={{ left: hintPos[0] + 14, top: hintPos[1] + 18 }}>
           {hint.text}

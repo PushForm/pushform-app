@@ -20,6 +20,8 @@ export type {
   ToolKeyEvent,
   ToolWheelEvent,
   ToolStatus,
+  EntryField,
+  EntryFieldKind,
   Modifiers,
   InferenceResult,
 } from './tools/Tool';

@@ -6,7 +6,8 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { emptyFeatureBrief, emptyProblemReport, type FeatureBrief, type ProblemReport } from './brief.ts';
 import { runTurn } from './client.ts';
 import { fakeAnthropic } from './fakeAnthropic.ts';
-import { helpAgent, HELP_PROCEDURE_RULES } from './help.ts';
+import { GENERAL_KNOWLEDGE_RULE, helpAgent, HELP_PROCEDURE_RULES } from './help.ts';
+import { MODEL_DOCUMENT_RULES } from './document.ts';
 import { openAgent } from './open.ts';
 import { splitMarkdownSections } from './digest.ts';
 import { GUIDANCE_RULES } from '../guidance.ts';
@@ -294,6 +295,44 @@ it('keeps procedural continuation rules on both help entry routes and the path-s
   expect(result).toContain(HELP_PROCEDURE_RULES);
 });
 
+
+it('lets help give general trade knowledge without disclaiming the guides, while product behavior stays grounded in them', async () => {
+  const context = ctx({ path: 'open', brief: null });
+  for (const system of [helpAgent.system(context), openAgent.system(context)]) {
+    expect(system).toContain(GENERAL_KNOWLEDGE_RULE);
+    expect(system).toContain('how the product works only from');
+  }
+  expect(GENERAL_KNOWLEDGE_RULE).toContain('without saying the help guides do not cover it');
+  const result = await openAgent.handlers(context, new MemoryConversationStore(null, null, 'open'))['switch_path']!({ to: 'help', reason: 'Standard cabinet depth?' });
+  expect(result).toContain(GENERAL_KNOWLEDGE_RULE);
+});
+
+it('asks procedures to cover every named part with height kept vertical', () => {
+  expect(HELP_PROCEDURE_RULES).toContain('the procedure reaches every part');
+  expect(HELP_PROCEDURE_RULES).toContain('pulled up to that height');
+});
+
+it('sends a model change on the open path to the document tools, never to layout tools', async () => {
+  const context = ctx({ path: 'open', brief: null, document: { type: 'model', apiVersion: 1, edit: 1, guidance: 1 } });
+  expect(openAgent.system(context)).not.toContain('layout tools');
+  const result = await openAgent.handlers(context, new MemoryConversationStore(null, null, 'open'))['switch_path']!({ to: 'help', reason: 'Build a cabinet' });
+  expect(result).toContain('make it now with the document tools');
+  expect(result).not.toContain('layout tools');
+});
+
+it('has the model agent build requested objects from boxes, every named part included, and say what is left', () => {
+  const rules = MODEL_DOCUMENT_RULES(ctx());
+  expect(rules).toContain('is a request for a change');
+  expect(rules).toContain('add_box is the one operation that creates geometry');
+  expect(rules).toContain('Make every part the requester named, with its count');
+  expect(rules).toContain('say plainly what is left');
+});
+
+it('never reports a dismissed or missing highlight to the requester as a failure', () => {
+  expect(GUIDANCE_RULES).toContain('On expiry, dismissal');
+  expect(GUIDANCE_RULES).toContain('never tell the requester that a highlight did not work');
+  expect(GUIDANCE_RULES).not.toContain('explain that specific limitation');
+});
 
 it('excludes internal documents and traversal paths from help even when the supplied digest contains them', async () => {
   const section = { heading: 'Polygon', anchor: 'polygon', text: 'Internal polygon details: SECRET_INTERNAL_FACT.' };

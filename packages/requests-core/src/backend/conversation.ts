@@ -771,7 +771,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     const quietCue = pending.calls.length > 0 && pending.calls.every(call => {
       const answer = answers.get(call.id);
       if (call.name !== 'ui_highlight' || !answer || answer.isError) return false;
-      try { return ['expired', 'cancelled'].includes((JSON.parse(answer.content) as { status?: string }).status ?? ''); }
+      try { return ['expired', 'cancelled', 'dismissed'].includes((JSON.parse(answer.content) as { status?: string }).status ?? ''); }
       catch { return false; }
     });
     if (quietCue) return sseResponse(async emit => {

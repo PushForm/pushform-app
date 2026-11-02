@@ -449,7 +449,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
       <form className="pf-fr-composer" aria-label="Message" onSubmit={submit}>
         <textarea ref={composer} data-autofocus data-submit-on-enter aria-label="Your message" rows={1} value={text} maxLength={4000}
           disabled={busy && !waitingForGuidance && current.streaming !== null}
-          placeholder={current.conversation ? 'Type your answer, or say skip' : 'Describe what you need'} onChange={event => setText(event.target.value)} />
+          placeholder={!current.conversation ? 'Describe what you need' : reporting ? 'Type your answer, or say skip' : 'Ask a follow-up question'} onChange={event => setText(event.target.value)} />
         <button type="submit" className="pf-fr-primary pf-fr-send" disabled={(busy && !waitingForGuidance) || !attachmentsReady || !text.trim()}>Send</button>
       </form>
     </div>;

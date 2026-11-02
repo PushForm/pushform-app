@@ -12,7 +12,7 @@ import {
   type ModelVec3, type ModelViewResult,
 } from '@pushform/extension-protocol';
 import {
-  box3Empty, box3Expand, box3IsEmpty, m4invert, m4mul, m4transformPoint, m4translation, meshBounds, planeDistance, PushFormError, v3dot,
+  box3Empty, box3Expand, box3IsEmpty, MERGE_TOL, m4invert, m4mul, m4transformPoint, m4translation, meshBounds, planeDistance, PushFormError, v3dot,
   type Box3, type DefId, type Id, type MMat4, type Vec3,
 } from '@pushform/core';
 import {
@@ -381,6 +381,12 @@ export class ModelDocumentApi {
       return this.transform(matrices.map(m => planTransform(host.doc.state, refs, m, copy || copies !== undefined, label)));
     };
     switch (op.op) {
+      case 'add_box': {
+        const thin = [0, 1, 2].find(axis => !(op.max[axis]! - op.min[axis]! > MERGE_TOL));
+        if (thin !== undefined) throw this.failure('invalid_geometry', `A box needs max greater than min on every axis; ${'xyz'[thin]} is ${op.min[thin]} to ${op.max[thin]}.`);
+        const id = exec<number>('model.addBox', { min: op.min, max: op.max });
+        return { id, named: { kind: 'body', id } };
+      }
       case 'make_group': return instanceResult(exec<MakeResult>('group.make', { refs: refsOf(op.refs) }).instanceId!);
       case 'make_component': return instanceResult(exec<MakeResult>('component.make', { refs: refsOf(op.refs), ...(op.name ? { name: op.name } : {}) }).instanceId!);
       case 'explode': {

@@ -83,7 +83,7 @@ export type { EdgeMaterialOptions, EdgeShaderSource } from './renderables/EdgeMa
 export { buildFaceGeometry, buildFaceArrays, buildBodyEdgeSegments, extractEdges, extractEdgeSegments, meshFaceNormals, transformedVerts } from './renderables/buildGeometry';
 export type { BodyEdgeSegments, FaceArrays, FaceGeometryOptions } from './renderables/buildGeometry';
 export { ImageLayer, ImageRenderable, buildImageArrays, imageCorners, MISSING_IMAGE_COLOR } from './renderables/ImageLayer';
-export { GuideLayer, buildGuideGeometry, GUIDE_COLOR, GUIDE_EXTENT, GUIDE_POINT_SIZE } from './renderables/GuideLayer';
+export { GuideLayer, buildGuideGeometry, GUIDE_COLOR, GUIDE_EXTENT, GUIDE_POINT_SIZE, GUIDE_POINT_STROKE } from './renderables/GuideLayer';
 export type { GuideGeometry } from './renderables/GuideLayer';
 export { SectionLayer, SECTION_PLANE_OPACITY } from './renderables/SectionLayer';
 export type { SectionBody } from './renderables/SectionLayer';

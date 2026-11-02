@@ -12,8 +12,22 @@ import type { EdgeMaterial } from './EdgeMaterial';
 export const GUIDE_EXTENT = 1e4;
 /** Default guide color (the style's "Guides" modeling color: dark grey). */
 export const GUIDE_COLOR = 0x4d4d4d;
-/** Guide point glyph (×) size in CSS px. */
-export const GUIDE_POINT_SIZE = 9;
+/**
+ * Guide point glyph: an upright + in CSS px, `GUIDE_POINT_SIZE` across with arms `GUIDE_POINT_STROKE` wide,
+ * centered on the point, the same size at every distance.
+ */
+export const GUIDE_POINT_SIZE = 6;
+export const GUIDE_POINT_STROKE = 2;
+
+/**
+ * The guide point glyph as the point shader rasterizes it, one row per string ('#' drawn): a pixel of the
+ * `size`-px sprite is drawn when its center lies within the middle `stroke` px across or down.
+ */
+export function guidePointGlyph(size = GUIDE_POINT_SIZE, stroke = GUIDE_POINT_STROKE): string[] {
+  const half = stroke / size;
+  const inStroke = (i: number) => Math.abs(((i + 0.5) / size) * 2 - 1) < half;
+  return Array.from({ length: size }, (_, y) => Array.from({ length: size }, (_, x) => (inStroke(x) || inStroke(y) ? '#' : '.')).join(''));
+}
 
 /** Plain-array geometry of a guide set, origin-relative (testable without WebGL). */
 export interface GuideGeometry {
@@ -54,7 +68,7 @@ export function buildGuideGeometry(guides: RenderGuides, origin: Vec3, extent = 
 
 /**
  * Construction guides of the edit context: dashed thin lines (an infinite line is a long segment
- * around its anchor) and × glyphs for guide points. Depth-tested like edges.
+ * around its anchor) and + glyphs for guide points. Depth-tested like edges.
  */
 export class GuideLayer {
   readonly group = new Group();
@@ -71,7 +85,7 @@ export class GuideLayer {
     this.lineMaterial.dashSize = 5;
     this.lineMaterial.gapSize = 4;
     this.pointMaterial = new ShaderMaterial({
-      uniforms: { uSize: { value: GUIDE_POINT_SIZE }, uColor: { value: new Color(color) } },
+      uniforms: { uSize: { value: GUIDE_POINT_SIZE }, uColor: { value: new Color(color) }, uStroke: { value: GUIDE_POINT_STROKE / GUIDE_POINT_SIZE } },
       vertexShader: /* glsl */ `
         uniform float uSize;
         void main() {
@@ -82,9 +96,11 @@ export class GuideLayer {
       fragmentShader: /* glsl */ `
         precision highp float;
         uniform vec3 uColor;
+        uniform float uStroke;
         void main() {
-          vec2 p = gl_PointCoord * 2.0 - 1.0;
-          if (abs(p.x - p.y) > 0.3 && abs(p.x + p.y) > 0.3) discard;
+          // Keep the middle stroke of the sprite across and down: an upright + (guidePointGlyph).
+          vec2 p = abs(gl_PointCoord * 2.0 - 1.0);
+          if (p.x >= uStroke && p.y >= uStroke) discard;
           gl_FragColor = vec4(uColor, 1.0);
         }
       `,

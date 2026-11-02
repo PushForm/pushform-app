@@ -2840,7 +2840,8 @@ h4.pf-xui-text { font-size: 12px; }
 .pf-xui-section-toggle { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; padding: 3px 4px; font: inherit; font-weight: 600; color: inherit; text-align: start; background: none; border: 0; border-radius: var(--pf-radius); cursor: pointer; }
 .pf-xui-section-toggle:hover { background: var(--pf-accent-bg); }
 .pf-xui-section-chevron { display: inline-flex; flex: none; color: var(--pf-text-muted); }
-.pf-xui-section-title { overflow-wrap: anywhere; }
+/* The title takes the toggle's first line beside the chevron and wraps within it, so a narrow dock never leaves the chevron alone on a line; the badge follows it, the subtitle takes the next line. */
+.pf-xui-section-title { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
 .pf-xui-section-badge { flex: none; padding: 0 6px; border-radius: 9px; background: var(--pf-accent-bg); color: var(--pf-text); font-size: 11px; font-weight: 600; line-height: 18px; }
 .pf-xui-section-detail { display: contents; }
 .pf-xui-section-subtitle { flex-basis: 100%; min-width: 0; font-weight: 400; font-size: 11px; color: var(--pf-text-muted); overflow-wrap: anywhere; }

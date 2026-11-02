@@ -2,6 +2,30 @@
 
 Notable changes in each PushForm desktop release. Versions are `<year>.<week>.<build>`.
 
+## Unreleased
+
+### Materials
+
+- **368 built-in materials:** 338 image textures, 24 solid colors and six transparent glass tints. The expanded texture library includes complete Ceramic, Metal, Textiles, Plastic and Organic collections from Poly Haven, plus selected Wood, Brick, Concrete & Asphalt, Stone and Terrain surfaces. Textiles includes leather; Plastic includes rubber.
+- **Square texture previews.** The Materials picker shows the actual surface image, with names on hover. Ceramic replaces the former Tile category; paving and block textures are grouped under Brick.
+- Textures ship with the app, load when selected, and are saved inside documents when used. Physical repeat sizes and rectangular image proportions are preserved. The texture images are [CC0 assets from Poly Haven](https://polyhaven.com/license).
+
+| Category | Materials |
+| --- | ---: |
+| Wood | 50 |
+| Brick | 30 |
+| Ceramic | 26 |
+| Concrete & Asphalt | 50 |
+| Stone | 50 |
+| Metal | 26 |
+| Terrain | 50 |
+| Textiles | 44 |
+| Plastic | 6 |
+| Organic | 6 |
+| Solid colors | 24 |
+| Glass tints | 6 |
+| **Overall total** | **368** |
+
 ## 26.44.367
 
 ### Import and export

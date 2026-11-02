@@ -2,7 +2,7 @@
 // Copyright 2026 PushForm contributors
 
 /**
- * Interface trees. A panel, inspector or settings block is a tree of these components, sent whole with
+ * Interface trees. A sidebar, panel, inspector or settings block is a tree of these components, sent whole with
  * `context.ui.mount` and again, with a higher sequence number, with `context.ui.update`. PushForm draws them with its
  * own components; extensions never supply markup or styles. Every node needs an `id` unique in its tree.
  */
@@ -26,7 +26,8 @@ export interface UiOption {
  */
 export type UiIcon = 'add' | 'remove' | 'delete' | 'edit' | 'copy' | 'save' | 'print' | 'download' | 'upload' | 'search' | 'filter' | 'refresh'
   | 'settings' | 'help' | 'info' | 'warning' | 'check' | 'close' | 'more' | 'menu' | 'expand' | 'collapse' | 'up' | 'down' | 'show' | 'hide'
-  | 'lock' | 'unlock' | 'undo' | 'redo' | 'folder' | 'document' | 'tag' | 'tags' | 'palette' | 'box' | 'component' | 'table' | 'ruler';
+  | 'lock' | 'unlock' | 'undo' | 'redo' | 'folder' | 'document' | 'tag' | 'tags' | 'palette' | 'box' | 'component' | 'table' | 'ruler'
+  | 'saw-blade';
 
 export interface UiStack { type: 'stack'; id: string; children: UiNode[]; direction?: 'vertical' | 'horizontal' | undefined;
   gap?: 'none' | 'small' | 'medium' | 'large' | undefined; align?: 'start' | 'center' | 'end' | 'stretch' | undefined }
@@ -161,15 +162,7 @@ export type UiEvent =
   /** The pointer moved onto a vector view item, or off every item. Clicking one sends `select`. */
   | { component: string; event: 'hover'; item: string | null };
 
-/**
- * Where a panel is shown: `dock` in the side panel beside the editor, or `window` in a large window over the editor,
- * for wide tables and drawings. Pass it to `context.ui.mount` (a panel starts docked when it is absent); `update`
- * keeps the presentation shown unless it names one. Once the user moves the panel themselves, their choice is kept
- * and later requests do not move it. Inspector and settings blocks are always shown in place and ignore it.
- */
-export type UiPresentation = 'dock' | 'window';
-
-/** An event with the target (panel, inspector or settings contribution id) it happened on. */
+/** An event with the target (sidebar, panel, inspector or settings contribution id) it happened on. */
 export type UiEventOnTarget = { target: string } & UiEvent;
 
 /**

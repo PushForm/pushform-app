@@ -31,6 +31,7 @@ export function AboutDialog({ build, onClose }: { build: BuildInfo; onClose: () 
       </dl>
       <p className="pf-about-copyright">© 2026 JobCraft, Inc.</p>
       <p>Planned open-source release: <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener noreferrer">GNU GPLv3 license</a></p>
+      <p className="pf-about-credits">Icons include <a href="https://game-icons.net/" target="_blank" rel="noopener noreferrer">Game Icons</a> by Lorc, Delapouite and contributors, <a href="https://creativecommons.org/licenses/by/3.0/" target="_blank" rel="noopener noreferrer">CC BY 3.0</a>.</p>
     </div>
   </div>, document.body);
 }

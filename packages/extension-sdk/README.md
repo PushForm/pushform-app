@@ -49,7 +49,7 @@ throws an error naming the permission to request.
 
 | Service | Permission | What it does |
 | --- | --- | --- |
-| `ui` | none | Show and update panels, inspectors and settings blocks; hear user input |
+| `ui` | none | Show and update sidebars, panels, inspectors and settings blocks; open a panel's tab; hear user input |
 | `log` | none | Write diagnostic lines |
 | `document` | none | The units the document's lengths are shown in, and when they change |
 | `model` | `model.read`, `model.write` | Read and query the model, follow its changes, and change it in undoable batches |

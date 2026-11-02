@@ -5,25 +5,30 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { zipSync } from 'fflate';
 import { CommandRegistry, MemoryTransactionHost } from '@pushform/commands';
 import { DEFAULT_UNITS } from '@pushform/core';
-import { buildManifest, type ExtensionManifestInput } from '@pushform/extension-protocol';
+import { buildManifest, type ExtensionManifestInput, type ExtensionPermission, type ModelRef } from '@pushform/extension-protocol';
 import {
   ExtensionPlatform, memoryDeveloperMode, memoryExtensionStore, memorySettingsStore, messagePortTransport, startGuest, type ExtensionContext,
-  type ExtensionStore,
+  type ExtensionDocuments, type ExtensionPlatformOptions, type ExtensionStore,
 } from '@pushform/extensions';
 import { searchCommands } from '../components/CommandSearch';
 import { ExtensionActivity, ExtensionRuns } from './ExtensionActivity';
-import { ExtensionPanel, readSize } from './ExtensionPanel';
-import { extensionPanels, selectionActionGroups, syncExtensionCommands } from './extensionContributions';
-import { railLabel } from './useExtensionWorkspace';
+import { ExtensionSidebar } from './ExtensionSidebar';
+import { ExtensionTabView } from './ExtensionTabView';
+import { activityExtensions, extensionToolbarButtons, selectionActionGroups, syncExtensionCommands } from './extensionContributions';
+import { ExtensionTabs, extensionTabId } from './extensionTabs';
 
 const encode = (s: string) => new TextEncoder().encode(s);
+const SIDE = 'com.example.parts.side';
+const PANEL = 'com.example.parts.panel';
 const manifest = {
   id: 'com.example.parts', name: 'Parts', publisher: 'Example', version: '1.0.0', apiVersion: '^0.1.0', editors: ['modeling'],
-  defaultLocale: 'en', license: 'MIT', permissions: [],
+  defaultLocale: 'en', license: 'MIT', permissions: ['selection.write'], icon: 'saw-blade',
   contributions: [
-    { target: 'model.panel', id: 'com.example.parts.panel', name: 'Parts list' },
+    { target: 'model.sidebar', id: SIDE, name: 'Parts' },
+    { target: 'model.panel', id: PANEL, name: 'Parts list' },
     { target: 'model.command', id: 'com.example.parts.export', name: 'Export parts' },
     { target: 'model.selection.action', id: 'com.example.parts.label', name: 'Label selected parts' },
+    { target: 'model.toolbar', id: 'com.example.parts.cut', name: 'Cut parts', category: 'modify', icon: 'saw-blade' },
   ],
 } satisfies Omit<ExtensionManifestInput, 'files'>;
 
@@ -31,7 +36,8 @@ const channels: MessageChannel[] = [];
 afterEach(() => { cleanup(); for (const c of channels.splice(0)) { c.port1.close(); c.port2.close(); } });
 
 /** A platform with the Parts extension installed, running `module` in this process. */
-async function setup(module: unknown = { activate() {} }, store: ExtensionStore = memoryExtensionStore()) {
+async function setup(module: unknown = { activate() {} }, store: ExtensionStore = memoryExtensionStore(),
+  options: Partial<ExtensionPlatformOptions> = {}, grants: readonly ExtensionPermission[] = []) {
   const terminated: string[] = [];
   const platform = new ExtensionPlatform({
     store, developerMode: memoryDeveloperMode(true), settingsStore: () => memorySettingsStore(),
@@ -41,17 +47,32 @@ async function setup(module: unknown = { activate() {} }, store: ExtensionStore 
       void startGuest(messagePortTransport(channel.port2), async () => module);
       return { port: messagePortTransport(channel.port1), terminate: () => terminated.push('parts') };
     },
+    ...options,
   });
   const files = new Map<string, Uint8Array>([['main.js', encode('export function activate() {}')]]);
   files.set('manifest.json', await buildManifest(manifest, files));
-  await platform.install(await platform.sideload(zipSync(Object.fromEntries(files))), []);
+  await platform.install(await platform.sideload(zipSync(Object.fromEntries(files))), grants);
   return { platform, terminated };
 }
 
 const registry = () => new CommandRegistry({ tx: new MemoryTransactionHost(), services: new Map() });
+const extensionOf = (platform: ExtensionPlatform) => activityExtensions(platform, 'modeling')[0]!;
+const panelOf = (platform: ExtensionPlatform) => extensionOf(platform).contributions.find((c) => c.target === 'model.panel')!;
+const tabStore = (activated: string[] = []) => new ExtensionTabs({ activateDocument: (id) => activated.push(id), isOpen: (id) => id.startsWith('tab-') });
+type Ui = { mount(i: unknown): Promise<unknown>; update(i: unknown): Promise<unknown>; open(i: unknown): Promise<unknown>; dialog(i: unknown): Promise<unknown>;
+  closeDialog(i: unknown): Promise<unknown>; onEvent(h: (e: Record<string, unknown>) => void): void };
+
+/** Mounts a text for a target when its contribution runs. */
+const mounts = (trees: Record<string, string>) => ({
+  activate(context: ExtensionContext) {
+    const ui = context.ui as unknown as Ui;
+    for (const [target, text] of Object.entries(trees))
+      context.commands.register(target, () => ui.mount({ target, seq: 1, tree: { type: 'text', id: 't', text } }));
+  },
+});
 
 describe('extension commands', () => {
-  it('appear in command search and the selection menu under the extension name, and leave when it is turned off', async () => {
+  it('appear in command search and the selection menu under the extension name, with the toolbar button and the panel, and leave when it is turned off', async () => {
     const { platform } = await setup();
     const commands = registry();
     const ran: string[] = [];
@@ -59,23 +80,31 @@ describe('extension commands', () => {
     expect(searchCommands(commands, null, 'export')).toEqual([expect.objectContaining({ id: 'extension:com.example.parts.export', title: 'Export parts', source: 'Parts' })]);
     // The extension's name finds its commands too.
     expect(searchCommands(commands, null, 'parts').map((i) => i.id)).toContain('extension:com.example.parts.label');
+    // The toolbar button and the panel are searchable as well; the sidebar is not a command.
+    expect(commands.has('extension:com.example.parts.cut')).toBe(true);
+    expect(commands.has(`extension:${PANEL}`)).toBe(true);
+    expect(commands.has(`extension:${SIDE}`)).toBe(false);
     expect(selectionActionGroups(commands)).toEqual([
       expect.objectContaining({ label: 'Parts', children: [expect.objectContaining({ label: 'Label selected parts', command: 'extension:com.example.parts.label' })] }),
     ]);
     await commands.execute('extension:com.example.parts.export', {});
-    expect(ran).toEqual(['com.example.parts.export']);
+    await commands.execute(`extension:${PANEL}`, {});
+    expect(ran).toEqual(['com.example.parts.export', PANEL]);
     // Registering ran no extension code.
     expect(platform.state('com.example.parts')!.run).toBe('stopped');
 
     await platform.setEnabled('com.example.parts', false);
     expect(commands.has('extension:com.example.parts.export')).toBe(false);
-    expect(extensionPanels(platform, 'modeling')).toEqual([]);
+    expect(activityExtensions(platform, 'modeling')).toEqual([]);
+    expect(extensionToolbarButtons(platform, 'modeling')).toEqual([]);
     await platform.setEnabled('com.example.parts', true);
     expect(commands.has('extension:com.example.parts.export')).toBe(true);
+    expect(extensionToolbarButtons(platform, 'modeling')).toEqual([expect.objectContaining({ id: 'com.example.parts.cut', category: 'modify', icon: 'saw-blade' })]);
     // An editor the extension does not support gets none of it.
     const layout = registry();
     syncExtensionCommands(layout, platform, 'layout', () => {});
     expect(layout.list().filter((c) => c.id.startsWith('extension:'))).toEqual([]);
+    expect(activityExtensions(platform, 'layout')).toEqual([]);
     stop();
     expect(commands.has('extension:com.example.parts.export')).toBe(false);
   });
@@ -149,6 +178,7 @@ describe('extension failures', () => {
     const commands = registry();
     syncExtensionCommands(commands, platform, 'modeling', () => {});
     expect(commands.list().filter((c) => c.id.startsWith('extension:'))).toEqual([]);
+    expect(activityExtensions(platform, 'modeling')).toEqual([]);
     render(<ExtensionActivity runs={new ExtensionRuns(platform)} platform={platform} />);
     const notice = screen.getByRole('alert');
     expect(notice.textContent).toMatch(/Parts was not started because its installed files could not be verified/);
@@ -161,190 +191,156 @@ describe('extension failures', () => {
   });
 });
 
-describe('extension panels', () => {
-  it('opens in a PushForm frame naming the extension, shows its interface, and removes it when closed', async () => {
-    const { platform } = await setup({
-      activate(context: ExtensionContext) {
-        const ui = context.ui as { mount(i: unknown): Promise<unknown> };
-        context.commands.register('com.example.parts.panel', () =>
-          ui.mount({ target: 'com.example.parts.panel', seq: 1, tree: { type: 'text', id: 't', text: '12 parts' } }));
-      },
-    });
-    const [entry] = extensionPanels(platform, 'modeling');
-    const view = render(<ExtensionPanel platform={platform} entry={entry!} units={DEFAULT_UNITS} documentId='tab-1' onClose={() => {}} />);
-    const frame = screen.getByRole('region', { name: 'Parts list, from Parts' });
+describe('extension side panels', () => {
+  it('open in a PushForm frame naming the extension, mount the sidebar contribution, and remove it when closed', async () => {
+    const { platform } = await setup(mounts({ [SIDE]: '12 parts' }));
+    const view = render(<ExtensionSidebar platform={platform} extension={extensionOf(platform)} units={DEFAULT_UNITS} documentId="tab-1" onClose={() => {}} />);
+    const frame = screen.getByRole('region', { name: 'Parts side panel' });
+    expect(within(frame).getByRole('heading', { name: 'Parts' })).toBeTruthy();
     expect(frame.textContent).toContain('Unsigned (developer)');
     expect(await screen.findByText('12 parts')).toBeTruthy();
-    expect(platform.ui('com.example.parts')!.get('com.example.parts.panel')).toBeTruthy();
+    expect(platform.ui('com.example.parts')!.get(SIDE)).toBeTruthy();
+    // One sidebar contribution: no tab strip.
+    expect(screen.queryByRole('tablist')).toBeNull();
     view.unmount();
-    expect(platform.ui('com.example.parts')!.get('com.example.parts.panel')).toBeUndefined();
+    expect(platform.ui('com.example.parts')!.get(SIDE)).toBeUndefined();
   });
 
-  it('says when the extension fails to open it', async () => {
-    const { platform } = await setup({
-      activate(context: ExtensionContext) {
-        context.commands.register('com.example.parts.panel', () => { throw new Error('No model open'); });
-      },
-    });
-    const [entry] = extensionPanels(platform, 'modeling');
-    render(<ExtensionPanel platform={platform} entry={entry!} units={DEFAULT_UNITS} documentId='tab-1' onClose={() => {}} />);
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/No model open/));
-  });
-
-  it('offers Restart after the extension failed, and runs the panel again', async () => {
+  it('say when the extension fails to open it, and offer Restart after it failed', async () => {
     let starts = 0;
     const { platform } = await setup({
       activate(context: ExtensionContext) {
         if (++starts === 1) throw new Error('First start failed');
-        const ui = context.ui as { mount(i: unknown): Promise<unknown> };
-        context.commands.register('com.example.parts.panel', () =>
-          ui.mount({ target: 'com.example.parts.panel', seq: 1, tree: { type: 'text', id: 't', text: 'Back again' } }));
+        context.commands.register(SIDE, () => { throw new Error('No model open'); });
       },
     });
-    const [entry] = extensionPanels(platform, 'modeling');
-    render(<ExtensionPanel platform={platform} entry={entry!} units={DEFAULT_UNITS} documentId="tab-1" onClose={() => {}} />);
+    render(<ExtensionSidebar platform={platform} extension={extensionOf(platform)} units={DEFAULT_UNITS} documentId="tab-1" onClose={() => {}} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Restart Parts' }));
-    expect(await screen.findByText('Back again')).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/No model open/));
   });
 
-  /** A panel with a counter button, mounted with `presentation` when one is given. */
-  const counter = (presentation?: 'dock' | 'window') => ({
-    activate(context: ExtensionContext) {
-      const ui = context.ui as unknown as { mount(i: unknown): Promise<unknown>; update(i: unknown): Promise<unknown>; onEvent(h: (e: { component: string }) => void): void };
-      const tree = (n: number) => ({ type: 'button', id: 'count', label: `Pressed ${n}` });
-      let presses = 0;
-      ui.onEvent((e) => { if (e.component === 'count') void ui.update({ target: 'com.example.parts.panel', seq: ++presses + 1, tree: tree(presses) }); });
-      context.commands.register('com.example.parts.panel', () =>
-        ui.mount({ target: 'com.example.parts.panel', seq: 1, tree: tree(0), ...(presentation ? { presentation } : {}) }));
-    },
-  });
-
-  it('opens in a large window with PushForm\'s header, keeps the same live interface, and returns to the dock on Escape', async () => {
-    const { platform } = await setup(counter());
-    const [entry] = extensionPanels(platform, 'modeling');
-    render(<ExtensionPanel platform={platform} entry={entry!} units={DEFAULT_UNITS} documentId="tab-1" onClose={() => {}} />);
-    await screen.findByRole('button', { name: 'Pressed 0' });
-    const open = screen.getByRole('button', { name: 'Open Parts list in a window' });
-    open.focus();
-    fireEvent.click(open);
-    const window = screen.getByRole('dialog', { name: 'Parts list, from Parts' });
-    expect(window.getAttribute('aria-modal')).toBe('true');
-    expect(window.textContent).toContain('Unsigned (developer)');
-    // The interface moved: the dock keeps a note and a way back, and focus starts in the window.
-    expect(screen.getByRole('region', { name: 'Parts list, from Parts' }).textContent).toContain('Parts list is open in a window.');
-    const button = within(window).getByRole('button', { name: 'Pressed 0' });
-    expect(document.activeElement).toBe(button);
-    // Tab stays in the window.
-    const returnButton = within(window).getByRole('button', { name: /Return to side panel/ });
-    returnButton.focus();
-    fireEvent.keyDown(returnButton, { key: 'Tab', shiftKey: true });
-    expect(window.contains(document.activeElement)).toBe(true);
-    // It is the same mounted interface: events reach the extension and its update shows.
-    fireEvent.click(button);
-    expect(await within(window).findByRole('button', { name: 'Pressed 1' })).toBeTruthy();
-    // Keys do not reach the editor's shortcuts.
-    let reached = false;
-    const listener = () => { reached = true; };
-    globalThis.addEventListener('keydown', listener);
-    fireEvent.keyDown(within(window).getByRole('button', { name: 'Pressed 1' }), { key: 'p' });
-    globalThis.removeEventListener('keydown', listener);
-    expect(reached).toBe(false);
-    fireEvent.keyDown(within(window).getByRole('button', { name: 'Pressed 1' }), { key: 'Escape' });
-    expect(screen.queryByRole('dialog')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Pressed 1' })).toBeTruthy();
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open Parts list in a window' }));
-  });
-
-  it('opens in the window when the extension asks, until the user moves it, and remembers their choice', async () => {
-    localStorage.clear();
-    const key = 'pushform:extensions:presentation:me:modeling:com.example.parts.panel';
-    const { platform } = await setup(counter('window'));
-    const [entry] = extensionPanels(platform, 'modeling');
-    const first = render(<ExtensionPanel platform={platform} entry={entry!} units={DEFAULT_UNITS} documentId="tab-1" onClose={() => {}} presentationKey={key} />);
-    const window = await screen.findByRole('dialog', { name: 'Parts list, from Parts' });
-    fireEvent.click(within(window).getByRole('button', { name: /Return to side panel/ }));
-    expect(screen.queryByRole('dialog')).toBeNull();
-    expect(localStorage.getItem(key)).toBe('dock');
-    first.unmount();
-    // Opened again, the extension still asks for the window, but the user's choice wins.
-    render(<ExtensionPanel platform={platform} entry={entry!} units={DEFAULT_UNITS} documentId="tab-1" onClose={() => {}} presentationKey={key} />);
-    await screen.findByRole('button', { name: 'Pressed 0' });
-    expect(screen.queryByRole('dialog')).toBeNull();
-    // The dock's note brings a windowed panel back too.
-    fireEvent.click(screen.getByRole('button', { name: 'Open Parts list in a window' }));
-    expect(localStorage.getItem(key)).toBe('window');
-    fireEvent.click(within(screen.getByRole('region', { name: 'Parts list, from Parts' })).getByRole('button', { name: 'Return to side panel' }));
-    expect(screen.queryByRole('dialog')).toBeNull();
-    localStorage.clear();
+  it('show several sidebar contributions as a tab strip, running only the chosen one', async () => {
+    const second = 'com.example.parts.sheets';
+    const multi = { ...manifest, contributions: [...manifest.contributions, { target: 'model.sidebar' as const, id: second, name: 'Sheets' }] };
+    const files = new Map<string, Uint8Array>([['main.js', encode('export function activate() {}')]]);
+    files.set('manifest.json', await buildManifest(multi, files));
+    const { platform } = await setup(mounts({ [SIDE]: 'The parts', [second]: 'The sheets' }));
+    await platform.install(await platform.sideload(zipSync(Object.fromEntries(files))), []);
+    render(<ExtensionSidebar platform={platform} extension={extensionOf(platform)} units={DEFAULT_UNITS} documentId="tab-1" onClose={() => {}} />);
+    const strip = screen.getByRole('tablist', { name: 'Parts views' });
+    expect(within(strip).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Parts', 'Sheets']);
+    expect(await screen.findByText('The parts')).toBeTruthy();
+    expect(platform.ui('com.example.parts')!.get(second)).toBeUndefined();
+    fireEvent.click(within(strip).getByRole('tab', { name: 'Sheets' }));
+    expect(await screen.findByText('The sheets')).toBeTruthy();
+    expect(screen.queryByText('The parts')).toBeNull();
+    expect(platform.ui('com.example.parts')!.get(SIDE)).toBeUndefined();
   });
 });
 
-describe('extension panels keep their state between the dock and the window', () => {
-  const editor = {
-    activate(context: ExtensionContext) {
-      const ui = context.ui as unknown as { mount(i: unknown): Promise<unknown> };
-      context.commands.register('com.example.parts.panel', () => ui.mount({ target: 'com.example.parts.panel', seq: 1, tree: { type: 'stack', id: 'root', children: [
-        { type: 'textField', id: 'name', label: 'Job name', value: 'Kitchen' },
-        { type: 'table', id: 'parts', label: 'Parts', columns: [{ id: 'n', label: 'Name', kind: 'text' }, { id: 'm', label: 'Material', kind: 'text', hideable: true }], rows: [{ id: 'a', cells: { n: 'Side', m: 'Oak' } }] },
-      ] } }));
-    },
-  };
-
-  it('moves the same rendered interface, with typing in progress and open menus, rather than drawing it again', async () => {
-    const { platform } = await setup(editor);
-    const [entry] = extensionPanels(platform, 'modeling');
-    render(<ExtensionPanel platform={platform} entry={entry!} units={DEFAULT_UNITS} documentId="tab-1" onClose={() => {}} />);
-    const field = await screen.findByLabelText('Job name') as HTMLInputElement;
-    fireEvent.focus(field);
-    fireEvent.change(field, { target: { value: 'Kitchen, north wall' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Columns' }));
-    expect(screen.getByText('Shown columns')).toBeTruthy();
-    const table = screen.getByRole('grid', { name: 'Parts' });
-    fireEvent.click(screen.getByRole('button', { name: 'Open Parts list in a window' }));
-    const window = screen.getByRole('dialog', { name: 'Parts list, from Parts' });
-    // The very same elements are in the window, with the draft and the menu as they were.
-    const moved = within(window).getByLabelText('Job name') as HTMLInputElement;
-    expect(moved).toBe(field);
-    expect(moved.value).toBe('Kitchen, north wall');
-    expect(within(window).getByRole('grid', { name: 'Parts' })).toBe(table);
-    expect(within(window).getByText('Shown columns')).toBeTruthy();
-    expect(screen.getByRole('region', { name: 'Parts list, from Parts' }).contains(field)).toBe(false);
-    // And back again.
-    fireEvent.click(within(window).getByRole('button', { name: /Return to side panel/ }));
-    expect(screen.queryByRole('dialog')).toBeNull();
-    const back = screen.getByLabelText('Job name') as HTMLInputElement;
-    expect(back).toBe(field);
-    expect(back.value).toBe('Kitchen, north wall');
-    expect(screen.getByRole('region', { name: 'Parts list, from Parts' }).contains(field)).toBe(true);
-    expect(screen.getByText('Shown columns')).toBeTruthy();
+describe('extension tabs', () => {
+  it('open once per panel and document, come to the front with their document, close, and close with their document', () => {
+    const activated: string[] = [];
+    const tabs = tabStore(activated);
+    const entry = { extensionId: 'com.example.parts', extensionName: 'Parts', integrity: 'unsigned' as const, id: PANEL, target: 'model.panel' as const, name: 'Parts list' };
+    tabs.open(entry, 'tab-1');
+    tabs.open(entry, 'tab-2');
+    tabs.open(entry, 'tab-1');
+    expect(tabs.tabs.map((t) => t.id)).toEqual([extensionTabId(PANEL, 'tab-1'), extensionTabId(PANEL, 'tab-2')]);
+    expect(tabs.activeTab?.documentId).toBe('tab-1');
+    expect(activated).toEqual(['tab-1', 'tab-2', 'tab-1']);
+    // A document that is not open gets no tab.
+    tabs.open(entry, 'closed');
+    expect(tabs.tabs).toHaveLength(2);
+    // Choosing a document tab leaves the extension tab open, behind it.
+    tabs.activate(null);
+    expect(tabs.activeId).toBeNull();
+    expect(tabs.tabs).toHaveLength(2);
+    tabs.activate(extensionTabId(PANEL, 'tab-2'));
+    expect(activated.at(-1)).toBe('tab-2');
+    // Switching to another document puts the editor in front; switching to the tab's own document does not.
+    tabs.documentActivated('tab-2');
+    expect(tabs.activeId).toBe(extensionTabId(PANEL, 'tab-2'));
+    tabs.documentActivated('tab-1');
+    expect(tabs.activeId).toBeNull();
+    tabs.activate(extensionTabId(PANEL, 'tab-2'));
+    tabs.closeDocument('tab-2');
+    expect(tabs.tabs.map((t) => t.documentId)).toEqual(['tab-1']);
+    expect(tabs.activeId).toBeNull();
+    tabs.close(extensionTabId(PANEL, 'tab-1'));
+    expect(tabs.tabs).toEqual([]);
   });
 
-  it('remembers the window size the user set, within sensible bounds', async () => {
-    localStorage.clear();
-    const key = 'pushform:extensions:presentation:me:modeling:com.example.parts.panel';
-    localStorage.setItem(`${key}:size`, JSON.stringify({ width: 900, height: 600 }));
-    expect(readSize(`${key}:size`)).toEqual({ width: 900, height: 600 });
-    localStorage.setItem('bad', '{"width":"wide"}');
-    expect(readSize('bad')).toBeNull();
-    localStorage.setItem('tiny', JSON.stringify({ width: 10, height: 10 }));
-    expect(readSize('tiny')).toEqual({ width: 360, height: 240 });
-    const { platform } = await setup(editor);
-    const [entry] = extensionPanels(platform, 'modeling');
-    render(<ExtensionPanel platform={platform} entry={entry!} units={DEFAULT_UNITS} documentId="tab-1" onClose={() => {}} presentationKey={key} />);
-    await screen.findByLabelText('Job name');
-    fireEvent.click(screen.getByRole('button', { name: 'Open Parts list in a window' }));
-    const window = screen.getByRole('dialog', { name: 'Parts list, from Parts' });
-    expect(window.style.width).toBe('900px');
-    expect(window.style.height).toBe('600px');
-    localStorage.clear();
+  it('show the panel in a frame naming it and the extension, and unmount it when the tab closes', async () => {
+    const { platform } = await setup(mounts({ [PANEL]: 'All 12 parts, with sheets' }));
+    const tabs = tabStore();
+    tabs.open(panelOf(platform), 'tab-1');
+    const view = render(<ExtensionTabView platform={platform} tab={tabs.activeTab!} units={DEFAULT_UNITS} />);
+    const frame = screen.getByRole('region', { name: 'Parts list, from Parts' });
+    expect(within(frame).getByRole('heading', { name: 'Parts list' })).toBeTruthy();
+    expect(frame.textContent).toContain('Unsigned (developer)');
+    expect(await screen.findByText('All 12 parts, with sheets')).toBeTruthy();
+    expect(platform.ui('com.example.parts')!.get(PANEL)).toBeTruthy();
+    view.unmount();
+    expect(platform.ui('com.example.parts')!.get(PANEL)).toBeUndefined();
+  });
+
+  it('open from the sidebar through ui.open, for the extension own panel and the sidebar document', async () => {
+    const tabs = tabStore();
+    const ref: { platform?: ExtensionPlatform } = {};
+    const { platform } = await setup({
+      activate(context: ExtensionContext) {
+        const ui = context.ui as unknown as Ui;
+        context.commands.register(SIDE, () => ui.mount({ target: SIDE, seq: 1, tree: { type: 'button', id: 'open', label: 'Open the full list' } }));
+        ui.onEvent((e) => { if (e.component === 'open') void ui.open({ target: PANEL }); });
+      },
+    }, undefined, { openUi: (request) => tabs.openRequest(ref.platform!, request) });
+    ref.platform = platform;
+    render(<ExtensionSidebar platform={platform} extension={extensionOf(platform)} units={DEFAULT_UNITS} documentId="tab-3" onClose={() => {}} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open the full list' }));
+    await waitFor(() => expect(tabs.activeTab).toMatchObject({ documentId: 'tab-3', entry: { id: PANEL, target: 'model.panel' } }));
+    // Asked for by something other than the extension's own panel, nothing opens.
+    tabs.openRequest(platform, { extensionId: 'com.example.parts', target: SIDE, documentId: 'tab-3' });
+    tabs.openRequest(platform, { extensionId: 'com.other', target: PANEL, documentId: 'tab-3' });
+    expect(tabs.tabs).toHaveLength(1);
+  });
+
+  it('give way to the document when the extension sets or frames its selection from the tab', async () => {
+    const tabs = tabStore();
+    const selected: unknown[] = [];
+    const documents: ExtensionDocuments = {
+      get: (id) => ({
+        name: () => id, units: () => ({ system: 'metric', lengthUnit: 'mm', format: 'decimal', lengthPrecision: 1 }), listen: () => () => {},
+        model: () => ({ revision: 1, getDocument: () => { throw new Error('unused'); }, query: () => { throw new Error('unused'); }, apply: async () => { throw new Error('unused'); },
+          selection: () => [], select: (refs) => { selected.push(refs); return refs as ModelRef[]; }, frame: () => null }),
+      }),
+    };
+    const { platform } = await setup({
+      activate(context: ExtensionContext) {
+        const ui = context.ui as unknown as Ui;
+        const selection = context.selection as unknown as { set(i: unknown): Promise<unknown> };
+        context.commands.register(PANEL, () => ui.mount({ target: PANEL, seq: 1, tree: { type: 'button', id: 'show', label: 'Show part 1' } }));
+        ui.onEvent((e) => { if (e.component === 'show') void selection.set({ refs: [{ kind: 'body', id: 1 }] }); });
+      },
+    }, undefined, { documents, onSelectionShown: (extensionId, documentId) => tabs.selectionShown(extensionId, documentId) }, ['selection.write']);
+    tabs.open(panelOf(platform), 'tab-1');
+    render(<ExtensionTabView platform={platform} tab={tabs.activeTab!} units={DEFAULT_UNITS} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Show part 1' }));
+    await waitFor(() => expect(selected).toEqual([[{ kind: 'body', id: 1 }]]));
+    // The document's tab is in front; the extension tab stays open.
+    await waitFor(() => expect(tabs.activeId).toBeNull());
+    expect(tabs.tabs).toHaveLength(1);
+    // A selection of another document, or by another extension, leaves the tab in front.
+    tabs.activate(extensionTabId(PANEL, 'tab-1'));
+    tabs.selectionShown('com.example.parts', 'tab-2');
+    tabs.selectionShown('com.other', 'tab-1');
+    expect(tabs.activeId).toBe(extensionTabId(PANEL, 'tab-1'));
   });
 });
 
 describe('extension dialogs', () => {
-  type Ui = { mount(i: unknown): Promise<unknown>; dialog(i: unknown): Promise<unknown>; closeDialog(i: unknown): Promise<unknown>; onEvent(h: (e: Record<string, unknown>) => void): void };
-  const target = 'com.example.parts.panel';
   const heard: Record<string, unknown>[] = [];
-  const materials = {
+  const materials = (target: string) => ({
     activate(context: ExtensionContext) {
       const ui = context.ui as unknown as Ui;
       let seq = 0;
@@ -362,13 +358,12 @@ describe('extension dialogs', () => {
         { type: 'text', id: 't', text: '2 materials' }, { type: 'button', id: 'edit', label: 'Edit Oak' },
       ] } }));
     },
-  };
+  });
 
-  it('shows a modal dialog drawn by PushForm over the panel, routes its events, and reports the user closing it', async () => {
+  it('show a modal dialog drawn by PushForm over the side panel, route its events, and report the user closing it', async () => {
     heard.length = 0;
-    const { platform } = await setup(materials);
-    const [entry] = extensionPanels(platform, 'modeling');
-    render(<ExtensionPanel platform={platform} entry={entry!} units={DEFAULT_UNITS} documentId="tab-1" onClose={() => {}} />);
+    const { platform } = await setup(materials(SIDE));
+    render(<ExtensionSidebar platform={platform} extension={extensionOf(platform)} units={DEFAULT_UNITS} documentId="tab-1" onClose={() => {}} />);
     const edit = await screen.findByRole('button', { name: 'Edit Oak' });
     edit.focus();
     fireEvent.click(edit);
@@ -384,14 +379,14 @@ describe('extension dialogs', () => {
     fireEvent.focus(name);
     fireEvent.change(name, { target: { value: 'Oak, quarter sawn' } });
     fireEvent.blur(name);
-    await waitFor(() => expect(heard.at(-1)).toEqual({ target, component: 'name', event: 'change', value: 'Oak, quarter sawn' }));
+    await waitFor(() => expect(heard.at(-1)).toEqual({ target: SIDE, component: 'name', event: 'change', value: 'Oak, quarter sawn' }));
     await waitFor(() => expect((within(screen.getByRole('dialog', { name: 'Edit material' })).getByLabelText('Material name') as HTMLInputElement).value).toBe('Oak, quarter sawn'));
     expect(screen.getByRole('dialog', { name: 'Edit material' })).toBe(dialog);
     // Escape closes it at once, the extension hears dialogClose, and focus returns.
     fireEvent.keyDown(within(dialog).getByRole('button', { name: 'Save' }), { key: 'Escape' });
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(document.activeElement).toBe(edit);
-    await waitFor(() => expect(heard.at(-1)).toEqual({ target, component: 'editor', event: 'dialogClose' }));
+    await waitFor(() => expect(heard.at(-1)).toEqual({ target: SIDE, component: 'editor', event: 'dialogClose' }));
     // The extension closes it too.
     fireEvent.click(edit);
     const again = await screen.findByRole('dialog', { name: 'Edit material' });
@@ -406,29 +401,21 @@ describe('extension dialogs', () => {
     await waitFor(() => expect(heard.filter((e) => e.event === 'dialogClose')).toHaveLength(2));
   });
 
-  it('stays above the panel window, and Escape in it closes only the dialog', async () => {
+  it('show over an extension tab as well, in the app root above the tab content', async () => {
     heard.length = 0;
-    const { platform } = await setup(materials);
-    const [entry] = extensionPanels(platform, 'modeling');
-    render(<ExtensionPanel platform={platform} entry={entry!} units={DEFAULT_UNITS} documentId="tab-1" onClose={() => {}} />);
-    await screen.findByRole('button', { name: 'Edit Oak' });
-    fireEvent.click(screen.getByRole('button', { name: 'Open Parts list in a window' }));
-    const window = screen.getByRole('dialog', { name: 'Parts list, from Parts' });
-    fireEvent.click(within(window).getByRole('button', { name: 'Edit Oak' }));
+    const { platform } = await setup(materials(PANEL));
+    const tabs = tabStore();
+    tabs.open(panelOf(platform), 'tab-1');
+    render(<div className="pf-app"><ExtensionTabView platform={platform} tab={tabs.activeTab!} units={DEFAULT_UNITS} /></div>);
+    const frame = screen.getByRole('region', { name: 'Parts list, from Parts' });
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Oak' }));
     const dialog = await screen.findByRole('dialog', { name: 'Edit material' });
-    // The dialog is a sibling of the window's backdrop in the app root, not inside the window.
-    expect(window.contains(dialog)).toBe(false);
-    expect(dialog.closest('.pf-xdialog-backdrop')?.parentElement).toBe(window.closest('.pf-xwindow-backdrop')?.parentElement);
+    // The dialog is portalled to the app root, not into the tab's content.
+    expect(frame.contains(dialog)).toBe(false);
+    expect(dialog.closest('.pf-xdialog-backdrop')?.parentElement).toBe(document.querySelector('.pf-app'));
     fireEvent.keyDown(within(dialog).getByRole('button', { name: 'Save' }), { key: 'Escape' });
     expect(screen.queryByRole('dialog', { name: 'Edit material' })).toBeNull();
-    expect(screen.getByRole('dialog', { name: 'Parts list, from Parts' })).toBeTruthy();
-    await waitFor(() => expect(heard.at(-1)).toEqual({ target, component: 'editor', event: 'dialogClose' }));
-  });
-});
-
-describe('side rail names', () => {
-  it('name the panel and its extension, or just the panel when the names are the same', () => {
-    expect(railLabel('Parts list', 'Parts')).toEqual({ label: 'Parts list (Parts)', accessibleLabel: 'Parts list, from Parts' });
-    expect(railLabel('Cut List', 'Cut List')).toEqual({ label: 'Cut List', accessibleLabel: 'Cut List extension' });
+    expect(screen.getByRole('region', { name: 'Parts list, from Parts' })).toBeTruthy();
+    await waitFor(() => expect(heard.at(-1)).toEqual({ target: PANEL, component: 'editor', event: 'dialogClose' }));
   });
 });

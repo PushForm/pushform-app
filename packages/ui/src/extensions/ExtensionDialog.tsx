@@ -9,11 +9,11 @@ import { ExtensionUiView } from './ExtensionUi';
 import { firstFocusable, trapTab } from './modalFocus';
 
 /**
- * A modal dialog an extension shows over its panel, inspector or settings block, drawn by PushForm: its frame, title
- * and Close button are the host's, and the body is the extension's tree rendered like the panel's. It sits above the
- * panel's large window and below PushForm's own prompts. Focus starts inside it, Tab and Shift+Tab cycle through its
- * controls, keys do not reach the window or the editor, and Escape (unless a field inside used it) or the Close
- * button closes it and returns focus to where it was. Replacing the tree keeps the dialog and its focus in place.
+ * A modal dialog an extension shows over its side panel, tab, inspector or settings block, drawn by PushForm: its
+ * frame, title and Close button are the host's, and the body is the extension's tree rendered like the target's. It
+ * sits above the editor and below PushForm's own prompts. Focus starts inside it, Tab and Shift+Tab cycle through its
+ * controls, keys do not reach the editor, and Escape (unless a field inside used it) or the Close button closes it
+ * and returns focus to where it was. Replacing the tree keeps the dialog and its focus in place.
  */
 export function ExtensionDialog({ title, tree, units, onEvent, onClose }: {
   readonly title: string;
@@ -30,7 +30,7 @@ export function ExtensionDialog({ title, tree, units, onEvent, onClose }: {
     return () => { if (previous?.isConnected && previous !== document.body) previous.focus(); };
   }, []);
   const keyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
-    // Neither the panel's window nor the editor's shortcuts may act on keys meant for the dialog.
+    // The editor's shortcuts must not act on keys meant for the dialog.
     e.stopPropagation();
     if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); onClose(); return; }
     trapTab(e, dialog.current);

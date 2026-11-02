@@ -12,10 +12,17 @@ const manifest: ExtensionManifest = extensionManifestSchema.parse({
   editors: ['modeling'], defaultLocale: 'en', license: 'MIT', files: {}, permissions: [],
   contributions: [
     { target: 'model.panel', id: 'com.example.parts.panel', name: 'Parts' },
+    { target: 'model.sidebar', id: 'com.example.parts.side', name: 'Parts' },
     { target: 'model.command', id: 'com.example.parts.open', name: 'Open parts' },
   ],
 });
 const PANEL = 'com.example.parts.panel';
+const SIDEBAR = 'com.example.parts.side';
+/** A service call as the session makes it, from an extension the user just acted on unless `active` is false. */
+const call = (active = true, documentId = 'doc-1') => ({
+  signal: new AbortController().signal, extensionId: manifest.id, generation: 1, progress: () => {},
+  document: () => documentId, currentDocument: () => documentId, userActivated: () => active,
+});
 const button = (label: string, disabled = false) => ({ type: 'stack', id: 'root', children: [{ type: 'button', id: 'go', label, disabled }] });
 
 const failure = (run: () => unknown): ExtensionError => {
@@ -48,25 +55,34 @@ describe('ExtensionUiHost', () => {
     expect(host.get(PANEL)).toMatchObject({ seq: 5, tree: { children: [{ label: 'Kept' }] } });
   });
 
-  it('records where a panel asked to be shown, keeping it through updates that do not name one', () => {
+  it('mounts sidebar targets as it does panels, without any presentation field', () => {
     const host = new ExtensionUiHost(manifest, () => {});
     const ui = host.services();
-    ui['ui.mount']!({ target: PANEL, seq: 1, tree: button('One') }, {} as never);
-    expect(host.get(PANEL)?.presentation).toBe('dock');
-    ui['ui.mount']!({ target: PANEL, seq: 2, tree: button('Two'), presentation: 'window' }, {} as never);
-    expect(host.get(PANEL)?.presentation).toBe('window');
-    ui['ui.update']!({ target: PANEL, seq: 3, tree: button('Three') }, {} as never);
-    expect(host.get(PANEL)?.presentation).toBe('window');
-    ui['ui.update']!({ target: PANEL, seq: 4, tree: button('Four'), presentation: 'dock' }, {} as never);
-    expect(host.get(PANEL)?.presentation).toBe('dock');
-    expect(failure(() => ui['ui.update']!({ target: PANEL, seq: 5, tree: button('x'), presentation: 'floating' }, {} as never)).message).toMatch(/"dock" or "window"/);
-    expect(host.get(PANEL)).toMatchObject({ seq: 4, presentation: 'dock' });
+    ui['ui.mount']!({ target: SIDEBAR, seq: 1, tree: button('Side') }, {} as never);
+    expect(host.get(SIDEBAR)).toMatchObject({ seq: 1, tree: { children: [{ label: 'Side' }] } });
+    expect(failure(() => ui['ui.update']!({ target: SIDEBAR, seq: 2, tree: button('x'), presentation: 'window' }, {} as never)).code).toBe('validation.failed');
+    expect(host.get(SIDEBAR)).toMatchObject({ seq: 1 });
   });
 
-  it('accepts only the extension own panel, inspector or settings targets', () => {
+  it('opens a panel tab only for the extension own panel, right after the user acted, for the document in use', () => {
+    const opened: unknown[] = [];
+    const host = new ExtensionUiHost(manifest, () => {}, { open: (request) => opened.push(request) });
+    const ui = host.services();
+    expect(ui['ui.open']!({ target: PANEL }, call())).toBeNull();
+    expect(opened).toEqual([{ extensionId: 'com.example.parts', target: PANEL, documentId: 'doc-1' }]);
+    expect(failure(() => ui['ui.open']!({ target: SIDEBAR }, call())).message).toMatch(/not a panel contribution/);
+    expect(failure(() => ui['ui.open']!({ target: 'com.other.panel' }, call())).code).toBe('validation.failed');
+    expect(failure(() => ui['ui.open']!({}, call())).code).toBe('validation.failed');
+    expect(failure(() => ui['ui.open']!({ target: PANEL }, call(false))).code).toBe('permission.denied');
+    expect(opened).toHaveLength(1);
+    // Without a host that opens tabs, the request is unavailable.
+    expect(failure(() => new ExtensionUiHost(manifest, () => {}).services()['ui.open']!({ target: PANEL }, call())).code).toBe('unavailable');
+  });
+
+  it('accepts only the extension own sidebar, panel, inspector or settings targets', () => {
     const ui = new ExtensionUiHost(manifest, () => {}).services();
-    expect(failure(() => ui['ui.mount']!({ target: 'com.example.parts.open', seq: 1, tree: button('x') }, {} as never)).message).toMatch(/not a panel/);
-    expect(failure(() => ui['ui.mount']!({ target: 'com.other.panel', seq: 1, tree: button('x') }, {} as never)).message).toMatch(/not a panel/);
+    expect(failure(() => ui['ui.mount']!({ target: 'com.example.parts.open', seq: 1, tree: button('x') }, {} as never)).message).toMatch(/not a sidebar, panel/);
+    expect(failure(() => ui['ui.mount']!({ target: 'com.other.panel', seq: 1, tree: button('x') }, {} as never)).message).toMatch(/not a sidebar, panel/);
     expect(failure(() => ui['ui.update']!({ target: PANEL, seq: 1, tree: button('x') }, {} as never)).message).toMatch(/not mounted/);
   });
 

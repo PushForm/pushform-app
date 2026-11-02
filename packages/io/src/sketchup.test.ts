@@ -347,11 +347,16 @@ describe('SketchUp import', () => {
       expect(activeStyle(into).modeling).toEqual(before);
     });
 
-  it('opens a file that records no section display with its section planes hidden and its cuts showing', async () => {
+  it('opens a file that records no section display with the format default: section planes and cuts both shown', async () => {
     const scene = await readSketchUp(readFileSync(new URL('../../testing/assets/sketchup/section-display-2027.skp', import.meta.url)));
+    expect(scene.root.sectionPlanes.length).toBeGreaterThan(0);
     const doc = createDocument();
+    doc.transact('Hide sections', draft => {
+      const modeling = draft.styles.get(draft.activeStyleId)!.modeling;
+      modeling.sectionPlanesVisible = false; modeling.sectionCutsVisible = false;
+    });
     doc.transact('Open fixture', draft => applySketchUpImport(draft, { ...scene, sectionDisplay: null }));
-    expect(activeStyle(doc).modeling).toMatchObject({ sectionPlanesVisible: false, sectionCutsVisible: true });
+    expect(activeStyle(doc).modeling).toMatchObject({ sectionPlanesVisible: true, sectionCutsVisible: true });
   });
 
   it('reads no section display from a 2021+ file whose rendering options lack it', () => {

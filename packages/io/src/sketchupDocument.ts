@@ -18,6 +18,8 @@ import type {
 
 /** The shadow settings a .skp file starts with, which an opened model takes until the reader decodes the file's own. */
 export const SKP_DEFAULT_SHADOWS = { enabled: false, useSunForShading: false } as const;
+/** Display Section Planes and Display Section Cuts in a .skp file that does not record them. */
+export const SKP_DEFAULT_SECTION_DISPLAY = { planes: true, cuts: true } as const;
 
 /** Style settings read from a file, with their colors copied, so a document never shares arrays with the import. */
 function copyDisplay(display: ImportedDisplay): ImportedDisplay {
@@ -339,14 +341,15 @@ export function applySketchUpImport(
   // So do its shadow settings. The reader does not decode them yet, so an opened model takes the format's defaults:
   // shadows off and the sun not used for shading, which lights faces from the camera.
   if (options.groupName === undefined) draft.shadows = { ...(draft.shadows ?? DEFAULT_SHADOWS), ...SKP_DEFAULT_SHADOWS };
-  // An opened file keeps its own Display Section Planes and Display Section Cuts. A file that records neither and holds
-  // section planes starts with them hidden, as authors often hide them, and its active cuts showing.
+  // An opened file keeps its own Display Section Planes and Display Section Cuts. A file that records neither takes the
+  // format's default: section planes and section cuts both shown.
   if (options.groupName === undefined) {
     const style = draft.styles.get(draft.activeStyleId);
-    if (style && scene.sectionDisplay) {
-      style.modeling.sectionPlanesVisible = scene.sectionDisplay.planes;
-      style.modeling.sectionCutsVisible = scene.sectionDisplay.cuts;
-    } else if (style && report.sectionPlanes > 0) style.modeling.sectionPlanesVisible = false;
+    if (style) {
+      const sections = scene.sectionDisplay ?? SKP_DEFAULT_SECTION_DISPLAY;
+      style.modeling.sectionPlanesVisible = sections.planes;
+      style.modeling.sectionCutsVisible = sections.cuts;
+    }
     // The model opens in its own style: the settings the file records replace the active style's.
     if (style && scene.display) {
       const settings = copyDisplay(scene.display);

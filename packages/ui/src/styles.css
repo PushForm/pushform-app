@@ -2813,6 +2813,7 @@ h4.pf-xui-text { font-size: 12px; }
 .pf-xui-text.is-code { font-family: ui-monospace, monospace; white-space: pre-wrap; }
 .pf-xui-text.tone-muted, .pf-xui-label { color: var(--pf-text-muted); }
 .pf-xui-text.tone-error, .pf-xui-error, .pf-xui-message.tone-error { color: var(--pf-danger); }
+.pf-xui-text, .pf-xui-message { white-space: pre-line; }
 .pf-xui-message { margin: 0; padding: 6px 8px; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); background: var(--pf-surface-2); }
 .pf-xui-message.tone-error { border-color: var(--pf-danger); }
 .pf-xui-message.tone-info, .pf-xui-message.tone-success { border-color: var(--pf-accent); }

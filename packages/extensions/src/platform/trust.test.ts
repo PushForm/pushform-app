@@ -223,6 +223,10 @@ describe('stored releases', () => {
     const s = await reload((r) => withFiles(r, (f) => { f['main.js'] = encode('export function activate() { /* changed */ }'); }));
     await expectRefused(s, 'file.hash');
     expect(s.platform.state('com.example.stored')!.failure!.error.message).toMatch(/"main\.js" does not match its hash/);
+    // The activity record notes the refusal once, however often the release is tried, dismissed or restarted.
+    await refusal(s.platform.invoke('com.example.stored', 'com.example.stored.run'));
+    const failed = (await s.platform.activity('com.example.stored')).entries.filter((e) => e.event.type === 'failed');
+    expect(failed.map((e) => e.event)).toEqual([{ type: 'failed', kind: 'verification-failed' }]);
   });
 
   it('refuses a release whose manifest was replaced, even by one consistent with changed files', async () => {

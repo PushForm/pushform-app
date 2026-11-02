@@ -28,7 +28,7 @@ export type ActivityEvent =
   | { readonly type: 'uninstalled'; readonly name: string; readonly version: string; readonly settingsDeleted: boolean; readonly by: 'user' | 'policy' }
   | { readonly type: 'activated' }
   | { readonly type: 'stopped'; readonly reason: StopReason }
-  | { readonly type: 'failed'; readonly kind: SessionFailure['kind'] }
+  | { readonly type: 'failed'; readonly kind: SessionFailure['kind'] | 'verification-failed' }
   /** The network use of one runtime run to one destination origin, updated as it makes requests. */
   | { readonly type: 'egress'; readonly origin: string; readonly requests: number; readonly bytesSent: number; readonly bytesReceived: number };
 

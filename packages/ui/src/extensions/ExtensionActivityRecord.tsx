@@ -40,13 +40,14 @@ const STOP_TEXT: Readonly<Record<StopReason, string>> = {
   stopped: 'Stopped',
 };
 
-const FAILURE_TEXT: Readonly<Record<SessionFailure['kind'], string>> = {
+const FAILURE_TEXT: Readonly<Record<SessionFailure['kind'] | 'verification-failed', string>> = {
   'load-failed': 'Stopped after a problem: it could not load',
   'load-timeout': 'Stopped after a problem: it took too long to load',
   'activation-failed': 'Stopped after a problem: it failed to start',
   'activation-timeout': 'Stopped after a problem: it took too long to start',
   'protocol-violation': 'Stopped after a problem: it sent messages PushForm does not accept',
   unresponsive: 'Stopped after a problem: it stopped responding',
+  'verification-failed': 'Not started: its installed files could not be verified',
 };
 
 /** One entry as a plain sentence. */

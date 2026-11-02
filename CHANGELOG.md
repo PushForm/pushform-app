@@ -2,7 +2,7 @@
 
 Notable changes in each PushForm desktop release. Versions are `<year>.<week>.<build>`.
 
-## Unreleased
+## 26.45.18
 
 ### Materials
 
@@ -25,6 +25,33 @@ Notable changes in each PushForm desktop release. Versions are `<year>.<week>.<b
 | Solid colors | 24 |
 | Glass tints | 6 |
 | **Overall total** | **368** |
+
+- The Materials panel switches between List and Preview with two icon buttons.
+
+### Import
+
+- **Watch STEP models appear while they import.** Each part is drawn in the view, in its colour, as soon as it is converted, and the view zooms out as the model grows. Progress and Cancel move to a small box in the lower right, so you can orbit, pan and zoom while the rest arrives. Opening a STEP file shows it in a new tab named after the file; importing draws it into the model you're working on. The parts are added as one Undo step when the import finishes, and Cancel removes them.
+
+### Objects and tags
+
+- **Tags live in the Object browser.** The Object browser has **Objects** and **Tags** tabs. Create, rename, recolour and delete tags, organize tag folders, set visibility and the active tag, filter, change dashes, purge unused tags and turn on **Color by Tag**, all from the Tags tab. Switching tabs keeps what's expanded and selected.
+- Each tagged object shows a dot in its tag's colour; hover it to see the tag name.
+- Hiding a tag or tag folder marks the affected objects hidden in **Objects**, with a crossed-out eye. Their eye controls are disabled until the tag is shown again, and objects you hid yourself stay hidden.
+- **Color by Tag** colours untagged geometry inside a tagged group or component with that tag's colour.
+
+### Modeling
+
+- **Delete individual guides.** Click a guide line, segment or point with Select, then press Delete or Backspace. You can select several, and Undo brings them back.
+
+### Desktop
+
+- On Windows and Linux, the minimize, maximize and close buttons now appear on every screen, including Home, sign-in, account setup and loading, and those screens can be dragged to move the window.
+- At startup the window shrinks and centers to fit the screen when it would otherwise open partly off screen.
+
+### Account and About
+
+- **Mailing list.** Join or leave the mailing list from your account details at any time; the choice saves immediately.
+- About PushForm links to the public source code on GitHub.
 
 ## 26.44.367
 

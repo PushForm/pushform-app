@@ -18,6 +18,17 @@ import type { UiEvent, UiVector, UiVectorShape, UiVectorStyle } from '@pushform/
 interface ViewBox { x: number; y: number; width: number; height: number }
 
 const ZOOM_STEP = 1.25;
+/** Wheel zoom per 100 px of scroll, like the model viewport: a trackpad's many small events add up to one step. */
+const WHEEL_ZOOM_PER_NOTCH = 1 / 0.85;
+/** Pixels per wheel unit when the browser reports lines or pages instead of pixels. */
+const WHEEL_LINE_PX = 16, WHEEL_PAGE_PX = 400;
+
+/** The zoom factor one wheel event applies (> 1 zooms in), bounded so one jump never exceeds two steps. */
+export function wheelZoomFactor(e: Pick<WheelEvent, 'deltaY' | 'deltaMode'>): number {
+  const px = e.deltaY * (e.deltaMode === 1 ? WHEEL_LINE_PX : e.deltaMode === 2 ? WHEEL_PAGE_PX : 1);
+  const notches = Math.max(-2, Math.min(2, -px / 100));
+  return WHEEL_ZOOM_PER_NOTCH ** notches;
+}
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 200;
 /** The frame's height range when it follows the drawing's proportions, and its height before the width is known. */
@@ -100,7 +111,7 @@ export function VectorView({ node, onEvent }: { readonly node: UiVector; readonl
     if (!element) return;
     const wheel = (e: WheelEvent): void => {
       e.preventDefault();
-      zoom(e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP, toDrawing(e.clientX, e.clientY));
+      zoom(wheelZoomFactor(e), toDrawing(e.clientX, e.clientY));
     };
     element.addEventListener('wheel', wheel, { passive: false });
     return () => element.removeEventListener('wheel', wheel);

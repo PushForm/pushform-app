@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { DEFAULT_UNITS } from '@pushform/core';
 import { validateUiTree, type UiEvent } from '@pushform/extension-protocol';
 import { ExtensionUiView } from './ExtensionUi';
-import { AUTO_HEIGHT_PX, autoVectorHeight, fittedWidth } from './VectorView';
+import { AUTO_HEIGHT_PX, autoVectorHeight, fittedWidth, wheelZoomFactor } from './VectorView';
 
 afterEach(cleanup);
 
@@ -73,6 +73,16 @@ describe('vector views', () => {
     ]);
     fireEvent.keyDown(canvas, { key: 'ArrowRight' });
     expect(canvas.getAttribute('viewBox')!.startsWith('0.244')).toBe(true);
+  });
+
+  it('zooms with the wheel in proportion to the scroll distance, so a trackpad gesture is not a burst of fixed steps', () => {
+    // 100 px of scroll is one step either way; a trackpad's few-pixel events are a fraction of it; one event is bounded.
+    expect(wheelZoomFactor({ deltaY: -100, deltaMode: 0 })).toBeCloseTo(1 / 0.85, 5);
+    expect(wheelZoomFactor({ deltaY: 100, deltaMode: 0 })).toBeCloseTo(0.85, 5);
+    expect(wheelZoomFactor({ deltaY: -4, deltaMode: 0 })).toBeCloseTo((1 / 0.85) ** 0.04, 5);
+    expect(wheelZoomFactor({ deltaY: -3, deltaMode: 1 })).toBeCloseTo((1 / 0.85) ** 0.48, 5);
+    expect(wheelZoomFactor({ deltaY: -5000, deltaMode: 0 })).toBeCloseTo((1 / 0.85) ** 2, 5);
+    expect(wheelZoomFactor({ deltaY: 0, deltaMode: 0 })).toBe(1);
   });
 
   it('size the frame from the drawing at the width available when no height is given, within limits', () => {

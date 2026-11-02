@@ -343,12 +343,15 @@ it('has the model agent shape parts with push/pull and cut joinery and openings 
   expect(rules).toContain('a door\'s panel sits in grooves');
   expect(rules).toContain('a sink cutout is a box through the countertop');
   expect(rules).toContain('Cut and join solids before grouping them');
+  expect(rules).toContain('Names carry across your model_apply_operations calls for this message');
   expect(rules).toContain('never work around it by converting a solid into loose geometry');
 });
 
 it('has the model agent finish parts, use library woods and check for overlaps after building', () => {
   const rules = MODEL_DOCUMENT_RULES(ctx());
   expect(rules).toContain('fillet_edges and chamfer_edges round over or bevel edges');
+  expect(rules).toContain('pick edges by face, which never goes stale');
+  expect(rules).toContain('{between: [faceA, faceB]}');
   expect(rules).toContain('add_material with a library key');
   expect(rules).toContain('call model_find_overlaps');
   expect(rules).toContain('only when asked');

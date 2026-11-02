@@ -681,6 +681,163 @@ describe('ModelDocumentApi phase 2: edges, more shapes, annotation, materials an
   });
 });
 
+describe('ModelDocumentApi names across batches', () => {
+  const op = (api: ModelDocumentApi, ...operations: unknown[]) => api.apply({ expectedRevision: api.revision, label: 'x', operations });
+
+  it('lets a later batch use a name an earlier one gave, and lists the earlier names still live', async () => {
+    const { api, root } = setup();
+    const first = await op(api, { op: 'add_box', as: 'ls', min: [0, 0, 0], max: [0.02, 0.5, 0.7] }, { op: 'add_box', as: 'rs', min: [0.6, 0, 0], max: [0.62, 0.5, 0.7] });
+    expect(first.names).toBeUndefined();
+    const second = await op(api, { op: 'move', refs: ['$rs'], offset: [0.1, 0, 0] });
+    expect(second.names).toEqual({ ls: { kind: 'body', id: first.created.ls }, rs: { kind: 'body', id: first.created.rs } });
+    expect(root().bodies.get(first.created.rs as never)!.mesh.verts[0]).toBeGreaterThan(0.69);
+    const grouped = await op(api, { op: 'make_group', as: 'carcass', refs: ['$ls', '$rs'] });
+    expect(grouped.created.carcass).toBe([...root().instances.keys()][0]);
+    // The solids moved into the group, so they no longer name anything here.
+    expect(grouped.names).toBeUndefined();
+    const moved = await failure(() => op(api, { op: 'move', refs: ['$ls'], offset: [1, 0, 0] }));
+    expect(moved.error.code).toBe('invalid_reference');
+    expect(moved.error.message).toMatch(/"\$ls" named solid \d+, which no longer exists.*moved into a group/);
+  });
+
+  it('fails clearly for a name whose entity was deleted, or that lives in another container', async () => {
+    const { api } = setup();
+    const made = await op(api, { op: 'add_box', as: 'tmp', min: [0, 0, 0], max: [1, 1, 1] }, { op: 'add_box', as: 'inner', min: [3, 0, 0], max: [4, 1, 1] },
+      { op: 'make_group', as: 'g', refs: ['$inner'] });
+    await op(api, { op: 'delete', refs: ['$tmp'] });
+    const gone = await failure(() => op(api, { op: 'move', refs: ['$tmp'], offset: [1, 0, 0] }));
+    expect(gone.error).toMatchObject({ code: 'invalid_reference', operationIndex: 0 });
+    expect(gone.error.message).toContain('no longer exists');
+    await op(api, { op: 'add_box', as: 'other', min: [0, 5, 0], max: [1, 6, 1] });
+    const elsewhere = await failure(() => api.apply({ expectedRevision: api.revision, label: 'x', container: [made.created.g!], operations: [{ op: 'move', refs: ['$other'], offset: [1, 0, 0] }] }));
+    expect(elsewhere.error.code).toBe('invalid_reference');
+    expect(elsewhere.error.message).toContain(`in the container at instance path [], but this batch edits [${made.created.g}]`);
+    const unknown = await failure(() => op(api, { op: 'move', refs: ['$nope'], offset: [1, 0, 0] }));
+    expect(unknown.error.message).toMatch(/Names you can use: .*"\$other" \(solid \d+\)/);
+  });
+
+  it('rebinds a name a later batch gives again, and says so', async () => {
+    const { api, root } = setup();
+    const first = await op(api, { op: 'add_box', as: 'shelf', min: [0, 0, 0], max: [1, 0.3, 0.02] });
+    const second = await op(api, { op: 'add_box', as: 'shelf', min: [0, 0, 0.4], max: [1, 0.3, 0.42] });
+    expect(second.rebound).toEqual(['shelf']);
+    expect(second.created.shelf).not.toBe(first.created.shelf);
+    await op(api, { op: 'move', refs: ['$shelf'], offset: [0, 0, 0.1] });
+    const z = (id: number) => Math.min(...Array.from(root().bodies.get(id as never)!.mesh.verts.filter((_, i) => i % 3 === 2)));
+    expect(z(second.created.shelf!)).toBeCloseTo(0.5);
+    expect(z(first.created.shelf!)).toBeCloseTo(0);
+    expect((await failure(() => op(api, { op: 'add_box', as: 'a', min: [5, 0, 0], max: [6, 1, 1] }, { op: 'add_box', as: 'a', min: [7, 0, 0], max: [8, 1, 1] }))).error.code).toBe('invalid_operation');
+  });
+
+  it('drops the names of an undone batch and keeps them out of the document', async () => {
+    const { api, host, commands } = setup();
+    await op(api, { op: 'add_box', as: 'kept', min: [0, 0, 0], max: [1, 1, 1] });
+    await op(api, { op: 'add_box', as: 'undone', min: [3, 0, 0], max: [4, 1, 1] });
+    expect(host.undoStack.undo()).toBe(true);
+    const next = await op(api, { op: 'add_tag', name: 'Parts' });
+    expect(next.dropped).toEqual(['undone']);
+    expect(Object.keys(next.names ?? {})).toEqual(['kept']);
+    const use = await failure(() => op(api, { op: 'move', refs: ['$undone'], offset: [1, 0, 0] }));
+    expect(use.error).toMatchObject({ code: 'invalid_reference' });
+    expect(use.error.message).toContain('was undone');
+    expect(JSON.stringify([...host.doc.state.definitions.values()].map(d => d.name))).not.toContain('kept');
+    // A new API object, as a new message makes, starts with no names.
+    const fresh = new ModelDocumentApi(commands, 'AI Chat');
+    expect((await failure(() => op(fresh, { op: 'move', refs: ['$kept'], offset: [1, 0, 0] }))).error.message).toContain('does not name anything');
+  });
+});
+
+describe('ModelDocumentApi edge selectors', () => {
+  const queryAll = { container: null, kinds: null, ids: null, facing: null, containing: null, fields: null, offset: null, limit: null };
+  const volumeOf = (api: ModelDocumentApi, id: number) => api.query({ ...queryAll, kinds: ['body'], ids: [id] }).entities[0]!.volume!;
+  const front = [0, -1, 0] as const;
+
+  /** A 0.4 × 0.5 m panel 20 mm thick, its front at y = 0, with a field raised 5 mm in front of it. */
+  async function raisedPanel(api: ModelDocumentApi): Promise<number> {
+    const result = await api.apply({ expectedRevision: api.revision, label: 'Panel', operations: [
+      { op: 'add_box', as: 'panel', min: [0, 0, 0], max: [0.4, 0.02, 0.5] },
+      { op: 'add_rectangle', as: 'field', corner: [0.05, 0, 0.05], side1: [0.3, 0, 0], side2: [0, 0, 0.4] },
+      { op: 'push_pull', face: '$field', distance: 0.005 },
+    ] });
+    return result.created.panel!;
+  }
+
+  it('bevels the four front edges of a raised field by {face, which: "outer"}, in a later batch', async () => {
+    const { api } = setup();
+    const id = await raisedPanel(api);
+    const before = volumeOf(api, id);
+    const result = await api.apply({ expectedRevision: api.revision, label: 'Bevel', operations: [
+      { op: 'chamfer_edges', body: '$panel', edges: [{ face: { facing: front, point: [0.2, -0.005, 0.25] }, which: 'outer' }], distance: 0.003 },
+    ] });
+    expect(result.results[0]!.count).toBe(4);
+    expect(volumeOf(api, id)).toBeLessThan(before - 4 * 0.3 * 0.003 ** 2 / 2 * 0.9);
+    // The surround's outline is the panel's outside; its opening is where the field rises.
+    const surround = { facing: front, point: [0.01, 0, 0.01] };
+    const outer = await api.apply({ expectedRevision: api.revision, label: 'Round', operations: [{ op: 'fillet_edges', body: box(id), edges: [{ face: surround, which: 'outer' }], radius: 0.002 }] });
+    expect(outer.results[0]!.count).toBe(4);
+  });
+
+  it('beads the inside edges of a face frame by which: "inner", picks one edge between two faces, and edges along a direction', async () => {
+    const { api } = setup();
+    const made = await api.apply({ expectedRevision: api.revision, label: 'Frame', operations: [
+      { op: 'add_box', as: 'frame', min: [0, 0, 0], max: [0.6, 0.02, 0.8] },
+      { op: 'add_box', as: 'opening', min: [0.05, -0.01, 0.05], max: [0.55, 0.03, 0.75] },
+      { op: 'subtract', target: '$frame', cutters: ['$opening'] },
+      { op: 'add_box', as: 'stile', min: [1, 0, 0], max: [1.05, 0.02, 0.7] },
+      { op: 'add_box', as: 'post', min: [2, 0, 0], max: [2.05, 0.05, 0.7] },
+    ] });
+    const bead = await api.apply({ expectedRevision: api.revision, label: 'Bead', operations: [
+      { op: 'fillet_edges', body: '$frame', edges: [{ face: { facing: front }, which: 'inner' }], radius: 0.003 },
+      { op: 'fillet_edges', body: '$stile', edges: [{ between: [{ facing: front }, { facing: [1, 0, 0] }] }], radius: 0.003 },
+    ] });
+    expect(bead.results.map(r => r.count)).toEqual([4, 1]);
+    const along = await api.apply({ expectedRevision: api.revision, label: 'Ease', operations: [
+      { op: 'chamfer_edges', body: box(made.created.stile!), edges: [{ face: { facing: [0, 1, 0] }, which: 'parallel', along: [1, 0, 0] }], distance: 0.002 },
+    ] });
+    expect(along.results[0]!.count).toBe(2);
+    // The older forms keep working.
+    const old = await api.apply({ expectedRevision: api.revision, label: 'Old', operations: [{ op: 'chamfer_edges', body: box(made.created.post!), edges: [{ faceFacing: [-1, 0, 0] }], distance: 0.002 }] });
+    expect(old.results[0]!.count).toBe(4);
+  });
+
+  it('explains a selector that matches no edge, or several faces, with what it matched and one that works', async () => {
+    const { api } = setup();
+    const id = await raisedPanel(api);
+    const revision = api.revision;
+    const chamfer = (edges: unknown[]) => failure(() => api.apply({ expectedRevision: api.revision, label: 'x', operations: [{ op: 'chamfer_edges', body: box(id), edges, distance: 0.002 }] }));
+    const two = await chamfer([{ face: { facing: front }, which: 'outer' }]);
+    expect(two.error).toMatchObject({ code: 'invalid_reference', operationIndex: 0 });
+    expect(two.error.message).toMatch(/The face \{facing: \[0, -1, 0\]\}, matches 2 faces of solid \d+: face \d+ facing \[0, -1, 0\], 0\.4 × 0\.3 m, at \[0\.2, -0\.005, 0\.25\]; face \d+ facing \[0, -1, 0\], 0\.5 × 0\.4 m with 1 opening, at .*Add a point on the one you mean, for example \{facing: \[0, -1, 0\], point: \[/);
+    const none = await chamfer([{ face: { facing: [1, 1, 0] } }]);
+    expect(none.error.message).toMatch(/No face of solid \d+ faces \[1, 1, 0\].*Its faces: .*The closest is \{facing:/);
+    const noOpening = await chamfer([{ face: { facing: [0, 1, 0] }, which: 'inner' }]);
+    expect(noOpening.error.message).toContain('has no openings');
+    const wrongWay = await chamfer([{ face: { facing: [0, 1, 0] }, which: 'parallel', along: [1, 1, 0] }]);
+    expect(wrongWay.error.message).toMatch(/none of the 4 edges .* runs along \[1, 1, 0\]; they run \[1, 0, 0\] \(2\), \[0, 0, 1\] \(2\)/);
+    const apart = await chamfer([{ between: [{ facing: [0, 1, 0] }, { facing: front, point: [0.2, -0.005, 0.25] }] }]);
+    expect(apart.error.message).toMatch(/share no edge\. Face \d+ meets 4 faces: .*For example \{between:/);
+    expect((await chamfer([{ face: { facing: [0, 1, 0] }, which: 'parallel' }])).error.code).toBe('invalid_operation');
+    expect(api.revision).toBe(revision);
+  });
+
+  it('reports the largest radius that fits when one is too big, and names the edges of a corner it cannot make', async () => {
+    const { api, host, addBox } = setup();
+    const id = addBox([0, 0, 0], [1, 1, 0.1]);
+    const depth = host.undoStack.length;
+    const big = await failure(() => api.apply({ expectedRevision: api.revision, label: 'x', operations: [{ op: 'fillet_edges', body: box(id), edges: [{ face: { facing: [0, 0, 1] } }], radius: 0.3 }] }));
+    expect(big.error.code).toBe('invalid_geometry');
+    const largest = Number(/largest radius that fits these edges is about ([\d.]+) m/.exec(big.error.message)?.[1]);
+    expect(largest).toBeGreaterThan(0.05);
+    expect(largest).toBeLessThan(0.3);
+    expect(host.undoStack.length).toBe(depth);
+    await api.apply({ expectedRevision: api.revision, label: 'Fits', operations: [{ op: 'fillet_edges', body: box(id), edges: [{ face: { facing: [0, 0, 1] } }], radius: largest }] });
+    const post = addBox([3, 0, 0], [3.1, 0.1, 1]);
+    const corner = await failure(() => api.apply({ expectedRevision: api.revision, label: 'x', operations: [{ op: 'fillet_edges', body: box(post), edges: [{ face: { facing: [0, 0, 1] } }, { along: [0, 0, 1] }], radius: 0.01 }] }));
+    expect(corner.error.code).toBe('invalid_geometry');
+    expect(corner.error.message).toMatch(/The edges: 8 edges of solid \d+: \[/);
+  });
+});
+
 describe('runModelTool', () => {
   it('returns results and errors as tool results', async () => {
     const { api } = setup();

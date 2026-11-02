@@ -26,7 +26,7 @@ const meters = z.number().finite();
 // Shared shapes carry registry ids, so a tool's JSON schema states each once (under $defs) instead of at every use.
 const point = z.tuple([meters, meters, meters]).meta({ id: 'Point', description: '[x, y, z] in meters, in the coordinates of the batch\'s container; z is up.' });
 const direction = z.tuple([meters, meters, meters]).refine(v => Math.hypot(...v) > 1e-9, 'A direction must not be zero.').meta({ id: 'Direction', description: '[x, y, z] direction; need not be unit length.' });
-const localName = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,39}$/).meta({ id: 'LocalName', description: 'Names this operation\'s result for later operations of the same batch, which refer to it as "$name".' });
+const localName = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,39}$/).meta({ id: 'LocalName', description: 'Names this operation\'s result; later operations, in this batch or a later batch of the same message, refer to it as "$name". Reusing a name in a later batch rebinds it.' });
 const id = z.number().int().nonnegative();
 const idOrName = z.union([id, z.string().regex(LOCAL_REFERENCE)]).meta({ id: 'IdOrName' });
 const color = z.string().regex(/^#[0-9a-fA-F]{6}$/).describe('Hex color such as #8b5a2b.');
@@ -55,12 +55,28 @@ export type ModelRefInput = z.infer<typeof modelRefSchema>;
 const refs = z.array(modelRefSchema).min(1).max(1000);
 const vector = z.tuple([meters, meters, meters]).meta({ id: 'Vector', description: '[dx, dy, dz] in meters.' });
 const pointList = z.array(point).max(MODEL_LIMITS.pointsPerBatch);
-/** Edges of one solid: keys from model_query, every edge around a face, or edges running one way. */
+/** A face of the operation's solid, chosen as a face selector is but without the body. */
+const edgeFace = z.object({
+  facing: direction.describe('The face\'s outward direction, within 1 degree: [0, -1, 0] is the front.'),
+  point: point.optional().describe('A point on the face, when several faces of the solid face the same way.'),
+}).meta({ id: 'EdgeFace', description: 'A face of the solid: {facing, point?}. It must match exactly one face.' });
+/**
+ * Edges of one solid, found when the operation runs, so selectors by face or direction never go stale: keys from
+ * model_query, the edges bounding a face, the edge two faces share, or edges running one way.
+ */
 const edgeSelectors = z.array(z.union([
-  z.string().describe('An edge key from model_query (kind edge).'),
-  z.object({ faceFacing: direction, facePoint: point.optional() }).describe('Every edge around the face facing this way (with facePoint, the face containing it).'),
+  z.string().describe('An edge key from model_query (kind edge); valid only for the revision it was read at.'),
+  z.object({
+    face: edgeFace,
+    which: z.enum(['all', 'outer', 'inner', 'parallel']).optional().describe('all (default): every edge bounding the face; outer: its outside outline only; inner: the outlines of its openings only; parallel: those running along.'),
+    along: direction.optional().describe('Keep only the face\'s edges running this way, within 1 degree; needed for which: parallel.'),
+  }).refine(s => s.which !== 'parallel' || s.along !== undefined, 'which: parallel needs along.')
+    .describe('Edges bounding a face. Bevel a raised panel\'s field: {face: {facing: [0, -1, 0], point: <a point on the field>}, which: "outer"}. Bead a face frame\'s opening: {face: {facing: [0, -1, 0]}, which: "inner"}.'),
+  z.object({ between: z.tuple([edgeFace, edgeFace]) })
+    .describe('The edge two faces share, such as a stile\'s inside front edge: {between: [{facing: [0, -1, 0]}, {facing: [1, 0, 0]}]}.'),
+  z.object({ faceFacing: direction, facePoint: point.optional() }).describe('Every edge around the face facing this way (with facePoint, the face containing it); the same as {face: {facing, point}}.'),
   z.object({ along: direction, through: point.optional() }).describe('Edges running this way, within 1 degree; with through, only edges through that point.'),
-])).min(1).max(1000).describe('Edges of the solid; only sharp edges can be rounded or beveled.');
+])).min(1).max(1000).describe('Edges of the solid, found when the operation runs; each selector must match at least one sharp edge. Only sharp edges can be rounded or beveled.');
 const shapeNormal = direction.describe('The direction the shape faces; push_pull of the shape moves along it. [0, 0, 1] for a shape lying flat.');
 const copies = z.number().int().min(1).max(MODEL_LIMITS.copiesPerArray)
   .describe('Leave the originals and make this many copies, each offset from the previous one by the same transform (a linear or polar array).');
@@ -141,9 +157,9 @@ export const modelOperationSchema = z.discriminatedUnion('op', [
     .describe('Add a rectangular solid with its sides along the container\'s axes, between two opposite corners; each side must be longer than zero. Returns the solid\'s id. A part such as a cabinet side or a shelf is one box, made into its own group or component.'),
   z.object({ op: z.literal('fillet_edges'), body: modelRefSchema.describe('The solid.'), edges: edgeSelectors, radius: z.number().positive().finite(),
     segments: z.number().int().min(3).max(96).optional().describe('Faces a full circle of rounding would have; default 24.') })
-    .describe('Round over edges of a solid, such as the top edges of a table top. A radius too big for the edge\'s faces fails with invalid_geometry.'),
+    .describe('Round over edges of a solid, such as the top edges of a table top ({face: {facing: [0, 0, 1]}}) or a bead along a face frame\'s opening ({face: {facing: [0, -1, 0]}, which: "inner"}). A radius too big for the edge\'s faces fails with invalid_geometry and the largest radius that fits.'),
   z.object({ op: z.literal('chamfer_edges'), body: modelRefSchema.describe('The solid.'), edges: edgeSelectors, distance: z.number().positive().finite().describe('Set back along each face.') })
-    .describe('Bevel edges of a solid at 45 degrees.'),
+    .describe('Bevel edges of a solid at 45 degrees, such as the four front edges of a raised panel\'s field ({face: {facing: [0, -1, 0], point: <on the field>}, which: "outer"}). A distance too big fails with invalid_geometry and the largest that fits.'),
   z.object({ op: z.literal('add_arc'), as: localName.optional(), center: point, normal: shapeNormal, radius: z.number().positive().finite(),
     startDeg: z.number().finite().describe('Counterclockwise about normal from the plane\'s first axis (+x for a level arc).'), endDeg: z.number().finite(),
     segments: z.number().int().min(1).max(360).optional().describe('Default 12.') })
@@ -426,12 +442,23 @@ export interface ModelOverlapsResult { revision: number; container: number[]; so
 export interface ModelLibraryResult { categories?: { name: string; count: number }[]; materials?: { key: string; name: string; color: string; textured: boolean; grain?: ModelTextureGrain }[] }
 /** A face an operation left as it was, and why. */
 export interface ModelSkipped { ref: ModelRef; reason: 'no_texture' | 'no_grain' | 'end_grain' }
+/** What an `as` name of an earlier batch names: its kind and id, and a group's or placement's definition. */
+export interface ModelNameEntry { kind: string; id: number; definitionId?: number }
 export interface ModelBatchResult {
   ok: true;
   revision: number;
   label: string;
-  /** `as` names and the ids they got. */
+  /** `as` names this batch gave, and the ids they got. */
   created: Record<string, number>;
+  /**
+   * Names from earlier batches of this API session that still name something, with what they name; with `created`,
+   * every name a later batch may use. Absent when there are none.
+   */
+  names?: Record<string, ModelNameEntry>;
+  /** Names this batch gave that an earlier batch had given to something else; they now mean the new result. */
+  rebound?: string[];
+  /** Names dropped since the last batch because the batch that gave them was undone. */
+  dropped?: string[];
   /**
    * Per operation: `id` is the main result (a new solid, the face a shape made, a group's instance), `refs` what it
    * created or changed, and `deleted` what it removed, such as the cutters of a subtract.
@@ -451,7 +478,7 @@ export const MODEL_TOOLS = {
   },
   applyOperations: {
     name: 'model_apply_operations',
-    description: 'Edit the open 3D model in one atomic batch: every operation applies or none does, and the batch is one undo entry labelled with label. Lengths are meters, local to the container being edited; angles are degrees; z is up. Entities are named by {kind, id} from model_query (faces as {kind: "face", id: bodyId, faceId}). Create operations accept as: "name"; later operations refer to the result as "$name". Returns the new revision and the created ids, or an error naming the failed operation; a stale_revision error means the user changed the model, so read it again before retrying. add_box adds a rectangular solid. Drawing operations (add_edges, add_polyline, add_rectangle, add_circle, add_polygon) make loose edges and faces, or divide the face of a solid when drawn on it; push_pull turns a loose face into a solid or pushes and pulls the face of a solid; union, subtract, intersect and split combine overlapping solids of the container; follow_me sweeps a face along a path; fillet_edges and chamfer_edges round or bevel edges of a solid; add_arc, offset and fillet_corner draw more shapes; mirror reflects entities. Guides, dimensions, text, 3D text, section planes and library materials have their own operations. Geometry that would not leave a valid solid fails with invalid_geometry and changes nothing. A face of a solid can be named as {body, facing, point?} instead of by id. Scene operations add, update, delete, rename, reorder and include scenes; a framed camera fits a subject from a view direction.',
+    description: 'Edit the open 3D model in one atomic batch: every operation applies or none does, and the batch is one undo entry labelled with label. Lengths are meters, local to the container being edited; angles are degrees; z is up. Entities are named by {kind, id} from model_query (faces as {kind: "face", id: bodyId, faceId}). Create operations accept as: "name"; later operations refer to the result as "$name", in this batch or a later one of the same message (names lists the earlier ones still live). Returns the new revision and the created ids, or an error naming the failed operation; a stale_revision error means the user changed the model, so read it again before retrying. add_box adds a rectangular solid. Drawing operations (add_edges, add_polyline, add_rectangle, add_circle, add_polygon) make loose edges and faces, or divide the face of a solid when drawn on it; push_pull turns a loose face into a solid or pushes and pulls the face of a solid; union, subtract, intersect and split combine overlapping solids of the container; follow_me sweeps a face along a path; fillet_edges and chamfer_edges round or bevel edges of a solid, picked by face ({face: {facing, point?}, which?}) or by the two faces they join, which never go stale; add_arc, offset and fillet_corner draw more shapes; mirror reflects entities. Guides, dimensions, text, 3D text, section planes and library materials have their own operations. Geometry that would not leave a valid solid fails with invalid_geometry and changes nothing. A face of a solid can be named as {body, facing, point?} instead of by id. Scene operations add, update, delete, rename, reorder and include scenes; a framed camera fits a subject from a view direction.',
   },
   overlaps: {
     name: 'model_find_overlaps',

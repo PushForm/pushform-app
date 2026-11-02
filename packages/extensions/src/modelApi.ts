@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import {
-  DEFAULT_BLEND_SEGMENTS, SERVICE_FONTS, Text3DParamsSchema, isHardEdge, libraryMaterial, loadLibraryMaterial, planEdgeBlend, runEdgeBlendKernel, runIntersectKernel,
+  DEFAULT_BLEND_SEGMENTS, SERVICE_FONTS, checkEdgeBlendResult, Text3DParamsSchema, isHardEdge, libraryMaterial, loadLibraryMaterial, planEdgeBlend, runEdgeBlendKernel, runIntersectKernel,
   runText3DKernel, BUILTIN_LIBRARY, LIBRARY_CATEGORIES, activeTagOpt, applyTransformPlan, arrayMatrices, contextFrame, curvePoints, definitionBounds, hostOf, instanceCount, kernelOf, localPushPullDistance,
   m4rotationAbout, m4scaleAbout, planPushPull, planTransform, runFollowMeKernel, runPushPullKernel, runSolidsKernel, runTransformKernel, sceneRuntimeOf,
   type CameraHost, type CameraState, type CommandRegistry, type DocumentHost, type ExplodeResult, type FollowMeApplyResult, type FollowMeParams,
-  type MakeResult, type StandardView, type PushPullApplyResult, type PushPullTarget, type SolidsApplyResult, type SolidsKernelWork, type SolidsPairMode, type TransformKernelWork, type TransformPlan,
+  type EdgeBlendKind, type MakeResult, type StandardView, type PushPullApplyResult, type PushPullTarget, type SolidsApplyResult, type SolidsKernelWork, type SolidsPairMode, type TransformKernelWork, type TransformPlan,
 } from '@pushform/commands';
 import {
   LOCAL_REFERENCE, MODEL_API_VERSION, MODEL_LIMITS, MODEL_RENDER_LIMITS, modelRenderSchema, modelRenderViewName, modelRenderViews, type ModelRenderImage, type ModelRenderResult, MODEL_PLANNED_OPERATIONS, MODEL_TOOLS, modelBatchSchema, modelMaterialLibrarySchema, modelOperationSchema, modelOverlapsSchema, modelQuerySchema,
   type ModelLibraryResult, type ModelOverlap, type ModelOverlapsResult,
   modelViewSchema, type ModelApiError, type ModelApiErrorCode, type ModelBatchResult, type ModelBounds, type ModelCameraInput, type ModelCameraSummary,
   type ModelDocumentSnapshot, type ModelEntitySummary, type ModelOperation, type ModelQueryResult, type ModelRef, type ModelRefInput, type ModelSceneSaves,
-  type ModelSkipped, type ModelVec3, type ModelViewResult,
+  type ModelNameEntry, type ModelSkipped, type ModelVec3, type ModelViewResult,
 } from '@pushform/extension-protocol';
 import {
   basisToLocal, box3Empty, box3Expand, box3IsEmpty, MERGE_TOL, m4invert, m4mul, m4transformPoint, m4translation, meshBounds, planeDistance, PushFormError,
@@ -22,7 +22,7 @@ import {
 import {
   computeRegions, containerAt, contextMatrix, entityCounts, materialOrNull, regionAt, sketchFaceLoops, UV_AUTO, uvInvert, uvToAffine,
   type Body, type DocumentState, type EdgeRecord, type EntityContainer, type EntityRef, type FaceRecord, type Material, type Rgb, type Scene, type SceneFlags, type SketchFace,
-  type UvMapping,
+  type UndoEntry, type UvMapping,
 } from '@pushform/model';
 import type { ToolCallResult } from './layoutApi';
 import { frameCamera } from './modelCamera';
@@ -42,6 +42,23 @@ interface Shape { edges: number[]; faces: number[]; imprinted: { bodyId: number;
  * placement its definition, and for a drawn shape everything it made.
  */
 interface Named { kind: ModelRef['kind'] | 'tag' | 'material' | 'scene'; id: number; definitionId?: number; faceId?: number; shape?: Shape }
+/**
+ * A name in the API's table: what it names, the container that holds it, the batch that gave it (a sequence number
+ * of this API object), and that batch's undo entry once it committed, so an undone batch's names can be dropped.
+ */
+interface NameEntry { named: Named; path: readonly number[]; batch: number; undo: UndoEntry | null }
+/** Kinds that live in one container; tags, materials and scenes belong to the whole model. */
+const DOCUMENT_KINDS = new Set<Named['kind']>(['tag', 'material', 'scene']);
+/** How an error names what a name stood for. */
+const KIND_WORDS: Partial<Record<Named['kind'], string>> = { body: 'solid', instance: 'group or placement', sketchFace: 'drawn face', sketchEdge: 'drawn edge', face: 'face of solid', sectionPlane: 'section plane' };
+const describeNamed = (n: Named): string => `${KIND_WORDS[n.kind] ?? n.kind} ${n.id}${n.faceId !== undefined ? ` face ${n.faceId}` : ''}`;
+/** An edge selector of fillet_edges and chamfer_edges, as the schema parses it. */
+type EdgeFaceSelector = { facing: Vec3; point?: Vec3 | undefined };
+type EdgeSelector = string
+  | { face: EdgeFaceSelector; which?: 'all' | 'outer' | 'inner' | 'parallel' | undefined; along?: Vec3 | undefined }
+  | { between: [EdgeFaceSelector, EdgeFaceSelector] }
+  | { faceFacing: Vec3; facePoint?: Vec3 | undefined }
+  | { along: Vec3; through?: Vec3 | undefined };
 /** A face to push, pull or sweep, as the commands take it, and the direction a positive API distance moves. */
 interface FaceTarget { target: PushPullTarget; plane: Plane; normal: Vec3; shown: string }
 type OpResult = Omit<ModelBatchResult['results'][number], 'op'> & { named?: Named };
@@ -66,9 +83,19 @@ const samePath = (a: readonly number[], b: readonly number[]): boolean => a.leng
  * `apply` runs a batch through the model's commands inside one exclusive undo group: the batch commits as one undo
  * entry labelled `<client>: <label>`, or every change is reverted, and no other edit can interleave with it while
  * kernel work is awaited.
+ *
+ * `as` names live as long as this object: a later batch through it may use a name an earlier one gave. AI Chat makes
+ * one per message the requester sends (`documentToolsFor` runs when the message is sent), so its names last one turn;
+ * an extension's names last as long as the host keeps its API object. Names never enter the document. A name keeps
+ * the container it was given in; an undone batch's names are dropped, and a later batch may rebind a name.
  */
 export class ModelDocumentApi {
   private readonly host: DocumentHost;
+  /** Names that committed batches gave, with what they name. */
+  private readonly names = new Map<string, NameEntry>();
+  /** Names dropped because their batch was undone, so a use of one can say why it fails. */
+  private readonly undone = new Set<string>();
+  private batches = 0;
 
   constructor(private readonly commands: CommandRegistry, private readonly client: string) {
     this.host = hostOf(commands.ctx);
@@ -116,11 +143,11 @@ export class ModelDocumentApi {
     if (action.type !== 'play' && action.type !== 'stop') runtime.stop();
     switch (action.type) {
       case 'set_camera':
-        shown = this.cameraFor(action.camera, path, this.resolver(path, new Map()).ref);
+        shown = this.cameraFor(action.camera, path, this.resolver(path, this.names, -1).ref);
         runtime.animateCamera(camera, shown, action.animate ?? true ? runtime.animationSettings.transitionSeconds : 0);
         break;
       case 'activate_scene': {
-        const scene = this.sceneOf(this.resolveScene(action.scene, new Map()));
+        const scene = this.sceneOf(this.resolveScene(action.scene, this.names));
         this.commands.execute('scene.activate', { id: scene.id, animate: action.animate ?? true });
         if (scene.flags.useCamera) shown = cameraFromScene(scene);
         break;
@@ -151,13 +178,13 @@ export class ModelDocumentApi {
     return scene;
   }
 
-  /** A scene by id, name (any case), "active", or "$name" of a scene added earlier in the batch. */
-  private resolveScene(input: number | string, names: ReadonlyMap<string, Named>): number {
+  /** A scene by id, name (any case), "active", or "$name" of a scene added earlier. */
+  private resolveScene(input: number | string, names: ReadonlyMap<string, NameEntry>): number {
     if (typeof input === 'number') return this.sceneOf(input).id;
     const local = LOCAL_REFERENCE.exec(input)?.[1];
     if (local !== undefined) {
-      const found = names.get(local);
-      if (found?.kind !== 'scene') throw this.failure('invalid_reference', `"${input}" does not name a scene added earlier in this batch.`);
+      const found = names.get(local)?.named;
+      if (found?.kind !== 'scene') throw this.failure('invalid_reference', `"${input}" does not name a scene added earlier in this batch or an earlier one.`);
       return this.sceneOf(found.id).id;
     }
     if (input.trim().toLowerCase() === 'active') {
@@ -413,8 +440,12 @@ export class ModelDocumentApi {
     this.containerOrFail(path);
     this.runtime.stop();
     const label = `${this.client}: ${batch.label}`;
-    const names = new Map<string, Named>();
+    const dropped = this.dropUndone();
+    // Earlier batches' names, and this batch's as they are given; the table changes only when the batch commits.
+    const names = new Map(this.names), batchNo = ++this.batches;
+    const created = new Map<string, Named>(), rebound: string[] = [];
     const results: ModelBatchResult['results'] = [];
+    const lastEntry = undo.peek();
     const savedPath = [...host.context.path], savedSelection = host.selection.snapshot();
     const deadline = Date.now() + MODEL_LIMITS.kernelSeconds * 1000;
     let at = 0, failed: ModelApiFailure | null = null;
@@ -425,10 +456,14 @@ export class ModelDocumentApi {
         at = index;
         if (signal?.aborted) throw this.failure('cancelled', 'The batch was stopped before it finished. Nothing was changed.', index);
         if (Date.now() > deadline) throw this.failure('limit_exceeded', `The batch ran longer than ${MODEL_LIMITS.kernelSeconds} seconds and was cancelled. Nothing was changed.`, index);
-        const { named, ...result } = await this.run(op, path, names, label);
+        const { named, ...result } = await this.run(op, path, names, batchNo, label);
         if ('as' in op && op.as) {
-          if (names.has(op.as)) throw this.failure('invalid_operation', `The name "${op.as}" is used twice in this batch.`, index);
-          if (named) names.set(op.as, named);
+          if (created.has(op.as)) throw this.failure('invalid_operation', `The name "${op.as}" is used twice in this batch.`, index);
+          if (named) {
+            if (names.has(op.as)) rebound.push(op.as);
+            names.set(op.as, { named, path: [...path], batch: batchNo, undo: null });
+            created.set(op.as, named);
+          }
         }
         results.push({ op: op.op, ...result });
       }
@@ -443,7 +478,55 @@ export class ModelDocumentApi {
     }
     // Reverting the batch is itself a change, so a failure reports the revision after it.
     if (failed) throw new ModelApiFailure({ ...failed.error, revision: this.revision });
-    return { ok: true, revision: this.revision, label, created: Object.fromEntries([...names].map(([name, value]) => [name, value.id])), results };
+    const committed = undo.peek() !== lastEntry ? undo.peek() : null;
+    const earlier: Record<string, ModelNameEntry> = {};
+    for (const [name, entry] of this.names) if (!created.has(name) && this.alive(entry)) earlier[name] = nameOut(entry.named);
+    for (const [name, named] of created) {
+      this.names.set(name, { named, path: [...path], batch: batchNo, undo: committed });
+      this.undone.delete(name);
+    }
+    return { ok: true, revision: this.revision, label, created: Object.fromEntries([...created].map(([name, value]) => [name, value.id])),
+      ...(Object.keys(earlier).length ? { names: earlier } : {}), ...(rebound.length ? { rebound } : {}), ...(dropped.length ? { dropped } : {}), results };
+  }
+
+  /**
+   * Drop the names of batches that were undone: their undo entry is no longer applied and what they named is gone.
+   * A redone batch's entry is applied again, so its names stay; an entry that fell off a full undo history does not
+   * drop names that still name something.
+   */
+  private dropUndone(): string[] {
+    const applied = new Set(this.host.undoStack.entries), dropped: string[] = [];
+    for (const [name, entry] of this.names) {
+      if (!entry.undo || applied.has(entry.undo) || this.alive(entry)) continue;
+      this.names.delete(name);
+      this.undone.add(name);
+      dropped.push(name);
+    }
+    return dropped;
+  }
+
+  /** Whether what a name stands for still exists where it was named. */
+  private alive(entry: NameEntry): boolean {
+    const state = this.host.doc.state, n = entry.named;
+    if (n.kind === 'tag') return state.tags.has(n.id as never);
+    if (n.kind === 'material') return state.materials.has(n.id as never);
+    if (n.kind === 'scene') return state.scenes.has(n.id as never);
+    let c: EntityContainer;
+    try { c = containerAt(state, entry.path as Id[]); } catch { return false; }
+    if (n.shape) return n.shape.edges.some(id => c.sketch.edges.has(id as Id)) || n.shape.faces.some(id => c.sketch.faces.has(id as Id))
+      || n.shape.imprinted.some(f => c.bodies.has(f.bodyId as Id));
+    switch (n.kind) {
+      case 'instance': return c.instances.has(n.id as Id);
+      case 'body': return c.bodies.has(n.id as Id);
+      case 'face': return !!c.bodies.get(n.id as Id)?.faces.has(n.faceId as never);
+      case 'sketchEdge': return c.sketch.edges.has(n.id as Id);
+      case 'sketchFace': return c.sketch.faces.has(n.id as Id);
+      case 'guide': return c.guides.has(n.id as Id);
+      case 'text': return c.texts.has(n.id as Id);
+      case 'dimension': return c.dimensions.has(n.id as Id);
+      case 'sectionPlane': return c.sectionPlanes.has(n.id as Id);
+      default: return false;
+    }
   }
 
   private failure(code: ModelApiErrorCode, message: string, operationIndex?: number): ModelApiFailure {
@@ -458,14 +541,29 @@ export class ModelDocumentApi {
     }
   }
 
-  /** Resolves `"$name"`s and entity references of the container at `path`. */
-  private resolver(path: Id[], names: ReadonlyMap<string, Named>) {
+  /**
+   * Resolves `"$name"`s and entity references of the container at `path` for batch number `batch`. A name an earlier
+   * batch gave must still name something, in this container unless it is a tag, material or scene; with
+   * `definition`, a group or placement named in another container still stands for its definition.
+   */
+  private resolver(path: Id[], names: ReadonlyMap<string, NameEntry>, batch: number) {
     const host = this.host;
-    const named = (value: string): Named => {
+    const named = (value: string, use: 'entity' | 'definition' = 'entity'): Named => {
       const name = LOCAL_REFERENCE.exec(value)?.[1];
-      const found = name === undefined ? undefined : names.get(name);
-      if (!found) throw this.failure('invalid_reference', `"${value}" does not name anything created earlier in this batch.`);
-      return found;
+      const entry = name === undefined ? undefined : names.get(name);
+      if (!entry) {
+        if (name !== undefined && this.undone.has(name)) throw this.failure('invalid_reference', `"${value}" was dropped: the batch that named it was undone. Create it again or use {kind, id} from ${MODEL_TOOLS.query.name}.`);
+        const live = [...names].filter(([, e]) => e.batch === batch || this.alive(e)).slice(0, 20).map(([n, e]) => `"$${n}" (${describeNamed(e.named)})`);
+        throw this.failure('invalid_reference', `"${value}" does not name anything created earlier in this batch or an earlier batch of this message.${live.length ? ` Names you can use: ${live.join(', ')}.` : ''}`);
+      }
+      if (entry.batch === batch) return entry.named;
+      const what = describeNamed(entry.named);
+      if (use === 'definition' && entry.named.definitionId !== undefined && host.doc.state.definitions.has(entry.named.definitionId as DefId)) return entry.named;
+      if (!DOCUMENT_KINDS.has(entry.named.kind) && !samePath(entry.path, path))
+        throw this.failure('invalid_reference', `"${value}" names ${what} in the container at instance path [${entry.path.join(', ')}], but this batch edits [${path.join(', ')}]. Edit that container, or use {kind, id} from ${MODEL_TOOLS.query.name} for this one.`);
+      if (!this.alive(entry))
+        throw this.failure('invalid_reference', `"${value}" named ${what}, which no longer exists: it was deleted, used up by a later operation (a union, subtract or push/pull of a drawn face), or moved into a group. Call ${MODEL_TOOLS.query.name} for current ids.`);
+      return entry.named;
     };
     const ref = (input: ModelRefInput): EntityRef => {
       const state = host.doc.state, container = containerAt(state, path);
@@ -507,10 +605,10 @@ export class ModelDocumentApi {
     return { named, ref, refsOf };
   }
 
-  private async run(op: ModelOperation, path: Id[], names: ReadonlyMap<string, Named>, label: string): Promise<OpResult> {
+  private async run(op: ModelOperation, path: Id[], names: ReadonlyMap<string, NameEntry>, batch: number, label: string): Promise<OpResult> {
     const host = this.host, undo = host.undoStack;
     const exec = <T>(command: string, params: Record<string, unknown>): T => undo.withinGroup(() => this.commands.execute(command, params) as T);
-    const { named, ref, refsOf } = this.resolver(path, names);
+    const { named, ref, refsOf } = this.resolver(path, names, batch);
     const sceneId = (input: number | string): number => this.resolveScene(input, names);
     const capture = (camera: ModelCameraInput | undefined, what: string): CameraState | undefined => {
       if (camera) return this.cameraFor(camera, path, ref);
@@ -530,7 +628,7 @@ export class ModelDocumentApi {
     };
     const definitionOf = (value: number | string): number => {
       if (typeof value === 'number') return value;
-      const found = named(value);
+      const found = named(value, 'definition');
       // A placement's definition is read when used: Make Unique may have given it a new one since.
       const placed = found.kind === 'instance' ? containerAt(host.doc.state, path).instances.get(found.id as Id) : undefined;
       if (placed) return placed.definitionId;
@@ -734,11 +832,18 @@ export class ModelDocumentApi {
         const kind = op.op === 'fillet_edges' ? 'fillet' as const : 'chamfer' as const;
         const target = solid(op.body, 'The body');
         const body = containerAt(host.doc.state, path).bodies.get(target.id as Id)!;
-        const edges = this.edgeKeys(path, body, op.edges, named);
+        // Selectors are resolved against the solid as it is now, so a face or direction never goes stale.
+        const edges = this.edgeKeys(body, op.edges as readonly EdgeSelector[]);
         const size = op.op === 'fillet_edges' ? op.radius : op.distance;
         const params = { path: [...path], bodyId: body.id, edges, size, segments: op.op === 'fillet_edges' ? op.segments ?? DEFAULT_BLEND_SEGMENTS : DEFAULT_BLEND_SEGMENTS };
-        const plan = planEdgeBlend(host.doc.state, kind, params);
-        const precomputed = await runEdgeBlendKernel(kernelOf(this.commands.ctx), plan);
+        let precomputed: Awaited<ReturnType<typeof runEdgeBlendKernel>>;
+        try {
+          const plan = planEdgeBlend(host.doc.state, kind, params);
+          precomputed = await runEdgeBlendKernel(kernelOf(this.commands.ctx), plan);
+          checkEdgeBlendResult(plan, precomputed);
+        } catch (cause) {
+          throw await this.blendFailure(cause, kind, body, params);
+        }
         await exec<Promise<unknown>>(`${kind}.apply`, { ...params, precomputed });
         this.checkSolids(path, [body.id], op.op);
         return { id: body.id, refs: [bodyOut(body.id)], count: edges.length };
@@ -1031,25 +1136,115 @@ export class ModelDocumentApi {
     throw this.failure('invalid_operation', `Only a face can be used to ${what}; ${r.kind} ${r.id} is not one.`);
   }
 
-  /** Edge keys of a solid that edge selectors name; only sharp edges can be rounded or beveled. */
-  private edgeKeys(path: Id[], body: Body, selectors: readonly (string | { faceFacing: Vec3; facePoint?: Vec3 | undefined } | { along: Vec3; through?: Vec3 | undefined })[], named: (value: string) => Named): string[] {
+  /**
+   * Edge keys of a solid that edge selectors name, resolved against the solid as it is when the operation runs. Every
+   * selector must match a sharp edge; one that does not fails with `invalid_reference` and says what it did match.
+   */
+  private edgeKeys(body: Body, selectors: readonly EdgeSelector[]): string[] {
     const keys = new Set<string>();
+    const all = [...body.edges.values()];
     for (const sel of selectors) {
       if (typeof sel === 'string') {
         const edge = body.edges.get(sel as never);
-        if (!edge) throw this.failure('invalid_reference', `Solid ${body.id} has no edge ${sel} now; edge keys change when the solid changes, so read them again.`);
+        if (!edge) throw this.failure('invalid_reference', `Solid ${body.id} has no edge ${sel} now; edge keys change when the solid changes. Pick edges by face instead, for example {face: {facing: [0, -1, 0]}}.`);
         if (!isHardEdge(edge)) throw this.failure('invalid_operation', `Edge ${sel} of solid ${body.id} is soft, smooth or hidden; only sharp edges can be rounded or beveled.`);
         keys.add(sel);
         continue;
       }
-      const found = 'faceFacing' in sel
-        ? (() => { const { face } = this.selectFace(path, { body: body.id, facing: sel.faceFacing, point: sel.facePoint }, named); return [...body.edges.values()].filter(e => e.faceA === face.id || e.faceB === face.id); })()
-        : [...body.edges.values()].filter(e => edgeMatches(e.polyline, sel.along, sel.through ?? null));
+      let found: EdgeRecord[], shown: string;
+      if ('between' in sel) {
+        const [a, b] = sel.between.map(f => this.edgeFace(body, f, 'between'));
+        if (a!.id === b!.id) throw this.failure('invalid_reference', `Both faces of ${JSON.stringify(sel)} are face ${a!.id} of solid ${body.id}; name two different faces.`);
+        found = all.filter(e => (e.faceA === a!.id && e.faceB === b!.id) || (e.faceA === b!.id && e.faceB === a!.id));
+        if (found.length === 0) {
+          const neighbours = [...new Set(all.filter(e => e.faceA === a!.id || e.faceB === a!.id).map(e => (e.faceA === a!.id ? e.faceB : e.faceA)))]
+            .map(id => body.faces.get(id)).filter((f): f is FaceRecord => !!f);
+          throw this.failure('invalid_reference', `Faces ${a!.id} and ${b!.id} of solid ${body.id} share no edge. Face ${a!.id} meets ${neighbours.length} faces: ${neighbours.slice(0, 8).map(describeFace).join('; ')}.`
+            + (neighbours[0] ? ` For example {between: [${faceSelector(a!)}, ${faceSelector(neighbours[0])}]}.` : ''));
+        }
+        shown = JSON.stringify(sel);
+      } else if ('face' in sel || 'faceFacing' in sel) {
+        const which = 'face' in sel ? sel.which ?? 'all' : 'all', along = 'face' in sel ? sel.along : undefined;
+        const face = this.edgeFace(body, 'face' in sel ? sel.face : { facing: sel.faceFacing, point: sel.facePoint }, 'face');
+        const bounding = all.filter(e => e.faceA === face.id || e.faceB === face.id);
+        const onLoop = (e: EdgeRecord, loops: readonly (readonly Vec3[])[]): boolean => loops.some(loop => onRing(midpoint(e.polyline), loop));
+        found = bounding.filter(e => which === 'outer' ? onLoop(e, face.loops.slice(0, 1)) : which === 'inner' ? onLoop(e, face.loops.slice(1)) : true)
+          .filter(e => !along || edgeMatches(e.polyline, along, null));
+        shown = JSON.stringify(sel);
+        if (found.length === 0) {
+          const why = which === 'inner' && face.loops.length < 2 ? `face ${face.id} has no openings, so it has no inside edges; use which: "outer" or "all"`
+            : along ? `none of the ${bounding.length} edges of face ${face.id} runs along [${along.join(', ')}]; they run ${directions(bounding)}` : `face ${face.id} has no such edges`;
+          throw this.failure('invalid_reference', `${shown} matched ${describeFace(face)} of solid ${body.id}, but ${why}.`);
+        }
+      } else {
+        found = all.filter(e => edgeMatches(e.polyline, sel.along, sel.through ?? null));
+        shown = JSON.stringify(sel);
+        if (found.length === 0) throw this.failure('invalid_reference', `No edge of solid ${body.id} matches ${shown}. Its sharp edges run ${directions(all.filter(isHardEdge))}; or pick edges by face, for example {face: {facing: [0, -1, 0]}}.`);
+      }
       const hard = found.filter(isHardEdge);
-      if (hard.length === 0) throw this.failure('invalid_reference', `No sharp edge of solid ${body.id} matches ${JSON.stringify(sel)}.`);
+      if (hard.length === 0) throw this.failure('invalid_reference', `The ${found.length} edge${found.length === 1 ? '' : 's'} ${shown} matched on solid ${body.id} ${found.length === 1 ? 'is' : 'are'} soft, smooth or hidden (already rounded?); only sharp edges can be rounded or beveled.`);
       for (const e of hard) keys.add(e.key);
     }
     return [...keys];
+  }
+
+  /** The one face of `body` an edge selector's `{facing, point?}` names, or an error listing what it matched and a selector that works. */
+  private edgeFace(body: Body, sel: EdgeFaceSelector, role: string): FaceRecord {
+    const facing = unit(sel.facing), point = sel.point;
+    const toward = [...body.faces.values()].filter(f => v3dot(f.plane.n, facing) >= FACING_TOLERANCE);
+    const faces = point ? toward.filter(f => faceContains(f, point, MERGE_TOL)) : toward;
+    if (faces.length === 1) return faces[0]!;
+    const asked = `{facing: [${sel.facing.join(', ')}]${point ? `, point: [${point.join(', ')}]` : ''}}`;
+    const byArea = (list: FaceRecord[]) => [...list].sort((a, b) => faceArea(b) - faceArea(a));
+    if (faces.length > 1) {
+      const listed = byArea(faces);
+      throw this.failure('invalid_reference', `${role === 'between' ? 'A face of between, ' : 'The face '}${asked}, matches ${faces.length} faces of solid ${body.id}: ${listed.slice(0, 8).map(describeFace).join('; ')}. Add a point on the one you mean, for example ${faceSelector(listed[0]!)}.`);
+    }
+    if (toward.length > 0) {
+      const listed = byArea(toward);
+      throw this.failure('invalid_reference', `No face of solid ${body.id} facing [${sel.facing.join(', ')}] contains [${point!.join(', ')}]. The faces facing that way are ${listed.slice(0, 8).map(describeFace).join('; ')}; for example ${faceSelector(listed[0]!)}.`);
+    }
+    const closest = byArea([...body.faces.values()]).sort((a, b) => v3dot(b.plane.n, facing) - v3dot(a.plane.n, facing));
+    throw this.failure('invalid_reference', `No face of solid ${body.id} faces [${sel.facing.join(', ')}] (within 1 degree). Its faces: ${closest.slice(0, 8).map(describeFace).join('; ')}${closest.length > 8 ? `; and ${closest.length - 8} more` : ''}.`
+      + (closest[0] ? ` The closest is ${faceSelector(closest[0])}.` : ''));
+  }
+
+  /**
+   * A fillet or chamfer that the plan or the kernel refused, as an actionable failure: a size too big reports the
+   * largest that fits, and any other refusal names the edges involved.
+   */
+  private async blendFailure(cause: unknown, kind: EdgeBlendKind, body: Body, params: { path: number[]; bodyId: number; edges: string[]; size: number; segments: number }): Promise<ModelApiFailure> {
+    if (cause instanceof ModelApiFailure) return cause;
+    const message = cause instanceof Error ? cause.message : String(cause);
+    const what = kind === 'fillet' ? 'radius' : 'distance';
+    const code = cause instanceof PushFormError ? cause.code : '';
+    if (code === 'edgeblend.tooLarge') {
+      const largest = await this.largestBlend(kind, params);
+      return this.failure('invalid_geometry', largest === null ? `${message} No ${what} fits these edges; ${edgeList(body, params.edges)}.`
+        : `${message} You asked for ${params.size} m; the largest ${what} that fits these edges is about ${largest} m. Use that or less, or pick fewer edges.`);
+    }
+    const hint = code === 'edgeblend.corner' ? ' Pick the edges of one face at a time, or edges that do not meet at that corner.' : '';
+    return this.failure(errorCode(cause), `${message} The edges: ${edgeList(body, params.edges)}.${hint}`);
+  }
+
+  /** The largest blend size, rounded down to three significant figures, that the plan and the kernel accept, or null. */
+  private async largestBlend(kind: EdgeBlendKind, params: { path: number[]; bodyId: number; edges: string[]; size: number; segments: number }): Promise<number | null> {
+    const state = this.host.doc.state, kernel = kernelOf(this.commands.ctx);
+    const planFits = (size: number): boolean => { try { planEdgeBlend(state, kind, { ...params, size }); return true; } catch { return false; } };
+    const kernelFits = async (size: number): Promise<boolean> => {
+      try { const plan = planEdgeBlend(state, kind, { ...params, size }); checkEdgeBlendResult(plan, await runEdgeBlendKernel(kernel, plan)); return true; } catch { return false; }
+    };
+    let lo = 0, hi = params.size;
+    // The plan's checks are cheap and exact, so they bound the search before the kernel is asked.
+    for (let i = 0; i < 30 && hi - lo > MERGE_TOL / 4; i++) { const mid = (lo + hi) / 2; if (planFits(mid)) lo = mid; else hi = mid; }
+    if (!(lo > MERGE_TOL)) return null;
+    const down = (x: number): number => { const scale = 10 ** (2 - Math.floor(Math.log10(x))); return Math.floor(x * scale) / scale; };
+    let best = down(lo);
+    if (best > MERGE_TOL && await kernelFits(best)) return best;
+    let kLo = 0, kHi = lo;
+    for (let i = 0; i < 8; i++) { const mid = (kLo + kHi) / 2; if (mid > MERGE_TOL && await kernelFits(mid)) kLo = mid; else kHi = mid; }
+    best = kLo > MERGE_TOL ? down(kLo) : 0;
+    return best > MERGE_TOL ? best : null;
   }
 
   /** Every solid an operation leaves must be a closed solid with volume (the kernel's results always are manifold). */
@@ -1074,6 +1269,69 @@ export class ModelDocumentApi {
     });
     return { refs: refs.map(refOut) };
   }
+}
+
+/** The middle of an edge's polyline: a point on the edge away from its ends. */
+function midpoint(polyline: readonly Vec3[]): Vec3 {
+  const i = Math.floor((polyline.length - 1) / 2), a = polyline[i]!, b = polyline[Math.min(i + 1, polyline.length - 1)]!;
+  return v3scale(v3add(a, b), 0.5);
+}
+/** Whether a point lies on a closed ring of positions. */
+function onRing(p: Vec3, ring: readonly Vec3[]): boolean {
+  return ring.some((q, i) => pointOnSegment(p, q, ring[(i + 1) % ring.length]!));
+}
+function faceArea(face: FaceRecord): number {
+  return face.loops.reduce((sum, loop, i) => sum + (i === 0 ? 1 : -1) * Math.abs(v3dot(newell(loop), face.plane.n)) / 2, 0);
+}
+/** A point inside a face, clear of its holes: the outline's inside point, or a point just inside one of its edges. */
+function pointOnFace(face: FaceRecord): Vec3 {
+  const outer = face.loops[0] ?? [];
+  const first = interiorPoint(outer, face.plane.n);
+  if (faceContains(face, first)) return first;
+  for (const nudge of [0.01, 0.002, 0.0005]) for (const [i, a] of outer.entries()) {
+    const b = outer[(i + 1) % outer.length]!, d = v3sub(b, a), length = v3len(d);
+    if (!(length > 2 * nudge)) continue;
+    const p = v3add(v3scale(v3add(a, b), 0.5), v3scale(unit(v3cross(face.plane.n, d)), nudge));
+    if (faceContains(face, p)) return p;
+  }
+  return first;
+}
+/** A face as errors list it: id, facing, size along its two longest directions and a point on it. */
+function describeFace(face: FaceRecord): string {
+  const outer = face.loops[0] ?? [];
+  const u = outer.map(p => v3dot(p, face.basis.u)), v = outer.map(p => v3dot(p, face.basis.v));
+  const size = [Math.max(...u) - Math.min(...u), Math.max(...v) - Math.min(...v)].sort((a, b) => b - a).map(x => +x.toPrecision(3));
+  return `face ${face.id} facing [${short(face.plane.n).join(', ')}], ${size[0]} × ${size[1]} m${face.loops.length > 1 ? ` with ${face.loops.length - 1} opening${face.loops.length > 2 ? 's' : ''}` : ''}, at [${vec(pointOnFace(face)).join(', ')}]`;
+}
+/** A selector that names exactly this face. */
+function faceSelector(face: FaceRecord): string {
+  return `{facing: [${short(face.plane.n).join(', ')}], point: [${vec(pointOnFace(face)).join(', ')}]}`;
+}
+const short = (v: Vec3): number[] => v.map(x => Math.round(x * 1000) / 1000 + 0);
+/** The directions edges run, as errors list them: each direction (either way) with how many edges run it. */
+function directions(edges: readonly EdgeRecord[]): string {
+  const runs: { d: Vec3; n: number }[] = [];
+  for (const e of edges) {
+    const a = e.polyline[0], b = e.polyline[e.polyline.length - 1];
+    if (!a || !b || !(dist(a, b) > MERGE_TOL)) continue;
+    const d = unit(v3sub(b, a)), run = runs.find(r => Math.abs(v3dot(r.d, d)) >= FACING_TOLERANCE);
+    if (run) run.n++; else runs.push({ d, n: 1 });
+  }
+  if (runs.length === 0) return 'in no straight direction';
+  return runs.sort((x, y) => y.n - x.n).slice(0, 6).map(r => `[${short(r.d.map(x => (r.d.find(c => Math.abs(c) > 1e-6)! < 0 ? -x : x)) as unknown as Vec3).join(', ')}] (${r.n})`).join(', ');
+}
+/** The picked edges as errors name them: their ends, for at most six of them. */
+function edgeList(body: Body, keys: readonly string[]): string {
+  const shown = keys.slice(0, 6).map(key => {
+    const e = body.edges.get(key as never);
+    return e ? `[${vec(e.polyline[0]!).join(', ')}] to [${vec(e.polyline[e.polyline.length - 1]!).join(', ')}]` : key;
+  });
+  return `${keys.length} edge${keys.length === 1 ? '' : 's'} of solid ${body.id}: ${shown.join('; ')}${keys.length > 6 ? `; and ${keys.length - 6} more` : ''}`;
+}
+
+/** A name's entry in a batch result. */
+function nameOut(n: Named): ModelNameEntry {
+  return { kind: n.kind, id: n.id, ...(n.definitionId !== undefined ? { definitionId: n.definitionId } : {}) };
 }
 
 /** Points and references an operation names, counted toward the batch's point limit. */

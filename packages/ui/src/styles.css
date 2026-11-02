@@ -2600,6 +2600,8 @@ button.pf-brand { border: 0; background: transparent; color: inherit; font: inhe
 /* Left menu bar and docked side panel: the rail mirrors .pf-rightstrip on the editor's left edge. */
 .pf-side-rail { width: var(--pf-toolbar-w); flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 0; background: var(--pf-surface); border-right: 1px solid var(--pf-border); }
 .pf-side-rail-button > svg { width: 24px; height: 24px; }
+.pf-side-rail-button.is-end { position: relative; margin-top: auto; }
+.pf-side-rail-button.is-end::before { content: ''; position: absolute; top: -5px; left: 6px; right: 6px; border-top: 1px solid var(--pf-border); }
 .pf-side-dock { position: relative; flex: none; display: flex; min-height: 0; background: var(--pf-surface); border-right: 1px solid var(--pf-border); }
 .pf-side-dock[hidden] { display: none; }
 .pf-side-dock-content { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
@@ -2913,6 +2915,10 @@ h4.pf-xui-text { font-size: 12px; }
 .pf-xmanager-confirm { border: 1px solid #b26a00; border-radius: var(--pf-radius); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
 .pf-xmanager-confirm p { margin: 0; }
 .pf-xmanager-details { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.pf-xmanager.is-panel { max-width: none; }
+.pf-xmanager.is-panel .pf-xmanager-row-head { flex-wrap: wrap; }
+.pf-xmanager.is-panel .pf-xmanager-network { display: block; overflow-x: auto; }
+.pf-xmanager-browse, .pf-xmanager-installed { display: flex; flex-direction: column; gap: 6px; }
 .pf-xmanager-logs pre { max-height: 160px; overflow: auto; font-size: 11px; margin: 4px 0 0; white-space: pre-wrap; }
 .pf-xmanager-network { border-collapse: collapse; width: 100%; font-size: 12px; }
 .pf-xmanager-network th, .pf-xmanager-network td { text-align: start; padding: 2px 8px 2px 0; overflow-wrap: anywhere; }

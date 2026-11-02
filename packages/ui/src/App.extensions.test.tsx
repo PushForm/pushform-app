@@ -38,20 +38,75 @@ afterEach(() => {
 const runtime = { workerSource: '', computeSource: '' };
 const search = (): HTMLElement => screen.getByRole('combobox', { name: 'Search tools and commands' });
 
-it('offers the extension manager when the host supplies a runtime and the account may use extensions', async () => {
+const rail = (): HTMLElement => screen.getByRole('navigation', { name: 'Left menu bar' });
+const PANEL_KEY = 'pushform:extensions:panel:user-1:modeling';
+
+it('offers the Extensions item and panel when the host supplies a runtime and the account may use extensions', async () => {
+  localStorage.clear();
   render(<App initialScreen="workspace" app={app} cloud={cloud} extensionRuntime={runtime} staff={{ isStaff: async () => true }} />);
   await act(async () => { await Promise.resolve(); });
   expect(app.commands.has('extensions.manage')).toBe(true);
+  // The Extensions item is last in the activity bar, set apart at its end.
+  const icon = await within(rail()).findByRole('button', { name: 'Extensions' });
+  expect(within(rail()).getAllByRole('button').at(-1)).toBe(icon);
+  expect(icon.className).toContain('is-end');
+  expect(icon.getAttribute('aria-pressed')).toBe('false');
+  // The command opens the Extensions side panel, with the manager's content.
   fireEvent.focus(search());
   fireEvent.change(search(), { target: { value: 'extensions' } });
   fireEvent.keyDown(search(), { key: 'Enter' });
-  expect(await screen.findByRole('dialog', { name: 'Extensions' })).toBeTruthy();
+  const panel = await screen.findByRole('region', { name: 'Extensions side panel' });
+  expect(screen.queryByRole('dialog', { name: 'Extensions' })).toBeNull();
+  expect(within(panel).getByRole('heading', { name: 'Extensions' })).toBeTruthy();
+  expect(within(panel).getByRole('heading', { name: 'Browse' })).toBeTruthy();
+  expect(panel.textContent).toContain('The extension directory is coming soon.');
+  expect(within(panel).getByText('No extensions are installed.')).toBeTruthy();
+  expect(within(panel).getByRole('checkbox', { name: 'Allow unsigned extensions on this device' })).toBeTruthy();
+  expect(icon.getAttribute('aria-pressed')).toBe('true');
+  // The command opens, never closes; the icon toggles.
+  fireEvent.focus(search());
+  fireEvent.change(search(), { target: { value: 'extensions' } });
+  fireEvent.keyDown(search(), { key: 'Enter' });
+  expect(screen.getByRole('region', { name: 'Extensions side panel' })).toBeTruthy();
+  fireEvent.click(icon);
+  expect(screen.queryByRole('region', { name: 'Extensions side panel' })).toBeNull();
+  expect(icon.getAttribute('aria-pressed')).toBe('false');
+  fireEvent.click(icon);
+  expect(screen.getByRole('region', { name: 'Extensions side panel' })).toBeTruthy();
+  // The panel's close button closes it too.
+  fireEvent.click(within(screen.getByRole('region', { name: 'Extensions side panel' })).getByRole('button', { name: 'Close Extensions' }));
+  expect(screen.queryByRole('region', { name: 'Extensions side panel' })).toBeNull();
+});
+
+it('remembers the open Extensions panel for the editor and restores it', async () => {
+  localStorage.clear();
+  const view = render(<App initialScreen="workspace" app={app} cloud={cloud} extensionRuntime={runtime} staff={{ isStaff: async () => true }} />);
+  fireEvent.click(await within(rail()).findByRole('button', { name: 'Extensions' }));
+  await screen.findByRole('region', { name: 'Extensions side panel' });
+  await waitFor(() => expect(localStorage.getItem(PANEL_KEY)).toBe('extensions'));
+  view.unmount();
+  render(<App initialScreen="workspace" app={app} cloud={cloud} extensionRuntime={runtime} staff={{ isStaff: async () => true }} />);
+  expect(await screen.findByRole('region', { name: 'Extensions side panel' })).toBeTruthy();
+  expect(within(rail()).getByRole('button', { name: 'Extensions' }).getAttribute('aria-pressed')).toBe('true');
+  fireEvent.click(within(rail()).getByRole('button', { name: 'Extensions' }));
+  await waitFor(() => expect(localStorage.getItem(PANEL_KEY)).toBeNull());
 });
 
 it('does not offer the extension manager without a runtime', async () => {
   render(<App initialScreen="workspace" app={app} cloud={cloud} staff={{ isStaff: async () => true }} />);
   await act(async () => { await Promise.resolve(); });
   expect(app.commands.has('extensions.manage')).toBe(false);
+  expect(within(rail()).queryByRole('button', { name: 'Extensions' })).toBeNull();
+});
+
+it('does not offer the Extensions item to an account that may not use extensions, even with a remembered panel', async () => {
+  localStorage.setItem(PANEL_KEY, 'extensions');
+  render(<App initialScreen="workspace" app={app} cloud={cloud} extensionRuntime={runtime} staff={{ isStaff: async () => false }} />);
+  await act(async () => { await Promise.resolve(); });
+  expect(app.commands.has('extensions.manage')).toBe(false);
+  expect(within(rail()).queryByRole('button', { name: 'Extensions' })).toBeNull();
+  expect(screen.queryByRole('region', { name: 'Extensions side panel' })).toBeNull();
+  localStorage.clear();
 });
 
 // The activity bar, side panel, toolbar button and tabs of an installed extension, with the platform's runtime
@@ -118,9 +173,10 @@ it('lists an installed extension in the activity bar and toolbar, opens its side
   localStorage.clear();
   render(<App initialScreen="workspace" app={app} cloud={cloud} extensionRuntime={runtime} staff={{ isStaff: async () => true }} />);
   const rail = screen.getByRole('navigation', { name: 'Left menu bar' });
-  // The activity bar: the built-in items, then one icon per extension, named after it.
+  // The activity bar: the built-in items, then one icon per extension, named after it, then the Extensions item.
   const icon = await within(rail).findByRole('button', { name: 'Parts' });
-  expect(within(rail).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Files', 'AI Chat', 'Object browser', 'Parts']);
+  await within(rail).findByRole('button', { name: 'Extensions' });
+  expect(within(rail).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Files', 'AI Chat', 'Object browser', 'Parts', 'Extensions']);
   expect(icon.getAttribute('aria-pressed')).toBe('false');
   // The toolbar button joins the end of its group, after a separator, named after the contribution and the extension.
   const modify = screen.getByRole('group', { name: 'Modify' });

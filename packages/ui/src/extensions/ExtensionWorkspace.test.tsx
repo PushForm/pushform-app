@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import { useState, type JSX } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { zipSync } from 'fflate';
@@ -11,11 +12,14 @@ import {
   type ExtensionDocuments, type ExtensionPlatformOptions, type ExtensionStore,
 } from '@pushform/extensions';
 import { searchCommands } from '../components/CommandSearch';
+import { SideRail } from '../components/SideRail';
+import type { DocumentTab } from '../session';
 import { ExtensionActivity, ExtensionRuns } from './ExtensionActivity';
 import { ExtensionSidebar } from './ExtensionSidebar';
 import { ExtensionTabView } from './ExtensionTabView';
 import { activityExtensions, extensionToolbarButtons, selectionActionGroups, syncExtensionCommands } from './extensionContributions';
 import { ExtensionTabs, extensionTabId } from './extensionTabs';
+import { useExtensionWorkspace, type ExtensionWorkspaceRailId, type ExtensionsPanelOptions } from './useExtensionWorkspace';
 
 const encode = (s: string) => new TextEncoder().encode(s);
 const SIDE = 'com.example.parts.side';
@@ -417,5 +421,80 @@ describe('extension dialogs', () => {
     expect(screen.queryByRole('dialog', { name: 'Edit material' })).toBeNull();
     expect(screen.getByRole('region', { name: 'Parts list, from Parts' })).toBeTruthy();
     await waitFor(() => expect(heard.at(-1)).toEqual({ target: PANEL, component: 'editor', event: 'dialogClose' }));
+  });
+});
+
+describe('the Extensions item in the activity bar', () => {
+  const PANEL_KEY = 'pushform:extensions:panel:u1:modeling';
+  const tab = { id: 'tab-1', type: 'model', app: { commands: registry(), document: { doc: { state: { meta: { units: DEFAULT_UNITS } } } } } } as unknown as DocumentTab;
+  /** The rail and dock of an editor, driven by the hook as the app drives it. */
+  function Harness({ platform, manager }: { platform: ExtensionPlatform; manager: ExtensionsPanelOptions | undefined }): JSX.Element {
+    const [sidePanel, setSidePanel] = useState<string | null>(null);
+    const workspace = useExtensionWorkspace({ platform, runs: null, tabs: null, ownerId: 'u1', active: tab, openTabs: ['tab-1'], sidePanel,
+      openPanel: setSidePanel, closePanel: () => setSidePanel(null), manager });
+    return <>
+      <SideRail items={workspace.railItems} active={workspace.shown ? sidePanel : null} onToggle={(id) => workspace.toggleRail(id as ExtensionWorkspaceRailId)} />
+      {workspace.panel}
+    </>;
+  }
+  const rail = () => screen.getByRole('navigation', { name: 'Left menu bar' });
+  const labels = () => within(rail()).getAllByRole('button').map((b) => b.getAttribute('aria-label'));
+  const offered = (offered: boolean | null): ExtensionsPanelOptions => ({ offered, available: true, developerModeOn: false });
+  afterEach(() => localStorage.clear());
+
+  it('is last, after the extensions, only once the account is known to be offered extensions', async () => {
+    const { platform } = await setup();
+    const view = render(<Harness platform={platform} manager={undefined} />);
+    expect(labels()).toEqual(['Parts']);
+    view.rerender(<Harness platform={platform} manager={offered(null)} />);
+    expect(labels()).toEqual(['Parts']);
+    view.rerender(<Harness platform={platform} manager={offered(false)} />);
+    expect(labels()).toEqual(['Parts']);
+    view.rerender(<Harness platform={platform} manager={offered(true)} />);
+    expect(labels()).toEqual(['Parts', 'Extensions']);
+    const icon = within(rail()).getByRole('button', { name: 'Extensions' });
+    expect(icon.className).toContain('is-end');
+    expect(icon.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('toggles the Extensions side panel, which offers developer mode, and remembers it like an extension panel', async () => {
+    const { platform } = await setup();
+    render(<Harness platform={platform} manager={offered(true)} />);
+    const icon = within(rail()).getByRole('button', { name: 'Extensions' });
+    fireEvent.click(icon);
+    const panel = screen.getByRole('region', { name: 'Extensions side panel' });
+    expect(icon.getAttribute('aria-pressed')).toBe('true');
+    expect(within(panel).getByText('The extension directory is coming soon.')).toBeTruthy();
+    expect(within(panel).getByRole('checkbox', { name: 'Parts turned on' })).toBeTruthy();
+    expect(within(panel).getByRole('checkbox', { name: 'Allow unsigned extensions on this device' })).toBeTruthy();
+    await waitFor(() => expect(localStorage.getItem(PANEL_KEY)).toBe('extensions'));
+    // An extension's icon replaces it; the Extensions icon replaces that again.
+    fireEvent.click(within(rail()).getByRole('button', { name: 'Parts' }));
+    expect(screen.queryByRole('region', { name: 'Extensions side panel' })).toBeNull();
+    expect(screen.getByRole('region', { name: 'Parts side panel' })).toBeTruthy();
+    await waitFor(() => expect(localStorage.getItem(PANEL_KEY)).toBe('com.example.parts'));
+    fireEvent.click(icon);
+    expect(screen.queryByRole('region', { name: 'Parts side panel' })).toBeNull();
+    expect(screen.getByRole('region', { name: 'Extensions side panel' })).toBeTruthy();
+    fireEvent.click(icon);
+    expect(screen.queryByRole('region', { name: 'Extensions side panel' })).toBeNull();
+    expect(icon.getAttribute('aria-pressed')).toBe('false');
+    await waitFor(() => expect(localStorage.getItem(PANEL_KEY)).toBeNull());
+  });
+
+  it('restores the remembered Extensions panel once the account is known to be offered extensions, and not otherwise', async () => {
+    const { platform } = await setup();
+    localStorage.setItem(PANEL_KEY, 'extensions');
+    const view = render(<Harness platform={platform} manager={offered(null)} />);
+    expect(screen.queryByRole('region', { name: 'Extensions side panel' })).toBeNull();
+    view.rerender(<Harness platform={platform} manager={offered(true)} />);
+    expect(await screen.findByRole('region', { name: 'Extensions side panel' })).toBeTruthy();
+    expect(within(rail()).getByRole('button', { name: 'Extensions' }).getAttribute('aria-pressed')).toBe('true');
+    view.unmount();
+    localStorage.setItem(PANEL_KEY, 'extensions');
+    render(<Harness platform={platform} manager={offered(false)} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.queryByRole('region', { name: 'Extensions side panel' })).toBeNull();
+    expect(within(rail()).queryByRole('button', { name: 'Extensions' })).toBeNull();
   });
 });

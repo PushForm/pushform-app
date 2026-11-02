@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { m4translation } from '@pushform/core';
 import type { Box3, DefId, Id, Ray, Vec3 } from '@pushform/core';
-import { freeInference, GROUND_PLANE } from '@pushform/inference';
+import { freeInference, GROUND_PLANE, InferenceEngineImpl } from '@pushform/inference';
 import type { PickHit } from '@pushform/inference';
 import { createEntityContainer } from '@pushform/model';
 import type { EntityRef } from '@pushform/model';
@@ -130,6 +130,36 @@ function at(p: Vec3, hit: PickHit | null = null): ToolPointerEvent {
 }
 
 describe('SelectTool edit contexts', () => {
+  it.each(['line', 'segment', 'point'] as const)('selects a %s guide through real picking and deletes it with undo/redo', kind => {
+    const { host, tools, select } = setup();
+    let id = 0 as Id;
+    host.doc.transact('guide', draft => {
+      id = draft.meta.nextId++ as Id;
+      const attrs = { id, origin: [0, 0, 0] as const, tagId: draft.defaultTagId, hidden: false, locked: false, castShadows: false, receiveShadows: false, attributes: {} };
+      const guide = kind === 'line' ? { ...attrs, kind, dir: [1, 0, 0] as const } : kind === 'segment' ? { ...attrs, kind, end: [1, 0, 0] as const } : { ...attrs, kind };
+      draft.definitions.get(draft.rootDefinitionId)!.entities.guides.set(id, guide as never);
+    });
+    const engine = new InferenceEngineImpl();
+    engine.setState(host.doc.state);
+    const event = at([0, 0, 0]);
+    const inference = engine.resolve({ ray: event.ray, screen: event.screen, pixelSizeAt: () => 0.01 }, { pickOnly: true });
+    const picked = { ...event, inference };
+    tools.pointerMove(picked);
+    expect(select.hoverRef).toEqual({ kind: 'guide', path: [], id });
+    expect(select.overlay().length).toBeGreaterThan(0);
+    tools.click(picked);
+    expect(host.selection.refs).toEqual([{ kind: 'guide', path: [], id }]);
+    for (const key of ['Delete', 'Backspace']) {
+      tools.keyDown({ key, code: key, modifiers: NO_MODIFIERS, repeat: false });
+      expect(host.doc.rootDefinition.entities.guides.has(id)).toBe(false);
+      host.undo();
+      expect(host.doc.rootDefinition.entities.guides.has(id)).toBe(true);
+      expect(host.selection.refs).toEqual([{ kind: 'guide', path: [], id }]);
+    }
+    host.redo();
+    expect(host.doc.rootDefinition.entities.guides.has(id)).toBe(false);
+  });
+
   it('clicks select hit.selectable (the instance seen from the context) and hover follows it', () => {
     const { host, tools } = setup();
     const { outer } = addNestedGroups(host);

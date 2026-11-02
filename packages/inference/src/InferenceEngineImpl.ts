@@ -274,7 +274,7 @@ export class InferenceEngineImpl implements InferenceEngine {
     const freePoint = this.freePoint(ray, freePlane);
     const context = opts.context ?? this.ctxPath;
     const cands = this.picker.candidates(input, this.pickOptions(opts));
-    const hit = this.picker.contextualize(choosePick(cands), context);
+    const hit = this.picker.contextualize(choosePick(cands, !!opts.pickOnly || !!opts.kinds?.includes('guide')), context);
     if (opts.pickOnly) {
       this.updateHover(null, hit, cands);
       return freeInference(hit?.point ?? freePoint, cands.surface?.plane ?? freePlane, hit);

@@ -706,6 +706,7 @@ export class SpatialIndex {
 
   /** Visible guides of every indexed container, transformed to world space. */
   guides(): readonly IndexedGuide[] {
+    if (this.state?.styles.get(this.state.activeStyleId)?.modeling.guidesVisible === false) return [];
     if (!this.ensure()) return [];
     return this.guideList;
   }

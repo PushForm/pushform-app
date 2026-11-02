@@ -11,3 +11,7 @@ A solid's individual boundary faces and edges cannot be deleted this way. Select
 Choose **Eraser** in the toolbar, or press **E** with focus on the modeling canvas. Click or drag across sketch edges and release to erase the touched edges in one undoable step. The Eraser also removes eligible dividing edges, guides, dimensions and text. Erasing a dividing line on a solid face merges the regions it separated.
 
 A solid's actual boundary edge cannot simply be erased. The Eraser offers Shift to hide or Ctrl to soften/smooth; use Push/Pull when you want to change a face's shape. Use Select and Delete to remove an entire solid, group or component instead of trying to erase its boundary edges.
+
+## Delete individual guides
+
+Use **Select** to click a guide line, segment or point, then press **Delete** or **Backspace**. Selection modifiers let you select multiple guides. Undo restores deleted guides. For a guide inside a group or component, open that group or component for editing first. Guides must be visible to click them.

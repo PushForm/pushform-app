@@ -715,7 +715,7 @@ export function insideParallelogram(p: Vec3, c: readonly [Vec3, Vec3, Vec3, Vec3
 // Precedence
 
 /** Vertex within tolerance > edge > surface. Body corners are reported through an incident edge. */
-export function choosePick(c: PickCandidates): PickHit | null {
+export function choosePick(c: PickCandidates, pickGuides = true): PickHit | null {
   // A click on a text's label picks the text, over whatever is drawn beneath it.
   const label = c.texts?.[0];
   if (label && label.screenDist === 0) return { ref: label.ref, point: label.point, t: label.t, screenDist: 0 };
@@ -731,6 +731,8 @@ export function choosePick(c: PickCandidates): PickHit | null {
   // So is a section plane's outline.
   const sp = c.sectionPlanes?.[0];
   if (sp) return { ref: sp.ref, point: sp.point, t: sp.t, screenDist: sp.screenDist };
+  const guide = pickGuides ? c.guides[0] : undefined;
+  if (guide) return { ref: guide.ref, point: guide.point, t: guide.t, screenDist: guide.screenDist };
   const s = c.surface;
   if (s) return { ref: s.ref, point: s.point, t: s.t, normal: s.normal, screenDist: 0 };
   return null;

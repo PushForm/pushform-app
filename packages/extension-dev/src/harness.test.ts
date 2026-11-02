@@ -130,3 +130,42 @@ describe('createTestHost with a document', () => {
     await host.close();
   });
 });
+
+/** A sidebar with a button that opens the extension's full panel tab, written against the SDK. */
+const opener = {
+  activate(context: ExtensionContext) {
+    context.commands.register('com.example.opener.side', async () => {
+      await context.ui.mount({ target: 'com.example.opener.side', seq: 1, tree: { type: 'button', id: 'open', label: 'Open the full list' } });
+    });
+    context.commands.register('com.example.opener.panel', async () => {
+      await context.ui.mount({ target: 'com.example.opener.panel', seq: 1, tree: { type: 'text', id: 't', text: 'The full list' } });
+    });
+    context.ui.onEvent(async (event) => {
+      if (event.component === 'open') await context.ui.open({ target: 'com.example.opener.panel' });
+    });
+  },
+};
+
+describe('createTestHost with sidebar and panel targets', () => {
+  const manifest = {
+    id: 'com.example.opener', name: 'Opener', publisher: 'Example', version: '1.0.0', apiVersion: '^0.1.0', editors: ['modeling' as const],
+    defaultLocale: 'en', license: 'MIT', permissions: [], icon: 'saw-blade',
+    contributions: [
+      { target: 'model.sidebar' as const, id: 'com.example.opener.side', name: 'Opener' },
+      { target: 'model.panel' as const, id: 'com.example.opener.panel', name: 'Full list' },
+      { target: 'model.toolbar' as const, id: 'com.example.opener.button', name: 'Open the list', category: 'inspect' as const, icon: 'saw-blade' },
+    ],
+  };
+
+  it('mounts a sidebar and records the panel tabs the extension asks to open', async () => {
+    const host = await createTestHost({ manifest, module: opener, document: {} });
+    await host.invoke('com.example.opener.side');
+    expect(host.tree('com.example.opener.side')).toMatchObject({ label: 'Open the full list' });
+    expect(host.press('com.example.opener.side', 'open')).toBe(true);
+    await vi.waitFor(() => expect(host.opened).toEqual([{ extensionId: 'com.example.opener', target: 'com.example.opener.panel', documentId: 'test-document' }]));
+    // Opening the tab runs the panel contribution, as PushForm would.
+    await host.invoke(host.opened[0]!.target);
+    expect(host.tree('com.example.opener.panel')).toMatchObject({ text: 'The full list' });
+    await host.close();
+  });
+});

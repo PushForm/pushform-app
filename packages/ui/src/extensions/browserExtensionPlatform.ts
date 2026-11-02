@@ -2,6 +2,7 @@
 // Copyright 2026 PushForm contributors
 import {
   ExtensionPlatform, localSettingsStore, startWebRuntime, storedDeveloperMode, type ExtensionDocuments, type ExtensionFailure, type InstalledExtension,
+  type UiOpenRequest,
 } from '@pushform/extensions';
 import type { UnitSettings } from '@pushform/core';
 import { browserClipboardWriter, browserFilePicker } from './browserExtensionIo';
@@ -30,6 +31,10 @@ export function createBrowserExtensionPlatform(options: {
   readonly documents?: ExtensionDocuments;
   /** The units of an open document, so printed tables show quantities as its panels do. */
   readonly units?: (documentId: string) => UnitSettings | null;
+  /** Opens an extension's panel tab for `ui.open`. */
+  readonly openUi?: (request: UiOpenRequest) => void;
+  /** Told when an extension set or framed a document's selection, so its tab can give way to the document. */
+  readonly onSelectionShown?: (extensionId: string, documentId: string) => void;
 }): ExtensionPlatform {
   const storage = options.storage ?? window.localStorage;
   return new ExtensionPlatform({
@@ -49,6 +54,8 @@ export function createBrowserExtensionPlatform(options: {
     fetchTransport: null,
     ...(options.printPrompts ? { printer: browserViewPrinter(options.printPrompts, undefined, options.units) } : {}),
     ...(options.documents ? { documents: options.documents } : {}),
+    ...(options.openUi ? { openUi: options.openUi } : {}),
+    ...(options.onSelectionShown ? { onSelectionShown: options.onSelectionShown } : {}),
     ...(options.onFailure ? { onFailure: options.onFailure } : {}),
   });
 }

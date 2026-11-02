@@ -16,7 +16,7 @@ Renaming does not enter the group. Use **Edit Group** or **Edit Component** in i
 
 Use the Object browser's eye to hide or show a solid, group or component. Groups and components also have a lock button. Hiding a selected solid removes it from selection and from normal picking.
 
-Hidden items appear dimmed in the browser. A hidden tag or hidden tag folder also hides its contents. Check those ancestors if showing an individual item does not make it appear.
+Hidden items appear dimmed in the browser with a crossed-out eye. Hiding a tag or tag folder in **Tags** also marks all affected objects and their descendants hidden in **Objects**. Their eye controls are disabled while a tag or ancestor hides them; show that tag or ancestor first. Objects you hid individually remain hidden when the tag is shown again.
 
 ## Use Lasso in Modeling
 

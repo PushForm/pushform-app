@@ -3,7 +3,7 @@
 import { browserSelectionRange } from './browserSelectionRange';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type { CSSProperties, JSX, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
-import { entityRefKey } from '@pushform/model';
+import { entityRefKey, tagVisible } from '@pushform/model';
 import { PiCaretRight, PiCube, PiPencilSimple } from 'react-icons/pi';
 import { useGuidanceBrowser } from '../hooks/useGuidanceBrowser';
 import { useApp } from '../AppContext';
@@ -186,15 +186,18 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
     if (handled) event.preventDefault();
   };
 
-  const renderNode = (node: ModelBrowserNode, setSize: number, position: number): JSX.Element => {
+  const renderNode = (node: ModelBrowserNode, setSize: number, position: number, ancestorHidden = false): JSX.Element => {
     const tag = node.tagId === state.defaultTagId ? undefined : state.tags.get(node.tagId);
     const luminance = tag?.color.map(channel => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
     const lightText = luminance ? luminance[0]! * 0.2126 + luminance[1]! * 0.7152 + luminance[2]! * 0.0722 < 0.179 : false;
     const open = expandable(node) && isExpanded(node);
     const labelId = `${idPrefix}-${node.key}`, hiddenId = `${labelId}-hidden`;
     const renaming = editing?.key === node.key;
-    const dimmed = node.hidden || node.inHidden;
-    const description = node.hidden ? 'Hidden' : node.inHidden ? 'Inside a hidden group or component' : null;
+    const tagHidden = !tagVisible(state, node.tagId);
+    const inheritedHidden = ancestorHidden || node.inHidden;
+    const dimmed = node.hidden || tagHidden || inheritedHidden;
+    const blockedVisibility = tagHidden || inheritedHidden;
+    const description = tagHidden ? 'Hidden by tag or tag folder' : inheritedHidden ? 'Inside a hidden group or component' : node.hidden ? 'Hidden' : null;
     const selected = selectedKeys.has(node.key);
     const current = context.path.length > 0 && node.fullPath?.length === context.path.length && node.fullPath.every((id, index) => id === context.path[index]);
     const className = ['pf-layout-browser-item', dimmed ? 'is-hidden' : '', current ? 'is-current' : ''].filter(Boolean).join(' ');
@@ -224,11 +227,11 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
           style={{ backgroundColor: rgbToCss(tag.color), color: lightText ? '#fff' : '#000' }}>{tag.name}</span> : null}
         {current ? <span className="pf-layout-browser-flag" role="img" aria-label="Open for editing" title="Open for editing"><PiPencilSimple /></span> : null}
         {description ? <span id={hiddenId} className="pf-layout-browser-sr">{description}</span> : null}
-        <button type="button" tabIndex={-1} aria-label={`Show ${node.label}`} aria-pressed={!node.hidden}
-          className={`pf-layout-browser-toggle${node.hidden ? ' is-on' : ''}`} title={`${node.hidden ? 'Show' : 'Hide'} ${what}`}
+        <button type="button" tabIndex={-1} aria-label={`Show ${node.label}`} aria-pressed={!dimmed} disabled={blockedVisibility}
+          className={`pf-layout-browser-toggle${dimmed ? ' is-on' : ''}`} title={blockedVisibility ? `${description}. Show its tag or ancestor first.` : `${node.hidden ? 'Show' : 'Hide'} ${what}`}
           onDoubleClick={stop} onClick={event => { event.stopPropagation(); setHidden(node, !node.hidden); }}>
           {/* The Layout object browser's eye and lock icons. */}
-          <Icon name={node.hidden ? 'eye-off' : 'eye'} size={TOGGLE_ICON_PX} /></button>
+          <Icon name={dimmed ? 'eye-off' : 'eye'} size={TOGGLE_ICON_PX} /></button>
         {node.locked !== undefined ? <button type="button" tabIndex={-1} aria-label={`Lock ${node.label}`} aria-pressed={node.locked}
           className={`pf-layout-browser-toggle${node.locked ? ' is-on' : ''}`} title={`${node.locked ? 'Unlock' : 'Lock'} ${what}`}
           onDoubleClick={stop} onClick={event => { event.stopPropagation(); run('instance.setLocked', { refs: [node.ref], locked: !node.locked }); }}>
@@ -236,7 +239,7 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
           // Solids keep the lock's place so names and eyes line up.
           : <span className="pf-model-browser-toggle-gap" aria-hidden="true" />}
       </div>
-      {open ? <ul role="group">{node.children.map((child, i) => renderNode(child, node.children.length, i + 1))}</ul> : null}
+      {open ? <ul role="group">{node.children.map((child, i) => renderNode(child, node.children.length, i + 1, dimmed))}</ul> : null}
     </li>;
   };
 

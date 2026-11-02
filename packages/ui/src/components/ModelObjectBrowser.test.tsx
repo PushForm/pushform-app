@@ -96,6 +96,57 @@ describe('ModelObjectBrowser', () => {
     expect(within(row('Frame')).queryByLabelText(/^Tag:/)).toBeNull();
   });
 
+  it('reflects tag and folder visibility on objects and descendants without changing their own hidden flags', () => {
+    const a = boot();
+    for (const command of tagCommands) if (!a.commands.has(command.id)) a.commands.register(command);
+    const group = addInstance(a, { name: 'Frame' });
+    addInstance(a, { name: 'Joint', parent: [group] });
+    const solid = addSolid(a);
+    const part = addMeshPart(a, { name: 'Bracket' });
+    const hidden = addInstance(a, { name: 'Hidden piece', hidden: true });
+    a.commands.execute('tag.create', { name: 'Timber' });
+    const tagId = [...a.document.doc.state.tags.values()].find(tag => tag.name === 'Timber')!.id;
+    a.commands.execute('tag.assign', { tagId, refs: [
+      { kind: 'instance', path: [], id: group }, { kind: 'body', path: [], id: solid },
+      { kind: 'meshPart', path: [], id: part }, { kind: 'instance', path: [], id: hidden },
+    ] });
+    mount(a);
+    fireEvent.click(row('Frame').querySelector('.pf-layout-browser-chevron')!);
+    fireEvent.click(screen.getByRole('tab', { name: 'Tags' }));
+    fireEvent.click(screen.getByLabelText('Hide Timber'));
+    fireEvent.click(screen.getByRole('tab', { name: 'Objects' }));
+    const eye = (name: string) => within(row(name)).getByRole('button', { name: `Show ${name}` }) as HTMLButtonElement;
+    for (const name of ['Frame', 'Joint', 'Solid 1', 'Bracket', 'Hidden piece']) {
+      expect(item(name).classList.contains('is-hidden')).toBe(true);
+      expect(eye(name).getAttribute('aria-pressed')).toBe('false');
+      expect(eye(name).classList.contains('is-on')).toBe(true);
+      expect(eye(name).disabled).toBe(true);
+    }
+    expect(eye('Frame').title).toContain('Hidden by tag or tag folder');
+    expect(eye('Joint').title).toContain('Inside a hidden group or component');
+    expect(containerAt(a.document.doc.state, [])!.instances.get(group)!.hidden).toBe(false);
+    act(() => { a.document.undo(); });
+    for (const name of ['Frame', 'Joint', 'Solid 1', 'Bracket']) {
+      expect(item(name).classList.contains('is-hidden')).toBe(false);
+      expect(eye(name).getAttribute('aria-pressed')).toBe('true');
+      expect(eye(name).disabled).toBe(false);
+    }
+    expect(item('Hidden piece').classList.contains('is-hidden')).toBe(true);
+    act(() => { a.document.redo(); });
+    expect(item('Frame').classList.contains('is-hidden')).toBe(true);
+    act(() => {
+      a.commands.execute('tag.setVisible', { ids: [tagId], visible: true });
+      a.commands.execute('tag.folder.create', { name: 'Materials', tagIds: [tagId] });
+      const folderId = [...a.document.doc.state.tagFolders.keys()][0]!;
+      a.commands.execute('tag.folder.setVisible', { id: folderId, visible: false });
+    });
+    expect(item('Frame').classList.contains('is-hidden')).toBe(true);
+    expect(item('Joint').classList.contains('is-hidden')).toBe(true);
+    act(() => { a.document.undo(); });
+    expect(item('Frame').classList.contains('is-hidden')).toBe(false);
+    expect(item('Hidden piece').classList.contains('is-hidden')).toBe(true);
+  });
+
   it('updates selection without rebuilding the model hierarchy', () => {
     const a = boot();
     const first = addInstance(a, { name: 'First' });

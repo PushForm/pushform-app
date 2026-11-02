@@ -79,9 +79,11 @@ export interface SuspendedTurn {
   rounds: number;
   document: { type: 'layout' | 'model'; apiVersion: number; readonly guidance?: 1 | undefined };
 }
+/** A picture the requester posted with a message: an image attachment of the conversation. */
+export interface MessagePicture { id: string; name: string; mime: string }
 /** A visible chat message; `tool` messages record the model's tool use and are hidden from the UI. */
 export type ConversationMessage =
-  | { role: 'user'; text: string; at: string }
+  | { role: 'user'; text: string; at: string; attachments?: MessagePicture[] }
   | { role: 'assistant'; text: string; at: string; turn?: SuspendedTurn }
   | { role: 'tool'; name: string; toolUseId: string; input: unknown; output: string; at: string };
 export interface Conversation {

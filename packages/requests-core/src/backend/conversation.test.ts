@@ -527,6 +527,85 @@ describe('POST /conversations/:id/file', () => {
   });
 });
 
+describe('pictures posted with messages', () => {
+  const help = conversationRow({ kind: 'help', path: 'help' });
+  const picture = { id: ATTACHMENT_ID, name: 'shot.png', mime: 'image/png' };
+  const pictured = (over: Parameters<typeof harness>[0] = {}, rows = [attachmentRow()]) => {
+    const storage = new FakeStorage();
+    storage.objects.set(attachmentRow().storage_path, 2048);
+    const h = harness({ turns: [{ text: ['I see a cabinet.'] }], ...over, service: { fr_conversation_get: help, ...over.service }, deps: { storage, ...over.deps } });
+    h.service.tables['fr_attachments'] = rows.map(r => ({ ...r }));
+    return { ...h, storage };
+  };
+  const anthropicOf = (h: Harness) => h.deps.anthropic as ReturnType<typeof fakeAnthropic>;
+  const send = (h: Harness, body: Record<string, unknown>) => call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, body);
+  const lastContent = (h: Harness) => (anthropicOf(h).calls[0]!.messages.at(-1)!.content as { type: string; text?: string; source?: { media_type: string; data: string } }[]);
+
+  it('sends the pictures to the agent before the framed text and stores them on the message', async () => {
+    const h = pictured();
+    await (await send(h, { text: 'Build this', attachments: [ATTACHMENT_ID], document: { type: 'model', apiVersion: 1, edit: 1 } })).text();
+    const content = lastContent(h);
+    expect(content.map(b => b.type)).toEqual(['image', 'text']);
+    expect(content[0]!.source).toEqual({ type: 'base64', media_type: 'image/png', data: btoa(String.fromCharCode(...new Uint8Array(2048))) });
+    expect(content[1]!.text).toContain('Build this');
+    expect((anthropicOf(h).calls[0]!.system as { text: string }[])[0]!.text).toContain('Pictures from the requester');
+    const stored = h.service.named('fr_conversation_append')[0]!.params['p_messages'] as ConversationMessage[];
+    expect(stored[0]).toMatchObject({ role: 'user', text: 'Build this', attachments: [picture] });
+  });
+
+  it('accepts a message of pictures alone and refuses one with neither text nor pictures', async () => {
+    const h = pictured();
+    expect((await send(h, { text: '', attachments: [ATTACHMENT_ID] })).status).toBe(200);
+    await status(await send(pictured(), { text: '  ' }), 400, 'invalid');
+  });
+
+  it('shows earlier pictures again in later turns, and a note for a picture removed since', async () => {
+    const earlier: ConversationMessage[] = [{ role: 'user', text: 'Like this one', at: 't', attachments: [picture] }, { role: 'assistant', text: 'Done.', at: 't' }];
+    const kept = pictured({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help', messages: earlier, message_count: 1 }) } });
+    await (await send(kept, { text: 'Make it taller' })).text();
+    const first = anthropicOf(kept).calls[0]!.messages[0]!.content as { type: string }[];
+    expect(first.map(b => b.type)).toEqual(['image', 'text']);
+    const removed = pictured({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help', messages: earlier, message_count: 1 }) } }, []);
+    await (await send(removed, { text: 'Make it taller' })).text();
+    const note = anthropicOf(removed).calls[0]!.messages[0]!.content as { type: string; text?: string }[];
+    expect(note[0]).toEqual({ type: 'text', text: '(The requester removed the picture "shot.png".)' });
+  });
+
+  it('refuses pictures of another conversation or requester, unfinished uploads and oversized images, before the agent runs', async () => {
+    for (const row of [
+      attachmentRow({ conversation_id: '99999999-9999-4999-8999-999999999999' }),
+      attachmentRow({ uploaded_by: '99999999-9999-4999-8999-999999999999' }),
+      attachmentRow({ uploaded_at: null }),
+      attachmentRow({ size: 5 * 1024 * 1024 + 1 }),
+    ]) {
+      const h = pictured({}, [row]);
+      await status(await send(h, { text: 'Build this', attachments: [ATTACHMENT_ID] }), 400, 'invalid');
+      expect(anthropicOf(h).calls).toEqual([]);
+      expect(h.service.named('fr_conversation_append')).toEqual([]);
+    }
+    const unknown = pictured({}, []);
+    await status(await send(unknown, { text: 'Build this', attachments: [ATTACHMENT_ID] }), 400, 'invalid');
+  });
+
+  it('fails the turn for retry when a picture cannot be read, instead of continuing without it', async () => {
+    const h = pictured();
+    h.storage.objects.clear();
+    await status(await send(h, { text: 'Build this', attachments: [ATTACHMENT_ID] }), 503, 'unavailable');
+    expect(anthropicOf(h).calls).toEqual([]);
+  });
+
+  it('keeps the opening pictures when a suspended document turn resumes', async () => {
+    const call1 = { id: 'm1', name: 'model_get_document', input: {} };
+    const first = pictured({ turns: [{ toolUses: [call1] }] });
+    await (await send(first, { text: 'Build this', attachments: [ATTACHMENT_ID], document: { type: 'model', apiVersion: 1, edit: 1 } })).text();
+    const stored = first.service.named('fr_conversation_append')[0]!.params['p_messages'] as ConversationMessage[];
+    const resumed = pictured({ turns: [{ text: ['Built.'] }], service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help', messages: stored, message_count: 1 }) } });
+    await (await call(resumed.handler, 'POST', `/conversations/${CONVERSATION_ID}/tool-results`, { results: [{ toolUseId: 'm1', content: '{"revision":0}', isError: false }] })).text();
+    const opening = anthropicOf(resumed).calls[0]!.messages[0]!.content as { type: string }[];
+    expect(opening.map(b => b.type)).toEqual(['image', 'text']);
+  });
+});
+
 describe('problem-report attachments', () => {
   const problem = conversationRow({ path: 'problem', kind: 'problem' });
   const shot = { kind: 'screenshot', name: 'shot.png', mime: 'image/png', size: 2048 };
@@ -545,9 +624,13 @@ describe('problem-report attachments', () => {
     expect(h.service.named('fr_rate_check')).toHaveLength(1);
     await status(await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/attachments`, { kind: 'document', name: 'plan.pfm', mime: 'application/octet-stream', size: 9000 }), 400, 'invalid');
   });
-  it('refuses other paths, closed conversations, wrong types and sizes, the per-report limit, and a missing bucket', async () => {
+  it('accepts every path, and refuses closed conversations, wrong types and sizes, the per-conversation limit, and a missing bucket', async () => {
     const feature = withStorage({ service: { fr_conversation_get: conversationRow() } });
     await status(await call(feature.handler, 'POST', `/conversations/${CONVERSATION_ID}/attachments`, shot), 200);
+    for (const [kind, path] of [['help', 'help'], ['intake', 'open']] as const) {
+      const chat = withStorage({ service: { fr_conversation_get: conversationRow({ kind, path }) } });
+      await status(await call(chat.handler, 'POST', `/conversations/${CONVERSATION_ID}/attachments`, shot), 200);
+    }
     const closed = withStorage({ service: { fr_conversation_get: conversationRow({ path: 'problem', status: 'filed', closed_at: 't' }) } });
     await status(await call(closed.handler, 'POST', `/conversations/${CONVERSATION_ID}/attachments`, shot), 400, 'invalid');
     const h = withStorage();

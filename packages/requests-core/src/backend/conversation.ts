@@ -8,6 +8,7 @@ import { briefSchema, completeness, emptyBriefFor, type Brief, type DeclineReaso
 import { answerPending, runTurn, type AnthropicLike, type ClientToolCall, type PendingClientTools, type ToolCallEvent, type ToolHandler, type ToolResult } from '../agents/client.ts';
 import { retrieveUserHelp, USER_HELP_RULES } from '../agents/digest.ts';
 import { GUIDANCE_RULES } from '../guidance.ts';
+import { PICTURE_RULES } from '../agents/pictures.ts';
 import { DOCUMENT_RULES, MODEL_DOCUMENT_RULES, documentTools, editableDocument, type DocumentCapability } from '../agents/document.ts';
 import type { DigestSection } from '../agents/digest.ts';
 import { helpAgent } from '../agents/help.ts';
@@ -19,7 +20,7 @@ import { checkTrackerProjects, checkTrackerStates } from '../config/load.ts';
 import type { Config } from '../config/schema.ts';
 import { issueBody, issueLabels, issueTitle, transcriptUrl } from '../domain/issue.ts';
 import { isClosedRequesterState } from '../domain/states.ts';
-import type { Conversation, ConversationKind, ConversationMessage, ConversationPath, Eligibility, Kind, PanelScreen, Request as PipelineRequest, RequestDetail, SuspendedTurn } from '../domain/types.ts';
+import type { Conversation, ConversationKind, ConversationMessage, ConversationPath, MessagePicture, Eligibility, Kind, PanelScreen, Request as PipelineRequest, RequestDetail, SuspendedTurn } from '../domain/types.ts';
 import { CORS_HEADERS, enforceRate, errorResponse, HttpError, httpErrorOf, json, lookupRoles, validateSession, type SessionUser, type SessionValidator } from './auth.ts';
 import { conversationFromRow, requestDetailFromRow, requestFromRow, type AttachmentKind, type MeView, type ServiceDb, type SqlAttachmentRow, type UserDb } from './db.ts';
 
@@ -71,6 +72,11 @@ export const DOCUMENT_TYPE = 'application/octet-stream';
 const ATTACHMENT_URL_SECONDS = 300;
 export const FUNCTION_NAME = 'fr-conversation';
 export const MESSAGE_MAX_CHARS = 4000;
+/** Pictures one message may carry, and the largest picture sent to the model (the model API's own per-image limit). */
+export const PICTURES_PER_MESSAGE = 5;
+export const PICTURE_MAX_BYTES = 5 * 1024 * 1024;
+/** A picture's bytes as the model receives them. */
+export interface PictureData { mime: string; data: string }
 /** Bound on one document tool result the browser returns. */
 export const TOOL_RESULT_MAX_CHARS = 200_000;
 /** Model rounds a document turn may use across all its requests. */
@@ -93,7 +99,10 @@ const startSchema = z.object({ kind: z.enum(['help', 'intake']), path: z.enum(['
 /** `intent` is the card the requester clicked; it settles an open conversation's path before the agent runs and is ignored once a path is set. */
 /** `document` is what the sending tab can edit this turn; absent or null offers no document tools. */
 const documentSchema = z.object({ type: z.enum(['layout', 'model']), apiVersion: z.int().min(1), guidance: z.literal(1).optional(), edit: z.literal(1).optional() });
-const messageSchema = z.object({ text: z.string().min(1).max(MESSAGE_MAX_CHARS), intent: z.enum(['help', 'problem', 'feature']).optional(), document: documentSchema.nullable().optional() });
+/** `attachments` are the ids of uploaded pictures of this conversation sent with the message; a message may be pictures alone. */
+const messageSchema = z.object({ text: z.string().max(MESSAGE_MAX_CHARS), intent: z.enum(['help', 'problem', 'feature']).optional(), document: documentSchema.nullable().optional(),
+  attachments: z.array(z.uuid()).max(PICTURES_PER_MESSAGE).optional() })
+  .refine(b => b.text.trim().length > 0 || (b.attachments?.length ?? 0) > 0, { message: 'A message needs text or a picture.', path: ['text'] });
 /** The editor's answers to a suspended turn; a call left out is answered as not run. */
 const toolResultsSchema = z.object({ results: z.array(z.object({ toolUseId: z.string().min(1).max(200), content: z.string().max(TOOL_RESULT_MAX_CHARS), isError: z.boolean().default(false) })).max(20) });
 const briefBodySchema = z.object({ brief: briefSchema.nullable(), title: z.string().trim().max(300).nullable().optional() });
@@ -179,7 +188,23 @@ export function issueSummaryOf(issue: TrackerIssue, config: Config): OpenIssueSu
  * `tool_use` blocks and one user message of `tool_result` blocks; the latest requester message carries the
  * volatile context block (account, screen, brief, limits) so the cached system prompt stays stable.
  */
-export function historyOf(messages: readonly ConversationMessage[], contextBlock: string, latestText: string): Anthropic.MessageParam[] {
+/** Base64 of bytes, in chunks small enough for String.fromCharCode. */
+function base64Of(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+/** A message's pictures as model content: each image, or a note where the requester removed it. */
+function pictureBlocks(pictures: readonly MessagePicture[] | undefined, images: ReadonlyMap<string, PictureData>): Anthropic.ContentBlockParam[] {
+  return (pictures ?? []).map(p => {
+    const image = images.get(p.id);
+    return image
+      ? { type: 'image' as const, source: { type: 'base64' as const, media_type: image.mime as 'image/png' | 'image/jpeg' | 'image/webp', data: image.data } }
+      : { type: 'text' as const, text: `(The requester removed the picture "${p.name.replace(/["<>]/g, '')}".)` };
+  });
+}
+export function historyOf(messages: readonly ConversationMessage[], contextBlock: string, latestText: string,
+  latestPictures: readonly MessagePicture[] = [], images: ReadonlyMap<string, PictureData> = new Map()): Anthropic.MessageParam[] {
   const out: Anthropic.MessageParam[] = [];
   let tools: Extract<ConversationMessage, { role: 'tool' }>[] = [];
   const flushTools = () => {
@@ -191,7 +216,7 @@ export function historyOf(messages: readonly ConversationMessage[], contextBlock
   for (const m of messages) {
     if (m.role === 'tool') { tools.push(m); continue; }
     flushTools();
-    if (m.role === 'user') out.push({ role: 'user', content: frameRequesterText(m.text) });
+    if (m.role === 'user') out.push({ role: 'user', content: m.attachments?.length ? [...pictureBlocks(m.attachments, images), { type: 'text', text: frameRequesterText(m.text) }] : frameRequesterText(m.text) });
     else if (m.text.trim()) out.push({ role: 'assistant', content: m.text });
   }
   flushTools();
@@ -204,7 +229,8 @@ export function historyOf(messages: readonly ConversationMessage[], contextBlock
     merged.push({ role: m.role, content: blocks(m.content) });
   }
   if (merged.length && merged[merged.length - 1]!.role === 'user') merged.push({ role: 'assistant', content: [{ type: 'text', text: '(continued)' }] });
-  return [...merged, { role: 'user', content: `${contextBlock}\n\n${frameRequesterText(latestText)}` }];
+  const latest = `${contextBlock}\n\n${frameRequesterText(latestText)}`;
+  return [...merged, { role: 'user', content: latestPictures.length ? [...pictureBlocks(latestPictures, images), { type: 'text', text: latest }] : latest }];
 }
 function blocks(content: Anthropic.MessageParam['content']): Anthropic.ContentBlockParam[] {
   return typeof content === 'string' ? [{ type: 'text', text: content }] : [...(content as Anthropic.ContentBlockParam[])];
@@ -453,12 +479,48 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     if (!deps.storage) throw new HttpError('unavailable', 'Attachments are not available right now.');
     return deps.storage;
   };
+
+  /* ---------- pictures posted with messages ---------- */
+
+  /** The pictures a new message names: uploaded images of this conversation by this requester, within the model's size limit. */
+  const messagePictures = async (conversation: Conversation, userId: string, ids: readonly string[]): Promise<MessagePicture[]> => {
+    const unique = [...new Set(ids)];
+    if (!db.rpc.selectIn) throw new HttpError('unavailable', 'Pictures are not available right now.');
+    const rows = await db.rpc.selectIn('fr_attachments', 'id,conversation_id,uploaded_by,kind,name,mime,size,uploaded_at', 'id', unique);
+    return unique.map(id => {
+      const row = rows.find(r => r['id'] === id);
+      if (!row || row['conversation_id'] !== conversation.id || row['uploaded_by'] !== userId) throw new HttpError('invalid', 'A picture does not belong to this conversation.');
+      if (!row['uploaded_at']) throw new HttpError('invalid', `The picture "${String(row['name'])}" has not finished uploading.`);
+      if (!(SCREENSHOT_TYPES as readonly string[]).includes(String(row['mime']))) throw new HttpError('invalid', 'Pictures must be PNG, JPEG or WebP images.');
+      if (Number(row['size']) > PICTURE_MAX_BYTES) throw new HttpError('invalid', `The picture "${String(row['name'])}" is larger than 5 MB.`);
+      return { id, name: String(row['name']), mime: String(row['mime']) };
+    });
+  };
+  /** The bytes of every picture still attached to the conversation among `messages`; removed pictures are left out. */
+  const pictureData = async (messages: readonly ConversationMessage[]): Promise<Map<string, PictureData>> => {
+    const ids = [...new Set(messages.flatMap(m => (m.role === 'user' ? (m.attachments ?? []).map(p => p.id) : [])))];
+    const images = new Map<string, PictureData>();
+    if (!ids.length) return images;
+    if (!db.rpc.selectIn) throw new HttpError('unavailable', 'Pictures are not available right now.');
+    const storage = deps.storage;
+    if (!storage?.read) throw new HttpError('unavailable', 'Pictures are not available right now.');
+    const rows = await db.rpc.selectIn('fr_attachments', 'id,storage_path,mime,uploaded_at', 'id', ids);
+    await Promise.all(rows.filter(r => r['uploaded_at']).map(async row => {
+      try {
+        const blob = await storage.read!(String(row['storage_path']));
+        images.set(String(row['id']), { mime: String(row['mime']), data: base64Of(new Uint8Array(await blob.arrayBuffer())) });
+      } catch (error) {
+        deps.log?.(`picture ${String(row['id'])} not read: ${error instanceof Error ? error.message : String(error)}`);
+        throw new HttpError('unavailable', 'A picture could not be read. Please retry.');
+      }
+    }));
+    return images;
+  };
   /** Reserve an attachment and hand back a URL to upload it to; the requester confirmed its name and size first. */
   const addAttachment = async (req: Request, id: string): Promise<Response> => {
     const user = await session(req);
     const conversation = await loadConversation(id, user);
     if (conversation.status !== 'open') throw new HttpError('invalid', 'The conversation is closed.');
-    if (!['feature', 'problem'].includes(conversation.path)) throw new HttpError('invalid', 'Images belong to a feature request or problem report.');
     const body = await parseBody(req, attachmentBodySchema);
     const storage = storageOrThrow();
     await enforceRate(db, user.id, config.limits.messagesPerMinute);
@@ -467,7 +529,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     let row: SqlAttachmentRow;
     try { row = await db.attachmentAdd(conversation.id, user.id, { kind: body.kind, name: body.name, mime: body.mime, size: body.size, path }); } catch (error) {
       const e = httpErrorOf(error);
-      throw e.code === 'limit' ? new HttpError('limit', 'A report takes at most 5 attachments.') : e;
+      throw e.code === 'limit' ? new HttpError('limit', 'A conversation takes at most 5 images.') : e;
     }
     return json({ attachment: attachmentView(row), uploadUrl: await storage.uploadUrl(path) });
   };
@@ -731,13 +793,15 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     const help = path === 'help' || path === 'open'
       ? `\n\n<retrieved_help>\n${retrieveUserHelp(deps.digest, body.text.slice(0, 300), ctx.screen.editor)}\n</retrieved_help>` : '';
     const context = agent.context(ctx) + help;
+    const pictures = body.attachments?.length ? await messagePictures(conversation, user.id, body.attachments) : [];
+    const images = await pictureData([...prior, { role: 'user', text: body.text, at: base.now, attachments: pictures }]);
     return streamTurn({
       user, conversation, store, handlers: agent.handlers(ctx, store), pathChanged: path !== conversation.path,
-      leading: [...closers, { role: 'user', text: body.text, at: base.now }],
+      leading: [...closers, { role: 'user', text: body.text, at: base.now, ...(pictures.length ? { attachments: pictures } : {}) }],
       setup: {
         model: tools.length ? config.models.document : config.models.conversation,
-        system: [agent.system(ctx), USER_HELP_RULES, ...(editableDocument(document) === 'layout' ? [DOCUMENT_RULES(ctx)] : editableDocument(document) === 'model' ? [MODEL_DOCUMENT_RULES(ctx)] : []), ...(document?.guidance ? [GUIDANCE_RULES] : [])].join('\n\n'),
-        tools: [...agent.tools(ctx), ...tools], context, historyLength: prior.length, messages: historyOf(prior, context, body.text), document, resume: undefined,
+        system: [agent.system(ctx), USER_HELP_RULES, PICTURE_RULES, ...(editableDocument(document) === 'layout' ? [DOCUMENT_RULES(ctx)] : editableDocument(document) === 'model' ? [MODEL_DOCUMENT_RULES(ctx)] : []), ...(document?.guidance ? [GUIDANCE_RULES] : [])].join('\n\n'),
+        tools: [...agent.tools(ctx), ...tools], context, historyLength: prior.length, messages: historyOf(prior, context, body.text, pictures, images), document, resume: undefined,
       },
     });
   };
@@ -785,13 +849,15 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       const saved = conversationFromRow(await db.conversationAppend(id, user.id, messages, store.getBrief(), store.getTitle(), store.getPath(), null));
       emit({ event: 'done', data: { messageCount: saved.messageCount, limitReached: saved.messageCount >= config.limits.messagesPerConversation, ended: false } });
     });
+    const history = conversation.messages.slice(0, turn.historyLength);
+    const images = await pictureData([...history, opening]);
     return streamTurn({
       user, conversation, store, handlers: agentFor(ctx.path).handlers(ctx, store), pathChanged: false,
       leading: pending.calls.map(call => ({ role: 'tool' as const, name: call.name, toolUseId: call.id, input: call.input,
         output: (answers.get(call.id)?.content ?? NOT_ANSWERED).slice(0, 8000), at: base.now })),
       setup: {
         model: turn.model, system: turn.system, tools: turn.tools as Anthropic.Tool[], context: turn.context, historyLength: turn.historyLength,
-        messages: historyOf(conversation.messages.slice(0, turn.historyLength), turn.context, opening.text), document: turn.document,
+        messages: historyOf(history, turn.context, opening.text, opening.attachments ?? [], images), document: turn.document,
         resume: { appended: [...(turn.appended as Anthropic.MessageParam[]), answerPending(pending, answers)], rounds: turn.rounds },
       },
     });

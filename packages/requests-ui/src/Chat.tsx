@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type JSX } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type JSX } from 'react';
 import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_REPORT, formatBytes, RequestsError, SCREENSHOT_TYPES, type Attachment, type AttachmentFile, type Conversation, type ConversationPath, type ConversationSummary, type DocumentDescriptor, type IntentPath, type Me, type Message, type RequestsClient, type ScreenInfo, type ToolCall, type ToolCallResult } from './client';
 import { draftScope, forgetDraft, HOME_SCOPE, readDrafts, rememberDraft } from './drafts';
 import { DockedPanel } from './DockedPanel';
 import { Popover } from './Popover';
 import { MessageMarkdown } from './MessageMarkdown';
+import { imageFiles, preparePicture, PICTURES_PER_MESSAGE } from './pictures';
 
 export interface ChatProps {
   readonly client: RequestsClient;
@@ -60,7 +61,8 @@ type View =
   | { readonly kind: 'chat' };
 
 /** A transcript line: a persisted message, or a local system line such as "Filed as CUS-12". */
-type Entry = Message | { readonly role: 'system'; readonly text: string; readonly at: string };
+/** `local`: the pictures of a message sent from this panel, shown from their files until the conversation reloads. */
+type Entry = (Message & { readonly local?: readonly AttachmentFile[] | undefined }) | { readonly role: 'system'; readonly text: string; readonly at: string };
 
 interface ChatState {
   /**
@@ -210,13 +212,16 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
     const body = message.trim();
     if (!intent && body.startsWith('/')) { runSlash(body); return; }
     if ((busy && !waitingForGuidance) || !attachmentsReady) return;
-    if (!body) return;
+    // Pictures in the composer go with a typed message, never with an intent card.
+    const outgoing = intent ? [] : pictures;
+    if (!body && !outgoing.length) return;
     if (waitingForGuidance) { generation.current += 1; turn.current?.abort(); setWaitingForGuidance(false); }
     onMessage?.();
     const at = new Date().toISOString();
     started.current = true;
     setText(''); setNotice(null); setError(null);
-    setChat(current => ({ ...current, transcript: [...current.transcript, { role: 'user', text: body, at }], streaming: '' }));
+    if (outgoing.length) setPictures([]);
+    setChat(current => ({ ...current, transcript: [...current.transcript, { role: 'user', text: body, at, ...(outgoing.length ? { local: outgoing } : {}) }], streaming: '' }));
     const controller = new AbortController(); turn.current = controller;
     const gen = generation.current;
     const live = (): boolean => alive.current && generation.current === gen;
@@ -224,6 +229,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
       let streamed = '', rateLimited = false, failed = false, resumed = false, conversation = chat.conversation;
       // A conversation the server ended (filed, added, closed) is left behind: this message starts a new one.
       let ended = false, startOver = false, path = conversation ? chat.path : 'open', title = conversation?.title ?? null;
+      const pictureIds: string[] = [];
       try {
         if (!conversation) {
           try {
@@ -243,9 +249,18 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
           setAttachments(current => [...current, attached]);
           setLocalImages(current => current.filter(item => item !== file));
         }
+        // The message's pictures are uploaded before the message is sent; on a filing path they are the ticket's images too.
+        for (const file of outgoing) {
+          let attached: Attachment;
+          try { attached = await client.attach(id, file); } catch (cause) { failed = true; throw cause; }
+          if (!live()) return;
+          uploadedPreviews.current.set(attached.id, file.blob);
+          pictureIds.push(attached.id);
+          if (path === 'problem' || path === 'feature') setAttachments(current => [...current, attached]);
+        }
         // The document is bound now; switching tabs later never retargets this turn's tool calls.
         const tools = documentTools?.() ?? null;
-        let stream = client.sendMessage(id, body, { ...(intent ? { intent } : {}), document: tools?.document ?? null, signal: controller.signal });
+        let stream = client.sendMessage(id, body, { ...(intent ? { intent } : {}), document: tools?.document ?? null, signal: controller.signal, attachments: pictureIds });
         for (;;) {
           let requested: readonly ToolCall[] = [];
           for await (const event of stream) {
@@ -313,6 +328,14 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
         if (turn.current === controller) turn.current = null;
         // A turn the server rejected before answering never received the message: the optimistic copy leaves the transcript.
         // Start over (the requester asked the agent to discard): the transcript goes too, so the greeting and cards return.
+        // A message that never reached the agent keeps its pictures in the composer for retry; its uploads are released.
+        if (failed && !resumed && outgoing.length && live()) {
+          setPictures(current => [...outgoing, ...current].slice(0, PICTURES_PER_MESSAGE));
+          if (!intent) setText(current => current || body);
+          const released = [...pictureIds], from = conversation?.id;
+          if (from) for (const attachmentId of released) void client.removeAttachment(from, attachmentId).catch(() => {});
+          setAttachments(current => current.filter(item => !released.includes(item.id)));
+        }
         if (live()) setChat(current => startOver ? EMPTY : ({ ...current, streaming: null,
           ...(ended ? { conversation: null, path: 'open' as const, messageCount: 0, limitReached: false } : {}),
           transcript: streamed.trim() ? [...current.transcript, { role: 'assistant', text: streamed, at: new Date().toISOString() }]
@@ -330,6 +353,37 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
   const [attachmentsReady, setAttachmentsReady] = useState(true);
   const [attachmentRetry, setAttachmentRetry] = useState(0);
   const picker = useRef<HTMLInputElement>(null);
+  // Pictures waiting in the composer for the next message, on every path.
+  const [pictures, setPictures] = useState<readonly AttachmentFile[]>([]);
+  const [dropping, setDropping] = useState(false);
+  const picturePicker = useRef<HTMLInputElement>(null);
+  const addPictures = (files: readonly File[]): void => {
+    if (!files.length) return;
+    void (async () => {
+      const prepared = await Promise.all(files.map(file => preparePicture(file, file.name || 'Pasted picture.png')));
+      if (!alive.current) return;
+      const refused = prepared.flatMap(p => (p.ok ? [] : [p.reason]));
+      const ready = prepared.flatMap(p => (p.ok ? [p.file] : []));
+      setPictures(current => {
+        const room = PICTURES_PER_MESSAGE - current.length;
+        if (ready.length > room) refused.push(`A message takes at most ${PICTURES_PER_MESSAGE} pictures.`);
+        return [...current, ...ready.slice(0, Math.max(0, room))];
+      });
+      setNotice(refused.length ? refused.join(' ') : null);
+    })();
+  };
+  const pickPictures = (event: ChangeEvent<HTMLInputElement>): void => { const files = Array.from(event.target.files ?? []); event.target.value = ''; addPictures(files); };
+  const pastePictures = (event: ClipboardEvent<HTMLTextAreaElement>): void => {
+    const files = imageFiles(event.clipboardData?.files);
+    if (files.length) { event.preventDefault(); addPictures(files); }
+  };
+  const hasFiles = (event: DragEvent): boolean => Array.from(event.dataTransfer?.types ?? []).includes('Files');
+  const dragOver = (event: DragEvent<HTMLDivElement>): void => { if (hasFiles(event)) { event.preventDefault(); setDropping(true); } };
+  const drop = (event: DragEvent<HTMLDivElement>): void => {
+    if (!hasFiles(event)) return;
+    event.preventDefault(); setDropping(false);
+    addPictures(imageFiles(event.dataTransfer.files));
+  };
   const capture = useRef(captureScreenshot); capture.current = captureScreenshot;
   const autoRemoved = useRef(new Set<string>());
   const reporting = conversationId !== null && (chat.path === 'problem' || chat.path === 'feature');
@@ -404,7 +458,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
     const current = chat;
     const greeted = current.transcript.length === 0 || current.transcript[0]?.role === 'user';
     const showCards = current.transcript.length === 0 && current.streaming === null;
-    body = <div className="pf-fr-chat">
+    body = <div className={`pf-fr-chat${dropping ? ' is-dropping' : ''}`} onDragOver={dragOver} onDragLeave={() => setDropping(false)} onDrop={drop}>
       <div className="pf-fr-transcript" role="log" aria-label="Conversation" aria-live="polite">
         {greeted ? <div className="pf-fr-message is-assistant"><span className="pf-fr-role">Agent</span><MessageMarkdown text={GREETING} /></div> : null}
         {showCards ? <div className="pf-fr-cards" role="group" aria-label="What would you like to do?">
@@ -424,7 +478,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
           : <div key={index} className={`pf-fr-message is-${entry.role}`}>{entry.role === 'assistant' && current.transcript[index - 1]?.role === 'assistant' ? null
             : <span className="pf-fr-role">{entry.role === 'user' ? 'You' : 'Agent'}</span>}
             {/* The requester's own words stay as typed; the agent's replies are Markdown. */}
-            {entry.role === 'user' ? <p>{entry.text}</p> : <MessageMarkdown text={entry.text} />}</div>)}
+            {entry.role === 'user' ? <>{entry.text ? <p>{entry.text}</p> : null}<SentPictures entry={entry} client={client} previews={uploadedPreviews.current} /></> : <MessageMarkdown text={entry.text} />}</div>)}
         {current.streaming !== null && !waitingForGuidance ? <div className="pf-fr-message is-assistant is-streaming">{current.transcript.at(-1)?.role === 'assistant' ? null : <span className="pf-fr-role">Agent</span>}{current.streaming ? <MessageMarkdown text={current.streaming} /> : (toolProgress ? <p>{toolProgress}</p> : <p className="pf-fr-thinking" role="status" aria-label="Agent is thinking"><span /><span /><span /></p>)}</div> : null}
         <div ref={transcriptEnd} />
       </div>
@@ -446,11 +500,20 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
         <button type="button" disabled={busy || full || !attachmentsReady} onClick={() => picker.current?.click()}>Upload images</button>
         <input ref={picker} type="file" multiple accept={SCREENSHOT_TYPES.join(',')} hidden aria-label="Image files" onChange={pickImages} />
       </div> : null}
+      {pictures.length ? <ul className="pf-fr-pictures" aria-label="Pictures to send">{pictures.map((file, index) => <li key={`${file.name}-${index}`}>
+        <AttachmentPreview item={file} client={client} blob={file.blob} />
+        <button type="button" aria-label={`Remove ${file.name}`} onClick={() => setPictures(current => current.filter(item => item !== file))}>×</button>
+      </li>)}</ul> : null}
       <form className="pf-fr-composer" aria-label="Message" onSubmit={submit}>
+        <button type="button" className="pf-fr-add-picture" aria-label="Add picture" title="Add picture (or paste or drop an image)"
+          disabled={(busy && !waitingForGuidance) || pictures.length >= PICTURES_PER_MESSAGE} onClick={() => picturePicker.current?.click()}>
+          <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><rect x="2.5" y="4" width="15" height="12" rx="2" fill="none" stroke="currentColor" strokeWidth="1.5" /><circle cx="7.5" cy="8.5" r="1.5" fill="currentColor" /><path d="M4 15l4.5-4.5 3 3 2-2 3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" /></svg>
+        </button>
+        <input ref={picturePicker} type="file" multiple accept={SCREENSHOT_TYPES.join(',')} hidden aria-label="Picture files" onChange={pickPictures} />
         <textarea ref={composer} data-autofocus data-submit-on-enter aria-label="Your message" rows={1} value={text} maxLength={4000}
-          disabled={busy && !waitingForGuidance && current.streaming !== null}
+          disabled={busy && !waitingForGuidance && current.streaming !== null} onPaste={pastePictures}
           placeholder={!current.conversation ? 'Describe what you need' : reporting ? 'Type your answer, or say skip' : 'Ask a follow-up question'} onChange={event => setText(event.target.value)} />
-        <button type="submit" className="pf-fr-primary pf-fr-send" disabled={(busy && !waitingForGuidance) || !attachmentsReady || !text.trim()}>Send</button>
+        <button type="submit" className="pf-fr-primary pf-fr-send" disabled={(busy && !waitingForGuidance) || !attachmentsReady || (!text.trim() && !pictures.length)}>Send</button>
       </form>
     </div>;
   }
@@ -460,8 +523,17 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
   </Shell>;
 }
 
+/** The pictures of a sent message: from their files when sent here, otherwise downloaded by id. */
+function SentPictures({ entry, client, previews }: { entry: Message & { readonly local?: readonly AttachmentFile[] | undefined }; client: RequestsClient; previews: ReadonlyMap<string, Blob> }): JSX.Element | null {
+  const items = entry.local ?? entry.pictures ?? [];
+  if (!items.length) return null;
+  return <ul className="pf-fr-sent-pictures" aria-label="Pictures">{items.map((item, index) => <li key={'id' in item ? item.id : `local-${index}`}>
+    <AttachmentPreview item={item} client={client} blob={'blob' in item ? item.blob : previews.get(item.id)} />
+  </li>)}</ul>;
+}
+
 /** CORS downloads become local previews, independent of signed-link expiry and COEP image blocking. */
-function AttachmentPreview({ item, client, blob }: { item: Attachment | AttachmentFile; client: RequestsClient; blob: Blob | undefined }): JSX.Element | null {
+function AttachmentPreview({ item, client, blob }: { item: Attachment | AttachmentFile | { readonly id: string; readonly name: string }; client: RequestsClient; blob: Blob | undefined }): JSX.Element | null {
   const [src, setSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);

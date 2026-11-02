@@ -18,6 +18,16 @@ If the highlighted tool is the one already shown on its toolbar button, clicking
 
 Highlighting does not click a tool, select an object, or edit the document for you. Opening a panel can reveal an item in the Object browser. Instructions stay in chat while you follow the step. Guidance does not show toasts or floating messages, and looking up a control does not close chat. A fading highlight does not require you to click or trigger a reminder.
 
+## Post pictures
+
+You can show the agent a picture in any conversation, in either editor or on Home. Click the picture button beside the message box, paste an image into the message box, or drop one on the chat. PNG, JPEG and WebP images work. Pictures show above the message box until you send; click **×** on one to leave it out. They go with your next message, and you can send pictures without any text.
+
+The agent sees the pictures along with your message, and it can still refer to them later in the conversation. Ask it to build or draw what a picture shows, such as “Build this cabinet” with a photo or a dimensioned sketch. It uses the sizes you give first, then any dimensions it can read in the picture, then standard sizes for that kind of object. It says which sizes it assumed, so you can correct them.
+
+- A message takes up to 5 pictures, and a conversation up to 5 in total. Large pictures are scaled down before they are sent, and a picture over 5 MB even after scaling is refused.
+- When you report a problem or request a feature, the pictures you post are attached to the ticket, along with any others you upload. Remove one before you confirm to leave it off.
+- Pictures stay private to you and the PushForm team. Pictures in a help conversation are deleted with it, after 30 days.
+
 ## Ask for a change to your document
 
 AI Chat can change the document open in the tab you send from: a Layout document, or a 3D model. Ask for the change in plain words, such as “Put the three shelves in one group, then make two more copies of it 40 cm higher” or “Paint the top of the table oak.” A question gets an answer only; the agent changes the document only when you ask it to.

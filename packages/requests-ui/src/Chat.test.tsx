@@ -613,6 +613,66 @@ describe('Chat docked', () => {
   });
 });
 
+describe('pictures in messages', () => {
+  const choosePictures = (...files: File[]): void => { fireEvent.change(screen.getByLabelText('Picture files'), { target: { files } }); };
+  const png = (name: string): File => new File(['pixels'], name, { type: 'image/png' });
+  const pending = (): HTMLElement | null => screen.queryByRole('list', { name: 'Pictures to send' });
+
+  it('adds pictures with the Add picture control, shows them removable, and sends them with the next message on any path', async () => {
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() }));
+    const { backend } = setup();
+    expect(await screen.findByRole('button', { name: 'Add picture' })).toBeTruthy();
+    choosePictures(png('cabinet.png'), png('door.png'));
+    await waitFor(() => expect(within(pending()!).getAllByRole('listitem')).toHaveLength(2));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove door.png' }));
+    await waitFor(() => expect(within(pending()!).getAllByRole('listitem')).toHaveLength(1));
+    await say('Build this cabinet');
+    expect(pending()).toBeNull();
+    const message = backend.calls.findLast(c => c.path.endsWith('/messages'))!;
+    expect(message.body).toMatchObject({ text: 'Build this cabinet', attachments: ['att-1'] });
+    const complete = backend.calls.findIndex(c => c.path.endsWith('/complete'));
+    expect(complete).toBeGreaterThan(0); expect(complete).toBeLessThan(backend.calls.indexOf(message));
+    expect(within(log()).getByRole('list', { name: 'Pictures' })).toBeTruthy();
+    expect(backend.conversations.get('conv-1')?.messages[0]).toMatchObject({ role: 'user', pictures: [{ id: 'att-1', name: 'cabinet.png' }] });
+  });
+
+  it('sends a message of pictures alone, and adds pasted images', async () => {
+    const { backend } = setup();
+    const box = await screen.findByLabelText('Your message');
+    fireEvent.paste(box, { clipboardData: { files: [png('pasted.png')] } });
+    await waitFor(() => expect(pending()).not.toBeNull());
+    const sendButton = screen.getByRole('button', { name: 'Send' });
+    await waitFor(() => expect(sendButton.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(sendButton);
+    await waitFor(() => expect(backend.calls.some(c => c.path.endsWith('/messages'))).toBe(true));
+    expect(backend.calls.findLast(c => c.path.endsWith('/messages'))!.body).toMatchObject({ text: '', attachments: ['att-1'] });
+  });
+
+  it('refuses files that are not PNG, JPEG or WebP pictures with a notice', async () => {
+    setup();
+    await screen.findByRole('button', { name: 'Add picture' });
+    choosePictures(new File(['x'], 'notes.txt', { type: 'text/plain' }));
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('notes.txt is not a PNG, JPEG or WebP image.'));
+    expect(pending()).toBeNull();
+  });
+
+  it('keeps the message and its pictures in the composer when an upload fails', async () => {
+    const { backend } = setup();
+    await screen.findByRole('button', { name: 'Add picture' });
+    choosePictures(png('cabinet.png'));
+    await waitFor(() => expect(pending()).not.toBeNull());
+    // The storage upload succeeds but the size check fails: completion is refused.
+    const stored = backend.uploads; const set = stored.set.bind(stored);
+    stored.set = ((key: string) => set(key, -1)) as typeof stored.set;
+    fireEvent.change(screen.getByLabelText('Your message'), { target: { value: 'Build this' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('does not match'));
+    expect(within(pending()!).getAllByRole('listitem')).toHaveLength(1);
+    expect((screen.getByLabelText('Your message') as HTMLTextAreaElement).value).toBe('Build this');
+    expect(backend.calls.some(c => c.path.endsWith('/messages'))).toBe(false);
+  });
+});
+
 describe('ticket images', () => {
   const chooseFiles = (...files: File[]): void => { fireEvent.change(screen.getByLabelText('Image files'), { target: { files } }); };
   const readyImages = async (): Promise<void> => { await waitFor(() => expect(screen.getByRole('button', { name: 'Upload images' }).hasAttribute('disabled')).toBe(false)); };

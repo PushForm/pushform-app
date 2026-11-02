@@ -64,7 +64,9 @@ export interface ConversationSummary {
   readonly id: string; readonly kind: ConversationKind; readonly path: ConversationPath;
   readonly title: string | null; readonly updatedAt: string; readonly messageCount: number;
 }
-export interface Message { readonly role: 'user' | 'assistant' | 'tool'; readonly text: string; readonly at: string }
+/** A picture posted with a message, by attachment id. */
+export interface MessagePicture { readonly id: string; readonly name: string; readonly mime: string }
+export interface Message { readonly role: 'user' | 'assistant' | 'tool'; readonly text: string; readonly at: string; readonly pictures?: readonly MessagePicture[] | undefined }
 export interface Conversation {
   readonly id: string; readonly kind: ConversationKind; readonly path: ConversationPath; readonly status: ConversationStatus;
   readonly title: string | null; readonly brief: Brief | null; readonly messages: readonly Message[];
@@ -150,7 +152,11 @@ export function normalizeConversation(raw: unknown): Conversation {
     id: str(row['id']), kind: (str(row['kind'], 'intake') as ConversationKind), path: (str(row['path'], 'help') as ConversationPath),
     status: (str(row['status'], 'open') as ConversationStatus), title: nullable(row['title']),
     brief: (row['brief'] as Brief | null | undefined) ?? null,
-    messages: messages.map(m => ({ role: str(m['role'], 'assistant') as Message['role'], text: str(m['text'] ?? m['content']), at: str(m['at']) })),
+    messages: messages.map(m => {
+      const pictures = (Array.isArray(m['attachments']) ? m['attachments'] as Json[] : []).filter(p => typeof p?.['id'] === 'string')
+        .map(p => ({ id: str(p['id']), name: str(p['name']), mime: str(p['mime']) }));
+      return { role: str(m['role'], 'assistant') as Message['role'], text: str(m['text'] ?? m['content']), at: str(m['at']), ...(pictures.length ? { pictures } : {}) };
+    }),
     messageCount: num(pick(row, 'message_count', 'messageCount')), requestId: nullable(pick(row, 'request_id', 'requestId')),
   };
 }
@@ -279,8 +285,10 @@ export class RequestsClient {
    * connection. `intent` travels in the body when the requester clicked an intent card: the backend sets
    * the conversation path from it and answers on that path.
    */
-  async *sendMessage(id: string, text: string, options: { readonly intent?: IntentPath | undefined; readonly document?: DocumentDescriptor | null | undefined; readonly signal?: AbortSignal | undefined } = {}): AsyncGenerator<StreamEvent> {
-    const body: Json = { text, ...(options.intent ? { intent: options.intent } : {}), ...(options.document ? { document: options.document } : {}) };
+  /** `attachments` are uploaded pictures of this conversation (see `attach`) that the agent sees with the message. */
+  async *sendMessage(id: string, text: string, options: { readonly intent?: IntentPath | undefined; readonly document?: DocumentDescriptor | null | undefined; readonly signal?: AbortSignal | undefined; readonly attachments?: readonly string[] | undefined } = {}): AsyncGenerator<StreamEvent> {
+    const body: Json = { text, ...(options.intent ? { intent: options.intent } : {}), ...(options.document ? { document: options.document } : {}),
+      ...(options.attachments?.length ? { attachments: [...options.attachments] } : {}) };
     yield* this.stream(`/conversations/${encodeURIComponent(id)}/messages`, body, options.signal);
   }
   /** Answer a turn's `tool_request` and stream the rest of the turn, which may request more calls. */

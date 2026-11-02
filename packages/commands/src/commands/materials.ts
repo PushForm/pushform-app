@@ -617,7 +617,7 @@ export const materialFromLibrary = defineCommand({
     if (entry.texture) {
       const jpeg = await loadLibraryTexture(entry.key);
       if (jpeg) {
-        const asset = await host.images.put(jpeg, 'image/jpeg', `${entry.name}.jpg`, { width: entry.texture.px, height: entry.texture.px });
+        const asset = await host.images.put(jpeg, 'image/jpeg', `${entry.name}.jpg`, { width: entry.texture.widthPx, height: entry.texture.heightPx });
         texture = { imageId: asset.id, widthM: entry.texture.widthM, heightM: entry.texture.heightM };
       }
     }

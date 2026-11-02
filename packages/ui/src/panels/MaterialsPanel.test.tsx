@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { InlineBackend, KernelClient } from '@pushform/kernel';
 import type { Id, MaterialId } from '@pushform/core';
 import type { JSX } from 'react';
@@ -43,6 +43,19 @@ describe('MaterialsPanel', () => {
     expect(screen.getByRole('listbox', { name: 'Wood' }).classList.contains('is-large')).toBe(true);
     expect(screen.getByRole('option', { name: 'Cherry' }).querySelector('.pf-swatch')?.getAttribute('style')).toContain('cherry_veneer-preview.jpg');
     expect(useAppStore.getState().activeMaterialId).toBe(material);
+  });
+
+  it('exposes the expanded categories and all imported swatches', () => {
+    mount(boot(), <MaterialsPanel />);
+    const library = screen.getByLabelText('Library');
+    expect(within(library).queryByRole('option', { name: /^Tile$/ })).toBeNull();
+    for (const [category, count] of Object.entries({
+      Wood: 50, Brick: 30, Ceramic: 26, 'Concrete & Asphalt': 50, Stone: 50,
+      Metal: 26, Terrain: 50, Textiles: 44, Plastic: 6, Organic: 6,
+    })) {
+      fireEvent.change(library, { target: { value: category } });
+      expect(within(screen.getByRole('listbox', { name: category })).getAllByRole('option')).toHaveLength(count);
+    }
   });
 
   it('keeps the latest material choice when image loads finish out of order', async () => {

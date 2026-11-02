@@ -2,7 +2,7 @@
 // Copyright 2026 PushForm contributors
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, CSSProperties, JSX, KeyboardEvent, MouseEvent } from 'react';
-import { BUILTIN_LIBRARY } from '@pushform/commands';
+import { BUILTIN_LIBRARY, LIBRARY_CATEGORIES } from '@pushform/commands';
 import { colorizedImageUrl } from '@pushform/render';
 import type { LibraryMaterial, PaintTool } from '@pushform/commands';
 import type { Material, Rgb } from '@pushform/model';
@@ -54,13 +54,7 @@ export function hlsToRgb(h: number, l: number, s: number): Rgb {
 type LibraryId = 'inModel' | LibraryMaterial['category'];
 const LIBRARIES: readonly (readonly [LibraryId, string])[] = [
   ['inModel', 'In Model'],
-  ['Colors', 'Colors'],
-  ['Wood', 'Wood'],
-  ['Brick', 'Brick'],
-  ['Tile', 'Tile'],
-  ['Glass', 'Glass'],
-  ['Metal', 'Metal'],
-  ['Stone', 'Stone'],
+  ...LIBRARY_CATEGORIES.map((category) => [category, category] as const),
 ];
 
 interface ItemMenu {

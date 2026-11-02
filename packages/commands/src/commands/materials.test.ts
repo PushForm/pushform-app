@@ -133,6 +133,14 @@ describe('material.* commands', () => {
     expect(host.doc.state.materials.get(id)?.texture).toBeTruthy();
   });
 
+  it('embeds rectangular fabrics with their original pixel dimensions and physical proportions', async () => {
+    const { registry, host } = setup();
+    const id = await registry.execute('material.fromLibrary', { key: 'Textiles_floral_jacquard' }) as MaterialId;
+    const texture = host.doc.state.materials.get(id)!.texture!;
+    expect(texture).toMatchObject({ widthM: 0.25295, heightM: 0.3836 });
+    expect(host.doc.state.images.get(texture.imageId)).toMatchObject({ width: 1024, height: 1553, mime: 'image/jpeg' });
+  });
+
   it('embeds a full library image with its physical repeat size and deduplicates simultaneous additions', async () => {
     const { registry, host } = setup();
     const before = host.doc.state.materials.size;

@@ -4,18 +4,26 @@ import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { imageSizeFromHeader } from '@pushform/model';
-import { BUILTIN_LIBRARY, loadLibraryTexture } from './materialLibrary';
+import { BUILTIN_LIBRARY, LIBRARY_CATEGORIES, loadLibraryTexture } from './materialLibrary';
 import sources from './material-textures/sources.json';
 
 describe('bundled material library', () => {
-  it('offers at least six distinct choices in every category', () => {
-    for (const category of ['Colors', 'Wood', 'Brick', 'Tile', 'Metal', 'Stone', 'Glass']) {
+  it('contains the requested totals with unique material and source identities', () => {
+    const expected = {
+      Colors: 24, Wood: 50, Brick: 30, Ceramic: 26, 'Concrete & Asphalt': 50,
+      Stone: 50, Metal: 26, Terrain: 50, Textiles: 44, Plastic: 6, Organic: 6, Glass: 6,
+    };
+    expect(new Set(LIBRARY_CATEGORIES)).toEqual(new Set(Object.keys(expected)));
+    for (const category of LIBRARY_CATEGORIES) {
       const entries = BUILTIN_LIBRARY.filter((m) => m.category === category);
-      expect(entries.length, category).toBeGreaterThanOrEqual(6);
-      if (!['Colors', 'Glass'].includes(category)) expect(entries.filter((m) => m.texture).length, category).toBeGreaterThanOrEqual(6);
+      expect(entries.length, category).toBe(expected[category]);
+      if (!['Colors', 'Glass'].includes(category)) expect(entries.every((m) => m.texture), category).toBe(true);
     }
     expect(new Set(BUILTIN_LIBRARY.map((m) => m.key)).size).toBe(BUILTIN_LIBRARY.length);
     expect(new Set(BUILTIN_LIBRARY.map((m) => m.name)).size).toBe(BUILTIN_LIBRARY.length);
+    expect(new Set(sources.textures.map((m) => m.asset)).size).toBe(338);
+    expect(sources.textures.filter((m) => m.sourceCategory.startsWith('Concrete/'))).toHaveLength(38);
+    expect(sources.textures.filter((m) => m.sourceCategory.startsWith('Asphalt & Bitumen/'))).toHaveLength(12);
   });
 
   it('ships valid full resolution maps and compact previews with documented provenance', async () => {
@@ -24,17 +32,23 @@ describe('bundled material library', () => {
       if (!material.texture) continue;
       const { texture } = material;
       const bytes = (await loadLibraryTexture(material.key))!;
-      expect(imageSizeFromHeader(bytes)).toEqual({ width: texture.px, height: texture.px });
-      expect(texture.px).toBeGreaterThanOrEqual(1024);
+      expect(imageSizeFromHeader(bytes)).toEqual({ width: texture.widthPx, height: texture.heightPx });
+      expect(Math.max(texture.widthPx, texture.heightPx)).toBeGreaterThanOrEqual(1024);
       expect(texture.widthM).toBeGreaterThan(0);
       expect(texture.heightM).toBeGreaterThan(0);
       const hash = createHash('sha256').update(bytes).digest('hex');
-      expect(sources.textures.find((s) => s.key === material.key)?.sha256).toBe(hash);
+      const source = sources.textures.find((s) => s.key === material.key)!;
+      expect(source.sha256).toBe(hash);
+      expect(source.widthPx).toBe(texture.widthPx);
+      expect(source.heightPx).toBe(texture.heightPx);
       hashes.add(hash);
       const preview = await readFile(new URL(texture.previewUrl));
-      expect(imageSizeFromHeader(preview)).toEqual({ width: 128, height: 128 });
+      const previewSize = imageSizeFromHeader(preview)!;
+      expect(previewSize).toEqual({ width: source.previewWidthPx, height: source.previewHeightPx });
+      expect(Math.max(previewSize.width, previewSize.height)).toBe(128);
+      expect(Math.abs(previewSize.width / previewSize.height - texture.widthPx / texture.heightPx)).toBeLessThan(0.02);
       expect(preview.byteLength).toBeLessThan(20_000);
     }
-    expect(hashes.size).toBe(30);
+    expect(hashes.size).toBe(338);
   });
 });

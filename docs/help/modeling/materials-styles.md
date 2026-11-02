@@ -40,6 +40,23 @@ To inspect hidden edges or faces, enable **Hidden Geometry**. Hiding and unhidin
 
 In **Materials → Select**, materials always appear as square previews. Hover a swatch to see its name, and click it to choose that material. Use the library picker to browse categories; switching libraries keeps your active material.
 
-Each built-in category has at least six options. Wood, Brick, Tile, Metal and Stone include tileable image textures; Glass offers six transparent tints, and Colors offers solid colors. The square previews show the actual surface image. Textures use real-world repeat sizes, which you can adjust in **Edit**. When you add a library texture, its image is saved with your document. The library ships with the app and needs no external texture service.
+The library includes 338 tileable image textures:
+
+| Category | Materials |
+| --- | ---: |
+| Wood | 50 |
+| Brick | 30 |
+| Ceramic | 26 |
+| Concrete & Asphalt | 50 |
+| Stone | 50 |
+| Metal | 26 |
+| Terrain | 50 |
+| Textiles (including leather) | 44 |
+| Plastic (including rubber) | 6 |
+| Organic | 6 |
+
+Colors provides 24 solid colors, and Glass offers six transparent tints. Ceramic replaces the former Tile category. Some paving and block materials now appear under Brick.
+
+The square previews show the actual surface image. Full textures load when you choose a material and use real-world repeat sizes, which you can adjust in **Edit**. Rectangular textures retain their proportions. When you add a library texture, its image is saved with your document. The library ships with the app and needs no external texture service.
 
 The textured finishes use CC0 color maps from [Poly Haven](https://polyhaven.com/license). They provide surface color and pattern; glass tints provide transparency. These presets do not add reflection, refraction, or surface relief.

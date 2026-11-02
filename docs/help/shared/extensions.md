@@ -4,13 +4,13 @@
 
 Extensions add side panels, tabs, toolbar buttons and commands to PushForm, such as a cut list for a model. Each one runs separately from the editor, so a slow or broken extension cannot freeze your work, and it can do only what you allowed when you installed it.
 
-Extensions run in the web editor in Chrome, Edge, Firefox and other Chromium-based browsers. In Safari the Extensions window opens but says extensions cannot run there. The desktop app does not offer extensions yet.
+Extensions run in the web editor in Chrome, Edge, Firefox and other Chromium-based browsers. In Safari the Extensions panel opens but says extensions cannot run there. The desktop app does not offer extensions yet.
 
-## Open the Extensions window
+## Open the Extensions panel
 
-Open your account control in the header and, in the account dialog, choose **Manage extensions…**, or type **Extensions** in command search. The window works from Home and from both editors. Opening it never starts an extension.
+In either editor, choose the **Extensions** icon (a puzzle piece) at the bottom of the left menu bar. The Extensions panel opens beside the editor, where Files and the Object browser open; choose the icon again, or its close button, to close it. You can also choose **View ▸ Extensions**, type **Extensions** in command search, or choose **Manage extensions…** in the account dialog, which on Home opens the same content in a window. Opening the panel never starts an extension, and PushForm reopens it with that editor if you left it open.
 
-Each installed extension shows its name, publisher, version and whether it is **Official, countersigned by PushForm** or **Unsigned (developer)**. Below that you see whether it is running, starting, not running or stopped after a problem. Choose **Details** to see what it is allowed to do, when it was installed, its network use and activity, and, for a side-loaded extension, its log. Memory and processor use read **unavailable** in the browser, because they cannot be measured per extension.
+**Browse** is where the extension directory will appear; it is coming soon. Under **Installed**, each extension shows its name, publisher, version and whether it is **Official, countersigned by PushForm** or **Unsigned (developer)**. Below that, whether it is running, starting, not running or stopped after a problem. Choose **Details** for what it is allowed to do, when it was installed, its network use and activity, and, for a side-loaded extension, its log. Memory and processor use read **unavailable**: the browser cannot measure them per extension.
 
 ## Read an extension's activity and network use
 
@@ -74,12 +74,12 @@ PushForm checks an installed extension's files before running it, once each sess
 
 ## Turn an extension off or uninstall it
 
-In the Extensions window, clear an extension's **On** checkbox to turn it off. Its panels and commands disappear and it stops running; turn it back on at any time.
+In the Extensions panel, clear an extension's **On** checkbox to turn it off. Its panels and commands disappear and it stops running; turn it back on at any time.
 
 To remove it, choose **Details**, then **Uninstall…**. Select **Also delete its settings** to remove what it saved for you as well, or leave it cleared to keep those settings if you install it again. Uninstalling never changes your documents.
 
 ## Load your own extension in developer mode
 
-Developer mode lets you load an unsigned extension package from a file, for example one you are building. In the Extensions window, select **Allow unsigned extensions on this device** under **Developer mode**, read the warning, and choose **Turn on developer mode**. Then choose **Load extension from file…** and pick the package's `.zip` file. The install dialog opens as usual, labelled **Unsigned (developer)**. Loading the same version again shows **Reload**.
+Developer mode lets you load an unsigned extension package from a file, for example one you are building. In the Extensions panel, select **Allow unsigned extensions on this device** under **Developer mode**, read the warning, and choose **Turn on developer mode**. Then choose **Load extension from file…** and pick the package's `.zip` file. The install dialog opens as usual, labelled **Unsigned (developer)**. Loading the same version again shows **Reload**.
 
 Unsigned extensions run with the same protections as official ones, stay on this device and are not added to your account. They cannot use PushForm's own names or replace an official extension. Turning developer mode off turns every unsigned extension off; they stay installed until you uninstall them.

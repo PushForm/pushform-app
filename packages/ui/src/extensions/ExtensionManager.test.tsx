@@ -9,7 +9,7 @@ import {
   ExtensionPlatform, memoryActivityStore, memoryDeveloperMode, memoryExtensionStore, memorySettingsStore, type ActivityEntry, type ExtensionActivityStore,
   type InstalledExtension, type SettingsStore,
 } from '@pushform/extensions';
-import { ExtensionManager } from './ExtensionManager';
+import { ExtensionManager, ExtensionManagerPanel } from './ExtensionManager';
 import { browserRunsExtensions } from './browserExtensionPlatform';
 import { indexedDbActivityStore, indexedDbExtensionStore } from './indexedDbExtensionStore';
 
@@ -30,15 +30,19 @@ async function zipBytes(overrides: Partial<Omit<ExtensionManifestInput, 'files'>
 const zip = async (overrides: Partial<Omit<ExtensionManifestInput, 'files'>> = {}): Promise<File> =>
   new File([(await zipBytes(overrides)) as Uint8Array<ArrayBuffer>], 'prices.zip', { type: 'application/zip' });
 
-function setup(activity: ExtensionActivityStore = memoryActivityStore()) {
+function setup(activity: ExtensionActivityStore = memoryActivityStore(), placement: 'window' | 'panel' = 'window') {
   const settings = new Map<string, SettingsStore>();
   const settingsFor = (r: InstalledExtension) => settings.get(r.id) ?? (settings.set(r.id, memorySettingsStore()), settings.get(r.id)!);
   const platform = new ExtensionPlatform({
     store: memoryExtensionStore(), developerMode: memoryDeveloperMode(false),
     startRuntime: async () => { throw new Error('no runtime in this test'); }, settingsStore: settingsFor, activity,
   });
-  render(<ExtensionManager platform={platform} developerModeAllowed developerModeOn={false} onClose={() => {}} />);
-  return { platform, settingsFor };
+  const closed: number[] = [];
+  const onClose = () => closed.push(1);
+  render(placement === 'window'
+    ? <ExtensionManager platform={platform} developerModeAllowed developerModeOn={false} onClose={onClose} />
+    : <div className="pf-app"><ExtensionManagerPanel platform={platform} developerModeAllowed developerModeOn={false} onClose={onClose} /></div>);
+  return { platform, settingsFor, closed };
 }
 
 async function loadFile(file: File): Promise<void> {
@@ -70,6 +74,39 @@ describe('ExtensionManager', () => {
     const row = await screen.findByText('Lumber Prices');
     expect(row.closest('li')!.textContent).toMatch(/Unsigned \(developer\)/);
     expect(platform.state('com.example.prices')?.record.grants).toEqual(['model.read', 'settings', 'network']);
+  });
+
+  it('shows the same content in the Extensions side panel, with the install dialog over the editor, not inside the panel', async () => {
+    const { platform, closed } = setup(undefined, 'panel');
+    const panel = screen.getByRole('region', { name: 'Extensions side panel' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(within(panel).getByRole('heading', { name: 'Extensions' })).toBeTruthy();
+    expect(within(panel).getByRole('heading', { name: 'Browse' })).toBeTruthy();
+    expect(within(panel).getByText('The extension directory is coming soon.')).toBeTruthy();
+    expect(within(panel).queryByRole('link')).toBeNull();
+    expect(within(panel).getByText('No extensions are installed.')).toBeTruthy();
+    fireEvent.click(within(panel).getByRole('checkbox', { name: 'Allow unsigned extensions on this device' }));
+    fireEvent.click(within(panel).getByRole('button', { name: 'Turn on developer mode' }));
+    await within(panel).findByRole('button', { name: 'Load extension from file…' });
+    await loadFile(await zip());
+    const dialog = await screen.findByRole('dialog', { name: 'Install Lumber Prices?' });
+    expect(panel.contains(dialog)).toBe(false);
+    expect(dialog.closest('.pf-dialog-backdrop')?.parentElement).toBe(document.querySelector('.pf-app'));
+    // The panel stays while the dialog is open.
+    expect(screen.getByRole('region', { name: 'Extensions side panel' })).toBe(panel);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Install' }));
+    const row = await within(panel).findByText('Lumber Prices');
+    expect(row.closest('li')!.textContent).toMatch(/Unsigned \(developer\)/);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(platform.state('com.example.prices')?.record.grants).toEqual(['model.read', 'settings', 'network']);
+    // Cancelling an install closes only the dialog.
+    await loadFile(await zip({ version: '1.1.0' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Update Lumber Prices?' })).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByRole('region', { name: 'Extensions side panel' })).toBeTruthy();
+    expect(closed).toEqual([]);
+    fireEvent.click(within(panel).getByRole('button', { name: 'Close Extensions' }));
+    expect(closed).toEqual([1]);
   });
 
   it('marks what a reload newly asks for', async () => {

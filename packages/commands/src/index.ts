@@ -136,7 +136,7 @@ export { tagTools } from './tools/tagTools';
 
 // Materials, Paint Bucket and texture positioning
 export * from './commands/materials';
-export { BUILTIN_LIBRARY, generateLibraryTexture, libraryMaterial } from './commands/materialLibrary';
+export { BUILTIN_LIBRARY, loadLibraryTexture, libraryMaterial } from './commands/materialLibrary';
 export type { LibraryMaterial, LibraryTexture } from './commands/materialLibrary';
 export { PaintTool, paintModeOf, hitSide } from './tools/impl/Paint';
 export { PositionTextureTool, positionTextureCommands, textureTargetOf, PIN_COLORS, PIN_KINDS, PIN_PICK_PX } from './tools/impl/PositionTexture';

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { useEffect, useMemo, useState } from 'react';
-import { LuList, LuLayoutGrid } from 'react-icons/lu';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, CSSProperties, JSX, KeyboardEvent, MouseEvent } from 'react';
 import { BUILTIN_LIBRARY } from '@pushform/commands';
 import { colorizedImageUrl } from '@pushform/render';
@@ -63,7 +62,6 @@ const LIBRARIES: readonly (readonly [LibraryId, string])[] = [
   ['Metal', 'Metal'],
   ['Stone', 'Stone'],
 ];
-type MaterialView = 'preview' | 'list';
 
 interface ItemMenu {
   readonly x: number;
@@ -103,7 +101,7 @@ function NumberField({ label, value, onCommit, step = 1, min, max }: { label: st
 
 /**
  * Materials panel: active material header with Create and Sample, a Select tab
- * (In Model list + built-in libraries, Preview/List views, purge, per-item context menu) and an
+ * (In Model list + built-in libraries, square previews, purge, per-item context menu) and an
  * Edit tab (color picker with RGB/HLS, opacity, texture image, size with aspect lock, colorize).
  */
 export function MaterialsPanel(): JSX.Element {
@@ -115,10 +113,15 @@ export function MaterialsPanel(): JSX.Element {
   const setTab = useAppStore((s) => s.setMaterialsTab);
   const setActiveId = useAppStore((s) => s.setActiveMaterialId);
   const [library, setLibrary] = useState<LibraryId>('inModel');
-  const [view, setView] = useState<MaterialView>('preview');
   const [menu, setMenu] = useState<ItemMenu | null>(null);
   const [lockAspect, setLockAspect] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const libraryRequest = useRef(0);
+  useEffect(() => () => { libraryRequest.current++; }, [app]);
+  const selectMaterial = (id: number | null): void => {
+    libraryRequest.current++;
+    setActiveId(id);
+  };
 
   const state = app.document.doc.state;
   const images = app.document.images;
@@ -137,6 +140,17 @@ export function MaterialsPanel(): JSX.Element {
     return colorizedSwatches.get(key) ?? url;
   };
 
+  const addLibraryMaterial = async (key: string): Promise<void> => {
+    const request = ++libraryRequest.current;
+    const previousActive = useAppStore.getState().activeMaterialId;
+    setError(null);
+    try {
+      const id = await app.commands.execute('material.fromLibrary', { key, activate: false }) as number;
+      if (request === libraryRequest.current && useAppStore.getState().activeMaterialId === previousActive) setActiveId(id);
+    } catch (err) {
+      if (request === libraryRequest.current) setError(err instanceof Error ? err.message : String(err));
+    }
+  };
   const run = (id: string, params?: unknown): unknown => {
     const r = app.commands.tryExecute(id, params);
     if (!r.ok) {
@@ -209,7 +223,7 @@ export function MaterialsPanel(): JSX.Element {
   };
 
   const libraryItems: LibraryMaterial[] = library === 'inModel' ? [] : BUILTIN_LIBRARY.filter((m) => m.category === library);
-  const gridClass = `pf-materials-grid ${view === 'preview' ? 'is-large' : 'is-list'}`;
+  const gridClass = 'pf-materials-grid is-large';
 
   return (
     <div className="pf-materials" onClick={() => menu && setMenu(null)}>
@@ -243,12 +257,6 @@ export function MaterialsPanel(): JSX.Element {
                 </option>
               ))}
             </select>
-            <button type="button" className={`pf-toolbtn${view === 'list' ? ' is-active' : ''}`} aria-label="List" title="List" aria-pressed={view === 'list'} onClick={() => setView('list')}>
-              <LuList size={16} aria-hidden="true" />
-            </button>
-            <button type="button" className={`pf-toolbtn${view === 'preview' ? ' is-active' : ''}`} aria-label="Preview" title="Preview" aria-pressed={view === 'preview'} onClick={() => setView('preview')}>
-              <LuLayoutGrid size={16} aria-hidden="true" />
-            </button>
             {library === 'inModel' ? (
               <button type="button" className="pf-btn" onClick={() => run('material.purgeUnused')} title="Purge unused materials">
                 Purge
@@ -263,7 +271,7 @@ export function MaterialsPanel(): JSX.Element {
                 aria-selected={activeId === null}
                 className={`pf-material-item${activeId === null ? ' is-active' : ''}`}
                 title="Default"
-                onClick={() => setActiveId(null)}
+                onClick={() => selectMaterial(null)}
               >
                 <span className="pf-swatch" style={{ background: '#ffffff' }} aria-hidden="true" />
                 <span className="pf-material-label">Default</span>
@@ -276,7 +284,7 @@ export function MaterialsPanel(): JSX.Element {
                   aria-selected={activeId === m.id}
                   className={`pf-material-item${activeId === m.id ? ' is-active' : ''}`}
                   title={m.name}
-                  onClick={() => setActiveId(m.id)}
+                  onClick={() => selectMaterial(m.id)}
                   onContextMenu={(e) => onItemContextMenu(e, m.id)}
                 >
                   <span className="pf-swatch" style={swatchStyle(m, textureUrl(m))} aria-hidden="true" />
@@ -287,8 +295,8 @@ export function MaterialsPanel(): JSX.Element {
           ) : (
             <div className={gridClass} role="listbox" aria-label={library}>
               {libraryItems.map((m) => (
-                <button key={m.key} type="button" role="option" className="pf-material-item" title={m.name} onClick={() => void app.commands.execute('material.fromLibrary', { key: m.key })}>
-                  <span className="pf-swatch" style={{ background: rgbToCss(m.color), opacity: m.alpha ?? 1 }} aria-hidden="true" />
+                <button key={m.key} type="button" role="option" className="pf-material-item" title={m.name} onClick={() => void addLibraryMaterial(m.key)}>
+                  <span className="pf-swatch" style={{ backgroundColor: rgbToCss(m.color), backgroundImage: m.texture ? `url("${m.texture.previewUrl}")` : undefined, opacity: m.alpha ?? 1 }} aria-hidden="true" />
                   <span className="pf-material-label">{m.name}</span>
                 </button>
               ))}

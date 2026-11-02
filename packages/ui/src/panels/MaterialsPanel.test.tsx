@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { InlineBackend, KernelClient } from '@pushform/kernel';
 import type { Id, MaterialId } from '@pushform/core';
@@ -15,6 +15,7 @@ import { MaterialsPanel, cssToRgb01, hlsToRgb, rgbToHls } from './MaterialsPanel
 let app: AppInstance | null = null;
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   app?.dispose();
   app = null;
   useAppStore.getState().setActiveMaterialId(null);
@@ -30,25 +31,37 @@ function mount(a: AppInstance, el: JSX.Element) {
 }
 
 describe('MaterialsPanel', () => {
-  it('offers List and Preview without a thumbnail size menu and preserves the material and library', () => {
+  it('always shows square previews without view controls and preserves the active material when browsing', () => {
     const a = boot();
     const material = a.commands.execute('material.create', { name: 'Oak', color: [0.5, 0.3, 0.1] }) as number;
     mount(a, <MaterialsPanel />);
-    const list = screen.getByRole('button', { name: 'List' });
-    const preview = screen.getByRole('button', { name: 'Preview' });
-    expect(preview.getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByRole('listbox', { name: 'In Model' }).classList.contains('is-large')).toBe(true);
+    expect(screen.queryByRole('button', { name: 'List' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Preview' })).toBeNull();
     expect(screen.queryByLabelText('Thumbnail size')).toBeNull();
-    expect(list.querySelector('svg')).toBeTruthy();
-    fireEvent.click(list);
-    expect(list.getAttribute('aria-pressed')).toBe('true');
-    expect(preview.getAttribute('aria-pressed')).toBe('false');
-    expect(screen.getByRole('listbox', { name: 'In Model' }).classList.contains('is-list')).toBe(true);
-    expect(useAppStore.getState().activeMaterialId).toBe(material);
     fireEvent.change(screen.getByLabelText('Library'), { target: { value: 'Wood' } });
-    fireEvent.click(preview);
     expect(screen.getByRole('listbox', { name: 'Wood' }).classList.contains('is-large')).toBe(true);
+    expect(screen.getByRole('option', { name: 'Cherry' }).querySelector('.pf-swatch')?.getAttribute('style')).toContain('cherry_veneer-preview.jpg');
     expect(useAppStore.getState().activeMaterialId).toBe(material);
+  });
+
+  it('keeps the latest material choice when image loads finish out of order', async () => {
+    const a = boot();
+    const cherry = a.commands.execute('material.create', { name: 'Cherry', color: [0.5, 0.3, 0.1], activate: false }) as number;
+    const pine = a.commands.execute('material.create', { name: 'Pine', color: [0.7, 0.5, 0.3], activate: false }) as number;
+    mount(a, <MaterialsPanel />);
+    let finishCherry!: (id: number) => void;
+    let finishPine!: (id: number) => void;
+    vi.spyOn(a.commands, 'execute')
+      .mockImplementationOnce(() => new Promise<number>((resolve) => { finishCherry = resolve; }))
+      .mockImplementationOnce(() => new Promise<number>((resolve) => { finishPine = resolve; }));
+    fireEvent.change(screen.getByLabelText('Library'), { target: { value: 'Wood' } });
+    fireEvent.click(screen.getByRole('option', { name: 'Cherry' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Pine' }));
+    await act(async () => { finishPine(pine); });
+    expect(useAppStore.getState().activeMaterialId).toBe(pine);
+    await act(async () => { finishCherry(cherry); });
+    expect(useAppStore.getState().activeMaterialId).toBe(pine);
   });
 
   it('lists in-model materials, activates one on click, edits it and paints a face from Entity Info', () => {

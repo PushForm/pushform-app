@@ -1824,9 +1824,6 @@
 .pf-materials-grid.is-large {
   grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
 }
-.pf-materials-grid.is-list {
-  grid-template-columns: 1fr;
-}
 .pf-material-item {
   display: flex;
   flex-direction: column;
@@ -1839,10 +1836,6 @@
   border: 2px solid transparent;
   border-radius: var(--pf-radius);
   cursor: pointer;
-}
-.pf-materials-grid.is-list .pf-material-item {
-  flex-direction: row;
-  justify-content: flex-start;
 }
 .pf-material-item.is-active {
   border-color: var(--pf-accent, #1e63d1);

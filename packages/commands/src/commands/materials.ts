@@ -26,7 +26,7 @@ import { activeMaterialOf, hostOf } from '../host/services';
 import { draftContainerAt, requireContextPath, samePath } from './context';
 import { EntityRefSchema } from './sketch';
 import { surfaceRefs } from './sketchQueries';
-import { BUILTIN_LIBRARY, generateLibraryTexture, libraryMaterial } from './materialLibrary';
+import { BUILTIN_LIBRARY, loadLibraryTexture, libraryMaterial } from './materialLibrary';
 import { positionTextureCommands } from '../tools/impl/PositionTexture';
 
 /**
@@ -615,10 +615,16 @@ export const materialFromLibrary = defineCommand({
     }
     let texture: { imageId: number; widthM: number; heightM: number } | null = null;
     if (entry.texture) {
-      const png = generateLibraryTexture(entry.key);
-      if (png) {
-        const asset = await host.images.put(png, 'image/png', `${entry.name}.png`, { width: entry.texture.px, height: entry.texture.px });
+      const jpeg = await loadLibraryTexture(entry.key);
+      if (jpeg) {
+        const asset = await host.images.put(jpeg, 'image/jpeg', `${entry.name}.jpg`, { width: entry.texture.px, height: entry.texture.px });
         texture = { imageId: asset.id, widthM: entry.texture.widthM, heightM: entry.texture.heightM };
+      }
+    }
+    for (const m of host.doc.state.materials.values()) {
+      if (m.name === entry.name) {
+        if (p.activate) activeMaterialOf(ctx).set(m.id);
+        return m.id;
       }
     }
     const id = host.transact('Add Material', () =>

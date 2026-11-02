@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { basisToLocal } from '@pushform/core';
 import type { Id, MaterialId, PlaneBasis, Vec3 } from '@pushform/core';
 import { reverseLoop, uvAt, uvToAffine } from '@pushform/model';
@@ -14,6 +14,8 @@ import { contextMenu } from './contextMenu';
 import { placeholderTool } from '../tools/impl/Placeholder';
 import { groupCommands } from './groups';
 import { materialCommands } from './materials';
+import { libraryMaterial } from './materialLibrary';
+import * as materialLibrary from './materialLibrary';
 import type { PaintResult } from './materials';
 import { modelCommands } from './model';
 import { sketchCommands } from './sketch';
@@ -105,17 +107,51 @@ describe('material.* commands', () => {
     expect(host.doc.state.images.get(t.imageId)?.sha256).toBe(rt.sha256);
   });
 
-  it('fromLibrary adds a named color (no canvas in node → no texture) once and lists the library', async () => {
+  it('fromLibrary adds named colors and lists the library', async () => {
     const { registry, host } = setup();
     const list = registry.execute('material.library') as { key: string; textured: boolean }[];
     expect(list.some((m) => m.key === 'Wood_Cherry' && m.textured)).toBe(true);
     const id = (await registry.execute('material.fromLibrary', { key: 'Color_B01' })) as number;
     expect(host.doc.state.materials.get(id as MaterialId)).toMatchObject({ name: 'Color_B01', color: [1, 0, 0] });
     expect(await registry.execute('material.fromLibrary', { key: 'Color_B01' })).toBe(id);
-    const wood = (await registry.execute('material.fromLibrary', { key: 'Wood_Cherry' })) as number;
-    expect(host.doc.state.materials.get(wood as MaterialId)?.texture).toBeNull();
     await expect(registry.execute('material.fromLibrary', { key: 'Nope' })).rejects.toThrow(/Unknown library/);
   });
+
+  it('leaves the document and active material intact when a texture cannot load, and allows retry', async () => {
+    const { registry, host } = setup();
+    const before = host.doc.state;
+    const active = registry.execute('material.getActive');
+    const load = vi.spyOn(materialLibrary, 'loadLibraryTexture').mockRejectedValueOnce(new Error('Texture unavailable'));
+    try {
+      await expect(registry.execute('material.fromLibrary', { key: 'Wood_Cherry' })).rejects.toThrow('Texture unavailable');
+      expect(host.doc.state).toBe(before);
+      expect(registry.execute('material.getActive')).toBe(active);
+    } finally {
+      load.mockRestore();
+    }
+    const id = await registry.execute('material.fromLibrary', { key: 'Wood_Cherry' }) as MaterialId;
+    expect(host.doc.state.materials.get(id)?.texture).toBeTruthy();
+  });
+
+  it('embeds a full library image with its physical repeat size and deduplicates simultaneous additions', async () => {
+    const { registry, host } = setup();
+    const before = host.doc.state.materials.size;
+    const [first, second] = await Promise.all([
+      registry.execute('material.fromLibrary', { key: 'Wood_Cherry' }),
+      registry.execute('material.fromLibrary', { key: 'Wood_Cherry' }),
+    ]) as number[];
+    expect(second).toBe(first);
+    expect(host.doc.state.materials.size).toBe(before + 1);
+    const mat = host.doc.state.materials.get(first as MaterialId)!;
+    const source = libraryMaterial('Wood_Cherry')!.texture!;
+    expect(mat.texture).toMatchObject({ widthM: source.widthM, heightM: source.heightM, colorize: false });
+    const asset = host.doc.state.images.get(mat.texture!.imageId)!;
+    expect(asset).toMatchObject({ mime: 'image/jpeg', width: 1024, height: 1024 });
+    expect(host.images.get(asset.id)!.bytes.byteLength).toBeGreaterThan(100_000);
+    expect(host.doc.state.images.size).toBe(1);
+    expect(registry.execute('material.getActive')).toBe(first);
+  });
+
 });
 
 describe('paint.apply modes on a box', () => {

@@ -1,0 +1,551 @@
+{
+  "license": "CC0-1.0",
+  "source": "https://polyhaven.com/license",
+  "textures": [
+    {
+      "key": "Wood_Cherry",
+      "name": "Cherry",
+      "category": "Wood",
+      "asset": "cherry_veneer",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/cherry_veneer/cherry_veneer_diff_1k.jpg",
+      "authors": [
+        "Jenelle van Heerden"
+      ],
+      "sha256": "d50fed9f9964721d6b18581cadb6d95717a714b85361b22078e7d913ba5ce4d2",
+      "color": [
+        224,
+        176,
+        132
+      ],
+      "widthM": 1.0,
+      "heightM": 1.0
+    },
+    {
+      "key": "Wood_Pine",
+      "name": "Pine",
+      "category": "Wood",
+      "asset": "coated_pine",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/coated_pine/coated_pine_diff_1k.jpg",
+      "authors": [
+        "Charlotte Baglioni",
+        "Rico Cilliers"
+      ],
+      "sha256": "afee7cfb2ec1716edc712f929cdb3d3dfbac5a0ba290e25943b4472a8144bbaf",
+      "color": [
+        104,
+        57,
+        7
+      ],
+      "widthM": 0.74,
+      "heightM": 0.74
+    },
+    {
+      "key": "Wood_Oak",
+      "name": "White Oak",
+      "category": "Wood",
+      "asset": "oak_veneer_01",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/oak_veneer_01/oak_veneer_01_diff_1k.jpg",
+      "authors": [
+        "Jenelle van Heerden"
+      ],
+      "sha256": "c14681f72f59f17bff568cae7a837641443b607b899f0c279cd64a5638f877a7",
+      "color": [
+        161,
+        126,
+        87
+      ],
+      "widthM": 1.83,
+      "heightM": 1.83
+    },
+    {
+      "key": "Wood_Walnut",
+      "name": "Gray Walnut",
+      "category": "Wood",
+      "asset": "american_walnut_veneer",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/american_walnut_veneer/american_walnut_veneer_diff_1k.jpg",
+      "authors": [
+        "Jenelle van Heerden"
+      ],
+      "sha256": "10d983003bb686db4af3d35d91197fdb6144dcd15d3dcea2ef315600f51b1af5",
+      "color": [
+        114,
+        110,
+        105
+      ],
+      "widthM": 1.0,
+      "heightM": 1.0
+    },
+    {
+      "key": "Wood_Ash",
+      "name": "Ash",
+      "category": "Wood",
+      "asset": "ash_veneer",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/ash_veneer/ash_veneer_diff_1k.jpg",
+      "authors": [
+        "Jenelle van Heerden"
+      ],
+      "sha256": "13fd87c8b0a5cc1d4e408fb75b3eb629417ea6b1aaf1672b5adf993640486673",
+      "color": [
+        172,
+        148,
+        125
+      ],
+      "widthM": 1.0,
+      "heightM": 1.0
+    },
+    {
+      "key": "Wood_Bamboo",
+      "name": "Bamboo",
+      "category": "Wood",
+      "asset": "bamboo_veneer",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/bamboo_veneer/bamboo_veneer_diff_1k.jpg",
+      "authors": [
+        "Jenelle van Heerden"
+      ],
+      "sha256": "903a46f3414355c62a6dab09d0c01b1d54cbefac09d6de1996030bc90f406115",
+      "color": [
+        210,
+        173,
+        128
+      ],
+      "widthM": 1.0,
+      "heightM": 1.0
+    },
+    {
+      "key": "Brick_Antique",
+      "name": "Antique Red Brick",
+      "category": "Brick",
+      "asset": "brick_wall_001",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/brick_wall_001/brick_wall_001_diffuse_1k.jpg",
+      "authors": [
+        "Rob Tuytel",
+        "Dimitrios Savva"
+      ],
+      "sha256": "6a1233ec0186703de830354d89f122991e61e67fb67e0846c7eaf6c5aefea902",
+      "color": [
+        100,
+        74,
+        60
+      ],
+      "widthM": 3.0,
+      "heightM": 3.0
+    },
+    {
+      "key": "Brick_Red",
+      "name": "Red Brick",
+      "category": "Brick",
+      "asset": "red_brick",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/red_brick/red_brick_diff_1k.jpg",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "sha256": "6dea3a2b5a3185ff48d299d182c405a9f787129d79677792db6de4afd81c47f6",
+      "color": [
+        142,
+        103,
+        80
+      ],
+      "widthM": 1.4,
+      "heightM": 1.4
+    },
+    {
+      "key": "Brick_Dark",
+      "name": "Dark Brick",
+      "category": "Brick",
+      "asset": "dark_brick_wall",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/dark_brick_wall/dark_brick_wall_diff_1k.jpg",
+      "authors": [
+        "Dario Barresi",
+        "Dimitrios Savva"
+      ],
+      "sha256": "5ec2718d497fadae9492d0b6977a1de3f0867c9ccbf65a835f9bbe48d632a228",
+      "color": [
+        83,
+        71,
+        57
+      ],
+      "widthM": 1.05,
+      "heightM": 1.05
+    },
+    {
+      "key": "Brick_Painted",
+      "name": "Blue Painted Brick",
+      "category": "Brick",
+      "asset": "painted_brick",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/painted_brick/painted_brick_diff_1k.jpg",
+      "authors": [
+        "Amal Kumar"
+      ],
+      "sha256": "927c8742a483ff37a76a2571e5470215ca7b1d2acd62d6e93303ed109374f0ec",
+      "color": [
+        120,
+        159,
+        170
+      ],
+      "widthM": 1.8,
+      "heightM": 1.8
+    },
+    {
+      "key": "Brick_Herringbone",
+      "name": "Herringbone Brick",
+      "category": "Brick",
+      "asset": "herringbone_brick",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/herringbone_brick/herringbone_brick_diff_1k.jpg",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "sha256": "a61980cfad832040411c892bd13166494b7d0e19e91c69aec354d414bbf2e4d8",
+      "color": [
+        80,
+        60,
+        44
+      ],
+      "widthM": 1.8,
+      "heightM": 1.8
+    },
+    {
+      "key": "Brick_Pavers",
+      "name": "Red Brick Pavers",
+      "category": "Brick",
+      "asset": "red_brick_pavers",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/red_brick_pavers/red_brick_pavers_diff_1k.jpg",
+      "authors": [
+        "Amal Kumar"
+      ],
+      "sha256": "50567d36dd6d9bbf4ef9b76f83ed08fcfc8faa0d2bdfe1c2de81de5978d851db",
+      "color": [
+        116,
+        64,
+        50
+      ],
+      "widthM": 1.8,
+      "heightM": 1.8
+    },
+    {
+      "key": "Tile_Ceramic",
+      "name": "Gray Ceramic Mosaic",
+      "category": "Tile",
+      "asset": "square_tiles",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/square_tiles/square_tiles_diff_1k.jpg",
+      "authors": [
+        "Charlotte Baglioni"
+      ],
+      "sha256": "4112faaa94887f6a1d940ebadcc96d9fc1c7aa4ba16f0a236ffe0363e75d3610",
+      "color": [
+        104,
+        95,
+        85
+      ],
+      "widthM": 2.4,
+      "heightM": 2.4
+    },
+    {
+      "key": "Tile_Subway",
+      "name": "Ivory Finger Tile",
+      "category": "Tile",
+      "asset": "long_white_tiles",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/long_white_tiles/long_white_tiles_diff_1k.jpg",
+      "authors": [
+        "Jenelle van Heerden",
+        "Sergej Majboroda"
+      ],
+      "sha256": "0aa70e14117e9b1fbf726868675f6afa8fd62a2691f7ba3964f47796df06cd9c",
+      "color": [
+        205,
+        198,
+        182
+      ],
+      "widthM": 1.27,
+      "heightM": 1.27
+    },
+    {
+      "key": "Tile_Terracotta",
+      "name": "Terracotta",
+      "category": "Tile",
+      "asset": "terracotta_floor_tiles",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/terracotta_floor_tiles/terracotta_floor_tiles_diff_1k.jpg",
+      "authors": [
+        "Dimitrios Savva"
+      ],
+      "sha256": "966ff423065e4a4ce9490864fba61fdb491985d4a2c60eb2b85181c7e7edcd5d",
+      "color": [
+        77,
+        39,
+        26
+      ],
+      "widthM": 2.08,
+      "heightM": 2.08
+    },
+    {
+      "key": "Tile_Terrazzo",
+      "name": "Terrazzo",
+      "category": "Tile",
+      "asset": "terrazzo_tiles",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/terrazzo_tiles/terrazzo_tiles_diff_1k.jpg",
+      "authors": [
+        "Amal Kumar"
+      ],
+      "sha256": "462e3e719cda0472a33152523cf5ca2fc660e1c5869348be1609ba3dca12a2ef",
+      "color": [
+        137,
+        109,
+        87
+      ],
+      "widthM": 2.0,
+      "heightM": 2.0
+    },
+    {
+      "key": "Tile_Blue",
+      "name": "Aged Blue Pavers",
+      "category": "Tile",
+      "asset": "blue_floor_tiles_01",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/blue_floor_tiles_01/blue_floor_tiles_01_diff_1k.jpg",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "sha256": "aed68dd650f97d0f98220e40524dceac34cc259f712f224f099365f643610b58",
+      "color": [
+        149,
+        139,
+        113
+      ],
+      "widthM": 2.0,
+      "heightM": 2.0
+    },
+    {
+      "key": "Tile_Mosaic",
+      "name": "Marble Mosaic",
+      "category": "Tile",
+      "asset": "marble_mosaic_tiles",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/marble_mosaic_tiles/marble_mosaic_tiles_diff_1k.jpg",
+      "authors": [
+        "Amal Kumar"
+      ],
+      "sha256": "436d823e566b7744dd5c969efff183de6eeee9cd94e843a0517b2a5425c50f11",
+      "color": [
+        129,
+        109,
+        94
+      ],
+      "widthM": 2.0,
+      "heightM": 2.0
+    },
+    {
+      "key": "Metal_Plate",
+      "name": "Diamond Plate",
+      "category": "Metal",
+      "asset": "metal_plate",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/metal_plate/metal_plate_diff_1k.jpg",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "sha256": "c6b6739eac2c75ccc898e753d7833df24eafbdb9aa92fb6eabfb92abd1a680a5",
+      "color": [
+        61,
+        50,
+        28
+      ],
+      "widthM": 0.5,
+      "heightM": 0.5
+    },
+    {
+      "key": "Metal_Diamond",
+      "name": "Weathered Metal Plates",
+      "category": "Metal",
+      "asset": "metal_plate_02",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/metal_plate_02/metal_plate_02_diff_1k.jpg",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "sha256": "6e80877d0e9d5973d96298c6091df7ace906b0a6760afc4f3592e4855f3f1d4c",
+      "color": [
+        84,
+        73,
+        62
+      ],
+      "widthM": 2.0,
+      "heightM": 2.0
+    },
+    {
+      "key": "Metal_Corrugated",
+      "name": "Corrugated Iron",
+      "category": "Metal",
+      "asset": "corrugated_iron",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/corrugated_iron/corrugated_iron_diff_1k.jpg",
+      "authors": [
+        "Jenelle van Heerden",
+        "Dimitrios Savva"
+      ],
+      "sha256": "7f3649dd0d056a55a910146f09b1d5298370696a90f511a255fb4c5715bb4b58",
+      "color": [
+        170,
+        179,
+        174
+      ],
+      "widthM": 1.12,
+      "heightM": 1.12
+    },
+    {
+      "key": "Metal_Blue",
+      "name": "Blue Painted Metal",
+      "category": "Metal",
+      "asset": "blue_metal_plate",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/blue_metal_plate/blue_metal_plate_diff_1k.jpg",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "sha256": "a0162bffce47d4a35613a12af22571b28c18412dc5805cbb69eac343554ef750",
+      "color": [
+        41,
+        62,
+        76
+      ],
+      "widthM": 2.5,
+      "heightM": 2.5
+    },
+    {
+      "key": "Metal_Weathered",
+      "name": "Weathered Steel",
+      "category": "Metal",
+      "asset": "rusty_metal_02",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rusty_metal_02/rusty_metal_02_diff_1k.jpg",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "sha256": "adaf094391518b6afe787a123942110aa88ef521c844f970b124420f5ed5d3d9",
+      "color": [
+        172,
+        144,
+        90
+      ],
+      "widthM": 1.0,
+      "heightM": 1.0
+    },
+    {
+      "key": "Metal_Rusted",
+      "name": "Rusted Metal",
+      "category": "Metal",
+      "asset": "rusty_metal_sheet",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rusty_metal_sheet/rusty_metal_sheet_diff_1k.jpg",
+      "authors": [
+        "Amal Kumar"
+      ],
+      "sha256": "ecfacdea466b43162b63867b419576b7d35d34ea37c96969cf05e5a07faeb705",
+      "color": [
+        119,
+        110,
+        84
+      ],
+      "widthM": 2.0,
+      "heightM": 2.0
+    },
+    {
+      "key": "Stone_Granite",
+      "name": "Granite Tiles",
+      "category": "Stone",
+      "asset": "granite_tile",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/granite_tile/granite_tile_diff_1k.jpg",
+      "authors": [
+        "Charlotte Baglioni"
+      ],
+      "sha256": "9df48b66055588708d446e69f37ea6146b8d5d3df54cd1ff088ec688acdca95c",
+      "color": [
+        78,
+        78,
+        79
+      ],
+      "widthM": 2.3,
+      "heightM": 2.3
+    },
+    {
+      "key": "Stone_Marble",
+      "name": "Honed Marble",
+      "category": "Stone",
+      "asset": "marble_01",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/marble_01/marble_01_diff_1k.jpg",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "sha256": "b10dabea976d68baa976a0d4e8dac58789df8d26a1b50697f320106f1b00a229",
+      "color": [
+        177,
+        157,
+        122
+      ],
+      "widthM": 1.5,
+      "heightM": 1.5
+    },
+    {
+      "key": "Stone_Slate",
+      "name": "Slate Flagstone",
+      "category": "Stone",
+      "asset": "slate_floor",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/slate_floor/slate_floor_diff_1k.jpg",
+      "authors": [
+        "Dimitrios Savva"
+      ],
+      "sha256": "ca47f5ba941cca29af7c7c16f7c6e7a8ba9dbdeb440e26c7a166d2f3bae9ace5",
+      "color": [
+        42,
+        30,
+        30
+      ],
+      "widthM": 2.29,
+      "heightM": 2.29
+    },
+    {
+      "key": "Stone_Sandstone",
+      "name": "Sandstone",
+      "category": "Stone",
+      "asset": "sandstone_blocks_04",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/sandstone_blocks_04/sandstone_blocks_04_diff_1k.jpg",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "sha256": "a1399a26a60b5024a832c8dd0f1a27bc7ad6c4d06fd60143d803ff6d93b778ed",
+      "color": [
+        197,
+        165,
+        128
+      ],
+      "widthM": 3.0,
+      "heightM": 3.0
+    },
+    {
+      "key": "Stone_Stacked",
+      "name": "Stacked Stone",
+      "category": "Stone",
+      "asset": "stacked_stone_wall",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/stacked_stone_wall/stacked_stone_wall_diff_1k.jpg",
+      "authors": [
+        "Dimitrios Savva"
+      ],
+      "sha256": "91217c3edf4f288eb8fa31ef208d8f6067d75320a8a66b32cd6f3965b763c45a",
+      "color": [
+        95,
+        69,
+        48
+      ],
+      "widthM": 2.0,
+      "heightM": 2.0
+    },
+    {
+      "key": "Stone_Cobblestone",
+      "name": "Cobblestone",
+      "category": "Stone",
+      "asset": "cobblestone_floor_01",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/cobblestone_floor_01/cobblestone_floor_01_diff_1k.jpg",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "sha256": "7630d6a59501cab4d2295b2be47bad892b8dae49895b4bee6bc26fd45c423e05",
+      "color": [
+        143,
+        130,
+        110
+      ],
+      "widthM": 1.0,
+      "heightM": 1.0
+    }
+  ]
+}

@@ -3,6 +3,7 @@
 import { MdUpdate } from 'react-icons/md';
 import { AiOutlineTable } from 'react-icons/ai';
 import { BsCloudFog2 } from 'react-icons/bs';
+import { GiCircularSawblade } from 'react-icons/gi';
 import type { JSX } from 'react';
 import type { IconType } from 'react-icons';
 import { LuPuzzle } from 'react-icons/lu';
@@ -89,6 +90,8 @@ import {
 
 /** Filled glyph: the shared stroke width would thicken it, so it draws with fill only. */
 const FogIcon: IconType = (props) => <BsCloudFog2 {...props} strokeWidth={0} />;
+/** Game Icons (CC BY 3.0, credited in About PushForm) are filled glyphs too. */
+const SawBladeIcon: IconType = (props) => <GiCircularSawblade {...props} strokeWidth={0} />;
 
 /** Shared outline icons for the tool and panel strips. */
 const REACT_ICONS: Record<string, IconType> = {
@@ -116,6 +119,8 @@ const REACT_ICONS: Record<string, IconType> = {
   'chat-ai': RiChatAiLine,
   'object-browser': PiTreeView,
   extensions: LuPuzzle,
+  /** A circular saw blade, for the Cut List extension and any other that names it. */
+  'saw-blade': SawBladeIcon,
   'chat-delete': RiChatDeleteLine,
   'tool-viewport': TbPackageImport,
   'tool-select': LuMousePointer2,
@@ -226,10 +231,6 @@ const PATHS: Record<string, string> = {
   search: 'M10 4a6 6 0 1 0 0 12 6 6 0 0 0 0-12M14.5 14.5L20 20',
   help: 'M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7M12 17h.01',
   close: 'M6 6l12 12M18 6L6 18',
-  /** A box with an arrow out of its corner: show in a larger window. */
-  'open-window': 'M14 4h6v6M20 4l-8 8M11 4H4v16h16v-7',
-  /** A frame with a side column: back to the side panel. */
-  'dock-side': 'M4 4h16v16H4zM10 4v16M7 8h.01M7 11h.01',
   command: 'M5 7l5 5-5 5M12 17h7',
   'panel-softenEdges': 'M4 20V9a5 5 0 0 1 5-5h11M4 20h11a5 5 0 0 0 5-5V4M9 15a2 2 0 0 1 2-2h4',
   'panel-instructor': 'M3 9l9-4 9 4-9 4-9-4zM7 11v4c0 1.5 2.5 3 5 3s5-1.5 5-3v-4M21 9v6',

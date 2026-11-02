@@ -2,7 +2,7 @@
 // Copyright 2026 PushForm contributors
 import type { KeyboardEvent } from 'react';
 
-/** Focus handling shared by the extension window and extension dialogs, which are both modal. */
+/** Focus handling of extension dialogs, which are modal. */
 
 const CANDIDATES = 'button, input, select, textarea, a[href], [tabindex]';
 

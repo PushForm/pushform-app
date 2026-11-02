@@ -4,7 +4,7 @@ import type {
   DocumentInfo, DocumentInfoEvent, DocumentUnits, DocumentUnitsEvent, ModelBatch, ModelBatchResult, ModelChangeEvent, ModelDocumentSnapshot,
   ModelQuery, ModelQueryResult, ModelRef, ModelRefInput,
 } from './model.ts';
-import type { UiEventOnTarget, UiNode, UiPresentation, UiPrintRequest } from './ui.ts';
+import type { UiEventOnTarget, UiNode, UiPrintRequest } from './ui.ts';
 
 /**
  * What an extension's entry module receives. The module exports `activate(context)` and, optionally,
@@ -22,6 +22,9 @@ import type { UiEventOnTarget, UiNode, UiPresentation, UiPrintRequest } from './
 /** Permissions an extension can request in its manifest. */
 export type ExtensionPermission = 'model.read' | 'model.write' | 'selection.read' | 'selection.write' | 'tool.interaction'
   | 'viewport.presentation' | 'file.read' | 'file.export' | 'settings' | 'clipboard.write' | 'network' | 'model.egress';
+
+/** The groups of the modeling toolbar a `model.toolbar` button can join; it is added at the end of its group. */
+export type ToolbarCategory = 'transform' | 'draw' | 'modify' | 'inspect' | 'organize' | 'navigate';
 
 /** Options every host call accepts. */
 export interface CallOptions {
@@ -43,13 +46,21 @@ export type ContributionHandler = (params: unknown, invocation: InvocationContex
 
 export interface UiService {
   /**
-   * Shows `tree` for one of the extension's panel, inspector or settings contributions. A panel can ask to open in a
-   * large window with `presentation: 'window'`; it opens docked otherwise, and the user can move it either way.
+   * Shows `tree` for one of the extension's sidebar, panel, inspector or settings contributions: a `model.sidebar`
+   * target in the extension's side panel, a `model.panel` target in its own tab filling the editor area, and the
+   * blocks in place. Call it from the contribution's handler, which runs when PushForm opens the sidebar or the tab.
    */
-  mount(input: { target: string; seq: number; tree: UiNode; presentation?: UiPresentation }, options?: CallOptions): Promise<{ seq: number }>;
+  mount(input: { target: string; seq: number; tree: UiNode }, options?: CallOptions): Promise<{ seq: number }>;
   /** Replaces the tree; `seq` must be higher than the one shown, or the shown tree is kept and the call fails. */
-  update(input: { target: string; seq: number; tree: UiNode; presentation?: UiPresentation }, options?: CallOptions): Promise<{ seq: number }>;
+  update(input: { target: string; seq: number; tree: UiNode }, options?: CallOptions): Promise<{ seq: number }>;
   unmount(input: { target: string }, options?: CallOptions): Promise<null>;
+  /**
+   * Opens, or brings to the front, the tab of one of the extension's own `model.panel` contributions for the
+   * document the current invocation acts on; PushForm then runs that contribution, which mounts the tab's tree.
+   * Works only right after the user acted on the extension (pressed one of its controls, ran one of its commands or
+   * toolbar buttons), like the clipboard; otherwise it fails with `permission.denied`.
+   */
+  open(input: { target: string }, options?: CallOptions): Promise<null>;
   /**
    * Shows a modal dialog over a mounted target, drawn by PushForm with `title` and your `tree` (a material editor, a
    * confirmation), or replaces the open one's title and tree with a higher `seq`. Events from its components arrive

@@ -27,6 +27,7 @@ describe('AboutDialog', () => {
     expect(license.getAttribute('href')).toBe('https://www.gnu.org/licenses/gpl-3.0.html');
     expect(license.getAttribute('target')).toBe('_blank');
     expect(license.getAttribute('rel')).toBe('noopener noreferrer');
+    // The source link, then the icon credits follow, then Tab wraps back to the close button.
     fireEvent.keyDown(window, { key: 'Tab' });
     const source = screen.getByRole('link', { name: 'Source code on GitHub' });
     expect(document.activeElement).toBe(source);
@@ -34,9 +35,15 @@ describe('AboutDialog', () => {
     expect(source.getAttribute('target')).toBe('_blank');
     expect(source.getAttribute('rel')).toBe('noopener noreferrer');
     fireEvent.keyDown(window, { key: 'Tab' });
+    const icons = screen.getByRole('link', { name: 'Game Icons' });
+    expect(document.activeElement).toBe(icons);
+    expect(icons.getAttribute('href')).toBe('https://game-icons.net/');
+    fireEvent.keyDown(window, { key: 'Tab' });
+    expect(document.activeElement).toBe(screen.getByRole('link', { name: 'CC BY 3.0' }));
+    fireEvent.keyDown(window, { key: 'Tab' });
     expect(document.activeElement).toBe(close);
     fireEvent.keyDown(window, { key: 'Tab', shiftKey: true });
-    expect(document.activeElement).toBe(source);
+    expect(document.activeElement).toBe(screen.getByRole('link', { name: 'CC BY 3.0' }));
     fireEvent.keyDown(window, { key: 'Tab' });
     expect(document.activeElement).toBe(close);
     fireEvent.click(close);

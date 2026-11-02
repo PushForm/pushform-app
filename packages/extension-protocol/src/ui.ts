@@ -49,7 +49,7 @@ const color = z.string().regex(/^#[0-9a-fA-F]{6}$/);
 export const UI_ICONS = [
   'add', 'remove', 'delete', 'edit', 'copy', 'save', 'print', 'download', 'upload', 'search', 'filter', 'refresh', 'settings',
   'help', 'info', 'warning', 'check', 'close', 'more', 'menu', 'expand', 'collapse', 'up', 'down', 'show', 'hide', 'lock', 'unlock',
-  'undo', 'redo', 'folder', 'document', 'tag', 'tags', 'palette', 'box', 'component', 'table', 'ruler',
+  'undo', 'redo', 'folder', 'document', 'tag', 'tags', 'palette', 'box', 'component', 'table', 'ruler', 'saw-blade',
 ] as const;
 export type UiIcon = (typeof UI_ICONS)[number];
 const icon = z.enum(UI_ICONS);
@@ -376,19 +376,12 @@ export type UiEvent =
   | { component: string; event: 'hover'; item: string | null };
 
 /**
- * Where a panel's interface is shown: `dock` in the side panel beside the editor, or `window` in a large window over
- * the editor, for wide tables and drawings. A panel starts docked unless its `ui.mount` asks for `window`; `ui.update`
- * keeps the presentation shown unless it names one. Once the user moves the panel themselves, their choice is kept
- * and later requests do not move it. Inspector and settings blocks are always shown in place and ignore it.
+ * Requests of the `ui` service: mount or replace the tree of a target, or remove it. A `model.sidebar` target shows
+ * in the extension's side panel, a `model.panel` target in its own tab, and inspector and settings blocks in place.
  */
-export const UI_PRESENTATIONS = ['dock', 'window'] as const;
-export type UiPresentation = (typeof UI_PRESENTATIONS)[number];
-
-/** Requests of the `ui` service: mount or replace the tree of a target, or remove it. */
-export const uiMountSchema = z.strictObject({ target: z.string().min(1).max(200), seq: z.number().int().nonnegative(), tree: z.unknown(),
-  presentation: z.enum(UI_PRESENTATIONS).optional() });
+export const uiMountSchema = z.strictObject({ target: z.string().min(1).max(200), seq: z.number().int().nonnegative(), tree: z.unknown() });
 /** What `ui.mount` and `ui.update` take; the tree is validated separately, by `validateUiTree`. */
-export type UiMountInput = { target: string; seq: number; tree: UiNode; presentation?: UiPresentation };
+export type UiMountInput = { target: string; seq: number; tree: UiNode };
 export const uiUnmountSchema = z.strictObject({ target: z.string().min(1).max(200) });
 /** Pages one print request may produce. */
 export const UI_PRINT_MAX_PAGES = 500;
@@ -400,6 +393,12 @@ export const UI_PRINT_MAX_PAGES = 500;
 export const uiDialogSchema = z.strictObject({ target: z.string().min(1).max(200), seq: z.number().int().nonnegative(), title: label, tree: z.unknown() });
 export type UiDialogInput = { target: string; seq: number; title: string; tree: UiNode };
 export const uiCloseDialogSchema = z.strictObject({ target: z.string().min(1).max(200) });
+/**
+ * Opens, or brings to the front, the tab of one of the extension's own `model.panel` contributions, for the document
+ * the calling invocation acts on. Allowed only right after the user acted on the extension, like the clipboard.
+ */
+export const uiOpenSchema = z.strictObject({ target: z.string().min(1).max(200) });
+export type UiOpenInput = z.infer<typeof uiOpenSchema>;
 /**
  * Prints, or saves as PDF, components on screen, in order, at a page size in meters (20 mm to 2 m a side; landscape
  * when wider than tall). A `vector` view is one page. `table`, `text` and `divider` components, and `stack`s holding

@@ -32,7 +32,7 @@ export const UI_ICON_NAMES: Readonly<Record<UiIcon, string>> = {
   info: 'panel-entityInfo', warning: 'warning', check: 'check', close: 'close', more: 'more', menu: 'menu', expand: 'chevron-down',
   collapse: 'chevron-up', up: 'page-up', down: 'page-down', show: 'eye', hide: 'eye-off', lock: 'lock', unlock: 'unlock', undo: 'undo',
   redo: 'redo', folder: 'folder', document: 'layer-page', tag: 'tool-tag', tags: 'panel-tags', palette: 'panel-styles', box: 'outliner-group',
-  component: 'outliner-component', table: 'tool-table', ruler: 'tool-dimension',
+  component: 'outliner-component', table: 'tool-table', ruler: 'tool-dimension', 'saw-blade': 'saw-blade',
 };
 
 function UiIconGlyph({ icon }: { icon: UiIcon }): JSX.Element {

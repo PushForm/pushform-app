@@ -128,7 +128,7 @@ type DeleteChoice = 'untagged' | 'current' | 'delete';
 /**
  * Tags panel: tag and folder rows with visibility, the active-tag pencil, inline
  * rename, color swatch and dash pattern; Add Tag / Add Folder / Delete (with a
- * "what happens to the entities" choice inline); filter; Color by Tag; details menu.
+ * "what happens to the entities" choice inline); filter; Color by Tag; Select All and Purge actions.
  */
 export function TagsPanel(): JSX.Element {
   const app = useApp();
@@ -141,7 +141,6 @@ export function TagsPanel(): JSX.Element {
   const [renamingFolderId, setRenamingFolderId] = useState<number | null>(null);
   const [collapsed, setCollapsed] = useState<Set<number>>(() => new Set());
   const [deleting, setDeleting] = useState<number | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
 
   const run = (id: string, params?: unknown) => app.commands.tryExecute(id, params);
   /** Run and return a numeric result (new entity id), or undefined on failure. */
@@ -272,7 +271,7 @@ export function TagsPanel(): JSX.Element {
   };
 
   return (
-    <div className="pf-outliner pf-tags" onClick={() => menuOpen && setMenuOpen(false)}>
+    <div className="pf-outliner pf-tags">
       <div className="pf-outliner-head">
         <button type="button" className="pf-iconbtn" aria-label="Add Tag" title="Add Tag" onClick={addTag}>
           <Icon name="plus" size={16} />
@@ -294,34 +293,7 @@ export function TagsPanel(): JSX.Element {
           <Icon name="minus" size={16} />
         </button>
         <input className="pf-outliner-filter" placeholder="Filter" aria-label="Filter tags" value={filter} onChange={(e) => setFilter(e.target.value)} />
-        <div className="pf-outliner-details">
-          <button
-            type="button"
-            className="pf-iconbtn"
-            aria-label="Details"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            onClick={(e) => {
-              e.stopPropagation();
-              setMenuOpen((v) => !v);
-            }}
-          >
-            <Icon name="more-vertical" size={16} />
-          </button>
-          {menuOpen ? (
-            <div className="pf-menu pf-outliner-menu" role="menu">
-              <div className="pf-menu-item" role="menuitem" onClick={() => run('tag.selectAll', { id: selectedTag ? selectedTag.id : effectiveActive })}>
-                Select All
-              </div>
-              <div className="pf-menu-item" role="menuitem" onClick={() => run('tag.purge')}>
-                Purge
-              </div>
-              <div className="pf-menu-item" role="menuitemcheckbox" aria-checked={colorByTag} onClick={() => run('view.colorByTag')}>
-                {colorByTag ? '✓ ' : ''}Color by Tag
-              </div>
-            </div>
-          ) : null}
-        </div>
+
       </div>
       {deleting !== null ? (
         <div className="pf-tag-delete" role="group" aria-label="Delete tag">
@@ -361,6 +333,10 @@ export function TagsPanel(): JSX.Element {
         <input type="checkbox" checked={colorByTag} onChange={(e) => run('view.colorByTag', { value: e.target.checked })} />
         Color by Tag
       </label>
+      <div className="pf-form-actions">
+        <button type="button" className="pf-btn" title="Select all objects with the selected tag" onClick={() => run('tag.selectAll', { id: selectedTag ? selectedTag.id : effectiveActive })}>Select All</button>
+        <button type="button" className="pf-btn" title="Remove unused tags and empty folders" onClick={() => run('tag.purge')}>Purge</button>
+      </div>
     </div>
   );
 }

@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { describe, expect, it } from 'vitest';
-import type { Id, MaterialId } from '@pushform/core';
+import type { Id, MaterialId, TagId } from '@pushform/core';
 import { InlineBackend, KernelClient } from '@pushform/kernel';
 import type { EntityRef } from '@pushform/model';
+import { containerAt } from '@pushform/model';
+import { addInstance, addMeshPart } from '../panels/instances.testutil';
 import { createApp } from '../bootstrap';
 import { bodiesToRender, faceMaterialsToRender, renderMaterial, setRenderImageStore, sketchesToRender, uvOverrideKey } from './renderAdapter';
 
@@ -12,6 +14,72 @@ function boot() {
 }
 
 describe('renderAdapter materials', () => {
+  it('replaces painted faces and textures with inherited tag colors and restores materials when disabled', async () => {
+    const app = boot();
+    try {
+      const { commands, document: host } = app;
+      const parent = addInstance(app, { name: 'Assembly' });
+      const child = addInstance(app, { name: 'Nested', parent: [parent], withBox: true });
+      const part = addMeshPart(app, { name: 'Mesh', parent: [parent, child] });
+      const path = [parent, child];
+      const container = () => containerAt(host.doc.state, path)!;
+      const body = [...container().bodies.values()][0]!;
+      const faceId = [...body.faces.keys()][0]!;
+      const red = commands.execute('tag.create', { name: 'Red tag', color: [1, 0, 0] }) as TagId;
+      const green = commands.execute('tag.create', { name: 'Green tag', color: [0, 1, 0] }) as TagId;
+      commands.execute('tag.assign', { refs: [{ kind: 'instance', path: [], id: parent }], tagId: red });
+      const blue = commands.execute('material.create', { name: 'Blue', color: [0, 0, 1], alpha: 0.5 }) as MaterialId;
+      const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0]);
+      const texture = await commands.execute('material.importImage', { bytes: png, name: 'texture.png' }) as { materialId: MaterialId };
+      setRenderImageStore(host.images);
+      host.doc.transact('paint', draft => {
+        const c = containerAt(draft as never, path)!;
+        const b = c.bodies.get(body.id)!;
+        b.materialId = blue;
+        b.faces.get(faceId)!.frontMaterialId = texture.materialId;
+        b.faces.get(faceId)!.backMaterialId = blue;
+        c.meshParts.get(part)!.materialId = blue;
+        containerAt(draft as never, [parent])!.instances.get(child)!.materialId = blue;
+      });
+      const original = bodiesToRender(host.doc.state).find(b => b.entityId === body.id)!;
+      expect(original.faceMaterials!.get(faceId)!.front!.textureUrl).toBeTruthy();
+      commands.execute('view.colorByTag');
+      let rendered = bodiesToRender(host.doc.state);
+      expect(rendered.every(b => b.defaultColor === '#ff0000')).toBe(true);
+      let tagged = rendered.find(b => b.entityId === body.id)!;
+      expect(tagged.faceMaterials!.get(faceId)).toMatchObject({ front: { color: '#ff0000', alpha: 1 }, back: { color: '#ff0000', alpha: 1 } });
+      expect(tagged.faceMaterials!.get(faceId)!.front!.textureUrl).toBeUndefined();
+      expect(tagged.edges!.every(e => e.color === '#ff0000')).toBe(true);
+      expect(rendered.find(b => b.entityId === part)!.faceMaterials!.size).toBe(0);
+      // A second placement shares the definition but inherits a different tag color.
+      let second = 0 as Id;
+      host.doc.transact('shared placement', draft => {
+        const root = draft.definitions.get(draft.rootDefinitionId)!;
+        second = draft.meta.nextId++ as Id;
+        root.entities.instances.set(second, { ...root.entities.instances.get(parent)!, id: second, tagId: green });
+        root.entities.order.push(second);
+      });
+      rendered = bodiesToRender(host.doc.state);
+      expect(rendered.find(b => b.entityId === body.id && b.path[0] === parent)!.faceMaterials!.get(faceId)!.front!.color).toBe('#ff0000');
+      expect(rendered.find(b => b.entityId === body.id && b.path[0] === second)!.faceMaterials!.get(faceId)!.front!.color).toBe('#00ff00');
+      const repeated = bodiesToRender(host.doc.state);
+      for (let i = 0; i < rendered.length; i++) {
+        expect(repeated[i]!.faceMaterials).toBe(rendered[i]!.faceMaterials);
+        expect(repeated[i]!.edges).toBe(rendered[i]!.edges);
+      }
+      host.doc.transact('face tag', draft => { containerAt(draft as never, path)!.bodies.get(body.id)!.faces.get(faceId)!.tagId = green; });
+      tagged = bodiesToRender(host.doc.state).find(b => b.entityId === body.id)!;
+      expect(tagged.faceMaterials!.get(faceId)!.front!.color).toBe('#00ff00');
+      commands.execute('tag.setColor', { id: green, color: [1, 1, 0] });
+      expect(bodiesToRender(host.doc.state).find(b => b.entityId === body.id)!.faceMaterials!.get(faceId)!.front!.color).toBe('#ffff00');
+      host.undo();
+      expect(bodiesToRender(host.doc.state).find(b => b.entityId === body.id)!.faceMaterials!.get(faceId)!.front!.color).toBe('#00ff00');
+      commands.execute('view.colorByTag');
+      rendered = bodiesToRender(host.doc.state);
+      expect(rendered.find(b => b.entityId === body.id)!.faceMaterials!.get(faceId)).toMatchObject({ front: { textureUrl: original.faceMaterials!.get(faceId)!.front!.textureUrl }, back: { color: '#0000ff', alpha: 0.5 } });
+    } finally { app.dispose(); }
+  });
+
   it('resolves per-face materials through the body and the instance material; explicit face materials win', async () => {
     const app = boot();
     try {

@@ -88,9 +88,10 @@ describe('TagsPanel', () => {
     fireEvent.click(screen.getByText('Move to Untagged'));
     expect(state().tags.has(created.id)).toBe(false);
     expect(useAppStore.getState().display.activeTagId).toBeNull();
-    // details menu
-    fireEvent.click(screen.getByLabelText('Details'));
-    fireEvent.click(screen.getByText('Purge'));
+    expect(screen.queryByLabelText('Details')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Select All' })).toBeTruthy();
+    expect(screen.getAllByRole('checkbox', { name: 'Color by Tag' })).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Purge' }));
     expect(state().tagFolders.size).toBe(0);
   });
 

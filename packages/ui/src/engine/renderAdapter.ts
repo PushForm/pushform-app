@@ -113,6 +113,7 @@ export function faceMaterialsToRender(
   opts: RenderAdapterOptions = {},
   path: readonly Id[] = [],
 ): ReadonlyMap<number, RenderFaceMaterial> {
+  if (colorByTagOn(state)) return tagFaceMaterials(state, body, inherited?.color);
   const images = opts.images ?? renderImages;
   const overrides = opts.uvOverrides;
   const prefix = `${renderKey(path, body.id)}#`;
@@ -208,6 +209,7 @@ export function meshPartSurfacesToRender(g: MeshPartGeometry): RenderBodySurface
 }
 /** Per source face materials of a mesh part: faces with a color of their own, both sides alike, with no texture placement. */
 export function meshPartFaceMaterialsToRender(state: DocumentState, part: MeshPart, inherited: RenderMaterial | null, opts: RenderAdapterOptions = {}): ReadonlyMap<number, RenderFaceMaterial> {
+  if (colorByTagOn(state)) return EMPTY_FACE_MATERIALS;
   const g = part.geometry, images = opts.images ?? renderImages;
   const cached = meshPartMaterialCache.get(g);
   if (cached && cached.materials === state.materials && cached.partMaterial === part.materialId && cached.inherited === inherited && cached.images === images) return cached.out;
@@ -303,9 +305,10 @@ export function instancesToRender(state: DocumentState): RenderInstance[] {
     const prev = matrixCache.get(key);
     const matrix = prev && sameMatrix(prev, v.matrix) ? prev : (v.matrix as unknown as Mat4);
     next.set(key, matrix);
-    const color = (colorByTagOn(state) ? tagColor(state, v.instance.tagId) : undefined) ?? materialColor(state, v.instance.materialId) ?? colors.get(parentKey);
+    const byTag = colorByTagOn(state);
+    const color = byTag ? effectiveTagColor(state, v.instance.tagId, colors.get(parentKey)) : materialColor(state, v.instance.materialId) ?? colors.get(parentKey);
     colors.set(key, color);
-    const material = renderMaterial(state, v.instance.materialId) ?? materials.get(parentKey) ?? null;
+    const material = byTag ? tagRenderMaterial(color) : renderMaterial(state, v.instance.materialId) ?? materials.get(parentKey) ?? null;
     materials.set(key, material);
     const parent = shadows.get(parentKey) ?? { cast: true, receive: true };
     const shadow = { cast: parent.cast && v.instance.castShadows !== false, receive: parent.receive && v.instance.receiveShadows !== false };
@@ -343,9 +346,9 @@ function pushBodies(
       version: body.version,
       mesh: body.mesh,
       transform,
-      edges: taggedBodyEdges(state, body),
+      edges: taggedBodyEdges(state, body, inherited),
       surfaces: bodySurfacesToRender(body),
-      defaultColor: (colorByTagOn(state) ? tagColor(state, body.tagId) : undefined) ?? materialColor(state, body.materialId) ?? inherited,
+      defaultColor: colorByTagOn(state) ? effectiveTagColor(state, body.tagId, inherited) : materialColor(state, body.materialId) ?? inherited,
       castShadows: shadows.cast && body.castShadows !== false,
       receiveShadows: shadows.receive && body.receiveShadows !== false,
       ...(faceCamera ? { faceCamera } : {}),
@@ -363,7 +366,7 @@ function pushBodies(
       // Without source edges the renderer draws the boundaries between source faces instead.
       edges: part.geometry.edgeFlags.length ? meshPartEdgesToRender(part.geometry) : undefined,
       surfaces: meshPartSurfacesToRender(part.geometry),
-      defaultColor: (colorByTagOn(state) ? tagColor(state, part.tagId) : undefined) ?? materialColor(state, part.materialId) ?? inherited,
+      defaultColor: colorByTagOn(state) ? effectiveTagColor(state, part.tagId, inherited) : materialColor(state, part.materialId) ?? inherited,
       castShadows: shadows.cast && part.castShadows !== false,
       receiveShadows: shadows.receive && part.receiveShadows !== false,
       ...(faceCamera ? { faceCamera } : {}),
@@ -656,10 +659,10 @@ export function containerSketchToRender(
     : d;
   for (const face of sketch.faces.values()) {
     if (!tagVisible(state, face.tagId)) continue;
-    const front = (byTag ? tagColor(state, face.tagId) : undefined) ?? materialColor(state, face.frontMaterialId) ?? defaultColor;
-    const back = (byTag ? tagColor(state, face.tagId) : undefined) ?? materialColor(state, face.backMaterialId) ?? defaultColor;
-    const frontMaterial = renderMaterial(state, face.frontMaterialId, images) ?? inheritedMaterial;
-    const backMaterial = renderMaterial(state, face.backMaterialId, images) ?? inheritedMaterial;
+    const front = byTag ? effectiveTagColor(state, face.tagId, defaultColor) : materialColor(state, face.frontMaterialId) ?? defaultColor;
+    const back = byTag ? front : materialColor(state, face.backMaterialId) ?? defaultColor;
+    const frontMaterial = byTag ? null : renderMaterial(state, face.frontMaterialId, images) ?? inheritedMaterial;
+    const backMaterial = byTag ? null : renderMaterial(state, face.backMaterialId, images) ?? inheritedMaterial;
     const uvOverride = opts.uvOverrides?.get(`${uvPrefix}${face.id}`);
     if (uvOverride) uvToken += `${face.id}:${uvOverride.kind === 'auto' ? 'auto' : `${uvOverride.kind}:${uvOverride.matrix.join(',')}`};`;
     const uv = uvOverride ?? face.uv;
@@ -682,7 +685,7 @@ export function containerSketchToRender(
   for (const e of sketch.edges.values()) {
     const a = sketch.vertices.get(e.a), b = sketch.vertices.get(e.b);
     if (!a || !b || !tagVisible(state, e.tagId)) continue;
-    edges.push({ id: e.id, a: tp(a.p), b: tp(b.p), soft: e.soft, smooth: e.smooth, hidden: e.hidden, ...tagEdgeStyle(state, e.tagId, byTag) });
+    edges.push({ id: e.id, a: tp(a.p), b: tp(b.p), soft: e.soft, smooth: e.smooth, hidden: e.hidden, ...tagEdgeStyle(state, e.tagId, byTag, defaultColor) });
   }
   // Imprint edges (lines drawn on body faces) are drawn with the sketch edges. The version token
   // combines the sketch identity with every body's imprint state so a change to either rebuilds.
@@ -904,12 +907,43 @@ export function tagColor(state: DocumentState, tagId: TagId): string | undefined
   return t ? rgbToCss(t.color) : undefined;
 }
 
+/** Untagged geometry inherits its containing placement's color before the root default. */
+function effectiveTagColor(state: DocumentState, id: TagId, inherited?: string): string | undefined {
+  return id === state.defaultTagId ? inherited ?? tagColor(state, id) : tagColor(state, id) ?? inherited;
+}
+
+const EMPTY_FACE_MATERIALS: ReadonlyMap<number, RenderFaceMaterial> = new Map();
+const tagMaterials = new Map<string, RenderMaterial>();
+function tagRenderMaterial(color: string | undefined): RenderMaterial | null {
+  if (!color) return null;
+  let material = tagMaterials.get(color);
+  if (!material) { material = { id: -1, color, alpha: 1 }; tagMaterials.set(color, material); }
+  return material;
+}
+const tagFacesCache = new WeakMap<Body['faces'], { token: object; variants: Map<string | undefined, ReadonlyMap<number, RenderFaceMaterial>> }>();
+/** Tag colors replace both face materials, including their opacity and texture. */
+function tagFaceMaterials(state: DocumentState, body: Body, inherited?: string): ReadonlyMap<number, RenderFaceMaterial> {
+  const token = tagStyleToken(state), color = effectiveTagColor(state, body.tagId, inherited);
+  const cached = tagFacesCache.get(body.faces);
+  const variants = cached?.token === token ? cached.variants : new Map<string | undefined, ReadonlyMap<number, RenderFaceMaterial>>();
+  const existing = variants.get(color);
+  if (existing) return existing;
+  const out = new Map<number, RenderFaceMaterial>();
+  for (const face of body.faces.values()) {
+    const material = tagRenderMaterial(effectiveTagColor(state, face.tagId, color));
+    out.set(face.id, { front: material, back: material, uv: { kind: 'auto' }, basis: face.basis });
+  }
+  variants.set(color, out);
+  tagFacesCache.set(body.faces, { token, variants });
+  return out;
+}
+
 /** Per-edge render style of a tag: color (Color by Tag) and dash pattern. */
-export function tagEdgeStyle(state: DocumentState, tagId: TagId, byTag: boolean): { color?: string | undefined; dashes?: string | null | undefined } {
+export function tagEdgeStyle(state: DocumentState, tagId: TagId, byTag: boolean, inherited?: string): { color?: string | undefined; dashes?: string | null | undefined } {
   const t = state.tags.get(tagId);
   if (!t) return {};
   const out: { color?: string | undefined; dashes?: string | null | undefined } = {};
-  if (byTag) out.color = rgbToCss(t.color);
+  if (byTag) out.color = effectiveTagColor(state, tagId, inherited);
   if (t.dashes) out.dashes = t.dashes;
   return out;
 }
@@ -928,17 +962,20 @@ export function tagStyleToken(state: DocumentState): object {
 }
 
 // Tagged edge arrays are cached per (edges map, tag token): the renderer diffs `edges` by identity.
-const taggedEdgeCache = new WeakMap<Body['edges'], { token: object; out: RenderBodyEdge[] }>();
+const taggedEdgeCache = new WeakMap<Body['edges'], { token: object; variants: Map<string | undefined, RenderBodyEdge[]> }>();
 
 /**
  * Body edges with tag styling: edges whose tag is hidden are flagged `hidden` (so they drop out
  * unless hidden geometry is shown), Color by Tag sets `color`, and tag dash patterns set `dashes`.
  * Falls back to the plain cached array when no tag affects the body.
  */
-export function taggedBodyEdges(state: DocumentState, body: Body): RenderBodyEdge[] {
+export function taggedBodyEdges(state: DocumentState, body: Body, inherited?: string): RenderBodyEdge[] {
+  const color = colorByTagOn(state) ? effectiveTagColor(state, body.tagId, inherited) : undefined;
   const token = tagStyleToken(state);
   const cached = taggedEdgeCache.get(body.edges);
-  if (cached && cached.token === token) return cached.out;
+  const variants = cached?.token === token ? cached.variants : new Map<string | undefined, RenderBodyEdge[]>();
+  const existing = variants.get(color);
+  if (existing) return existing;
   const byTag = colorByTagOn(state);
   let styled = false;
   for (const e of body.edges.values()) {
@@ -960,11 +997,12 @@ export function taggedBodyEdges(state: DocumentState, body: Body): RenderBodyEdg
         hidden: e.hidden || !tagVisible(state, e.tagId),
         faceA: e.faceA,
         faceB: e.faceB,
-        ...tagEdgeStyle(state, e.tagId, byTag),
+        ...tagEdgeStyle(state, e.tagId, byTag, color),
       });
     }
   }
-  taggedEdgeCache.set(body.edges, { token, out });
+  variants.set(color, out);
+  taggedEdgeCache.set(body.edges, { token, variants });
   return out;
 }
 

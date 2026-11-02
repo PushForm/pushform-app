@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { PushFormError } from '@pushform/core';
-import type { TagId } from '@pushform/core';
+import type { Id, TagId } from '@pushform/core';
 import type { KernelClient } from '@pushform/kernel';
 import type { InferenceEngine } from '@pushform/inference';
+import type { DocumentDraft } from '@pushform/model';
 import type { CommandContext } from '../registry/Command';
 import { CommandRegistry, SERVICE_COMMANDS } from '../registry/CommandRegistry';
 import { DocumentHost } from './DocumentHost';
@@ -60,6 +61,24 @@ export function activeTagOpt(ctx: CommandContext): { tagId?: TagId } {
   const h = ctx.services.get(SERVICE_DOCUMENT);
   if (h instanceof DocumentHost && !h.doc.state.tags.has(id as TagId)) return {};
   return { tagId: id as TagId };
+}
+
+/**
+ * Converts an imported mesh part into editable geometry (solids and sheet faces) inside an open
+ * transaction. The converter lives in the io package; the UI installs it as a service so commands can
+ * make mesh parts editable without depending on the importers.
+ */
+export const SERVICE_MESH_EDITABLE = 'meshEditable';
+
+export interface MeshEditableHost {
+  /** Replace the mesh part `id` of the container at `path` with bodies and sheet faces. Call inside a transaction. */
+  makeEditable(draft: DocumentDraft, path: readonly Id[], id: Id): { bodies: number; sheetFaces: number };
+}
+
+export function meshEditableOf(ctx: CommandContext): MeshEditableHost {
+  const m = ctx.services.get(SERVICE_MESH_EDITABLE) as MeshEditableHost | undefined;
+  if (!m || typeof m.makeEditable !== 'function') throw new PushFormError('service.missing', 'Mesh parts cannot be made editable here');
+  return m;
 }
 
 /** Active material of the Paint Bucket / Materials panel (runtime UI state; the UI backs it with its store). */

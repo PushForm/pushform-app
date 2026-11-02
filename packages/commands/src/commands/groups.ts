@@ -39,7 +39,7 @@ import type {
 import { defineCommand } from '../registry/Command';
 import type { AnyCommand } from '../registry/Command';
 import type { DocumentHost } from '../host/DocumentHost';
-import { hostOf } from '../host/services';
+import { hostOf, meshEditableOf } from '../host/services';
 import { contextFrame, currentFrame, draftContainerAt, refsInContext, requireContextPath, sketchGraphAt } from './context';
 import { orthonormalAxes } from './axes';
 import { glueFaceAt } from './componentBehaviors';
@@ -491,11 +491,22 @@ function refsOrSelection(host: DocumentHost, refs: readonly RefParam[] | undefin
 /** Move (or copy) the collected entities into a fresh definition and insert an instance for it. */
 function makeDefinition(host: DocumentHost, refs: readonly EntityRef[], opts: MakeOptions): MakeResult {
   const path = host.context.path;
-  const state = host.doc.state;
-  const srcState = containerAt(state, path);
-  const collected = collect(srcState, refs);
+  const result = host.edit(opts.isGroup ? 'Make Group' : 'Make Component', (draft) => makeDefinitionInDraft(draft, path, refs, opts));
+  if (result.instanceId !== null) host.selection.set([{ kind: 'instance', path, id: result.instanceId as Id }]);
+  return result;
+}
+
+/**
+ * The draft half of `makeDefinition`: reads the container at `path` from the open draft (so entities
+ * created earlier in the same transaction count) and moves or copies the collected entities into a
+ * new definition. Throws when nothing was collected.
+ */
+function makeDefinitionInDraft(draft: DocumentDraft, path: readonly Id[], refs: readonly EntityRef[], opts: MakeOptions): MakeResult {
+  const state = draft as unknown as DocumentState;
+  const src = draftContainerAt(draft, path);
+  const collected = collect(src, refs);
   if (collected.size === 0) throw new PushFormError('group.empty', 'Select something to make a group or component from');
-  const bounds = collectedBounds(state, srcState, collected);
+  const bounds = collectedBounds(state, src, collected);
   const origin: Vec3 = opts.origin ?? bounds?.min ?? [0, 0, 0];
   const frame: MMat4 = opts.frame ?? m4translation(origin);
   const toLocal: MMat4 = m4invert(frame) ?? m4translation([-origin[0], -origin[1], -origin[2]]);
@@ -504,105 +515,101 @@ function makeDefinition(host: DocumentHost, refs: readonly EntityRef[], opts: Ma
   let instanceId: number | null = null;
   let definitionId = 0;
 
-  host.edit(opts.isGroup ? 'Make Group' : 'Make Component', (draft) => {
-    const src = draftContainerAt(draft, path);
-    const def = createDefinition(draft, opts);
-    definitionId = def.id;
-    const dst = def.entities;
-    const removed = new Set<Id>();
+  const def = createDefinition(draft, opts);
+  definitionId = def.id;
+  const dst = def.entities;
+  const removed = new Set<Id>();
 
-    // bodies
-    for (const id of collected.bodies) {
-      const body = src.bodies.get(id);
-      if (!body) continue;
-      const target = move ? copyBodyRecord(body, body.id) : cloneBody(draft, dst, body);
-      transformBodyInPlace(target, toLocal, textureTiles(draft));
-      if (move) {
-        src.bodies.delete(id);
-        removed.add(id);
-        dst.bodies.set(target.id, target);
-        dst.order.push(target.id);
-      }
-    }
-    // mesh parts
-    for (const id of collected.meshParts) {
-      const part = src.meshParts.get(id);
-      if (!part) continue;
-      const target = move ? copyMeshPartRecord(part, part.id) : cloneMeshPart(draft, dst, part);
-      target.geometry = transformMeshPartGeometry(part.geometry, toLocal);
-      if (move) {
-        src.meshParts.delete(id);
-        removed.add(id);
-        dst.meshParts.set(target.id, target);
-        dst.order.push(target.id);
-      }
-    }
-    // instances
-    for (const id of collected.instances) {
-      const inst = src.instances.get(id);
-      if (!inst) continue;
-      const copy: ComponentInstance = {
-        ...inst,
-        id: move ? inst.id : allocId<Id>(draft),
-        transform: m4mul(toLocal, inst.transform) as unknown as Mat4,
-        attributes: cloneJson(inst.attributes),
-      };
-      if (move) {
-        src.instances.delete(id);
-        removed.add(id);
-      }
-      dst.instances.set(copy.id, copy);
-      dst.order.push(copy.id);
-    }
-    // guides
-    for (const id of collected.guides) {
-      const g = src.guides.get(id);
-      if (!g) continue;
-      const copy = mapGuide(g, move ? g.id : allocId<Id>(draft), localMap);
-      if (move) {
-        src.guides.delete(id);
-        removed.add(id);
-      }
-      dst.guides.set(copy.id, copy);
-      dst.order.push(copy.id);
-    }
-    // placed pictures
-    for (const id of collected.images) {
-      const image = src.images.get(id);
-      if (!image) continue;
-      const copy: ImageEntity = { ...image, id: move ? image.id : allocId<Id>(draft), transform: m4mul(toLocal, image.transform) as unknown as Mat4,
-        attributes: cloneJson(image.attributes) };
-      if (move) {
-        src.images.delete(id);
-        removed.add(id);
-      }
-      dst.images.set(copy.id, copy);
-      dst.order.push(copy.id);
-    }
-    // sketch
-    if (collected.edges.size) {
-      const srcGraph = sketchGraphAt(draft, path);
-      const dstGraph = SketchGraph.for(draft, def.id);
-      copySketchInto(draft, srcGraph.sketch, collected.edges, collected.faces, dstGraph, localMap);
-      if (move) {
-        for (const id of collected.faces) srcGraph.removeFace(id);
-        for (const id of collected.edges) srcGraph.removeEdge(id);
-      }
-    }
-    removeFromOrder(src, removed);
-
+  // bodies
+  for (const id of collected.bodies) {
+    const body = src.bodies.get(id);
+    if (!body) continue;
+    const target = move ? copyBodyRecord(body, body.id) : cloneBody(draft, dst, body);
+    transformBodyInPlace(target, toLocal, textureTiles(draft));
     if (move) {
-      const inst = newInstance(draft, def.id, frame);
-      // Glue To: glue to the face holding the component's origin across its blue axis
-      const frameOf = contextFrame(state, path);
-      const plane = glueFaceAt(src, def.behaviors.glueTo, m4transformPoint(frame, [0, 0, 0]), m4transformDir(frame, [0, 0, 1]), frameOf.toWorldNormal);
-      if (plane) inst.gluedPlane = plane;
-      src.instances.set(inst.id, inst);
-      src.order.push(inst.id);
-      instanceId = inst.id;
+      src.bodies.delete(id);
+      removed.add(id);
+      dst.bodies.set(target.id, target);
+      dst.order.push(target.id);
     }
-  });
-  if (instanceId !== null) host.selection.set([{ kind: 'instance', path, id: instanceId as Id }]);
+  }
+  // mesh parts
+  for (const id of collected.meshParts) {
+    const part = src.meshParts.get(id);
+    if (!part) continue;
+    const target = move ? copyMeshPartRecord(part, part.id) : cloneMeshPart(draft, dst, part);
+    target.geometry = transformMeshPartGeometry(part.geometry, toLocal);
+    if (move) {
+      src.meshParts.delete(id);
+      removed.add(id);
+      dst.meshParts.set(target.id, target);
+      dst.order.push(target.id);
+    }
+  }
+  // instances
+  for (const id of collected.instances) {
+    const inst = src.instances.get(id);
+    if (!inst) continue;
+    const copy: ComponentInstance = {
+      ...inst,
+      id: move ? inst.id : allocId<Id>(draft),
+      transform: m4mul(toLocal, inst.transform) as unknown as Mat4,
+      attributes: cloneJson(inst.attributes),
+    };
+    if (move) {
+      src.instances.delete(id);
+      removed.add(id);
+    }
+    dst.instances.set(copy.id, copy);
+    dst.order.push(copy.id);
+  }
+  // guides
+  for (const id of collected.guides) {
+    const g = src.guides.get(id);
+    if (!g) continue;
+    const copy = mapGuide(g, move ? g.id : allocId<Id>(draft), localMap);
+    if (move) {
+      src.guides.delete(id);
+      removed.add(id);
+    }
+    dst.guides.set(copy.id, copy);
+    dst.order.push(copy.id);
+  }
+  // placed pictures
+  for (const id of collected.images) {
+    const image = src.images.get(id);
+    if (!image) continue;
+    const copy: ImageEntity = { ...image, id: move ? image.id : allocId<Id>(draft), transform: m4mul(toLocal, image.transform) as unknown as Mat4,
+      attributes: cloneJson(image.attributes) };
+    if (move) {
+      src.images.delete(id);
+      removed.add(id);
+    }
+    dst.images.set(copy.id, copy);
+    dst.order.push(copy.id);
+  }
+  // sketch
+  if (collected.edges.size) {
+    const srcGraph = sketchGraphAt(draft, path);
+    const dstGraph = SketchGraph.for(draft, def.id);
+    copySketchInto(draft, srcGraph.sketch, collected.edges, collected.faces, dstGraph, localMap);
+    if (move) {
+      for (const id of collected.faces) srcGraph.removeFace(id);
+      for (const id of collected.edges) srcGraph.removeEdge(id);
+    }
+  }
+  removeFromOrder(src, removed);
+
+  if (move) {
+    const inst = newInstance(draft, def.id, frame);
+    // Glue To: glue to the face holding the component's origin across its blue axis
+    const frameOf = contextFrame(state, path);
+    const plane = glueFaceAt(src, def.behaviors.glueTo, m4transformPoint(frame, [0, 0, 0]), m4transformDir(frame, [0, 0, 1]), frameOf.toWorldNormal);
+    if (plane) inst.gluedPlane = plane;
+    src.instances.set(inst.id, inst);
+    src.order.push(inst.id);
+    instanceId = inst.id;
+  }
   return { definitionId, instanceId };
 }
 
@@ -672,6 +679,130 @@ export const componentMake = defineCommand({
       origin: p.axesOrigin ? frame.toLocal(p.axesOrigin) : null,
       frame: axes ? m4fromBasis(axes.origin, axes.x, axes.y, axes.z) : undefined,
     });
+  },
+});
+
+// ---------------------------------------------------------------------------------------------
+// Make Components (one per object)
+
+/** Group instances, loose solids and mesh parts: the objects Make Components wraps one by one. */
+const GROUP_DEFAULT_NAME = /^Group(?:#\d+)?$/;
+
+/** Objects of the current context that Make Components turns into components, in selection order without repeats. */
+export function makeEachTargets(state: DocumentState, container: EntityContainer, refs: readonly EntityRef[]): EntityRef[] {
+  const out: EntityRef[] = [];
+  const seen = new Set<string>();
+  for (const r of refs) {
+    const key = `${r.kind}:${r.id}`;
+    if (seen.has(key)) continue;
+    let eligible = false;
+    if (r.kind === 'body') eligible = container.bodies.has(r.id);
+    else if (r.kind === 'meshPart') eligible = container.meshParts.has(r.id);
+    else if (r.kind === 'instance') {
+      const inst = container.instances.get(r.id);
+      eligible = inst !== undefined && state.definitions.get(inst.definitionId)?.isGroup === true;
+    }
+    if (!eligible) continue;
+    seen.add(key);
+    out.push(r);
+  }
+  return out;
+}
+
+/** Definition name for a new per-object component: the object's own name, or the next `Component#n`. */
+function makeEachName(state: DocumentState, container: EntityContainer, r: EntityRef): string {
+  let own = '';
+  if (r.kind === 'meshPart') own = container.meshParts.get(r.id)?.name ?? '';
+  else if (r.kind === 'instance') {
+    const inst = container.instances.get(r.id);
+    const def = inst && state.definitions.get(inst.definitionId);
+    own = inst?.name || (def && !GROUP_DEFAULT_NAME.test(def.name) ? def.name : '');
+  }
+  own = own.trim();
+  return own || uniqueDefinitionName(state, 'Component#1', false);
+}
+
+/** Entity refs of `container` at `path` that were not in the `before` snapshot. */
+function newEntityRefs(container: EntityContainer, path: readonly Id[], before: ContainerIds): EntityRef[] {
+  const out: EntityRef[] = [];
+  for (const id of container.bodies.keys()) if (!before.bodies.has(id)) out.push({ kind: 'body', path, id });
+  for (const id of container.instances.keys()) if (!before.instances.has(id)) out.push({ kind: 'instance', path, id });
+  for (const id of container.sketch.faces.keys()) if (!before.faces.has(id)) out.push({ kind: 'sketchFace', path, id });
+  for (const id of container.sketch.edges.keys()) if (!before.edges.has(id)) out.push({ kind: 'sketchEdge', path, id });
+  return out;
+}
+
+interface ContainerIds {
+  readonly bodies: ReadonlySet<Id>;
+  readonly instances: ReadonlySet<Id>;
+  readonly faces: ReadonlySet<Id>;
+  readonly edges: ReadonlySet<Id>;
+}
+
+const containerIds = (c: EntityContainer): ContainerIds => ({
+  bodies: new Set(c.bodies.keys()),
+  instances: new Set(c.instances.keys()),
+  faces: new Set(c.sketch.faces.keys()),
+  edges: new Set(c.sketch.edges.keys()),
+});
+
+export const MakeEachParamsSchema = z.object({
+  /** Objects to wrap; the current selection when omitted. */
+  refs: refsSchema,
+});
+export type MakeEachParams = z.infer<typeof MakeEachParamsSchema>;
+
+export interface MakeEachResult {
+  readonly definitionIds: number[];
+  readonly instanceIds: number[];
+  /** Status-bar text: "Made N components". */
+  readonly message: string;
+}
+
+/**
+ * Make Components: one component per selected object. Each loose solid, group instance and mesh
+ * part of the current context becomes its own component in the same container, keeping its world
+ * placement; the definition is named after the object when it has a name. Components already in
+ * the selection are left alone; faces, edges and other kinds are ignored. A mesh part is first made
+ * editable, and the solids and sheet faces that come out of it form the component. One undo entry.
+ */
+export const componentMakeEach = defineCommand({
+  id: 'component.makeEach',
+  title: 'Make Components',
+  description: 'One component per selected object, named after it',
+  category: 'edit',
+  menu: 'Edit',
+  params: MakeEachParamsSchema,
+  undoable: true,
+  run(ctx, p): MakeEachResult {
+    const host = hostOf(ctx);
+    const refs = refsOrSelection(host, p.refs);
+    const path = host.context.path;
+    const targets = makeEachTargets(host.doc.state, containerAt(host.doc.state, path), refs);
+    if (targets.length === 0) throw new PushFormError('group.empty', 'Select solids, groups or mesh parts to make components from');
+    const definitionIds: number[] = [], instanceIds: number[] = [];
+    const meshEditable = targets.some((r) => r.kind === 'meshPart') ? meshEditableOf(ctx) : null;
+    host.edit('Make Components', (draft) => {
+      const state = draft as unknown as DocumentState;
+      for (const target of targets) {
+        // Re-read the container each time: the mesh converter may replace its sketch or entity maps.
+        const container = draftContainerAt(draft, path);
+        const name = makeEachName(state, container, target);
+        let refsOf: EntityRef[] = [target];
+        if (target.kind === 'meshPart') {
+          const before = containerIds(container);
+          meshEditable!.makeEditable(draft, path, target.id);
+          refsOf = newEntityRefs(draftContainerAt(draft, path), path, before);
+          if (refsOf.length === 0) continue;
+        }
+        const made = makeDefinitionInDraft(draft, path, refsOf, { name, isGroup: false, replaceSelection: true, origin: null });
+        definitionIds.push(made.definitionId);
+        if (made.instanceId !== null) instanceIds.push(made.instanceId);
+      }
+    });
+    host.selection.set(instanceIds.map((id) => ({ kind: 'instance', path, id: id as Id })));
+    const n = instanceIds.length;
+    return { definitionIds, instanceIds, message: `Made ${n} component${n === 1 ? '' : 's'}` };
   },
 });
 
@@ -1052,6 +1183,7 @@ export const entitySetShadows = defineCommand({
 export const groupCommands: readonly AnyCommand[] = [
   groupMake,
   componentMake,
+  componentMakeEach,
   groupExplode,
   componentMakeUnique,
   instanceRename,

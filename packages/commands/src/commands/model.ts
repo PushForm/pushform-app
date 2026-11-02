@@ -15,7 +15,7 @@ const asDraft = (c: EntityContainer): Draft<EntityContainer> => c as unknown as 
 
 const vec3 = z.tuple([z.number(), z.number(), z.number()]);
 
-/** Debug/M0: add an axis-aligned box body (context-local coordinates) directly from a mesh (no kernel round trip). */
+/** Add an axis-aligned box body (context-local coordinates) directly from a mesh (no kernel round trip); the model document API's add_box. */
 export const addBox = defineCommand({
   id: 'model.addBox',
   title: 'Add Box',

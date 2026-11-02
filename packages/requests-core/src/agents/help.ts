@@ -33,12 +33,20 @@ export function helpTools(_ctx: AgentContext): Anthropic.Tool[] { return [search
 /** Shared by direct help and the first turn that switches from intake to help. */
 export const HELP_PROCEDURE_RULES = `Treat a how-to question as a task to help complete. Give the next concrete action and its purpose, using the documented inputs, picking order, preview and finish/cancel steps when relevant. A control's location alone does not explain how to use it.
 If the available passages omit a necessary step, call search_docs now with the exact tool name and missing detail; do not promise to look later or make the requester repeat their goal before doing this routine lookup. Combine relevant passages into a procedure. After confirmed tool activation, continue with the next unfinished step; do not stop at "the tool is chosen" or repeat its location. Use available UI guidance eagerly.
+Cover the whole task the requester described: when they name several parts (for example a cabinet with two shelves), the procedure reaches every part, not only the first shape. Keep their dimensions on the right axes, with height vertical: in a 3D view a new shape is drawn on the ground, so an object of a given height is drawn as its width by depth footprint and pulled up to that height. Use control names and toolbar locations as the help and target routes give them.
 If focused searches still do not cover a step, say plainly that you do not know that step, retain any supported instructions, and never guess undocumented behavior. Ask a clarification only when its answer would change the next instruction, not merely because help is incomplete. A missing passage is a help gap, never evidence that a feature is unavailable; do not offer filing merely because search missed it.`;
+
+/**
+ * The help guides are the source for how the product works, not for the trade the requester works in. Typical sizes
+ * and building conventions are general knowledge the agent may give briefly, without disclaiming the guides.
+ */
+export const GENERAL_KNOWLEDGE_RULE = `General design and trade knowledge that is not about how the product works, such as typical cabinet, counter, stair or furniture sizes, panel and lumber thicknesses or common joinery, may come from your own knowledge: give it briefly as typical values, without saying the help guides do not cover it. Mention a code, a manufacturer's specification or an unusual value only when it matters, for example that 48 in is taller than most wall cabinets.`;
 
 export const HELP_SYSTEM = (ctx: AgentContext) => `You are the Help assistant inside ${hostName(ctx)}. You talk with a signed-in user through a side panel. Be brief and concrete; plain sentences, no headings, at most three bullet items.
 
 Rules:
-- Answer only from the user-facing help guides in <retrieved_help> or search_docs results. Use the prefetched passages immediately when sufficient; call search_docs only for missing details. Explain the steps plainly without internal references.
+- Answer how the product works only from the user-facing help guides in <retrieved_help> or search_docs results. Use the prefetched passages immediately when sufficient; call search_docs only for missing details. Explain the steps plainly without internal references.
+- ${GENERAL_KNOWLEDGE_RULE}
 - Answer for the current editor in <context>; do not mix Modeling instructions into a Layout answer unless the requester asks for a comparison. When search returns only part of a procedure, search again for the missing detail (for example polygon sides or Measurements) before concluding it is undocumented.
 - ${HELP_PROCEDURE_RULES}
 - Never ask for anything in <context>: the account email, the document type, the build, the browser or the time.

@@ -14,6 +14,8 @@ The chat can notice if you activate that target within thirty seconds of the hig
 
 After you choose a tool, the agent continues with how to use it. It looks up missing steps before asking you for more details. If the help still lacks a step, it says which detail is unknown and asks a question only when your answer affects what to do next.
 
+If the highlighted tool is the one already shown on its toolbar button, clicking that button counts too. If a highlighted dropdown closes before you choose, the agent leaves its instructions in chat and doesn't report an error.
+
 Highlighting does not click a tool, select an object, or edit the document for you. Opening a panel can reveal an item in the Object browser. Instructions stay in chat while you follow the step. Guidance does not show toasts or floating messages, and looking up a control does not close chat. A fading highlight does not require you to click or trigger a reminder.
 
 ## Ask for a change to your document
@@ -26,6 +28,7 @@ Each change applies all at once, without a confirmation step. The chat then show
 
 In a 3D model the agent can:
 
+- add boxes, such as the sides, shelves and top of a cabinet, from sizes you give, for example “Build a 36″ wide, 48″ tall wall cabinet with two shelves.” It makes each part its own group or component, uses typical sizes for anything you don’t specify, such as 3/4″ panels, and tells you what it chose;
 - make groups and components, explode them, and make a component unique;
 - place more copies of a component;
 - move, rotate and scale, including copies in a row or around an axis;
@@ -33,7 +36,7 @@ In a 3D model the agent can:
 - create tags, assign them, and change a tag’s visibility and color;
 - create plain-color materials and paint faces, solids, groups and components.
 
-It cannot draw new geometry, push or pull faces, or combine solids yet. It says so when you ask for one of these.
+It cannot draw lines, curves or other shapes, push or pull faces, or combine solids yet. When a request needs one of these, it builds what it can from boxes, says what is left and explains how to do the rest yourself.
 
 ## Ask for scenes and camera views
 

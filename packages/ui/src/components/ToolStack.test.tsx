@@ -81,3 +81,23 @@ it.each(['fillet', 'chamfer'])('guidance opens and highlights the exact Chamfer 
   expect(screen.queryByRole('menu')).toBeNull();
   chat.remove();
 });
+
+it('names the visible toolbar group in a choice route and reports a dropdown closed without a choice as dismissed', async () => {
+  vi.stubGlobal('requestAnimationFrame', (fn: FrameRequestCallback) => setTimeout(() => fn(0), 0));
+  render(<div className="pf-toolbar"><div role="group" aria-label="Draw"><ToolStack title="Shape" tools={[
+    { id: 'rect', title: 'Rectangle', icon: 'tool-rect' },
+    { id: 'circle', title: 'Circle', icon: 'tool-circle' },
+  ]} activeId="rect" onSelect={vi.fn()} /></div></div>);
+  // The slot face runs the choice it shows, so it stands in for that choice when guidance waits for a click.
+  expect(screen.getByRole('button', { name: 'Rectangle' }).dataset['guidanceAlias']).toBe('toolbar:rect');
+  const tab = { id: 'a', type: 'model' } as DocumentTab;
+  const session = { tabs: [tab], active: tab, subscribe: () => () => {} } as unknown as DocumentSession;
+  const guide = guidanceFor(session, tab, vi.fn());
+  const listing = JSON.parse((await guide('ui_list_targets', { query: 'rectangle' })).content);
+  expect(listing.targets.find((target: { id: string }) => target.id === 'toolbar:rect')).toMatchObject({ route: 'Toolbar > Draw > Rectangle (in the Shape dropdown)' });
+  let pending!: ReturnType<typeof guide>;
+  act(() => { pending = guide('ui_highlight', { targets: ['toolbar:rect'] }); });
+  await screen.findByRole('menuitemradio', { name: 'Rectangle' });
+  act(() => { fireEvent.pointerDown(document.body); });
+  expect(JSON.parse((await pending).content)).toMatchObject({ status: 'dismissed' });
+});

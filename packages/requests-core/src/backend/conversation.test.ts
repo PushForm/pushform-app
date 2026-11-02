@@ -754,7 +754,7 @@ describe('document tools', () => {
     expect(stored.at(-1)).toMatchObject({ role: 'assistant', text: instruction });
   });
 
-  it.each(['expired', 'cancelled'])('records %s guidance quietly without another model call or a follow-up message', async outcome => {
+  it.each(['expired', 'cancelled', 'dismissed'])('records %s guidance quietly without another model call or a follow-up message', async outcome => {
     const guide = { id: 'g1', name: 'ui_highlight', input: { targets: ['toolbar:import'], instruction: 'Click Import and choose a PNG image.' } };
     const first = harness({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help' }) }, turns: [{ text: ['Click Import and choose a PNG image.'], toolUses: [guide] }] });
     await (await call(first.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'Show me how to import an image', document: { type: 'layout', apiVersion: 1, guidance: 1 } })).text();

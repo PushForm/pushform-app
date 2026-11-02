@@ -242,8 +242,8 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
 
   return <div className="pf-layout-object-browser pf-model-object-browser">
     <h2 className="pf-layout-browser-title">Object browser</h2>
-    <div className="pf-model-browser-tabs" role="tablist" aria-label="Object browser sections">
-      {(['objects', 'tags'] as const).map(name => <button key={name} type="button" role="tab"
+    <div className="pf-tabs pf-model-browser-tabs" role="tablist" aria-label="Object browser sections">
+      {(['objects', 'tags'] as const).map(name => <button key={name} type="button" role="tab" className={`pf-tab${section === name ? ' is-active' : ''}`}
         id={`${idPrefix}-${name}-tab`} aria-controls={`${idPrefix}-${name}-panel`} aria-selected={section === name}
         tabIndex={section === name ? 0 : -1} onClick={() => setSection(name)}
         onKeyDown={event => {

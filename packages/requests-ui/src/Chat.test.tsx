@@ -317,6 +317,24 @@ describe('Chat', () => {
     view.unmount();
     expect(signal?.aborted).toBe(true);
   });
+  it('shows animated thinking dots until the first words of a reply arrive', async () => {
+    const backend = fakeBackend();
+    let push: ((chunk: string) => void) | undefined;
+    const slow: typeof fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (!url.endsWith('/messages')) return backend.fetch(input, init);
+      return new Response(new ReadableStream<Uint8Array>({ start(controller) { push = (chunk) => controller.enqueue(new TextEncoder().encode(chunk)); } }), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    };
+    const client = new RequestsClient({ baseUrl: BASE, apikey: 'k', getToken: async () => 'jwt-token', fetch: slow });
+    render(<Chat client={client} account={account} screen={screenInfo} onClose={() => {}} />);
+    fireEvent.change(await screen.findByLabelText('Your message'), { target: { value: 'hello' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    const dots = await screen.findByRole('status', { name: 'Agent is thinking' });
+    expect(dots.querySelectorAll('span')).toHaveLength(3);
+    push!('event: text\ndata: {"delta":"Hello"}\n\n');
+    await waitFor(() => expect(screen.queryByRole('status', { name: 'Agent is thinking' })).toBeNull());
+    expect(document.querySelector('.is-streaming')?.textContent).toContain('Hello');
+  });
   it('shows a short muted notice when the message limit is reached and never a message counter', async () => {
     setup({ turns: [[text('That is all I can take; send it or stop?'), briefEvent({ ...featureBrief, desired: 'x' }, 'T'), done(30, true)]] });
     await say('hello');

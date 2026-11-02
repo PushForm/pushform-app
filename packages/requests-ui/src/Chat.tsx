@@ -425,7 +425,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
             : <span className="pf-fr-role">{entry.role === 'user' ? 'You' : 'Agent'}</span>}
             {/* The requester's own words stay as typed; the agent's replies are Markdown. */}
             {entry.role === 'user' ? <p>{entry.text}</p> : <MessageMarkdown text={entry.text} />}</div>)}
-        {current.streaming !== null && !waitingForGuidance ? <div className="pf-fr-message is-assistant is-streaming">{current.transcript.at(-1)?.role === 'assistant' ? null : <span className="pf-fr-role">Agent</span>}{current.streaming ? <MessageMarkdown text={current.streaming} /> : <p>{toolProgress ?? '…'}</p>}</div> : null}
+        {current.streaming !== null && !waitingForGuidance ? <div className="pf-fr-message is-assistant is-streaming">{current.transcript.at(-1)?.role === 'assistant' ? null : <span className="pf-fr-role">Agent</span>}{current.streaming ? <MessageMarkdown text={current.streaming} /> : (toolProgress ? <p>{toolProgress}</p> : <p className="pf-fr-thinking" role="status" aria-label="Agent is thinking"><span /><span /><span /></p>)}</div> : null}
         <div ref={transcriptEnd} />
       </div>
       {current.limitReached ? <p className="pf-fr-muted pf-fr-limit" role="status">This conversation reached its {messageLimit}-message limit.</p> : null}

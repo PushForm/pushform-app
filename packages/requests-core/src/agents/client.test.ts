@@ -64,11 +64,28 @@ describe('runTurn', () => {
     const client = fakeAnthropic([{ text: ['ok'] }]);
     await runTurn({ client, model: 'claude-haiku-5-5', system: 'stable', tools: [echoTool], handlers: {}, messages: [user('hi')] });
     const p = client.calls[0]!;
-    expect(p.system).toEqual([{ type: 'text', text: 'stable', cache_control: { type: 'ephemeral' } }]);
+    // The shared tools and system prompt stay cached for an hour; a rolling breakpoint caches the transcript so far.
+    expect(p.system).toEqual([{ type: 'text', text: 'stable', cache_control: { type: 'ephemeral', ttl: '1h' } }]);
+    expect(p.cache_control).toEqual({ type: 'ephemeral' });
+    expect(p.messages).toEqual([user('hi')]);
     expect(p.output_config).toEqual({ effort: 'low' });
     expect(p.tool_choice).toEqual({ type: 'auto' });
     expect(p).not.toHaveProperty('thinking');
     expect(p.tools?.[0]).toMatchObject({ strict: true });
+  });
+  it('reports timing, tokens and the request id of every round', async () => {
+    const client = fakeAnthropic([
+      { toolUses: [{ id: 'tu1', name: 'echo', input: { text: 'a' } }], usage: { cache_read_input_tokens: 900, cache_creation_input_tokens: 50 } },
+      { text: ['done'] },
+    ]);
+    const r = await runTurn({ client, model: 'm', system: 's', tools: [echoTool], handlers: { echo: () => 'ok' }, messages: [user('hi')] });
+    expect(r.roundStats).toHaveLength(2);
+    expect(r.roundStats[0]).toMatchObject({ input: 100, output: 20, cacheRead: 900, cacheWrite: 50, requestId: 'req_fake' });
+    for (const round of r.roundStats) {
+      expect(round.firstMs).not.toBeNull();
+      expect(round.startMs).toBeLessThanOrEqual(round.firstMs!);
+      expect(round.firstMs!).toBeLessThanOrEqual(round.ms);
+    }
   });
   it('omits tools and tool_choice when the agent has none', async () => {
     const client = fakeAnthropic([{ text: ['ok'] }]);

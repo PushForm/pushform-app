@@ -4,7 +4,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 
 /** The slice of the SDK client `runTurn` uses, so tests inject a scripted stream and never reach the network. */
-export interface MessageStreamLike extends AsyncIterable<Anthropic.MessageStreamEvent> { finalMessage(): Promise<Anthropic.Message> }
+export interface MessageStreamLike extends AsyncIterable<Anthropic.MessageStreamEvent> { finalMessage(): Promise<Anthropic.Message>; readonly request_id?: string | null | undefined }
 export interface AnthropicLike { messages: { stream(params: Anthropic.MessageStreamParams, options?: { headers?: Record<string, string> }): MessageStreamLike } }
 
 export function createAnthropic(apiKey: string): Anthropic { return new Anthropic({ apiKey, maxRetries: 2, timeout: 60_000 }); }
@@ -110,7 +110,16 @@ export interface RunTurnOptions {
    */
   resume?: { appended: Anthropic.MessageParam[]; rounds: number } | undefined;
 }
-export interface RunTurnResult { appended: Anthropic.MessageParam[]; text: string; usage: TurnUsage; stop: TurnStop; rounds: number; pending: PendingClientTools | null }
+/** Timing and token use of one model request, for the per-turn latency log. */
+export interface RoundStat {
+  /** Until the response started (message_start): queueing, retries and prompt reading. */
+  startMs: number;
+  /** Until the first content arrived (thinking, text or a tool call), or null when none did. */
+  firstMs: number | null;
+  ms: number; input: number; output: number; cacheRead: number; cacheWrite: number; requestId: string | null;
+}
+export interface RunTurnResult { appended: Anthropic.MessageParam[]; text: string; usage: TurnUsage; stop: TurnStop; rounds: number; pending: PendingClientTools | null; roundStats: RoundStat[] }
+
 
 /** The beta that returns between-tool progress notes as thinking text while reasoning stays hidden. */
 export const PROGRESS_UPDATES_BETA = 'thinking-display-updates-2026-08-18';
@@ -134,18 +143,25 @@ export async function runTurn(options: RunTurnOptions): Promise<RunTurnResult> {
   const usage: TurnUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
   let text = ''; let rounds = options.resume?.rounds ?? 0; let stop: TurnStop = 'other';
   let pending: PendingClientTools | null = null;
+  const roundStats: RoundStat[] = [];
   const emit = (delta: string) => { text += delta; onText?.(delta); };
   const progress = options.progressUpdates === true && supportsProgressUpdates(model);
   for (;;) {
     const params: Anthropic.MessageStreamParams = {
       model, max_tokens: options.maxTokens ?? 4096,
-      system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
+      // The tools and system prompt are the same for every requester of an agent; an hour keeps them warm between turns.
+      system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral', ttl: '1h' } }],
       messages: [...options.messages, ...appended],
+      // A rolling breakpoint on the last block: the next round, and the request that resumes the turn after the editor
+      // answers, read the whole transcript so far from the prompt cache instead of the model reading it again.
+      cache_control: { type: 'ephemeral' },
       output_config: { effort: options.effort ?? 'low' },
     };
     if (tools.length) { params.tools = tools; params.tool_choice = { type: 'auto' }; }
     // `updates` is a beta display value the stable parameter type does not list yet.
     if (progress) params.thinking = { type: 'adaptive', display: 'updates' } as unknown as Anthropic.ThinkingConfigParam;
+    const roundStarted = performance.now();
+    let startMs: number | null = null, firstMs: number | null = null;
     const stream = client.messages.stream(params, progress ? { headers: { 'anthropic-beta': PROGRESS_UPDATES_BETA } } : undefined);
     // Each visible block (a progress note or reply text) starts a new paragraph after text already shown.
     let blockStarted = false;
@@ -155,6 +171,8 @@ export async function runTurn(options: RunTurnOptions): Promise<RunTurnResult> {
       emit(delta);
     };
     for await (const event of stream) {
+      if (event.type === 'message_start') startMs ??= Math.round(performance.now() - roundStarted);
+      else if (event.type === 'content_block_delta' || event.type === 'content_block_start') firstMs ??= Math.round(performance.now() - roundStarted);
       if (event.type === 'content_block_start') blockStarted = false;
       else if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') visible(event.delta.text);
       else if (progress && event.type === 'content_block_delta' && event.delta.type === 'thinking_delta') visible(event.delta.thinking);
@@ -162,6 +180,8 @@ export async function runTurn(options: RunTurnOptions): Promise<RunTurnResult> {
     const message = await stream.finalMessage();
     usage.inputTokens += message.usage.input_tokens; usage.outputTokens += message.usage.output_tokens;
     usage.cacheReadTokens += message.usage.cache_read_input_tokens ?? 0; usage.cacheWriteTokens += message.usage.cache_creation_input_tokens ?? 0;
+    roundStats.push({ startMs: startMs ?? 0, firstMs, ms: Math.round(performance.now() - roundStarted), input: message.usage.input_tokens, output: message.usage.output_tokens,
+      cacheRead: message.usage.cache_read_input_tokens ?? 0, cacheWrite: message.usage.cache_creation_input_tokens ?? 0, requestId: stream.request_id ?? null });
     appended.push({ role: 'assistant', content: message.content });
     const toolUses = message.content.filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
     const reason = message.stop_reason;
@@ -202,7 +222,7 @@ export async function runTurn(options: RunTurnOptions): Promise<RunTurnResult> {
     }
     appended.push({ role: 'user', content: results });
   }
-  return { appended, text, usage, stop, rounds, pending };
+  return { appended, text, usage, stop, rounds, pending, roundStats };
 }
 
 /**

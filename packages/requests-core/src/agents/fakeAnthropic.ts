@@ -70,5 +70,6 @@ function scriptedStream(turn: ScriptedTurn): MessageStreamLike {
   return {
     async *[Symbol.asyncIterator]() { for (const e of events) yield e; },
     async finalMessage() { return message; },
+    request_id: 'req_fake',
   };
 }

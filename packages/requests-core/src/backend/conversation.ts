@@ -339,7 +339,15 @@ function sseResponse(log: ((message: string) => void) | undefined, run: (emit: (
 
 type TurnBase = Omit<AgentContext, 'path' | 'brief' | 'title'>;
 /** What one request of a turn runs: a new turn's first request, or a resume after the editor answered. */
+/** When the request arrived and how long each lookup before the model took, for the per-turn latency log. */
+interface TurnTiming { received: number; phases: Record<string, number>; toolChars?: number }
+/** Resolve as `work` does, recording its duration under `name`. */
+function timed<T>(timing: TurnTiming, name: string, work: Promise<T>): Promise<T> {
+  const started = performance.now();
+  return work.finally(() => { timing.phases[name] = Math.round(performance.now() - started); });
+}
 interface TurnRun {
+  timing: TurnTiming;
   user: SessionUser;
   conversation: Conversation;
   store: DbConversationStore;
@@ -694,6 +702,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
         emit({ event: 'filed', data: { request: filedRequestEvent(request) } });
       };
       const generationStarted = performance.now();
+      const setupMs = Math.round(generationStarted - t.timing.received);
       let firstTextMs: number | null = null;
       let result;
       try {
@@ -733,7 +742,9 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       if (replyText !== result.text) emit({ event: 'text', data: { delta: replyText } });
       appended.push({ role: 'assistant', text: replyText, at: now().toISOString(), ...(turn ? { turn } : {}) });
       let saved: Conversation;
+      const saveStarted = performance.now();
       try { saved = conversationFromRow(await persist()); } catch (error) { throw httpErrorOf(error); }
+      const saveMs = Math.round(performance.now() - saveStarted);
       if (store.getBrief() || store.getTitle()) briefEvent();
       if (reason === 'filed') await recordPending();
       else if (reason === 'added' && store.added) {
@@ -743,7 +754,10 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
         // The requester asked to start over;: abusive content ends the conversation. Either way it is discarded.
         try { await db.conversationClose(id, user.id, 'discarded'); } catch (error) { deps.log?.(`turn ${id}: close (${reason}): ${error instanceof Error ? error.message : String(error)}`); }
       }
-      deps.log?.(`turn ${id}: model=${setup.model} stop=${result.stop} rounds=${result.rounds} firstTextMs=${firstTextMs ?? 'none'} generationMs=${generationMs} in=${result.usage.inputTokens} out=${result.usage.outputTokens} cacheRead=${result.usage.cacheReadTokens}${reason ? ` ended=${reason}` : ''}`);
+      // New fields follow cacheRead so readers of the older line keep matching. Each round: start/first/total ms and tokens.
+      const phases = Object.entries(t.timing.phases).map(([name, ms]) => `${name}:${ms}`).join(',') || 'none';
+      const roundLog = result.roundStats.map(r => `${r.startMs}/${r.firstMs ?? '-'}/${r.ms}ms,in${r.input},out${r.output},cr${r.cacheRead},cw${r.cacheWrite}${r.requestId ? `,${r.requestId}` : ''}`).join(' ');
+      deps.log?.(`turn ${id}: model=${setup.model} stop=${result.stop} rounds=${result.rounds} firstTextMs=${firstTextMs ?? 'none'} generationMs=${generationMs} in=${result.usage.inputTokens} out=${result.usage.outputTokens} cacheRead=${result.usage.cacheReadTokens} cacheWrite=${result.usage.cacheWriteTokens} setupMs=${setupMs} setup=${phases}${t.timing.toolChars !== undefined ? ` toolChars=${t.timing.toolChars}` : ''} saveMs=${saveMs} rounds=[${roundLog}]${reason ? ` ended=${reason}` : ''}`);
       if (turn) emit({ event: 'tool_request', data: { calls: turn.pending.calls } });
       emit({ event: 'done', data: { messageCount: saved.messageCount, limitReached: saved.messageCount >= config.limits.messagesPerConversation, ended: reason !== null,
         ...(reason ? { reason } : {}), ...(turn ? { awaitingTools: true } : {}) } });
@@ -752,22 +766,23 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
 
   /** A new requester message: one agent turn, with document tools when the browser offers them. */
   const message = async (req: Request, id: string): Promise<Response> => {
+    const timing: TurnTiming = { received: performance.now(), phases: {} };
     // The body is read while the session is checked; an unauthorized request still answers unauthorized first.
-    const [who, parsed] = await Promise.allSettled([session(req), parseBody(req, messageSchema)]);
+    const [who, parsed] = await Promise.allSettled([timed(timing, 'auth', session(req)), parseBody(req, messageSchema)]);
     if (who.status === 'rejected') throw who.reason;
     if (parsed.status === 'rejected') throw parsed.reason;
     const user = who.value, body = parsed.value;
     const userDb = deps.userDb(req);
     // Everything the turn needs before the model starts, at once: one database round trip of waiting instead of five.
-    const loading = loadConversation(id, user);
+    const loading = timed(timing, 'load', loadConversation(id, user));
     const [loaded, rate, account, issues] = await Promise.allSettled([
       loading,
-      enforceRate(db, user.id, config.limits.messagesPerMinute),
-      accountContext(user, userDb),
+      timed(timing, 'rate', enforceRate(db, user.id, config.limits.messagesPerMinute)),
+      timed(timing, 'account', accountContext(user, userDb)),
       loading.then(conversation => {
         const path = conversation.path === 'open' && body.intent ? body.intent : conversation.path;
         // Help and initial routing need no tracker snapshot. Duplicate lookup stays available on demand.
-        return path === 'help' || path === 'open' ? [] : openIssues();
+        return path === 'help' || path === 'open' ? [] : timed(timing, 'issues', openIssues());
       }),
     ]);
     // Failures are reported in the order the checks used to run one by one, so a response never depends on timing.
@@ -793,9 +808,10 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     const help = path === 'help' || path === 'open'
       ? `\n\n<retrieved_help>\n${retrieveUserHelp(deps.digest, body.text.slice(0, 300), ctx.screen.editor)}\n</retrieved_help>` : '';
     const context = agent.context(ctx) + help;
-    const pictures = body.attachments?.length ? await messagePictures(conversation, user.id, body.attachments) : [];
-    const images = await pictureData([...prior, { role: 'user', text: body.text, at: base.now, attachments: pictures }]);
+    const pictures = body.attachments?.length ? await timed(timing, 'pictures', messagePictures(conversation, user.id, body.attachments)) : [];
+    const images = await timed(timing, 'images', pictureData([...prior, { role: 'user', text: body.text, at: base.now, attachments: pictures }]));
     return streamTurn({
+      timing,
       user, conversation, store, handlers: agent.handlers(ctx, store), pathChanged: path !== conversation.path,
       leading: [...closers, { role: 'user', text: body.text, at: base.now, ...(pictures.length ? { attachments: pictures } : {}) }],
       setup: {
@@ -808,13 +824,17 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
 
   /** The browser's answers to a suspended turn's document tool calls; the turn continues exactly where it stopped. */
   const toolResults = async (req: Request, id: string): Promise<Response> => {
-    const [who, parsed] = await Promise.allSettled([session(req), parseBody(req, toolResultsSchema)]);
+    const timing: TurnTiming = { received: performance.now(), phases: {} };
+    const [who, parsed] = await Promise.allSettled([timed(timing, 'auth', session(req)), parseBody(req, toolResultsSchema)]);
     if (who.status === 'rejected') throw who.reason;
     if (parsed.status === 'rejected') throw parsed.reason;
     const user = who.value, body = parsed.value;
     const userDb = deps.userDb(req);
     // As for a new message, the lookups start together and their failures are reported in a fixed order.
-    const [loaded, account, issues] = await Promise.allSettled([loadConversation(id, user), accountContext(user, userDb), openIssues()]);
+    const loading = timed(timing, 'load', loadConversation(id, user));
+    const [loaded, account, issues] = await Promise.allSettled([loading, timed(timing, 'account', accountContext(user, userDb)),
+      // As for a new message, help and initial routing need no tracker snapshot.
+      loading.then(conversation => (conversation.path === 'help' || conversation.path === 'open' ? [] : timed(timing, 'issues', openIssues())))]);
     if (loaded.status === 'rejected') throw loaded.reason;
     const conversation = loaded.value;
     if (conversation.status !== 'open') throw new HttpError('invalid', 'The conversation is closed; start a new one.');
@@ -828,6 +848,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       if (!expected.has(r.toolUseId) || answers.has(r.toolUseId)) throw new HttpError('invalid', `Unexpected tool result for ${r.toolUseId}.`);
       answers.set(r.toolUseId, { content: r.content, isError: r.isError });
     }
+    timing.toolChars = body.results.reduce((sum, r) => sum + r.content.length, 0);
     if (!deps.anthropic) throw new HttpError('unavailable', 'The assistant is not configured (ANTHROPIC_API_KEY missing).');
     if (account.status === 'rejected') throw account.reason;
     if (issues.status === 'rejected') throw issues.reason;
@@ -852,6 +873,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     const history = conversation.messages.slice(0, turn.historyLength);
     const images = await pictureData([...history, opening]);
     return streamTurn({
+      timing,
       user, conversation, store, handlers: agentFor(ctx.path).handlers(ctx, store), pathChanged: false,
       leading: pending.calls.map(call => ({ role: 'tool' as const, name: call.name, toolUseId: call.id, input: call.input,
         output: (answers.get(call.id)?.content ?? NOT_ANSWERED).slice(0, 8000), at: base.now })),

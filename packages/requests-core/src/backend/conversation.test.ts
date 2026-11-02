@@ -892,6 +892,22 @@ describe('document tools', () => {
     ]);
   });
 
+  it('resumes a help turn without waiting for the tracker, and logs where the time went', async () => {
+    const { stored } = await suspended();
+    const logged: string[] = [];
+    const h = harness({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help', messages: stored, message_count: 1 }) }, turns: [{ text: ['Done.'] }] });
+    let searches = 0;
+    h.tracker.searchOpen = async () => { searches += 1; return []; };
+    h.deps.log = (line) => { logged.push(line); };
+    const res = await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/tool-results`, { results: [{ toolUseId: 'c1', content: '{"revision":3}', isError: false }] });
+    expect(parseSse(await res.text()).map(e => e.event)).toEqual(['text', 'done']);
+    expect(searches).toBe(0);
+    const line = logged.find(l => l.startsWith(`turn ${CONVERSATION_ID}:`))!;
+    expect(line).toMatch(/cacheRead=\d+ cacheWrite=\d+ setupMs=\d+ setup=auth:\d+,/);
+    expect(line).toContain('toolChars=14');
+    expect(line).toMatch(/rounds=\[\d+\/\d+\/\d+ms,in100,out20,cr0,cw0,req_fake\]/);
+  });
+
   it('rejects results when nothing is waiting or for calls that were not made', async () => {
     const idle = harness();
     await status(await call(idle.handler, 'POST', `/conversations/${CONVERSATION_ID}/tool-results`, { results: [] }), 400, 'invalid');

@@ -21,7 +21,7 @@ import type { HighlightState, RenderAxes, RenderBody, RenderDimensions, RenderDi
 import { DEFAULT_RENDER_FOG, DEFAULT_RENDER_SHADOWS } from './types';
 import type { RenderFog, RenderShadows } from './types';
 import { SunLight } from './shadows/SunLight';
-import { shadowDisplay } from './renderables/BodyRenderable';
+import { cameraLight, shadowDisplay } from './renderables/BodyRenderable';
 
 // three-mesh-bvh acceleration for CPU picking.
 (ThreeBufferGeometry.prototype as unknown as { computeBoundsTree: typeof computeBoundsTree }).computeBoundsTree = computeBoundsTree;
@@ -114,6 +114,15 @@ export class Viewport {
   /** Current sun/shadow settings. */
   get shadows(): RenderShadows {
     return this.shadowSettings;
+  }
+
+  /**
+   * Faces are lit from the camera when the model neither shows shadows nor uses the sun for shading, and by the sun
+   * and sky lights otherwise. The camera light is shared by every viewport's materials, so each viewport sets it from
+   * its own settings right before it draws.
+   */
+  private applyLighting(): void {
+    cameraLight.value = this.shadowSettings.enabled || this.shadowSettings.useSunForShading ? 0 : 1;
   }
 
   /**
@@ -269,6 +278,7 @@ export class Viewport {
       if (this.shadowSettings.enabled) this.sunLight.fit(this.sceneSync.sceneBounds());
       if (this.sky.visible) this.sky.update(cam, w / h);
       this.sceneSync.prepareFrame();
+      this.applyLighting();
       renderer.render(this.scene, cam);
       const out = document.createElement('canvas');
       out.width = w;
@@ -331,6 +341,7 @@ export class Viewport {
       // face-camera placements face the picture's camera; the next frame turns them back
       this.sceneSync.updateFaceCamera({ eye: camera.eye, forward: fwd, parallel: camera.projection === 'parallel' }, this.shadowSettings.enabled ? this.sunLight.current.sunDirection : null);
       this.sceneSync.prepareFrame();
+      this.applyLighting();
       renderer.render(this.scene, this.camera.three);
       return read(renderer.domElement);
     } catch {
@@ -672,6 +683,7 @@ export class Viewport {
     if (this.sky.visible) this.sky.update(cam, this.width / Math.max(1, this.height));
     renderer.autoClear = true;
     if (this.sceneSync.prepareFrame()) this.ensureBoundsTrees();
+    this.applyLighting();
     renderer.render(this.scene, cam);
     this.overlay.render(renderer, cam);
     this.events.emit('render', undefined);

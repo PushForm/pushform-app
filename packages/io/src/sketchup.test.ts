@@ -315,6 +315,20 @@ describe('SketchUp import', () => {
     expect(into.state.meta.units).toEqual(DEFAULT_UNITS);
   });
 
+  it('opens a model with shadows off and without sun shading, and keeps the destination settings on import', async () => {
+    const scene = await readSketchUp(new Uint8Array(readFileSync(new URL('../../testing/assets/sketchup/import-basics.skp', import.meta.url))));
+    const doc = createDocument();
+    doc.transact('Open fixture', draft => {
+      draft.shadows = { ...draft.shadows, enabled: true, useSunForShading: true, light: 60 };
+      applySketchUpImport(draft, scene);
+    });
+    expect(doc.state.shadows).toMatchObject({ enabled: false, useSunForShading: false, light: 60 });
+    const into = createDocument();
+    into.transact('Shadows', draft => { draft.shadows = { ...draft.shadows, enabled: true, useSunForShading: true }; });
+    into.transact('Import fixture', draft => applySketchUpImport(draft, scene, { groupName: 'Shadows' }));
+    expect(into.state.shadows).toMatchObject({ enabled: true, useSunForShading: true });
+  });
+
   // section-display-*.skp were built in SketchUp 2027 (see the fixtures README); the expected settings are what it reads back.
   const activeStyle = (doc: ReturnType<typeof createDocument>) => doc.state.styles.get(doc.state.activeStyleId)!;
   it.each([[2017, { planes: true, cuts: false }], [2027, { planes: false, cuts: true }]] as const)(

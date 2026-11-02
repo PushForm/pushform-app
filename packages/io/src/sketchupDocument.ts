@@ -7,7 +7,7 @@ import {
   M4_IDENTITY, m4mul, m4translation,
 } from '@pushform/core';
 import {
-  allocId, bodyFromMesh, createDefaultStyle, createEntityContainer, DEFAULT_AXES, DEFAULT_BEHAVIORS, DEFAULT_SCENE_FLAGS,
+  allocId, bodyFromMesh, createDefaultStyle, createEntityContainer, DEFAULT_AXES, DEFAULT_BEHAVIORS, DEFAULT_SCENE_FLAGS, DEFAULT_SHADOWS,
   newImageEntity, overlapRatio, UV_AUTO,
   type CameraState, type ComponentDefinition, type ComponentInstance, type Curve, type DocumentDraft, type Draft, type EdgeRecord,
   type EntityContainer, type ImageAsset, type ImageStore, type LoopRef, type Sketch, type SketchEdge, type Style, type UvMapping, validateMeshPartGeometry, MAX_DOCUMENT_MESH_PART_TRIANGLES, type MeshPartGeometry } from '@pushform/model';
@@ -15,6 +15,9 @@ import { cellKey } from '@pushform/geom';
 import type {
   ImportedCurve, ImportedDefinition, ImportedDisplay, ImportedEdgeFlags, ImportedFace, ImportedScene, ImportedUvMap, ModelImportReport, SketchUpImport,
 } from './sketchup';
+
+/** The shadow settings a .skp file starts with, which an opened model takes until the reader decodes the file's own. */
+export const SKP_DEFAULT_SHADOWS = { enabled: false, useSunForShading: false } as const;
 
 /** Style settings read from a file, with their colors copied, so a document never shares arrays with the import. */
 function copyDisplay(display: ImportedDisplay): ImportedDisplay {
@@ -333,6 +336,9 @@ export function applySketchUpImport(
   };
   // Display units belong to the opened model; importing into another model keeps the destination's units.
   if (options.groupName === undefined && scene.units) draft.meta.units = { ...scene.units };
+  // So do its shadow settings. The reader does not decode them yet, so an opened model takes the format's defaults:
+  // shadows off and the sun not used for shading, which lights faces from the camera.
+  if (options.groupName === undefined) draft.shadows = { ...(draft.shadows ?? DEFAULT_SHADOWS), ...SKP_DEFAULT_SHADOWS };
   // An opened file keeps its own Display Section Planes and Display Section Cuts. A file that records neither and holds
   // section planes starts with them hidden, as authors often hide them, and its active cuts showing.
   if (options.groupName === undefined) {

@@ -44,6 +44,15 @@ export const shadowDisplay = { onFaces: true };
  */
 export const hiddenLineShade = { value: new Vector2(0, 1) };
 
+/**
+ * Camera light: with 1, shaded faces are lit from the camera instead of the sun and sky lights. Each side's sRGB color
+ * is multiplied by `CAMERA_LIGHT.ambient + CAMERA_LIGHT.facing × cos θ`, θ between its shading normal and the view
+ * direction, and limited to white. Used when the model's shadows are off and it does not use the sun for shading;
+ * shared by every patched material, set by `SceneSync`.
+ */
+export const cameraLight = { value: 0 };
+export const CAMERA_LIGHT = { ambient: 0.391, facing: 0.8125 } as const;
+
 /** Dashed grey of hidden-geometry edges. */
 export const HIDDEN_EDGE_COLOR = 0x6b7280;
 /** Back edges draw in the edge color at a lighter weight. */
@@ -65,18 +74,25 @@ export function patchSelectTint(material: Material, color?: number): void {
   material.onBeforeCompile = (shader: WebGLProgramParametersWithUniforms) => {
     shader.uniforms['uPfSelectColor'] = { value: tint };
     shader.uniforms['uPfHiddenShade'] = hiddenLineShade;
+    shader.uniforms['uPfCameraLight'] = cameraLight;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nattribute float flags;\nvarying float vPfFlags;\nattribute float uvq;\nvarying float vPfUvQ;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvPfFlags = flags;')
       .replace('#include <uv_vertex>', '#include <uv_vertex>\nvPfUvQ = 1.0 + uvq;\n#ifdef USE_MAP\nvMapUv = ( mapTransform * vec3( MAP_UV, vPfUvQ ) ).xy;\n#endif');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform vec3 uPfSelectColor;\nuniform vec2 uPfHiddenShade;\nvarying float vPfFlags;\nvarying float vPfUvQ;')
+      .replace('#include <common>', '#include <common>\nuniform vec3 uPfSelectColor;\nuniform vec2 uPfHiddenShade;\nuniform float uPfCameraLight;\nvarying float vPfFlags;\nvarying float vPfUvQ;')
       .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
 if ( uPfHiddenShade.x > 0.5 ) {
   vec3 pfSun = reflectedLight.directDiffuse;
   float pfLit = step( 1e-5, max( pfSun.r, max( pfSun.g, pfSun.b ) ) );
   reflectedLight.directDiffuse = vec3( 0.0 );
   reflectedLight.indirectDiffuse = diffuseColor.rgb * mix( uPfHiddenShade.y, 1.0, pfLit );
+} else if ( uPfCameraLight > 0.5 ) {
+  // View space: the camera looks along -z, so the normal's z is the cosine to the view direction.
+  vec3 pfColor = sRGBTransferOETF( vec4( diffuseColor.rgb, 1.0 ) ).rgb;
+  vec3 pfLit = min( pfColor * ( ${CAMERA_LIGHT.ambient} + ${CAMERA_LIGHT.facing} * max( normal.z, 0.0 ) ), vec3( 1.0 ) );
+  reflectedLight.directDiffuse = vec3( 0.0 );
+  reflectedLight.indirectDiffuse = sRGBTransferEOTF( vec4( pfLit, 1.0 ) ).rgb;
 }`)
       .replace('#include <map_fragment>', ShaderChunk.map_fragment.replace('texture2D( map, vMapUv )', 'texture2D( map, vMapUv / vPfUvQ )'))
       .replace(

@@ -25,12 +25,29 @@ export function stripUnsupportedKeywords(node: unknown, propertyMap = false): un
   return out;
 }
 /**
+ * Rewrite fixed-length tuples (`prefixItems`, which tool schemas reject) as plain arrays: one `items` schema, or an
+ * `anyOf` when the positions differ. Length bounds stay for the caller to keep or strip; zod still checks the tuple.
+ */
+export function flattenTuples(node: unknown, propertyMap = false): unknown {
+  if (Array.isArray(node)) return node.map((n) => flattenTuples(n));
+  if (!node || typeof node !== 'object') return node;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(node)) out[key] = flattenTuples(value, !propertyMap && key === 'properties');
+  if (!propertyMap && Array.isArray(out['prefixItems'])) {
+    const positions = out['prefixItems'] as unknown[];
+    delete out['prefixItems'];
+    const distinct = positions.filter((p, i) => positions.findIndex(q => JSON.stringify(q) === JSON.stringify(p)) === i);
+    out['items'] = distinct.length === 1 ? distinct[0] : { anyOf: distinct };
+  }
+  return out;
+}
+/**
  * A tool definition for Haiku 5.5: strict schema from zod with `additionalProperties: false` and every key required.
  * `z.int()`, `.min()`, `.max()` and friends emit `minimum`/`maximum`/`maxLength`, which the API rejects on a strict
  * schema, so they are stripped here and enforced client-side by `withSchema`.
  */
 export function defineTool<S extends z.ZodObject>(name: string, description: string, schema: S): Anthropic.Tool {
-  const json = stripUnsupportedKeywords(z.toJSONSchema(schema)) as Record<string, unknown>;
+  const json = stripUnsupportedKeywords(flattenTuples(z.toJSONSchema(schema))) as Record<string, unknown>;
   delete json['$schema'];
   const { type: _type, ...rest } = json;
   return { name, description, input_schema: { type: 'object', ...rest }, strict: true };
@@ -41,7 +58,7 @@ export function defineTool<S extends z.ZodObject>(name: string, description: str
  * generated; nothing here runs it, since `runTurn` never runs tools from a `max_tokens` or `refusal` stop.
  */
 export function defineLooseTool<S extends z.ZodObject>(name: string, description: string, schema: S): Anthropic.Tool {
-  const json = z.toJSONSchema(schema) as Record<string, unknown>;
+  const json = flattenTuples(z.toJSONSchema(schema)) as Record<string, unknown>;
   delete json['$schema'];
   const { type: _type, ...rest } = json;
   return { name, description, input_schema: { type: 'object', ...rest }, eager_input_streaming: true };

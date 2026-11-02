@@ -3,8 +3,9 @@
 import { describe, expect, it } from 'vitest';
 import type Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
-import { PROGRESS_UPDATES_BETA, REFUSAL_TEXT, ROUNDS_TEXT, TRUNCATED_TEXT, answerPending, defineLooseTool, defineTool, messageText, runTurn, stripUnsupportedKeywords, withSchema } from './client.ts';
+import { PROGRESS_UPDATES_BETA, REFUSAL_TEXT, ROUNDS_TEXT, TRUNCATED_TEXT, answerPending, defineLooseTool, defineTool, flattenTuples, messageText, runTurn, stripUnsupportedKeywords, withSchema } from './client.ts';
 import { fakeAnthropic } from './fakeAnthropic.ts';
+import { layoutDocumentTools, modelDocumentTools } from './document.ts';
 
 const echoTool = defineTool('echo', 'Echo the input.', z.object({ value: z.string() }));
 const user = (text: string): Anthropic.MessageParam => ({ role: 'user', content: text });
@@ -178,5 +179,23 @@ describe('client tools', () => {
       expect(client.calls[0]).not.toHaveProperty('thinking');
       expect(client.headers[0]).toBeUndefined();
     });
+  });
+});
+
+describe('tuple schemas', () => {
+  const schema = z.object({ at: z.tuple([z.number(), z.number(), z.number()]), pair: z.tuple([z.string(), z.number()]) });
+  const hasPrefixItems = (node: unknown): boolean => JSON.stringify(node).includes('prefixItems');
+  it('become plain arrays the API accepts, in strict and loose tools', () => {
+    expect(hasPrefixItems(defineTool('t', 'd', schema).input_schema)).toBe(false);
+    expect(hasPrefixItems(defineLooseTool('t', 'd', schema).input_schema)).toBe(false);
+    const props = (defineLooseTool('t', 'd', schema).input_schema as { properties: Record<string, Record<string, unknown>> }).properties;
+    expect(props['at']).toMatchObject({ type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 });
+    expect(props['pair']!['items']).toEqual({ anyOf: [{ type: 'string' }, { type: 'number' }] });
+  });
+  it('never reach the API from the document tools', () => {
+    for (const tool of [...layoutDocumentTools, ...modelDocumentTools]) expect(hasPrefixItems(tool.input_schema), tool.name).toBe(false);
+  });
+  it('leave a property named prefixItems alone', () => {
+    expect(flattenTuples({ type: 'object', properties: { prefixItems: { type: 'string' } } })).toEqual({ type: 'object', properties: { prefixItems: { type: 'string' } } });
   });
 });

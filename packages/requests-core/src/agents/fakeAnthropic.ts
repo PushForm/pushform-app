@@ -5,22 +5,26 @@ import type { AnthropicLike, MessageStreamLike } from './client.ts';
 
 /** One scripted assistant message: text deltas, tool calls and how the message stopped. */
 export interface ScriptedTurn {
+  /** Thinking deltas streamed before the text, as a progress note (or empty reasoning) arrives. */
+  thinking?: string[];
   text?: string[];
   toolUses?: { id: string; name: string; input: unknown }[];
   stopReason?: Anthropic.StopReason;
   usage?: Partial<Anthropic.Usage>;
 }
-export interface FakeAnthropic extends AnthropicLike { calls: Anthropic.MessageStreamParams[] }
+export interface FakeAnthropic extends AnthropicLike { calls: Anthropic.MessageStreamParams[]; headers: (Record<string, string> | undefined)[] }
 
 /** A client whose `messages.stream` yields the scripted events in order, so tool loops are tested without the network. */
 export function fakeAnthropic(turns: ScriptedTurn[]): FakeAnthropic {
   const queue = [...turns];
   const calls: Anthropic.MessageStreamParams[] = [];
+  const headers: (Record<string, string> | undefined)[] = [];
   return {
     calls,
+    headers,
     messages: {
-      stream(params) {
-        calls.push(params);
+      stream(params, options) {
+        calls.push(params); headers.push(options?.headers);
         const turn = queue.shift();
         if (!turn) throw new Error('fakeAnthropic: no scripted turn left');
         return scriptedStream(turn);
@@ -31,6 +35,7 @@ export function fakeAnthropic(turns: ScriptedTurn[]): FakeAnthropic {
 function scriptedStream(turn: ScriptedTurn): MessageStreamLike {
   const content: Anthropic.ContentBlock[] = [];
   const text = (turn.text ?? []).join('');
+  if (turn.thinking) content.push({ type: 'thinking', thinking: turn.thinking.join(''), signature: 'sig' });
   if (turn.text?.length) content.push({ type: 'text', text, citations: null });
   for (const t of turn.toolUses ?? []) content.push({ type: 'tool_use', id: t.id, name: t.name, input: t.input, caller: { type: 'direct' } });
   const stopReason: Anthropic.StopReason = turn.stopReason ?? (turn.toolUses?.length ? 'tool_use' : 'end_turn');
@@ -45,6 +50,11 @@ function scriptedStream(turn: ScriptedTurn): MessageStreamLike {
   const events: Anthropic.MessageStreamEvent[] = [];
   events.push({ type: 'message_start', message: { ...message, content: [], stop_reason: null } });
   let index = 0;
+  if (turn.thinking) {
+    events.push({ type: 'content_block_start', index, content_block: { type: 'thinking', thinking: '', signature: '' } });
+    for (const d of turn.thinking) events.push({ type: 'content_block_delta', index, delta: { type: 'thinking_delta', thinking: d } });
+    events.push({ type: 'content_block_stop', index }); index += 1;
+  }
   if (turn.text?.length) {
     events.push({ type: 'content_block_start', index, content_block: { type: 'text', text: '', citations: null } });
     for (const d of turn.text) events.push({ type: 'content_block_delta', index, delta: { type: 'text_delta', text: d } });

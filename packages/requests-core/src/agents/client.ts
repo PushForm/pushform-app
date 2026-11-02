@@ -5,7 +5,7 @@ import { z } from 'zod';
 
 /** The slice of the SDK client `runTurn` uses, so tests inject a scripted stream and never reach the network. */
 export interface MessageStreamLike extends AsyncIterable<Anthropic.MessageStreamEvent> { finalMessage(): Promise<Anthropic.Message> }
-export interface AnthropicLike { messages: { stream(params: Anthropic.MessageStreamParams): MessageStreamLike } }
+export interface AnthropicLike { messages: { stream(params: Anthropic.MessageStreamParams, options?: { headers?: Record<string, string> }): MessageStreamLike } }
 
 export function createAnthropic(apiKey: string): Anthropic { return new Anthropic({ apiKey, maxRetries: 2, timeout: 60_000 }); }
 
@@ -79,6 +79,12 @@ export interface RunTurnOptions {
   maxToolRounds?: number;
   maxTokens?: number;
   effort?: 'low' | 'medium' | 'high';
+  /**
+   * Stream the short notes the model writes between tool calls as visible text. Models that return those notes as
+   * thinking blocks keep them empty unless asked, which leaves a multi-round turn silent until its final answer.
+   * Ignored for models that do not support it (see `supportsProgressUpdates`).
+   */
+  progressUpdates?: boolean;
   /** Tools the browser runs: a round that calls any of them suspends the turn instead of running a handler. */
   clientTools?: ReadonlySet<string> | undefined;
   /**
@@ -88,6 +94,11 @@ export interface RunTurnOptions {
   resume?: { appended: Anthropic.MessageParam[]; rounds: number } | undefined;
 }
 export interface RunTurnResult { appended: Anthropic.MessageParam[]; text: string; usage: TurnUsage; stop: TurnStop; rounds: number; pending: PendingClientTools | null }
+
+/** The beta that returns between-tool progress notes as thinking text while reasoning stays hidden. */
+export const PROGRESS_UPDATES_BETA = 'thinking-display-updates-2026-08-18';
+/** Models that write between-tool notes as thinking blocks and accept the progress-update display. */
+export function supportsProgressUpdates(model: string): boolean { return /^claude-(sonnet-5-5|opus-5-5|fable-5|mythos-5)/.test(model); }
 
 export const REFUSAL_TEXT = 'I cannot help with that in this conversation.';
 export const TRUNCATED_TEXT = '\n\n(My reply was cut short. Ask me to continue.)';
@@ -107,6 +118,7 @@ export async function runTurn(options: RunTurnOptions): Promise<RunTurnResult> {
   let text = ''; let rounds = options.resume?.rounds ?? 0; let stop: TurnStop = 'other';
   let pending: PendingClientTools | null = null;
   const emit = (delta: string) => { text += delta; onText?.(delta); };
+  const progress = options.progressUpdates === true && supportsProgressUpdates(model);
   for (;;) {
     const params: Anthropic.MessageStreamParams = {
       model, max_tokens: options.maxTokens ?? 4096,
@@ -115,9 +127,20 @@ export async function runTurn(options: RunTurnOptions): Promise<RunTurnResult> {
       output_config: { effort: options.effort ?? 'low' },
     };
     if (tools.length) { params.tools = tools; params.tool_choice = { type: 'auto' }; }
-    const stream = client.messages.stream(params);
+    // `updates` is a beta display value the stable parameter type does not list yet.
+    if (progress) params.thinking = { type: 'adaptive', display: 'updates' } as unknown as Anthropic.ThinkingConfigParam;
+    const stream = client.messages.stream(params, progress ? { headers: { 'anthropic-beta': PROGRESS_UPDATES_BETA } } : undefined);
+    // Each visible block (a progress note or reply text) starts a new paragraph after text already shown.
+    let blockStarted = false;
+    const visible = (delta: string) => {
+      if (!delta) return;
+      if (!blockStarted) { blockStarted = true; if (text && !text.endsWith('\n\n')) emit(text.endsWith('\n') ? '\n' : '\n\n'); }
+      emit(delta);
+    };
     for await (const event of stream) {
-      if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') emit(event.delta.text);
+      if (event.type === 'content_block_start') blockStarted = false;
+      else if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') visible(event.delta.text);
+      else if (progress && event.type === 'content_block_delta' && event.delta.type === 'thinking_delta') visible(event.delta.thinking);
     }
     const message = await stream.finalMessage();
     usage.inputTokens += message.usage.input_tokens; usage.outputTokens += message.usage.output_tokens;

@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import type Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
-import { REFUSAL_TEXT, ROUNDS_TEXT, TRUNCATED_TEXT, answerPending, defineLooseTool, defineTool, messageText, runTurn, stripUnsupportedKeywords, withSchema } from './client.ts';
+import { PROGRESS_UPDATES_BETA, REFUSAL_TEXT, ROUNDS_TEXT, TRUNCATED_TEXT, answerPending, defineLooseTool, defineTool, messageText, runTurn, stripUnsupportedKeywords, withSchema } from './client.ts';
 import { fakeAnthropic } from './fakeAnthropic.ts';
 
 const echoTool = defineTool('echo', 'Echo the input.', z.object({ value: z.string() }));
@@ -47,8 +47,8 @@ describe('runTurn', () => {
       handlers: { echo: withSchema(z.object({ value: z.string() }), ({ value }) => `echo:${value}`) },
       onText: (d) => deltas.push(d), onToolCall: (c) => calls.push(`${c.name}:${c.result.content}`),
     });
-    expect(deltas).toEqual(['Let me ', 'check.', 'Done.']);
-    expect(r.text).toBe('Let me check.Done.');
+    expect(deltas).toEqual(['Let me ', 'check.', '\n\n', 'Done.']);
+    expect(r.text).toBe('Let me check.\n\nDone.');
     expect(r.stop).toBe('end_turn'); expect(r.rounds).toBe(1);
     expect(calls).toEqual(['echo:echo:a', 'echo:echo:b']);
     expect(r.appended.map((m) => m.role)).toEqual(['assistant', 'user', 'assistant']);
@@ -151,5 +151,32 @@ describe('client tools', () => {
     expect(r.rounds).toBe(1);
     expect(client.calls[0]!.messages).toEqual([user('hi'), ...first.appended, answer]);
     expect(r.appended.map((m) => m.role)).toEqual(['assistant', 'user', 'assistant']);
+  });
+
+  describe('progress updates', () => {
+    const turns = () => [
+      { thinking: ['Reading the ', 'walls first.'], toolUses: [{ id: 'tu1', name: 'echo', input: { value: 'a' } }] },
+      { thinking: [''], text: ['Moved the door.'] },
+    ];
+    const handlers = { echo: withSchema(z.object({ value: z.string() }), ({ value }) => value) };
+    it('streams between-tool notes as text on models that return them as thinking', async () => {
+      const client = fakeAnthropic(turns());
+      const deltas: string[] = [];
+      const r = await runTurn({ client, model: 'claude-sonnet-5-5', system: 'S', tools: [], handlers, messages: [{ role: 'user', content: 'Move it' }],
+        progressUpdates: true, onText: (d) => deltas.push(d) });
+      expect(r.text).toBe('Reading the walls first.\n\nMoved the door.');
+      expect(deltas[0]).toBe('Reading the ');
+      expect(client.calls[0]!.thinking).toEqual({ type: 'adaptive', display: 'updates' });
+      expect(client.headers[0]).toEqual({ 'anthropic-beta': PROGRESS_UPDATES_BETA });
+      // The thinking blocks are kept in the transcript unchanged for the next round.
+      expect((r.appended[0]!.content as Anthropic.ContentBlock[])[0]!.type).toBe('thinking');
+    });
+    it('leaves the request and the reply unchanged where the model does not support them', async () => {
+      const client = fakeAnthropic(turns());
+      const r = await runTurn({ client, model: 'claude-haiku-5-5', system: 'S', tools: [], handlers, messages: [{ role: 'user', content: 'Move it' }], progressUpdates: true });
+      expect(r.text).toBe('Moved the door.');
+      expect(client.calls[0]).not.toHaveProperty('thinking');
+      expect(client.headers[0]).toBeUndefined();
+    });
   });
 });

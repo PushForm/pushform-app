@@ -637,6 +637,8 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
           clientTools, resume: setup.resume,
           // A turn that can edit the document plans multi-step geometry; help and intake stay short.
           effort: editing ? 'medium' : 'low', maxTokens: editing ? 16_000 : 4096, maxToolRounds: editing ? DOCUMENT_TOOL_ROUNDS : 8,
+          // Editing turns run many tool rounds; their between-call notes stream so the panel is never silent for the whole turn.
+          progressUpdates: editing,
           onText: (delta) => {
             firstTextMs ??= Math.round(performance.now() - generationStarted);
             emit({ event: 'text', data: { delta } });

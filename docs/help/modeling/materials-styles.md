@@ -38,6 +38,8 @@ Select the edge and use **Soft**, **Smooth**, or **Hidden** in Entity Info where
 
 To inspect hidden edges or faces, enable **Hidden Geometry**. Hiding and unhiding can be undone like other document changes.
 
+## Browse the materials library
+
 In **Materials → Select**, materials always appear as square previews. Hover a swatch to see its name, and click it to choose that material. Use the library picker to browse categories; switching libraries keeps your active material.
 
 The library includes 338 tileable image textures:
@@ -57,6 +59,8 @@ The library includes 338 tileable image textures:
 
 Colors provides 24 solid colors, and Glass offers six transparent tints. Ceramic replaces the former Tile category. Some paving and block materials now appear under Brick.
 
-The square previews show the actual surface image. Full textures load when you choose a material and use real-world repeat sizes, which you can adjust in **Edit**. Rectangular textures retain their proportions. When you add a library texture, its image is saved with your document. The library ships with the app and needs no external texture service.
+## Adjust and save library textures
+
+The square previews show the actual surface image. Full textures load when you choose a material and use real-world repeat sizes, which you can adjust in **Materials → Edit**. Rectangular textures retain their proportions. When you add a library texture, its image is saved with your document. The library ships with the app and needs no external texture service.
 
 The textured finishes use CC0 color maps from [Poly Haven](https://polyhaven.com/license). They provide surface color and pattern; glass tints provide transparency. These presets do not add reflection, refraction, or surface relief.

@@ -90,7 +90,10 @@ export function ToolStack({
 
   useLayoutEffect(() => {
     if (!wrapper.current) return;
-    return registerGuidanceTargets({ root: wrapper.current, targets: tools.map(tool => ({ id: `toolbar:${tool.id}`, label: tool.title, surface: 'toolbar' as const, dropdown: title, active: tool.id === activeId, route: `Toolbar > ${title} > ${tool.title}`, enabled: true })),
+    // The route names what is on screen: the toolbar group's label, then the choice, with the dropdown's own name after it.
+    const group = wrapper.current.closest('[role="group"][aria-label]')?.getAttribute('aria-label');
+    return registerGuidanceTargets({ root: wrapper.current, targets: tools.map(tool => ({ id: `toolbar:${tool.id}`, label: tool.title, surface: 'toolbar' as const, dropdown: title, active: tool.id === activeId,
+      route: `Toolbar > ${group && group !== title ? `${group} > ` : ''}${tool.title} (in the ${title} dropdown)`, enabled: true })),
       reveal: ids => { if (tools.some(tool => ids.includes(`toolbar:${tool.id}`))) open(false); },
     });
   });
@@ -156,6 +159,7 @@ export function ToolStack({
         className={`pf-toolbtn${owned ? ' is-active' : ''}`}
         title={current.key ? `${current.title} (${current.key})` : current.title}
         data-guidance-skip="true"
+        data-guidance-alias={`toolbar:${current.id}`}
         aria-label={current.title}
         aria-pressed={owned !== undefined}
         onClick={() => pick(current.id, false)}

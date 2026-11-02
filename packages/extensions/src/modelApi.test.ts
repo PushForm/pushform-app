@@ -189,6 +189,38 @@ describe('ModelDocumentApi batches', () => {
     expect(error.error.revision).toBe(api.revision);
   });
 
+  it('builds a cabinet carcass from boxes as one undo step, each panel its own component', async () => {
+    const { api, host, root } = setup();
+    const t = 0.019, w = 0.9144, h = 1.2192, d = 0.3048;
+    const result = await api.apply({ expectedRevision: api.revision, label: 'Wall cabinet', operations: [
+      { op: 'add_box', as: 'left', min: [0, 0, 0], max: [t, d, h] },
+      { op: 'add_box', as: 'right', min: [w - t, 0, 0], max: [w, d, h] },
+      { op: 'add_box', as: 'shelf', min: [t, 0, h / 3], max: [w - t, d, h / 3 + t] },
+      { op: 'make_component', as: 'shelfPart', refs: ['$shelf'], name: 'Shelf' },
+      { op: 'move', refs: ['$shelfPart'], offset: [0, 0, h / 3], copy: true },
+      { op: 'make_group', refs: ['$left'] },
+      { op: 'make_group', refs: ['$right'] },
+    ] });
+    expect(result.results.slice(0, 3).map(r => r.op)).toEqual(['add_box', 'add_box', 'add_box']);
+    expect(root().bodies.size).toBe(0);
+    expect(root().instances.size).toBe(4);
+    const shelves = api.query({ container: null, kinds: ['instance'], ids: null, facing: null, containing: null, fields: null, offset: null, limit: null })
+      .entities.filter(e => e.definitionId === result.results[3]!.definitionId);
+    expect(shelves).toHaveLength(2);
+    expect(host.undoStack.canUndo).toBe(true);
+    host.undoStack.undo();
+    expect(root().instances.size + root().bodies.size).toBe(0);
+  });
+
+  it('refuses a box that is flat or inverted on any axis without changing anything', async () => {
+    const { api } = setup();
+    const revision = api.revision;
+    const flat = await failure(() => api.apply({ expectedRevision: revision, label: 'x', operations: [{ op: 'add_box', min: [0, 0, 0], max: [1, 0, 1] }] }));
+    expect(flat.error).toMatchObject({ code: 'invalid_geometry', operationIndex: 0 });
+    expect(flat.error.message).toContain('y');
+    expect(api.revision).toBe(revision);
+  });
+
   it('refuses stale revisions, unknown names, unavailable and malformed operations before changing anything', async () => {
     const { api, addBox } = setup();
     const id = addBox([0, 0, 0], [1, 1, 1]);

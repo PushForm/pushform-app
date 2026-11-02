@@ -90,17 +90,24 @@ export function guidanceFor(session: DocumentSession, tab: DocumentTab, openPane
         if (!event.isTrusted) return;
         if (!valid() || signal?.aborted) { finish('cancelled'); return; }
         if (performance.now() - started >= 30_000) { finish('expired'); return; }
-        const target = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-guidance-id]') : null;
+        // A dropdown slot's face runs the choice it shows, so clicking it activates that choice as well as the menu item does.
+        const target = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-guidance-id], [data-guidance-alias]') : null;
         if (!target || target.getAttribute('aria-disabled') === 'true' || target.matches(':disabled')) return;
-        const index = shown.indexOf(target);
-        if (index >= 0) finish('interacted', ids[index], event instanceof KeyboardEvent || (event as MouseEvent).detail === 0 ? 'keyboard' : 'click');
+        const id = shown.includes(target) ? target.dataset['guidanceId'] : target.dataset['guidanceAlias'];
+        if (id && ids.includes(id)) finish('interacted', id, event instanceof KeyboardEvent || (event as MouseEvent).detail === 0 ? 'keyboard' : 'click');
       };
       const clicked = (event: MouseEvent): void => activate(event);
       // Native buttons generate trusted clicks for Enter/Space. Treeitems activate on Enter in their own handler.
       const keyed = (event: KeyboardEvent): void => { if (event.key === 'Enter' && event.target instanceof Element && event.target.matches('[role="treeitem"]')) activate(event); };
       const cancelled = (): void => finish('cancelled');
       const unsubscribe = session.subscribe(() => { if (!valid()) cancelled(); });
-      const observer = new MutationObserver(() => { if (shown.some(element => !available(element))) finish('unavailable'); });
+      // A revealed dropdown that closes again (a click elsewhere, Escape) was dismissed, not lost: its choice is still there.
+      // Only a target that was part of the page on its own and then disappeared is unavailable.
+      const revealed = new Set(activeProviders().flatMap(provider => provider.targets.map(target => target.id)).filter(id => ids.includes(id)));
+      const observer = new MutationObserver(() => {
+        const gone = ids.filter((id, index) => !available(shown[index]!));
+        if (gone.length) finish(gone.every(id => revealed.has(id) && !id.startsWith('object:')) ? 'dismissed' : 'unavailable');
+      });
       observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'inert'] });
       const glow = setTimeout(clearGlow, 5000);
       const expiry = setTimeout(() => finish('expired'), 30_000);

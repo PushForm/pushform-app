@@ -14,7 +14,7 @@ After the start point, the Length and Angle fields beside the line show its size
 
 ## Draw a Rectangle or Rotated Rectangle
 
-Choose **Rectangle** from the Shape dropdown. Click the first corner, then the opposite corner, or drag between them and release. After the first corner, type the width, press Tab, type the height and press Enter for exact dimensions. Escape cancels the unfinished rectangle.
+In the Draw group of the toolbar, choose **Rectangle** from the Shape dropdown. Click the first corner, then the opposite corner, or drag between them and release. After the first corner, type the width, press Tab, type the height and press Enter for exact dimensions. Escape cancels the unfinished rectangle.
 
 For **Rotated Rectangle**, click the first corner, click the second corner to set the first edge, then click a third point to set the width and orientation. The third click completes the face. A rectangle begins as a flat face; use Push/Pull to give it thickness.
 

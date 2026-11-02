@@ -109,6 +109,13 @@ describe('Chat', () => {
     expect(screen.queryByText(/Not provided/)).toBeNull();
     expect(screen.queryByText(/of 30 messages/)).toBeNull();
     expect(readDrafts(account.id)[0]).toMatchObject({ conversationId: 'conv-1', path: 'problem' });
+    expect(screen.getByRole('textbox', { name: 'Your message' }).getAttribute('placeholder')).toBe('Type your answer, or say skip');
+  });
+  it('invites a follow-up question, not an answer or a skip, on the help path', async () => {
+    setup();
+    expect(screen.getByRole('textbox', { name: 'Your message' }).getAttribute('placeholder')).toBe('Describe what you need');
+    await pick('Get help');
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Your message' }).getAttribute('placeholder')).toBe('Ask a follow-up question'));
   });
   it('starts from a typed message without a card and sends no intent', async () => {
     const { backend } = setup({ turns: [[text('Tell me more.'), briefEvent(featureBrief, 'Mirror', 'feature'), done(1)]] });

@@ -21,7 +21,7 @@ export const MODEL_LIMITS = {
  * rejecting it as unknown, so a client can tell "not yet" from "never".
  */
 export const MODEL_PLANNED_OPERATIONS = [
-  'add_edges', 'add_polyline', 'add_rectangle', 'add_circle', 'add_polygon', 'add_box', 'push_pull',
+  'add_edges', 'add_polyline', 'add_rectangle', 'add_circle', 'add_polygon', 'push_pull',
   'union', 'subtract', 'intersect', 'split', 'follow_me',
   'set_texture', 'add_guide', 'add_text', 'add_dimension', 'add_section_plane', 'soften_edges',
   'intersect_faces', 'offset', 'fillet', 'set_attribute',
@@ -88,6 +88,8 @@ const sceneSaves = z.object({
 }).describe('Which properties the scene saves and restores (tags: tag visibility; style: style and fog). Omitted ones keep their setting; a new scene saves all of them.');
 
 export const modelOperationSchema = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('add_box'), as: localName.optional(), min: point.describe('One corner: the smallest x, y and z.'), max: point.describe('The opposite corner: the largest x, y and z.') })
+    .describe('Add a rectangular solid with its sides along the container\'s axes, between two opposite corners; each side must be longer than zero. Returns the solid\'s id. A part such as a cabinet side or a shelf is one box, made into its own group or component.'),
   z.object({ op: z.literal('make_group'), as: localName.optional(), refs })
     .describe('Group loose geometry, solids, groups or components of the container into a new group. Returns the group\'s instance id and definition id.'),
   z.object({ op: z.literal('make_component'), as: localName.optional(), refs, name: name.optional() })
@@ -269,7 +271,7 @@ export const MODEL_TOOLS = {
   },
   applyOperations: {
     name: 'model_apply_operations',
-    description: 'Edit the open 3D model in one atomic batch: every operation applies or none does, and the batch is one undo entry labelled with label. Lengths are meters, local to the container being edited; angles are degrees; z is up. Entities are named by {kind, id} from model_query (faces as {kind: "face", id: bodyId, faceId}). Create operations accept as: "name"; later operations refer to the result as "$name". Returns the new revision and the created ids, or an error naming the failed operation; a stale_revision error means the user changed the model, so read it again before retrying. Drawing and push/pull operations are not available yet and fail with unavailable. Scene operations add, update, delete, rename, reorder and include scenes; a framed camera fits a subject from a view direction.',
+    description: 'Edit the open 3D model in one atomic batch: every operation applies or none does, and the batch is one undo entry labelled with label. Lengths are meters, local to the container being edited; angles are degrees; z is up. Entities are named by {kind, id} from model_query (faces as {kind: "face", id: bodyId, faceId}). Create operations accept as: "name"; later operations refer to the result as "$name". Returns the new revision and the created ids, or an error naming the failed operation; a stale_revision error means the user changed the model, so read it again before retrying. add_box adds a rectangular solid; other drawing operations, push/pull and solid booleans are not available yet and fail with unavailable. Scene operations add, update, delete, rename, reorder and include scenes; a framed camera fits a subject from a view direction.',
   },
   view: {
     name: 'model_view',

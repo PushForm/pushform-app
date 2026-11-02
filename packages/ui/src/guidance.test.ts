@@ -94,6 +94,25 @@ describe('private AI Chat guidance', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('counts a click on the slot face that shows the highlighted dropdown choice', async () => {
+    const face = document.createElement('button'); face.dataset['guidanceSkip'] = 'true'; face.dataset['guidanceAlias'] = 'toolbar:rect'; document.body.append(face);
+    const item = document.createElement('button'); item.dataset['guidanceId'] = 'toolbar:rect';
+    cleanups.push(registerGuidanceTargets({ root: face, targets: [{ id: 'toolbar:rect', label: 'Rectangle' }], reveal: () => document.body.append(item) }));
+    const pending = guidanceFor(session, tab, vi.fn())('ui_highlight', { targets: ['toolbar:rect'] });
+    await flush(); click(face); item.remove(); await flush();
+    expect(await result(pending)).toMatchObject({ status: 'interacted', target: 'toolbar:rect', interactionType: 'click' });
+  });
+
+  it('reports a revealed dropdown that closes without a choice as dismissed, not unavailable', async () => {
+    const face = document.createElement('button'); face.dataset['guidanceSkip'] = 'true'; document.body.append(face);
+    const item = document.createElement('button'); item.dataset['guidanceId'] = 'toolbar:rect';
+    cleanups.push(registerGuidanceTargets({ root: face, targets: [{ id: 'toolbar:rect', label: 'Rectangle' }], reveal: () => document.body.append(item) }));
+    const pending = guidanceFor(session, tab, vi.fn())('ui_highlight', { targets: ['toolbar:rect'] });
+    await flush(); click(document.body); item.remove(); await flush();
+    expect(await result(pending)).toMatchObject({ status: 'dismissed' });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('discovers and reveals collapsed browser nodes before starting the timers', async () => {
     const open = vi.fn();
     const reveal = vi.fn(() => { const row = document.createElement('div'); row.dataset['guidanceId'] = 'object:body:7'; root.append(row); });

@@ -42,6 +42,6 @@ Soft and hidden edges are not drawn, so the pointer passes through them to the f
 
 ## Manage tags in the Object browser
 
-Choose the **Tags** tab in the Object browser to create, rename, recolor or delete tags, organize tag folders, toggle visibility, choose the active tag, filter tags, change dashes, purge unused tags or turn on **Color by Tag**. Tag controls are now here instead of the right-hand panel strip. Assign an object’s tag through **Entity Info**.
+Choose the **Tags** tab in the Object browser to create, rename, recolor or delete tags, organize tag folders, toggle visibility, choose the active tag, filter tags, change dashes, purge unused tags or turn on **Color by Tag**. Tag controls are now here instead of the right-hand panel strip. The pencil button chooses the active tag for newly created objects; it does not retag existing objects. Assign an existing object’s tag through **Entity Info**.
 
-In **Objects**, each tagged object shows its tag name as a pill in that tag’s color. Untagged objects have no pill. Hover over a truncated pill to read its full name. Pills update when tags change, including undo and redo. Switching between **Objects** and **Tags** keeps your tree expansion and selection.
+In **Objects**, each tagged object shows a small dot in that tag’s color. Hover over the dot or focus the object row with the keyboard to see a popup containing the tag name in a colored pill. Untagged objects have no dot. Dots and popups update when tags change, including undo and redo. Switching between **Objects** and **Tags** keeps your tree expansion and selection.

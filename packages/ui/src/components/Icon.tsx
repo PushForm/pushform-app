@@ -163,6 +163,7 @@ const REACT_ICONS: Record<string, IconType> = {
   'page-duplicate': LuCopy,
   'page-delete': LuTrash2,
   'page-rename': LuPencil,
+  pencil: LuPencil,
   'page-up': LuArrowUp,
   'page-down': LuArrowDown,
   'chevron-right': LuChevronRight,

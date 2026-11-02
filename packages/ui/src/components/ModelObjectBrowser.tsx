@@ -3,6 +3,8 @@
 import { browserSelectionRange } from './browserSelectionRange';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type { CSSProperties, JSX, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import type { Rgb } from '@pushform/model';
 import { entityRefKey, tagVisible } from '@pushform/model';
 import { PiCaretRight, PiCube, PiPencilSimple } from 'react-icons/pi';
 import { useGuidanceBrowser } from '../hooks/useGuidanceBrowser';
@@ -43,6 +45,19 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
   const idPrefix = useId();
   const state = useDocumentState();
   const [section, setSection] = useState<'objects' | 'tags'>('objects');
+  const [tagTooltip, setTagTooltip] = useState<{ key: string; left: number; top: number } | null>(null);
+  const showTagTooltip = (key: string, anchor: Element | null): void => {
+    if (!anchor) { setTagTooltip(null); return; }
+    const bounds = anchor.getBoundingClientRect();
+    setTagTooltip({ key, left: Math.max(8, Math.min(bounds.left, window.innerWidth - 256)), top: bounds.bottom + 6 });
+  };
+  useEffect(() => {
+    const dismiss = (): void => setTagTooltip(null);
+    window.addEventListener('scroll', dismiss, true);
+    window.addEventListener('resize', dismiss);
+    return () => { window.removeEventListener('scroll', dismiss, true); window.removeEventListener('resize', dismiss); };
+  }, []);
+  useEffect(() => setTagTooltip(null), [section]);
   // A viewport click selects a solid's face or edge; the tree lists the solid, so those mark its row.
   const selectedKeys = useMemo(() => new Set(refs.map(ref =>
     ref.kind === 'face' || ref.kind === 'edge' || ref.kind === 'imprintEdge' ? entityRefKey({ kind: 'body', path: ref.path, id: ref.id }) : entityRefKey(ref))), [refs]);
@@ -156,7 +171,7 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
     event.stopPropagation();
     const item = event.target instanceof Element ? event.target.closest('[role="treeitem"]') : null;
     const node = byKey.get(item?.getAttribute('data-key') ?? tabKey ?? '');
-    if (event.key === 'Escape') { event.preventDefault(); onClose?.(); return; }
+    if (event.key === 'Escape') { event.preventDefault(); if (tagTooltip) setTagTooltip(null); else onClose?.(); return; }
     if (!node) return;
     const index = visible.indexOf(node);
     const go = (key: string | undefined): void => { if (key) moveFocus(key); };
@@ -188,8 +203,6 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
 
   const renderNode = (node: ModelBrowserNode, setSize: number, position: number, ancestorHidden = false): JSX.Element => {
     const tag = node.tagId === state.defaultTagId ? undefined : state.tags.get(node.tagId);
-    const luminance = tag?.color.map(channel => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
-    const lightText = luminance ? luminance[0]! * 0.2126 + luminance[1]! * 0.7152 + luminance[2]! * 0.0722 < 0.179 : false;
     const open = expandable(node) && isExpanded(node);
     const labelId = `${idPrefix}-${node.key}`, hiddenId = `${labelId}-hidden`;
     const renaming = editing?.key === node.key;
@@ -207,8 +220,9 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
     return <li key={node.key} role="treeitem" data-key={node.key} data-guidance-id={`object:${node.key}`} className={className} aria-labelledby={labelId} aria-level={node.level}
       aria-setsize={setSize} aria-posinset={position} aria-selected={selected} tabIndex={node.key === tabKey ? 0 : -1}
       {...(expandable(node) ? { 'aria-expanded': open } : {})}
-      {...(description ? { 'aria-describedby': hiddenId } : {})}
-      onFocus={event => { if (event.target === event.currentTarget) setFocusKey(node.key); }}>
+      aria-describedby={[description ? hiddenId : '', tagTooltip?.key === node.key ? `${idPrefix}-tag-tooltip` : ''].filter(Boolean).join(' ') || undefined}
+      onFocus={event => { if (event.target === event.currentTarget) { setFocusKey(node.key); showTagTooltip(node.key, event.currentTarget.querySelector(':scope > .pf-layout-browser-row .pf-model-browser-tag-dot')); } }}
+      onBlur={event => { if (event.target === event.currentTarget) setTagTooltip(null); }}>
       <div className={`pf-layout-browser-row${selected ? ' is-selected' : ''}`} style={{ '--pf-browser-level': node.level - 1 } as CSSProperties}
         title={`${KIND_NAMES[node.kind]}: ${node.label}${node.definitionName ? ` <${node.definitionName}>` : ''}`}
         onClick={onRowClick} onDoubleClick={() => startRename(node)}
@@ -223,8 +237,10 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
           ? <RenameField label={node.label} id={labelId} onFinish={finishRename} />
           : <span id={labelId} className="pf-layout-browser-name">{node.label}
             {node.definitionName ? <span className="pf-model-browser-def"> &lt;{node.definitionName}&gt;</span> : null}</span>}
-        {tag ? <span className="pf-model-browser-tag" title={tag.name} aria-label={`Tag: ${tag.name}`}
-          style={{ backgroundColor: rgbToCss(tag.color), color: lightText ? '#fff' : '#000' }}>{tag.name}</span> : null}
+        {tag ? <span className="pf-model-browser-tag-dot" role="img" aria-label={`Tag: ${tag.name}`} title=""
+          aria-describedby={tagTooltip?.key === node.key ? `${idPrefix}-tag-tooltip` : undefined}
+          style={{ backgroundColor: rgbToCss(tag.color) }}
+          onMouseEnter={event => showTagTooltip(node.key, event.currentTarget)} onMouseLeave={() => setTagTooltip(null)} /> : null}
         {current ? <span className="pf-layout-browser-flag" role="img" aria-label="Open for editing" title="Open for editing"><PiPencilSimple /></span> : null}
         {description ? <span id={hiddenId} className="pf-layout-browser-sr">{description}</span> : null}
         <button type="button" tabIndex={-1} aria-label={`Show ${node.label}`} aria-pressed={!dimmed} disabled={blockedVisibility}
@@ -243,7 +259,11 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
     </li>;
   };
 
+  const tooltipNode = tagTooltip ? allByKey.get(tagTooltip.key) : undefined;
+  const tooltipTag = tooltipNode && tooltipNode.tagId !== state.defaultTagId ? state.tags.get(tooltipNode.tagId) : undefined;
   return <div className="pf-layout-object-browser pf-model-object-browser">
+    {tagTooltip && tooltipTag && section === 'objects' ? createPortal(<TagTooltip id={`${idPrefix}-tag-tooltip`} name={tooltipTag.name}
+      color={tooltipTag.color} left={tagTooltip.left} top={tagTooltip.top} />, document.body) : null}
     <h2 className="pf-layout-browser-title">Object browser</h2>
     <div className="pf-tabs pf-model-browser-tabs" role="tablist" aria-label="Object browser sections">
       {(['objects', 'tags'] as const).map(name => <button key={name} type="button" role="tab" className={`pf-tab${section === name ? ' is-active' : ''}`}
@@ -286,4 +306,18 @@ function RenameField({ label, id, onFinish }: { label: string; id: string; onFin
       else if (event.key === 'Escape') { event.preventDefault(); onFinish(null, true); }
     }}
     onBlur={event => onFinish(event.currentTarget.value, false)} />;
+}
+
+/** A portal keeps the tag pill clear of the browser's scrolling and dimmed rows. */
+function TagTooltip({ id, name, color, left, top }: { id: string; name: string; color: Rgb; left: number; top: number }): JSX.Element {
+  const ref = useRef<HTMLDivElement>(null);
+  const [fittedTop, setFittedTop] = useState(top);
+  useLayoutEffect(() => {
+    setFittedTop(Math.max(8, Math.min(top, window.innerHeight - (ref.current?.getBoundingClientRect().height ?? 0) - 8)));
+  }, [top, name]);
+  const linear = color.map(channel => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
+  const lightText = linear[0]! * 0.2126 + linear[1]! * 0.7152 + linear[2]! * 0.0722 < 0.179;
+  return <div ref={ref} id={id} role="tooltip" className="pf-model-browser-tag-tooltip" style={{ left, top: fittedTop }}>
+    <span className="pf-model-browser-tag" style={{ backgroundColor: rgbToCss(color), color: lightText ? '#fff' : '#000' }}>{name}</span>
+  </div>;
 }

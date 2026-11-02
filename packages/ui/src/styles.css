@@ -16,6 +16,8 @@
   --pf-statusbar-h: 26px;
   --pf-toolbar-w: 42px;
   --pf-panel-w: 300px;
+  --pf-panel-font-size: 12px;
+  --pf-panel-line-height: 1.3;
   --pf-radius: 4px;
   --pf-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   color-scheme: light;
@@ -257,7 +259,8 @@
   flex: none;
   width: var(--pf-panel-w);
   border-left: 1px solid var(--pf-border);
-  font-size: 12px;
+  font-size: var(--pf-panel-font-size);
+  line-height: var(--pf-panel-line-height);
 }
 .pf-layout-accordion {
   border-bottom: 1px solid var(--pf-border);
@@ -809,6 +812,8 @@
   border-left: 1px solid var(--pf-border);
 }
 .pf-panel {
+  font-size: var(--pf-panel-font-size);
+  line-height: var(--pf-panel-line-height);
   width: var(--pf-panel-w);
   flex: none;
   display: flex;
@@ -2609,7 +2614,7 @@ button.pf-brand { border: 0; background: transparent; color: inherit; font: inhe
 .pf-side-dock .pf-requests-unavailable { padding: 14px 16px; }
 
 /* Layout object browser: the tree inside the docked side panel. */
-.pf-layout-object-browser { display: flex; flex-direction: column; min-height: 0; font-size: 14px; color: var(--pf-text); }
+.pf-layout-object-browser { display: flex; flex-direction: column; min-height: 0; font-size: var(--pf-panel-font-size); line-height: var(--pf-panel-line-height); color: var(--pf-text); }
 .pf-layout-browser-title { margin: 0; padding: 12px 12px 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--pf-text-muted); }
 .pf-layout-browser-tree, .pf-layout-browser-tree [role='group'] { list-style: none; margin: 0; padding: 0; }
 .pf-layout-browser-tree { padding-bottom: 8px; }
@@ -2644,7 +2649,7 @@ button.pf-brand { border: 0; background: transparent; color: inherit; font: inhe
 /* Model object browser: the Layout object browser's rows, plus a component's definition name and the empty state. */
 .pf-model-browser-def { color: var(--pf-text-muted); }
 .pf-model-browser-toggle-gap { flex: none; width: 26px; }
-.pf-model-browser-empty { margin: 0; padding: 4px 12px 12px; font-size: 13px; color: var(--pf-text-muted); }
+.pf-model-browser-empty { margin: 0; padding: 4px 12px 12px; font-size: inherit; color: var(--pf-text-muted); }
 
 .pf-layout-references ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
 .pf-layout-references li { display: flex; flex-direction: column; gap: 6px; }
@@ -2944,6 +2949,10 @@ h4.pf-xui-text { font-size: 12px; }
 .pf-modeling-ribbon > .pf-layout-ribbon-group:last-child { border-right: 0; }
 
 .pf-model-browser-tabs button:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: -2px; }
-.pf-model-browser-tag { flex: 0 1 auto; max-width: 40%; min-width: 0; border-radius: 999px; padding: 2px 7px; font-size: 11px; line-height: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-model-browser-tag { display: inline-block; border-radius: 999px; padding: 2px 7px; font-size: 11px; line-height: 16px; overflow-wrap: anywhere; white-space: normal; }
 
 .pf-model-object-browser > [role="tabpanel"] > .pf-tags { padding: 8px; }
+
+.pf-model-browser-tag-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; box-shadow: 0 0 0 1px var(--pf-border); }
+.pf-model-browser-tag-tooltip { position: fixed; z-index: 1000; max-width: min(240px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: auto; font: var(--pf-panel-font-size)/var(--pf-panel-line-height) var(--pf-font); pointer-events: none; }
+

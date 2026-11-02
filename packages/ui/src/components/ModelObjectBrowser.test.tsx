@@ -55,7 +55,7 @@ const item = (name: string): HTMLElement =>
 const row = (name: string): HTMLElement => item(name).querySelector<HTMLElement>(':scope > .pf-layout-browser-row')!;
 
 describe('ModelObjectBrowser', () => {
-  it('manages tags in a sub-tab and updates object pills through edits and undo', () => {
+  it('manages tags in a sub-tab and updates tag dots and custom pill tooltips through edits and undo', () => {
     const a = boot();
     for (const command of tagCommands) if (!a.commands.has(command.id)) a.commands.register(command);
     const group = addInstance(a, { name: 'Frame' });
@@ -81,7 +81,16 @@ describe('ModelObjectBrowser', () => {
     fireEvent.click(objects);
     expect(names()).toEqual(['Frame', 'Solid 1']);
     expect(item('Frame').getAttribute('aria-selected')).toBe('true');
-    const pill = within(row('Frame')).getByLabelText('Tag: Timber');
+    const dot = within(row('Frame')).getByLabelText('Tag: Timber');
+    expect(dot.textContent).toBe('');
+    expect(dot.style.backgroundColor).toBe('rgb(0, 0, 0)');
+    expect(screen.queryByRole('tooltip')).toBeNull();
+    fireEvent.mouseEnter(dot);
+    const popup = screen.getByRole('tooltip');
+    expect(popup.parentElement).toBe(document.body);
+    expect(popup.classList.contains('pf-tool-tooltip')).toBe(false);
+    expect(popup.textContent).toBe('Timber');
+    const pill = popup.querySelector<HTMLElement>('.pf-model-browser-tag')!;
     expect(pill.style.backgroundColor).toBe('rgb(0, 0, 0)');
     expect(pill.style.color).toBe('rgb(255, 255, 255)');
     expect(within(row('Solid 1')).getByLabelText('Tag: Timber')).toBeTruthy();
@@ -92,8 +101,24 @@ describe('ModelObjectBrowser', () => {
     expect(pill.style.backgroundColor).toBe('rgb(0, 0, 0)');
     act(() => { a.commands.execute('tag.rename', { id: tagId, name: 'Oak' }); });
     expect(within(row('Frame')).getByLabelText('Tag: Oak')).toBeTruthy();
+    expect(screen.getByRole('tooltip').textContent).toBe('Oak');
+    fireEvent.mouseLeave(dot);
+    expect(screen.queryByRole('tooltip')).toBeNull();
+    act(() => item('Frame').focus());
+    expect(screen.getByRole('tooltip').textContent).toBe('Oak');
+    fireEvent.keyDown(item('Frame'), { key: 'Escape' });
+    expect(screen.queryByRole('tooltip')).toBeNull();
+    fireEvent.mouseEnter(dot);
+    fireEvent.scroll(window);
+    expect(screen.queryByRole('tooltip')).toBeNull();
+    fireEvent.mouseEnter(dot);
+    fireEvent.click(tags);
+    expect(screen.queryByRole('tooltip')).toBeNull();
+    fireEvent.click(objects);
+    fireEvent.mouseEnter(dot);
     act(() => { a.commands.execute('tag.assign', { tagId: a.document.doc.state.defaultTagId, refs: [{ kind: 'instance', path: [], id: group }] }); });
     expect(within(row('Frame')).queryByLabelText(/^Tag:/)).toBeNull();
+    expect(screen.queryByRole('tooltip')).toBeNull();
   });
 
   it('reflects tag and folder visibility on objects and descendants without changing their own hidden flags', () => {

@@ -82,6 +82,7 @@ function TagRow(p: TagRowProps): JSX.Element {
         type="button"
         className={`pf-tag-pencil${p.active ? ' is-active' : ''}`}
         aria-label={p.active ? `${tag.name} is the active tag` : `Make ${tag.name} the active tag`}
+        title={p.active ? `New objects use ${tag.name}` : `Use ${tag.name} for new objects`}
         aria-pressed={p.active}
         onClick={(e) => {
           e.stopPropagation();

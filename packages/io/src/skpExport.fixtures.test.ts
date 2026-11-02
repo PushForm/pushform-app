@@ -19,7 +19,8 @@ const DIFFERENCES: Record<string, { allowed: Compared[]; reason: string }> = {
   'entity-tags-': { allowed: ['faces', 'edges', 'area', 'bounds', 'definitions', 'instances', 'flags'], reason: 'content on hidden tags is not exported' },
   'tag-attributes-': { allowed: ['edges', 'bounds'], reason: 'an edge on a hidden tag, which sets the bounds, is not exported' },
 };
-const fixtures = readdirSync(folder).filter(name => name.endsWith('.skp')).sort();
+// empty-2020.skp holds nothing to open or export.
+const fixtures = readdirSync(folder).filter(name => name.endsWith('.skp') && name !== 'empty-2020.skp').sort();
 
 async function openFile(bytes: Uint8Array) {
   const scene = await readSketchUp(bytes);

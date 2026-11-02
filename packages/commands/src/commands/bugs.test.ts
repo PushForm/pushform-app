@@ -5,12 +5,12 @@ import { InlineBackend, KernelClient } from '@pushform/kernel';
 import type { Body } from '@pushform/model';
 import { CommandRegistry } from '../registry/CommandRegistry';
 import { DocumentHost } from '../host/DocumentHost';
-import { SERVICE_DOCUMENT, SERVICE_KERNEL } from '../host/services';
+import { kernelOf, SERVICE_DOCUMENT, SERVICE_KERNEL } from '../host/services';
 import { sketchCommands } from './sketch';
 import { curveCommands } from './curves';
 import { pushPullCommands } from './pushpull';
-import { solidCommands } from './solids';
-import { followMeCommands } from './followme';
+import { runSolidsKernel, solidCommands } from './solids';
+import { followMeCommands, runFollowMeKernel } from './followme';
 
 function circle(c: [number, number, number], n: [number, number, number], r: number, segs: number) {
   const u: [number, number, number] = Math.abs(n[2]) > 0.9 ? [1, 0, 0] : [0, 0, 1];
@@ -103,5 +103,35 @@ describe('Follow Me from a face of a solid merges into it', () => {
     expect(s.host.undoStack.length).toBeGreaterThan(0);
     s.host.undo();
     expect(s.bodies()[0]!.props.volume).toBeCloseTo(vol0, 6);
+  });
+});
+
+describe('Solid Tools and Follow Me take a precomputed kernel step', () => {
+  it('commits a subtract computed beforehand without running the kernel again, inside an exclusive group', async () => {
+    const s = setup();
+    const target = await box(s, [0, 0, 0], [1, 1, 1]);
+    const cutter = await box(s, [0.5, -0.5, 0.5], [1.5, 1.5, 1.5]);
+    const a = { kind: 'body' as const, path: [], id: cutter.id }, b = { kind: 'body' as const, path: [], id: target.id };
+    const precomputed = await runSolidsKernel(s.host, kernelOf(s.commands.ctx), 'subtract', { a, b });
+    s.host.undoStack.beginGroup('Cut');
+    // The command commits synchronously within the group's edits, since no kernel call is left to await.
+    const pending = s.host.undoStack.withinGroup(() => s.commands.execute('solids.subtract', { a, b, precomputed })) as Promise<{ bodyIds: number[]; deleted: number[] }>;
+    s.host.undoStack.endGroup(true);
+    expect(await pending).toEqual({ bodyIds: [target.id], deleted: [cutter.id] });
+    expect(s.bodies()).toHaveLength(1);
+    expect(s.bodies()[0]!.props.volume).toBeCloseTo(0.75);
+    await expect(s.commands.execute('solids.union', { a, b, precomputed })).rejects.toMatchObject({ code: 'solids.target' });
+  });
+
+  it('commits a Follow Me sweep computed beforehand', async () => {
+    const s = setup();
+    s.commands.execute('sketch.rectangle', { a: [0, 0, 0], b: [0, 0.1, 0], c: [0, 0.1, 0.1], d: [0, 0, 0.1] });
+    const faceId = [...s.root().sketch.faces.keys()].pop()!;
+    const params = { profile: { kind: 'sketchFace' as const, path: [], id: faceId }, pathPoints: [[0, 0, 0], [2, 0, 0]] as [number, number, number][] };
+    const precomputed = await runFollowMeKernel(s.host, kernelOf(s.commands.ctx), params);
+    expect(s.bodies()).toHaveLength(0);
+    const result = (await s.commands.execute('followme.apply', { ...params, precomputed })) as { bodyIds: number[] };
+    expect(result.bodyIds).toHaveLength(1);
+    expect(s.bodies()[0]!.props.volume).toBeCloseTo(0.02);
   });
 });

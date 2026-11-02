@@ -3,9 +3,9 @@
 import { z } from 'zod';
 import type { Id, MeshData, Vec3, FaceLocalId } from '@pushform/core';
 import { MERGE_TOL, PushFormError, v3dist, v3dot } from '@pushform/core';
-import type { ComponentsResult, KernelComponent, BooleanResult } from '@pushform/kernel';
+import type { ComponentsResult, KernelClient, KernelComponent, BooleanResult } from '@pushform/kernel';
 import { applyKernelResult, bodyFromMesh, sketchFaceEdgeIds } from '@pushform/model';
-import type { DocumentDraft, EntityContainer, Draft, KernelFaceOrigin } from '@pushform/model';
+import type { Body, DocumentDraft, EntityContainer, Draft, KernelFaceOrigin } from '@pushform/model';
 import { defineCommand } from '../registry/Command';
 import type { AnyCommand } from '../registry/Command';
 import { hostOf, kernelOf } from '../host/services';
@@ -28,6 +28,8 @@ export const FollowMeParamsSchema = z
     pathPoints: z.array(vec3).min(2).optional(),
     /** Close the path (lathe / loop). Inferred from the edge chain when omitted. */
     closed: z.boolean().optional(),
+    /** A kernel step from `runFollowMeKernel` for exactly these params. */
+    precomputed: z.custom<FollowMeKernelWork>((v) => typeof v === 'object' && v !== null && 'plan' in v && 'result' in v).optional(),
   })
   .refine((p) => (p.pathEdgeIds !== undefined && p.pathEdgeIds.length > 0) !== (p.pathPoints !== undefined), {
     message: 'Provide either pathEdgeIds or pathPoints',
@@ -102,6 +104,74 @@ export function applyFollowMeResult(draft: DocumentDraft, plan: FollowMePlan, re
 }
 
 /**
+ * The kernel step of Follow Me, computed before the document changes: the sweep, and for a profile on a solid's face
+ * the sweep merged into that solid. Passing it back as `precomputed` commits it without running the kernel again.
+ */
+export interface FollowMeKernelWork {
+  readonly plan: FollowMePlan;
+  readonly result: ComponentsResult;
+  readonly merge: { readonly hostBody: Body; readonly merged: BooleanResult } | null;
+}
+
+/** Plan the sweep and run the kernel. Reads the document only. A kernel `NotImplemented` error propagates unchanged. */
+export async function runFollowMeKernel(host: ReturnType<typeof hostOf>, kernel: KernelClient, p: FollowMeParams): Promise<FollowMeKernelWork> {
+  const plan = planFollowMe(host, p);
+  const result = await kernel.followMe({
+    profile: plan.info.polygon,
+    profileBasis: plan.info.basis,
+    path: plan.path.map((q) => [q[0], q[1], q[2]] as Vec3),
+    closed: plan.closed,
+    nextFaceId: 0,
+  });
+  if (!result.components.length) throw new PushFormError('followme.empty', 'Follow Me produced no solid');
+  // A profile drawn on a solid's face sweeps out of (or into) that solid: merge the sweep into it,
+  // instead of leaving a separate body.
+  const hostBodyId = plan.info.bodyId;
+  const hostBody = hostBodyId !== null && result.components.length === 1 ? rootContainerOf(host.doc.state, p.profile.path).bodies.get(hostBodyId) : undefined;
+  if (!hostBody) return { plan, result, merge: null };
+  const temp = { bodyId: TEMP_SWEEP_BASE + (sweepCounter++ % 0xffff), version: 0 };
+  try {
+    await kernel.ensureBody(hostBody.id, hostBody.version, hostBody.mesh);
+    await kernel.ensureBody(temp.bodyId, temp.version, result.components[0]!.mesh);
+    const merged = await kernel.boolean({ op: 'add', a: { bodyId: hostBody.id, version: hostBody.version }, b: temp, nextFaceId: hostBody.nextFaceId });
+    return { plan, result, merge: { hostBody, merged } };
+  } finally {
+    void kernel.release(temp.bodyId, temp.version).catch(() => undefined);
+  }
+}
+
+/** Commit a kernel step as one transaction ("Follow Me"); throws `followme.stale` when the profile changed since. */
+export function commitFollowMe(host: ReturnType<typeof hostOf>, work: FollowMeKernelWork): FollowMeApplyResult {
+  const { plan, result, merge } = work;
+  if (!merge) return host.transact('Follow Me', () => host.edit('Follow Me', (draft) => applyFollowMeResult(draft, plan, result)));
+  const { hostBody, merged } = merge;
+  return host.transact('Follow Me', () =>
+    host.edit('Follow Me', (draft) => {
+      const root = draftContainerAt(draft, plan.info.target.path);
+      const cur = root.bodies.get(hostBody.id);
+      if (!cur || cur.version !== hostBody.version) throw new PushFormError('followme.stale', 'The solid changed before Follow Me could be applied');
+      const [first, ...extras] = merged.components;
+      const bodyIds: number[] = [];
+      if (first) {
+        const updated = applyKernelResult(draft, cur.id, {
+          mesh: toMesh(first),
+          faceOrigin: first.faceOrigin as unknown as Map<FaceLocalId, KernelFaceOrigin[]>,
+          selfRunId: merged.aRunId,
+          props: first.props,
+        });
+        updated.nextFaceId = Math.max(updated.nextFaceId, merged.nextFaceId);
+        bodyIds.push(updated.id);
+      } else {
+        root.bodies.delete(cur.id);
+        root.order = root.order.filter((x) => x !== cur.id);
+      }
+      for (const c of extras) bodyIds.push(bodyFromMesh(draft, toMesh(c), { container: asDraft(root), tagId: cur.tagId }).id);
+      return { bodyIds };
+    }),
+  );
+}
+
+/**
  * Sweep the profile along the path. Async: the kernel runs first, then the document edit is one
  * undo entry ("Follow Me"). A kernel `NotImplemented` error propagates unchanged.
  */
@@ -113,59 +183,8 @@ export const followMeApply = defineCommand({
   undoable: false,
   async run(ctx, p): Promise<FollowMeApplyResult> {
     const host = hostOf(ctx);
-    const kernel = kernelOf(ctx);
-    const plan = planFollowMe(host, p);
-    const result = await kernel.followMe({
-      profile: plan.info.polygon,
-      profileBasis: plan.info.basis,
-      path: plan.path.map((q) => [q[0], q[1], q[2]] as Vec3),
-      closed: plan.closed,
-      nextFaceId: 0,
-    });
-    if (!result.components.length) throw new PushFormError('followme.empty', 'Follow Me produced no solid');
-    // A profile drawn on a solid's face sweeps out of (or into) that solid: merge the sweep into it,
-    // instead of leaving a separate body.
-    const hostBodyId = plan.info.bodyId;
-    if (hostBodyId !== null && result.components.length === 1) {
-      const hostBody = rootContainerOf(host.doc.state, p.profile.path).bodies.get(hostBodyId);
-      const swept = result.components[0]!;
-      if (hostBody) {
-        const temp = { bodyId: TEMP_SWEEP_BASE + (sweepCounter++ % 0xffff), version: 0 };
-        let merged: BooleanResult;
-        try {
-          await kernel.ensureBody(hostBody.id, hostBody.version, hostBody.mesh);
-          await kernel.ensureBody(temp.bodyId, temp.version, swept.mesh);
-          merged = await kernel.boolean({ op: 'add', a: { bodyId: hostBody.id, version: hostBody.version }, b: temp, nextFaceId: hostBody.nextFaceId });
-        } finally {
-          void kernel.release(temp.bodyId, temp.version).catch(() => undefined);
-        }
-        return host.transact('Follow Me', () =>
-          host.edit('Follow Me', (draft) => {
-            const root = draftContainerAt(draft, p.profile.path);
-            const cur = root.bodies.get(hostBodyId);
-            if (!cur || cur.version !== hostBody.version) throw new PushFormError('followme.stale', 'The solid changed before Follow Me could be applied');
-            const [first, ...extras] = merged.components;
-            const bodyIds: number[] = [];
-            if (first) {
-              const updated = applyKernelResult(draft, cur.id, {
-                mesh: toMesh(first),
-                faceOrigin: first.faceOrigin as unknown as Map<FaceLocalId, KernelFaceOrigin[]>,
-                selfRunId: merged.aRunId,
-                props: first.props,
-              });
-              updated.nextFaceId = Math.max(updated.nextFaceId, merged.nextFaceId);
-              bodyIds.push(updated.id);
-            } else {
-              root.bodies.delete(cur.id);
-              root.order = root.order.filter((x) => x !== cur.id);
-            }
-            for (const c of extras) bodyIds.push(bodyFromMesh(draft, toMesh(c), { container: asDraft(root), tagId: cur.tagId }).id);
-            return { bodyIds };
-          }),
-        );
-      }
-    }
-    return host.transact('Follow Me', () => host.edit('Follow Me', (draft) => applyFollowMeResult(draft, plan, result)));
+    const work = p.precomputed ?? (await runFollowMeKernel(host, kernelOf(ctx), p));
+    return commitFollowMe(host, work);
   },
 });
 

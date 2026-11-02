@@ -2,8 +2,8 @@
 // Copyright 2026 PushForm contributors
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  CommandRegistry, DocumentHost, SERVICE_DOCUMENT, SERVICE_KERNEL, componentCommands, contextCommands, editCommands, groupCommands,
-  materialCommands, modelCommands, sketchCommands, tagCommands, transformCommands,
+  CommandRegistry, DocumentHost, SERVICE_DOCUMENT, SERVICE_KERNEL, componentCommands, contextCommands, curveCommands, editCommands, followMeCommands,
+  groupCommands, materialCommands, modelCommands, pushPullCommands, sketchCommands, solidCommands, tagCommands, transformCommands,
 } from '@pushform/commands';
 import { MODEL_TOOLS, type ModelBatchResult } from '@pushform/extension-protocol';
 import { InlineBackend, KernelClient } from '@pushform/kernel';
@@ -17,7 +17,8 @@ function setup() {
   const kernel = new KernelClient(new InlineBackend());
   kernels.push(kernel);
   const commands = new CommandRegistry({ tx: host, services: new Map<string, unknown>([[SERVICE_DOCUMENT, host], [SERVICE_KERNEL, kernel]]) });
-  for (const group of [editCommands, modelCommands, sketchCommands, transformCommands, groupCommands, componentCommands, contextCommands, tagCommands, materialCommands])
+  for (const group of [editCommands, modelCommands, sketchCommands, transformCommands, groupCommands, componentCommands, contextCommands, tagCommands, materialCommands,
+    curveCommands, pushPullCommands, solidCommands, followMeCommands])
     commands.registerAll(group);
   const api = new ModelDocumentApi(commands, 'AI Chat');
   const root = () => host.doc.rootDefinition.entities;
@@ -227,7 +228,7 @@ describe('ModelDocumentApi batches', () => {
     const revision = api.revision;
     expect((await failure(() => api.apply({ expectedRevision: revision - 1, label: 'x', operations: [{ op: 'add_tag' }] }))).error.code).toBe('stale_revision');
     expect((await failure(() => api.apply({ expectedRevision: revision, label: 'x', operations: [{ op: 'move', refs: ['$nope'], offset: [1, 0, 0] }] }))).error.code).toBe('invalid_reference');
-    const unavailable = await failure(() => api.apply({ expectedRevision: revision, label: 'x', operations: [{ op: 'add_tag' }, { op: 'push_pull', distance: 1 }] }));
+    const unavailable = await failure(() => api.apply({ expectedRevision: revision, label: 'x', operations: [{ op: 'add_tag' }, { op: 'fillet', radius: 1 }] }));
     expect(unavailable.error).toMatchObject({ code: 'unavailable', operationIndex: 1 });
     expect((await failure(() => api.apply({ expectedRevision: revision, label: 'x', operations: [{ op: 'teleport' }] }))).error.code).toBe('invalid_operation');
     expect((await failure(() => api.apply({ expectedRevision: revision, label: 'x', operations: Array.from({ length: 201 }, () => ({ op: 'add_tag' })) }))).error.code).toBe('limit_exceeded');
@@ -252,6 +253,214 @@ describe('ModelDocumentApi batches', () => {
     expect((await failure(() => stopped)).error.code).toBe('cancelled');
     expect(root().bodies.get(id as never)!.props.volume).toBeCloseTo(2);
     expect(api.getDocument().tags.some(tag => tag.name === 'Never')).toBe(false);
+  });
+});
+
+describe('ModelDocumentApi geometry', () => {
+  const queryAll = { container: null, kinds: null, ids: null, facing: null, containing: null, fields: null, offset: null, limit: null };
+  const bounds = (api: ModelDocumentApi, id: number) => api.query({ ...queryAll, kinds: ['body'], ids: [id] }).entities[0]!.bounds!;
+
+  it('pulls a drawn rectangle into a solid, then cuts a groove in it with a box, as one undo step', async () => {
+    const { api, host, root } = setup();
+    const undoDepth = host.undoStack.length;
+    // A 0.6 m × 0.05 m door rail lying flat, 0.02 m thick, with a 0.006 m × 0.01 m groove along its top edge.
+    const result = await api.apply({ expectedRevision: api.revision, label: 'Grooved rail', operations: [
+      { op: 'add_rectangle', as: 'outline', corner: [0, 0, 0], side1: [0.6, 0, 0], side2: [0, 0.05, 0] },
+      { op: 'push_pull', as: 'rail', face: '$outline', distance: 0.02 },
+      { op: 'add_box', as: 'cutter', min: [-0.01, 0.04, 0.007], max: [0.61, 0.06, 0.013] },
+      { op: 'subtract', target: '$rail', cutters: ['$cutter'] },
+      { op: 'make_group', refs: ['$rail'] },
+    ] });
+    expect(result.results[0]).toMatchObject({ op: 'add_rectangle' });
+    expect(result.results[0]!.refs!.filter(r => r.kind === 'sketchEdge')).toHaveLength(4);
+    expect(result.results[0]!.refs!.filter(r => r.kind === 'sketchFace')).toHaveLength(1);
+    const rail = result.created.rail!;
+    expect(result.results[1]).toMatchObject({ op: 'push_pull', id: rail });
+    expect(result.results[3]).toMatchObject({ op: 'subtract', id: rail, deleted: [{ kind: 'body', id: result.created.cutter }] });
+    expect(host.undoStack.length).toBe(undoDepth + 1);
+    expect(root().sketch.faces.size + root().sketch.edges.size).toBe(0);
+    const def = host.doc.state.definitions.get([...root().instances.values()][0]!.definitionId)!;
+    const body = def.entities.bodies.get(rail as never)!;
+    expect(body.valid).toBe(true);
+    expect(body.props.volume).toBeCloseTo(0.6 * 0.05 * 0.02 - 0.6 * 0.01 * 0.006, 9);
+    host.undo();
+    expect(root().instances.size + root().bodies.size + root().sketch.edges.size).toBe(0);
+  });
+
+  it('pushes a shape the way it faces: side1 × side2, or the right-hand rule of a closed polyline', async () => {
+    const { api } = setup();
+    const result = await api.apply({ expectedRevision: api.revision, label: 'Profiles', operations: [
+      { op: 'add_rectangle', as: 'down', corner: [0, 0, 0], side1: [0, 1, 0], side2: [1, 0, 0] },
+      { op: 'push_pull', as: 'slab', face: '$down', distance: 0.1 },
+      // An L-shaped profile in the side (x = 2) plane, wound counterclockwise seen from +x, pushed out 0.5 m along +x.
+      { op: 'add_polyline', as: 'ell', closed: true, points: [[2, 0, 0], [2, 0.3, 0], [2, 0.3, 0.1], [2, 0.1, 0.1], [2, 0.1, 0.4], [2, 0, 0.4]] },
+      { op: 'push_pull', as: 'bracket', face: '$ell', distance: 0.5 },
+    ] });
+    expect(bounds(api, result.created.slab!)).toMatchObject({ min: [0, 0, -0.1], max: [1, 1, 0] });
+    expect(bounds(api, result.created.bracket!)).toMatchObject({ min: [2, 0, 0], max: [2.5, 0.3, 0.4] });
+    const { root } = { root: () => api.query({ ...queryAll, kinds: ['body'], ids: [result.created.bracket!] }).entities[0]! };
+    expect(root().volume).toBeCloseTo((0.3 * 0.1 + 0.1 * 0.3) * 0.5, 9);
+  });
+
+  it('bores a hole through a solid with a circle drawn on its face, and raises a polygon from the ground', async () => {
+    const { api, root, addBox } = setup();
+    const top = addBox([0, 0, 0], [1, 1, 0.1]);
+    const result = await api.apply({ expectedRevision: api.revision, label: 'Sink cutout', operations: [
+      { op: 'add_circle', as: 'hole', center: [0.5, 0.5, 0.1], normal: [0, 0, 1], radius: 0.2, segments: 32 },
+      { op: 'push_pull', face: '$hole', distance: -0.1 },
+      { op: 'add_polygon', as: 'hex', center: [3, 0, 0], normal: [0, 0, 1], radius: 0.1, sides: 6 },
+      { op: 'push_pull', as: 'post', face: '$hex', distance: 0.2 },
+    ] });
+    expect(result.results[0]!.refs).toContainEqual({ path: [], kind: 'face', id: top, faceId: expect.any(Number) });
+    expect(result.results[1]).toMatchObject({ id: top });
+    const ring = 0.5 * 32 * 0.2 ** 2 * Math.sin((2 * Math.PI) / 32);
+    expect(root().bodies.get(top as never)!.props.volume).toBeCloseTo(0.1 - ring * 0.1, 6);
+    const post = root().bodies.get(result.created.post as never)!;
+    expect(post.props.volume).toBeCloseTo(0.5 * 6 * 0.01 * Math.sin(Math.PI / 3) * 0.2, 7);
+    expect(bounds(api, post.id).max[0]).toBeCloseTo(3.1);
+  });
+
+  it('pulls a face of a solid chosen by facing direction, and refuses a push that would remove the solid', async () => {
+    const { api, host, root, addBox } = setup();
+    const id = addBox([0, 0, 0], [1, 1, 1]);
+    await api.apply({ expectedRevision: api.revision, label: 'Taller', operations: [{ op: 'push_pull', face: { body: id, facing: [0, 0, 1] }, distance: 0.5 }] });
+    expect(root().bodies.get(id as never)!.props.volume).toBeCloseTo(1.5);
+    const revision = api.revision, undoDepth = host.undoStack.length;
+    const error = await failure(() => api.apply({ expectedRevision: revision, label: 'Gone', operations: [
+      { op: 'add_tag', name: 'Before' },
+      { op: 'push_pull', face: { body: id, facing: [0, 0, 1] }, distance: -1.5 },
+    ] }));
+    expect(error.error).toMatchObject({ code: 'invalid_geometry', operationIndex: 1 });
+    expect(root().bodies.get(id as never)!.props.volume).toBeCloseTo(1.5);
+    expect(api.getDocument().tags.some(tag => tag.name === 'Before')).toBe(false);
+    expect(host.undoStack.length).toBe(undoDepth);
+    const none = await failure(() => api.apply({ expectedRevision: api.revision, label: 'x', operations: [{ op: 'push_pull', face: { body: id, facing: [1, 1, 0] }, distance: 0.1 }] }));
+    expect(none.error.code).toBe('invalid_reference');
+    const named = await api.apply({ expectedRevision: api.revision, label: 'Leg', operations: [
+      { op: 'add_box', as: 'leg', min: [3, 0, 0], max: [3.1, 0.1, 0.1] },
+      { op: 'push_pull', face: { body: '$leg', facing: [0, 0, 1] }, distance: 0.6 },
+    ] });
+    expect(bounds(api, named.created.leg!).max[2]).toBeCloseTo(0.7);
+  });
+
+  it('asks for a point when shapes drawn on a face divide it', async () => {
+    const { api, root, addBox } = setup();
+    const id = addBox([0, 0, 0], [1, 1, 0.2]);
+    await api.apply({ expectedRevision: api.revision, label: 'Mark', operations: [{ op: 'add_rectangle', corner: [0.2, 0.2, 0.2], side1: [0.2, 0, 0], side2: [0, 0.2, 0] }] });
+    const divided = await failure(() => api.apply({ expectedRevision: api.revision, label: 'x', operations: [{ op: 'push_pull', face: { body: id, facing: [0, 0, 1] }, distance: -0.1 }] }));
+    expect(divided.error.code).toBe('invalid_reference');
+    expect(divided.error.message).toContain('point');
+    await api.apply({ expectedRevision: api.revision, label: 'Pocket', operations: [{ op: 'push_pull', face: { body: id, facing: [0, 0, 1], point: [0.3, 0.3, 0.2] }, distance: -0.1 }] });
+    expect(root().bodies.get(id as never)!.props.volume).toBeCloseTo(0.2 - 0.04 * 0.1);
+  });
+
+  it('refuses a closed shape that lies partly along a face of a solid and so makes no face', async () => {
+    const { api, addBox } = setup();
+    addBox([0, 0, 0], [1, 1, 1]);
+    const error = await failure(() => api.apply({ expectedRevision: api.revision, label: 'x', operations: [
+      { op: 'add_rectangle', corner: [0, 0, 1], side1: [3, 0, 0], side2: [0, 1, 0] }] }));
+    expect(error.error).toMatchObject({ code: 'invalid_geometry', operationIndex: 0 });
+    expect(error.error.message).toContain('clear of solids');
+  });
+
+  it('draws loose edges and open polylines, closing a flat loop into a face', async () => {
+    const { api } = setup();
+    const result = await api.apply({ expectedRevision: api.revision, label: 'Lines', operations: [
+      { op: 'add_edges', as: 'tri', edges: [[[0, 0, 0], [1, 0, 0]], [[1, 0, 0], [0, 1, 0]], [[0, 1, 0], [0, 0, 0]]] },
+      { op: 'add_polyline', as: 'path', points: [[5, 0, 0], [6, 0, 0], [6, 1, 1]] },
+    ] });
+    expect(result.results[0]!.refs!.map(r => r.kind).sort()).toEqual(['sketchEdge', 'sketchEdge', 'sketchEdge', 'sketchFace']);
+    expect(result.results[1]!.refs!.map(r => r.kind)).toEqual(['sketchEdge', 'sketchEdge']);
+    const open = await failure(() => api.apply({ expectedRevision: api.revision, label: 'x', operations: [
+      { op: 'add_polyline', as: 'p', points: [[5, 5, 0], [6, 5, 0]] }, { op: 'push_pull', face: '$p', distance: 1 }] }));
+    expect(open.error).toMatchObject({ code: 'invalid_reference', operationIndex: 1 });
+  });
+
+  it('refuses shapes that cannot make a face, before changing anything', async () => {
+    const { api } = setup();
+    const revision = api.revision;
+    const cases: [Record<string, unknown>, RegExp][] = [
+      [{ op: 'add_rectangle', corner: [0, 0, 0], side1: [1, 0, 0], side2: [0.5, 1, 0] }, /square/],
+      [{ op: 'add_rectangle', corner: [0, 0, 0], side1: [1, 0, 0], side2: [0, 0, 0] }, /longer/],
+      [{ op: 'add_polyline', closed: true, points: [[0, 0, 0], [1, 0, 0], [1, 1, 0.5], [0, 1, 0]] }, /flat/],
+      [{ op: 'add_polyline', closed: true, points: [[0, 0, 0], [1, 0, 0], [2, 0, 0]] }, /line/],
+      [{ op: 'add_edges', edges: [[[0, 0, 0], [0, 0, 0]]] }, /no length/],
+      [{ op: 'add_circle', center: [0, 0, 0], normal: [0, 0, 1], radius: 1e-5 }, /too small/],
+      [{ op: 'push_pull', face: { kind: 'sketchFace', id: 1 }, distance: 0 }, /distance/],
+    ];
+    for (const [op, message] of cases) {
+      const error = await failure(() => api.apply({ expectedRevision: revision, label: 'x', operations: [op] }));
+      expect(error.error.code).toBe('invalid_geometry');
+      expect(error.error.message).toMatch(message);
+    }
+    expect(api.revision).toBe(revision);
+    const tooMany = await failure(() => api.apply({ expectedRevision: revision, label: 'x', operations: [
+      { op: 'add_polyline', points: Array.from({ length: 6000 }, (_, i) => [i, 0, 0]) },
+      { op: 'add_polyline', points: Array.from({ length: 6000 }, (_, i) => [i, 1, 0]) },
+    ] }));
+    expect(tooMany.error.code).toBe('limit_exceeded');
+  });
+
+  it('joins, intersects and splits solids, and refuses ones that do not touch or overlap', async () => {
+    const { api, root, addBox } = setup();
+    const a = addBox([0, 0, 0], [1, 1, 1]), b = addBox([0.5, 0, 0], [1.5, 1, 1]);
+    const joined = await api.apply({ expectedRevision: api.revision, label: 'Join', operations: [{ op: 'union', as: 'both', refs: [box(a), box(b)] }] });
+    expect(joined.results[0]).toMatchObject({ id: a, deleted: [{ kind: 'body', id: b }] });
+    expect(root().bodies.size).toBe(1);
+    expect(root().bodies.get(a as never)!.props.volume).toBeCloseTo(1.5);
+    const far = addBox([5, 5, 5], [6, 6, 6]);
+    expect((await failure(() => api.apply({ expectedRevision: api.revision, label: 'x', operations: [{ op: 'union', refs: [box(a), box(far)] }] }))).error.code).toBe('invalid_geometry');
+    expect((await failure(() => api.apply({ expectedRevision: api.revision, label: 'x', operations: [{ op: 'intersect', refs: [box(a), box(far)] }] }))).error.code).toBe('invalid_geometry');
+    expect((await failure(() => api.apply({ expectedRevision: api.revision, label: 'x', operations: [{ op: 'split', refs: [box(a), box(far)] }] }))).error.code).toBe('invalid_geometry');
+    expect((await failure(() => api.apply({ expectedRevision: api.revision, label: 'x', operations: [{ op: 'subtract', target: box(a), cutters: [box(far)] }] }))).error.message).toMatch(/does not overlap/);
+    expect(root().bodies.size).toBe(2);
+    const c = addBox([1, 0, 0], [2, 1, 1]);
+    const split = await api.apply({ expectedRevision: api.revision, label: 'Split', operations: [{ op: 'split', refs: [box(a), box(c)] }] });
+    expect(split.results[0]!.refs).toHaveLength(3);
+    const volumes = split.results[0]!.refs!.map(r => root().bodies.get(r.id as never)!.props.volume).sort();
+    expect(volumes[0]).toBeCloseTo(0.5);
+    expect(volumes[1]).toBeCloseTo(0.5);
+    expect(volumes[2]).toBeCloseTo(1);
+    const d = addBox([10, 0, 0], [11, 1, 1]), e = addBox([10.5, 0.5, 0], [11.5, 1.5, 1]);
+    const shared = await api.apply({ expectedRevision: api.revision, label: 'Common', operations: [{ op: 'intersect', refs: [box(d), box(e)] }] });
+    expect(shared.results[0]).toMatchObject({ id: d });
+    expect(root().bodies.get(d as never)!.props.volume).toBeCloseTo(0.25);
+    expect(root().bodies.has(e as never)).toBe(false);
+  });
+
+  it('subtracts several cutters and can keep them; refuses a cut that leaves nothing or targets a group', async () => {
+    const { api, root, addBox } = setup();
+    const panel = addBox([0, 0, 0], [1, 0.02, 1]);
+    const result = await api.apply({ expectedRevision: api.revision, label: 'Dadoes', operations: [
+      { op: 'add_box', as: 'd1', min: [-0.1, 0.01, 0.3], max: [1.1, 0.03, 0.32] },
+      { op: 'add_box', as: 'd2', min: [-0.1, 0.01, 0.6], max: [1.1, 0.03, 0.62] },
+      { op: 'subtract', target: box(panel), cutters: ['$d1', '$d2'], keepCutters: true },
+    ] });
+    expect(root().bodies.get(panel as never)!.props.volume).toBeCloseTo(0.02 - 2 * 0.01 * 0.02, 9);
+    expect(root().bodies.has(result.created.d1 as never)).toBe(true);
+    const all = await failure(() => api.apply({ expectedRevision: api.revision, label: 'x', operations: [
+      { op: 'add_box', as: 'big', min: [-1, -1, -1], max: [2, 2, 2] }, { op: 'subtract', target: box(panel), cutters: ['$big'] }] }));
+    expect(all.error).toMatchObject({ code: 'invalid_geometry', operationIndex: 1 });
+    const grouped = await failure(() => api.apply({ expectedRevision: api.revision, label: 'x', operations: [
+      { op: 'make_group', as: 'g', refs: [box(panel)] }, { op: 'subtract', target: '$g', cutters: [box(result.created.d1!)] }] }));
+    expect(grouped.error.code).toBe('invalid_operation');
+    expect(root().bodies.size).toBe(3);
+  });
+
+  it('sweeps a profile along path points or a drawn polyline with Follow Me', async () => {
+    const { api, root } = setup();
+    const result = await api.apply({ expectedRevision: api.revision, label: 'Mouldings', operations: [
+      { op: 'add_rectangle', as: 'profile', corner: [0, 0, 0], side1: [0, 0.1, 0], side2: [0, 0, 0.05] },
+      { op: 'follow_me', as: 'rail', profile: '$profile', pathPoints: [[0, 0, 0], [1, 0, 0]] },
+      { op: 'add_rectangle', as: 'profile2', corner: [0, 5, 0], side1: [0, 0.1, 0], side2: [0, 0, 0.05] },
+      { op: 'add_polyline', as: 'path', points: [[0, 5, 0], [2, 5, 0]] },
+      { op: 'follow_me', as: 'rail2', profile: '$profile2', pathEdges: ['$path'] },
+    ] });
+    expect(root().bodies.get(result.created.rail as never)!.props.volume).toBeCloseTo(0.005, 9);
+    expect(root().bodies.get(result.created.rail2 as never)!.props.volume).toBeCloseTo(0.01, 9);
+    const both = await failure(() => api.apply({ expectedRevision: api.revision, label: 'x', operations: [
+      { op: 'follow_me', profile: { kind: 'sketchFace', id: 1 }, pathPoints: [[0, 0, 0], [1, 0, 0]], pathEdges: [{ kind: 'sketchEdge', id: 1 }] }] }));
+    expect(both.error.code).toBe('invalid_operation');
   });
 });
 

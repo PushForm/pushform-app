@@ -323,9 +323,20 @@ it('sends a model change on the open path to the document tools, never to layout
 it('has the model agent build requested objects from boxes, every named part included, and say what is left', () => {
   const rules = MODEL_DOCUMENT_RULES(ctx());
   expect(rules).toContain('is a request for a change');
-  expect(rules).toContain('add_box is the one operation that creates geometry');
+  expect(rules).toContain('Build simple parts from boxes (add_box)');
   expect(rules).toContain('Make every part the requester named, with its count');
   expect(rules).toContain('say plainly what is left');
+  expect(rules).not.toContain('not available yet');
+});
+
+it('has the model agent shape parts with push/pull and cut joinery and openings with subtract', () => {
+  const rules = MODEL_DOCUMENT_RULES(ctx());
+  expect(rules).toContain('then push_pull it by its thickness');
+  expect(rules).toContain('Cut joinery and openings with subtract');
+  expect(rules).toContain('a door\'s panel sits in grooves');
+  expect(rules).toContain('a sink cutout is a box through the countertop');
+  expect(rules).toContain('Cut and join solids before grouping them');
+  expect(rules).toContain('never work around it by converting a solid into loose geometry');
 });
 
 it('never reports a dismissed or missing highlight to the requester as a failure', () => {

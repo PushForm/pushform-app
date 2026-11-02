@@ -21,8 +21,6 @@ export const MODEL_LIMITS = {
  * rejecting it as unknown, so a client can tell "not yet" from "never".
  */
 export const MODEL_PLANNED_OPERATIONS = [
-  'add_edges', 'add_polyline', 'add_rectangle', 'add_circle', 'add_polygon', 'push_pull',
-  'union', 'subtract', 'intersect', 'split', 'follow_me',
   'set_texture', 'add_guide', 'add_text', 'add_dimension', 'add_section_plane', 'soften_edges',
   'intersect_faces', 'offset', 'fillet', 'set_attribute',
 ] as const;
@@ -48,9 +46,17 @@ export const modelRefSchema = z.union([
   z.string().regex(LOCAL_REFERENCE),
   z.object({ kind: z.enum(['instance', 'body', 'sketchEdge', 'sketchFace', 'guide', 'text', 'dimension']), id }),
   z.object({ kind: z.literal('face'), id: id.describe('The body.'), faceId: id }),
-]);
+  z.object({
+    body: idOrName.describe('The solid: its id, or "$name" of a solid made earlier in the batch.'),
+    facing: direction.describe('The face\'s outward direction, within 1 degree: [0, 0, 1] is the top, [0, -1, 0] the front.'),
+    point: point.optional().describe('A point on the face, when several faces of the solid face the same way. It also picks one part of a face that shapes drawn on it divide.'),
+  }).describe('A face of a solid, chosen without its face id. It must match exactly one face.'),
+]).meta({ id: 'ModelRef', description: 'An entity of the container being edited: {kind, id} from model_query, a face {kind: "face", id: bodyId, faceId}, a face chosen as {body, facing, point?}, or "$name" of something made earlier in the batch.' });
 export type ModelRefInput = z.infer<typeof modelRefSchema>;
 const refs = z.array(modelRefSchema).min(1).max(1000);
+const vector = z.tuple([meters, meters, meters]);
+const pointList = z.array(point).max(MODEL_LIMITS.pointsPerBatch);
+const shapeNormal = direction.describe('The direction the shape faces; push_pull of the shape moves along it. [0, 0, 1] for a shape lying flat.');
 const copies = z.number().int().min(1).max(MODEL_LIMITS.copiesPerArray)
   .describe('Leave the originals and make this many copies, each offset from the previous one by the same transform (a linear or polar array).');
 
@@ -88,6 +94,44 @@ const sceneSaves = z.object({
 }).describe('Which properties the scene saves and restores (tags: tag visibility; style: style and fog). Omitted ones keep their setting; a new scene saves all of them.');
 
 export const modelOperationSchema = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('add_edges'), as: localName.optional(),
+    edges: z.array(z.tuple([point, point])).min(1).max(MODEL_LIMITS.pointsPerBatch / 2).describe('Line segments, each [start, end].') })
+    .describe('Draw loose line segments. Segments that close a flat loop make a face; segments lying on a face of a solid are drawn on it and divide it. Returns the new edges and faces; "$name" then means them.'),
+  z.object({ op: z.literal('add_polyline'), as: localName.optional(), points: pointList.min(2),
+    closed: z.boolean().optional().describe('Join the last point back to the first. A closed polyline must be flat and makes a face, such as a profile to push_pull; it faces the way the right-hand rule gives around the points.') })
+    .describe('Draw connected edges through the points. Returns the new edges and faces; "$name" then means the shape, so push_pull can pull its face.'),
+  z.object({ op: z.literal('add_rectangle'), as: localName.optional(), corner: point,
+    side1: vector.describe('[dx, dy, dz] from corner along the first side; its length is that side\'s length.'),
+    side2: vector.describe('[dx, dy, dz] from corner along the second side, square to side1.') })
+    .describe('Draw a rectangle in any plane, making a face that faces side1 × side2 (side1 [1, 0, 0] and side2 [0, 1, 0] face up). Drawn on a face of a solid, it divides that face instead. Returns its edges and face.'),
+  z.object({ op: z.literal('add_circle'), as: localName.optional(), center: point, normal: shapeNormal,
+    radius: z.number().positive().finite(), segments: z.number().int().min(3).max(360).optional().describe('Straight edges around the circle; default 24.') })
+    .describe('Draw a circle, making a face; pushed or pulled, it makes a smooth round side. Drawn on a face of a solid, it divides that face instead (push_pull it to bore a hole or raise a boss).'),
+  z.object({ op: z.literal('add_polygon'), as: localName.optional(), center: point, normal: shapeNormal,
+    radius: z.number().positive().finite().describe('From the center to each corner.'), sides: z.number().int().min(3).max(100) })
+    .describe('Draw a regular polygon, making a face. The first corner is toward +x from the center for a flat polygon, otherwise level with the center.'),
+  z.object({ op: z.literal('push_pull'), as: localName.optional(),
+    face: modelRefSchema.describe('"$name" of a closed shape drawn earlier in the batch, a sketchFace, or a face of a solid ({kind: "face"} or {body, facing}).'),
+    distance: meters.describe('Meters along the way the face faces: for a drawn shape, its normal; for a face of a solid, outward, so positive adds material and negative cuts in.'),
+    mode: z.enum(['merged', 'new_body']).optional().describe('Face of a solid only: merged (default) changes that solid; new_body makes the pulled part a separate solid.') })
+    .describe('Push or pull a face. A loose face becomes a new solid, using up the face and its edges. A face of a solid, or a shape drawn on it, changes that solid: pull to add, push in to cut a pocket or a hole through. Returns the solid; as names it.'),
+  z.object({ op: z.literal('union'), as: localName.optional(), refs: z.array(modelRefSchema).min(2).max(100).describe('Solids that touch or overlap; the first one survives.') })
+    .describe('Join solids into one. Solids that do not touch cannot join: group them instead.'),
+  z.object({ op: z.literal('subtract'), as: localName.optional(), target: modelRefSchema.describe('The solid to cut.'),
+    cutters: z.array(modelRefSchema).min(1).max(100).describe('Solids whose volume is removed from target, such as boxes placed where a groove, dado, rabbet, cutout or hole goes. Each must overlap the target.'),
+    keepCutters: z.boolean().optional().describe('Keep the cutters (default false: they are deleted).') })
+    .describe('Cut solids out of a solid. Returns the cut solid; if the cut leaves several pieces, refs lists them all.'),
+  z.object({ op: z.literal('intersect'), as: localName.optional(), refs: z.array(modelRefSchema).min(2).max(100).describe('Overlapping solids; the first one survives.') })
+    .describe('Keep only the volume all the solids share; the others are deleted.'),
+  z.object({ op: z.literal('split'), refs: z.array(modelRefSchema).length(2).describe('Two overlapping solids.') })
+    .describe('Replace two overlapping solids by the pieces they make: their shared volume and what is left of each. Returns every piece.'),
+  z.object({ op: z.literal('follow_me'), as: localName.optional(),
+    profile: modelRefSchema.describe('The face to sweep: "$name" of a closed shape, a sketchFace, or a face of a solid (the sweep then joins that solid).'),
+    pathEdges: refs.optional().describe('Loose edges forming one continuous chain, or "$name" of a polyline drawn earlier.'),
+    pathPoints: pointList.min(2).optional().describe('The path as points instead of edges; nothing is drawn for it.'),
+    closed: z.boolean().optional().describe('Loop the path back to its start. Default: closed when the edges form a loop.') })
+    .refine(o => (o.pathEdges === undefined) !== (o.pathPoints === undefined), 'Give either pathEdges or pathPoints.')
+    .describe('Sweep a profile face along a path, starting at the end nearest the profile, to make a solid such as a moulding, a rail or a turned part. Draw the profile square to the path where they meet.'),
   z.object({ op: z.literal('add_box'), as: localName.optional(), min: point.describe('One corner: the smallest x, y and z.'), max: point.describe('The opposite corner: the largest x, y and z.') })
     .describe('Add a rectangular solid with its sides along the container\'s axes, between two opposite corners; each side must be longer than zero. Returns the solid\'s id. A part such as a cabinet side or a shelf is one box, made into its own group or component.'),
   z.object({ op: z.literal('make_group'), as: localName.optional(), refs })
@@ -256,7 +300,11 @@ export interface ModelBatchResult {
   label: string;
   /** `as` names and the ids they got. */
   created: Record<string, number>;
-  results: { op: ModelOperationName; id?: number; definitionId?: number; refs?: ModelRef[]; count?: number; name?: string }[];
+  /**
+   * Per operation: `id` is the main result (a new solid, the face a shape made, a group's instance), `refs` what it
+   * created or changed, and `deleted` what it removed, such as the cutters of a subtract.
+   */
+  results: { op: ModelOperationName; id?: number; definitionId?: number; refs?: ModelRef[]; deleted?: ModelRef[]; count?: number; name?: string }[];
 }
 
 /** Tool names and descriptions shared by the host and every client that offers them to a model. */
@@ -271,7 +319,7 @@ export const MODEL_TOOLS = {
   },
   applyOperations: {
     name: 'model_apply_operations',
-    description: 'Edit the open 3D model in one atomic batch: every operation applies or none does, and the batch is one undo entry labelled with label. Lengths are meters, local to the container being edited; angles are degrees; z is up. Entities are named by {kind, id} from model_query (faces as {kind: "face", id: bodyId, faceId}). Create operations accept as: "name"; later operations refer to the result as "$name". Returns the new revision and the created ids, or an error naming the failed operation; a stale_revision error means the user changed the model, so read it again before retrying. add_box adds a rectangular solid; other drawing operations, push/pull and solid booleans are not available yet and fail with unavailable. Scene operations add, update, delete, rename, reorder and include scenes; a framed camera fits a subject from a view direction.',
+    description: 'Edit the open 3D model in one atomic batch: every operation applies or none does, and the batch is one undo entry labelled with label. Lengths are meters, local to the container being edited; angles are degrees; z is up. Entities are named by {kind, id} from model_query (faces as {kind: "face", id: bodyId, faceId}). Create operations accept as: "name"; later operations refer to the result as "$name". Returns the new revision and the created ids, or an error naming the failed operation; a stale_revision error means the user changed the model, so read it again before retrying. add_box adds a rectangular solid. Drawing operations (add_edges, add_polyline, add_rectangle, add_circle, add_polygon) make loose edges and faces, or divide the face of a solid when drawn on it; push_pull turns a loose face into a solid or pushes and pulls the face of a solid; union, subtract, intersect and split combine overlapping solids of the container; follow_me sweeps a face along a path. Geometry that would not leave a valid solid fails with invalid_geometry and changes nothing. A face of a solid can be named as {body, facing, point?} instead of by id. Scene operations add, update, delete, rename, reorder and include scenes; a framed camera fits a subject from a view direction.',
   },
   view: {
     name: 'model_view',

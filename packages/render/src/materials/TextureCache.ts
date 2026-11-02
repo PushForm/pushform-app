@@ -17,6 +17,8 @@ export class TextureCache {
   /** Colorized copies by `url|color|type`, drawn once the URL's image has loaded. */
   private colorizedTextures = new Map<string, { url: string; texture: Texture }>();
   private waiting = new Map<string, ((image: TextureImage) => void)[]>();
+  /** Whether each loaded image has transparent pixels. */
+  private alphas = new Map<string, boolean>();
   private loading = new Map<string, { ready: Promise<boolean>; settle: (ok: boolean) => void }>();
   private loader: TextureLoader | null = null;
   private anisotropy = 1;
@@ -33,6 +35,7 @@ export class TextureCache {
       url,
       (loaded) => {
         settle(true);
+        this.alphas.set(url, imageHasAlpha(loaded.image as TextureImage));
         const waiting = this.waiting.get(url);
         this.waiting.delete(url);
         waiting?.forEach((apply) => apply(loaded.image as TextureImage));
@@ -57,6 +60,21 @@ export class TextureCache {
   }
 
   /**
+   * Whether the image at `url` has transparent pixels: false until it has loaded, and where no 2D canvas can read
+   * it.
+   */
+  hasAlpha(url: string): boolean {
+    return this.alphas.get(url) ?? false;
+  }
+
+  /** Call `apply` with the image at `url` once it has loaded, now when it already has. */
+  whenLoaded(url: string, apply: (image: TextureImage) => void): void {
+    const image = this.get(url).image as TextureImage | null | undefined;
+    if (image && image.width > 0 && image.height > 0) apply(image);
+    else this.waiting.set(url, [...(this.waiting.get(url) ?? []), apply]);
+  }
+
+  /**
    * The image at `url` colorized toward the CSS `color`. It is empty until the image
    * has loaded, and shows the image colors where no 2D canvas is available.
    */
@@ -72,9 +90,7 @@ export class TextureCache {
       tex.image = colorizedImage(image, rgb, type) ?? image;
       tex.needsUpdate = true;
     };
-    const image = this.get(url).image as TextureImage | null | undefined;
-    if (image && image.width > 0 && image.height > 0) apply(image);
-    else this.waiting.set(url, [...(this.waiting.get(url) ?? []), apply]);
+    this.whenLoaded(url, apply);
     return tex;
   }
 
@@ -109,6 +125,7 @@ export class TextureCache {
       this.textures.delete(url);
       this.loading.get(url)?.settle(false); this.loading.delete(url);
       this.waiting.delete(url);
+      this.alphas.delete(url);
     }
     for (const [key, c] of this.colorizedTextures) {
       if (keep.has(c.url)) continue;
@@ -125,7 +142,28 @@ export class TextureCache {
     this.textures.clear();
     this.colorizedTextures.clear();
     this.waiting.clear();
+    this.alphas.clear();
   }
+}
+
+/** Whether `image` has a pixel that is not fully opaque, read at up to 1024 pixels on its longer side; false without a 2D canvas. */
+function imageHasAlpha(image: TextureImage | null | undefined): boolean {
+  if (!image || !(image.width > 0) || !(image.height > 0) || typeof document === 'undefined') return false;
+  const canvas = document.createElement('canvas');
+  const scale = Math.min(1, 1024 / Math.max(image.width, image.height));
+  canvas.width = Math.max(1, Math.round(image.width * scale));
+  canvas.height = Math.max(1, Math.round(image.height * scale));
+  let ctx: CanvasRenderingContext2D | null = null;
+  try {
+    ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return false;
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    for (let i = 3; i < data.length; i += 4) if (data[i]! < 255) return true;
+  } catch {
+    return false;
+  }
+  return false;
 }
 
 /** A CSS color's sRGB channels in 0..255 (`Color` itself holds linear values). */
@@ -157,6 +195,9 @@ function colorizedImage(image: TextureImage, rgb: readonly [number, number, numb
   ctx.putImageData(data, 0, 0);
   return canvas;
 }
+
+/** Texels at most this opaque are not drawn (as image entities draw their pictures). */
+const TEXTURE_ALPHA_TEST = 0.02;
 
 export interface TexturedDisplay {
   /** X-ray: every face translucent, no depth write. */
@@ -198,12 +239,18 @@ export class TexturedMaterialCache {
       mat.map = m.colorize
         ? this.textures.colorized(m.textureUrl!, m.color, m.colorize)
         : this.textures.get(m.textureUrl!);
+      mat.userData['textureUrl'] = m.textureUrl;
     }
     mat.userData['alpha'] = m.alpha;
     mat.userData['faded'] = faded;
     patchSelectTint(mat);
     this.applyTo(mat);
     this.materials.set(key, mat);
+    // A texture with transparent pixels shows through them once its image has loaded.
+    if (useMap) {
+      const shown = mat;
+      this.textures.whenLoaded(m.textureUrl!, () => { if (this.materials.get(key) === shown) this.applyTo(shown); });
+    }
     return mat;
   }
 
@@ -216,10 +263,15 @@ export class TexturedMaterialCache {
   private applyTo(m: MeshLambertMaterial): void {
     const alpha = (m.userData['alpha'] as number | undefined) ?? 1;
     const faded = m.userData['faded'] === true;
+    const url = m.userData['textureUrl'] as string | undefined;
     const d = this.display;
     const opacity = d.xray ? Math.min(d.xrayOpacity, alpha) : faded ? Math.min(FADE_OPACITY, alpha) : alpha;
+    // Transparent texels are blended; fully clear ones are left out, so they hide nothing behind them.
+    const seeThrough = url !== undefined && this.textures.hasAlpha(url);
+    const alphaTest = seeThrough ? TEXTURE_ALPHA_TEST : 0;
+    if (m.alphaTest !== alphaTest) { m.alphaTest = alphaTest; m.needsUpdate = true; }
     m.visible = d.faces;
-    m.transparent = opacity < 1;
+    m.transparent = opacity < 1 || seeThrough;
     m.opacity = opacity;
     m.depthWrite = !d.xray;
   }

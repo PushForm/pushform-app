@@ -102,10 +102,11 @@ export function materialsInUse(state: DocumentState): Set<MaterialId> {
   return used;
 }
 
-/** Ids of image assets referenced by any material texture. */
+/** Ids of image assets referenced by any material or tag texture, image entity or watermark. */
 export function imagesInUse(state: DocumentState): Set<number> {
   const used = new Set<number>();
   for (const m of state.materials.values()) if (m.texture) used.add(m.texture.imageId);
+  for (const t of state.tags.values()) if (t.texture) used.add(t.texture.imageId);
   for (const def of state.definitions.values()) for (const img of def.entities.images.values()) used.add(img.imageId);
   for (const s of state.styles.values()) for (const w of s.watermarks) used.add(w.imageId);
   return used;

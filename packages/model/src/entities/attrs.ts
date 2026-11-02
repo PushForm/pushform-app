@@ -49,11 +49,20 @@ export type UvMapping =
 
 export const UV_AUTO: UvMapping = { kind: 'auto' };
 
+/** A tag's texture image, drawn in place of its color by Color by Tag (as a material texture, never colorized). */
+export interface TagTexture {
+  imageId: ImageId;
+  widthM: number;
+  heightM: number;
+}
+
 export interface Tag {
   id: TagId;
   name: string;
   visible: boolean;
   color: Rgb;
+  /** Texture drawn by Color by Tag; the color stands for it where textures are not drawn. */
+  texture?: TagTexture | undefined;
   /** Dash pattern name ("solid", "dash", "dot", ...) or null for solid. */
   dashes: string | null;
   folderId: TagFolderId | null;

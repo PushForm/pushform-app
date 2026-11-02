@@ -4,6 +4,11 @@ import "modelMeta.proto";
 import "material.proto";
 message NullableId { oneof state { EmptyState null_value = 2; uint32 value = 3; } }
 message NullableString { oneof state { EmptyState null_value = 2; string value = 3; } }
+message TagTexture {
+  required uint32 image_id = 1;
+  required double width_m = 2;
+  required double height_m = 3;
+}
 message Tag {
   required uint32 id = 1;
   required string name = 2;
@@ -11,6 +16,7 @@ message Tag {
   required Rgb color = 4;
   required NullableString dashes = 5;
   required NullableId folder_id = 6;
+  optional TagTexture texture = 7; // absent: the tag has no texture
 }
 message TagFolder {
   required uint32 id = 1;

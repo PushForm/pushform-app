@@ -63,4 +63,4 @@ Colors provides 24 solid colors, and Glass offers six transparent tints. Ceramic
 
 The square previews show the actual surface image. Full textures load when you choose a material and use real-world repeat sizes, which you can adjust in **Materials → Edit**. Rectangular textures retain their proportions. When you add a library texture, its image is saved with your document. The library ships with the app and needs no external texture service.
 
-The textured finishes use CC0 color maps from [Poly Haven](https://polyhaven.com/license). They provide surface color and pattern; glass tints provide transparency. These presets do not add reflection, refraction, or surface relief.
+The textured finishes use CC0 color maps from [Poly Haven](https://polyhaven.com/license). They provide surface color and pattern; glass tints provide transparency. These presets do not add reflection, refraction, or surface relief. A texture image with transparent areas, such as a PNG cutout of a plant or a hatch pattern, shows what lies behind the face through those areas.

@@ -12,7 +12,7 @@ import type { BackgroundStyle, CurveKind, EdgeStyle, EdgeStyleMode, FaceStyle, F
 import { fastHash, hashImageBytes, imageSizeFromHeader } from '@pushform/model';
 import { TiffError, tiffToPng } from './tiff';
 import type {
-  ConstructionLine, ConstructionPoint, Definition, Dimension, Edge, Face, SectionPlane, SkpModel,
+  ConstructionLine, ConstructionPoint, Definition, Dimension, Edge, Face, Material, SectionPlane, SkpModel,
 } from 'openskp';
 
 // Fields PushForm's reader patch adds (patches/openskp@1.3.0.patch): tags, hidden guides, the active
@@ -212,7 +212,9 @@ export interface SketchUpImport {
   materials: Map<number, ImportedMaterial>;
   images: ImportedImage[];
   /** Tags, each with its folder: an index into `tagFolders`, or null at the top level. */
-  tags: { name: string; color: Vec3; visible: boolean; folder?: number | null }[];
+  tags: { name: string; color: Vec3; visible: boolean; folder?: number | null;
+    /** The texture of the tag's color material, which Color by Tag draws; an index into `images`. */
+    texture?: { image: number; widthM: number; heightM: number } }[];
   /** Tag folders (SketchUp 2021+), each with its parent folder's index or null at the top level. */
   tagFolders?: { name: string; visible: boolean; parent: number | null }[];
   scenes: ImportedScene[];
@@ -378,33 +380,49 @@ export function prepareSketchUp(model: SkpModel, onProgress?: (p: ImportProgress
     }
     return converted.get(key)!;
   };
-  for (const [key, m] of model.materialsById) {
-    let texture: ImportedMaterial['texture'] = null;
+  /** A material's texture as an image of the import and its size, or null without a usable one (counted). */
+  const textureOf = (m: Material): { image: number; widthM: number; heightM: number } | null => {
     const source = m.texture;
-    const tiff = source?.data && isTiff(source.data) ? toPng(source.data) : null;
-    const data = tiff ?? source?.data, mime = data ? imageMime(data) : null;
-    if (source && (!data || !mime || !(source.width > 0) || !(source.height > 0) ||
-        !Number.isFinite(source.width) || !Number.isFinite(source.height))) unusable++;
-    else if (source && data && mime) {
-      // Copy: the reader's bytes can be a view into the whole file.
-      const bytes = tiff ?? data.slice(), hash = fastHash(bytes);
-      let image = imageByHash.get(hash);
-      if (image === undefined) {
-        const size = imageSizeFromHeader(bytes);
-        const name = source.filename.split(/[\\/]/).pop() || m.name;
-        image = images.push({ name: tiff ? name.replace(/\.[^.]*$/, '') + '.png' : name, mime, bytes,
-          width: size?.width ?? 0, height: size?.height ?? 0, sha256: hash }) - 1;
-        imageByHash.set(hash, image);
-      }
-      texture = { image, widthM: source.width * INCH, heightM: source.height * INCH,
-        // The material color is the colorize color. Older files' material type and colorize type come
-        // from PushForm's reader patch.
-        ...(m.colorized ? { colorize: m.colorizeType === 1 ? 'tint' as const : 'shift' as const } : {}) };
+    if (!source) return null;
+    const tiff = source.data && isTiff(source.data) ? toPng(source.data) : null;
+    const data = tiff ?? source.data, mime = data ? imageMime(data) : null;
+    if (!data || !mime || !(source.width > 0) || !(source.height > 0) || !Number.isFinite(source.width) || !Number.isFinite(source.height)) {
+      unusable++;
+      return null;
     }
+    // Copy: the reader's bytes can be a view into the whole file.
+    const bytes = tiff ?? data.slice(), hash = fastHash(bytes);
+    let image = imageByHash.get(hash);
+    if (image === undefined) {
+      const size = imageSizeFromHeader(bytes);
+      const name = source.filename.split(/[\\/]/).pop() || m.name;
+      image = images.push({ name: tiff ? name.replace(/\.[^.]*$/, '') + '.png' : name, mime, bytes,
+        width: size?.width ?? 0, height: size?.height ?? 0, sha256: hash }) - 1;
+      imageByHash.set(hash, image);
+    }
+    return { image, widthM: source.width * INCH, heightM: source.height * INCH };
+  };
+  for (const [key, m] of model.materialsById) {
+    const image = textureOf(m);
+    const texture: ImportedMaterial['texture'] = image && { ...image,
+      // The material color is the colorize color. Older files' material type and colorize type come
+      // from PushForm's reader patch.
+      ...(m.colorized ? { colorize: m.colorizeType === 1 ? 'tint' as const : 'shift' as const } : {}) };
     // Opacity is the material's own opacity setting (openskp's `transparency`, 1 = opaque). The color's
     // alpha byte of pre-2021 files is not opacity: textured materials store their texture's average there, and many
     // opaque materials store 0.
     materials.set(key, { name: m.name, color: color(m.color), alpha: Math.max(0, Math.min(1, m.transparency)), texture });
+  }
+  // A tag's color is a material of the file named after the tag ("Layer_<tag name>"), and that material can carry a
+  // texture: Color by Tag draws it. The color must agree, since a renamed tag's material keeps the tag's first name.
+  const tagTextures = new Map<string, { image: number; widthM: number; heightM: number }>();
+  const byName = new Map(model.materials.map(m => [m.name, m]));
+  // Untagged opens as PushForm's own default tag, without the file's color.
+  for (const l of model.layers) if (!/^(Layer0|Untagged)$/i.test(l.name)) {
+    const m = byName.get(`Layer_${l.name}`);
+    if (!m?.texture || m.color.r !== l.color.r || m.color.g !== l.color.g || m.color.b !== l.color.b) continue;
+    const texture = textureOf(m);
+    if (texture) tagTextures.set(l.name, texture);
   }
   if (unusable) warn(`${unusable} texture image${unusable === 1 ? ' is' : 's are'} missing from the file or not PNG, JPEG, GIF, BMP or a TIFF PushForm can read; ${unusable === 1 ? 'its material uses its' : 'their materials use their'} color.`);
   const definitions = new Map<number, ImportedDefinition>();
@@ -479,7 +497,10 @@ export function prepareSketchUp(model: SkpModel, onProgress?: (p: ImportProgress
   });
   if (model.scenesUnread > 0) warn(`${model.scenesUnread} saved scene(s) could not be read and are not imported.`);
   return { version: model.version, root, definitions, materials, images,
-    tags: (model.layers as ReaderLayer[]).map(l => ({ name: l.name, color: color(l.color), visible: !l.hidden, ...(l.folder != null ? { folder: l.folder } : {}) })),
+    tags: (model.layers as ReaderLayer[]).map(l => {
+      const texture = tagTextures.get(l.name);
+      return { name: l.name, color: color(l.color), visible: !l.hidden, ...(l.folder != null ? { folder: l.folder } : {}), ...(texture ? { texture } : {}) };
+    }),
     tagFolders: ((model as ReaderModel).tagFolders ?? []).map(f => ({ name: f.name, visible: !f.hidden, parent: f.parent })), scenes,
     units: sketchUpUnits(model.unitsOptions), sectionDisplay: model.sectionDisplay ?? null,
     display: sketchUpDisplay(model.renderingOptions), warnings: [...warnings], format };

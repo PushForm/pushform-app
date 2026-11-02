@@ -80,6 +80,60 @@ describe('renderAdapter materials', () => {
     } finally { app.dispose(); }
   });
 
+  it('draws a tag texture with Color by Tag on solids and sheet faces, inherited by untagged contents', async () => {
+    const app = boot();
+    try {
+      const { commands, document: host } = app;
+      const bodyId = commands.execute('model.addBox', { min: [0, 0, 0], max: [1, 1, 1] }) as Id;
+      const faceId = [...host.doc.rootDefinition.entities.bodies.get(bodyId)!.faces.keys()][0]!;
+      const { instanceId } = commands.execute('group.make', { refs: [{ kind: 'body', path: [], id: bodyId }] }) as { instanceId: Id };
+      commands.execute('sketch.rectangle', { a: [5, 0, 0], b: [6, 0, 0], c: [6, 1, 0], d: [5, 1, 0] });
+      const sheet = [...host.doc.rootDefinition.entities.sketch.faces.keys()][0]!;
+      const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0]);
+      const painted = await commands.execute('material.importImage', { bytes: png, name: 'pattern.png' }) as { materialId: MaterialId };
+      const imageId = host.doc.state.materials.get(painted.materialId)!.texture!.imageId;
+      setRenderImageStore(host.images);
+      const lawn = commands.execute('tag.create', { name: 'Lawn', color: [0, 0, 0] }) as TagId;
+      commands.execute('tag.assign', { refs: [{ kind: 'instance', path: [], id: instanceId }], tagId: lawn });
+      host.doc.transact('tag texture', draft => {
+        draft.tags.get(lawn)!.texture = { imageId, widthM: 2, heightM: 3 };
+        draft.definitions.get(draft.rootDefinitionId)!.entities.sketch.faces.get(sheet)!.tagId = lawn;
+        // A painted face shows the tag's texture too, on the face's own plane rather than at its material's placement.
+        const b = containerAt(draft as never, [instanceId])!.bodies.get(bodyId)!;
+        b.faces.get(faceId)!.frontMaterialId = painted.materialId;
+        b.faces.get(faceId)!.uv = { kind: 'affine', matrix: [2, 0, 0.5, 0, 2, 0] };
+      });
+      const url = host.images.objectUrl(imageId);
+      expect(url).toBeTruthy();
+      // Off: the tag's texture is not drawn.
+      let body = bodiesToRender(host.doc.state)[0]!;
+      expect(body.faceMaterials!.get(faceId)!.front!.id).toBe(painted.materialId);
+      expect([...body.faceMaterials!.values()].filter(m => m.front?.id === -1)).toHaveLength(0);
+      commands.execute('view.colorByTag');
+      body = bodiesToRender(host.doc.state)[0]!;
+      expect(body.defaultColor).toBe('#000000');
+      expect(body.faceMaterials!.size).toBe(6);
+      for (const m of body.faceMaterials!.values()) {
+        expect(m.front).toMatchObject({ color: '#000000', alpha: 1, textureUrl: url, widthM: 2, heightM: 3 });
+        expect(m.back).toBe(m.front);
+        expect(m.uv).toEqual({ kind: 'auto' });
+        expect(m.front!.colorize).toBeUndefined();
+      }
+      const sheetFace = sketchesToRender(host.doc.state)[0]!.faces.find(f => f.id === sheet)!;
+      expect(sheetFace.frontMaterial).toMatchObject({ textureUrl: url, widthM: 2, heightM: 3 });
+      expect(sheetFace.backMaterial).toBe(sheetFace.frontMaterial);
+      expect(sheetFace.uv).toEqual({ kind: 'auto' });
+      // Choosing a color replaces the texture; undo brings it back.
+      commands.execute('tag.setColor', { id: lawn, color: [1, 0, 0] });
+      expect(host.doc.state.tags.get(lawn)!.texture).toBeUndefined();
+      body = bodiesToRender(host.doc.state)[0]!;
+      expect(body.faceMaterials!.get(faceId)!.front).toMatchObject({ color: '#ff0000' });
+      expect(body.faceMaterials!.get(faceId)!.front!.textureUrl).toBeUndefined();
+      host.undo();
+      expect(bodiesToRender(host.doc.state)[0]!.faceMaterials!.get(faceId)!.front!.textureUrl).toBe(url);
+    } finally { app.dispose(); }
+  });
+
   it('resolves per-face materials through the body and the instance material; explicit face materials win', async () => {
     const app = boot();
     try {

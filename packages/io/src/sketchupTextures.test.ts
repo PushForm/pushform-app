@@ -7,7 +7,7 @@ import { basisToLocal, type MaterialId, type PlaneBasis, type Vec3 } from '@push
 import { colorizePixels, createDocument, ImageStore, sketchFaceLoops, uvAt, type DocumentState, type MaterialTexture, type UvMapping } from '@pushform/model';
 import { applySketchUpImport } from './sketchupDocument';
 import { prepareSketchUp, readSketchUp } from './sketchup';
-import { decodePng } from './png';
+import { decodePng, encodePng } from './png';
 import { decodeModelFile, encodeModelDocument, modelJson } from './modelFile';
 
 const INCH = 0.0254;
@@ -315,6 +315,32 @@ describe('SketchUp textures', () => {
     expect(scene.images).toMatchObject([{ name: 'brick.bmp', mime: 'image/bmp', width: 4, height: 2 }]);
     expect([...scene.materials.values()][0]!.texture).toMatchObject({ image: 0, widthM: 10 * INCH, heightM: 10 * INCH });
     expect(scene.warnings.some(w => /texture image/.test(w))).toBe(false);
+  });
+
+  it('gives a tag the texture of its color material, and keeps it through native save and reopen', () => {
+    const b = create(), lawn = b.addLayer('Lawn', { color: [0, 0, 0, 255] });
+    b.addLayer('Gravel', { color: [10, 10, 10, 255] });
+    b.addFace([[0, 0, 0], [10, 0, 0], [10, 10, 0], [0, 10, 0]], { layer: lawn });
+    const model = parseSkp(new Uint8Array(b.toBytes()).buffer);
+    // A tag's color material carries a pattern image; one whose color no longer matches belongs to another tag.
+    const png = encodePng(2, 2, new Uint8Array(16).fill(255), 4);
+    const pattern = (name: string, r: number) => ({ name, color: { r, g: r, b: r, a: 255 }, transparency: 1, id: null, colorized: false, colorizeType: 0,
+      texture: { filename: 'C:/patterns/grass.png', width: 48, height: 24, data: png } });
+    model.materials.push(pattern('Layer_Lawn', 0), pattern('Layer_Gravel', 0), pattern('Layer_Layer0', 255));
+    const scene = prepareSketchUp(model);
+    expect(scene.tags.find(t => t.name === 'Lawn')!.texture).toEqual({ image: 0, widthM: 48 * INCH, heightM: 24 * INCH });
+    expect(scene.tags.find(t => t.name === 'Gravel')!.texture).toBeUndefined();
+    expect(scene.tags.find(t => t.name === 'Layer0')?.texture).toBeUndefined();
+    expect(scene.images).toHaveLength(1);
+    const doc = createDocument(), images = new ImageStore();
+    doc.transact('Open', draft => applySketchUpImport(draft, scene, { images }));
+    const tag = [...doc.state.tags.values()].find(t => t.name === 'Lawn')!;
+    expect(tag.texture).toMatchObject({ widthM: 48 * INCH, heightM: 24 * INCH });
+    expect(doc.state.images.get(tag.texture!.imageId)).toMatchObject({ name: 'grass.png', mime: 'image/png', width: 2, height: 2 });
+    expect([...doc.state.tags.values()].find(t => t.name === 'Gravel')!.texture).toBeUndefined();
+    const reopened = decodeModelFile(encodeModelDocument(doc, images));
+    expect(modelJson(reopened.state)).toBe(modelJson(doc.state));
+    expect(reopened.images.get(tag.texture!.imageId)!.bytes).toEqual(images.get(tag.texture!.imageId)!.bytes);
   });
 
   /** How a .skp file stores an image: a definition holding one four-cornered face painted with the picture. */

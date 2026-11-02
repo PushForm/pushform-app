@@ -337,7 +337,10 @@ export const tagSetColor = defineCommand({
   undoable: true,
   run(ctx, p): void {
     hostOf(ctx).edit('Tag Color', (draft) => {
-      tagOf(draftState(draft), p.id).color = [p.color[0], p.color[1], p.color[2]];
+      // A chosen color replaces the tag's texture too.
+      const tag = tagOf(draftState(draft), p.id);
+      tag.color = [p.color[0], p.color[1], p.color[2]];
+      delete tag.texture;
     });
   },
 });

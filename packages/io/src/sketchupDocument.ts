@@ -95,7 +95,8 @@ export function applySketchUpImport(
     if (/^(Layer0|Untagged)$/i.test(tag.name)) { tags.set(tag.name, draft.defaultTagId); continue; }
     const id = allocId<TagId>(draft);
     draft.tags.set(id, { id, name: tag.name, color: [...tag.color], visible: tag.visible,
-      folderId: tag.folder === undefined || tag.folder === null ? null : folderIds[tag.folder] ?? null, dashes: null });
+      folderId: tag.folder === undefined || tag.folder === null ? null : folderIds[tag.folder] ?? null, dashes: null,
+      ...(tag.texture ? { texture: { imageId: imageIds[tag.texture.image]!, widthM: tag.texture.widthM, heightM: tag.texture.heightM } } : {}) });
     tags.set(tag.name, id); report.tags++;
   }
   // Scene tag lists and text/instance tag references drop the trailing spaces some tag names have,

@@ -26,7 +26,8 @@ import { ExtensionManager } from './extensions/ExtensionManager';
 import { browserRunsExtensions, createBrowserExtensionPlatform, type ExtensionRuntimeSources } from './extensions/browserExtensionPlatform';
 import { ExtensionRuns } from './extensions/ExtensionActivity';
 import { ExtensionPrintDialog, PrintPrompts } from './extensions/extensionPrint';
-import { isExtensionPanelId } from './extensions/extensionContributions';
+import { isExtensionRailId } from './extensions/extensionContributions';
+import { ExtensionTabs } from './extensions/extensionTabs';
 import { sessionExtensionDocuments, sessionExtensionUnits } from './extensions/extensionDocuments';
 import { useExtensionWorkspace } from './extensions/useExtensionWorkspace';
 import { markDesktopShell, syncDesktopTitleBar } from './desktopShell';
@@ -212,9 +213,16 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
   const [printPrompts] = useState(() => new PrintPrompts());
   // The platform exists before the document session; extensions reach the session's tabs once it does.
   const sessionRef = useRef<DocumentSession | null>(null);
+  /** The extension tabs open in the tab strip; an extension's `ui.open` and its selection calls reach them from the platform. */
+  const [extensionTabs] = useState(() => extensionRuntime ? new ExtensionTabs({
+    activateDocument: (id) => { sessionRef.current?.activate(id); },
+    isOpen: (id) => sessionRef.current?.tabs.some(tab => tab.id === id) ?? false,
+  }) : null);
   const [extensions] = useState(() => extensionRuntime
     ? createBrowserExtensionPlatform({ ownerId, sources: extensionRuntime, printPrompts,
-      documents: sessionExtensionDocuments(() => sessionRef.current), units: sessionExtensionUnits(() => sessionRef.current) }) : null);
+      documents: sessionExtensionDocuments(() => sessionRef.current), units: sessionExtensionUnits(() => sessionRef.current),
+      openUi: request => extensionTabs?.openRequest(extensions!, request),
+      onSelectionShown: (extensionId, documentId) => extensionTabs?.selectionShown(extensionId, documentId) }) : null);
   const [extensionRuns] = useState(() => extensions ? new ExtensionRuns(extensions) : null);
   const [extensionsOpen, setExtensionsOpen] = useState(false);
   useEffect(() => {
@@ -301,7 +309,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
   const modelApp = active.type === 'model' ? active.app : app;
   useGlobalKeys(modelApp, active.type === 'model' && !locked && !home);
   useModelClipboard(modelApp, active.type === 'model' ? active : null, active.type === 'model' && !locked && !home);
-  const extensionWorkspace = useExtensionWorkspace({ platform: extensions, runs: extensionRuns, ownerId, active: home || locked ? null : active,
+  const extensionWorkspace = useExtensionWorkspace({ platform: extensions, runs: extensionRuns, tabs: extensionTabs, ownerId, active: home || locked ? null : active,
     openTabs: session.tabs.map(tab => tab.id), sidePanel,
     openPanel: id => setSidePanel(id), closePanel: () => { setGuidanceBrowserTab(null); setSidePanel(null); } });
   useEffect(() => () => session.dispose(), [session]);
@@ -342,7 +350,8 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     setSidePanel(current => current === id && mode === 'toggle' ? null : id);
   const toggleSidePanel = (id: string): void => {
     setGuidanceBrowserTab(null);
-    if (id === 'files' || id === 'requests' || id === 'objects' || isExtensionPanelId(id)) showSidePanel(id, 'toggle');
+    if (isExtensionRailId(id)) extensionWorkspace.toggleRail(id);
+    else if (id === 'files' || id === 'requests' || id === 'objects') showSidePanel(id, 'toggle');
   };
   const closeSidePanel = (): void => { setGuidanceBrowserTab(null); setSidePanel(null); };
   /** The object browser hides itself on Escape; focus inside it then returns to its rail icon. */
@@ -386,7 +395,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     ...extensionWorkspace.railItems,
   ];
   /** An extension panel that is no longer available (turned off, or not for this editor) counts as closed. */
-  const shownPanel = sidePanel && isExtensionPanelId(sidePanel) && !extensionWorkspace.shown ? null : sidePanel;
+  const shownPanel = sidePanel && isExtensionRailId(sidePanel) && !extensionWorkspace.shown ? null : sidePanel;
   /** The rail and its dock open the editor area, in the right-hand panels' band between tool row and status bar. */
   const companionBrowser = guidanceBrowserTab === active.id && sidePanel === 'requests';
   const browserVisible = sidePanel === 'objects' || companionBrowser;
@@ -402,6 +411,8 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
       {extensionWorkspace.panel}
     </SideDock>
   </>;
+  /** An extension tab in front fills the editor area; the viewport and its panels stay mounted behind it. */
+  const extensionTab = extensionWorkspace.tabView ? <div className="pf-xtab-host">{extensionWorkspace.tabView}</div> : null;
   const removeStarter = (): void => {
     const starter = session.tabs.find(tab => tab.id === 'tab-1' && !tab.identity && !session.isDirty(tab));
     if (!given && starter && session.tabs.length > 1) session.close(starter.id, true);
@@ -454,14 +465,15 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
       <div className="pf-app">
         <TopBar session={session} cloud={cloud} cloudFiles={cloudFiles} buildInfo={buildInfo} autosave={autosave} onHome={() => setHome(true)}
           onRequests={() => toggleSidePanel('requests')} onObjects={() => toggleSidePanel('objects')} onClearChat={requestsClient ? clearChat : undefined}
-          onExtensions={openExtensions} />
+          onExtensions={openExtensions} extensionTabs={extensionWorkspace.tabStrip} />
         {extensionManager}
         {extensionPrint}
         {active.type === 'model' ? (
           <>
-            <MainToolbar />
-            <div className="pf-main">
+            <MainToolbar extensionTools={extensionWorkspace.toolbarItems} />
+            <div className={`pf-main${extensionTab ? ' has-xtab' : ''}`}>
               {sideBar}
+              {extensionTab}
               <ViewportView key={active.id} />
               <PanelHost />
               <RightStrip />
@@ -469,7 +481,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
             <StatusBar />
           </>
         ) : (
-          <LayoutWorkspace key={active.id} tab={active} session={session} leading={sideBar}
+          <LayoutWorkspace key={active.id} tab={active} session={session} leading={sideBar} editorOverride={extensionTab}
             objectBrowser={{ host: objectHost, open: browserVisible, onClose: closeObjects }}
             cloud={cloudFiles ? { api: cloudFiles, owner, session, saves: cloudModelSaves } : undefined} />
         )}

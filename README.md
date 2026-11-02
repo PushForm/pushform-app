@@ -37,6 +37,8 @@ The standalone Commons frontend has its own build and catalog configuration; see
 
 GPL-3.0-or-later (see LICENSE). Dependencies must be GPLv3-compatible: permissive licenses, LGPL, GPL-3.0 and GPL-2.0-or-later are allowed; GPL-2.0-only and AGPL are not. First-party source files carry an SPDX tag; `pnpm spdx-check` fails when one is missing.
 
+Icons come from the sets bundled by `react-icons` (MIT). The Game Icons set (`react-icons/gi`, used for the `saw-blade` icon) is by Lorc, Delapouite and contributors at [game-icons.net](https://game-icons.net/), licensed [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/); the About dialog carries this credit.
+
 ## Disclaimer
 
 SketchUp and LayOut are trademarks and copyrighted works of Trimble Inc. PushForm is made by JobCraft, Inc. and is not affiliated with, endorsed by, or sponsored by Trimble. References to SketchUp and LayOut describe file-format compatibility only.

@@ -137,6 +137,11 @@ export interface ExtensionDocumentHostOptions {
   /** The session the services belong to, once it exists. */
   readonly session: () => ExtensionSession | undefined;
   readonly coalesceMs?: number;
+  /**
+   * Told when the extension set or framed the selection of a document, so the host can bring that document into
+   * view (its tab in front of the extension's own tab) and the user sees what the extension points at.
+   */
+  readonly onSelectionShown?: (documentId: string) => void;
 }
 
 export class ExtensionDocumentHost {
@@ -183,13 +188,16 @@ export class ExtensionDocumentHost {
       },
       'selection.set': (input, call) => {
         const { refs } = parse(selectionSetSchema, input, 'selection.set');
-        const { document } = this.target(input, call);
-        return this.attempt(() => ({ refs: this.model(document).select(refs) }));
+        const { id, document } = this.target(input, call);
+        const result = this.attempt(() => ({ refs: this.model(document).select(refs) }));
+        this.options.onSelectionShown?.(id);
+        return result;
       },
       'selection.frame': (input, call) => {
         const { refs } = parse(selectionFrameSchema, input, 'selection.frame');
-        const { document } = this.target(input, call);
+        const { id, document } = this.target(input, call);
         this.attempt(() => this.model(document).frame(refs));
+        this.options.onSelectionShown?.(id);
         return null;
       },
       'document.units': (input, call) => {

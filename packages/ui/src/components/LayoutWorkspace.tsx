@@ -979,6 +979,7 @@ export function LayoutWorkspace({
   tab,
   session,
   leading,
+  editorOverride,
   objectBrowser,
   cloud,
 }: {
@@ -986,6 +987,8 @@ export function LayoutWorkspace({
   session: DocumentSession;
   /** The left menu bar and its dock, first in the editor band below the tool row, mirroring the settings panel. */
   leading?: ReactNode;
+  /** Content that takes the editor area's place (an extension tab in front); the page and its panels hide meanwhile. */
+  editorOverride?: ReactNode;
   /** The left menu bar's docked Object browser: rendered into `host` while `open`. */
   objectBrowser?: { readonly host: HTMLElement | null; readonly open: boolean; readonly onClose: () => void } | undefined;
   /** Cloud files for model references; `saves` counts cloud model saves in this session, each prompting a freshness check. */
@@ -3789,8 +3792,9 @@ export function LayoutWorkspace({
             <span className="pf-layout-ribbon-caption" aria-hidden="true">Present</span>
           </div>
         </nav>
-      <div className="pf-layout-main">
+      <div className={`pf-layout-main${editorOverride ? ' has-xtab' : ''}`}>
         {leading}
+        {editorOverride}
         <div className="pf-layout-workspace-frame">
         <canvas ref={surroundRef} className="pf-layout-surround" aria-hidden="true" />
         <main ref={workspaceRef} className="pf-layout-workspace" aria-label="Layout workspace" onContextMenu={openContextMenu}

@@ -2,7 +2,7 @@
 // Copyright 2026 PushForm contributors
 import {
   EXTENSION_PERMISSIONS, ExtensionError, ExtensionPackageError, readPackageArchive, validatePackage, type ExtensionErrorData,
-  type ExtensionManifest, type ExtensionPermission, type ExtensionTarget, type ValidatedPackage, type ValidatePackageOptions,
+  type ExtensionManifest, type ExtensionPermission, type ExtensionTarget, type ToolbarCategory, type ValidatedPackage, type ValidatePackageOptions,
 } from '@pushform/extension-protocol';
 import { ComputeHost, type ComputeWorkerHandle } from '../runtime/compute';
 import { ExtensionDocumentHost, type ExtensionDocuments } from '../runtime/documents';
@@ -10,7 +10,7 @@ import { ExtensionSession, type InvokeOptions, type ServiceImplementations, type
 import { FetchBroker, clipboardServices, fileServices, type ClipboardWriter, type FetchTransport, type FilePicker } from '../runtime/io';
 import type { RuntimePort } from '../runtime/port';
 import { ExtensionSettingsHost, type SettingsStore } from '../runtime/settings';
-import { ExtensionUiHost } from '../runtime/ui';
+import { ExtensionUiHost, type UiOpenRequest } from '../runtime/ui';
 import { vectorExportServices, vectorPrintServices, type ViewPrinter } from '../runtime/vector';
 import {
   addTraffic, memoryActivityStore, type ActivityEvent, type DisabledBy, type ExtensionActivity, type ExtensionActivityStore, type StopReason,
@@ -54,6 +54,10 @@ export interface ExtensionPlatformOptions {
   readonly filePicker?: FilePicker;
   /** The host's print dialog for `ui.print`; without it printing answers `unavailable`. */
   readonly printer?: ViewPrinter;
+  /** Opens a panel's tab for `ui.open`; without it the request answers `unavailable`. */
+  readonly openUi?: (request: UiOpenRequest) => void;
+  /** Told when an extension set or framed a document's selection, so the host can show that document. */
+  readonly onSelectionShown?: (extensionId: string, documentId: string) => void;
   readonly clipboard?: ClipboardWriter;
   /** Performs network requests; none on the web until a relay exists. */
   readonly fetchTransport?: FetchTransport | null;
@@ -127,6 +131,20 @@ export interface ContributionEntry {
   readonly id: string;
   readonly target: ExtensionTarget;
   readonly name: string;
+  /** A toolbar button's group. */
+  readonly category?: ToolbarCategory;
+  /** A toolbar button's icon: a host icon name, or the path of a PNG in the package (see `file`). */
+  readonly icon?: string;
+}
+
+/** An enabled extension as the activity bar lists it, from its manifest alone. */
+export interface ExtensionEntry {
+  readonly id: string;
+  readonly name: string;
+  readonly integrity: 'official' | 'unsigned';
+  /** The manifest's icon: a host icon name, or the path of a PNG in the package (see `file`); absent for the generic icon. */
+  readonly icon: string | null;
+  readonly contributions: readonly ContributionEntry[];
 }
 
 interface Running {
@@ -375,17 +393,37 @@ export class ExtensionPlatform {
     this.notify();
   }
 
-  /** The enabled extensions' contributions, for menus, command search and the side rail. Runs no extension code. */
+  /** The enabled extensions' contributions, for menus, command search and the toolbar. Runs no extension code. */
   contributions(editor?: 'modeling' | 'layout'): ContributionEntry[] {
-    const entries: ContributionEntry[] = [];
+    return this.extensions(editor).flatMap((extension) => extension.contributions)
+      .sort((a, b) => a.extensionName.localeCompare(b.extensionName) || a.name.localeCompare(b.name));
+  }
+
+  /**
+   * The enabled extensions that list `editor` (every enabled one without it), by name, each with its contributions
+   * in manifest order: what the activity bar shows. Runs no extension code.
+   */
+  extensions(editor?: 'modeling' | 'layout'): ExtensionEntry[] {
+    const entries: ExtensionEntry[] = [];
     for (const record of this.records.values()) {
       if (!record.enabled || (record.source === 'developer' && !this.options.developerMode.enabled())) continue;
       if (this.unverified.has(record.id)) continue;
       if (editor && !record.manifest.editors.includes(editor)) continue;
-      for (const c of record.manifest.contributions)
-        entries.push({ extensionId: record.id, extensionName: record.manifest.name, integrity: record.integrity, id: c.id, target: c.target, name: c.name });
+      const { manifest } = record;
+      entries.push({
+        id: record.id, name: manifest.name, integrity: record.integrity, icon: manifest.icon ?? null,
+        contributions: manifest.contributions.map((c) => ({
+          extensionId: record.id, extensionName: manifest.name, integrity: record.integrity, id: c.id, target: c.target, name: c.name,
+          ...(c.category ? { category: c.category } : {}), ...(c.icon ? { icon: c.icon } : {}),
+        })),
+      });
     }
-    return entries.sort((a, b) => a.extensionName.localeCompare(b.extensionName) || a.name.localeCompare(b.name));
+    return entries.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** The bytes of a file in an installed extension's package, such as its icon; null when there is no such file. */
+  file(extensionId: string, path: string): Uint8Array | null {
+    return this.records.get(extensionId)?.files[path] ?? null;
   }
 
   /** Runs a contribution, starting the extension's runtime first if needed. */
@@ -514,7 +552,7 @@ export class ExtensionPlatform {
     const runtime = await this.options.startRuntime(record);
     const grants = new Set(record.grants);
     const ref: { session?: ExtensionSession } = {};
-    const ui = new ExtensionUiHost(record.manifest, (event) => ref.session?.postEvent(event));
+    const ui = new ExtensionUiHost(record.manifest, (event) => ref.session?.postEvent(event), this.options.openUi ? { open: this.options.openUi } : {});
     const settings = new ExtensionSettingsHost(record.manifest, this.options.settingsStore(record));
     const files = new Map(Object.entries(record.files));
     const compute = record.manifest.wasm.length && runtime.startCompute
@@ -533,7 +571,8 @@ export class ExtensionPlatform {
     });
     const declining: FilePicker = { open: async () => null, save: async () => null };
     const documents = this.options.documents
-      ? new ExtensionDocumentHost({ manifest: record.manifest, grants, documents: this.options.documents, session: () => ref.session }) : null;
+      ? new ExtensionDocumentHost({ manifest: record.manifest, grants, documents: this.options.documents, session: () => ref.session,
+        ...(this.options.onSelectionShown ? { onSelectionShown: (documentId: string) => this.options.onSelectionShown!(record.id, documentId) } : {}) }) : null;
     const services: ServiceImplementations = {
       ...ui.services(),
       ...settings.services(),

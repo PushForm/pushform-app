@@ -6,7 +6,7 @@ import {
 } from '@pushform/extension-protocol';
 import {
   ComputeHost, ExtensionDocumentHost, ExtensionSession, type DocumentChange, type ExtensionDocument, type ExtensionDocuments,
-  type ExtensionModelAccess, ExtensionSettingsHost, ExtensionUiHost, FetchBroker, UNNAMED_DOCUMENT, clipboardServices, fileServices, memorySettingsStore,
+  type ExtensionModelAccess, ExtensionSettingsHost, ExtensionUiHost, FetchBroker, type UiOpenRequest, UNNAMED_DOCUMENT, clipboardServices, fileServices, memorySettingsStore,
   vectorExportServices, vectorPrintServices, messagePortTransport, runComputeWorker, startGuest, type FetchTransport, type FilePicker, type ViewPrinter,
   type InvokeOptions, type ServiceImplementations, type SettingsStore, type SpawnComputeWorker,
 } from '@pushform/extensions';
@@ -85,6 +85,8 @@ export interface TestHost {
   readonly logs: unknown[];
   /** What the extension wrote to the clipboard. */
   readonly clipboard: { text?: string; html?: string; png?: Uint8Array }[];
+  /** The panel tabs the extension asked to open with `ui.open`, in order; the harness records them and shows nothing. */
+  readonly opened: UiOpenRequest[];
   /** The document opened with the `document` option, or null. */
   readonly document: TestDocument | null;
   /** Runs a contribution, as a user-started action by default, on the test document when there is one. */
@@ -147,6 +149,7 @@ export async function createTestHost(options: TestHostOptions): Promise<TestHost
   const channel = new MessageChannel();
   const logs: unknown[] = [];
   const clipboard: TestHost['clipboard'] = [];
+  const openedTabs: UiOpenRequest[] = [];
   const ref: { session?: ExtensionSession } = {};
   const documentId = options.document ? options.document.id ?? 'test-document' : null;
   const opened = options.document ? fakeDocument(options.document) : null;
@@ -155,7 +158,7 @@ export async function createTestHost(options: TestHostOptions): Promise<TestHost
     ?? (opened ? { get: (id) => (open && id === documentId ? opened : null) } : null);
   const documentHost = documents
     ? new ExtensionDocumentHost({ manifest, grants, documents, session: () => ref.session, coalesceMs: 0 }) : null;
-  const ui = new ExtensionUiHost(manifest, (event) => ref.session?.postEvent(event));
+  const ui = new ExtensionUiHost(manifest, (event) => ref.session?.postEvent(event), { open: (request) => { openedTabs.push(request); } });
   const settings = new ExtensionSettingsHost(manifest, options.settings ?? memorySettingsStore());
   const compute = manifest.wasm.length ? new ComputeHost({ manifest, files: options.files ?? new Map(), spawn: inProcessCompute }) : null;
   const services: ServiceImplementations = {
@@ -188,7 +191,7 @@ export async function createTestHost(options: TestHostOptions): Promise<TestHost
   } : null;
   void startGuest(messagePortTransport(channel.port2), async () => options.module);
   return {
-    manifest, session, ui, logs, clipboard, document,
+    manifest, session, ui, logs, clipboard, opened: openedTabs, document,
     invoke: (id, params = {}, invokeOptions = {}) => session.invoke(id, params,
       { userAction: true, ...(documentId !== null && open ? { document: documentId } : {}), ...invokeOptions }),
     tree: (target) => ui.get(target)?.tree,

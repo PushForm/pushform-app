@@ -2,7 +2,7 @@
 
 Notable changes in each PushForm desktop release. Versions are `<year>.<week>.<build>`.
 
-## 26.45.18
+## 26.45.20
 
 ### Materials
 

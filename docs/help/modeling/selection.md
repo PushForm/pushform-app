@@ -2,7 +2,7 @@
 
 ## Find a solid, group or component
 
-Open **Object browser** in the left menu bar. It lists loose solids, groups and components. Groups and components start collapsed. Expand the ones you want to inspect; selecting an item elsewhere reveals its ancestors. Loose solids appear as **Solid N** in creation order; those numbers can change as the model changes.
+Open **Object browser** in the left menu bar and choose **Objects**. It lists loose solids, groups and components. Groups and components start collapsed. Expand the ones you want to inspect; selecting an item elsewhere reveals its ancestors. Loose solids appear as **Solid N** in creation order; those numbers can change as the model changes.
 
 Click an item, or focus it and press Enter, to select it. The viewport shows the selection: a selected solid is outlined in the selection color with its faces tinted, and a selected group or component shows its bounding box. Shift-click selects the range from the last clicked item and all children, including children inside collapsed items; Ctrl/Cmd-click adds, and Ctrl/Cmd+Shift-click removes. Selecting something elsewhere reveals it in the browser: clicking a solid in the viewport, or one of its faces or edges, marks that solid, and clicking a group or component marks that item.
 
@@ -39,3 +39,9 @@ Entity Info shows a selected surface as **Surface** with its total area. The Pai
 ## Pick soft or hidden edges
 
 Soft and hidden edges are not drawn, so the pointer passes through them to the face behind, and drawing tools do not snap to them or to corners only they reach. Turn on **Hidden Geometry** to show them dashed; while it is on you can click, select and snap to them, for example to unhide or unsoften an edge in Entity Info.
+
+## Manage tags in the Object browser
+
+Choose the **Tags** tab in the Object browser to create, rename, recolor or delete tags, organize tag folders, toggle visibility, choose the active tag, filter tags, change dashes, purge unused tags or turn on **Color by Tag**. Tag controls are now here instead of the right-hand panel strip. Assign an object’s tag through **Entity Info**.
+
+In **Objects**, each tagged object shows its tag name as a pill in that tag’s color. Untagged objects have no pill. Hover over a truncated pill to read its full name. Pills update when tags change, including undo and redo. Switching between **Objects** and **Tags** keeps your tree expansion and selection.

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import type { Id } from '@pushform/core';
+import type { Id, TagId } from '@pushform/core';
 import { entityRefKey, pathKey } from '@pushform/model';
 import type { ComponentDefinition, ComponentInstance, DocumentState, EntityContainer, EntityRef } from '@pushform/model';
 
@@ -10,6 +10,7 @@ export type ModelBrowserKind = 'group' | 'component' | 'solid' | 'meshPart';
 /** One item of the Model object browser tree; `key` is the `entityRefKey` of its ref, so it matches selection keys. */
 export interface ModelBrowserNode {
   readonly key: string;
+  readonly tagId: TagId;
   /** 1-based tree depth (`aria-level`). */
   readonly level: number;
   readonly kind: ModelBrowserKind;
@@ -82,14 +83,14 @@ export function modelBrowserTree(state: Pick<DocumentState, 'definitions' | 'roo
         const ref: EntityRef = { kind: 'body', path, id: entry.id };
         const key = entityRefKey(ref);
         return [{ key, level, kind: 'solid', label: `Solid ${numbers.get(entry.id) ?? ''}`, ref, parent, children: [],
-          hidden: body.hidden, inHidden, selected: selectedKeys.has(key), current: false }];
+          tagId: body.tagId, hidden: body.hidden, inHidden, selected: selectedKeys.has(key), current: false }];
       }
       if (entry.kind === 'meshPart') {
         const part = container.meshParts.get(entry.id)!;
         const ref: EntityRef = { kind: 'meshPart', path, id: entry.id };
         const key = entityRefKey(ref);
         return [{ key, level, kind: 'meshPart', label: part.name || 'Mesh Part', ref, parent, children: [],
-          hidden: part.hidden, inHidden, selected: selectedKeys.has(key), current: false }];
+          tagId: part.tagId, hidden: part.hidden, inHidden, selected: selectedKeys.has(key), current: false }];
       }
       const { inst } = entry;
       const def = state.definitions.get(inst.definitionId);
@@ -98,7 +99,7 @@ export function modelBrowserTree(state: Pick<DocumentState, 'definitions' | 'roo
       const key = entityRefKey(ref), fullPath = [...path, inst.id], label = instanceLabel(inst, def);
       const children = seen.has(def.id) ? [] : build(def.entities, fullPath, level + 1, key, inHidden || inst.hidden, new Set([...seen, def.id]));
       return [{ key, level, kind: def.isGroup ? 'group' : 'component', label, ...(!def.isGroup && label !== def.name ? { definitionName: def.name } : {}),
-        ref, fullPath, parent, children, hidden: inst.hidden, inHidden, locked: inst.locked, custom: Boolean(inst.name), selected: selectedKeys.has(key),
+        ref, fullPath, parent, children, tagId: inst.tagId, hidden: inst.hidden, inHidden, locked: inst.locked, custom: Boolean(inst.name), selected: selectedKeys.has(key),
         current: contextPath.length > 0 && pathKey(fullPath) === contextKey }];
     });
   return build(root.entities, [], 1, null, false, new Set([root.id]));

@@ -6,7 +6,6 @@ import { EntityInfoPanel } from './EntityInfoPanel';
 import { MaterialsPanel } from './MaterialsPanel';
 import { ComponentsPanel } from './ComponentsPanel';
 import { StylesPanel } from './StylesPanel';
-import { TagsPanel } from './TagsPanel';
 import { ScenesPanel } from './ScenesPanel';
 import { ShadowsPanel } from './ShadowsPanel';
 import { DisplayPanel } from './DisplayPanel';
@@ -27,7 +26,6 @@ export const PANELS: readonly PanelSpec[] = [
   { id: 'materials', title: 'Materials', component: MaterialsPanel },
   { id: 'components', title: 'Components', component: ComponentsPanel },
   { id: 'styles', title: 'Styles', component: StylesPanel },
-  { id: 'tags', title: 'Tags', component: TagsPanel },
   { id: 'scenes', title: 'Scenes', component: ScenesPanel },
   { id: 'shadows', title: 'Shadows', component: ShadowsPanel },
   { id: 'display', title: 'Display', component: DisplayPanel },

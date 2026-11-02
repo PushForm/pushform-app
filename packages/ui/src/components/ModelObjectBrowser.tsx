@@ -10,6 +10,9 @@ import { useApp } from '../AppContext';
 import { installUiCommands } from '../engine/uiCommands';
 import { useEditContext } from '../hooks/useEditContext';
 import { useSelectionRefs } from '../hooks/useSelection';
+import { TagsPanel } from '../panels/TagsPanel';
+import { rgbToCss } from '../panels/colors';
+import { useDocumentState } from '../hooks/useDocument';
 import { Icon } from './Icon';
 import { modelBrowserTree, type ModelBrowserKind, type ModelBrowserNode } from './modelBrowserTree';
 
@@ -38,7 +41,8 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
   const context = useEditContext();
   useEffect(() => installUiCommands(app.commands), [app]);
   const idPrefix = useId();
-  const state = app.document.doc.state;
+  const state = useDocumentState();
+  const [section, setSection] = useState<'objects' | 'tags'>('objects');
   // A viewport click selects a solid's face or edge; the tree lists the solid, so those mark its row.
   const selectedKeys = useMemo(() => new Set(refs.map(ref =>
     ref.kind === 'face' || ref.kind === 'edge' || ref.kind === 'imprintEdge' ? entityRefKey({ kind: 'body', path: ref.path, id: ref.id }) : entityRefKey(ref))), [refs]);
@@ -183,6 +187,9 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
   };
 
   const renderNode = (node: ModelBrowserNode, setSize: number, position: number): JSX.Element => {
+    const tag = node.tagId === state.defaultTagId ? undefined : state.tags.get(node.tagId);
+    const luminance = tag?.color.map(channel => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
+    const lightText = luminance ? luminance[0]! * 0.2126 + luminance[1]! * 0.7152 + luminance[2]! * 0.0722 < 0.179 : false;
     const open = expandable(node) && isExpanded(node);
     const labelId = `${idPrefix}-${node.key}`, hiddenId = `${labelId}-hidden`;
     const renaming = editing?.key === node.key;
@@ -213,6 +220,8 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
           ? <RenameField label={node.label} id={labelId} onFinish={finishRename} />
           : <span id={labelId} className="pf-layout-browser-name">{node.label}
             {node.definitionName ? <span className="pf-model-browser-def"> &lt;{node.definitionName}&gt;</span> : null}</span>}
+        {tag ? <span className="pf-model-browser-tag" title={tag.name} aria-label={`Tag: ${tag.name}`}
+          style={{ backgroundColor: rgbToCss(tag.color), color: lightText ? '#fff' : '#000' }}>{tag.name}</span> : null}
         {current ? <span className="pf-layout-browser-flag" role="img" aria-label="Open for editing" title="Open for editing"><PiPencilSimple /></span> : null}
         {description ? <span id={hiddenId} className="pf-layout-browser-sr">{description}</span> : null}
         <button type="button" tabIndex={-1} aria-label={`Show ${node.label}`} aria-pressed={!node.hidden}
@@ -233,10 +242,32 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
 
   return <div className="pf-layout-object-browser pf-model-object-browser">
     <h2 className="pf-layout-browser-title">Object browser</h2>
-    <ul ref={treeRef} role="tree" aria-label="Object browser" aria-multiselectable="true" className="pf-layout-browser-tree" onKeyDown={onTreeKeyDown}>
-      {tree.map((node, index) => renderNode(node, tree.length, index + 1))}
-    </ul>
-    {tree.length ? null : <p className="pf-model-browser-empty">Solids, groups and components you make appear here.</p>}
+    <div className="pf-model-browser-tabs" role="tablist" aria-label="Object browser sections">
+      {(['objects', 'tags'] as const).map(name => <button key={name} type="button" role="tab"
+        id={`${idPrefix}-${name}-tab`} aria-controls={`${idPrefix}-${name}-panel`} aria-selected={section === name}
+        tabIndex={section === name ? 0 : -1} onClick={() => setSection(name)}
+        onKeyDown={event => {
+          if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+            event.preventDefault(); event.stopPropagation();
+            const next = event.key === 'Home' ? 'objects' : event.key === 'End' ? 'tags' : section === 'objects' ? 'tags' : 'objects';
+            setSection(next); document.getElementById(`${idPrefix}-${next}-tab`)?.focus();
+          } else if (event.key === 'Escape') { event.stopPropagation(); onClose?.(); }
+          else if (!modelBrowserPassesKey(event.nativeEvent)) event.stopPropagation();
+        }}>{name === 'objects' ? 'Objects' : 'Tags'}</button>)}
+    </div>
+    <div role="tabpanel" id={`${idPrefix}-objects-panel`} aria-labelledby={`${idPrefix}-objects-tab`} hidden={section !== 'objects'}>
+      <ul ref={treeRef} role="tree" aria-label="Object browser" aria-multiselectable="true" className="pf-layout-browser-tree" onKeyDown={onTreeKeyDown}>
+        {tree.map((node, index) => renderNode(node, tree.length, index + 1))}
+      </ul>
+      {tree.length ? null : <p className="pf-model-browser-empty">Solids, groups and components you make appear here.</p>}
+    </div>
+    <div role="tabpanel" id={`${idPrefix}-tags-panel`} aria-labelledby={`${idPrefix}-tags-tab`} hidden={section !== 'tags'}
+      onKeyDown={event => {
+        if (event.key === 'Escape') { event.stopPropagation(); onClose?.(); }
+        else if (!modelBrowserPassesKey(event.nativeEvent)) event.stopPropagation();
+      }}>
+      {section === 'tags' ? <TagsPanel /> : null}
+    </div>
   </div>;
 }
 

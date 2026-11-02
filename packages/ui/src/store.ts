@@ -11,7 +11,6 @@ export const PANEL_IDS = [
   'materials',
   'components',
   'styles',
-  'tags',
   'scenes',
   'shadows',
   'display',

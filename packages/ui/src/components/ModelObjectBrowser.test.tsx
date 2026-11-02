@@ -2,6 +2,7 @@
 // Copyright 2026 PushForm contributors
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { tagCommands } from '@pushform/commands';
 import { meshBox } from '@pushform/core';
 import type { Id } from '@pushform/core';
 import { InlineBackend, KernelClient } from '@pushform/kernel';
@@ -54,6 +55,47 @@ const item = (name: string): HTMLElement =>
 const row = (name: string): HTMLElement => item(name).querySelector<HTMLElement>(':scope > .pf-layout-browser-row')!;
 
 describe('ModelObjectBrowser', () => {
+  it('manages tags in a sub-tab and updates object pills through edits and undo', () => {
+    const a = boot();
+    for (const command of tagCommands) if (!a.commands.has(command.id)) a.commands.register(command);
+    const group = addInstance(a, { name: 'Frame' });
+    const solid = addSolid(a, [group]);
+    mount(a);
+    fireEvent.click(row('Frame').querySelector('.pf-layout-browser-chevron')!);
+    fireEvent.click(row('Frame'));
+    expect(screen.queryByLabelText(/^Tag:/)).toBeNull();
+    const objects = screen.getByRole('tab', { name: 'Objects' });
+    const tags = screen.getByRole('tab', { name: 'Tags' });
+    fireEvent.keyDown(objects, { key: 'ArrowRight' });
+    expect(document.activeElement).toBe(tags);
+    expect(screen.queryByRole('tree')).toBeNull();
+    fireEvent.click(screen.getByLabelText('Add Tag'));
+    fireEvent.change(screen.getByLabelText('Tag name'), { target: { value: 'Timber' } });
+    fireEvent.keyDown(screen.getByLabelText('Tag name'), { key: 'Enter' });
+    const tagId = [...a.document.doc.state.tags.values()].find(tag => tag.name === 'Timber')!.id;
+    fireEvent.change(screen.getByLabelText('Timber color'), { target: { value: '#000000' } });
+    act(() => { a.commands.execute('tag.assign', { tagId, refs: [{ kind: 'instance', path: [], id: group }] }); });
+    act(() => {
+      a.document.doc.transact('Tag nested solid', draft => { containerAt(draft as never, [group])!.bodies.get(solid)!.tagId = tagId; });
+    });
+    fireEvent.click(objects);
+    expect(names()).toEqual(['Frame', 'Solid 1']);
+    expect(item('Frame').getAttribute('aria-selected')).toBe('true');
+    const pill = within(row('Frame')).getByLabelText('Tag: Timber');
+    expect(pill.style.backgroundColor).toBe('rgb(0, 0, 0)');
+    expect(pill.style.color).toBe('rgb(255, 255, 255)');
+    expect(within(row('Solid 1')).getByLabelText('Tag: Timber')).toBeTruthy();
+    act(() => { a.commands.execute('tag.setColor', { id: tagId, color: [1, 1, 1] }); });
+    expect(pill.style.backgroundColor).toBe('rgb(255, 255, 255)');
+    expect(pill.style.color).toBe('rgb(0, 0, 0)');
+    act(() => { a.document.undo(); });
+    expect(pill.style.backgroundColor).toBe('rgb(0, 0, 0)');
+    act(() => { a.commands.execute('tag.rename', { id: tagId, name: 'Oak' }); });
+    expect(within(row('Frame')).getByLabelText('Tag: Oak')).toBeTruthy();
+    act(() => { a.commands.execute('tag.assign', { tagId: a.document.doc.state.defaultTagId, refs: [{ kind: 'instance', path: [], id: group }] }); });
+    expect(within(row('Frame')).queryByLabelText(/^Tag:/)).toBeNull();
+  });
+
   it('updates selection without rebuilding the model hierarchy', () => {
     const a = boot();
     const first = addInstance(a, { name: 'First' });

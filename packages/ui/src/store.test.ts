@@ -8,9 +8,9 @@ describe('useAppStore', () => {
     const s = useAppStore.getState();
     s.togglePanel('materials');
     expect(useAppStore.getState().openPanel).toBe('materials');
-    s.togglePanel('tags');
-    expect(useAppStore.getState().openPanel).toBe('tags');
-    s.togglePanel('tags');
+    s.togglePanel('scenes');
+    expect(useAppStore.getState().openPanel).toBe('scenes');
+    s.togglePanel('scenes');
     expect(useAppStore.getState().openPanel).toBeNull();
   });
 

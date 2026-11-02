@@ -294,12 +294,15 @@ export function parseSse(text: string): SseEvent[] {
     return { event, data: data ? JSON.parse(data) : {} } as SseEvent;
   });
 }
-function sseResponse(run: (emit: (e: SseEvent) => void) => Promise<void>): Response {
+function sseResponse(log: ((message: string) => void) | undefined, run: (emit: (e: SseEvent) => void) => Promise<void>): Response {
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const emit = (e: SseEvent) => { try { controller.enqueue(encoder.encode(formatSse(e))); } catch { /* client went away */ } };
-      try { await run(emit); } catch (error) { const e = httpErrorOf(error); emit({ event: 'error', data: { code: e.code, message: e.message } }); }
+      try { await run(emit); } catch (error) {
+        // The client sees only the mapped message, so the underlying failure is logged here.
+        if (!(error instanceof HttpError)) log?.(`turn failed: ${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`);
+        const e = httpErrorOf(error); emit({ event: 'error', data: { code: e.code, message: e.message } }); }
       try { controller.close(); } catch { /* already closed */ }
     },
   });
@@ -615,7 +618,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     const anthropic = deps.anthropic!;
     const editing = setup.document !== null;
     const clientTools = new Set(documentTools(setup.document).map(tool => tool.name));
-    return sseResponse(async (emit) => {
+    return sseResponse(deps.log, async (emit) => {
       const appended: ConversationMessage[] = [...t.leading];
       const briefEvent = () => emit({ event: 'brief', data: { brief: store.getBrief(), title: store.getTitle(), path: store.getPath(), estimatedClass: store.getBrief()?.estimatedClass ?? null } });
       if (t.pathChanged) briefEvent();
@@ -637,8 +640,8 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
           clientTools, resume: setup.resume,
           // A turn that can edit the document plans multi-step geometry; help and intake stay short.
           effort: editing ? 'medium' : 'low', maxTokens: editing ? 16_000 : 4096, maxToolRounds: editing ? DOCUMENT_TOOL_ROUNDS : 8,
-          // Editing turns run many tool rounds; their between-call notes stream so the panel is never silent for the whole turn.
-          progressUpdates: editing,
+          // Progress notes stay off until the hosted model accepts the progress-update display; requesting it fails editing turns.
+          progressUpdates: false,
           onText: (delta) => {
             firstTextMs ??= Math.round(performance.now() - generationStarted);
             emit({ event: 'text', data: { delta } });
@@ -776,7 +779,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       try { return ['expired', 'cancelled'].includes((JSON.parse(answer.content) as { status?: string }).status ?? ''); }
       catch { return false; }
     });
-    if (quietCue) return sseResponse(async emit => {
+    if (quietCue) return sseResponse(deps.log, async emit => {
       const messages: ConversationMessage[] = pending.calls.map(call => ({ role: 'tool', name: call.name, toolUseId: call.id,
         input: call.input, output: answers.get(call.id)!.content.slice(0, 8000), at: base.now }));
       const saved = conversationFromRow(await db.conversationAppend(id, user.id, messages, store.getBrief(), store.getTitle(), store.getPath(), null));

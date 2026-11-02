@@ -207,6 +207,49 @@ describe('SketchUp LayOut import', () => {
     ]);
   });
 
+  it('imports text inserted from a file, which LayOut keeps in the archive instead of in the box', () => {
+    const entities = `
+      <e:rtfText id="id30" anchorType="5" growMode="1">
+        <e:placedFileReference><e:rectangleBase x="1" y="1" width="2" height="1" /></e:placedFileReference>
+        <r:rtfTextFileReference r:id="id44" />
+      </e:rtfText>`;
+    const files = unzipSync(layoutFile(page(entities, onLayer('id10', ['id30']))));
+    files['ref/notes.rtf'] = strToU8('{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0\\froman Times New Roman;}}\\pard\\f0\\fs24 General notes\\par Verify on site\\par}');
+    files['references.xml'] = strToU8(strFromU8(files['references.xml']!).replace('</references>',
+      '<r:rtfTextFileReference r:id="id44" internalTarget="ref/notes.rtf" externalTarget="notes.rtf" /></references>'));
+    const { doc, warnings } = importSketchUpLayout(zipSync(files));
+    const text = [...doc.state.pages.get(doc.state.pageOrder[0]!)!.entities.values()][0]!.text!;
+    expect(text).toMatchObject({ content: 'General notes\nVerify on site', fontFamily: 'Times New Roman', fontSizePt: 12 });
+    delete files['ref/notes.rtf'];
+    expect(importSketchUpLayout(zipSync(files)).warnings).toContain('text inserted from a file that is missing was skipped');
+    expect(warnings).not.toContain('text inserted from a file that is missing was skipped');
+  });
+
+  it('keeps list numbering it cannot number itself as the markers the file stores', () => {
+    const box = (id: number, rtf: string) => `
+      <e:rtfText id="id${id}" anchorType="5" growMode="1">
+        <e:placedFileReference><e:rectangleBase x="1" y="${id - 29}" width="3" height="1" /></e:placedFileReference>
+        <e:rtfTextRep>${rtf}</e:rtfTextRep>
+      </e:rtfText>`;
+    const head = '{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0\\fnil Arial;}}\\pard ';
+    const pn = '{\\*\\pn\\pnlvlbody\\pnf0\\pnindent0\\pnstart1\\pndec{\\pntxta.}}';
+    const entities = [
+      // Every paragraph numbered from 1: a numbered list PushForm numbers itself.
+      box(30, `${head}{\\pntext\\f0 1.\\tab}${pn}\\fi-360\\li360 One\\par{\\pntext\\f0 2.\\tab}Two\\par}`),
+      // Numbered from 0, after an unnumbered paragraph: the markers stay as text.
+      box(31, `${head}Intro\\par{\\pntext\\f0 0.\\tab}${pn}\\fi-720\\li720 Window\\par{\\pntext\\f0 1.\\tab}Louvres\\par}`),
+      // Lettered list items saved by Word: the markers stay as text.
+      box(32, `${head}{\\listtext\\pard\\plain\\f0 A.\\tab}Codes\\par{\\listtext\\pard\\plain\\f0 B.\\tab}Permits\\par}`),
+    ].join('');
+    const { doc } = importSketchUpLayout(layoutFile(page(entities, onLayer('id10', ['id30', 'id31', 'id32']))));
+    const texts = [...doc.state.pages.get(doc.state.pageOrder[0]!)!.entities.values()].map(entity => entity.text!);
+    expect(texts.map(text => [text.list, text.content])).toEqual([
+      ['number', 'One\nTwo'],
+      ['none', 'Intro\n0.\tWindow\n1.\tLouvres'],
+      ['none', 'A.\tCodes\nB.\tPermits'],
+    ]);
+  });
+
   it('imports page-number auto-text as live page-number fields counted from their own start pages', () => {
     // As in forum-217965 PgNumTest: each tag counts from the page its definition refers to, and is blank before it.
     const tags = (id: number) => `

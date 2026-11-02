@@ -103,7 +103,8 @@ it('sets lines as LayOut does: inset from the sides, baselines one ascent down, 
   const calls: [string, number, number][] = [];
   const ctx = { font: '', fillStyle: '', textBaseline: '', save: vi.fn(), restore: vi.fn(), setLineDash: vi.fn(), strokeRect: vi.fn(),
     beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(), stroke: vi.fn(), rect: vi.fn(), clip: vi.fn(),
-    measureText: () => ({ width: 1, fontBoundingBoxAscent: 3, fontBoundingBoxDescent: 1 }),
+    // A font's box in proportion to its size, as canvases report it: ascent 3 and descent 1 at 10 pt.
+    measureText() { const size = parseFloat(this.font) / (10 * 25.4 / 72); return { width: 1, fontBoundingBoxAscent: 3 * size, fontBoundingBoxDescent: size }; },
     fillText(char: string, x: number, y: number) { calls.push([char, x, y]); } };
   const entity: LayoutEntity = { id: 3, layerId: 1, kind: 'text', closed: false, points: [[10, 20], [60, 50]],
     text: { content: 'a\nb', fontFamily: 'Verdana', fontSizePt: 10, color: '#000000', bold: false, italic: false, underline: false,
@@ -168,4 +169,38 @@ it('spaces tabs in the on-page editors at evenly spaced stops, or the default ot
   expect(layoutEditorTabSizeMm({})).toBeCloseTo(36 * pt);
   expect(layoutEditorTabSizeMm({ tabStopsPt: [28, 56, 84] })).toBeCloseTo(28 * pt);
   expect(layoutEditorTabSizeMm({ tabStopsPt: [20, 90] })).toBeCloseTo(36 * pt);
+});
+
+it('takes line heights from the font, not from its box rounded to whole canvas units at millimetre sizes', () => {
+  const doc = createLayoutDocument(), page = doc.state.pages.get(doc.state.pageOrder[0]!)!;
+  // Verdana's box (1.01 em above, 0.21 em below) rounded to whole units, as browsers report it: at 10 pt, 3.5 units,
+  // that is 4 and 1, a line of 1.42 em instead of 1.22.
+  const ctx = { font: '', measureText() {
+    const size = parseFloat(this.font.replace(/^(italic |bold )*/g, ''));
+    return { width: size, fontBoundingBoxAscent: Math.round(size * 1.01), fontBoundingBoxDescent: Math.round(size * 0.21) };
+  } };
+  const text = { content: 'one\ntwo', fontFamily: 'Verdana', fontSizePt: 10, color: '#000000', bold: false, italic: false, underline: false,
+    align: 'left' as const, vertical: 'top' as const, bounded: false, leader: 'none' as const, endpoint: 'none' as const };
+  const block = layoutTextBlock(ctx as unknown as CanvasRenderingContext2D, text, Infinity, page, doc.state);
+  const em = 10 * 25.4 / 72;
+  expect(block.lineHeights.map(height => height / em)).toEqual([expect.closeTo(1.22, 2), expect.closeTo(1.22, 2)]);
+  expect(block.lineAscents[0]! / em).toBeCloseTo(1.01, 2);
+});
+
+it('keeps text taller than its box bottom- or middle-aligned, so the box cuts off its top', () => {
+  const doc = createLayoutDocument(), page = doc.state.pages.get(doc.state.pageOrder[0]!)!;
+  const baselines: number[] = [];
+  // Ascent 3 and descent 1 at 10 pt: four 4 mm lines in a 10 mm box.
+  const ctx = { font: '', fillStyle: '', textBaseline: '', save: vi.fn(), restore: vi.fn(), beginPath: vi.fn(), rect: vi.fn(), clip: vi.fn(),
+    measureText() { const size = parseFloat(this.font) / (10 * 25.4 / 72); return { width: 1, fontBoundingBoxAscent: 3 * size, fontBoundingBoxDescent: size }; },
+    fillText(_char: string, _x: number, y: number) { baselines.push(y); } };
+  const text = { content: 'a\nb\nc\nd', fontFamily: 'Verdana', fontSizePt: 10, color: '#000000', bold: false, italic: false, underline: false,
+    align: 'left' as const, vertical: 'bottom' as const, bounded: true, leader: 'none' as const, endpoint: 'none' as const };
+  const entity: LayoutEntity = { id: 3, layerId: 1, kind: 'text', closed: false, points: [[0, 20], [40, 30]], text };
+  paintLayoutText(ctx as unknown as CanvasRenderingContext2D, entity, page, doc.state, false);
+  expect(baselines.map(y => +y.toFixed(6))).toEqual([17, 21, 25, 29]);
+  expect(ctx.rect).toHaveBeenCalledWith(0, 20, 40, 10);
+  baselines.length = 0;
+  paintLayoutText(ctx as unknown as CanvasRenderingContext2D, { ...entity, text: { ...text, vertical: 'middle' } }, page, doc.state, false);
+  expect(baselines.map(y => +y.toFixed(6))).toEqual([20, 24, 28, 32]);
 });

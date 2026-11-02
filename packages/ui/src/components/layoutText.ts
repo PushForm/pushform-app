@@ -36,7 +36,8 @@ export function paintLayoutText(ctx: CanvasRenderingContext2D, entity: LayoutEnt
   const blockHeight = lineHeights.reduce((sum, value) => sum + value, 0);
   const offset = text.vertical === 'middle' ? (height - blockHeight) / 2
     : text.vertical === 'bottom' ? height - blockHeight : 0;
-  let top = y + Math.max(0, offset);
+  // Text taller than its box keeps its alignment: the box clips it, at the bottom, top or both.
+  let top = y + (text.bounded ? offset : Math.max(0, offset));
   const glyphs: LayoutPaintedGlyph[] = [];
   lines.forEach((line, index) => {
     const measured = line.reduce((sum, item) => sum + item.width, 0), room = width - 2 * inset;
@@ -76,16 +77,14 @@ export function layoutTextBlock(ctx: CanvasRenderingContext2D, text: LayoutText,
   // Each paragraph's mark (the style of its line break) sets the height of a line with no characters.
   const marks: LayoutTextStyle[] = [];
   let paragraph = 0;
-  // Arial's ascent and descent stand in where the canvas cannot report the font's own.
-  const vertical = (metrics: TextMetrics, fontSizePt: number) => ({
-    ascent: metrics.fontBoundingBoxAscent ?? fontSizePt * 25.4 / 72 * 0.905,
-    descent: metrics.fontBoundingBoxDescent ?? fontSizePt * 25.4 / 72 * 0.212,
-  });
+  const vertical = (style: LayoutTextStyle) => {
+    const em = layoutFontVerticalEm(style, ctx), sizeMm = style.fontSizePt * 25.4 / 72;
+    return { ascent: em.ascent * sizeMm, descent: em.descent * sizeMm };
+  };
   const append = (char: string, sourceIndex: number): void => {
     const style = layoutTextStyleAt(text, sourceIndex);
     ctx.font = font(style);
-    const metrics = ctx.measureText(char);
-    const glyph: Glyph = { ...style, char, width: metrics.width, ...vertical(metrics, style.fontSizePt) };
+    const glyph: Glyph = { ...style, char, width: ctx.measureText(char).width, ...vertical(style) };
     lines.at(-1)!.push(glyph);
   };
   const prefix = (): void => {
@@ -130,7 +129,7 @@ export function layoutTextBlock(ctx: CanvasRenderingContext2D, text: LayoutText,
     return result;
   }) : lines.map(line => { line.reduce((used, glyph) => advance(glyph, used), 0); return line; });
   if (!text.bounded) lineMarks.push(...marks);
-  const measure = (style: LayoutTextStyle) => { ctx.font = font(style); return vertical(ctx.measureText(''), style.fontSizePt); };
+  const measure = (style: LayoutTextStyle) => vertical(style);
   const base = measure(text);
   // A line is as tall as the largest font on it;: line spacing scales or replaces that height.
   const spaced = wrapped.map((line, index) => {
@@ -144,15 +143,39 @@ export function layoutTextBlock(ctx: CanvasRenderingContext2D, text: LayoutText,
 }
 
 let measuring: CanvasRenderingContext2D | null | undefined;
-/** A font's ascent plus descent over its size: the painted line height, for DOM editors. */
-export function layoutFontLineHeight(style: Pick<LayoutText, 'fontFamily' | 'bold' | 'italic'>): number {
-  if (measuring === undefined) {
+const verticalEm = new WeakMap<object, Map<string, { ascent: number; descent: number }>>();
+/**
+ * A font's ascent and descent per unit of size. They are measured once at a large size and scaled: browsers round a
+ * font's box to whole canvas units, and text is laid out in millimetres (10 pt is 3.5), where rounding makes a line
+ * as much as a sixth too tall. Arial's ascent and descent stand in where the canvas cannot report the font's own.
+ */
+export function layoutFontVerticalEm(style: Pick<LayoutText, 'fontFamily' | 'bold' | 'italic'>, ctx?: CanvasRenderingContext2D): { ascent: number; descent: number } {
+  if (!ctx && measuring === undefined) {
     try { measuring = document.createElement('canvas').getContext('2d'); } catch { measuring = null; }
   }
-  if (!measuring) return 0.905 + 0.212;
-  measuring.font = `${style.italic ? 'italic ' : ''}${style.bold ? 'bold ' : ''}100px "${style.fontFamily.replace(/["\\]/g, '')}", sans-serif`;
-  const metrics = measuring.measureText('');
-  return ((metrics.fontBoundingBoxAscent ?? 90.5) + (metrics.fontBoundingBoxDescent ?? 21.2)) / 100;
+  const canvas = ctx ?? measuring;
+  const key = `${style.italic ? 'i' : ''}${style.bold ? 'b' : ''}|${style.fontFamily}`;
+  const cache = canvas ? verticalEm.get(canvas) ?? verticalEm.set(canvas, new Map()).get(canvas)! : null;
+  const known = cache?.get(key);
+  if (known) return known;
+  let em = { ascent: 0.905, descent: 0.212 };
+  if (canvas) {
+    const previous = canvas.font;
+    canvas.font = `${style.italic ? 'italic ' : ''}${style.bold ? 'bold ' : ''}1000px "${style.fontFamily.replace(/["\\]/g, '')}", sans-serif`;
+    const metrics = canvas.measureText('');
+    canvas.font = previous;
+    if (metrics.fontBoundingBoxAscent !== undefined && metrics.fontBoundingBoxDescent !== undefined)
+      em = { ascent: metrics.fontBoundingBoxAscent / 1000, descent: metrics.fontBoundingBoxDescent / 1000 };
+  }
+  // A font still loading reports its fallback's box, so only boxes measured once fonts have settled are kept.
+  if (typeof document === 'undefined' || !document.fonts || document.fonts.status === 'loaded') cache?.set(key, em);
+  return em;
+}
+
+/** A font's ascent plus descent over its size: the painted line height, for DOM editors. */
+export function layoutFontLineHeight(style: Pick<LayoutText, 'fontFamily' | 'bold' | 'italic'>): number {
+  const em = layoutFontVerticalEm(style);
+  return em.ascent + em.descent;
 }
 
 /** The on-page editors' CSS line height, relative to the box's font size, with its line spacing. */

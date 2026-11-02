@@ -678,7 +678,7 @@ class Importer {
 
   private text(element: XmlElement, layerId: number, context: EntityContext): LayoutEntity[] {
     const base = child(child(element, 'placedFileReference') ?? element, 'rectangleBase');
-    const rtf = child(element, 'rtfTextRep')?.text;
+    const rtf = child(element, 'rtfTextRep')?.text ?? this.linkedRtf(element);
     if (!base || rtf === undefined) return [];
     const { x, y, width, height, transform } = rectangle(base);
     // Keep the unrotated box size around the transformed center; the rotation goes on the text.
@@ -703,6 +703,17 @@ class Importer {
       points: [toMm([center[0] - halfWidth, center[1] - halfHeight]), toMm([center[0] + halfWidth, center[1] + halfHeight])],
       closed: false, text,
     }];
+  }
+
+  /** The RTF of text inserted from a file, which LayOut keeps in the archive instead of in the text box. */
+  private linkedRtf(element: XmlElement): string | undefined {
+    const refId = child(element, 'rtfTextFileReference')?.attrs['r:id'];
+    if (!refId) return undefined;
+    const target = this.references.get(refId)?.attrs.internalTarget;
+    const bytes = target ? this.files[target] : undefined;
+    if (!bytes) { this.warn('text inserted from a file that is missing was skipped'); return undefined; }
+    // RTF is 7-bit text with escapes for everything else.
+    return strFromU8(bytes, true);
   }
 
   /**
@@ -1546,6 +1557,14 @@ function parseLayoutLength(text: string | null, format: LengthFormat, units: Lay
   return match ? Number(match[1]) * INCHES_PER_UNIT[format === 'engineering' ? 'ft' : units] : null;
 }
 
+/** A list paragraph's marker group: RichEdit's {\pntext …}, or Word's and macOS's {\listtext …}. */
+const LIST_MARKER = /\{\\(?:pntext|listtext)([^{}]*)\}/g;
+/** A marker as it reads ("a.", "IV.", "•"), without the tab after it. */
+function listMarker(group: string): string {
+  return group.replace(/\\'([0-9a-f]{2})/gi, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/\\[a-z]+-?\d* ?/gi, '').replace(/[\r\n]/g, '').trim();
+}
+
 /** Text body plus the paragraph style of its first run; LayOut's RTF is otherwise character-styled. */
 /** Null for blank text unless `keepBlank`, which returns its styling with empty content (a table cell). */
 function rtfText(rtf: string, autoText: Map<string, string>, anchor: number, bounded: boolean,
@@ -1553,12 +1572,23 @@ function rtfText(rtf: string, autoText: Map<string, string>, anchor: number, bou
   // RichEdit list paragraphs: the marker lives in {\pntext …} groups, the list kind in {\*\pn …}.
   // macOS (Cocoa) lists put the marker in {\listtext …}: a bullet (舦) or a number.
   const cocoaMarker = /\{\\listtext([^{}]*)\}/.exec(rtf)?.[1];
-  const list = /\\pnlvlblt/.test(rtf) ? 'bullet' : /\\pnlvlbody|\\pndec/.test(rtf) ? 'number'
+  let list: LayoutText['list'] = /\\pnlvlblt/.test(rtf) ? 'bullet' : /\\pnlvlbody|\\pndec/.test(rtf) ? 'number'
     : cocoaMarker !== undefined ? (/\d/.test(cocoaMarker.replace(/\\[a-z]+-?\d* ?/gi, '')) ? 'number' : 'bullet') : 'none';
-  rtf = rtf.replace(/\{\\pntext[^{}]*\}/g, '');
+  // PushForm numbers or bullets a list itself when it covers every paragraph, numbered 1, 2, 3… or bulleted. Other
+  // lists (lettered, roman, starting elsewhere, or covering some paragraphs) keep the markers the file stores as text.
+  const markers = [...rtf.matchAll(LIST_MARKER)].map(match => listMarker(match[1]!));
+  const literal = rtf.replace(LIST_MARKER, (_, marker: string) => `{${marker.replace(/\\(?:pard|plain)(?![a-z])/g, '')}}`);
+  // An empty group, so a control word before the marker (\par{\pntext…}Two) does not run into the text after it.
+  rtf = rtf.replace(/\{\\pntext[^{}]*\}/g, '{}');
   const body = rtf.replace(/\{\\fonttbl[^]*?\}\}|\{\\colortbl[^}]*\}/g, '');
   const control = (word: string) => new RegExp(`\\\\${word}(-?\\d+)?(?![a-z])`).exec(body);
-  const parsed = importLayoutText(rtf);
+  let parsed = importLayoutText(rtf);
+  const paragraphs = parsed.content.replace(/\n+$/, '').split('\n').length;
+  if (list !== 'none' && !(markers.length === paragraphs && markers.every((marker, index) =>
+    list === 'bullet' ? !/[0-9a-z]/i.test(marker) : marker === `${index + 1}.`))) {
+    parsed = importLayoutText(literal);
+    list = 'none';
+  }
   let content = parsed.content.replace(/\n+$/, '');
   // The box takes its first run's style; trailing paragraph marks may carry another.
   const firstRun = parsed.spans.find((span) => span.start < content.length) ?? parsed.spans[0];

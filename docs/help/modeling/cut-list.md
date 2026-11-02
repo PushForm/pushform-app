@@ -14,3 +14,8 @@ individual solid limits it to that object. **Whole model, ignoring the selection
 
 Each material group offers its applicable cutting-diagram, labels and print actions. The summary totals stock by
 material. Tables have fixed columns, and group headers do not have a Hide Group button.
+
+In a cutting diagram, choose **Nesting** to pack actual part contours, including holes. Nesting always displays those
+contours. For rectangle or guillotine layouts, turn on **Draw part shapes** to show the contours inside the rectangular
+packing allowances; this updates the displayed layout immediately. Parts with no usable face outline use rectangles.
+After updating the extension, generate the diagram again to read the model's shapes.

@@ -12,6 +12,7 @@ import {
   contextCommands,
   curveCommands,
   dimensionCommands,
+  edgeBlendCommands,
   edgeCommands,
   editCommands,
   fogCommands,
@@ -28,10 +29,12 @@ import {
   pushPullCommands,
   shadowCommands,
   sceneCommands,
+  sectionPlaneCommands,
   sketchCommands,
   solidCommands,
   styleCommands,
   tagCommands,
+  text3dCommands,
   textCommands,
   transformCommands,
   viewCommands,
@@ -43,7 +46,7 @@ import { Document } from '@pushform/model';
 
 /**
  * The command sets a headless session registers: every model command set of the app
- * except camera, which needs a viewport. Scenes are registered for their document edits; without a camera, adding or
+ * except camera, which needs a viewport. 3D text needs a font service, which a headless session does not have. Scenes are registered for their document edits; without a camera, adding or
  * updating one saves the default view, and activating one leaves the camera alone. Display, active-material and clipboard state
  * fall back to in-memory hosts when a command first asks for them.
  */
@@ -52,7 +55,7 @@ export const HEADLESS_COMMAND_SETS: readonly (readonly AnyCommand[])[] = [
   transformCommands, viewCommands, lastOpCommands, edgeCommands, guideCommands, dimensionCommands, textCommands,
   axesCommands, offsetCommands, followMeCommands, solidCommands, intersectCommands, contextCommands, groupCommands,
   componentBehaviorCommands, tagCommands, styleCommands, shadowCommands, fogCommands, materialCommands,
-  modelInfoCommands, componentCommands, sceneCommands,
+  modelInfoCommands, componentCommands, sceneCommands, edgeBlendCommands, sectionPlaneCommands, text3dCommands,
 ];
 
 /** One open model: its document host and the registry that edits it, on the inline kernel. */

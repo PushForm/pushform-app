@@ -38,3 +38,8 @@ it('keeps the open model and path when native validation rejects a file', async 
     expect(s.model).toBe(model); expect(s.path).toBe('existing.pf');
   }
 });
+
+it('registers the edge blend, section plane and 3D text commands the model document API runs', () => {
+  const s = session();
+  for (const id of ['fillet.apply', 'chamfer.apply', 'sectionPlane.add', 'sectionPlane.setActive', 'text3d.create']) expect(s.model.registry.has(id)).toBe(true);
+});

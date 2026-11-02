@@ -469,13 +469,27 @@
 [data-desktop-shell='mac'] .pf-topbar {
   padding-left: 80px;
 }
-[data-desktop-shell] .pf-topbar {
+[data-desktop-shell] :is(.pf-topbar, .pf-home-header) {
   user-select: none;
 }
+/* Other platforms: the controls are pinned to the window's top-right corner above every screen and dialog, so each
+   header reserves room for them. */
+[data-desktop-shell='other'] {
+  --pf-window-controls-w: 138px;
+}
+[data-desktop-shell='other'] .pf-topbar {
+  padding-right: calc(8px + var(--pf-window-controls-w));
+}
+[data-desktop-shell='other'] :is(.pf-home-header, .pf-deletion-banner) {
+  padding-right: calc(16px + var(--pf-window-controls-w));
+}
 .pf-window-controls {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 10001;
   display: flex;
-  align-self: stretch;
-  margin: 0 -8px 0 4px;
+  height: var(--pf-topbar-h);
 }
 .pf-window-controls button {
   display: flex;

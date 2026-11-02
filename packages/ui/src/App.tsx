@@ -31,6 +31,7 @@ import { useExtensionWorkspace } from './extensions/useExtensionWorkspace';
 import { markDesktopShell, syncDesktopTitleBar } from './desktopShell';
 import { allowOpeningDocument, desktopUpdates } from './desktopUpdates';
 import { DesktopUpdates } from './components/DesktopUpdates';
+import { WindowControls } from './components/WindowControls';
 import { DocumentSession, type DocumentTab } from './session';
 import { loadRefreshImages, type RefreshImageStore } from './refreshImages';
 import { paintLoading } from './documentLoading';
@@ -141,7 +142,7 @@ export function App({ app, cloud: supplied, cloudFiles, profiles, account, build
     {signedIn && !profileReady && profiles ? <ProfileScreen cloud={cloud} session={state} profiles={profiles} state={profileState} /> : null}
     {signedIn && profileReady && account && accountState.ownerId === state.user!.id ? <DeletionBanner account={account} state={accountState} /> : null}
   </>;
-  const provided = <ProfileContext.Provider value={profiles ?? null}><AccountContext.Provider value={account ?? null}>{screens}<ToastHost /></AccountContext.Provider></ProfileContext.Provider>;
+  const provided = <ProfileContext.Provider value={profiles ?? null}><AccountContext.Provider value={account ?? null}>{screens}<ToastHost /><WindowControls /></AccountContext.Provider></ProfileContext.Provider>;
   return provided;
 }
 

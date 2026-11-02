@@ -24,7 +24,6 @@ import type { DocumentSession, DocumentTab, ModelTab } from '../session';
 import { CommandSearch } from './CommandSearch';
 import { commandSearchSourceFor } from './commandSearchSource';
 import { DocumentTabs } from './DocumentTabs';
-import { WindowControls } from './WindowControls';
 import { LayoutTemplateChooser } from './LayoutTemplateChooser';
 import { LayoutImportDialog } from './LayoutImportDialog';
 import { ModelImportDialog } from './ModelImportDialog';
@@ -854,7 +853,6 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
       <CommandSearch source={() => commandSearchSourceFor(session.active)} />
       {autosave ? <AutosaveIndicator autosave={autosave} tab={active} onSaveCopy={makeCloudCopy} /> : null}
       <AccountControl cloud={cloud} onExtensions={onExtensions} />
-      <WindowControls />
       {aboutOpen ? <AboutDialog build={buildInfo ?? UNKNOWN_BUILD} onClose={() => setAboutOpen(false)} /> : null}
       {cloudBrowser && cloudFiles ? <CloudBrowser api={cloudFiles} session={session} owner={cloudOwner}
         saveTab={cloudBrowser.saveTab} saveAsTemplate={cloudBrowser.saveAsTemplate} forceCopy={!!autosave} onClose={closeCloudBrowser} /> : null}

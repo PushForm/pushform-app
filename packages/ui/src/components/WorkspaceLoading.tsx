@@ -10,7 +10,7 @@ export function WorkspaceLoading({ progress }: { progress: NativeRefreshProgress
     root.classList.add('pf-document-loading');
     return () => root.classList.remove('pf-document-loading');
   }, []);
-  return <main className="pf-workspace-loading" aria-label="Loading workspace" aria-busy="true">
+  return <main className="pf-workspace-loading" aria-label="Loading workspace" data-tauri-drag-region aria-busy="true">
     <section role="status" aria-live="polite">
       <div className="pf-workspace-loading-brand"><img src="/pf-logo-mark.svg" alt="" width={32} height={32} /><strong>PushForm</strong></div>
       <h1>Restoring your workspace…</h1>

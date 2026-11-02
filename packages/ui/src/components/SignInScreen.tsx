@@ -7,7 +7,7 @@ import type { CloudSession, CloudSessionState } from '@pushform/cloud';
 export function SignInScreen({ cloud, state }: { cloud: CloudSession; state: CloudSessionState }): JSX.Element {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => { if (state.status !== 'signedOut') heading.current?.focus(); }, [state.status]);
-  return <main className="pf-signin-screen" aria-label="Sign in">
+  return <main className="pf-signin-screen" aria-label="Sign in" data-tauri-drag-region>
     <section className="pf-signin-card" aria-labelledby="pf-signin-title">
       <div className="pf-signin-brand"><img src="/pf-logo-mark.svg" alt="" width={32} height={32} /><span>PushForm</span></div>
       <h1 id="pf-signin-title" ref={heading} tabIndex={-1}>{state.status === 'restoring' ? 'Welcome to PushForm' : 'Sign in to PushForm'}</h1>

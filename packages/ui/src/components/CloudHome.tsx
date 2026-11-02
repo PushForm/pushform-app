@@ -244,7 +244,7 @@ export function CloudHome({ api, cloud, recents, openTabs, ownerId, buildInfo, o
     </div>;
   };
   return <div className="pf-app pf-home">
-    <header className="pf-home-header">
+    <header className="pf-home-header" data-tauri-drag-region>
       <button className="pf-home-brand" type="button" aria-label="PushForm home" onClick={() => choose('')}>
         <img src="/pf-logo-mark.svg" alt="" width={28} height={28} /><span>PushForm</span>
       </button>

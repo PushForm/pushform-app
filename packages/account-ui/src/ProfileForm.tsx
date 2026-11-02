@@ -116,7 +116,7 @@ export function ProfileScreen({ cloud, session, profiles, state }: {
   const loading = state.status === 'loading' || state.status === 'signedOut';
   useEffect(() => { if (!loading) heading.current?.focus(); }, [loading]);
   const returning = state.profile !== null;
-  return <main className="pf-signin-screen" aria-label="Set up your account">
+  return <main className="pf-signin-screen" aria-label="Set up your account" data-tauri-drag-region>
     <section className="pf-signin-card pf-profile-card" aria-labelledby="pf-profile-title">
       <div className="pf-signin-brand"><img src="/pf-logo-mark.svg" alt="" width={32} height={32} /><span>PushForm</span></div>
       {loading ? <p role="status">Loading your account…</p>

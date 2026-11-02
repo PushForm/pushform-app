@@ -206,3 +206,8 @@ it('trashes a file, lists the Trash with Restore and a confirmed permanent delet
   api.listTrash.mockResolvedValue([]);
   await screen.findByText('The Trash is empty');
 });
+
+it('lets the desktop window be dragged by the Home header', () => {
+  const { container } = render(<CloudHome api={undefined} cloud={undefined} recents={[]} openTabs={[]} onResume={() => {}} onOpen={vi.fn()} onCreate={vi.fn()} />);
+  expect(container.querySelector('.pf-home-header')?.hasAttribute('data-tauri-drag-region')).toBe(true);
+});

@@ -3,6 +3,7 @@
 mod updates;
 mod clipboard;
 mod step;
+mod window_fit;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -24,13 +25,13 @@ pub fn run() {
       step::step_cancel
     ])
     .setup(|app| {
-      // macOS keeps its traffic lights over the overlay title bar; elsewhere the top bar draws its own window controls.
-      #[cfg(not(target_os = "macos"))]
-      {
-        use tauri::Manager;
-        if let Some(window) = app.get_webview_window("main") {
-          window.set_decorations(false)?;
-        }
+      use tauri::Manager;
+      if let Some(window) = app.get_webview_window("main") {
+        // macOS keeps its traffic lights over the overlay title bar; elsewhere the app draws its own window controls.
+        #[cfg(not(target_os = "macos"))]
+        window.set_decorations(false)?;
+        // Without a native title bar the window cannot be dragged back once its edge is off screen, so it opens inside the screen.
+        window_fit::fit_to_monitor(&window);
       }
       if cfg!(debug_assertions) {
         app.handle().plugin(

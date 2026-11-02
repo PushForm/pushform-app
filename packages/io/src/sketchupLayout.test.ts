@@ -562,6 +562,22 @@ describe('SketchUp LayOut import', () => {
     expect([...decodePng(Uint8Array.from(atob(src.slice('data:image/png;base64,'.length)), c => c.charCodeAt(0)))!.pixels]).toEqual([0, 0, 0, 255, 255, 255]);
   });
 
+  it('keeps a raster render that already leaves out its backdrop as stored, sky and background colored texture included', () => {
+    const bytes = new Uint8Array(readFileSync(new URL('../../testing/assets/layout/background-off-texture-2027.layout', import.meta.url)));
+    const stored = Object.values(unzipSync(bytes, { filter: file => file.name.startsWith('ref/') && file.name.endsWith('.png') }))[0]!;
+    const { doc } = importSketchUpLayout(bytes);
+    const p = doc.state.pages.get(doc.state.pageOrder[0]!)!;
+    const view = [...p.entities.values()].find(entity => entity.image?.viewport)!.image!;
+    expect(view.viewport!.background).toBeNull();
+    const src = Uint8Array.from(atob(view.src.slice('data:image/png;base64,'.length)), c => c.charCodeAt(0));
+    expect(src).toEqual(stored);
+    const { pixels } = decodePng(src)!;
+    const opaque = (rgb: number) => { let count = 0; for (let q = 0; q < pixels.length; q += 4) if (pixels[q + 3] === 255 && (pixels[q]! << 16 | pixels[q + 1]! << 8 | pixels[q + 2]!) === rgb) count++; return count; };
+    // The texture's stripes in the sky and background colors.
+    expect(opaque(0xc85028)).toBeGreaterThan(1000);
+    expect(opaque(0x28a05a)).toBeGreaterThan(1000);
+  });
+
   it('keeps each model view\'s face style, edges and X-ray from LayOut\'s rendering options', () => {
     const entry = (key: string, value: string) => `<e:entry key="${key}" type="3" value="${value}" />`;
     const model = (id: string, options: string) => `<e:skpModelRef id="${id}">
@@ -1167,10 +1183,16 @@ describe('SketchUp LayOut import', () => {
       '3.705927,0.6757834,3.111473,3.683638,2.703447,3.683638', 'WAND 1\\par\\par 4.2m x 16\\par 67.2 x 15.6W');
     // A consistent first-line connection: the box's top is half a line above the leader.
     const top = label(70, 9, 5, 'x="5" y="5" width="1" height="0.3"', '4,4,4.5,5.08,5,5.08', 'First\\par Second');
-    const { doc } = importSketchUpLayout(layoutFile(page(stale + top, onLayer('id10', ['id60', 'id70']))));
+    // The same box and leader with an automatic connection: the leader meets the text where the box sets it.
+    const automatic = label(80, 1, 10, 'x="1.0360858" y="2.2169719" width="1.6638889" height="1.8520833"',
+      '3.705927,0.6757834,3.111473,3.683638,2.703447,3.683638', 'WAND 1\\par\\par 4.2m x 16\\par 67.2 x 15.6W');
+    const { doc } = importSketchUpLayout(layoutFile(page(stale + top + automatic, onLayer('id10', ['id60', 'id70', 'id80']))));
     const pageState = doc.state.pages.get(doc.state.pageOrder[0]!)!;
-    const [moved, kept] = pageState.entityOrder.map((id) => pageState.entities.get(id)!);
-    const halfLine = 10 * 1.15 / 2 * 25.4 / 72, end = 3.683638 * 25.4;
+    const [moved, kept, unmoved] = pageState.entityOrder.map((id) => pageState.entities.get(id)!);
+    // The painted line: without a canvas to measure on, Arial's ascent and descent (0.905 and 0.212 em).
+    const halfLine = 10 * (0.905 + 0.212) / 2 * 25.4 / 72, end = 3.683638 * 25.4;
+    expect(unmoved!.points[0]![1]).toBeCloseTo(2.2169719 * 25.4, 9);
+    expect(unmoved!.text!.leaderOffsetMm).toBeCloseTo((3.683638 - (2.2169719 + 1.8520833 / 2)) * 25.4, 6);
     expect(moved!.points[1]![1]).toBeCloseTo(end + halfLine, 6);
     expect(moved!.points[1]![1] - moved!.points[0]![1]).toBeCloseTo(1.8520833 * 25.4, 6);
     expect(moved!.text!.vertical).toBe('bottom');
@@ -1181,6 +1203,66 @@ describe('SketchUp LayOut import', () => {
     expect(kept!.points[0]![1]).toBeCloseTo(5 * 25.4, 9);
     expect(kept!.text!.leaderOffsetMm).toBeCloseTo((5.08 - 5.15) * 25.4, 6);
     expect(layoutLabelLeader(kept!)!.start[1]).toBeCloseTo(5.08 * 25.4, 6);
+  });
+
+  const connectedDimension = (id: string, [ax, ay]: [number, number], [bx, by]: [number, number], arrow = 1) => `
+    <e:linearDimension id="${id}">
+      <e:dimensionText id="${id}t" anchorType="5" growMode="0">
+        <e:placedFileReference><e:rectangleBase x="${ax}" y="${ay - 0.8}" width="1" height="0.2" /></e:placedFileReference>
+        <e:rtfTextRep>${RTF('&lt;&gt;')}</e:rtfTextRep>
+      </e:dimensionText>
+      <ld:startConnectionPoint x="${ax}" y="${ay}" /><ld:endConnectionPoint x="${bx}" y="${by}" />
+      <e:dimensionLine id="${id}l"><e:graphicEntity shouldFill="0" />
+        <e:elements>0,1</e:elements><e:points2f>${ax},${ay - 0.5},${bx},${by - 0.5}</e:points2f>
+        <e:arrowData startArrowType="${arrow}" startArrowSize="1" endArrowType="${arrow}" endArrowSize="1" /></e:dimensionLine>
+    </e:linearDimension>`;
+  const vertexConnection = (x: number, y: number, path: string, index: number, dimension: string, end: number) => `<connection>
+    <connectionPoint ver="2" type="1" x="${x}" y="${y}" dirx="0" diry="0" param1="${index}" param2="0" l:ref="${path}" />
+    <dimensionConnectionPoint l:ref="${dimension}" componentId="${end}" /></connection>`;
+
+  it('drops the connections to an id that names an object on more than one page', () => {
+    // Page 1 has paths id40 and id41; page 2 has another path id40. Each dimension measures its path's first segment.
+    const first = `<e:path id="id40"><e:elements>0,1</e:elements><e:points2f>1,1,4,1</e:points2f></e:path>
+      <e:path id="id41"><e:elements>0,1</e:elements><e:points2f>1,5,4,5</e:points2f></e:path>
+      ${connectedDimension('id50', [1, 1], [4, 1])}${connectedDimension('id52', [1, 5], [4, 5])}`;
+    const second = `<e:path id="id40"><e:elements>0,1</e:elements><e:points2f>2,2,6,2</e:points2f></e:path>${connectedDimension('id51', [2, 2], [6, 2])}`;
+    const connections = (lines: string[]) => `<connectionManager>${lines.join('')}</connectionManager>`;
+    const files = unzipSync(layoutFile(page(first, onLayer('id10', ['id40', 'id41', 'id50', 'id52'])) + connections([
+      vertexConnection(1, 1, 'id40', 0, 'id50', 5), vertexConnection(4, 1, 'id40', 1, 'id50', 6),
+      vertexConnection(1, 5, 'id41', 0, 'id52', 5), vertexConnection(4, 5, 'id41', 1, 'id52', 6),
+    ])));
+    files['pages/page2.xml'] = strToU8(`<?xml version="1.0" ?><page xmlns="http://sketchup.google.com/schemas/layout/1.0/page" ${NS}>${
+      page(second, onLayer('id10', ['id40', 'id51']))}${connections([vertexConnection(2, 2, 'id40', 0, 'id51', 5), vertexConnection(6, 2, 'id40', 1, 'id51', 6)])}</page>`);
+    files['document.xml'] = strToU8(strFromU8(files['document.xml']!).replace('</ld:pageManager>',
+      '<ld:pageRef r:id="id5" name="Second"><r:layerVisibility>1,1,1</r:layerVisibility></ld:pageRef></ld:pageManager>'));
+    files['references.xml'] = strToU8(strFromU8(files['references.xml']!).replace('</references>',
+      '<r:pageFileReference r:id="id5" internalTarget="pages/page2.xml" /></references>'));
+    const { doc, warnings } = importSketchUpLayout(zipSync(files));
+    const dimensions = doc.state.pageOrder.flatMap(id => [...doc.state.pages.get(id)!.entities.values()].filter(entity => entity.dimension));
+    expect(dimensions).toHaveLength(3);
+    const [onFirst, unique, onSecond] = dimensions;
+    // Which page's id40 a connection meant cannot be told, so both dimensions keep their points, unattached.
+    expect(onFirst!.dimension!.anchors).toEqual([null, null]);
+    expect(onSecond!.dimension!.anchors).toEqual([null, null]);
+    expect(onSecond!.points[0]!.map(v => v / 25.4)).toEqual([2, 2]);
+    expect(unique!.dimension!.anchors.map(anchor => anchor?.pointIndex)).toEqual([0, 1]);
+    expect(warnings).toContain('dimensions and labels attached to shapes that were not imported keep their points but are no longer attached (4×)');
+  });
+
+  it('draws dimension and label end styles it has no style for as arrows, and says so', () => {
+    const label = `<e:label id="id60" connectionType="9" extensionLineLength="0"><e:bodyOffset x="0" y="0" />
+      <e:leaderLine id="id61"><e:elements>0,1</e:elements><e:points2f>1,4,2,4</e:points2f>
+        <e:arrowData startArrowType="7" startArrowSize="1" endArrowType="0" endArrowSize="1" /></e:leaderLine>
+      <e:labelText id="id62" anchorType="5" growMode="0"><e:placedFileReference><e:rectangleBase x="2" y="3.9" width="1" height="0.2" /></e:placedFileReference>
+        <e:rtfTextRep>${RTF('Square')}</e:rtfTextRep></e:labelText></e:label>`;
+    const known = connectedDimension('id51', [1, 6], [4, 6], 13);
+    const { doc, warnings } = importSketchUpLayout(layoutFile(page(connectedDimension('id50', [1, 1], [4, 1], 12) + known + label, onLayer('id10', ['id50', 'id51', 'id60']))));
+    const all = [...doc.state.pages.get(doc.state.pageOrder[0]!)!.entities.values()];
+    expect(all.filter(entity => entity.dimension).map(entity => entity.dimension!.endpoint)).toEqual(['arrow', 'tick']);
+    expect(all.find(entity => entity.kind === 'label')!.text!.endpoint).toBe('arrow');
+    expect(warnings).toContain('dimension end style 12 was drawn as an arrow');
+    expect(warnings).toContain('label end style 7 was drawn as an arrow');
+    expect(warnings.filter(warning => warning.includes('end style'))).toHaveLength(2);
   });
 
   it('imports images, styled and rotated text, arrows, a dimension, and a label LayOut 2027 wrote', () => {

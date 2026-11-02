@@ -18,7 +18,7 @@ import {
   importLayoutText,
   layoutPathAnchorAt,
   layoutTextCenter,
-  layoutTextStyleAt,
+  layoutTextLineHeightMm,
   rotateLayoutPoint,
   MAX_TABLE_AXIS,
   layoutDashMm,
@@ -46,7 +46,7 @@ import { DEFAULT_SHADOWS, type ShadowSettings } from '@pushform/model';
 import { child, childrenNamed, parseXml, type XmlElement } from './xml';
 import { readLayOutCamera, viewportCameraFromLayOut } from './sketchupViewportCamera';
 import { validateImportedLayoutState } from './layoutImportValidation';
-import { clearPngColors } from './png';
+import { clearPngColors, pngHasTransparency } from './png';
 import { pngIsBlank } from './pngBlank';
 import { TiffError, tiffToPng } from './tiff';
 
@@ -661,12 +661,20 @@ class Importer {
     return { ...(startArrow ? { startArrow } : {}), ...(endArrow ? { endArrow } : {}) };
   }
 
+  /** A dimension's or label's end style by its `arrowData` code; one PushForm has no style for is drawn as an arrow. */
+  private endpoint<T extends string>(styles: Record<number, T>, code: number, owner: 'dimension' | 'label'): T | 'arrow' {
+    const style = styles[code];
+    if (style !== undefined) return style;
+    this.warn(`${owner} end style ${code} was drawn as an arrow`);
+    return 'arrow';
+  }
+
   private shape(element: XmlElement, layerId: number): LayoutEntity[] {
     const base = child(element, 'rectangleBase');
     if (!base) return [];
     const { x, y, width, height, transform } = rectangle(base);
     const rounding = num(element, 'rounding', 0);
-    // `shape` follows Layout::Rectangle::TYPE_*: 0 normal, 1 rounded, 2 lozenge, 3 bulged.
+    // `shape` is the stored rectangle type: 0 normal, 1 rounded, 2 lozenge, 3 bulged.
     const variant = element.name === 'ellipse' ? 'ellipse' : element.attrs.shape ?? '0';
     if (!['ellipse', '0', '1', '2', '3'].includes(variant)) this.warn(`rectangle variant ${variant} was imported as a plain rectangle`);
     const subpath = variant === 'ellipse' ? ellipse(x, y, width, height)
@@ -799,13 +807,14 @@ class Importer {
     // An absent strokeWidth is LayOut's 1 pt default.
     const weight = num(graphic?.attrs.strokeWidth !== undefined ? graphic : lineGraphic ?? element, 'strokeWidth', 1);
     const arrows = child(lineElement!, 'arrowData');
-    const endpoint = DIMENSION_ENDPOINT[Number(arrows?.attrs.startArrowType ?? 0)] ?? 'arrow';
+    const endpoint = this.endpoint(DIMENSION_ENDPOINT, Number(arrows?.attrs.startArrowType ?? 0), 'dimension');
     const arrowPt = num(arrows ?? element, 'startArrowSize', 3);
     const extension = child(element, 'extensionLine1');
     const extensionPath = extension ? parsePath(extension)[0] : undefined;
     const extensionArrows = extension && child(extension, 'arrowData');
     const measuredGap = extensionPath?.points[0] ? Math.hypot(extensionPath.points[0][0] - a[0], extensionPath.points[0][1] - a[1]) : NaN;
-    const gap = Number.isFinite(measuredGap) ? measuredGap : 0.125;
+    // A gap that cannot be measured is 1/8 in, the gap a new dimension is written with.
+    const gap = Number.isFinite(measuredGap) ? measuredGap : DEFAULT_EXTENSION_GAP_IN;
     // A blank body that is not automatic is custom text the author cleared.
     const template = (element.attrs.dimensionString ?? (element.attrs.autoText === '1' || !rtf ? '<>' : shown ?? '')).replace(/\r\n?/g, '\n');
     return {
@@ -960,12 +969,13 @@ class Importer {
     const elbow = leader.points.length >= 3;
     const angle = body.text!.rotationDeg ?? 0;
     let points = body.points;
-    // An unbounded label's text is set from its leader's end, and its stored box can be stale; one whose anchored
-    // edge lies more than half a line from where that puts it moves there, keeping its size.
-    if (!body.text!.bounded && angle === 0) {
+    // An unbounded label connected to a line of its text is set from its leader's end, and its stored box can be
+    // stale; one whose anchored edge lies more than half a line from where that puts it moves there, keeping its size.
+    // Lines are measured as they are painted. A label whose connection is automatic keeps its box.
+    if (!body.text!.bounded && angle === 0 && element.attrs.connectionType !== LABEL_CONNECTION_AUTO) {
       const end = toMm(leader.points.at(-1)!)[1];
       const top = Math.min(points[0]![1], points[1]![1]), bottom = Math.max(points[0]![1], points[1]![1]);
-      const vertical = body.text!.vertical, half = labelLineHalfHeightMm(body.text!, vertical === 'bottom');
+      const vertical = body.text!.vertical, half = layoutTextLineHeightMm(body.text!, vertical === 'bottom') / 2;
       const shift = vertical === 'top' ? end - half - top : vertical === 'bottom' ? end + half - bottom : end - (top + bottom) / 2;
       if (Math.abs(shift) > half) points = points.map(([x, y]): Point => [x, y + shift]);
     }
@@ -977,7 +987,7 @@ class Importer {
     return [...boxes, {
       ...body, kind: 'label',
       points: [...points, local(leader.points[0]!), ...(elbow ? [local(leader.points.at(-2)!)] : [])],
-      text: { ...body.text!, leader: elbow ? 'elbow' : 'straight', endpoint: LABEL_ENDPOINT[arrow] ?? 'arrow',
+      text: { ...body.text!, leader: elbow ? 'elbow' : 'straight', endpoint: this.endpoint(LABEL_ENDPOINT, arrow, 'label'),
         ...(Math.abs(offset) > LABEL_OFFSET_EPSILON_MM ? { leaderOffsetMm: offset } : {}) },
     }];
   }
@@ -1036,8 +1046,15 @@ class Importer {
     const options = childrenNamed(child(element, 'renderingOptions') ?? element, 'entry');
     const backgroundEntry = options.find((entry) => entry.attrs.key === 'BackgroundColor');
     const backgroundColor = element.attrs.displayBackground === '1' && backgroundEntry ? color(backgroundEntry.attrs.value, '#ffffff') : null;
-    // With it off, the cached raster render still holds the sky and background, which are not drawn.
-    // A color the model itself draws in (faces, edges) or white paper is kept: clearing it would cut into the model.
+    // LayOut's render mode shows in which caches it stored: a picture (raster), paths (vector), or both
+    // (hybrid: the picture's faces under the paths' edges).
+    const rasterId = child(element, 'imageFileReference')?.attrs['r:id'];
+    const rasterTarget = rasterId ? this.references.get(rasterId)?.attrs.internalTarget : undefined;
+    const rasterBytes = rasterTarget && /\.png$/i.test(rasterTarget) ? this.files[rasterTarget] : undefined;
+    // With Background off, a raster render with transparency already leaves out the sky and background, and its opaque
+    // pixels are all model, even those in the sky or background color (a texture, a face). A fully opaque render
+    // still holds them, so those two colors are cleared from it, except a color the model itself draws in
+    // (faces, edges) or white paper: clearing it would cut into the model.
     const rgbOf = (key: string): number | null => {
       const value = options.find((entry) => entry.attrs.key === key)?.attrs.value;
       if (value === undefined || !Number.isFinite(Number(value))) return null;
@@ -1045,16 +1062,12 @@ class Importer {
       return (abgr & 0xff) << 16 | (abgr >>> 8 & 0xff) << 8 | (abgr >>> 16 & 0xff);
     };
     const modelColors = [0xffffff, ...['FaceFrontColor', 'FaceBackColor', 'ForegroundColor'].map(rgbOf)];
-    const backdrop = element.attrs.displayBackground === '1' ? [] : ['SkyColor', 'BackgroundColor']
+    const backdrop = element.attrs.displayBackground === '1' || !rasterBytes || pngHasTransparency(rasterBytes) ? [] : ['SkyColor', 'BackgroundColor']
       .map(rgbOf).filter((rgb): rgb is number => rgb !== null && !modelColors.includes(rgb));
-    // LayOut's render mode shows in which caches it stored: a picture (raster), paths (vector), or both
-    // (hybrid: the picture's faces under the paths' edges).
-    const rasterId = child(element, 'imageFileReference')?.attrs['r:id'];
-    const rasterTarget = rasterId ? this.references.get(rasterId)?.attrs.internalTarget : undefined;
     const renderable = Boolean(this.originalArchive && modelReferenceId && this.references.get(modelReferenceId)?.name === 'skpFileReference');
     // A file sometimes holds a blank raster render, meant to be drawn again from its model; a model view does that.
     // (Render timestamps older than the view's last change are not a reliable sign: those renders are still current.)
-    const blank = renderable && Boolean(rasterTarget && this.files[rasterTarget] && /\.png$/i.test(rasterTarget) && pngIsBlank(this.files[rasterTarget]!));
+    const blank = renderable && Boolean(rasterBytes && pngIsBlank(rasterBytes));
     const raster = blank ? null : this.imageUrl(rasterId, backdrop);
     const imageRect = child(element, 'imageRect');
     const vector = this.vectorSvg(child(element, 'vectorFileReference')?.attrs['r:id'], base,
@@ -1522,6 +1535,8 @@ const DIMENSION_ENDPOINT: Record<number, LayoutLinearDimension['endpoint']> = {
 const LABEL_ENDPOINT: Record<number, LayoutText['endpoint']> = {
   0: 'none', 1: 'arrow', 2: 'arrow', 3: 'arrow', 4: 'arrow', 17: 'arrow', 18: 'arrow', 5: 'dot', 6: 'dot',
 };
+/** The extension-line gap, in inches, of a dimension whose stored gap cannot be measured. */
+const DEFAULT_EXTENSION_GAP_IN = 0.125;
 /** `unitsInfo unit` codes: inches 0, feet 1, millimeters 2, centimeters 3, meters 4, points 5; angles in degrees 9 or radians 10. */
 const LINEAR_UNITS: Record<number, LayoutLinearDimension['units']> = { 0: 'inch', 1: 'ft', 2: 'mm', 3: 'cm', 4: 'm', 5: 'pt' };
 const UNIT_RADIANS = 10;
@@ -1646,17 +1661,8 @@ function toMm([x, y]: Point): Point {
 
 /** A label leader within this of the box's center meets it at the center. */
 const LABEL_OFFSET_EPSILON_MM = 0.05;
-/** A line's height in ems, for placing a stale label box: lines are 1.1 (Arial) to 1.2 (Verdana) em. */
-const LABEL_LINE_EM = 1.15;
-
-/** Half the height of a text's first or last line, by its largest font. */
-function labelLineHalfHeightMm(text: LayoutText, last: boolean): number {
-  const breakAt = last ? text.content.lastIndexOf('\n') : text.content.indexOf('\n');
-  const start = last ? breakAt + 1 : 0, end = last || breakAt < 0 ? text.content.length : breakAt;
-  let size = layoutTextStyleAt(text, Math.min(start, Math.max(0, text.content.length - 1))).fontSizePt;
-  for (let index = start; index < end; index++) size = Math.max(size, layoutTextStyleAt(text, index).fontSizePt);
-  return size * LABEL_LINE_EM / 2 * MM_PER_INCH / 72;
-}
+/** A label's `connectionType` when its leader meets the text wherever the box puts it. */
+const LABEL_CONNECTION_AUTO = '1';
 
 function handleToMm(handle: LayoutPathHandle): LayoutPathHandle {
   return {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { layoutModelFields, LAYOUT_DEFAULT_TAB_PT, LAYOUT_TEXT_INSET_MM, layoutTextStyleAt, nextLayoutTabStop, spaceLayoutLine, type LayoutTextStyle, layoutLabelLeader, type LayoutLabelLeader, type LayoutText, resolveLayoutText, type LayoutEntity, type LayoutPage, type LayoutDocumentState } from '@pushform/layout';
+import { layoutFontVerticalEm, layoutModelFields, LAYOUT_DEFAULT_TAB_PT, LAYOUT_TEXT_INSET_MM, layoutTextStyleAt, nextLayoutTabStop, spaceLayoutLine, type LayoutTextStyle, layoutLabelLeader, type LayoutLabelLeader, type LayoutText, resolveLayoutText, type LayoutEntity, type LayoutPage, type LayoutDocumentState } from '@pushform/layout';
 
 /** Positioned glyphs after wrapping and formatting, also used to retain editable SVG text blocks. */
 export interface LayoutPaintedGlyph { text: string; x: number; y: number; font: string; color: string; underline: boolean }
@@ -140,36 +140,6 @@ export function layoutTextBlock(ctx: CanvasRenderingContext2D, text: LayoutText,
   const lineAscents = spaced.map(line => line.ascent);
   const lineHeights = spaced.map(line => line.height);
   return { size, lineHeight: base.ascent + base.descent, lineHeights, lineAscents, lines: wrapped, font };
-}
-
-let measuring: CanvasRenderingContext2D | null | undefined;
-const verticalEm = new WeakMap<object, Map<string, { ascent: number; descent: number }>>();
-/**
- * A font's ascent and descent per unit of size. They are measured once at a large size and scaled: browsers round a
- * font's box to whole canvas units, and text is laid out in millimetres (10 pt is 3.5), where rounding makes a line
- * as much as a sixth too tall. Arial's ascent and descent stand in where the canvas cannot report the font's own.
- */
-export function layoutFontVerticalEm(style: Pick<LayoutText, 'fontFamily' | 'bold' | 'italic'>, ctx?: CanvasRenderingContext2D): { ascent: number; descent: number } {
-  if (!ctx && measuring === undefined) {
-    try { measuring = document.createElement('canvas').getContext('2d'); } catch { measuring = null; }
-  }
-  const canvas = ctx ?? measuring;
-  const key = `${style.italic ? 'i' : ''}${style.bold ? 'b' : ''}|${style.fontFamily}`;
-  const cache = canvas ? verticalEm.get(canvas) ?? verticalEm.set(canvas, new Map()).get(canvas)! : null;
-  const known = cache?.get(key);
-  if (known) return known;
-  let em = { ascent: 0.905, descent: 0.212 };
-  if (canvas) {
-    const previous = canvas.font;
-    canvas.font = `${style.italic ? 'italic ' : ''}${style.bold ? 'bold ' : ''}1000px "${style.fontFamily.replace(/["\\]/g, '')}", sans-serif`;
-    const metrics = canvas.measureText('');
-    canvas.font = previous;
-    if (metrics.fontBoundingBoxAscent !== undefined && metrics.fontBoundingBoxDescent !== undefined)
-      em = { ascent: metrics.fontBoundingBoxAscent / 1000, descent: metrics.fontBoundingBoxDescent / 1000 };
-  }
-  // A font still loading reports its fallback's box, so only boxes measured once fonts have settled are kept.
-  if (typeof document === 'undefined' || !document.fonts || document.fonts.status === 'loaded') cache?.set(key, em);
-  return em;
 }
 
 /** A font's ascent plus descent over its size: the painted line height, for DOM editors. */

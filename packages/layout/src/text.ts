@@ -319,6 +319,59 @@ export function layoutTextStyleAt(text: LayoutText, index: number): LayoutTextSt
   return style;
 }
 
+type FontMeasuringContext = Pick<CanvasRenderingContext2D, 'font' | 'measureText'>;
+let measuring: FontMeasuringContext | null | undefined;
+const verticalEm = new WeakMap<object, Map<string, { ascent: number; descent: number }>>();
+/**
+ * A font's ascent and descent per unit of size. They are measured once at a large size and scaled: browsers round a
+ * font's box to whole canvas units, and text is laid out in millimetres (10 pt is 3.5), where rounding makes a line
+ * as much as a sixth too tall. Without a canvas given, a page's canvas measures, or an offscreen one where there is
+ * no page (a worker). Arial's ascent and descent stand in where no canvas can report the font's own.
+ */
+export function layoutFontVerticalEm(style: Pick<LayoutText, 'fontFamily' | 'bold' | 'italic'>, ctx?: FontMeasuringContext): { ascent: number; descent: number } {
+  if (!ctx && measuring === undefined) {
+    try {
+      measuring = typeof document !== 'undefined' ? document.createElement('canvas').getContext('2d')
+        : typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(1, 1).getContext('2d') : null;
+    } catch { measuring = null; }
+  }
+  const canvas = ctx ?? measuring;
+  const key = `${style.italic ? 'i' : ''}${style.bold ? 'b' : ''}|${style.fontFamily}`;
+  const cache = canvas ? verticalEm.get(canvas) ?? verticalEm.set(canvas, new Map()).get(canvas)! : null;
+  const known = cache?.get(key);
+  if (known) return known;
+  let em = { ascent: 0.905, descent: 0.212 };
+  if (canvas) {
+    const previous = canvas.font;
+    canvas.font = `${style.italic ? 'italic ' : ''}${style.bold ? 'bold ' : ''}1000px "${style.fontFamily.replace(/["\\]/g, '')}", sans-serif`;
+    const metrics = canvas.measureText('');
+    canvas.font = previous;
+    if (metrics.fontBoundingBoxAscent !== undefined && metrics.fontBoundingBoxDescent !== undefined)
+      em = { ascent: metrics.fontBoundingBoxAscent / 1000, descent: metrics.fontBoundingBoxDescent / 1000 };
+  }
+  // A font still loading reports its fallback's box, so only boxes measured once fonts have settled are kept.
+  if (typeof document === 'undefined' || !document.fonts || document.fonts.status === 'loaded') cache?.set(key, em);
+  return em;
+}
+
+/**
+ * The height of a text's first or last line as it is painted: its largest font's ascent plus descent, under the
+ * text's line spacing. An empty line takes the style at its line break.
+ */
+export function layoutTextLineHeightMm(text: LayoutText, last: boolean): number {
+  const breakAt = last ? text.content.lastIndexOf('\n') : text.content.indexOf('\n');
+  const start = last ? breakAt + 1 : 0, end = last || breakAt < 0 ? text.content.length : breakAt;
+  let ascent = 0, descent = 0;
+  const measure = (index: number): void => {
+    const style = layoutTextStyleAt(text, index), em = layoutFontVerticalEm(style), sizeMm = style.fontSizePt * 25.4 / 72;
+    ascent = Math.max(ascent, em.ascent * sizeMm);
+    descent = Math.max(descent, em.descent * sizeMm);
+  };
+  if (start >= end) measure(Math.min(start, Math.max(0, text.content.length - 1)));
+  for (let index = start; index < end; index++) measure(index);
+  return spaceLayoutLine(ascent, descent, text.lineSpacing).height;
+}
+
 /** Apply only the requested attributes, retaining all other formatting and unaffected characters. */
 export function formatLayoutTextRange(text: LayoutText, range: { start: number; end: number }, patch: Partial<LayoutTextStyle>): Partial<LayoutText> {
   const start = Math.max(0, Math.min(range.start, text.content.length)), end = Math.max(start, Math.min(range.end, text.content.length));

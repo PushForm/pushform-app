@@ -20,12 +20,14 @@ import {
   imageCommands,
   text3dCommands,
   SERVICE_FONTS,
+  SERVICE_MESH_EDITABLE,
   detectPlatform,
   editCommands,
   placeholderTool,
 } from '@pushform/commands';
 import type { DisplayState, Platform, Tool } from '@pushform/commands';
 import type { Mat4, MeshData } from '@pushform/core';
+import { makeMeshPartEditable } from '@pushform/io';
 import { InlineBackend, KernelClient, WorkerBackend } from '@pushform/kernel';
 import { bodyFromMesh } from '@pushform/model';
 import { Viewport, renderKey } from '@pushform/render';
@@ -142,6 +144,7 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
     [SERVICE_KERNEL, kernel],
     [SERVICE_INFERENCE, inference],
     [SERVICE_FONTS, bundledFonts],
+    [SERVICE_MESH_EDITABLE, { makeEditable: makeMeshPartEditable }],
   ]);
   const commands = new CommandRegistry({ tx, camera: viewport.camera, services });
   commands.registerAll(editCommands);

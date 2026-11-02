@@ -2955,4 +2955,3 @@ h4.pf-xui-text { font-size: 12px; }
 
 .pf-model-browser-tag-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; box-shadow: 0 0 0 1px var(--pf-border); }
 .pf-model-browser-tag-tooltip { position: fixed; z-index: 1000; max-width: min(240px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: auto; font: var(--pf-panel-font-size)/var(--pf-panel-line-height) var(--pf-font); pointer-events: none; }
-

@@ -73,7 +73,7 @@ describe('runTurn', () => {
     expect(p).not.toHaveProperty('thinking');
     expect(p.tools?.[0]).toMatchObject({ strict: true });
   });
-  it('reports timing, tokens and the request id of every round', async () => {
+  it('reports timing and tokens of every round', async () => {
     const client = fakeAnthropic([
       { toolUses: [{ id: 'tu1', name: 'echo', input: { text: 'a' } }], usage: { cache_read_input_tokens: 900, cache_creation_input_tokens: 50 } },
       { text: ['done'] },

@@ -211,7 +211,8 @@ export function messagesFromRows(value: unknown): ConversationMessage[] {
       const turn = asRecord(r['turn']);
       out.push({ role: 'assistant', text: r['text'], at: str(r['at']), ...(turn ? { turn: turn as unknown as SuspendedTurn } : {}) });
     }
-    else if (r['role'] === 'tool' && typeof r['name'] === 'string') out.push({ role: 'tool', name: r['name'], toolUseId: str(r['toolUseId']), input: r['input'], output: str(r['output']), at: str(r['at']) });
+    else if (r['role'] === 'tool' && typeof r['name'] === 'string') out.push({ role: 'tool', name: r['name'], toolUseId: str(r['toolUseId']), input: r['input'], output: str(r['output']), at: str(r['at']),
+      ...(Array.isArray(r['views']) ? { views: (r['views'] as unknown[]).map(v => str(v)) } : {}) });
   }
   return out;
 }

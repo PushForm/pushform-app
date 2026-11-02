@@ -3,11 +3,11 @@
 // @pushform/requests-ui: AI Chat, docked in editors and popped down on Home
 export const PACKAGE = '@pushform/requests-ui';
 
-export { RequestsClient, RequestsError, parseEventStream, normalizeConversation, formatBytes, ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_REPORT, DOCUMENT_TYPE, SCREENSHOT_TYPES } from './client';
+export { RequestsClient, RequestsError, parseEventStream, normalizeConversation, formatBytes, ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_REPORT, DOCUMENT_TYPE, SCREENSHOT_TYPES, TOOL_IMAGES_PER_RESULT, TOOL_IMAGE_MAX_CHARS } from './client';
 export type {
   RequestsClientOptions, ErrorCode, ConversationKind, ConversationPath, IntentPath, ConversationStatus, EffectiveRole, ChangeClass, Area,
   FeatureBrief, ProblemReport, Brief, ScreenInfo, Me, ConversationSummary, Message, Conversation, FiledRequest, StreamEvent,
-  DocumentDescriptor, ToolCall, ToolCallResult, Attachment, AttachmentKind, AttachmentFile,
+  DocumentDescriptor, ToolCall, ToolCallResult, ToolImage, Attachment, AttachmentKind, AttachmentFile,
 } from './client';
 export { readDrafts, rememberDraft, forgetDraft, draftScope, DRAFT_TTL_MS, HOME_SCOPE } from './drafts';
 export type { DraftRecord } from './drafts';

@@ -66,7 +66,7 @@ function scriptedStream(turn: ScriptedTurn): AsyncIterable<Anthropic.RawMessageS
     for (const chunk of t.raw ?? [JSON.stringify(t.input)]) events.push({ type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: chunk } });
     events.push({ type: 'content_block_stop', index }); index += 1;
   }
-  events.push({ type: 'message_delta', delta: { stop_reason: stopReason, stop_sequence: null, stop_details: message.stop_details, container: null, context_management: null }, usage: { output_tokens: usage.output_tokens, input_tokens: usage.input_tokens, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, server_tool_use: null, output_tokens_details: null } } as Anthropic.MessageStreamEvent);
+  events.push({ type: 'message_delta', delta: { stop_reason: stopReason, stop_sequence: null, stop_details: message.stop_details, container: null, context_management: null }, usage: { output_tokens: usage.output_tokens, input_tokens: usage.input_tokens, cache_creation_input_tokens: usage.cache_creation_input_tokens, cache_read_input_tokens: usage.cache_read_input_tokens, server_tool_use: null, output_tokens_details: null } } as Anthropic.MessageStreamEvent);
   events.push({ type: 'message_stop' });
   return { async *[Symbol.asyncIterator]() { for (const e of events) yield e; } };
 }

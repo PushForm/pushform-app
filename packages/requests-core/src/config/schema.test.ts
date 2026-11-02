@@ -18,6 +18,9 @@ describe('configSchema', () => {
     expect(result.data?.mail).toEqual({ kind: 'resend', from: 'requests@pushform.io', replyTo: 'support@pushform.io' });
     expect(result.data?.limits.messagesPerConversation).toBe(30);
     expect(result.data?.limits.messagesPerMinute).toBe(20);
+    // Render review bounds come from the defaults when the file leaves them out.
+    expect(result.data?.limits.renderReviewsPerTurn).toBe(3);
+    expect(result.data?.limits.documentToolRoundsWithReview).toBe(20);
   });
   it('accepts the sample input', () => { expect(configSchema.safeParse(SAMPLE_CONFIG_INPUT).success).toBe(true); });
   it('fills the limits, treatments, ceiling and sizes with their defaults', () => {
@@ -26,6 +29,7 @@ describe('configSchema', () => {
     expect(config.limits).toEqual({
       openRequestsPerAccount: 5, messagesPerConversation: 30, messagesPerMinute: 20, concurrentRuns: 2, runWallClockMinutes: 120,
       runBudgetUsd: 20, trialDays: 3, verdictGraceHours: 24, rounds: 2, dailyRuns: 6, liveDataBranches: 3,
+      renderReviewsPerTurn: 3, documentToolRoundsWithReview: 20,
     });
     expect(config.boundaries.treatments).toEqual({ C1: 'allowed', C2: 'allowed', C3: 'allowed', C4: 'allowed', C5: 'review', C6: 'forbidden', C7: 'forbidden' });
     expect(config.boundaries.automaticCeiling).toEqual({ builder: 'C3', maintainer: 'C4' });

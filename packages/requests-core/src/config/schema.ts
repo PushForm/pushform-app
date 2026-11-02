@@ -101,6 +101,10 @@ export const limitsConfigSchema = z.strictObject({
   rounds: z.int().min(0).default(2),
   dailyRuns: z.int().positive().default(6),
   liveDataBranches: z.int().positive().default(3),
+  /** Render reviews (`model_render` calls) one requester message may make. */
+  renderReviewsPerTurn: z.int().min(0).default(3),
+  /** Model rounds of a document turn that offers render review; other document turns keep their fixed 12. */
+  documentToolRoundsWithReview: z.int().positive().default(20),
 });
 
 export const configSchema = z.strictObject({

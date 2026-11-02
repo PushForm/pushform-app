@@ -923,7 +923,7 @@ describe('document tools', () => {
     const line = logged.find(l => l.startsWith(`turn ${CONVERSATION_ID}:`))!;
     expect(line).toMatch(/cacheRead=\d+ cacheWrite=\d+ setupMs=\d+ setup=auth:\d+,/);
     expect(line).toContain('toolChars=14');
-    expect(line).toMatch(/rounds=\[\d+\/\d+\/\d+ms,in100,out20,cr0,cw0,req_fake\]/);
+    expect(line).toMatch(/rounds=\[\d+\/\d+\/\d+ms,in100,out20,cr0,cw0\]/);
   });
 
   it('rejects results when nothing is waiting or for calls that were not made', async () => {
@@ -1032,5 +1032,129 @@ describe('prompt-cache warm-up', () => {
     const results = await warmChatPrompts({ anthropic: client as never, config, log: m => logs.push(m) });
     expect(results.map(r => r.usage === null)).toEqual([false, false, true]);
     expect(logs.some(l => l.includes('warm layout+guidance: failed: overloaded'))).toBe(true);
+  });
+});
+
+describe('render review', () => {
+  const MODEL = { type: 'model', apiVersion: 1, edit: 1 };
+  const anthropicOf = (h: Harness) => h.deps.anthropic as ReturnType<typeof fakeAnthropic>;
+  const render = (id: string, input: unknown = {}) => ({ id, name: 'model_render', input });
+  const picture = (tag: string) => ({ mime: 'image/jpeg' as const, data: `/9j/${tag}${'Q'.repeat(40)}` });
+  const json = (value: unknown) => JSON.stringify(value);
+  /** Requests of one conversation in turn, each against the transcript the earlier ones stored, as the database keeps it. */
+  function conversation(limits: Partial<typeof config.limits> = {}) {
+    const stored: ConversationMessage[] = [];
+    const conf = loadConfig({ ...SAMPLE_CONFIG_INPUT, limits: { ...SAMPLE_CONFIG_INPUT.limits, ...limits } });
+    const step = async (turns: ScriptedTurn[], route: 'messages' | 'tool-results', body: unknown) => {
+      const h = harness({ deps: { config: conf }, turns, service: { fr_conversation_get: () => conversationRow({ kind: 'help', path: 'help', messages: [...stored], message_count: stored.filter(m => m.role === 'user').length }) } });
+      const response = await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/${route}`, body);
+      const events = parseSse(await response.text());
+      const appended = (h.service.named('fr_conversation_append')[0]?.params['p_messages'] ?? []) as ConversationMessage[];
+      stored.push(...appended);
+      return { h, events, appended, calls: anthropicOf(h).calls };
+    };
+    const suspendedTurn = () => (stored.at(-1) as Extract<ConversationMessage, { role: 'assistant' }>).turn!;
+    return { stored, step, suspendedTurn };
+  }
+
+  it('offers model_render with the review rule only to a model tab that can edit', async () => {
+    const c = conversation();
+    const { calls } = await c.step([{ text: ['Done.'] }], 'messages', { text: 'Build a cabinet', document: MODEL });
+    expect((calls[0]!.tools ?? []).map(t => (t as { name: string }).name)).toContain('model_render');
+    const system = (calls[0]!.system as { text: string }[])[0]!.text;
+    expect(system).toContain('Render review: after building something or substantially changing geometry, call model_render');
+    expect(system).toContain('at most 3 reviews per message');
+    expect(system).not.toContain('You have no picture of the model');
+    const layout = conversation();
+    const other = await layout.step([{ text: ['Done.'] }], 'messages', { text: 'Add a title', document: { type: 'layout', apiVersion: 1 } });
+    expect((other.calls[0]!.tools ?? []).map(t => (t as { name: string }).name)).not.toContain('model_render');
+  });
+
+  it('gives a turn that offers review its own round limit and keeps 12 rounds for other document turns', async () => {
+    const search = (n: number) => Array.from({ length: n }, (_, i) => ({ toolUses: [{ id: `s${i}`, name: 'search_docs', input: { query: 'shelf' } }] }));
+    const review = conversation({ documentToolRoundsWithReview: 3 });
+    const reviewed = await review.step(search(4), 'messages', { text: 'Build a cabinet', document: MODEL });
+    expect(reviewed.calls).toHaveLength(4);
+    expect(reviewed.appended.at(-1)).toMatchObject({ role: 'assistant', text: expect.stringContaining('I stopped looking things up') });
+    const layout = conversation({ documentToolRoundsWithReview: 3 });
+    const plain = await layout.step(search(13), 'messages', { text: 'Add a title', document: { type: 'layout', apiVersion: 1 } });
+    expect(plain.calls).toHaveLength(13);
+    expect(plain.appended.at(-1)).toMatchObject({ role: 'assistant', text: expect.stringContaining('I stopped looking things up') });
+    // The default for a review turn is 20 rounds.
+    expect(config.limits.documentToolRoundsWithReview).toBe(20);
+  });
+
+  it('sends the pictures to the model as image blocks after the text, and stores only a placeholder naming the views', async () => {
+    const c = conversation();
+    const first = await c.step([{ text: ['Building it.'], toolUses: [render('r1')] }], 'messages', { text: 'Build a cabinet', document: MODEL });
+    expect(first.events.find(e => e.event === 'tool_request')!.data).toEqual({ calls: [{ ...render('r1'), review: { index: 1, limit: 3 } }] });
+    expect(c.suspendedTurn().reviews).toBe(1);
+    const [a, b] = [picture('A'), picture('B')];
+    const resumed = await c.step([{ text: ['The cabinet matches the request.'] }], 'tool-results',
+      { results: [{ toolUseId: 'r1', content: '{"ok":true,"revision":2}', isError: false, images: [a, b] }] });
+    expect(resumed.calls[0]!.messages.at(-1)).toEqual({ role: 'user', content: [{ type: 'tool_result', tool_use_id: 'r1', content: [
+      { type: 'text', text: '{"ok":true,"revision":2}' },
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: a.data } },
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b.data } },
+    ] }] });
+    expect(resumed.appended[0]).toEqual({ role: 'tool', name: 'model_render', toolUseId: 'r1', input: {}, at: '2026-10-23T10:30:00.000Z',
+      output: '{"ok":true,"revision":2}\n(Render pictures not kept: iso; front.)', views: ['iso', 'front'] });
+    // The turn ended: nothing stored, now or in the transcript the panel reads, holds the pictures.
+    expect(json(c.stored)).not.toContain(a.data);
+    expect(json(c.stored)).not.toContain(b.data);
+    const view = harness({ service: { fr_conversation_get: conversationRow({ messages: c.stored, message_count: 1 }) } });
+    const got = await (await call(view.handler, 'GET', `/conversations/${CONVERSATION_ID}`)).json() as { conversation: { messages: Record<string, unknown>[] } };
+    expect(got.conversation.messages.find(m => m['role'] === 'tool')).toMatchObject({ views: ['iso', 'front'] });
+    // A later turn sees the placeholder, never the pictures again.
+    const later = await c.step([{ text: ['Sure.'] }], 'messages', { text: 'Thanks', document: MODEL });
+    expect(json(later.calls[0]!.messages)).not.toContain(a.data);
+    expect(json(later.calls[0]!.messages)).toContain('Render pictures not kept: iso; front.');
+  });
+
+  it('allows 3 reviews per requester message across resumes, keeps each picture once while the turn runs, and answers the 4th itself', async () => {
+    const c = conversation();
+    const [a, b, d] = [picture('A'), picture('B'), picture('D')];
+    await c.step([{ toolUses: [render('r1')] }], 'messages', { text: 'Build a cabinet', document: MODEL });
+    const second = await c.step([{ text: ['The shelf is too low.'], toolUses: [render('r2', { views: [{ direction: 'front' }] })] }], 'tool-results',
+      { results: [{ toolUseId: 'r1', content: '{"ok":true}', isError: false, images: [a] }] });
+    expect(second.events.find(e => e.event === 'tool_request')!.data).toMatchObject({ calls: [{ id: 'r2', review: { index: 2, limit: 3 } }] });
+    // While the turn is suspended the picture is kept once, outside the rounds that name it.
+    expect(c.suspendedTurn()).toMatchObject({ reviews: 2, renders: { 'r1#0': a } });
+    expect(json(c.suspendedTurn().appended)).not.toContain(a.data);
+    const third = await c.step([{ toolUses: [render('r3')] }], 'tool-results', { results: [{ toolUseId: 'r2', content: '{"ok":true}', isError: false, images: [b] }] });
+    // The resumed rounds carry the earlier picture again, exactly as the agent saw it.
+    expect(json(third.calls[0]!.messages)).toContain(a.data);
+    expect(third.events.find(e => e.event === 'tool_request')!.data).toMatchObject({ calls: [{ id: 'r3', review: { index: 3, limit: 3 } }] });
+    expect(c.suspendedTurn()).toMatchObject({ reviews: 3, renders: { 'r2#0': b } });
+    expect(Object.keys(c.suspendedTurn().renders!)).toEqual(['r2#0']);
+    expect(json(c.stored).split(a.data)).toHaveLength(2);
+    const last = await c.step([{ toolUses: [render('r4')] }, { text: ['Fixed the shelf; I could not check the back.'] }], 'tool-results',
+      { results: [{ toolUseId: 'r3', content: '{"ok":true}', isError: false, images: [d] }] });
+    // The 4th render never reaches the browser: the agent gets the limit error and finishes the turn.
+    expect(last.events.map(e => e.event)).not.toContain('tool_request');
+    expect(last.calls).toHaveLength(2);
+    expect(json(last.calls[1]!.messages.at(-1))).toContain('render limit reached; finish and say what you could not verify');
+    expect(last.calls[1]!.messages.at(-1)).toMatchObject({ content: [{ type: 'tool_result', tool_use_id: 'r4', is_error: true }] });
+    expect(last.appended.map(m => m.role)).toEqual(['tool', 'tool', 'assistant']);
+    expect(last.appended[1]).toMatchObject({ name: 'model_render', toolUseId: 'r4', output: expect.stringContaining('render limit reached') });
+    expect(last.appended.at(-1)).not.toHaveProperty('turn');
+    expect(json(last.appended)).not.toContain(d.data);
+    // The next requester message starts a new count.
+    const next = await c.step([{ toolUses: [render('r5')] }], 'messages', { text: 'Now add a door', document: MODEL });
+    expect(next.events.find(e => e.event === 'tool_request')!.data).toMatchObject({ calls: [{ id: 'r5', review: { index: 1, limit: 3 } }] });
+  });
+
+  it('refuses pictures on any result but a render, and pictures past the limits', async () => {
+    const c = conversation();
+    await c.step([{ toolUses: [render('r1'), { id: 'g1', name: 'model_get_document', input: {} }] }], 'messages', { text: 'Build a cabinet', document: MODEL });
+    const tryResults = async (results: unknown[]) => {
+      const h = harness({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help', messages: c.stored, message_count: 1 }) } });
+      return call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/tool-results`, { results });
+    };
+    await status(await tryResults([{ toolUseId: 'g1', content: '{}', images: [picture('A')] }]), 400, 'invalid');
+    await status(await tryResults([{ toolUseId: 'r1', content: '{}', images: [picture('A'), picture('B'), picture('C'), picture('D')] }]), 400, 'invalid');
+    await status(await tryResults([{ toolUseId: 'r1', content: '{}', images: [{ mime: 'image/gif', data: 'R0lG' }] }]), 400, 'invalid');
+    await status(await tryResults([{ toolUseId: 'r1', content: '{}', images: [{ mime: 'image/jpeg', data: 'not base64!' }] }]), 400, 'invalid');
+    await status(await tryResults([{ toolUseId: 'r1', content: '{}', images: [{ mime: 'image/jpeg', data: 'A'.repeat(1_572_868) }] }]), 400, 'invalid');
   });
 });

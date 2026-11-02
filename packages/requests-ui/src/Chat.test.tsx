@@ -835,3 +835,108 @@ describe('composer', () => {
     expect(screen.getByRole('button', { name: 'Dictate' }).getAttribute('aria-pressed')).toBe('false');
   });
 });
+
+describe('render review and progress', () => {
+  const MODEL = { type: 'model', apiVersion: 1, edit: 1 } as const;
+  const awaiting: FakeTurn = { event: 'done', data: { messageCount: 1, limitReached: false, ended: false, awaitingTools: true } };
+  const apply = { id: 'a1', name: 'model_apply_operations', input: { label: 'Cabinet' } };
+  const query = { id: 'q1', name: 'model_query', input: {} };
+  const renderCall = { id: 'r1', name: 'model_render', input: {}, review: { index: 2, limit: 3 } };
+  const progress = (call: { name: string }) => (call.name === 'model_apply_operations' ? 'Applying the change…' : undefined);
+  const placeholder = (): string => document.querySelector('.is-streaming .pf-fr-working')?.textContent ?? '';
+  /** A tool run that waits until the test lets it finish, or until the turn is stopped. */
+  function held() {
+    const pending: { call: { id: string; name: string }; finish: (outcome: Record<string, unknown>) => void; signal: AbortSignal | undefined }[] = [];
+    const run = vi.fn((call: { id: string; name: string }, signal?: AbortSignal) => new Promise<{ content: string; isError: boolean }>(resolve => {
+      signal?.addEventListener('abort', () => resolve({ content: '{"ok":false,"error":{"code":"cancelled"}}', isError: true }), { once: true });
+      pending.push({ call, finish: outcome => resolve(outcome as { content: string; isError: boolean }), signal });
+    }));
+    return { run, pending };
+  }
+  const send = async (message: string): Promise<void> => {
+    fireEvent.change(await screen.findByLabelText('Your message'), { target: { value: message } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+  };
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('reads "Checking the result (review N of 3)…" from the backend count, keeps the last step between steps, and shows a collapsed review line', async () => {
+    const { run, pending } = held();
+    const image = { mime: 'image/jpeg' as const, data: '/9j/AQID' };
+    const { backend } = setup({ turns: [[text('Building it.'), { event: 'tool_request', data: { calls: [apply, query] } }, awaiting],
+      [{ event: 'tool_request', data: { calls: [renderCall] } }, awaiting], [text('It matches the request.'), done(1)]] },
+    { documentTools: () => ({ document: MODEL, run, progress }) });
+    await send('Build a cabinet');
+    await waitFor(() => expect(placeholder()).toBe('Applying the change…'));
+    act(() => pending[0]!.finish({ content: '{"ok":true}', isError: false, notice: 'Changed the document: Cabinet. Undo reverts it.' }));
+    // A step without its own text keeps the last step's.
+    await waitFor(() => expect(pending).toHaveLength(2));
+    expect(placeholder()).toBe('Applying the change…');
+    act(() => pending[1]!.finish({ content: '{"entities":[]}', isError: false }));
+    await waitFor(() => expect(pending).toHaveLength(3));
+    await waitFor(() => expect(placeholder()).toBe('Checking the result (review 2 of 3)…'));
+    act(() => pending[2]!.finish({ content: '{"ok":true}', isError: false, images: [image, image], views: ['iso', 'front'] }));
+    await waitFor(() => expect(log().textContent).toContain('It matches the request.'));
+    expect(backend.calls.filter(c => c.path.endsWith('/tool-results')).at(-1)?.body).toEqual({ results: [{ toolUseId: 'r1', content: '{"ok":true}', isError: false, images: [image, image] }] });
+    // The review line: compact, collapsed, with small previews; it opens to the full pictures.
+    const toggle = screen.getByRole('button', { name: 'Checked the result' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.querySelectorAll('img')).toHaveLength(2);
+    expect(screen.queryByRole('img', { name: 'Render, iso' })).toBeNull();
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByRole('img', { name: 'Render, iso' }).getAttribute('src')).toBe('data:image/jpeg;base64,/9j/AQID');
+    expect(screen.getByRole('img', { name: 'Render, front' })).toBeTruthy();
+    fireEvent.click(toggle);
+    expect(screen.queryByRole('img', { name: 'Render, iso' })).toBeNull();
+    // It is not a change line, which stays the one for the batch.
+    const lines = [...log().querySelectorAll('.pf-fr-message.is-system')].map(el => el.textContent);
+    expect(lines).toEqual(['Changed the document: Cabinet. Undo reverts it.', 'Checked the result']);
+  });
+
+  it('adds the running time to the placeholder after 10 seconds, each second, and tells screen readers only now and then', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { run } = held();
+    setup({ turns: [[{ event: 'tool_request', data: { calls: [apply] } }, awaiting]] }, { documentTools: () => ({ document: MODEL, run, progress }) });
+    await send('Build a cabinet');
+    await waitFor(() => expect(placeholder()).toBe('Applying the change…'));
+    act(() => { vi.advanceTimersByTime(8_000); });
+    expect(placeholder()).toBe('Applying the change…');
+    act(() => { vi.advanceTimersByTime(16_000); });
+    expect(placeholder()).toMatch(/^Applying the change… 2[45] s$/);
+    const shown = Number(/(\d+) s$/.exec(placeholder())![1]);
+    act(() => { vi.advanceTimersByTime(1_000); });
+    expect(placeholder()).toBe(`Applying the change… ${shown + 1} s`);
+    expect(document.querySelector('.pf-fr-elapsed')!.getAttribute('aria-hidden')).toBe('true');
+    expect(document.querySelector('.pf-fr-sr')).toBeNull();
+    act(() => { vi.advanceTimersByTime(10_000); });
+    expect(document.querySelector('.pf-fr-sr')?.textContent).toBe('Still working, 30 seconds.');
+  });
+
+  it('stops the turn with Stop: the running batch is cancelled, nothing more is sent, and the reply so far stays', async () => {
+    const { run, pending } = held();
+    const { backend } = setup({ turns: [[text('Building it.'), { event: 'tool_request', data: { calls: [apply] } }, awaiting]] },
+      { documentTools: () => ({ document: MODEL, run, progress }) });
+    await send('Build a cabinet');
+    await waitFor(() => expect(placeholder()).toBe('Applying the change…'));
+    expect(screen.queryByRole('alert')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    expect(pending[0]!.signal?.aborted).toBe(true);
+    await settled();
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+    expect(backend.calls.some(c => c.path.endsWith('/tool-results'))).toBe(false);
+    expect(log().textContent).toContain('Building it.');
+    expect(log().textContent).toContain('Build a cabinet');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect((screen.getByLabelText('Your message') as HTMLTextAreaElement).disabled).toBe(false);
+  });
+
+  it('shows a reloaded review as a line without pictures, naming its views', async () => {
+    const conversation = { id: 'conv-r', kind: 'help', path: 'help' as const, status: 'open', title: null, brief: null, messageCount: 1, requestId: null, updatedAt: '2026-11-02T10:00:00Z',
+      messages: [{ role: 'user', text: 'Build a cabinet', at: 't1' }, { role: 'tool', text: '', at: 't2', views: ['iso', 'front'] } as { role: string; text: string; at: string }, { role: 'assistant', text: 'Built it.', at: 't3' }] };
+    rememberDraft(account.id, { conversationId: 'conv-r', path: 'help', title: null });
+    setup({ openConversations: [conversation] });
+    const toggle = await screen.findByRole('button', { name: 'Checked the result' });
+    fireEvent.click(toggle);
+    expect(log().textContent).toContain('Pictures are not kept after the reply. Views: iso; front.');
+  });
+});

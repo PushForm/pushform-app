@@ -4,16 +4,18 @@ import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 
 /**
- * The slice of the SDK client `runTurn` and `warmPrompt` use, so tests inject scripted events and never reach the
+ * The slice of the SDK client `runTurn` uses, so tests inject scripted events and never reach the
  * network. Turns read the raw event stream: `runTurn` builds the message itself (see `readMessage`), because the SDK's
  * own message builder throws on a tool input that streamed as invalid JSON and drops the rest of the message.
  */
 export interface AnthropicLike {
   messages: {
     create(params: Anthropic.MessageCreateParamsStreaming, options?: { headers?: Record<string, string> }): PromiseLike<AsyncIterable<Anthropic.RawMessageStreamEvent>>;
-    /** Non-streaming requests; only the prompt-cache warm-up sends them. */
-    create(params: Anthropic.MessageCreateParamsNonStreaming, options?: { headers?: Record<string, string> }): PromiseLike<Anthropic.Message>;
   };
+}
+/** The slice of the SDK client `warmPrompt` uses: one non-streaming request. */
+export interface WarmClient {
+  messages: { create(params: Anthropic.MessageCreateParamsNonStreaming, options?: { headers?: Record<string, string> }): PromiseLike<Anthropic.Message> };
 }
 
 /**
@@ -26,7 +28,8 @@ export function createAnthropic(apiKey: string, log?: (message: string) => void)
   return new Anthropic({ apiKey, maxRetries: 2, timeout: 60_000, logLevel: 'info', logger: { error: line, warn: line, info: line, debug: () => {} } });
 }
 
-export interface ToolResult { content: string; isError?: boolean }
+/** `images` (base64) follow the text in the tool result the model sees; only browser answers carry them. */
+export interface ToolResult { content: string; isError?: boolean; images?: readonly { mime: string; data: string }[] | undefined }
 export type ToolHandler = (input: unknown) => Promise<ToolResult | string> | ToolResult | string;
 /** Keywords strict tool schemas reject (numerical, string and array constraints); zod keeps checking them in `withSchema`. */
 const UNSUPPORTED_STRICT_KEYWORDS = new Set(['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'multipleOf', 'minLength', 'maxLength', 'pattern', 'minItems', 'maxItems', 'uniqueItems']);
@@ -123,6 +126,11 @@ export interface RunTurnOptions {
   /** Tools the browser runs: a round that calls any of them suspends the turn instead of running a handler. */
   clientTools?: ReadonlySet<string> | undefined;
   /**
+   * Answer a browser tool call here instead of sending it to the browser (a call past a limit, say): a result is
+   * treated as a server tool's; null sends the call on as usual.
+   */
+  interceptClientCall?: ((call: ClientToolCall) => ToolResult | null) | undefined;
+  /**
    * Resume a suspended turn: `appended` is everything the turn appended so far, unchanged (thinking blocks included),
    * ending with the user message that answers the suspended round; `rounds` counts the rounds already used.
    */
@@ -180,7 +188,7 @@ export interface WarmUsage { cacheWrite: number; cacheRead: number; input: numbe
  * output is generated or billed. The breakpoint stays on the system prompt only (no rolling breakpoint), so nothing
  * is cached for the placeholder message. On an entry that is already warm this is a cheap read that restarts its hour.
  */
-export async function warmPrompt(client: AnthropicLike, prompt: TurnPrompt): Promise<WarmUsage> {
+export async function warmPrompt(client: WarmClient, prompt: TurnPrompt): Promise<WarmUsage> {
   const { params, headers } = turnRequest({ ...prompt, messages: [{ role: 'user', content: 'warmup' }], maxTokens: 0 });
   const { cache_control: _rolling, stream: _stream, ...rest } = params as Anthropic.MessageStreamParams & { stream?: unknown };
   const message = await client.messages.create({ ...rest, stream: false } as Anthropic.MessageCreateParamsNonStreaming, headers ? { headers } : undefined);
@@ -242,7 +250,7 @@ export async function runTurn(options: RunTurnOptions): Promise<RunTurnResult> {
     }
     rounds += 1;
     const results: Anthropic.ToolResultBlockParam[] = [];
-    const clientCalls = toolUses.filter((t) => options.clientTools?.has(t.name) && !invalid.has(t.id));
+    const clientCalls: Anthropic.ToolUseBlock[] = [];
     for (const use of toolUses) {
       const bad = invalid.get(use.id);
       if (bad) {
@@ -252,14 +260,19 @@ export async function runTurn(options: RunTurnOptions): Promise<RunTurnResult> {
         results.push({ type: 'tool_result', tool_use_id: use.id, content: result.content, is_error: true });
         continue;
       }
-      if (options.clientTools?.has(use.name)) continue;
-      const handler = handlers[use.name];
       let result: ToolResult;
-      try {
-        const raw = handler ? await handler(use.input) : { content: `Unknown tool "${use.name}".`, isError: true };
-        result = typeof raw === 'string' ? { content: raw } : raw;
-      } catch (error) {
-        result = { content: `Tool failed: ${error instanceof Error ? error.message : String(error)}`, isError: true };
+      if (options.clientTools?.has(use.name)) {
+        const intercepted = options.interceptClientCall?.({ id: use.id, name: use.name, input: use.input }) ?? null;
+        if (!intercepted) { clientCalls.push(use); continue; }
+        result = intercepted;
+      } else {
+        const handler = handlers[use.name];
+        try {
+          const raw = handler ? await handler(use.input) : { content: `Unknown tool "${use.name}".`, isError: true };
+          result = typeof raw === 'string' ? { content: raw } : raw;
+        } catch (error) {
+          result = { content: `Tool failed: ${error instanceof Error ? error.message : String(error)}`, isError: true };
+        }
       }
       onToolCall?.({ id: use.id, name: use.name, input: use.input, result });
       const block: Anthropic.ToolResultBlockParam = { type: 'tool_result', tool_use_id: use.id, content: result.content };
@@ -367,7 +380,12 @@ export function answerPending(pending: PendingClientTools, answers: ReadonlyMap<
   const byId = new Map(pending.results.map((r) => [r.tool_use_id, r]));
   for (const call of pending.calls) {
     const answer = answers.get(call.id) ?? { content: 'Not run: the editor did not return a result.', isError: true };
-    const block: Anthropic.ToolResultBlockParam = { type: 'tool_result', tool_use_id: call.id, content: answer.content };
+    // Pictures follow the text as image blocks, in the order the browser returned them.
+    const content: Anthropic.ToolResultBlockParam['content'] = answer.images?.length
+      ? [{ type: 'text', text: answer.content }, ...answer.images.map(image => ({ type: 'image' as const,
+        source: { type: 'base64' as const, media_type: image.mime as 'image/jpeg' | 'image/png', data: image.data } }))]
+      : answer.content;
+    const block: Anthropic.ToolResultBlockParam = { type: 'tool_result', tool_use_id: call.id, content };
     if (answer.isError) block.is_error = true;
     byId.set(call.id, block);
   }

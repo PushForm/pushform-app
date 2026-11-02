@@ -5,11 +5,12 @@ import { z } from 'zod';
 import type { Tracker, TrackerIssue } from '../adapters/tracker.ts';
 import { TrackerError } from '../adapters/tracker.ts';
 import { briefSchema, completeness, emptyBriefFor, type Brief, type DeclineReason, type Path } from '../agents/brief.ts';
-import { answerPending, runTurn, warmPrompt, type AnthropicLike, type WarmUsage, type ClientToolCall, type PendingClientTools, type ToolCallEvent, type ToolHandler, type ToolResult } from '../agents/client.ts';
+import { answerPending, runTurn, warmPrompt, type AnthropicLike, type WarmClient, type WarmUsage, type ClientToolCall, type PendingClientTools, type ToolCallEvent, type ToolHandler, type ToolResult } from '../agents/client.ts';
 import { retrieveUserHelp, USER_HELP_RULES } from '../agents/digest.ts';
 import { GUIDANCE_RULES } from '../guidance.ts';
 import { PICTURE_RULES } from '../agents/pictures.ts';
-import { DOCUMENT_RULES, MODEL_DOCUMENT_RULES, documentTools, editableDocument, type DocumentCapability } from '../agents/document.ts';
+import { DOCUMENT_RULES, MODEL_DOCUMENT_RULES, RENDER_TOOL, documentTools, editableDocument, type DocumentCapability } from '../agents/document.ts';
+import { modelRenderSchema, modelRenderViewName, modelRenderViews } from '@pushform/extension-protocol';
 import type { DigestSection } from '../agents/digest.ts';
 import { helpAgent } from '../agents/help.ts';
 import { intakeAgent } from '../agents/intake.ts';
@@ -79,7 +80,7 @@ export const PICTURE_MAX_BYTES = 5 * 1024 * 1024;
 export interface PictureData { mime: string; data: string }
 /** Bound on one document tool result the browser returns. */
 export const TOOL_RESULT_MAX_CHARS = 200_000;
-/** Model rounds a document turn may use across all its requests. */
+/** Model rounds a document turn may use across all its requests (with render review: `limits.documentToolRoundsWithReview`). */
 export const DOCUMENT_TOOL_ROUNDS = 12;
 
 /** How a turn runs: one that can edit the document plans multi-step geometry; help and intake stay short. */
@@ -126,7 +127,7 @@ function warmContext(config: Config, document: DocumentCapability | null): Agent
  * it, so calling this every half hour costs one cache write per prompt and cheap reads after that. Failures are
  * logged and skipped: a cold cache only makes the next first message slower.
  */
-export async function warmChatPrompts(deps: { anthropic: AnthropicLike; config: Config; log?: ((message: string) => void) | undefined }): Promise<{ document: string; usage: WarmUsage | null }[]> {
+export async function warmChatPrompts(deps: { anthropic: WarmClient; config: Config; log?: ((message: string) => void) | undefined }): Promise<{ document: string; usage: WarmUsage | null }[]> {
   return Promise.all(WARM_DOCUMENTS.map(async (document) => {
     const label = document ? `${document.type}${document.edit ? '+edit' : ''}${document.guidance ? '+guidance' : ''}` : 'none';
     const prompt = turnPrompt(deps.config.models, warmContext(deps.config, document), document);
@@ -140,6 +141,11 @@ export async function warmChatPrompts(deps: { anthropic: AnthropicLike; config: 
     }
   }));
 }
+/** Pictures one tool result may carry (a render's views), and the longest base64 text of each (1.5 MB). */
+export const TOOL_IMAGES_PER_RESULT = 3;
+export const TOOL_IMAGE_MAX_CHARS = 1_572_864;
+/** What the agent gets for a render past the turn's limit; the browser never sees the call. */
+export const RENDER_LIMIT_RESULT = JSON.stringify({ ok: false, error: { code: 'limit_exceeded', message: 'render limit reached; finish and say what you could not verify' } });
 const NOT_ANSWERED = 'Not run: the editor did not return a result.';
 const ABANDONED = 'Not run: the requester sent a new message before the editor answered.';
 
@@ -163,7 +169,10 @@ const messageSchema = z.object({ text: z.string().max(MESSAGE_MAX_CHARS), intent
   attachments: z.array(z.uuid()).max(PICTURES_PER_MESSAGE).optional() })
   .refine(b => b.text.trim().length > 0 || (b.attachments?.length ?? 0) > 0, { message: 'A message needs text or a picture.', path: ['text'] });
 /** The editor's answers to a suspended turn; a call left out is answered as not run. */
-const toolResultsSchema = z.object({ results: z.array(z.object({ toolUseId: z.string().min(1).max(200), content: z.string().max(TOOL_RESULT_MAX_CHARS), isError: z.boolean().default(false) })).max(20) });
+/** `images` are a render's pictures as base64, in view order; only a `model_render` answer may carry them. */
+const toolImageSchema = z.object({ mime: z.enum(['image/jpeg', 'image/png']), data: z.string().min(1).max(TOOL_IMAGE_MAX_CHARS).regex(/^[A-Za-z0-9+/]+={0,2}$/, 'base64') });
+const toolResultsSchema = z.object({ results: z.array(z.object({ toolUseId: z.string().min(1).max(200), content: z.string().max(TOOL_RESULT_MAX_CHARS), isError: z.boolean().default(false),
+  images: z.array(toolImageSchema).max(TOOL_IMAGES_PER_RESULT).optional() })).max(20) });
 const briefBodySchema = z.object({ brief: briefSchema.nullable(), title: z.string().trim().max(300).nullable().optional() });
 const addMeSchema = z.object({ requestId: z.uuid(), notes: z.string().max(4000).default('') });
 const replySchema = z.object({ text: z.string().trim().min(1).max(4000) });
@@ -221,6 +230,62 @@ export function closeSuspended(messages: readonly ConversationMessage[], at: str
   const last = messages.at(-1);
   if (last?.role !== 'assistant' || !last.turn) return [];
   return last.turn.pending.calls.map(call => ({ role: 'tool', name: call.name, toolUseId: call.id, input: call.input, output: ABANDONED, at }));
+}
+/** The view names of a render call, as its placeholder and review line show them. */
+export function renderViewNames(input: unknown): string[] {
+  const parsed = modelRenderSchema.safeParse(input ?? {});
+  return modelRenderViews(parsed.success ? parsed.data : null).map(modelRenderViewName);
+}
+/** What the stored transcript keeps of a render's pictures: a short note naming the views. */
+export function renderPlaceholder(views: readonly string[]): string {
+  return `(Render pictures not kept: ${views.join('; ')}.)`;
+}
+
+/* ---------- render pictures in a suspended turn ---------- */
+
+/** An image block of a suspended turn whose bytes are kept once, in a `renders` record of the turn's messages. */
+const RENDER_REF = 'pf-render:';
+type ImageBlock = Anthropic.ImageBlockParam & { source: Anthropic.Base64ImageSource };
+/** Each render image block of `appended` with its key `<tool use id>#<index>`, in order. */
+function renderBlocks(appended: readonly Anthropic.MessageParam[], visit: (block: ImageBlock, key: string) => Anthropic.ContentBlockParam): Anthropic.MessageParam[] {
+  return appended.map(m => {
+    if (m.role !== 'user' || typeof m.content === 'string') return m;
+    if (!m.content.some(b => b.type === 'tool_result' && Array.isArray(b.content) && b.content.some(c => c.type === 'image'))) return m;
+    return { ...m, content: m.content.map(block => {
+      if (block.type !== 'tool_result' || !Array.isArray(block.content)) return block;
+      let index = 0;
+      return { ...block, content: block.content.map(item => (item.type === 'image' && item.source.type === 'base64'
+        ? visit(item as ImageBlock, `${block.tool_use_id}#${index++}`) : item)) as Anthropic.ToolResultBlockParam['content'] & unknown[] } as Anthropic.ToolResultBlockParam;
+    }) } as Anthropic.MessageParam;
+  });
+}
+/**
+ * A suspended turn's rounds as stored: render pictures become references, and the pictures no earlier message of the
+ * turn keeps are returned to keep with this one. Each picture is stored once while the turn runs.
+ */
+export function keepRenders(appended: readonly Anthropic.MessageParam[], known: ReadonlySet<string>): { appended: Anthropic.MessageParam[]; renders: Record<string, PictureData> } {
+  const renders: Record<string, PictureData> = {};
+  const stored = renderBlocks(appended, (block, key) => {
+    if (block.source.data.startsWith(RENDER_REF)) return block;
+    if (!known.has(key)) renders[key] = { mime: block.source.media_type, data: block.source.data };
+    return { ...block, source: { ...block.source, data: `${RENDER_REF}${key}` } };
+  });
+  return { appended: stored, renders };
+}
+/** The render pictures the turn's messages keep, gathered for a resume. */
+export function turnRenders(messages: readonly ConversationMessage[]): Map<string, PictureData> {
+  const out = new Map<string, PictureData>();
+  for (const m of messages) if (m.role === 'assistant' && m.turn?.renders) for (const [key, image] of Object.entries(m.turn.renders)) out.set(key, image);
+  return out;
+}
+/** A stored turn's rounds with their render pictures back in place; a picture that is gone becomes a note. */
+export function restoreRenders(appended: readonly Anthropic.MessageParam[], renders: ReadonlyMap<string, PictureData>): Anthropic.MessageParam[] {
+  return renderBlocks(appended, block => {
+    if (!block.source.data.startsWith(RENDER_REF)) return block;
+    const image = renders.get(block.source.data.slice(RENDER_REF.length));
+    return image ? { ...block, source: { ...block.source, media_type: image.mime as Anthropic.Base64ImageSource['media_type'], data: image.data } }
+      : { type: 'text', text: '(A render picture is no longer available.)' };
+  });
 }
 export function filedRequestEvent(r: PipelineRequest): FiledRequestEvent {
   return { id: r.id, issueKey: r.issueKey, issueUrl: r.issueUrl, title: r.title, requesterState: r.requesterState, eligibility: r.eligibility };
@@ -366,7 +431,8 @@ export type SseEvent =
   /** The agent added the requester to an existing request; the conversation is complete. */
   | { event: 'added'; data: { request: FiledRequestEvent } }
   /** The turn is suspended until the editor answers these document tool calls through `POST /conversations/:id/tool-results`. */
-  | { event: 'tool_request'; data: { calls: ClientToolCall[] } }
+  /** A render call carries `review`: its number among the requester message's allowed reviews, as the backend counts them. */
+  | { event: 'tool_request'; data: { calls: (ClientToolCall & { review?: { index: number; limit: number } })[] } }
   | { event: 'error'; data: { code: string; message: string } }
   /** `ended`: the conversation is closed and the next message needs a new one; `reason` says why (filed, added, start_over, or abusive content). */
   | { event: 'done'; data: { messageCount: number; limitReached: boolean; ended: boolean; reason?: TurnEndReason; awaitingTools?: boolean } };
@@ -417,7 +483,7 @@ interface TurnRun {
   setup: {
     model: string; system: string; tools: Anthropic.Tool[]; context: string; historyLength: number;
     messages: Anthropic.MessageParam[]; document: DocumentCapability | null;
-    resume: { appended: Anthropic.MessageParam[]; rounds: number } | undefined;
+    resume: { appended: Anthropic.MessageParam[]; rounds: number; reviews: number; renders: ReadonlySet<string> } | undefined;
   };
 }
 const agentFor = agentForPath;
@@ -747,6 +813,11 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     const anthropic = deps.anthropic!;
     const editing = setup.document !== null;
     const clientTools = new Set(documentTools(setup.document).map(tool => tool.name));
+    // Render reviews are counted per requester message, across the turn's requests: the count rides in the suspended turn.
+    const reviewing = clientTools.has(RENDER_TOOL);
+    const reviewLimit = config.limits.renderReviewsPerTurn;
+    let reviews = setup.resume?.reviews ?? 0;
+    const reviewIndex = new Map<string, number>();
     return sseResponse(deps.log, async (emit) => {
       const appended: ConversationMessage[] = [...t.leading];
       const briefEvent = () => emit({ event: 'brief', data: { brief: store.getBrief(), title: store.getTitle(), path: store.getPath(), estimatedClass: store.getBrief()?.estimatedClass ?? null } });
@@ -768,8 +839,16 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
         result = await runTurn({
           client: anthropic, model: setup.model, system: setup.system, tools: setup.tools, handlers: t.handlers, messages: setup.messages,
           clientTools, resume: setup.resume,
-          // A turn that can edit the document plans multi-step geometry; help and intake stay short.
-          ...turnSettings(editing),
+          // A render past the limit is answered here, so the agent finishes instead of the browser drawing again.
+          interceptClientCall: (toolCall) => {
+            if (toolCall.name !== RENDER_TOOL) return null;
+            if (reviews >= reviewLimit) return { content: RENDER_LIMIT_RESULT, isError: true };
+            reviews += 1; reviewIndex.set(toolCall.id, reviews);
+            return null;
+          },
+          // A turn that can edit the document plans multi-step geometry; help and intake stay short. Reviewing a
+          // build and fixing what it shows takes more rounds.
+          ...turnSettings(editing), ...(editing && reviewing ? { maxToolRounds: config.limits.documentToolRoundsWithReview } : {}),
           // Progress notes stay off until the hosted model accepts the progress-update display; requesting it fails editing turns.
           progressUpdates: false,
           onText: (delta) => {
@@ -793,9 +872,12 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       const reason = store.ended();
       // A turn that also ended the conversation (filed, start over) does not wait for the editor: the calls are dropped.
       const suspended = result.stop === 'client_tools' && !reason ? result.pending : null;
-      const turn: SuspendedTurn | null = suspended && setup.document ? {
+      // Render pictures are kept once while the turn runs: this suspension stores only those no earlier one of the turn keeps.
+      const kept = suspended ? keepRenders(result.appended, setup.resume?.renders ?? new Set()) : null;
+      const turn: SuspendedTurn | null = suspended && kept && setup.document ? {
         model: setup.model, system: setup.system, tools: setup.tools, context: setup.context, historyLength: setup.historyLength,
-        appended: result.appended, pending: suspended, rounds: result.rounds, document: setup.document,
+        appended: kept.appended, pending: suspended, rounds: result.rounds, document: setup.document,
+        ...(reviews ? { reviews } : {}), ...(Object.keys(kept.renders).length ? { renders: kept.renders } : {}),
       } : null;
       const cue = turn?.pending.calls.find(call => call.name === 'ui_highlight')?.input as { instruction?: unknown } | undefined;
       const replyText = result.text.trim() || typeof cue?.instruction !== 'string' ? result.text : cue.instruction.slice(0, 400);
@@ -818,7 +900,10 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       const phases = Object.entries(t.timing.phases).map(([name, ms]) => `${name}:${ms}`).join(',') || 'none';
       const roundLog = result.roundStats.map(r => `${r.startMs}/${r.firstMs ?? '-'}/${r.ms}ms,in${r.input},out${r.output},cr${r.cacheRead},cw${r.cacheWrite}`).join(' ');
       deps.log?.(`turn ${id}: model=${setup.model} stop=${result.stop} rounds=${result.rounds} firstTextMs=${firstTextMs ?? 'none'} generationMs=${generationMs} in=${result.usage.inputTokens} out=${result.usage.outputTokens} cacheRead=${result.usage.cacheReadTokens} cacheWrite=${result.usage.cacheWriteTokens} setupMs=${setupMs} setup=${phases}${t.timing.toolChars !== undefined ? ` toolChars=${t.timing.toolChars}` : ''} saveMs=${saveMs} rounds=[${roundLog}]${reason ? ` ended=${reason}` : ''}`);
-      if (turn) emit({ event: 'tool_request', data: { calls: turn.pending.calls } });
+      if (turn) emit({ event: 'tool_request', data: { calls: turn.pending.calls.map(c => {
+        const index = reviewIndex.get(c.id);
+        return index ? { ...c, review: { index, limit: reviewLimit } } : c;
+      }) } });
       emit({ event: 'done', data: { messageCount: saved.messageCount, limitReached: saved.messageCount >= config.limits.messagesPerConversation, ended: reason !== null,
         ...(reason ? { reason } : {}), ...(turn ? { awaitingTools: true } : {}) } });
     });
@@ -903,7 +988,8 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     const answers = new Map<string, ToolResult>();
     for (const r of body.results) {
       if (!expected.has(r.toolUseId) || answers.has(r.toolUseId)) throw new HttpError('invalid', `Unexpected tool result for ${r.toolUseId}.`);
-      answers.set(r.toolUseId, { content: r.content, isError: r.isError });
+      if (r.images?.length && turn.pending.calls.find(c => c.id === r.toolUseId)?.name !== RENDER_TOOL) throw new HttpError('invalid', `Only a ${RENDER_TOOL} result carries pictures.`);
+      answers.set(r.toolUseId, { content: r.content, isError: r.isError, ...(r.images?.length ? { images: r.images } : {}) });
     }
     timing.toolChars = body.results.reduce((sum, r) => sum + r.content.length, 0);
     if (!deps.anthropic) throw new HttpError('unavailable', 'The assistant is not configured (ANTHROPIC_API_KEY missing).');
@@ -929,15 +1015,24 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     });
     const history = conversation.messages.slice(0, turn.historyLength);
     const images = await pictureData([...history, opening]);
+    // The render pictures of this turn's earlier suspensions, put back into the rounds the agent saw.
+    const renders = turnRenders(conversation.messages.slice(turn.historyLength));
     return streamTurn({
       timing,
       user, conversation, store, handlers: agentFor(ctx.path).handlers(ctx, store), pathChanged: false,
-      leading: pending.calls.map(call => ({ role: 'tool' as const, name: call.name, toolUseId: call.id, input: call.input,
-        output: (answers.get(call.id)?.content ?? NOT_ANSWERED).slice(0, 8000), at: base.now })),
+      // The transcript never keeps a render's pictures: its record names the views in a placeholder instead.
+      leading: pending.calls.map(call => {
+        const answer = answers.get(call.id);
+        const output = (answer?.content ?? NOT_ANSWERED).slice(0, 8000);
+        if (!answer?.images?.length) return { role: 'tool' as const, name: call.name, toolUseId: call.id, input: call.input, output, at: base.now };
+        const views = renderViewNames(call.input).slice(0, answer.images.length);
+        return { role: 'tool' as const, name: call.name, toolUseId: call.id, input: call.input, output: `${output}\n${renderPlaceholder(views)}`, at: base.now, views };
+      }),
       setup: {
         model: turn.model, system: turn.system, tools: turn.tools as Anthropic.Tool[], context: turn.context, historyLength: turn.historyLength,
         messages: historyOf(history, turn.context, opening.text, opening.attachments ?? [], images), document: turn.document,
-        resume: { appended: [...(turn.appended as Anthropic.MessageParam[]), answerPending(pending, answers)], rounds: turn.rounds },
+        resume: { appended: [...restoreRenders(turn.appended as Anthropic.MessageParam[], renders), answerPending(pending, answers)], rounds: turn.rounds,
+          reviews: turn.reviews ?? 0, renders: new Set(renders.keys()) },
       },
     });
   };

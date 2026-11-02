@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type JSX } from 'react';
-import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_REPORT, formatBytes, RequestsError, SCREENSHOT_TYPES, type Attachment, type AttachmentFile, type Conversation, type ConversationPath, type ConversationSummary, type DocumentDescriptor, type IntentPath, type Me, type Message, type RequestsClient, type ScreenInfo, type ToolCall, type ToolCallResult } from './client';
+import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_REPORT, formatBytes, RequestsError, SCREENSHOT_TYPES, type Attachment, type AttachmentFile, type Conversation, type ConversationPath, type ConversationSummary, type DocumentDescriptor, type IntentPath, type Me, type Message, type RequestsClient, type ScreenInfo, type ToolCall, type ToolCallResult, type ToolImage } from './client';
 import { draftScope, forgetDraft, HOME_SCOPE, readDrafts, rememberDraft } from './drafts';
 import { DockedPanel } from './DockedPanel';
 import { Popover } from './Popover';
@@ -55,7 +55,11 @@ export interface DocumentToolSession {
   /** What the chat shows while a call runs, for a call that takes noticeable time; undefined keeps the usual placeholder. */
   progress?(call: ToolCall): string | undefined;
 }
-export interface DocumentToolOutcome { readonly content: string; readonly isError: boolean; readonly notice?: string | undefined }
+/** `images` are a render's pictures for the agent, and `views` name them for the review line. */
+export interface DocumentToolOutcome {
+  readonly content: string; readonly isError: boolean; readonly notice?: string | undefined;
+  readonly images?: readonly ToolImage[] | undefined; readonly views?: readonly string[] | undefined;
+}
 
 type View =
   | { readonly kind: 'unavailable'; readonly message: string }
@@ -63,7 +67,12 @@ type View =
 
 /** A transcript line: a persisted message, or a local system line such as "Filed as CUS-12". */
 /** `local`: the pictures of a message sent from this panel, shown from their files until the conversation reloads. */
-type Entry = (Message & { readonly local?: readonly AttachmentFile[] | undefined }) | { readonly role: 'system'; readonly text: string; readonly at: string };
+/**
+ * `review`: a render review's line, with the pictures the agent saw while they are still in this panel (none after a
+ * reload: the backend does not keep them). Review lines are transcript-only, never change lines.
+ */
+type Entry = (Message & { readonly local?: readonly AttachmentFile[] | undefined }) | { readonly role: 'system'; readonly text: string; readonly at: string }
+  | { readonly role: 'review'; readonly views: readonly string[]; readonly images: readonly ToolImage[]; readonly at: string };
 
 interface ChatState {
   /**
@@ -92,7 +101,15 @@ export const SLASH_COMMANDS: readonly { readonly name: string; readonly descript
   { name: 'clear', description: 'Clear this chat and start a new conversation for this document.' },
 ];
 const slashName = (message: string): string => message.slice(1).split(/\s/, 1)[0]!.toLowerCase();
-const visible = (messages: readonly Message[]): Message[] => messages.filter(message => message.role !== 'tool' && (message.role !== 'assistant' || !!message.text.trim()));
+const visible = (messages: readonly Message[]): Entry[] => messages.flatMap((message): Entry[] => {
+  if (message.role === 'tool') return message.reviewed?.length ? [{ role: 'review', views: message.reviewed, images: [], at: message.at }] : [];
+  return message.role !== 'assistant' || !!message.text.trim() ? [message] : [];
+});
+/** The placeholder adds the turn's running time once the turn has run this long. */
+export const ELAPSED_AFTER_SECONDS = 10;
+/** Screen readers hear that the agent is still working at this interval, never every second. */
+const ANNOUNCE_EVERY_SECONDS = 30;
+const reviewProgress = (call: ToolCall): string | undefined => (call.review ? `Checking the result (review ${call.review.index} of ${call.review.limit})…` : undefined);
 const errorText = (cause: unknown): string => cause instanceof Error ? cause.message : 'Something went wrong.';
 const EMPTY: ChatState = { conversation: null, transcript: [], streaming: null, path: 'open', messageCount: 0, limitReached: false };
 function fromConversation(conversation: Conversation): ChatState {
@@ -116,6 +133,8 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
   const [busy, setBusy] = useState(false);
   const [waitingForGuidance, setWaitingForGuidance] = useState(false);
   const [toolProgress, setToolProgress] = useState<string | null>(null);
+  /** When the running turn started, for the elapsed time in its placeholder; null while no turn runs. */
+  const [turnStarted, setTurnStarted] = useState<number | null>(null);
   const [error, setError] = useState<{ code: string; message: string; retry?: (() => void) | undefined } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [retryTick, setRetryTick] = useState(0);
@@ -191,9 +210,11 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
     const ids = new Set<string>(chat.conversation ? [chat.conversation.id] : []);
     for (const draft of readDrafts(account.id, draftStorage)) if (draftScope(draft) === scopeRef.current) ids.add(draft.conversationId);
     for (const id of ids) { forgetDraft(account.id, id, draftStorage); void client.discardConversation(id).catch(() => {}); }
-    setWaitingForGuidance(false);
+    setWaitingForGuidance(false); setToolProgress(null); setTurnStarted(null);
     setChat(EMPTY); setText(''); setError(null); setNotice(null); setBusy(false);
   };
+  /** Stop: cancels the running turn and any batch in progress; what was already applied stays, undoable. */
+  const stop = (): void => { turn.current?.abort(); };
   const clearsSeen = useRef(0);
   useEffect(() => {
     if (clearSignal <= clearsSeen.current) return;
@@ -226,6 +247,9 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
     const controller = new AbortController(); turn.current = controller;
     const gen = generation.current;
     const live = (): boolean => alive.current && generation.current === gen;
+    /** Stop ends the turn here: the calls of a stopped round are never answered. */
+    const stopped = (): void => { if (controller.signal.aborted) throw new DOMException('Stopped', 'AbortError'); };
+    setToolProgress(null); setTurnStarted(Date.now());
     void run(async () => {
       let streamed = '', rateLimited = false, failed = false, resumed = false, conversation = chat.conversation;
       // A conversation the server ended (filed, added, closed) is left behind: this message starts a new one.
@@ -297,22 +321,26 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
           const cueInstruction = requested.find(call => call.name === 'ui_highlight')?.input as { instruction?: unknown } | undefined;
           const instructionText = partial.trim() ? partial : typeof cueInstruction?.instruction === 'string' ? cueInstruction.instruction.slice(0, 400) : '';
           if (instructionText.trim()) setChat(current => ({ ...current, streaming: '', transcript: [...current.transcript, { role: 'assistant', text: instructionText, at: new Date().toISOString() }] }));
-          const results: ToolCallResult[] = [], notices: string[] = [];
+          const results: ToolCallResult[] = [], lines: Entry[] = [];
           for (const call of requested) {
             let outcome: DocumentToolOutcome;
             if (!live()) return;
+            stopped();
             if (call.name === 'ui_highlight') setWaitingForGuidance(true);
-            setToolProgress(tools.progress?.(call) ?? null);
-            try { outcome = await tools.run(call, controller.signal); } catch (cause) { outcome = { content: `The editor could not run ${call.name}: ${errorText(cause)}`, isError: true }; } finally { if (alive.current) setToolProgress(null); }
+            // The placeholder keeps the last step's text until a step with its own text, or the reply, replaces it.
+            const progress = reviewProgress(call) ?? tools.progress?.(call);
+            if (progress) setToolProgress(progress);
+            try { outcome = await tools.run(call, controller.signal); } catch (cause) { outcome = { content: `The editor could not run ${call.name}: ${errorText(cause)}`, isError: true }; }
             if (!live()) return;
             setWaitingForGuidance(false);
-            results.push({ toolUseId: call.id, content: outcome.content, isError: outcome.isError });
-            if (outcome.notice) notices.push(outcome.notice);
+            stopped();
+            results.push({ toolUseId: call.id, content: outcome.content, isError: outcome.isError, ...(outcome.images?.length ? { images: outcome.images } : {}) });
+            const at = new Date().toISOString();
+            if (outcome.notice) lines.push({ role: 'system', text: outcome.notice, at });
+            if (outcome.images?.length) lines.push({ role: 'review', views: outcome.views ?? [], images: outcome.images, at });
           }
           if (!live()) return;
-          const shown = new Date().toISOString();
-          setChat(current => ({ ...current, streaming: '', transcript: [...current.transcript,
-            ...notices.map(text => ({ role: 'system' as const, text, at: shown }))] }));
+          setChat(current => ({ ...current, streaming: '', transcript: [...current.transcript, ...lines] }));
           resumed = true;
           stream = client.sendToolResults(id, results, { signal: controller.signal });
         }
@@ -321,12 +349,15 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
         if (ended) forgetDraft(account.id, id, draftStorage);
       } catch (cause) {
         if (!live()) return;
+        // Stopped by the requester: the reply so far stays, with no error.
+        if (controller.signal.aborted) return;
         failed = true;
         if (cause instanceof RequestsError && cause.code === 'rate_limited') rateLimited = true;
         else if (cause instanceof RequestsError && cause.code === 'limit') setChat(current => ({ ...current, limitReached: true }));
         else throw cause;
       } finally {
         if (turn.current === controller) turn.current = null;
+        if (live()) { setToolProgress(null); setTurnStarted(null); setWaitingForGuidance(false); }
         // A turn the server rejected before answering never received the message: the optimistic copy leaves the transcript.
         // Start over (the requester asked the agent to discard): the transcript goes too, so the greeting and cards return.
         // A message that never reached the agent keeps its pictures in the composer for retry; its uploads are released.
@@ -462,6 +493,8 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
     box.style.height = `${box.scrollHeight}px`;
   }, [text, view.kind]);
 
+  // A turn is running from the send until its last stream ends; Stop is offered all that time.
+  const working = turnStarted !== null;
   // Typing "/" lists the commands that match what follows it.
   const slashMatches = text.startsWith('/') && !/\s/.test(text) ? SLASH_COMMANDS.filter(command => command.name.startsWith(text.slice(1).toLowerCase())) : [];
   let body: JSX.Element;
@@ -485,14 +518,18 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
             </div>;
           })}
         </div> : null}
-        {current.transcript.map((entry, index) => entry.role === 'system'
+        {current.transcript.map((entry, index) => entry.role === 'review' ? <ReviewLine key={index} entry={entry} />
+          : entry.role === 'system'
           ? <p key={index} className="pf-fr-message is-system pf-fr-muted" role="status">{entry.text}</p>
           // A reply split by tool calls reads as one message, under one label.
           : <div key={index} className={`pf-fr-message is-${entry.role}`}>{entry.role === 'assistant' && current.transcript[index - 1]?.role === 'assistant' ? null
             : <span className="pf-fr-role">{entry.role === 'user' ? 'You' : 'Agent'}</span>}
             {/* The requester's own words stay as typed; the agent's replies are Markdown. */}
             {entry.role === 'user' ? <>{entry.text ? <p>{entry.text}</p> : null}<SentPictures entry={entry} client={client} previews={uploadedPreviews.current} /></> : <MessageMarkdown text={entry.text} />}</div>)}
-        {current.streaming !== null && !waitingForGuidance ? <div className="pf-fr-message is-assistant is-streaming">{current.transcript.at(-1)?.role === 'assistant' ? null : <span className="pf-fr-role">Agent</span>}{current.streaming ? <MessageMarkdown text={current.streaming} /> : (toolProgress ? <p>{toolProgress}</p> : <p className="pf-fr-thinking" role="status" aria-label="Agent is thinking"><span /><span /><span /></p>)}</div> : null}
+        {current.streaming !== null && !waitingForGuidance ? <div className="pf-fr-message is-assistant is-streaming">{current.transcript.at(-1)?.role === 'assistant' ? null : <span className="pf-fr-role">Agent</span>}{current.streaming ? <MessageMarkdown text={current.streaming} /> : <div className="pf-fr-working">
+          {toolProgress ? <p role="status">{toolProgress}</p> : <p className="pf-fr-thinking" role="status" aria-label="Agent is thinking"><span /><span /><span /></p>}
+          {turnStarted !== null ? <Elapsed since={turnStarted} /> : null}
+        </div>}</div> : null}
         <div ref={transcriptEnd} />
       </div>
       {current.limitReached ? <p className="pf-fr-muted pf-fr-limit" role="status">This conversation reached its {messageLimit}-message limit.</p> : null}
@@ -525,6 +562,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
         <textarea ref={composer} data-autofocus data-submit-on-enter aria-label="Your message" rows={1} value={text} maxLength={4000}
           disabled={textLocked} onPaste={pastePictures}
           placeholder={!current.conversation ? 'Describe what you need' : reporting ? 'Type your answer, or say skip' : 'Ask a follow-up question'} onChange={event => setText(event.target.value)} />
+        {working ? <button type="button" className="pf-fr-stop" onClick={stop}>Stop</button> : null}
         {/* Enter sends and Shift+Enter starts a new line; the return key appears once there is something to send. */}
         {text.trim() || pictures.length ? <button type="submit" className="pf-fr-icon" aria-label="Send" title="Send (Enter)" disabled={(busy && !waitingForGuidance) || !attachmentsReady}>{RETURN_ICON}</button> : null}
         <button type="button" className={`pf-fr-icon${dictation.listening ? ' is-listening' : ''}`} aria-label={dictation.listening ? 'Stop dictation' : 'Dictate'} aria-pressed={dictation.listening}
@@ -537,6 +575,44 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
   return <Shell label="AI Chat" className={`pf-fr-panel is-${view.kind}`} anchor={anchor} onClose={onClose} open={open}>
     {body}
   </Shell>;
+}
+
+/**
+ * The running time of a turn, once it has run 10 seconds, updated each second. It is for the eye only: screen readers
+ * hear a short "still working" note every 30 seconds instead of every tick.
+ */
+function Elapsed({ since }: { since: number }): JSX.Element | null {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [since]);
+  const seconds = Math.max(0, Math.floor((now - since) / 1000));
+  if (seconds < ELAPSED_AFTER_SECONDS) return null;
+  return <>
+    <span className="pf-fr-elapsed" aria-hidden="true"> {seconds} s</span>
+    {seconds >= ANNOUNCE_EVERY_SECONDS ? <span className="pf-fr-sr">Still working, {Math.floor(seconds / ANNOUNCE_EVERY_SECONDS) * ANNOUNCE_EVERY_SECONDS} seconds.</span> : null}
+  </>;
+}
+
+/**
+ * A render review in the transcript: "Checked the result" with small previews, collapsed, opening to the full pictures.
+ * The pictures are the ones the browser drew for the agent; after a reload only the views are named.
+ */
+function ReviewLine({ entry }: { entry: Extract<Entry, { role: 'review' }> }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const src = (image: ToolImage): string => `data:${image.mime};base64,${image.data}`;
+  const named = (index: number): string => entry.views[index] ?? `view ${index + 1}`;
+  return <div className="pf-fr-message is-system pf-fr-review">
+    <button type="button" className="pf-fr-review-toggle" aria-expanded={open} onClick={() => setOpen(value => !value)}>
+      <span>Checked the result</span>
+      {entry.images.length ? <span className="pf-fr-review-thumbs" aria-hidden="true">{entry.images.map((image, index) => <img key={index} src={src(image)} alt="" />)}</span> : null}
+    </button>
+    {open ? (entry.images.length
+      ? <div className="pf-fr-review-pictures">{entry.images.map((image, index) => <figure key={index}><img src={src(image)} alt={`Render, ${named(index)}`} /><figcaption>{named(index)}</figcaption></figure>)}</div>
+      : <p className="pf-fr-muted">Pictures are not kept after the reply. Views: {entry.views.join('; ')}.</p>) : null}
+  </div>;
 }
 
 /** The pictures of a sent message: from their files when sent here, otherwise downloaded by id. */

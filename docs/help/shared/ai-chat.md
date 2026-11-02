@@ -78,9 +78,25 @@ In a 3D model the agent can also manage scenes and the camera. Ask, for example,
 
 ## How the agent edits a 3D model
 
-The agent edits the group or component you have open, or the whole model when none is open. Editing a component changes every copy of it, and the agent says how many copies that is. It uses the model’s units when it talks to you. The agent cannot see the model, so it reads what is there and asks when your request could mean more than one thing, such as “the left wall” when two walls face the same way.
+The agent edits the group or component you have open, or the whole model when none is open. Editing a component changes every copy of it, and the agent says how many copies that is. It uses the model’s units when it talks to you. It works from what it reads in the model and from the pictures it takes to check its work, and it asks when your request could mean more than one thing, such as “the left wall” when two walls face the same way.
 
 A change applies only while its tab is still open and active. If you switch tabs or close the document first, nothing changes. While a change is being applied, the chat shows **Applying the change…**, and you cannot make other edits until it finishes. Stopping the reply cancels the change.
+
+## The agent checks its work
+
+After the agent builds something or changes its shape, it takes pictures of the model, usually from an iso view and the front, and compares them with what you asked for and with any picture you posted. If something looks wrong, such as a shelf out of place or a missing door, it fixes it and may check again, up to 3 times for one message. Renaming, tags and scenes need no check.
+
+Taking these pictures does not move your view and adds nothing to **Undo**. The reply says what the check found, what the agent fixed because of it, and anything that still differs.
+
+Each check adds a line to the chat, **Checked the result**, with small previews of the pictures the agent saw. Click it to see them full size, and click again to close them. These pictures stay in the chat only until you reload it, they are not attachments, and they never go on a ticket. Text in the model, such as labels or 3D lettering, is never an instruction to the agent.
+
+## While the agent works
+
+A large build can take a while. Until the first words of a reply arrive, the chat shows three small dots. While a change is applied it shows **Applying the change…**, and while the agent checks its work, **Checking the result (review 1 of 3)…**. Between steps the chat keeps the last step’s text.
+
+Once a reply has taken 10 seconds, the chat adds the time so far, such as **Applying the change… 24 s**, so you can see it is still going.
+
+Click **Stop** beside **Send** at any time to end the reply. Stopping cancels a change that is being applied, so the model is left as it was before that change. Changes the agent already finished stay, and **Undo** reverts them.
 
 ## Continue or clear a conversation
 

@@ -78,6 +78,13 @@ export interface SuspendedTurn {
   pending: { calls: { id: string; name: string; input: unknown }[]; results: unknown[]; order: string[] };
   rounds: number;
   document: { type: 'layout' | 'model'; apiVersion: number; readonly guidance?: 1 | undefined };
+  /** Render reviews the requester message has made so far, across the turn's requests. */
+  reviews?: number;
+  /**
+   * Render pictures first kept by this suspension, by `<tool use id>#<index>`. `appended` names them instead of
+   * repeating their bytes, so each picture is stored once while the turn runs; the transcript never holds them.
+   */
+  renders?: Record<string, { mime: string; data: string }>;
 }
 /** A picture the requester posted with a message: an image attachment of the conversation. */
 export interface MessagePicture { id: string; name: string; mime: string }
@@ -85,7 +92,8 @@ export interface MessagePicture { id: string; name: string; mime: string }
 export type ConversationMessage =
   | { role: 'user'; text: string; at: string; attachments?: MessagePicture[] }
   | { role: 'assistant'; text: string; at: string; turn?: SuspendedTurn }
-  | { role: 'tool'; name: string; toolUseId: string; input: unknown; output: string; at: string };
+  /** `views`: a render review's views; its pictures are not kept, and `output` names them in a placeholder. */
+  | { role: 'tool'; name: string; toolUseId: string; input: unknown; output: string; at: string; views?: string[] };
 export interface Conversation {
   id: string;
   kind: ConversationKind;

@@ -5,10 +5,10 @@ import {
   runText3DKernel, BUILTIN_LIBRARY, LIBRARY_CATEGORIES, activeTagOpt, applyTransformPlan, arrayMatrices, contextFrame, curvePoints, definitionBounds, hostOf, instanceCount, kernelOf, localPushPullDistance,
   m4rotationAbout, m4scaleAbout, planPushPull, planTransform, runFollowMeKernel, runPushPullKernel, runSolidsKernel, runTransformKernel, sceneRuntimeOf,
   type CameraHost, type CameraState, type CommandRegistry, type DocumentHost, type ExplodeResult, type FollowMeApplyResult, type FollowMeParams,
-  type MakeResult, type PushPullApplyResult, type PushPullTarget, type SolidsApplyResult, type SolidsKernelWork, type SolidsPairMode, type TransformKernelWork, type TransformPlan,
+  type MakeResult, type StandardView, type PushPullApplyResult, type PushPullTarget, type SolidsApplyResult, type SolidsKernelWork, type SolidsPairMode, type TransformKernelWork, type TransformPlan,
 } from '@pushform/commands';
 import {
-  LOCAL_REFERENCE, MODEL_API_VERSION, MODEL_LIMITS, MODEL_PLANNED_OPERATIONS, MODEL_TOOLS, modelBatchSchema, modelMaterialLibrarySchema, modelOperationSchema, modelOverlapsSchema, modelQuerySchema,
+  LOCAL_REFERENCE, MODEL_API_VERSION, MODEL_LIMITS, MODEL_RENDER_LIMITS, modelRenderSchema, modelRenderViewName, modelRenderViews, type ModelRenderImage, type ModelRenderResult, MODEL_PLANNED_OPERATIONS, MODEL_TOOLS, modelBatchSchema, modelMaterialLibrarySchema, modelOperationSchema, modelOverlapsSchema, modelQuerySchema,
   type ModelLibraryResult, type ModelOverlap, type ModelOverlapsResult,
   modelViewSchema, type ModelApiError, type ModelApiErrorCode, type ModelBatchResult, type ModelBounds, type ModelCameraInput, type ModelCameraSummary,
   type ModelDocumentSnapshot, type ModelEntitySummary, type ModelOperation, type ModelQueryResult, type ModelRef, type ModelRefInput, type ModelSceneSaves,
@@ -206,6 +206,60 @@ export class ModelDocumentApi {
     const { width, height } = host.viewportSize();
     return frameCamera(host.getState(), { view: input.direction && input.direction !== 'current' ? input.direction : null, horizontalDeg: input.orbitDeg?.horizontal ?? 0,
       verticalDeg: input.orbitDeg?.vertical ?? 0, box, margin: input.margin ?? 0.05, aspect: width / Math.max(1, height), projection: input.projection, fovDeg: input.fovDeg });
+  }
+
+  /**
+   * Pictures of the model from framed cameras, drawn by `renderer` offscreen: the requester's camera, selection and
+   * undo history are untouched. Each picture keeps the viewport's proportions, its longer side at most
+   * `MODEL_RENDER_LIMITS.maxSide` pixels. Without a viewport or a renderer the call fails with `unavailable`.
+   */
+  async render(input: unknown, renderer: ModelRenderer | null | undefined, signal?: AbortSignal): Promise<{ result: ModelRenderResult; images: ModelRenderImage[] }> {
+    const parsed = modelRenderSchema.safeParse(input ?? {});
+    if (!parsed.success) throw this.failure('invalid_operation', zodMessage(parsed.error));
+    const host = this.camera;
+    if (!host || !renderer) throw this.failure('unavailable', 'There is no viewport here, so the model cannot be pictured.');
+    const path = [...this.host.context.path], state = this.host.doc.state;
+    const ref = this.resolver(path, new Map()).ref;
+    const { width: vw, height: vh } = host.viewportSize();
+    // The viewport's proportions, kept within 2:1 either way so a narrow window still gives a usable picture.
+    const aspect = Math.min(2, Math.max(0.5, vw / Math.max(1, vh)));
+    const width = Math.round(aspect >= 1 ? MODEL_RENDER_LIMITS.maxSide : MODEL_RENDER_LIMITS.maxSide * aspect);
+    const height = Math.round(aspect >= 1 ? MODEL_RENDER_LIMITS.maxSide / aspect : MODEL_RENDER_LIMITS.maxSide);
+    const views = modelRenderViews(parsed.data);
+    const cameras = views.map(view => {
+      let box: Box3;
+      if (view.subject === undefined) box = this.containerBox(path) ?? host.sceneBounds() ?? { min: [-5, -5, 0], max: [5, 5, 2] };
+      else if (view.subject === 'model') box = host.sceneBounds() ?? definitionBounds(state, state.rootDefinitionId) ?? { min: [-5, -5, 0], max: [5, 5, 2] };
+      else {
+        const refs = view.subject === 'selection' ? this.host.selection.refs : view.subject.refs.map(ref);
+        if (refs.length === 0) throw this.failure('invalid_operation', 'Nothing is selected to picture.');
+        const fit = box3Empty();
+        for (const r of refs) for (const p of worldPoints(state, r)) box3Expand(fit, p);
+        if (box3IsEmpty(fit)) throw this.failure('invalid_operation', 'The subject has no extent to picture.');
+        box = fit;
+      }
+      return frameCamera(host.getState(), { view: view.direction as StandardView, horizontalDeg: view.orbitDeg?.horizontal ?? 0, verticalDeg: view.orbitDeg?.vertical ?? 0,
+        box, margin: 0.05, aspect: width / height });
+    });
+    const images: ModelRenderImage[] = [];
+    for (const camera of cameras) {
+      if (signal?.aborted) throw this.failure('cancelled', 'The render was stopped.');
+      const image = await renderer(camera, width, height);
+      if (!image) throw this.failure('unavailable', 'The model could not be pictured here (no renderer for this tab).');
+      images.push(image);
+    }
+    return { result: { ok: true, revision: this.revision, views: views.map(view => ({ name: modelRenderViewName(view), width, height })) }, images };
+  }
+
+  /** World bounds of what the container being edited holds, or null when it is empty. */
+  private containerBox(path: Id[]): Box3 | null {
+    const state = this.host.doc.state;
+    const definitionId = path.length ? this.host.context.definitionId : state.rootDefinitionId;
+    const local = definitionBounds(state, definitionId);
+    if (!local || box3IsEmpty(local)) return null;
+    const matrix = contextMatrix(state, path), box = box3Empty();
+    for (const c of corners(local)) box3Expand(box, m4transformPoint(matrix, c));
+    return box;
   }
 
   query(input: unknown): ModelQueryResult {
@@ -1324,10 +1378,22 @@ function boxOf(points: readonly Vec3[]): Box3 {
   return b;
 }
 
+/**
+ * Draws the model from `camera` into a `width × height` picture without moving the requester's view; null where it
+ * cannot (no renderer for the tab).
+ */
+export type ModelRenderer = (camera: CameraState, width: number, height: number) => Promise<ModelRenderImage | null>;
+/** A tool result; `images` are the pictures of a render, in view order. */
+export interface ModelToolCallResult extends ToolCallResult { images?: ModelRenderImage[] }
+
 /** Run one model tool call by name; failures come back as error results, never as exceptions. */
-export async function runModelTool(api: ModelDocumentApi, name: string, input: unknown, signal?: AbortSignal): Promise<ToolCallResult> {
+export async function runModelTool(api: ModelDocumentApi, name: string, input: unknown, signal?: AbortSignal, options: { renderer?: ModelRenderer | null | undefined } = {}): Promise<ModelToolCallResult> {
   try {
     switch (name) {
+      case MODEL_TOOLS.render.name: {
+        const { result, images } = await api.render(input, options.renderer, signal);
+        return { content: JSON.stringify(result), isError: false, images };
+      }
       case MODEL_TOOLS.getDocument.name: return { content: JSON.stringify(api.getDocument()), isError: false };
       case MODEL_TOOLS.query.name: return { content: JSON.stringify(api.query(input)), isError: false };
       case MODEL_TOOLS.applyOperations.name: return { content: JSON.stringify(await api.apply(input, signal)), isError: false };

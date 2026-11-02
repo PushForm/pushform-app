@@ -289,6 +289,39 @@ export const modelViewSchema = z.object({
 });
 export type ModelViewInput = z.infer<typeof modelViewSchema>;
 
+/** The directions a render can look from. */
+export const MODEL_RENDER_DIRECTIONS = ['iso', 'front', 'back', 'left', 'right', 'top'] as const satisfies readonly (typeof MODEL_STANDARD_VIEWS)[number][];
+/** Bounds of one render call: views per call, the longer side of each picture in pixels. */
+export const MODEL_RENDER_LIMITS = { views: 3, maxSide: 1024 } as const;
+const renderView = z.object({
+  direction: z.enum(MODEL_RENDER_DIRECTIONS).describe('Look from this standard view. Front looks along +y; iso looks down from the front right.'),
+  orbitDeg: z.object({
+    horizontal: z.number().finite().optional().describe('Turn the direction about the vertical, counterclockwise seen from above.'),
+    vertical: z.number().finite().optional().describe('Raise (positive) or lower the eye.'),
+  }).optional().describe('Orbit the direction after choosing it.'),
+  subject: z.union([z.enum(['model', 'selection']), z.object({ refs })]).optional()
+    .describe('What to fit: the container being edited (default), the whole model, the selection, or entities of the container (as model_query names them).'),
+});
+/** Pictures of the model from framed cameras, drawn offscreen without moving the requester's view. */
+export const modelRenderSchema = z.object({
+  views: z.array(renderView).min(1).max(MODEL_RENDER_LIMITS.views).optional().describe('1 to 3 views. Default: iso and front of the container being edited.'),
+});
+export type ModelRenderInput = z.infer<typeof modelRenderSchema>;
+export type ModelRenderView = z.infer<typeof renderView>;
+/** The views a render call draws: its own, or iso and front of the container being edited. */
+export function modelRenderViews(input: ModelRenderInput | null | undefined): ModelRenderView[] {
+  return input?.views?.length ? input.views : [{ direction: 'iso' }, { direction: 'front' }];
+}
+/** A short name of a render view, such as "iso" or "front, orbited 30°". */
+export function modelRenderViewName(view: ModelRenderView): string {
+  const turns = [view.orbitDeg?.horizontal, view.orbitDeg?.vertical].filter(n => typeof n === 'number' && n !== 0);
+  const subject = view.subject === undefined ? '' : typeof view.subject === 'string' ? ` of the ${view.subject}` : ' of the given entities';
+  return `${view.direction}${turns.length ? ', orbited' : ''}${subject}`;
+}
+/** A picture the browser drew, as base64. */
+export interface ModelRenderImage { mime: 'image/jpeg' | 'image/png'; data: string }
+export interface ModelRenderResult { ok: true; revision: number; views: { name: string; width: number; height: number }[] }
+
 export type ModelApiErrorCode = 'stale_revision' | 'invalid_reference' | 'invalid_operation' | 'operation_failed' | 'limit_exceeded' | 'unavailable' | 'invalid_geometry' | 'cancelled';
 export interface ModelApiError { code: ModelApiErrorCode; message: string; revision: number | null; operationIndex?: number }
 
@@ -431,5 +464,9 @@ export const MODEL_TOOLS = {
   view: {
     name: 'model_view',
     description: 'Change what the requester sees, with no undo entry: set the camera (exact, or framed around the model, the selection or entities from a view direction), go to a scene or the next or previous one, or play and stop the animation. Returns the camera, the active scene and whether the animation is playing. Fails with unavailable where there is no viewport.',
+  },
+  render: {
+    name: 'model_render',
+    description: 'See the model: pictures of 1 to 3 views, each a framed camera from a standard direction (optionally orbited) fitted to the container being edited (default), the whole model, the selection or given entities, drawn in the model\'s own style. Default: iso and front. The requester\'s view does not move and nothing is added to undo. The pictures follow the result in view order. Fails with unavailable where there is no viewport. Use it to check what you built against the request.',
   },
 } as const;

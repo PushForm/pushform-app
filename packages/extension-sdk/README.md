@@ -89,7 +89,11 @@ context.model!.onChange(({ revision, changes }) => refresh(revision, changes)); 
 ```
 
 A query returns one page of at most 200 entities; fields you leave out are null (the open container, every kind but
-faces, 50 entities). A batch applies every operation or none and is one undo entry named after your extension; it
+faces, 50 entities). With `geometry`, a face or sketch face carries its outline: `outerLoop` runs counterclockwise
+about `normal`, each loop of `holes` runs clockwise, and all are in the container's coordinates. A loop of more than
+512 points is simplified to 512 by dropping the points that change the outline least, and the face then reports
+`truncated: true`; a page of faces ends early, with `next` set, once its loops hold 40,000 points, so always follow
+`next`. A batch applies every operation or none and is one undo entry named after your extension; it
 fails with `revision.stale` when the model changed since the revision you read. References name entities of the
 container open in the editor, or, with the `path` a read reports, entities inside a group or component: `selection.set`
 highlights those in place without opening the group, as choosing them in the Object browser does, and `selection.frame`

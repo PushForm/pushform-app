@@ -63,10 +63,17 @@ export interface ModelQuery {
   facing: ModelVec3 | null;
   /** Faces only: keep faces that contain this point. */
   containing: ModelVec3 | null;
-  /** null: all. bounds: bounding boxes; geometry: transforms, points, normals, areas and volumes; appearance: materials. */
+  /**
+   * null: all. bounds: bounding boxes; geometry: transforms, points, normals, areas, volumes and face outlines
+   * (`outerLoop` and `holes`, each loop simplified to at most 512 points, with `truncated` set when that happened);
+   * appearance: materials.
+   */
   fields: ('bounds' | 'geometry' | 'appearance')[] | null;
   offset: number | null;
-  /** 1 to 200; null: 50. */
+  /**
+   * 1 to 200; null: 50. A page of faces with geometry may end before the limit, once its loops hold 40,000 points;
+   * `next` says where to continue.
+   */
   limit: number | null;
 }
 
@@ -88,11 +95,18 @@ export interface ModelEntitySummary {
   volume?: number;
   area?: number;
   faceCount?: number;
-  /** Faces. */
+  /**
+   * Faces and sketch faces. `outerLoop` runs counterclockwise about `normal` and each hole in `holes` runs clockwise,
+   * so a loop's signed area about the normal is positive for the outline and negative for every hole. Loops are in
+   * the container's coordinates and do not repeat their first point. A loop of more than 512 points is simplified to
+   * that many, dropping the points that change its outline least, and `truncated` is then true; `loopPointCount` is
+   * the outer loop's count before simplification.
+   */
   normal?: ModelVec3;
   outerLoop?: ModelVec3[];
   loopPointCount?: number;
-  holes?: number;
+  holes?: ModelVec3[][];
+  truncated?: boolean;
   /** Sketch edges. */
   start?: ModelVec3;
   end?: ModelVec3;

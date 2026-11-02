@@ -36,6 +36,7 @@ describe('SDK types', () => {
     expect(same<Sdk.ModelDocumentSnapshot, Protocol.ModelDocumentSnapshot>(true)).toBe(true);
     expect(same<Sdk.ModelQuery, Protocol.ModelQuery>(true)).toBe(true);
     expect(same<Sdk.ModelQueryResult, Protocol.ModelQueryResult>(true)).toBe(true);
+    expect(same<Sdk.ModelEntitySummary, Protocol.ModelEntitySummary>(true)).toBe(true);
     expect(same<Sdk.ModelCameraInput, Protocol.ModelCameraInput>(true)).toBe(true);
     expect(same<Sdk.ModelOperation, Protocol.ModelOperation>(true)).toBe(true);
     expect(same<Sdk.ModelBatch, Protocol.ModelBatch>(true)).toBe(true);

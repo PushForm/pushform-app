@@ -20,6 +20,7 @@ import {
   type DocumentState, type EntityContainer, type EntityRef, type FaceRecord, type Rgb, type Scene, type SceneFlags,
 } from '@pushform/model';
 import type { ToolCallResult } from './layoutApi';
+import { simplifyLoop } from './loopSimplify';
 import { frameCamera } from './modelCamera';
 
 /** A structured API error; the message is safe to show to the user and to a model. */
@@ -256,8 +257,18 @@ export class ModelDocumentApi {
     for (const text of container.texts.values()) if (keep('text', text.id)) all.push(() => ({ ...base(path, 'text', text.id, text), text: text.text.slice(0, 500) }));
     for (const dim of container.dimensions.values()) if (keep('dimension', dim.id)) all.push(() => base(path, 'dimension', dim.id, dim));
     const offset = query.offset ?? 0, limit = query.limit ?? DEFAULT_QUERY_LIMIT;
+    // A page ends early once the face loops on it reach the point budget, so a page of curved, holed faces stays
+    // within one message; `next` says where to continue.
+    const entities: ModelEntitySummary[] = [];
+    let points = 0;
+    for (let i = offset; i < all.length && entities.length < limit && points < MODEL_LIMITS.loopPointsPerQueryPage; i++) {
+      const entity = all[i]!();
+      entities.push(entity);
+      points += loopPointsOf(entity);
+    }
+    const next = offset + entities.length;
     return { revision: this.revision, container: [...path], worldTransform: contextMatrix(state, path).map(round), total: all.length, offset,
-      entities: all.slice(offset, offset + limit).map(make => make()), next: offset + limit < all.length ? offset + limit : null };
+      entities, next: next < all.length ? next : null };
   }
 
   /** Validate, check the revision, then run every operation as one undo entry; rejects with `ModelApiFailure`. */
@@ -631,10 +642,26 @@ function summarizeFace(path: readonly Id[], bodyId: Id, face: FaceRecord, fields
   return out;
 }
 
+/**
+ * A face's outline as the API reports it: the outer loop counterclockwise about the normal, holes clockwise, each
+ * simplified to the per-loop point limit with `truncated` saying whether any was. The area comes from the full loops.
+ */
 function loopFields(normal: Vec3, loops: readonly (readonly Vec3[])[]): Partial<ModelEntitySummary> {
   const outer = loops[0] ?? [];
   const area = loops.reduce((sum, loop, i) => sum + (i === 0 ? 1 : -1) * Math.abs(v3dot(newell(loop), normal)) / 2, 0);
-  return { normal: vec(normal), area: round(area), outerLoop: outer.slice(0, MODEL_LIMITS.loopPointsPerFace).map(vec), loopPointCount: outer.length, holes: loops.length - 1 };
+  let truncated = false;
+  const report = (loop: readonly Vec3[], counterclockwise: boolean): ModelVec3[] => {
+    const kept = simplifyLoop(loop, MODEL_LIMITS.loopPointsPerFace);
+    if (kept.length < loop.length) truncated = true;
+    const out = kept.map(vec);
+    return (v3dot(newell(loop), normal) >= 0) === counterclockwise ? out : out.reverse();
+  };
+  return { normal: vec(normal), area: round(area), outerLoop: report(outer, true), loopPointCount: outer.length, holes: loops.slice(1).map(loop => report(loop, false)), truncated };
+}
+
+/** Points a face's loops put on a page, counted so that a page of faces stays within one message. */
+function loopPointsOf(entity: ModelEntitySummary): number {
+  return (entity.outerLoop?.length ?? 0) + (entity.holes?.reduce((sum, hole) => sum + hole.length, 0) ?? 0);
 }
 
 function faceContains(face: FaceRecord, p: Vec3): boolean {

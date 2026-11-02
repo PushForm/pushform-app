@@ -290,7 +290,7 @@ export function TagsPanel(): JSX.Element {
             else if (selectedTag) setDeleting(selectedTag.id);
           }}
         >
-          <Icon name="trash" size={16} />
+          <Icon name="minus" size={16} />
         </button>
         <input className="pf-outliner-filter" placeholder="Filter" aria-label="Filter tags" value={filter} onChange={(e) => setFilter(e.target.value)} />
         <div className="pf-outliner-details">

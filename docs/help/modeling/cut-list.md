@@ -19,3 +19,6 @@ In a cutting diagram, choose **Nesting** to pack actual part contours, including
 contours. For rectangle or guillotine layouts, turn on **Draw part shapes** to show the contours inside the rectangular
 packing allowances; this updates the displayed layout immediately. Parts with no usable face outline use rectangles.
 After updating the extension, generate the diagram again to read the model's shapes.
+
+The cutting diagram's **Cost** uses the material's saved stock prices, including prices for a particular sheet size.
+After editing a material's price, choose **Pack again** to update the layout costs.

@@ -19,7 +19,7 @@ it('reuses the initial account fields, keeps mailing optional unchecked, and gat
   const auth=account(null);render(<CommonsAccessGate account={auth}><p>Download is ready</p></CommonsAccessGate>);
   expect(await screen.findByRole('heading',{name:'Tell us about yourself'})).toBeTruthy();
   expect(screen.queryByText('Download is ready')).toBeNull();
-  expect((screen.getByRole('checkbox',{name:/Send me PushForm news/}) as HTMLInputElement).checked).toBe(false);
+  expect((screen.getByRole('checkbox',{name:/Join the mailing list/}) as HTMLInputElement).checked).toBe(false);
   fireEvent.change(screen.getByLabelText('First name'),{target:{value:'Ada'}});fireEvent.change(screen.getByLabelText('Last name'),{target:{value:'Lovelace'}});
   fireEvent.click(screen.getByRole('radio',{name:'As an individual'}));fireEvent.change(screen.getByLabelText('Industry'),{target:{value:'hobbyist'}});
   expect((screen.getByRole('button',{name:'Continue'}) as HTMLButtonElement).disabled).toBe(true);

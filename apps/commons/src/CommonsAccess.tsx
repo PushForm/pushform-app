@@ -105,7 +105,7 @@ export function CommonsMailingPreference({account}:{account:CommonsAccessAccount
     <label><input type="checkbox" checked={state.value.mailingOptIn} disabled={state.busy} onChange={event=>{
       const checked=event.target.checked;setState(current=>({...current,busy:true,error:null}));
       void setCommonsMailingPreference(account.client,checked).then(value=>setState(current=>current.owner===owner?{owner,value,error:null,busy:false}:current),()=>setState(current=>current.owner===owner?{...current,busy:false,error:'Could not save your mailing preference.'}:current));
-    }}/> Send me PushForm news and updates by email (optional)</label>
+    }}/> Join the mailing list (optional)</label>
     <p>You can change this choice here. It does not affect downloads.</p>{state.error&&<p role="alert">{state.error}</p>}
   </section>;
 }

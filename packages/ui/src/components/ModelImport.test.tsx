@@ -59,9 +59,10 @@ describe('Model import UI', () => {
     fireEvent.change(screen.getByLabelText('Open PushForm file'), { target: { files: [stepFile('Bracket.step')] } });
     const panel = await screen.findByRole('region', { name: 'Importing STEP model' });
     expect(panel.textContent).toContain('Bracket.step');
-    // No modal: the viewport stays usable while the parts come in.
+    // No modal: the viewport stays usable while the parts come in. The reading dialog that came before the panel
+    // gives the app back in its effect cleanup, which can run just after the panel appears.
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(document.querySelector<HTMLElement>('.pf-app')!.inert).toBe(false);
+    await waitFor(() => expect(document.querySelector<HTMLElement>('.pf-app')!.inert).toBe(false));
     const drawing = session.active;
     if (drawing.type !== 'model') throw new Error('Expected model');
     expect(drawing).not.toBe(original);

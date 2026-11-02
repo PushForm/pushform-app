@@ -7,8 +7,10 @@ import type { DocumentTabStrip } from '../components/DocumentTabs';
 import type { ExtensionToolbarItem } from '../components/MainToolbar';
 import type { SideRailItem } from '../components/SideRail';
 import type { DocumentTab } from '../session';
+import { Icon } from '../components/Icon';
 import { ExtensionActivity, type ExtensionRuns } from './ExtensionActivity';
 import { ExtensionIcon } from './ExtensionIcon';
+import { ExtensionManagerPanel } from './ExtensionManager';
 import { ExtensionSidebar } from './ExtensionSidebar';
 import { ExtensionTabView } from './ExtensionTabView';
 import {
@@ -17,15 +19,31 @@ import {
 } from './extensionContributions';
 import type { ExtensionTabs } from './extensionTabs';
 
+/** The activity bar id of the Extensions item, and of the Extensions side panel it toggles. */
+export const EXTENSIONS_RAIL_ID = 'extensions';
+export type ExtensionsPanelId = typeof EXTENSIONS_RAIL_ID;
+/** A rail item of this hook: an extension's own, or the Extensions item at the bottom. */
+export type ExtensionWorkspaceRailId = `extension:${string}` | ExtensionsPanelId;
+
+/** The Extensions side panel: the extension manager, offered under the same condition as the Extensions window. */
+export interface ExtensionsPanelOptions {
+  /** Whether the account may use extensions; null while that is still being decided. */
+  readonly offered: boolean | null;
+  /** False where extensions cannot run, such as this browser. */
+  readonly available: boolean;
+  readonly developerModeOn: boolean;
+}
+
 /**
  * What enabled extensions add to the open editor, on the model of a code editor's activity bar: one icon per
  * extension in the side rail, after the built-in items, which opens the extension's side panel in the dock (or, for
  * an extension without one, its tab); its panels as tabs in the tab strip, filling the editor area; its toolbar
  * buttons in the modeling toolbar; its commands in the document's registry (and so in command search and the context
- * menu); and the status of commands that are running. Which extension's side panel is open is remembered per
- * account and editor. Extension tabs last for the session.
+ * menu); and the status of commands that are running. Last in the rail, after a gap, the Extensions item opens the
+ * Extensions side panel, the extension manager. Which of these side panels is open is remembered per account and
+ * editor. Extension tabs last for the session.
  */
-export function useExtensionWorkspace({ platform, runs, tabs, ownerId, active, openTabs, sidePanel, openPanel, closePanel }: {
+export function useExtensionWorkspace({ platform, runs, tabs, ownerId, active, openTabs, sidePanel, openPanel, closePanel, manager }: {
   readonly platform: ExtensionPlatform | null;
   readonly runs: ExtensionRuns | null;
   readonly tabs: ExtensionTabs | null;
@@ -35,12 +53,14 @@ export function useExtensionWorkspace({ platform, runs, tabs, ownerId, active, o
   /** The ids of every open document. */
   readonly openTabs: readonly string[];
   readonly sidePanel: string | null;
-  readonly openPanel: (id: `extension:${string}`) => void;
+  readonly openPanel: (id: ExtensionWorkspaceRailId) => void;
   readonly closePanel: () => void;
+  /** The Extensions side panel; without it, the rail has no Extensions item. */
+  readonly manager?: ExtensionsPanelOptions | undefined;
 }): {
   railItems: SideRailItem[];
-  /** Handles a click on an extension's activity bar icon. */
-  toggleRail: (id: `extension:${string}`) => void;
+  /** Handles a click on an extension's activity bar icon, or on the Extensions item. */
+  toggleRail: (id: ExtensionWorkspaceRailId) => void;
   panel: JSX.Element | null;
   activity: JSX.Element | null;
   shown: boolean;
@@ -89,6 +109,10 @@ export function useExtensionWorkspace({ platform, runs, tabs, ownerId, active, o
   // The user switched to another document: its editor comes to the front.
   useEffect(() => { if (activeId) tabs?.documentActivated(activeId); }, [tabs, activeId]);
 
+  // The Extensions side panel is offered under the same condition as the Extensions window.
+  const offered = manager?.offered ?? false;
+  const managerShown = !!platform && offered && sidePanel === EXTENSIONS_RAIL_ID;
+
   // The open side panel, remembered per editor.
   const storageKey = editor ? `pushform:extensions:panel:${ownerId}:${editor}` : null;
   const restored = useRef(new Set<string>());
@@ -96,16 +120,26 @@ export function useExtensionWorkspace({ platform, runs, tabs, ownerId, active, o
   useEffect(() => {
     if (!storageKey || !platform || restored.current.has(storageKey)) return;
     if (revision === 0) return; // what is installed has not been read yet
-    restored.current.add(storageKey);
     const stored = readStorage(storageKey);
-    if (stored && sidePanel === null && extensions.some((e) => e.id === stored && extensionSidebars(e).length > 0)) openPanel(extensionRailId(stored));
-  }, [storageKey, platform, extensions, revision, sidePanel, openPanel]);
+    // A remembered Extensions panel waits until it is known whether the account may use it.
+    if (stored === EXTENSIONS_RAIL_ID && manager && manager.offered === null) return;
+    restored.current.add(storageKey);
+    if (!stored || sidePanel !== null) return;
+    if (stored === EXTENSIONS_RAIL_ID) { if (offered) openPanel(EXTENSIONS_RAIL_ID); }
+    else if (extensions.some((e) => e.id === stored && extensionSidebars(e).length > 0)) openPanel(extensionRailId(stored));
+  }, [storageKey, platform, extensions, revision, sidePanel, openPanel, manager, offered]);
+  const remembered = extension?.id ?? (managerShown ? EXTENSIONS_RAIL_ID : null);
   useEffect(() => {
     if (!storageKey || !restored.current.has(storageKey)) return;
-    writeStorage(storageKey, extension?.id ?? null);
-  }, [storageKey, extension?.id]);
+    writeStorage(storageKey, remembered);
+  }, [storageKey, remembered]);
 
-  const toggleRail = (id: `extension:${string}`): void => {
+  const toggleRail = (id: ExtensionWorkspaceRailId): void => {
+    if (id === EXTENSIONS_RAIL_ID) {
+      if (!platform || !offered) return;
+      if (sidePanel === id) closePanel(); else openPanel(id);
+      return;
+    }
     const target = extensions.find((e) => e.id === railExtensionId(id));
     if (!target) return;
     if (extensionSidebars(target).length > 0) {
@@ -121,6 +155,7 @@ export function useExtensionWorkspace({ platform, runs, tabs, ownerId, active, o
     id: extensionRailId(e.id), label: e.name,
     icon: <ExtensionIcon platform={platform} extensionId={e.id} icon={e.icon} size={24} alt={e.name} />,
   })) : [];
+  if (platform && offered) railItems.push({ id: EXTENSIONS_RAIL_ID, label: 'Extensions', icon: <Icon name="extensions" size={24} />, placement: 'end' });
   const toolbarItems: ExtensionToolbarItem[] = platform ? buttons.map((entry) => ({
     id: entry.id, category: entry.category ?? 'inspect', title: entry.name, accessibleLabel: `${entry.name} — ${entry.extensionName} extension`,
     icon: <ExtensionIcon platform={platform} extensionId={entry.extensionId} icon={entry.icon} size={24} />,
@@ -142,10 +177,12 @@ export function useExtensionWorkspace({ platform, runs, tabs, ownerId, active, o
   return {
     railItems,
     toggleRail,
-    shown: !!extension,
+    shown: !!extension || managerShown,
     panel: platform && extension && active
       ? <ExtensionSidebar key={`${extension.id}:${active.id}`} platform={platform} extension={extension} units={unitsFor(active)} documentId={active.id} onClose={closePanel} />
-      : null,
+      : platform && managerShown && manager
+        ? <ExtensionManagerPanel platform={platform} available={manager.available} developerModeAllowed developerModeOn={manager.developerModeOn} onClose={closePanel} />
+        : null,
     activity: runs && platform ? <ExtensionActivity runs={runs} platform={platform} /> : null,
     tabStrip,
     tabView: platform && activeTab && tabDocument(activeTab.documentId)

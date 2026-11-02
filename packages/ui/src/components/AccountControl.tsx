@@ -85,6 +85,7 @@ function AccountDialog({ cloud, state, profiles, profileState, account, accountS
       {profiles ? <section className="pf-account-profile" aria-labelledby="pf-account-profile-title">
         <h3 id="pf-account-profile-title">Profile</h3>
         <p>Your name and company also fill the account auto-text in Layout documents.</p>
+        <MailingPreference key={profileState.ownerId} profiles={profiles} />
         <ProfileForm profiles={profiles} state={profileState} submitLabel="Save profile" savingLabel="Saving…" termsLocked />
       </section> : null}
       {account ? <>
@@ -103,4 +104,33 @@ function AccountDialog({ cloud, state, profiles, profileState, account, accountS
       }}>{state.pending === 'signingOut' ? 'Signing out…' : 'Sign out'}</button>
     </div>
   </div>, document.body);
+}
+
+export function MailingPreference({ profiles }: { profiles: CloudProfileStore }): JSX.Element | null {
+  const [choice, setChoice] = useState<boolean | null>(null);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setError(null);
+    void profiles.readMailingPreference?.().then(value => { if (active) setChoice(value); })
+      .catch(() => { if (active) setError('Could not load your mailing preference.'); });
+    return () => { active = false; };
+  }, [profiles, retry]);
+  if (!profiles.readMailingPreference || !profiles.saveMailingPreference) return null;
+  return <section aria-label="Mailing list">
+    <label className="pf-profile-check"><input type="checkbox" checked={choice ?? false}
+      disabled={choice === null || pending} onChange={event => {
+        const next = event.target.checked;
+        setPending(true); setError(null); setSaved(false);
+        void profiles.saveMailingPreference!(next).then(value => { setChoice(value); setSaved(true); })
+          .catch(() => setError('Could not save your mailing preference. Please try again.'))
+          .finally(() => setPending(false));
+      }} /><span>Join the mailing list (optional)</span></label>
+    <p>PushForm news and updates. You can leave at any time. Email unsubscribe links are handled separately.</p>
+    {error ? <p role="alert">{error} {choice === null ? <button type="button" onClick={() => setRetry(value => value + 1)}>Try again</button> : null}</p> : null}
+    {pending ? <p role="status">Saving mailing preference…</p> : saved ? <p role="status">Your mailing preference was saved.</p> : null}
+  </section>;
 }

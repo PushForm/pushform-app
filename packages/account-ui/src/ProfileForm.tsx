@@ -95,7 +95,7 @@ export function ProfileForm({ profiles, state, submitLabel, savingLabel, termsLo
     {state.profile === null ? <label className="pf-profile-check">
       <input type="checkbox" name="mailingOptIn" checked={input.mailingOptIn ?? false} disabled={state.saving}
         onChange={event => set({ mailingOptIn: event.target.checked })} />
-      <span>Send me PushForm news and updates by email (optional)</span>
+      <span>Join the mailing list (optional)</span>
     </label> : null}
     {state.error ? <p className="pf-account-error" role="alert">{state.error}</p> : null}
     {saved && !state.error ? <p role="status">Your profile was saved.</p> : null}

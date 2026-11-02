@@ -2,8 +2,8 @@
 // Copyright 2026 PushForm contributors
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { CloudSession, type AuthApi } from '@pushform/cloud';
-import { AccountControl } from './AccountControl';
+import { CloudSession, type AuthApi, type CloudProfileStore } from '@pushform/cloud';
+import { AccountControl, MailingPreference } from './AccountControl';
 let cloud: CloudSession | undefined;
 afterEach(() => { cleanup(); cloud?.dispose(); });
 it('does not offer a header sign-in bypass when signed out or unconfigured', () => {
@@ -28,4 +28,18 @@ it('opens account details, traps focus, shields shortcuts, and restores focus on
     fireEvent.keyDown(window, { key: 'Escape' }); expect(screen.queryByRole('dialog')).toBeNull();
     expect(document.activeElement).toBe(account); expect(document.querySelector<HTMLElement>('.pf-app')?.inert).toBe(false);
   } finally { window.removeEventListener('keydown', shortcut); }
+});
+
+it('loads the mailing choice and preserves it on a failed save, then allows retry', async () => {
+  const save = vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValue(false);
+  const profiles = { readMailingPreference: async () => true, saveMailingPreference: save } as unknown as CloudProfileStore;
+  render(<MailingPreference profiles={profiles} />);
+  const checkbox = screen.getByRole('checkbox') as HTMLInputElement;
+  await vi.waitFor(() => expect(checkbox.checked).toBe(true));
+  fireEvent.click(checkbox);
+  expect(await screen.findByRole('alert')).toBeTruthy();
+  expect(checkbox.checked).toBe(true);
+  fireEvent.click(checkbox);
+  await vi.waitFor(() => expect(checkbox.checked).toBe(false));
+  expect(save).toHaveBeenLastCalledWith(false);
 });

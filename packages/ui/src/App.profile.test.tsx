@@ -55,7 +55,7 @@ it('holds a new account on the signup step, then opens the workspace once it is 
 
   const submit = within(step).getByRole('button', { name: 'Continue' }) as HTMLButtonElement;
   expect(submit.disabled).toBe(true);
-  expect((within(step).getByRole('checkbox',{name:/Send me PushForm news/}) as HTMLInputElement).checked).toBe(false);
+  expect((within(step).getByRole('checkbox',{name:/Join the mailing list/}) as HTMLInputElement).checked).toBe(false);
   expect(within(step).getByRole('link', { name: 'Terms of Use' }).getAttribute('href')).toBe('https://pushform.io/terms.html');
   fireEvent.click(within(step).getByRole('checkbox', { name: /I accept the Terms of Use/ }));
   expect(submit.disabled).toBe(false);
@@ -122,7 +122,8 @@ it('edits the profile from account details and updates the header and auto-text'
   const { rpc } = await setup(complete);
   fireEvent.click(await screen.findByRole('button', { name: 'Account: Ada Lovelace, artist@example.com' }));
   const dialog = screen.getByRole('dialog', { name: 'Your account' });
-  expect(within(dialog).queryByRole('checkbox')).toBeNull();
+  expect(within(dialog).queryByRole('checkbox', { name: /I accept/ })).toBeNull();
+  expect(within(dialog).getByRole('checkbox', { name: /Join the mailing list/ })).toBeTruthy();
   expect(within(dialog).getByText(/You accepted the/)).toBeTruthy();
   fireEvent.change(within(dialog).getByLabelText(/First name/), { target: { value: 'Augusta' } });
   fireEvent.click(within(dialog).getByRole('radio', { name: 'As an individual' }));

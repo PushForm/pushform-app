@@ -213,6 +213,20 @@ isOneToOne: true
       referencedColumns: ["id"]
     }
                   ]
+                },"cloud_mailing_outbox": {
+                  Row: {
+                    "attempts": number,"claim_token": string | null,"claimed_at": string | null,"email": string,"first_name": string,"id": number,"kind": string,"last_error": string | null,"last_name": string,"next_at": string,"owner_id": string,"sent_at": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "attempts"?: number,"claim_token"?: string | null,"claimed_at"?: string | null,"email": string,"first_name": string,"id"?: never,"kind": string,"last_error"?: string | null,"last_name": string,"next_at"?: string,"owner_id": string,"sent_at"?: string | null
+                  }
+                  Update: {
+                    "attempts"?: number,"claim_token"?: string | null,"claimed_at"?: string | null,"email"?: string,"first_name"?: string,"id"?: never,"kind"?: string,"last_error"?: string | null,"last_name"?: string,"next_at"?: string,"owner_id"?: string,"sent_at"?: string | null
+                  }
+                  Relationships: [
+
+                  ]
                 },"cloud_mailing_preferences": {
                   Row: {
                     "consent_version": string | null,"opt_in": boolean,"owner_id": string,"source": string,"updated_at": string
@@ -229,14 +243,14 @@ isOneToOne: true
                   ]
                 },"cloud_profiles": {
                   Row: {
-                    "account_type": string,"company_name": string | null,"company_size": string | null,"completed_at": string,"first_name": string,"industry": string,"industry_other": string | null,"last_name": string,"owner_id": string,"terms_accepted_at": string,"terms_version": string,"updated_at": string
+                    "account_type": string,"company_name": string | null,"company_size": string | null,"completed_at": string,"first_name": string,"industry": string,"industry_other": string | null,"last_name": string,"mailing_opted_in_at": string | null,"owner_id": string,"terms_accepted_at": string,"terms_version": string,"updated_at": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "account_type": string,"company_name"?: string | null,"company_size"?: string | null,"completed_at"?: string,"first_name": string,"industry": string,"industry_other"?: string | null,"last_name": string,"owner_id": string,"terms_accepted_at": string,"terms_version": string,"updated_at"?: string
+                    "account_type": string,"company_name"?: string | null,"company_size"?: string | null,"completed_at"?: string,"first_name": string,"industry": string,"industry_other"?: string | null,"last_name": string,"mailing_opted_in_at"?: string | null,"owner_id": string,"terms_accepted_at": string,"terms_version": string,"updated_at"?: string
                   }
                   Update: {
-                    "account_type"?: string,"company_name"?: string | null,"company_size"?: string | null,"completed_at"?: string,"first_name"?: string,"industry"?: string,"industry_other"?: string | null,"last_name"?: string,"owner_id"?: string,"terms_accepted_at"?: string,"terms_version"?: string,"updated_at"?: string
+                    "account_type"?: string,"company_name"?: string | null,"company_size"?: string | null,"completed_at"?: string,"first_name"?: string,"industry"?: string,"industry_other"?: string | null,"last_name"?: string,"mailing_opted_in_at"?: string | null,"owner_id"?: string,"terms_accepted_at"?: string,"terms_version"?: string,"updated_at"?: string
                   }
                   Relationships: [
 
@@ -935,6 +949,9 @@ isOneToOne: false
 "cloud_claim_import_support":
 { Args: Record<PropertyKey, never>; Returns: Json
                            },
+"cloud_claim_mailing":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
 "cloud_commit_save":
 { Args: { "p_revision": string }; Returns: Json
                            },
@@ -976,6 +993,9 @@ isOneToOne: false
                            },
 "cloud_finish_import_support":
 { Args: { "p_error": string,"p_issue_key": string,"p_report": string }; Returns: undefined
+                           },
+"cloud_finish_mailing":
+{ Args: { "p_error"?: string,"p_id": number,"p_token": string }; Returns: undefined
                            },
 "cloud_import_source_access":
 { Args: { "p_path": string,"p_write": boolean }; Returns: boolean

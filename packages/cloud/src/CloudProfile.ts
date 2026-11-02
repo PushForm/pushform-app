@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import { readCommonsAccountStatus, setCommonsMailingPreference } from './CommonsAccess';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from './db.types';
 import { callRpc, type RpcArgs } from './rpc';
@@ -147,6 +148,8 @@ export interface CloudProfileStore {
   reload(): Promise<void>;
   /** Saves the signed-in account's profile; false with `error` set when it was refused or could not be sent. */
   save(input: CloudProfileInput): Promise<boolean>;
+  readMailingPreference?(): Promise<boolean>;
+  saveMailingPreference?(optIn: boolean): Promise<boolean>;
   clearError(): void;
 }
 
@@ -219,6 +222,19 @@ export class CloudProfiles implements CloudProfileStore {
       if (epoch === this.epoch) this.update({ saving: false, error: message(error, 'Could not save your profile. Check your connection and try again.') });
       return false;
     }
+  }
+
+  async readMailingPreference(): Promise<boolean> {
+    const epoch = this.epoch;
+    const status = await readCommonsAccountStatus(this.client);
+    if (epoch !== this.epoch || this.disposed) throw new Error('Account changed. Reopen account details.');
+    return status.mailingOptIn;
+  }
+  async saveMailingPreference(optIn: boolean): Promise<boolean> {
+    const epoch = this.epoch;
+    const status = await setCommonsMailingPreference(this.client, optIn);
+    if (epoch !== this.epoch || this.disposed) throw new Error('Account changed. Reopen account details.');
+    return status.mailingOptIn;
   }
 
   clearError(): void { this.update({ error: null }); }

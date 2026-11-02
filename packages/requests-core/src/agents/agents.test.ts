@@ -7,7 +7,7 @@ import { emptyFeatureBrief, emptyProblemReport, type FeatureBrief, type ProblemR
 import { runTurn } from './client.ts';
 import { fakeAnthropic } from './fakeAnthropic.ts';
 import { GENERAL_KNOWLEDGE_RULE, helpAgent, HELP_PROCEDURE_RULES } from './help.ts';
-import { MODEL_DOCUMENT_RULES } from './document.ts';
+import { MODEL_DOCUMENT_RULES, modelDocumentTools } from './document.ts';
 import { openAgent } from './open.ts';
 import { splitMarkdownSections } from './digest.ts';
 import { GUIDANCE_RULES } from '../guidance.ts';
@@ -337,6 +337,19 @@ it('has the model agent shape parts with push/pull and cut joinery and openings 
   expect(rules).toContain('a sink cutout is a box through the countertop');
   expect(rules).toContain('Cut and join solids before grouping them');
   expect(rules).toContain('never work around it by converting a solid into loose geometry');
+});
+
+it('has the model agent finish parts, use library woods and check for overlaps after building', () => {
+  const rules = MODEL_DOCUMENT_RULES(ctx());
+  expect(rules).toContain('fillet_edges and chamfer_edges round over or bevel edges');
+  expect(rules).toContain('add_material with a library key');
+  expect(rules).toContain('call model_find_overlaps');
+  expect(rules).toContain('only when asked');
+});
+
+it('offers the overlap and material library reads with the model tools', () => {
+  const names = modelDocumentTools.map(tool => tool.name);
+  expect(names).toEqual(expect.arrayContaining(['model_find_overlaps', 'model_material_library']));
 });
 
 it('never reports a dismissed or missing highlight to the requester as a failure', () => {

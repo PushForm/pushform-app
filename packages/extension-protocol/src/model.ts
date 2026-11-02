@@ -20,22 +20,20 @@ export const MODEL_LIMITS = {
  * Operations of later parts of version 1. A host that does not serve one yet answers `unavailable` instead of
  * rejecting it as unknown, so a client can tell "not yet" from "never".
  */
-export const MODEL_PLANNED_OPERATIONS = [
-  'set_texture', 'add_guide', 'add_text', 'add_dimension', 'add_section_plane', 'soften_edges',
-  'intersect_faces', 'offset', 'fillet', 'set_attribute',
-] as const;
+export const MODEL_PLANNED_OPERATIONS = ['set_attribute'] as const;
 
 const meters = z.number().finite();
-const point = z.tuple([meters, meters, meters]).describe('[x, y, z] in meters, in the coordinates of the batch\'s container; z is up.');
-const direction = z.tuple([meters, meters, meters]).refine(v => Math.hypot(...v) > 1e-9, 'A direction must not be zero.').describe('[x, y, z] direction; need not be unit length.');
-const localName = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,39}$/).describe('Names this operation\'s result for later operations of the same batch, which refer to it as "$name".');
+// Shared shapes carry registry ids, so a tool's JSON schema states each once (under $defs) instead of at every use.
+const point = z.tuple([meters, meters, meters]).meta({ id: 'Point', description: '[x, y, z] in meters, in the coordinates of the batch\'s container; z is up.' });
+const direction = z.tuple([meters, meters, meters]).refine(v => Math.hypot(...v) > 1e-9, 'A direction must not be zero.').meta({ id: 'Direction', description: '[x, y, z] direction; need not be unit length.' });
+const localName = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,39}$/).meta({ id: 'LocalName', description: 'Names this operation\'s result for later operations of the same batch, which refer to it as "$name".' });
 const id = z.number().int().nonnegative();
-const idOrName = z.union([id, z.string().regex(LOCAL_REFERENCE)]);
+const idOrName = z.union([id, z.string().regex(LOCAL_REFERENCE)]).meta({ id: 'IdOrName' });
 const color = z.string().regex(/^#[0-9a-fA-F]{6}$/).describe('Hex color such as #8b5a2b.');
 const name = z.string().trim().min(1).max(200);
 const instancePath = z.array(id).max(64).describe('Instance ids from the model down to the open group or component; [] is the model itself.');
 
-export const MODEL_ENTITY_KINDS = ['instance', 'body', 'face', 'sketchEdge', 'sketchFace', 'guide', 'text', 'dimension'] as const;
+export const MODEL_ENTITY_KINDS = ['instance', 'body', 'face', 'edge', 'sketchEdge', 'sketchFace', 'guide', 'text', 'dimension', 'sectionPlane'] as const;
 export type ModelEntityKind = (typeof MODEL_ENTITY_KINDS)[number];
 
 /**
@@ -44,8 +42,9 @@ export type ModelEntityKind = (typeof MODEL_ENTITY_KINDS)[number];
  */
 export const modelRefSchema = z.union([
   z.string().regex(LOCAL_REFERENCE),
-  z.object({ kind: z.enum(['instance', 'body', 'sketchEdge', 'sketchFace', 'guide', 'text', 'dimension']), id }),
+  z.object({ kind: z.enum(['instance', 'body', 'sketchEdge', 'sketchFace', 'guide', 'text', 'dimension', 'sectionPlane']), id }),
   z.object({ kind: z.literal('face'), id: id.describe('The body.'), faceId: id }),
+  z.object({ kind: z.literal('edge'), id: id.describe('The body.'), edgeKey: z.string().describe('From model_query; valid only for the revision it was read at.') }),
   z.object({
     body: idOrName.describe('The solid: its id, or "$name" of a solid made earlier in the batch.'),
     facing: direction.describe('The face\'s outward direction, within 1 degree: [0, 0, 1] is the top, [0, -1, 0] the front.'),
@@ -54,8 +53,14 @@ export const modelRefSchema = z.union([
 ]).meta({ id: 'ModelRef', description: 'An entity of the container being edited: {kind, id} from model_query, a face {kind: "face", id: bodyId, faceId}, a face chosen as {body, facing, point?}, or "$name" of something made earlier in the batch.' });
 export type ModelRefInput = z.infer<typeof modelRefSchema>;
 const refs = z.array(modelRefSchema).min(1).max(1000);
-const vector = z.tuple([meters, meters, meters]);
+const vector = z.tuple([meters, meters, meters]).meta({ id: 'Vector', description: '[dx, dy, dz] in meters.' });
 const pointList = z.array(point).max(MODEL_LIMITS.pointsPerBatch);
+/** Edges of one solid: keys from model_query, every edge around a face, or edges running one way. */
+const edgeSelectors = z.array(z.union([
+  z.string().describe('An edge key from model_query (kind edge).'),
+  z.object({ faceFacing: direction, facePoint: point.optional() }).describe('Every edge around the face facing this way (with facePoint, the face containing it).'),
+  z.object({ along: direction, through: point.optional() }).describe('Edges running this way, within 1 degree; with through, only edges through that point.'),
+])).min(1).max(1000).describe('Edges of the solid; only sharp edges can be rounded or beveled.');
 const shapeNormal = direction.describe('The direction the shape faces; push_pull of the shape moves along it. [0, 0, 1] for a shape lying flat.');
 const copies = z.number().int().min(1).max(MODEL_LIMITS.copiesPerArray)
   .describe('Leave the originals and make this many copies, each offset from the previous one by the same transform (a linear or polar array).');
@@ -134,6 +139,55 @@ export const modelOperationSchema = z.discriminatedUnion('op', [
     .describe('Sweep a profile face along a path, starting at the end nearest the profile, to make a solid such as a moulding, a rail or a turned part. Draw the profile square to the path where they meet.'),
   z.object({ op: z.literal('add_box'), as: localName.optional(), min: point.describe('One corner: the smallest x, y and z.'), max: point.describe('The opposite corner: the largest x, y and z.') })
     .describe('Add a rectangular solid with its sides along the container\'s axes, between two opposite corners; each side must be longer than zero. Returns the solid\'s id. A part such as a cabinet side or a shelf is one box, made into its own group or component.'),
+  z.object({ op: z.literal('fillet_edges'), body: modelRefSchema.describe('The solid.'), edges: edgeSelectors, radius: z.number().positive().finite(),
+    segments: z.number().int().min(3).max(96).optional().describe('Faces a full circle of rounding would have; default 24.') })
+    .describe('Round over edges of a solid, such as the top edges of a table top. A radius too big for the edge\'s faces fails with invalid_geometry.'),
+  z.object({ op: z.literal('chamfer_edges'), body: modelRefSchema.describe('The solid.'), edges: edgeSelectors, distance: z.number().positive().finite().describe('Set back along each face.') })
+    .describe('Bevel edges of a solid at 45 degrees.'),
+  z.object({ op: z.literal('add_arc'), as: localName.optional(), center: point, normal: shapeNormal, radius: z.number().positive().finite(),
+    startDeg: z.number().finite().describe('Counterclockwise about normal from the plane\'s first axis (+x for a level arc).'), endDeg: z.number().finite(),
+    segments: z.number().int().min(1).max(360).optional().describe('Default 12.') })
+    .describe('Draw an arc; with other edges it can close a face, such as an arched top.'),
+  z.object({ op: z.literal('offset'), as: localName.optional(), face: modelRefSchema.optional().describe('A face to offset: "$name" of a shape, a sketchFace or a face of a solid.'),
+    edges: refs.optional().describe('Or a chain of loose edges in one plane.'),
+    distance: meters.describe('Positive grows a face (for edges: to the right of travel), negative shrinks it.') })
+    .refine(o => (o.face === undefined) !== (o.edges === undefined), 'Give either face or edges.')
+    .describe('Draw a copy of a face\'s outline, or of edges, a set distance away. "$name" of an inward offset means the face inside the new outline, so push_pull can raise or sink it.'),
+  z.object({ op: z.literal('fillet_corner'), corner: point.describe('Where exactly two loose edges meet.'), radius: z.number().positive().finite(), segments: z.number().int().min(1).max(96).optional() })
+    .describe('Round a corner of loose edges with an arc, before push_pull, for rounded corners.'),
+  z.object({ op: z.literal('mirror'), refs, origin: point, normal: direction.describe('The mirror plane passes through origin square to normal.'), copy: z.boolean().optional() })
+    .describe('Mirror entities across a plane, or a copy of them, such as the left half of a symmetric part.'),
+  z.object({ op: z.literal('intersect_faces'), refs: refs.describe('Faces to draw lines on.'),
+    with: refs.optional().describe('Solids to intersect with; default every solid of the container.') })
+    .describe('Draw lines on faces where other solids pass through them.'),
+  z.object({ op: z.literal('soften_edges'), refs: refs.describe('Solids, faces or edges.'), angleDeg: z.number().min(0).max(180).optional().describe('Soften edges whose faces meet within this angle; default 20.'),
+    smooth: z.boolean().optional().describe('Also shade smooth; default true.') })
+    .describe('Hide and smooth the edges between nearly flat faces, as on a curved surface.'),
+  z.object({ op: z.literal('add_guide'), as: localName.optional(), point,
+    direction: direction.optional().describe('An endless guide line through point.'), end: point.optional().describe('A guide segment from point to end.') })
+    .describe('Add a construction guide: a point, a line or a segment. Guides print nowhere and are not geometry.'),
+  z.object({ op: z.literal('add_dimension'), as: localName.optional(), start: point, end: point,
+    offset: vector.describe('From the measured points to the dimension line, such as [0, -0.1, 0] to put it in front.') })
+    .describe('Add a linear dimension between two points.'),
+  z.object({ op: z.literal('add_text'), as: localName.optional(), text: z.string().min(1).max(4000), anchor: point.optional().describe('The point a leader points to.'),
+    label: point.optional().describe('Where the text sits; default a little above anchor.'),
+    screen: z.tuple([z.number().min(0).max(1), z.number().min(0).max(1)]).optional().describe('Or fixed on the screen: [x, y] from the top left, as fractions of the view.') })
+    .refine(o => (o.anchor === undefined) !== (o.screen === undefined), 'Give either anchor or screen.')
+    .describe('Add a text label, with a leader to a point in the model or fixed on the screen.'),
+  z.object({ op: z.literal('add_3d_text'), as: localName.optional(), text: z.string().min(1).max(2000), position: point.describe('The text\'s lower left corner; it lies flat facing up, so rotate it to stand.'),
+    height: z.number().positive().max(1000).optional().describe('Capital height; default 0.3048.'), extrude: z.number().finite().optional().describe('Thickness; 0 (default) leaves flat faces.'),
+    font: z.enum(['sans', 'serif', 'mono']).optional(), bold: z.boolean().optional(), align: z.enum(['left', 'center', 'right']).optional() })
+    .describe('Add lettering as geometry in a new component. Returns its instance id; as names it.'),
+  z.object({ op: z.literal('add_section_plane'), as: localName.optional(), point, normal: direction.describe('Points to the side the cut keeps visible.'), name: name.optional(),
+    active: z.boolean().optional().describe('Cut the view with it; default true.') })
+    .describe('Add a section plane that cuts the view open, as for a cutaway of a cabinet.'),
+  z.object({ op: z.literal('set_section_plane'), plane: idOrName.describe('A section plane id, or "$name".'), active: z.boolean().optional(), hidden: z.boolean().optional(),
+    reverse: z.boolean().optional().describe('Keep the other side.') }),
+  z.object({ op: z.literal('set_material'), materialId: idOrName, name: name.optional(), color: color.optional(), opacity: z.number().min(0).max(1).optional() })
+    .describe('Change a material\'s name, color or opacity everywhere it is used.'),
+  z.object({ op: z.literal('set_texture'), refs: refs.describe('Faces or solids painted with a textured material.'),
+    grain: direction.nullable().describe('Run the texture\'s width along this direction on every face, such as [0, 0, 1] for vertical grain on a stile; null restores the default placement.') })
+    .describe('Turn a texture, such as wood grain, on faces.'),
   z.object({ op: z.literal('make_group'), as: localName.optional(), refs })
     .describe('Group loose geometry, solids, groups or components of the container into a new group. Returns the group\'s instance id and definition id.'),
   z.object({ op: z.literal('make_component'), as: localName.optional(), refs, name: name.optional() })
@@ -162,8 +216,10 @@ export const modelOperationSchema = z.discriminatedUnion('op', [
     .describe('Create a tag. Returns its id; "$name" then works wherever a tag id is accepted.'),
   z.object({ op: z.literal('assign_tag'), refs, tagId: idOrName }),
   z.object({ op: z.literal('set_tag'), tagId: idOrName, visible: z.boolean().optional(), color: color.optional(), name: name.optional() }),
-  z.object({ op: z.literal('add_material'), as: localName.optional(), name: name.optional(), color, opacity: z.number().min(0).max(1).optional().describe('1 is opaque; default 1.') })
-    .describe('Create a plain-color material. Returns its id; "$name" then works wherever a material id is accepted.'),
+  z.object({ op: z.literal('add_material'), as: localName.optional(), name: name.optional(), color: color.optional(), opacity: z.number().min(0).max(1).optional().describe('1 is opaque; default 1.'),
+    library: z.string().max(100).optional().describe('A key from model_material_library, such as Wood_Oak, instead of name and color: a textured material such as a wood veneer.') })
+    .refine(o => (o.color === undefined) !== (o.library === undefined), 'Give either color or library.')
+    .describe('Create a plain-color material, or add one from the built-in library. Returns its id; "$name" then works wherever a material id is accepted.'),
   z.object({ op: z.literal('paint'), refs: refs.describe('Faces, solids, sketch faces, groups or placements.'),
     materialId: idOrName.nullable().describe('null restores the default material.'), side: z.enum(['front', 'back']).optional().describe('Faces only; default front.') })
     .describe('Paint faces, or whole solids, groups and placements, with a material.'),
@@ -193,19 +249,32 @@ export const modelBatchSchema = z.object({
 export const modelBatchToolSchema = modelBatchSchema.extend({ operations: z.array(modelOperationSchema).min(1).max(MODEL_LIMITS.operationsPerBatch) });
 export type ModelBatch = z.infer<typeof modelBatchToolSchema>;
 
+// The query is a strict tool, so it spells these shapes out rather than referring to shared definitions.
+const queryPoint = z.tuple([meters, meters, meters]).describe('[x, y, z] in meters, in the coordinates of the container; z is up.');
+const queryDirection = z.tuple([meters, meters, meters]).refine(v => Math.hypot(...v) > 1e-9, 'A direction must not be zero.').describe('[x, y, z] direction; need not be unit length.');
 /** Field-selected, bounded read of one container's entities; nullable fields so the schema stays strict. */
 export const modelQuerySchema = z.object({
   container: instancePath.nullable().describe('null: the container open in the editor.'),
-  kinds: z.array(z.enum(MODEL_ENTITY_KINDS)).nullable().describe('null: every kind except face. Faces are listed only when asked for, per body.'),
-  ids: z.array(id).max(MODEL_LIMITS.entitiesPerQuery).nullable().describe('null: all. For faces, the body ids whose faces to list.'),
-  facing: direction.nullable().describe('Faces only: keep faces whose outward normal is within 1 degree of this direction.'),
-  containing: point.nullable().describe('Faces only: keep faces that contain this point.'),
+  kinds: z.array(z.enum(MODEL_ENTITY_KINDS)).nullable().describe('null: every kind except face and edge. Faces and edges of solids are listed only when asked for, per body.'),
+  ids: z.array(id).max(MODEL_LIMITS.entitiesPerQuery).nullable().describe('null: all. For faces and edges, the body ids whose faces or edges to list.'),
+  facing: queryDirection.nullable().describe('Faces: keep faces whose outward normal is within 1 degree of this direction. Edges: keep edges running this way.'),
+  containing: queryPoint.nullable().describe('Faces and edges: keep those that contain this point.'),
   fields: z.array(z.enum(['bounds', 'geometry', 'appearance'])).nullable().describe('null: all. bounds: bounding boxes; geometry: transforms, points, normals, areas and volumes; appearance: materials.'),
   offset: z.number().int().min(0).nullable(),
   limit: z.number().int().min(1).max(MODEL_LIMITS.entitiesPerQuery).nullable().describe('null: 50.'),
 });
 export type ModelQuery = z.infer<typeof modelQuerySchema>;
 export const modelGetDocumentSchema = z.object({});
+
+/** Which solids of a container interpenetrate, in the container's coordinates, through nested groups and components. */
+export const modelOverlapsSchema = z.object({
+  container: instancePath.nullable().describe('null: the container open in the editor.'),
+  minVolume: z.number().min(0).nullable().describe('Report only overlaps larger than this, in cubic meters; null: 1e-9.'),
+});
+export type ModelOverlapsQuery = z.infer<typeof modelOverlapsSchema>;
+export const modelMaterialLibrarySchema = z.object({
+  category: z.string().max(100).nullable().describe('null: the categories and their sizes.'),
+});
 
 /** What the requester sees: camera, scenes and playback. No undo entry. */
 export const modelViewSchema = z.object({
@@ -230,7 +299,7 @@ export interface ModelSceneSummary { id: number; name: string; description: stri
 export interface ModelViewResult { ok: true; revision: number; camera: ModelCameraSummary; activeScene: { id: number; name: string } | null; playing: boolean }
 export interface ModelBounds { min: ModelVec3; max: ModelVec3 }
 /** An entity as reads report it: the instance path of its container, its kind and id (and face id for faces). */
-export interface ModelRef { path: number[]; kind: ModelEntityKind; id: number; faceId?: number }
+export interface ModelRef { path: number[]; kind: ModelEntityKind; id: number; faceId?: number; edgeKey?: string }
 export interface ModelDefinitionSummary { id: number; name: string; type: 'group' | 'component'; placements: number; solids: number; faces: number; edges: number; instances: number; bounds: ModelBounds | null }
 export interface ModelTagSummary { id: number; name: string; visible: boolean; color: string; active: boolean; untagged: boolean }
 export interface ModelMaterialSummary { id: number; name: string; color: string; opacity: number; textured: boolean; isDefault: boolean }
@@ -274,13 +343,18 @@ export interface ModelEntitySummary {
   outerLoop?: ModelVec3[];
   loopPointCount?: number;
   holes?: number;
-  /** Sketch edges. */
+  /** Sketch edges and edges of solids. */
   start?: ModelVec3;
+  /** Edges of solids: their length and the two faces they join. */
+  length?: number;
+  faces?: [number, number];
   end?: ModelVec3;
   soft?: boolean;
   smooth?: boolean;
   curve?: boolean;
-  /** Guides, texts and dimensions. */
+  /** Section planes: whether it cuts the view. */
+  active?: boolean;
+  /** Guides, texts, dimensions and section planes. */
   points?: ModelVec3[];
   text?: string;
 }
@@ -294,6 +368,16 @@ export interface ModelQueryResult {
   entities: ModelEntitySummary[];
   next: number | null;
 }
+export interface ModelOverlap {
+  /** The two solids, each with the instance path of the group or component holding it. */
+  a: ModelRef & { name: string };
+  b: ModelRef & { name: string };
+  /** Shared volume in cubic meters, and its bounds in the container's coordinates. */
+  volume: number;
+  bounds: ModelBounds;
+}
+export interface ModelOverlapsResult { revision: number; container: number[]; solids: number; overlaps: ModelOverlap[]; truncated: boolean }
+export interface ModelLibraryResult { categories?: { name: string; count: number }[]; materials?: { key: string; name: string; color: string; textured: boolean }[] }
 export interface ModelBatchResult {
   ok: true;
   revision: number;
@@ -315,11 +399,19 @@ export const MODEL_TOOLS = {
   },
   query: {
     name: 'model_query',
-    description: 'List entities of one container (the model, or an open group or component): groups and component placements, solids, loose edges and faces, guides, texts and dimensions, with ids, tags, bounds, transforms and materials in meters. Faces of solids are listed only when kinds includes face, filtered by body id, facing direction or a point on the face. Paged: pass offset from the previous result\'s next.',
+    description: 'List entities of one container (the model, or an open group or component): groups and component placements, solids, loose edges and faces, guides, texts, dimensions and section planes, with ids, tags, bounds, transforms and materials in meters. Faces and edges of solids are listed only when kinds includes face or edge, filtered by body id, direction or a point on them; edge keys are valid only for the revision they were read at. Paged: pass offset from the previous result\'s next.',
   },
   applyOperations: {
     name: 'model_apply_operations',
-    description: 'Edit the open 3D model in one atomic batch: every operation applies or none does, and the batch is one undo entry labelled with label. Lengths are meters, local to the container being edited; angles are degrees; z is up. Entities are named by {kind, id} from model_query (faces as {kind: "face", id: bodyId, faceId}). Create operations accept as: "name"; later operations refer to the result as "$name". Returns the new revision and the created ids, or an error naming the failed operation; a stale_revision error means the user changed the model, so read it again before retrying. add_box adds a rectangular solid. Drawing operations (add_edges, add_polyline, add_rectangle, add_circle, add_polygon) make loose edges and faces, or divide the face of a solid when drawn on it; push_pull turns a loose face into a solid or pushes and pulls the face of a solid; union, subtract, intersect and split combine overlapping solids of the container; follow_me sweeps a face along a path. Geometry that would not leave a valid solid fails with invalid_geometry and changes nothing. A face of a solid can be named as {body, facing, point?} instead of by id. Scene operations add, update, delete, rename, reorder and include scenes; a framed camera fits a subject from a view direction.',
+    description: 'Edit the open 3D model in one atomic batch: every operation applies or none does, and the batch is one undo entry labelled with label. Lengths are meters, local to the container being edited; angles are degrees; z is up. Entities are named by {kind, id} from model_query (faces as {kind: "face", id: bodyId, faceId}). Create operations accept as: "name"; later operations refer to the result as "$name". Returns the new revision and the created ids, or an error naming the failed operation; a stale_revision error means the user changed the model, so read it again before retrying. add_box adds a rectangular solid. Drawing operations (add_edges, add_polyline, add_rectangle, add_circle, add_polygon) make loose edges and faces, or divide the face of a solid when drawn on it; push_pull turns a loose face into a solid or pushes and pulls the face of a solid; union, subtract, intersect and split combine overlapping solids of the container; follow_me sweeps a face along a path; fillet_edges and chamfer_edges round or bevel edges of a solid; add_arc, offset and fillet_corner draw more shapes; mirror reflects entities. Guides, dimensions, text, 3D text, section planes and library materials have their own operations. Geometry that would not leave a valid solid fails with invalid_geometry and changes nothing. A face of a solid can be named as {body, facing, point?} instead of by id. Scene operations add, update, delete, rename, reorder and include scenes; a framed camera fits a subject from a view direction.',
+  },
+  overlaps: {
+    name: 'model_find_overlaps',
+    description: 'Check which solids interpenetrate, including solids inside groups and components: each pair with its shared volume and bounds. Parts should touch, not overlap, except where joinery is meant to (a panel in a groove that was cut for it leaves no overlap). Call it after building.',
+  },
+  materialLibrary: {
+    name: 'model_material_library',
+    description: 'List the built-in material library: its categories, or the materials of one category (Wood holds veneers such as oak, walnut and maple). Pass a key to add_material as library.',
   },
   view: {
     name: 'model_view',

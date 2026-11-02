@@ -7,6 +7,7 @@ import { pointInPolygon, segSegIntersect2D } from '@pushform/geom';
 import type { PolygonsWithHoles } from '@pushform/geom';
 import { addImprintEdge } from '@pushform/model';
 import type { Body, DocumentState, EntityRef } from '@pushform/model';
+import type { KernelClient } from '@pushform/kernel';
 import { defineCommand } from '../registry/Command';
 import type { AnyCommand } from '../registry/Command';
 import { hostOf, kernelOf } from '../host/services';
@@ -28,6 +29,8 @@ export const IntersectParamsSchema = z.object({
   refs: z.array(EntityRefSchema).optional(),
   /** `model`: against every body of the current context's container; `selection`: only against bodies in `refs`. */
   with: z.enum(['model', 'selection']).default('model'),
+  /** A kernel step from `runIntersectKernel` for exactly these params. */
+  precomputed: z.custom<IntersectKernelWork>((v) => typeof v === 'object' && v !== null && 'plans' in v).optional(),
 });
 export type IntersectParams = z.infer<typeof IntersectParamsSchema>;
 
@@ -38,7 +41,7 @@ export interface IntersectApplyResult {
   faceCount: number;
 }
 
-interface CutPlan {
+export interface CutPlan {
   info: FaceTargetInfo;
   /** Clipped segments in world space. */
   segments: [Vec3, Vec3][];
@@ -86,6 +89,79 @@ function clipLoopToFace(info: FaceTargetInfo, loop: Float64Array, into: [Vec3, V
   }
 }
 
+/**
+ * The kernel step of Intersect Faces: the section lines of every other solid clipped to each face, computed before the
+ * document changes. Passing it back as `precomputed` commits it without running the kernel again.
+ */
+export interface IntersectKernelWork {
+  readonly path: readonly Id[];
+  readonly plans: readonly CutPlan[];
+}
+
+/** Resolve the faces and solids and run the section cuts. Reads the document only. */
+export async function runIntersectKernel(host: ReturnType<typeof hostOf>, kernel: KernelClient, p: IntersectParams): Promise<IntersectKernelWork> {
+  const state: DocumentState = host.doc.state;
+  const refs: EntityRef[] = p.refs ? (p.refs as unknown as EntityRef[]) : host.selection.refs;
+  const path = host.context.path;
+  const root = rootContainerOf(state, path);
+
+  const faces: FaceTargetInfo[] = [];
+  const selectedBodies = new Set<Id>();
+  for (const r of refs) {
+    requireContextPath(host, r.path, 'Face');
+    if (r.kind === 'sketchFace') faces.push(resolveFaceTarget(state, { kind: 'sketchFace', path: [...path], id: r.id }));
+    else if (r.kind === 'face') faces.push(resolveFaceTarget(state, { kind: 'face', path: [...path], id: r.id, faceId: r.faceId, region: r.region }));
+    else if (r.kind === 'body') selectedBodies.add(r.id);
+  }
+  if (!faces.length) {
+    if (selectedBodies.size) {
+      throw new PushFormError('intersect.unsupported', 'Intersect Faces between solids is not supported: use Solid Tools (Union/Subtract/Intersect/Split)');
+    }
+    throw new PushFormError('intersect.target', 'Select a face to intersect');
+  }
+  const bodies: Body[] = [...root.bodies.values()].filter((b) => (p.with === 'model' ? true : selectedBodies.has(b.id)) && !b.hidden);
+
+  const plans: CutPlan[] = [];
+  for (const info of faces) {
+    const segments: [Vec3, Vec3][] = [];
+    for (const body of bodies) {
+      if (body.id === info.bodyId) continue;
+      await kernel.ensureBody(body.id, body.version, body.mesh);
+      const cut = await kernel.sectionCut({ body: { bodyId: body.id, version: body.version }, plane: info.plane });
+      for (const loop of cut.loops) clipLoopToFace(info, loop, segments);
+    }
+    plans.push({ info, segments });
+  }
+  return { path, plans };
+}
+
+/** Commit the section lines in one transaction ("Intersect Faces"). */
+export function commitIntersect(host: ReturnType<typeof hostOf>, work: IntersectKernelWork): IntersectApplyResult {
+  const { path, plans } = work;
+  return host.transact('Intersect Faces', () =>
+    host.edit('Intersect Faces', (draft) => {
+      const edgeIds: number[] = [];
+      let faceCount = 0;
+      const g = sketchGraphAt(draft, path);
+      const droot = draftContainerAt(draft, path);
+      for (const { info, segments } of plans) {
+        if (!segments.length) continue;
+        faceCount++;
+        if (info.bodyId !== null && info.faceId !== null) {
+          const body = droot.bodies.get(info.bodyId);
+          if (!body) continue;
+          for (const [a, b] of segments) {
+            edgeIds.push(...addImprintEdge(asDraftBody(body), info.faceId as FaceLocalId, a, b));
+          }
+        } else {
+          for (const [a, b] of segments) for (const id of g.addEdge(a, b)) edgeIds.push(id as number);
+        }
+      }
+      return { edgeIds, faceCount };
+    }),
+  );
+}
+
 export const intersectFaces = defineCommand({
   id: 'intersect.faces',
   title: 'Intersect Faces',
@@ -94,62 +170,8 @@ export const intersectFaces = defineCommand({
   undoable: false,
   async run(ctx, p): Promise<IntersectApplyResult> {
     const host = hostOf(ctx);
-    const kernel = kernelOf(ctx);
-    const state: DocumentState = host.doc.state;
-    const refs: EntityRef[] = p.refs ? (p.refs as unknown as EntityRef[]) : host.selection.refs;
-    const path = host.context.path;
-    const root = rootContainerOf(state, path);
-
-    const faces: FaceTargetInfo[] = [];
-    const selectedBodies = new Set<Id>();
-    for (const r of refs) {
-      requireContextPath(host, r.path, 'Face');
-      if (r.kind === 'sketchFace') faces.push(resolveFaceTarget(state, { kind: 'sketchFace', path: [...path], id: r.id }));
-      else if (r.kind === 'face') faces.push(resolveFaceTarget(state, { kind: 'face', path: [...path], id: r.id, faceId: r.faceId, region: r.region }));
-      else if (r.kind === 'body') selectedBodies.add(r.id);
-    }
-    if (!faces.length) {
-      if (selectedBodies.size) {
-        throw new PushFormError('intersect.unsupported', 'Intersect Faces between solids is not supported: use Solid Tools (Union/Subtract/Intersect/Split)');
-      }
-      throw new PushFormError('intersect.target', 'Select a face to intersect');
-    }
-    const bodies: Body[] = [...root.bodies.values()].filter((b) => (p.with === 'model' ? true : selectedBodies.has(b.id)) && !b.hidden);
-
-    const plans: CutPlan[] = [];
-    for (const info of faces) {
-      const segments: [Vec3, Vec3][] = [];
-      for (const body of bodies) {
-        if (body.id === info.bodyId) continue;
-        await kernel.ensureBody(body.id, body.version, body.mesh);
-        const cut = await kernel.sectionCut({ body: { bodyId: body.id, version: body.version }, plane: info.plane });
-        for (const loop of cut.loops) clipLoopToFace(info, loop, segments);
-      }
-      plans.push({ info, segments });
-    }
-
-    return host.transact('Intersect Faces', () =>
-      host.edit('Intersect Faces', (draft) => {
-        const edgeIds: number[] = [];
-        let faceCount = 0;
-        const g = sketchGraphAt(draft, path);
-        const droot = draftContainerAt(draft, path);
-        for (const { info, segments } of plans) {
-          if (!segments.length) continue;
-          faceCount++;
-          if (info.bodyId !== null && info.faceId !== null) {
-            const body = droot.bodies.get(info.bodyId);
-            if (!body) continue;
-            for (const [a, b] of segments) {
-              edgeIds.push(...addImprintEdge(asDraftBody(body), info.faceId as FaceLocalId, a, b));
-            }
-          } else {
-            for (const [a, b] of segments) for (const id of g.addEdge(a, b)) edgeIds.push(id as number);
-          }
-        }
-        return { edgeIds, faceCount };
-      }),
-    );
+    const work = p.precomputed ?? (await runIntersectKernel(host, kernelOf(ctx), p));
+    return commitIntersect(host, work);
   },
 });
 

@@ -2,9 +2,13 @@
 // Copyright 2026 PushForm contributors
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  CommandRegistry, DocumentHost, SERVICE_DOCUMENT, SERVICE_KERNEL, componentCommands, contextCommands, curveCommands, editCommands, followMeCommands,
-  groupCommands, materialCommands, modelCommands, pushPullCommands, sketchCommands, solidCommands, tagCommands, transformCommands,
+  CommandRegistry, DocumentHost, SERVICE_DOCUMENT, SERVICE_FONTS, SERVICE_KERNEL, componentCommands, contextCommands, curveCommands, dimensionCommands,
+  edgeBlendCommands, edgeCommands, editCommands, followMeCommands, groupCommands, guideCommands, intersectCommands, materialCommands, modelCommands,
+  offsetCommands, pushPullCommands, sectionPlaneCommands, sketchCommands, solidCommands, tagCommands, text3dCommands, textCommands, transformCommands,
+  type FontSource,
 } from '@pushform/commands';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { MODEL_TOOLS, type ModelBatchResult } from '@pushform/extension-protocol';
 import { InlineBackend, KernelClient } from '@pushform/kernel';
 import { ModelApiFailure, ModelDocumentApi, runModelTool } from './modelApi';
@@ -12,13 +16,23 @@ import { ModelApiFailure, ModelDocumentApi, runModelTool } from './modelApi';
 const kernels: KernelClient[] = [];
 afterEach(() => { for (const kernel of kernels.splice(0)) kernel.dispose(); });
 
-function setup() {
+/** Roboto for every family, from the commands package's test fonts. */
+const fontFile = (name: string): ArrayBuffer => {
+  const b = readFileSync(createRequire(new URL('../../commands/package.json', import.meta.url)).resolve(`@fontsource/roboto/files/${name}`));
+  return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
+};
+const fonts: FontSource = { load: (_font, bold) => Promise.resolve([fontFile(`roboto-latin-${bold ? 700 : 400}-normal.woff`)]) };
+
+function setup(options: { fonts?: boolean } = {}) {
   const host = new DocumentHost();
   const kernel = new KernelClient(new InlineBackend());
   kernels.push(kernel);
-  const commands = new CommandRegistry({ tx: host, services: new Map<string, unknown>([[SERVICE_DOCUMENT, host], [SERVICE_KERNEL, kernel]]) });
+  const services = new Map<string, unknown>([[SERVICE_DOCUMENT, host], [SERVICE_KERNEL, kernel]]);
+  if (options.fonts) services.set(SERVICE_FONTS, fonts);
+  const commands = new CommandRegistry({ tx: host, services });
   for (const group of [editCommands, modelCommands, sketchCommands, transformCommands, groupCommands, componentCommands, contextCommands, tagCommands, materialCommands,
-    curveCommands, pushPullCommands, solidCommands, followMeCommands])
+    curveCommands, pushPullCommands, solidCommands, followMeCommands, edgeBlendCommands, offsetCommands, intersectCommands, edgeCommands, guideCommands,
+    dimensionCommands, textCommands, text3dCommands, sectionPlaneCommands])
     commands.registerAll(group);
   const api = new ModelDocumentApi(commands, 'AI Chat');
   const root = () => host.doc.rootDefinition.entities;
@@ -228,7 +242,7 @@ describe('ModelDocumentApi batches', () => {
     const revision = api.revision;
     expect((await failure(() => api.apply({ expectedRevision: revision - 1, label: 'x', operations: [{ op: 'add_tag' }] }))).error.code).toBe('stale_revision');
     expect((await failure(() => api.apply({ expectedRevision: revision, label: 'x', operations: [{ op: 'move', refs: ['$nope'], offset: [1, 0, 0] }] }))).error.code).toBe('invalid_reference');
-    const unavailable = await failure(() => api.apply({ expectedRevision: revision, label: 'x', operations: [{ op: 'add_tag' }, { op: 'fillet', radius: 1 }] }));
+    const unavailable = await failure(() => api.apply({ expectedRevision: revision, label: 'x', operations: [{ op: 'add_tag' }, { op: 'set_attribute', key: 'x' }] }));
     expect(unavailable.error).toMatchObject({ code: 'unavailable', operationIndex: 1 });
     expect((await failure(() => api.apply({ expectedRevision: revision, label: 'x', operations: [{ op: 'teleport' }] }))).error.code).toBe('invalid_operation');
     expect((await failure(() => api.apply({ expectedRevision: revision, label: 'x', operations: Array.from({ length: 201 }, () => ({ op: 'add_tag' })) }))).error.code).toBe('limit_exceeded');
@@ -461,6 +475,149 @@ describe('ModelDocumentApi geometry', () => {
     const both = await failure(() => api.apply({ expectedRevision: api.revision, label: 'x', operations: [
       { op: 'follow_me', profile: { kind: 'sketchFace', id: 1 }, pathPoints: [[0, 0, 0], [1, 0, 0]], pathEdges: [{ kind: 'sketchEdge', id: 1 }] }] }));
     expect(both.error.code).toBe('invalid_operation');
+  });
+});
+
+describe('ModelDocumentApi phase 2: edges, more shapes, annotation, materials and overlaps', () => {
+  const queryAll = { container: null, kinds: null, ids: null, facing: null, containing: null, fields: null, offset: null, limit: null };
+  const volumeOf = (api: ModelDocumentApi, id: number) => api.query({ ...queryAll, kinds: ['body'], ids: [id] }).entities[0]!.volume!;
+
+  it('lists the edges of a solid by direction and point, with keys, length and faces', () => {
+    const { api, addBox } = setup();
+    const id = addBox([0, 0, 0], [1, 2, 3]);
+    const all = api.query({ ...queryAll, kinds: ['edge'], ids: [id] });
+    expect(all.total).toBe(12);
+    const vertical = api.query({ ...queryAll, kinds: ['edge'], ids: [id], facing: [0, 0, -1] });
+    expect(vertical.total).toBe(4);
+    expect(vertical.entities[0]).toMatchObject({ ref: { kind: 'edge', id, edgeKey: expect.any(String) }, length: 3, faces: [expect.any(Number), expect.any(Number)] });
+    expect(api.query({ ...queryAll, kinds: ['edge'], ids: [id], containing: [0, 0, 0] }).total).toBe(3);
+  });
+
+  it('rounds over the top edges of a slab and bevels its corners, and refuses stale keys and oversized radii', async () => {
+    const { api, host, addBox } = setup();
+    const id = addBox([0, 0, 0], [1, 1, 0.1]);
+    await api.apply({ expectedRevision: api.revision, label: 'Round over', operations: [{ op: 'fillet_edges', body: box(id), edges: [{ faceFacing: [0, 0, 1] }], radius: 0.02, segments: 24 }] });
+    const lost = 0.02 ** 2 * (1 - Math.PI / 4);
+    expect(volumeOf(api, id)).toBeLessThan(0.1 - 3 * lost);
+    expect(volumeOf(api, id)).toBeGreaterThan(0.1 - 5 * lost);
+    const corner = await failure(() => api.apply({ expectedRevision: api.revision, label: 'x', operations: [{ op: 'chamfer_edges', body: box(id), edges: [{ along: [0, 0, 1] }], distance: 0.01 }] }));
+    expect(corner.error.code).toBe('invalid_geometry');
+    const post = addBox([3, 0, 0], [3.1, 0.1, 1]);
+    const key = api.query({ ...queryAll, kinds: ['edge'], ids: [post], facing: [0, 0, 1], containing: [3, 0, 0.5] }).entities[0]!.ref.edgeKey!;
+    await api.apply({ expectedRevision: api.revision, label: 'Bevel', operations: [{ op: 'chamfer_edges', body: box(post), edges: [key], distance: 0.01 }] });
+    expect(volumeOf(api, post)).toBeCloseTo(0.01 - 0.01 ** 2 / 2, 9);
+    const stale = await failure(() => api.apply({ expectedRevision: api.revision, label: 'x', operations: [{ op: 'chamfer_edges', body: box(post), edges: [key], distance: 0.01 }] }));
+    expect(stale.error.code).toBe('invalid_reference');
+    const before = volumeOf(api, id), depth = host.undoStack.length;
+    const big = await failure(() => api.apply({ expectedRevision: api.revision, label: 'x', operations: [{ op: 'fillet_edges', body: box(id), edges: [{ along: [1, 0, 0] }], radius: 0.5 }] }));
+    expect(big.error.code).toBe('invalid_geometry');
+    expect(volumeOf(api, id)).toBeCloseTo(before);
+    expect(host.undoStack.length).toBe(depth);
+  });
+
+  it('draws an arched top with an arc, a raised panel with an inward offset, and rounded corners', async () => {
+    const { api, root } = setup();
+    const result = await api.apply({ expectedRevision: api.revision, label: 'Shapes', operations: [
+      { op: 'add_arc', center: [0.5, 1, 0], normal: [0, 0, 1], radius: 0.5, startDeg: 0, endDeg: 180, segments: 12 },
+      { op: 'add_polyline', as: 'arched', points: [[0, 1, 0], [0, 0, 0], [1, 0, 0], [1, 1, 0]] },
+      { op: 'push_pull', as: 'top', face: '$arched', distance: 0.1 },
+      { op: 'add_rectangle', as: 'panel', corner: [5, 0, 0], side1: [1, 0, 0], side2: [0, 1, 0] },
+      { op: 'offset', as: 'field', face: '$panel', distance: -0.1 },
+      { op: 'push_pull', as: 'raised', face: '$field', distance: 0.05 },
+      { op: 'add_rectangle', as: 'round', corner: [10, 0, 0], side1: [1, 0, 0], side2: [0, 1, 0] },
+      { op: 'fillet_corner', corner: [10, 0, 0], radius: 0.2 },
+      { op: 'push_pull', as: 'rounded', face: '$round', distance: 0.1 },
+    ] });
+    const half = 0.5 * 0.25 * 12 * Math.sin(Math.PI / 12);
+    expect(root().bodies.get(result.created.top as never)!.props.volume).toBeCloseTo((1 + half) * 0.1, 6);
+    expect(root().bodies.get(result.created.raised as never)!.props.volume).toBeCloseTo(0.8 * 0.8 * 0.05, 6);
+    const rounded = root().bodies.get(result.created.rounded as never)!.props.volume;
+    expect(rounded).toBeLessThan(0.1);
+    expect(rounded).toBeGreaterThan(0.1 - 0.04 * 0.1);
+  });
+
+  it('mirrors a copy across a plane, draws lines where solids pass through faces, and softens edges', async () => {
+    const { api, root, addBox } = setup();
+    const a = addBox([1, 0, 0], [2, 1, 1]);
+    const mirrored = await api.apply({ expectedRevision: api.revision, label: 'Mirror', operations: [{ op: 'mirror', refs: [box(a)], origin: [0, 0, 0], normal: [1, 0, 0], copy: true }] });
+    const copy = mirrored.results[0]!.refs![0]!.id;
+    expect(api.query({ ...queryAll, kinds: ['body'], ids: [copy] }).entities[0]!.bounds).toMatchObject({ min: [-2, 0, 0], max: [-1, 1, 1] });
+    expect(root().bodies.get(copy as never)!.props.volume).toBeCloseTo(1);
+    const b = addBox([1.5, 0.25, 0.5], [3, 0.75, 1.5]);
+    const cut = await api.apply({ expectedRevision: api.revision, label: 'Lines', operations: [{ op: 'intersect_faces', refs: [{ body: a, facing: [0, 0, 1] }], with: [box(b)] }] });
+    expect(cut.results[0]!.count).toBe(1);
+    expect(root().bodies.get(a as never)!.imprints.size).toBe(1);
+    const prism = await api.apply({ expectedRevision: api.revision, label: 'Post', operations: [
+      { op: 'add_polygon', as: 'oct', center: [10, 0, 0], normal: [0, 0, 1], radius: 0.1, sides: 16 },
+      { op: 'push_pull', as: 'post', face: '$oct', distance: 1 },
+      { op: 'soften_edges', refs: ['$post'], angleDeg: 30 },
+    ] });
+    expect(prism.results[2]!.count).toBe(16);
+  });
+
+  it('adds guides, a dimension, text and a section plane that the query lists', async () => {
+    const { api, root } = setup();
+    const result = await api.apply({ expectedRevision: api.revision, label: 'Notes', operations: [
+      { op: 'add_guide', as: 'g1', point: [0, 0, 0], direction: [1, 0, 0] },
+      { op: 'add_guide', point: [0, 0, 1], end: [1, 0, 1] },
+      { op: 'add_guide', point: [2, 2, 2] },
+      { op: 'add_dimension', as: 'd', start: [0, 0, 0], end: [0.9144, 0, 0], offset: [0, -0.1, 0] },
+      { op: 'add_text', as: 't', text: 'Toe kick', anchor: [0.5, 0, 0.05] },
+      { op: 'add_text', text: 'Base cabinet', screen: [0.05, 0.05] },
+      { op: 'add_section_plane', as: 'cut', point: [0.5, 0, 0], normal: [1, 0, 0], name: 'Center' },
+      { op: 'set_section_plane', plane: '$cut', hidden: true },
+    ] });
+    expect(root().guides.size).toBe(3);
+    expect(api.query({ ...queryAll, kinds: ['dimension'] }).entities[0]).toMatchObject({ ref: { id: result.created.d }, points: [[0, 0, 0], [0.9144, 0, 0]] });
+    expect(api.query({ ...queryAll, kinds: ['text'] }).entities.map(t => t.text).sort()).toEqual(['Base cabinet', 'Toe kick']);
+    expect(api.query({ ...queryAll, kinds: ['sectionPlane'] }).entities[0]).toMatchObject({ ref: { id: result.created.cut }, name: 'Center', active: true, hidden: true, normal: [1, 0, 0] });
+    const along = await failure(() => api.apply({ expectedRevision: api.revision, label: 'x', operations: [{ op: 'add_dimension', start: [0, 0, 0], end: [1, 0, 0], offset: [2, 0, 0] }] }));
+    expect(along.error.code).toBe('invalid_operation');
+  });
+
+  it('adds a library wood, turns its grain on a solid, and edits a material', async () => {
+    const { api, root, addBox } = setup();
+    const id = addBox([0, 0, 0], [0.05, 0.02, 0.7]);
+    const result = await api.apply({ expectedRevision: api.revision, label: 'Oak stile', operations: [
+      { op: 'add_material', as: 'oak', library: 'Wood_Oak' },
+      { op: 'paint', refs: [box(id)], materialId: '$oak' },
+      { op: 'set_texture', refs: [box(id)], grain: [0, 0, 1] },
+      { op: 'set_material', materialId: '$oak', name: 'Quartersawn oak', opacity: 0.9 },
+    ] });
+    expect(result.results[2]!.count).toBe(4);
+    const body = root().bodies.get(id as never)!;
+    expect([...body.faces.values()].filter(f => f.uv.kind === 'sized')).toHaveLength(4);
+    expect(api.getDocument().materials.find(m => m.id === result.created.oak)).toMatchObject({ name: 'Quartersawn oak', opacity: 0.9 });
+    const unknown = await failure(() => api.apply({ expectedRevision: api.revision, label: 'x', operations: [{ op: 'add_material', library: 'Wood_Unobtainium' }] }));
+    expect(unknown.error.code).toBe('invalid_reference');
+    const library = await runModelTool(api, MODEL_TOOLS.materialLibrary.name, { category: 'wood' });
+    expect(JSON.parse(library.content).materials.some((m: { key: string }) => m.key === 'Wood_Walnut')).toBe(true);
+    expect(JSON.parse((await runModelTool(api, MODEL_TOOLS.materialLibrary.name, { category: null })).content).categories.length).toBeGreaterThan(5);
+  });
+
+  it('adds 3D lettering as a component, or reports that fonts are unavailable', async () => {
+    const { api, root } = setup({ fonts: true });
+    const result = await api.apply({ expectedRevision: api.revision, label: 'Sign', operations: [{ op: 'add_3d_text', as: 'sign', text: 'OAK', position: [0, 0, 0], height: 0.05, extrude: 0.005 }] });
+    const inst = root().instances.get(result.created.sign as never)!;
+    expect(api.getDocument().definitions.find(d => d.id === inst.definitionId)!.solids).toBeGreaterThanOrEqual(3);
+    const bare = setup();
+    const error = await failure(() => bare.api.apply({ expectedRevision: bare.api.revision, label: 'x', operations: [{ op: 'add_3d_text', text: 'A', position: [0, 0, 0] }] }));
+    expect(error.error.code).toBe('unavailable');
+  });
+
+  it('finds solids that interpenetrate, through groups, and ignores ones that only touch', async () => {
+    const { api, addBox } = setup();
+    const a = addBox([0, 0, 0], [1, 1, 1]), b = addBox([0.9, 0, 0], [2, 1, 1]), c = addBox([2, 0, 0], [3, 1, 1]);
+    await api.apply({ expectedRevision: api.revision, label: 'Group', operations: [
+      { op: 'make_group', as: 'inner', refs: [box(b)] }, { op: 'rename_instance', ref: '$inner', name: 'Rail' }, { op: 'make_group', refs: ['$inner'] }] });
+    const result = await api.findOverlaps({ container: null, minVolume: null });
+    expect(result.solids).toBe(3);
+    expect(result.overlaps).toHaveLength(1);
+    expect(result.overlaps[0]).toMatchObject({ a: { kind: 'body', id: a, path: [] }, b: { kind: 'body', name: 'Rail' } });
+    expect(result.overlaps[0]!.volume).toBeCloseTo(0.1, 6);
+    expect(result.overlaps[0]!.bounds.min[0]).toBeCloseTo(0.9);
+    expect(result.overlaps.some(o => o.a.id === c || o.b.id === c)).toBe(false);
+    expect(JSON.parse((await runModelTool(api, MODEL_TOOLS.overlaps.name, { container: null, minVolume: 1 })).content).overlaps).toEqual([]);
   });
 });
 

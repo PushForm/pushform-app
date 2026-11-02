@@ -43,9 +43,14 @@ Beyond boxes, the agent can:
 - draw lines, rectangles, circles, regular polygons and outlines in any plane, and push or pull a closed shape into a solid, for example a curved apron or a bracket drawn from its side;
 - push or pull a face of a solid, or a shape drawn on it, to make it bigger or to cut a pocket or a hole;
 - combine overlapping solids: join them, cut one out of another, keep what they share, or split them. This is how it cuts grooves, dadoes, rabbets, cutouts and holes, for example “Make a shaker door with its panel set in grooves” or “Cut a sink opening in the countertop”;
-- sweep a profile along a path with Follow Me, for a moulding or a rail.
+- sweep a profile along a path with Follow Me, for a moulding or a rail;
+- round over or bevel edges, draw arcs, offset outlines, round corners, and mirror parts.
 
-It cannot yet add textures, text, dimensions, guides or section planes, or round over or offset edges. When a request needs one of these, it builds what it can, says what is left and explains how to do the rest yourself. When a change would not leave a valid solid, for example pushing a face all the way through, the agent tells you and changes nothing.
+When a change would not leave a valid solid, for example pushing a face all the way through, the agent tells you and changes nothing. After building, it checks that no parts overlap by mistake.
+
+## Ask for finishes and notes in a 3D model
+
+The agent can add materials from the built-in library, such as oak, walnut or maple veneer, paint parts with them and turn the grain to run along each part. It can also add guides, linear dimensions, text labels, 3D lettering and section planes that cut the model open, for example “Show a cutaway through the middle of the cabinet.” It adds notes like these only when you ask.
 
 ## Ask for scenes and camera views
 

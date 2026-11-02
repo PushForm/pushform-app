@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import {
-  activeTagOpt, applyTransformPlan, arrayMatrices, contextFrame, curvePoints, definitionBounds, hostOf, instanceCount, kernelOf, localPushPullDistance,
+  DEFAULT_BLEND_SEGMENTS, SERVICE_FONTS, Text3DParamsSchema, isHardEdge, libraryMaterial, loadLibraryMaterial, planEdgeBlend, runEdgeBlendKernel, runIntersectKernel,
+  runText3DKernel, BUILTIN_LIBRARY, LIBRARY_CATEGORIES, activeTagOpt, applyTransformPlan, arrayMatrices, contextFrame, curvePoints, definitionBounds, hostOf, instanceCount, kernelOf, localPushPullDistance,
   m4rotationAbout, m4scaleAbout, planPushPull, planTransform, runFollowMeKernel, runPushPullKernel, runSolidsKernel, runTransformKernel, sceneRuntimeOf,
   type CameraHost, type CameraState, type CommandRegistry, type DocumentHost, type ExplodeResult, type FollowMeApplyResult, type FollowMeParams,
   type MakeResult, type PushPullApplyResult, type PushPullTarget, type SolidsApplyResult, type SolidsKernelWork, type SolidsPairMode, type TransformKernelWork, type TransformPlan,
 } from '@pushform/commands';
 import {
-  LOCAL_REFERENCE, MODEL_API_VERSION, MODEL_LIMITS, MODEL_PLANNED_OPERATIONS, MODEL_TOOLS, modelBatchSchema, modelOperationSchema, modelQuerySchema,
+  LOCAL_REFERENCE, MODEL_API_VERSION, MODEL_LIMITS, MODEL_PLANNED_OPERATIONS, MODEL_TOOLS, modelBatchSchema, modelMaterialLibrarySchema, modelOperationSchema, modelOverlapsSchema, modelQuerySchema,
+  type ModelLibraryResult, type ModelOverlap, type ModelOverlapsResult,
   modelViewSchema, type ModelApiError, type ModelApiErrorCode, type ModelBatchResult, type ModelBounds, type ModelCameraInput, type ModelCameraSummary,
   type ModelDocumentSnapshot, type ModelEntitySummary, type ModelOperation, type ModelQueryResult, type ModelRef, type ModelRefInput, type ModelSceneSaves,
   type ModelVec3, type ModelViewResult,
@@ -19,7 +21,7 @@ import {
 } from '@pushform/core';
 import {
   computeRegions, containerAt, contextMatrix, entityCounts, regionAt, sketchFaceLoops,
-  type Body, type DocumentState, type EntityContainer, type EntityRef, type FaceRecord, type Rgb, type Scene, type SceneFlags, type SketchFace,
+  type Body, type DocumentState, type EdgeRecord, type EntityContainer, type EntityRef, type FaceRecord, type Rgb, type Scene, type SceneFlags, type SketchFace,
 } from '@pushform/model';
 import type { ToolCallResult } from './layoutApi';
 import { frameCamera } from './modelCamera';
@@ -47,6 +49,8 @@ const DEFAULT_QUERY_LIMIT = 50;
 const FACING_TOLERANCE = Math.cos(Math.PI / 180);
 /** Smallest volume a committed solid may have: a cube one merge tolerance on a side. */
 const MIN_VOLUME = MERGE_TOL ** 3;
+/** Bounds of the overlap read: solids considered, pairs reported, and kernel ids for solids moved into place. */
+const OVERLAP_SOLIDS = 500, OVERLAP_PAIRS = 100, OVERLAP_TEMP_BASE = 0x7d000000;
 const PLANNED = new Set<string>(MODEL_PLANNED_OPERATIONS);
 const round = (value: number): number => Math.round(value * 1e6) / 1e6;
 const vec = (p: Vec3): ModelVec3 => [round(p[0]), round(p[1]), round(p[2])];
@@ -208,7 +212,7 @@ export class ModelDocumentApi {
     const query = parsed.data, state = this.host.doc.state;
     const path = (query.container ?? [...this.host.context.path]) as Id[];
     const container = this.containerOrFail(path);
-    const kinds = new Set<string>(query.kinds ?? ['instance', 'body', 'sketchEdge', 'sketchFace', 'guide', 'text', 'dimension']);
+    const kinds = new Set<string>(query.kinds ?? ['instance', 'body', 'sketchEdge', 'sketchFace', 'guide', 'text', 'dimension', 'sectionPlane']);
     const ids = query.ids ? new Set<number>(query.ids) : null;
     const fields = new Set(query.fields ?? ['bounds', 'geometry', 'appearance']);
     const all: (() => ModelEntitySummary)[] = [];
@@ -216,11 +220,15 @@ export class ModelDocumentApi {
     for (const inst of container.instances.values()) if (keep('instance', inst.id)) all.push(() => summarizeInstance(state, path, inst.id, fields));
     for (const body of container.bodies.values()) {
       if (keep('body', body.id)) all.push(() => summarizeBody(path, container, body.id, fields));
-      if (!kinds.has('face') || (ids && !ids.has(body.id))) continue;
-      for (const face of body.faces.values()) {
+      if ((!kinds.has('face') && !kinds.has('edge')) || (ids && !ids.has(body.id))) continue;
+      if (kinds.has('face')) for (const face of body.faces.values()) {
         if (query.facing && v3dot(face.plane.n, unit(query.facing)) < FACING_TOLERANCE) continue;
         if (query.containing && !faceContains(face, query.containing)) continue;
         all.push(() => summarizeFace(path, body.id, face, fields));
+      }
+      if (kinds.has('edge')) for (const edge of body.edges.values()) {
+        if (!edgeMatches(edge.polyline, query.facing, query.containing)) continue;
+        all.push(() => summarizeEdge(path, body.id, edge, fields));
       }
     }
     const sketch = container.sketch;
@@ -244,10 +252,85 @@ export class ModelDocumentApi {
       return { ...base(path, 'guide', guide.id, guide), ...(fields.has('geometry') ? { points: points.map(vec), text: guide.kind } : {}) };
     });
     for (const text of container.texts.values()) if (keep('text', text.id)) all.push(() => ({ ...base(path, 'text', text.id, text), text: text.text.slice(0, 500) }));
-    for (const dim of container.dimensions.values()) if (keep('dimension', dim.id)) all.push(() => base(path, 'dimension', dim.id, dim));
+    for (const dim of container.dimensions.values()) if (keep('dimension', dim.id)) all.push(() => ({ ...base(path, 'dimension', dim.id, dim), ...(fields.has('geometry') ? { points: [vec(dim.start), vec(dim.end)] } : {}) }));
+    for (const plane of container.sectionPlanes.values()) if (keep('sectionPlane', plane.id)) all.push(() => ({
+      ...base(path, 'sectionPlane', plane.id, plane), name: plane.name, active: container.activeSectionPlaneId === plane.id,
+      ...(fields.has('geometry') ? { points: [vec(plane.origin)], normal: vec(plane.plane.n) } : {}),
+    }));
     const offset = query.offset ?? 0, limit = query.limit ?? DEFAULT_QUERY_LIMIT;
     return { revision: this.revision, container: [...path], worldTransform: contextMatrix(state, path).map(round), total: all.length, offset,
       entities: all.slice(offset, offset + limit).map(make => make()), next: offset + limit < all.length ? offset + limit : null };
+  }
+
+  /**
+   * Pairs of solids that interpenetrate, through nested groups and components, in the container's coordinates. Bounds
+   * that overlap pick the candidates; the kernel measures their shared volume. Makes no change.
+   */
+  async findOverlaps(input: unknown): Promise<ModelOverlapsResult> {
+    const parsed = modelOverlapsSchema.safeParse(input);
+    if (!parsed.success) throw this.failure('invalid_operation', zodMessage(parsed.error));
+    const state = this.host.doc.state, revision = this.revision;
+    const path = (parsed.data.container ?? [...this.host.context.path]) as Id[];
+    const container = this.containerOrFail(path);
+    const minVolume = parsed.data.minVolume ?? 1e-9;
+    interface Placed { ref: ModelRef & { name: string }; body: Body; matrix: MMat4 | null; box: Box3 }
+    const solids: Placed[] = [];
+    const walk = (c: EntityContainer, at: number[], matrix: MMat4 | null, name: string, depth: number): void => {
+      for (const body of c.bodies.values()) {
+        if (body.hidden || solids.length >= OVERLAP_SOLIDS) continue;
+        const local = corners(meshBounds(body.mesh));
+        solids.push({ ref: { path: at, kind: 'body', id: body.id, name }, body, matrix, box: boxOf(matrix ? local.map(p => m4transformPoint(matrix, p)) : local) });
+      }
+      if (depth >= 16) return;
+      for (const inst of c.instances.values()) {
+        const def = state.definitions.get(inst.definitionId as DefId);
+        if (!def || inst.hidden) continue;
+        walk(def.entities, [...at, inst.id], matrix ? m4mul(matrix, inst.transform) : [...inst.transform], inst.name || def.name, depth + 1);
+      }
+    };
+    walk(container, [...path], null, '', 0);
+    const kernel = kernelOf(this.commands.ctx);
+    const overlaps: ModelOverlap[] = [];
+    let truncated = solids.length >= OVERLAP_SOLIDS, temp = 0;
+    const upload = async (p: Placed): Promise<{ bodyId: number; version: number }> => {
+      if (!p.matrix) { await kernel.ensureBody(p.body.id, p.body.version, p.body.mesh); return { bodyId: p.body.id, version: p.body.version }; }
+      const verts = new Float64Array(p.body.mesh.verts.length);
+      for (let i = 0; i < verts.length; i += 3) verts.set(m4transformPoint(p.matrix, [p.body.mesh.verts[i]!, p.body.mesh.verts[i + 1]!, p.body.mesh.verts[i + 2]!]), i);
+      const id = { bodyId: OVERLAP_TEMP_BASE + (temp++ % 0xffff), version: 0 };
+      await kernel.ensureBody(id.bodyId, id.version, { verts, tris: p.body.mesh.tris, faceId: p.body.mesh.faceId });
+      return id;
+    };
+    const temps: { bodyId: number; version: number }[] = [];
+    try {
+      for (let i = 0; i < solids.length && !truncated; i++) for (let j = i + 1; j < solids.length; j++) {
+        const a = solids[i]!, b = solids[j]!;
+        if (!boxesOverlap(a.box, b.box, -MERGE_TOL)) continue;
+        const ia = await upload(a), ib = await upload(b);
+        if (a.matrix) temps.push(ia);
+        if (b.matrix) temps.push(ib);
+        const shared = await kernel.boolean({ op: 'intersect', a: ia, b: ib, nextFaceId: 0 });
+        const volume = shared.components.reduce((sum, c) => sum + c.props.volume, 0);
+        if (!(volume > minVolume)) continue;
+        const box = box3Empty();
+        for (const c of shared.components) for (let k = 0; k < c.mesh.verts.length; k += 3) box3Expand(box, [c.mesh.verts[k]!, c.mesh.verts[k + 1]!, c.mesh.verts[k + 2]!]);
+        overlaps.push({ a: a.ref, b: b.ref, volume: Math.round(volume * 1e12) / 1e12, bounds: boundsOut(box)! });
+        if (overlaps.length >= OVERLAP_PAIRS) { truncated = true; break; }
+      }
+    } finally {
+      for (const t of temps) void kernel.release(t.bodyId, t.version).catch(() => undefined);
+    }
+    return { revision, container: [...path], solids: solids.length, overlaps, truncated };
+  }
+
+  /** The built-in material library: its categories, or one category's materials. */
+  materialLibrary(input: unknown): ModelLibraryResult {
+    const parsed = modelMaterialLibrarySchema.safeParse(input);
+    if (!parsed.success) throw this.failure('invalid_operation', zodMessage(parsed.error));
+    const category = parsed.data.category;
+    if (category === null) return { categories: LIBRARY_CATEGORIES.map(name => ({ name, count: BUILTIN_LIBRARY.filter(m => m.category === name).length })) };
+    const materials = BUILTIN_LIBRARY.filter(m => sameName(m.category, category));
+    if (materials.length === 0) throw this.failure('invalid_reference', `There is no library category "${category}"; the categories are ${LIBRARY_CATEGORIES.join(', ')}.`);
+    return { materials: materials.map(m => ({ key: m.key, name: m.name, color: hex(m.color), textured: !!m.texture })) };
   }
 
   /** Validate, check the revision, then run every operation as one undo entry; rejects with `ModelApiFailure`. */
@@ -330,7 +413,7 @@ export class ModelDocumentApi {
     const ref = (input: ModelRefInput): EntityRef => {
       const state = host.doc.state, container = containerAt(state, path);
       if (typeof input === 'object' && 'body' in input) return this.selectFace(path, input, named).ref;
-      const target: { kind: string; id: number; faceId?: number | undefined } = typeof input === 'string' ? named(input) : input;
+      const target: { kind: string; id: number; faceId?: number | undefined; edgeKey?: string | undefined } = typeof input === 'string' ? named(input) : input;
       const exists = (() => {
         switch (target.kind) {
           case 'instance': return container.instances.has(target.id as Id);
@@ -341,12 +424,15 @@ export class ModelDocumentApi {
           case 'guide': return container.guides.has(target.id as Id);
           case 'text': return container.texts.has(target.id as Id);
           case 'dimension': return container.dimensions.has(target.id as Id);
+          case 'sectionPlane': return container.sectionPlanes.has(target.id as Id);
+          case 'edge': return target.edgeKey !== undefined && !!container.bodies.get(target.id as Id)?.edges.has(target.edgeKey as never);
           default: return false;
         }
       })();
-      const shown = typeof input === 'string' ? input : `${input.kind} ${input.id}${'faceId' in input ? ` face ${input.faceId}` : ''}`;
+      const shown = typeof input === 'string' ? input : `${input.kind} ${input.id}${'faceId' in input ? ` face ${input.faceId}` : 'edgeKey' in input ? ` edge ${input.edgeKey}` : ''}`;
       if (!exists) throw this.failure('invalid_reference', `There is no ${shown} in the container being edited${typeof input === 'string' ? ' any more' : ''}. Call ${MODEL_TOOLS.query.name} for current ids.`);
       if (target.kind === 'face') return { kind: 'face', path, id: target.id as Id, faceId: target.faceId as never, region: null };
+      if (target.kind === 'edge') return { kind: 'edge', path, id: target.id as Id, edgeKey: target.edgeKey as never };
       return { kind: target.kind as 'instance', path, id: target.id as Id };
     };
     /** References, with a drawn shape's "$name" standing for every edge and face it made that still exists. */
@@ -586,6 +672,135 @@ export class ModelDocumentApi {
         this.checkSolids(path, result.bodyIds, 'follow_me');
         return { id: result.bodyIds[0]!, refs: result.bodyIds.map(bodyOut), named: { kind: 'body', id: result.bodyIds[0]! } };
       }
+      case 'fillet_edges':
+      case 'chamfer_edges': {
+        const kind = op.op === 'fillet_edges' ? 'fillet' as const : 'chamfer' as const;
+        const target = solid(op.body, 'The body');
+        const body = containerAt(host.doc.state, path).bodies.get(target.id as Id)!;
+        const edges = this.edgeKeys(path, body, op.edges, named);
+        const size = op.op === 'fillet_edges' ? op.radius : op.distance;
+        const params = { path: [...path], bodyId: body.id, edges, size, segments: op.op === 'fillet_edges' ? op.segments ?? DEFAULT_BLEND_SEGMENTS : DEFAULT_BLEND_SEGMENTS };
+        const plan = planEdgeBlend(host.doc.state, kind, params);
+        const precomputed = await runEdgeBlendKernel(kernelOf(this.commands.ctx), plan);
+        await exec<Promise<unknown>>(`${kind}.apply`, { ...params, precomputed });
+        this.checkSolids(path, [body.id], op.op);
+        return { id: body.id, refs: [bodyOut(body.id)], count: edges.length };
+      }
+      case 'add_arc': {
+        const sweep = op.endDeg - op.startDeg;
+        if (!(Math.abs(sweep) > 1e-6 && Math.abs(sweep) <= 360)) throw this.failure('invalid_geometry', 'An arc needs endDeg different from startDeg, within 360 degrees of it.');
+        const segments = op.segments ?? 12;
+        const radians = Math.PI / 180, normal = unit(op.normal), frame = contextFrame(host.doc.state, path);
+        if (!(2 * op.radius * Math.sin(Math.abs(sweep) * radians / (2 * segments)) > MERGE_TOL)) throw this.failure('invalid_geometry', `An arc of radius ${op.radius} m is too small for ${segments} segments.`);
+        const curve = { kind: 'arc' as const, center: op.center, normal, radius: op.radius, startAngle: op.startDeg * radians, endAngle: op.endDeg * radians, segments };
+        const params = { points: curvePoints(curve).map(world), closed: false, curve: { ...curve, center: world(op.center), normal: frame.toWorldNormal(normal) } };
+        return draw(() => exec('sketch.addCurve', params), null, null, false, 'arc');
+      }
+      case 'offset': {
+        if (!(Math.abs(op.distance) > MERGE_TOL)) throw this.failure('invalid_geometry', `offset needs a distance longer than ${MERGE_TOL} m.`);
+        if (op.face) {
+          const face = this.faceTarget(path, op.face, resolver, 'offset');
+          let rings: Vec3[][] = [];
+          const result = draw(() => { rings = exec<{ rings: Vec3[][] }>('sketch.offset', { faceRef: face.target, distance: op.distance }).rings; }, face.normal, null, false, 'offset');
+          const ring = rings[0];
+          // An inward offset names the face inside its new outline.
+          if (op.distance < 0 && ring && result.named?.shape) result.named.shape.inside = interiorPoint(ring, face.plane.n);
+          return result;
+        }
+        const ids = (op.edges ?? []).flatMap(input => {
+          const shape = typeof input === 'string' ? named(input).shape : undefined;
+          if (shape) return shape.edges;
+          const r = ref(input);
+          if (r.kind !== 'sketchEdge') throw this.failure('invalid_operation', `Only loose edges can be offset this way; ${r.kind} ${r.id} is not one.`);
+          return [r.id];
+        });
+        return draw(() => exec('sketch.offset', { edgeIds: ids, distance: op.distance }), null, null, false, 'offset');
+      }
+      case 'fillet_corner':
+        return draw(() => exec('sketch.fillet', { vertex: world(op.corner), radius: op.radius, segments: op.segments ?? 12 }), null, null, false, 'rounded corner');
+      case 'mirror': return transform(refsOf(op.refs), reflection(op.origin, unit(op.normal)), op.copy ?? false, undefined);
+      case 'intersect_faces': {
+        const faces = only(refsOf(op.refs), ['face', 'sketchFace'], 'Lines are drawn on faces');
+        const solids = op.with ? op.with.map((r, i) => solid(r, `Solid ${i}`)) : [];
+        const params = { refs: [...faces, ...solids], with: op.with ? 'selection' as const : 'model' as const };
+        const precomputed = await runIntersectKernel(host, kernelOf(this.commands.ctx), params as unknown as Parameters<typeof runIntersectKernel>[2]);
+        const result = await exec<Promise<{ edgeIds: number[]; faceCount: number }>>('intersect.faces', { ...params, precomputed });
+        return { count: result.faceCount };
+      }
+      case 'soften_edges': {
+        const refs = only(refsOf(op.refs), ['body', 'face', 'edge', 'sketchEdge'], 'Only solids, faces and edges can be softened');
+        return { count: exec<{ softened: number }>('edges.soften', { refs, ...(op.angleDeg !== undefined ? { angleDeg: op.angleDeg } : {}), ...(op.smooth !== undefined ? { smooth: op.smooth } : {}) }).softened };
+      }
+      case 'add_guide': {
+        if (op.direction && op.end) throw this.failure('invalid_operation', 'Give direction for a guide line or end for a guide segment, not both.');
+        if (op.end && !(dist(op.point, op.end) > MERGE_TOL)) throw this.failure('invalid_geometry', 'A guide segment needs two different points.');
+        const frame = contextFrame(host.doc.state, path);
+        const id = op.direction ? exec<number>('guides.addLine', { point: world(op.point), dir: frame.toWorldDir(unit(op.direction)) })
+          : op.end ? exec<number>('guides.addSegment', { a: world(op.point), b: world(op.end) })
+          : exec<{ id: number }>('guides.addPoint', { point: world(op.point) }).id;
+        return { id, named: { kind: 'guide', id } };
+      }
+      case 'add_dimension': {
+        const along = v3sub(op.end, op.start), normal = v3cross(along, op.offset);
+        if (!(v3len(along) > MERGE_TOL)) throw this.failure('invalid_geometry', 'A dimension needs two different points.');
+        if (!(v3len(normal) > MERGE_TOL * v3len(along))) throw this.failure('invalid_operation', 'offset must point away from the measured line, not along it.');
+        const frame = contextFrame(host.doc.state, path);
+        const id = exec<number>('dimension.add', { kind: 'linear', start: world(op.start), end: world(op.end), offset: frame.toWorldDir(op.offset), normal: frame.toWorldNormal(unit(normal)) });
+        return { id, named: { kind: 'dimension', id } };
+      }
+      case 'add_text': {
+        const params = op.screen ? { kind: 'screen', screen: op.screen, text: op.text }
+          : { kind: 'leader', anchor: world(op.anchor!), label: world(op.label ?? v3add(op.anchor!, [0, 0, 0.15])), text: op.text };
+        const id = exec<EntityRef>('text.add', params).id;
+        return { id, named: { kind: 'text', id } };
+      }
+      case 'add_3d_text': {
+        const params = Text3DParamsSchema.parse({ text: op.text, point: world(op.position), ...(op.height !== undefined ? { height: op.height } : {}), ...(op.extrude !== undefined ? { extrude: op.extrude } : {}),
+          ...(op.font ? { font: op.font } : {}), ...(op.bold !== undefined ? { bold: op.bold } : {}), ...(op.align ? { align: op.align } : {}) });
+        if (!this.commands.ctx.services.has(SERVICE_FONTS)) throw this.failure('unavailable', '3D text needs fonts, which are not available here.');
+        const precomputed = await runText3DKernel(this.commands.ctx, params);
+        const result = await exec<Promise<{ instanceId: number | null }>>('text3d.create', { ...params, precomputed });
+        return instanceResult(result.instanceId!);
+      }
+      case 'add_section_plane': {
+        const id = exec<number>('sectionPlane.add', { point: world(op.point), normal: contextFrame(host.doc.state, path).toWorldNormal(unit(op.normal)), ...(op.name ? { name: op.name } : {}) });
+        if (op.active ?? true) exec('sectionPlane.setActive', { path: [...path], id, active: true });
+        return { id, named: { kind: 'sectionPlane', id } };
+      }
+      case 'set_section_plane': {
+        const id = typeof op.plane === 'number' ? op.plane : (() => {
+          const found = named(op.plane);
+          if (found.kind !== 'sectionPlane') throw this.failure('invalid_reference', `"${op.plane}" names a ${found.kind}, not a section plane.`);
+          return found.id;
+        })();
+        if (!containerAt(host.doc.state, path).sectionPlanes.has(id as Id)) throw this.failure('invalid_reference', `There is no section plane ${id} in the container being edited.`);
+        const plane = { path: [...path], id };
+        if (op.active !== undefined) exec('sectionPlane.setActive', { ...plane, active: op.active });
+        if (op.hidden !== undefined) exec('sectionPlane.setHidden', { refs: [plane], hidden: op.hidden });
+        if (op.reverse) exec('sectionPlane.reverse', { refs: [plane] });
+        return { id };
+      }
+      case 'set_material': {
+        const id = idOf(op.materialId, 'material');
+        if (!host.doc.state.materials.has(id as never)) throw this.failure('invalid_reference', `There is no material ${id}.`);
+        exec('material.update', { id, ...(op.name ? { name: op.name } : {}), ...(op.color ? { color: rgb(op.color) } : {}), ...(op.opacity !== undefined ? { alpha: op.opacity } : {}) });
+        return { id };
+      }
+      case 'set_texture': {
+        const container = containerAt(host.doc.state, path);
+        const faces = only(refsOf(op.refs), ['face', 'sketchFace', 'body'], 'Only faces and solids have textures').flatMap((r): EntityRef[] => r.kind === 'body'
+          ? [...container.bodies.get(r.id)!.faces.keys()].map(faceId => ({ kind: 'face', path, id: r.id, faceId, region: null })) : [r]);
+        let count = 0;
+        for (const r of faces) {
+          const face = r.kind === 'face' ? container.bodies.get(r.id)?.faces.get(r.faceId) : r.kind === 'sketchFace' ? container.sketch.faces.get(r.id) : undefined;
+          if (!face) continue;
+          const uv = op.grain ? grainMapping(face.basis, face.plane.n, op.grain) : { kind: 'auto' as const };
+          if (!uv) continue; // the grain runs square to this face, as on end grain
+          exec('texture.position', { ref: r, uv });
+          count++;
+        }
+        return { count };
+      }
       case 'make_group': return instanceResult(exec<MakeResult>('group.make', { refs: refsOf(op.refs) }).instanceId!);
       case 'make_component': return instanceResult(exec<MakeResult>('component.make', { refs: refsOf(op.refs), ...(op.name ? { name: op.name } : {}) }).instanceId!);
       case 'explode': {
@@ -637,7 +852,14 @@ export class ModelDocumentApi {
         return {};
       }
       case 'add_material': {
-        const id = exec<number>('material.create', { name: op.name ?? 'Material', color: rgb(op.color), ...(op.opacity !== undefined ? { alpha: op.opacity } : {}), activate: false });
+        if (op.library !== undefined) {
+          if (!libraryMaterial(op.library)) throw this.failure('invalid_reference', `There is no library material "${op.library}". Call ${MODEL_TOOLS.materialLibrary.name} for the keys.`);
+          const precomputed = await loadLibraryMaterial(host, op.library);
+          const id = await exec<Promise<number>>('material.fromLibrary', { key: op.library, activate: false, precomputed });
+          if (op.name || op.opacity !== undefined) exec('material.update', { id, ...(op.name ? { name: op.name } : {}), ...(op.opacity !== undefined ? { alpha: op.opacity } : {}) });
+          return { id, named: { kind: 'material', id } };
+        }
+        const id = exec<number>('material.create', { name: op.name ?? 'Material', color: rgb(op.color!), ...(op.opacity !== undefined ? { alpha: op.opacity } : {}), activate: false });
         return { id, named: { kind: 'material', id } };
       }
       case 'paint': {
@@ -743,6 +965,27 @@ export class ModelDocumentApi {
     throw this.failure('invalid_operation', `Only a face can be used to ${what}; ${r.kind} ${r.id} is not one.`);
   }
 
+  /** Edge keys of a solid that edge selectors name; only sharp edges can be rounded or beveled. */
+  private edgeKeys(path: Id[], body: Body, selectors: readonly (string | { faceFacing: Vec3; facePoint?: Vec3 | undefined } | { along: Vec3; through?: Vec3 | undefined })[], named: (value: string) => Named): string[] {
+    const keys = new Set<string>();
+    for (const sel of selectors) {
+      if (typeof sel === 'string') {
+        const edge = body.edges.get(sel as never);
+        if (!edge) throw this.failure('invalid_reference', `Solid ${body.id} has no edge ${sel} now; edge keys change when the solid changes, so read them again.`);
+        if (!isHardEdge(edge)) throw this.failure('invalid_operation', `Edge ${sel} of solid ${body.id} is soft, smooth or hidden; only sharp edges can be rounded or beveled.`);
+        keys.add(sel);
+        continue;
+      }
+      const found = 'faceFacing' in sel
+        ? (() => { const { face } = this.selectFace(path, { body: body.id, facing: sel.faceFacing, point: sel.facePoint }, named); return [...body.edges.values()].filter(e => e.faceA === face.id || e.faceB === face.id); })()
+        : [...body.edges.values()].filter(e => edgeMatches(e.polyline, sel.along, sel.through ?? null));
+      const hard = found.filter(isHardEdge);
+      if (hard.length === 0) throw this.failure('invalid_reference', `No sharp edge of solid ${body.id} matches ${JSON.stringify(sel)}.`);
+      for (const e of hard) keys.add(e.key);
+    }
+    return [...keys];
+  }
+
   /** Every solid an operation leaves must be a closed solid with volume (the kernel's results always are manifold). */
   private checkSolids(path: Id[], ids: readonly number[], what: string): void {
     const container = containerAt(this.host.doc.state, path);
@@ -806,7 +1049,11 @@ function shapeFace(c: EntityContainer, shape: Shape): { kind: 'region'; body: Bo
     if (region >= 0) return { kind: 'region', body, face, region };
   }
   const faces = shape.faces.filter(id => c.sketch.faces.has(id as Id));
-  const id = shape.inside ? faces.find(f => sketchFaceContains(c, f, shape.inside!)) : faces.length === 1 ? faces[0] : undefined;
+  const inside = shape.inside, normal = shape.normal;
+  // A later edit (a rounded corner, an offset) may re-find the face under a new id; its inside point still finds it.
+  const id = inside ? faces.find(f => sketchFaceContains(c, f, inside))
+      ?? [...c.sketch.faces.values()].find(f => (!normal || Math.abs(v3dot(f.plane.n, normal)) >= FACING_TOLERANCE) && sketchFaceContains(c, f.id, inside))?.id
+    : faces.length === 1 ? faces[0] : undefined;
   const face = id === undefined ? undefined : c.sketch.faces.get(id as Id);
   return face ? { kind: 'sketch', face } : null;
 }
@@ -845,14 +1092,32 @@ function loopsContain(plane: Plane, basis: PlaneBasis, loops: readonly (readonly
   return evenOdd(uv(p), loops.map(loop => loop.map(uv)));
 }
 const dist = (a: Vec3, b: Vec3): number => v3len(v3sub(a, b));
-function boxesOverlap(a: Box3, b: Box3): boolean {
-  return [0, 1, 2].every(i => a.min[i]! <= b.max[i]! + MERGE_TOL && b.min[i]! <= a.max[i]! + MERGE_TOL);
+/** Reflection across the plane through `origin` square to the unit `normal`, as a column-major matrix. */
+function reflection(origin: Vec3, n: Vec3): MMat4 {
+  const d = 2 * v3dot(origin, n);
+  return [
+    1 - 2 * n[0] * n[0], -2 * n[1] * n[0], -2 * n[2] * n[0], 0,
+    -2 * n[0] * n[1], 1 - 2 * n[1] * n[1], -2 * n[2] * n[1], 0,
+    -2 * n[0] * n[2], -2 * n[1] * n[2], 1 - 2 * n[2] * n[2], 0,
+    d * n[0], d * n[1], d * n[2], 1,
+  ];
+}
+/** A texture placement whose width runs along `grain` on a face, or null when the grain runs square to the face. */
+function grainMapping(basis: PlaneBasis, normal: Vec3, grain: Vec3): { kind: 'sized'; matrix: [number, number, number, number, number, number] } | null {
+  const g = v3sub(grain, v3scale(normal, v3dot(grain, normal)));
+  if (!(v3len(g) > 1e-6 * v3len(grain))) return null;
+  const angle = Math.atan2(v3dot(g, basis.v), v3dot(g, basis.u)), c = Math.cos(angle), s = Math.sin(angle);
+  return { kind: 'sized', matrix: [c, s, 0, -s, c, 0] };
+}
+function boxesOverlap(a: Box3, b: Box3, margin = MERGE_TOL): boolean {
+  return [0, 1, 2].every(i => a.min[i]! <= b.max[i]! + margin && b.min[i]! <= a.max[i]! + margin);
 }
 
 function errorCode(cause: unknown): ModelApiErrorCode {
   if (cause instanceof Error && cause.name === 'KernelError') return 'invalid_geometry';
   const code = cause instanceof PushFormError ? cause.code : '';
-  if (/invalidSolid|invalid_geometry|kernel|notSolid|degenerate|^path\.|^followme\.(path|empty)/i.test(code)) return 'invalid_geometry';
+  if (code === 'service.missing') return 'unavailable';
+  if (/invalidSolid|invalid_geometry|kernel|notSolid|degenerate|^path\.|^followme\.(path|empty)|^edgeblend\.(?!target|stale)|^fillet\.|^offset\.|^dimension\.|^text3d\./i.test(code)) return 'invalid_geometry';
   if (/missing|notFound|target/i.test(code)) return 'invalid_reference';
   return 'operation_failed';
 }
@@ -911,6 +1176,7 @@ function worldPoints(state: DocumentState, ref: EntityRef): Vec3[] {
 function refOut(ref: EntityRef): ModelRef {
   const out: ModelRef = { path: [...ref.path], kind: ref.kind as ModelRef['kind'], id: ref.id };
   if (ref.kind === 'face') out.faceId = ref.faceId;
+  if (ref.kind === 'edge') out.edgeKey = ref.edgeKey;
   return out;
 }
 
@@ -937,6 +1203,29 @@ function summarizeBody(path: readonly Id[], container: EntityContainer, id: Id, 
   if (fields.has('geometry')) Object.assign(out, { volume: round(body.props.volume), area: round(body.props.area), faceCount: body.faces.size });
   if (fields.has('appearance')) out.materialId = body.materialId;
   if (fields.has('bounds')) out.bounds = boundsOut(meshBounds(body.mesh));
+  return out;
+}
+
+/** Edges of solids by direction (either way, within 1 degree) and by a point on them. */
+function edgeMatches(polyline: readonly Vec3[], along: Vec3 | null, through: Vec3 | null): boolean {
+  const a = polyline[0], b = polyline[polyline.length - 1];
+  if (!a || !b) return false;
+  if (along && Math.abs(v3dot(unit(v3sub(b, a)), unit(along))) < FACING_TOLERANCE) return false;
+  if (through && !polyline.some((p, i) => i > 0 && pointOnSegment(through, polyline[i - 1]!, p))) return false;
+  return true;
+}
+function pointOnSegment(p: Vec3, a: Vec3, b: Vec3): boolean {
+  const ab = v3sub(b, a), length = v3len(ab);
+  if (length <= MERGE_TOL) return dist(p, a) <= MERGE_TOL;
+  const t = Math.min(1, Math.max(0, v3dot(v3sub(p, a), ab) / (length * length)));
+  return dist(p, v3add(a, v3scale(ab, t))) <= MERGE_TOL;
+}
+function summarizeEdge(path: readonly Id[], bodyId: Id, edge: EdgeRecord, fields: ReadonlySet<string>): ModelEntitySummary {
+  const out: ModelEntitySummary = { ref: { path: [...path], kind: 'edge', id: bodyId, edgeKey: edge.key }, hidden: edge.hidden };
+  const a = edge.polyline[0]!, b = edge.polyline[edge.polyline.length - 1]!;
+  if (fields.has('geometry')) Object.assign(out, { start: vec(a), end: vec(b), length: round(edge.polyline.reduce((sum, p, i) => sum + (i ? dist(p, edge.polyline[i - 1]!) : 0), 0)),
+    faces: [edge.faceA, edge.faceB], soft: edge.soft, smooth: edge.smooth, curve: edge.curveId !== null });
+  if (fields.has('bounds')) out.bounds = boundsOut(boxOf(edge.polyline));
   return out;
 }
 
@@ -990,6 +1279,8 @@ export async function runModelTool(api: ModelDocumentApi, name: string, input: u
       case MODEL_TOOLS.query.name: return { content: JSON.stringify(api.query(input)), isError: false };
       case MODEL_TOOLS.applyOperations.name: return { content: JSON.stringify(await api.apply(input, signal)), isError: false };
       case MODEL_TOOLS.view.name: return { content: JSON.stringify(api.view(input)), isError: false };
+      case MODEL_TOOLS.overlaps.name: return { content: JSON.stringify(await api.findOverlaps(input)), isError: false };
+      case MODEL_TOOLS.materialLibrary.name: return { content: JSON.stringify(api.materialLibrary(input)), isError: false };
       default: return { content: JSON.stringify({ ok: false, error: { code: 'invalid_operation', message: `Unknown model tool "${name}".`, revision: api.revision } }), isError: true };
     }
   } catch (cause) {

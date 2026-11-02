@@ -244,7 +244,39 @@ export const Text3DParamsSchema = z.object({
   extrude: z.number().min(-1000).max(1000).default(0),
   /** World point to place the text at; omitted, the text follows the cursor until a click places it (at the origin without a tool manager). */
   point: vec3.optional(),
+  /** Outlines and solids from `runText3DKernel` for exactly these params. */
+  precomputed: z.custom<Text3DKernelWork>((v) => typeof v === 'object' && v !== null && 'polys' in v && 'solids' in v).optional(),
 });
+
+/**
+ * The asynchronous step of 3D Text: the glyph outlines and, when extruded, their solids, computed before the document
+ * changes. Passing it back as `precomputed` commits it without loading fonts or running the kernel again.
+ */
+export interface Text3DKernelWork {
+  readonly polys: ReturnType<typeof textOutlines>;
+  readonly solids: readonly KernelComponent[];
+  readonly extruded: boolean;
+}
+
+/** Load the font, outline the text and extrude it. Reads the document only. */
+export async function runText3DKernel(ctx: CommandContext, p: z.output<typeof Text3DParamsSchema>): Promise<Text3DKernelWork> {
+  const source = ctx.services.get(SERVICE_FONTS) as FontSource | undefined;
+  if (!source) throw new PushFormError('service.missing', 'Font service missing');
+  const fonts = await fontsFor(source, p.font, p.bold);
+  const polys = textOutlines(fonts, p.text, { height: p.height, align: p.align });
+  if (!polys.length) throw new PushFormError('text3d.empty', 'The text has no visible characters');
+  const extruded = Math.abs(p.extrude) >= MIN_SEGMENT;
+  const solids: KernelComponent[] = [];
+  if (extruded) {
+    // Manifold's own extrude triangulates the caps robustly; one solid per outline
+    const kernel = kernelOf(ctx);
+    for (const polygon of polys) {
+      const res = await kernel.extrudeSketch({ basis: XY, polygon, distance: p.extrude, nextFaceId: 0 });
+      solids.push(...res.components);
+    }
+  }
+  return { polys, solids, extruded };
+}
 
 export interface Text3DResult {
   readonly definitionId: number;
@@ -265,21 +297,7 @@ export const text3dCreate = defineCommand({
   undoable: false,
   async run(ctx: CommandContext, p): Promise<Text3DResult> {
     const host = hostOf(ctx);
-    const source = ctx.services.get(SERVICE_FONTS) as FontSource | undefined;
-    if (!source) throw new PushFormError('service.missing', 'Font service missing');
-    const fonts = await fontsFor(source, p.font, p.bold);
-    const polys = textOutlines(fonts, p.text, { height: p.height, align: p.align });
-    if (!polys.length) throw new PushFormError('text3d.empty', 'The text has no visible characters');
-    const extruded = Math.abs(p.extrude) >= MIN_SEGMENT;
-    const solids: KernelComponent[] = [];
-    if (extruded) {
-      // Manifold's own extrude triangulates the caps robustly; one solid per outline
-      const kernel = kernelOf(ctx);
-      for (const polygon of polys) {
-        const res = await kernel.extrudeSketch({ basis: XY, polygon, distance: p.extrude, nextFaceId: 0 });
-        solids.push(...res.components);
-      }
-    }
+    const { polys, solids, extruded } = p.precomputed ?? (await runText3DKernel(ctx, p));
     const tag = activeTagOpt(ctx);
     const name = p.text.trim().split(/\r?\n/)[0]!.trim().slice(0, 40);
     const path = host.context.path;

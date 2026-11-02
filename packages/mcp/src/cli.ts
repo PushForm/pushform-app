@@ -2,7 +2,7 @@
 // Copyright 2026 PushForm contributors
 /**
  * `pushform-mcp --headless [file.pf]`: an MCP server on stdio over a headless model. There is
- * no mode that connects to a running app (the live bridge was dropped, PF-178), so the command refuses
+ * no mode that connects to a running app (the live bridge was removed), so the command refuses
  * to start without `--headless`. Logs go to stderr: stdout carries the protocol.
  */
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';

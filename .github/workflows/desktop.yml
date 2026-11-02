@@ -11,7 +11,7 @@
 # computed once here and passed to the web bundle (VITE_VERSION) and to Tauri, which ignores tauri.conf.json's version.
 #
 # The web bundle is built with the same public variables as the production deploy. macOS requires the Apple signing
-# and notarization secrets ; Windows signing remains pending (PF-45).
+# and notarization secrets; Windows signing is not set up yet.
 # Builds are signed for the in-app updater when
 # the Desktop environment holds the updater key pair: the secret TAURI_SIGNING_PRIVATE_KEY (and
 # TAURI_SIGNING_PRIVATE_KEY_PASSWORD if it has one) and the variable TAURI_UPDATER_PUBKEY. Without them the apps are

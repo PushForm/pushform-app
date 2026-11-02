@@ -15,7 +15,7 @@ describe('mat4', () => {
   });
 });
 describe('plane', () => {
-  it('builds SketchUp-style basis and round-trips', () => {
+  it('builds the fixed-rule in-plane basis and round-trips', () => {
     const b = planeBasis([1, 1, 1], [0, 0, 1]);
     expect(v3eq(b.u, [1, 0, 0])).toBe(true);
     expect(v3eq(b.v, [0, 1, 0])).toBe(true);

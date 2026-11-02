@@ -847,7 +847,7 @@ function paintPage(
   }
 }
 
-/** A page painted for print (and for the sample check), with no selection, guides or tool feedback. */
+/** A page painted for print (and for offscreen rendering), with no selection, guides or tool feedback. */
 export function paintPrintPage(canvas: HTMLCanvasElement, page: LayoutPage, state: LayoutDocumentState, dpi: number): void {
   if (!canvas.getContext('2d')) throw new Error('The print canvas could not be created. Try a lower print quality.');
   paintPage(canvas, page, state, null, null, 'select', new Set<number>(), null, null, [], 1,

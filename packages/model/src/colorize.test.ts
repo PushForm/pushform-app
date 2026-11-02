@@ -20,7 +20,7 @@ function deltaE(a: ArrayLike<number>, b: ArrayLike<number>): number {
   return Math.hypot(p[0]! - q[0]!, p[1]! - q[1]!, p[2]! - q[2]!);
 }
 
-it('reproduces SketchUp\'s shift and tint colorization of test textures within a small color difference', () => {
+it('reproduces shift and tint colorization of test textures within a small color difference', () => {
   expect(fixture.cases).toHaveLength(54);
   let total = 0, count = 0;
   for (const c of fixture.cases) {
@@ -46,7 +46,7 @@ it('keeps alpha and makes a gray material color gray', () => {
   expect(pixels[0]).toBe(pixels[1]); expect(pixels[1]).toBe(pixels[2]);
 });
 
-it('averages pixels per channel and truncates, as SketchUp reports a texture\'s average color', () => {
+it('averages pixels per channel and truncates for a texture\'s average color', () => {
   expect(textureAverage(new Uint8ClampedArray([10, 20, 30, 255, 11, 21, 32, 0]))).toEqual([10, 20, 31]);
   expect(textureAverage(new Uint8ClampedArray(0))).toEqual([0, 0, 0]);
 });

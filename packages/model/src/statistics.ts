@@ -7,7 +7,7 @@ import { sketchFaceLoops } from './sketch/sketchFace';
 
 /**
  * Model statistics as counted per placement: every placement of a group or
- * component counts its contents again, hidden or not. The sample check uses them to compare an import with the
+ * component counts its contents again, hidden or not. Development tools use them to compare an import with the
  * source model.
  */
 export interface ModelStatistics {

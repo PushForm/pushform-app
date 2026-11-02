@@ -134,7 +134,7 @@ it('chooses the same farthest endpoints for every ray and endpoint ordering, inc
   }
 });
 
-// Expected strings are what LayOut 2027 rendered for the same settings through its Ruby API.
+// Expected display strings for each format, precision and unit setting.
 it.each([
   ['architectural', 4, true, true, 0, '0"'], ['architectural', 1, true, true, 0.5, '1/2"'],
   ['architectural', 4, true, true, 11.5625, '11 9/16"'], ['architectural', 4, true, true, 12, `1'-0"`],
@@ -148,7 +148,7 @@ it.each([
   ['engineering', 0, true, true, 18.96875, `1'`], ['engineering', 1, true, true, 0.5, `0'`],
   ['engineering', 1, true, true, 24, `2'`], ['engineering', 1, false, true, 35.25, `2.9'`],
   ['engineering', 3, true, true, 3.0001, `0.250'`],
-] as const)('formats %s at precision %s (units %s, dashes %s): %s" reads as LayOut shows it', (format, precision, showUnits, showDashes, inches, expected) => {
+] as const)('formats %s at precision %s (units %s, dashes %s): %s" reads as expected', (format, precision, showUnits, showDashes, inches, expected) => {
   expect(formatLayoutLength(inches, { format, units: 'inch', precision, showUnits, showDashes })).toBe(expected);
 });
 
@@ -156,7 +156,7 @@ it.each([
   ['inch', 2, true, 24, '24.00"'], ['inch', 2, false, 24, '24.00'], ['ft', 2, true, 60.5, `5.04'`],
   ['mm', 1, true, 1, '25.4 mm'], ['mm', 1, false, 1, '25.4'], ['cm', 2, true, 3.0001, '7.62 cm'],
   ['m', 2, true, 47.9999, '1.22 m'], ['pt', 0, true, 1, '72 pt'], ['pt', 3, true, 1.13, '81.4 pt'],
-] as const)('formats decimal %s at %s places (units %s): %s" reads as LayOut shows it', (units, precision, showUnits, inches, expected) => {
+] as const)('formats decimal %s at %s places (units %s): %s" reads as expected', (units, precision, showUnits, inches, expected) => {
   expect(formatLayoutLength(inches, { units, precision, showUnits })).toBe(expected);
   expect(formatLayoutLength(inches, { format: 'decimal', units, precision, showUnits })).toBe(expected);
 });

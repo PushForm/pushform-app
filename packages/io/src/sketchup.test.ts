@@ -39,7 +39,7 @@ export function modelFixture(): Uint8Array {
 }
 
 describe('SketchUp import', () => {
-  it('reads a 2017 definition ending in a four-byte guide trailer (Garage V3 regression)', async () => {
+  it('reads a 2017 definition ending in a four-byte guide trailer', async () => {
     const bytes = readFileSync(new URL('../../testing/assets/sketchup/guide-last-2017.skp', import.meta.url));
     const scene = await readSketchUp(bytes);
     const definition = [...scene.definitions.values()].find(d => d.name === 'Guide last');
@@ -71,7 +71,7 @@ describe('SketchUp import', () => {
     expect(polygonArea(scene.root.sheets[0]!.loops.map(loop => loop.map(p => [p[0], p[1]])))).toBeCloseTo(5, 10);
   });
 
-  it('takes a material\'s opacity from its opacity setting, not the color\'s alpha byte (PF-146)', () => {
+  it('takes a material\'s opacity from its opacity setting, not the color\'s alpha byte', () => {
     const b = create();
     const plain = b.addMaterial('Plain', [200, 0, 0]), glass = b.addMaterial('Glass', [0, 0, 255], 0.5);
     const wood = b.addTextureMaterial('Wood', encodePng(2, 2, new Uint8Array(12).fill(160), 3), 'wood.png');
@@ -79,7 +79,7 @@ describe('SketchUp import', () => {
     b.addFace([[20, 0, 0], [30, 0, 0], [30, 10, 0], [20, 10, 0]], { material: glass });
     b.addFace([[40, 0, 0], [50, 0, 0], [50, 10, 0], [40, 10, 0]], { material: wood });
     const bytes = b.toBytes(), model = parseSkp(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
-    // As SketchUp 2018 stores them (forum-78487 FujitsuScanSnapHolder): opaque materials with a 0 alpha byte, and a
+    // As 2018 files store them: opaque materials with a 0 alpha byte, and a
     // translucent one whose byte repeats its opacity.
     const byName = (name: string) => [...model.materialsById.values()].find(m => m.name === name)!;
     byName('Plain').color.a = 0; byName('Wood').color.a = 0; byName('Glass').color.a = 128;
@@ -91,7 +91,7 @@ describe('SketchUp import', () => {
     expect(alpha('Glass')).toBeCloseTo(0.5, 9);
   });
 
-  it('keeps texture colorization, its type and its color (PF-168)', () => {
+  it('keeps texture colorization, its type and its color', () => {
     const b = create(), png = encodePng(2, 2, new Uint8Array(12).fill(160), 3);
     const names = ['Shifted', 'Tinted', 'Plain'];
     const materials = names.map(name => b.addTextureMaterial(name, png, `${name}.png`));
@@ -178,7 +178,7 @@ describe('SketchUp import', () => {
   it('reads pre-2021 tags whose color material carries attribute dictionaries', async () => {
     // A tag record is its preamble, name, hidden flag and its color as an inline material body. SketchUp writes
     // `Tagged`'s own Extension dictionary in the first preamble; move it into the material's preamble, where an
-    // extension (V-Ray) left one in a real 2017 model. The store-map numbering is unchanged.
+    // extension can leave one. The store-map numbering is unchanged.
     const bytes = readFileSync(new URL('../../testing/assets/sketchup/tag-attributes-2017.skp', import.meta.url));
     const find = (needle: number[]) => Buffer.from(bytes).indexOf(Buffer.from(needle));
     const utf16 = (s: string) => [0xff, 0xfe, 0xff, s.length, ...[...Buffer.from(s, 'utf16le')]];
@@ -329,7 +329,7 @@ describe('SketchUp import', () => {
     expect(into.state.shadows).toMatchObject({ enabled: true, useSunForShading: true });
   });
 
-  // section-display-*.skp were built in SketchUp 2027 (see the fixtures README); the expected settings are what it reads back.
+  // section-display-*.skp: see the fixtures README; the expected settings are the ones each file saves.
   const activeStyle = (doc: ReturnType<typeof createDocument>) => doc.state.styles.get(doc.state.activeStyleId)!;
   it.each([[2017, { planes: true, cuts: false }], [2027, { planes: false, cuts: true }]] as const)(
     'opens with the file\'s Display Section Planes and Display Section Cuts; Import keeps the destination\'s (SketchUp %s)',
@@ -413,11 +413,11 @@ describe('SketchUp import', () => {
       .toMatchObject({ format: 'fractional', lengthUnit: 'in', lengthPrecision: 6 });
     expect(sketchUpUnits({ LengthUnit: 5, LengthFormat: 0, LengthPrecision: 9, AreaUnit: 5, VolumeUnit: 5 }))
       .toMatchObject({ lengthUnit: 'yd', lengthPrecision: 6, areaUnit: 'yd²', volumeUnit: 'yd³' });
-    // US gallons (7) have no PushForm equivalent. SketchUp reads a zero snap length as 1/16".
+    // US gallons (7) have no PushForm equivalent. A zero snap length means 1/16".
     expect(sketchUpUnits({ LengthUnit: 4, LengthFormat: 0, AreaUnit: 4, VolumeUnit: 7, LengthSnapEnabled: true, LengthSnapLength: 0,
       AngleSnapEnabled: true, SnapAngle: 7.5, SuppressUnitsDisplay: false }))
       .toMatchObject({ lengthUnit: 'm', volumeUnit: DEFAULT_UNITS.volumeUnit, lengthSnap: 0.0254 / 16, angleSnap: 7.5, displayUnitSuffix: true });
-    // Files saved before SketchUp had area and volume units get the ones matching the length unit, at precision 2.
+    // Files from versions without area and volume units get the ones matching the length unit, at precision 2.
     expect(sketchUpUnits({ LengthUnit: 2, LengthFormat: 0, LengthPrecision: 0 }))
       .toMatchObject({ areaUnit: 'mm²', volumeUnit: 'mm³', areaPrecision: 2, volumePrecision: 2 });
   });
@@ -431,7 +431,7 @@ describe('SketchUp import', () => {
     doc.transact('Open fixture', draft => applySketchUpImport(draft, scene));
     const defs = new Map([...doc.state.definitions.values()].map(d => [d.name, d]));
     expect(['Group0', 'Group0#1', 'Group1', 'Post'].map(name => defs.get(name)!.isGroup)).toEqual([true, true, true, false]);
-    // The nested Ring group is shared by both boxes, as in SketchUp; Post is placed twice.
+    // The nested Ring group is shared by both boxes, as in the file; Post is placed twice.
     const placements = (id: number): number => [...doc.state.definitions.values()]
       .reduce((n, d) => n + [...d.entities.instances.values()].filter(i => i.definitionId === id).length, 0);
     expect(placements(defs.get('Group1')!.id)).toBe(2);
@@ -580,7 +580,7 @@ describe('SketchUp import', () => {
     expect(report.warnings.some(w => w.includes('on solids'))).toBe(false);
   });
 
-  // annotations-*.skp were built in SketchUp 2027 (see the fixtures README); expected values are its own.
+  // annotations-*.skp: see the fixtures README; expected values are the ones the files save.
   const annotations = (year: number) => readSketchUp(readFileSync(new URL(`../../testing/assets/sketchup/annotations-${year}.skp`, import.meta.url)));
   const close = (actual: readonly number[], expected: readonly number[]) => actual.forEach((v, i) => expect(v).toBeCloseTo(expected[i]!, 9));
 
@@ -591,7 +591,7 @@ describe('SketchUp import', () => {
     const root = doc.rootDefinition.entities;
     const group = [...doc.state.definitions.values()].find(d => d.name === 'Group0')!.entities;
     const notes = [...doc.state.tags.values()].find(t => t.name === 'Notes')!.id;
-    // SketchUp 2017 files store no section plane names; SketchUp shows these as Section 1-3.
+    // 2017 files store no section plane names; these are numbered Section 1-3.
     const named = (name: string, symbol: string, n: number) => year === 2017 ? { name: `Section ${n}`, symbol: String(n) } : { name, symbol };
     const [cut, plan] = [...root.sectionPlanes.values()];
     expect(cut).toMatchObject({ ...named('Cut A', 'A', 1), hidden: false, tagId: doc.state.defaultTagId });
@@ -670,7 +670,7 @@ describe('SketchUp import', () => {
     const model = parseSkp(new Uint8Array(readFileSync(new URL('../../testing/assets/sketchup/annotations-2017.skp', import.meta.url))).buffer);
     type Patched = { a: number[] | null; b: number[] | null; normal: number[] | null; planeX: number[] | null; alignment?: number | null; offset: number };
     const [free] = model.root.dimensions as unknown as Patched[];
-    // SketchUp 2027 saved the free dimension down with a downward normal, measuring along its X axis.
+    // The 2027 file saves the free dimension down with a downward normal, measuring along its X axis.
     close(free!.a!, [0, -19.68503937007874, 0]); close(free!.b!, [39.37007874015748, -19.68503937007874, 0]);
     close(free!.normal!, [0, 0, -1]); close(free!.planeX!, [-1, 0, 0]);
     expect(free!.alignment).toBe(1); expect(free!.offset).toBeCloseTo(-11.811023622047244, 9);
@@ -707,7 +707,7 @@ describe('SketchUp import', () => {
     expect(plan!.camera.height).toBeCloseTo(6, 9);
     close(plan!.camera.eye, [1.5, 1.5, 20]); close(plan!.camera.up, [0, 1, 0]);
     expect(hidden(plan)).toEqual(['Notes']);
-    // SketchUp leaves the view where it is for a scene that saves no camera, and the tags alone for one that saves no tag visibility.
+    // A scene that saves no camera leaves the view where it is, and one that saves no tag visibility leaves the tags alone.
     expect(noCamera!.flags).toMatchObject({ useCamera: false, useTags: true });
     expect(keepsTags!.flags).toMatchObject({ useCamera: true, useTags: false });
     expect(keepsTags!.hiddenTags).toEqual([]);
@@ -793,7 +793,7 @@ describe('SketchUp import', () => {
   });
 
   it('reads a text\'s font and arrow from the file', () => {
-    // The writer stores SketchUp's own text font record: Tahoma, 8 pt, regular, with a closed arrow.
+    // The writer stores the default text font record: Tahoma, 8 pt, regular, with a closed arrow.
     const b = create();
     b.addText('Label', [1, 2, 3], [4, 0, 0]);
     const [text] = parseSkp(b.toBytes().buffer as ArrayBuffer).root.texts;
@@ -839,7 +839,7 @@ describe('SketchUp import', () => {
   });
 
   it('keeps untagged entities off a hidden tag whose name is only spaces', () => {
-    // forum-114034: a hidden tag named " " trimmed to "", the name an untagged entity reports, and hid the whole model.
+    // A hidden tag named " " must not be trimmed to "", the name an untagged entity reports, or it hides the whole model.
     const model = parseSkp(new Uint8Array(modelFixture()).buffer);
     model.layers.find(l => l.name === 'Furniture')!.name = ' ';
     model.layers.find(l => l.name === ' ')!.hidden = true;
@@ -874,7 +874,7 @@ describe('SketchUp import', () => {
     const doc = createDocument();
     const report = doc.transact('Import', draft => applySketchUpImport(draft, scene)).value;
     expect(report).toMatchObject({ bodies: 1, sheetFaces: 1, looseEdges: 1, definitions: 1, instances: 2, materials: 2, tags: 1 });
-    // The writer stores SketchUp's default template units: architectural inches to 1/16".
+    // The writer stores the default template units: architectural inches to 1/16".
     expect(doc.state.meta.units).toMatchObject({ format: 'architectural', lengthUnit: 'in', lengthPrecision: 4 });
     const instances = [...doc.rootDefinition.entities.instances.values()];
     expect(instances[0]!.definitionId).toBe(instances[1]!.definitionId);
@@ -943,7 +943,7 @@ describe('SketchUp import', () => {
     expect(outward.warnings.some(w => w.includes('reversed'))).toBe(false);
     const solid = inward.root.solids[0]!;
     expect(meshTopologyProblems(solid.mesh)).toEqual([]);
-    // Each face now faces outward, as the outward cube's does, with SketchUp's back material in front.
+    // Each face now faces outward, as the outward cube's does, with the file's back material in front.
     const key = (a: Vec3, b: Vec3): string => [a.join(','), b.join(',')].sort().join('|');
     const segments = (face: (typeof solid.faces)[number]) => new Map(face.loops.flatMap((loop, k) =>
       loop.map((p, i) => [key(p, loop[(i + 1) % loop.length]!), face.edgeFlags[k]![i]!] as const)));
@@ -1036,7 +1036,7 @@ describe('SketchUp import', () => {
     expect(scene.warnings.some(w => w.includes('skipped'))).toBe(false);
   });
 
-  it('makes a solid of a wall whose window holes line up, without T-junctions in its triangles (PF-267)', async () => {
+  it('makes a solid of a wall whose window holes line up, without T-junctions in its triangles', async () => {
     const b = create();
     // Two windows whose sills and heads lie on one line: triangulating the wall faces can run a triangle side
     // through the corners of both holes, which then meets no other triangle side unless it is cut there.
@@ -1065,11 +1065,11 @@ describe('SketchUp import', () => {
   const inches = (p: Vec3): number[] => p.map(c => +(c / 0.0254).toFixed(9));
   const signedXY = (ring: Vec3[]): number => ring.reduce((sum, a, i) => { const c = ring[(i + 1) % ring.length]!; return sum + a[0] * c[1] - a[1] * c[0]; }, 0) / 2;
 
-  it('imports a bowtie as the sheet SketchUp shades, without the outline around its unshaded lobe', async () => {
+  it('imports a bowtie as the sheet its outline shades, without the outline around its unshaded lobe', async () => {
     const b = create();
     // Its sides A→B and C→D cross at X (22, 4/3): the loop winds clockwise around X B C (8 in²) and
-    // counterclockwise around D A X (2 in²). SketchUp shades the lobe the outline winds around in its
-    // overall direction (shoelace area −6 in²), and so does the import.
+    // counterclockwise around D A X (2 in²). The shaded lobe is the one the outline winds around in its
+    // overall direction (shoelace area −6 in²), and the import keeps that lobe.
     b.addFace([[20, 0, 0], [26, 4, 0], [26, 0, 0], [20, 2, 0]]);
     const scene = await readSketchUp(b.toBytes());
     expect(scene.root.solids).toHaveLength(0);
@@ -1080,7 +1080,7 @@ describe('SketchUp import', () => {
     // Counterclockwise about its normal, like every sheet's outer loop.
     expect(signedXY(piece.loops[0]!) * piece.normal[2]).toBeCloseTo(8 * IN2, 12);
     expect(new Set(piece.edgeFlags[0]!.map(f => f.edge)).size).toBe(3);
-    // D→A, A→X and X→D bound no shaded area: SketchUp counts them as the face's edges, not loose ones,
+    // D→A, A→X and X→D bound no shaded area: the file counts them as the face's edges, not loose ones,
     // and a sketch edge bounding no face would be loose, so they are not imported.
     expect(scene.root.edges).toHaveLength(0);
     expect(scene.warnings.some(w => w.includes('skipped'))).toBe(false);
@@ -1251,8 +1251,8 @@ describe('SketchUp import', () => {
   });
 });
 
-// style-*.skp were built in SketchUp 2027 with deliberately unusual rendering options (see the fixtures README); the
-// expected values are the options as set, which SketchUp reads back unchanged from every copy.
+// style-*.skp hold deliberately unusual rendering options (see the fixtures README); the
+// expected values are the options as set, the same in every copy.
 describe('SketchUp styles', () => {
   const fixture = (name: string) => readFileSync(new URL(`../../testing/assets/sketchup/${name}.skp`, import.meta.url));
   const rgb = (r: number, g: number, b: number): Vec3 => [r / 255, g / 255, b / 255];
@@ -1312,7 +1312,7 @@ describe('SketchUp styles', () => {
   });
 
   it('reads the background and edge colors from the current style when the 2021+ record leaves them unset', async () => {
-    // section-display-2027.skp stores (0, 0, 0, 0) for both in its rendering options; SketchUp shows white and black.
+    // section-display-2027.skp stores (0, 0, 0, 0) for both in its rendering options; they mean white and black.
     const { scene, style } = await open('section-display-2027');
     expect(scene.display?.background.color).toEqual([1, 1, 1]);
     expect(scene.display?.edges.color).toEqual([0, 0, 0]);
@@ -1338,7 +1338,7 @@ describe('SketchUp styles', () => {
   });
 
   // scene-styles-*.skp: Plan saves its own hidden-line style, Perspective saves the model's current style, NoStyle saves none.
-  // The 2020 copy is left out: the reader finds no loose geometry in it (PF-307), while its scene styles read the same.
+  // The 2020 copy is left out: the reader finds no loose geometry in it, while its scene styles read the same.
   it.each(['scene-styles-2027', 'scene-styles-2017'])('gives each scene the style it saved: its own, the model\'s, or none (%s)', async name => {
     const { scene, doc } = await open(name);
     expect(scene.scenes.map(saved => [saved.name, saved.display?.faces.mode ?? null])).toEqual([['Plan', 'hiddenLine'], ['Perspective', 'shadedWithTextures'], ['NoStyle', null]]);

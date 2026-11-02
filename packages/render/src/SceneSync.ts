@@ -61,7 +61,7 @@ interface ContextAware extends Object3D {
  * preview meshes. Bodies and sketches are diffed by their string render key (`path/id`, resp.
  * the path key) and version (or object identity). The floating origin is applied when geometry
  * is (re)built. Bodies and sketches draw through `SceneBatches` (merged per material) unless they turn to face the
- * camera, are hidden by the edit context, or section cuts are active; then they draw themselves (PF-191).
+ * camera, are hidden by the edit context, or section cuts are active; then they draw themselves.
  */
 export class SceneSync {
   readonly root = new Group();
@@ -86,7 +86,7 @@ export class SceneSync {
   readonly sections = new SectionLayer();
   /** Dashed bounding box of the open context instance. */
   readonly contextBox: EdgeBatch;
-  /** Merged face meshes and edge batches of the bodies and sketches drawn together (PF-191). */
+  /** Merged face meshes and edge batches of the bodies and sketches drawn together. */
   readonly batches = new SceneBatches();
   readonly contextBoxMaterial: EdgeMaterial;
   private bodies = new Map<string, BodyRenderable>();
@@ -157,7 +157,7 @@ export class SceneSync {
 
   /**
    * Put a body or sketch in the batches, or back in the scene to draw itself: those turning to face the camera, those
-   * the edit context hides, and all of them while section cuts are active (PF-191). Call after anything it draws changed.
+   * the edit context hides, and all of them while section cuts are active. Call after anything it draws changed.
    */
   private stage(r: BodyRenderable | SketchRenderable): void {
     if (this.batching && r.visible && !r.faceCamera) {

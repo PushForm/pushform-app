@@ -37,7 +37,7 @@ import type { InferenceInput } from './types';
 
 /**
  * Imported-sheet workloads: a document whose geometry is mostly zero-thickness sketch faces, in
- * the root and in instanced components, like a SketchUp building import. Faces are written into
+ * the root and in instanced components, like an imported building model. Faces are written into
  * the sketch records directly (the way the importer does) rather than through the SketchGraph,
  * so the fixture builds thousands of faces in milliseconds.
  */
@@ -301,7 +301,7 @@ describe('sheet-face picking through the bounds trees (imported-sheet workload)'
     expect(f.engine.picker.candidates(input(down(2, 2), 0.05)).surface).toBeNull();
   });
 
-  it('builds a large index in short slices, and hovers meanwhile see an empty index instead of waiting (PF-189)', () => {
+  it('builds a large index in short slices, and hovers meanwhile see an empty index instead of waiting', () => {
     const f = fixture(60, 20);
     const full = new SpatialIndex();
     full.setState(f.doc.state);

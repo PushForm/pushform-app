@@ -371,7 +371,7 @@ ${autoText}    </ld:entityList>
     // Every row and column line, as LayOut writes them for a turned table; LayOut drops a turned table without them.
     const { xs, ys } = tableGridPositions(entity);
     const lines = tableBoundaries(entity).map(({ axis, index, runs, style }) => {
-      // A line merged cells hide entirely is written as a single point, as LayOut does.
+      // A line merged cells hide entirely is written as a single point, as the format stores it.
       const start: Point = axis === 'row' ? [0, ys[index + 1]!] : [xs[index + 1]!, 0];
       const subpaths = runs.length ? runs : [[start, start]];
       const ops = subpaths.flatMap(run => run.map((_, i) => i ? OP_LINE : OP_MOVE));
@@ -794,7 +794,7 @@ function annotationStyle(entity: LayoutEntity): Style {
 }
 
 /**
- * LayOut arrow size for a mark of the given drawn extent. Measured on LayOut 2027 renders, one size
+ * The arrow size stored in a .layout file for a mark of the given drawn extent. One size
  * unit is one point: triangles are 3 units long, dots and slashes 2 units across, and an overrun
  * extends the line by 1 unit.
  */

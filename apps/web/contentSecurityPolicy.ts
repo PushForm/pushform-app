@@ -86,7 +86,7 @@ export function contentSecurityPolicy(surface: CspSurface, input: CspInput): str
       // The desktop shell's IPC (Tauri 2).
       surface === 'desktop' && 'ipc:',
       surface === 'desktop' && 'http://ipc.localhost',
-      // troika-three-text's Unicode font fallback for 3D text (until PF-249 bundles a font).
+      // troika-three-text's Unicode font fallback for 3D text (until a font is bundled).
       product && 'https://cdn.jsdelivr.net',
       // PDF export fetches font programs to embed selectable, subset text.
       product && 'https://fonts.googleapis.com',

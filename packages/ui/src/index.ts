@@ -48,7 +48,7 @@ export { storeActiveMaterialHost } from './engine/uiServices';
 export { setRenderImageStore, uvOverrideKey, renderMaterial, faceMaterialsToRender } from './engine/renderAdapter';
 export type { RenderAdapterOptions } from './engine/renderAdapter';
 export type { MaterialsTab } from './store';
-// Offscreen rendering for tools/sample-check, which renders models and pages as the app does.
+// Offscreen rendering for development tools, which render models and pages as the app does.
 export { bodiesToRender, dimensionsToRender, displayToRender, imagesToRender, sketchesToRender, textsToRender, withRenderImageStore } from './engine/renderAdapter';
 export { sectionsToRender } from './engine/sectionAdapter';
 export { paintPrintPage } from './components/LayoutWorkspace';

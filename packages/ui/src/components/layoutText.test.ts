@@ -98,7 +98,7 @@ it('measures and paints each selected font, size, color, and emphasis while fitt
   expect(bounds[1][1] - 10).toBeCloseTo((24 + 12) * 25.4 / 72 * 1.117);
 });
 
-it('sets lines as LayOut does: inset from the sides, baselines one ascent down, spaced by ascent plus descent', () => {
+it('sets lines inset from the sides, baselines one ascent down, spaced by ascent plus descent', () => {
   const doc = createLayoutDocument(), page = doc.state.pages.get(doc.state.pageOrder[0]!)!;
   const calls: [string, number, number][] = [];
   const ctx = { font: '', fillStyle: '', textBaseline: '', save: vi.fn(), restore: vi.fn(), setLineDash: vi.fn(), strokeRect: vi.fn(),

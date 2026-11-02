@@ -3,8 +3,8 @@
 import { base64ToBytes, bytesToBase64, type ImageBlob } from '@pushform/model';
 
 /**
- * Image bytes a document session keeps so that its model tabs reopen with their textures after a page refresh
- *, by content hash. Reads are synchronous: the session restores its tabs as it is created, so the
+ * Image bytes a document session keeps so that its model tabs reopen with their textures after a page refresh,
+ * by content hash. Reads are synchronous: the session restores its tabs as it is created, so the
  * bytes it may need are read beforehand (`loadRefreshImages`). Writes may finish later.
  */
 export interface RefreshImageStore {

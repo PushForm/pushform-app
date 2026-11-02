@@ -9,7 +9,7 @@
  * - saturation: adds the saturation difference, clamped, except that a material color less saturated than the
  *   average scales saturation by their ratio, so a gray material color makes the texture gray.
  *
- * The average is the per-channel pixel mean, truncated to whole 0..255 values, as `Texture#average_color` reports.
+ * The average is the per-channel pixel mean, truncated to whole 0..255 values.
  */
 export type ColorizeType = 'shift' | 'tint';
 export type Rgb255 = readonly [number, number, number];

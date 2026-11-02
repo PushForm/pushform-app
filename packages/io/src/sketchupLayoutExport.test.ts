@@ -384,7 +384,7 @@ describe('SketchUp LayOut export', () => {
     expect(exported.warnings).toEqual([]);
     expect(warnings).toEqual([]);
     const xml = strFromU8(files['pages/page1.xml']!);
-    // Codes as LayOut 2027 saved them for each Ruby API unit; the scale keeps full precision.
+    // The codes the format stores for each unit; the scale keeps full precision.
     for (const units of ['format="1" unit="0" precision="4"', 'format="3" unit="0" precision="6" suppressUnitDisplay="1"',
       'format="2" unit="1" precision="3"', 'format="0" unit="5" precision="1"', 'format="0" unit="1" precision="2"']) expect(xml).toContain(units);
     expect(xml).toContain('suppressDashesDisplay="1"');

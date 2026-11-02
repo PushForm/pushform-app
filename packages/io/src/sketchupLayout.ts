@@ -225,8 +225,8 @@ class Importer {
       }
     }
     // Page-number auto-text (type 2) counts pages from the page it refers to (`l:ref`, a pageRef's r:id), from its start
-    // number, in its numbering style; LayOut shows nothing on earlier pages. Each becomes a live page-number field
-    // LayOut's PageNumber is <PageNumber> with its settings, and another name that numbers as the default
+    // number, in its numbering style, and is blank on earlier pages. Each becomes a live page-number field
+    // The document's PageNumber is <PageNumber> with its settings, and another name that numbers as the default
     // does is <PageNumber> too. The start page becomes a page id once the pages are read.
     const pageRefIds = childrenNamed(child(document, 'pageManager') ?? document, 'pageRef').map((ref) => ref.attrs['r:id'] ?? '');
     const pageNumbers = new Map<string, { from: number; startNumber: number; style: LayoutPageNumberStyle }>();
@@ -255,7 +255,7 @@ class Importer {
       });
     }
     const pageNames = childrenNamed(child(document, 'pageManager') ?? document, 'pageRef').map((ref) => ref.attrs.name ?? '');
-    // Indexed and sequence auto-text has no PushForm field, so it becomes the text LayOut shows.
+    // Indexed and sequence auto-text has no PushForm field, so it becomes the text it resolves to.
     const resolve = (name: string, index: number | null): string | undefined => {
       if (name === 'PageName' && index !== null) return pageNames[index - 1] ?? '';
       const sequence = sequences.get(name);
@@ -517,8 +517,8 @@ class Importer {
           continue;
         }
         const entity = owner.entity;
-        // LayOut keeps a connection whose annotation was moved off the vertex but leaves the annotation where it is
-        // ("soft disconnect"); attaching it would move it, so it stays a free point.
+        // A file can keep a connection whose annotation was moved off the vertex, with the annotation where it is
+        // (a "soft disconnect"); attaching it would move it, so it stays a free point.
         const angle = entity.text?.rotationDeg ?? 0;
         const drawn = entity.dimension ? entity.points[end]! : rotateLayoutPoint(entity.points[2]!, layoutTextCenter(entity), angle);
         if (Math.hypot(drawn[0] - position[0], drawn[1] - position[1]) > CONNECTION_TOLERANCE_MM) {
@@ -635,7 +635,7 @@ class Importer {
       closed,
       style: entityStyle,
     });
-    // LayOut fills an open path as if it were closed but strokes only its drawn segments.
+    // An open path fills as if it were closed but strokes only its drawn segments.
     if (!subpath.closed && style.fillColor && subpath.points.length >= 3) {
       const stroked = style.strokeColor !== '#00000000';
       return [
@@ -960,7 +960,7 @@ class Importer {
     const elbow = leader.points.length >= 3;
     const angle = body.text!.rotationDeg ?? 0;
     let points = body.points;
-    // LayOut sets an unbounded label's text from its leader's end, and its stored box can be stale; one whose anchored
+    // An unbounded label's text is set from its leader's end, and its stored box can be stale; one whose anchored
     // edge lies more than half a line from where that puts it moves there, keeping its size.
     if (!body.text!.bounded && angle === 0) {
       const end = toMm(leader.points.at(-1)!)[1];
@@ -972,7 +972,7 @@ class Importer {
     // PushForm keeps a label's leader unrotated and turns it with the text; LayOut stores page points.
     const center = layoutTextCenter({ ...body, points });
     const local = (point: Point): Point => rotateLayoutPoint(toMm(point), center, -angle);
-    // The leader meets the text where LayOut's does: the middle of its first or last line, or its center.
+    // The leader meets the text at the middle of its first or last line, or at its center.
     const offset = local(leader.points.at(-1)!)[1] - center[1];
     return [...boxes, {
       ...body, kind: 'label',
@@ -1002,7 +1002,7 @@ class Importer {
     const src = this.imageUrl(refId);
     if (!base) return [];
     if (!src) {
-      // LayOut shows a gray box crossed in red where a picture's file is missing; pictures PushForm cannot read get it too.
+      // A picture whose file is missing shows as a gray box crossed in red; pictures PushForm cannot read get it too.
       const target = refId ? this.references.get(refId)?.attrs.internalTarget : undefined;
       this.warn(target && this.files[target] ? 'an image that could not be read was shown as a placeholder' : 'an image whose file is missing was shown as a placeholder');
       const [a, b, c, d] = transformedFrame(base) as [Point, Point, Point, Point];
@@ -1032,11 +1032,11 @@ class Importer {
     const placed = child(element, 'placedFileReference');
     const base = placed && child(placed, 'rectangleBase');
     if (!base) return [];
-    // With "Background" on, LayOut paints the model's background color behind it, within the crop.
+    // With "Background" on, the model's background color is painted behind it, within the crop.
     const options = childrenNamed(child(element, 'renderingOptions') ?? element, 'entry');
     const backgroundEntry = options.find((entry) => entry.attrs.key === 'BackgroundColor');
     const backgroundColor = element.attrs.displayBackground === '1' && backgroundEntry ? color(backgroundEntry.attrs.value, '#ffffff') : null;
-    // With it off, LayOut's raster render still holds the sky and background, which LayOut does not draw.
+    // With it off, the cached raster render still holds the sky and background, which are not drawn.
     // A color the model itself draws in (faces, edges) or white paper is kept: clearing it would cut into the model.
     const rgbOf = (key: string): number | null => {
       const value = options.find((entry) => entry.attrs.key === key)?.attrs.value;
@@ -1052,7 +1052,7 @@ class Importer {
     const rasterId = child(element, 'imageFileReference')?.attrs['r:id'];
     const rasterTarget = rasterId ? this.references.get(rasterId)?.attrs.internalTarget : undefined;
     const renderable = Boolean(this.originalArchive && modelReferenceId && this.references.get(modelReferenceId)?.name === 'skpFileReference');
-    // LayOut sometimes saves a blank raster render and draws the view again from its model; a model view does the same.
+    // A file sometimes holds a blank raster render, meant to be drawn again from its model; a model view does that.
     // (Render timestamps older than the view's last change are not a reliable sign: those renders are still current.)
     const blank = renderable && Boolean(rasterTarget && this.files[rasterTarget] && /\.png$/i.test(rasterTarget) && pngIsBlank(this.files[rasterTarget]!));
     const raster = blank ? null : this.imageUrl(rasterId, backdrop);
@@ -1200,7 +1200,7 @@ class Importer {
 interface EntityContext {
   autoText: Map<string, string>;
   layers: Map<number, LayoutLayer>;
-  /** Text LayOut shows for `<Name(index)>` auto-text (page names, sequences); undefined when unknown. */
+  /** The text `<Name(index)>` auto-text resolves to (page names, sequences); undefined when unknown. */
   resolve: (name: string, index: number | null) => string | undefined;
 }
 
@@ -1529,7 +1529,7 @@ const UNIT_RADIANS = 10;
 const LENGTH_FORMATS: Record<number, LengthFormat> = { 0: 'decimal', 1: 'architectural', 2: 'engineering', 3: 'fractional' };
 const INCHES_PER_UNIT: Record<LayoutLinearDimension['units'], number> = { inch: 1, ft: 12, mm: 1 / 25.4, cm: 1 / 2.54, m: 1 / 0.0254, pt: 1 / 72 };
 
-/** The measurement within text LayOut showed for a template such as `<> RO`, or null when it does not fit. */
+/** The measurement within the shown text of a template such as `<> RO`, or null when it does not fit. */
 function templateValue(shown: string, template: string): string | null {
   const at = template.indexOf('<>');
   if (at < 0) return null;
@@ -1539,7 +1539,7 @@ function templateValue(shown: string, template: string): string | null {
 }
 
 /**
- * A length as LayOut shows it (`17'-11 13/16"`, `13-1/2"`, `6.29'`, `9600 mm`, `3,21`), in inches.
+ * A length as a dimension's text shows it (`17'-11 13/16"`, `13-1/2"`, `6.29'`, `9600 mm`, `3,21`), in inches.
  * Decimal commas from the author's locale are accepted.
  */
 function parseLayoutLength(text: string | null, format: LengthFormat, units: LayoutLinearDimension['units']): number | null {
@@ -1594,7 +1594,7 @@ function rtfText(rtf: string, autoText: Map<string, string>, anchor: number, bou
   const firstRun = parsed.spans.find((span) => span.start < content.length) ?? parsed.spans[0];
   let spans = parsed.spans.map((span) => ({ ...span, end: Math.min(span.end, content.length) })).filter((span) => span.start < span.end);
   // Named Auto-Text tags stay live in the shared syntax; indexed and sequence tags
-  // (<PageName(2)>, <Sheet(1)>) become the text LayOut shows.
+  // (<PageName(2)>, <Sheet(1)>) become the text they resolve to.
   const replace = (name: string, index: string | undefined): string | undefined =>
     index === undefined ? autoText.get(name) ?? resolve?.(name, null) : resolve?.(name, Number(index));
   const tokens = [...content.matchAll(/<([A-Za-z][A-Za-z0-9# ]*)(?:\((\d+)\))?>/g)].filter((match) => replace(match[1]!, match[2]) !== undefined);
@@ -1646,7 +1646,7 @@ function toMm([x, y]: Point): Point {
 
 /** A label leader within this of the box's center meets it at the center. */
 const LABEL_OFFSET_EPSILON_MM = 0.05;
-/** A line's height in ems, for placing a stale label box: LayOut's lines are 1.1 (Arial) to 1.2 (Verdana) em. */
+/** A line's height in ems, for placing a stale label box: lines are 1.1 (Arial) to 1.2 (Verdana) em. */
 const LABEL_LINE_EM = 1.15;
 
 /** Half the height of a text's first or last line, by its largest font. */

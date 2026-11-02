@@ -136,7 +136,7 @@ const viewOf = (attr: BufferAttribute, at: number, count: number): BufferAttribu
   new BufferAttribute((attr.array as TypedArray).subarray(at * attr.itemSize, (at + count) * attr.itemSize), attr.itemSize, attr.normalized);
 
 /**
- * Static geometry batched per material (PF-191): the faces of every body and sketch renderable that draws the same
+ * Static geometry batched per material: the faces of every body and sketch renderable that draws the same
  * materials with the same shadow flags are merged into a few meshes, and their edges into a few edge batches, so a
  * model draws in tens of calls instead of several per body and sketch. Batches hold up to `BATCH_CAPACITY` vertices
  * or segments; changing a source rebuilds only the batches it is in, on the next `flush`, and selection tint copies

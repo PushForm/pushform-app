@@ -34,7 +34,7 @@ export function buildBVH(primBounds: Float64Array, centroids: Float64Array, opts
 const STEP_PRIMITIVES = 16384;
 
 /**
- * `buildBVH` that yields between large subtrees, for callers that spread a big build over several tasks (PF-189).
+ * `buildBVH` that yields between large subtrees, for callers that spread a big build over several tasks.
  * Builds the same tree.
  */
 export function* buildBVHSteps(primBounds: Float64Array, centroids: Float64Array, opts: BuildOptions = {}): Generator<void, BVH, void> {

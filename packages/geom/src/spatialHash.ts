@@ -19,7 +19,7 @@ export function neighborCellKeys(p: Vec3, cellSize: number): string[] {
 
 /**
  * Numeric key of a grid cell. Distinct cells can share a key; lookups check distances, so a shared key only adds
- * candidates. Numbers avoid building strings, which dominated index builds (PF-189).
+ * candidates. Numbers avoid building strings, which dominated index builds.
  */
 function numericCellKey(cx: number, cy: number, cz: number): number {
   return (Math.imul(cx, 73856093) ^ Math.imul(cy, 19349663) ^ Math.imul(cz, 83492791)) | 0;

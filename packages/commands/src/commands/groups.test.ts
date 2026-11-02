@@ -144,7 +144,7 @@ describe('group.make / group.explode', () => {
   });
 });
 
-/** Put an active section plane (cutting away local x < 0.5) and a dimension into a definition, as a SketchUp import does. */
+/** Put an active section plane (cutting away local x < 0.5) and a dimension into a definition, as importing a .skp file does. */
 function addAnnotations(s: ReturnType<typeof setup>, definitionId: number): { planeId: Id; dimensionId: Id } {
   const ids = { planeId: 0 as Id, dimensionId: 0 as Id };
   s.host.doc.transact('annotations', (draft) => {
@@ -262,7 +262,7 @@ describe('texture placements through Make Group and Explode', () => {
       expect(grouped.get(k)![1]).toBeCloseTo(st[1]!, 9);
     }
 
-    // Rotated 60° about X and scaled 1.5 × 2 × 1, as a SketchUp component placement can be.
+    // Rotated 60° about X and scaled 1.5 × 2 × 1, as a component placement in an imported file can be.
     const m = m4mul(m4translation([1, 2, 3]), m4mul([1.5, 0, 0, 0, 0, 2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], m4rotationAxis([1, 0, 0], Math.PI / 3)));
     setInstanceTransform([], made.instanceId!, m);
     const placed = textureCoords(host.doc.state.definitions.get(made.definitionId as never)!.entities, tile, m);

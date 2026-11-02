@@ -164,7 +164,7 @@ export function colladaModel(root: XmlElement, warn: (message: string) => void, 
       const normalOffset = Number(normalInput?.attrs.offset ?? 0);
       if (!Number.isInteger(vertexOffset)) { warn(`${name}: a ${primitive.name} element without vertices is skipped.`); continue; }
       const symbol = primitive.attrs.material, bound = symbol === undefined ? undefined : bindings.get(symbol);
-      // Edges carry no material, so a line's material (SketchUp's edge colors) is not imported.
+      // Edges carry no material, so a line's material (an edge color) is not imported.
       const lines = primitive.name === 'lines' || primitive.name === 'linestrips';
       const material = symbol === undefined || lines ? null : materialKey((bound?.target ?? `#${symbol}`).replace(/^#/, ''));
       // The texture coordinate set the material binds, else the first.
@@ -329,7 +329,7 @@ export function colladaModel(root: XmlElement, warn: (message: string) => void, 
   if (!chosen) throw new Error('No supported geometry was found in this COLLADA file: it has no visual scene.');
   const top = meshDefinition(-1, '', false);
   const nodes = childrenNamed(chosen, 'node');
-  // A scene whose one node holds the model at its origin (SketchUp exports wrap everything in one) is the model itself.
+  // A scene whose one node holds the model at its origin (some exporters wrap everything in one) is the model itself.
   const wrapper = nodes.length === 1 ? nodes[0]! : null;
   if (wrapper && isIdentity(nodeMatrix(wrapper))) fill(top, wrapper);
   else for (const node of nodes) place(top, node);

@@ -7,7 +7,7 @@ import { buildBoxBVH, buildSegBVH, buildSegBVHSteps, buildTriBVH, queryBVHBox, q
 import { SpatialHash } from './spatialHash';
 
 describe('bvh', () => {
-  it('builds the same tree in steps as in one go, every primitive in exactly one leaf (PF-189)', () => {
+  it('builds the same tree in steps as in one go, every primitive in exactly one leaf', () => {
     // a deterministic scatter, with repeated centroids along one axis
     const segments: Segment3[] = [];
     for (let i = 0; i < 50_000; i++) {

@@ -119,7 +119,7 @@ it('sets one inner line, giving the others the stroke they drew with', () => {
   expect(() => setTableEdge(entity, 'row', 0, { strokeColor: '#000000', strokeWeightPt: 0 })).toThrow('Invalid table line');
 });
 
-it('fills new cells in LayOut\'s default text style', () => {
+it('fills new cells in the default text style', () => {
   expect(createLayoutTable(1, 1).cells[0]!.text).toMatchObject({ fontFamily: 'Verdana', fontSizePt: 10, color: '#000000', vertical: 'top' });
   expect(LAYOUT_DEFAULT_TEXT).toEqual({ fontFamily: 'Verdana', fontSizePt: 10, color: '#000000' });
 });

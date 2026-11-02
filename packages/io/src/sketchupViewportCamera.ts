@@ -4,7 +4,7 @@ import { viewportCameraBasis, type LayoutViewportCamera } from '@pushform/layout
 import { child, type XmlElement } from './xml';
 
 /**
- * LayOut's `e:camera` (confirmed against LayOut 2027's model_to_paper_point on 168 corpus viewports): eye,
+ * A .layout file's `e:camera`: eye,
  * target and up in model inches; perspective `fov` is vertical across the unzoomed view; a parallel view is
  * `height` inches tall. With `twoDCamera="1"` the frame shows `twoDScale` of that view, centered at
  * (`twoDxCenter`, `twoDyCenter`) in units of the unzoomed half-height (and half-width, which is the half-height

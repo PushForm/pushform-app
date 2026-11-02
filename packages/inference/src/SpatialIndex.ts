@@ -292,7 +292,7 @@ export class SpatialIndex {
    */
   constructor(readonly path: readonly Id[] = []) {}
 
-  /** The rebuild in progress, advanced a slice at a time by `ensureFor` (PF-189). */
+  /** The rebuild in progress, advanced a slice at a time by `ensureFor`. */
   private job: Generator<void, void, void> | null = null;
   /** While finite, rebuilding stops at this `performance.now()` time and queries see an empty index. */
   private deadline = Infinity;

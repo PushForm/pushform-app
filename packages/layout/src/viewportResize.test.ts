@@ -22,7 +22,7 @@ it.each(['parallel', 'perspective'] as const)('preserves paper positions and siz
   }
 });
 
-it('matches LayOut height-based scaling when preserve scale is off and measures 1 m as 20 mm at 1:50', () => {
+it('scales by height when preserve scale is off and measures 1 m as 20 mm at 1:50', () => {
   const paper = ([x, y, z]: [number, number, number]) => viewportPaperPoint(frame, parallel, [x, y, z])!;
   expect(paper([1, 0, 0])[0] - paper([0, 0, 0])[0]).toBeCloseTo(20);
   const wider = frame.map(([x, y]): Point => [x * 2, y]), taller = frame.map(([x, y]): Point => [x, y * 2]);

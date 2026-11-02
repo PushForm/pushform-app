@@ -1,5 +1,5 @@
 {
- "source": "SketchUp 2027 UVHelper (Face#get_UVHelper, get_front_UVQ / get_back_UVQ) on textures-2027.skp; identical for textures-2020.skp. Points in inches, coordinates in texture tiles (u/q, v/q).",
+ "source": "Expected front and back texture coordinates of every textured face of textures-2027.skp; identical for textures-2020.skp. Points in inches, coordinates in texture tiles (u/q, v/q).",
  "faces": [
   {
    "definition": "#root",

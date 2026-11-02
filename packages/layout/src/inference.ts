@@ -144,8 +144,8 @@ export interface PaperAlignment {
 }
 
 /**
- * Lock `point` onto the horizontal or vertical line through a reference vertex when it is within `toleranceMm` of it
- *; the closer line wins when both are in reach.
+ * Lock `point` onto the horizontal or vertical line through a reference vertex when it is within `toleranceMm` of
+ * it; the closer line wins when both are in reach.
  */
 export function alignToPaperReference(point: PaperPoint, reference: PaperPoint, toleranceMm: number): PaperAlignment | null {
   const dy = Math.abs(point[1] - reference[1]), dx = Math.abs(point[0] - reference[0]);

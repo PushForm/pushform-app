@@ -272,7 +272,7 @@ describe('SceneSync (sketch, highlight, preview)', () => {
     s.dispose();
   });
 
-  it('sheet faces cast and receive shadows per their containers\' settings and On Faces (PF-269)', () => {
+  it('sheet faces cast and receive shadows per their containers\' settings and On Faces', () => {
     const s = new SceneSync();
     const node = (name: string) => s.renderables().find((c) => c.name === name) as unknown as SketchRenderable;
     const meshes = (name: string) => [node(name).front, node(name).back];
@@ -280,7 +280,7 @@ describe('SceneSync (sketch, highlight, preview)', () => {
     s.syncSketches([root, inner]);
     for (const m of meshes('Sketch:')) expect([m.castShadow, m.receiveShadow]).toEqual([true, true]);
     for (const m of meshes('Sketch:9')) expect([m.castShadow, m.receiveShadow]).toEqual([false, false]);
-    // The batches drawing them keep each sheet's flags apart (PF-191).
+    // The batches drawing them keep each sheet's flags apart.
     s.prepareFrame();
     expect(s.batches.allFaceMeshes().map((m) => [m.name, m.castShadow, m.receiveShadow]).sort()).toEqual(
       [['backfaces', false, false], ['backfaces', true, true], ['faces', false, false], ['faces', true, true]]);
@@ -298,7 +298,7 @@ describe('SceneSync (sketch, highlight, preview)', () => {
     s.dispose();
   });
 
-  it('turns a face-camera sketch\'s shadow toward the sun with Shadows Face Sun (PF-269)', () => {
+  it('turns a face-camera sketch\'s shadow toward the sun with Shadows Face Sun', () => {
     const s = new SceneSync();
     const tree: RenderSketch = { ...sketch({}), id: '7', path: [7],
       faceCamera: { pivot: [0, 0, 0], axis: [0, 0, 1], front: [0, -1, 0], shadowsFaceSun: true } };
@@ -423,7 +423,7 @@ describe('SceneSync (sketch, highlight, preview)', () => {
 });
 
 
-describe('SceneSync batching (PF-191)', () => {
+describe('SceneSync batching', () => {
   const box = meshBox([0, 0, 0], [1, 1, 1]);
   const bodies = (n: number, extra: Partial<RenderBody> = {}): RenderBody[] =>
     Array.from({ length: n }, (_, k) => ({ id: renderKey([k + 1], 7), path: [k + 1], entityId: 7, mesh: box, transform: m4translation([k * 2, 0, 0]) as unknown as Mat4, ...extra }));

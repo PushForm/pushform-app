@@ -188,7 +188,7 @@ export function layoutEditorLineHeight(text: Pick<LayoutText, 'fontFamily' | 'bo
 }
 
 /**
- * The on-page editors' tab spacing in mm. Browsers space tabs evenly, so evenly spaced stops (LayOut's
+ * The on-page editors' tab spacing in mm. Browsers space tabs evenly, so evenly spaced stops (the
  * default, and the stops most documents set) keep their spacing while editing; uneven stops show at the default.
  */
 export function layoutEditorTabSizeMm(text: Pick<LayoutText, 'tabStopsPt'>): number {

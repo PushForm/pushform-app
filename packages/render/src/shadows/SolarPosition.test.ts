@@ -57,7 +57,7 @@ describe('NOAA solar position', () => {
     const rotated = sunDirection(90, 30, 90);
     expect(rotated[1]).toBeCloseTo(-Math.cos(Math.PI / 6));
     expect(Math.abs(rotated[0])).toBeLessThan(1e-9);
-    // SketchUp 2027: London, 20 March 2020 at noon with north angle 30 puts the sun at x -0.36 (PF-258).
+    // London, 20 March 2020 at noon with north angle 30 puts the sun at x -0.36.
     const london = solarPosition({ year: 2020, month: 3, day: 20, minutes: 720, utcOffsetHours: 0, latitude: 51.5, longitude: -0.12 });
     expect(sunDirection(london.azimuth, london.elevation, 30)[0]).toBeCloseTo(-0.36, 1);
     const boulder = solarPosition({ year: 2015, month: 6, day: 29, minutes: 13 * 60 + 42, utcOffsetHours: -7, latitude: 40.018309, longitude: -105.242139 });

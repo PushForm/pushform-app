@@ -103,7 +103,7 @@ export async function openReferencedModel(reference: CloudModelReference, cloud:
 }
 
 /**
- * Make an embedded SketchUp model editable (note, user decision 2026-10-26): convert it to a
+ * Make an embedded SketchUp model editable: convert it to a
  * PushForm model saved in the drawing's project, link it, and move every view of it to that link.
  * The original package stays in the document for LayOut export of untouched views and for relinking.
  */

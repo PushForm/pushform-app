@@ -230,7 +230,7 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
   };
   setRenderImageStore(tx.images);
   // The inference index catches up with the document in short slices between frames, so that opening a large model
-  // never builds it in one long task on the first hover (PF-189).
+  // never builds it in one long task on the first hover.
   let indexSlice: ReturnType<typeof setTimeout> | null = null;
   const buildIndexInBackground = () => {
     if (indexSlice !== null || !inference.index.building) return;

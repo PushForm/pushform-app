@@ -14,7 +14,7 @@ const INCH = 0.0254;
 const asset = (name: string): Buffer => readFileSync(new URL(`../../testing/assets/sketchup/${name}`, import.meta.url));
 interface TruthSide { material: string; uvs: [number, number][] }
 interface TruthFace { definition: string; normal: Vec3; points: Vec3[]; front?: TruthSide; back?: TruthSide }
-/** SketchUp 2027's own UVHelper coordinates for every textured face of the fixture. */
+/** The expected texture coordinates for every textured face of the fixture. */
 const truth = (JSON.parse(asset('textures-uv.json').toString()) as { faces: TruthFace[] }).faces;
 
 interface FaceUv {
@@ -46,7 +46,7 @@ function tileAt(state: DocumentState, face: FaceUv, side: 'front' | 'back', p: V
 }
 
 describe('SketchUp textures', () => {
-  it.each(['textures-2027.skp', 'textures-2020.skp'])('imports texture images and every placement SketchUp shows in %s', async name => {
+  it.each(['textures-2027.skp', 'textures-2020.skp'])('imports texture images and every texture placement in %s', async name => {
     const scene = await readSketchUp(asset(name));
     const doc = createDocument(), images = new ImageStore();
     const report = doc.transact('Open fixture', draft => applySketchUpImport(draft, scene, { images })).value;
@@ -57,18 +57,18 @@ describe('SketchUp textures', () => {
     expect(quadrants.widthM).toBeCloseTo(1, 12);
     expect(quadrants.heightM).toBeCloseTo(0.5, 12);
     expect(quadrants.colorize).toBe(false);
-    // One asset per picture, with its pixel size; the bytes are the PNGs SketchUp embedded.
+    // One asset per picture, with its pixel size; the bytes are the PNGs the file embeds.
     expect([...doc.state.images.values()].map(a => [a.mime, a.width, a.height]).sort()).toEqual(
       [['image/png', 4, 4], ['image/png', 6, 3], ['image/png', 8, 4]]);
     for (const a of doc.state.images.values()) expect([...images.get(a.id)!.bytes.subarray(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47]);
     expect(report.warnings.some(w => /distorted/.test(w))).toBe(false);
     expect(report.warnings.some(w => /Texture images|untextured|SketchUp image/.test(w))).toBe(false);
-    // The fixture's SketchUp image is an image entity showing the picture its material holds.
+    // The fixture's image is an image entity showing the picture its material holds.
     const pictures = [...doc.state.definitions.values()].flatMap(d => [...d.entities.images.values()]);
     expect(pictures).toHaveLength(1);
     expect(report.images).toBe(1);
     expect(pictures[0]!.imageId).toBe(textured.find(m => m.name === 'Image')!.texture!.imageId);
-    // SketchUp shows the whole picture across the image's 6" × 3" rectangle, on both sides, from its origin corner.
+    // The whole picture spans the image's 6" × 3" rectangle, on both sides, from its origin corner.
     expect([pictures[0]!.widthM, pictures[0]!.heightM]).toEqual([6 * INCH, 3 * INCH]);
     expect(truth.filter(t => t.definition === 'Image').flatMap(t => [t.front!.uvs, t.back!.uvs])).toEqual([[[0, 0], [1, 0], [1, 1], [0, 1]], [[0, 0], [1, 0], [1, 1], [0, 1]]]);
 
@@ -131,7 +131,7 @@ describe('SketchUp textures', () => {
     expect(images.size).toBe(2);
   });
 
-  it('places a texture inherited by a face facing down as SketchUp does, whatever sizes its placements pass down', () => {
+  it('places a texture inherited by a face facing down by the default frame, whatever sizes its placements pass down', () => {
     const model = parseSkp(new Uint8Array(asset('textures-2027.skp')).buffer);
     const quadrants = [...model.materialsById].find(([, m]) => m.name === 'Quadrants')![0];
     const stripes = [...model.materialsById].find(([, m]) => m.name === 'Stripes')![0];
@@ -147,14 +147,14 @@ describe('SketchUp textures', () => {
       const scene = prepareSketchUp(model), doc = createDocument();
       doc.transact('Open', draft => applySketchUpImport(draft, scene));
       const face = facesByPoints(doc.state).get(`Group0/${pointKey(points)}`)!;
-      // One placement for every texture the face shows: SketchUp's default frame, divided by that texture's size.
+      // One placement for every texture the face shows: the default frame, divided by that texture's size.
       expect(face.uv.kind).toBe('sized');
       const textures = [...doc.state.materials.values()].filter(m => m.texture).map(m => m.texture!);
       const shown = textures.find(t => t.widthM === [...doc.state.materials.values()].find(m => m.name === 'Quadrants')!.texture!.widthM)!;
       for (const texture of textures) {
         points.forEach((p, i) => {
           const [s, t] = tileAt(doc.state, face, 'front', p, texture);
-          // SketchUp's coordinates for Quadrants, scaled to this texture's tile.
+          // The expected coordinates for Quadrants, scaled to this texture's tile.
           const [eu, ev] = expected.front!.uvs[i]!;
           expect(s).toBeCloseTo(eu * shown.widthM / texture.widthM, 6);
           expect(t).toBeCloseTo(ev * shown.heightM / texture.heightM, 6);
@@ -168,7 +168,7 @@ describe('SketchUp textures', () => {
     check();
   });
 
-  it('shows each side of a reversed inside-out solid where SketchUp shows it', () => {
+  it('keeps each side\'s texture of a reversed inside-out solid on the side it was painted', () => {
     // Group0 turned inside out: every face runs the other way, keeping its paint and placement.
     const insideOut = (drop: boolean) => {
       const model = parseSkp(new Uint8Array(asset('textures-2027.skp')).buffer);
@@ -177,7 +177,7 @@ describe('SketchUp textures', () => {
         face.loops = face.loops.map(loop => loop.map(ref => ({ ...ref, orientation: -ref.orientation })).reverse());
         face.normal = [-face.normal[0], -face.normal[1], -face.normal[2]];
       }
-      // Without its top the shell is open, and its faces stay as SketchUp has them.
+      // Without its top the shell is open, and its faces stay as the file has them.
       if (drop) group.faces = group.faces.filter(f => f.normal[2] > -0.5);
       const scene = prepareSketchUp(model), doc = createDocument();
       doc.transact('Open', draft => applySketchUpImport(draft, scene));
@@ -195,7 +195,7 @@ describe('SketchUp textures', () => {
     for (const [key, sheet] of sheets) {
       if (!key.startsWith('Group0/')) continue;
       const face = reversed.get(key)!;
-      // The painted side faced inward in SketchUp, so it is the reversed face's back.
+      // The painted side faced inward in the file, so it is the reversed face's back.
       expect(face.front).toBeNull();
       expect(solid.doc.state.materials.get(face.back!)!.name).toBe(open.doc.state.materials.get(sheet.front!)!.name);
       for (const p of sheet.points) {
@@ -208,7 +208,7 @@ describe('SketchUp textures', () => {
     expect(compared).toBe(5);
   });
 
-  it('places differently sized inherited textures on a reversed inside-out solid where SketchUp shows them', () => {
+  it('places differently sized inherited textures on a reversed inside-out solid on the side they were painted', () => {
     const open = (reversedShell: boolean) => {
       const model = parseSkp(new Uint8Array(asset('textures-2027.skp')).buffer);
       const id = (name: string) => [...model.materialsById].find(([, m]) => m.name === name)![0];
@@ -219,7 +219,7 @@ describe('SketchUp textures', () => {
         face.materialId = null;
         face.backMaterialId = null;
       }
-      // Without its top the shell is open, and its faces stay as SketchUp has them.
+      // Without its top the shell is open, and its faces stay as the file has them.
       if (!reversedShell) group.faces = group.faces.filter(f => f.normal[2] > -0.5);
       // Two placements pass down textures of different sizes.
       const placement = model.root.instances.find(i => i.refIdx === groupKey)!;
@@ -237,7 +237,7 @@ describe('SketchUp textures', () => {
     let compared = 0;
     for (const [key, sheet] of asDrawn) {
       if (!key.startsWith('Group0/')) continue;
-      // SketchUp shows the inherited texture on the side that faced inward, the reversed face's back.
+      // The inherited texture is on the side that faced inward, the reversed face's back.
       const face = reversed.get(key)!;
       for (const texture of textures) for (const p of sheet.points) {
         const [s, t] = tileAt(solid.doc.state, face, 'back', p, texture), [es, et] = tileAt(sheets.doc.state, sheet, 'front', p, texture);
@@ -317,7 +317,7 @@ describe('SketchUp textures', () => {
     expect(scene.warnings.some(w => /texture image/.test(w))).toBe(false);
   });
 
-  /** What SketchUp writes for an image: a definition holding one four-cornered face painted with the picture. */
+  /** How a .skp file stores an image: a definition holding one four-cornered face painted with the picture. */
   function imageDefinition(id: number, name: string, corners: Vec3[], material: number) {
     return { id, guid: `${name}-guid`, name, isImage: true, alwaysFacesCamera: false, shadowsFaceSun: false,
       vertices: corners.map(([x, y, z], i) => ({ id: i + 1, x, y, z })),
@@ -364,7 +364,7 @@ describe('SketchUp textures', () => {
     expect(scene.warnings).toContain('Tilted: a SketchUp image that is not a single flat rectangle is imported as a component holding its textured geometry.');
   });
 
-  it.each(['colorize-2027.skp', 'colorize-2017.skp'])('draws the textures %s colorizes as SketchUp does (PF-168)', async name => {
+  it.each(['colorize-2027.skp', 'colorize-2017.skp'])('draws the textures %s colorizes', async name => {
     const scene = await readSketchUp(asset(name));
     const doc = createDocument(), images = new ImageStore();
     const report = doc.transact('Open fixture', draft => applySketchUpImport(draft, scene, { images })).value;
@@ -382,7 +382,7 @@ describe('SketchUp textures', () => {
       let worst = 0;
       for (let i = 0; i < source.width * source.height; i++)
         for (let k = 0; k < 3; k++) worst = Math.max(worst, Math.abs(rgba[i * 4 + k]! - expected.pixels[i * expected.channels + k]!));
-      // Within a few levels of SketchUp's own colorized image, pixel for pixel.
+      // Within a few levels of the expected colorized image, pixel for pixel.
       expect(worst, n).toBeLessThanOrEqual(6);
     }
   });

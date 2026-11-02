@@ -112,7 +112,7 @@ it('imports files through the dialog straight into the chosen folder without ope
 
 const activeSession = (): DocumentSession => (window as unknown as { pushform: { session: DocumentSession } }).pushform.session;
 
-it.each(['model', 'layout'] as const)('refreshes into the active %s document rather than Home (PF-278)', async type => {
+it.each(['model', 'layout'] as const)('refreshes into the active %s document rather than Home', async type => {
   const { cloud, api } = await signedIn();
   const first = render(<App cloud={cloud} cloudFiles={api} />);
   fireEvent.click(await screen.findByRole('button', { name: /Create a model/ }));

@@ -58,8 +58,8 @@ export function createBrowserCloud(config: BrowserCloudConfig, browser: Pick<Win
 }
 
 /**
- * Session and client for an application that calls `security definer` functions only, such as the admin console
- *. Same sign-in as the product; no file library.
+ * Session and client for an application that calls `security definer` functions only, such as an admin
+ * console. Same sign-in as the product; no file library.
  */
 export function createBrowserRpc(config: BrowserCloudConfig, browser: Pick<Window, 'location' | 'history'> = window): { session: CloudSession; client: SupabaseClient<Database> } {
   const { client, callback, redirectTo } = browserClient(config, browser);

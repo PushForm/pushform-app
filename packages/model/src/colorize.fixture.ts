@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-// SketchUp 2027 `Texture#write(path, true)` output for generated 48x48 grid, gray and wood textures, colorized toward
-// each color with each colorize type (PF-168). `pixels`: every 6th pixel as source rgb + colorized rgb, in hex.
+// Expected colorized output for generated 48x48 grid, gray and wood textures, colorized toward
+// each color with each colorize type. `pixels`: every 6th pixel as source rgb + colorized rgb, in hex.
 export const SKETCHUP_COLORIZE_CASES: readonly { name: string; color: readonly [number, number, number]; type: 'shift' | 'tint';
   average: readonly [number, number, number]; pixels: string }[] = [
   { name: 'grid_0_0', color: [210, 180, 140], type: 'shift', average: [127, 127, 127],

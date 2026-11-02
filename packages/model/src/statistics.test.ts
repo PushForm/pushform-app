@@ -30,13 +30,13 @@ describe('modelStatistics', () => {
     const doc = fixture();
     const stats = modelStatistics(doc.state);
     expect(stats).toMatchObject({ faces: 18, edges: 36, definitions: 1, instances: 2, materials: 0, tags: 0, scenes: 0 });
-    // Two placements of the unit cube, one scaled to 2 × 2 × 2; the cube at the top of the model has no volume, as in SketchUp.
+    // Two placements of the unit cube, one scaled to 2 × 2 × 2; the cube at the top of the model, outside any placement, has no volume.
     expect(stats.volume).toBeCloseTo(1 + 8, 9);
     expect(stats.area).toBeCloseTo(6 + 6 + 24, 9);
     expect(stats.bounds).toEqual({ min: [0, 0, 0], max: [6, 2, 2] });
   });
 
-  it('counts no volume for a placement whose contents are not only solids, as SketchUp does not call it a solid', () => {
+  it('counts no volume for a placement whose contents are not only solids, since such a placement is not a solid', () => {
     const doc = fixture();
     doc.transact('stray edge', d => {
       const cube = [...d.definitions.values()].find(def => def.name === 'Cube')!.entities.sketch;
@@ -47,7 +47,7 @@ describe('modelStatistics', () => {
     expect(modelStatistics(doc.state).volume).toBe(0);
   });
 
-  it('counts no volume for a placement that holds another group or component beside its solids (PF-267)', () => {
+  it('counts no volume for a placement that holds another group or component beside its solids', () => {
     const doc = fixture();
     doc.transact('nest', d => {
       const cube = [...d.definitions.values()].find(def => def.name === 'Cube')!;

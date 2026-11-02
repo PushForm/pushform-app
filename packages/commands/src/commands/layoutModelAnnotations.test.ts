@@ -99,7 +99,7 @@ it('rejects unresolved and cross-view attachments atomically', () => {
   expect(entity()).toEqual(before);
 });
 
-it('matches LayOut projected parallel measurement and true perspective distance', () => {
+it('measures projected lengths in parallel views and true distances in perspective views', () => {
   const { doc, model, commands, pageId, viewportId, entity, attach } = setup();
   model.transact('Raise endpoint', draft => {
     draft.definitions.get(draft.rootDefinitionId)!.entities.sketch.vertices.get(101 as Id)!.p = [2, 0, 2];

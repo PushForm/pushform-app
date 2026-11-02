@@ -42,7 +42,7 @@ describe('buildSketchGeometry', () => {
     for (let i = 0; i < 6; i++) expect(g.normals[i * 3 + 2]).toBe(1);
     expect(g.faceIds.every((f) => f === 1)).toBe(true);
     expect(g.faceRanges.get(1)).toEqual([0, 6]);
-    // front white, back SketchUp blue-grey
+    // front white, back the default blue-grey
     expect([g.frontColors[0], g.frontColors[1], g.frontColors[2]]).toEqual([1, 1, 1]);
     expect(g.backColors[0]!).toBeLessThan(1);
   });

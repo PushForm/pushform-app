@@ -76,12 +76,12 @@ describe('Layout text', () => {
     expect(importLayoutText(String.raw`{\rtf1\pard\sl-280\slmult0 exact\par\pard\sl480\slmult1 later}`).lineSpacing).toEqual({ mode: 'exactly', value: 14 });
     expect(importLayoutText(String.raw`{\rtf1\pard\sl300 at least}`).lineSpacing).toEqual({ mode: 'atLeast', value: 15 });
   });
-  it('reads the first paragraph\'s tab stops and finds the next stop as LayOut does', () => {
+  it('reads the first paragraph\'s tab stops and finds the next stop', () => {
     const key = '{\\rtf1\\ansi\\cocoartf2576\n{\\fonttbl\\f0\\fnil\\fcharset0 Verdana;}\n' +
       '\\pard\\tx1120\\tx560\\tx1680\\pardirnatural\n\n\\f0\\fs20 \\cf0 WM\t\tWashing Machine\\\nTD\t\tTumble Dryer}';
     expect(importLayoutText(key)).toMatchObject({ content: 'WM\t\tWashing Machine\nTD\t\tTumble Dryer', tabStopsPt: [28, 56, 84] });
     expect(importLayoutText(String.raw`{\rtf1\pard\tx720 a\tab b}`)).toMatchObject({ content: 'a\tb', tabStopsPt: [36] });
-    // \pard clears stops; a paragraph without them has LayOut's default.
+    // \pard clears stops; a paragraph without them has the default stops.
     expect(importLayoutText(String.raw`{\rtf1\pard\tx720\par\pard plain}`).tabStopsPt).toBeUndefined();
     const pt = 25.4 / 72;
     expect(nextLayoutTabStop(0, [28, 56]) / pt).toBeCloseTo(28);
@@ -101,7 +101,7 @@ describe('Layout text', () => {
     expect(lineSpacingRtf(undefined)).toBe('\\sl240\\slmult1');
     expect(lineSpacingRtf({ mode: 'multiple', value: 1 })).toBe('\\sl240\\slmult1');
   });
-  it('spaces lines as LayOut does: multiples keep the baseline, fixed heights keep the descent', () => {
+  it('spaces lines: multiples keep the baseline, fixed heights keep the descent', () => {
     const pt = 25.4 / 72;
     expect(spaceLayoutLine(9, 2, undefined)).toEqual({ ascent: 9, height: 11 });
     expect(spaceLayoutLine(9, 2, { mode: 'multiple', value: 0.8 })).toEqual({ ascent: 9, height: 8.8 });

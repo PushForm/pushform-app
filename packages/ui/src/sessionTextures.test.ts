@@ -42,7 +42,7 @@ describe('SketchUp textures in the app', () => {
     const quadrants = [...state.materials.values()].find(m => m.name === 'Quadrants')!;
     expect(renderMaterial(state, quadrants.id, store)?.textureUrl).toBeTruthy();
 
-    // The panel is placed twice, once rotated 60° about X and scaled 1.5 × 2; both show SketchUp's coordinates.
+    // The panel is placed twice, once rotated 60° about X and scaled 1.5 × 2; both show the file's texture coordinates.
     const truth = (JSON.parse(asset('textures-uv.json').toString()) as { faces: TruthFace[] }).faces.find(f => f.definition === 'Textured panel')!;
     const panels = sketchesToRender(state, { images: store }).filter(s => s.path.length === 1 && s.faces.some(f => f.frontMaterial?.id === quadrants.id && f.uv?.kind === 'affine'));
     expect(panels).toHaveLength(2);
@@ -57,7 +57,7 @@ describe('SketchUp textures in the app', () => {
         return { front: [front[0]! * u + front[1]! * v + front[2]!, front[3]! * u + front[4]! * v + front[5]!],
           back: back ? [back[0] * u + back[1] * v + back[2], back[3] * u + back[4] * v + back[5]] : [u / width, v / height] };
       });
-      // Match corners by their front coordinates; SketchUp lists the same corners in its own order.
+      // Match corners by their front coordinates; the reference lists the same corners in its own order.
       for (const [i, expected] of truth.front!.uvs.entries()) {
         const corner = tiles.find(t => Math.hypot(t.front[0]! - expected[0], t.front[1]! - expected[1]) < 1e-6);
         expect(corner, `front corner ${i}`).toBeDefined();

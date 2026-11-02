@@ -6,7 +6,7 @@ import { InlineBackend, KernelClient } from '@pushform/kernel';
 import { createApp } from '../bootstrap';
 import { sketchesToRender } from './renderAdapter';
 
-describe('renderAdapter sheet-face shadows (PF-269)', () => {
+describe('renderAdapter sheet-face shadows', () => {
   it('gives each container\'s sheet faces the Cast/Receive Shadows of every group or component containing them', () => {
     const app = createApp({ demo: false, expose: false, kernel: new KernelClient(new InlineBackend()) });
     try {

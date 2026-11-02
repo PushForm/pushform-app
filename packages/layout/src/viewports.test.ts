@@ -9,7 +9,7 @@ const m = (v: number[]) => v.map(x => x * IN) as [number, number, number];
 const frame = (x: number, y: number, w: number, h: number) =>
   ([[x, y], [x + w, y], [x + w, y + h], [x, y + h]] as [number, number][]).map(([u, v]) => [u * MM, v * MM] as [number, number]);
 
-// A LayOut 2027 perspective viewport and the paper points LayOut's model_to_paper_point reported for it.
+// A perspective viewport as a .layout file stores it, and the paper points expected for it.
 const perspective: LayoutViewportCamera = {
   eye: m([154.59745034414158, -67.97778598998778, 69.284067670143983]),
   target: m([53.169682725009132, 33.449981629144645, 18.570183860577771]),
@@ -19,7 +19,7 @@ const perspective: LayoutViewportCamera = {
 const perspectiveFrame = frame(1.169291, 0.91557789, 3.8210192, 3.5650606);
 
 describe('viewport projection', () => {
-  it('matches LayOut for a perspective view', () => {
+  it('projects model points to paper in a perspective view', () => {
     const cases: [number[], [number, number]][] = [
       [[0, 0, 0], [1.060470834155707, 3.1220947203803733]],
       [[100, 0, 0], [3.5901382636030434, 4.663139055622702]],
@@ -32,8 +32,8 @@ describe('viewport projection', () => {
     }
   });
 
-  it('matches LayOut for an off-center parallel view at 1:1', () => {
-    // LayOut stored this as height 6.614 in, 2D zoom 0.714 and centers (0.0344, 0.1786); folded, the
+  it('projects model points to paper in an off-center parallel view at 1:1', () => {
+    // The file stores this as height 6.614 in, 2D zoom 0.714 and centers (0.0344, 0.1786); folded, the
     // frame center sits 0.2559 in right of and 0.5906 in above the view axis.
     const camera: LayoutViewportCamera = {
       eye: m([5.154586519391, 1.783954755886, 6794.019723671]), target: m([5.154586519391, 1.783954755886, 0]), up: [0, 1, 0],

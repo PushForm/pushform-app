@@ -90,7 +90,7 @@ describe('document properties', () => {
   });
 });
 
-/** Documents written by LayOut 2027 (27.0.264) through its own Ruby API. */
+/** Documents saved in version 27.0.264 of the format. */
 function fixture(name: string): Uint8Array {
   return new Uint8Array(readFileSync(new URL(`./__fixtures__/${name}`, import.meta.url)));
 }
@@ -251,7 +251,7 @@ describe('SketchUp LayOut import', () => {
   });
 
   it('imports page-number auto-text as live page-number fields counted from their own start pages', () => {
-    // As in forum-217965 PgNumTest: each tag counts from the page its definition refers to, and is blank before it.
+    // Each tag counts from the page its definition refers to, and is blank before it.
     const tags = (id: number) => `
       <e:rtfText id="id${id}" anchorType="5" growMode="1">
         <e:placedFileReference><e:rectangleBase x="1" y="1" width="2" height="1" /></e:placedFileReference>
@@ -283,7 +283,7 @@ describe('SketchUp LayOut import', () => {
       ['PageNumE', { startPageId: state.pageOrder[1], startNumber: 1, style: 'arabic' }],
       ['PageNumR', { startPageId: null, startNumber: 3, style: 'upper-roman' }],
     ]);
-    // Each page shows what LayOut shows, shared-layer text included, which no fixed text could.
+    // Each page shows its own page number, shared-layer text included, which no fixed text could.
     expect(pages.map((p) => resolveLayoutText('A.<PageNumber> E.<PageNumE> R.<PageNumR>', p, state))).toEqual(['A.1 E. R.III', 'A.2 E.1 R.IV', 'A.3 E.2 R.V']);
     expect([...state.sharedEntities.values()].map((entity) => entity.text?.content)).toEqual(['Sheet <PageNumE>']);
     expect(pages.map((p) => resolveLayoutText('Sheet <PageNumE>', p, state))).toEqual(['Sheet ', 'Sheet 1', 'Sheet 2']);
@@ -291,7 +291,7 @@ describe('SketchUp LayOut import', () => {
   });
 
   it('keeps another default-numbered name apart from a customized PageNumber', () => {
-    // As in forum-22457: PageNumber itself starts on the second page, padded, so a plain field cannot be <PageNumber>.
+    // PageNumber itself starts on the second page, padded, so a plain field cannot be <PageNumber>.
     const text = `<e:rtfText id="id30" anchorType="5" growMode="1">
         <e:placedFileReference><e:rectangleBase x="1" y="1" width="2" height="1" /></e:placedFileReference>
         <e:rtfTextRep>${RTF('&lt;PageNumber&gt;/&lt;Plain&gt;')}</e:rtfTextRep>
@@ -850,7 +850,7 @@ describe('SketchUp LayOut import', () => {
     const dashes = all.filter((entity) => entity.kind === 'path' && !entity.closed && entity.points[0]![1] === 0);
     expect(dashes).toHaveLength(1);
     expect(dashes[0]!.points.map(inches)).toEqual([[0, 0], [1, 0]]);
-    // LayOut 2027 draws its dash 12 weights on, 6 off.
+    // This dash is 12 weights on, 6 off.
     expect(dashes[0]!.style!.strokeDashMm).toEqual([12, 6].map(length => length * 25.4 / 72));
     // Arrow code 3 is LayOut's open 90° arrow; code 5 is a filled circle. Both stay on the line.
     expect(dashes[0]!.style).toMatchObject({ startArrow: { type: 'open-arrow-90', sizePt: 4 }, endArrow: { type: 'filled-circle', sizePt: 4 } });
@@ -864,7 +864,7 @@ describe('SketchUp LayOut import', () => {
     expect(warnings).toContain('dimensions were imported as lines and text');
   });
 
-  it('draws square, diamond, star and T arrowheads as LayOut does and stops lines behind open ones', () => {
+  it('draws square, diamond, star and T arrowheads and stops lines behind open ones', () => {
     // Arrow size 9 is 1/8 in per unit.
     const u = 0.125, path = (id: string, points: string, start: number, end: number) => `
       <e:path id="${id}" rotationAngle="0">
@@ -1031,7 +1031,7 @@ describe('SketchUp LayOut import', () => {
     expect(loose!.dimension!.anchors[1]).toBeNull();
     const [tip, movedOff] = all.filter((entity) => entity.kind === 'label');
     expect(tip!.labelAnchor).toEqual({ entityId: polyline!.id, pointIndex: 2, pointCount: 3 });
-    // LayOut keeps this connection but draws the arrow away from its vertex, so it stays where it is.
+    // The file keeps this connection but stores the arrow away from its vertex, so it stays where it is.
     expect(movedOff!.labelAnchor).toBeUndefined();
     expect(warnings).toContain('dimensions and labels LayOut shows away from the vertex they are connected to keep their points but are no longer attached');
     expect(warnings).toContain('dimensions and labels attached to model views keep their points but are no longer attached');
@@ -1073,7 +1073,7 @@ describe('SketchUp LayOut import', () => {
       dimension('id70', 2, 'scale="1" useInModelDistance="1" autoText="0"', 'format="1" unit="0" precision="4"', `20'-1"`),
       dimension('id71', 1, 'scale="1" useInModelDistance="1" dimensionString="&lt;&gt;&#x0D;&#x0A;RAFTER"', 'format="1" unit="0" precision="4"', '4 1/2"\\par RAFTER'),
       dimension('id72', 2, 'scale="1" autoText="0"', 'format="1" unit="0" precision="4"', ' '),
-      // LayOut 3 wrote no suppressDashesDisplay and shows feet and inches without a dash.
+      // LayOut 3 files have no suppressDashesDisplay, and their feet and inches show without a dash.
       dimension('id73', 0.25, 'scale="0.020833333333333332" autoText="1"', 'format="1" unit="0" precision="2"', `1' 0"`),
     ];
     const ids = cases.map((_, index) => `id${60 + index}`);
@@ -1118,7 +1118,7 @@ describe('SketchUp LayOut import', () => {
   });
 
   it('attaches dimension ends and label tips LayOut connected along straight and curved segments', () => {
-    // LayOut 2027 connected these through its Ruby API: a polyline (1,1)-(5,1)-(5,4), a rectangle from (7,4) 2 × 1 in,
+    // The file connects these: a polyline (1,1)-(5,1)-(5,4), a rectangle from (7,4) 2 × 1 in,
     // a half circle about (3,6), and text at (7,1).
     const { doc, warnings } = importSketchUpLayout(fixture('layout2027-connections.layout'));
     const page = doc.state.pages.get(doc.state.pageOrder[0]!)!;
@@ -1155,14 +1155,14 @@ describe('SketchUp LayOut import', () => {
     expect(curved.warnings.some((w) => w.startsWith('dimensions and labels attached to points inside text or shapes keep their points'))).toBe(true);
   });
 
-  it('sets label text against its leader as LayOut does, moving a stale box', () => {
+  it('sets label text against its leader, moving a stale box', () => {
     const label = (id: number, connection: number, anchor: number, rect: string, points: string, rtf: string) =>
       `<e:label id="id${id}" connectionType="${connection}" extensionLineLength="0"><e:bodyOffset x="0" y="0" />
         <e:leaderLine id="id${id + 1}" wantInternalPoints="0"><e:elements>0,1,1</e:elements><e:points2f>${points}</e:points2f>
           <e:arrowData startArrowType="5" startArrowSize="5" endArrowType="0" endArrowSize="5" /></e:leaderLine>
         <e:labelText id="id${id + 2}" anchorType="${anchor}" growMode="0"><e:placedFileReference><e:rectangleBase ${rect} /></e:placedFileReference>
           <e:rtfTextRep>{\\rtf1\\ansi{\\fonttbl{\\f0\\fnil Arial;}}\\f0\\fs20 ${rtf}\\par}</e:rtfTextRep></e:labelText></e:label>`;
-    // forum-204780: the box ends 0.385 in below the leader, but LayOut draws the last line's middle on it.
+    // The stored box ends 0.385 in below the leader, but the leader connects to the middle of its last line.
     const stale = label(60, 10, 10, 'x="1.0360858" y="2.2169719" width="1.6638889" height="1.8520833"',
       '3.705927,0.6757834,3.111473,3.683638,2.703447,3.683638', 'WAND 1\\par\\par 4.2m x 16\\par 67.2 x 15.6W');
     // A consistent first-line connection: the box's top is half a line above the leader.
@@ -1174,7 +1174,7 @@ describe('SketchUp LayOut import', () => {
     expect(moved!.points[1]![1]).toBeCloseTo(end + halfLine, 6);
     expect(moved!.points[1]![1] - moved!.points[0]![1]).toBeCloseTo(1.8520833 * 25.4, 6);
     expect(moved!.text!.vertical).toBe('bottom');
-    // No bend where LayOut has none: the leader meets the text at its own end.
+    // No bend where the file has none: the leader meets the text at its own end.
     const leader = layoutLabelLeader(moved!)!;
     expect(leader.start[1]).toBeCloseTo(end, 6);
     expect(leader.bend[1]).toBeCloseTo(end, 6);
@@ -1208,7 +1208,7 @@ describe('SketchUp LayOut import', () => {
     expect(all.find((entity) => entity.style?.endArrow)!.style).toMatchObject({ startArrow: { type: 'filled-circle' }, endArrow: { type: 'filled-triangle' } });
   });
 
-  it('draws rounded, lozenge, and bulged rectangles and fills open filled paths as LayOut does', () => {
+  it('draws rounded, lozenge, and bulged rectangles and fills open filled paths as if closed', () => {
     const rect = (shape: number, rounding: number, x: number) =>
       `<e:rectangle id="id${70 + shape}" shape="${shape}" rounding="${rounding}"><e:rectangleBase x="${x}" y="1" width="1.6" height="1.2" /></e:rectangle>`;
     const openFilled = `<e:path id="id80" rotationAngle="0"><e:graphicEntity fillColor="4278190335" />
@@ -1444,7 +1444,7 @@ describe('SketchUp LayOut import', () => {
   });
 
   it('keeps a filled path with open and closed subpaths as one compound path', () => {
-    // A closed square, a stray two-point line and a lone point, as in the corpus's section and elevation fills.
+    // A closed square, a stray two-point line and a lone point, as in section and elevation fills.
     const entity = `<e:path id="id80"><e:graphicEntity fillColor="4278190335" />
       <e:elements>0,1,1,1,3,0,1,0</e:elements>
       <e:points2f>0,0,4,0,4,4,0,4,1,1,3,3,5,5</e:points2f></e:path>`;

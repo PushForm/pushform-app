@@ -29,7 +29,7 @@ describe('spec-ids', () => {
 
   // Without a specs/ directory there is nothing to check.
   const specsRoot = join(fileURLToPath(import.meta.url), '..', '..');
-  it.skipIf(!Object.keys(readSpecs(specsRoot)).length)('finds no duplicate requirement IDs in the specs (PF-273)', () => {
+  it.skipIf(!Object.keys(readSpecs(specsRoot)).length)('finds no duplicate requirement IDs in the specs', () => {
     const specs = readSpecs(specsRoot);
     expect(Object.keys(specs)).toContain('specs/modeling.md');
     expect(duplicateRequirementIds(specs)).toEqual([]);

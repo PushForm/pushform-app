@@ -50,7 +50,7 @@ export function renderComponentThumbnail(state: DocumentState, id: DefId, width 
   return picture;
 }
 
-/** A perspective view along (1, −1, 0.8) that fits the bounds' sphere, like the sample check's fitted view. */
+/** A perspective view along (1, −1, 0.8) that fits the bounds' sphere. */
 export function isoCamera(bounds: { min: Vec3; max: Vec3 }, aspect: number, fov = 35): CameraState {
   const target: Vec3 = [(bounds.min[0] + bounds.max[0]) / 2, (bounds.min[1] + bounds.max[1]) / 2, (bounds.min[2] + bounds.max[2]) / 2];
   const radius = Math.max(Math.hypot(bounds.max[0] - bounds.min[0], bounds.max[1] - bounds.min[1], bounds.max[2] - bounds.min[2]) / 2, 1e-3);

@@ -71,7 +71,7 @@ export interface InferenceEngineOptions {
 
 /**
  * How long one pointer query may spend catching the index up with the document. Past it, the query sees an empty
- * index until the rest is built in idle time, so the first hover over a large model never stalls (PF-189).
+ * index until the rest is built in idle time, so the first hover over a large model never stalls.
  */
 export const POINTER_INDEX_BUDGET_MS = 40;
 

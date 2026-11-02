@@ -31,7 +31,7 @@ index 9be1b32aa8166d5a75f3b9f2faf7a5221c1db088..2593927c9ddbb93af9a5bf924db34418
 +    /** PushForm patch: the model's Display Section Planes and Display Section Cuts rendering options; null when the
 +     * file does not record them. */
 +    sectionDisplay: { planes: boolean; cuts: boolean } | null;
-+    /** PushForm patch: the model's current rendering options, as SketchUp shows the model (RenderMode, EdgeDisplayMode,
++    /** PushForm patch: the model's current rendering options in effect (RenderMode, EdgeDisplayMode,
 +     * BackgroundColor, ...), keyed by the names of Sketchup::RenderingOptions, as numbers, booleans or [r, g, b, a]
 +     * colors in 0..255; null when the file records none. */
 +    renderingOptions: Record<string, number | boolean | [number, number, number, number]> | null;
@@ -173,7 +173,7 @@ index 9be1b32aa8166d5a75f3b9f2faf7a5221c1db088..2593927c9ddbb93af9a5bf924db34418
 +    /** PushForm patch: the model's Display Section Planes and Display Section Cuts rendering options; null when the
 +     * file does not record them. */
 +    sectionDisplay: { planes: boolean; cuts: boolean } | null;
-+    /** PushForm patch: the model's current rendering options, as SketchUp shows the model (RenderMode, EdgeDisplayMode,
++    /** PushForm patch: the model's current rendering options in effect (RenderMode, EdgeDisplayMode,
 +     * BackgroundColor, ...), keyed by the names of Sketchup::RenderingOptions, as numbers, booleans or [r, g, b, a]
 +     * colors in 0..255; null when the file records none. */
 +    renderingOptions: Record<string, number | boolean | [number, number, number, number]> | null;
@@ -373,8 +373,8 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
 +  return value === null ? null : { planes: (value & 1) !== 0, cuts: (value & 2) !== 0 };
 +}
 +/** PushForm patch: SketchUp rendering options (the names of Sketchup::RenderingOptions) by the tag of their value in
-+ * VFF model.dat's 0x733c record: b boolean (1 byte), i int32, c color (r, g, b, a bytes), d float64. Verified against
-+ * SketchUp 2027's own reading of fixtures with distinctive values (packages/testing/assets/sketchup/style-*.skp). */
++ * VFF model.dat's 0x733c record: b boolean (1 byte), i int32, c color (r, g, b, a bytes), d float64. Checked against
++ * fixtures with distinctive values (packages/testing/assets/sketchup/style-*.skp). */
 +var RENDERING_OPTION_TAGS = {
 +  29501: ["RenderMode", "i"], 29502: ["ModelTransparency", "b"], 29503: ["MaterialTransparency", "b"], 29504: ["Texture", "b"],
 +  29505: ["EdgeDisplayMode", "i"], 29506: ["EdgeType", "i"], 29507: ["DisplaySketchAxes", "b"], 29508: ["DisplayText", "b"],
@@ -450,7 +450,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
 +  }
 +  return last;
 +}
-+/** PushForm patch: the model's current rendering options, as SketchUp shows the model, keyed by SketchUp's option
++/** PushForm patch: the model's current rendering options in effect, keyed by SketchUp's option
 + * names, as numbers, booleans or [r, g, b, a] colors; null when the file records none. VFF model.dat: the 0x733c
 + * record's values (RENDERING_OPTION_TAGS); its BackgroundColor and ForegroundColor are (0, 0, 0, 0) in some files,
 + * where the current style's items 4000 and 1014 (`styleInts`, from the last style.xml) hold them. Legacy files: the
@@ -1465,7 +1465,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
 -  }
 +  // The hidden flag, then the tag's color written inline as a material body (CMaterial's preamble, name and
 +  // texture flag). Its attribute container is usually null, but an extension can attach dictionaries to it
-+  // (V-Ray did in a 2017 model), and those are objects that take store-map slots.
++  // (some do), and those are objects that take store-map slots.
 +  const mid = [r.u8()];
 +  preamble(ar, r);
    r.utf16();
@@ -1500,8 +1500,8 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    const opacity = r.f64();
    const useOp = r.u8();
 -  const colorized = Boolean(blob[4]) || avg[3] === 255;
-+  // PushForm patch (PF-168): the 8 bytes hold SketchUp's material type (u32: 1 textured, 2 colorized texture) and
-+  // its colorize type (u32: 0 shift, 1 tint), as SketchUp 2027's saves to the 2017-2020 formats show.
++  // PushForm patch: the 8 bytes hold SketchUp's material type (u32: 1 textured, 2 colorized texture) and
++  // its colorize type (u32: 0 shift, 1 tint), as 2017-2020 format files store them.
 +  const blobView = new DataView(blob.buffer, blob.byteOffset, 8);
 +  const colorized = blobView.getUint32(0, true) === 2;
 +  const colorizeType = blobView.getUint32(4, true);
@@ -2514,8 +2514,8 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
 +  return value === null ? null : { planes: (value & 1) !== 0, cuts: (value & 2) !== 0 };
 +}
 +/** PushForm patch: SketchUp rendering options (the names of Sketchup::RenderingOptions) by the tag of their value in
-+ * VFF model.dat's 0x733c record: b boolean (1 byte), i int32, c color (r, g, b, a bytes), d float64. Verified against
-+ * SketchUp 2027's own reading of fixtures with distinctive values (packages/testing/assets/sketchup/style-*.skp). */
++ * VFF model.dat's 0x733c record: b boolean (1 byte), i int32, c color (r, g, b, a bytes), d float64. Checked against
++ * fixtures with distinctive values (packages/testing/assets/sketchup/style-*.skp). */
 +var RENDERING_OPTION_TAGS = {
 +  29501: ["RenderMode", "i"], 29502: ["ModelTransparency", "b"], 29503: ["MaterialTransparency", "b"], 29504: ["Texture", "b"],
 +  29505: ["EdgeDisplayMode", "i"], 29506: ["EdgeType", "i"], 29507: ["DisplaySketchAxes", "b"], 29508: ["DisplayText", "b"],
@@ -2591,7 +2591,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
 +  }
 +  return last;
 +}
-+/** PushForm patch: the model's current rendering options, as SketchUp shows the model, keyed by SketchUp's option
++/** PushForm patch: the model's current rendering options in effect, keyed by SketchUp's option
 + * names, as numbers, booleans or [r, g, b, a] colors; null when the file records none. VFF model.dat: the 0x733c
 + * record's values (RENDERING_OPTION_TAGS); its BackgroundColor and ForegroundColor are (0, 0, 0, 0) in some files,
 + * where the current style's items 4000 and 1014 (`styleInts`, from the last style.xml) hold them. Legacy files: the
@@ -3606,7 +3606,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
 -  }
 +  // The hidden flag, then the tag's color written inline as a material body (CMaterial's preamble, name and
 +  // texture flag). Its attribute container is usually null, but an extension can attach dictionaries to it
-+  // (V-Ray did in a 2017 model), and those are objects that take store-map slots.
++  // (some do), and those are objects that take store-map slots.
 +  const mid = [r.u8()];
 +  preamble(ar, r);
    r.utf16();
@@ -3641,8 +3641,8 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    const opacity = r.f64();
    const useOp = r.u8();
 -  const colorized = Boolean(blob[4]) || avg[3] === 255;
-+  // PushForm patch (PF-168): the 8 bytes hold SketchUp's material type (u32: 1 textured, 2 colorized texture) and
-+  // its colorize type (u32: 0 shift, 1 tint), as SketchUp 2027's saves to the 2017-2020 formats show.
++  // PushForm patch: the 8 bytes hold SketchUp's material type (u32: 1 textured, 2 colorized texture) and
++  // its colorize type (u32: 0 shift, 1 tint), as 2017-2020 format files store them.
 +  const blobView = new DataView(blob.buffer, blob.byteOffset, 8);
 +  const colorized = blobView.getUint32(0, true) === 2;
 +  const colorizeType = blobView.getUint32(4, true);

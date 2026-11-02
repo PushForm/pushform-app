@@ -20,7 +20,7 @@ function stubCanvas(pixel: [number, number, number, number]): { drawn: number[] 
   return { drawn };
 }
 
-it('colorizes a texture once its image loads, as SketchUp does, keeping the plain texture apart', () => {
+it('colorizes a texture once its image loads, keeping the plain texture apart', () => {
   const { drawn } = stubCanvas([100, 100, 100, 255]);
   const cache = new TextureCache();
   const plain = cache.get('blob:wood');

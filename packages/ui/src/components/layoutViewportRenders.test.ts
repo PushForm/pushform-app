@@ -64,7 +64,7 @@ function view(): LayoutEntity {
     image: { src: '', viewport: { source: { archiveId: 'a', modelReferenceId: 'm' }, templateId: 't', originalId: null, camera, scene: null, background: null, cache: null } } };
 }
 // Wait for the queue's own completion (model loading, identity hashes and rendering happen inside its drain): neither a
-// timer tick nor a fixed deadline is a completion boundary under a loaded machine (PF-289).
+// timer tick nor a fixed deadline is a completion boundary under a loaded machine.
 const settle = () => whenLayoutViewportRendersIdle();
 const state = createLayoutDocumentState();
 

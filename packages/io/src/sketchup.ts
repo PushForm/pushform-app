@@ -73,7 +73,7 @@ export interface ImportedFace {
   normal: Vec3;
   front: number | null;
   back: number | null;
-  /** Side texture placement where SketchUp's differs from PushForm's automatic one; null = automatic. */
+  /** Side texture placement where the file's differs from PushForm's automatic one; null = automatic. */
   frontUv: ImportedUvMap | null;
   backUv: ImportedUvMap | null;
   hidden: boolean;
@@ -97,7 +97,7 @@ export interface ImportedMaterial {
   color: Vec3;
   alpha: number;
   /**
-   * Texture image index and the size of one tile in meters, or null for a plain color. `colorize` is SketchUp's
+   * Texture image index and the size of one tile in meters, or null for a plain color. `colorize` is the file's
    * colorize type when the texture is colorized toward the material color.
    */
   texture: { image: number; widthM: number; heightM: number; colorize?: 'shift' | 'tint' } | null;
@@ -339,7 +339,7 @@ export async function readSketchUp(bytes: Uint8Array, onProgress?: (p: ImportPro
   const { parseSkp } = await import('openskp');
   let model: SkpModel;
   // The reader takes a whole ArrayBuffer; reuse the caller's when the bytes fill it (the import worker's always do), so a
-  // file near the 128 MiB limit is not held twice (PF-23).
+  // file near the 128 MiB limit is not held twice.
   const buffer = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength && bytes.buffer instanceof ArrayBuffer
     ? bytes.buffer : new Uint8Array(bytes).buffer;
   try {
@@ -639,14 +639,14 @@ function convertDefinition(source: Definition, key: number, warn: (m: string) =>
   const referenced = new Set<number>();
   const faces: ImportedFace[] = [];
   const triangles: Triangulated[] = [];
-  // Each kept face's source record, with SketchUp's normal and its boundary points (the whole source face's
+  // Each kept face's source record, with the file's normal and its boundary points (the whole source face's
   // for a crossing face's pieces, which share the placement fitted to it).
   type Side = { face: ProjectedFace; normal: Vec3; points: Vec3[] };
   const sides: Side[] = [], crossingSides: Side[] = [];
   const skip = (face: Face, cause: unknown): void =>
     warn(`${source.name || 'Model'}: face ${face.id} skipped: ${cause instanceof Error ? cause.message : String(cause)}.`);
   // First every face's outline; a face whose outline crosses or touches itself is cut into the simple
-  // faces SketchUp shades, and the points where it is cut are later added to the sheets along those edges.
+  // faces that cover its shaded region, and the points where it is cut are later added to the sheets along those edges.
   const outlines: { face: Face; normal: Vec3; points: Vec3[]; piece: FacePiece; tri: Triangulated | null; crossing: boolean }[] = [];
   const splits = new Map<number, Vec3[]>(), unshaded: ShadedRegion['unshaded'] = [];
   for (const face of source.faces) {
@@ -655,7 +655,7 @@ function convertDefinition(source: Definition, key: number, warn: (m: string) =>
       const loops = faceLoops(face, edges, vertices);
       if (!face.normal.every(Number.isFinite) || v3len(face.normal) < LENGTH_TOL) throw new Error('invalid normal');
       const normal = v3normalize(face.normal);
-      // SketchUp keeps a face's points within tolerance of its own plane, which passes near their centroid,
+      // A stored face's points lie within tolerance of its own plane, which passes near their centroid,
       // so a plane through one corner can see twice the deviation.
       const points = loops.flat(), mean = (axis: 0 | 1 | 2): number => points.reduce((sum, p) => sum + p[axis], 0) / points.length;
       const centroid: Vec3 = [mean(0), mean(1), mean(2)];
@@ -754,9 +754,9 @@ function convertDefinition(source: Definition, key: number, warn: (m: string) =>
       return mapped;
     });
     let mesh: MeshData = { verts: Float64Array.from(compact), tris, faceId: Uint32Array.from(triangleFaces) };
-    // Faces narrower than the merge tolerance have no triangle left; SketchUp keeps them, so they stay sheets.
+    // Faces narrower than the merge tolerance have no triangle left; the file keeps them as faces, so they stay sheets.
     let problems = tris.length ? meshTopologyProblems(mesh) : ['its triangles weld away at the merge tolerance'];
-    // A closed, consistently oriented shell that is only inside out is a solid in SketchUp: turn it outward.
+    // A closed, consistently oriented shell that is only inside out is still a solid: turn it outward.
     if (problems.length === 1 && problems[0] === INSIDE_OUT) {
       const reversed: MeshData = { ...mesh, tris: reverseTriangles(mesh.tris) };
       if (!meshTopologyProblems(reversed).length) {
@@ -805,7 +805,7 @@ function convertDefinition(source: Definition, key: number, warn: (m: string) =>
     face.edgeFlags = cut.edges.map((ring, k) => ring.map(id => ({ ...flags[k]!.get(id)! })));
   }
   // The parts of a crossing outline around no shaded piece (a backwards lobe, an outline doubling back
-  // over itself, holes overlapping one another) are edges of that face in SketchUp, never loose edges.
+  // over itself, holes overlapping one another) are edges of that face in the file, never loose edges.
   // A sketch edge bounding no face is loose, so they are not imported; another face along them still
   // has its own edges there. Source edges with no part left are left out of their curves.
   const omitted = new Set<number>();
@@ -855,8 +855,8 @@ function triangulateOutline(loops: Vec3[][], normal: Vec3): Triangulated {
 /**
  * Where collinear outline points meet (two window holes whose sills lie on one line, say), the triangulation
  * can leave zero-area slivers and run a triangle edge straight past a vertex. The face next door meets that
- * vertex, so the shared edge has no twin and a closed shell the file marks as a solid would stay sheets
- *. This drops the slivers and splits each edge that runs past one of the face's vertices; the
+ * vertex, so the shared edge has no twin and a closed shell the file marks as a solid would stay sheets.
+ * This drops the slivers and splits each edge that runs past one of the face's vertices; the
  * triangles then cover the same area and meet every outline segment exactly.
  */
 function withoutSlivers(positions: Float64Array, indices: Uint32Array, ringStarts: readonly number[]): Uint32Array {
@@ -1000,7 +1000,7 @@ function edgeChain(edges: ReaderEdge[]): { edges: number[]; vertices: number[]; 
 
 /**
  * PushForm curve geometry for a SketchUp curve. Only the arc's centre, normal and radius are taken from the
- * file: the start angle and sweep come from the vertices, since SketchUp's stored x axis can disagree with
+ * file: the start angle and sweep come from the vertices, since the stored x axis can disagree with
  * them. The result is accepted only when its tessellation reproduces every vertex; otherwise the curve is
  * freehand, which keeps its edges together without claiming arc geometry.
  */
@@ -1118,7 +1118,7 @@ function convertAnnotations(source: Definition, result: ImportedDefinition, tall
 /**
  * Leader text keeps its anchor and label offset; screen text keeps its position as fractions of the view.
  * A pushpin leader's vector is a world offset. A view-based leader's vector holds its offset along the view's
- * right and up directions (SketchUp's Text#vector is that offset in the camera the model opens with), so it is kept
+ * right and up directions (in the camera the model opens with), so it is kept
  * as a view offset. Fonts, the material's color and the arrow come with the text. Text whose anchor
  * the reader does not resolve is reported and skipped.
  */

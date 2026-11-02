@@ -10,7 +10,7 @@ describe('arrows', () => {
     for (const type of LAYOUT_ARROW_TYPES) expect(layoutArrowFromFile(LAYOUT_ARROW_FILE_CODES[type], 6)).toEqual({ type, sizePt: 6 });
     expect(new Set(Object.values(LAYOUT_ARROW_FILE_CODES)).size).toBe(LAYOUT_ARROW_TYPES.length);
     for (const code of [0, 15, 16, 99]) expect(layoutArrowFromFile(code, 4)).toBeNull();
-    // LayOut draws a zero-size arrow as nothing.
+    // A zero-size arrow draws nothing.
     expect(layoutArrowFromFile(5, 0)).toBeNull();
   });
 

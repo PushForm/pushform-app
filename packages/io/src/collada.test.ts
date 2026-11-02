@@ -61,7 +61,7 @@ describe('COLLADA import', () => {
     await expect(readModelImport(new Uint8Array([1, 2, 3, 4]))).rejects.toThrow('Not a SketchUp model');
   });
 
-  it('imports a SketchUp-style export: an inch-unit component placed by a wrapper node becomes one shared solid', async () => {
+  it('imports an export whose inch-unit component, placed by a wrapper node, becomes one shared solid', async () => {
     const bytes = dae({
       unit: 0.0254, materials: RED,
       geometries: mesh('cube', CUBE_POSITIONS.split(' ').map(v => Number(v) * 10).join(' '),
@@ -162,7 +162,7 @@ describe('COLLADA import', () => {
   });
 
   it('treats a triangle on one line far from the origin as a sliver, though rounding leaves it some area', async () => {
-    // From 3dw-rooftop-garden's model.dae: SketchUp's export fans a wall's bottom edge from a point 1.6 km away, and
+    // An exporter can fan a wall's bottom edge from a point 1.6 km away, and
     // the fan's triangles on that line keep about 2e-10 m² from rounding. They used to become faces that were skipped.
     const scene = await readCollada(dae({
       unit: 0.0254,

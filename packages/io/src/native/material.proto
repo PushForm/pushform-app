@@ -9,6 +9,7 @@ message MaterialTexture {
   required double height_m = 3;
   required bool colorize = 4;
   optional OptionalColorizeType colorize_type = 5;
+  optional uint32 grain = 6; // 0 width, 1 height, 2 none; absent means width
 }
 message NullableTexture { oneof state { EmptyState null_value = 2; MaterialTexture value = 3; } }
 message Material {

@@ -133,6 +133,16 @@ describe('material.* commands', () => {
     expect(host.doc.state.materials.get(id)?.texture).toBeTruthy();
   });
 
+  it('carries the library grain axis onto the material and keeps it through texture edits', async () => {
+    const { registry, host } = setup();
+    const oak = await registry.execute('material.fromLibrary', { key: 'Wood_Oak' }) as MaterialId;
+    expect(host.doc.state.materials.get(oak)!.texture!.grain).toBe('height');
+    registry.execute('material.update', { id: oak, texture: { widthM: 2 } });
+    expect(host.doc.state.materials.get(oak)!.texture).toMatchObject({ widthM: 2, grain: 'height' });
+    const parquet = await registry.execute('material.fromLibrary', { key: 'Wood_herringbone_parquet' }) as MaterialId;
+    expect(host.doc.state.materials.get(parquet)!.texture!.grain).toBe('none');
+  });
+
   it('embeds rectangular fabrics with their original pixel dimensions and physical proportions', async () => {
     const { registry, host } = setup();
     const id = await registry.execute('material.fromLibrary', { key: 'Textiles_floral_jacquard' }) as MaterialId;

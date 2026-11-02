@@ -354,6 +354,15 @@ it('has the model agent finish parts, use library woods and check for overlaps a
   expect(rules).toContain('only when asked');
 });
 
+it('gives the model agent casework finish and grain conventions it can verify', () => {
+  const rules = MODEL_DOCUMENT_RULES(ctx());
+  expect(rules).toContain('prefinished maple plywood inside');
+  expect(rules).toContain('take the paint or stain asked for');
+  expect(rules).toContain('Grain runs vertical on stiles, sides, door panels and slab doors, horizontal on rails and drawer fronts');
+  expect(rules).toContain('Paint inside and outside faces separately');
+  expect(rules).toContain('reports grain as a direction');
+});
+
 it('offers the overlap and material library reads with the model tools', () => {
   const names = modelDocumentTools.map(tool => tool.name);
   expect(names).toEqual(expect.arrayContaining(['model_find_overlaps', 'model_material_library']));

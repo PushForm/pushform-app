@@ -5,6 +5,12 @@ import type { ColorizeType } from '../colorize';
 
 export type Rgb = readonly [number, number, number]; // 0..1
 
+/**
+ * Which way the grain of a texture's image runs: along its `width`, along its `height`, or `none` for patterns
+ * with no single direction (parquet, herringbone, stone). Absent means `width`.
+ */
+export type TextureGrain = 'width' | 'height' | 'none';
+
 export interface MaterialTexture {
   imageId: ImageId;
   widthM: number;
@@ -13,6 +19,8 @@ export interface MaterialTexture {
   colorize: boolean;
   /** Colorize type: `shift` (the default) moves each pixel's hue, `tint` replaces it. */
   colorizeType?: ColorizeType | undefined;
+  /** Which way the image's grain runs; absent in older files and for imported textures, meaning `width`. */
+  grain?: TextureGrain | undefined;
 }
 export interface Material {
   id: MaterialId;

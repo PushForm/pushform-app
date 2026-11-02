@@ -64,7 +64,7 @@ When a change would not leave a valid solid, for example pushing a face all the 
 
 ## Ask for finishes and notes in a 3D model
 
-The agent can add materials from the built-in library, such as oak, walnut or maple veneer, paint parts with them and turn the grain to run along each part. It can also add guides, linear dimensions, text labels, 3D lettering and section planes that cut the model open, for example “Show a cutaway through the middle of the cabinet.” It adds notes like these only when you ask.
+The agent can add materials from the built-in library, such as oak, walnut or maple veneer, paint parts with them and turn the grain to run along each part. Unless you ask for something else, a cabinet gets a maple plywood interior, your paint or stain on the doors, drawer fronts and face frame, vertical grain on stiles, sides and doors, and horizontal grain on rails and drawer fronts. Patterned woods such as herringbone parquet have no single grain direction, so the agent leaves them as they are. It can also add guides, linear dimensions, text labels, 3D lettering and section planes that cut the model open, for example “Show a cutaway through the middle of the cabinet.” It adds notes like these only when you ask.
 
 ## Ask for scenes and camera views
 

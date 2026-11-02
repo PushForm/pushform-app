@@ -10,6 +10,8 @@ import {
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { MODEL_TOOLS, type ModelBatchResult } from '@pushform/extension-protocol';
+import { basisToLocal } from '@pushform/core';
+import { uvAt } from '@pushform/model';
 import { InlineBackend, KernelClient } from '@pushform/kernel';
 import { ModelApiFailure, ModelDocumentApi, runModelTool } from './modelApi';
 
@@ -593,6 +595,64 @@ describe('ModelDocumentApi phase 2: edges, more shapes, annotation, materials an
     const library = await runModelTool(api, MODEL_TOOLS.materialLibrary.name, { category: 'wood' });
     expect(JSON.parse(library.content).materials.some((m: { key: string }) => m.key === 'Wood_Walnut')).toBe(true);
     expect(JSON.parse((await runModelTool(api, MODEL_TOOLS.materialLibrary.name, { category: null })).content).categories.length).toBeGreaterThan(5);
+  });
+
+  it('runs the visible grain along the requested direction whichever way the wood image runs', async () => {
+    // White Oak's image grain runs down its height, Cherry's across its width; both must show vertical grain on a stile.
+    for (const library of ['Wood_Oak', 'Wood_Cherry']) {
+      const { api, host, root, addBox } = setup();
+      const id = addBox([0, 0, 0], [0.05, 0.02, 0.7]);
+      const result = await api.apply({ expectedRevision: api.revision, label: 'Stile', operations: [
+        { op: 'add_material', as: 'wood', library },
+        { op: 'paint', refs: [box(id)], materialId: '$wood' },
+        { op: 'set_texture', refs: [box(id)], grain: [0, 0, 1] },
+      ] });
+      expect(result.results[2]).toMatchObject({ count: 4, skipped: [{ reason: 'end_grain' }, { reason: 'end_grain' }] });
+      const material = api.getDocument().materials.find(m => m.id === result.created.wood)!;
+      expect(material.grain, library).toBe(library === 'Wood_Oak' ? 'height' : 'width');
+      // In the texture's own coordinates, moving up the front face moves along the image's grain axis only.
+      const face = [...root().bodies.get(id as never)!.faces.values()].find(f => f.plane.n[1] < -0.9)!;
+      const texture = host.doc.state.materials.get(result.created.wood as never)!.texture!;
+      const at = (p: [number, number, number]) => { const [u, v] = basisToLocal(face.basis, p); return uvAt(face.uv, texture.widthM, texture.heightM, u, v); };
+      const [s0, t0] = at([0.02, 0, 0.1]), [s1, t1] = at([0.02, 0, 0.6]);
+      const along = library === 'Wood_Oak' ? Math.abs(t1 - t0) : Math.abs(s1 - s0), across = library === 'Wood_Oak' ? Math.abs(s1 - s0) : Math.abs(t1 - t0);
+      expect(along, library).toBeGreaterThan(0.1);
+      expect(across, library).toBeLessThan(1e-9);
+      const front = api.query({ ...queryAll, kinds: ['face'], facing: [0, -1, 0] }).entities[0]!;
+      expect(front.grain, library).toEqual([0, 0, 1]);
+      expect(front.defaultPlacement).toBe(false);
+      const side = api.query({ ...queryAll, kinds: ['face'], facing: [1, 0, 0] }).entities[0]!;
+      expect(side.grain, library).toEqual([0, 0, 1]);
+    }
+  });
+
+  it('reports the default grain, skips patterns and untextured faces, and turns grain across a rail', async () => {
+    const { api, addBox } = setup();
+    const rail = addBox([0, 0, 0], [0.5, 0.02, 0.06]), floor = addBox([1, 0, 0], [2, 1, 0.02]), plain = addBox([3, 0, 0], [3.1, 0.1, 0.1]);
+    const result = await api.apply({ expectedRevision: api.revision, label: 'Finish', operations: [
+      { op: 'add_material', as: 'oak', library: 'Wood_Oak' },
+      { op: 'add_material', as: 'parquet', library: 'Wood_herringbone_parquet' },
+      { op: 'paint', refs: [box(rail)], materialId: '$oak' },
+      { op: 'paint', refs: [box(floor)], materialId: '$parquet' },
+    ] });
+    const front = () => api.query({ ...queryAll, kinds: ['face'], ids: [rail], facing: [0, -1, 0] }).entities[0]!;
+    expect(front().defaultPlacement).toBe(true);
+    expect(front().grain).toHaveLength(3);
+    const turned = await api.apply({ expectedRevision: api.revision, label: 'Grain', operations: [
+      { op: 'set_texture', refs: [box(rail)], grain: [1, 0, 0] },
+      { op: 'set_texture', refs: [box(floor), box(plain)], grain: [1, 0, 0] },
+    ] });
+    expect(front().grain).toEqual([1, 0, 0]);
+    expect(turned.results[1]!.count).toBe(0);
+    const reasons = turned.results[1]!.skipped!.map(s => `${s.ref.id}:${s.reason}`);
+    expect(reasons.filter(r => r === `${floor}:no_grain`)).toHaveLength(6);
+    expect(reasons.filter(r => r === `${plain}:no_texture`)).toHaveLength(6);
+    const parquet = api.query({ ...queryAll, kinds: ['face'], ids: [floor], facing: [0, 0, 1] }).entities[0]!;
+    expect(parquet).toMatchObject({ grain: null, defaultPlacement: true });
+    expect(api.query({ ...queryAll, kinds: ['face'], ids: [plain], facing: [0, 0, 1] }).entities[0]!.grain).toBeUndefined();
+    expect(api.getDocument().materials.find(m => m.id === result.created.parquet)!.grain).toBe('none');
+    const library = JSON.parse((await runModelTool(api, MODEL_TOOLS.materialLibrary.name, { category: 'wood' })).content) as { materials: { key: string; grain: string }[] };
+    expect(library.materials.find(m => m.key === 'Wood_sapele_veneer')!.grain).toBe('height');
   });
 
   it('adds 3D lettering as a component, or reports that fonts are unavailable', async () => {

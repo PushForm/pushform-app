@@ -12,7 +12,7 @@ import {
   type ModelLibraryResult, type ModelOverlap, type ModelOverlapsResult,
   modelViewSchema, type ModelApiError, type ModelApiErrorCode, type ModelBatchResult, type ModelBounds, type ModelCameraInput, type ModelCameraSummary,
   type ModelDocumentSnapshot, type ModelEntitySummary, type ModelOperation, type ModelQueryResult, type ModelRef, type ModelRefInput, type ModelSceneSaves,
-  type ModelVec3, type ModelViewResult,
+  type ModelSkipped, type ModelVec3, type ModelViewResult,
 } from '@pushform/extension-protocol';
 import {
   basisToLocal, box3Empty, box3Expand, box3IsEmpty, MERGE_TOL, m4invert, m4mul, m4transformPoint, m4translation, meshBounds, planeDistance, PushFormError,
@@ -20,8 +20,9 @@ import {
   type Box3, type DefId, type FaceLocalId, type Id, type MMat4, type PlaneBasis, type Plane, type Vec3,
 } from '@pushform/core';
 import {
-  computeRegions, containerAt, contextMatrix, entityCounts, regionAt, sketchFaceLoops,
-  type Body, type DocumentState, type EdgeRecord, type EntityContainer, type EntityRef, type FaceRecord, type Rgb, type Scene, type SceneFlags, type SketchFace,
+  computeRegions, containerAt, contextMatrix, entityCounts, materialOrNull, regionAt, sketchFaceLoops, UV_AUTO, uvInvert, uvToAffine,
+  type Body, type DocumentState, type EdgeRecord, type EntityContainer, type EntityRef, type FaceRecord, type Material, type Rgb, type Scene, type SceneFlags, type SketchFace,
+  type UvMapping,
 } from '@pushform/model';
 import type { ToolCallResult } from './layoutApi';
 import { frameCamera } from './modelCamera';
@@ -93,7 +94,8 @@ export class ModelDocumentApi {
           bounds: boundsOut(definitionBounds(state, def.id)) };
       }),
       tags: [...state.tags.values()].map(tag => ({ id: tag.id, name: tag.name, visible: tag.visible, color: hex(tag.color), active: tag.id === activeTagId, untagged: tag.id === state.defaultTagId })),
-      materials: [...state.materials.values()].map(m => ({ id: m.id, name: m.name, color: hex(m.color), opacity: m.alpha, textured: m.texture !== null, isDefault: m.id === state.defaultMaterialId })),
+      materials: [...state.materials.values()].map(m => ({ id: m.id, name: m.name, color: hex(m.color), opacity: m.alpha, textured: m.texture !== null, isDefault: m.id === state.defaultMaterialId,
+        grain: m.texture ? m.texture.grain ?? 'width' : null })),
       scenes: state.sceneOrder.flatMap((id, index) => {
         const scene = state.scenes.get(id);
         return scene ? [{ id: scene.id, name: scene.name, description: scene.description, index, active: scene.id === this.runtime.activeSceneId, saves: savesOut(scene.flags), includeInAnimation: scene.includeInAnimation ?? true }] : [];
@@ -216,6 +218,7 @@ export class ModelDocumentApi {
     const ids = query.ids ? new Set<number>(query.ids) : null;
     const fields = new Set(query.fields ?? ['bounds', 'geometry', 'appearance']);
     const all: (() => ModelEntitySummary)[] = [];
+    const inherited = inheritedMaterial(state, path);
     const keep = (kind: string, id: number): boolean => kinds.has(kind) && (!ids || ids.has(id));
     for (const inst of container.instances.values()) if (keep('instance', inst.id)) all.push(() => summarizeInstance(state, path, inst.id, fields));
     for (const body of container.bodies.values()) {
@@ -224,7 +227,7 @@ export class ModelDocumentApi {
       if (kinds.has('face')) for (const face of body.faces.values()) {
         if (query.facing && v3dot(face.plane.n, unit(query.facing)) < FACING_TOLERANCE) continue;
         if (query.containing && !faceContains(face, query.containing)) continue;
-        all.push(() => summarizeFace(path, body.id, face, fields));
+        all.push(() => summarizeFace(path, body.id, face, fields, frontMaterial(state, face, body, inherited)));
       }
       if (kinds.has('edge')) for (const edge of body.edges.values()) {
         if (!edgeMatches(edge.polyline, query.facing, query.containing)) continue;
@@ -244,7 +247,7 @@ export class ModelDocumentApi {
       const loops = sketchFaceLoops(sketch, face);
       if (fields.has('geometry')) Object.assign(out, loopFields(face.plane.n, loops));
       if (fields.has('bounds')) out.bounds = boundsOut(boxOf(loops[0] ?? []));
-      if (fields.has('appearance')) Object.assign(out, { frontMaterialId: face.frontMaterialId, backMaterialId: face.backMaterialId });
+      if (fields.has('appearance')) Object.assign(out, { frontMaterialId: face.frontMaterialId, backMaterialId: face.backMaterialId }, grainFields(face, frontMaterial(state, face, undefined, inherited)));
       return out;
     });
     for (const guide of container.guides.values()) if (keep('guide', guide.id)) all.push(() => {
@@ -330,7 +333,7 @@ export class ModelDocumentApi {
     if (category === null) return { categories: LIBRARY_CATEGORIES.map(name => ({ name, count: BUILTIN_LIBRARY.filter(m => m.category === name).length })) };
     const materials = BUILTIN_LIBRARY.filter(m => sameName(m.category, category));
     if (materials.length === 0) throw this.failure('invalid_reference', `There is no library category "${category}"; the categories are ${LIBRARY_CATEGORIES.join(', ')}.`);
-    return { materials: materials.map(m => ({ key: m.key, name: m.name, color: hex(m.color), textured: !!m.texture })) };
+    return { materials: materials.map(m => ({ key: m.key, name: m.name, color: hex(m.color), textured: !!m.texture, ...(m.texture ? { grain: m.texture.grain ?? 'width' } : {}) })) };
   }
 
   /** Validate, check the revision, then run every operation as one undo entry; rejects with `ModelApiFailure`. */
@@ -790,16 +793,25 @@ export class ModelDocumentApi {
         const container = containerAt(host.doc.state, path);
         const faces = only(refsOf(op.refs), ['face', 'sketchFace', 'body'], 'Only faces and solids have textures').flatMap((r): EntityRef[] => r.kind === 'body'
           ? [...container.bodies.get(r.id)!.faces.keys()].map(faceId => ({ kind: 'face', path, id: r.id, faceId, region: null })) : [r]);
+        const inherited = inheritedMaterial(host.doc.state, path);
+        const skipped: ModelSkipped[] = [];
         let count = 0;
         for (const r of faces) {
-          const face = r.kind === 'face' ? container.bodies.get(r.id)?.faces.get(r.faceId) : r.kind === 'sketchFace' ? container.sketch.faces.get(r.id) : undefined;
+          const body = r.kind === 'face' ? container.bodies.get(r.id) : undefined;
+          const face = body && r.kind === 'face' ? body.faces.get(r.faceId) : r.kind === 'sketchFace' ? container.sketch.faces.get(r.id) : undefined;
           if (!face) continue;
-          const uv = op.grain ? grainMapping(face.basis, face.plane.n, op.grain) : { kind: 'auto' as const };
-          if (!uv) continue; // the grain runs square to this face, as on end grain
+          let uv: UvMapping | null = UV_AUTO;
+          if (op.grain) {
+            const texture = frontMaterial(host.doc.state, face, body, inherited)?.texture;
+            const grain = texture ? texture.grain ?? 'width' : null;
+            if (grain === null || grain === 'none') { skipped.push({ ref: refOut(r), reason: grain === null ? 'no_texture' : 'no_grain' }); continue; }
+            uv = grainMapping(face.basis, face.plane.n, op.grain, grain);
+            if (!uv) { skipped.push({ ref: refOut(r), reason: 'end_grain' }); continue; }
+          }
           exec('texture.position', { ref: r, uv });
           count++;
         }
-        return { count };
+        return { count, ...(skipped.length ? { skipped } : {}) };
       }
       case 'make_group': return instanceResult(exec<MakeResult>('group.make', { refs: refsOf(op.refs) }).instanceId!);
       case 'make_component': return instanceResult(exec<MakeResult>('component.make', { refs: refsOf(op.refs), ...(op.name ? { name: op.name } : {}) }).instanceId!);
@@ -1102,12 +1114,53 @@ function reflection(origin: Vec3, n: Vec3): MMat4 {
     d * n[0], d * n[1], d * n[2], 1,
   ];
 }
-/** A texture placement whose width runs along `grain` on a face, or null when the grain runs square to the face. */
-function grainMapping(basis: PlaneBasis, normal: Vec3, grain: Vec3): { kind: 'sized'; matrix: [number, number, number, number, number, number] } | null {
+/**
+ * A texture placement whose image grain (its width, or its height for `height`) runs along `grain` projected onto
+ * the face, or null when the grain runs square to the face, as on end grain. The placement is a rotation, so the
+ * image is never mirrored.
+ */
+function grainMapping(basis: PlaneBasis, normal: Vec3, grain: Vec3, axis: 'width' | 'height'): UvMapping | null {
   const g = v3sub(grain, v3scale(normal, v3dot(grain, normal)));
   if (!(v3len(g) > 1e-6 * v3len(grain))) return null;
-  const angle = Math.atan2(v3dot(g, basis.v), v3dot(g, basis.u)), c = Math.cos(angle), s = Math.sin(angle);
+  const angle = Math.atan2(v3dot(g, basis.v), v3dot(g, basis.u)) - (axis === 'height' ? Math.PI / 2 : 0), c = Math.cos(angle), s = Math.sin(angle);
   return { kind: 'sized', matrix: [c, s, 0, -s, c, 0] };
+}
+/** The material the instances on `path` pass to geometry with the default material: the innermost one that has one. */
+function inheritedMaterial(state: DocumentState, path: readonly Id[]): Material | null {
+  let def = state.definitions.get(state.rootDefinitionId), material: Material | null = null;
+  for (const id of path) {
+    const inst = def?.entities.instances.get(id);
+    if (!inst) break;
+    material = materialOrNull(state, inst.materialId) ?? material;
+    def = state.definitions.get(inst.definitionId as DefId);
+  }
+  return material;
+}
+/** The material the front of a face shows: its own, else its solid's, else the inherited one. */
+function frontMaterial(state: DocumentState, face: FaceRecord | SketchFace, body: Body | undefined, inherited: Material | null): Material | null {
+  return materialOrNull(state, face.frontMaterialId) ?? (body ? materialOrNull(state, body.materialId) : null) ?? inherited;
+}
+/**
+ * The grain of the texture the front of a face shows, as `model_query` reports it: the direction the image's grain
+ * axis runs on the face, a unit vector in the container's coordinates (its largest component positive), or null
+ * for a pattern with no grain. Nothing for an untextured face.
+ */
+function grainFields(face: FaceRecord | SketchFace, material: Material | null): Pick<ModelEntitySummary, 'grain' | 'defaultPlacement'> {
+  const texture = material?.texture;
+  if (!texture) return {};
+  const defaultPlacement = face.uv.kind === 'auto', axis = texture.grain ?? 'width';
+  if (axis === 'none') return { grain: null, defaultPlacement };
+  const inverse = uvInvert(uvToAffine(face.uv, texture.widthM, texture.heightM));
+  if (!inverse) return { grain: null, defaultPlacement };
+  // the face direction along which only the image coordinate of the grain axis changes
+  const du = axis === 'width' ? inverse[0] : inverse[1], dv = axis === 'width' ? inverse[3] : inverse[4];
+  let d = v3add(v3scale(face.basis.u, du), v3scale(face.basis.v, dv));
+  const length = v3len(d);
+  if (!(length > 0)) return { grain: null, defaultPlacement };
+  d = v3scale(d, 1 / length);
+  const largest = d.reduce((best, x, i) => (Math.abs(x) > Math.abs(d[best]!) + 1e-9 ? i : best), 0);
+  if (d[largest]! < 0) d = v3scale(d, -1);
+  return { grain: vec(d), defaultPlacement };
 }
 function boxesOverlap(a: Box3, b: Box3, margin = MERGE_TOL): boolean {
   return [0, 1, 2].every(i => a.min[i]! <= b.max[i]! + margin && b.min[i]! <= a.max[i]! + margin);
@@ -1229,11 +1282,11 @@ function summarizeEdge(path: readonly Id[], bodyId: Id, edge: EdgeRecord, fields
   return out;
 }
 
-function summarizeFace(path: readonly Id[], bodyId: Id, face: FaceRecord, fields: ReadonlySet<string>): ModelEntitySummary {
+function summarizeFace(path: readonly Id[], bodyId: Id, face: FaceRecord, fields: ReadonlySet<string>, material: Material | null): ModelEntitySummary {
   const out: ModelEntitySummary = { ref: { path: [...path], kind: 'face', id: bodyId, faceId: face.id }, tagId: face.tagId, hidden: face.hidden };
   if (fields.has('geometry')) Object.assign(out, loopFields(face.plane.n, face.loops));
   if (fields.has('bounds')) out.bounds = boundsOut(boxOf(face.loops[0] ?? []));
-  if (fields.has('appearance')) Object.assign(out, { frontMaterialId: face.frontMaterialId, backMaterialId: face.backMaterialId });
+  if (fields.has('appearance')) Object.assign(out, { frontMaterialId: face.frontMaterialId, backMaterialId: face.backMaterialId }, grainFields(face, material));
   return out;
 }
 

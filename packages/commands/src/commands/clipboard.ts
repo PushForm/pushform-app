@@ -461,7 +461,7 @@ function sameMaterial(a: Material, b: Material): boolean {
   if ((a.name !== b.name && a.name.replace(/#\d+$/, '') !== b.name) || !sameColor(a, b)) return false;
   if (!a.texture || !b.texture) return a.texture === b.texture;
   return a.texture.imageId === b.texture.imageId && a.texture.widthM === b.texture.widthM && a.texture.heightM === b.texture.heightM && a.texture.colorize === b.texture.colorize &&
-    (a.texture.colorizeType ?? 'shift') === (b.texture.colorizeType ?? 'shift');
+    (a.texture.colorizeType ?? 'shift') === (b.texture.colorizeType ?? 'shift') && (a.texture.grain ?? 'width') === (b.texture.grain ?? 'width');
 }
 
 /**

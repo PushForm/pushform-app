@@ -7,11 +7,12 @@ import type { NativeField, NativeFieldKind, NativeScalar } from './record';
 import { NativeChunkError } from './chunks';
 const f = (id: number, kind: NativeFieldKind, required = true): NativeField => ({ id, kind, required });
 const material = new NativeRecordCodec({ id: f(1, 'uint32'), name: f(2, 'string'), color: f(3, 'bytes'), alpha: f(4, 'double'), texture: f(5, 'bytes') } satisfies Record<keyof Material, NativeField>);
-const texture = new NativeRecordCodec({ imageId: f(1, 'uint32'), widthM: f(2, 'double'), heightM: f(3, 'double'), colorize: f(4, 'bool'), colorizeType: f(5, 'bytes', false) } satisfies Record<keyof MaterialTexture, NativeField>);
+const texture = new NativeRecordCodec({ imageId: f(1, 'uint32'), widthM: f(2, 'double'), heightM: f(3, 'double'), colorize: f(4, 'bool'), colorizeType: f(5, 'bytes', false), grain: f(6, 'uint32', false) } satisfies Record<keyof MaterialTexture, NativeField>);
 const rgb = new NativeRecordCodec({ red: f(1, 'double'), green: f(2, 'double'), blue: f(3, 'double') });
 const nullable = new NativeRecordCodec({ nullValue: f(2, 'bytes', false), value: f(3, 'bytes', false) });
 const optional = new NativeRecordCodec({ undefinedValue: f(1, 'bytes', false), value: f(3, 'uint32', false) });
 const empty = new NativeRecordCodec({});
+const GRAINS = ['width', 'height', 'none'] as const;
 export type MaterialExtensions = Map<string, Uint8Array[]>;
 const fail = (): never => { throw new NativeChunkError('Invalid native material'); };
 function number(value: unknown, color = false): number {
@@ -37,6 +38,11 @@ export function encodeNativeMaterial(value: Material, extensions: MaterialExtens
       fields.colorizeType = encode(optional, t.colorizeType === undefined ? { undefinedValue: encode(empty, {}, 'texture.colorizeType.undefined', extensions) }
         : { value: t.colorizeType === 'shift' ? 0 : 1 }, 'texture.colorizeType', extensions);
     }
+    if (t.grain !== undefined) {
+      const grain = GRAINS.indexOf(t.grain);
+      if (grain < 0) return fail();
+      fields.grain = grain;
+    }
     wrapped = { value: encode(texture, fields, 'texture.value', extensions) };
   }
   const color = encode(rgb, { red: number(value.color[0], true), green: number(value.color[1], true), blue: number(value.color[2], true) }, 'color', extensions);
@@ -55,6 +61,7 @@ export function decodeNativeMaterial(bytes: Uint8Array): { value: Material; exte
       if (state(choice, 'undefinedValue')) { decode(empty, choice.undefinedValue as Uint8Array, 'texture.colorizeType.undefined', extensions); t.colorizeType = undefined; }
       else { if (choice.value !== 0 && choice.value !== 1) return fail(); t.colorizeType = choice.value === 0 ? 'shift' : 'tint'; }
     }
+    if (Object.hasOwn(f, 'grain')) t.grain = GRAINS[f.grain as number] ?? fail();
   }
   return { value: { id: fields.id as MaterialId, name: fields.name as string, color: [number(color.red, true), number(color.green, true), number(color.blue, true)], alpha: number(fields.alpha, true), texture: t }, extensions };
 }

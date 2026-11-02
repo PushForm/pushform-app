@@ -186,8 +186,8 @@ export const modelOperationSchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('set_material'), materialId: idOrName, name: name.optional(), color: color.optional(), opacity: z.number().min(0).max(1).optional() })
     .describe('Change a material\'s name, color or opacity everywhere it is used.'),
   z.object({ op: z.literal('set_texture'), refs: refs.describe('Faces or solids painted with a textured material.'),
-    grain: direction.nullable().describe('Run the texture\'s width along this direction on every face, such as [0, 0, 1] for vertical grain on a stile; null restores the default placement.') })
-    .describe('Turn a texture, such as wood grain, on faces.'),
+    grain: direction.nullable().describe('Run the visible wood grain along this direction on every face, such as [0, 0, 1] for vertical grain on a stile; null restores the default placement.') })
+    .describe('Turn a texture, such as wood grain, on faces. Faces with no texture, a pattern with no grain (parquet), or end grain are skipped and listed in skipped.'),
   z.object({ op: z.literal('make_group'), as: localName.optional(), refs })
     .describe('Group loose geometry, solids, groups or components of the container into a new group. Returns the group\'s instance id and definition id.'),
   z.object({ op: z.literal('make_component'), as: localName.optional(), refs, name: name.optional() })
@@ -259,7 +259,7 @@ export const modelQuerySchema = z.object({
   ids: z.array(id).max(MODEL_LIMITS.entitiesPerQuery).nullable().describe('null: all. For faces and edges, the body ids whose faces or edges to list.'),
   facing: queryDirection.nullable().describe('Faces: keep faces whose outward normal is within 1 degree of this direction. Edges: keep edges running this way.'),
   containing: queryPoint.nullable().describe('Faces and edges: keep those that contain this point.'),
-  fields: z.array(z.enum(['bounds', 'geometry', 'appearance'])).nullable().describe('null: all. bounds: bounding boxes; geometry: transforms, points, normals, areas and volumes; appearance: materials.'),
+  fields: z.array(z.enum(['bounds', 'geometry', 'appearance'])).nullable().describe('null: all. bounds: bounding boxes; geometry: transforms, points, normals, areas and volumes; appearance: materials and, for textured faces, the visible grain direction.'),
   offset: z.number().int().min(0).nullable(),
   limit: z.number().int().min(1).max(MODEL_LIMITS.entitiesPerQuery).nullable().describe('null: 50.'),
 });
@@ -302,7 +302,13 @@ export interface ModelBounds { min: ModelVec3; max: ModelVec3 }
 export interface ModelRef { path: number[]; kind: ModelEntityKind; id: number; faceId?: number; edgeKey?: string }
 export interface ModelDefinitionSummary { id: number; name: string; type: 'group' | 'component'; placements: number; solids: number; faces: number; edges: number; instances: number; bounds: ModelBounds | null }
 export interface ModelTagSummary { id: number; name: string; visible: boolean; color: string; active: boolean; untagged: boolean }
-export interface ModelMaterialSummary { id: number; name: string; color: string; opacity: number; textured: boolean; isDefault: boolean }
+/** Which way a texture image's grain runs: along its width or height, `none` for a pattern with no single direction. */
+export type ModelTextureGrain = 'width' | 'height' | 'none';
+export interface ModelMaterialSummary {
+  id: number; name: string; color: string; opacity: number; textured: boolean; isDefault: boolean;
+  /** Textured materials: which way the image's grain runs; null without a texture. */
+  grain: ModelTextureGrain | null;
+}
 export interface ModelDocumentSnapshot {
   apiVersion: number;
   revision: number;
@@ -334,6 +340,13 @@ export interface ModelEntitySummary {
   materialId?: number | null;
   frontMaterialId?: number | null;
   backMaterialId?: number | null;
+  /**
+   * Faces whose front shows a texture: the direction its grain runs, a unit vector in the container's coordinates,
+   * or null for a pattern with no grain.
+   */
+  grain?: ModelVec3 | null;
+  /** Faces whose front shows a texture: whether the texture has its default placement (never turned). */
+  defaultPlacement?: boolean;
   /** Solids. */
   volume?: number;
   area?: number;
@@ -377,7 +390,9 @@ export interface ModelOverlap {
   bounds: ModelBounds;
 }
 export interface ModelOverlapsResult { revision: number; container: number[]; solids: number; overlaps: ModelOverlap[]; truncated: boolean }
-export interface ModelLibraryResult { categories?: { name: string; count: number }[]; materials?: { key: string; name: string; color: string; textured: boolean }[] }
+export interface ModelLibraryResult { categories?: { name: string; count: number }[]; materials?: { key: string; name: string; color: string; textured: boolean; grain?: ModelTextureGrain }[] }
+/** A face an operation left as it was, and why. */
+export interface ModelSkipped { ref: ModelRef; reason: 'no_texture' | 'no_grain' | 'end_grain' }
 export interface ModelBatchResult {
   ok: true;
   revision: number;
@@ -388,7 +403,7 @@ export interface ModelBatchResult {
    * Per operation: `id` is the main result (a new solid, the face a shape made, a group's instance), `refs` what it
    * created or changed, and `deleted` what it removed, such as the cutters of a subtract.
    */
-  results: { op: ModelOperationName; id?: number; definitionId?: number; refs?: ModelRef[]; deleted?: ModelRef[]; count?: number; name?: string }[];
+  results: { op: ModelOperationName; id?: number; definitionId?: number; refs?: ModelRef[]; deleted?: ModelRef[]; count?: number; name?: string; skipped?: ModelSkipped[] }[];
 }
 
 /** Tool names and descriptions shared by the host and every client that offers them to a model. */

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { useEffect, useMemo, useState } from 'react';
+import { LuList, LuLayoutGrid } from 'react-icons/lu';
 import type { ChangeEvent, CSSProperties, JSX, KeyboardEvent, MouseEvent } from 'react';
 import { BUILTIN_LIBRARY } from '@pushform/commands';
 import { colorizedImageUrl } from '@pushform/render';
@@ -62,7 +63,7 @@ const LIBRARIES: readonly (readonly [LibraryId, string])[] = [
   ['Metal', 'Metal'],
   ['Stone', 'Stone'],
 ];
-type ThumbSize = 'small' | 'large' | 'list';
+type MaterialView = 'preview' | 'list';
 
 interface ItemMenu {
   readonly x: number;
@@ -102,7 +103,7 @@ function NumberField({ label, value, onCommit, step = 1, min, max }: { label: st
 
 /**
  * Materials panel: active material header with Create and Sample, a Select tab
- * (In Model list + built-in libraries, thumbnail sizes, purge, per-item context menu) and an
+ * (In Model list + built-in libraries, Preview/List views, purge, per-item context menu) and an
  * Edit tab (color picker with RGB/HLS, opacity, texture image, size with aspect lock, colorize).
  */
 export function MaterialsPanel(): JSX.Element {
@@ -114,7 +115,7 @@ export function MaterialsPanel(): JSX.Element {
   const setTab = useAppStore((s) => s.setMaterialsTab);
   const setActiveId = useAppStore((s) => s.setActiveMaterialId);
   const [library, setLibrary] = useState<LibraryId>('inModel');
-  const [thumb, setThumb] = useState<ThumbSize>('small');
+  const [view, setView] = useState<MaterialView>('preview');
   const [menu, setMenu] = useState<ItemMenu | null>(null);
   const [lockAspect, setLockAspect] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -208,7 +209,7 @@ export function MaterialsPanel(): JSX.Element {
   };
 
   const libraryItems: LibraryMaterial[] = library === 'inModel' ? [] : BUILTIN_LIBRARY.filter((m) => m.category === library);
-  const gridClass = `pf-materials-grid${thumb === 'large' ? ' is-large' : thumb === 'list' ? ' is-list' : ''}`;
+  const gridClass = `pf-materials-grid ${view === 'preview' ? 'is-large' : 'is-list'}`;
 
   return (
     <div className="pf-materials" onClick={() => menu && setMenu(null)}>
@@ -242,14 +243,11 @@ export function MaterialsPanel(): JSX.Element {
                 </option>
               ))}
             </select>
-            <button
-              type="button"
-              className="pf-btn"
-              aria-label="Thumbnail size"
-              title="Thumbnail size"
-              onClick={() => setThumb(thumb === 'small' ? 'large' : thumb === 'large' ? 'list' : 'small')}
-            >
-              {thumb === 'small' ? 'S' : thumb === 'large' ? 'L' : '≡'}
+            <button type="button" className={`pf-toolbtn${view === 'list' ? ' is-active' : ''}`} aria-label="List" title="List" aria-pressed={view === 'list'} onClick={() => setView('list')}>
+              <LuList size={16} aria-hidden="true" />
+            </button>
+            <button type="button" className={`pf-toolbtn${view === 'preview' ? ' is-active' : ''}`} aria-label="Preview" title="Preview" aria-pressed={view === 'preview'} onClick={() => setView('preview')}>
+              <LuLayoutGrid size={16} aria-hidden="true" />
             </button>
             {library === 'inModel' ? (
               <button type="button" className="pf-btn" onClick={() => run('material.purgeUnused')} title="Purge unused materials">

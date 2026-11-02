@@ -30,6 +30,27 @@ function mount(a: AppInstance, el: JSX.Element) {
 }
 
 describe('MaterialsPanel', () => {
+  it('offers List and Preview without a thumbnail size menu and preserves the material and library', () => {
+    const a = boot();
+    const material = a.commands.execute('material.create', { name: 'Oak', color: [0.5, 0.3, 0.1] }) as number;
+    mount(a, <MaterialsPanel />);
+    const list = screen.getByRole('button', { name: 'List' });
+    const preview = screen.getByRole('button', { name: 'Preview' });
+    expect(preview.getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('listbox', { name: 'In Model' }).classList.contains('is-large')).toBe(true);
+    expect(screen.queryByLabelText('Thumbnail size')).toBeNull();
+    expect(list.querySelector('svg')).toBeTruthy();
+    fireEvent.click(list);
+    expect(list.getAttribute('aria-pressed')).toBe('true');
+    expect(preview.getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByRole('listbox', { name: 'In Model' }).classList.contains('is-list')).toBe(true);
+    expect(useAppStore.getState().activeMaterialId).toBe(material);
+    fireEvent.change(screen.getByLabelText('Library'), { target: { value: 'Wood' } });
+    fireEvent.click(preview);
+    expect(screen.getByRole('listbox', { name: 'Wood' }).classList.contains('is-large')).toBe(true);
+    expect(useAppStore.getState().activeMaterialId).toBe(material);
+  });
+
   it('lists in-model materials, activates one on click, edits it and paints a face from Entity Info', () => {
     const a = boot();
     const red = a.commands.execute('material.create', { name: 'Red', color: [1, 0, 0], activate: false }) as number;

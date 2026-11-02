@@ -37,3 +37,5 @@ Settings that are not rendered yet are disabled with an explanation. Changing di
 Select the edge and use **Soft**, **Smooth**, or **Hidden** in Entity Info where available. Hiding an edge changes its display; it does not remove the boundary needed by a solid.
 
 To inspect hidden edges or faces, enable **Hidden Geometry**. Hiding and unhiding can be undone like other document changes.
+
+In **Materials → Select**, use **List** (list icon) for named rows or **Preview** (grid icon) for larger material swatches. Preview is the default. Changing the view keeps your chosen library and active material.

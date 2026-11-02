@@ -2,6 +2,7 @@
 // Copyright 2026 PushForm contributors
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { JSX, KeyboardEvent } from 'react';
+import { AiOutlineFolderAdd } from 'react-icons/ai';
 import { TAG_DASHES, tagUsage } from '@pushform/commands';
 import type { Tag, TagFolder } from '@pushform/model';
 import { useApp } from '../AppContext';
@@ -276,7 +277,7 @@ export function TagsPanel(): JSX.Element {
           <Icon name="plus" size={16} />
         </button>
         <button type="button" className="pf-iconbtn" aria-label="Add Folder" title="Add Folder" onClick={addFolder}>
-          <Icon name="folder-plus" size={16} />
+          <AiOutlineFolderAdd size={16} aria-hidden="true" />
         </button>
         <button
           type="button"

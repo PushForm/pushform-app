@@ -32,6 +32,7 @@ check(
 check(header(index, 'cross-origin-opener-policy') === 'same-origin', 'COOP same-origin');
 check(header(index, 'cross-origin-embedder-policy') === 'require-corp', 'COEP require-corp');
 check(header(index, 'x-content-type-options') === 'nosniff', 'X-Content-Type-Options nosniff');
+check(/(?:^|,\s*)microphone=\(self\)(?:,|$)/.test(header(index, 'permissions-policy')), 'Permissions-Policy allows same-origin microphone requests');
 // The Content-Security-Policy: report-only until the deployed app's reports are clean,
 // then enforcing; either is accepted. --strict also checks that it allows the Supabase project the bundles use.
 const csp = header(index, 'content-security-policy') || header(index, 'content-security-policy-report-only');

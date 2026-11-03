@@ -57,7 +57,7 @@ export function useDictation(onText: (text: string) => void): Dictation {
     r.onerror = event => {
       if (event.error === 'aborted' || event.error === 'no-speech') return;
       setError(event.error === 'not-allowed' || event.error === 'service-not-allowed'
-        ? 'Dictation needs permission to use the microphone.'
+        ? 'Dictation needs microphone access. Allow the microphone in your browser’s site settings and system privacy settings, then try again.'
         : 'Dictation stopped unexpectedly. Please try again.');
     };
     r.onend = () => { if (recognizer.current === r) { recognizer.current = null; setListening(false); } };

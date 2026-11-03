@@ -20,7 +20,7 @@ Highlighting does not click a tool, select an object, or edit the document for y
 
 ## Type or dictate
 
-Press Enter to send and Shift+Enter to start a new line. The return-key button at the right of the message box also sends. Choose the microphone button to dictate: what you say is added to the message box until you choose it again, and nothing is sent until you send it. Dictation needs a browser or system that offers speech recognition and permission to use the microphone.
+Press Enter to send and Shift+Enter to start a new line. The return-key button at the right of the message box also sends. Choose the microphone button to dictate: what you say is added to the message box until you choose it again, and nothing is sent until you send it. Dictation needs a browser or system that offers speech recognition and permission to use the microphone. When prompted, allow microphone access. If Chrome shows a permission notice without a prompt, open the site controls beside the address bar and allow the microphone, then reload and try Dictate again. Also check that your operating system allows Chrome to use the microphone.
 
 ## Post pictures
 

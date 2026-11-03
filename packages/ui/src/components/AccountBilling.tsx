@@ -45,6 +45,8 @@ export function AccountBilling({ billing, state }: { billing: CloudBillingStore;
   const [destination, setDestination] = useState<{ url: string; kind: 'checkout' | 'portal' } | null>(null);
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const subscription = state.summary?.subscription;
+  const subscribed = Boolean(subscription && subscription.status !== 'canceled' && subscription.status !== 'incomplete_expired');
   useEffect(() => {
     void billing.reload();
     const refresh = (): void => { void billing.reload(); };
@@ -57,6 +59,9 @@ export function AccountBilling({ billing, state }: { billing: CloudBillingStore;
     return () => { generation.current++; };
   }, [billing, state.ownerId]);
   useEffect(() => {
+    if (subscribed && destination?.kind === 'checkout') setDestination(null);
+  }, [subscribed, destination?.kind]);
+  useEffect(() => {
     if (state.returned !== 'success' || state.summary?.subscription?.status === 'active' || state.summary?.subscription?.status === 'trialing') return;
     // A successful browser return may reach the app before the payment webhook.
     let attempts = 0;
@@ -65,9 +70,7 @@ export function AccountBilling({ billing, state }: { billing: CloudBillingStore;
   }, [billing, state.returned, state.summary?.subscription?.status]);
   const summary = state.summary;
   if (state.status === 'signedOut') return null;
-  const subscription = summary?.subscription;
   const active = subscription?.status === 'active' || subscription?.status === 'trialing';
-  const subscribed = subscription && subscription.status !== 'canceled' && subscription.status !== 'incomplete_expired';
   const busy = opening || state.busy !== null;
   const selectedOffer = summary?.offers.find(offer => offer.interval === selectedInterval) ?? summary?.offers.find(offer => offer.interval === 'year') ?? summary?.offers[0];
   const prepare = async (kind: 'checkout' | 'portal', interval: BillingInterval = 'month'): Promise<void> => {
@@ -116,7 +119,7 @@ export function AccountBilling({ billing, state }: { billing: CloudBillingStore;
     {state.returned === 'success' ? <p role="status">{active ? 'Your Individual subscription is active.' : 'Checkout returned. Waiting for payment confirmation; this can take a moment.'}</p>
       : state.returned === 'cancelled' ? <p role="status">Checkout was cancelled. No subscription change has been confirmed.</p>
       : state.returned === 'returned' ? <p role="status">Billing details refreshed.</p> : null}
-    {destination ? <p><a href={destination.url} target="_blank" rel="noopener noreferrer" onClick={event => {
+    {destination && (destination.kind === 'portal' || !subscribed) ? <p><a href={destination.url} target="_blank" rel="noopener noreferrer" onClick={event => {
       if (!isTauri()) return;
       event.preventDefault();
       void openBilling(destination.url).catch(() => setError('Could not open your browser. Please try again.'));

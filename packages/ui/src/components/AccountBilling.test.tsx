@@ -33,12 +33,43 @@ it('does not offer purchase before billing is configured', () => {
 it('shows cancellation date and management for a subscriber without offering duplicate checkout', async () => {
   const { billing, state } = fake({ summary: { available: true, offers: [{ interval: 'month', amount: 1200, currency: 'usd' }], canManageBilling: true,
     subscription: { status: 'active', interval: 'month', currentPeriodEnd: '2026-12-02T00:00:00Z', cancelAtPeriodEnd: true } } });
-  render(<AccountBilling billing={billing} state={state} />);
+  const view = render(<AccountBilling billing={billing} state={state} />);
   expect(screen.getByText(/Scheduled to end/)).toBeTruthy();
   expect(screen.queryByRole('button', { name: /Continue with/ })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Manage billing…' }));
   expect(await screen.findByRole('link', { name: /Continue to billing management/ })).toBeTruthy();
   expect(billing.portal).toHaveBeenCalledOnce();
+  view.rerender(<AccountBilling billing={billing} state={{ ...state, summary: { ...state.summary!, subscription: { ...state.summary!.subscription!, status: 'past_due' } } }} />);
+  expect(screen.getByRole('link', { name: /Continue to billing management/ })).toBeTruthy();
+  expect(screen.getByText(/Your payment needs attention/)).toBeTruthy();
+});
+it.each(['active', 'past_due'])('discards prepared checkout after confirmation of a %s subscription', async status => {
+  const { billing, state } = fake({ returned: 'success' });
+  const view = render(<AccountBilling billing={billing} state={state} />);
+  fireEvent.click(screen.getByRole('button', { name: /Continue with annual Individual/ }));
+  await screen.findByRole('link', { name: /Continue to secure checkout/ });
+  const confirmed: CloudBillingState = { ...state, summary: { ...state.summary!, canManageBilling: true,
+    subscription: { status, interval: 'year', currentPeriodEnd: '2027-11-03T00:00:00Z', cancelAtPeriodEnd: false } } };
+  view.rerender(<AccountBilling billing={billing} state={confirmed} />);
+  expect(screen.queryByRole('link', { name: /Continue to secure checkout/ })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Manage billing…' })).toBeTruthy();
+  view.rerender(<AccountBilling billing={billing} state={{ ...confirmed, summary: { ...confirmed.summary!, subscription: { ...confirmed.summary!.subscription!, status: 'canceled' } } }} />);
+  expect(screen.queryByRole('link', { name: /Continue to secure checkout/ })).toBeNull();
+});
+it('discards an in-flight checkout response after the subscription has been confirmed', async () => {
+  const { billing, state } = fake();
+  let finish!: (url: string) => void;
+  vi.mocked(billing.checkout).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const view = render(<AccountBilling billing={billing} state={state} />);
+  fireEvent.click(screen.getByRole('button', { name: /Continue with annual Individual/ }));
+  const confirmed: CloudBillingState = { ...state, summary: { ...state.summary!, canManageBilling: true,
+    subscription: { status: 'active', interval: 'year', currentPeriodEnd: '2027-11-03T00:00:00Z', cancelAtPeriodEnd: false } } };
+  view.rerender(<AccountBilling billing={billing} state={confirmed} />);
+  finish('https://checkout.stripe.com/c/pay/completed');
+  await vi.waitFor(() => expect(screen.queryByText('Preparing secure billing…')).toBeNull());
+  expect(screen.queryByRole('link', { name: /Continue to secure checkout/ })).toBeNull();
+  view.rerender(<AccountBilling billing={billing} state={state} />);
+  expect(screen.queryByRole('link', { name: /Continue to secure checkout/ })).toBeNull();
 });
 it('refreshes pending payment confirmation without treating checkout return as activation', async () => {
   vi.useFakeTimers();

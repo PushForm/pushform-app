@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import type Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
-import { PROGRESS_UPDATES_BETA, REFUSAL_TEXT, ROUNDS_TEXT, TRUNCATED_TEXT, answerPending, defineLooseTool, defineTool, flattenTuples, messageText, runTurn, stripUnsupportedKeywords, withSchema } from './client.ts';
+import { PROGRESS_UPDATES_BETA, REFUSAL_TEXT, ROUNDS_TEXT, TRUNCATED_TEXT, type AnthropicLike, answerPending, defineLooseTool, defineTool, flattenTuples, messageText, runTurn, stripUnsupportedKeywords, withSchema } from './client.ts';
 import { fakeAnthropic } from './fakeAnthropic.ts';
 import { layoutDocumentTools, modelDocumentTools } from './document.ts';
 
@@ -80,7 +80,7 @@ describe('runTurn', () => {
     ]);
     const r = await runTurn({ client, model: 'm', system: 's', tools: [echoTool], handlers: { echo: () => 'ok' }, messages: [user('hi')] });
     expect(r.roundStats).toHaveLength(2);
-    expect(r.roundStats[0]).toMatchObject({ input: 100, output: 20, cacheRead: 900, cacheWrite: 50, requestId: 'req_fake' });
+    expect(r.roundStats[0]).toMatchObject({ input: 100, output: 20, cacheRead: 900, cacheWrite: 50 });
     for (const round of r.roundStats) {
       expect(round.firstMs).not.toBeNull();
       expect(round.startMs).toBeLessThanOrEqual(round.firstMs!);
@@ -169,6 +169,57 @@ describe('client tools', () => {
     expect(r.rounds).toBe(1);
     expect(client.calls[0]!.messages).toEqual([user('hi'), ...first.appended, answer]);
     expect(r.appended.map((m) => m.role)).toEqual(['assistant', 'user', 'assistant']);
+  });
+
+  describe('tool input that streamed as invalid JSON', () => {
+    const malformed = ['{"ops":["add_box",[0,-0.5334,0,],', '"max":[0,0,0]]}'];
+    it('answers the call with an error instead of failing the turn, so the model can send it again', async () => {
+      const client = fakeAnthropic([
+        { text: ['Adding the side.'], toolUses: [{ id: 'c1', name: 'edit', input: null, raw: malformed }] },
+        { toolUses: [{ id: 'c2', name: 'edit', input: { ops: ['add_box'] } }] },
+      ]);
+      const events: { id: string; isError: boolean | undefined; invalidInput: string | undefined }[] = [];
+      const r = await runTurn({ client, model: 'm', system: 's', tools: [editTool], messages: [user('hi')], handlers: {}, clientTools: new Set(['edit']),
+        onToolCall: (c) => events.push({ id: c.id, isError: c.result.isError, invalidInput: c.invalidInput }) });
+      // The bad call never reaches the editor; the resent one does.
+      expect(r.stop).toBe('client_tools');
+      expect(r.pending?.calls).toEqual([{ id: 'c2', name: 'edit', input: { ops: ['add_box'] } }]);
+      expect(r.rounds).toBe(2);
+      expect(events).toEqual([{ id: 'c1', isError: true, invalidInput: malformed.join('') }]);
+      const assistant = r.appended[0]!.content as Anthropic.ContentBlock[];
+      expect(assistant.find((b) => b.type === 'tool_use')).toMatchObject({ id: 'c1', input: {} });
+      const results = r.appended[1]!.content as Anthropic.ToolResultBlockParam[];
+      expect(results).toHaveLength(1);
+      expect(results[0]).toMatchObject({ tool_use_id: 'c1', is_error: true });
+      expect(String(results[0]!.content)).toMatch(/^Not run: the tool input was not valid JSON \(.+\)\. Send the call again with valid JSON\.$/);
+      expect(client.calls[1]!.messages.at(-1)).toEqual(r.appended[1]);
+    });
+    it('still reads the rest of the message: other calls run, and stop reason and usage are kept', async () => {
+      const client = fakeAnthropic([
+        { toolUses: [{ id: 'bad', name: 'echo', input: null, raw: ['{"value":"a"'] }, { id: 'good', name: 'echo', input: { value: 'b' } }], usage: { input_tokens: 300, output_tokens: 40 } },
+        { text: ['Done.'] },
+      ]);
+      const r = await runTurn({ client, model: 'm', system: 's', tools: [echoTool], messages: [user('hi')], handlers: { echo: withSchema(z.object({ value: z.string() }), ({ value }) => `echo:${value}`) } });
+      expect(r.stop).toBe('end_turn');
+      expect(r.text).toBe('Done.');
+      const results = r.appended[1]!.content as Anthropic.ToolResultBlockParam[];
+      expect(results.map((b) => [b.tool_use_id, b.is_error ?? false])).toEqual([['bad', true], ['good', false]]);
+      expect(results[1]!.content).toBe('echo:b');
+      expect(r.usage).toMatchObject({ inputTokens: 400, outputTokens: 60 });
+    });
+    it('treats input that parses to something other than an object as invalid', async () => {
+      const client = fakeAnthropic([{ toolUses: [{ id: 'arr', name: 'echo', input: null, raw: ['[1,2]'] }] }, { text: ['ok'] }]);
+      const r = await runTurn({ client, model: 'm', system: 's', tools: [echoTool], messages: [user('hi')], handlers: { echo: () => 'ran' } });
+      expect((r.appended[1]!.content as Anthropic.ToolResultBlockParam[])[0]).toMatchObject({ tool_use_id: 'arr', is_error: true });
+    });
+  });
+  it('fails a stream that ends before the message is complete', async () => {
+    const events: Anthropic.RawMessageStreamEvent[] = [];
+    const client: AnthropicLike = { messages: { async create(params) {
+      for await (const e of await fakeAnthropic([{ text: ['Hel'] }]).messages.create(params)) if (e.type !== 'message_stop') events.push(e);
+      return { async *[Symbol.asyncIterator]() { yield* events; } };
+    } } };
+    await expect(runTurn({ client, model: 'm', system: 's', tools: [], messages: [user('hi')], handlers: {} })).rejects.toThrow(/ended before the message was complete/);
   });
 
   describe('progress updates', () => {

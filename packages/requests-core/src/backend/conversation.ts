@@ -777,6 +777,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
             emit({ event: 'text', data: { delta } });
           },
           onToolCall: (call: ToolCallEvent) => {
+            if (call.invalidInput !== undefined) deps.log?.(`turn ${id}: ${call.name} input was not valid JSON, asked the model to resend: ${call.invalidInput}`);
             appended.push({ role: 'tool', name: call.name, toolUseId: call.id, input: call.input, output: call.result.content.slice(0, 8000), at: now().toISOString() });
             if (store.changed) { store.changed = false; briefEvent(); }
           },
@@ -815,7 +816,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       }
       // New fields follow cacheRead so readers of the older line keep matching. Each round: start/first/total ms and tokens.
       const phases = Object.entries(t.timing.phases).map(([name, ms]) => `${name}:${ms}`).join(',') || 'none';
-      const roundLog = result.roundStats.map(r => `${r.startMs}/${r.firstMs ?? '-'}/${r.ms}ms,in${r.input},out${r.output},cr${r.cacheRead},cw${r.cacheWrite}${r.requestId ? `,${r.requestId}` : ''}`).join(' ');
+      const roundLog = result.roundStats.map(r => `${r.startMs}/${r.firstMs ?? '-'}/${r.ms}ms,in${r.input},out${r.output},cr${r.cacheRead},cw${r.cacheWrite}`).join(' ');
       deps.log?.(`turn ${id}: model=${setup.model} stop=${result.stop} rounds=${result.rounds} firstTextMs=${firstTextMs ?? 'none'} generationMs=${generationMs} in=${result.usage.inputTokens} out=${result.usage.outputTokens} cacheRead=${result.usage.cacheReadTokens} cacheWrite=${result.usage.cacheWriteTokens} setupMs=${setupMs} setup=${phases}${t.timing.toolChars !== undefined ? ` toolChars=${t.timing.toolChars}` : ''} saveMs=${saveMs} rounds=[${roundLog}]${reason ? ` ended=${reason}` : ''}`);
       if (turn) emit({ event: 'tool_request', data: { calls: turn.pending.calls } });
       emit({ event: 'done', data: { messageCount: saved.messageCount, limitReached: saved.messageCount >= config.limits.messagesPerConversation, ended: reason !== null,

@@ -3,13 +3,16 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 
-/** The slice of the SDK client `runTurn` uses, so tests inject a scripted stream and never reach the network. */
-export interface MessageStreamLike extends AsyncIterable<Anthropic.MessageStreamEvent> { finalMessage(): Promise<Anthropic.Message>; readonly request_id?: string | null | undefined }
+/**
+ * The slice of the SDK client `runTurn` and `warmPrompt` use, so tests inject scripted events and never reach the
+ * network. Turns read the raw event stream: `runTurn` builds the message itself (see `readMessage`), because the SDK's
+ * own message builder throws on a tool input that streamed as invalid JSON and drops the rest of the message.
+ */
 export interface AnthropicLike {
   messages: {
-    stream(params: Anthropic.MessageStreamParams, options?: { headers?: Record<string, string> }): MessageStreamLike;
-    /** Non-streaming requests; only the prompt-cache warm-up uses it. */
-    create?(params: Anthropic.MessageCreateParamsNonStreaming, options?: { headers?: Record<string, string> }): Promise<Anthropic.Message>;
+    create(params: Anthropic.MessageCreateParamsStreaming, options?: { headers?: Record<string, string> }): PromiseLike<AsyncIterable<Anthropic.RawMessageStreamEvent>>;
+    /** Non-streaming requests; only the prompt-cache warm-up sends them. */
+    create(params: Anthropic.MessageCreateParamsNonStreaming, options?: { headers?: Record<string, string> }): PromiseLike<Anthropic.Message>;
   };
 }
 
@@ -86,7 +89,8 @@ export function withSchema<S extends z.ZodType>(schema: S, run: (input: z.output
   };
 }
 
-export interface ToolCallEvent { id: string; name: string; input: unknown; result: ToolResult }
+/** `invalidInput`: the call's input streamed as invalid JSON; it holds the start of the raw input, for diagnosis. */
+export interface ToolCallEvent { id: string; name: string; input: unknown; result: ToolResult; invalidInput?: string }
 export interface TurnUsage { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }
 /** `client_tools`: the turn is suspended until the browser answers the calls in `pending`. */
 export type TurnStop = 'end_turn' | 'max_tokens' | 'refusal' | 'tool_rounds' | 'client_tools' | 'other';
@@ -130,7 +134,7 @@ export interface RoundStat {
   startMs: number;
   /** Until the first content arrived (thinking, text or a tool call), or null when none did. */
   firstMs: number | null;
-  ms: number; input: number; output: number; cacheRead: number; cacheWrite: number; requestId: string | null;
+  ms: number; input: number; output: number; cacheRead: number; cacheWrite: number;
 }
 export interface RunTurnResult { appended: Anthropic.MessageParam[]; text: string; usage: TurnUsage; stop: TurnStop; rounds: number; pending: PendingClientTools | null; roundStats: RoundStat[] }
 
@@ -177,7 +181,6 @@ export interface WarmUsage { cacheWrite: number; cacheRead: number; input: numbe
  * is cached for the placeholder message. On an entry that is already warm this is a cheap read that restarts its hour.
  */
 export async function warmPrompt(client: AnthropicLike, prompt: TurnPrompt): Promise<WarmUsage> {
-  if (!client.messages.create) throw new Error('This client cannot send non-streaming requests.');
   const { params, headers } = turnRequest({ ...prompt, messages: [{ role: 'user', content: 'warmup' }], maxTokens: 0 });
   const { cache_control: _rolling, stream: _stream, ...rest } = params as Anthropic.MessageStreamParams & { stream?: unknown };
   const message = await client.messages.create({ ...rest, stream: false } as Anthropic.MessageCreateParamsNonStreaming, headers ? { headers } : undefined);
@@ -204,7 +207,6 @@ export async function runTurn(options: RunTurnOptions): Promise<RunTurnResult> {
     const { params, headers } = turnRequest({ model, system, tools, messages: [...options.messages, ...appended], effort: options.effort, maxTokens: options.maxTokens, progress });
     const roundStarted = performance.now();
     let startMs: number | null = null, firstMs: number | null = null;
-    const stream = client.messages.stream(params, headers ? { headers } : undefined);
     // Each visible block (a progress note or reply text) starts a new paragraph after text already shown.
     let blockStarted = false;
     const visible = (delta: string) => {
@@ -212,18 +214,18 @@ export async function runTurn(options: RunTurnOptions): Promise<RunTurnResult> {
       if (!blockStarted) { blockStarted = true; if (text && !text.endsWith('\n\n')) emit(text.endsWith('\n') ? '\n' : '\n\n'); }
       emit(delta);
     };
-    for await (const event of stream) {
+    const events = await client.messages.create({ ...params, stream: true } as Anthropic.MessageCreateParamsStreaming, headers ? { headers } : undefined);
+    const { message, invalid } = await readMessage(events, (event) => {
       if (event.type === 'message_start') startMs ??= Math.round(performance.now() - roundStarted);
       else if (event.type === 'content_block_delta' || event.type === 'content_block_start') firstMs ??= Math.round(performance.now() - roundStarted);
       if (event.type === 'content_block_start') blockStarted = false;
       else if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') visible(event.delta.text);
       else if (progress && event.type === 'content_block_delta' && event.delta.type === 'thinking_delta') visible(event.delta.thinking);
-    }
-    const message = await stream.finalMessage();
+    });
     usage.inputTokens += message.usage.input_tokens; usage.outputTokens += message.usage.output_tokens;
     usage.cacheReadTokens += message.usage.cache_read_input_tokens ?? 0; usage.cacheWriteTokens += message.usage.cache_creation_input_tokens ?? 0;
     roundStats.push({ startMs: startMs ?? 0, firstMs, ms: Math.round(performance.now() - roundStarted), input: message.usage.input_tokens, output: message.usage.output_tokens,
-      cacheRead: message.usage.cache_read_input_tokens ?? 0, cacheWrite: message.usage.cache_creation_input_tokens ?? 0, requestId: stream.request_id ?? null });
+      cacheRead: message.usage.cache_read_input_tokens ?? 0, cacheWrite: message.usage.cache_creation_input_tokens ?? 0 });
     appended.push({ role: 'assistant', content: message.content });
     const toolUses = message.content.filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
     const reason = message.stop_reason;
@@ -240,8 +242,16 @@ export async function runTurn(options: RunTurnOptions): Promise<RunTurnResult> {
     }
     rounds += 1;
     const results: Anthropic.ToolResultBlockParam[] = [];
-    const clientCalls = toolUses.filter((t) => options.clientTools?.has(t.name));
+    const clientCalls = toolUses.filter((t) => options.clientTools?.has(t.name) && !invalid.has(t.id));
     for (const use of toolUses) {
+      const bad = invalid.get(use.id);
+      if (bad) {
+        // Never run, on the server or in the browser: the model gets the parse error and sends the call again.
+        const result: ToolResult = { content: `Not run: the tool input was not valid JSON (${bad.error}). Send the call again with valid JSON.`, isError: true };
+        onToolCall?.({ id: use.id, name: use.name, input: use.input, result, invalidInput: bad.raw.slice(0, INVALID_INPUT_LOG_CHARS) });
+        results.push({ type: 'tool_result', tool_use_id: use.id, content: result.content, is_error: true });
+        continue;
+      }
       if (options.clientTools?.has(use.name)) continue;
       const handler = handlers[use.name];
       let result: ToolResult;
@@ -265,6 +275,88 @@ export async function runTurn(options: RunTurnOptions): Promise<RunTurnResult> {
     appended.push({ role: 'user', content: results });
   }
   return { appended, text, usage, stop, rounds, pending, roundStats };
+}
+
+/** How much of an invalid tool input `onToolCall` reports. */
+const INVALID_INPUT_LOG_CHARS = 2000;
+/** A tool call whose input streamed as invalid JSON: `raw` is the input as streamed, `error` the parser's message. */
+export interface InvalidToolInput { raw: string; error: string }
+
+function parseToolInput(raw: string): { input: Record<string, unknown> } | { error: string } {
+  if (!raw.trim()) return { input: {} };
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (value && typeof value === 'object' && !Array.isArray(value)) return { input: value as Record<string, unknown> };
+    return { error: 'the input is not a JSON object' };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * Build the assistant message from raw stream events, calling `onEvent` for each as it arrives. Tool inputs stream as
+ * they are generated (`eager_input_streaming`), so one can arrive as invalid JSON. Each input is parsed once, when its
+ * block ends; an invalid one is kept in the message with an empty input and reported in `invalid` by tool_use id, so
+ * the rest of the message (other calls, the stop reason, usage) is still read.
+ */
+export async function readMessage(events: AsyncIterable<Anthropic.RawMessageStreamEvent>, onEvent?: (event: Anthropic.RawMessageStreamEvent) => void): Promise<{ message: Anthropic.Message; invalid: Map<string, InvalidToolInput> }> {
+  let message: Anthropic.Message | null = null;
+  let stopped = false;
+  const buffers = new Map<number, string>();
+  const invalid = new Map<string, InvalidToolInput>();
+  const finish = (index: number) => {
+    const block = message?.content[index]; const raw = buffers.get(index);
+    if (raw === undefined || !block || (block.type !== 'tool_use' && block.type !== 'server_tool_use')) return;
+    buffers.delete(index);
+    const parsed = parseToolInput(raw);
+    if ('input' in parsed) block.input = parsed.input;
+    else { block.input = {}; invalid.set(block.id, { raw, error: parsed.error }); }
+  };
+  for await (const event of events) {
+    onEvent?.(event);
+    switch (event.type) {
+      case 'message_start':
+        message = { ...event.message, content: [], usage: { ...event.message.usage } };
+        break;
+      case 'content_block_start':
+        if (!message) break;
+        message.content[event.index] = { ...event.content_block };
+        if (event.content_block.type === 'tool_use' || event.content_block.type === 'server_tool_use') buffers.set(event.index, '');
+        break;
+      case 'content_block_delta': {
+        const block = message?.content[event.index];
+        if (!block) break;
+        const delta = event.delta;
+        if (delta.type === 'text_delta' && block.type === 'text') block.text += delta.text;
+        else if (delta.type === 'citations_delta' && block.type === 'text') block.citations = [...(block.citations ?? []), delta.citation];
+        else if (delta.type === 'thinking_delta' && block.type === 'thinking') block.thinking += delta.thinking;
+        else if (delta.type === 'signature_delta' && block.type === 'thinking') block.signature = delta.signature;
+        else if (delta.type === 'input_json_delta' && buffers.has(event.index)) buffers.set(event.index, buffers.get(event.index)! + delta.partial_json);
+        break;
+      }
+      case 'content_block_stop':
+        finish(event.index);
+        break;
+      case 'message_delta': {
+        if (!message) break;
+        message.stop_reason = event.delta.stop_reason; message.stop_sequence = event.delta.stop_sequence; message.stop_details = event.delta.stop_details;
+        if (event.delta.container != null) message.container = event.delta.container;
+        // Output tokens are always sent; the other counters are whole-message totals, sent only when they apply.
+        const u = event.usage; message.usage.output_tokens = u.output_tokens;
+        if (u.input_tokens != null) message.usage.input_tokens = u.input_tokens;
+        if (u.cache_creation_input_tokens != null) message.usage.cache_creation_input_tokens = u.cache_creation_input_tokens;
+        if (u.cache_read_input_tokens != null) message.usage.cache_read_input_tokens = u.cache_read_input_tokens;
+        if (u.server_tool_use != null) message.usage.server_tool_use = u.server_tool_use;
+        break;
+      }
+      case 'message_stop':
+        stopped = true;
+        break;
+    }
+  }
+  if (!message || !stopped) throw new Error('The model stream ended before the message was complete.');
+  for (const index of [...buffers.keys()]) finish(index);
+  return { message, invalid };
 }
 
 /**

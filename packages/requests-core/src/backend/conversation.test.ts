@@ -99,9 +99,12 @@ describe('conversations', () => {
     const scripted = fakeAnthropic([{ text: ['First ', 'step.'] }]);
     let release!: () => void;
     const held = new Promise<void>(resolve => { release = resolve; });
-    const h = harness({ deps: { anthropic: { messages: { stream(params) {
-      const stream = scripted.messages.stream(params);
-      return { [Symbol.asyncIterator]: () => stream[Symbol.asyncIterator](), finalMessage: async () => { await held; return stream.finalMessage(); } };
+    // The stream holds before its last event, so the message is not finished until the test releases it.
+    const h = harness({ deps: { anthropic: { messages: { async create(params) {
+      const stream = await scripted.messages.create(params);
+      return { async *[Symbol.asyncIterator]() {
+        for await (const event of stream) { if (event.type === 'message_stop') await held; yield event; }
+      } };
     } } } } });
     const response = await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'Help' });
     const reader = response.body!.getReader();
@@ -211,6 +214,21 @@ describe('POST /conversations/:id/messages (SSE)', () => {
     expect(ge.map(e => e.event)).toEqual(['text', 'brief', 'done']); expect(ge[2]!.data).toMatchObject({ ended: false });
     expect(((gone.service.named('fr_conversation_append')[0]!.params['p_messages'] as ConversationMessage[])[1] as { output: string }).output).toContain('no longer accepts new subscribers');
     expect(gone.service.named('fr_conversation_close')).toEqual([]);
+  });
+  it('asks the model to resend a tool call whose input streamed as invalid JSON, without failing the turn', async () => {
+    const lines: string[] = [];
+    const h = harness({ deps: { log: (line: string) => lines.push(line) }, turns: [
+      { toolUses: [{ id: 't1', name: 'update_brief', input: null, raw: ['{"section":"problem","text":"Doors rub",]'] }] },
+      { toolUses: [{ id: 't2', name: 'update_brief', input: { section: 'problem', text: 'Doors rub' } }] },
+      { text: ['Noted.'] },
+    ] });
+    const events = parseSse(await (await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'My doors rub' })).text());
+    expect(events.map(e => e.event)).not.toContain('error');
+    expect(events.at(-1)!.event).toBe('done');
+    expect(lines.some(l => l.includes('update_brief input was not valid JSON') && l.includes('"text":"Doors rub",]'))).toBe(true);
+    const messages = h.service.named('fr_conversation_append')[0]!.params['p_messages'] as ConversationMessage[];
+    expect(messages.map(m => m.role)).toEqual(['user', 'tool', 'tool', 'assistant']);
+    expect((messages[1] as { output: string }).output).toMatch(/^Not run: the tool input was not valid JSON/);
   });
   describe('request_file from the chat', () => {
     const ready = conversationRow({ brief: BRIEF, title: 'Lock inference with Shift' });
@@ -977,7 +995,6 @@ describe('prompt-cache warm-up', () => {
   function warmClient(fail?: string) {
     const created: Record<string, unknown>[] = [];
     const client = { messages: {
-      stream(): never { throw new Error('warm-ups do not stream'); },
       async create(params: Record<string, unknown>) {
         created.push(params);
         if (fail && JSON.stringify(params).includes(fail)) throw new Error('overloaded');

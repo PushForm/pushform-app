@@ -12,7 +12,9 @@ export type LayoutVectorItem = VectorBase & (
   | { kind: 'path'; path: VectorPath; fill: string | null; stroke: string | null; weight: number; dash: number[]; evenodd: boolean }
   | { kind: 'text'; textBlockId?: number; underline?: boolean; text: string; point: VectorPoint; matrix: VectorMatrix; font: string; color: string;
     align: CanvasTextAlign; baseline: CanvasTextBaseline; bounds: [number, number, number, number] }
-  | { kind: 'image'; src: string; matrix: VectorMatrix; x: number; y: number; width: number; height: number });
+  | { kind: 'image'; src: string; matrix: VectorMatrix; x: number; y: number; width: number; height: number }
+  /** A picture repeated across a path's area; `matrix` maps one tile's unit square ([0, 0] top-left) to the page. */
+  | { kind: 'pattern'; path: VectorPath; evenodd: boolean; src: string; matrix: VectorMatrix });
 export interface LayoutVectorPage { paperUnits?: 'mm' | 'in'; name: string; width: number; height: number; background: string; items: LayoutVectorItem[] }
 export type LayoutExportArea = 'page' | 'drawing';
 export interface LayoutVectorBounds { x: number; y: number; width: number; height: number }
@@ -27,6 +29,7 @@ export function combineLayoutVectorPages(pages: LayoutVectorPage[]): LayoutVecto
     ? { ...s, point: shift(s.point), c1: shift(s.c1), c2: shift(s.c2) } : { ...s, point: shift(s.point) }) });
   for (const page of pages) {
     for (const item of page.items) items.push(item.kind === 'path' ? { ...item, clips: item.clips.map(path), path: path(item.path) }
+      : item.kind === 'pattern' ? { ...item, clips: item.clips.map(path), path: path(item.path), matrix: [item.matrix[0], item.matrix[1], item.matrix[2], item.matrix[3], item.matrix[4] + offset, item.matrix[5]] }
       : { ...item, clips: item.clips.map(path), matrix: [item.matrix[0], item.matrix[1], item.matrix[2], item.matrix[3], item.matrix[4] + offset, item.matrix[5]] });
     offset += page.width + 10;
   }
@@ -44,7 +47,9 @@ export function layoutVectorBounds(page: LayoutVectorPage, area: LayoutExportAre
   };
   const total = { minX, minY, maxX, maxY };
   const clipBounds = new Map<VectorPath, LayoutVectorBounds>();
-  for (const item of page.items) {
+  for (const painted of page.items) {
+    // A pattern paints its path's area, as a fill does.
+    const item: LayoutVectorItem = painted.kind === 'pattern' ? { ...painted, kind: 'path', fill: '#000000', stroke: null, weight: 0, dash: [] } : painted;
     minX = minY = Infinity; maxX = maxY = -Infinity;
     if (item.kind === 'path') {
       if ((!item.fill || /00$/i.test(item.fill) && item.fill.length === 9) && (!item.stroke || /00$/i.test(item.stroke) && item.stroke.length === 9)) continue;
@@ -175,7 +180,7 @@ export function writeLayoutSvg(page: LayoutVectorPage, area: LayoutExportArea = 
   // Named-view zoom/center use CSS pixels, regardless of SVG user units or the displayed paper unit.
   const pixelWidth = bounds.width * SVG_PIXELS_PER_MM, pixelHeight = bounds.height * SVG_PIXELS_PER_MM;
   const initialZoom = Math.min(1, SVG_INITIAL_VIEW_PX.width / pixelWidth, SVG_INITIAL_VIEW_PX.height / pixelHeight);
-  const xml = vectorXml, n = vectorNumber, defs: string[] = [], body: string[] = [];
+  const xml = vectorXml, n = vectorNumber, defs: string[] = [], body: string[] = [], patterns = new Map<string, string>();
   // Collapse each recorded text block before counting objects or constructing SVG groups.
   const elements: { item: LayoutVectorItem; text: VectorTextItem[] }[] = [];
   for (const item of page.items) {
@@ -206,6 +211,17 @@ export function writeLayoutSvg(page: LayoutVectorPage, area: LayoutExportArea = 
     if (item.kind === 'text') {
       const baseline = ({ alphabetic: 'alphabetic', top: 'text-before-edge', hanging: 'hanging', middle: 'central', bottom: 'text-after-edge', ideographic: 'ideographic' } as const)[item.baseline];
       body.push(`<text${metadata} x="${n(item.point[0])}" y="${n(item.point[1])}" transform="matrix(${item.matrix.map(n).join(' ')})" style="font:${xml(item.font)};white-space:pre" fill="${xml(item.color)}" text-anchor="${item.align === 'center' ? 'middle' : item.align === 'right' || item.align === 'end' ? 'end' : 'start'}" dominant-baseline="${baseline}">${item.textBlockId !== undefined ? svgTextSpans(text) : xml(item.text)}</text>`);
+    }
+    if (item.kind === 'pattern') {
+      if (!item.src.startsWith('data:image/')) throw new Error('An exported picture is not embedded in the document.');
+      // One tile is the unit square of the pattern's own transform.
+      const key = `${item.src}|${item.matrix.join(',')}`;
+      let id = patterns.get(key);
+      if (!id) {
+        id = `pattern${patterns.size}`; patterns.set(key, id);
+        defs.push(`<pattern id="${id}" patternUnits="userSpaceOnUse" width="1" height="1" patternTransform="matrix(${item.matrix.map(n).join(' ')})"><image href="${xml(item.src)}" width="1" height="1" preserveAspectRatio="none"/></pattern>`);
+      }
+      body.push(`<path${metadata} d="${vectorPathData(item.path)}" fill="url(#${id})" fill-rule="${item.evenodd ? 'evenodd' : 'nonzero'}" stroke="none"/>`);
     }
     if (item.kind === 'image') {
       if (!item.src.startsWith('data:image/')) throw new Error('An exported picture is not embedded in the document.');

@@ -20,7 +20,7 @@ export function reconcileNativeEntityFields(state: LayoutDocumentState, patches:
     if (touched.get(page) === null) continue;
     const ids = touched.get(page) ?? new Set<number>(); ids.add(path[entityAt] as number); touched.set(page, ids);
   }
-  const cleanup: { pageId: number; id: number; geometry: string[]; metadata: string[]; emptyPayloads: LayoutEntityPayload[]; dash: boolean; arrows: ('startArrow' | 'endArrow')[]; text: boolean; table: boolean; dimensions: boolean; label: boolean; annotation: boolean; image: boolean }[] = [];
+  const cleanup: { pageId: number; id: number; geometry: string[]; metadata: string[]; emptyPayloads: LayoutEntityPayload[]; dash: boolean; pattern: boolean; arrows: ('startArrow' | 'endArrow')[]; text: boolean; table: boolean; dimensions: boolean; label: boolean; annotation: boolean; image: boolean }[] = [];
   for (const [pageId, ids] of touched) {
     const entities = pageId === 0 ? state.sharedEntities : state.pages.get(pageId)?.entities;
     if (!entities) continue;
@@ -32,6 +32,7 @@ export function reconcileNativeEntityFields(state: LayoutDocumentState, patches:
       const metadata = [...extra?.metadata?.keys() ?? []].filter(key =>
         (key === 'name' || key === 'nestedGroupIds' || key === 'style') && !Object.hasOwn(entity, key));
       const dash = !!style?.records.has('style/dash') && !Object.hasOwn(entity.style!, 'strokeDashMm');
+      const pattern = !!(style?.records.has('style/pattern') || style?.records.has('style/pattern/value')) && !entity.style!.fillPattern;
       const arrows = (['startArrow', 'endArrow'] as const).filter(key => style?.style.has(key) &&
         (!Object.hasOwn(entity.style!, key) || entity.style![key] !== undefined));
       const text = entity.text ? reconcileNativeTextFields(entity.text) : false;
@@ -40,7 +41,7 @@ export function reconcileNativeEntityFields(state: LayoutDocumentState, patches:
       const label = entity.labelAnchor ? reconcileNativeLayoutAnchorFields(entity.labelAnchor) : false;
       const annotation = [entity.modelAnnotation, entity.preservedModelConnections].some(value => value && reconcileNativeAnnotationFields(value));
       const image = entity.image ? reconcileNativeImageFields(entity.image) : false;
-      if (emptyPayloads.length || geometry.length || metadata.length || dash || arrows.length || text || table || dimensions || label || annotation || image) cleanup.push({ pageId, id, geometry, metadata, emptyPayloads, dash, arrows, text, table, dimensions, label, annotation, image });
+      if (emptyPayloads.length || geometry.length || metadata.length || dash || pattern || arrows.length || text || table || dimensions || label || annotation || image) cleanup.push({ pageId, id, geometry, metadata, emptyPayloads, dash, pattern, arrows, text, table, dimensions, label, annotation, image });
     }
   }
   if (!cleanup.length) return null;
@@ -59,6 +60,7 @@ export function reconcileNativeEntityFields(state: LayoutDocumentState, patches:
       const style = entity.style?.nativeUnknownFields;
       if (style) {
         if (change.dash) style.records.delete('style/dash');
+        if (change.pattern) { style.records.delete('style/pattern'); style.records.delete('style/pattern/value'); }
         for (const key of change.arrows) style.style.delete(key);
         if (!style.records.size && !style.style.size) delete entity.style!.nativeUnknownFields;
       }

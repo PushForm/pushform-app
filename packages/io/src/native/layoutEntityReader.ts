@@ -99,7 +99,12 @@ export function materializeNativeLayoutEntity(packed: NativePackedLayoutEntity, 
   const metadata = new Map(packed.header.metadata.extensions.records);
   if (value.style) {
     const records = new Map<string, Uint8Array[]>(), style = new Map(packed.header.metadata.extensions.style);
-    for (const key of ['style/value', 'style/dash']) { const fields = metadata.get(key); if (fields) { records.set(key, fields); metadata.delete(key); } }
+    for (const key of ['style/value', 'style/dash', 'style/pattern', 'style/pattern/value']) { const fields = metadata.get(key); if (fields) { records.set(key, fields); metadata.delete(key); } }
+    const patternAsset = packed.header.metadata.extensions.fillPatternAsset;
+    if (value.style.fillPattern) {
+      const src = patternAsset === undefined ? undefined : assetStrings.get(patternAsset); if (src === undefined) return fail();
+      value.style = { ...value.style, fillPattern: { ...value.style.fillPattern, src } };
+    }
     for (const key of ['startArrow', 'endArrow'] as const) {
       const arrow = value.style[key], fields = style.get(key);
       if (arrow && fields) { arrow.nativeUnknownFields = fields; style.delete(key); }

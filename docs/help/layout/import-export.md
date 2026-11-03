@@ -18,6 +18,10 @@ Some LayOut files contain objects saved with unusable numbers. A dimension saved
 
 If import still reports invalid or nonfinite numeric data, repair the source drawing and save a new copy in SketchUp LayOut before trying again. The failed import leaves your open drawings unchanged.
 
+## Pattern fills in LayOut documents
+
+Shapes with a pattern fill, such as a concrete, brick, soil or gravel hatch, keep it: the pattern picture repeats across the shape with its original position, scale and rotation, over the shape's fill color and under its outline. It shows in the workspace, prints, and exports to PDF, SVG, page images and back to LayOut; DXF leaves the pattern out and keeps the shape's fill color and outline. Pattern fills cannot be added or changed yet, and the pattern stays where it is on the page when you move or reshape its shape. A pattern whose picture is missing from the file is left out and listed in the import notes.
+
 ## Import DXF into a drawing
 
 Use Import for a DXF drawing. Review its options and import notes, especially units and unsupported content. DXF is an exchange format; do not expect every source application feature to become an editable PushForm object.

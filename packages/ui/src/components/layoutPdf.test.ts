@@ -4,7 +4,7 @@ import { expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { PDFDocument, PDFName, PDFRawStream, decodePDFRawStream } from 'pdf-lib';
-import type { LayoutVectorPage } from '@pushform/io';
+import type { LayoutVectorItem, LayoutVectorPage, VectorPath } from '@pushform/io';
 import { writeLayoutPdf } from './layoutPdf';
 import { pdfPageRange } from './layoutPdfExport';
 
@@ -39,4 +39,22 @@ it('reports system font substitution and rejects unavailable webfonts instead of
 it('selects user page ranges in document order and rejects invalid ranges', () => {
   expect(pdfPageRange([40, 20, 70, 10], '4, 1-2, 2')).toEqual([40, 20, 10]);
   for (const range of ['', '0', '5', '3-1', '1-', '1.5']) expect(() => pdfPageRange([1, 2, 3, 4], range)).toThrow('page numbers');
+});
+
+it('writes pattern fills as tiling patterns of one embedded picture', async () => {
+  const src = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const square: VectorPath = { segments: [{ kind: 'move', point: [10, 10] }, { kind: 'line', point: [50, 10] }, { kind: 'line', point: [50, 50] }, { kind: 'close' }] };
+  const pattern = (x: number): LayoutVectorItem => ({ kind: 'pattern', layer: '', clips: [], evenodd: false, src, path: square, matrix: [10, 0, 0, 5, x, 20] });
+  const result = await writeLayoutPdf([{ name: 'Sheet', width: 100, height: 100, background: '#ffffff', items: [pattern(10), pattern(12)] }], async () => null);
+  const pdf = await PDFDocument.load(result.bytes);
+  const objects = pdf.context.enumerateIndirectObjects().map(([, object]) => object);
+  const patterns = objects.filter(object => object instanceof PDFRawStream && object.dict.get(PDFName.of('PatternType'))) as PDFRawStream[];
+  expect(patterns).toHaveLength(2);
+  // Tiles map to the page's default space, in points from its bottom-left corner.
+  const PT = 72 / 25.4;
+  expect(String(patterns[0]!.dict.get(PDFName.of('Matrix')))).toBe(`[ ${[10 * PT, -0, 0, -5 * PT, 10 * PT, 100 * PT - 20 * PT].join(' ')} ]`);
+  // One picture, with its transparency as a soft mask.
+  expect(objects.filter(object => object instanceof PDFRawStream && String(object.dict.get(PDFName.of('Subtype'))) === '/Image' && object.dict.has(PDFName.of('SMask')))).toHaveLength(1);
+  const content = objects.flatMap(object => object instanceof PDFRawStream && !object.dict.has(PDFName.of('Subtype')) ? [new TextDecoder().decode(decodePDFRawStream(object).decode())] : []).join('\n');
+  expect(content).toContain('/Pattern cs'); expect(content).toContain('/P0 scn'); expect(content).toContain('/P1 scn');
 });

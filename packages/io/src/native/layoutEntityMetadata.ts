@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { LAYOUT_OBJECT_NAME_MAX } from '@pushform/layout';
+import { LAYOUT_OBJECT_NAME_MAX, validLayoutFillPattern } from '@pushform/layout';
 import type { LayoutEntity } from '@pushform/layout';
 import { NativeChunkError } from './chunks';
 import { NativeRecordCodec } from './record';
@@ -9,13 +9,18 @@ import { encodeNativeIds, decodeNativeIds } from './idList';
 import { encodeNativeLayoutStyle, decodeNativeLayoutStyle } from './layoutStyle';
 import type { LayoutStyleExtensions } from './layoutStyle';
 export type NativeLayoutEntityMetadata = Pick<LayoutEntity, 'id' | 'kind' | 'layerId' | 'name' | 'locked' | 'hidden' | 'groupId' | 'nestedGroupIds' | 'style'>;
-export interface LayoutEntityMetadataExtensions { records: Map<string, Uint8Array[]>; style: LayoutStyleExtensions }
+/** `fillPatternAsset` is the decoded pattern's picture asset; the pattern's `src` is empty until the document's assets resolve it. */
+export interface LayoutEntityMetadataExtensions { records: Map<string, Uint8Array[]>; style: LayoutStyleExtensions; fillPatternAsset?: number }
+/** Registers a pattern picture in the document's asset catalog and returns its asset ID. */
+export type NativeLayoutAssetRegistrar = (src: string) => number;
 const f = (id: number, kind: NativeFieldKind, required = true): NativeField => ({ id, kind, required });
 const record = new NativeRecordCodec({ id: f(1, 'uint32'), kind: f(2, 'uint32'), layerId: f(3, 'uint32'), name: f(4, 'bytes', false), locked: f(5, 'uint32', false),
   hidden: f(6, 'uint32', false), groupId: f(7, 'uint32', false), nestedGroupIds: f(8, 'bytes', false), style: f(9, 'bytes', false) } satisfies Record<keyof NativeLayoutEntityMetadata, NativeField>);
 const optionalString = new NativeRecordCodec({ state: f(1, 'uint32'), value: f(2, 'string', false) });
 const optionalBytes = new NativeRecordCodec({ state: f(1, 'uint32'), value: f(2, 'bytes', false) });
-const style = new NativeRecordCodec({ base: f(1, 'bytes'), strokeDashMm: f(2, 'bytes', false) });
+const style = new NativeRecordCodec({ base: f(1, 'bytes'), strokeDashMm: f(2, 'bytes', false), fillPattern: f(3, 'bytes', false) });
+const pattern = new NativeRecordCodec({ assetId: f(1, 'uint32'), tileWidthMm: f(2, 'double'), tileHeightMm: f(3, 'double'), originXMm: f(4, 'double'), originYMm: f(5, 'double'),
+  scale: f(6, 'double'), rotationDeg: f(7, 'double') });
 const kinds = ['path', 'text', 'label', 'dimension', 'angular-dimension', 'image', 'table'] as const;
 const fail = (): never => { throw new NativeChunkError('Invalid native Layout entity metadata'); };
 function id(n: number): void { if (!Number.isInteger(n) || n < 1 || n > 0xffffffff) fail(); }
@@ -40,8 +45,10 @@ function validate(value: NativeLayoutEntityMetadata): void {
     if (!Array.isArray(dash) || dash.length % 2 || dash.length > 131070) fail();
     for (const n of dash) if (!Number.isFinite(n) || n <= 0) fail();
   }
+  const fill = value.style?.fillPattern;
+  if (fill !== undefined && !validLayoutFillPattern(fill)) fail();
 }
-export function encodeNativeLayoutEntityMetadata(value: NativeLayoutEntityMetadata, ext: LayoutEntityMetadataExtensions = { records: new Map(), style: new Map() }): Uint8Array {
+export function encodeNativeLayoutEntityMetadata(value: NativeLayoutEntityMetadata, ext: LayoutEntityMetadataExtensions = { records: new Map(), style: new Map() }, registerAsset?: NativeLayoutAssetRegistrar): Uint8Array {
   if (value.style?.nativeUnknownFields) ext = { records: new Map([...ext.records, ...value.style.nativeUnknownFields.records]), style: value.style.nativeUnknownFields.style };
   validate(value); const fields: Record<string, NativeScalar> = { id: value.id, kind: kinds.indexOf(value.kind), layerId: value.layerId };
   if (Object.hasOwn(value, 'name')) fields.name = wrap(optionalString, value.name, 'name', ext);
@@ -58,6 +65,16 @@ export function encodeNativeLayoutEntityMetadata(value: NativeLayoutEntityMetada
         let bytes: Uint8Array | undefined;
         if (s.strokeDashMm !== undefined) { bytes = new Uint8Array(s.strokeDashMm.length * 8); const view = new DataView(bytes.buffer); for (let i = 0; i < s.strokeDashMm.length; i++) view.setFloat64(i * 8, s.strokeDashMm[i]!, true); }
         fields.strokeDashMm = wrap(optionalBytes, bytes, 'style/dash', ext);
+      }
+      if (Object.hasOwn(s, 'fillPattern')) {
+        const p = s.fillPattern;
+        let bytes: Uint8Array | undefined;
+        if (p !== undefined) {
+          if (!registerAsset) return fail();
+          bytes = write(pattern, { assetId: registerAsset(p.src), tileWidthMm: p.tileMm[0], tileHeightMm: p.tileMm[1], originXMm: p.originMm[0], originYMm: p.originMm[1],
+            scale: p.scale, rotationDeg: p.rotationDeg }, 'style/pattern/value', ext);
+        }
+        fields.fillPattern = wrap(optionalBytes, bytes, 'style/pattern', ext);
       }
       bytes = write(style, fields, 'style/value', ext);
     }
@@ -87,7 +104,19 @@ export function decodeNativeLayoutEntityMetadata(bytes: Uint8Array): { value: Na
           for (let at = 0; at < b.length; at += 8) dash.push(view.getFloat64(at, true)); value.style.strokeDashMm = dash;
         }
       }
+      if (Object.hasOwn(s, 'fillPattern')) {
+        const bytes = unwrap(optionalBytes, s.fillPattern as Uint8Array, 'style/pattern', ext);
+        if (bytes === undefined) present(value.style, 'fillPattern', undefined);
+        else {
+          const p = read(pattern, bytes as Uint8Array, 'style/pattern/value', ext), assetId = p.assetId as number; id(assetId);
+          ext.fillPatternAsset = assetId;
+          value.style.fillPattern = { src: '', tileMm: [p.tileWidthMm as number, p.tileHeightMm as number], originMm: [p.originXMm as number, p.originYMm as number],
+            scale: p.scale as number, rotationDeg: p.rotationDeg as number };
+        }
+      }
     }
   }
-  validate(value); return { value, extensions: ext };
+  const fill = value.style?.fillPattern;
+  if (fill) validate({ ...value, style: { ...value.style!, fillPattern: { ...fill, src: 'data:image/png;' } } }); else validate(value);
+  return { value, extensions: ext };
 }

@@ -279,11 +279,14 @@ function newShapeStyle(draft: Draft<LayoutDocumentState>, closed: boolean): NonN
   return closed ? { ...plainStyle(draft), fillColor: draft.defaultStyle.fillColor ?? '#ffffff' } : { ...draft.defaultStyle, fillColor: null };
 }
 
+/** A copied pattern fill keeps its embedded picture, origin, scale and rotation. */
+const fillPattern = z.object({ src: z.string().regex(/^data:image\/(png|jpeg);/), tileMm: z.tuple([finite.positive(), finite.positive()]), originMm: point,
+  scale: finite.positive(), rotationDeg: finite });
 /** Copies keep a custom object name. */
 const clipboardBase = z.object({ name: z.string().trim().max(LAYOUT_OBJECT_NAME_MAX).optional(),
   points: z.array(point).min(2), closed: z.boolean(), groupId: id.optional(), nestedGroupIds: z.array(id).min(1).optional(),
   style: z.object({ strokeColor: color, strokeWeightPt: finite.nonnegative(), strokeDashMm: strokeDashMm.optional(), fillColor: color.nullable(),
-    startArrow: arrow.optional(), endArrow: arrow.optional() }).optional() });
+    fillPattern: fillPattern.optional(), startArrow: arrow.optional(), endArrow: arrow.optional() }).optional() });
 const vector3 = z.tuple([finite, finite, finite]);
 const viewportCamera = z.object({ eye: vector3, target: vector3, up: vector3, projection: z.enum(['perspective', 'parallel']),
   fov: finite.positive().lt(180), scale: finite.positive(), shift: point.optional() });

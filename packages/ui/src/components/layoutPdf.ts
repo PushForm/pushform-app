@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { PDFDocument, StandardFonts, rgb, pushGraphicsState, popGraphicsState, concatTransformationMatrix, moveTo, lineTo, appendBezierCurve, closePath, clip, endPath, fill, stroke, fillAndStroke, setFillingColor, setStrokingColor, setLineWidth, setDashPattern, PDFOperator, PDFOperatorNames, setGraphicsState, type PDFFont } from 'pdf-lib';
+import { PDFDocument, StandardFonts, rgb, pushGraphicsState, popGraphicsState, concatTransformationMatrix, moveTo, lineTo, appendBezierCurve, closePath, clip, endPath, fill, stroke, fillAndStroke, setFillingColor, setStrokingColor, setLineWidth, setDashPattern, PDFOperator, PDFOperatorNames, PDFName, PDFDict, setGraphicsState, type PDFFont, type PDFImage, type PDFRef } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import type { LayoutVectorPage, VectorPath } from '@pushform/io';
 
@@ -35,8 +35,43 @@ export async function writeLayoutPdf(pages: readonly LayoutVectorPage[], loadFon
       fonts.set(item.font, [await pdf.embedFont(standard)]);
     }
   }
+  // Pictures are embedded once however often they are drawn; pattern fills are tiling patterns of them.
+  const pictures = new Map<string, PDFImage>(), patterns = new Map<string, PDFRef>();
+  const picture = async (src: string): Promise<PDFImage> => {
+    let image = pictures.get(src);
+    if (!image) {
+      const response = await fetch(src);
+      if (!response.ok) throw new Error('A page image could not be loaded.');
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      image = bytes[0] === 137 ? await pdf.embedPng(bytes) : await pdf.embedJpg(bytes);
+      pictures.set(src, image);
+    }
+    return image;
+  };
   for (const source of pages) {
     const page = pdf.addPage([source.width * PT, source.height * PT]);
+    const pagePatterns = new Map<PDFRef, PDFName>();
+    // A pattern's matrix maps its tile to the page's default space: points, y up from the bottom edge.
+    const patternName = async (src: string, m: readonly number[]): Promise<PDFName> => {
+      const matrix = [PT * m[0]!, -PT * m[1]!, PT * m[2]!, -PT * m[3]!, PT * m[4]!, source.height * PT - PT * m[5]!];
+      const key = `${src}|${matrix.join(',')}`;
+      let ref = patterns.get(key);
+      if (!ref) {
+        const image = await picture(src);
+        // One tile is the unit square, y down, with the picture's top row at its top.
+        const stream = pdf.context.stream('q 1 0 0 -1 0 1 cm /Im0 Do Q', { Type: 'Pattern', PatternType: 1, PaintType: 1, TilingType: 1,
+          BBox: [0, 0, 1, 1], XStep: 1, YStep: 1, Matrix: matrix, Resources: { XObject: { Im0: image.ref } } });
+        ref = pdf.context.register(stream); patterns.set(key, ref);
+      }
+      let name = pagePatterns.get(ref);
+      if (!name) {
+        const { Resources } = page.node.normalizedEntries();
+        let dict = Resources.lookupMaybe(PDFName.of('Pattern'), PDFDict);
+        if (!dict) { dict = pdf.context.obj({}); Resources.set(PDFName.of('Pattern'), dict); }
+        name = PDFName.of(`P${pagePatterns.size}`); dict.set(name, ref); pagePatterns.set(ref, name);
+      }
+      return name;
+    };
     page.drawRectangle({ width: source.width * PT, height: source.height * PT, color: color(source.background) });
     page.pushOperators(pushGraphicsState(), concatTransformationMatrix(PT, 0, 0, -PT, 0, source.height * PT));
     for (const item of source.items) {
@@ -50,6 +85,10 @@ export async function writeLayoutPdf(pages: readonly LayoutVectorPage[], loadFon
         if (item.fill) page.pushOperators(setFillingColor(color(item.fill)));
         if (item.stroke) page.pushOperators(setStrokingColor(color(item.stroke)));
         page.pushOperators(item.fill && item.stroke ? item.evenodd ? fillAndStrokeEvenOdd() : fillAndStroke() : item.fill ? item.evenodd ? fillEvenOdd() : fill() : item.stroke ? stroke() : endPath());
+      } else if (item.kind === 'pattern') {
+        const name = await patternName(item.src, item.matrix);
+        page.pushOperators(PDFOperator.of(PDFOperatorNames.NonStrokingColorspace, [PDFName.of('Pattern')]), PDFOperator.of(PDFOperatorNames.NonStrokingColorN, [name]),
+          ...pathOperators(item.path), item.evenodd ? fillEvenOdd() : fill());
       } else if (item.kind === 'text') {
         const candidates = fonts.get(item.font)!, font = candidates[0]!, size = Number(item.font.match(/([\d.]+)px/)?.[1] ?? 10);
         const [left, top, right, bottom] = item.bounds;

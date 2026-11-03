@@ -200,3 +200,28 @@ it('uses the exported viewport size for metric and cropped initial views, indepe
   expect(cropped.cy).toBeCloseTo(height! * 96 / 25.4 / 2);
   expect(cropped.cx).toBeLessThan(100);
 });
+
+it('keeps a pattern fill as one repeating picture between the fill color and the stroke', () => {
+  const { doc, commands, pageId, drawing, svg } = setup();
+  const src = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const fillPattern = { src, tileMm: [10, 5] as [number, number], originMm: [10, 20] as [number, number], scale: 2, rotationDeg: 90 };
+  commands.execute('layout.clipboard.paste', { pageId, entities: [{ kind: 'path', closed: true, points: [[10, 10], [50, 10], [50, 50], [10, 50]],
+    style: { fillColor: '#0000ff', strokeColor: '#000000', strokeWeightPt: 1, fillPattern } }] });
+  const page = doc.state.pages.get(pageId)!;
+  expect(page.entities.get(page.entityOrder.at(-1)!)!.style!.fillPattern).toEqual(fillPattern);
+  const items = drawing().items;
+  expect(items.map(item => item.kind)).toEqual(['path', 'pattern', 'path']);
+  const pattern = items[1]!;
+  // A 20 × 10 mm tile turned a quarter turn counterclockwise: its x axis points up the page.
+  if (pattern.kind !== 'pattern') throw new Error('expected a pattern');
+  expect(pattern.matrix.map(n => Math.round(n * 1e9) / 1e9)).toEqual([0, -20, 10, 0, 10, 20]);
+  expect(pattern.src).toBe(src);
+  const root = svg(), definition = root.querySelector('pattern')!;
+  expect(definition.getAttribute('patternTransform')).toBe('matrix(0 -20 10 0 10 20)');
+  expect(definition.querySelector('image')!.getAttribute('href')).toBe(src);
+  expect([...root.querySelectorAll('path')].map(path => path.getAttribute('fill'))).toEqual(['#0000ff', `url(#${definition.id})`, 'none']);
+  // DXF has no picture fills: the fill color and stroke remain.
+  const dxf = writeLayoutDxf(drawing());
+  expect(dxf.warnings.some(warning => /Pattern fills are omitted/.test(warning))).toBe(true);
+  expect(parseDxf(strToU8(dxf.text)).items.map(item => item.kind)).toEqual(['fill', 'path']);
+});

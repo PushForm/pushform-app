@@ -39,6 +39,7 @@ import { lastCreatedLayoutObjects, trackLayoutCreations } from './layoutLastCrea
 import { LayoutDashControls } from './LayoutDashControls';
 import { LayoutArrowControls } from './LayoutArrowControls';
 import { layoutImageLoads, paintLayoutImage } from './layoutImage';
+import { paintLayoutFillPattern } from './layoutFillPattern';
 import { layoutViewportModel, layoutViewportPicture, layoutViewportSources } from './layoutViewportRenders';
 import { initialViewportCamera, orbitViewportCamera, panViewportCamera, zoomViewportCamera } from './layoutViewportCameras';
 import { LayoutViewportPanel } from './LayoutViewportPanel';
@@ -444,7 +445,7 @@ function pickEntity(p: Point, page: LayoutPage, state: LayoutDocumentState, incl
       // Fill tests close every contour (pointInsideLayoutPath wraps around); edge tests skip undrawn closing segments.
       const contours = layoutPathContours(entity.points, entity.handles, entity.closed, entity.contourStarts, entity.openContours)
         .map(contour => flattenLayoutPath(contour.points, contour.handles, contour.closed));
-      if (entity.closed && (entity.style?.fillColor || includeUnfilledInterior) &&
+      if (entity.closed && (entity.style?.fillColor || entity.style?.fillPattern || includeUnfilledInterior) &&
         contours.filter(samples => pointInsideLayoutPath(p, samples)).length % 2 === 1) return entity;
       for (const samples of contours) for (let i = 1; i < samples.length; i++) {
         if (distanceToSegment(p, samples[i - 1]!, samples[i]!) < 2) return entity;
@@ -644,6 +645,8 @@ function paintPage(
           if (entity.contourStarts) ctx.fill('evenodd');
           else ctx.fill();
         }
+        // A pattern fill goes over the fill color and under the stroke.
+        if (entity.closed) paintLayoutFillPattern(ctx, entity.style?.fillPattern, Boolean(entity.contourStarts));
         // Open contours fill as if closed, but their closing segments are not stroked.
         if (entity.openContours) traceLayoutPath(ctx, arrows.points, handles, entity.closed, entity.contourStarts, entity.openContours);
         ctx.strokeStyle =

@@ -68,7 +68,9 @@ export interface SketchUpLayoutExport {
 }
 
 type Point = [number, number];
-interface Style { fill: string | null; stroke: string | null; weightPt: number; dash?: { id: number; scale: number } }
+/** A pattern fill as LayOut stores it: the picture's image reference, its origin in page inches, scale and rotation in degrees. */
+interface Pattern { refId: string; origin: Point; scale: number; rotationDeg: number }
+interface Style { fill: string | null; stroke: string | null; weightPt: number; dash?: { id: number; scale: number }; pattern?: Pattern }
 interface Subpath { points: Point[]; handles: LayoutPathHandle[]; closed: boolean }
 /** Arrowhead [file code, size] at each end of a path. */
 interface Arrows { start: [number, number]; end: [number, number] }
@@ -327,7 +329,7 @@ ${autoText}    </ld:entityList>
   private async entity(entity: LayoutEntity): Promise<[string, string][]> {
     switch (entity.kind) {
       case 'table': return this.table(entity);
-      case 'path': return this.pathEntity(entity);
+      case 'path': return await this.pathEntity(entity);
       case 'text': return entity.text ? [this.textEntity(entity.text, entity.points)] : [];
       case 'label': return this.label(entity.text && layoutModelFields(entity)
         ? { ...entity, text: bakeLayoutModelText(entity.text, layoutModelFields(entity)) } : entity);
@@ -383,16 +385,20 @@ ${autoText}    </ld:entityList>
     return [[id, `      <e:table id="${id}" ${attrs.join(' ')}>\n${frame}${cells}${lines}      </e:table>\n`]];
   }
 
-  private pathEntity(entity: LayoutEntity): [string, string][] {
+  private async pathEntity(entity: LayoutEntity): Promise<[string, string][]> {
     if (entity.points.length < 2) return [];
     const style = entity.style ?? this.state.defaultStyle;
+    const fillPattern = entity.closed ? entity.style?.fillPattern : undefined;
+    // The picture is written as stored, so its stored resolution, which sets the tile size, is kept.
+    const patternRef = fillPattern ? await this.imageReference(fillPattern.src, fillPattern.tileMm[0] / MM_PER_INCH, fillPattern.tileMm[1] / MM_PER_INCH) : null;
     const visible: Style = {
       fill: entity.closed && style.fillColor && !transparent(style.fillColor) ? style.fillColor : null,
       stroke: transparent(style.strokeColor) ? null : style.strokeColor,
       weightPt: style.strokeWeightPt,
       ...this.dash(entity.style?.strokeDashMm, style.strokeWeightPt),
+      ...(fillPattern && patternRef ? { pattern: { refId: patternRef, origin: inch(fillPattern.originMm), scale: fillPattern.scale, rotationDeg: fillPattern.rotationDeg } } : {}),
     };
-    if (!visible.fill && !visible.stroke) return [];
+    if (!visible.fill && !visible.stroke && !visible.pattern) return [];
     // An open shape's arrows are LayOut arrow styles in points.
     const end = (arrow: LayoutArrow | undefined): [number, number] => arrow ? [LAYOUT_ARROW_FILE_CODES[arrow.type], arrow.sizePt] : [ARROW.none, LAYOUT_DEFAULT_ARROW_SIZE_PT];
     const arrows = !entity.closed && visible.stroke && (entity.style?.startArrow || entity.style?.endArrow)
@@ -722,7 +728,7 @@ function encodePath({ points, handles, closed }: Subpath): { ops: number[]; valu
   return { ops, values };
 }
 
-function graphicEntity({ fill, stroke, weightPt, dash }: Style): string {
+function graphicEntity({ fill, stroke, weightPt, dash, pattern }: Style): string {
   const attrs: string[] = [];
   if (fill === null) attrs.push('shouldFill="0"');
   else if (color(fill) !== 4294967295) attrs.push(`fillColor="${color(fill)}"`);
@@ -734,7 +740,14 @@ function graphicEntity({ fill, stroke, weightPt, dash }: Style): string {
     if (width !== 1) attrs.push(`strokeWidth="${num(width)}"`);
     if (dash) attrs.push(`strokeDashPattern="${dash.id}"`, ...(Math.abs(dash.scale - 1) > DASH_PATTERN_TOL ? [`stroke.patternscale="${num(dash.scale)}"`] : []));
   }
-  return `        <e:graphicEntity${attrs.length ? ` ${attrs.join(' ')}` : ''}>\n          <e:entity/>\n        </e:graphicEntity>\n`;
+  if (pattern) {
+    attrs.push('shouldFillPattern="1"');
+    if (pattern.rotationDeg) attrs.push(`fillImageRotation="${num(pattern.rotationDeg)}"`);
+    if (pattern.scale !== 1) attrs.push(`fillImageScale="${num(pattern.scale)}"`);
+    attrs.push(`fillImageOriginX="${num(pattern.origin[0])}"`, `fillImageOriginY="${num(pattern.origin[1])}"`);
+  }
+  const picture = pattern ? `          <r:imageFileReference tag="fill.imagepattern" r:id="${pattern.refId}"/>\n` : '';
+  return `        <e:graphicEntity${attrs.length ? ` ${attrs.join(' ')}` : ''}>\n          <e:entity/>\n${picture}        </e:graphicEntity>\n`;
 }
 
 function rotationAbout([cx, cy]: Point, degrees: number): string {

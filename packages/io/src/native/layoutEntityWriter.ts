@@ -68,7 +68,7 @@ async function* chunks<T>(stream: AsyncGenerator<NativeStoredChunk, T>): AsyncGe
 export async function* streamNativeLayoutEntity(value: LayoutEntity, assets: NativeLayoutAssetCatalog, nextId: () => number, options: NativeChunkOptions = {}): AsyncGenerator<NativeLayoutEntityOutput> {
   options.signal?.throwIfAborted();
   const metadata = Object.fromEntries((Object.keys(sections) as (keyof LayoutEntity)[]).filter(k => sections[k] === 'metadata' && Object.hasOwn(value, k)).map(k => [k, value[k]])) as NativeLayoutEntityMetadata;
-  const metadataBytes = encodeNativeLayoutEntityMetadata(metadata, { records: value.nativeUnknownFields?.metadata ?? new Map(), style: new Map() }), geometry = yield* chunks(streamNativeLayoutGeometry(value, nextId, options));
+  const metadataBytes = encodeNativeLayoutEntityMetadata(metadata, { records: value.nativeUnknownFields?.metadata ?? new Map(), style: new Map() }, src => assets.register(src, 'image')), geometry = yield* chunks(streamNativeLayoutGeometry(value, nextId, options));
   geometry.extensions = value.nativeUnknownFields?.geometry ?? new Map();
   const emit = (kind: NativeLayoutEntityRecordKind, payload: Uint8Array | undefined): NativeLayoutEntityOutput => ({ type: 'record', record: { ownerId: value.id, kind, payload, unknownFields: kind === 'header' ? value.nativeUnknownFields?.headerEnvelope ?? [] : kind === 'text' || kind === 'dimension' || kind === 'angularDimension' || kind === 'labelAnchor' || kind === 'modelAnnotation' || kind === 'preservedModelConnections' || kind === 'image' ? value[kind]?.nativeUnknownFields?.envelope ?? [] : [] } });
   let payloadMask = 0; for (const [i, key] of payloads.entries()) if (Object.hasOwn(value, key)) payloadMask |= 1 << i;

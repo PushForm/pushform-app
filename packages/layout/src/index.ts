@@ -27,6 +27,7 @@ export * from './selection';
 
 export * from './tables';
 export * from './dashes';
+export * from './fillPatterns';
 export * from './viewports';
 export * from './modelAttachments';
 

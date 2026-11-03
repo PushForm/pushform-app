@@ -70,6 +70,11 @@ export function forgetLayoutImage(src: string): void {
   canvases.delete(src);
 }
 
+/** The decoded picture for `src`, or null while it loads (it repaints once loaded) or when it cannot be shown. */
+export function layoutPicture(src: string): HTMLImageElement | HTMLCanvasElement | null {
+  return loadedImage(src);
+}
+
 function loadedImage(src: string): HTMLImageElement | HTMLCanvasElement | null {
   if (isMarker(src)) return null;
   const canvas = canvases.get(src);
@@ -154,9 +159,10 @@ export function paintLayoutImage(ctx: CanvasRenderingContext2D, entity: LayoutEn
   }
 }
 
-/** Printing waits for visible pictures instead of emitting their loading placeholders. */
+/** Printing waits for visible pictures, and the pictures of pattern fills, instead of emitting their loading placeholders. */
 export async function prepareLayoutImages(entities: readonly LayoutEntity[], source = (entity: LayoutEntity) => entity.image?.src ?? ''): Promise<void> {
   const sources = new Set(entities.flatMap(entity => entity.image && source(entity) && !isMarker(source(entity)) ? [source(entity)] : []));
+  for (const entity of entities) if (entity.closed && entity.style?.fillPattern) sources.add(entity.style.fillPattern.src);
   await Promise.all([...sources].map(async src => {
     if (canvases.has(src)) return;
     if (isPdfPicture(src)) {

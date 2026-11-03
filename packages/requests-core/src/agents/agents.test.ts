@@ -336,6 +336,15 @@ it('has the model agent build requested objects from boxes, every named part inc
   expect(rules).not.toContain('not available yet');
 });
 
+it('has the model agent group each door, drawer and face frame as its own named assembly of named parts', () => {
+  const rules = MODEL_DOCUMENT_RULES(ctx());
+  expect(rules).toContain('Group each assembly made and hung as one unit, named for it');
+  expect(rules).toContain('every door ("Door", holding its stiles, rails and panel)');
+  expect(rules).toContain('every drawer (its front, and its box if built) and the face frame');
+  expect(rules).toContain('Its parts stay separate named groups inside it, never one solid');
+  expect(rules).toContain('Then group the parts and assemblies into the whole object and name it');
+});
+
 it('has the model agent shape parts with push/pull and cut joinery and openings with subtract', () => {
   const rules = MODEL_DOCUMENT_RULES(ctx());
   expect(rules).toContain('then push_pull it by its thickness');

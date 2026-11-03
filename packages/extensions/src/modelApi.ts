@@ -1220,7 +1220,9 @@ export class ModelDocumentApi {
     const code = cause instanceof PushFormError ? cause.code : '';
     if (code === 'edgeblend.tooLarge') {
       const largest = await this.largestBlend(kind, params);
-      return this.failure('invalid_geometry', largest === null ? `${message} No ${what} fits these edges; ${edgeList(body, params.edges)}.`
+      // When even the smallest size fails, the reason is not the size: report what the plan says there.
+      const tiny = (() => { try { planEdgeBlend(this.host.doc.state, kind, { ...params, size: 4 * MERGE_TOL }); return null; } catch (e) { return e instanceof Error ? e.message : String(e); } })();
+      return this.failure('invalid_geometry', largest === null ? `${message} No ${what} fits these edges${tiny ? `, at any size: ${tiny}` : ''}; ${edgeList(body, params.edges)}.`
         : `${message} You asked for ${params.size} m; the largest ${what} that fits these edges is about ${largest} m. Use that or less, or pick fewer edges.`);
     }
     const hint = code === 'edgeblend.corner' ? ' Pick the edges of one face at a time, or edges that do not meet at that corner.' : '';

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { strFromU8, strToU8, unzipSync } from 'fflate';
+import { strFromU8, strToU8 } from 'fflate';
 import {
   LAYOUT_FORMAT_VERSION,
   LAYOUT_AUTO_TEXT_TAGS,
@@ -49,6 +49,7 @@ import { validateImportedLayoutState } from './layoutImportValidation';
 import { clearPngColors, pngHasTransparency } from './png';
 import { pngIsBlank } from './pngBlank';
 import { TiffError, tiffToPng } from './tiff';
+import { unzipEntries } from './nativeArchive';
 
 /**
  * Import of SketchUp LayOut documents (a zip of XML parts, unchanged in structure from LayOut 2013
@@ -140,13 +141,19 @@ export function isSketchUpLayoutFile(name: string): boolean {
 /** Inflate, parse and convert a .layout archive in one synchronous pass; browsers run this in a worker (see sketchupLayoutClient). */
 export function prepareSketchUpLayout(bytes: Uint8Array, fileName = 'Imported', options: { preserveSources?: boolean } = {}): PreparedSketchUpLayout {
   let files: Record<string, Uint8Array>;
+  /** Embedded models, by entry name. */
+  const models = new Set<string>();
   try {
     // Model bytes remain in the preserved compressed package; display conversion need not inflate them.
-    files = unzipSync(bytes, { filter: (file) => !file.name.toLowerCase().endsWith('.skp') });
+    files = unzipEntries(bytes, name => {
+      if (!name.toLowerCase().endsWith('.skp')) return true;
+      models.add(name);
+      return false;
+    });
   } catch {
     throw new Error('Invalid .layout archive');
   }
-  const prepared = new Importer(files, fileName, options.preserveSources === false ? undefined : bytes).run();
+  const prepared = new Importer(files, fileName, options.preserveSources === false ? undefined : bytes, models).run();
   validateImportedLayoutState(prepared.state);
   return prepared;
 }
@@ -174,7 +181,8 @@ class Importer {
   /** Viewports name their preserved package before it is assembled at the end of the import. */
   private readonly archiveId = newGuid();
 
-  constructor(private readonly files: Record<string, Uint8Array>, private readonly fileName: string, private readonly originalArchive?: Uint8Array) {}
+  constructor(private readonly files: Record<string, Uint8Array>, private readonly fileName: string, private readonly originalArchive?: Uint8Array,
+    private readonly embeddedModels: ReadonlySet<string> = new Set()) {}
 
   run(): PreparedSketchUpLayout {
     const document = this.xml('document.xml');
@@ -1083,6 +1091,9 @@ class Importer {
       const viewportCamera = modelCamera;
       // A blank raster render is stale even beside vector edges: the model is rendered instead.
       const picture = blank ? null : vector ?? raster;
+      const modelTarget = this.references.get(modelReferenceId)?.attrs.internalTarget;
+      if (!picture && !(modelTarget && this.embeddedModels.has(modelTarget)))
+        this.warn('a SketchUp viewport without a cached render whose model is not embedded in the file shows no picture');
       const entity = this.imageEntity(base, picture ?? '', placed, layerId);
       entity.image!.viewport = {
         source: { archiveId: this.archiveId, modelReferenceId }, templateId: originalId, originalId,

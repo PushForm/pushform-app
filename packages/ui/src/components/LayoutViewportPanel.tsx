@@ -3,7 +3,7 @@
 import { useEffect, useState, type JSX } from 'react';
 import { isViewport, LAYOUT_DIMENSION_SCALES, layoutDimensionScaleLabel, viewportCloudReference, viewportSourceKey, type LayoutDocumentState, type LayoutEntity, type LayoutViewportCamera } from '@pushform/layout';
 import type { StandardView } from '@pushform/render';
-import { layoutViewportFailure, layoutViewportModel, layoutViewportStatus, type LayoutViewportModel } from './layoutViewportRenders';
+import { layoutViewportFailure, layoutViewportModel, layoutViewportProblem, layoutViewportStatus, type LayoutViewportModel } from './layoutViewportRenders';
 import { projectionViewportCamera, sceneViewportCamera, standardViewportCamera } from './layoutViewportCameras';
 
 const VIEWS: { id: StandardView; label: string }[] = [
@@ -47,7 +47,7 @@ export function LayoutViewportPanel({ entity, state, disabled, navigating, onCam
     // The model depends only on its source; later document edits do not reload it.
   }, [sourceKey]);
   if (!viewport) return null;
-  const failure = layoutViewportFailure(state, viewport.source);
+  const failure = layoutViewportFailure(state, viewport.source) ?? layoutViewportProblem(state, entity);
   const scenes = model?.scenes.filter(scene => scene.camera) ?? [];
   const sceneValue = viewport.scene !== null && scenes.some(scene => scene.name === viewport.scene) ? viewport.scene : '';
   const unavailable = disabled || !model;

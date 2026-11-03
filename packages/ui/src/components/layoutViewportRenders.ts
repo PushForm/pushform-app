@@ -78,6 +78,9 @@ function trimModels(): void {
   }
 }
 const failures = new Map<string, string>();
+/** Why the latest print render of a viewport failed, by entity id; cleared when one succeeds. */
+const renderFailures = new Map<number, string>();
+const NO_RENDERER = 'This browser cannot draw 3D views (WebGL is unavailable).';
 /** Finished renders by configuration key, most recent last; '' marks a render that failed. */
 const renders = new Map<string, string>();
 const RENDER_LIMIT = 48;
@@ -214,6 +217,30 @@ export function layoutViewportFailure(state: LayoutDocumentState, source: Source
   return failures.get(sourceKey(state, source)) ?? null;
 }
 
+/**
+ * Why a viewport shows no picture of its own: its model cannot be rendered, or, without a current saved render,
+ * its latest render failed. Null while it renders or shows a picture.
+ */
+export function layoutViewportProblem(state: LayoutDocumentState, entity: LayoutEntity): string | null {
+  if (!isViewport(entity)) return null;
+  const viewport = entity.image.viewport;
+  if (entity.image.src && viewportCacheCurrent(viewport, entity.points, state)) return null;
+  return layoutViewportFailure(state, viewport.source) ?? renderFailures.get(entity.id) ?? null;
+}
+
+/**
+ * One warning per reason, with how many of `entities`' viewports it leaves without a picture, for the
+ * import or print report. Call after the renders settle (`settleLayoutViewportRenders`).
+ */
+export function layoutViewportWarnings(state: LayoutDocumentState, entities: readonly LayoutEntity[]): string[] {
+  const reasons = new Map<string, number>();
+  for (const entity of entities) {
+    const problem = layoutViewportProblem(state, entity);
+    if (problem) reasons.set(problem, (reasons.get(problem) ?? 0) + 1);
+  }
+  return [...reasons].map(([reason, count]) => `${count === 1 ? 'A model view' : `${count} model views`} could not be rendered: ${reason}`);
+}
+
 /** The renderer's camera for a viewport camera across a frame `heightMm` tall. */
 export function viewportCameraState(camera: LayoutViewportCamera, heightMm: number): CameraState {
   return { eye: camera.eye, target: camera.target, up: camera.up, fov: camera.fov, projection: camera.projection,
@@ -334,7 +361,8 @@ export function layoutViewportStatus(state: LayoutDocumentState, entity: LayoutE
   const viewport = entity.image.viewport;
   if (failures.has(sourceKey(state, viewport.source))) return 'unavailable';
   if (entity.image.src && viewportCacheCurrent(viewport, entity.points, state)) return 'cached';
-  return queue.some(job => job.entityId === entity.id) || running && current?.entityId === entity.id ? 'rendering' : 'current';
+  if (queue.some(job => job.entityId === entity.id) || running && current?.entityId === entity.id) return 'rendering';
+  return renderFailures.has(entity.id) ? 'unavailable' : 'current';
 }
 
 let current: Job | null = null;
@@ -359,7 +387,7 @@ async function drain(): Promise<void> {
     while (queue.length) {
       const job = queue.pop()!;
       current = job;
-      let picture = '';
+      let picture = '', failure: string | null = null;
       try {
         const model = await layoutViewportModel(job.state, job.source);
         const view = renderer();
@@ -384,10 +412,19 @@ async function drain(): Promise<void> {
               preview.key = job.key;
               picture = preview.src;
             }
-          } else picture = view.snapshot(job.width, job.height, job.camera, opts);
-        }
-      } catch { /* The failure is recorded per model; the viewport keeps its previous picture. */ }
-      if (!job.preview) remember(job.key, picture);
+          } else {
+            picture = view.snapshot(job.width, job.height, job.camera, opts);
+            if (!picture) failure = 'The renderer produced no picture.';
+          }
+        } else failure = NO_RENDERER;
+      } catch (error) {
+        // A model that cannot be read is recorded per model (layoutViewportFailure); the viewport keeps its previous picture.
+        if (!failures.has(sourceKey(job.state, job.source))) failure = error instanceof Error && error.message ? error.message : 'The view could not be rendered.';
+      }
+      if (!job.preview) {
+        remember(job.key, picture);
+        if (failure) renderFailures.set(job.entityId, failure); else renderFailures.delete(job.entityId);
+      }
       // A committed render takes over once decoded (layoutViewportPicture); a preview paints at once.
       if (picture && (job.preview || layoutImageReady(picture))) showPicture(job.entityId, picture);
       current = null;

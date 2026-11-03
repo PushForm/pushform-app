@@ -63,6 +63,20 @@ function layoutFile(page: string, master = '', visibility = '1,1,1', masterIds =
   });
 }
 
+/** The archive with every entry's UTF-8 name flag cleared, as some writers store UTF-8 names. */
+function withoutUtf8Flag(bytes: Uint8Array): Uint8Array {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let end = bytes.length - 22;
+  while (view.getUint32(end, true) !== 0x06054b50) end--;
+  for (let at = view.getUint32(end + 16, true), index = view.getUint16(end + 10, true); index > 0; index--) {
+    view.setUint16(at + 8, view.getUint16(at + 8, true) & ~0x800, true);
+    const local = view.getUint32(at + 42, true);
+    view.setUint16(local + 6, view.getUint16(local + 6, true) & ~0x800, true);
+    at += 46 + view.getUint16(at + 28, true) + view.getUint16(at + 30, true) + view.getUint16(at + 32, true);
+  }
+  return bytes;
+}
+
 const PROPERTIES = `<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
 <documentProperties xmlns="http://sketchup.google.com/schemas/layout/1.0/documentproperties" xmlns:dp="http://sketchup.google.com/schemas/1.0/documentproperties" xmlns:ldp="http://sketchup.google.com/schemas/layout/1.0/documentproperties">
   <dp:path>C:/Users/Example/Documents/Drawing.layout</dp:path>
@@ -468,6 +482,24 @@ describe('SketchUp LayOut import', () => {
     const [archiveId, archive] = [...doc.state.modelArchives!][0]!;
     expect(archive.viewports.get('id40')?.modelReferenceId).toBeNull();
     expect(readOriginalLayoutArchive(decodeLayoutDocument(encodeLayoutDocument(doc)).state, archiveId)).toEqual(readOriginalLayoutArchive(doc.state, archiveId));
+  });
+
+  it('finds an embedded model whose non-ASCII entry name is stored as UTF-8 without the UTF-8 flag', () => {
+    const view = (id: string, ref: string) => `<e:skpModelRef id="${id}">
+      <e:placedFileReference><e:rectangleBase x="1" y="1" width="2" height="1" /></e:placedFileReference>
+      <e:camera projection="perspective" /><r:skpFileReference r:id="${ref}" />
+    </e:skpModelRef>`;
+    const files = unzipSync(layoutFile(page(view('id40', 'idModel') + view('id41', 'idMissing'), onLayer('id10', ['id40', 'id41']))));
+    const modelBytes = new Uint8Array([7, 7, 7]), name = 'ref/12_Модель 模型_5.skp';
+    files[name] = modelBytes;
+    files['references.xml'] = strToU8(strFromU8(files['references.xml']!).replace('</references>',
+      `<r:skpFileReference r:id="idModel" internalTarget="${name}" /><r:skpFileReference r:id="idMissing" internalTarget="ref/34_Gone_6.skp" /></references>`));
+    const { doc, warnings } = importSketchUpLayout(withoutUtf8Flag(zipSync(files)));
+    const [archiveId] = [...doc.state.modelArchives!][0]!;
+    expect(readPreservedSketchUpModel(doc.state, archiveId, 'idModel')).toEqual(modelBytes);
+    expect(readPreservedSketchUpModel(doc.state, archiveId, 'idMissing')).toBeNull();
+    // Only the view whose model is absent from the file, and which has no saved picture, is reported.
+    expect(warnings).toContain('a SketchUp viewport without a cached render whose model is not embedded in the file shows no picture');
   });
 
   it('preserves namespace bindings, dependent vector resources, and shared model references without id collisions', async () => {

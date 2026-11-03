@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { unzipSync } from 'fflate';
+import { unzipSync, type UnzipFileInfo } from 'fflate';
 
 /**
  * Bounds on what a native .pf/.pfl archive may expand to before it is opened.
@@ -38,19 +38,61 @@ export function readNativeArchive(bytes: Uint8Array, options: NativeArchiveOptio
   const invalid = `Invalid ${options.extension} archive`;
   let entries = 0, expanded = 0;
   try {
-    return unzipSync(bytes, {
-      filter: (file) => {
-        if (++entries > NATIVE_ARCHIVE_MAX_ENTRIES)
-          throw new NativeArchiveError(`${invalid}: more than ${NATIVE_ARCHIVE_MAX_ENTRIES} entries`);
-        if (!options.supported(file.name)) return false;
-        expanded += file.originalSize;
-        if (expanded > NATIVE_ARCHIVE_MAX_EXPANDED_BYTES)
-          throw new NativeArchiveError(`${invalid}: expands beyond ${NATIVE_ARCHIVE_MAX_EXPANDED_BYTES / (1024 * 1024)} MiB`);
-        return true;
-      },
+    return unzipEntries(bytes, (name, file) => {
+      if (++entries > NATIVE_ARCHIVE_MAX_ENTRIES)
+        throw new NativeArchiveError(`${invalid}: more than ${NATIVE_ARCHIVE_MAX_ENTRIES} entries`);
+      if (!options.supported(name)) return false;
+      expanded += file.originalSize;
+      if (expanded > NATIVE_ARCHIVE_MAX_EXPANDED_BYTES)
+        throw new NativeArchiveError(`${invalid}: expands beyond ${NATIVE_ARCHIVE_MAX_EXPANDED_BYTES / (1024 * 1024)} MiB`);
+      return true;
     });
   } catch (cause) {
     if (cause instanceof NativeArchiveError) throw cause;
     throw new NativeArchiveError(invalid);
   }
+}
+
+/**
+ * Inflate the entries of a ZIP archive that `filter` accepts, keyed by their names. An entry name
+ * without the archive's UTF-8 flag is read as UTF-8 when its bytes are valid UTF-8: some writers,
+ * LayOut among them, store UTF-8 names without setting the flag, and reading them in the legacy
+ * single-byte encoding garbles every non-ASCII name, so references to those entries never resolve.
+ */
+export function unzipEntries(bytes: Uint8Array, filter: (name: string, file: UnzipFileInfo) => boolean): Record<string, Uint8Array> {
+  const names = utf8EntryNames(bytes);
+  const files = unzipSync(bytes, { filter: file => filter(names.get(file.name) ?? file.name, file) });
+  if (!names.size) return files;
+  return Object.fromEntries(Object.entries(files).map(([name, data]) => [names.get(name) ?? name, data]));
+}
+
+const strictUtf8 = new TextDecoder('utf-8', { fatal: true });
+
+/**
+ * Names of entries stored without the UTF-8 flag whose bytes are valid UTF-8 beyond ASCII, keyed by
+ * the single-byte reading fflate gives them. Reads the central directory; an archive this cannot
+ * read (ZIP64 or damaged) is left to fflate's own reading.
+ */
+function utf8EntryNames(bytes: Uint8Array): Map<string, string> {
+  const names = new Map<string, string>();
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let end = -1;
+  for (let at = bytes.length - 22; at >= Math.max(0, bytes.length - 22 - 0xffff); at--) {
+    if (view.getUint32(at, true) === 0x06054b50) { end = at; break; }
+  }
+  if (end < 0) return names;
+  const count = view.getUint16(end + 10, true), directory = view.getUint32(end + 16, true);
+  if (count === 0xffff || directory === 0xffffffff) return names;
+  for (let at = directory, index = 0; index < count; index++) {
+    if (at + 46 > bytes.length || view.getUint32(at, true) !== 0x02014b50) return names;
+    const flags = view.getUint16(at + 8, true), length = view.getUint16(at + 28, true);
+    const raw = bytes.subarray(at + 46, at + 46 + length);
+    if (!(flags & 0x800) && raw.some(byte => byte >= 0x80)) {
+      try {
+        names.set(String.fromCharCode(...raw), strictUtf8.decode(raw));
+      } catch { /* Not UTF-8: keep the single-byte reading. */ }
+    }
+    at += 46 + length + view.getUint16(at + 30, true) + view.getUint16(at + 32, true);
+  }
+  return names;
 }

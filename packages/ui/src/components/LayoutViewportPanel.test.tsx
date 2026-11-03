@@ -8,7 +8,7 @@ import { createLayoutRegistry } from '@pushform/commands';
 import { LayoutViewportPanel } from './LayoutViewportPanel';
 
 vi.mock('./layoutViewportRenders', () => ({
-  layoutViewportModel: async () => ({ scenes: [], bounds: null }), layoutViewportStatus: () => 'current', layoutViewportFailure: () => null,
+  layoutViewportModel: async () => ({ scenes: [], bounds: null }), layoutViewportStatus: () => 'current', layoutViewportFailure: () => null, layoutViewportProblem: () => null,
 }));
 afterEach(cleanup);
 

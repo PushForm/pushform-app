@@ -6,7 +6,7 @@ import { fakeAnthropic, type ScriptedTurn } from '../agents/fakeAnthropic.ts';
 import { loadConfig } from '../config/load.ts';
 import { SAMPLE_CONFIG_INPUT } from '../config/sample.ts';
 import type { ConversationMessage } from '../domain/types.ts';
-import { attachmentSection, closeSuspended, createConversationHandler, formatBytes, historyOf, issueSummaryOf, parseSse, requestIdOfIssue, routePath, type ConversationDeps } from './conversation.ts';
+import { attachmentSection, closeSuspended, createConversationHandler, WARM_DOCUMENTS, warmChatPrompts, formatBytes, historyOf, issueSummaryOf, parseSse, requestIdOfIssue, routePath, type ConversationDeps } from './conversation.ts';
 import { ServiceDb, UserDb } from './db.ts';
 import { ALICE, ATTACHMENT_ID, attachmentRow, CONVERSATION_ID, conversationRow, FakeRpc, FakeSessions, FakeStorage, FakeTracker, myRoles, REQUEST_ID, requestRow, sqlError, TOKEN, type RpcScript } from './fakes.ts';
 
@@ -969,5 +969,51 @@ describe('turn setup runs in parallel', () => {
     // Preflight and health never wait for it.
     expect((await failing.handler(new Request('http://x/me', { method: 'OPTIONS' }))).status).toBe(204);
     expect((await call(failing.handler, 'GET', '/health', undefined, null)).status).toBe(200);
+  });
+});
+
+describe('prompt-cache warm-up', () => {
+  /** A client whose non-streaming requests (the warm-ups) are recorded; streaming is not used. */
+  function warmClient(fail?: string) {
+    const created: Record<string, unknown>[] = [];
+    const client = { messages: {
+      stream(): never { throw new Error('warm-ups do not stream'); },
+      async create(params: Record<string, unknown>) {
+        created.push(params);
+        if (fail && JSON.stringify(params).includes(fail)) throw new Error('overloaded');
+        return { content: [], stop_reason: 'max_tokens', usage: { input_tokens: 4, output_tokens: 0, cache_creation_input_tokens: 30_000, cache_read_input_tokens: 0 } };
+      },
+    } };
+    return { client, created };
+  }
+  it('sends each first-message prompt with the exact tools, system prompt and settings of a real first message', async () => {
+    const { client, created } = warmClient();
+    const logs: string[] = [];
+    const results = await warmChatPrompts({ anthropic: client as never, config, log: m => logs.push(m) });
+    expect(results.map(r => r.document)).toEqual(['none', 'model+edit+guidance', 'layout+guidance']);
+    expect(created).toHaveLength(WARM_DOCUMENTS.length);
+    for (const [i, document] of WARM_DOCUMENTS.entries()) {
+      // A real first message from an account at its open-request limit, on another editor: the prefix must still match.
+      const h = harness({ service: { fr_conversation_get: conversationRow({ kind: 'intake', path: 'open' }), fr_request_count_open: 5 }, turns: [{ text: ['Hi.'] }] });
+      await (await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'hi', ...(document ? { document } : {}) })).text();
+      const real = (h.deps.anthropic as ReturnType<typeof fakeAnthropic>).calls[0]!;
+      const warm = created[i]!;
+      expect(warm['model']).toBe(real.model);
+      expect(JSON.stringify(warm['tools'])).toBe(JSON.stringify(real.tools));
+      expect(JSON.stringify(warm['system'])).toBe(JSON.stringify(real.system));
+      expect(warm['tool_choice']).toEqual(real.tool_choice);
+      expect(warm['output_config']).toEqual(real.output_config);
+      expect(warm['thinking']).toEqual(real.thinking);
+      // Prompt only: no output, no streaming, and no rolling breakpoint that would cache the placeholder message.
+      expect(warm['max_tokens']).toBe(0); expect(warm['stream']).toBe(false); expect(warm).not.toHaveProperty('cache_control');
+    }
+    expect(logs[0]).toContain('cacheWrite=30000');
+  });
+  it('logs a failed warm-up and still warms the other prompts', async () => {
+    const { client } = warmClient('layout_');
+    const logs: string[] = [];
+    const results = await warmChatPrompts({ anthropic: client as never, config, log: m => logs.push(m) });
+    expect(results.map(r => r.usage === null)).toEqual([false, false, true]);
+    expect(logs.some(l => l.includes('warm layout+guidance: failed: overloaded'))).toBe(true);
   });
 });

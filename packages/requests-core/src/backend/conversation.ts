@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { Tracker, TrackerIssue } from '../adapters/tracker.ts';
 import { TrackerError } from '../adapters/tracker.ts';
 import { briefSchema, completeness, emptyBriefFor, type Brief, type DeclineReason, type Path } from '../agents/brief.ts';
-import { answerPending, runTurn, type AnthropicLike, type ClientToolCall, type PendingClientTools, type ToolCallEvent, type ToolHandler, type ToolResult } from '../agents/client.ts';
+import { answerPending, runTurn, warmPrompt, type AnthropicLike, type WarmUsage, type ClientToolCall, type PendingClientTools, type ToolCallEvent, type ToolHandler, type ToolResult } from '../agents/client.ts';
 import { retrieveUserHelp, USER_HELP_RULES } from '../agents/digest.ts';
 import { GUIDANCE_RULES } from '../guidance.ts';
 import { PICTURE_RULES } from '../agents/pictures.ts';
@@ -81,6 +81,65 @@ export interface PictureData { mime: string; data: string }
 export const TOOL_RESULT_MAX_CHARS = 200_000;
 /** Model rounds a document turn may use across all its requests. */
 export const DOCUMENT_TOOL_ROUNDS = 12;
+
+/** How a turn runs: one that can edit the document plans multi-step geometry; help and intake stay short. */
+export function turnSettings(editing: boolean): { effort: 'low' | 'medium'; maxTokens: number; maxToolRounds: number } {
+  return editing ? { effort: 'medium', maxTokens: 16_000, maxToolRounds: DOCUMENT_TOOL_ROUNDS } : { effort: 'low', maxTokens: 4096, maxToolRounds: 8 };
+}
+const agentForPath = (path: ConversationPath): ConversationAgent => (path === 'open' ? openAgent : path === 'help' ? helpAgent : path === 'problem' ? problemAgent : intakeAgent);
+/**
+ * The model, system prompt and tools of a turn: they depend only on the path and the open document, never on the
+ * account, so every conversation in the same state shares one prompt-cache prefix. Turns and warm-ups both use this.
+ */
+export function turnPrompt(models: Config['models'], ctx: AgentContext, document: DocumentCapability | null): { model: string; system: string; tools: Anthropic.Tool[] } {
+  const agent = agentForPath(ctx.path);
+  const tools = documentTools(document);
+  const editable = editableDocument(document);
+  return {
+    model: tools.length ? models.document : models.conversation,
+    system: [agent.system(ctx), USER_HELP_RULES, PICTURE_RULES, ...(editable === 'layout' ? [DOCUMENT_RULES(ctx)] : editable === 'model' ? [MODEL_DOCUMENT_RULES(ctx)] : []), ...(document?.guidance ? [GUIDANCE_RULES] : [])].join('\n\n'),
+    tools: [...agent.tools(ctx), ...tools],
+  };
+}
+/**
+ * What a new conversation's first message offers, by what the tab has open: nothing (Home), a model with editing and
+ * UI guidance, a Layout document with UI guidance. These are the prefixes `warmChatPrompts` keeps in the cache.
+ */
+export const WARM_DOCUMENTS: readonly (DocumentCapability | null)[] = [
+  null,
+  { type: 'model', apiVersion: 1, edit: 1, guidance: 1 },
+  { type: 'layout', apiVersion: 1, guidance: 1 },
+];
+/** A first-message context with no account in it: the prompt does not depend on the account (see `turnPrompt`). */
+function warmContext(config: Config, document: DocumentCapability | null): AgentContext {
+  return {
+    host: config.host, accountEmail: '', roles: [], filingAllowed: true,
+    screen: { editor: document?.type ?? 'home', documentType: null, browser: '', os: '' }, build: { version: '', commit: '' }, now: '',
+    path: 'open', brief: null, title: null, messageCount: 1, openRequests: [], openRequestCount: 0,
+    limits: { openRequestsPerAccount: config.limits.openRequestsPerAccount, messagesPerConversation: config.limits.messagesPerConversation },
+    openIssues: [], digest: [], document,
+  };
+}
+/**
+ * Keep the first-message prompts of `WARM_DOCUMENTS` in the prompt cache, so the first message of a conversation does
+ * not wait for ~30k tokens of tools and instructions to be processed. Each entry lives an hour and every read restarts
+ * it, so calling this every half hour costs one cache write per prompt and cheap reads after that. Failures are
+ * logged and skipped: a cold cache only makes the next first message slower.
+ */
+export async function warmChatPrompts(deps: { anthropic: AnthropicLike; config: Config; log?: ((message: string) => void) | undefined }): Promise<{ document: string; usage: WarmUsage | null }[]> {
+  return Promise.all(WARM_DOCUMENTS.map(async (document) => {
+    const label = document ? `${document.type}${document.edit ? '+edit' : ''}${document.guidance ? '+guidance' : ''}` : 'none';
+    const prompt = turnPrompt(deps.config.models, warmContext(deps.config, document), document);
+    try {
+      const usage = await warmPrompt(deps.anthropic, { ...prompt, effort: turnSettings(document !== null).effort });
+      deps.log?.(`warm ${label}: model=${prompt.model} cacheWrite=${usage.cacheWrite} cacheRead=${usage.cacheRead} in=${usage.input}`);
+      return { document: label, usage };
+    } catch (error) {
+      deps.log?.(`warm ${label}: failed: ${error instanceof Error ? error.message : String(error)}`);
+      return { document: label, usage: null };
+    }
+  }));
+}
 const NOT_ANSWERED = 'Not run: the editor did not return a result.';
 const ABANDONED = 'Not run: the requester sent a new message before the editor answered.';
 
@@ -361,7 +420,7 @@ interface TurnRun {
     resume: { appended: Anthropic.MessageParam[]; rounds: number } | undefined;
   };
 }
-const agentFor = (path: ConversationPath): ConversationAgent => (path === 'open' ? openAgent : path === 'help' ? helpAgent : path === 'problem' ? problemAgent : intakeAgent);
+const agentFor = agentForPath;
 /** The conversation kind a settled path implies: help conversations are kept 30 days, the two filing paths are intake. */
 const kindOf = (path: ConversationPath): ConversationKind => (path === 'help' ? 'help' : 'intake');
 const clientOf = (screen: PanelScreen | null): Record<string, unknown> | null => (screen ? { version: screen.build.version, build: screen.build.commit, editor: screen.editor, browser: screen.browser, os: screen.os } : null);
@@ -710,7 +769,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
           client: anthropic, model: setup.model, system: setup.system, tools: setup.tools, handlers: t.handlers, messages: setup.messages,
           clientTools, resume: setup.resume,
           // A turn that can edit the document plans multi-step geometry; help and intake stay short.
-          effort: editing ? 'medium' : 'low', maxTokens: editing ? 16_000 : 4096, maxToolRounds: editing ? DOCUMENT_TOOL_ROUNDS : 8,
+          ...turnSettings(editing),
           // Progress notes stay off until the hosted model accepts the progress-update display; requesting it fails editing turns.
           progressUpdates: false,
           onText: (delta) => {
@@ -801,7 +860,6 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     const store = storeFor(user, userDb, conversation, base, path);
     const ctx: AgentContext = { ...base, path: store.getPath(), brief: store.getBrief(), title: store.getTitle() };
     const agent = agentFor(ctx.path);
-    const tools = documentTools(document);
     // A turn still waiting for the editor is closed with error results before the new message, so the transcript stays valid.
     const closers = closeSuspended(conversation.messages, base.now);
     const prior = [...conversation.messages, ...closers];
@@ -815,9 +873,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       user, conversation, store, handlers: agent.handlers(ctx, store), pathChanged: path !== conversation.path,
       leading: [...closers, { role: 'user', text: body.text, at: base.now, ...(pictures.length ? { attachments: pictures } : {}) }],
       setup: {
-        model: tools.length ? config.models.document : config.models.conversation,
-        system: [agent.system(ctx), USER_HELP_RULES, PICTURE_RULES, ...(editableDocument(document) === 'layout' ? [DOCUMENT_RULES(ctx)] : editableDocument(document) === 'model' ? [MODEL_DOCUMENT_RULES(ctx)] : []), ...(document?.guidance ? [GUIDANCE_RULES] : [])].join('\n\n'),
-        tools: [...agent.tools(ctx), ...tools], context, historyLength: prior.length, messages: historyOf(prior, context, body.text, pictures, images), document, resume: undefined,
+        ...turnPrompt(config.models, ctx, document), context, historyLength: prior.length, messages: historyOf(prior, context, body.text, pictures, images), document, resume: undefined,
       },
     });
   };

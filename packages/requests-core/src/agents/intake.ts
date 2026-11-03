@@ -130,6 +130,7 @@ export function briefHandlers(ctx: AgentContext, store: ConversationStore): Reco
     }),
     request_file: withSchema(requestFileSchema, async () => {
       if (!ctx.filingAllowed) return err('Filing is not available for this account. Say so; nothing was filed.');
+      if (ctx.openRequestCount >= ctx.limits.openRequestsPerAccount) return err(`The account already has ${ctx.openRequestCount} open requests; the limit is ${ctx.limits.openRequestsPerAccount}. Nothing was filed. Say so, list their open requests from <context> and offer Add me to a matching one.`);
       const brief = store.getBrief();
       if (!completeness(brief).fileable) {
         const required = brief?.kind === 'problem' ? 'what happened or what they expected' : 'the Problem or the Desired behavior';
@@ -142,17 +143,15 @@ export function briefHandlers(ctx: AgentContext, store: ConversationStore): Reco
 }
 
 /**
- * The tool list for a brief-gathering path. `request_file` appears once the brief has substance, filing is
- * allowed and the account is under its open-request limit; the prompt still requires the shown brief and an explicit yes.
- * The 30th message is still recorded (restricts the conversation after 30); the open-request limit counts the
- * account's own filings, not the requests it joined with Add me.
+ * The tool list for a brief-gathering path. It is the same for every account and every state of the brief, so the
+ * tools and system prompt stay one shared prompt-cache prefix: `request_file` is always offered and refuses when the
+ * brief is not fileable, filing is not allowed or the account is at its open-request limit (the prompt still requires
+ * the shown brief and an explicit yes). Past the message limit (restricts the conversation after 30) only sending or
+ * stopping remains.
  */
 export function briefTools(ctx: AgentContext): Anthropic.Tool[] {
-  const atLimit = ctx.messageCount > ctx.limits.messagesPerConversation;
-  const canFile = ctx.filingAllowed && ctx.openRequestCount < ctx.limits.openRequestsPerAccount && completeness(ctx.brief).fileable;
-  if (atLimit) return canFile ? [requestFileTool, declineTool, startOverTool] : [declineTool, startOverTool];
-  const tools = [searchDocsTool, searchOpenIssuesTool, updateBriefTool, setBriefChoiceTool, proposeTitleTool, switchPathTool, addMeTool, declineTool, startOverTool];
-  return canFile ? [...tools, requestFileTool] : tools;
+  if (ctx.messageCount > ctx.limits.messagesPerConversation) return [requestFileTool, declineTool, startOverTool];
+  return [searchDocsTool, searchOpenIssuesTool, updateBriefTool, setBriefChoiceTool, proposeTitleTool, switchPathTool, addMeTool, declineTool, startOverTool, requestFileTool];
 }
 
 /* ---------- context and prompts ---------- */
@@ -166,6 +165,8 @@ export function contextBlock(ctx: AgentContext): string {
   const own = ctx.openRequests.length ? ctx.openRequests.map((r) => `- ${r.issueKey} "${line(r.title)}" (${r.requesterState})`).join('\n') : '- none';
   const issues = ctx.openIssues.length ? ctx.openIssues.slice(0, 40).map((i) => `- ${i.key}: ${line(i.title)}`).join('\n') : '- none';
   const brief = ctx.brief ? `\n${frameRequesterText(renderBriefMarkdown(ctx.brief, ctx.title), 'brief')}` : '';
+  // Help answers file nothing, so their context carries no filing limits.
+  const limits = ctx.path === 'help' ? [] : limitNotes(ctx);
   return [
     '<context>', `host: ${ctx.host}`, `account_email: ${ctx.accountEmail}`, `roles: ${ctx.roles.join(', ') || 'user'}`, `filing_allowed: ${ctx.filingAllowed}`,
     `screen: ${screen}`, ...(ctx.document ? [`open_document: ${ctx.document.type}${editableDocument(ctx.document) ? ` (the ${editableDocument(ctx.document)}_* tools read and edit it)` : ' (UI guidance only)'}`] : []),
@@ -173,7 +174,8 @@ export function contextBlock(ctx: AgentContext): string {
     `requester_messages_so_far: ${ctx.messageCount} of ${ctx.limits.messagesPerConversation}`,
     `open_requests_filed_by_this_account: ${ctx.openRequestCount} of ${ctx.limits.openRequestsPerAccount}`,
     'requests_listed_under_this_account (own and joined with Add me):', frameRequesterText(own, 'issue'),
-    'open_issues_in_tracker (titles; use search_open_issues for details):', frameRequesterText(issues, 'issue'), '</context>', brief,
+    'open_issues_in_tracker (titles; use search_open_issues for details):', frameRequesterText(issues, 'issue'),
+    ...(limits.length ? ['current_limits (follow these on this turn):', ...limits.map((l) => `- ${l}`)] : []), '</context>', brief,
   ].join('\n');
 }
 /** The one opening question of the feature path. */
@@ -199,14 +201,18 @@ ${FEEDBACK_RULES}
 - Starting over: when the requester clearly asks to start over or drop this request, call start_over; if anything substantial has been gathered, ask once whether they really want to drop it and call it only after a yes.
 - Do not promise that anything will be built, scheduled or changed. Say what happens next: a maintainer reviews the request and the requester gets email updates at their account address.`;
 
-export const LIMIT_RULES = (ctx: AgentContext) => {
+/**
+ * What the account's limits allow on this turn. Part of the per-turn <context>, not the system prompt, so the system
+ * prompt is the same for every account and stays cached across conversations. `noun` names what is being sent.
+ */
+export function limitNotes(ctx: AgentContext, noun: 'brief' | 'report' = ctx.path === 'problem' ? 'report' : 'brief'): string[] {
   const parts: string[] = [];
-  if (ctx.messageCount > ctx.limits.messagesPerConversation) parts.push(`This conversation has reached its ${ctx.limits.messagesPerConversation}-message limit. Do not ask further questions; only offer to send the brief as it stands (show it and ask for a yes, then request_file) or to stop (start_over).`);
-  else if (ctx.messageCount === ctx.limits.messagesPerConversation) parts.push(`This is the requester's last message in this conversation (${ctx.limits.messagesPerConversation}-message limit). Record what they said, then say the limit is reached and that they can send the brief as it stands or stop; ask nothing further.`);
+  if (ctx.messageCount > ctx.limits.messagesPerConversation) parts.push(`This conversation has reached its ${ctx.limits.messagesPerConversation}-message limit. Do not ask further questions; only offer to send the ${noun} as it stands (show it and ask for a yes, then request_file) or to stop (start_over).`);
+  else if (ctx.messageCount === ctx.limits.messagesPerConversation) parts.push(`This is the requester's last message in this conversation (${ctx.limits.messagesPerConversation}-message limit). Record what they said, then say the limit is reached and that they can send the ${noun} as it stands or stop; ask nothing further.`);
   if (ctx.openRequestCount >= ctx.limits.openRequestsPerAccount) parts.push(`The account has ${ctx.openRequestCount} open requests, the limit. Explain this, list the open requests from <context>, and offer Add me to a matching open request; do not offer a new filing.`);
   if (!ctx.filingAllowed) parts.push('Filing is not available for this account in this product. You can still help; say that filing is not available when asked.');
-  return parts.length ? `\n\nCurrent limits:\n- ${parts.join('\n- ')}` : '';
-};
+  return parts;
+}
 
 export const FEATURE_SYSTEM = (ctx: AgentContext) => `${COMMON_RULES(ctx)}
 
@@ -216,7 +222,7 @@ Record the problem and desired behavior already described, then show a concise t
 
 Before gathering details, call search_docs: when the behavior already exists, say so, explain how to use it from the documentation, and ask whether the request still differs. If it does not, end the conversation without filing; nothing is recorded.
 
-When the requester describes something that is specified or used to work but does not (a defect), first record everything they already told you into the brief with update_brief (problem, desired behavior, workaround), then say that it sounds like a problem report and ask whether to switch; after a yes call switch_path. Their recorded answers carry over to the new path; do not ask them again.${LIMIT_RULES(ctx)}`;
+When the requester describes something that is specified or used to work but does not (a defect), first record everything they already told you into the brief with update_brief (problem, desired behavior, workaround), then say that it sounds like a problem report and ask whether to switch; after a yes call switch_path. Their recorded answers carry over to the new path; do not ask them again.`;
 
 /** Feature and UX change intake. */
 export const intakeAgent: ConversationAgent = {

@@ -5,9 +5,23 @@ import { z } from 'zod';
 
 /** The slice of the SDK client `runTurn` uses, so tests inject a scripted stream and never reach the network. */
 export interface MessageStreamLike extends AsyncIterable<Anthropic.MessageStreamEvent> { finalMessage(): Promise<Anthropic.Message>; readonly request_id?: string | null | undefined }
-export interface AnthropicLike { messages: { stream(params: Anthropic.MessageStreamParams, options?: { headers?: Record<string, string> }): MessageStreamLike } }
+export interface AnthropicLike {
+  messages: {
+    stream(params: Anthropic.MessageStreamParams, options?: { headers?: Record<string, string> }): MessageStreamLike;
+    /** Non-streaming requests; only the prompt-cache warm-up uses it. */
+    create?(params: Anthropic.MessageCreateParamsNonStreaming, options?: { headers?: Record<string, string> }): Promise<Anthropic.Message>;
+  };
+}
 
-export function createAnthropic(apiKey: string): Anthropic { return new Anthropic({ apiKey, maxRetries: 2, timeout: 60_000 }); }
+/**
+ * With `log`, every API response is logged with its status, time to headers and retry count, so a request that waited
+ * through a rate limit or overload retry shows up in the function logs instead of as unexplained model time.
+ */
+export function createAnthropic(apiKey: string, log?: (message: string) => void): Anthropic {
+  if (!log) return new Anthropic({ apiKey, maxRetries: 2, timeout: 60_000 });
+  const line = (message: string) => log(`anthropic ${message}`);
+  return new Anthropic({ apiKey, maxRetries: 2, timeout: 60_000, logLevel: 'info', logger: { error: line, warn: line, info: line, debug: () => {} } });
+}
 
 export interface ToolResult { content: string; isError?: boolean }
 export type ToolHandler = (input: unknown) => Promise<ToolResult | string> | ToolResult | string;
@@ -130,6 +144,46 @@ export const REFUSAL_TEXT = 'I cannot help with that in this conversation.';
 export const TRUNCATED_TEXT = '\n\n(My reply was cut short. Ask me to continue.)';
 export const ROUNDS_TEXT = '\n\n(I stopped looking things up for this turn. Ask me to continue.)';
 
+/** What decides a turn's cached prefix besides its messages: the same for a turn and for its warm-up. */
+export interface TurnPrompt { model: string; system: string; tools: Anthropic.Tool[]; effort?: 'low' | 'medium' | 'high' | undefined; progress?: boolean | undefined }
+/**
+ * The request of one model round. Tools, system prompt, `tool_choice`, effort and thinking all shape the cached prefix,
+ * so turns and `warmPrompt` both build their requests here.
+ */
+export function turnRequest(p: TurnPrompt & { messages: Anthropic.MessageParam[]; maxTokens?: number | undefined }): { params: Anthropic.MessageStreamParams; headers: Record<string, string> | undefined } {
+  const params: Anthropic.MessageStreamParams = {
+    model: p.model, max_tokens: p.maxTokens ?? 4096,
+    // The tools and system prompt are the same for every requester with the same open document; an hour keeps them
+    // warm between conversations, and every read restarts the hour.
+    system: [{ type: 'text', text: p.system, cache_control: { type: 'ephemeral', ttl: '1h' } }],
+    messages: p.messages,
+    // A rolling breakpoint on the last block: the next round, and the request that resumes the turn after the editor
+    // answers, read the whole transcript so far from the prompt cache instead of the model reading it again.
+    cache_control: { type: 'ephemeral' },
+    output_config: { effort: p.effort ?? 'low' },
+  };
+  if (p.tools.length) { params.tools = p.tools; params.tool_choice = { type: 'auto' }; }
+  // `updates` is a beta display value the stable parameter type does not list yet.
+  if (p.progress) params.thinking = { type: 'adaptive', display: 'updates' } as unknown as Anthropic.ThinkingConfigParam;
+  return { params, headers: p.progress ? { 'anthropic-beta': PROGRESS_UPDATES_BETA } : undefined };
+}
+
+/** What a warm-up wrote to (or read from) the prompt cache. */
+export interface WarmUsage { cacheWrite: number; cacheRead: number; input: number }
+/**
+ * Write a turn's tools and system prompt to the prompt cache before anyone asks, so the first message of a
+ * conversation reads them instead of waiting for them to be processed. `max_tokens: 0` runs only the prompt: no
+ * output is generated or billed. The breakpoint stays on the system prompt only (no rolling breakpoint), so nothing
+ * is cached for the placeholder message. On an entry that is already warm this is a cheap read that restarts its hour.
+ */
+export async function warmPrompt(client: AnthropicLike, prompt: TurnPrompt): Promise<WarmUsage> {
+  if (!client.messages.create) throw new Error('This client cannot send non-streaming requests.');
+  const { params, headers } = turnRequest({ ...prompt, messages: [{ role: 'user', content: 'warmup' }], maxTokens: 0 });
+  const { cache_control: _rolling, stream: _stream, ...rest } = params as Anthropic.MessageStreamParams & { stream?: unknown };
+  const message = await client.messages.create({ ...rest, stream: false } as Anthropic.MessageCreateParamsNonStreaming, headers ? { headers } : undefined);
+  return { cacheWrite: message.usage.cache_creation_input_tokens ?? 0, cacheRead: message.usage.cache_read_input_tokens ?? 0, input: message.usage.input_tokens };
+}
+
 /**
  * One assistant turn with a hand-written streaming tool loop (brief §Decisions): stream the assistant message, emit text
  * deltas, run every tool_use through its handler, answer them all in one user message, and loop until `end_turn`.
@@ -147,22 +201,10 @@ export async function runTurn(options: RunTurnOptions): Promise<RunTurnResult> {
   const emit = (delta: string) => { text += delta; onText?.(delta); };
   const progress = options.progressUpdates === true && supportsProgressUpdates(model);
   for (;;) {
-    const params: Anthropic.MessageStreamParams = {
-      model, max_tokens: options.maxTokens ?? 4096,
-      // The tools and system prompt are the same for every requester of an agent; an hour keeps them warm between turns.
-      system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral', ttl: '1h' } }],
-      messages: [...options.messages, ...appended],
-      // A rolling breakpoint on the last block: the next round, and the request that resumes the turn after the editor
-      // answers, read the whole transcript so far from the prompt cache instead of the model reading it again.
-      cache_control: { type: 'ephemeral' },
-      output_config: { effort: options.effort ?? 'low' },
-    };
-    if (tools.length) { params.tools = tools; params.tool_choice = { type: 'auto' }; }
-    // `updates` is a beta display value the stable parameter type does not list yet.
-    if (progress) params.thinking = { type: 'adaptive', display: 'updates' } as unknown as Anthropic.ThinkingConfigParam;
+    const { params, headers } = turnRequest({ model, system, tools, messages: [...options.messages, ...appended], effort: options.effort, maxTokens: options.maxTokens, progress });
     const roundStarted = performance.now();
     let startMs: number | null = null, firstMs: number | null = null;
-    const stream = client.messages.stream(params, progress ? { headers: { 'anthropic-beta': PROGRESS_UPDATES_BETA } } : undefined);
+    const stream = client.messages.stream(params, headers ? { headers } : undefined);
     // Each visible block (a progress note or reply text) starts a new paragraph after text already shown.
     let blockStarted = false;
     const visible = (delta: string) => {

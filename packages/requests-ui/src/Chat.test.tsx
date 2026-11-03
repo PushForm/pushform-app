@@ -342,6 +342,29 @@ describe('Chat', () => {
     await waitFor(() => expect(screen.queryByRole('status', { name: 'Agent is thinking' })).toBeNull());
     expect(document.querySelector('.is-streaming')?.textContent).toContain('Hello');
   });
+  it('shows the backend status line in place of the dots, hides it when the agent speaks, and shows a later one beneath its words', async () => {
+    const backend = fakeBackend();
+    let push: ((chunk: string) => void) | undefined;
+    const slow: typeof fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (!url.endsWith('/messages')) return backend.fetch(input, init);
+      return new Response(new ReadableStream<Uint8Array>({ start(controller) { push = (chunk) => controller.enqueue(new TextEncoder().encode(chunk)); } }), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    };
+    const client = new RequestsClient({ baseUrl: BASE, apikey: 'k', getToken: async () => 'jwt-token', fetch: slow });
+    render(<Chat client={client} account={account} screen={screenInfo} onClose={() => {}} />);
+    fireEvent.change(await screen.findByLabelText('Your message'), { target: { value: 'Build a cabinet' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await screen.findByRole('status', { name: 'Agent is thinking' });
+    push!('event: status\ndata: {"phase":"reading","text":"Reading your request…"}\n\n');
+    await waitFor(() => expect(document.querySelector('.is-streaming .pf-fr-working')?.textContent).toBe('Reading your request…'));
+    expect(screen.queryByRole('status', { name: 'Agent is thinking' })).toBeNull();
+    push!('event: text\ndata: {"delta":"Building the box."}\n\n');
+    await waitFor(() => expect(document.querySelector('.is-streaming')?.textContent).toContain('Building the box.'));
+    expect(document.querySelector('.is-streaming')?.textContent).not.toContain('Reading your request…');
+    push!('event: status\ndata: {"phase":"writing","text":"Writing the change…"}\n\n');
+    await waitFor(() => expect(document.querySelector('.is-streaming .pf-fr-working.is-after')?.textContent).toBe('Writing the change…'));
+    expect(document.querySelector('.is-streaming')?.textContent).toContain('Building the box.');
+  });
   it('shows a short muted notice when the message limit is reached and never a message counter', async () => {
     setup({ turns: [[text('That is all I can take; send it or stop?'), briefEvent({ ...featureBrief, desired: 'x' }, 'T'), done(30, true)]] });
     await say('hello');
@@ -862,11 +885,13 @@ describe('render review and progress', () => {
   it('reads "Checking the result (review N of 3)…" from the backend count, keeps the last step between steps, and shows a collapsed review line', async () => {
     const { run, pending } = held();
     const image = { mime: 'image/jpeg' as const, data: '/9j/AQID' };
-    const { backend } = setup({ turns: [[text('Building it.'), { event: 'tool_request', data: { calls: [apply, query] } }, awaiting],
+    const { backend } = setup({ turns: [[text('Building it.'), { event: 'status', data: { phase: 'writing', text: 'Writing the change…' } }, { event: 'tool_request', data: { calls: [apply, query] } }, awaiting],
       [{ event: 'tool_request', data: { calls: [renderCall] } }, awaiting], [text('It matches the request.'), done(1)]] },
     { documentTools: () => ({ document: MODEL, run, progress }) });
     await send('Build a cabinet');
+    // The editor's own step replaces the backend's status line while it runs.
     await waitFor(() => expect(placeholder()).toBe('Applying the change…'));
+    expect(document.querySelector('.is-streaming')?.textContent).not.toContain('Writing the change…');
     act(() => pending[0]!.finish({ content: '{"ok":true}', isError: false, notice: 'Changed the document: Cabinet. Undo reverts it.' }));
     // A step without its own text keeps the last step's.
     await waitFor(() => expect(pending).toHaveLength(2));

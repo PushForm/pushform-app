@@ -33,16 +33,6 @@
         }
       ]
     },
-    {
-      "identifier": "opener:allow-open-url",
-      "allow": [
-        {
-          "url": "https://checkout.stripe.com/*"
-        },
-        {
-          "url": "https://billing.stripe.com/*"
-        }
-      ]
-    }
+    "opener:allow-default-urls"
   ]
 }

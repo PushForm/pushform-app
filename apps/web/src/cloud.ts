@@ -6,7 +6,7 @@ import type { RequestsConfig } from '@pushform/ui';
 export function configuredCloud() {
   const url = import.meta.env.VITE_SUPABASE_URL;
   const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY;
-  const none = { session: new CloudSession(null), files: undefined, profiles: undefined, account: undefined, usage: undefined, staff: undefined };
+  const none = { session: new CloudSession(null), files: undefined, profiles: undefined, account: undefined, billing: undefined, usage: undefined, staff: undefined };
   if (!url || !publishableKey) return none;
   try { return createBrowserCloud({ url, publishableKey }); }
   catch { return none; }
@@ -34,6 +34,6 @@ export function clearCommonsIntent(): void {
   for (const name of ['commonsModel', 'commonsRevision', 'commonsAsset']) url.searchParams.delete(name);
   window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
 }
-export const { session: cloudSession, files: cloudFiles, profiles: cloudProfiles, account: cloudAccount, usage: cloudUsage, staff: cloudStaff } = configuredCloud();
+export const { session: cloudSession, files: cloudFiles, profiles: cloudProfiles, account: cloudAccount, billing: cloudBilling, usage: cloudUsage, staff: cloudStaff } = configuredCloud();
 export const requestsConfig = configuredRequests();
 if (import.meta.hot) import.meta.hot.dispose(() => cloudSession.dispose());

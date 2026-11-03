@@ -107,6 +107,34 @@ export type Database = {
                   Relationships: [
 
                   ]
+                },"cloud_billing_accounts": {
+                  Row: {
+                    "billing_interval": string | null,"cancel_at_period_end": boolean,"current_period_end": string | null,"customer_id": string | null,"deletion_cleared_at": string | null,"lock_expires_at": string | null,"lock_token": string | null,"owner_id": string,"price_id": string | null,"status": string,"subscription_id": string | null,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "billing_interval"?: string | null,"cancel_at_period_end"?: boolean,"current_period_end"?: string | null,"customer_id"?: string | null,"deletion_cleared_at"?: string | null,"lock_expires_at"?: string | null,"lock_token"?: string | null,"owner_id": string,"price_id"?: string | null,"status"?: string,"subscription_id"?: string | null,"updated_at"?: string
+                  }
+                  Update: {
+                    "billing_interval"?: string | null,"cancel_at_period_end"?: boolean,"current_period_end"?: string | null,"customer_id"?: string | null,"deletion_cleared_at"?: string | null,"lock_expires_at"?: string | null,"lock_token"?: string | null,"owner_id"?: string,"price_id"?: string | null,"status"?: string,"subscription_id"?: string | null,"updated_at"?: string
+                  }
+                  Relationships: [
+
+                  ]
+                },"cloud_billing_events": {
+                  Row: {
+                    "event_created": number,"event_id": string,"owner_id": string,"processed_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "event_created": number,"event_id": string,"owner_id": string,"processed_at"?: string
+                  }
+                  Update: {
+                    "event_created"?: number,"event_id"?: string,"owner_id"?: string,"processed_at"?: string
+                  }
+                  Relationships: [
+
+                  ]
                 },"cloud_documents": {
                   Row: {
                     "client_key": string | null,"created_at": string,"current_revision_id": string | null,"folder_id": string | null,"id": string,"is_template": boolean,"kind": string,"name": string,"owner_id": string,"project_id": string,"purge_after": string | null,"revision_number": number,"size_bytes": number,"trash_op": string | null,"trashed_at": string | null,"updated_at": string
@@ -937,6 +965,33 @@ isOneToOne: false
                            },
 "cloud_begin_save":
 { Args: { "p_client_key"?: string,"p_document"?: string,"p_folder"?: string,"p_is_template"?: boolean,"p_kind": string,"p_name": string,"p_parent"?: string,"p_project": string,"p_sha256": string,"p_size": number }; Returns: Json
+                           },
+"cloud_billing_apply_subscription":
+{ Args: { "p_cancel_at_period_end": boolean,"p_current_period_end": string,"p_customer_id": string,"p_event_created": number,"p_event_id": string,"p_interval": string,"p_owner": string,"p_price_id": string,"p_status": string,"p_subscription_id": string,"p_token": string }; Returns: boolean
+                           },
+"cloud_billing_ensure_customer":
+{ Args: { "p_customer_id": string,"p_owner": string,"p_token": string }; Returns: Json
+                           },
+"cloud_billing_find_customer":
+{ Args: { "p_customer_id": string }; Returns: Json
+                           },
+"cloud_billing_lock":
+{ Args: { "p_owner": string }; Returns: Json
+                           },
+"cloud_billing_record_cancellation":
+{ Args: { "p_owner": string,"p_subscription_id": string,"p_token": string }; Returns: boolean
+                           },
+"cloud_billing_record_deletion_cleanup":
+{ Args: { "p_owner": string,"p_token": string }; Returns: boolean
+                           },
+"cloud_billing_renew":
+{ Args: { "p_owner": string,"p_token": string }; Returns: boolean
+                           },
+"cloud_billing_status":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"cloud_billing_unlock":
+{ Args: { "p_owner": string,"p_token": string }; Returns: boolean
                            },
 "cloud_cancel_account_deletion":
 { Args: Record<PropertyKey, never>; Returns: boolean

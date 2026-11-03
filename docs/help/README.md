@@ -54,6 +54,7 @@ PushForm has two editors: **Modeling** for 3D work and **Layout** for drawings o
 ## Accounts, files and recovery
 
 - [Sign-in and account profiles](cloud/account.md)
+- [Individual subscriptions and billing](cloud/billing.md)
 - [Library, projects, folders and batch import](cloud/library.md)
 - [Documents, cloud saves and page refresh](cloud/documents.md)
 - [Offline work, save errors and conflicts](cloud/recovery.md)

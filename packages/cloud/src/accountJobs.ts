@@ -28,6 +28,8 @@ export interface AccountJobsDeps {
     remove(bucket: string, paths: string[]): Promise<void>;
     signedUrl(bucket: string, path: string, seconds: number): Promise<string>;
   };
+  /** Stop recurring billing before removing any account data. Failures defer deletion. */
+  beforeDeleteAccount?(id: string): Promise<void>;
   /** Deletes the auth user; resolves when it is already gone. */
   deleteUser(id: string): Promise<void>;
   mail: { send(message: { to: string; subject: string; text: string; html: string }): Promise<unknown> } | null;
@@ -65,6 +67,7 @@ async function deleteAccounts(deps: AccountJobsDeps, result: AccountJobsResult):
   const due = (await deps.rpc('cloud_due_account_deletions', { p_limit: 10 })) as string[];
   for (const owner of due) {
     try {
+      await deps.beforeDeleteAccount?.(owner);
       const objects = (await deps.rpc('cloud_account_objects', { p_owner: owner })) as { bucket: string; path: string }[];
       const byBucket = new Map<string, string[]>();
       for (const { bucket, path } of objects) byBucket.set(bucket, [...byBucket.get(bucket) ?? [], path]);

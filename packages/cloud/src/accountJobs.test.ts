@@ -170,3 +170,20 @@ it('keeps zip paths unique without regard to case, before the extension', () => 
   expect(['A/Plan.pf', 'A/plan.pf', 'A/PLAN.pf', 'A/Notes', 'A/Notes'].map(p => uniqueZipPath(p, taken)))
     .toEqual(['A/Plan.pf', 'A/plan (2).pf', 'A/PLAN (3).pf', 'A/Notes', 'A/Notes (2)']);
 });
+
+
+it('completes billing cleanup before removing account files', async () => {
+  const { deps, calls } = fakes({ cloud_due_account_deletions: () => ['u1'], cloud_account_objects: () => [],
+    cloud_claim_exports: () => [], cloud_expired_exports: () => [] });
+  deps.beforeDeleteAccount = async id => { calls.push(`billing ${id}`); };
+  expect(await runAccountJobs(deps)).toMatchObject({ deleted: 1, failed: 0 });
+  expect(calls.indexOf('billing u1')).toBeLessThan(calls.findIndex(call => call.startsWith('rpc cloud_account_objects')));
+});
+
+it('retains account files when stopping recurring billing fails', async () => {
+  const { deps, calls } = fakes({ cloud_due_account_deletions: () => ['u1'], cloud_claim_exports: () => [], cloud_expired_exports: () => [] });
+  deps.beforeDeleteAccount = async () => { throw new Error('Billing unavailable'); };
+  expect(await runAccountJobs(deps)).toMatchObject({ deleted: 0, failed: 1 });
+  expect(calls.some(call => call.startsWith('remove ') || call.startsWith('deleteUser ') || call.startsWith('rpc cloud_account_objects'))).toBe(false);
+  expect(calls).toContain('rpc cloud_account_deletion_failed {"p_owner":"u1","p_error":"Billing unavailable"}');
+});

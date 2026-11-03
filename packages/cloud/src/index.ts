@@ -8,6 +8,7 @@ export * from './CloudFiles';
 export * from './CloudImportLog';
 export * from './CloudProfile';
 export * from './CloudAccount';
+export * from './CloudBilling';
 export * from './CloudUsage';
 export * from './CloudStaff';
 export * from './CloudExtensionSettings';

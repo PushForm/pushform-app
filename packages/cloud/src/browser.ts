@@ -4,6 +4,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from './db.types';
 import { commonsIntentFromUrl } from './CommonsOpen';
 import { CloudAccount } from './CloudAccount';
+import { CloudBilling, billingReturnFromUrl } from './CloudBilling';
 import { CloudFiles } from './CloudFiles';
 import { CloudProfiles } from './CloudProfile';
 import { CloudSession, type AuthCallback } from './CloudSession';
@@ -46,15 +47,22 @@ function browserClient(config: BrowserCloudConfig, browser: Pick<Window, 'locati
 
 /** Construct once at app boot; SDK owns persistence, refresh, locks and cross-tab auth notifications. */
 export function createBrowserCloud(config: BrowserCloudConfig, browser: Pick<Window, 'location' | 'history'> = window): {
-  session: CloudSession; files: CloudFiles; profiles: CloudProfiles; account: CloudAccount; usage: CloudUsage; staff: CloudStaff;
+  session: CloudSession; files: CloudFiles; profiles: CloudProfiles; account: CloudAccount; billing: CloudBilling; usage: CloudUsage; staff: CloudStaff;
 } {
+  const returned = billingReturnFromUrl(new URL(browser.location.href));
+  if (returned) {
+    const url = new URL(browser.location.href);
+    url.searchParams.delete('billing');
+    browser.history.replaceState(browser.history.state, '', url.pathname + url.search + url.hash);
+  }
   const { client, callback, redirectTo } = browserClient(config, browser);
   const session = new CloudSession(client.auth, redirectTo, callback,
-    () => { files.dispose(); profiles.dispose(); account.dispose(); void client.auth.dispose().catch(() => {}); });
+    () => { files.dispose(); profiles.dispose(); account.dispose(); billing.dispose(); void client.auth.dispose().catch(() => {}); });
   const files = new CloudFiles(client, session);
   const profiles = new CloudProfiles(client, session);
   const account = new CloudAccount(client, session);
-  return { session, files, profiles, account, usage: new CloudUsage(client, session), staff: new CloudStaff(client) };
+  const billing = new CloudBilling(client, session, returned);
+  return { session, files, profiles, account, billing, usage: new CloudUsage(client, session), staff: new CloudStaff(client) };
 }
 
 /**

@@ -6,6 +6,8 @@ import {
   CloudSession, cloudProfileFullName, type CloudAccountState, type CloudAccountStore, type CloudProfileState, type CloudProfileStore, type CloudSessionState,
 } from '@pushform/cloud';
 import { AccountContext, useAccountState } from '../accountContext';
+import { BillingContext, useBillingState } from '../billingContext';
+import { AccountBilling } from './AccountBilling';
 import { ProfileContext, useProfileState } from '../profileContext';
 import { DeletionSection, ExportSection } from './AccountLifecycle';
 import { ProfileForm } from './ProfileForm';
@@ -21,9 +23,11 @@ export function AccountControl({ cloud: supplied, onExtensions }: { cloud?: Clou
   const profileState = useProfileState(profiles);
   const account = useContext(AccountContext);
   const accountState = useAccountState(account);
+  const billing = useContext(BillingContext);
+  const billingState = useBillingState(billing);
   const [open, setOpen] = useState(false);
   useEffect(() => { void cloud.start(); }, [cloud]);
-  useEffect(() => { if (state.error) setOpen(true); }, [state.error]);
+  useEffect(() => { if (state.error || billingState.returned) setOpen(true); }, [state.error, billingState.returned]);
   if (state.status !== 'signedIn' || !state.user) return <></>;
   // The header names the account holder once their profile is known; the email stays in the tooltip.
   const profile = profileState.ownerId === state.user.id ? profileState.profile : null;
@@ -36,7 +40,7 @@ export function AccountControl({ cloud: supplied, onExtensions }: { cloud?: Clou
     </button>
     {open ? <AccountDialog cloud={cloud} state={state} profiles={profile ? profiles : null} profileState={profileState}
       account={account && accountState.ownerId === state.user.id && accountState.status === 'ready' ? account : null} accountState={accountState}
-      onClose={() => { cloud.clearError(); profiles?.clearError(); account?.clearError(); setOpen(false); }}
+      onClose={() => { billing?.clearReturn(); cloud.clearError(); profiles?.clearError(); account?.clearError(); setOpen(false); }}
       onExtensions={onExtensions ? () => { setOpen(false); onExtensions(); } : undefined} /> : null}
   </>;
 }
@@ -46,6 +50,8 @@ function AccountDialog({ cloud, state, profiles, profileState, account, accountS
   /** Only while the account's deletion and export state has loaded. */
   account: CloudAccountStore | null; accountState: CloudAccountState; onClose: () => void; onExtensions?: (() => void) | undefined;
 }): JSX.Element {
+  const billing = useContext(BillingContext);
+  const billingState = useBillingState(billing);
   const dialog = useRef<HTMLDivElement>(null), close = useRef(onClose);
   close.current = onClose;
   useEffect(() => {
@@ -88,6 +94,7 @@ function AccountDialog({ cloud, state, profiles, profileState, account, accountS
         <MailingPreference key={profileState.ownerId} profiles={profiles} />
         <ProfileForm profiles={profiles} state={profileState} submitLabel="Save profile" savingLabel="Saving…" termsLocked />
       </section> : null}
+      {billing && billingState.ownerId === state.user?.id ? <AccountBilling key={billingState.ownerId} billing={billing} state={billingState} /> : null}
       {account ? <>
         {accountState.error ? <p className="pf-account-error" role="alert">{accountState.error}</p> : null}
         <ExportSection account={account} state={accountState} email={state.user?.email ?? 'your email address'} />

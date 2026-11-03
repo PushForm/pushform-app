@@ -2286,6 +2286,11 @@
 .pf-account-error { color: var(--pf-danger); }
 /* Export and deletion sections in account details. */
 .pf-account-section { margin: 0 0 16px; padding: 0 0 16px; border-bottom: 1px solid var(--pf-border); }
+.pf-account-dialog .pf-billing-options { display: grid; gap: 8px; min-width: 0; margin: 0 0 10px; padding: 0; border: 0; }
+.pf-billing-options legend { margin-bottom: 8px; font-weight: 600; }
+.pf-billing-choice { display: flex; align-items: flex-start; gap: 8px; padding: 10px; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); cursor: pointer; }
+.pf-billing-choice:has(input:checked) { border-color: var(--pf-accent); background: var(--pf-surface-2); }
+.pf-account-dialog .pf-billing-choice input { flex: 0 0 auto; width: auto; margin: 4px 0 0; padding: 0; accent-color: var(--pf-accent); }
 .pf-account-section h3 { margin: 0 0 4px; font-size: 15px; }
 .pf-account-section p { margin: 0 0 10px; }
 .pf-account-delete h3 { color: var(--pf-danger); }

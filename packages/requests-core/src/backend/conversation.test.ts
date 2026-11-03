@@ -796,7 +796,7 @@ describe('document tools', () => {
     const { h } = await suspended();
     const first = anthropicOf(h).calls[0]!;
     expect(first.model).toBe('claude-sonnet-5-5');
-    expect(first.output_config).toEqual({ effort: 'medium' });
+    expect(first.output_config).toEqual({ effort: 'low' });
     expect(toolNames(h)).toEqual(expect.arrayContaining(['search_docs', 'layout_get_document', 'layout_list_objects', 'layout_apply_operations']));
     expect((first.system as { text: string }[])[0]!.text).toContain('Editing the open document');
     expect((first.system as { text: string }[])[0]!.text).toContain('you change nothing except the open document');

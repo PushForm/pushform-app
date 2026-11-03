@@ -83,9 +83,13 @@ export const TOOL_RESULT_MAX_CHARS = 200_000;
 /** Model rounds a document turn may use across all its requests (with render review: `limits.documentToolRoundsWithReview`). */
 export const DOCUMENT_TOOL_ROUNDS = 12;
 
-/** How a turn runs: one that can edit the document plans multi-step geometry; help and intake stay short. */
+/**
+ * How a turn runs: one that can edit the document plans multi-step geometry and gets more output and rounds; help and
+ * intake stay short. Both run at low effort: the model still thinks where a build needs it, but hidden reasoning was
+ * most of an editing turn's output and the requester waits for every token of it.
+ */
 export function turnSettings(editing: boolean): { effort: 'low' | 'medium'; maxTokens: number; maxToolRounds: number } {
-  return editing ? { effort: 'medium', maxTokens: 16_000, maxToolRounds: DOCUMENT_TOOL_ROUNDS } : { effort: 'low', maxTokens: 4096, maxToolRounds: 8 };
+  return editing ? { effort: 'low', maxTokens: 16_000, maxToolRounds: DOCUMENT_TOOL_ROUNDS } : { effort: 'low', maxTokens: 4096, maxToolRounds: 8 };
 }
 const agentForPath = (path: ConversationPath): ConversationAgent => (path === 'open' ? openAgent : path === 'help' ? helpAgent : path === 'problem' ? problemAgent : intakeAgent);
 /**

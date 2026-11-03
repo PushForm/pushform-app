@@ -12,6 +12,7 @@ import { TbLayersUnion, TbOval, TbPackageImport, TbTextSize, TbWriting } from 'r
 import { LayoutDifferenceIcon, LayoutIntersectionIcon, LayoutExclusionIcon, LayoutDivisionIcon, LayoutCutPathIcon } from './LayoutBooleanIcons';
 import { LayoutFilletIcon } from './LayoutFilletIcon';
 import { LayoutShapeBuilderIcon } from './LayoutShapeBuilderIcon';
+import { SectionPlaneIcon } from './SectionPlaneIcon';
 import {
   LuSave,
   LuArrowDown,
@@ -86,6 +87,7 @@ const FogIcon: IconType = (props) => <BsCloudFog2 {...props} strokeWidth={0} />;
 const REACT_ICONS: Record<string, IconType> = {
   'tool-shape-builder': LayoutShapeBuilderIcon,
   'tool-fillet': LayoutFilletIcon,
+  'tool-sectionPlane': SectionPlaneIcon,
   save: LuSave,
   'check-updates': MdUpdate,
   'save-as': LuCopy,

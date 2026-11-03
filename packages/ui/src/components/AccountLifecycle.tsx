@@ -52,7 +52,7 @@ export function DeletionSection({ account, state }: { account: CloudAccountStore
   const deletion = state.deletion;
   return <section className="pf-account-section pf-account-delete" aria-labelledby="pf-account-delete-title">
     <h3 id="pf-account-delete-title">Delete account</h3>
-    <p>Any active subscription is cancelled when your account is permanently deleted. To stop renewal sooner, use Manage billing.</p>
+    <p>Any active subscription is cancelled when your account is permanently deleted. To stop renewal sooner, use Manage account to open Stripe.</p>
     {deletion ? <>
       <p>Your account will be deleted on <strong>{formatAccountTime(deletion.deleteAfter)}</strong>. You can cancel until then.</p>
       <button type="button" disabled={state.busy !== null} onClick={() => { void account.cancelDeletion(); }}>

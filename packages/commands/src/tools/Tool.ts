@@ -65,6 +65,17 @@ export interface EntryField {
   readonly locked?: boolean | undefined;
 }
 
+/** A setting the tool offers as a pick list beside its status, such as Profile Edges' router-bit profile. */
+export interface ToolChoice {
+  /** Stable id within the tool; keys `onChoice`. */
+  readonly id: string;
+  /** Accessible name, e.g. "Profile". */
+  readonly label: string;
+  /** The option picked now (its `value`). */
+  readonly value: string;
+  readonly options: readonly { readonly value: string; readonly label: string }[];
+}
+
 export interface ToolStatus {
   /** Instructor / status bar text. */
   readonly instructor: string;
@@ -74,6 +85,8 @@ export interface ToolStatus {
   readonly vcbValue?: string | undefined;
   /** Value fields to draw in the viewport, in Tab order. None: typing opens one beside the pointer. */
   readonly fields?: readonly EntryField[] | undefined;
+  /** Settings the tool offers as pick lists (`onChoice`). */
+  readonly choices?: readonly ToolChoice[] | undefined;
 }
 
 export interface ToolContext {
@@ -137,6 +150,8 @@ export interface Tool {
   onEntry?(values: Readonly<Record<string, VcbValue>>): void;
   /** Hold (or with null, release) a typed field value in the preview while the others are set. */
   onEntryLock?(id: string, value: VcbValue | null): void;
+  /** A pick list of `status().choices` was set to `value`. */
+  onChoice?(id: string, value: string): void;
   onCancel(): void;
   overlay(): readonly OverlayPrimitive[];
   status(): ToolStatus;

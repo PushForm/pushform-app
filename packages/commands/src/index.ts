@@ -20,6 +20,7 @@ export type {
   ToolKeyEvent,
   ToolWheelEvent,
   ToolStatus,
+  ToolChoice,
   EntryField,
   EntryFieldKind,
   Modifiers,
@@ -118,7 +119,7 @@ export { AxesTool, type PickedAxes } from './tools/impl/AxesTool';
 export { ComponentAxesTool, componentAxesPick, type ComponentAxesRequest } from './tools/impl/ComponentAxesTool';
 export { OffsetTool } from './tools/impl/Offset';
 export { FollowMeTool } from './tools/impl/FollowMe';
-export { EdgeBlendTool, edgeBlendTools } from './tools/impl/EdgeBlend';
+export { EdgeBlendTool, edgeBlendTools, PROFILE_LABELS } from './tools/impl/EdgeBlend';
 export { SolidTool, solidTools } from './tools/impl/SolidTool';
 export { constructionTools } from './tools/constructionTools';
 export * from './commands/contextMenu';

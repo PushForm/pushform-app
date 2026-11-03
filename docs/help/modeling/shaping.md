@@ -48,4 +48,22 @@ Edges you selected before choosing the tool start out picked. Escape clears the 
 
 The radius or distance you type is remembered until the app is closed, also when you switch tools. For a fillet, type a number followed by `s` (for example `12s`) to set how many segments a full circle of fillet faces would have; the default is 24, so a right-angle edge gets 6 faces. Fillet faces form one smooth surface.
 
-Outside edges are cut away and inside corners are filled. Picked edges that meet end to end are joined with a mitre, as in a picture frame. Chamfer can also bevel three picked edges that meet at one corner, such as all twelve edges of a box: the three bevels cut into each other and meet in a point. Fillet cannot round such a corner. When the value is too large for the faces beside an edge, when the fillets of two edges would run into each other, or when three picked edges meet at one corner for a fillet, nothing changes: the status bar explains why and the picked edges stay so you can type a smaller value. An edge can only end at a corner where three faces meet.
+Outside edges are cut away and inside corners are filled. Picked edges that meet end to end are joined with a mitre, as in a picture frame. Where picked edges turn from an outside edge to an inside corner, each part is rounded or beveled on its own and ends flat on the face across its end. Chamfer can also bevel three picked edges that meet at one corner, such as all twelve edges of a box: the three bevels cut into each other and meet in a point. Fillet cannot round such a corner. When the value is too large for the faces beside an edge, when the fillets of two edges would run into each other, or when three picked edges meet at one corner for a fillet, nothing changes: the status bar explains why and the picked edges stay so you can type a smaller value.
+
+## Shape edges like a router bit with Profile Edges
+
+Choose **Profile Edges** from the Edge dropdown in the toolbar, next to Fillet and Chamfer, or search for it by name. Pick a profile from the **Profile** list at the right of the status bar:
+
+- **Roundover**: a quarter round. The size is its radius.
+- **Cove**: a hollow quarter round. The size is its radius.
+- **Ogee**: an S curve, rounded near the edge and hollow near the face. The size is its width and depth.
+- **Bead**: a half round on the edge with a small groove beside it, as on a beaded face frame. The size is the bead's radius.
+- **Chamfer**: a bevel. The size is its width on the face; type an angle such as `20°` for a wide, shallow bevel, as on a raised panel.
+- **Step**: a square rabbet. The size is its width and depth.
+
+Pick edges as with Fillet, type the size, for example `1/4"`, and press Enter or double-click to apply. A preview shows the result first, and the whole operation is one Undo step.
+
+## Profile Edges corners and limits
+
+A profile is measured from one face beside each edge, as a router rides on it: for edges round a face, that face; for a single edge, its larger face. Profiles shape square outside edges, where two faces meet at a right angle. Picked edges that meet end to end are mitred, also round the inside of an opening, as on a beaded face frame. Inside corners in your pick are left alone: the profile stops flat against the face it runs into there, as a router's bearing stops. When the size is too large, nothing changes and the status bar explains why.
+

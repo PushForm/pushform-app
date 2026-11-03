@@ -890,6 +890,8 @@
   border-radius: 50%;
   background: #3cb371;
 }
+.pf-status-choice { display: flex; align-items: center; gap: 6px; flex: none; color: var(--pf-text-muted); }
+.pf-status-choice select { height: 20px; padding: 0 4px; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); color: var(--pf-text); background: var(--pf-surface-2); font: inherit; }
 .pf-status-mid {
   flex: 1;
   overflow: hidden;

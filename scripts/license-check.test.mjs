@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+/* global URL */
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { auditLicenses, licenseOf, licenseProblems, normalizeId, spdxAllows } from './license-check.mjs';
+import {
+  ALLOWED, auditLicenses, licenseOf, licenseProblems, normalizeId, npmNotices, packageNoticeFiles, spdxAllows,
+} from './license-check.mjs';
 
 const ok = (id) => ['MIT', 'Apache-2.0'].includes(id);
 const dirs = [];
@@ -80,5 +83,82 @@ describe('license-check', () => {
       'packages/app/package.json': { name: 'app', dependencies: { gone: '1' }, optionalDependencies: { 'other-platform': '1' } },
     });
     expect(auditLicenses(root).problems).toEqual(['gone: not installed (needed by app)']);
+  });
+});
+
+describe('license-check --notices', () => {
+  it('starts the walk at the shipped apps, following their workspace packages and skipping the others', () => {
+    const root = workspace({
+      'pnpm-workspace.yaml': 'packages:\n  - apps/*\n  - packages/*\n',
+      'package.json': { name: 'root', private: true },
+      'apps/web/package.json': { name: 'web', dependencies: { ui: 'workspace:*' } },
+      'packages/ui/package.json': { name: 'ui', dependencies: { lib: '1' } },
+      'packages/ui/node_modules/lib/package.json': { name: 'lib', version: '1.0.0', license: 'MIT' },
+      'packages/tool/package.json': { name: 'tool', dependencies: { builder: '1' } },
+      'packages/tool/node_modules/builder/package.json': { name: 'builder', version: '1.0.0', license: 'MIT' },
+    });
+    // pnpm links a workspace dependency into node_modules.
+    mkdirSync(join(root, 'apps/web/node_modules'));
+    symlinkSync(join(root, 'packages/ui'), join(root, 'apps/web/node_modules/ui'), 'junction');
+    const { packages, problems } = auditLicenses(root, { from: ['apps/web'] });
+    expect(packages.map((p) => p.name)).toEqual(['lib']);
+    expect(packages[0].via).toEqual(['web', 'ui', 'lib']);
+    expect(problems).toEqual([]);
+    expect(auditLicenses(root).packages.map((p) => p.name)).toEqual(['builder', 'lib']);
+  });
+
+  it('reads license and NOTICE files at the top of a package and one directory down, not in node_modules', () => {
+    const dir = workspace({
+      'LICENSE.md': 'MIT License\r\n\r\nCopyright (c) A   \r\n',
+      'NOTICE': 'Notice text',
+      'COPYING': 'Copying text',
+      'README.md': 'not a license',
+      'wasm/LICENSE_DECODER': 'Decoder license',
+      'node_modules/dep/LICENSE': 'nested',
+      'a/b/LICENSE': 'too deep',
+      'empty/LICENSE': '   ',
+    });
+    expect(packageNoticeFiles(dir)).toEqual([
+      { path: 'COPYING', notice: false, text: 'Copying text' },
+      { path: 'LICENSE.md', notice: false, text: 'MIT License\n\nCopyright (c) A' },
+      { path: 'NOTICE', notice: true, text: 'Notice text' },
+      { path: 'wasm/LICENSE_DECODER', notice: false, text: 'Decoder license' },
+    ]);
+  });
+
+  it('groups packages with identical license files and fails packages without one unless accepted', () => {
+    const root = workspace({
+      'a/package.json': { name: 'a', version: '1.0.0', license: 'MIT' }, 'a/LICENSE': 'MIT text\n',
+      'b/package.json': { name: 'b', version: '2.0.0', license: 'MIT' }, 'b/LICENSE': 'MIT text',
+      'c/package.json': { name: 'c', version: '3.0.0', license: 'Apache-2.0' }, 'c/LICENSE': 'Apache text', 'c/NOTICE': 'C notice',
+      'd/package.json': { name: 'd', version: '4.0.0', license: 'MIT' },
+      'e/package.json': { name: 'e', version: '5.0.0', license: 'MIT', author: { name: 'E Author' },
+        repository: { url: 'git+https://example.com/e.git' } },
+    });
+    const pkg = (name, version, license) => ({ name, version, license, dir: join(root, name) });
+    const packages = [pkg('a', '1.0.0', 'MIT'), pkg('b', '2.0.0', 'MIT'), pkg('c', '3.0.0', 'Apache-2.0'),
+      pkg('d', '4.0.0', 'MIT'), pkg('e', '5.0.0', 'MIT')];
+    const { groups, problems } = npmNotices(packages, new Map([['e', 'no license file'], ['gone', 'no license file']]));
+    expect(groups.map((group) => group.packages.map((p) => p.name))).toEqual([['a', 'b'], ['c'], ['e']]);
+    expect(groups[0].text).toBe('MIT text');
+    expect(groups[1].text).toBe('--- LICENSE ---\n\nApache text\n\n--- NOTICE ---\n\nC notice');
+    expect(groups[2].text.split('\n').slice(0, 6)).toEqual([
+      'e 5.0.0 is published without a license file; its package.json states MIT.',
+      'Authors: E Author.',
+      'Source: https://example.com/e',
+      '',
+      'MIT License',
+      '',
+    ]);
+    expect(problems).toEqual(['d@4.0.0: no license file in the package', 'gone: no longer shipped; remove it from NO_LICENSE_FILE']);
+    expect(npmNotices([pkg('a', '1.0.0', 'MIT')], new Map([['a', 'no license file']])).problems)
+      .toEqual(['a@1.0.0: has a license file now; remove it from NO_LICENSE_FILE']);
+  });
+
+  it('accepts only Rust crate licenses that the npm policy allows too', () => {
+    const toml = readFileSync(new URL('./notices/about.toml', import.meta.url), 'utf8');
+    const accepted = [...toml.match(/^accepted = \[([^\]]*)\]/m)[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+    expect(accepted.length).toBeGreaterThan(5);
+    for (const license of accepted) expect(ALLOWED.has(license.split(' WITH ')[0]), license).toBe(true);
   });
 });

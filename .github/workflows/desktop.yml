@@ -140,6 +140,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: apps/desktop/src-tauri }
+      # The web build writes the third-party notices, listing the Rust crates with cargo-about.
+      - uses: taiki-e/install-action@v2
+        with: { tool: cargo-about }
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with: { node-version: 24, cache: pnpm }
@@ -182,6 +185,9 @@ jobs:
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
           VITE_FR_REGION: ${{ vars.VITE_FR_REGION }}
+      # tauri.release.conf.json bundles the notices as THIRD_PARTY_NOTICES.txt in every installer.
+      - shell: bash
+        run: test -s apps/web/dist/third-party-notices.txt
       - run: node scripts/check-cloud-config.mjs apps/web/dist
         env:
           VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
@@ -235,7 +241,7 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" > /dev/null
           rm -f "$RUNNER_TEMP/pushform-signing.p12"
           echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/pushform-notarization.p8" >> "$GITHUB_ENV"
-      - run: pnpm --filter @pushform/app-desktop tauri build --ci --bundles ${{ matrix.bundles }} --config "${{ runner.temp }}/version.json"
+      - run: pnpm --filter @pushform/app-desktop tauri build --ci --bundles ${{ matrix.bundles }} --config src-tauri/tauri.release.conf.json --config "${{ runner.temp }}/version.json"
         env:
           # Run Finder customization so the DMG keeps its background and icon positions.
           TAURI_BUNDLER_DMG_IGNORE_CI: 'true'

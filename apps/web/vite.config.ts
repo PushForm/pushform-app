@@ -6,6 +6,7 @@ import { defineConfig, loadEnv, type Plugin } from 'vite';
 import { gitVersion } from './buildVersion';
 import { contentSecurityPolicy, contentSecurityPolicyPlugin } from './contentSecurityPolicy';
 import { extensionWorkerPlugin } from './extensionRuntime';
+import { thirdPartyNoticesPlugin } from './thirdPartyNotices';
 import { sentryDsnFor } from './src/sentryDsn';
 import react from '@vitejs/plugin-react';
 
@@ -61,7 +62,8 @@ export default defineConfig(({ mode }) => {
     sentryDsn: sentryDsnFor(env, true),
   });
   return {
-    plugins: [react(), contentSecurityPolicyPlugin(policy), crossOriginIsolation(), extensionWorkerPlugin()],
+    plugins: [react(), contentSecurityPolicyPlugin(policy), crossOriginIsolation(), extensionWorkerPlugin(),
+      thirdPartyNoticesPlugin(repoRoot)],
     define: {
       __PF_BUILD__: JSON.stringify(buildInfo()),
     },

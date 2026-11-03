@@ -1,21 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { useRef, useSyncExternalStore, type JSX } from 'react';
+import { useRef, useState, useSyncExternalStore, type JSX } from 'react';
 import { createPortal } from 'react-dom';
 import { formatBuildDate, type BuildInfo } from '../buildInfo';
 import { desktopUpdates, type DesktopUpdates } from '../desktopUpdates';
+import { THIRD_PARTY_NOTICES_URL, openThirdPartyNotices } from '../thirdPartyNotices';
 import { Icon } from './Icon';
 import { useModalFocus } from './useModalFocus';
 
 /**
  * Modal About box with the version, build commit and build time of the running bundle
- * and the product's copyright owner; desktop builds that update also show the update channel.
+ * and the product's copyright owner, with links to the license, the source code and the third-party notices; desktop
+ * builds that update also show the update channel.
  * Traps focus, closes with Escape or its close button, and restores focus afterwards.
  */
 export function AboutDialog({ build, onClose }: { build: BuildInfo; onClose: () => void }): JSX.Element {
   const dialog = useRef<HTMLDivElement>(null);
   useModalFocus(dialog, onClose);
   const updates = desktopUpdates();
+  const [noticesMissing, setNoticesMissing] = useState(false);
   return createPortal(<div className="pf-modal-backdrop">
     <div ref={dialog} className="pf-modal pf-about-dialog" role="dialog" aria-modal="true" aria-labelledby="pf-about-title">
       <div className="pf-about-heading">
@@ -30,7 +33,8 @@ export function AboutDialog({ build, onClose }: { build: BuildInfo; onClose: () 
         {updates ? <UpdateChannel updates={updates} /> : null}
       </dl>
       <p className="pf-about-copyright">© 2026 JobCraft, Inc.</p>
-      <p>Open source under the <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener noreferrer">GNU GPLv3 license</a>. <a href="https://github.com/PushForm/pushform-app" target="_blank" rel="noopener noreferrer">Source code on GitHub</a></p>
+      <p>Open source under the <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener noreferrer">GNU GPLv3 license</a>. <a href="https://github.com/PushForm/pushform-app" target="_blank" rel="noopener noreferrer">Source code on GitHub</a>. <a href={THIRD_PARTY_NOTICES_URL} target="_blank" rel="noopener noreferrer" onClick={event => { void openThirdPartyNotices(event).then(opened => setNoticesMissing(!opened)); }}>Third-party notices</a></p>
+      {noticesMissing ? <p role="status">The third-party notices file is installed with release builds only.</p> : null}
     </div>
   </div>, document.body);
 }

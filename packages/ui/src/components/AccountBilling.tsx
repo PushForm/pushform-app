@@ -2,51 +2,22 @@
 // Copyright 2026 PushForm contributors
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
-import { billingHostedUrl, type BillingInterval, type BillingSummary, type CloudBillingState, type CloudBillingStore } from '@pushform/cloud';
-import { formatAccountTime } from '../accountContext';
+import { billingHostedUrl, type CloudBillingState, type CloudBillingStore } from '@pushform/cloud';
 
-function formatBillingAmount(offer: BillingSummary['offers'][number]): string {
-  // Stripe charge units differ from ISO currency digits for ISK and UGX.
-  // https://docs.stripe.com/currencies#special-cases
-  const currency = offer.currency.toLowerCase();
-  const zeroDecimal = new Set(['bif', 'clp', 'djf', 'gnf', 'jpy', 'kmf', 'krw', 'mga', 'pyg', 'rwf', 'vnd', 'vuv', 'xaf', 'xof', 'xpf']);
-  const threeDecimal = new Set(['bhd', 'jod', 'kwd', 'omr', 'tnd']);
-  const digits = zeroDecimal.has(currency) ? 0 : threeDecimal.has(currency) ? 3 : 2;
-  const displayDigits = currency === 'isk' || currency === 'ugx' ? 0 : digits;
-  const format = new Intl.NumberFormat(undefined, { style: 'currency', currency: offer.currency, minimumFractionDigits: displayDigits, maximumFractionDigits: displayDigits });
-  return format.format(offer.amount / 10 ** digits);
-}
-
-export function formatBillingPrice(offer: BillingSummary['offers'][number]): string {
-  return `${formatBillingAmount(offer)} / ${offer.interval === 'month' ? 'month' : 'year'}`;
-}
-
-export function annualBillingComparison(annual: BillingSummary['offers'][number], monthly: BillingSummary['offers'][number] | undefined): { monthlyEquivalent: string; yearlyTotal: string; savingsPercent: number | null } {
-  const savings = monthly && monthly.currency.toLowerCase() === annual.currency.toLowerCase() && monthly.amount > 0
-    ? Math.round((1 - annual.amount / (monthly.amount * 12)) * 100) : null;
-  return { monthlyEquivalent: formatBillingAmount({ ...annual, amount: annual.amount / 12 }), yearlyTotal: formatBillingAmount(annual), savingsPercent: savings !== null && savings > 0 ? savings : null };
-}
-
-/** Use the system browser on desktop; browser checkout opens a separate tab to preserve document edits. */
-async function openBilling(url: string): Promise<void> {
-  if (isTauri()) {
-    const { openUrl } = await import('@tauri-apps/plugin-opener');
-    await openUrl(url);
-    return;
-  }
-  const link = document.createElement('a');
-  link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer';
-  link.click();
-}
-
+/** Account billing opens provider destinations from the original user gesture. */
 export function AccountBilling({ billing, state }: { billing: CloudBillingStore; state: CloudBillingState }): JSX.Element | null {
   const generation = useRef(0);
-  const [selectedInterval, setSelectedInterval] = useState<BillingInterval>('year');
-  const [destination, setDestination] = useState<{ url: string; kind: 'checkout' | 'portal' } | null>(null);
+  const pending = useRef<{ popup: Window; kind: 'checkout' | 'portal' } | null>(null);
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const subscription = state.summary?.subscription;
   const subscribed = Boolean(subscription && subscription.status !== 'canceled' && subscription.status !== 'incomplete_expired');
+  const latest = useRef({ owner: state.ownerId, subscribed });
+  latest.current = { owner: state.ownerId, subscribed };
+  const closeBlank = (): void => {
+    const current = pending.current; pending.current = null;
+    try { current?.popup.close(); } catch { /* A closed browser window needs no further action. */ }
+  };
   useEffect(() => {
     void billing.reload();
     const refresh = (): void => { void billing.reload(); };
@@ -55,80 +26,77 @@ export function AccountBilling({ billing, state }: { billing: CloudBillingStore;
   }, [billing]);
   useEffect(() => {
     generation.current++;
-    setDestination(null); setError(null); setOpening(false);
-    return () => { generation.current++; };
+    closeBlank(); setError(null); setOpening(false);
+    return () => { generation.current++; closeBlank(); };
   }, [billing, state.ownerId]);
   useEffect(() => {
-    if (subscribed && destination?.kind === 'checkout') setDestination(null);
-  }, [subscribed, destination?.kind]);
+    if (!subscribed) return;
+    if (pending.current?.kind === 'checkout') { generation.current++; closeBlank(); setOpening(false); }
+  }, [subscribed]);
   useEffect(() => {
-    if (state.returned !== 'success' || state.summary?.subscription?.status === 'active' || state.summary?.subscription?.status === 'trialing') return;
-    // A successful browser return may reach the app before the payment webhook.
+    if (state.returned !== 'success' || subscription?.status === 'active' || subscription?.status === 'trialing') return;
     let attempts = 0;
     const timer = setInterval(() => { void billing.reload(); if (++attempts >= 12) clearInterval(timer); }, 5000);
     return () => clearInterval(timer);
-  }, [billing, state.returned, state.summary?.subscription?.status]);
+  }, [billing, state.returned, subscription?.status]);
   const summary = state.summary;
-  if (state.status === 'signedOut') return null;
-  const active = subscription?.status === 'active' || subscription?.status === 'trialing';
   const busy = opening || state.busy !== null;
-  const selectedOffer = summary?.offers.find(offer => offer.interval === selectedInterval) ?? summary?.offers.find(offer => offer.interval === 'year') ?? summary?.offers[0];
-  const prepare = async (kind: 'checkout' | 'portal', interval: BillingInterval = 'month'): Promise<void> => {
-    const current = generation.current;
-    setDestination(null); setError(null); setOpening(true);
+  const ready = state.status === 'ready' && Boolean(state.ownerId && summary);
+  const open = async (kind: 'checkout' | 'portal'): Promise<void> => {
+    if (!ready || busy) return;
+    const current = generation.current, owner = state.ownerId, desktop = isTauri();
+    setError(null);
+    let popup: Window | null = null;
+    if (!desktop) {
+      try {
+        popup = window.open('about:blank', '_blank');
+        if (!popup) { setError('Allow pop-ups to open billing, then try again.'); return; }
+        popup.opener = null;
+        pending.current = { popup, kind };
+      } catch {
+        try { popup?.close(); } catch { /* Nothing else to close. */ }
+        setError('Could not open your browser. Please try again.'); return;
+      }
+    }
+    setOpening(true);
+    const currentAccount = (): boolean => current === generation.current && latest.current.owner === owner
+      && !(kind === 'checkout' && latest.current.subscribed);
     try {
-      const value = kind === 'checkout' ? await billing.checkout(interval) : await billing.portal();
-      if (!value || current !== generation.current) return;
+      const value = kind === 'checkout' ? await billing.checkout('month') : await billing.portal();
+      if (!currentAccount()) return;
+      if (!value) throw new Error('Billing destination unavailable');
       const url = billingHostedUrl({ url: value }, kind);
-      // A direct link opens the payment tab from a user gesture and preserves the editor.
-      setDestination({ url, kind });
-    } catch { if (current === generation.current) setError('Could not open billing. Please try again.'); }
-    finally { if (current === generation.current) setOpening(false); }
+      if (desktop) {
+        const { openUrl } = await import('@tauri-apps/plugin-opener');
+        if (!currentAccount()) return;
+        await openUrl(url);
+      } else {
+        if (!popup || popup.closed) throw new Error('Billing window was closed');
+        popup.location.assign(url);
+        pending.current = null;
+      }
+    } catch {
+      if (currentAccount()) setError('Could not open billing. Please try again.');
+    } finally {
+      if (pending.current?.popup === popup) closeBlank();
+      if (current === generation.current) setOpening(false);
+    }
   };
+  if (state.status === 'signedOut') return null;
   return <section className="pf-account-section" aria-labelledby="pf-account-billing-title">
     <h3 id="pf-account-billing-title">Plan and billing</h3>
-    {state.status === 'loading' ? <p role="status">Loading billing…</p> : null}
-    {summary ? <>
-      <p>Current plan: <strong>{active ? 'Individual' : 'Community'}</strong></p>
-      {subscription ? <>
-        <p>{subscription.status === 'past_due' || subscription.status === 'unpaid' ? 'Your payment needs attention. Manage billing to update your payment method.'
-          : subscription.status === 'incomplete' ? 'Your subscription is waiting for payment.'
-          : subscription.status === 'canceled' ? 'Your subscription has ended.'
-          : subscription.status === 'paused' ? 'Your subscription is paused.'
-          : null}</p>
-        {subscription.currentPeriodEnd && active ? <p>{subscription.cancelAtPeriodEnd ? 'Scheduled to end' : 'Current billing period ends'} on {formatAccountTime(subscription.currentPeriodEnd)}.</p> : null}
-      </> : null}
-      {summary.canManageBilling ? <>
-        <p>Update payment details, view invoices, or cancel your subscription in Stripe.</p>
-        <button type="button" disabled={busy} onClick={() => { void prepare('portal'); }}>Manage or cancel subscription…</button>
-      </> : null}
-      {summary.available && !subscribed && selectedOffer ? <fieldset className="pf-billing-options" disabled={busy}>
-        <legend>Individual billing</legend>
-        {[...summary.offers].sort((a, b) => a.interval === b.interval ? 0 : a.interval === 'year' ? -1 : 1).map(offer => {
-          const annual = offer.interval === 'year' ? annualBillingComparison(offer, summary.offers.find(item => item.interval === 'month')) : null;
-          return <label className="pf-billing-choice" key={offer.interval}>
-            <input type="radio" name="individual-billing-interval" value={offer.interval} checked={selectedOffer.interval === offer.interval}
-              onChange={() => { setSelectedInterval(offer.interval); setDestination(null); }} />
-            <span>{annual ? <>Annual — {annual.monthlyEquivalent} / month. Billed {annual.yearlyTotal} yearly.{annual.savingsPercent ? <> Save {annual.savingsPercent}%.</> : null}</>
-              : <>Monthly — {formatBillingPrice(offer)}</>}</span>
-          </label>;
-        })}
-        <button type="button" disabled={busy} onClick={() => { void prepare('checkout', selectedOffer.interval); }}>
-          Continue with {selectedOffer.interval === 'year' ? 'annual' : 'monthly'} Individual…
-        </button>
-      </fieldset> : null}
-      {!summary.available && !summary.canManageBilling ? <p>Individual subscriptions are not available for purchase yet.</p> : null}
-    </> : null}
-    {state.returned === 'success' ? <p role="status">{active ? 'Your Individual subscription is active.' : 'Checkout returned. Waiting for payment confirmation; this can take a moment.'}</p>
-      : state.returned === 'cancelled' ? <p role="status">Checkout was cancelled. No subscription change has been confirmed.</p>
-      : state.returned === 'returned' ? <p role="status">Billing details refreshed.</p> : null}
-    {destination && (destination.kind === 'portal' || !subscribed) ? <p><a href={destination.url} target="_blank" rel="noopener noreferrer" onClick={event => {
-      if (!isTauri()) return;
-      event.preventDefault();
-      void openBilling(destination.url).catch(() => setError('Could not open your browser. Please try again.'));
-    }}>Continue to {destination.kind === 'checkout' ? 'secure checkout' : 'manage or cancel subscription'} ↗</a></p> : null}
-    {busy ? <p role="status">Preparing secure billing…</p> : null}
-    {state.error || error ? <p className="pf-account-error" role="alert">{state.error ?? error}</p> : null}
-    <button type="button" disabled={busy} onClick={() => { void billing.reload(); }}>Refresh billing</button>
+    <p>Current plan: <strong>{summary ? (subscribed ? 'Individual' : 'Community') : state.status === 'loading' ? 'Loading…' : 'Unavailable'}</strong></p>
+    <button type="button" className={subscribed ? undefined : 'pf-account-subscribe'} disabled={busy || (!ready && state.status !== 'error') || (ready && subscribed && !summary?.canManageBilling) || (ready && !subscribed && !summary?.available)} onClick={() => {
+      if (state.status === 'error') {
+        const current = generation.current; setError(null); setOpening(true);
+        void billing.reload().catch(() => { if (current === generation.current) setError('Could not load billing. Please try again.'); })
+          .finally(() => { if (current === generation.current) setOpening(false); });
+        return;
+      }
+      if (subscribed) void open('portal');
+      else void open('checkout');
+    }}>{subscribed ? 'Manage account' : 'Subscribe now'}</button>
+    {state.status === 'loading' ? <p role="status">Loading billing…</p> : busy ? <p role="status">Opening secure billing…</p> : null}
+    {error || state.error ? <p className="pf-account-error" role="alert">{error ?? state.error}</p> : null}
   </section>;
 }

@@ -4,18 +4,18 @@ Open your account from the name or email at the top of PushForm, then find **Pla
 
 ## Choose a billing interval
 
-When Individual subscriptions are available, this section shows the configured monthly and annual prices. Annual billing is selected initially and shows its monthly equivalent, the full amount billed yearly, and the savings compared with monthly billing when applicable. You can switch to monthly billing. Choose **Continue with annual Individual…** or **Continue with monthly Individual…**, then use **Continue to secure checkout** to open Stripe's checkout in a separate browser tab or your desktop's browser. Review the total, taxes and renewal terms there before purchasing. Your open PushForm documents stay in place.
+If you do not have a current subscription, choose **Subscribe now**. Stripe's checkout opens directly in a separate browser tab or your desktop's browser. Monthly billing is the initial option. You can choose annual billing in Stripe before purchasing. Review the amount, billing interval, taxes and renewal terms there, then subscribe. Your open PushForm documents stay in place.
 
 ## Confirm a purchase
 
-Returning from checkout does not by itself confirm payment. PushForm reads your subscription status from the billing service. If payment confirmation is still pending, wait a moment or choose **Refresh billing**. If you completed checkout in another browser, return to PushForm and refresh billing there.
+Stripe returns you to the billing page on the PushForm website. A return from checkout does not by itself confirm payment: the billing page reads your subscription status from the billing service. If payment confirmation is still pending, wait a moment. The app also checks your subscription when you return to its window. You can close and reopen your account to read the latest billing status.
 
 ## Manage or cancel billing
 
-Existing billing customers can choose **Manage or cancel subscription…**, then **Continue to manage or cancel subscription**, to open Stripe's billing portal. Available actions, including payment-method updates and cancellation, depend on the portal's configuration. After returning to PushForm, refresh billing to see the latest status. A scheduled cancellation shows when the current billing period ends.
+With a current subscription, **Manage account** opens Stripe's billing portal directly. Update your payment method, view invoices, or choose **Cancel subscription** there. When you return to the app, your account reads the latest billing status. Stripe’s billing portal shows the scheduled subscription end date. If your subscription has already ended, **Subscribe now** opens Stripe's checkout instead.
 
 If Individual subscriptions are not yet available for purchase, there is no checkout option. Billing status does not publish files or change file privacy.
 
 ## Account deletion and subscriptions
 
-Deleting your account cancels any active subscription when the account is permanently deleted, after the 48-hour cancellation window. To stop renewal sooner, use **Manage or cancel subscription…**. Cancelling an account deletion request during the window does not cancel your subscription.
+Deleting your account cancels any active subscription when the account is permanently deleted, after the 48-hour cancellation window. To stop renewal sooner, use **Manage account** and cancel your subscription in Stripe. Cancelling an account deletion request during the window does not cancel your subscription.

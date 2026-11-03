@@ -2287,6 +2287,7 @@
 .pf-account-dialog input { box-sizing: border-box; width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); background: var(--pf-surface-2); color: var(--pf-text); font: inherit; }
 .pf-account-dialog button:not(.pf-iconbtn) { height: auto; padding: 8px 12px; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); background: var(--pf-surface-2); color: var(--pf-text); font: inherit; cursor: pointer; }
 .pf-account-dialog button.pf-account-primary { width: 100%; background: var(--pf-accent); border-color: var(--pf-accent); color: #fff; }
+.pf-account-dialog button.pf-account-subscribe { background: #ef5a2a; border-color: #ef5a2a; color: #0f1217; font-weight: 600; }
 .pf-account-dialog button:disabled { opacity: .55; cursor: default; }
 .pf-account-dialog :is(input, button, summary):focus-visible, .pf-account-button:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 2px; }
 .pf-account-secondary { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }

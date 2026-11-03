@@ -357,6 +357,16 @@ it('has the model agent finish parts, use library woods and check for overlaps a
   expect(rules).toContain('only when asked');
 });
 
+it('gives the model agent a raised-panel and bead recipe with wide, shallow bevels and router profiles', () => {
+  const rules = MODEL_DOCUMENT_RULES(ctx());
+  expect(rules).toContain('its opening plus twice the groove depth');
+  expect(rules).toContain('a tongue about 1/4 to 5/16 in thick');
+  expect(rules).toContain('wide and shallow, never 45 degrees');
+  expect(rules).toContain('distance2 down the edges');
+  expect(rules).toContain('profile_edges profile "bead" on its inside edges');
+  expect(rules).toContain('bead the stiles and rails before joining them');
+});
+
 it('gives the model agent casework finish and grain conventions it can verify', () => {
   const rules = MODEL_DOCUMENT_RULES(ctx());
   expect(rules).toContain('prefinished maple plywood inside');

@@ -35,12 +35,13 @@ it('shows cancellation date and management for a subscriber without offering dup
     subscription: { status: 'active', interval: 'month', currentPeriodEnd: '2026-12-02T00:00:00Z', cancelAtPeriodEnd: true } } });
   const view = render(<AccountBilling billing={billing} state={state} />);
   expect(screen.getByText(/Scheduled to end/)).toBeTruthy();
+  expect(screen.getByText('Update payment details, view invoices, or cancel your subscription in Stripe.')).toBeTruthy();
   expect(screen.queryByRole('button', { name: /Continue with/ })).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Manage billing…' }));
-  expect(await screen.findByRole('link', { name: /Continue to billing management/ })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Manage or cancel subscription…' }));
+  expect(await screen.findByRole('link', { name: /Continue to manage or cancel subscription/ })).toBeTruthy();
   expect(billing.portal).toHaveBeenCalledOnce();
   view.rerender(<AccountBilling billing={billing} state={{ ...state, summary: { ...state.summary!, subscription: { ...state.summary!.subscription!, status: 'past_due' } } }} />);
-  expect(screen.getByRole('link', { name: /Continue to billing management/ })).toBeTruthy();
+  expect(screen.getByRole('link', { name: /Continue to manage or cancel subscription/ })).toBeTruthy();
   expect(screen.getByText(/Your payment needs attention/)).toBeTruthy();
 });
 it.each(['active', 'past_due'])('discards prepared checkout after confirmation of a %s subscription', async status => {
@@ -52,7 +53,7 @@ it.each(['active', 'past_due'])('discards prepared checkout after confirmation o
     subscription: { status, interval: 'year', currentPeriodEnd: '2027-11-03T00:00:00Z', cancelAtPeriodEnd: false } } };
   view.rerender(<AccountBilling billing={billing} state={confirmed} />);
   expect(screen.queryByRole('link', { name: /Continue to secure checkout/ })).toBeNull();
-  expect(screen.getByRole('button', { name: 'Manage billing…' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Manage or cancel subscription…' })).toBeTruthy();
   view.rerender(<AccountBilling billing={billing} state={{ ...confirmed, summary: { ...confirmed.summary!, subscription: { ...confirmed.summary!.subscription!, status: 'canceled' } } }} />);
   expect(screen.queryByRole('link', { name: /Continue to secure checkout/ })).toBeNull();
 });

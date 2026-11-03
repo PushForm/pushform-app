@@ -412,6 +412,7 @@ it('locks both workspaces on sign-out and preserves tabs, edits, and undo after 
     createLayoutFromChooser(); pageMenu('Page 1', 'Add Page After');
     expect(screen.getByRole('treeitem', { name: 'Page 2' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Account: artist@example.com' }));
+    fireEvent.click(screen.getByText('Danger Zone', { selector: 'summary' }));
     fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
     await screen.findByRole('heading', { name: 'Sign in to PushForm' });
     expect(screen.queryByLabelText('Layout workspace')).toBeNull();

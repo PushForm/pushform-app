@@ -22,7 +22,7 @@ If you use an individual account, company-only fields are not required. Closing 
 
 Local editing can continue offline while your sign-in session remains valid. If the session expires, the workspace locks until you sign in. Open documents and undo history remain in memory for the same account in the same page.
 
-Signing out signs out other tabs sharing that browser session, but not other devices. Signing in as a different account uses that account's own workspace and recovery data.
+To sign out, open account details and expand **Danger Zone** below Extensions, then choose **Sign out**. Signing out signs out other tabs sharing that browser session, but not other devices. Signing in as a different account uses that account's own workspace and recovery data.
 
 ## Mailing list
 

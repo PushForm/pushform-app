@@ -98,7 +98,10 @@ export function AccountBilling({ billing, state }: { billing: CloudBillingStore;
           : null}</p>
         {subscription.currentPeriodEnd && active ? <p>{subscription.cancelAtPeriodEnd ? 'Scheduled to end' : 'Current billing period ends'} on {formatAccountTime(subscription.currentPeriodEnd)}.</p> : null}
       </> : null}
-      {summary.canManageBilling ? <button type="button" disabled={busy} onClick={() => { void prepare('portal'); }}>Manage billing…</button> : null}
+      {summary.canManageBilling ? <>
+        <p>Update payment details, view invoices, or cancel your subscription in Stripe.</p>
+        <button type="button" disabled={busy} onClick={() => { void prepare('portal'); }}>Manage or cancel subscription…</button>
+      </> : null}
       {summary.available && !subscribed && selectedOffer ? <fieldset className="pf-billing-options" disabled={busy}>
         <legend>Individual billing</legend>
         {[...summary.offers].sort((a, b) => a.interval === b.interval ? 0 : a.interval === 'year' ? -1 : 1).map(offer => {
@@ -123,7 +126,7 @@ export function AccountBilling({ billing, state }: { billing: CloudBillingStore;
       if (!isTauri()) return;
       event.preventDefault();
       void openBilling(destination.url).catch(() => setError('Could not open your browser. Please try again.'));
-    }}>Continue to {destination.kind === 'checkout' ? 'secure checkout' : 'billing management'} ↗</a></p> : null}
+    }}>Continue to {destination.kind === 'checkout' ? 'secure checkout' : 'manage or cancel subscription'} ↗</a></p> : null}
     {busy ? <p role="status">Preparing secure billing…</p> : null}
     {state.error || error ? <p className="pf-account-error" role="alert">{state.error ?? error}</p> : null}
     <button type="button" disabled={busy} onClick={() => { void billing.reload(); }}>Refresh billing</button>

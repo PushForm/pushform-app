@@ -13,6 +13,24 @@ import { DeletionSection, ExportSection } from './AccountLifecycle';
 import { ProfileForm } from './ProfileForm';
 import { Icon } from './Icon';
 
+/** Native details hides its contents without layout information in jsdom. Inspect ancestry explicitly. */
+function accountFocusTargets(root: HTMLElement): HTMLElement[] {
+  const targets = root.querySelectorAll<HTMLElement>('button, input:not([type="hidden"]), select, textarea, a[href], summary, [tabindex]');
+  return [...targets].filter(target => {
+    if (target.matches(':disabled') || (target.hasAttribute('tabindex') && target.tabIndex < 0)) return false;
+    for (let element: HTMLElement | null = target; element && root.contains(element); element = element.parentElement) {
+      if (element.hidden || element.hasAttribute('inert') || element.getAttribute('aria-hidden') === 'true') return false;
+      const style = getComputedStyle(element);
+      if (style.display === 'none' || style.visibility === 'hidden') return false;
+      if (element.tagName === 'DETAILS' && !element.hasAttribute('open')) {
+        const summary = [...element.children].find(child => child.tagName === 'SUMMARY');
+        if (!summary?.contains(target)) return false;
+      }
+    }
+    return true;
+  });
+}
+
 export function AccountControl({ cloud: supplied, onExtensions }: { cloud?: CloudSession | undefined;
   /** Opens the extension manager; the account dialog offers it when given. */
   onExtensions?: (() => void) | undefined }): JSX.Element {
@@ -58,13 +76,15 @@ function AccountDialog({ cloud, state, profiles, profileState, account, accountS
     const previous = document.activeElement as HTMLElement | null;
     const app = document.querySelector<HTMLElement>('.pf-app'), wasInert = app?.inert ?? false;
     if (app) app.inert = true;
-    (dialog.current?.querySelector<HTMLElement>('input:not(:disabled)') ?? dialog.current?.querySelector<HTMLElement>('button'))?.focus();
+    const initial = dialog.current ? accountFocusTargets(dialog.current) : [];
+    (initial.find(target => target.tagName === 'INPUT') ?? initial[0])?.focus();
     const keydown = (event: KeyboardEvent): void => {
       event.stopImmediatePropagation();
       if (event.key === 'Escape') { event.preventDefault(); close.current(); }
       if (event.key === 'Tab') {
         event.preventDefault();
-        const targets = [...dialog.current!.querySelectorAll<HTMLElement>(':is(button, input, select, a[href], [tabindex="0"]):not(:disabled)')];
+        const targets = dialog.current ? accountFocusTargets(dialog.current) : [];
+        if (!targets.length) return;
         const index = targets.indexOf(document.activeElement as HTMLElement);
         const next = index < 0 ? (event.shiftKey ? targets.length - 1 : 0) : (index + (event.shiftKey ? -1 : 1) + targets.length) % targets.length;
         targets[next]?.focus();
@@ -81,9 +101,12 @@ function AccountDialog({ cloud, state, profiles, profileState, account, accountS
     };
   }, []);
   const pending = state.pending !== null;
+  const pro = billingState.status === 'ready' && billingState.ownerId === state.user?.id
+    && (billingState.summary?.subscription?.status === 'active' || billingState.summary?.subscription?.status === 'trialing');
   return createPortal(<div className="pf-modal-backdrop">
     <div ref={dialog} className="pf-modal pf-account-dialog" role="dialog" aria-modal="true" aria-labelledby="pf-account-title">
-      <div className="pf-account-heading"><h2 id="pf-account-title">Your account</h2>
+      <div className="pf-account-heading"><div className="pf-account-title-row"><h2 id="pf-account-title">Your account</h2>
+        {pro ? <span className="pf-account-pro">Pro</span> : null}</div>
         <button type="button" className="pf-iconbtn" aria-label="Close account dialog" onClick={onClose}><Icon name="close" /></button>
       </div>
       {state.error ? <p className="pf-account-error" role="alert">{state.error}</p> : null}
@@ -95,20 +118,25 @@ function AccountDialog({ cloud, state, profiles, profileState, account, accountS
         <ProfileForm profiles={profiles} state={profileState} submitLabel="Save profile" savingLabel="Saving…" termsLocked />
       </section> : null}
       {billing && billingState.ownerId === state.user?.id ? <AccountBilling key={billingState.ownerId} billing={billing} state={billingState} /> : null}
-      {account ? <>
-        {accountState.error ? <p className="pf-account-error" role="alert">{accountState.error}</p> : null}
-        <ExportSection account={account} state={accountState} email={state.user?.email ?? 'your email address'} />
-        <DeletionSection account={account} state={accountState} />
-      </> : null}
+      {accountState.ownerId === state.user?.id && accountState.error ? <p className="pf-account-error" role="alert">{accountState.error}</p> : null}
       {onExtensions ? <section className="pf-account-extensions" aria-labelledby="pf-account-extensions-title">
         <h3 id="pf-account-extensions-title">Extensions</h3>
         <p>Add features to PushForm, and see what your extensions can do.</p>
         <button type="button" className="pf-btn" onClick={onExtensions}>Manage extensions…</button>
       </section> : null}
-      <p>Signing out returns you to the sign-in screen. Your open documents will be available when you sign back in.</p>
-      <button className="pf-account-primary" type="button" disabled={pending} onClick={() => {
-          void cloud.signOut().then(ok => { if (ok) close.current(); });
-      }}>{state.pending === 'signingOut' ? 'Signing out…' : 'Sign out'}</button>
+      <details className="pf-account-danger-zone">
+        <summary tabIndex={0}>Danger Zone</summary>
+        <div className="pf-account-danger-content">
+          {account ? <>
+            <ExportSection account={account} state={accountState} email={state.user?.email ?? 'your email address'} />
+            <DeletionSection account={account} state={accountState} />
+          </> : null}
+          <p>Signing out returns you to the sign-in screen. Your open documents will be available when you sign back in.</p>
+          <button className="pf-account-primary" type="button" disabled={pending} onClick={() => {
+            void cloud.signOut().then(ok => { if (ok) close.current(); });
+          }}>{state.pending === 'signingOut' ? 'Signing out…' : 'Sign out'}</button>
+        </div>
+      </details>
     </div>
   </div>, document.body);
 }

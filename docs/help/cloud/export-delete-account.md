@@ -2,7 +2,7 @@
 
 ## Request a copy of your saved files
 
-In account details, open **Export your files** and choose **Email me my files**. PushForm prepares a ZIP of the current saved revision of your documents as native model and Layout files, arranged by project and folder.
+In account details, expand **Danger Zone** below Extensions, then find **Export your files** and choose **Email me my files**. PushForm prepares a ZIP of the current saved revision of your documents as native model and Layout files, arranged by project and folder.
 
 The export is independent of account deletion. Pending unsaved edits are not a substitute for saved revisions, so check save status first. If this section is unavailable in your installation, account-wide export is not enabled there.
 
@@ -14,7 +14,7 @@ A request already being prepared is reused instead of creating a duplicate. Limi
 
 ## Request account deletion
 
-In account details, choose **Delete account…** and read the confirmation. **Delete my account** schedules deletion after 48 hours. Your account stays usable during that delay.
+In account details, expand **Danger Zone**, choose **Delete account…** and read the confirmation. **Delete my account** schedules deletion after 48 hours. Your account stays usable during that delay.
 
 The red banner and account dialog show when deletion will happen. Exporting files is optional and separate. If deletion controls are unavailable, the installation does not currently offer this account operation.
 

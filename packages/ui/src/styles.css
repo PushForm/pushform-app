@@ -2276,12 +2276,19 @@
 .pf-modal.pf-account-dialog { box-sizing: border-box; width: min(440px, calc(100vw - 36px)); min-width: 0; max-height: calc(100dvh - 36px); padding: 24px; overflow: auto; color: var(--pf-text); font: 14px/1.5 var(--pf-font); overflow-wrap: anywhere; }
 .pf-account-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .pf-account-heading h2 { margin: 0; font-size: 20px; }
+.pf-account-title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.pf-account-pro { display: inline-flex; align-items: center; flex-shrink: 0; padding: 2px 8px; border: 1px solid var(--pf-accent); border-radius: 999px; background: var(--pf-accent-bg); color: var(--pf-accent); font-size: 11px; font-weight: 700; line-height: 1.4; }
+.pf-account-danger-zone { margin-top: 20px; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); }
+.pf-account-danger-zone > summary { padding: 10px 12px; color: var(--pf-danger); font-weight: 600; cursor: pointer; }
+.pf-account-danger-zone[open] > summary { border-bottom: 1px solid var(--pf-border); }
+.pf-account-danger-content { padding: 14px 12px; }
+.pf-account-danger-content > p { margin: 0 0 12px; }
 .pf-account-dialog form { display: grid; gap: 10px; }
 .pf-account-dialog input { box-sizing: border-box; width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); background: var(--pf-surface-2); color: var(--pf-text); font: inherit; }
-.pf-account-dialog button:not(.pf-iconbtn) { padding: 8px 12px; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); background: var(--pf-surface-2); color: var(--pf-text); font: inherit; cursor: pointer; }
+.pf-account-dialog button:not(.pf-iconbtn) { height: auto; padding: 8px 12px; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); background: var(--pf-surface-2); color: var(--pf-text); font: inherit; cursor: pointer; }
 .pf-account-dialog button.pf-account-primary { width: 100%; background: var(--pf-accent); border-color: var(--pf-accent); color: #fff; }
 .pf-account-dialog button:disabled { opacity: .55; cursor: default; }
-.pf-account-dialog :is(input, button):focus-visible, .pf-account-button:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 2px; }
+.pf-account-dialog :is(input, button, summary):focus-visible, .pf-account-button:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 2px; }
 .pf-account-secondary { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .pf-account-error { color: var(--pf-danger); }
 /* Export and deletion sections in account details. */

@@ -22,6 +22,8 @@ Work in the context containing two valid solids. Clear the selection first if yo
 
 **Subtract** removes the cutter after cutting the target. **Trim** keeps the cutter. **Undo** restores the completed operation. If two solids are already selected, choosing the tool applies it immediately using the selection order.
 
+To bore a round hole, draw a circle outside the target, use **Push/Pull** to make a cylinder that passes through it, then subtract the cylinder. Save the resulting model as a `.pf` file to reopen and continue editing it later.
+
 This is Modeling's cutter-first order. Layout's Difference uses target-first order. A loose edge or a flat sketch face cannot serve as a solid cutter.
 
 ## Combine solids with Union or Outer Shell

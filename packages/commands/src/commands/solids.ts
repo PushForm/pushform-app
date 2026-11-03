@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { z } from 'zod';
-import type { FaceLocalId, Id, MeshData } from '@pushform/core';
+import type { CurveId, FaceLocalId, Id, MeshData, SurfaceId } from '@pushform/core';
 import { PushFormError } from '@pushform/core';
 import type { BooleanResult, KernelClient, KernelComponent } from '@pushform/kernel';
-import { applyKernelResult, bodyFromMesh } from '@pushform/model';
+import { allocId, applyKernelResult, bodyFromMesh } from '@pushform/model';
 import type { Body, DocumentDraft, DocumentState, EntityContainer, Draft, KernelFaceOrigin, KernelResult } from '@pushform/model';
 import { defineCommand } from '../registry/Command';
 import type { AnyCommand } from '../registry/Command';
@@ -80,6 +80,27 @@ function bodyFromComponent(draft: DocumentDraft, root: EntityContainer, c: Kerne
 function removeBody(root: EntityContainer, id: Id): void {
   root.bodies.delete(id);
   root.order = root.order.filter((x) => x !== id);
+}
+
+/** Trim keeps its cutter, so copied curve/surface records need distinct persistent IDs. */
+function reidentifyCutterMetadata(draft: DocumentDraft, body: Body, cutter: Body): void {
+  for (const cid of cutter.curves.keys()) {
+    const curve = body.curves.get(cid);
+    if (!curve) continue;
+    const id = allocId<CurveId>(draft);
+    body.curves.delete(cid);
+    body.curves.set(id, { ...curve, id });
+    for (const edge of body.edges.values()) if (edge.curveId === cid) edge.curveId = id;
+    for (const surface of body.surfaces.values()) if (surface.curveId === cid) surface.curveId = id;
+  }
+  for (const sid of cutter.surfaces.keys()) {
+    const surface = body.surfaces.get(sid);
+    if (!surface) continue;
+    const id = allocId<SurfaceId>(draft);
+    body.surfaces.delete(sid);
+    body.surfaces.set(id, { ...surface, id });
+    for (const face of body.faces.values()) if (face.surfaceId === sid) face.surfaceId = id;
+  }
 }
 
 function draftRoot(draft: DocumentDraft, host: DocumentHost): EntityContainer {
@@ -189,6 +210,9 @@ export function commitSolids(host: DocumentHost, work: SolidsKernelWork): Solids
       const k = assertUnchanged(root, keep, label);
       if (deleteOther) assertUnchanged(root, other, label);
       const bodyIds = applyComponents(draft, root, k, res.components, res.aRunId, res.nextFaceId, [{ runId: res.bRunId, body: other }]);
+      if (!deleteOther) {
+        for (const id of bodyIds) reidentifyCutterMetadata(draft, root.bodies.get(id as Id)!, other);
+      }
       const deleted: number[] = bodyIds.includes(k.id) ? [] : [k.id];
       if (deleteOther) {
         removeBody(root, other.id);

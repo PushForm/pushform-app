@@ -747,6 +747,119 @@ describe('ModelDocumentApi names across batches', () => {
   });
 });
 
+describe('ModelDocumentApi failed batches and revisions', () => {
+  const at = (api: ModelDocumentApi, expectedRevision: number, ...operations: unknown[]) => api.apply({ expectedRevision, label: 'x', operations });
+
+  it('accepts the revision a failed batch was planned against, since its own revert changed nothing', async () => {
+    const { api, root } = setup();
+    const planned = api.revision;
+    const failed = await failure(() => at(api, planned, { op: 'add_box', as: 'a', min: [0, 0, 0], max: [1, 1, 1] }, { op: 'add_box', as: 'b', min: [3, 0, 0], max: [4, 1, 1] },
+      { op: 'union', refs: ['$a', '$b'] }));
+    expect(failed.error).toMatchObject({ code: 'invalid_geometry', operationIndex: 2 });
+    // Reverting is a change, so the revision moved on, but the corrected batch still runs against the one it was planned for.
+    expect(api.revision).toBeGreaterThan(planned);
+    const fixed = await at(api, planned, { op: 'add_box', as: 'a', min: [0, 0, 0], max: [1, 1, 1] }, { op: 'add_box', as: 'b', min: [1, 0, 0], max: [2, 1, 1] },
+      { op: 'union', refs: ['$a', '$b'] });
+    expect(fixed.ok).toBe(true);
+    expect(root().bodies.size).toBe(1);
+  });
+
+  it('accepts a revision only its own batches have moved past, as parallel calls of one round send', async () => {
+    const { api, root, addBox } = setup();
+    addBox([0, 0, 5], [1, 1, 6]);
+    const planned = api.revision;
+    await at(api, planned, { op: 'add_box', min: [0, 0, 0], max: [1, 1, 1] });
+    await at(api, planned, { op: 'add_box', min: [2, 0, 0], max: [3, 1, 1] });
+    await at(api, planned, { op: 'add_box', min: [4, 0, 0], max: [5, 1, 1] });
+    expect(root().bodies.size).toBe(4);
+    // A revision from before the first of them, or one never reached, is still stale.
+    expect((await failure(() => at(api, planned - 1, { op: 'add_tag' }))).error.code).toBe('stale_revision');
+    expect((await failure(() => at(api, api.revision + 1, { op: 'add_tag' }))).error.code).toBe('stale_revision');
+  });
+
+  it('refuses a revision when anyone else changed the model after it, or the change was undone', async () => {
+    const { api, host, addBox, commands } = setup();
+    const planned = api.revision;
+    await at(api, planned, { op: 'add_box', min: [0, 0, 0], max: [1, 1, 1] });
+    addBox([5, 0, 0], [6, 1, 1]);
+    const edited = await failure(() => at(api, planned, { op: 'add_tag' }));
+    expect(edited.error).toMatchObject({ code: 'stale_revision', revision: api.revision });
+    const now = api.revision;
+    await at(api, now, { op: 'add_box', min: [8, 0, 0], max: [9, 1, 1] });
+    expect(host.undoStack.undo()).toBe(true);
+    expect((await failure(() => at(api, now, { op: 'add_tag' }))).error.code).toBe('stale_revision');
+    // Another API object's batches are someone else's too.
+    const plugin = new ModelDocumentApi(commands, 'Plugin');
+    const before = api.revision;
+    await at(api, before, { op: 'add_tag' });
+    await at(plugin, api.revision, { op: 'add_tag' });
+    expect((await failure(() => at(api, before, { op: 'add_tag' }))).error.code).toBe('stale_revision');
+  });
+
+  it('names one copy made by move, rotate, mirror or scale with as', async () => {
+    const { api, root } = setup();
+    const made = await api.apply({ expectedRevision: api.revision, label: 'Shelves', operations: [
+      { op: 'add_box', as: 'shelf', min: [0, 0, 0], max: [1, 0.3, 0.02] },
+      { op: 'make_group', as: 'g', refs: ['$shelf'] },
+      { op: 'move', as: 'g2', copy: true, refs: ['$g'], offset: [0, 0, 0.3] },
+      { op: 'rename_instance', ref: '$g2', name: 'Shelf 2' },
+      { op: 'add_box', as: 'side', min: [2, 0, 0], max: [2.02, 0.3, 1] },
+      { op: 'mirror', as: 'side2', copy: true, refs: ['$side'], origin: [3, 0, 0], normal: [1, 0, 0] },
+      { op: 'rotate', as: 'g3', copy: true, refs: ['$g2'], origin: [0, 0, 0], axis: [0, 0, 1], angleDeg: 90 },
+      { op: 'scale', as: 'side3', copy: true, refs: ['$side2'], origin: [4, 0, 0], factors: [1, 1, 0.5] },
+    ] });
+    expect(made.created.g2).toBe([...root().instances.values()].find(i => i.name === 'Shelf 2')!.id);
+    expect(made.created.g3).not.toBe(made.created.g2);
+    expect(root().bodies.has(made.created.side2 as never)).toBe(true);
+    expect(root().bodies.has(made.created.side3 as never)).toBe(true);
+    expect(root().instances.size).toBe(3);
+    expect(root().bodies.size).toBe(3);
+  });
+
+  it('refuses as on an operation that names nothing, or on a transform that is not one copy of one entity, before changing anything', async () => {
+    const { api, addBox } = setup();
+    const a = addBox([0, 0, 0], [1, 1, 1]), b = addBox([2, 0, 0], [3, 1, 1]);
+    const revision = api.revision;
+    const paint = await failure(() => at(api, revision, { op: 'add_tag', as: 't' }, { op: 'assign_tag', as: 'x', refs: [box(a)], tagId: '$t' }));
+    expect(paint.error).toMatchObject({ code: 'invalid_operation', operationIndex: 1 });
+    expect(paint.error.message).toContain('does not name a result');
+    for (const move of [{ op: 'move', as: 'm', refs: [box(a)], offset: [1, 0, 0] }, { op: 'move', as: 'm', copy: true, refs: [box(a), box(b)], offset: [1, 0, 0] },
+      { op: 'move', as: 'm', refs: [box(a)], offset: [1, 0, 0], copies: 3 }]) {
+      const error = await failure(() => at(api, revision, move));
+      expect(error.error).toMatchObject({ code: 'invalid_operation', operationIndex: 0 });
+      expect(error.error.message).toContain('names the copy');
+    }
+    expect(api.revision).toBe(revision);
+  });
+
+  it('lets an operation give again a name it reads, and refuses any other second use before changing anything', async () => {
+    const { api, root } = setup();
+    const result = await at(api, api.revision,
+      { op: 'add_box', as: 'side', min: [0, 0, 0], max: [0.02, 0.5, 0.7] },
+      { op: 'add_box', as: 'dado', min: [-0.01, 0, 0.3], max: [0.01, 0.5, 0.32] },
+      { op: 'subtract', as: 'side', target: '$side', cutters: ['$dado'] },
+      { op: 'add_box', as: 'rail', min: [0.01, 0, 0.6], max: [0.5, 0.02, 0.7] },
+      { op: 'union', as: 'side', refs: ['$side', '$rail'] },
+      { op: 'make_group', as: 'g', refs: ['$side'] });
+    expect(result.rebound).toBeUndefined();
+    expect(root().instances.size).toBe(1);
+    expect(root().bodies.size).toBe(0);
+    const revision = api.revision;
+    const twice = await failure(() => at(api, revision, { op: 'add_box', as: 'a', min: [5, 0, 0], max: [6, 1, 1] }, { op: 'add_box', as: 'a', min: [7, 0, 0], max: [8, 1, 1] }));
+    expect(twice.error).toMatchObject({ code: 'invalid_operation', operationIndex: 1 });
+    expect(twice.error.message).toContain('used twice');
+    expect(api.revision).toBe(revision);
+  });
+
+  it('explains a bare id where a reference is expected', async () => {
+    const { api, addBox } = setup();
+    const id = addBox([0, 0, 0], [1, 1, 1]);
+    const error = await failure(() => at(api, api.revision, { op: 'add_box', as: 'k', min: [0.4, -0.1, 0.4], max: [0.6, 0.1, 0.6] }, { op: 'subtract', target: id, cutters: ['$k'] }));
+    expect(error.error).toMatchObject({ code: 'invalid_operation', operationIndex: 1 });
+    expect(error.error.message).toContain(`{kind: "body", id: ${id}}`);
+  });
+});
+
 describe('ModelDocumentApi edge selectors', () => {
   const queryAll = { container: null, kinds: null, ids: null, facing: null, containing: null, fields: null, offset: null, limit: null };
   const volumeOf = (api: ModelDocumentApi, id: number) => api.query({ ...queryAll, kinds: ['body'], ids: [id] }).entities[0]!.volume!;

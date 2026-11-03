@@ -22,6 +22,8 @@ Highlighting does not click a tool, select an object, or edit the document for y
 
 Press Enter to send and Shift+Enter to start a new line. The return-key button at the right of the message box also sends. Choose the microphone button to dictate: what you say is added to the message box until you choose it again, and nothing is sent until you send it. Dictation needs a browser or system that offers speech recognition and permission to use the microphone. Choosing Dictate requests microphone access before starting speech recognition. When prompted, allow microphone access. If you stop Dictate or close chat while permission is pending, dictation stays stopped. A separate speech-recognition-unavailable notice means the browser has blocked or cannot provide its speech service, even if microphone access is allowed. If Chrome shows a permission notice without a prompt, open the site controls beside the address bar and allow the microphone, then reload and try Dictate again. Also check that your operating system allows Chrome to use the microphone.
 
+While a reply is running, choose the small red square **Stop** button beside the message box to cancel it. Edits already applied remain and can be undone.
+
 ## Post pictures
 
 You can show the agent a picture in any conversation, in either editor or on Home. Click **+** at the left of the message box, paste an image into the message box, or drop one on the chat. PNG, JPEG and WebP images work. Pictures show above the message box until you send; click **×** on one to leave it out. They go with your next message, and you can send pictures without any text.

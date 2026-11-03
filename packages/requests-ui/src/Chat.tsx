@@ -562,7 +562,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
         <textarea ref={composer} data-autofocus data-submit-on-enter aria-label="Your message" rows={1} value={text} maxLength={4000}
           disabled={textLocked} onPaste={pastePictures}
           placeholder={!current.conversation ? 'Describe what you need' : reporting ? 'Type your answer, or say skip' : 'Ask a follow-up question'} onChange={event => setText(event.target.value)} />
-        {working ? <button type="button" className="pf-fr-stop" onClick={stop}>Stop</button> : null}
+        {working ? <button type="button" className="pf-fr-stop" aria-label="Stop" title="Stop" onClick={stop}><span aria-hidden="true" /></button> : null}
         {/* Enter sends and Shift+Enter starts a new line; the return key appears once there is something to send. */}
         {text.trim() || pictures.length ? <button type="submit" className="pf-fr-icon" aria-label="Send" title="Send (Enter)" disabled={(busy && !waitingForGuidance) || !attachmentsReady}>{RETURN_ICON}</button> : null}
         <button type="button" className={`pf-fr-icon${dictation.listening ? ' is-listening' : ''}`} aria-label={dictation.listening ? 'Stop dictation' : 'Dictate'} aria-pressed={dictation.listening}

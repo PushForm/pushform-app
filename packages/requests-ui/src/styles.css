@@ -99,7 +99,9 @@
 :is(.pf-fr-popover, .pf-fr-docked) .pf-fr-composer button.pf-fr-icon:hover:not(:disabled) { color: var(--pf-text); background: color-mix(in srgb, var(--pf-text) 8%, transparent); }
 :is(.pf-fr-popover, .pf-fr-docked) .pf-fr-composer button.pf-fr-icon.is-listening { color: var(--pf-danger); }
 /* Stop ends a running turn; it sits beside the icons while the agent works. */
-:is(.pf-fr-popover, .pf-fr-docked) .pf-fr-composer .pf-fr-stop { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; height: 32px; padding: 0 12px; border-radius: 8px; }
+:is(.pf-fr-popover, .pf-fr-docked) .pf-fr-composer button.pf-fr-stop { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 28px; height: 32px; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--pf-danger); }
+.pf-fr-stop > span { width: 12px; height: 12px; background: currentColor; }
+.pf-fr-stop:hover > span { opacity: .75; }
 
 .pf-fr-attachments ul { list-style: none; padding: 0; margin: 4px 0; }
 .pf-fr-attachments li { display: flex; align-items: center; gap: 8px; margin: 4px 0; }

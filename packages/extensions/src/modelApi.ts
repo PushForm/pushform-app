@@ -253,7 +253,7 @@ export class ModelDocumentApi {
     const host = this.camera;
     if (!host || !renderer) throw this.failure('unavailable', 'There is no viewport here, so the model cannot be pictured.');
     const path = [...this.host.context.path], state = this.host.doc.state;
-    const ref = this.resolver(path, new Map()).ref;
+    const ref = this.resolver(path, this.names, -1).ref;
     const { width: vw, height: vh } = host.viewportSize();
     // The viewport's proportions, kept within 2:1 either way so a narrow window still gives a usable picture.
     const aspect = Math.min(2, Math.max(0.5, vw / Math.max(1, vh)));

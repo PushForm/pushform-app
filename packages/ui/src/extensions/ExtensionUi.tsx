@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type JSX, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { formatAngleDeg, parseLength, typedLengthUnit, type UnitSettings } from '@pushform/core';
-import type { UiEvent, UiNode, UiNodeOf, UiQuantity, UiTable, UiTreeItem } from '@pushform/extension-protocol';
-import type { ExtensionUiHost } from '@pushform/extensions';
+import type { UiEvent, UiIcon, UiNode, UiNodeOf, UiQuantity, UiTable, UiTreeItem } from '@pushform/extension-protocol';
+import { Icon } from '../components/Icon';
 import { formatArea, formatLength, formatVolume } from '../engine/format';
 import { VectorView } from './VectorView';
 
@@ -25,19 +25,23 @@ export function ExtensionUiView({ tree, units, onEvent }: ExtensionUiProps): JSX
   return <div className="pf-xui"><Node node={tree} units={units} onEvent={onEvent} /></div>;
 }
 
-/** The interface an extension mounted for `target`, kept current as the extension updates it. */
-export function ExtensionTarget({ host, target, units, empty }: {
-  readonly host: ExtensionUiHost;
-  readonly target: string;
-  readonly units: UnitSettings;
-  readonly empty?: ReactNode;
-}): JSX.Element | null {
-  const shown = useSyncExternalStore(
-    (notify) => host.subscribe((changed) => { if (changed === target) notify(); }),
-    () => host.get(target),
-  );
-  if (!shown) return <>{empty ?? null}</>;
-  return <ExtensionUiView tree={shown.tree} units={units} onEvent={(event) => host.dispatch(target, event)} />;
+/** The host's icon for each icon name an extension may use. Only these names reach the icon component. */
+export const UI_ICON_NAMES: Readonly<Record<UiIcon, string>> = {
+  add: 'plus', remove: 'minus', delete: 'page-delete', edit: 'page-rename', copy: 'page-duplicate', save: 'save', print: 'print',
+  download: 'download', upload: 'upload', search: 'search', filter: 'filter', refresh: 'refresh', settings: 'settings', help: 'help',
+  info: 'panel-entityInfo', warning: 'warning', check: 'check', close: 'close', more: 'more', menu: 'menu', expand: 'chevron-down',
+  collapse: 'chevron-up', up: 'page-up', down: 'page-down', show: 'eye', hide: 'eye-off', lock: 'lock', unlock: 'unlock', undo: 'undo',
+  redo: 'redo', folder: 'folder', document: 'layer-page', tag: 'tool-tag', tags: 'panel-tags', palette: 'panel-styles', box: 'outliner-group',
+  component: 'outliner-component', table: 'tool-table', ruler: 'tool-dimension', 'saw-blade': 'saw-blade',
+};
+
+function UiIconGlyph({ icon }: { icon: UiIcon }): JSX.Element {
+  return <span className="pf-xui-icon" aria-hidden="true"><Icon name={UI_ICON_NAMES[icon]} size={14} /></span>;
+}
+
+/** A button's contents: its icon, if any, and its label unless the button shows only the icon. */
+function ButtonFace({ label, icon, iconOnly }: { label: string; icon: UiIcon | undefined; iconOnly: boolean }): JSX.Element {
+  return <>{icon ? <UiIconGlyph icon={icon} /> : null}{iconOnly ? null : <span>{label}</span>}</>;
 }
 
 interface NodeProps<T extends UiNode = UiNode> {
@@ -75,11 +79,20 @@ function Node({ node, units, onEvent }: NodeProps): JSX.Element | null {
           <progress aria-label={node.label} {...(node.value === null ? {} : { value: node.value, max: 1 })} />
         </div>
       );
-    case 'button':
+    case 'button': {
+      const iconOnly = node.variant === 'icon';
       return (
         <button type="button" className={`pf-btn pf-xui-button is-${node.variant ?? 'secondary'}`} disabled={node.disabled}
-          onClick={() => onEvent({ component: node.id, event: 'press' })}>{node.label}</button>
+          {...(iconOnly ? { 'aria-label': node.label, title: node.label } : {})}
+          onClick={() => onEvent({ component: node.id, event: 'press' })}>
+          <ButtonFace label={node.label} icon={node.icon} iconOnly={iconOnly} />
+        </button>
       );
+    }
+    case 'section':
+      return <Section node={node} units={units} onEvent={onEvent} />;
+    case 'menu':
+      return <Menu node={node} onEvent={onEvent} />;
     case 'textField':
       return <TextField node={node} units={units} onEvent={onEvent} />;
     case 'numberField':
@@ -191,7 +204,7 @@ function NumberField({ node, units, onEvent }: NodeProps<UiNodeOf<'numberField'>
     <input id={id} className="pf-xui-input is-number" inputMode="decimal" value={draft} disabled={node.disabled}
       aria-invalid={error ? true : undefined} aria-describedby={errorId}
       onFocus={() => setEditing(true)} onChange={(e) => setDraft(e.target.value)} onBlur={commit}
-      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { setDraft(shown); setProblem(null); } }} />
+      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape' && (draft !== shown || problem)) { e.preventDefault(); setDraft(shown); setProblem(null); } }} />
   )}</Field>;
 }
 
@@ -205,11 +218,140 @@ function ChoiceField({ node, onEvent }: Omit<NodeProps<UiNodeOf<'choice'>>, 'uni
   )}</Field>;
 }
 
+/**
+ * A disclosure. The header button reports the state the user asked for and the extension sends the tree back with
+ * `collapsed` set; header actions are buttons of their own, so they do not toggle the section.
+ */
+function Section({ node, units, onEvent }: NodeProps<UiNodeOf<'section'>>): JSX.Element {
+  const base = useId();
+  const open = !node.collapsed;
+  return (
+    <section className={`pf-xui-section${open ? ' is-open' : ''}`} aria-labelledby={`${base}-title`}>
+      <div className="pf-xui-section-head">
+        <button type="button" className="pf-xui-section-toggle" aria-expanded={open} aria-controls={`${base}-body`}
+          aria-labelledby={`${base}-title`} aria-describedby={node.subtitle || node.badge ? `${base}-detail` : undefined}
+          onClick={() => onEvent({ component: node.id, event: 'collapse', collapsed: open })}>
+          <span className="pf-xui-section-chevron" aria-hidden="true"><Icon name={open ? 'chevron-down' : 'chevron-right'} size={14} /></span>
+          <span id={`${base}-title`} className="pf-xui-section-title">{node.title}</span>
+          {node.subtitle || node.badge ? (
+            <span id={`${base}-detail`} className="pf-xui-section-detail">
+              {node.badge ? <span className="pf-xui-section-badge">{node.badge}</span> : null}
+              {node.subtitle ? <span className="pf-xui-section-subtitle">{node.subtitle}</span> : null}
+            </span>
+          ) : null}
+        </button>
+        {node.actions?.length ? (
+          <div className="pf-xui-section-actions" role="group" aria-label={`${node.title} actions`}>
+            {node.actions.map((action) => (
+              <button key={action.id} type="button" className={`pf-btn pf-xui-button is-${action.icon ? 'icon' : 'secondary'} is-action`} disabled={action.disabled}
+                {...(action.icon ? { 'aria-label': action.label, title: action.label } : {})}
+                onClick={() => onEvent({ component: node.id, event: 'press', action: action.id })}>
+                <ButtonFace label={action.label} icon={action.icon} iconOnly={action.icon !== undefined} />
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+      {open ? (
+        <div id={`${base}-body`} className="pf-xui-section-body">
+          {node.children.map((child) => <Node key={child.id} node={child} units={units} onEvent={onEvent} />)}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * A dropdown menu drawn by the host. The button opens it (a click, Enter, Space or an arrow key) with focus on the
+ * first item; arrows move through the enabled items and wrap, Home and End jump, Escape or Tab closes and returns
+ * focus to the button, and so does choosing an item, which is reported as `select`. A click elsewhere closes it.
+ */
+function Menu({ node, onEvent }: Omit<NodeProps<UiNodeOf<'menu'>>, 'units'>): JSX.Element {
+  const base = useId();
+  const [open, setOpen] = useState(false);
+  const [alignEnd, setAlignEnd] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const enabled = node.items.map((item, i) => (item.disabled ? -1 : i)).filter((i) => i >= 0);
+  const iconOnly = node.variant === 'icon';
+
+  const close = (refocus: boolean): void => {
+    setOpen(false);
+    if (refocus) button.current?.focus();
+  };
+  const focusItem = (index: number): void => { document.getElementById(`${base}-item-${index}`)?.focus(); };
+  const openAt = (index: number): void => { setOpen(true); setTimeout(() => focusItem(index), 0); };
+
+  useLayoutEffect(() => {
+    if (!open || !list.current) return;
+    // A menu near the right edge opens leftwards rather than running out of the panel.
+    const rect = list.current.getBoundingClientRect();
+    setAlignEnd(rect.right > (document.documentElement.clientWidth || window.innerWidth) - 4);
+    focusItem(enabled[0] ?? 0);
+    const outside = (e: PointerEvent): void => { if (!wrap.current?.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('pointerdown', outside);
+    return () => document.removeEventListener('pointerdown', outside);
+    // Only opening positions the list and moves focus.
+  }, [open]);
+
+  const buttonKey = (e: KeyboardEvent<HTMLButtonElement>): void => {
+    if (node.disabled) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); openAt(e.key === 'ArrowDown' ? enabled[0] ?? 0 : enabled[enabled.length - 1] ?? 0); }
+  };
+  const itemKey = (e: KeyboardEvent<HTMLDivElement>): void => {
+    const current = Number((e.target as HTMLElement).id.replace(`${base}-item-`, ''));
+    const at = enabled.indexOf(current);
+    const step = (delta: number): void => { if (enabled.length) focusItem(enabled[(Math.max(at, 0) + delta + enabled.length) % enabled.length]!); };
+    switch (e.key) {
+      case 'ArrowDown': step(at < 0 ? 0 : 1); break;
+      case 'ArrowUp': step(at < 0 ? 0 : -1); break;
+      case 'Home': if (enabled.length) focusItem(enabled[0]!); break;
+      case 'End': if (enabled.length) focusItem(enabled[enabled.length - 1]!); break;
+      case 'Escape': close(true); break;
+      case 'Tab': close(true); return;
+      default: return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  const choose = (id: string): void => {
+    close(true);
+    onEvent({ component: node.id, event: 'select', value: id });
+  };
+
+  return (
+    <div ref={wrap} className="pf-xui-menu">
+      <button ref={button} type="button" id={`${base}-button`} className={`pf-btn pf-xui-button is-${iconOnly ? 'icon' : 'secondary'}`}
+        aria-haspopup="menu" aria-expanded={open} aria-controls={open ? `${base}-list` : undefined} disabled={node.disabled}
+        {...(iconOnly ? { 'aria-label': node.label, title: node.label } : {})}
+        onClick={() => (open ? close(false) : openAt(enabled[0] ?? 0))} onKeyDown={buttonKey}>
+        <ButtonFace label={node.label} icon={node.icon} iconOnly={iconOnly} />
+        {iconOnly ? null : <span className="pf-xui-menu-caret" aria-hidden="true"><Icon name="chevron-down" size={12} /></span>}
+      </button>
+      {open ? (
+        <div ref={list} id={`${base}-list`} className={`pf-xui-menu-list${alignEnd ? ' is-end' : ''}`} role="menu" aria-labelledby={`${base}-button`} onKeyDown={itemKey}>
+          {node.items.map((item, i) => (
+            <div key={item.id} className={item.separator ? 'has-separator' : undefined}>
+              <button type="button" id={`${base}-item-${i}`} role="menuitem" className="pf-xui-menu-item" tabIndex={-1}
+                disabled={item.disabled} aria-disabled={item.disabled ? true : undefined} onClick={() => choose(item.id)}>
+                {item.label}
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function Tabs({ node, units, onEvent }: NodeProps<UiNodeOf<'tabs'>>): JSX.Element {
   const base = useId();
   const index = Math.max(0, node.tabs.findIndex((t) => t.id === node.selected));
+  const count = node.tabs.length;
   const move = (e: KeyboardEvent, i: number) => {
-    const next = e.key === 'ArrowRight' ? (i + 1) % node.tabs.length : e.key === 'ArrowLeft' ? (i - 1 + node.tabs.length) % node.tabs.length : -1;
+    const next = e.key === 'ArrowRight' ? (i + 1) % count : e.key === 'ArrowLeft' ? (i - 1 + count) % count
+      : e.key === 'Home' ? 0 : e.key === 'End' ? count - 1 : -1;
     if (next < 0) return;
     e.preventDefault();
     onEvent({ component: node.id, event: 'select', value: node.tabs[next]!.id });
@@ -218,7 +360,8 @@ function Tabs({ node, units, onEvent }: NodeProps<UiNodeOf<'tabs'>>): JSX.Elemen
   const panel = node.children[index];
   return (
     <div className="pf-xui-tabs">
-      <div className="pf-tabs" role="tablist" aria-label={node.label}>
+      {/* The tabs wrap onto more rows rather than running out of a narrow panel. */}
+      <div className="pf-tabs pf-xui-tablist" role="tablist" aria-label={node.label}>
         {node.tabs.map((tab, i) => (
           <button key={tab.id} id={`${base}-tab-${i}`} type="button" role="tab" className={`pf-tab${i === index ? ' is-active' : ''}`}
             aria-selected={i === index} aria-controls={`${base}-panel`} tabIndex={i === index ? 0 : -1}
@@ -260,8 +403,40 @@ function TreeView({ node, onEvent }: Omit<NodeProps<UiNodeOf<'tree'>>, 'units'>)
 
 /** Height of one table row in pixels, fixed so that only the rows in view need rendering. */
 export const TABLE_ROW_PX = 26;
+/** The rows' viewport before it is measured; the stylesheet sets its real maximum height. */
 const TABLE_VIEW_PX = 360;
 const OVERSCAN = 8;
+/** Room kept below the last row for a scrollbar the browser draws over the content rather than beside it. */
+export const OVERLAY_SCROLLBAR_PX = 14;
+
+/**
+ * The height of the rows' viewport (without the header or a scrollbar), and whether a horizontal scrollbar would be
+ * drawn over the last row, so the table keeps room for it.
+ */
+function useTableViewport(scroller: RefObject<HTMLDivElement | null>, deps: readonly unknown[]): { view: number; overlayBar: boolean } {
+  const [measured, setMeasured] = useState({ view: TABLE_VIEW_PX, overlayBar: false });
+  useLayoutEffect(() => {
+    const element = scroller.current;
+    if (!element) return;
+    const measure = (): void => {
+      const style = getComputedStyle(element);
+      const borders = (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0);
+      const wide = element.scrollWidth > element.clientWidth + 1;
+      // A scrollbar beside the content takes height from the box; one drawn over it takes none.
+      const overlayBar = wide && element.offsetHeight > 0 && element.offsetHeight - borders - element.clientHeight < 1;
+      const view = element.clientHeight > 0 ? Math.max(TABLE_ROW_PX, element.clientHeight - TABLE_ROW_PX) : TABLE_VIEW_PX;
+      setMeasured((m) => (m.view === view && m.overlayBar === overlayBar ? m : { view, overlayBar }));
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    if (element.firstElementChild) observer.observe(element.firstElementChild);
+    return () => observer.disconnect();
+    // The rows and columns shown change what overflows.
+  }, deps);
+  return measured;
+}
 
 function Table({ node, units, onEvent }: NodeProps<UiTable>): JSX.Element {
   const hidden = new Set(node.hiddenColumns ?? []);
@@ -271,8 +446,9 @@ function Table({ node, units, onEvent }: NodeProps<UiTable>): JSX.Element {
   const [editing, setEditing] = useState<{ row: string; column: string } | null>(null);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
+  const { view, overlayBar } = useTableViewport(scroller, [node.rows.length, columns.length]);
   const first = Math.max(0, Math.floor(scrollTop / TABLE_ROW_PX) - OVERSCAN);
-  const last = Math.min(node.rows.length, Math.ceil((scrollTop + TABLE_VIEW_PX) / TABLE_ROW_PX) + OVERSCAN);
+  const last = Math.min(node.rows.length, Math.ceil((scrollTop + view) / TABLE_ROW_PX) + OVERSCAN);
   const hideable = node.columns.filter((c) => c.hideable);
 
   const select = (row: string, additive: boolean) => {
@@ -309,7 +485,8 @@ function Table({ node, units, onEvent }: NodeProps<UiTable>): JSX.Element {
           </div>
         ) : null}
       </div>
-      <div ref={scroller} className="pf-xui-table-scroll" style={{ maxHeight: TABLE_VIEW_PX }} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
+      <div ref={scroller} className={`pf-xui-table-scroll${overlayBar ? ' has-overlay-scrollbar' : ''}`}
+        style={overlayBar ? { paddingBottom: OVERLAY_SCROLLBAR_PX } : undefined} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
         <table className="pf-xui-table" role="grid" aria-label={node.label} aria-rowcount={node.rows.length + 1}
           aria-multiselectable={node.selection === 'multiple' ? true : undefined}>
           <thead>

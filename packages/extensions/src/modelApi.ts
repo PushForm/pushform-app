@@ -20,6 +20,7 @@ import {
   type DocumentState, type EntityContainer, type EntityRef, type FaceRecord, type Rgb, type Scene, type SceneFlags,
 } from '@pushform/model';
 import type { ToolCallResult } from './layoutApi';
+import { simplifyLoop } from './loopSimplify';
 import { frameCamera } from './modelCamera';
 
 /** A structured API error; the message is safe to show to the user and to a model. */
@@ -96,7 +97,7 @@ export class ModelDocumentApi {
     if (action.type !== 'play' && action.type !== 'stop') runtime.stop();
     switch (action.type) {
       case 'set_camera':
-        shown = this.cameraFor(action.camera, path, this.resolver(path, new Map()).ref);
+        shown = this.cameraFor(action.camera, path, this.resolver(path, new Map(), 'any').ref);
         runtime.animateCamera(camera, shown, action.animate ?? true ? runtime.animationSettings.transitionSeconds : 0);
         break;
       case 'activate_scene': {
@@ -120,6 +121,30 @@ export class ModelDocumentApi {
     }
     const active = runtime.activeSceneId === null ? undefined : this.host.doc.state.scenes.get(runtime.activeSceneId as never);
     return { ok: true, revision: this.revision, camera: cameraOut(shown ?? camera.getState()), activeScene: active ? { id: active.id, name: active.name } : null, playing: runtime.playing };
+  }
+
+  /** The selection, as references carrying the instance path of their container. */
+  selection(): ModelRef[] { return this.host.selection.refs.map(refOut); }
+
+  /**
+   * Replaces the selection; an empty list clears it. A reference without a path names an entity of the container
+   * open in the editor; one with a path names an entity inside a group or component, which is selected in place, as
+   * the Object browser selects a nested entity: the editor's open container stays as it is. Makes no undo entry.
+   * Rejects with `ModelApiFailure` naming the first reference that does not exist, selecting nothing.
+   */
+  select(refs: readonly ModelRefInput[]): ModelRef[] {
+    const { ref } = this.resolver([...this.host.context.path] as Id[], new Map(), 'any');
+    const resolved = refs.map(ref);
+    this.host.selection.set(resolved);
+    return this.selection();
+  }
+
+  /**
+   * Frames the camera on the world bounds of entities, keeping the view direction; with a path, an entity inside a
+   * group or component.
+   */
+  frame(refs: readonly ModelRefInput[], animate = true): ModelViewResult {
+    return this.view({ action: { type: 'set_camera', camera: { mode: 'framed', subject: { refs: [...refs] } }, animate } });
   }
 
   private get camera(): CameraHost | null { return this.commands.ctx.camera ?? null; }
@@ -232,8 +257,18 @@ export class ModelDocumentApi {
     for (const text of container.texts.values()) if (keep('text', text.id)) all.push(() => ({ ...base(path, 'text', text.id, text), text: text.text.slice(0, 500) }));
     for (const dim of container.dimensions.values()) if (keep('dimension', dim.id)) all.push(() => base(path, 'dimension', dim.id, dim));
     const offset = query.offset ?? 0, limit = query.limit ?? DEFAULT_QUERY_LIMIT;
+    // A page ends early once the face loops on it reach the point budget, so a page of curved, holed faces stays
+    // within one message; `next` says where to continue.
+    const entities: ModelEntitySummary[] = [];
+    let points = 0;
+    for (let i = offset; i < all.length && entities.length < limit && points < MODEL_LIMITS.loopPointsPerQueryPage; i++) {
+      const entity = all[i]!();
+      entities.push(entity);
+      points += loopPointsOf(entity);
+    }
+    const next = offset + entities.length;
     return { revision: this.revision, container: [...path], worldTransform: contextMatrix(state, path).map(round), total: all.length, offset,
-      entities: all.slice(offset, offset + limit).map(make => make()), next: offset + limit < all.length ? offset + limit : null };
+      entities, next: next < all.length ? next : null };
   }
 
   /** Validate, check the revision, then run every operation as one undo entry; rejects with `ModelApiFailure`. */
@@ -304,8 +339,12 @@ export class ModelDocumentApi {
     }
   }
 
-  /** Resolves `"$name"`s and entity references of the container at `path`. */
-  private resolver(path: Id[], names: ReadonlyMap<string, Named>) {
+  /**
+   * Resolves `"$name"`s and entity references of the container at `path`. A reference may carry its own path:
+   * `containers` says whether any container is accepted (selecting and framing) or only `path` itself (a batch,
+   * whose operations act on one container).
+   */
+  private resolver(path: Id[], names: ReadonlyMap<string, Named>, containers: 'batch' | 'any' = 'batch') {
     const host = this.host;
     const named = (value: string): Named => {
       const name = LOCAL_REFERENCE.exec(value)?.[1];
@@ -314,8 +353,20 @@ export class ModelDocumentApi {
       return found;
     };
     const ref = (input: ModelRefInput): EntityRef => {
-      const state = host.doc.state, container = containerAt(state, path);
+      const state = host.doc.state;
       const target = typeof input === 'string' ? named(input) : input;
+      const own = typeof input === 'string' ? undefined : input.path;
+      let at = path;
+      if (own && !samePath(own, path)) {
+        if (containers === 'batch') throw this.failure('invalid_reference', `${target.kind} ${target.id} is at instance path [${own.join(', ')}], not in the container this batch edits [${path.join(', ')}]; set the batch's container to edit it.`);
+        at = [...own] as Id[];
+      }
+      let container: EntityContainer;
+      try {
+        container = containerAt(state, at);
+      } catch {
+        throw this.failure('invalid_reference', `No group or component at instance path [${at.join(', ')}]. Call ${MODEL_TOOLS.query.name} for current ids.`);
+      }
       const exists = (() => {
         switch (target.kind) {
           case 'instance': return container.instances.has(target.id as Id);
@@ -330,9 +381,10 @@ export class ModelDocumentApi {
         }
       })();
       const shown = typeof input === 'string' ? input : `${input.kind} ${input.id}${'faceId' in input ? ` face ${input.faceId}` : ''}`;
-      if (!exists) throw this.failure('invalid_reference', `There is no ${shown} in the container being edited. Call ${MODEL_TOOLS.query.name} for current ids.`);
-      if (target.kind === 'face') return { kind: 'face', path, id: target.id as Id, faceId: (target as { faceId: number }).faceId as never, region: null };
-      return { kind: target.kind as 'instance', path, id: target.id as Id };
+      const where = at === path ? 'in the container being edited' : `at instance path [${at.join(', ')}]`;
+      if (!exists) throw this.failure('invalid_reference', `There is no ${shown} ${where}. Call ${MODEL_TOOLS.query.name} for current ids.`);
+      if (target.kind === 'face') return { kind: 'face', path: at, id: target.id as Id, faceId: (target as { faceId: number }).faceId as never, region: null };
+      return { kind: target.kind as 'instance', path: at, id: target.id as Id };
     };
     return { named, ref };
   }
@@ -596,10 +648,26 @@ function summarizeFace(path: readonly Id[], bodyId: Id, face: FaceRecord, fields
   return out;
 }
 
+/**
+ * A face's outline as the API reports it: the outer loop counterclockwise about the normal, holes clockwise, each
+ * simplified to the per-loop point limit with `truncated` saying whether any was. The area comes from the full loops.
+ */
 function loopFields(normal: Vec3, loops: readonly (readonly Vec3[])[]): Partial<ModelEntitySummary> {
   const outer = loops[0] ?? [];
   const area = loops.reduce((sum, loop, i) => sum + (i === 0 ? 1 : -1) * Math.abs(v3dot(newell(loop), normal)) / 2, 0);
-  return { normal: vec(normal), area: round(area), outerLoop: outer.slice(0, MODEL_LIMITS.loopPointsPerFace).map(vec), loopPointCount: outer.length, holes: loops.length - 1 };
+  let truncated = false;
+  const report = (loop: readonly Vec3[], counterclockwise: boolean): ModelVec3[] => {
+    const kept = simplifyLoop(loop, MODEL_LIMITS.loopPointsPerFace);
+    if (kept.length < loop.length) truncated = true;
+    const out = kept.map(vec);
+    return (v3dot(newell(loop), normal) >= 0) === counterclockwise ? out : out.reverse();
+  };
+  return { normal: vec(normal), area: round(area), outerLoop: report(outer, true), loopPointCount: outer.length, holes: loops.slice(1).map(loop => report(loop, false)), truncated };
+}
+
+/** Points a face's loops put on a page, counted so that a page of faces stays within one message. */
+function loopPointsOf(entity: ModelEntitySummary): number {
+  return (entity.outerLoop?.length ?? 0) + (entity.holes?.reduce((sum, hole) => sum + hole.length, 0) ?? 0);
 }
 
 function faceContains(face: FaceRecord, p: Vec3): boolean {

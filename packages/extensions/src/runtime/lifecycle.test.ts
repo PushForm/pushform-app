@@ -101,7 +101,7 @@ describe('context', () => {
         try { void context[name]; } catch (e) { seen[name] = e; }
     } }, { grants: ['model.read'] });
     await session.activate();
-    expect(seen.keys).toEqual(['commands', 'extensionId', 'log', 'model', 'signal', 'ui']);
+    expect(seen.keys).toEqual(['commands', 'document', 'extensionId', 'log', 'model', 'signal', 'ui']);
     expect(seen.selection).toMatchObject({ code: 'permission.denied', details: { permissions: ['selection.read', 'selection.write', 'viewport.presentation'] } });
     expect(seen.clipboard).toMatchObject({ code: 'permission.denied' });
     expect(seen.compute).toMatchObject({ code: 'unavailable' });

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import {
-  ExtensionError, RUNTIME_PROTOCOL_VERSION, measureMessage, methodPermission, runtimeMessageSchema, serviceAvailable,
-  type DeactivationReason, type ExtensionErrorData, type ExtensionManifest, type ExtensionPermission,
-  type ExtensionServiceName, type RuntimeMessage,
+  ExtensionError, HOST_EVENT_TARGET, MESSAGE_RATE_LIMITS, RUNTIME_PROTOCOL_VERSION, TokenBucket, measureMessage, methodPermission,
+  runtimeMessageSchema, serviceAvailable, type DeactivationReason, type ExtensionErrorData, type ExtensionManifest,
+  type ExtensionPermission, type ExtensionServiceName, type RuntimeMessage,
 } from '@pushform/extension-protocol';
 import type { RuntimePort } from './port';
 
@@ -27,10 +27,16 @@ export interface ServiceCall {
   readonly extensionId: string;
   readonly generation: number;
   /**
-   * The document a handle from the input names. Throws `permission.denied` for anything this session did not issue,
-   * including handles of closed documents, so services never resolve a document id the extension supplied itself.
+   * The document a handle from the input names. Throws `document.closed` for a handle this session issued whose
+   * document has closed, and `permission.denied` for anything else it did not issue, so services never resolve a
+   * document id the extension supplied itself.
    */
   document(handle: unknown): string;
+  /**
+   * The document of the extension's latest invocation that acts on one, for calls that name no handle. Throws
+   * `document.closed` when that document has closed, and `unavailable` when no invocation acted on a document yet.
+   */
+  currentDocument(): string;
   /**
    * Reports progress of this call to the extension: a fraction from 0 to 1 (or null when only a partial result is
    * new), and optionally the best partial result so far. Dropped once the call has ended or been cancelled.
@@ -63,6 +69,27 @@ export interface SessionLimits {
   readonly maxPendingRequests: number;
   /** Invalid messages tolerated before the session fails as a protocol violation and the runtime is to be ended. */
   readonly maxInvalidMessages: number;
+  /**
+   * How many messages the runtime may send at once and per second, of any kind, before the session fails as a
+   * protocol violation and the runtime is to be ended. Counted before a message is measured or parsed.
+   */
+  readonly messageBurst: number;
+  readonly messagesPerSecond: number;
+  /** The same for the measured size of the messages, in bytes. */
+  readonly messageBytesBurst: number;
+  readonly messageBytesPerSecond: number;
+  /**
+   * After this many messages, the host asks the runtime for a heartbeat answer, whatever its state. The runtime
+   * answers at once, but the answer queues behind everything it sent before, so a late answer measures how far
+   * behind the host is on this runtime's messages.
+   */
+  readonly backlogProbeMessages: number;
+  /**
+   * How long that answer may take while the runtime keeps sending (at least `backlogProbeMessages` more) before the
+   * session fails as a protocol violation. This ends a flood that the rate alone would let drain for a long time,
+   * where the browser handles messages more slowly than the rate allows.
+   */
+  readonly backlogMs: number;
   /** How often an active runtime is asked to answer a heartbeat. */
   readonly heartbeatMs: number;
   /**
@@ -74,7 +101,9 @@ export interface SessionLimits {
 
 export const DEFAULT_SESSION_LIMITS: SessionLimits = {
   loadMs: 10_000, activateMs: 10_000, deactivateMs: 2_000, maxPendingRequests: 32, maxInvalidMessages: 50,
-  heartbeatMs: 2_000, unresponsiveMs: 10_000,
+  heartbeatMs: 2_000, unresponsiveMs: 10_000, backlogProbeMessages: 1_000, backlogMs: 1_000,
+  messageBurst: MESSAGE_RATE_LIMITS.messages.burst, messagesPerSecond: MESSAGE_RATE_LIMITS.messages.perSecond,
+  messageBytesBurst: MESSAGE_RATE_LIMITS.bytes.burst, messageBytesPerSecond: MESSAGE_RATE_LIMITS.bytes.perSecond,
 };
 
 export type SessionState = 'loading' | 'loaded' | 'activating' | 'active' | 'deactivating' | 'stopped' | 'failed';
@@ -93,6 +122,8 @@ export interface ExtensionSessionOptions {
   readonly services?: ServiceImplementations;
   readonly limits?: Partial<SessionLimits>;
   readonly onFailure?: (failure: SessionFailure) => void;
+  /** Told once when the extension's `activate` succeeded. */
+  readonly onActivated?: () => void;
   /** The runtime generation this session serves; a restart creates a new session with a new generation. */
   readonly generation?: number;
   /**
@@ -100,6 +131,11 @@ export interface ExtensionSessionOptions {
    * If it fails, activation fails and no extension code runs.
    */
   readonly beforeActivate?: () => Promise<void>;
+  /**
+   * Told when an invocation starts acting on a different document than the latest one did, just before the runtime
+   * receives the invocation, so the host can tell the extension about the document first.
+   */
+  readonly onDocument?: (documentId: string) => void;
 }
 
 export interface InvokeOptions {
@@ -117,6 +153,8 @@ export interface InvokeOptions {
 }
 
 let nextGeneration = 1;
+/** Handles of closed documents remembered, so a late call learns the document closed rather than that it never existed. */
+const CLOSED_HANDLES = 256;
 const randomHandle = (): string => `doc_${crypto.randomUUID().replaceAll('-', '')}`;
 
 interface PendingInvocation {
@@ -132,10 +170,16 @@ export class ExtensionSession {
   readonly generation: number;
   private readonly documentOfHandle = new Map<string, string>();
   private readonly handleOfDocument = new Map<string, string>();
+  private readonly closedHandles = new Set<string>();
+  /** The document of the latest invocation that acted on one. */
+  private lastDocument: string | null = null;
+  private lastDocumentClosed = false;
+  private readonly onDocument: ((documentId: string) => void) | undefined;
   private readonly port: RuntimePort;
   private readonly services: ServiceImplementations;
   private readonly limits: SessionLimits;
   private readonly onFailure: ((failure: SessionFailure) => void) | undefined;
+  private readonly onActivated: (() => void) | undefined;
   private readonly beforeActivate: (() => Promise<void>) | undefined;
   private readonly contributions: ReadonlySet<string>;
   private currentState: SessionState = 'loading';
@@ -147,11 +191,15 @@ export class ExtensionSession {
   private lastUserAction = -Infinity;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private lastPong = 0;
-  private nextPing = 1;
+  /** The heartbeat the runtime has not answered yet: its random number, when it was sent, messages received since. */
+  private ping: { n: number; sentAt: number; received: number } | null = null;
+  private sinceAnswer = 0;
   private readonly invocations = new Map<number, PendingInvocation>();
   private readonly requests = new Map<number, AbortController>();
   private readonly unlisten: () => void;
   private readonly loadTimer: ReturnType<typeof setTimeout>;
+  private readonly messageBudget: TokenBucket;
+  private readonly byteBudget: TokenBucket;
   /** Messages from the runtime that failed validation and were dropped without effect. */
   invalidMessages = 0;
 
@@ -164,8 +212,13 @@ export class ExtensionSession {
     this.services = options.services ?? {};
     this.limits = { ...DEFAULT_SESSION_LIMITS, ...options.limits };
     this.onFailure = options.onFailure;
+    this.onActivated = options.onActivated;
     this.beforeActivate = options.beforeActivate;
+    this.onDocument = options.onDocument;
     this.contributions = new Set(options.manifest.contributions.map((c) => c.id));
+    const now = performance.now();
+    this.messageBudget = new TokenBucket(this.limits.messageBurst, this.limits.messagesPerSecond, now);
+    this.byteBudget = new TokenBucket(this.limits.messageBytesBurst, this.limits.messageBytesPerSecond, now);
     let settleLoad!: { resolve(): void; reject(error: ExtensionError): void };
     this.loaded = new Promise<void>((resolve, reject) => { settleLoad = { resolve, reject }; });
     this.loaded.catch(() => {});
@@ -231,6 +284,11 @@ export class ExtensionSession {
     if (options.userAction) this.noteUserAction();
     const scopes = options.document === undefined ? options.scopes ?? [] : [...(options.scopes ?? []), `document:${options.document}`];
     const document = options.document === undefined ? undefined : this.openDocument(options.document);
+    if (options.document !== undefined && (options.document !== this.lastDocument || this.lastDocumentClosed)) {
+      this.lastDocument = options.document;
+      this.lastDocumentClosed = false;
+      try { this.onDocument?.(options.document); } catch { /* telling the extension about the document is best effort */ }
+    }
     return new Promise((resolve, reject) => {
       const onAbort = () => this.cancelInvocation(invocation);
       options.signal?.addEventListener('abort', onAbort, { once: true });
@@ -251,6 +309,15 @@ export class ExtensionSession {
     // Events come only from the user's input on the extension's own interface.
     this.noteUserAction();
     this.port.post({ ...event, type: 'event' });
+  }
+
+  /**
+   * Sends an event of the host's own to the runtime, such as a document change. Unlike `postEvent` it is not the
+   * user's input and counts as no user gesture. Dropped unless the extension is active.
+   */
+  notify(component: string, event: string, payload: Record<string, unknown>): void {
+    if (this.currentState !== 'active') return;
+    this.port.post({ ...payload, type: 'event', target: HOST_EVENT_TARGET, component, event });
   }
 
   /** Records that the user just acted on this extension. */
@@ -280,14 +347,25 @@ export class ExtensionSession {
     if (handle !== undefined) {
       this.handleOfDocument.delete(documentId);
       this.documentOfHandle.delete(handle);
+      this.closedHandles.add(handle);
+      if (this.closedHandles.size > CLOSED_HANDLES) this.closedHandles.delete(this.closedHandles.values().next().value!);
     }
+    if (documentId === this.lastDocument) this.lastDocumentClosed = true;
     this.cancelScope(`document:${documentId}`);
   }
 
   private resolveDocument(handle: unknown): string {
     const documentId = typeof handle === 'string' ? this.documentOfHandle.get(handle) : undefined;
-    if (documentId === undefined) throw new ExtensionError('permission.denied', 'The document handle is not valid for this extension; the document may have closed.');
-    return documentId;
+    if (documentId !== undefined) return documentId;
+    if (typeof handle === 'string' && this.closedHandles.has(handle)) throw new ExtensionError('document.closed', 'The document has closed.');
+    throw new ExtensionError('permission.denied', 'The document handle is not valid for this extension.');
+  }
+
+  private currentDocument(): string {
+    if (this.lastDocument === null)
+      throw new ExtensionError('unavailable', 'No document yet: call this from a command or panel that acts on a document, or pass its handle.');
+    if (this.lastDocumentClosed || !this.handleOfDocument.has(this.lastDocument)) throw new ExtensionError('document.closed', 'The document has closed.');
+    return this.lastDocument;
   }
 
   /**
@@ -328,8 +406,18 @@ export class ExtensionSession {
         this.fail('unresponsive', new ExtensionError('extension.failed', 'The extension stopped responding and was ended.'), () => {});
         return;
       }
-      this.port.post({ type: 'ping', n: this.nextPing++ });
+      if (!this.ping) this.sendPing(performance.now());
     }, this.limits.heartbeatMs);
+  }
+
+  /**
+   * Asks the runtime to answer. The number is random, so only a runtime that read this ping can answer it, and only
+   * one ping is outstanding at a time: the runtime answers each at once, and its answers arrive in order.
+   */
+  private sendPing(now: number): void {
+    const [high, low] = crypto.getRandomValues(new Uint32Array(2));
+    this.ping = { n: (high! & 0x1f_ffff) * 0x1_0000_0000 + low!, sentAt: now, received: 0 };
+    this.port.post({ type: 'ping', n: this.ping.n });
   }
 
   private stopHeartbeat(): void {
@@ -356,14 +444,27 @@ export class ExtensionSession {
     this.requests.clear();
     reject(error);
     this.unlisten();
+    // Closing the port also drops whatever the runtime has queued, so a flood ends here rather than when it drains.
+    this.port.close();
     this.onFailure?.({ kind, error: error.toJSON() });
   }
 
   private receive(raw: unknown, lifecycle: (message: RuntimeMessage) => void): void {
     if (this.currentState === 'stopped' || this.currentState === 'failed') return;
-    // Size first, before anything reads the message. An oversized request or result still gets its structured
+    // The rate first, before the message is looked at: a flooding runtime costs the editor one count per message
+    // until its budget runs out, and then nothing.
+    const now = performance.now();
+    if (!this.messageBudget.take(1, now)) return this.flooded('messages', `more than ${this.limits.messagesPerSecond} messages a second`);
+    if (this.ping) {
+      if (++this.ping.received >= this.limits.backlogProbeMessages && now - this.ping.sentAt > this.limits.backlogMs)
+        return this.flooded('backlog', 'messages faster than PushForm could handle them');
+    } else if (++this.sinceAnswer >= this.limits.backlogProbeMessages) this.sendPing(now);
+    // Size next, before anything reads the message. An oversized request or result still gets its structured
     // answer, so the extension learns why instead of waiting forever.
-    if (measureMessage(raw) === null) {
+    const bytes = measureMessage(raw);
+    if (bytes !== null && !this.byteBudget.take(bytes, now))
+      return this.flooded('bytes', `more than ${Math.round(this.limits.messageBytesPerSecond / (1024 * 1024))} MiB of messages a second`);
+    if (bytes === null) {
       this.invalid();
       const fields = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : {};
       const tooLarge = new ExtensionError('limit.exceeded', 'The message is larger than an extension may send.');
@@ -392,6 +493,7 @@ export class ExtensionSession {
         this.startHeartbeat();
         this.settleActivation?.resolve();
         this.settleActivation = null;
+        this.onActivated?.();
         return;
       case 'activation-failed':
         if (this.currentState !== 'activating') return;
@@ -416,9 +518,18 @@ export class ExtensionSession {
         this.stopped?.resolve();
         return;
       case 'pong':
-        this.lastPong = performance.now();
+        // Only the answer to the outstanding ping counts; any other pong is well-formed and ignored.
+        if (message.n !== this.ping?.n) return;
+        this.lastPong = now;
+        this.ping = null;
+        this.sinceAnswer = 0;
         return;
     }
+  }
+
+  /** The runtime sent faster than its budget allows: the session fails, and the runtime is to be ended. */
+  private flooded(limit: 'messages' | 'bytes' | 'backlog', rate: string): void {
+    this.fail('protocol-violation', new ExtensionError('extension.failed', `The extension sent ${rate} and was stopped.`, { limit: `message-rate.${limit}` }), () => {});
   }
 
   /** Counts a dropped message; a runtime that keeps sending them is treated as hostile and its session fails. */
@@ -449,6 +560,7 @@ export class ExtensionSession {
       const result = await implementation(message.input, {
         signal: controller.signal, extensionId: this.manifest.id, generation: this.generation,
         document: (handle) => this.resolveDocument(handle),
+        currentDocument: () => this.currentDocument(),
         userActivated: (withinMs = USER_ACTIVATION_MS) => performance.now() - this.lastUserAction <= withinMs,
         progress: (value, partial) => {
           if (this.requests.get(message.id) !== controller || controller.signal.aborted) return;

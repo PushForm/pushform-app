@@ -3,20 +3,33 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   CommandRegistry, DocumentHost, SERVICE_DOCUMENT, SERVICE_KERNEL, componentCommands, contextCommands, editCommands, groupCommands,
-  materialCommands, modelCommands, sketchCommands, tagCommands, transformCommands,
+  materialCommands, modelCommands, sketchCommands, tagCommands, transformCommands, type CameraHost, type CameraState,
 } from '@pushform/commands';
-import { MODEL_TOOLS, type ModelBatchResult } from '@pushform/extension-protocol';
+import { MODEL_LIMITS, MODEL_TOOLS, type ModelBatchResult, type ModelEntitySummary, type ModelVec3 } from '@pushform/extension-protocol';
 import { InlineBackend, KernelClient } from '@pushform/kernel';
 import { ModelApiFailure, ModelDocumentApi, runModelTool } from './modelApi';
 
 const kernels: KernelClient[] = [];
 afterEach(() => { for (const kernel of kernels.splice(0)) kernel.dispose(); });
 
-function setup() {
+/** The parts of a viewport framing uses: a camera looking at the origin from the front right, in a 16:9 view. */
+function fakeCamera(): CameraHost & { state: CameraState } {
+  const camera = {
+    state: { eye: [10, -10, 5], target: [0, 0, 0], up: [0, 0, 1], fov: 35, projection: 'perspective', orthoHeight: 10 } as CameraState,
+    getState: () => camera.state,
+    setState: (state: CameraState) => { camera.state = state; },
+    viewportSize: () => ({ width: 1600, height: 900 }),
+    sceneBounds: () => null,
+  };
+  return camera as unknown as CameraHost & { state: CameraState };
+}
+
+function setup(options: { camera?: CameraHost } = {}) {
   const host = new DocumentHost();
   const kernel = new KernelClient(new InlineBackend());
   kernels.push(kernel);
-  const commands = new CommandRegistry({ tx: host, services: new Map<string, unknown>([[SERVICE_DOCUMENT, host], [SERVICE_KERNEL, kernel]]) });
+  const commands = new CommandRegistry({ tx: host, ...(options.camera ? { camera: options.camera } : {}),
+    services: new Map<string, unknown>([[SERVICE_DOCUMENT, host], [SERVICE_KERNEL, kernel]]) });
   for (const group of [editCommands, modelCommands, sketchCommands, transformCommands, groupCommands, componentCommands, contextCommands, tagCommands, materialCommands])
     commands.registerAll(group);
   const api = new ModelDocumentApi(commands, 'AI Chat');
@@ -53,7 +66,7 @@ describe('ModelDocumentApi reads', () => {
     expect(listing.entities[0]!.volume).toBeCloseTo(1);
     const top = api.query({ container: null, kinds: ['face'], ids: [id], facing: [0, 0, 1], containing: null, fields: ['geometry'], offset: null, limit: null });
     expect(top.total).toBe(1);
-    expect(top.entities[0]).toMatchObject({ ref: { kind: 'face', id }, normal: [0, 0, 1], holes: 0 });
+    expect(top.entities[0]).toMatchObject({ ref: { kind: 'face', id }, normal: [0, 0, 1], holes: [], truncated: false, loopPointCount: 4 });
     expect(top.entities[0]!.area).toBeCloseTo(1);
     expect(top.entities[0]!.bounds).toBeUndefined();
     const side = api.query({ container: null, kinds: ['face'], ids: null, facing: null, containing: [1, 0.5, 0.5], fields: null, offset: null, limit: null });
@@ -67,6 +80,113 @@ describe('ModelDocumentApi reads', () => {
     expect(page).toMatchObject({ total: 3, offset: 1, next: 2 });
     expect(() => api.query({ container: [999], kinds: null, ids: null, facing: null, containing: null, fields: null, offset: null, limit: null })).toThrow(/No group or component/);
     expect(() => api.query({ limit: 1000 })).toThrow(ModelApiFailure);
+  });
+});
+
+describe('ModelDocumentApi face outlines', () => {
+  const faces = (api: ReturnType<typeof setup>['api'], kinds: ('face' | 'sketchFace')[], ids: number[] | null = null, limit: number | null = null) =>
+    api.query({ container: null, kinds, ids, facing: null, containing: null, fields: ['geometry'], offset: null, limit });
+  /** Twice the signed area of a loop about the normal: positive counterclockwise. */
+  const signedArea = (loop: ModelVec3[], normal: ModelVec3): number => {
+    let x = 0, y = 0, z = 0;
+    for (let i = 0; i < loop.length; i++) {
+      const a = loop[i]!, b = loop[(i + 1) % loop.length]!;
+      x += (a[1] - b[1]) * (a[2] + b[2]); y += (a[2] - b[2]) * (a[0] + b[0]); z += (a[0] - b[0]) * (a[1] + b[1]);
+    }
+    return x * normal[0] + y * normal[1] + z * normal[2];
+  };
+  const circle = (count: number, radius: number, z: number): [number, number, number][] =>
+    Array.from({ length: count }, (_, i): [number, number, number] => [0.5 + radius * Math.cos((2 * Math.PI * i) / count), 0.5 + radius * Math.sin((2 * Math.PI * i) / count), z]);
+  /** Replaces the loops of the top face of a box with `loops`, as a cut or an import would leave them. */
+  const setTopLoops = (host: ReturnType<typeof setup>['host'], bodyId: number, loops: [number, number, number][][]) => host.edit('Loops', draft => {
+    const body = draft.definitions.get(draft.rootDefinitionId)!.entities.bodies.get(bodyId as never)!;
+    const top = [...body.faces.values()].find(face => face.plane.n[2] > 0.5)!;
+    top.loops = loops;
+  });
+  const topOf = (api: ReturnType<typeof setup>['api'], bodyId: number): ModelEntitySummary =>
+    api.query({ container: null, kinds: ['face'], ids: [bodyId], facing: [0, 0, 1], containing: null, fields: ['geometry'], offset: null, limit: null }).entities[0]!;
+
+  it('leaves a plain triangle as it is', () => {
+    const { api, host, addBox } = setup();
+    const id = addBox([0, 0, 0], [1, 1, 1]);
+    setTopLoops(host, id, [[[0, 0, 1], [1, 0, 1], [0, 1, 1]]]);
+    const top = topOf(api, id);
+    expect(top).toMatchObject({ outerLoop: [[0, 0, 1], [1, 0, 1], [0, 1, 1]], holes: [], truncated: false, loopPointCount: 3 });
+    expect(top.area).toBeCloseTo(0.5);
+  });
+
+  it('reports a hole of a solid face clockwise about the normal, with the outline counterclockwise', () => {
+    const { api, host, addBox } = setup();
+    const id = addBox([0, 0, 0], [1, 1, 1]);
+    // The hole is stored counterclockwise here; the API reports it clockwise regardless.
+    setTopLoops(host, id, [[[0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], [[0.25, 0.25, 1], [0.75, 0.25, 1], [0.75, 0.75, 1], [0.25, 0.75, 1]]]);
+    const top = topOf(api, id);
+    expect(top.holes).toHaveLength(1);
+    expect(top.holes![0]).toHaveLength(4);
+    expect(top.holes![0]!.every(p => p[2] === 1)).toBe(true);
+    expect(signedArea(top.outerLoop!, top.normal!)).toBeGreaterThan(0);
+    expect(signedArea(top.holes![0]!, top.normal!)).toBeLessThan(0);
+    expect(top.area).toBeCloseTo(0.75);
+    expect(top).toMatchObject({ truncated: false, loopPointCount: 4 });
+  });
+
+  it('reports a sketch face drawn around another as an outline with a hole', () => {
+    const { api, commands } = setup();
+    commands.execute('sketch.rectangle', { a: [0, 0, 0], b: [2, 0, 0], c: [2, 2, 0], d: [0, 2, 0] });
+    commands.execute('sketch.rectangle', { a: [0.5, 0.5, 0], b: [1.5, 0.5, 0], c: [1.5, 1.5, 0], d: [0.5, 1.5, 0] });
+    const listing = faces(api, ['sketchFace']);
+    expect(listing.total).toBe(2);
+    const outer = listing.entities.find(face => face.holes!.length === 1)!, inner = listing.entities.find(face => face.holes!.length === 0)!;
+    expect(outer.area).toBeCloseTo(3);
+    expect(inner.area).toBeCloseTo(1);
+    expect(outer.holes![0]).toHaveLength(4);
+    expect(signedArea(outer.outerLoop!, outer.normal!)).toBeGreaterThan(0);
+    expect(signedArea(outer.holes![0]!, outer.normal!)).toBeLessThan(0);
+    expect(signedArea(inner.outerLoop!, inner.normal!)).toBeGreaterThan(0);
+    expect(outer.holes![0]!.map(p => p[0]).sort()).toEqual([0.5, 0.5, 1.5, 1.5]);
+  });
+
+  it('simplifies a loop past the point limit to the limit, keeps the corners, and says so', () => {
+    const { api, host, addBox } = setup();
+    const id = addBox([0, 0, 0], [1, 1, 1]);
+    // A 600-point outline: a circle whose 599 other points are joined by one sharp corner, inside a 600-point hole-free face.
+    const outline = circle(600, 0.45, 1);
+    outline[0] = [1, 1, 1];
+    setTopLoops(host, id, [outline]);
+    const top = topOf(api, id);
+    expect(top.outerLoop!.length).toBeLessThanOrEqual(MODEL_LIMITS.loopPointsPerFace);
+    expect(top.outerLoop!.length).toBe(512);
+    expect(top).toMatchObject({ truncated: true, loopPointCount: 600 });
+    expect(top.outerLoop).toContainEqual([1, 1, 1]);
+    expect(signedArea(top.outerLoop!, top.normal!)).toBeGreaterThan(0);
+    // The area is that of the full loop, and the simplified loop stays close to it.
+    expect(signedArea(top.outerLoop!, top.normal!) / 2).toBeCloseTo(top.area!, 2);
+    // A hole past the limit is simplified on its own.
+    setTopLoops(host, id, [[[0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], circle(700, 0.3, 1).reverse()]);
+    const holed = topOf(api, id);
+    expect(holed.outerLoop).toHaveLength(4);
+    expect(holed.holes![0]).toHaveLength(512);
+    expect(holed).toMatchObject({ truncated: true, loopPointCount: 4 });
+  });
+
+  it('ends a page of faces early once their loops reach the point budget', () => {
+    const { api, host, addBox } = setup();
+    const ids = Array.from({ length: 5 }, (_, i) => addBox([i * 2, 0, 0], [i * 2 + 1, 1, 1]));
+    // Each top face carries a 512-point outline and 20 holes of 512 points: 10,752 points a face, so four faces pass the budget.
+    const holes = Array.from({ length: 20 }, (_, i) => circle(512, 0.01, 1).map((p): [number, number, number] => [p[0] + i * 0.02 - 0.2, p[1], p[2]]).reverse());
+    for (const id of ids) setTopLoops(host, id, [circle(512, 0.45, 1), ...holes]);
+    const query = (offset: number | null, fields: ('geometry' | 'bounds')[]) =>
+      api.query({ container: null, kinds: ['face'], ids, facing: [0, 0, 1], containing: null, fields, offset, limit: null });
+    const page = query(null, ['geometry']);
+    expect(page.total).toBe(5);
+    expect(page.entities).toHaveLength(Math.ceil(MODEL_LIMITS.loopPointsPerQueryPage / (21 * 512)));
+    expect(page.entities).toHaveLength(4);
+    expect(page.next).toBe(4);
+    const rest = query(page.next, ['geometry']);
+    expect(rest).toMatchObject({ offset: 4, next: null });
+    expect(rest.entities).toHaveLength(1);
+    // Without geometry there are no loops to count, so the whole page comes at once.
+    expect(query(null, ['bounds']).entities).toHaveLength(5);
   });
 });
 
@@ -252,6 +372,68 @@ describe('ModelDocumentApi batches', () => {
     expect((await failure(() => stopped)).error.code).toBe('cancelled');
     expect(root().bodies.get(id as never)!.props.volume).toBeCloseTo(2);
     expect(api.getDocument().tags.some(tag => tag.name === 'Never')).toBe(false);
+  });
+});
+
+describe('ModelDocumentApi selection and framing', () => {
+  /** A box at the root, and a box inside a group inside another group, with the editor back at the root. */
+  async function nested(options: { camera?: CameraHost } = {}) {
+    const made = setup(options);
+    const { api, host, addBox } = made;
+    const loose = addBox([0, 0, 0], [1, 1, 1]), grouped = addBox([5, 0, 0], [6, 1, 1]);
+    const outer = (await api.apply({ expectedRevision: api.revision, label: 'Outer', operations: [{ op: 'make_group', as: 'g', refs: [box(grouped)] }] })).created.g!;
+    host.setContext([outer as never]);
+    const insideId = addBox([0, 0, 0], [1, 1, 1]);
+    const inner = (await api.apply({ expectedRevision: api.revision, label: 'Inner', operations: [{ op: 'make_group', as: 'n', refs: [box(insideId)] }] })).created.n!;
+    host.setContext([]);
+    const path = [outer, inner];
+    const part = api.query({ container: path, kinds: ['body'], ids: null, facing: null, containing: null, fields: ['bounds'], offset: null, limit: null }).entities[0]!;
+    return { ...made, loose, outer, inner, path, part };
+  }
+
+  it('selects entities inside groups by their instance path, in place, and leaves the open container alone', async () => {
+    const { api, host, loose, path, part } = await nested();
+    const selected = api.select([{ kind: 'body', id: part.ref.id, path }, { kind: 'body', id: loose }, { kind: 'instance', id: path[1]!, path: [path[0]!] }]);
+    expect(selected).toEqual([{ path, kind: 'body', id: part.ref.id }, { path: [], kind: 'body', id: loose }, { path: [path[0]], kind: 'instance', id: path[1] }]);
+    expect(host.selection.refs).toEqual(selected);
+    expect(host.context.path).toEqual([]);
+    expect(api.getDocument().selection).toEqual(selected);
+    // A ref carrying the open container's own path is the plain form.
+    expect(api.select([{ kind: 'body', id: loose, path: [] }])).toEqual([{ path: [], kind: 'body', id: loose }]);
+  });
+
+  it('refuses entities that are not at their path, or paths that lead nowhere, selecting nothing', async () => {
+    const { api, host, loose, path, part } = await nested();
+    api.select([{ kind: 'body', id: loose }]);
+    const missing = await failure(async () => api.select([{ kind: 'body', id: part.ref.id, path }, { kind: 'body', id: 999, path }]));
+    expect(missing.error).toMatchObject({ code: 'invalid_reference' });
+    expect(missing.error.message).toContain(`at instance path [${path.join(', ')}]`);
+    const nowhere = await failure(async () => api.select([{ kind: 'body', id: part.ref.id, path: [999] }]));
+    expect(nowhere.error.message).toContain('No group or component at instance path [999]');
+    expect(host.selection.refs).toEqual([{ kind: 'body', path: [], id: loose }]);
+  });
+
+  it('frames the world bounds of nested entities', async () => {
+    const camera = fakeCamera();
+    const { api, path, part, outer } = await nested({ camera });
+    await api.apply({ expectedRevision: api.revision, label: 'Shift', operations: [{ op: 'move', refs: [{ kind: 'instance', id: outer }], offset: [10, 20, 0] }] });
+    api.frame([{ kind: 'body', id: part.ref.id, path }], false);
+    // The part is a unit box at the origin of the inner group; its world center is where that container's transform puts it.
+    expect(part.bounds).toEqual({ min: [0, 0, 0], max: [1, 1, 1] });
+    const m = api.query({ container: path, kinds: ['body'], ids: null, facing: null, containing: null, fields: null, offset: null, limit: null }).worldTransform;
+    const center = [0, 1, 2].map(i => m[i]! * 0.5 + m[4 + i]! * 0.5 + m[8 + i]! * 0.5 + m[12 + i]!);
+    expect(center[0]).toBeGreaterThan(10);
+    expect(center[1]).toBeGreaterThan(20);
+    for (const i of [0, 1, 2]) expect(camera.state.target[i]).toBeCloseTo(center[i]!);
+  });
+
+  it('keeps a batch to its own container: a ref of another container names it and fails', async () => {
+    const { api, path, part } = await nested();
+    const error = await failure(() => api.apply({ expectedRevision: api.revision, label: 'Hide', operations: [{ op: 'set_hidden', refs: [{ kind: 'body', id: part.ref.id, path }], hidden: true }] }));
+    expect(error.error).toMatchObject({ code: 'invalid_reference', operationIndex: 0 });
+    expect(error.error.message).toContain(`[${path.join(', ')}]`);
+    await api.apply({ expectedRevision: api.revision, container: path, label: 'Hide', operations: [{ op: 'set_hidden', refs: [{ kind: 'body', id: part.ref.id, path }], hidden: true }] });
+    expect(api.query({ container: path, kinds: ['body'], ids: null, facing: null, containing: null, fields: null, offset: null, limit: null }).entities[0]!.hidden).toBe(true);
   });
 });
 

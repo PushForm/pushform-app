@@ -1,22 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { ExtensionPlatform, localSettingsStore, startWebRuntime, storedDeveloperMode, type SessionFailure, type InstalledExtension } from '@pushform/extensions';
+import {
+  ExtensionPlatform, localSettingsStore, startWebRuntime, storedDeveloperMode, type ExtensionDocuments, type ExtensionFailure, type InstalledExtension,
+  type UiOpenRequest,
+} from '@pushform/extensions';
+import type { UnitSettings } from '@pushform/core';
 import { browserClipboardWriter, browserFilePicker } from './browserExtensionIo';
 import { browserViewPrinter, type PrintPrompts } from './extensionPrint';
-import { indexedDbExtensionStore } from './indexedDbExtensionStore';
+import { indexedDbActivityStore, indexedDbExtensionStore } from './indexedDbExtensionStore';
+
+export { browserRunsExtensions } from './browserRunsExtensions';
 
 /** The extension runtime's two worker bootstraps, bundled as classic scripts by the web build. */
 export interface ExtensionRuntimeSources {
   readonly workerSource: string;
   readonly computeSource: string;
-}
-
-/**
- * Whether this browser can run the isolated extension runtime. WebKit refuses the runtime's workers while the page is
- * cross-origin isolated, as PushForm's is, so Safari is excluded.
- */
-export function browserRunsExtensions(userAgent: string = typeof navigator === 'undefined' ? '' : navigator.userAgent): boolean {
-  return !/AppleWebKit/.test(userAgent) || /Chrome\/|Chromium\/|Edg\//.test(userAgent);
 }
 
 /** The extension platform of a signed-in account in this browser. */
@@ -26,13 +24,22 @@ export function createBrowserExtensionPlatform(options: {
   readonly storage?: Storage;
   /** False where organization policy forbids developer mode. */
   readonly developerModeAllowed?: () => boolean;
-  readonly onFailure?: (record: InstalledExtension, failure: SessionFailure) => void;
+  readonly onFailure?: (record: InstalledExtension, failure: ExtensionFailure) => void;
   /** Where print requests wait for the user; without it extensions cannot print. */
   readonly printPrompts?: PrintPrompts;
+  /** The open documents, for the model, selection and document services. */
+  readonly documents?: ExtensionDocuments;
+  /** The units of an open document, so printed tables show quantities as its panels do. */
+  readonly units?: (documentId: string) => UnitSettings | null;
+  /** Opens an extension's panel tab for `ui.open`. */
+  readonly openUi?: (request: UiOpenRequest) => void;
+  /** Told when an extension set or framed a document's selection, so its tab can give way to the document. */
+  readonly onSelectionShown?: (extensionId: string, documentId: string) => void;
 }): ExtensionPlatform {
   const storage = options.storage ?? window.localStorage;
   return new ExtensionPlatform({
     store: indexedDbExtensionStore(options.ownerId),
+    activity: indexedDbActivityStore(options.ownerId),
     developerMode: storedDeveloperMode(storage, options.developerModeAllowed),
     startRuntime: (record) => startWebRuntime({
       files: new Map(Object.entries(record.files)), main: record.manifest.main, wasm: record.manifest.wasm.length > 0,
@@ -45,7 +52,10 @@ export function createBrowserExtensionPlatform(options: {
     filePicker: browserFilePicker(async (request) => window.confirm(`${request.extensionName} wants to ${request.kind === 'open' ? 'open' : 'save'} a file: ${request.purpose}\n\nChoose the file?`)),
     clipboard: browserClipboardWriter(),
     fetchTransport: null,
-    ...(options.printPrompts ? { printer: browserViewPrinter(options.printPrompts) } : {}),
+    ...(options.printPrompts ? { printer: browserViewPrinter(options.printPrompts, undefined, options.units) } : {}),
+    ...(options.documents ? { documents: options.documents } : {}),
+    ...(options.openUi ? { openUi: options.openUi } : {}),
+    ...(options.onSelectionShown ? { onSelectionShown: options.onSelectionShown } : {}),
     ...(options.onFailure ? { onFailure: options.onFailure } : {}),
   });
 }

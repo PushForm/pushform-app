@@ -11,9 +11,15 @@ import { LOCAL_REFERENCE } from './layout.ts';
  */
 export const MODEL_API_VERSION = 1;
 
-/** Bounds a host applies before any work; requests over them fail with `limit_exceeded`. */
+/**
+ * Bounds a host applies before any work; requests over them fail with `limit_exceeded`. The loop bounds shape query
+ * results instead of failing them: a face loop (outer or hole) of more than `loopPointsPerFace` points is simplified
+ * to that many and the face reports `truncated`, and a query page ends early, with `next` set, once the loops of the
+ * faces on it hold `loopPointsPerQueryPage` points, so a page of faces with curved outlines and many holes stays
+ * within one message.
+ */
 export const MODEL_LIMITS = {
-  operationsPerBatch: 200, pointsPerBatch: 10_000, copiesPerArray: 100, entitiesPerQuery: 200, loopPointsPerFace: 64, kernelSeconds: 30,
+  operationsPerBatch: 200, pointsPerBatch: 10_000, copiesPerArray: 100, entitiesPerQuery: 200, loopPointsPerFace: 512, loopPointsPerQueryPage: 40_000, kernelSeconds: 30,
 } as const;
 
 /**
@@ -40,14 +46,18 @@ const instancePath = z.array(id).max(64).describe('Instance ids from the model d
 export const MODEL_ENTITY_KINDS = ['instance', 'body', 'face', 'sketchEdge', 'sketchFace', 'guide', 'text', 'dimension'] as const;
 export type ModelEntityKind = (typeof MODEL_ENTITY_KINDS)[number];
 
+const refPath = instancePath.optional()
+  .describe('The instance path of the entity\'s container, as reads report it. Default: the container of the request. Selecting and framing accept entities of any container; a batch\'s operations accept only its own.');
+
 /**
- * An entity of the batch's container. A face is a face of a body: `id` is the body and `faceId` the face.
- * `"$name"` refers to an instance, body or other entity created earlier in the batch.
+ * An entity of the batch's container, or, with `path`, of the container at that instance path. A face is a face of
+ * a body: `id` is the body and `faceId` the face. `"$name"` refers to an instance, body or other entity created
+ * earlier in the batch.
  */
 export const modelRefSchema = z.union([
   z.string().regex(LOCAL_REFERENCE),
-  z.object({ kind: z.enum(['instance', 'body', 'sketchEdge', 'sketchFace', 'guide', 'text', 'dimension']), id }),
-  z.object({ kind: z.literal('face'), id: id.describe('The body.'), faceId: id }),
+  z.object({ kind: z.enum(['instance', 'body', 'sketchEdge', 'sketchFace', 'guide', 'text', 'dimension']), id, path: refPath }),
+  z.object({ kind: z.literal('face'), id: id.describe('The body.'), faceId: id, path: refPath }),
 ]);
 export type ModelRefInput = z.infer<typeof modelRefSchema>;
 const refs = z.array(modelRefSchema).min(1).max(1000);
@@ -156,9 +166,9 @@ export const modelQuerySchema = z.object({
   ids: z.array(id).max(MODEL_LIMITS.entitiesPerQuery).nullable().describe('null: all. For faces, the body ids whose faces to list.'),
   facing: direction.nullable().describe('Faces only: keep faces whose outward normal is within 1 degree of this direction.'),
   containing: point.nullable().describe('Faces only: keep faces that contain this point.'),
-  fields: z.array(z.enum(['bounds', 'geometry', 'appearance'])).nullable().describe('null: all. bounds: bounding boxes; geometry: transforms, points, normals, areas and volumes; appearance: materials.'),
+  fields: z.array(z.enum(['bounds', 'geometry', 'appearance'])).nullable().describe(`null: all. bounds: bounding boxes; geometry: transforms, points, normals, areas, volumes and face outlines (outerLoop and holes, each loop simplified to at most ${MODEL_LIMITS.loopPointsPerFace} points, with truncated: true when that happened); appearance: materials.`),
   offset: z.number().int().min(0).nullable(),
-  limit: z.number().int().min(1).max(MODEL_LIMITS.entitiesPerQuery).nullable().describe('null: 50.'),
+  limit: z.number().int().min(1).max(MODEL_LIMITS.entitiesPerQuery).nullable().describe(`null: 50. A page of faces with geometry may end before the limit, once its loops hold ${MODEL_LIMITS.loopPointsPerQueryPage} points; next says where to continue.`),
 });
 export type ModelQuery = z.infer<typeof modelQuerySchema>;
 export const modelGetDocumentSchema = z.object({});
@@ -225,11 +235,18 @@ export interface ModelEntitySummary {
   volume?: number;
   area?: number;
   faceCount?: number;
-  /** Faces. */
+  /**
+   * Faces and sketch faces. `outerLoop` runs counterclockwise about `normal` and each hole in `holes` runs clockwise,
+   * so a loop's signed area about the normal is positive for the outline and negative for every hole. Loops are in
+   * the container's coordinates and do not repeat their first point. A loop of more than `MODEL_LIMITS.loopPointsPerFace`
+   * points is simplified to that many, dropping the points that change its outline least, and `truncated` is then
+   * true; `loopPointCount` is the outer loop's count before simplification.
+   */
   normal?: ModelVec3;
   outerLoop?: ModelVec3[];
   loopPointCount?: number;
-  holes?: number;
+  holes?: ModelVec3[][];
+  truncated?: boolean;
   /** Sketch edges. */
   start?: ModelVec3;
   end?: ModelVec3;
@@ -267,7 +284,7 @@ export const MODEL_TOOLS = {
   },
   query: {
     name: 'model_query',
-    description: 'List entities of one container (the model, or an open group or component): groups and component placements, solids, loose edges and faces, guides, texts and dimensions, with ids, tags, bounds, transforms and materials in meters. Faces of solids are listed only when kinds includes face, filtered by body id, facing direction or a point on the face. Paged: pass offset from the previous result\'s next.',
+    description: 'List entities of one container (the model, or an open group or component): groups and component placements, solids, loose edges and faces, guides, texts and dimensions, with ids, tags, bounds, transforms and materials in meters. Faces of solids are listed only when kinds includes face, filtered by body id, facing direction or a point on the face; geometry gives each face\'s outline and holes as loops of up to 512 points, simplified and flagged truncated past that. Paged: pass offset from the previous result\'s next, which comes before the limit when a page of face loops is large.',
   },
   applyOperations: {
     name: 'model_apply_operations',
@@ -275,6 +292,6 @@ export const MODEL_TOOLS = {
   },
   view: {
     name: 'model_view',
-    description: 'Change what the requester sees, with no undo entry: set the camera (exact, or framed around the model, the selection or entities from a view direction), go to a scene or the next or previous one, or play and stop the animation. Returns the camera, the active scene and whether the animation is playing. Fails with unavailable where there is no viewport.',
+    description: 'Change what the requester sees, with no undo entry: set the camera (exact, or framed around the model, the selection or entities from a view direction; an entity of another container is named with its path), go to a scene or the next or previous one, or play and stop the animation. Returns the camera, the active scene and whether the animation is playing. Fails with unavailable where there is no viewport.',
   },
 } as const;

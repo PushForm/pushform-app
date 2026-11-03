@@ -23,7 +23,7 @@ import { layoutContentKey, modelContentKey } from '../documentContent';
 import type { DocumentSession, DocumentTab, ModelTab } from '../session';
 import { CommandSearch } from './CommandSearch';
 import { commandSearchSourceFor } from './commandSearchSource';
-import { DocumentTabs } from './DocumentTabs';
+import { DocumentTabs, type DocumentTabStrip } from './DocumentTabs';
 import { LayoutTemplateChooser } from './LayoutTemplateChooser';
 import { LayoutImportDialog } from './LayoutImportDialog';
 import { ModelImportDialog } from './ModelImportDialog';
@@ -80,12 +80,14 @@ function download(bytes: Uint8Array, name: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome, onRequests, onObjects, onClearChat, onExtensions }: {
+export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome, onRequests, onObjects, onClearChat, onExtensions, extensionTabs }: {
   session: DocumentSession; cloud?: CloudSession | undefined; cloudFiles?: CloudFilesApi | undefined;
   buildInfo?: BuildInfo | undefined;
   autosave?: CloudAutosave | undefined; onHome?: (() => void) | undefined;
   /** Opens the extension manager, from the account dialog and command search. */
   onExtensions?: (() => void) | undefined;
+  /** The open extension tabs, shown after the document tabs. */
+  extensionTabs?: DocumentTabStrip | null | undefined;
   /**
    * Toggles the AI Chat pane from command search;
    * absent when the host embeds no pipeline entry point.
@@ -844,7 +846,7 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
       />
       <input ref={modelImportInput} type="file" hidden accept=".skp,.skb,.dae,.obj,.3ds,.stl,.dxf,.gltf,.glb,.step,.stp,.zip,.kmz,.png,.jpg,.jpeg,.gif,.bmp,.webp" aria-label="Import model file"
         onChange={event => { void importModelFallback(event); }} />
-      <DocumentTabs session={session} onClose={closeTab} onNewLayout={newLayout} />
+      <DocumentTabs session={session} onClose={closeTab} onNewLayout={newLayout} extensionTabs={extensionTabs} />
       {choosingTemplate ? <LayoutTemplateChooser busy={templateBusy} savedTemplates={cloudFiles ?
         <CloudBrowser api={cloudFiles} session={session} owner={cloudOwner} templatesOnly embedded
           onBusyChange={setTemplateBusy} onClose={() => setChoosingTemplate(false)} /> : undefined} onCancel={() => setChoosingTemplate(false)} onCreate={templateId => {

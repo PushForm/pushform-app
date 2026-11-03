@@ -24,10 +24,12 @@ import { LuFolderOpen } from 'react-icons/lu';
 import { ModelObjectBrowser } from './components/ModelObjectBrowser';
 import { ExtensionManager } from './extensions/ExtensionManager';
 import { browserRunsExtensions, createBrowserExtensionPlatform, type ExtensionRuntimeSources } from './extensions/browserExtensionPlatform';
+import { EXTENSIONS_RAIL_ID, useExtensionWorkspace, type ExtensionsPanelId } from './extensions/useExtensionWorkspace';
 import { ExtensionRuns } from './extensions/ExtensionActivity';
 import { ExtensionPrintDialog, PrintPrompts } from './extensions/extensionPrint';
-import { isExtensionPanelId } from './extensions/extensionContributions';
-import { useExtensionWorkspace } from './extensions/useExtensionWorkspace';
+import { isExtensionRailId } from './extensions/extensionContributions';
+import { ExtensionTabs } from './extensions/extensionTabs';
+import { sessionExtensionDocuments, sessionExtensionUnits } from './extensions/extensionDocuments';
 import { markDesktopShell, syncDesktopTitleBar } from './desktopShell';
 import { allowOpeningDocument, desktopUpdates } from './desktopUpdates';
 import { DesktopUpdates } from './components/DesktopUpdates';
@@ -113,14 +115,18 @@ function browserSessionStorage(ownerId: string): Pick<Storage, 'getItem' | 'setI
 }
 
 /** The editors' docked side panels. */
-type SidePanel = 'files' | 'requests' | 'objects' | `extension:${string}`;
+type SidePanel = 'files' | 'requests' | 'objects' | `extension:${string}` | ExtensionsPanelId;
+const DEVELOPER_MODE_KEY = 'pushform:extensions:developer-mode';
+function developerModeOn(): boolean {
+  try { return localStorage.getItem(DEVELOPER_MODE_KEY) === 'on'; } catch { return false; }
+}
 const WORKSPACE_SCREEN_KEY = 'pushform:workspace-screen:v1';
 
 /**
  * Required account gate. The document engine is first created after successful sign-in; the workspace stays locked
  * until the account's signup step is complete.
  */
-export function App({ app, cloud: supplied, cloudFiles, profiles, account, buildInfo, initialScreen, requests, usage, commons }: AppProps = {}): JSX.Element {
+export function App({ app, cloud: supplied, cloudFiles, profiles, account, buildInfo, initialScreen, requests, usage, commons, extensionRuntime, staff }: AppProps = {}): JSX.Element {
   const [unconfigured] = useState(() => new CloudSession(null));
   const cloud = supplied ?? unconfigured;
   const state = useSyncExternalStore(cloud.subscribe, cloud.getSnapshot);
@@ -137,7 +143,7 @@ export function App({ app, cloud: supplied, cloudFiles, profiles, account, build
   useEffect(() => desktopUpdates()?.start(), []);
   useEffect(() => { if (signedIn) setLastOwner(state.user!.id); }, [signedIn, state.user]);
   const screens = <>
-    {workspaceOwner ? <Workspace key={workspaceOwner} ownerId={workspaceOwner} app={app} cloud={cloud} cloudFiles={cloudFiles} buildInfo={buildInfo} initialScreen={initialScreen} requests={requests} usage={usage} commons={commons} locked={!signedIn || !profileReady} /> : null}
+    {workspaceOwner ? <Workspace key={workspaceOwner} ownerId={workspaceOwner} app={app} cloud={cloud} cloudFiles={cloudFiles} buildInfo={buildInfo} initialScreen={initialScreen} requests={requests} usage={usage} commons={commons} extensionRuntime={extensionRuntime} staff={staff} locked={!signedIn || !profileReady} /> : null}
     {!signedIn ? <SignInScreen cloud={cloud} state={state} /> : null}
     {signedIn && !profileReady && profiles ? <ProfileScreen cloud={cloud} session={state} profiles={profiles} state={profileState} /> : null}
     {signedIn && profileReady && account && accountState.ownerId === state.user!.id ? <DeletionBanner account={account} state={accountState} /> : null}
@@ -210,26 +216,40 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
   const [recents, setRecents] = useState(() => readCloudRecents(ownerId));
   /** This account's extensions on this device; nothing of theirs runs until one of their contributions is used. */
   const [printPrompts] = useState(() => new PrintPrompts());
-  const [extensions] = useState(() => extensionRuntime ? createBrowserExtensionPlatform({ ownerId, sources: extensionRuntime, printPrompts }) : null);
+  // The platform exists before the document session; extensions reach the session's tabs once it does.
+  const sessionRef = useRef<DocumentSession | null>(null);
+  /** The extension tabs open in the tab strip; an extension's `ui.open` and its selection calls reach them from the platform. */
+  const [extensionTabs] = useState(() => extensionRuntime ? new ExtensionTabs({
+    activateDocument: (id) => { sessionRef.current?.activate(id); },
+    isOpen: (id) => sessionRef.current?.tabs.some(tab => tab.id === id) ?? false,
+  }) : null);
+  const [extensions] = useState(() => extensionRuntime
+    ? createBrowserExtensionPlatform({ ownerId, sources: extensionRuntime, printPrompts,
+      documents: sessionExtensionDocuments(() => sessionRef.current), units: sessionExtensionUnits(() => sessionRef.current),
+      openUi: request => extensionTabs?.openRequest(extensions!, request),
+      onSelectionShown: (extensionId, documentId) => extensionTabs?.selectionShown(extensionId, documentId) }) : null);
   const [extensionRuns] = useState(() => extensions ? new ExtensionRuns(extensions) : null);
+  /** The Extensions window, for Home; beside an editor the Extensions side panel shows the manager instead. */
   const [extensionsOpen, setExtensionsOpen] = useState(false);
   useEffect(() => {
     if (!extensions) return;
     void extensions.load();
     return () => { void extensions.stopAll(); };
   }, [extensions]);
-  // Extensions are offered to staff first; installed ones still run for whoever installed them.
-  const [extensionsOffered, setExtensionsOffered] = useState(false);
+  // Extensions are offered to staff first; installed ones still run for whoever installed them. Null until decided.
+  const [extensionsOffered, setExtensionsOffered] = useState<boolean | null>(null);
   useEffect(() => {
     let live = true;
-    setExtensionsOffered(false);
+    setExtensionsOffered(staff ? null : false);
     void staff?.isStaff().then((yes) => { if (live) setExtensionsOffered(yes); });
     return () => { live = false; };
   }, [staff, ownerId]);
-  const openExtensions = extensions && extensionsOffered ? () => setExtensionsOpen(true) : undefined;
+  const openExtensionsWindow = extensions && extensionsOffered ? () => setExtensionsOpen(true) : undefined;
+  /** Beside an editor, Manage extensions, View ▸ Extensions and command search open the Extensions side panel. */
+  const openExtensionsPanel = extensions && extensionsOffered ? () => { setGuidanceBrowserTab(null); setSidePanel(EXTENSIONS_RAIL_ID); } : undefined;
   const extensionPrint = extensions ? <ExtensionPrintDialog prompts={printPrompts} /> : null;
   const extensionManager = extensions && extensionsOpen
-    ? <ExtensionManager platform={extensions} available={browserRunsExtensions()} developerModeAllowed developerModeOn={localStorage.getItem('pushform:extensions:developer-mode') === 'on'}
+    ? <ExtensionManager platform={extensions} available={browserRunsExtensions()} developerModeAllowed developerModeOn={developerModeOn()}
         onClose={() => setExtensionsOpen(false)} />
     : null;
   const [owned] = useState<AppInstance | null>(() => (given ? null : createApp({ demo: false })));
@@ -246,6 +266,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     ),
   );
   const [commonsIntent, setCommonsIntent] = useState(() => commons?.intent ?? null);
+  sessionRef.current = session;
   const [home, setHome] = useState(() => {
     if (initialScreen) return initialScreen === 'home';
     if (given || !session.restoredForRefresh) return true;
@@ -296,9 +317,10 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
   const modelApp = active.type === 'model' ? active.app : app;
   useGlobalKeys(modelApp, active.type === 'model' && !locked && !home);
   useModelClipboard(modelApp, active.type === 'model' ? active : null, active.type === 'model' && !locked && !home);
-  const extensionWorkspace = useExtensionWorkspace({ platform: extensions, runs: extensionRuns, ownerId, active: home || locked ? null : active,
+  const extensionWorkspace = useExtensionWorkspace({ platform: extensions, runs: extensionRuns, tabs: extensionTabs, ownerId, active: home || locked ? null : active,
     openTabs: session.tabs.map(tab => tab.id), sidePanel,
-    openPanel: id => setSidePanel(id), closePanel: () => { setGuidanceBrowserTab(null); setSidePanel(null); } });
+    openPanel: id => setSidePanel(id), closePanel: () => { setGuidanceBrowserTab(null); setSidePanel(null); },
+    manager: { offered: extensionsOffered, available: browserRunsExtensions(), developerModeOn: developerModeOn() } });
   useEffect(() => () => session.dispose(), [session]);
   // Product usage events, with AI Chat counted as open in whichever placement shows it.
   const usage = useProductUsage(usageSink, buildInfo, session,
@@ -337,7 +359,8 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     setSidePanel(current => current === id && mode === 'toggle' ? null : id);
   const toggleSidePanel = (id: string): void => {
     setGuidanceBrowserTab(null);
-    if (id === 'files' || id === 'requests' || id === 'objects' || isExtensionPanelId(id)) showSidePanel(id, 'toggle');
+    if (isExtensionRailId(id) || id === EXTENSIONS_RAIL_ID) extensionWorkspace.toggleRail(id);
+    else if (id === 'files' || id === 'requests' || id === 'objects') showSidePanel(id, 'toggle');
   };
   const closeSidePanel = (): void => { setGuidanceBrowserTab(null); setSidePanel(null); };
   /** The object browser hides itself on Escape; focus inside it then returns to its rail icon. */
@@ -381,7 +404,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     ...extensionWorkspace.railItems,
   ];
   /** An extension panel that is no longer available (turned off, or not for this editor) counts as closed. */
-  const shownPanel = sidePanel && isExtensionPanelId(sidePanel) && !extensionWorkspace.shown ? null : sidePanel;
+  const shownPanel = sidePanel && (isExtensionRailId(sidePanel) || sidePanel === EXTENSIONS_RAIL_ID) && !extensionWorkspace.shown ? null : sidePanel;
   /** The rail and its dock open the editor area, in the right-hand panels' band between tool row and status bar. */
   const companionBrowser = guidanceBrowserTab === active.id && sidePanel === 'requests';
   const browserVisible = sidePanel === 'objects' || companionBrowser;
@@ -397,6 +420,8 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
       {extensionWorkspace.panel}
     </SideDock>
   </>;
+  /** An extension tab in front fills the editor area; the viewport and its panels stay mounted behind it. */
+  const extensionTab = extensionWorkspace.tabView ? <div className="pf-xtab-host">{extensionWorkspace.tabView}</div> : null;
   const removeStarter = (): void => {
     const starter = session.tabs.find(tab => tab.id === 'tab-1' && !tab.identity && !session.isDirty(tab));
     if (!given && starter && session.tabs.length > 1) session.close(starter.id, true);
@@ -438,7 +463,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     <CloudHome api={cloudFiles} cloud={cloud} recents={recents} ownerId={ownerId} buildInfo={buildInfo}
       openTabs={session.tabs.filter(tab => tab.id !== 'tab-1' || tab.identity || session.isDirty(tab))}
       onResume={tab => { session.activate(tab.id); setHome(false); }} onOpen={open} onCreate={create} onRequests={toggleRequests} requestsOpen={requestsPanel?.open ?? false}
-      onForgetRecents={forgetRecents} onRenamed={renamed} onMoved={moved} onExtensions={openExtensions} />
+      onForgetRecents={forgetRecents} onRenamed={renamed} onMoved={moved} onExtensions={openExtensionsWindow} />
     {panel}
     {extensionManager}
     {extensionPrint}
@@ -449,14 +474,15 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
       <div className="pf-app">
         <TopBar session={session} cloud={cloud} cloudFiles={cloudFiles} buildInfo={buildInfo} autosave={autosave} onHome={() => setHome(true)}
           onRequests={() => toggleSidePanel('requests')} onObjects={() => toggleSidePanel('objects')} onClearChat={requestsClient ? clearChat : undefined}
-          onExtensions={openExtensions} />
+          onExtensions={openExtensionsPanel} extensionTabs={extensionWorkspace.tabStrip} />
         {extensionManager}
         {extensionPrint}
         {active.type === 'model' ? (
           <>
-            <MainToolbar />
-            <div className="pf-main">
+            <MainToolbar extensionTools={extensionWorkspace.toolbarItems} />
+            <div className={`pf-main${extensionTab ? ' has-xtab' : ''}`}>
               {sideBar}
+              {extensionTab}
               <ViewportView key={active.id} />
               <PanelHost />
               <RightStrip />
@@ -464,7 +490,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
             <StatusBar />
           </>
         ) : (
-          <LayoutWorkspace key={active.id} tab={active} session={session} leading={sideBar}
+          <LayoutWorkspace key={active.id} tab={active} session={session} leading={sideBar} editorOverride={extensionTab}
             objectBrowser={{ host: objectHost, open: browserVisible, onClose: closeObjects }}
             cloud={cloudFiles ? { api: cloudFiles, owner, session, saves: cloudModelSaves } : undefined} />
         )}

@@ -19,9 +19,33 @@ describe('SDK types', () => {
     expect(same<Sdk.UiEvent, Protocol.UiEvent>(true)).toBe(true);
     expect(same<Sdk.UiTreeItem, Protocol.UiTreeItem>(true)).toBe(true);
     expect(same<Sdk.UiQuantity, Protocol.UiQuantity>(true)).toBe(true);
+    expect(same<Parameters<Sdk.UiService['mount']>[0], Omit<Protocol.UiMountInput, 'tree'> & { tree: Sdk.UiNode }>(true)).toBe(true);
+    expect(same<Sdk.UiPrintRequest, Protocol.UiPrintRequest>(true)).toBe(true);
+    expect(same<Parameters<Sdk.UiService['dialog']>[0], Omit<Protocol.UiDialogInput, 'tree'> & { tree: Sdk.UiNode }>(true)).toBe(true);
+    expect(same<Parameters<Sdk.UiService['open']>[0], Protocol.UiOpenInput>(true)).toBe(true);
+    expect(same<Sdk.ToolbarCategory, Protocol.ToolbarCategory>(true)).toBe(true);
+    expect(same<Sdk.UiIcon, Protocol.UiIcon>(true)).toBe(true);
     expect(same<Sdk.ExtensionPermission, Protocol.ExtensionPermission>(true)).toBe(true);
     expect(same<Sdk.ExtensionErrorCode, Protocol.ExtensionErrorCode>(true)).toBe(true);
     expect(same<Sdk.ExtensionErrorData, Protocol.ExtensionErrorData>(true)).toBe(true);
+  });
+
+  it('match the model and document API', () => {
+    expect(same<Sdk.ModelRef, Protocol.ModelRef>(true)).toBe(true);
+    expect(same<Sdk.ModelRefInput, Protocol.ModelRefInput>(true)).toBe(true);
+    expect(same<Sdk.ModelDocumentSnapshot, Protocol.ModelDocumentSnapshot>(true)).toBe(true);
+    expect(same<Sdk.ModelQuery, Protocol.ModelQuery>(true)).toBe(true);
+    expect(same<Sdk.ModelQueryResult, Protocol.ModelQueryResult>(true)).toBe(true);
+    expect(same<Sdk.ModelEntitySummary, Protocol.ModelEntitySummary>(true)).toBe(true);
+    expect(same<Sdk.ModelCameraInput, Protocol.ModelCameraInput>(true)).toBe(true);
+    expect(same<Sdk.ModelOperation, Protocol.ModelOperation>(true)).toBe(true);
+    expect(same<Sdk.ModelBatch, Protocol.ModelBatch>(true)).toBe(true);
+    expect(same<Sdk.ModelBatchResult, Protocol.ModelBatchResult>(true)).toBe(true);
+    expect(same<Sdk.DocumentUnits, Protocol.DocumentUnits>(true)).toBe(true);
+    expect(same<Sdk.DocumentUnitsEvent, Protocol.DocumentUnitsEvent>(true)).toBe(true);
+    expect(same<Sdk.DocumentInfo, Protocol.DocumentInfo>(true)).toBe(true);
+    expect(same<Sdk.DocumentInfoEvent, Protocol.DocumentInfoEvent>(true)).toBe(true);
+    expect(same<Sdk.ModelChangeEvent, Protocol.ModelChangeEvent>(true)).toBe(true);
   });
 
   it('list the same error codes as the host', () => {

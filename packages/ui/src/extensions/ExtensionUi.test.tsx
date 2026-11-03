@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { DEFAULT_UNITS, type UnitSettings } from '@pushform/core';
 import { validateUiTree, type UiEvent } from '@pushform/extension-protocol';
-import { ExtensionUiView, TABLE_ROW_PX, formatQuantity, parseQuantity } from './ExtensionUi';
+import { ExtensionUiView, OVERLAY_SCROLLBAR_PX, TABLE_ROW_PX, formatQuantity, parseQuantity } from './ExtensionUi';
 
 afterEach(cleanup);
 
@@ -67,6 +67,108 @@ describe('ExtensionUiView', () => {
     expect(events).toEqual([{ component: 'name', event: 'change', value: 'Side panel' }]);
   });
 
+  it('shows icon buttons as icons named by their label, and never the icon name as markup', () => {
+    const { events, view } = show({ type: 'stack', id: 'r', direction: 'horizontal', children: [
+      { type: 'button', id: 'add', label: 'Add part', icon: 'add', variant: 'icon' },
+      { type: 'button', id: 'save', label: 'Save', icon: 'save', variant: 'primary' },
+    ] });
+    const add = screen.getByRole('button', { name: 'Add part' });
+    expect(add.textContent).toBe('');
+    expect(add.getAttribute('title')).toBe('Add part');
+    expect(add.querySelector('svg')).toBeTruthy();
+    const save = screen.getByRole('button', { name: 'Save' });
+    expect(save.textContent).toBe('Save');
+    expect(save.querySelector('svg')).toBeTruthy();
+    expect(view.container.textContent).not.toContain('add');
+    fireEvent.click(add);
+    expect(events).toEqual([{ component: 'add', event: 'press' }]);
+  });
+
+  it('renders a section as a disclosure whose header reports collapse requests and whose actions report presses', () => {
+    const { events, view } = show({ type: 'section', id: 'oak', title: 'Oak, 19 mm', subtitle: 'Solid wood', badge: '3',
+      actions: [{ id: 'hide', label: 'Hide group', icon: 'hide' }, { id: 'print', label: 'Print' }],
+      children: [{ type: 'text', id: 'body', text: 'Three parts' }] });
+    const toggle = screen.getByRole('button', { name: 'Oak, 19 mm' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle.getAttribute('aria-describedby')).toBeTruthy();
+    expect(toggle.textContent).toContain('3');
+    expect(toggle.textContent).toContain('Solid wood');
+    expect(screen.getByText('Three parts')).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Oak, 19 mm' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Hide group' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Print' }));
+    fireEvent.click(toggle);
+    expect(events).toEqual([
+      { component: 'oak', event: 'press', action: 'hide' }, { component: 'oak', event: 'press', action: 'print' }, { component: 'oak', event: 'collapse', collapsed: true },
+    ]);
+    // Collapsed by the extension: the children are gone and the header says so.
+    view.rerender(<ExtensionUiView tree={validateUiTree({ type: 'section', id: 'oak', title: 'Oak, 19 mm', collapsed: true, children: [{ type: 'text', id: 'body', text: 'Three parts' }] })}
+      units={metric} onEvent={(e) => events.push(e)} />);
+    expect(screen.queryByText('Three parts')).toBeNull();
+    expect(screen.getByRole('button', { name: /Oak, 19 mm/ }).getAttribute('aria-expanded')).toBe('false');
+    fireEvent.keyDown(screen.getByRole('button', { name: /Oak, 19 mm/ }), { key: 'Enter' });
+    fireEvent.click(screen.getByRole('button', { name: /Oak, 19 mm/ }));
+    expect(events.at(-1)).toEqual({ component: 'oak', event: 'collapse', collapsed: false });
+  });
+
+  it('opens a menu with focus on its first item, moves with the arrow keys past disabled items, and reports the choice', () => {
+    vi.useFakeTimers();
+    try {
+      const { events } = show({ type: 'menu', id: 'more', label: 'More', items: [
+        { id: 'expand', label: 'Expand all' }, { id: 'collapse', label: 'Collapse all' }, { id: 'reset', label: 'Reset numbers', separator: true, disabled: true },
+      ] });
+      const button = screen.getByRole('button', { name: 'More' });
+      expect(button.getAttribute('aria-haspopup')).toBe('menu');
+      expect(button.getAttribute('aria-expanded')).toBe('false');
+      expect(screen.queryByRole('menu')).toBeNull();
+      fireEvent.click(button);
+      vi.runAllTimers();
+      const menu = screen.getByRole('menu', { name: 'More' });
+      expect(button.getAttribute('aria-expanded')).toBe('true');
+      const items = within(menu).getAllByRole('menuitem');
+      expect(items.map((i) => i.textContent)).toEqual(['Expand all', 'Collapse all', 'Reset numbers']);
+      expect(document.activeElement).toBe(items[0]);
+      expect(menu.querySelector('.has-separator')?.textContent).toBe('Reset numbers');
+      // Arrows wrap over the disabled item; Home and End jump.
+      fireEvent.keyDown(items[0]!, { key: 'ArrowDown' });
+      expect(document.activeElement).toBe(items[1]);
+      fireEvent.keyDown(items[1]!, { key: 'ArrowDown' });
+      expect(document.activeElement).toBe(items[0]);
+      fireEvent.keyDown(items[0]!, { key: 'ArrowUp' });
+      expect(document.activeElement).toBe(items[1]);
+      fireEvent.keyDown(items[1]!, { key: 'Home' });
+      expect(document.activeElement).toBe(items[0]);
+      fireEvent.keyDown(items[0]!, { key: 'End' });
+      expect(document.activeElement).toBe(items[1]);
+      // Escape closes and returns focus to the button, sending nothing.
+      fireEvent.keyDown(items[1]!, { key: 'Escape' });
+      expect(screen.queryByRole('menu')).toBeNull();
+      expect(document.activeElement).toBe(button);
+      expect(events).toEqual([]);
+      // ArrowDown on the button opens it; choosing an item reports it and closes the menu.
+      fireEvent.keyDown(button, { key: 'ArrowDown' });
+      vi.runAllTimers();
+      fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Collapse all' }));
+      expect(events).toEqual([{ component: 'more', event: 'select', value: 'collapse' }]);
+      expect(screen.queryByRole('menu')).toBeNull();
+      expect(document.activeElement).toBe(button);
+      // A disabled item cannot be chosen; a click elsewhere closes the menu.
+      fireEvent.click(button);
+      vi.runAllTimers();
+      fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Reset numbers' }));
+      expect(events).toHaveLength(1);
+      fireEvent.pointerDown(document.body);
+      expect(screen.queryByRole('menu')).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('shows an icon menu by its label alone', () => {
+    show({ type: 'menu', id: 'more', label: 'More actions', icon: 'more', variant: 'icon', disabled: true, items: [{ id: 'a', label: 'A' }] });
+    const button = screen.getByRole('button', { name: 'More actions' });
+    expect(button.textContent).toBe('');
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('moves between tabs with the arrow keys and shows only the selected tab', () => {
     const { events } = show({ type: 'tabs', id: 'views', label: 'Views', selected: 'a', tabs: [{ id: 'a', label: 'Parts' }, { id: 'b', label: 'Materials' }],
       children: [{ type: 'text', id: 'ta', text: 'Parts view' }, { type: 'text', id: 'tb', text: 'Materials view' }] });
@@ -76,6 +178,31 @@ describe('ExtensionUiView', () => {
     expect(tab.getAttribute('aria-selected')).toBe('true');
     fireEvent.keyDown(tab, { key: 'ArrowRight' });
     expect(events).toEqual([{ component: 'views', event: 'select', value: 'b' }]);
+  });
+
+  it('lets tabs wrap onto more rows and reach every tab from the keyboard, Home and End included', () => {
+    const labels = ['Parts', 'Materials', 'Sheets', 'Bars', 'Edges', 'Estimate', 'Export'];
+    const { events, view } = show({ type: 'tabs', id: 'views', label: 'Views', selected: 't6',
+      tabs: labels.map((label, i) => ({ id: `t${i}`, label })), children: labels.map((label, i) => ({ type: 'text', id: `c${i}`, text: `${label} view` })) });
+    const list = screen.getByRole('tablist', { name: 'Views' });
+    expect(list.classList.contains('pf-xui-tablist')).toBe(true);
+    expect(within(list).getAllByRole('tab').map((t) => t.textContent)).toEqual(labels);
+    const last = screen.getByRole('tab', { name: 'Export' });
+    fireEvent.keyDown(last, { key: 'ArrowRight' });
+    fireEvent.keyDown(last, { key: 'Home' });
+    fireEvent.keyDown(last, { key: 'End' });
+    expect(events.map((e) => (e as { value: string }).value)).toEqual(['t0', 't0', 't6']);
+    expect(view.container.querySelector('.pf-xui-tablist')).toBe(list);
+  });
+
+  it('keeps Escape in a number field when it undoes typing, and lets it through otherwise', () => {
+    show({ type: 'numberField', id: 'kerf', label: 'Kerf', value: 0.003, quantity: 'length' });
+    const input = screen.getByLabelText('Kerf') as HTMLInputElement;
+    fireEvent.focus(input);
+    expect(fireEvent.keyDown(input, { key: 'Escape' })).toBe(true);
+    fireEvent.change(input, { target: { value: '9' } });
+    expect(fireEvent.keyDown(input, { key: 'Escape' })).toBe(false);
+    expect(input.value).toBe(formatQuantity(0.003, 'length', metric));
   });
 
   it('reports tree expansion and selection', () => {
@@ -108,6 +235,35 @@ describe('table', () => {
     expect(screen.queryByText('Part 4999')).toBeNull();
     fireEvent.scroll(grid.parentElement!, { target: { scrollTop: 4990 * TABLE_ROW_PX } });
     expect(screen.getByText('Part 4999')).toBeTruthy();
+  });
+
+  it('keeps room below the last row for a scrollbar drawn over the rows, so the last row stays clickable', () => {
+    // A wide table in a narrow panel, in a browser whose scrollbars overlay the content (they take no height).
+    const geometry = {
+      scrollWidth: { get(this: HTMLElement) { return this.classList.contains('pf-xui-table-scroll') ? 900 : 0; } },
+      clientWidth: { get(this: HTMLElement) { return this.classList.contains('pf-xui-table-scroll') ? 300 : 0; } },
+      clientHeight: { get(this: HTMLElement) { return this.classList.contains('pf-xui-table-scroll') ? 160 : 0; } },
+      offsetHeight: { get(this: HTMLElement) { return this.classList.contains('pf-xui-table-scroll') ? 160 : 0; } },
+    };
+    const saved = Object.fromEntries(Object.keys(geometry).map((k) => [k, Object.getOwnPropertyDescriptor(HTMLElement.prototype, k)]));
+    Object.defineProperties(HTMLElement.prototype, geometry);
+    try {
+      const { events } = show(table());
+      const scroller = screen.getByRole('grid', { name: 'Parts' }).parentElement!;
+      expect(scroller.classList.contains('has-overlay-scrollbar')).toBe(true);
+      expect(scroller.style.paddingBottom).toBe(`${OVERLAY_SCROLLBAR_PX}px`);
+      fireEvent.click(screen.getByText('Part 4'));
+      expect(events).toEqual([{ component: 'parts', event: 'rowSelect', rows: ['r4'] }]);
+    } finally {
+      for (const [k, d] of Object.entries(saved)) if (d) Object.defineProperty(HTMLElement.prototype, k, d);
+    }
+  });
+
+  it('adds no room when the scrollbar sits beside the rows or nothing overflows', () => {
+    show(table());
+    const scroller = screen.getByRole('grid', { name: 'Parts' }).parentElement!;
+    expect(scroller.classList.contains('has-overlay-scrollbar')).toBe(false);
+    expect(scroller.style.paddingBottom).toBe('');
   });
 
   it('reports sorting and shows the current sort to assistive technology', () => {

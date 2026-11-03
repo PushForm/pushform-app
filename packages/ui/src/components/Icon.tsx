@@ -3,6 +3,7 @@
 import { MdUpdate } from 'react-icons/md';
 import { AiOutlineTable } from 'react-icons/ai';
 import { BsCloudFog2 } from 'react-icons/bs';
+import { GiCircularSawblade } from 'react-icons/gi';
 import type { JSX } from 'react';
 import type { IconType } from 'react-icons';
 import { LuPuzzle } from 'react-icons/lu';
@@ -14,6 +15,14 @@ import { LayoutFilletIcon } from './LayoutFilletIcon';
 import { LayoutShapeBuilderIcon } from './LayoutShapeBuilderIcon';
 import {
   LuSave,
+  LuCheck,
+  LuChevronUp,
+  LuDownload,
+  LuFilter,
+  LuRefreshCw,
+  LuSettings,
+  LuTriangleAlert,
+  LuUpload,
   LuArrowDown,
   LuBold,
   LuItalic,
@@ -81,6 +90,8 @@ import {
 
 /** Filled glyph: the shared stroke width would thicken it, so it draws with fill only. */
 const FogIcon: IconType = (props) => <BsCloudFog2 {...props} strokeWidth={0} />;
+/** Game Icons (CC BY 3.0, credited in About PushForm) are filled glyphs too. */
+const SawBladeIcon: IconType = (props) => <GiCircularSawblade {...props} strokeWidth={0} />;
 
 /** Shared outline icons for the tool and panel strips. */
 const REACT_ICONS: Record<string, IconType> = {
@@ -108,6 +119,8 @@ const REACT_ICONS: Record<string, IconType> = {
   'chat-ai': RiChatAiLine,
   'object-browser': PiTreeView,
   extensions: LuPuzzle,
+  /** A circular saw blade, for the Cut List extension and any other that names it. */
+  'saw-blade': SawBladeIcon,
   'chat-delete': RiChatDeleteLine,
   'tool-viewport': TbPackageImport,
   'tool-select': LuMousePointer2,
@@ -175,6 +188,15 @@ const REACT_ICONS: Record<string, IconType> = {
   lock: LuLock,
   unlock: LuLockOpen,
   more: LuEllipsisVertical,
+  // Shared with extension interfaces, which name icons by purpose.
+  check: LuCheck,
+  'chevron-up': LuChevronUp,
+  download: LuDownload,
+  upload: LuUpload,
+  filter: LuFilter,
+  refresh: LuRefreshCw,
+  settings: LuSettings,
+  warning: LuTriangleAlert,
 };
 
 /** Custom modeling glyphs and shell icons; unknown names fall back to initials. */

@@ -2,7 +2,7 @@
 // Copyright 2026 PushForm contributors
 import { unzipSync } from 'fflate';
 import {
-  EXTENSION_API_VERSION, MANIFEST_LIMITS, extensionManifestSchema, isPackagePath, satisfiesRange,
+  EXTENSION_API_VERSION, ICON_LIMITS, MANIFEST_LIMITS, extensionManifestSchema, isHostIcon, isPackagePath, satisfiesRange,
   type ExtensionManifest, type ExtensionManifestInput,
 } from './manifest.ts';
 import { computeModuleProblems } from './wasm.ts';
@@ -39,7 +39,7 @@ export type PackageProblem =
   | 'archive.invalid' | 'archive.duplicate' | 'path.invalid' | 'path.case-collision' | 'file.type' | 'file.native'
   | 'manifest.missing' | 'manifest.json' | 'manifest.schema' | 'api.unsupported' | 'file.undeclared' | 'file.missing'
   | 'file.hash' | 'main.missing' | 'main.not-module' | 'wasm.missing' | 'wasm.invalid' | 'wasm.abi' | 'icon.missing'
-  | 'locale.missing' | 'limit.exceeded' | 'signature.invalid';
+  | 'icon.invalid' | 'locale.missing' | 'limit.exceeded' | 'signature.invalid';
 
 /** A structured failure: a stable `code`, a readable message, and the specific problem and file. */
 export class ExtensionPackageError extends Error {
@@ -155,8 +155,8 @@ export async function validatePackage(files: PackageFiles, options: ValidatePack
   for (const path of files.keys())
     if (path.endsWith('.wasm') && !manifest.wasm.some((m) => m.file === path))
       throw new ExtensionPackageError('wasm.invalid', `"${path}" is not declared as a WASM module.`, { path });
-  if (manifest.icon && !files.has(manifest.icon))
-    throw new ExtensionPackageError('icon.missing', `The icon "${manifest.icon}" is missing.`, { path: manifest.icon });
+  if (manifest.icon) checkIcon(files, manifest.icon, 'The icon');
+  for (const c of manifest.contributions) if (c.icon) checkIcon(files, c.icon, `The icon of "${c.name}"`);
   for (const [locale, path] of Object.entries(manifest.locales))
     if (!files.has(path)) throw new ExtensionPackageError('locale.missing', `The ${locale} locale file "${path}" is missing.`, { path });
 
@@ -221,6 +221,36 @@ function checkPaths(files: PackageFiles): void {
     if (bytes.byteLength > PACKAGE_LIMITS.fileBytes || total > PACKAGE_LIMITS.totalBytes)
       throw new ExtensionPackageError('limit.exceeded', 'The package is too large.', { path });
   }
+}
+
+/**
+ * An icon that is not one of the host's own must be a PNG file in the package, within `ICON_LIMITS`: square, from
+ * 64 to 512 pixels a side (read from the IHDR chunk that every PNG starts with), and at most 256 KiB.
+ */
+function checkIcon(files: PackageFiles, icon: string, what: string): void {
+  if (isHostIcon(icon)) return;
+  const bytes = files.get(icon);
+  if (!bytes) throw new ExtensionPackageError('icon.missing', `${what} "${icon}" is missing.`, { path: icon });
+  const size = pngSize(bytes);
+  if (!size) throw new ExtensionPackageError('icon.invalid', `${what} "${icon}" is not a PNG image.`, { path: icon });
+  if (bytes.byteLength > ICON_LIMITS.bytes)
+    throw new ExtensionPackageError('icon.invalid', `${what} "${icon}" is larger than ${ICON_LIMITS.bytes / 1024} KiB.`, { path: icon });
+  if (size.width !== size.height)
+    throw new ExtensionPackageError('icon.invalid', `${what} "${icon}" is ${size.width}×${size.height} pixels; icons must be square.`, { path: icon });
+  if (size.width < ICON_LIMITS.minPx || size.width > ICON_LIMITS.maxPx)
+    throw new ExtensionPackageError('icon.invalid', `${what} "${icon}" is ${size.width} pixels a side; icons are ${ICON_LIMITS.minPx} to ${ICON_LIMITS.maxPx}.`, { path: icon });
+}
+
+const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] as const;
+
+/** The dimensions of a PNG from its signature and IHDR chunk, or null when the bytes are not a PNG. */
+export function pngSize(bytes: Uint8Array): { width: number; height: number } | null {
+  // Signature, then the IHDR chunk: length (4), type "IHDR" (4), width (4), height (4), big-endian.
+  if (bytes.byteLength < 24 || !startsWith(bytes, PNG_MAGIC)) return null;
+  if (bytes[12] !== 0x49 || bytes[13] !== 0x48 || bytes[14] !== 0x44 || bytes[15] !== 0x52) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const width = view.getUint32(16), height = view.getUint32(20);
+  return width > 0 && height > 0 ? { width, height } : null;
 }
 
 const startsWith = (bytes: Uint8Array, magic: readonly number[]): boolean =>

@@ -89,6 +89,20 @@ describe('side-loading', () => {
     expect(reload.replaces?.version).toBe('1.0.0');
     expect(reload.newPermissions).toEqual(['file.export']);
   });
+
+  it('a reload stops the running release and lets open panels run the new one', async () => {
+    const { platform, started, terminated } = setup({ 'com.example.stairs': { activate(c: { commands: { register(i: string, h: () => unknown): void } }) {
+      c.commands.register('com.example.stairs.make', () => 'made');
+    } } });
+    await platform.install(await platform.sideload(await archive()), []);
+    expect(platform.state('com.example.stairs')!.generation).toBe(0);
+    await platform.invoke('com.example.stairs', 'com.example.stairs.make');
+    await platform.install(await platform.sideload(await archive({ version: '1.0.1' })), []);
+    expect(terminated).toEqual(['com.example.stairs']);
+    expect(platform.state('com.example.stairs')).toMatchObject({ run: 'stopped', generation: 1, record: { version: '1.0.1' } });
+    expect(await platform.invoke('com.example.stairs', 'com.example.stairs.make')).toBe('made');
+    expect(started).toEqual(['com.example.stairs', 'com.example.stairs']);
+  });
 });
 
 describe('running', () => {
@@ -186,5 +200,27 @@ describe('running', () => {
     await platform.install(await platform.sideload(await archive()), []);
     await platform.invoke('com.example.stairs', 'com.example.stairs.make');
     expect(platform.state('com.example.stairs')?.logs.map((l) => l.entry)).toEqual([{ step: 'made' }]);
+  });
+});
+
+describe('documents', () => {
+  it('serves the document services over the documents it is given, scoped to each invocation, until the document closes', async () => {
+    const units = (lengthUnit: 'mm' | 'in') => ({ system: lengthUnit === 'mm' ? 'metric' as const : 'imperial' as const, lengthUnit, format: 'decimal' as const, lengthPrecision: 2 });
+    const open = new Map([['tab-a', units('mm')], ['tab-b', units('in')]]);
+    const documents = { get: (id: string) => {
+      const u = open.get(id);
+      return u ? { name: () => 'Stairs', units: () => u, model: () => null, listen: () => () => {} } : null;
+    } };
+    const module = { activate(context: { commands: { register(id: string, h: () => unknown): void }; document: { units(): Promise<unknown> } }) {
+      context.commands.register('com.example.stairs.make', () => context.document.units());
+    } };
+    const { platform } = setup({ 'com.example.stairs': module }, { documents });
+    await platform.install(await platform.sideload(await archive()), ['settings']);
+    expect(await platform.invoke('com.example.stairs', 'com.example.stairs.make', {}, { document: 'tab-a' })).toEqual(units('mm'));
+    expect(await platform.invoke('com.example.stairs', 'com.example.stairs.make', {}, { document: 'tab-b' })).toEqual(units('in'));
+    open.delete('tab-b');
+    platform.closeDocument('tab-b');
+    expect((await failure(platform.invoke('com.example.stairs', 'com.example.stairs.make', {}))).code).toBe('document.closed');
+    await platform.stopAll();
   });
 });

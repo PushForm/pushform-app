@@ -2,7 +2,7 @@
 // Copyright 2026 PushForm contributors
 
 /**
- * Interface trees. A panel, inspector or settings block is a tree of these components, sent whole with
+ * Interface trees. A sidebar, panel, inspector or settings block is a tree of these components, sent whole with
  * `context.ui.mount` and again, with a higher sequence number, with `context.ui.update`. PushForm draws them with its
  * own components; extensions never supply markup or styles. Every node needs an `id` unique in its tree.
  */
@@ -20,6 +20,15 @@ export interface UiOption {
   label: string;
 }
 
+/**
+ * Icons a button, menu or section action may show, drawn by PushForm from its own icon set. The names say what the
+ * control does rather than what the glyph looks like.
+ */
+export type UiIcon = 'add' | 'remove' | 'delete' | 'edit' | 'copy' | 'save' | 'print' | 'download' | 'upload' | 'search' | 'filter' | 'refresh'
+  | 'settings' | 'help' | 'info' | 'warning' | 'check' | 'close' | 'more' | 'menu' | 'expand' | 'collapse' | 'up' | 'down' | 'show' | 'hide'
+  | 'lock' | 'unlock' | 'undo' | 'redo' | 'folder' | 'document' | 'tag' | 'tags' | 'palette' | 'box' | 'component' | 'table' | 'ruler'
+  | 'saw-blade';
+
 export interface UiStack { type: 'stack'; id: string; children: UiNode[]; direction?: 'vertical' | 'horizontal' | undefined;
   gap?: 'none' | 'small' | 'medium' | 'large' | undefined; align?: 'start' | 'center' | 'end' | 'stretch' | undefined }
 export interface UiDivider { type: 'divider'; id: string }
@@ -28,7 +37,24 @@ export interface UiText { type: 'text'; id: string; text: string; tone?: UiTone 
 export interface UiMessage { type: 'message'; id: string; text: string; tone: 'info' | 'success' | 'warning' | 'error' }
 /** `value` from 0 to 1, or null while the amount is unknown. */
 export interface UiProgress { type: 'progress'; id: string; label: string; value: number | null }
-export interface UiButton { type: 'button'; id: string; label: string; variant?: 'primary' | 'secondary' | 'danger' | undefined; disabled?: boolean | undefined }
+/** `variant: 'icon'` shows only the icon, with the label as the accessible name and tooltip, for compact toolbars; it needs an `icon`. */
+export interface UiButton { type: 'button'; id: string; label: string; variant?: 'primary' | 'secondary' | 'danger' | 'icon' | undefined;
+  icon?: UiIcon | undefined; disabled?: boolean | undefined }
+/**
+ * A disclosure: a header with a title, an optional subtitle and badge, and up to 8 header action buttons, over
+ * children shown unless `collapsed`. The header reports `collapse` with the state the user asked for; an action
+ * reports `press` with its id in `action`. Send the updated tree in reply.
+ */
+export interface UiSection { type: 'section'; id: string; title: string; subtitle?: string | undefined; badge?: string | undefined;
+  collapsed?: boolean | undefined; actions?: UiSectionAction[] | undefined; children: UiNode[] }
+export interface UiSectionAction { id: string; label: string; icon?: UiIcon | undefined; disabled?: boolean | undefined }
+/**
+ * A button that opens a dropdown of up to 50 items; choosing one reports `select` with its id. A `separator` item is
+ * drawn with a line above it. `variant: 'icon'` shows only the icon, with the label as the accessible name.
+ */
+export interface UiMenu { type: 'menu'; id: string; label: string; icon?: UiIcon | undefined; variant?: 'secondary' | 'icon' | undefined;
+  disabled?: boolean | undefined; items: UiMenuItem[] }
+export interface UiMenuItem { id: string; label: string; disabled?: boolean | undefined; separator?: boolean | undefined }
 export interface UiTextField { type: 'textField'; id: string; label: string; value: string; placeholder?: string | undefined;
   multiline?: boolean | undefined; maxLength?: number | undefined; disabled?: boolean | undefined; error?: string | undefined }
 export interface UiNumberField { type: 'numberField'; id: string; label: string; value: number | null; quantity?: UiQuantity | undefined;
@@ -97,8 +123,17 @@ export interface UiVector {
   type: 'vector'; id: string; label: string;
   bounds: { x: number; y: number; width: number; height: number };
   units: 'length' | 'plain';
-  /** On-screen height in pixels, 80 to 2000; 300 when absent. */
+  /**
+   * On-screen height in pixels, 80 to 2000. When absent, the frame follows the drawing's proportions at the width
+   * available, from 120 to 800 pixels, so the whole drawing shows without empty space above and below it.
+   */
   height?: number | undefined;
+  /**
+   * Sizes the drawing as if it were this wide, in drawing units, so that several drawings share one scale: an
+   * off-cut given a full sheet's `fitWidth` draws smaller than the sheet. A value under the drawing's width is taken
+   * as the drawing's width.
+   */
+  fitWidth?: number | undefined;
   styles: UiVectorStyle[];
   shapes: UiVectorShape[];
   /** Items shown highlighted. */
@@ -106,14 +141,20 @@ export interface UiVector {
 }
 
 export type UiNode = UiStack | UiDivider | UiText | UiMessage | UiProgress | UiButton | UiTextField | UiNumberField | UiCheckbox | UiChoice
-  | UiColorField | UiTabs | UiTree | UiTable | UiVector;
+  | UiColorField | UiTabs | UiTree | UiTable | UiVector | UiSection | UiMenu;
 
-/** User input on a mounted interface. Sorting and selection are reported; send the updated tree in reply. */
+/** User input on a mounted interface or its dialog. Sorting and selection are reported; send the updated tree in reply. */
 export type UiEvent =
-  | { component: string; event: 'press' }
+  /** A button was pressed; or, with `action`, a section's header action. */
+  | { component: string; event: 'press'; action?: string }
   | { component: string; event: 'change'; value: string | number | boolean | null }
+  /** A tab, a tree item, a vector item, or a menu item was chosen. */
   | { component: string; event: 'select'; value: string | null }
   | { component: string; event: 'toggle'; item: string; expanded: boolean }
+  /** The user asked to collapse or expand a section. */
+  | { component: string; event: 'collapse'; collapsed: boolean }
+  /** The user closed a dialog with Escape or its Close button; `component` is the dialog tree's root. The dialog is gone already. */
+  | { component: string; event: 'dialogClose' }
   | { component: string; event: 'cellEdit'; row: string; column: string; value: string | number | boolean | null }
   | { component: string; event: 'sort'; column: string; direction: 'ascending' | 'descending' }
   | { component: string; event: 'rowSelect'; rows: string[] }
@@ -121,5 +162,21 @@ export type UiEvent =
   /** The pointer moved onto a vector view item, or off every item. Clicking one sends `select`. */
   | { component: string; event: 'hover'; item: string | null };
 
-/** An event with the target (panel, inspector or settings contribution id) it happened on. */
+/** An event with the target (sidebar, panel, inspector or settings contribution id) it happened on. */
 export type UiEventOnTarget = { target: string } & UiEvent;
+
+/**
+ * What `ui.print` prints: components of `target` on screen, in order, at `page` size in meters (0.02 to 2 a side;
+ * landscape when wider than tall). A `vector` view is one page, at its real size when it fits. Tables, text and
+ * dividers, and stacks holding only printable components, flow over as many pages as they need, under `title` (the
+ * first component's label when absent) and with page numbers; any other component is refused. Tables print without
+ * their hidden columns, with the header row on every page and numbers in the document's units, as the panel shows
+ * them. At most 200 components and 500 pages.
+ */
+export interface UiPrintRequest {
+  target: string;
+  components: string[];
+  page: { width: number; height: number };
+  purpose: string;
+  title?: string | undefined;
+}

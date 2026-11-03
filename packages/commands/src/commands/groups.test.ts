@@ -2,11 +2,12 @@
 // Copyright 2026 PushForm contributors
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Id, ImageId, Mat4, MaterialId, MMat4, PlaneBasis, Vec3 } from '@pushform/core';
-import { basisToLocal, m4mul, m4rotationAxis, m4transformPoint, m4translation, meshBounds, v3eq } from '@pushform/core';
-import { allocId, containerAt, contextMatrix, sketchFaceLoops, uvApply, uvToAffine, type Body, type EntityContainer, type EntityRef, type FaceRecord, type UvMapping } from '@pushform/model';
+import { basisToLocal, m4mul, m4rotationAxis, m4transformPoint, m4translation, meshBounds, meshBox, v3eq } from '@pushform/core';
+import { allocId, bodyFromMesh, containerAt, contextMatrix, sketchFaceLoops, uvApply, uvToAffine, type Body, type DocumentDraft, type EntityContainer, type EntityRef, type FaceRecord, type MeshPart, type MeshPartGeometry, type UvMapping } from '@pushform/model';
 import { disposeKernels, setupCommands } from './transform.fixtures';
 import { contextCommands } from './context';
-import { groupCommands, instanceInfo, type ExplodeResult, type MakeResult, type MakeUniqueResult } from './groups';
+import { SERVICE_MESH_EDITABLE } from '../host/services';
+import { groupCommands, instanceInfo, instanceWorldBounds, type ExplodeResult, type MakeEachResult, type MakeResult, type MakeUniqueResult } from './groups';
 import type { PushPullApplyResult } from './pushpull';
 import type { TransformApplyResult } from './transform';
 
@@ -552,5 +553,178 @@ describe('bodies.setHidden', () => {
     expect(containerAt(host.doc.state, [group as Id]).bodies.get(inner)!.hidden).toBe(true);
     expect(registry.execute('bodies.setHidden', { refs: [bodyRef(inner, [group])], hidden: false })).toBe(1);
     expect(containerAt(host.doc.state, [group as Id]).bodies.get(inner)!.hidden).toBe(false);
+  });
+});
+
+describe('component.makeEach', () => {
+  const worldBounds = (host: ReturnType<typeof setup>['host'], path: readonly number[], id: number) => {
+    const b = instanceWorldBounds(host.doc.state, path as Id[], id as Id)!;
+    return [b.min, b.max].map((v) => v.map((x) => +x.toFixed(9)));
+  };
+  const defOf = (host: ReturnType<typeof setup>['host'], id: number) => host.doc.state.definitions.get(id as never)!;
+
+  it('wraps each loose solid in its own numbered component in place, selects them and undoes as one entry', () => {
+    const { host, registry, root, bodyRef } = setup();
+    const a = registry.execute('model.addBox', { min: [0, 0, 0], max: [1, 1, 1] }) as number;
+    const b = registry.execute('model.addBox', { min: [3, 0, 0], max: [5, 1, 1] }) as number;
+    const entries = host.undoStack.length;
+    registry.execute('selection.set', { refs: [bodyRef(a), bodyRef(b)] });
+    const res = registry.execute('component.makeEach', {}) as MakeEachResult;
+    expect(res.definitionIds).toHaveLength(2);
+    expect(res.instanceIds).toHaveLength(2);
+    expect(res.message).toBe('Made 2 components');
+    expect(host.undoStack.length).toBe(entries + 1);
+    expect(root().bodies.size).toBe(0);
+    expect(root().instances.size).toBe(2);
+    expect(res.definitionIds.map((id) => defOf(host, id).name)).toEqual(['Component#1', 'Component#2']);
+    expect(res.definitionIds.map((id) => defOf(host, id).isGroup)).toEqual([false, false]);
+    expect(res.definitionIds.map((id) => defOf(host, id).entities.bodies.size)).toEqual([1, 1]);
+    expect(worldBounds(host, [], res.instanceIds[0]!)).toEqual([[0, 0, 0], [1, 1, 1]]);
+    expect(worldBounds(host, [], res.instanceIds[1]!)).toEqual([[3, 0, 0], [5, 1, 1]]);
+    expect(host.selection.refs).toEqual(res.instanceIds.map((id) => ({ kind: 'instance', path: [], id })));
+
+    host.undo();
+    expect(root().bodies.size).toBe(2);
+    expect(root().instances.size).toBe(0);
+    for (const id of res.definitionIds) expect(host.doc.state.definitions.has(id as never)).toBe(false);
+    host.redo();
+    expect(root().instances.size).toBe(2);
+  });
+
+  it('names a component after its group instance, allows repeated names, and skips components', () => {
+    const { host, registry, root, bodyRef, makeGroup } = setup();
+    const ids = [0, 2, 4].map((x) => registry.execute('model.addBox', { min: [x, 0, 0], max: [x + 1, 1, 1] }) as number);
+    const g1 = makeGroup([bodyRef(ids[0]!)]).instanceId!;
+    const g2 = makeGroup([bodyRef(ids[1]!)]).instanceId!;
+    registry.execute('instance.rename', { ref: { kind: 'instance', path: [], id: g1 }, name: 'ripa' });
+    registry.execute('instance.rename', { ref: { kind: 'instance', path: [], id: g2 }, name: 'ripa' });
+    registry.execute('selection.set', { refs: [bodyRef(ids[2]!)] });
+    const comp = registry.execute('component.make', { name: 'Leg' }) as MakeResult;
+    const refs = [g1, g2, comp.instanceId!].map((id) => ({ kind: 'instance', path: [], id }));
+    const res = registry.execute('component.makeEach', { refs }) as MakeEachResult;
+    expect(res.definitionIds).toHaveLength(2);
+    expect(res.definitionIds.map((id) => defOf(host, id).name)).toEqual(['ripa', 'ripa']);
+    expect(res.instanceIds.map((id) => root().instances.get(id as Id)!.name)).toEqual(['', '']);
+    // each new component holds exactly the group it was made from; the component instance stays loose
+    for (const id of res.definitionIds) expect([...defOf(host, id).entities.instances.values()].map((i) => defOf(host, i.definitionId).isGroup)).toEqual([true]);
+    expect(root().instances.has(comp.instanceId as Id)).toBe(true);
+    expect(root().instances.size).toBe(3);
+    expect(worldBounds(host, [], res.instanceIds[1]!)).toEqual([[2, 0, 0], [3, 1, 1]]);
+    expect(host.selection.refs.map((r) => r.id)).toEqual(res.instanceIds);
+  });
+
+  it('ignores faces, edges and other kinds, and refuses an empty selection', () => {
+    const { registry, root, bodyRef } = setup();
+    const a = registry.execute('model.addBox', { min: [0, 0, 0], max: [1, 1, 1] }) as number;
+    registry.execute('sketch.rectangle', { a: [4, 3, 0], b: [6, 3, 0], c: [6, 5, 0], d: [4, 5, 0] });
+    const faceId = [...root().sketch.faces.keys()][0]!;
+    expect(() => registry.execute('component.makeEach', { refs: [{ kind: 'sketchFace', path: [], id: faceId }] })).toThrow(/Select solids/);
+    const res = registry.execute('component.makeEach', { refs: [bodyRef(a), { kind: 'sketchFace', path: [], id: faceId }] }) as MakeEachResult;
+    expect(res.instanceIds).toHaveLength(1);
+    expect(res.message).toBe('Made 1 component');
+  });
+
+  it('inside a moved and rotated group, keeps each solid where it is in the world', () => {
+    const { host, registry, bodyRef, makeGroup, setInstanceTransform } = setup();
+    const seed = registry.execute('model.addBox', { min: [0, 0, 0], max: [1, 1, 1] }) as number;
+    const group = makeGroup([bodyRef(seed)]).instanceId!;
+    setInstanceTransform([], group, m4mul(m4translation([10, 0, 0]), m4rotationAxis([0, 0, 1], Math.PI / 2)));
+    const inner: number[] = [];
+    host.doc.transact('boxes', (draft) => {
+      const c = containerAt(draft as never, [group as Id]);
+      for (const x of [2, 4]) inner.push(bodyFromMesh(draft, meshBox([x, 0, 0], [x + 1, 1, 1]), { container: c as never }).id);
+    });
+    registry.execute('context.enter', { path: [group] });
+    const before = inner.map((id) => {
+      const mb = meshBounds(containerAt(host.doc.state, [group as Id]).bodies.get(id as Id)!.mesh);
+      const m = contextMatrix(host.doc.state, [group as Id]);
+      return [m4transformPoint(m, mb.min), m4transformPoint(m, mb.max)].map((v) => v.map((x) => +x.toFixed(9)));
+    });
+    registry.execute('selection.set', { refs: inner.map((id) => bodyRef(id, [group])) });
+    const res = registry.execute('component.makeEach', {}) as MakeEachResult;
+    const c = containerAt(host.doc.state, [group as Id]);
+    expect(c.bodies.size).toBe(1);
+    expect(c.instances.size).toBe(2);
+    expect(host.selection.refs).toEqual(res.instanceIds.map((id) => ({ kind: 'instance', path: [group], id })));
+    for (let i = 0; i < 2; i++) {
+      const b = instanceWorldBounds(host.doc.state, [group as Id], res.instanceIds[i]! as Id)!;
+      const corners = [b.min, b.max].map((v) => v.map((x) => +x.toFixed(9)));
+      // the rotation swaps the box corners' extents, so compare as axis-aligned boxes
+      const want = before[i]!;
+      const lo = want[0]!.map((v, k) => Math.min(v, want[1]![k]!)), hi = want[0]!.map((v, k) => Math.max(v, want[1]![k]!));
+      expect(corners).toEqual([lo, hi]);
+    }
+    host.undo();
+    expect(containerAt(host.doc.state, [group as Id]).bodies.size).toBe(3);
+  });
+
+  it('makes a mesh part editable first and wraps the solid in a component named after the part; undo restores the part', () => {
+    const { host, registry, root } = setup();
+    // Test stand-in for the io converter: a closed box geometry becomes one solid.
+    registry.ctx.services.set(SERVICE_MESH_EDITABLE, {
+      makeEditable: (draft: DocumentDraft, path: readonly Id[], id: Id) => {
+        const c = containerAt(draft as never, path);
+        const part = c.meshParts.get(id)!;
+        const g = part.geometry;
+        bodyFromMesh(draft, { verts: g.positions, tris: g.triangles, faceId: g.triangleFace }, { container: c as never });
+        c.meshParts.delete(id);
+        c.order = c.order.filter((x) => x !== id);
+        return { bodies: 1, sheetFaces: 0 };
+      },
+    });
+    const partIds: number[] = [];
+    host.doc.transact('mesh parts', (draft) => {
+      const c = draft.definitions.get(draft.rootDefinitionId)!.entities;
+      for (const [name, x] of [['ripa', 0], ['tampo', 3]] as const) {
+        const mesh = meshBox([x, 0, 0], [x + 1, 1, 2]);
+        const id = allocId<Id>(draft);
+        const geometry: MeshPartGeometry = {
+          positions: mesh.verts, triangles: mesh.tris, triangleFace: mesh.faceId, faceCount: 6, faceMaterials: new Uint32Array(6),
+          edgeOffsets: new Uint32Array([0]), edgePositions: new Float64Array(0), edgeFlags: new Uint8Array(0),
+        };
+        const part: MeshPart = { id, name, source: { format: 'STEP', system: '' }, tagId: draft.defaultTagId, hidden: false, locked: false,
+          castShadows: true, receiveShadows: true, attributes: {}, materialId: null, geometry };
+        c.meshParts.set(id, part as never);
+        c.order.push(id);
+        partIds.push(id);
+      }
+    });
+    registry.execute('selection.set', { refs: partIds.map((id) => ({ kind: 'meshPart', path: [], id })) });
+    const res = registry.execute('component.makeEach', {}) as MakeEachResult;
+    expect(res.definitionIds.map((id) => defOf(host, id).name)).toEqual(['ripa', 'tampo']);
+    expect(root().meshParts.size).toBe(0);
+    expect(root().bodies.size).toBe(0);
+    expect(root().instances.size).toBe(2);
+    const solid = [...defOf(host, res.definitionIds[1]!).entities.bodies.values()][0]!;
+    expect(solid.valid).toBe(true);
+    expect(solid.props.volume).toBeCloseTo(2, 9);
+    expect(worldBounds(host, [], res.instanceIds[1]!)).toEqual([[3, 0, 0], [4, 1, 2]]);
+    host.undo();
+    expect(root().meshParts.size).toBe(2);
+    expect(root().meshParts.get(partIds[0]! as Id)!.name).toBe('ripa');
+    expect(root().instances.size).toBe(0);
+    expect(root().bodies.size).toBe(0);
+  });
+
+  it('refuses mesh parts when no converter service is installed, leaving the document unchanged', () => {
+    const { host, registry, root, bodyRef } = setup();
+    const a = registry.execute('model.addBox', { min: [0, 0, 0], max: [1, 1, 1] }) as number;
+    let partId = 0 as Id;
+    host.doc.transact('mesh part', (draft) => {
+      const c = draft.definitions.get(draft.rootDefinitionId)!.entities;
+      partId = allocId<Id>(draft);
+      const part: MeshPart = { id: partId, name: 'Bracket', source: { format: 'STEP', system: '' }, tagId: draft.defaultTagId, hidden: false, locked: false,
+        castShadows: true, receiveShadows: true, attributes: {}, materialId: null, geometry: {
+          positions: new Float64Array([0, 0, 1, 1, 0, 1, 1, 1, 1]), triangles: new Uint32Array([0, 1, 2]), triangleFace: new Uint32Array([0]), faceCount: 1,
+          faceMaterials: new Uint32Array([0]), edgeOffsets: new Uint32Array([0]), edgePositions: new Float64Array(0), edgeFlags: new Uint8Array(0),
+        } };
+      c.meshParts.set(partId, part as never);
+      c.order.push(partId);
+    });
+    const entries = host.undoStack.length;
+    expect(() => registry.execute('component.makeEach', { refs: [bodyRef(a), { kind: 'meshPart', path: [], id: partId }] })).toThrow(/cannot be made editable/);
+    expect(host.undoStack.length).toBe(entries);
+    expect(root().bodies.size).toBe(1);
+    expect(root().meshParts.size).toBe(1);
   });
 });

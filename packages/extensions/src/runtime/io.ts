@@ -146,6 +146,13 @@ export interface FetchTransportResponse {
   readonly truncated?: boolean;
 }
 
+/** Requests and bytes counted for one destination origin. */
+export interface BrokerTraffic {
+  readonly requests: number;
+  readonly bytesSent: number;
+  readonly bytesReceived: number;
+}
+
 /** Performs requests outside the extension: the desktop shell, or a PushForm relay. */
 export type FetchTransport = (request: FetchTransportRequest) => Promise<FetchTransportResponse>;
 
@@ -168,19 +175,24 @@ const ALLOWED_RESPONSE = new Set(['content-type', 'content-language', 'cache-con
  * The network broker. A request goes only to an HTTPS destination the manifest declares and the user granted, under
  * the destination's path prefix, with no host cookie or credential and within size, rate and time limits. A
  * destination that receives model data also needs the model-egress grant. Redirects are followed here, not by the
- * transport, and each new location is checked like the first. The bytes sent to each destination are counted for
- * the extension manager.
+ * transport, and each new location is checked like the first. Requests and the bytes sent and received are
+ * counted per destination origin for the extension manager and the activity record; nothing else about a request is
+ * reported.
  */
 export class FetchBroker {
   private readonly destinations: { prefix: URL; sendsModelData: boolean }[];
   private readonly recent: number[] = [];
   /** Bytes sent per destination origin during this session. */
   readonly bytesSent = new Map<string, number>();
+  /** Requests and bytes sent and received per destination origin during this session. */
+  readonly traffic = new Map<string, BrokerTraffic>();
 
   constructor(
     manifest: ExtensionManifest,
     private readonly grants: ReadonlySet<ExtensionPermission>,
     private readonly transport: FetchTransport | null,
+    /** Told after every request the transport performed (each redirect hop is one), with only its origin and counts. */
+    private readonly onTraffic?: (origin: string, traffic: BrokerTraffic) => void,
   ) {
     this.destinations = manifest.destinations.map((d) => ({ prefix: new URL(d.url), sendsModelData: d.sendsModelData }));
   }
@@ -202,6 +214,14 @@ export class FetchBroker {
     if (destination.sendsModelData && !this.grants.has('model.egress'))
       throw new ExtensionError('permission.denied', `Sending model data to ${parsed.origin} was not granted.`, { permission: 'model.egress' });
     return parsed;
+  }
+
+  private count(origin: string, bytesSent: number, bytesReceived: number): void {
+    const before = this.traffic.get(origin);
+    this.traffic.set(origin, {
+      requests: (before?.requests ?? 0) + 1, bytesSent: (before?.bytesSent ?? 0) + bytesSent, bytesReceived: (before?.bytesReceived ?? 0) + bytesReceived,
+    });
+    this.onTraffic?.(origin, { requests: 1, bytesSent, bytesReceived });
   }
 
   services(): ServiceImplementations {
@@ -233,15 +253,19 @@ export class FetchBroker {
         let currentMethod = method;
         let currentBody = body;
         for (let hop = 0; ; hop++) {
-          this.bytesSent.set(url.origin, (this.bytesSent.get(url.origin) ?? 0) + (currentBody?.byteLength ?? 0));
+          const origin = url.origin;
+          const sent = currentBody?.byteLength ?? 0;
+          this.bytesSent.set(origin, (this.bytesSent.get(origin) ?? 0) + sent);
           let response: FetchTransportResponse;
           try {
             response = await this.transport({ url: url.href, method: currentMethod, headers, body: currentBody, signal, maxResponseBytes: FETCH_LIMITS.responseBytes });
           } catch {
+            this.count(origin, sent, 0);
             if (call.signal.aborted) throw new ExtensionError('cancelled', 'The request was cancelled.');
             if (signal.aborted) throw new ExtensionError('limit.exceeded', `The request took longer than ${FETCH_LIMITS.timeoutMs / 1000} s.`);
             throw new ExtensionError('unavailable', 'The request failed.');
           }
+          this.count(origin, sent, response.body.byteLength);
           const location = response.headers.location;
           if (response.status >= 300 && response.status < 400 && location) {
             if (hop >= FETCH_LIMITS.redirects) throw new ExtensionError('limit.exceeded', 'Too many redirects.');

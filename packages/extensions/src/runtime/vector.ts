@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { ExtensionError, uiExportSchema, uiPrintSchema, type ExtensionManifest, type UiNode, type UiVector, type UiVectorStyle } from '@pushform/extension-protocol';
+import { ExtensionError, UI_PRINTABLE, uiExportSchema, uiPrintSchema, type ExtensionManifest, type UiNode, type UiVector, type UiVectorStyle } from '@pushform/extension-protocol';
 import { writeLayoutDxf, writeLayoutSvg, type LayoutVectorItem, type LayoutVectorPage, type VectorPath, type VectorPoint } from '@pushform/io/vector';
 import type { ServiceImplementations } from './host';
 import type { FilePicker } from './io';
+import { metricQuantityFormatter, printPages, type PrintBlock, type QuantityFormatter } from './printLayout';
 import { findNode as findInTree, type ExtensionUiHost } from './ui';
 
 /**
@@ -109,24 +110,53 @@ export interface PrintRequest {
 /** The host's print dialog: resolves with what the user did, or null when they cancelled. */
 export interface ViewPrinter {
   print(request: PrintRequest): Promise<'printed' | 'saved' | null>;
+  /**
+   * How table numbers print for the document an extension last acted on (null when none), as its panels show them.
+   * Without it lengths print in millimeters.
+   */
+  formatter?(documentId: string | null): QuantityFormatter;
 }
 
-/** `ui.print`: prints or saves as PDF vector views the extension has on screen, one page each. */
+const PRINTABLE: ReadonlySet<string> = new Set(UI_PRINTABLE);
+
+/** The printable blocks of a component, in order; anything else is refused. */
+function printBlocks(node: UiNode, paper: { width: number; height: number }, out: PrintBlock[]): void {
+  if (!PRINTABLE.has(node.type))
+    throw new ExtensionError('validation.failed', `"${node.id}" is a ${node.type}, which cannot be printed; print vector views, tables, text and stacks of them.`);
+  if (node.type === 'vector') out.push({ kind: 'page', page: vectorPage(node, paper) });
+  else if (node.type === 'table') out.push({ kind: 'table', table: node });
+  else if (node.type === 'text') out.push({ kind: 'text', text: node });
+  else if (node.type === 'divider') out.push({ kind: 'divider' });
+  else if (node.type === 'stack') for (const child of node.children) printBlocks(child, paper, out);
+}
+
+/**
+ * `ui.print`: prints or saves as PDF components the extension has on screen: vector views one page each, and tables
+ * and text flowing over as many pages as they need (`printPages`).
+ */
 export function vectorPrintServices(manifest: ExtensionManifest, ui: () => ExtensionUiHost, printer: ViewPrinter | null): ServiceImplementations {
   return {
-    'ui.print': async (input) => {
+    'ui.print': async (input, call) => {
       const parsed = uiPrintSchema.safeParse(input);
-      if (!parsed.success) throw new ExtensionError('validation.failed', 'ui.print needs a target, vector view components, a page size in meters (0.02 to 2) and a purpose.');
+      if (!parsed.success) throw new ExtensionError('validation.failed', 'ui.print needs a target, components to print, a page size in meters (0.02 to 2) and a purpose.');
       const { target, components, page, purpose, title } = parsed.data;
       if (!printer) throw new ExtensionError('unavailable', 'Printing is not available here.');
       const shown = ui().get(target);
       const paper = { width: page.width * MM_PER_M, height: page.height * MM_PER_M };
-      const pages = components.map((component) => {
+      const blocks: PrintBlock[] = [];
+      let name: string | undefined;
+      for (const component of components) {
         const node: UiNode | undefined = shown ? findInTree(shown.tree, component) : undefined;
-        if (!node || node.type !== 'vector') throw new ExtensionError('validation.failed', `"${component}" is not a vector view shown in "${target}".`);
-        return vectorPage(node, paper);
-      });
-      const outcome = await printer.print({ extensionName: manifest.name, purpose, title: title ?? pages[0]!.name, page: paper, pages });
+        if (!node) throw new ExtensionError('validation.failed', `"${component}" is not shown in "${target}".`);
+        name ??= 'label' in node && typeof node.label === 'string' ? node.label : node.type === 'text' ? node.text.slice(0, 200) : undefined;
+        printBlocks(node, paper, blocks);
+      }
+      if (!blocks.length) throw new ExtensionError('validation.failed', 'There is nothing to print in those components.');
+      let documentId: string | null = null;
+      try { documentId = call.currentDocument(); } catch { /* No document yet: tables print in millimeters. */ }
+      const heading = (title ?? name ?? manifest.name).trim() || manifest.name;
+      const pages = printPages(blocks, paper, heading, printer.formatter?.(documentId) ?? metricQuantityFormatter);
+      const outcome = await printer.print({ extensionName: manifest.name, purpose, title: heading, page: paper, pages });
       if (!outcome) throw new ExtensionError('cancelled', 'Nothing was printed.');
       return { outcome };
     },

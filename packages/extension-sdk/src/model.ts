@@ -160,6 +160,7 @@ export interface ModelSceneSavesInput {
 
 /** One operation of a batch. Create operations accept `as`; later operations refer to the result as `"$name"`. */
 export type ModelOperation =
+  | { op: 'add_box'; as?: string | undefined; min: ModelVec3; max: ModelVec3 }
   | { op: 'make_group'; as?: string | undefined; refs: ModelRefInput[] }
   | { op: 'make_component'; as?: string | undefined; refs: ModelRefInput[]; name?: string | undefined }
   | { op: 'explode'; refs: ModelRefInput[] }

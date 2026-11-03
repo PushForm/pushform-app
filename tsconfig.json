@@ -66,9 +66,6 @@
     },
     {
       "path": "packages/account-ui"
-    },
-    {
-      "path": "tools/extension-isolation"
     }
   ]
 }

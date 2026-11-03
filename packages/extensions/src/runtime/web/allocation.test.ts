@@ -77,7 +77,9 @@ describe('installAllocationLimit', () => {
     const half = new scope.Uint8Array(600 * 1024);
     expect(() => half.slice()).toThrow(RangeError);
     expect(() => half.map((v) => v)).toThrow(RangeError);
-    expect(() => { (scope as unknown as Record<string, unknown>).Uint8Array = Uint8Array; }).toThrow(TypeError);
+    // Assignment must run inside the worker realm; Node's VM global proxy can silently ignore outside writes.
+    expect(() => scope.eval('"use strict"; Uint8Array = null')).toThrow(/read only|Cannot assign/);
+    expect(Object.getOwnPropertyDescriptor(scope, 'Uint8Array')).toMatchObject({ writable: false, configurable: false });
   });
 
   it('counts a copy of a buffer the platform made, once', () => {

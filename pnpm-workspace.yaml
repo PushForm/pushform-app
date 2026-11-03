@@ -2,7 +2,6 @@ packages:
   - packages/*
   - apps/*
   - workers/*
-  - tools/*
 allowBuilds:
   esbuild: true
   workerd: true

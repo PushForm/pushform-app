@@ -334,7 +334,8 @@ export function sketchUpTransform(matrix: readonly number[]): Mat4 {
 }
 
 /** Parse and prepare off the UI thread. No document is mutated until this succeeds. */
-export async function readSketchUp(bytes: Uint8Array, onProgress?: (p: ImportProgress) => void): Promise<SketchUpImport> {
+export async function readSketchUp(bytes: Uint8Array, onProgress?: (p: ImportProgress) => void,
+  options: { /** Accept a model with nothing in it instead of rejecting it, as a model view of an empty model does. */ allowEmpty?: boolean } = {}): Promise<SketchUpImport> {
   if (bytes.byteLength > MAX_SKETCHUP_BYTES) throw new Error('SketchUp files larger than 128 MiB are not supported yet.');
   if (bytes.length < 4 || bytes[0] !== 255 || bytes[1] !== 254 || bytes[2] !== 255 || bytes[3] !== 14)
     throw new Error('Not a SketchUp model: invalid file header.');
@@ -351,7 +352,7 @@ export async function readSketchUp(bytes: Uint8Array, onProgress?: (p: ImportPro
   } catch (cause) {
     throw new Error(`Could not read this SketchUp file. The reader does not support every SketchUp version or record. Try saving a copy in a newer SketchUp version. ${cause instanceof Error ? cause.message : ''}`);
   }
-  const scene = prepareSketchUp(model, onProgress);
+  const scene = prepareSketchUp(model, onProgress, SKETCHUP_FORMAT, options);
   // The same hash as images added in the app, so a later import or library texture can share the asset.
   for (const image of scene.images) image.sha256 = await hashImageBytes(image.bytes);
   return scene;

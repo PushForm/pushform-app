@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import type { MeshImportOptions } from './meshImport';
-import { readModelImport } from './modelImport';
+import { readModelImport, type ImportLimits } from './modelImport';
 import { stepPreviewTransfer } from './stepWasm';
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
-scope.onmessage = async (event: MessageEvent<{ bytes: Uint8Array; preview?: boolean; mesh?: MeshImportOptions | undefined; limits?: { stepBytes?: number | undefined; meshPartThreshold?: number | undefined } }>) => {
+scope.onmessage = async (event: MessageEvent<{ bytes: Uint8Array; preview?: boolean; mesh?: MeshImportOptions | undefined; limits?: ImportLimits }>) => {
   try {
     const { bytes, mesh, limits, preview } = event.data;
     const scene = await readModelImport(bytes, progress => scope.postMessage({ type: 'progress', progress }), mesh, limits, undefined,

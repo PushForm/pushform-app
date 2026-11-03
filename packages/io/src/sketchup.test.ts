@@ -12,6 +12,7 @@ import { applySketchUpImport } from './sketchupDocument';
 import { isSketchUpModelFile, prepareSketchUp, readSketchUp, sketchUpDisplay, sketchUpTransform, sketchUpUnits } from './sketchup';
 import { decodeModelDocument, encodeModelDocument, modelJson } from './modelFile';
 import { encodePng } from './png';
+import { readSketchUpInWorker } from './sketchupClient';
 
 const cube: [number, number, number][][] = [
   [[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]],
@@ -82,6 +83,11 @@ describe('SketchUp import', () => {
     expect({ faces: model.root.faces.length, edges: model.root.edges.length, instances: model.root.instances.length, definitions: model.definitions.size })
       .toEqual({ faces: 0, edges: 0, instances: 0, definitions: 0 });
     await expect(readSketchUp(bytes)).rejects.toThrow(/No supported geometry/);
+    // A model view of an empty model reads it as empty instead (the worker path takes the same option).
+    const empty = await readSketchUp(bytes, undefined, { allowEmpty: true });
+    expect({ solids: empty.root.solids.length, sheets: empty.root.sheets.length, edges: empty.root.edges.length, definitions: empty.definitions.size })
+      .toEqual({ solids: 0, sheets: 0, edges: 0, definitions: 0 });
+    await expect(readSketchUpInWorker(new Uint8Array(bytes), { allowEmpty: true })).resolves.toMatchObject({ definitions: new Map() });
   });
 
   it('reads a SketchUp 5 file: its group, textured material, scene and rendering options', async () => {

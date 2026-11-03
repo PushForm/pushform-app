@@ -10,7 +10,7 @@ import { createDocument, ImageStore, type DocumentState } from '@pushform/model'
 import { Viewport, type CameraState, type RenderBody, type RenderDisplay, type RenderImage, type RenderSketch } from '@pushform/render';
 import { bodiesToRender, displayToRender, fogToRender, imagesToRender, shadowsToRender, sketchesToRender, withRenderImageStore } from '../engine/renderAdapter';
 import { sectionsToRender } from '../engine/sectionAdapter';
-import { forgetLayoutImage, layoutImageReady, notifyLayoutImages, setLayoutCanvasPicture } from './layoutImage';
+import { forgetLayoutImage, LAYOUT_VIEW_EMPTY, LAYOUT_VIEW_FAILED, layoutImageReady, notifyLayoutImages, setLayoutCanvasPicture } from './layoutImage';
 import { layoutEmbeddedModelIdentity } from './layoutEmbeddedModelIdentity';
 
 /**
@@ -33,7 +33,7 @@ export interface LayoutViewportModel {
   state: DocumentState;
 }
 
-export type LayoutViewportStatus = 'cached' | 'current' | 'rendering' | 'unavailable';
+export type LayoutViewportStatus = 'cached' | 'current' | 'empty' | 'rendering' | 'unavailable';
 
 type Source = LayoutViewport['source'];
 const sourceKey = viewportSourceKey;
@@ -88,6 +88,8 @@ const RENDER_LIMIT = 48;
 const PRINT_PX_PER_MM = 150 / 25.4, RENDER_MAX_PX = 2400;
 /** Navigation previews render at the view's on-screen size, up to this many pixels on the longer side. */
 const PREVIEW_PX_PER_MM = 72 / 25.4, PREVIEW_MAX_PX = 2048;
+/** A 1×1 transparent PNG: the stored picture of a cloud view that shows nothing. */
+const TRANSPARENT_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNgYGBgAAAABQABeqhXUAAAAABJRU5ErkJggg==';
 /** The last picture each viewport showed, so a stale picture stays up while the next renders. */
 const latest = new Map<number, string>();
 /**
@@ -124,7 +126,8 @@ export function layoutViewportModel(state: LayoutDocumentState, source: Source):
 async function loadEmbeddedModel(state: LayoutDocumentState, source: { archiveId: string; modelReferenceId: string }): Promise<LayoutViewportModel> {
   const bytes = readPreservedSketchUpModel(state, source.archiveId, source.modelReferenceId);
   if (!bytes) throw new Error('The model is linked to an external file that is not embedded in this document.');
-  const scene = await readSketchUpInWorker(bytes);
+  // A model with nothing in it is a view that shows nothing, not one that failed.
+  const scene = await readSketchUpInWorker(bytes, { allowEmpty: true });
   const doc = createDocument(), images = new ImageStore();
   doc.transact('Open SketchUp model', draft => {
     applySketchUpImport(draft, scene, { images });
@@ -174,6 +177,12 @@ export function viewGeometry(model: LayoutViewportModel, scene: string | null): 
     pictures: imagesToRender(state, model.images) };
   byScene.set(saved.name, geometry);
   return geometry;
+}
+
+/** Whether a view of `scene` draws nothing at all: no bodies, edges or pictures are shown in it. */
+export function viewShowsNothing(model: LayoutViewportModel, scene: string | null): boolean {
+  const geometry = viewGeometry(model, scene);
+  return !geometry.bodies.length && !geometry.sketches.length && !geometry.pictures.length;
 }
 
 /** A PushForm model's scenes in the shape the view camera helpers read (same as an imported SketchUp scene). */
@@ -253,6 +262,10 @@ export function viewportCameraState(camera: LayoutViewportCamera, heightMm: numb
  * `camera` previews a camera that is not yet in the document (navigation). `pxPerMm` is
  * the resolution the picture is painted at, so previews match the screen and committed views stay
  * sharp when zoomed in; without it views render for print.
+ *
+ * Besides a picture's address, it returns `LAYOUT_VIEW_EMPTY` for a view whose model shows nothing in it, which
+ * paints nothing, and `LAYOUT_VIEW_FAILED` for a view that cannot be rendered and has no earlier picture; '' means
+ * the first picture is still on its way.
  */
 export function layoutViewportPicture(state: LayoutDocumentState, entity: LayoutEntity, camera?: LayoutViewportCamera, pxPerMm?: number, exportResolution = false): string {
   if (!isViewport(entity)) return entity.image?.src ?? '';
@@ -260,7 +273,12 @@ export function layoutViewportPicture(state: LayoutDocumentState, entity: Layout
   const view = camera ?? viewport.camera;
   if (!camera && !exportResolution && entity.image.src && viewportCacheCurrent(viewport, entity.points, state)) return entity.image.src;
   const fallback = latest.get(entity.id) ?? entity.image.src;
-  if (failures.has(sourceKey(state, viewport.source))) return fallback;
+  if (failures.has(sourceKey(state, viewport.source))) return fallback || LAYOUT_VIEW_FAILED;
+  const model = loadedModels.get(sourceKey(state, viewport.source));
+  if (model && viewShowsNothing(model, viewport.scene)) {
+    if (!camera) showPicture(entity.id, LAYOUT_VIEW_EMPTY);
+    return LAYOUT_VIEW_EMPTY;
+  }
   const { width, height } = layoutFrameSize(entity.points);
   if (width <= 0 || height <= 0) return fallback;
   const scale = camera
@@ -272,16 +290,14 @@ export function layoutViewportPicture(state: LayoutDocumentState, entity: Layout
   if (camera && preview?.key === key) return preview.src;
   const done = camera ? undefined : renders.get(key);
   if (done !== undefined) {
-    if (exportResolution) {
-      if (!done) throw new Error('A model view could not be rendered at the chosen PDF resolution.');
-      return done;
-    }
+    // Export paints a view that could not be rendered as nothing, and reports it (layoutViewportWarnings).
+    if (exportResolution) return done || fallback || LAYOUT_VIEW_FAILED;
     // A new picture replaces the previous one only once it can paint, so the view never blanks.
     if (done && layoutImageReady(done)) {
       showPicture(entity.id, done);
       return done;
     }
-    if (!done) return fallback;
+    if (!done) return fallback || LAYOUT_VIEW_FAILED;
     return fallback && layoutImageReady(fallback) ? fallback : done;
   }
   enqueue({ key, entityId: entity.id, preview: !!camera, state, source: viewport.source, camera: viewportCameraState(view, height),
@@ -303,7 +319,9 @@ export function layoutViewportRender(state: LayoutDocumentState, entity: LayoutE
   const scale = Math.min(PRINT_PX_PER_MM, RENDER_MAX_PX / Math.max(width, height));
   const pixels = [Math.max(1, Math.round(width * scale)), Math.max(1, Math.round(height * scale))] as const;
   const key = JSON.stringify([sourceKey(state, viewport.source), viewport.camera, pixels, viewport.background, viewport.scene, viewport.display ?? null]);
-  const done = renders.get(key);
+  const found = renders.get(key);
+  // An empty view stores a transparent picture, so the drawing reopens showing nothing there without the model.
+  const done = found === LAYOUT_VIEW_EMPTY ? TRANSPARENT_PNG : found;
   if (done) return { src: done, cache: { camera: viewport.camera, widthMm: width, heightMm: height, sha256: reference.target.sha256 } };
   if (done === undefined) enqueue({ key, entityId: entity.id, preview: false, state, source: viewport.source, camera: viewportCameraState(viewport.camera, height),
     shift: viewport.camera.shift, width: pixels[0], height: pixels[1], background: viewport.background, scene: viewport.scene, display: viewport.display });
@@ -346,13 +364,8 @@ export async function settleLayoutViewportRenders(state: LayoutDocumentState, en
     await Promise.race([idle, new Promise<void>(resolve => { timer = setTimeout(resolve, Math.max(0, deadline - Date.now())); })]);
     clearTimeout(timer);
   }
-  if (exportDpi !== undefined) {
-    if (running || queue.length) throw new Error('Model views are still rendering. Try exporting again.');
-    for (const entity of entities) if (isViewport(entity)) {
-      const failure = layoutViewportFailure(state, entity.image.viewport.source);
-      if (failure) throw new Error(`A model view could not be rendered for PDF export: ${failure}`);
-    }
-  }
+  // Views that cannot be rendered do not stop an export: they export without a picture, and are reported.
+  if (exportDpi !== undefined && (running || queue.length)) throw new Error('Model views are still rendering. Try exporting again.');
 }
 
 /** What the viewport currently shows, for its status in the selection panel. */
@@ -361,6 +374,8 @@ export function layoutViewportStatus(state: LayoutDocumentState, entity: LayoutE
   const viewport = entity.image.viewport;
   if (failures.has(sourceKey(state, viewport.source))) return 'unavailable';
   if (entity.image.src && viewportCacheCurrent(viewport, entity.points, state)) return 'cached';
+  const model = loadedModels.get(sourceKey(state, viewport.source));
+  if (model && viewShowsNothing(model, viewport.scene)) return 'empty';
   if (queue.some(job => job.entityId === entity.id) || running && current?.entityId === entity.id) return 'rendering';
   return renderFailures.has(entity.id) ? 'unavailable' : 'current';
 }
@@ -390,8 +405,11 @@ async function drain(): Promise<void> {
       let picture = '', failure: string | null = null;
       try {
         const model = await layoutViewportModel(job.state, job.source);
-        const view = renderer();
-        if (view) {
+        // A view showing nothing needs no render, and an empty picture is no failure.
+        const empty = viewShowsNothing(model, job.scene);
+        const view = empty ? null : renderer();
+        if (empty) picture = LAYOUT_VIEW_EMPTY;
+        else if (view) {
           const geometry = viewGeometry(model, job.scene);
           withRenderImageStore(model.images, () => { view.setBodies(geometry.bodies); view.setSketches(geometry.sketches); });
           view.setImages(geometry.pictures);

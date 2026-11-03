@@ -14,6 +14,7 @@ const VIEWS: { id: StandardView; label: string }[] = [
 const STATUS: Record<ReturnType<typeof layoutViewportStatus>, string> = {
   cached: 'Showing the render saved with the LayOut document.',
   current: 'Rendered from the model.',
+  empty: 'Rendered from the model, which shows nothing in this view.',
   rendering: 'Rendering…',
   unavailable: 'The model cannot be rendered.',
 };

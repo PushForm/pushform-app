@@ -137,7 +137,7 @@ export function drawLayoutVectorPage(state: LayoutDocumentState, page: LayoutPag
       if (entity.table) { paintLayoutTable(ctx, entity, page, state, false, paintTextBlock); continue; }
       if (entity.image) {
         if (options.includeImages === false) recorder.items.push({ ...recorder.object, kind: 'image', src: '', x: 0, y: 0, width: 0, height: 0, matrix: [1, 0, 0, 1, 0, 0], clips: [], layer: recorder.layer });
-        else paintLayoutImage(ctx, entity, false, layoutViewportPicture(state, entity, undefined, options.exportDpi === undefined ? undefined : options.exportDpi / 25.4, options.exportDpi !== undefined));
+        else paintLayoutImage(ctx, entity, false, layoutViewportPicture(state, entity, undefined, options.exportDpi === undefined ? undefined : options.exportDpi / 25.4, options.exportDpi !== undefined), true);
         continue;
       }
       if (entity.text) { paintLayoutText(ctx, entity, page, state, false, paintTextBlock); continue; }

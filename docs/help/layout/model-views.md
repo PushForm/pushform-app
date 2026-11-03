@@ -28,4 +28,6 @@ The Models settings show its revision and status. **Pin** keeps the current revi
 
 Model views render as pictures of their model. Their status distinguishes a saved imported picture, a generated model picture, rendering in progress, and an unavailable model. If a source cannot be reached, its saved picture can remain visible, but new navigation or rendering may be unavailable.
 
+While a view is still rendering, the page shows a pale gray box in its frame; printing and export wait for the picture. A view whose model shows nothing from its camera and scene, such as an empty model or a scene that hides every tag, draws nothing (only its background when Background is on), so anything underneath it on the page shows through. A view that cannot be rendered and has no earlier picture, for example because its model was only linked to an outside file, shows a gray box crossed in red on the page while you edit, and its status gives the reason. Printed and exported pages leave such a view empty instead; PDF export lists it in its notes.
+
 Changing a view's frame does not turn it into ordinary drawing paths. In vector PDF export, the surrounding drawing can remain vector while the model view is a raster image.

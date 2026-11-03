@@ -609,7 +609,7 @@ function paintPage(
       if (entity.image) {
         const preview = pathEdit?.entityId === id && pathEdit.points ? previewedSource(id)! : entity;
         const picture = layoutViewportPicture(state, preview, viewportPreview?.entityId === id ? viewportPreview.camera : undefined, outputDpi ? undefined : renderScale);
-        if (!moving || moving.copy) paintLayoutImage(ctx, preview, selected.has(id), picture);
+        if (!moving || moving.copy) paintLayoutImage(ctx, preview, selected.has(id), picture, outputDpi !== undefined);
         if (moving) {
           ctx.save(); ctx.translate(...moving.delta);
           paintLayoutImage(ctx, preview, true, picture); ctx.restore();

@@ -35,6 +35,7 @@
     "@tauri-apps/plugin-opener": "^2.7.2",
     "fflate": "^0.8.2",
     "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.5.438",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-icons": "^5.7.0",

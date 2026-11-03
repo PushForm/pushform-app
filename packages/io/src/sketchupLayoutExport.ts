@@ -88,8 +88,8 @@ const COMMON_NS = `xmlns:l="${NS.layout}" xmlns:ld="${NS.layoutdocument}" xmlns:
 const OP_MOVE = 0, OP_LINE = 1, OP_CUBIC = 2, OP_CLOSE = 3;
 /** `anchorType` bits on text boxes. */
 const ANCHOR = { left: 1, right: 2, top: 4, bottom: 8, center: 16, middle: 32 } as const;
-/** Pictures LayOut places directly; anything else is rasterized to PNG. */
-const PLACEABLE: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg' };
+/** Pictures LayOut places directly, PDFs included; anything else is rasterized to PNG. */
+const PLACEABLE: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'application/pdf': 'pdf' };
 /** Raster resolution for converted pictures, capped so huge frames stay reasonable. */
 const RASTER_DPI = 300, RASTER_MAX_PX = PNG_MAX_PX;
 /** Average glyph advance and line height of the exported default text, as fractions of the font size. */

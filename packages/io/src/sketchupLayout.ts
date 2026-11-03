@@ -120,6 +120,11 @@ const PREFIXES = {
   'http://sketchup.google.com/schemas/layout/1.0/references': 'r',
   'http://sketchup.google.com/schemas/layout/1.0/layout': 'l',
 };
+/** A PDF file starts with `%PDF-` within its first 1024 bytes. */
+function isPdf(bytes: Uint8Array): boolean {
+  const head = strFromU8(bytes.subarray(0, 1024), true);
+  return head.includes('%PDF-');
+}
 const IMAGE_TYPES: Record<string, string> = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', bmp: 'image/bmp', webp: 'image/webp',
 };
@@ -1155,7 +1160,7 @@ class Importer {
     return url;
   }
 
-  /** Placed pictures: browser formats as stored, SVG with a size to draw at, and TIFF converted to PNG. */
+  /** Placed pictures: browser formats and PDFs as stored, SVG with a size to draw at, and TIFF converted to PNG. */
   private pictureUrl(bytes: Uint8Array, extension: string): string | null {
     const type = extension.toLowerCase();
     if (type === 'tif' || type === 'tiff') {
@@ -1167,6 +1172,12 @@ class Importer {
       }
     }
     if (type === 'svg') return `data:image/svg+xml;base64,${base64(strToU8(sizedSvg(strFromU8(bytes))))}`;
+    // A PDF stays the file itself; the app draws its first page.
+    if (type === 'pdf') {
+      if (isPdf(bytes)) return `data:application/pdf;base64,${base64(bytes)}`;
+      this.warn('a PDF image that is not a PDF file could not be read');
+      return null;
+    }
     const mime = IMAGE_TYPES[type];
     if (!mime) { this.warn(`images of type .${extension} are not supported`); return null; }
     return `data:${mime};base64,${base64(bytes)}`;

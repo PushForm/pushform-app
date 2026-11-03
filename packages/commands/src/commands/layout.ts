@@ -314,10 +314,12 @@ const layoutViewport = z.object({
   preserveScaleOnResize: z.boolean().optional(),
 });
 const pictureSource = /^data:image\/(?:png|jpeg|jpg|svg\+xml|webp|gif|bmp|avif)[;,]/i;
+/** Pictures a document can hold: the browser image formats and PDFs (shown by their first page). */
+const placedPicture = /^data:(?:image\/(?:png|jpeg|jpg|svg\+xml|webp|gif|bmp|avif)|application\/pdf)[;,]/i;
 /** A viewport may have no picture yet: it is rendered from its model. */
 const clipboardImage = z.object({ src: z.string(), viewport: layoutViewport.optional(),
   clip: z.object({ points: z.array(point).min(3), handles: z.array(pathHandle).optional() }).optional() })
-  .refine(image => pictureSource.test(image.src) || image.viewport && image.src === '', { message: 'Unsupported picture' });
+  .refine(image => placedPicture.test(image.src) || image.viewport && image.src === '', { message: 'Unsupported picture' });
 const tableProperties = z.custom<LayoutTable>(validLayoutTable, 'Invalid table grid');
 const clipboardEntity = z.discriminatedUnion('kind', [
   clipboardBase.extend({ kind: z.literal('path'), handles: z.array(pathHandle).optional(), contourStarts: z.array(id.or(z.literal(0))).optional(),

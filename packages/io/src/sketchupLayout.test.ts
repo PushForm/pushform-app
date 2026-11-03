@@ -876,6 +876,59 @@ describe('SketchUp LayOut import', () => {
     expect(warnings.some((warning) => /images of type/.test(warning))).toBe(false);
   });
 
+  it('keeps placed PDF pictures as the PDF file, in their frame, crop and rotation, through save, reopen and export', async () => {
+    const bytes = new Uint8Array(readFileSync(new URL('../../testing/assets/layout/pdf-picture-2027.layout', import.meta.url)));
+    const stored = unzipSync(bytes)['ref/3436053323_two-shapes_2.pdf']!;
+    const { doc, warnings } = importSketchUpLayout(bytes);
+    expect(warnings).toEqual([]);
+    const pictures = (state: typeof doc.state) => {
+      const p = state.pages.get(state.pageOrder[0]!)!;
+      return p.entityOrder.map((id) => p.entities.get(id)!).filter((entity) => entity.kind === 'image');
+    };
+    const pdfOf = (src: string) => Uint8Array.from(atob(src.replace('data:application/pdf;base64,', '')), (c) => c.charCodeAt(0));
+    const [plain, cropped, turned] = pictures(doc.state);
+    for (const picture of [plain, cropped, turned]) {
+      expect(picture!.image!.src.startsWith('data:application/pdf;base64,')).toBe(true);
+      expect(pdfOf(picture!.image!.src)).toEqual(stored);
+    }
+    expect(plain!.points.map(inches)).toEqual([[0.5, 0.5], [3.5, 0.5], [3.5, 2.5], [0.5, 2.5]]);
+    expect(plain!.image!.clip).toBeUndefined();
+    // The crop covers the frame's left two thirds and its middle three fifths, in the frame's own unit square.
+    expect(cropped!.image!.clip!.points.map(([x, y]) => [Math.round(x * 1e4) / 1e4, Math.round(y * 1e4) / 1e4]))
+      .toEqual([[0, 0.2], [0.6667, 0.2], [0.6667, 0.8], [0, 0.8]]);
+    // The 2 × 3 in frame keeps its size, turned 30° (clockwise on the page, whose y axis points down).
+    const [a, b, , d] = turned!.points.map(inches) as [number, number][];
+    expect(Math.hypot(b![0] - a![0], b![1] - a![1])).toBeCloseTo(2, 5);
+    expect(Math.hypot(d![0] - a![0], d![1] - a![1])).toBeCloseTo(3, 5);
+    expect(Math.atan2(b![1] - a![1], b![0] - a![0]) * 180 / Math.PI).toBeCloseTo(30, 4);
+
+    const reopened = decodeLayoutDocument(encodeLayoutDocument(doc));
+    expect(pictures(reopened.state).map((picture) => picture.image!.src)).toEqual([plain, cropped, turned].map((picture) => picture!.image!.src));
+    const exported = await exportSketchUpLayout(reopened.state);
+    expect(exported.warnings).toEqual([]);
+    const output = unzipSync(exported.bytes);
+    const pdfs = Object.keys(output).filter((name) => name.endsWith('.pdf'));
+    // One stored PDF for the three pictures, written unchanged.
+    expect(pdfs).toHaveLength(1);
+    expect(output[pdfs[0]!]).toEqual(stored);
+    const again = importSketchUpLayout(exported.bytes);
+    expect(pictures(again.doc.state).map((picture) => pdfOf(picture.image!.src))).toEqual([stored, stored, stored]);
+  });
+
+  it('shows the missing-picture placeholder for a placed .pdf that is not a PDF', () => {
+    const placed = `<e:image id="id40">
+        <e:placedFileReference><e:rectangleBase x="1" y="1" width="2" height="1.5" /></e:placedFileReference>
+        <r:imageFileReference r:id="id4" />
+      </e:image>`;
+    const files = unzipSync(layoutFile(page(placed, onLayer('id10', ['id40'])), '', '1,1,1', ['id90'], '', { 'ref/plan.pdf': PNG }));
+    files['references.xml'] = strToU8(strFromU8(files['references.xml']!).replace('</references>', '<r:imageFileReference r:id="id4" internalTarget="ref/plan.pdf" /></references>'));
+    const { doc, warnings } = importSketchUpLayout(zipSync(files));
+    const p = doc.state.pages.get(doc.state.pageOrder[0]!)!;
+    expect(p.entityOrder.map((id) => p.entities.get(id)!.kind)).toEqual(['path', 'path', 'path']);
+    expect(warnings).toContain('a PDF image that is not a PDF file could not be read');
+    expect(warnings).toContain('an image that could not be read was shown as a placeholder');
+  });
+
   it('preserves dashed paths, keeps their arrows as line styles, and splits dimensions', () => {
     const entities = `
       <e:path id="id50" rotationAngle="0">

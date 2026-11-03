@@ -63,3 +63,11 @@ it('pastes at an explicit page position in one undoable edit', () => {
   expect(doc.state.pages.get(pageId)!.entities.get(id!)!.points).toEqual([[70, 45], [90, 45], [90, 55], [70, 55]]);
   commands.execute('edit.undo'); expect(doc.state.pages.get(pageId)!.entities.size).toBe(0);
 });
+
+it('pastes a PDF picture as the PDF itself', () => {
+  const doc = createLayoutDocument(), { commands } = createLayoutRegistry(doc), pageId = doc.state.pageOrder[0]!;
+  const src = `data:application/pdf;base64,${btoa('%PDF-1.7')}`;
+  const [id] = commands.execute('layout.clipboard.paste', { pageId,
+    entities: [{ kind: 'image', points: [[0, 0], [30, 0], [30, 20], [0, 20]], closed: true, image: { src } }] }) as number[];
+  expect(doc.state.pages.get(pageId)!.entities.get(id!)!.image).toEqual({ src });
+});

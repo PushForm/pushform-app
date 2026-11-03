@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { pathSegment, type LayoutEntity } from '@pushform/layout';
+import { isPdfPicture, loadPdfPicture, pdfPicture, pdfPictureState } from './layoutPdfPicture';
 
 type Point = [number, number];
 
@@ -47,6 +48,7 @@ export function layoutImageState(src: string): LayoutImageState {
   if (src === LAYOUT_VIEW_EMPTY) return 'empty';
   if (src === LAYOUT_VIEW_FAILED) return 'failed';
   if (canvases.has(src)) return 'loaded';
+  if (isPdfPicture(src)) return pdfPictureState(src);
   const image = images.get(src);
   if (!image || !image.complete) return 'pending';
   return image.naturalWidth > 0 ? 'loaded' : 'failed';
@@ -72,6 +74,7 @@ function loadedImage(src: string): HTMLImageElement | HTMLCanvasElement | null {
   if (isMarker(src)) return null;
   const canvas = canvases.get(src);
   if (canvas) return canvas;
+  if (isPdfPicture(src)) return pdfPicture(src, notifyLayoutImages);
   let image = images.get(src);
   if (!image) {
     image = new Image();
@@ -156,6 +159,10 @@ export async function prepareLayoutImages(entities: readonly LayoutEntity[], sou
   const sources = new Set(entities.flatMap(entity => entity.image && source(entity) && !isMarker(source(entity)) ? [source(entity)] : []));
   await Promise.all([...sources].map(async src => {
     if (canvases.has(src)) return;
+    if (isPdfPicture(src)) {
+      await loadPdfPicture(src).catch(() => { throw new Error('A picture could not be loaded. Check the document images and try again.'); });
+      return;
+    }
     loadedImage(src);
     const image = images.get(src)!;
     if (!image.complete) await new Promise<void>((resolve, reject) => {

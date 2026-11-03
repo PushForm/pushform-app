@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright 2026 PushForm contributors -->
+<!-- Merged into the macOS bundle's Info.plist: AI Chat dictation needs the microphone and speech recognition. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>PushForm uses the microphone when you dictate a message to AI Chat.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>PushForm turns your speech into text when you dictate a message to AI Chat.</string>
+</dict>
+</plist>

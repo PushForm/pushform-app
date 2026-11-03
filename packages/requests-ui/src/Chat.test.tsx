@@ -800,3 +800,38 @@ it('shows instructions before waiting and cancels the old cue when the user send
   expect(backend.calls.some(call => call.path.endsWith('/tool-results'))).toBe(false);
   await act(async () => {});
 });
+
+describe('composer', () => {
+  it('shows the send key only when there is text', async () => {
+    setup();
+    const box = await screen.findByLabelText('Your message');
+    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull();
+    fireEvent.change(box, { target: { value: 'Hello' } });
+    expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy();
+  });
+  it('disables dictation where speech recognition is unavailable', async () => {
+    setup();
+    expect((await screen.findByRole('button', { name: 'Dictate' })).hasAttribute('disabled')).toBe(true);
+  });
+  it('appends dictated phrases to the draft and stops on a second press', async () => {
+    const instances: { onresult: ((event: unknown) => void) | null; onend: (() => void) | null; stop: () => void }[] = [];
+    vi.stubGlobal('webkitSpeechRecognition', class {
+      continuous = false; interimResults = false; lang = '';
+      onresult: ((event: unknown) => void) | null = null; onerror = null; onend: (() => void) | null = null;
+      constructor() { instances.push(this); }
+      start(): void {}
+      stop(): void { this.onend?.(); }
+      abort(): void {}
+    });
+    setup();
+    const box = await screen.findByLabelText<HTMLTextAreaElement>('Your message');
+    fireEvent.change(box, { target: { value: 'Make it' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Dictate' }));
+    expect(screen.getByRole('button', { name: 'Stop dictation' }).getAttribute('aria-pressed')).toBe('true');
+    const final = Object.assign([{ transcript: 'two feet wide' }], { isFinal: true });
+    act(() => { instances[0]!.onresult?.({ resultIndex: 0, results: [final] }); });
+    expect(box.value).toBe('Make it two feet wide');
+    fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
+    expect(screen.getByRole('button', { name: 'Dictate' }).getAttribute('aria-pressed')).toBe('false');
+  });
+});

@@ -18,9 +18,13 @@ If the highlighted tool is the one already shown on its toolbar button, clicking
 
 Highlighting does not click a tool, select an object, or edit the document for you. Opening a panel can reveal an item in the Object browser. Instructions stay in chat while you follow the step. Guidance does not show toasts or floating messages, and looking up a control does not close chat. A fading highlight does not require you to click or trigger a reminder.
 
+## Type or dictate
+
+Press Enter to send and Shift+Enter to start a new line. The return-key button at the right of the message box also sends. Choose the microphone button to dictate: what you say is added to the message box until you choose it again, and nothing is sent until you send it. Dictation needs a browser or system that offers speech recognition and permission to use the microphone.
+
 ## Post pictures
 
-You can show the agent a picture in any conversation, in either editor or on Home. Click the picture button beside the message box, paste an image into the message box, or drop one on the chat. PNG, JPEG and WebP images work. Pictures show above the message box until you send; click **×** on one to leave it out. They go with your next message, and you can send pictures without any text.
+You can show the agent a picture in any conversation, in either editor or on Home. Click **+** at the left of the message box, paste an image into the message box, or drop one on the chat. PNG, JPEG and WebP images work. Pictures show above the message box until you send; click **×** on one to leave it out. They go with your next message, and you can send pictures without any text.
 
 The agent sees the pictures along with your message, and it can still refer to them later in the conversation. Ask it to build or draw what a picture shows, such as “Build this cabinet” with a photo or a dimensioned sketch. It uses the sizes you give first, then any dimensions it can read in the picture, then standard sizes for that kind of object. It says which sizes it assumed, so you can correct them.
 

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type JSX } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type JSX } from 'react';
 import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_REPORT, formatBytes, RequestsError, SCREENSHOT_TYPES, type Attachment, type AttachmentFile, type Conversation, type ConversationPath, type ConversationSummary, type DocumentDescriptor, type IntentPath, type Me, type Message, type RequestsClient, type ScreenInfo, type ToolCall, type ToolCallResult } from './client';
 import { draftScope, forgetDraft, HOME_SCOPE, readDrafts, rememberDraft } from './drafts';
 import { DockedPanel } from './DockedPanel';
 import { Popover } from './Popover';
 import { MessageMarkdown } from './MessageMarkdown';
+import { useDictation } from './useDictation';
 import { imageFiles, preparePicture, PICTURES_PER_MESSAGE } from './pictures';
 
 export interface ChatProps {
@@ -449,6 +450,18 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
     });
   };
 
+  // Dictated phrases join the draft with a space, as if typed.
+  const dictation = useDictation(phrase => setText(draft => draft && !/\s$/.test(draft) ? `${draft} ${phrase}` : draft + phrase));
+  const textLocked = busy && !waitingForGuidance && chat.streaming !== null;
+  useEffect(() => { if (textLocked || !open) dictation.stop(); }, [textLocked, open]);
+  // The composer grows with its text up to its CSS max-height, then scrolls.
+  useLayoutEffect(() => {
+    const box = composer.current;
+    if (!box) return;
+    box.style.height = 'auto';
+    box.style.height = `${box.scrollHeight}px`;
+  }, [text, view.kind]);
+
   // Typing "/" lists the commands that match what follows it.
   const slashMatches = text.startsWith('/') && !/\s/.test(text) ? SLASH_COMMANDS.filter(command => command.name.startsWith(text.slice(1).toLowerCase())) : [];
   let body: JSX.Element;
@@ -500,20 +513,23 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
         <button type="button" disabled={busy || full || !attachmentsReady} onClick={() => picker.current?.click()}>Upload images</button>
         <input ref={picker} type="file" multiple accept={SCREENSHOT_TYPES.join(',')} hidden aria-label="Image files" onChange={pickImages} />
       </div> : null}
+      {dictation.error ? <p className="pf-fr-notice" role="status">{dictation.error}</p> : null}
       {pictures.length ? <ul className="pf-fr-pictures" aria-label="Pictures to send">{pictures.map((file, index) => <li key={`${file.name}-${index}`}>
         <AttachmentPreview item={file} client={client} blob={file.blob} />
         <button type="button" aria-label={`Remove ${file.name}`} onClick={() => setPictures(current => current.filter(item => item !== file))}>×</button>
       </li>)}</ul> : null}
       <form className="pf-fr-composer" aria-label="Message" onSubmit={submit}>
-        <button type="button" className="pf-fr-add-picture" aria-label="Add picture" title="Add picture (or paste or drop an image)"
-          disabled={(busy && !waitingForGuidance) || pictures.length >= PICTURES_PER_MESSAGE} onClick={() => picturePicker.current?.click()}>
-          <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><rect x="2.5" y="4" width="15" height="12" rx="2" fill="none" stroke="currentColor" strokeWidth="1.5" /><circle cx="7.5" cy="8.5" r="1.5" fill="currentColor" /><path d="M4 15l4.5-4.5 3 3 2-2 3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" /></svg>
-        </button>
+        <button type="button" className="pf-fr-icon" aria-label="Add picture" title="Add picture (or paste or drop an image)"
+          disabled={(busy && !waitingForGuidance) || pictures.length >= PICTURES_PER_MESSAGE} onClick={() => picturePicker.current?.click()}>{PLUS_ICON}</button>
         <input ref={picturePicker} type="file" multiple accept={SCREENSHOT_TYPES.join(',')} hidden aria-label="Picture files" onChange={pickPictures} />
         <textarea ref={composer} data-autofocus data-submit-on-enter aria-label="Your message" rows={1} value={text} maxLength={4000}
-          disabled={busy && !waitingForGuidance && current.streaming !== null} onPaste={pastePictures}
+          disabled={textLocked} onPaste={pastePictures}
           placeholder={!current.conversation ? 'Describe what you need' : reporting ? 'Type your answer, or say skip' : 'Ask a follow-up question'} onChange={event => setText(event.target.value)} />
-        <button type="submit" className="pf-fr-primary pf-fr-send" disabled={(busy && !waitingForGuidance) || !attachmentsReady || (!text.trim() && !pictures.length)}>Send</button>
+        {/* Enter sends and Shift+Enter starts a new line; the return key appears once there is something to send. */}
+        {text.trim() || pictures.length ? <button type="submit" className="pf-fr-icon" aria-label="Send" title="Send (Enter)" disabled={(busy && !waitingForGuidance) || !attachmentsReady}>{RETURN_ICON}</button> : null}
+        <button type="button" className={`pf-fr-icon${dictation.listening ? ' is-listening' : ''}`} aria-label={dictation.listening ? 'Stop dictation' : 'Dictate'} aria-pressed={dictation.listening}
+          title={dictation.supported ? (dictation.listening ? 'Stop dictation' : 'Dictate') : 'Dictation is not available here'}
+          disabled={!dictation.supported || textLocked} onClick={dictation.toggle}>{MIC_ICON}</button>
       </form>
     </div>;
   }
@@ -551,3 +567,8 @@ function AttachmentPreview({ item, client, blob }: { item: Attachment | Attachme
   if (failed) return <button type="button" onClick={() => setAttempt(n => n + 1)}>Retry preview for {item.name}</button>;
   return src ? <img src={src} alt={item.name} onError={() => setFailed(true)} /> : null;
 }
+
+const icon = (path: JSX.Element): JSX.Element => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">{path}</svg>;
+const PLUS_ICON = icon(<path d="M12 5v14M5 12h14" />);
+const RETURN_ICON = icon(<path d="M19 6v5a3 3 0 0 1-3 3H6m4-4-4 4 4 4" />);
+const MIC_ICON = icon(<><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" /></>);

@@ -838,6 +838,121 @@ describe('ModelDocumentApi edge selectors', () => {
   });
 });
 
+describe('ModelDocumentApi raised panels and edge profiles', () => {
+  const queryAll = { container: null, kinds: null, ids: null, facing: null, containing: null, fields: null, offset: null, limit: null };
+  const front = [0, -1, 0] as const;
+  const inch = 0.0254;
+
+  it('raises a panel in one batch: a box, then a wide, shallow two-distance bevel round its front face', async () => {
+    const { api, root } = setup();
+    // a 12 × 16 in panel 3/4 in thick, beveled 1 3/4 in across the front and 7/16 in down the edges
+    const w = 12 * inch, h = 16 * inch, t = 0.75 * inch, across = 1.75 * inch, down = 7 / 16 * inch;
+    const result = await api.apply({ expectedRevision: api.revision, label: 'Raised panel', operations: [
+      { op: 'add_box', as: 'panel', min: [0, 0, 0], max: [w, t, h] },
+      { op: 'chamfer_edges', body: '$panel', edges: [{ face: { facing: front }, which: 'outer' }], distance: across, distance2: down },
+    ] });
+    expect(result.results[1]!.count).toBe(4);
+    const panel = root().bodies.get(result.created.panel as never)!;
+    expect(panel.valid).toBe(true);
+    // what is left of the slab the bevel cuts into is a frustum under the field
+    const field = [w - 2 * across, h - 2 * across];
+    const frustum = down / 6 * (w * h + field[0]! * field[1]! + 4 * (w - across) * (h - across));
+    expect(panel.props.volume).toBeCloseTo(w * h * t - (w * h * down - frustum), 8);
+    // the field stays flat at the front; the edges keep a 5/16 in tongue
+    const faces = [...panel.faces.values()];
+    const fieldFace = faces.find(f => f.plane.n[1] < -0.999)!;
+    expect(Math.max(...fieldFace.loops[0]!.map(p => p[0])) - Math.min(...fieldFace.loops[0]!.map(p => p[0]))).toBeCloseTo(field[0]!, 7);
+    const side = faces.find(f => f.plane.n[0] < -0.999)!;
+    expect(Math.min(...side.loops[0]!.map(p => p[1]))).toBeCloseTo(down, 7);
+    // by an angle instead: the same bevel
+    const angled = await api.apply({ expectedRevision: api.revision, label: 'Angled', operations: [
+      { op: 'add_box', as: 'p2', min: [1, 0, 0], max: [1 + w, t, h] },
+      { op: 'chamfer_edges', body: '$p2', edges: [{ face: { facing: front }, which: 'outer' }], distance: across, angleDeg: Math.atan(down / across) * 180 / Math.PI, reference: { facing: front } },
+    ] });
+    expect(root().bodies.get(angled.created.p2 as never)!.props.volume).toBeCloseTo(panel.props.volume, 9);
+  });
+
+  it('reports the largest of each distance that fits, and refuses a reference face that is not beside the edges', async () => {
+    const { api, addBox } = setup();
+    const id = addBox([0, 0, 0], [0.3, 0.02, 0.4]);
+    const revision = api.revision;
+    const chamfer = (extra: Record<string, unknown>) => failure(() => api.apply({ expectedRevision: api.revision, label: 'x', operations: [{ op: 'chamfer_edges', body: box(id), edges: [{ face: { facing: front }, which: 'outer' }], ...extra }] }));
+    const wide = await chamfer({ distance: 0.2, distance2: 0.01 });
+    expect(wide.error.code).toBe('invalid_geometry');
+    const largest = Number(/largest distance that fits with that distance2 is about ([\d.]+) m/.exec(wide.error.message)?.[1]);
+    expect(largest).toBeGreaterThan(0.1);
+    expect(largest).toBeLessThanOrEqual(0.15);
+    expect(wide.error.message).toMatch(/largest distance2 that fits with that distance|no distance2 fits with that distance/);
+    const deep = await chamfer({ distance: 0.04, distance2: 0.05 });
+    const deepest = Number(/largest distance2 that fits with that distance is about ([\d.]+) m/.exec(deep.error.message)?.[1]);
+    expect(deepest).toBeGreaterThan(0.015);
+    expect(deepest).toBeLessThan(0.02);
+    const away = await chamfer({ distance: 0.04, distance2: 0.01, reference: { facing: [0, 1, 0] } });
+    expect(away.error.code).toBe('invalid_reference');
+    expect(away.error.message).toMatch(/not beside every picked edge.*Name as reference a face beside every one of them/);
+    const unnamed = await failure(() => api.apply({ expectedRevision: api.revision, label: 'x', operations: [{ op: 'chamfer_edges', body: box(id), edges: [{ along: [1, 0, 0] }], distance: 0.01, distance2: 0.005 }] }));
+    expect(unnamed.error).toMatchObject({ code: 'invalid_operation', message: expect.stringContaining('needs reference') });
+    expect(api.revision).toBe(revision);
+  });
+
+  /** A face frame 0.458 × 0.8 m with two openings; `proud` brings the middle rail forward of the stiles. */
+  function frameOps(proud: number, x = 0) {
+    return [
+      { op: 'add_box', as: proud > 0 ? 'board' : 'frame', min: [x, -0.019, 0], max: [x + 0.458, 0, 0.8] },
+      { op: 'add_box', as: 'o1', min: [x + 0.038, -0.03, 0.038], max: [x + 0.42, 0.01, 0.5] },
+      { op: 'add_box', as: 'o2', min: [x + 0.038, -0.03, 0.538], max: [x + 0.42, 0.01, 0.762] },
+      { op: 'subtract', target: proud > 0 ? '$board' : '$frame', cutters: ['$o1', '$o2'] },
+      ...(proud > 0 ? [
+        { op: 'add_box', as: 'rail', min: [x + 0.038, -0.019 - proud, 0.5], max: [x + 0.42, -0.018, 0.538] },
+        { op: 'union', as: 'frame', refs: ['$board', '$rail'] },
+      ] : []),
+    ];
+  }
+
+  it('beads a face frame\'s openings with profile_edges bead by {face, which: "inner"}', async () => {
+    const { api, root } = setup();
+    const made = await api.apply({ expectedRevision: api.revision, label: 'Frame', operations: frameOps(0) });
+    const frame = made.created.frame!;
+    const before = root().bodies.get(frame as never)!.props.volume;
+    const r = 0.003;
+    const bead = await api.apply({ expectedRevision: api.revision, label: 'Bead', operations: [
+      { op: 'profile_edges', body: box(frame), edges: [{ face: { facing: front }, which: 'inner' }], profile: 'bead', size: r },
+    ] });
+    expect(bead.results[0]!.count).toBe(8);
+    expect(bead.results[0]!.skipped).toBeUndefined();
+    const b = root().bodies.get(frame as never)!;
+    expect(b.valid).toBe(true);
+    expect(b.props.volume).toBeLessThan(before);
+    // the quirk sits on the front, 2.5 radii out from each opening
+    const fronts = [...b.faces.values()].filter(f => f.plane.n[1] < -0.999);
+    expect(fronts.some(f => f.loops.some(loop => loop.some(p => Math.abs(p[0] - (0.038 - 2.5 * r)) < 1e-6)))).toBe(true);
+    const curved = [...b.faces.values()].filter(f => f.surfaceId !== null);
+    expect(curved.length).toBeGreaterThan(8);
+    expect([...b.faces.values()].filter(face => face.loops.length === 0 || face.loops.some(loop => loop.length < 3))).toEqual([]);
+  });
+
+  it('splits a frame\'s front outline where a proud rail turns it to inside edges: profile_edges skips them and fillet_edges rounds the parts', async () => {
+    const { api, root } = setup();
+    const made = await api.apply({ expectedRevision: api.revision, label: 'Frame', operations: frameOps(0.006) });
+    const frame = made.created.frame!;
+    const stileFront = { facing: front, point: [0.019, -0.019, 0.3] };
+    const bead = await api.apply({ expectedRevision: api.revision, label: 'Bead', operations: [
+      { op: 'profile_edges', body: box(frame), edges: [{ face: stileFront, which: 'inner' }], profile: 'bead', size: 0.003 },
+    ] });
+    const skipped = bead.results[0]!.skipped!;
+    expect(skipped.length).toBeGreaterThan(0);
+    expect(skipped.every(s => s.reason === 'inside_edge' && s.ref.kind === 'edge')).toBe(true);
+    expect(root().bodies.get(frame as never)!.valid).toBe(true);
+    const again = await api.apply({ expectedRevision: api.revision, label: 'Frame 2', operations: frameOps(0.006, 1) });
+    const round = await api.apply({ expectedRevision: api.revision, label: 'Round', operations: [
+      { op: 'fillet_edges', body: box(again.created.frame!), edges: [{ face: { facing: front, point: [1.019, -0.019, 0.3] }, which: 'inner' }], radius: 0.003 },
+    ] });
+    expect(round.results[0]!.count).toBeGreaterThan(skipped.length);
+    expect(root().bodies.get(again.created.frame as never)!.valid).toBe(true);
+    expect(api.query({ ...queryAll, kinds: ['body'] }).entities.length).toBeGreaterThan(0);
+  });
+});
+
 describe('runModelTool', () => {
   it('returns results and errors as tool results', async () => {
     const { api } = setup();

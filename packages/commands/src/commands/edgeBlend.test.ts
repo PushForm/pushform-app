@@ -16,7 +16,7 @@ import { pushPullCommands } from './pushpull';
 import { sketchCommands } from './sketch';
 import { curveCommands, type AddCurveInput } from './curves';
 import { solidCommands } from './solids';
-import { blendEdgeGroup, edgeBlendCommands, type EdgeBlendApplyResult } from './edgeBlend';
+import { blendEdgeGroup, EDGE_PROFILES, edgeBlendCommands, profileShape, type EdgeBlendApplyResult, type EdgeProfile } from './edgeBlend';
 
 class FakeCamera implements CameraHost {
   state: CameraState = { eye: [10, -10, 10], target: [0, 0, 0], up: [0, 0, 1], fov: 35, projection: 'perspective', orthoHeight: 10 };
@@ -304,5 +304,192 @@ describe('fillet.apply / chamfer.apply', () => {
     });
     expect(blendEdgeGroup(body(id), edge.key)).toEqual([]);
     await expect(run(registry, 'fillet', id, [edge.key], 0.1)).rejects.toThrow(/hard edges/);
+  });
+});
+
+/** The face of `body` facing `n` whose plane passes through `p`. */
+function faceAt(body: Body, n: Vec3, p: Vec3): number {
+  const f = [...body.faces.values()].find((x) => v3dist(x.plane.n, n) < 1e-6 && x.loops[0]!.some((q) => v3dist(q, p) < 1e-6));
+  if (!f) throw new Error(`no face facing ${n} through ${p}`);
+  return f.id;
+}
+
+const chamfer2 = async (registry: CommandRegistry, bodyId: number, edges: EdgeKey[], size: number, extra: Record<string, unknown>): Promise<EdgeBlendApplyResult> =>
+  (await registry.execute('chamfer.apply', { path: [], bodyId, edges, size, ...extra })) as EdgeBlendApplyResult;
+
+describe('chamfer.apply with two distances', () => {
+  it('bevels one edge by distance on the reference face and distance2 on the other, or by an angle from it', async () => {
+    const { registry, body } = setupEdgeBlend();
+    const id = addBox(registry);
+    const top = faceAt(body(id), [0, 0, 1], [0, 0, 1]);
+    const edge = edgeAt(body(id), [0, 0, 1], [1, 0, 1]);
+    await chamfer2(registry, id, [edge.key], 0.4, { distance2: 0.1, referenceFace: top });
+    const b = body(id);
+    expect(b.props.volume).toBeCloseTo(1 - 0.5 * 0.4 * 0.1, 6);
+    expect(meshTopologyProblems(b.mesh)).toEqual([]);
+    // the bevel meets the top 0.4 from the edge and the front 0.1 below it
+    const bevel = [...b.faces.values()].find((f) => Math.abs(f.plane.n[1]) > 0.1 && Math.abs(f.plane.n[2]) > 0.1)!;
+    const pts = bevel.loops[0]!;
+    expect(Math.max(...pts.map((p) => p[1]))).toBeCloseTo(0.4, 6);
+    expect(Math.min(...pts.map((p) => p[2]))).toBeCloseTo(0.9, 6);
+
+    const id2 = addBox(registry, [3, 0, 0], [4, 1, 1]);
+    const top2 = faceAt(body(id2), [0, 0, 1], [3, 0, 1]);
+    await chamfer2(registry, id2, [edgeAt(body(id2), [3, 0, 1], [4, 0, 1]).key], 0.3, { angleDeg: 30, referenceFace: top2 });
+    expect(body(id2).props.volume).toBeCloseTo(1 - 0.5 * 0.3 * 0.3 * Math.tan(Math.PI / 6), 6);
+  });
+
+  it('mitres the four edges round a panel\'s front face, leaving a raised field', async () => {
+    const { registry, body } = setupEdgeBlend();
+    const id = addBox(registry, [0, 0, 0], [1, 0.2, 1]);
+    const b0 = body(id);
+    const front = faceAt(b0, [0, -1, 0], [0, 0, 0]);
+    const loop = [
+      edgeAt(b0, [0, 0, 0], [1, 0, 0]).key,
+      edgeAt(b0, [1, 0, 0], [1, 0, 1]).key,
+      edgeAt(b0, [1, 0, 1], [0, 0, 1]).key,
+      edgeAt(b0, [0, 0, 1], [0, 0, 0]).key,
+    ];
+    const res = await chamfer2(registry, id, loop, 0.3, { distance2: 0.05, referenceFace: front });
+    const b = body(id);
+    expect(meshTopologyProblems(b.mesh)).toEqual([]);
+    // the slab 0.05 deep less the frustum left under the field: 0.05 − 0.05/3 · (1 + 0.16 + 0.4)
+    expect(b.props.volume).toBeCloseTo(0.2 - 0.024, 6);
+    expect(res.faceIds).toHaveLength(4);
+    // the field is the 0.4 square left of the front face, and the bevels meet on the mitre diagonals
+    const field = b.faces.get(faceAt(b, [0, -1, 0], [0.3, 0, 0.3]) as never)!;
+    expect(field.loops[0]!.map((p) => [p[0], p[2]].map((x) => Math.round(x * 1e6) / 1e6)).sort()).toEqual([[0.3, 0.3], [0.3, 0.7], [0.7, 0.3], [0.7, 0.7]]);
+    for (const fid of res.faceIds) expect(b.faces.get(fid as never)!.loops[0]).toHaveLength(4);
+  });
+
+  it('says which distance does not fit, and refuses a reference face that is not beside every edge', async () => {
+    const { registry, body } = setupEdgeBlend();
+    const id = addBox(registry, [0, 0, 0], [1, 0.2, 1]);
+    const b0 = body(id);
+    const front = faceAt(b0, [0, -1, 0], [0, 0, 0]);
+    const bottom = edgeAt(b0, [0, 0, 0], [1, 0, 0]).key;
+    await expect(chamfer2(registry, id, [bottom], 1.2, { distance2: 0.05, referenceFace: front })).rejects.toMatchObject({ code: 'edgeblend.tooLarge', message: expect.stringMatching(/distance .* on the reference face/) });
+    await expect(chamfer2(registry, id, [bottom], 0.3, { distance2: 0.3, referenceFace: front })).rejects.toMatchObject({ code: 'edgeblend.tooLarge2', message: expect.stringMatching(/second distance .* across from the reference face/) });
+    const side = edgeAt(b0, [0, 0, 0], [0, 0.2, 0]).key;
+    await expect(chamfer2(registry, id, [bottom, side], 0.1, { distance2: 0.05, referenceFace: front })).rejects.toMatchObject({ code: 'edgeblend.reference' });
+    await expect(chamfer2(registry, id, [bottom], 0.1, { distance2: 0.05 })).rejects.toMatchObject({ code: 'edgeblend.reference' });
+    await expect(chamfer2(registry, id, [bottom], 0.1, { distance2: 0.05, angleDeg: 20, referenceFace: front })).rejects.toMatchObject({ code: 'edgeblend.reference' });
+    expect(body(id).version).toBe(b0.version);
+  });
+});
+
+/** An L: a 2 × 1 × 1 block with a 1 × 1 × 1 block on its right half, flush at the front, back and right. */
+async function stepBody(setup: ReturnType<typeof setupEdgeBlend>): Promise<number> {
+  const { registry, root } = setup;
+  const a = addBox(registry, [0, 0, 0], [2, 1, 1]);
+  const w = addBox(registry, [1, 0, 1], [2, 1, 2]);
+  await registry.execute('solids.union', { a: { kind: 'body', path: [], id: a }, b: { kind: 'body', path: [], id: w } });
+  return [...root().bodies.keys()][0]! as number;
+}
+
+/** The outline of the step's lower top face: front, inside edge against the block, back and left. */
+const stepLoop = (b: Body): EdgeKey[] => [
+  edgeAt(b, [0, 0, 1], [1, 0, 1]).key,
+  edgeAt(b, [1, 0, 1], [1, 1, 1]).key,
+  edgeAt(b, [1, 1, 1], [0, 1, 1]).key,
+  edgeAt(b, [0, 1, 1], [0, 0, 1]).key,
+];
+
+describe('chains that turn from outside to inside edges', () => {
+  it('fillets a face outline of outside and inside edges as separate parts, each ending on the face across it', async () => {
+    const s = setupEdgeBlend();
+    const id = await stepBody(s);
+    const res = await run(s.registry, 'fillet', id, stepLoop(s.body(id)), 0.1);
+    const b = s.body(id);
+    expect(meshTopologyProblems(b.mesh)).toEqual([]);
+    expect(res.faceIds.length).toBeGreaterThan(0);
+    // three rounded outside edges remove more than the filled inside edge adds
+    const r = 0.1, quarter = r * r * (1 - 0.5 * 6 * Math.sin(Math.PI / 12));
+    expect(b.props.volume).toBeLessThan(3 - quarter);
+    expect(b.props.volume).toBeGreaterThan(3 - 3 * quarter);
+  });
+});
+
+/** Area and centroid x of the region a profile removes, from its cross-section. */
+function removed(profile: EdgeProfile, size: number): { area: number; cx: number } {
+  const ring = [[0, 0] as const, ...profileShape(profile, size).points];
+  let a2 = 0, cx = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const [x0, y0] = ring[i]!, [x1, y1] = ring[(i + 1) % ring.length]!;
+    const c = x0 * y1 - x1 * y0;
+    a2 += c;
+    cx += (x0 + x1) * c;
+  }
+  return { area: Math.abs(a2) / 2, cx: cx / (3 * a2) };
+}
+
+const profile = async (registry: CommandRegistry, bodyId: number, edges: EdgeKey[], p: EdgeProfile, size: number, extra: Record<string, unknown> = {}): Promise<EdgeBlendApplyResult> =>
+  (await registry.execute('profile.apply', { path: [], bodyId, edges, profile: p, size, ...extra })) as EdgeBlendApplyResult;
+
+describe('profile.apply', () => {
+  it.each(EDGE_PROFILES)('cuts a %s along one straight edge, its cross-section all along it', async (p) => {
+    const { host, registry, body } = setupEdgeBlend();
+    const id = addBox(registry);
+    const top = faceAt(body(id), [0, 0, 1], [0, 0, 1]);
+    const res = await profile(registry, id, [edgeAt(body(id), [0, 0, 1], [1, 0, 1]).key], p, 0.1, { referenceFace: top });
+    const b = body(id);
+    expect(meshTopologyProblems(b.mesh)).toEqual([]);
+    expect(b.props.volume).toBeCloseTo(1 - removed(p, 0.1).area, 6);
+    expect(res.faceIds.length).toBeGreaterThan(0);
+    expect(host.undoStack.peek()?.label).toBe('Profile Edges');
+  });
+
+  it.each(EDGE_PROFILES)('mitres a %s round the four top edges of a box', async (p) => {
+    const { registry, body } = setupEdgeBlend();
+    const id = addBox(registry);
+    const b0 = body(id);
+    const keys = [edgeAt(b0, [0, 0, 1], [1, 0, 1]).key, edgeAt(b0, [1, 0, 1], [1, 1, 1]).key, edgeAt(b0, [1, 1, 1], [0, 1, 1]).key, edgeAt(b0, [0, 1, 1], [0, 0, 1]).key];
+    await profile(registry, id, keys, p, 0.1);
+    const b = body(id);
+    expect(meshTopologyProblems(b.mesh)).toEqual([]);
+    // each mitred piece is as long as the edge less twice its section's centroid in from it
+    const { area, cx } = removed(p, 0.1);
+    expect(b.props.volume).toBeCloseTo(1 - 4 * area * (1 - 2 * cx), 6);
+  });
+
+  it.each(EDGE_PROFILES)('splits a loop of outside and inside edges, leaving the inside edge and stopping a %s against the face across it', async (p) => {
+    const s = setupEdgeBlend();
+    const id = await stepBody(s);
+    const loop = stepLoop(s.body(id));
+    const res = await profile(s.registry, id, loop, p, 0.1);
+    expect(res.skipped).toEqual([loop[1]]);
+    const b = s.body(id);
+    expect(meshTopologyProblems(b.mesh)).toEqual([]);
+    // front and back: one mitre each; left: two; the front and back stop square on the block's side
+    const { area, cx } = removed(p, 0.1);
+    expect(b.props.volume).toBeCloseTo(3 - area * (2 * (1 - cx) + (1 - 2 * cx)), 6);
+  });
+
+  it('measures from the larger face of a single edge by default, and from a named reference face', async () => {
+    const { registry, body } = setupEdgeBlend();
+    const id = addBox(registry, [0, 0, 0], [1, 0.3, 1]);
+    const edge = edgeAt(body(id), [0, 0, 1], [1, 0, 1]).key;
+    await profile(registry, id, [edge], 'step', 0.1, { depth: 0.05 });
+    // the step is 0.1 down the front face and 0.05 deep into the part
+    expect(faceAt(body(id), [0, -1, 0], [0, 0.05, 1])).toBeDefined();
+    expect(faceAt(body(id), [0, 0, 1], [0, 0.05, 0.9])).toBeDefined();
+    const id2 = addBox(registry, [3, 0, 0], [4, 0.3, 1]);
+    const top = faceAt(body(id2), [0, 0, 1], [3, 0, 1]);
+    await profile(registry, id2, [edgeAt(body(id2), [3, 0, 1], [4, 0, 1]).key], 'step', 0.1, { depth: 0.05, referenceFace: top });
+    expect(faceAt(body(id2), [0, -1, 0], [3, 0.1, 1])).toBeDefined();
+    expect(faceAt(body(id2), [0, 0, 1], [3, 0.1, 0.95])).toBeDefined();
+  });
+
+  it('refuses a pick of inside edges only, an edge that is not square, and a size too big', async () => {
+    const s = setupEdgeBlend();
+    const id = await stepBody(s);
+    const inside = edgeAt(s.body(id), [1, 0, 1], [1, 1, 1]).key;
+    await expect(profile(s.registry, id, [inside], 'roundover', 0.1)).rejects.toMatchObject({ code: 'edgeblend.inside' });
+    const box = addBox(s.registry, [5, 0, 0], [6, 1, 1]);
+    const top = edgeAt(s.body(box), [5, 0, 1], [6, 0, 1]).key;
+    await s.registry.execute('chamfer.apply', { path: [], bodyId: box, edges: [top], size: 0.2 });
+    const bevelled = [...s.body(box).edges.values()].find((e) => e.polyline.every((q) => Math.abs(q[2] - 0.8) < 1e-6) && e.polyline.every((q) => Math.abs(q[1]) < 1e-6))!;
+    await expect(profile(s.registry, box, [bevelled.key], 'roundover', 0.05)).rejects.toMatchObject({ code: 'edgeblend.geometry', message: expect.stringMatching(/square edges/) });
+    await expect(profile(s.registry, id, [edgeAt(s.body(id), [0, 0, 1], [0, 1, 1]).key], 'bead', 0.5)).rejects.toMatchObject({ code: 'edgeblend.tooLarge' });
   });
 });

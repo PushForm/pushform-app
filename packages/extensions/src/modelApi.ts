@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import {
-  DEFAULT_BLEND_SEGMENTS, SERVICE_FONTS, checkEdgeBlendResult, Text3DParamsSchema, isHardEdge, libraryMaterial, loadLibraryMaterial, planEdgeBlend, runEdgeBlendKernel, runIntersectKernel,
+  DEFAULT_BLEND_SEGMENTS, SERVICE_FONTS, checkEdgeBlendResult, Text3DParamsSchema, isHardEdge, libraryMaterial, loadLibraryMaterial, planEdgeBlend, planEdgeProfile, runEdgeBlendKernel, runIntersectKernel,
   runText3DKernel, BUILTIN_LIBRARY, LIBRARY_CATEGORIES, activeTagOpt, applyTransformPlan, arrayMatrices, contextFrame, curvePoints, definitionBounds, hostOf, instanceCount, kernelOf, localPushPullDistance,
   m4rotationAbout, m4scaleAbout, planPushPull, planTransform, runFollowMeKernel, runPushPullKernel, runSolidsKernel, runTransformKernel, sceneRuntimeOf,
   type CameraHost, type CameraState, type CommandRegistry, type DocumentHost, type ExplodeResult, type FollowMeApplyResult, type FollowMeParams,
-  type EdgeBlendKind, type MakeResult, type StandardView, type PushPullApplyResult, type PushPullTarget, type SolidsApplyResult, type SolidsKernelWork, type SolidsPairMode, type TransformKernelWork, type TransformPlan,
+  type EdgeBlendMode, type EdgeBlendPlan, type MakeResult, type StandardView, type PushPullApplyResult, type PushPullTarget, type SolidsApplyResult, type SolidsKernelWork, type SolidsPairMode, type TransformKernelWork, type TransformPlan,
 } from '@pushform/commands';
 import {
   LOCAL_REFERENCE, MODEL_API_VERSION, MODEL_LIMITS, MODEL_RENDER_LIMITS, modelRenderSchema, modelRenderViewName, modelRenderViews, type ModelRenderImage, type ModelRenderResult, MODEL_PLANNED_OPERATIONS, MODEL_TOOLS, modelBatchSchema, modelMaterialLibrarySchema, modelOperationSchema, modelOverlapsSchema, modelQuerySchema,
@@ -59,6 +59,13 @@ type EdgeSelector = string
   | { between: [EdgeFaceSelector, EdgeFaceSelector] }
   | { faceFacing: Vec3; facePoint?: Vec3 | undefined }
   | { along: Vec3; through?: Vec3 | undefined };
+/** A fillet, chamfer or profile of a batch: its command, its params, and its plan with some params changed (for the largest that fits). */
+interface BlendJob {
+  kind: EdgeBlendMode;
+  command: string;
+  params: { edges: string[]; size: number; distance2?: number | undefined; angleDeg?: number | undefined };
+  plan: (state: DocumentState, change: { size?: number; distance2?: number }) => EdgeBlendPlan;
+}
 /** A face to push, pull or sweep, as the commands take it, and the direction a positive API distance moves. */
 interface FaceTarget { target: PushPullTarget; plane: Plane; normal: Vec3; shown: string }
 type OpResult = Omit<ModelBatchResult['results'][number], 'op'> & { named?: Named };
@@ -828,25 +835,42 @@ export class ModelDocumentApi {
         return { id: result.bodyIds[0]!, refs: result.bodyIds.map(bodyOut), named: { kind: 'body', id: result.bodyIds[0]! } };
       }
       case 'fillet_edges':
-      case 'chamfer_edges': {
-        const kind = op.op === 'fillet_edges' ? 'fillet' as const : 'chamfer' as const;
+      case 'chamfer_edges':
+      case 'profile_edges': {
         const target = solid(op.body, 'The body');
         const body = containerAt(host.doc.state, path).bodies.get(target.id as Id)!;
         // Selectors are resolved against the solid as it is now, so a face or direction never goes stale.
-        const edges = this.edgeKeys(body, op.edges as readonly EdgeSelector[]);
-        const size = op.op === 'fillet_edges' ? op.radius : op.distance;
-        const params = { path: [...path], bodyId: body.id, edges, size, segments: op.op === 'fillet_edges' ? op.segments ?? DEFAULT_BLEND_SEGMENTS : DEFAULT_BLEND_SEGMENTS };
+        const selectors = op.edges as readonly EdgeSelector[];
+        const edges = this.edgeKeys(body, selectors);
+        const reference = op.op === 'fillet_edges' ? undefined : op.reference ? this.edgeFace(body, op.reference, 'reference').id : this.selectorFace(body, selectors);
+        let job: BlendJob;
+        if (op.op === 'profile_edges') {
+          const params = { path: [...path], bodyId: body.id, edges, size: op.size, profile: op.profile, depth: op.depth, angleDeg: op.angleDeg, referenceFace: reference, segments: op.segments ?? DEFAULT_BLEND_SEGMENTS };
+          job = { kind: 'profile', command: 'profile.apply', params, plan: (state, p) => planEdgeProfile(state, { ...params, ...p }) };
+        } else if (op.op === 'chamfer_edges') {
+          const twoDistance = op.distance2 !== undefined || op.angleDeg !== undefined;
+          if (twoDistance && reference === undefined) {
+            throw this.failure('invalid_operation', `chamfer_edges with ${op.distance2 !== undefined ? 'distance2' : 'angleDeg'} needs reference, the face distance is measured along, beside every picked edge: for a raised panel, the front face, as in reference: {facing: [0, -1, 0]}. It can be left out when the edges come from one face selector, such as {face: {facing: [0, -1, 0]}, which: "outer"}.`);
+          }
+          const params = { path: [...path], bodyId: body.id, edges, size: op.distance, segments: DEFAULT_BLEND_SEGMENTS, ...(twoDistance ? { distance2: op.distance2, angleDeg: op.angleDeg, referenceFace: reference } : {}) };
+          job = { kind: 'chamfer', command: 'chamfer.apply', params, plan: (state, p) => planEdgeBlend(state, 'chamfer', { ...params, ...p }) };
+        } else {
+          const params = { path: [...path], bodyId: body.id, edges, size: op.radius, segments: op.segments ?? DEFAULT_BLEND_SEGMENTS };
+          job = { kind: 'fillet', command: 'fillet.apply', params, plan: (state, p) => planEdgeBlend(state, 'fillet', { ...params, ...p }) };
+        }
         let precomputed: Awaited<ReturnType<typeof runEdgeBlendKernel>>;
+        let plan: EdgeBlendPlan;
         try {
-          const plan = planEdgeBlend(host.doc.state, kind, params);
+          plan = job.plan(host.doc.state, {});
           precomputed = await runEdgeBlendKernel(kernelOf(this.commands.ctx), plan);
           checkEdgeBlendResult(plan, precomputed);
         } catch (cause) {
-          throw await this.blendFailure(cause, kind, body, params);
+          throw await this.blendFailure(cause, job, body);
         }
-        await exec<Promise<unknown>>(`${kind}.apply`, { ...params, precomputed });
+        await exec<Promise<unknown>>(job.command, { ...job.params, precomputed });
         this.checkSolids(path, [body.id], op.op);
-        return { id: body.id, refs: [bodyOut(body.id)], count: edges.length };
+        const skipped: ModelSkipped[] = plan.skipped.map(edgeKey => ({ ref: { path: [...path], kind: 'edge', id: body.id, edgeKey }, reason: 'inside_edge' }));
+        return { id: body.id, refs: [bodyOut(body.id)], count: edges.length - skipped.length, ...(skipped.length ? { skipped } : {}) };
       }
       case 'add_arc': {
         const sweep = op.endDeg - op.startDeg;
@@ -1209,34 +1233,58 @@ export class ModelDocumentApi {
       + (closest[0] ? ` The closest is ${faceSelector(closest[0])}.` : ''));
   }
 
-  /**
-   * A fillet or chamfer that the plan or the kernel refused, as an actionable failure: a size too big reports the
-   * largest that fits, and any other refusal names the edges involved.
-   */
-  private async blendFailure(cause: unknown, kind: EdgeBlendKind, body: Body, params: { path: number[]; bodyId: number; edges: string[]; size: number; segments: number }): Promise<ModelApiFailure> {
-    if (cause instanceof ModelApiFailure) return cause;
-    const message = cause instanceof Error ? cause.message : String(cause);
-    const what = kind === 'fillet' ? 'radius' : 'distance';
-    const code = cause instanceof PushFormError ? cause.code : '';
-    if (code === 'edgeblend.tooLarge') {
-      const largest = await this.largestBlend(kind, params);
-      // When even the smallest size fails, the reason is not the size: report what the plan says there.
-      const tiny = (() => { try { planEdgeBlend(this.host.doc.state, kind, { ...params, size: 4 * MERGE_TOL }); return null; } catch (e) { return e instanceof Error ? e.message : String(e); } })();
-      return this.failure('invalid_geometry', largest === null ? `${message} No ${what} fits these edges${tiny ? `, at any size: ${tiny}` : ''}; ${edgeList(body, params.edges)}.`
-        : `${message} You asked for ${params.size} m; the largest ${what} that fits these edges is about ${largest} m. Use that or less, or pick fewer edges.`);
+  /** The one face every face selector among `selectors` names, when they are all face selectors of one face. */
+  private selectorFace(body: Body, selectors: readonly EdgeSelector[]): number | undefined {
+    const ids = new Set<number>();
+    for (const sel of selectors) {
+      if (typeof sel !== 'object' || !('face' in sel || 'faceFacing' in sel)) return undefined;
+      ids.add(this.edgeFace(body, 'face' in sel ? sel.face : { facing: sel.faceFacing, point: sel.facePoint }, 'face').id);
     }
-    const hint = code === 'edgeblend.corner' ? ' Pick the edges of one face at a time, or edges that do not meet at that corner.' : '';
-    return this.failure(errorCode(cause), `${message} The edges: ${edgeList(body, params.edges)}.${hint}`);
+    return ids.size === 1 ? [...ids][0] : undefined;
   }
 
-  /** The largest blend size, rounded down to three significant figures, that the plan and the kernel accept, or null. */
-  private async largestBlend(kind: EdgeBlendKind, params: { path: number[]; bodyId: number; edges: string[]; size: number; segments: number }): Promise<number | null> {
+  /**
+   * A fillet, chamfer or profile that the plan or the kernel refused, as an actionable failure: a size too big
+   * reports the largest that fits (for a two-distance chamfer, the largest of each distance), and any other refusal
+   * names the edges involved.
+   */
+  private async blendFailure(cause: unknown, job: BlendJob, body: Body): Promise<ModelApiFailure> {
+    if (cause instanceof ModelApiFailure) return cause;
+    const message = cause instanceof Error ? cause.message : String(cause);
+    const what = job.kind === 'fillet' ? 'radius' : job.kind === 'chamfer' ? 'distance' : 'size';
+    const code = cause instanceof PushFormError ? cause.code : '';
+    const edges = job.params.edges;
+    if (code === 'edgeblend.tooLarge' || code === 'edgeblend.tooLarge2') {
+      const second = job.params.distance2;
+      if (second !== undefined) {
+        // two distances: the largest of each that fits with the other as asked
+        const first = await this.largestBlend(job, 'size');
+        const other = await this.largestBlend(job, 'distance2');
+        const say = (n: number | null, name: string, with_: string): string => n === null ? `no ${name} fits with that ${with_}` : `the largest ${name} that fits with that ${with_} is about ${n} m`;
+        return this.failure('invalid_geometry', `${message} You asked for distance ${job.params.size} m and distance2 ${second} m; ${say(first, 'distance', 'distance2')}, and ${say(other, 'distance2', 'distance')}. Use those or less, or pick fewer edges.`);
+      }
+      const largest = await this.largestBlend(job, 'size');
+      // When even the smallest size fails, the reason is not the size: report what the plan says there.
+      const tiny = (() => { try { job.plan(this.host.doc.state, { size: 4 * MERGE_TOL }); return null; } catch (e) { return e instanceof Error ? e.message : String(e); } })();
+      return this.failure('invalid_geometry', largest === null ? `${message} No ${what} fits these edges${tiny ? `, at any size: ${tiny}` : ''}; ${edgeList(body, edges)}.`
+        : `${message} You asked for ${job.params.size} m; the largest ${what} that fits these edges${job.params.angleDeg !== undefined ? ' at that angle' : ''} is about ${largest} m. Use that or less, or pick fewer edges.`);
+    }
+    if (code === 'edgeblend.reference') return this.failure('invalid_reference', `${message} The edges: ${edgeList(body, edges)}. Name as reference a face beside every one of them, or pick the edges of the reference face, such as {face: <the reference face>, which: "outer"}.`);
+    const hint = code !== 'edgeblend.corner' ? ''
+      : job.kind === 'profile' ? ' Pick the edges of one face at a time, or edges that do not meet at that corner.'
+        : ` Pick the edges of one face at a time, or edges that do not meet at that corner; or use profile_edges with profile "${job.kind === 'fillet' ? 'roundover' : 'chamfer'}", which stops where it meets an inside edge.`;
+    return this.failure(errorCode(cause), `${message} The edges: ${edgeList(body, edges)}.${hint}`);
+  }
+
+  /** The largest value of `key`, rounded down to three significant figures, that the plan and the kernel accept, the rest as asked; or null. */
+  private async largestBlend(job: BlendJob, key: 'size' | 'distance2'): Promise<number | null> {
     const state = this.host.doc.state, kernel = kernelOf(this.commands.ctx);
-    const planFits = (size: number): boolean => { try { planEdgeBlend(state, kind, { ...params, size }); return true; } catch { return false; } };
-    const kernelFits = async (size: number): Promise<boolean> => {
-      try { const plan = planEdgeBlend(state, kind, { ...params, size }); checkEdgeBlendResult(plan, await runEdgeBlendKernel(kernel, plan)); return true; } catch { return false; }
+    const asked = job.params[key]!;
+    const planFits = (value: number): boolean => { try { job.plan(state, { [key]: value }); return true; } catch { return false; } };
+    const kernelFits = async (value: number): Promise<boolean> => {
+      try { const plan = job.plan(state, { [key]: value }); checkEdgeBlendResult(plan, await runEdgeBlendKernel(kernel, plan)); return true; } catch { return false; }
     };
-    let lo = 0, hi = params.size;
+    let lo = 0, hi = asked;
     // The plan's checks are cheap and exact, so they bound the search before the kernel is asked.
     for (let i = 0; i < 30 && hi - lo > MERGE_TOL / 4; i++) { const mid = (lo + hi) / 2; if (planFits(mid)) lo = mid; else hi = mid; }
     if (!(lo > MERGE_TOL)) return null;

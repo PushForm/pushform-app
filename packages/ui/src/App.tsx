@@ -397,7 +397,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
   const companionBrowser = guidanceBrowserTab === active.id && sidePanel === 'requests';
   const browserVisible = sidePanel === 'objects' || companionBrowser;
   const sideBar = <>
-    <SideRail items={railItems} active={shownPanel} onToggle={id => { if (id === 'commons') { setCommonsVisited(true); setCommonsShown(true); } else { setCommonsShown(false); toggleSidePanel(id); } }} />
+    <SideRail items={railItems} active={commonsShown ? 'commons' : shownPanel} onToggle={id => { if (id === 'commons') { setCommonsVisited(true); setCommonsShown(true); } else { setCommonsShown(false); toggleSidePanel(id); } }} />
     <SideDock open={shownPanel !== null}>
       <DockSlot node={filesNode} attached={sidePanel === 'files'} />
       <DockSlot node={chatNode} attached={sidePanel === 'requests'} />

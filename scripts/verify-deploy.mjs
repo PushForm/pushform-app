@@ -20,8 +20,9 @@ const check = (ok, message) => {
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${message}`);
   if (!ok) failures++;
 };
-const get = (path) => fetch(base + path, { headers: { 'accept-encoding': 'br, gzip' } });
+const get = (path) => fetch(base + path, { headers: { 'accept-encoding': 'br, gzip', 'cache-control': 'no-cache' } });
 const header = (res, name) => res.headers.get(name) ?? '';
+const isJavaScript = (res) => /^(?:application|text)\/(?:javascript|ecmascript)(?:;|$)/i.test(header(res, 'content-type'));
 
 const index = await get('/');
 check(index.status === 200, `GET / → ${index.status}`);
@@ -46,6 +47,7 @@ check(Boolean(js), `index.html names a bundle (${js})`);
 if (js) {
   const bundle = await get(js);
   check(bundle.status === 200, `GET ${js} → ${bundle.status}`);
+  check(isJavaScript(bundle), `${js} serves JavaScript, not an HTML fallback`);
   check(
     /immutable/.test(header(bundle, 'cache-control')),
     `${js} cache-control: ${header(bundle, 'cache-control')}`,
@@ -69,7 +71,7 @@ if (js) {
   while ((strict || !wasm) && queue.length) {
     const source = queue.shift();
     // Vite emits "/assets/x.js" from the entry and "./x.js" between chunks in /assets.
-    for (const m of source.matchAll(/["'`](?:\.\/|\/assets\/)([\w.-]+\.(?:js|wasm))["'`]/g)) {
+    for (const m of source.matchAll(/["'`](?:\.\/|\/?assets\/)([\w.-]+\.(?:js|wasm))["'`]/g)) {
       const asset = `/assets/${m[1]}`;
       if (asset.endsWith('.wasm')) {
         wasm ??= asset;
@@ -78,7 +80,8 @@ if (js) {
       if (seen.has(asset)) continue;
       seen.add(asset);
       const res = await get(asset);
-      if (res.status === 200) {
+      check(res.status === 200 && isJavaScript(res), `${asset} serves JavaScript`);
+      if (res.status === 200 && isJavaScript(res)) {
         const chunk = await res.text();
         queue.push(chunk);
         sources.push(chunk);
@@ -87,6 +90,8 @@ if (js) {
   }
   check(Boolean(wasm), `bundle graph references the Manifold wasm (${wasm})`);
   if (strict) {
+    const release = process.env.VITE_RELEASE?.trim();
+    if (release) check(sources.some(source => source.includes(release)), `bundles contain the expected release ${release}`);
     const origin = process.env.VITE_SUPABASE_URL?.trim().replace(/\/$/, '');
     check(Boolean(origin), 'VITE_SUPABASE_URL names the expected Supabase project');
     if (origin) check(sources.some(source => source.includes(origin)), `bundles name the Supabase project ${origin}`);

@@ -273,7 +273,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
     const stopped = (): void => { if (controller.signal.aborted) throw new DOMException('Stopped', 'AbortError'); };
     setToolProgress(null); setStatusLine(null); setTurnStarted(Date.now());
     void run(async () => {
-      let streamed = '', rateLimited = false, failed = false, resumed = false, conversation = chat.conversation;
+      let streamed = '', rateLimited = false, failed = false, resumed = false, completed = false, conversation = chat.conversation;
       // A conversation the server ended (filed, added, closed) is left behind: this message starts a new one.
       let ended = false, startOver = false, path = conversation ? chat.path : 'open', title = conversation?.title ?? null;
       const pictureIds: string[] = [];
@@ -336,6 +336,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
                 else setError({ code: event.code, message: event.message });
                 break;
               case 'done':
+                completed = !event.awaitingTools;
                 ended = event.ended; startOver = ended && event.reason === 'start_over';
                 setChat(current => ({ ...current, messageCount: event.messageCount, limitReached: !ended && (event.limitReached || event.messageCount >= messageLimit) }));
                 break;
@@ -392,7 +393,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
       } finally {
         if (turn.current === controller) turn.current = null;
         if (live()) { setToolProgress(null); setStatusLine(null); setTurnStarted(null); setWaitingForGuidance(false); }
-        if (live() && (failed || rateLimited || ended || controller.signal.aborted)) setQueuePaused(true);
+        if (live() && (!completed || failed || rateLimited || ended || controller.signal.aborted)) setQueuePaused(true);
         if (live() && pending && failed && !resumed) replaceQueue([pending, ...queuedRef.current]);
         // A turn the server rejected before answering never received the message: the optimistic copy leaves the transcript.
         // Start over (the requester asked the agent to discard): the transcript goes too, so the greeting and cards return.

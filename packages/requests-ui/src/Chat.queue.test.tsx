@@ -95,6 +95,14 @@ it('keeps a hidden queue and sends it when that conversation is shown again', as
   await waitFor(() => expect(f.requests).toHaveLength(2));
   expect(f.requests[1]!.body.text).toBe('Second');
 });
+it('does not send the next message when a stream closes without confirming completion', async () => {
+  const f = setup(); await send('First'); await waitFor(() => expect(f.requests).toHaveLength(1));
+  await send('Second', true);
+  await act(async () => { f.requests[0]!.finish([]); });
+  expect(f.requests).toHaveLength(1);
+  expect(pending().textContent).toContain('Queued messages paused');
+  expect(screen.getByRole('button', { name: 'Send next' })).toBeTruthy();
+});
 it('waits for explicit confirmation to send queued text after a conversation ends', async () => {
   const f = setup(); await send('First'); await waitFor(() => expect(f.requests).toHaveLength(1));
   await send('Another topic', true);

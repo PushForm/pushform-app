@@ -485,6 +485,32 @@ describe('document editing', () => {
     expect(at('Adding a title block.')).toBeLessThan(at('Changed the document: Title block.'));
     expect(at('Changed the document: Title block.')).toBeLessThan(at('Done: the title block'));
   });
+  it('shows one change line per message, updated in place as later batches of the turn apply', async () => {
+    let applied = 0;
+    const run = vi.fn(() => {
+      applied += 1;
+      return { content: '{"ok":true}', isError: false, notice: applied === 1 ? 'Changed the document: Grain left side. Undo reverts it.' : `Changed the document: Grain left side and ${applied - 1} more change${applied === 2 ? '' : 's'}. Undo reverts it.` };
+    });
+    const two: FakeTurn = { event: 'tool_request', data: { calls: [{ ...call, id: 'c2' }, { ...call, id: 'c3' }] } };
+    setup({ turns: [[text('Setting the grain.'), toolRequest, awaiting], [text('Now the rest.'), two, awaiting], [toolRequest, awaiting], [text('Done.'), done(1)],
+      [toolRequest, awaiting], [text('Again.'), done(2)]] },
+      { documentTools: () => ({ document: LAYOUT, run }) });
+    await say('Set the grain on every part');
+    await waitFor(() => expect(log().textContent).toContain('Done.'));
+    const system = () => [...log().querySelectorAll('.pf-fr-message.is-system')].map(el => el.textContent);
+    expect(run).toHaveBeenCalledTimes(4);
+    expect(system()).toEqual(['Changed the document: Grain left side and 3 more changes. Undo reverts it.']);
+    // The line stays where the first change was made.
+    const lines = [...log().querySelectorAll('.pf-fr-message')].map(el => el.textContent ?? '');
+    const at = (needle: string) => lines.findIndex(line => line.includes(needle));
+    expect(at('Setting the grain.')).toBeLessThan(at('Changed the document'));
+    expect(at('Changed the document')).toBeLessThan(at('Now the rest.'));
+    // The next message gets a line of its own.
+    applied = 0;
+    await say('Once more');
+    await waitFor(() => expect(log().textContent).toContain('Again.'));
+    expect(system()).toEqual(['Changed the document: Grain left side and 3 more changes. Undo reverts it.', 'Changed the document: Grain left side. Undo reverts it.']);
+  });
   it('shows a reply split by tool calls under one Agent label and drops blank text before a call', async () => {
     const run = vi.fn(() => ({ content: '{"ok":true,"revision":1}', isError: false }));
     setup({ turns: [[text('\n\n'), toolRequest, awaiting], [text('Checking the page.'), toolRequest, awaiting], [text('Added the hallway.'), done(1)]] },

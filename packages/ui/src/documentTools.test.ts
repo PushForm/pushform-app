@@ -47,6 +47,34 @@ describe('documentToolsFor', () => {
     expect(root().instances.size).toBe(0);
   });
 
+  it('makes all of one message\'s batches one undo step, with one change line describing them all', async () => {
+    const s = open();
+    const tab = s.active;
+    if (tab.type !== 'model') throw new Error('expected a model tab');
+    const tools = documentToolsFor(s, tab)!;
+    const doc = tab.app.document.doc, undo = tab.app.document.undoStack, depth = undo.length;
+    const grain = (label: string, x: number) => tools.run({ id: label, name: 'model_apply_operations',
+      input: { expectedRevision: doc.version, label, operations: [{ op: 'add_box', min: [x, 0, 0], max: [x + 0.5, 0.5, 0.5] }] } });
+    expect((await grain('Grain left side', 0)).notice).toBe('Changed the document: Grain left side. Undo reverts it.');
+    expect((await grain('Grain right side', 1)).notice).toBe('Changed the document: Grain left side and 1 more change. Undo reverts it.');
+    expect((await grain('Grain toe kick', 2)).notice).toBe('Changed the document: Grain left side and 2 more changes. Undo reverts it.');
+    expect(undo.length).toBe(depth + 1);
+    expect(undo.peek()?.label).toBe('AI Chat: Grain left side and 2 more changes');
+    const root = () => tab.app.document.doc.rootDefinition.entities;
+    expect(root().bodies.size).toBe(3);
+    // The requester edits meanwhile: the next batch is its own undo step, and the line says how many there are.
+    tab.app.commands.execute('model.addBox', { min: [5, 0, 0], max: [6, 1, 1] });
+    expect((await grain('Grain back', 3)).notice).toBe('Changed the document: Grain left side and 3 more changes. Undo reverts it in 2 steps.');
+    expect(tab.app.commands.execute('edit.undo')).toBe(true);
+    expect(tab.app.commands.execute('edit.undo')).toBe(true);
+    expect(tab.app.commands.execute('edit.undo')).toBe(true);
+    expect(root().bodies.size).toBe(0);
+    // A new message gets a new API object, so its batches are a new undo step.
+    const next = documentToolsFor(s, tab)!;
+    const fresh = await next.run({ id: 'n', name: 'model_apply_operations', input: { expectedRevision: doc.version, label: 'Shelf', operations: [{ op: 'add_box', min: [0, 0, 0], max: [1, 1, 1] }] } });
+    expect(fresh.notice).toBe('Changed the document: Shelf. Undo reverts it.');
+  });
+
   it('renders the bound model offscreen as JPEG pictures for review without moving the view or adding undo', async () => {
     const s = open();
     const tab = s.active;

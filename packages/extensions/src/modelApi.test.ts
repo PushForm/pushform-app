@@ -730,8 +730,10 @@ describe('ModelDocumentApi names across batches', () => {
   });
 
   it('drops the names of an undone batch and keeps them out of the document', async () => {
-    const { api, host, commands } = setup();
+    const { api, host, commands, addBox } = setup();
     await op(api, { op: 'add_box', as: 'kept', min: [0, 0, 0], max: [1, 1, 1] });
+    // An edit in between keeps the next batch out of the first one's undo entry.
+    addBox([10, 0, 0], [11, 1, 1]);
     await op(api, { op: 'add_box', as: 'undone', min: [3, 0, 0], max: [4, 1, 1] });
     expect(host.undoStack.undo()).toBe(true);
     const next = await op(api, { op: 'add_tag', name: 'Parts' });
@@ -744,6 +746,84 @@ describe('ModelDocumentApi names across batches', () => {
     // A new API object, as a new message makes, starts with no names.
     const fresh = new ModelDocumentApi(commands, 'AI Chat');
     expect((await failure(() => op(fresh, { op: 'move', refs: ['$kept'], offset: [1, 0, 0] }))).error.message).toContain('does not name anything');
+  });
+});
+
+describe('ModelDocumentApi one undo step per request', () => {
+  const op = (api: ModelDocumentApi, label: string, ...operations: unknown[]) => api.apply({ expectedRevision: api.revision, label, operations });
+  const grain = (n: number) => ({ op: 'add_box', min: [n, 0, 0], max: [n + 0.5, 0.5, 0.5] });
+
+  it('merges batches that follow each other into one entry labelled for all of them, undone and redone whole', async () => {
+    const { api, host, root, addBox } = setup();
+    addBox([0, 0, 5], [1, 1, 6]);
+    const depth = host.undoStack.length;
+    expect(api.changes).toBeNull();
+    await op(api, 'Left side', grain(0));
+    expect(host.undoStack.peek()?.label).toBe('AI Chat: Left side');
+    expect(api.changes).toEqual({ label: 'Left side', undoSteps: 1 });
+    const second = await op(api, 'Right side', grain(1));
+    // The result keeps the batch's own label; the undo entry names the whole request.
+    expect(second.label).toBe('AI Chat: Right side');
+    await op(api, 'Toe kick', grain(2));
+    expect(host.undoStack.length).toBe(depth + 1);
+    expect(host.undoStack.peek()?.label).toBe('AI Chat: Left side and 2 more changes');
+    expect(api.changes).toEqual({ label: 'Left side and 2 more changes', undoSteps: 1 });
+    expect(root().bodies.size).toBe(4);
+    expect(host.undoStack.undo()).toBe(true);
+    expect(root().bodies.size).toBe(1);
+    expect(host.undoStack.length).toBe(depth);
+    expect(host.undoStack.redo()).toBe(true);
+    expect(root().bodies.size).toBe(4);
+    expect(host.undoStack.length).toBe(depth + 1);
+  });
+
+  it('starts a new entry after an edit, an undo or a redo in between, or another client', async () => {
+    const { api, host, root, addBox, commands } = setup();
+    await op(api, 'A', grain(0));
+    addBox([0, 0, 5], [1, 1, 6]);
+    await op(api, 'B', grain(1));
+    expect(host.undoStack.peek()?.label).toBe('AI Chat: B');
+    expect(api.changes).toEqual({ label: 'A and 1 more change', undoSteps: 2 });
+    // Undo and redo put the same entry back on top, but the model changed in between.
+    expect(host.undoStack.undo()).toBe(true);
+    expect(host.undoStack.redo()).toBe(true);
+    const depth = host.undoStack.length;
+    await op(api, 'C', grain(2));
+    expect(host.undoStack.length).toBe(depth + 1);
+    expect(host.undoStack.peek()?.label).toBe('AI Chat: C');
+    // Another API object never joins this one's entry, and this one does not join the other's.
+    const plugin = new ModelDocumentApi(commands, 'Plugin');
+    await op(plugin, 'P', grain(3));
+    await op(api, 'D', grain(4));
+    expect(host.undoStack.entries.slice(-3).map(e => e.label)).toEqual(['AI Chat: C', 'Plugin: P', 'AI Chat: D']);
+    expect(host.undoStack.undo()).toBe(true);
+    expect(root().bodies.size).toBe(5);
+  });
+
+  it('keeps merging across a failed batch, which changes nothing', async () => {
+    const { api, host, root } = setup();
+    await op(api, 'First', grain(0));
+    const depth = host.undoStack.length;
+    const failed = await failure(() => op(api, 'Broken', { op: 'add_box', as: 'a', min: [5, 0, 0], max: [6, 1, 1] }, { op: 'add_box', as: 'b', min: [8, 0, 0], max: [9, 1, 1] },
+      { op: 'union', refs: ['$a', '$b'] }));
+    expect(failed.error.code).toBe('invalid_geometry');
+    await op(api, 'Second', grain(1));
+    expect(host.undoStack.length).toBe(depth);
+    expect(host.undoStack.peek()?.label).toBe('AI Chat: First and 1 more change');
+    expect(api.changes).toEqual({ label: 'First and 1 more change', undoSteps: 1 });
+    expect(root().bodies.size).toBe(2);
+    expect(host.undoStack.undo()).toBe(true);
+    expect(root().bodies.size).toBe(0);
+    expect(host.undoStack.canUndo).toBe(false);
+  });
+
+  it('drops every name of a merged request when it is undone', async () => {
+    const { api, host } = setup();
+    await op(api, 'a', { op: 'add_box', as: 'one', min: [0, 0, 0], max: [1, 1, 1] });
+    await op(api, 'b', { op: 'add_box', as: 'two', min: [3, 0, 0], max: [4, 1, 1] });
+    expect(host.undoStack.undo()).toBe(true);
+    const next = await op(api, 'c', { op: 'add_tag', name: 'Parts' });
+    expect(next.dropped).toEqual(['one', 'two']);
   });
 });
 

@@ -287,6 +287,9 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
         }
         // The document is bound now; switching tabs later never retargets this turn's tool calls.
         const tools = documentTools?.() ?? null;
+        // The turn's one change line, as the transcript holds it and in its newest wording: each applied change
+        // updates it in place rather than adding a line.
+        let shownChange = null as Entry | null, change = null as Entry | null;
         let stream = client.sendMessage(id, body, { ...(intent ? { intent } : {}), document: tools?.document ?? null, signal: controller.signal, attachments: pictureIds });
         for (;;) {
           let requested: readonly ToolCall[] = [];
@@ -340,11 +343,18 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
             stopped();
             results.push({ toolUseId: call.id, content: outcome.content, isError: outcome.isError, ...(outcome.images?.length ? { images: outcome.images } : {}) });
             const at = new Date().toISOString();
-            if (outcome.notice) lines.push({ role: 'system', text: outcome.notice, at });
+            if (outcome.notice) {
+              const line: Entry = { role: 'system', text: outcome.notice, at: change?.at ?? at }, index = change ? lines.indexOf(change) : -1;
+              if (index >= 0) lines[index] = line;
+              else if (!change) lines.push(line);
+              change = line;
+            }
             if (outcome.images?.length) lines.push({ role: 'review', views: outcome.views ?? [], images: outcome.images, at });
           }
           if (!live()) return;
-          setChat(current => ({ ...current, streaming: '', transcript: [...current.transcript, ...lines] }));
+          const replaced = shownChange, updated = change;
+          setChat(current => ({ ...current, streaming: '', transcript: [...(replaced && updated !== replaced ? current.transcript.map(item => item === replaced ? updated! : item) : current.transcript), ...lines] }));
+          shownChange = change;
           resumed = true;
           stream = client.sendToolResults(id, results, { signal: controller.signal });
         }

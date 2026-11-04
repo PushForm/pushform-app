@@ -24,7 +24,7 @@ import {
   type Body, type DocumentState, type EdgeRecord, type EntityContainer, type EntityRef, type FaceRecord, type Material, type Rgb, type Scene, type SceneFlags, type SketchFace,
   type UndoEntry, type UvMapping,
 } from '@pushform/model';
-import type { ToolCallResult } from './layoutApi';
+import { summarizeLabels, type ToolCallResult } from './layoutApi';
 import { frameCamera } from './modelCamera';
 
 /** A structured API error; the message is safe to show to the user and to a model. */
@@ -122,6 +122,12 @@ const samePath = (a: readonly number[], b: readonly number[]): boolean => a.leng
  *
  * A batch's expected revision guards against other edits: it may be any revision since which only this object's own
  * batches, committed or reverted, changed the model.
+ *
+ * One object serves one request, so its batches are one undo step: a committed batch that follows this object's
+ * previous committed batch, with no other change to the model in between (the requester's edits, undo or redo,
+ * another client's batches), joins that batch's undo entry, which is then labelled for all of them. A reverted batch
+ * in between changes nothing and does not split them. A host gives each request its own object: AI Chat one per
+ * message, an extension's host one per run of the extension.
  */
 export class ModelDocumentApi {
   private readonly host: DocumentHost;
@@ -136,12 +142,26 @@ export class ModelDocumentApi {
    */
   private ownFrom = -1;
   private ownTo = -1;
+  /** The undo entry the latest committed batch went into, with the labels of the batches it holds, oldest first. */
+  private step: { entry: UndoEntry; labels: string[] } | null = null;
+  /** Labels of every committed batch, oldest first, and how many undo entries hold them. */
+  private readonly committedLabels: string[] = [];
+  private steps = 0;
 
   constructor(private readonly commands: CommandRegistry, private readonly client: string) {
     this.host = hostOf(commands.ctx);
   }
 
   get revision(): number { return this.host.doc.version; }
+
+  /**
+   * What this object's committed batches changed, for one line about all of them: `label` names them as their undo
+   * entries do, without the client's name, and `undoSteps` is how many undo entries hold them (one unless something
+   * else changed the model between them). Null until a batch commits.
+   */
+  get changes(): { label: string; undoSteps: number } | null {
+    return this.committedLabels.length ? { label: summarizeLabels(this.committedLabels), undoSteps: this.steps } : null;
+  }
 
   getDocument(): ModelDocumentSnapshot {
     const state = this.host.doc.state, context = this.host.context;
@@ -488,10 +508,11 @@ export class ModelDocumentApi {
     const names = new Map(this.names), batchNo = ++this.batches;
     const created = new Map<string, Named>(), rebound: string[] = [];
     const results: ModelBatchResult['results'] = [];
-    const lastEntry = undo.peek();
+    // Nothing but this object's own batches changed the model since its last commit, so this batch joins that entry.
+    const joins = own && this.step && undo.peek() === this.step.entry ? this.step : null;
     const savedPath = [...host.context.path], savedSelection = host.selection.snapshot();
     const deadline = Date.now() + MODEL_LIMITS.kernelSeconds * 1000;
-    let at = 0, failed: ModelApiFailure | null = null;
+    let at = 0, failed: ModelApiFailure | null = null, committed: UndoEntry | null = null;
     undo.beginGroup(label);
     try {
       undo.withinGroup(() => { if (!samePath(path, savedPath)) host.setContext(path); });
@@ -517,14 +538,19 @@ export class ModelDocumentApi {
     } finally {
       undo.withinGroup(() => { if (!samePath(host.context.path, savedPath)) host.setContext(savedPath); });
       if (!samePath(path, savedPath)) host.selection.restore(savedSelection);
-      undo.endGroup(failed === null);
+      const labels = [...joins?.labels ?? [], batch.label];
+      committed = undo.endGroup(failed === null, joins ? { entry: joins.entry, label: `${this.client}: ${summarizeLabels(labels)}` } : undefined);
+      if (committed) {
+        if (committed === joins?.entry) joins.labels = labels;
+        else { this.step = { entry: committed, labels: [batch.label] }; this.steps++; }
+        this.committedLabels.push(batch.label);
+      }
       // Committed or reverted, the change is this object's own, so it does not make the client's revision stale.
       if (!own) this.ownFrom = start;
       this.ownTo = this.revision;
     }
     // Reverting the batch is itself a change, so a failure reports the revision after it.
     if (failed) throw new ModelApiFailure({ ...failed.error, revision: this.revision });
-    const committed = undo.peek() !== lastEntry ? undo.peek() : null;
     const earlier: Record<string, ModelNameEntry> = {};
     for (const [name, entry] of this.names) if (!created.has(name) && this.alive(entry)) earlier[name] = nameOut(entry.named);
     for (const [name, named] of created) {

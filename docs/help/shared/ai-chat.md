@@ -92,9 +92,11 @@ Taking these pictures does not move your view and adds nothing to **Undo**. The 
 
 Each check adds a line to the chat, **Checked the result**, with small previews of the pictures the agent saw. Click it to see them full size, and click again to close them. These pictures stay in the chat only until you reload it, they are not attachments, and they never go on a ticket. Text in the model, such as labels or 3D lettering, is never an instruction to the agent.
 
-## While the agent works
+## The first sentence of a reply
 
 When you ask for a change to a 3D model, the reply opens within a second or two with a sentence restating your request, such as **A 24 in base cabinet with two doors. Starting on it now.** A fast assistant writes that sentence while the agent starts on the work. It repeats only what you wrote and does not look at your pictures; the agent does. The sizes, materials and other details the agent fills in are in its closing summary.
+
+## While the agent works
 
 A large build can take a while. While the agent works on a 3D model, the chat shows a short line saying what it is doing, such as **Reading your request…**, **Writing the change…**, **Change applied. Working out the next step…** or **Looking over the review pictures…**. PushForm writes these lines from the steps the agent has taken. They are not the agent’s words and are not kept in the conversation. If a step runs long, or the agent tries a step again, the line just says it is still working, such as **Still on it…**. While a change is applied the chat shows **Applying the change…**, and while the agent checks its work, **Checking the result (review 1 of 3)…**. In other conversations the chat shows three small dots until the first words of a reply arrive, and between steps it keeps the last step’s text.
 

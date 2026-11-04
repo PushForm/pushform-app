@@ -164,6 +164,42 @@ describe('exclusive undo groups', () => {
     undo.transact('after', rename('After'));
     expect(undo.length).toBe(1);
   });
+
+  it('merges a committed group into the entry it continues while that entry is still on top', () => {
+    const doc = createDocument();
+    const sel = new Selection();
+    const undo = new UndoStack(doc, sel);
+    undo.transact('before', rename('Before'));
+    undo.beginGroup('AI Chat: A');
+    undo.withinGroup(() => undo.transact('a', rename('A')));
+    const first = undo.endGroup(true)!;
+    expect(first).toBe(undo.peek());
+    const picked: EntityRef = { kind: 'body', path: [], id: 3 as Id };
+    undo.beginGroup('AI Chat: B');
+    undo.withinGroup(() => { undo.transact('b', rename('B')); sel.set([picked]); });
+    expect(undo.endGroup(true, { entry: first, label: 'AI Chat: A and 1 more change' })).toBe(first);
+    expect(undo.length).toBe(2);
+    expect(first.label).toBe('AI Chat: A and 1 more change');
+    expect(first.selectionAfter).toEqual([picked]);
+    expect(undo.undo()).toBe(true);
+    expect(doc.rootDefinition.name).toBe('Before');
+    expect(undo.redo()).toBe(true);
+    expect(doc.rootDefinition.name).toBe('B');
+    expect(sel.refs).toEqual([picked]);
+    // An entry that is no longer on top is not continued: the group gets its own entry.
+    undo.transact('other', rename('Other'));
+    undo.beginGroup('AI Chat: C');
+    undo.withinGroup(() => undo.transact('c', rename('C')));
+    expect(undo.endGroup(true, { entry: first, label: 'ignored' })).not.toBe(first);
+    expect(undo.length).toBe(4);
+    expect(undo.peek()!.label).toBe('AI Chat: C');
+    // A reverted group continues nothing and records nothing.
+    undo.beginGroup('AI Chat: D');
+    undo.withinGroup(() => undo.transact('d', rename('D')));
+    expect(undo.endGroup(false, { entry: undo.peek()!, label: 'ignored' })).toBeNull();
+    expect(undo.peek()!.label).toBe('AI Chat: C');
+    expect(doc.rootDefinition.name).toBe('C');
+  });
 });
 
 describe('persistent ids across undo', () => {

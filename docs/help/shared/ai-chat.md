@@ -38,7 +38,7 @@ The agent sees the pictures along with your message, and it can still refer to t
 
 AI Chat can change the document open in the tab you send from: a Layout document, or a 3D model. Ask for the change in plain words, such as “Put the three shelves in one group, then make two more copies of it 40 cm higher” or “Paint the top of the table oak.” A question gets an answer only; the agent changes the document only when you ask it to.
 
-Each change applies all at once, without a confirmation step. The chat then shows a line such as “Changed the document: Group the shelves. Undo reverts it.” One request is one undo step, so **Undo** reverts the whole change. If any part of a change fails, nothing changes and the agent says what could not be done.
+Each change applies all at once, without a confirmation step. The chat then shows a line such as “Changed the document: Group the shelves. Undo reverts it.” One request is one undo step, so **Undo** reverts the whole change, even when the agent made it in several parts; the chat keeps one such line for the request and updates it as the parts apply. If you edit the document while the agent is still working, its later parts become a separate undo step, and the line says how many steps **Undo** takes. If any part of a change fails, nothing changes and the agent says what could not be done.
 
 ## Ask for a change to a 3D model
 

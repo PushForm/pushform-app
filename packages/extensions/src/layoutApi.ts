@@ -34,14 +34,37 @@ const round = (value: number): number => Math.round(value * 100) / 100;
 const zodMessage = (error: { issues: readonly { path: readonly PropertyKey[]; message: string }[] }): string => error.issues.slice(0, 5).map(i => `${i.path.map(String).join('.') || 'input'}: ${i.message}`).join('; ');
 
 /**
+ * One label for several batches' changes, oldest first: the first label, and how many more there were.
+ * "Grain left side" alone, or "Grain left side and 6 more changes".
+ */
+export function summarizeLabels(labels: readonly string[]): string {
+  const more = labels.length - 1;
+  return more <= 0 ? labels[0] ?? '' : `${labels[0]} and ${more} more change${more === 1 ? '' : 's'}`;
+}
+
+/**
  * Host side of the Layout document API for one open document and one client. Reads are snapshots
  * of committed state; `apply` runs a whole batch inside one Layout transaction, so it commits as one undo entry,
  * labelled `<client>: <label>`, or not at all. Every mutation goes through the document's command registry.
+ *
+ * One object serves one request, so its batches are one undo step: a batch that follows this object's previous
+ * committed batch, with no other change to the document in between, joins that batch's undo entry, labelled for all
+ * of them. AI Chat makes one object per message the requester sends.
  */
 export class LayoutDocumentApi {
+  /** The undo entry the latest committed batch went into, the labels it holds, and the revision after it. */
+  private step: { entry: object; labels: string[]; revision: number } | null = null;
+  private readonly committedLabels: string[] = [];
+  private steps = 0;
+
   constructor(private readonly doc: LayoutDocument, private readonly commands: CommandRegistry, private readonly view: LayoutViewState, private readonly client: string) {}
 
   get revision(): number { return this.doc.version; }
+
+  /** What this object's committed batches changed, as `ModelDocumentApi.changes` describes; null until one commits. */
+  get changes(): { label: string; undoSteps: number } | null {
+    return this.committedLabels.length ? { label: summarizeLabels(this.committedLabels), undoSteps: this.steps } : null;
+  }
 
   getDocument(): LayoutDocumentSnapshot {
     const state = this.doc.state;
@@ -106,8 +129,12 @@ export class LayoutDocumentApi {
     const names = new Map<string, number>();
     const results: LayoutBatchResult['results'] = [];
     let at = 0;
+    const undo = this.doc.undoStack, start = this.revision;
+    // Nothing else changed the document since this object's last commit, so this batch joins that entry.
+    const joins = this.step && this.step.revision === start && undo.peek() === this.step.entry ? this.step : null;
+    const labels = [...joins?.labels ?? [], batch.label];
     try {
-      this.doc.undoStack.transact(label, () => {
+      undo.transact(label, () => {
         for (const [index, op] of batch.operations.entries()) {
           at = index;
           const result = this.run(op, names);
@@ -117,11 +144,19 @@ export class LayoutDocumentApi {
           }
           results.push({ op: op.op, ...(typeof result === 'number' ? { id: result } : Array.isArray(result) ? { ids: result } : {}) });
         }
-      });
+      }, joins ? { entry: joins.entry, label: `${this.client}: ${summarizeLabels(labels)}` } : undefined);
     } catch (cause) {
       // The transaction threw, so its draft was discarded: the document is exactly as it was.
       if (cause instanceof LayoutApiFailure) throw new LayoutApiFailure({ ...cause.error, revision: this.revision, operationIndex: cause.error.operationIndex ?? at });
       throw this.failure('operation_failed', `Operation ${at} (${batch.operations[at]?.op}) failed: ${cause instanceof Error ? cause.message : String(cause)}. Nothing was changed.`, at);
+    }
+    // A batch that changed nothing records nothing.
+    const entry = undo.peek();
+    if (this.revision !== start && entry) {
+      if (entry === joins?.entry) joins.labels = labels;
+      else { this.step = { entry, labels: [batch.label], revision: 0 }; this.steps++; }
+      this.step!.revision = this.revision;
+      this.committedLabels.push(batch.label);
     }
     return { ok: true, revision: this.revision, label, created: Object.fromEntries(names), results };
   }

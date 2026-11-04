@@ -10,7 +10,7 @@ import { z } from 'zod';
  */
 export interface AnthropicLike {
   messages: {
-    create(params: Anthropic.MessageCreateParamsStreaming, options?: { headers?: Record<string, string> }): PromiseLike<AsyncIterable<Anthropic.RawMessageStreamEvent>>;
+    create(params: Anthropic.MessageCreateParamsStreaming, options?: { headers?: Record<string, string>; signal?: AbortSignal }): PromiseLike<AsyncIterable<Anthropic.RawMessageStreamEvent>>;
   };
 }
 /** The slice of the SDK client `warmPrompt` uses: one non-streaming request. */
@@ -114,6 +114,8 @@ export interface RunTurnOptions {
   messages: Anthropic.MessageParam[];
   onText?: (delta: string) => void;
   onToolCall?: (call: ToolCallEvent) => void;
+  /** Where each model round is: called as a round's request is sent, and as each content block of its reply starts. */
+  onPhase?: (phase: RoundPhase) => void;
   maxToolRounds?: number;
   maxTokens?: number;
   effort?: 'low' | 'medium' | 'high';
@@ -136,6 +138,8 @@ export interface RunTurnOptions {
    */
   resume?: { appended: Anthropic.MessageParam[]; rounds: number } | undefined;
 }
+/** A round's progress: its request was sent (`round` counts from 0 within this call), or a reply block started. */
+export type RoundPhase = { kind: 'request'; round: number } | { kind: 'block'; block: 'thinking' | 'text' | 'tool_use'; tool?: string };
 /** Timing and token use of one model request, for the per-turn latency log. */
 export interface RoundStat {
   /** Until the response started (message_start): queueing, retries and prompt reading. */
@@ -202,7 +206,7 @@ export async function warmPrompt(client: WarmClient, prompt: TurnPrompt): Promis
  * stays valid, and the turn ends with a short note. Haiku 5.5: adaptive thinking by default, `effort: low`, `tool_choice: auto`.
  */
 export async function runTurn(options: RunTurnOptions): Promise<RunTurnResult> {
-  const { client, model, system, tools, handlers, onText, onToolCall } = options;
+  const { client, model, system, tools, handlers, onText, onToolCall, onPhase } = options;
   const maxRounds = options.maxToolRounds ?? 8;
   const appended: Anthropic.MessageParam[] = [...(options.resume?.appended ?? [])];
   const usage: TurnUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
@@ -213,6 +217,7 @@ export async function runTurn(options: RunTurnOptions): Promise<RunTurnResult> {
   const progress = options.progressUpdates === true && supportsProgressUpdates(model);
   for (;;) {
     const { params, headers } = turnRequest({ model, system, tools, messages: [...options.messages, ...appended], effort: options.effort, maxTokens: options.maxTokens, progress });
+    onPhase?.({ kind: 'request', round: roundStats.length });
     const roundStarted = performance.now();
     let startMs: number | null = null, firstMs: number | null = null;
     // Each visible block (a progress note or reply text) starts a new paragraph after text already shown.
@@ -226,7 +231,13 @@ export async function runTurn(options: RunTurnOptions): Promise<RunTurnResult> {
     const { message, invalid } = await readMessage(events, (event) => {
       if (event.type === 'message_start') startMs ??= Math.round(performance.now() - roundStarted);
       else if (event.type === 'content_block_delta' || event.type === 'content_block_start') firstMs ??= Math.round(performance.now() - roundStarted);
-      if (event.type === 'content_block_start') blockStarted = false;
+      if (event.type === 'content_block_start') {
+        blockStarted = false;
+        const block = event.content_block;
+        if (block.type === 'thinking' || block.type === 'redacted_thinking') onPhase?.({ kind: 'block', block: 'thinking' });
+        else if (block.type === 'text') onPhase?.({ kind: 'block', block: 'text' });
+        else if (block.type === 'tool_use') onPhase?.({ kind: 'block', block: 'tool_use', tool: block.name });
+      }
       else if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') visible(event.delta.text);
       else if (progress && event.type === 'content_block_delta' && event.delta.type === 'thinking_delta') visible(event.delta.thinking);
     });

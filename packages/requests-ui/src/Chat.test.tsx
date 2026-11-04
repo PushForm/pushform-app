@@ -342,6 +342,29 @@ describe('Chat', () => {
     await waitFor(() => expect(screen.queryByRole('status', { name: 'Agent is thinking' })).toBeNull());
     expect(document.querySelector('.is-streaming')?.textContent).toContain('Hello');
   });
+  it('shows the backend status line in place of the dots, hides it when the agent speaks, and shows a later one beneath its words', async () => {
+    const backend = fakeBackend();
+    let push: ((chunk: string) => void) | undefined;
+    const slow: typeof fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (!url.endsWith('/messages')) return backend.fetch(input, init);
+      return new Response(new ReadableStream<Uint8Array>({ start(controller) { push = (chunk) => controller.enqueue(new TextEncoder().encode(chunk)); } }), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    };
+    const client = new RequestsClient({ baseUrl: BASE, apikey: 'k', getToken: async () => 'jwt-token', fetch: slow });
+    render(<Chat client={client} account={account} screen={screenInfo} onClose={() => {}} />);
+    fireEvent.change(await screen.findByLabelText('Your message'), { target: { value: 'Build a cabinet' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await screen.findByRole('status', { name: 'Agent is thinking' });
+    push!('event: status\ndata: {"phase":"reading","text":"Reading your request…"}\n\n');
+    await waitFor(() => expect(document.querySelector('.is-streaming .pf-fr-working')?.textContent).toBe('Reading your request…'));
+    expect(screen.queryByRole('status', { name: 'Agent is thinking' })).toBeNull();
+    push!('event: text\ndata: {"delta":"Building the box."}\n\n');
+    await waitFor(() => expect(document.querySelector('.is-streaming')?.textContent).toContain('Building the box.'));
+    expect(document.querySelector('.is-streaming')?.textContent).not.toContain('Reading your request…');
+    push!('event: status\ndata: {"phase":"writing","text":"Writing the change…"}\n\n');
+    await waitFor(() => expect(document.querySelector('.is-streaming .pf-fr-working.is-after')?.textContent).toBe('Writing the change…'));
+    expect(document.querySelector('.is-streaming')?.textContent).toContain('Building the box.');
+  });
   it('shows a short muted notice when the message limit is reached and never a message counter', async () => {
     setup({ turns: [[text('That is all I can take; send it or stop?'), briefEvent({ ...featureBrief, desired: 'x' }, 'T'), done(30, true)]] });
     await say('hello');
@@ -461,6 +484,32 @@ describe('document editing', () => {
     const at = (needle: string) => lines.findIndex(line => line.includes(needle));
     expect(at('Adding a title block.')).toBeLessThan(at('Changed the document: Title block.'));
     expect(at('Changed the document: Title block.')).toBeLessThan(at('Done: the title block'));
+  });
+  it('shows one change line per message, updated in place as later batches of the turn apply', async () => {
+    let applied = 0;
+    const run = vi.fn(() => {
+      applied += 1;
+      return { content: '{"ok":true}', isError: false, notice: applied === 1 ? 'Changed the document: Grain left side. Undo reverts it.' : `Changed the document: Grain left side and ${applied - 1} more change${applied === 2 ? '' : 's'}. Undo reverts it.` };
+    });
+    const two: FakeTurn = { event: 'tool_request', data: { calls: [{ ...call, id: 'c2' }, { ...call, id: 'c3' }] } };
+    setup({ turns: [[text('Setting the grain.'), toolRequest, awaiting], [text('Now the rest.'), two, awaiting], [toolRequest, awaiting], [text('Done.'), done(1)],
+      [toolRequest, awaiting], [text('Again.'), done(2)]] },
+      { documentTools: () => ({ document: LAYOUT, run }) });
+    await say('Set the grain on every part');
+    await waitFor(() => expect(log().textContent).toContain('Done.'));
+    const system = () => [...log().querySelectorAll('.pf-fr-message.is-system')].map(el => el.textContent);
+    expect(run).toHaveBeenCalledTimes(4);
+    expect(system()).toEqual(['Changed the document: Grain left side and 3 more changes. Undo reverts it.']);
+    // The line stays where the first change was made.
+    const lines = [...log().querySelectorAll('.pf-fr-message')].map(el => el.textContent ?? '');
+    const at = (needle: string) => lines.findIndex(line => line.includes(needle));
+    expect(at('Setting the grain.')).toBeLessThan(at('Changed the document'));
+    expect(at('Changed the document')).toBeLessThan(at('Now the rest.'));
+    // The next message gets a line of its own.
+    applied = 0;
+    await say('Once more');
+    await waitFor(() => expect(log().textContent).toContain('Again.'));
+    expect(system()).toEqual(['Changed the document: Grain left side and 3 more changes. Undo reverts it.', 'Changed the document: Grain left side. Undo reverts it.']);
   });
   it('shows a reply split by tool calls under one Agent label and drops blank text before a call', async () => {
     const run = vi.fn(() => ({ content: '{"ok":true,"revision":1}', isError: false }));
@@ -862,11 +911,13 @@ describe('render review and progress', () => {
   it('reads "Checking the result (review N of 3)…" from the backend count, keeps the last step between steps, and shows a collapsed review line', async () => {
     const { run, pending } = held();
     const image = { mime: 'image/jpeg' as const, data: '/9j/AQID' };
-    const { backend } = setup({ turns: [[text('Building it.'), { event: 'tool_request', data: { calls: [apply, query] } }, awaiting],
+    const { backend } = setup({ turns: [[text('Building it.'), { event: 'status', data: { phase: 'writing', text: 'Writing the change…' } }, { event: 'tool_request', data: { calls: [apply, query] } }, awaiting],
       [{ event: 'tool_request', data: { calls: [renderCall] } }, awaiting], [text('It matches the request.'), done(1)]] },
     { documentTools: () => ({ document: MODEL, run, progress }) });
     await send('Build a cabinet');
+    // The editor's own step replaces the backend's status line while it runs.
     await waitFor(() => expect(placeholder()).toBe('Applying the change…'));
+    expect(document.querySelector('.is-streaming')?.textContent).not.toContain('Writing the change…');
     act(() => pending[0]!.finish({ content: '{"ok":true}', isError: false, notice: 'Changed the document: Cabinet. Undo reverts it.' }));
     // A step without its own text keeps the last step's.
     await waitFor(() => expect(pending).toHaveLength(2));
@@ -938,5 +989,17 @@ describe('render review and progress', () => {
     const toggle = await screen.findByRole('button', { name: 'Checked the result' });
     fireEvent.click(toggle);
     expect(log().textContent).toContain('Pictures are not kept after the reply. Views: iso; front.');
+  });
+
+  it('shows a reloaded acknowledgment as the opening of the reply, under one Agent label', async () => {
+    const conversation = { id: 'conv-a', kind: 'help', path: 'help' as const, status: 'open', title: null, brief: null, messageCount: 1, requestId: null, updatedAt: '2026-11-04T10:00:00Z',
+      messages: [{ role: 'user', text: 'A 24 in base cabinet', at: 't1' }, { role: 'assistant', text: 'A 24 in base cabinet. Starting on it now.', at: 't2', acknowledgment: true } as { role: string; text: string; at: string },
+        { role: 'tool', text: '', at: 't3' }, { role: 'assistant', text: 'Built it.', at: 't4' }] };
+    rememberDraft(account.id, { conversationId: 'conv-a', path: 'help', title: null });
+    setup({ openConversations: [conversation] });
+    await waitFor(() => expect(log().textContent).toContain('Built it.'));
+    expect(log().textContent).toContain('A 24 in base cabinet. Starting on it now.');
+    // The greeting, the requester, then one label over the acknowledgment and the reply that follows it.
+    expect([...log().querySelectorAll('.pf-fr-role')].map(el => el.textContent)).toEqual(['Agent', 'You', 'Agent']);
   });
 });

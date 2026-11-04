@@ -444,6 +444,46 @@ describe('ModelDocumentApi geometry', () => {
     expect(root().bodies.has(e as never)).toBe(false);
   });
 
+  it('joins butted parts in any ref order, and names the solids that touch nothing', async () => {
+    const { api, root } = setup();
+    // A face frame listed stile, stile, rails: the stiles meet only through the rails, and every joint is a shared face.
+    const frame = await api.apply({ expectedRevision: api.revision, label: 'Frame', operations: [
+      { op: 'add_box', as: 'ls', min: [0, -0.01905, 0], max: [0.0381, 0, 0.8763] },
+      { op: 'add_box', as: 'rs', min: [0.4191, -0.01905, 0], max: [0.4572, 0, 0.8763] },
+      { op: 'add_box', as: 'bottom', min: [0.0381, -0.01905, 0], max: [0.4191, 0, 0.0381] },
+      { op: 'add_box', as: 'middle', min: [0.0381, -0.01905, 0.6], max: [0.4191, 0, 0.6381] },
+      { op: 'add_box', as: 'top', min: [0.0381, -0.01905, 0.8382], max: [0.4191, 0, 0.8763] },
+      { op: 'union', as: 'frame', refs: ['$ls', '$rs', '$bottom', '$middle', '$top'] },
+    ] });
+    const { ls, rs, bottom, middle, top } = frame.created as { ls: number; rs: number; bottom: number; middle: number; top: number };
+    expect(frame.results[5]).toMatchObject({ id: ls });
+    expect(frame.results[5]!.deleted!.map(d => d.id).sort((x, y) => x - y)).toEqual([rs, bottom, middle, top].sort((x, y) => x - y));
+    expect(root().bodies.size).toBe(1);
+    const volume = 2 * 0.0381 * 0.8763 * 0.01905 + 3 * 0.381 * 0.0381 * 0.01905;
+    expect(root().bodies.get(ls as never)!.props.volume).toBeCloseTo(volume, 9);
+    // A pull: a bar and two posts behind it, flush with its ends, top and bottom.
+    const pull = await api.apply({ expectedRevision: api.revision, label: 'Pull', operations: [
+      { op: 'add_box', as: 'bar', min: [1.1015, -0.0508, 0.2604], max: [1.2795, -0.0381, 0.2731] },
+      { op: 'add_box', as: 'p1', min: [1.1015, -0.0381, 0.2604], max: [1.1142, -0.0126, 0.2731] },
+      { op: 'add_box', as: 'p2', min: [1.2668, -0.0381, 0.2604], max: [1.2795, -0.0126, 0.2731] },
+      { op: 'union', refs: ['$p1', '$bar', '$p2'] },
+    ] });
+    expect(pull.results[3]!.deleted).toHaveLength(2);
+    expect(root().bodies.size).toBe(2);
+    // Two parts that touch nothing fail by ref index and solid id, and the batch changes nothing.
+    const revision = api.revision;
+    const error = (await failure(() => api.apply({ expectedRevision: revision, label: 'x', operations: [
+      { op: 'add_box', as: 'a', min: [3, 0, 0], max: [3.5, 0.02, 0.5] },
+      { op: 'add_box', as: 'b', min: [3.5, 0, 0], max: [4, 0.02, 0.5] },
+      { op: 'add_box', as: 'c', min: [5, 0, 0], max: [5.5, 0.02, 0.5] },
+      { op: 'add_box', as: 'd', min: [3.5 + 1e-6, 1, 0], max: [4, 1.02, 0.5] },
+      { op: 'union', refs: ['$a', '$c', '$b', '$d'] },
+    ] }))).error;
+    expect(error).toMatchObject({ code: 'invalid_geometry', operationIndex: 4 });
+    expect(error.message).toMatch(/^Refs 1 and 3 \(solids \d+ and \d+\) do not touch the other solids, .*make_group/);
+    expect(root().bodies.size).toBe(2);
+  });
+
   it('subtracts several cutters and can keep them; refuses a cut that leaves nothing or targets a group', async () => {
     const { api, root, addBox } = setup();
     const panel = addBox([0, 0, 0], [1, 0.02, 1]);
@@ -730,8 +770,10 @@ describe('ModelDocumentApi names across batches', () => {
   });
 
   it('drops the names of an undone batch and keeps them out of the document', async () => {
-    const { api, host, commands } = setup();
+    const { api, host, commands, addBox } = setup();
     await op(api, { op: 'add_box', as: 'kept', min: [0, 0, 0], max: [1, 1, 1] });
+    // An edit in between keeps the next batch out of the first one's undo entry.
+    addBox([10, 0, 0], [11, 1, 1]);
     await op(api, { op: 'add_box', as: 'undone', min: [3, 0, 0], max: [4, 1, 1] });
     expect(host.undoStack.undo()).toBe(true);
     const next = await op(api, { op: 'add_tag', name: 'Parts' });
@@ -744,6 +786,197 @@ describe('ModelDocumentApi names across batches', () => {
     // A new API object, as a new message makes, starts with no names.
     const fresh = new ModelDocumentApi(commands, 'AI Chat');
     expect((await failure(() => op(fresh, { op: 'move', refs: ['$kept'], offset: [1, 0, 0] }))).error.message).toContain('does not name anything');
+  });
+});
+
+describe('ModelDocumentApi one undo step per request', () => {
+  const op = (api: ModelDocumentApi, label: string, ...operations: unknown[]) => api.apply({ expectedRevision: api.revision, label, operations });
+  const grain = (n: number) => ({ op: 'add_box', min: [n, 0, 0], max: [n + 0.5, 0.5, 0.5] });
+
+  it('merges batches that follow each other into one entry labelled for all of them, undone and redone whole', async () => {
+    const { api, host, root, addBox } = setup();
+    addBox([0, 0, 5], [1, 1, 6]);
+    const depth = host.undoStack.length;
+    expect(api.changes).toBeNull();
+    await op(api, 'Left side', grain(0));
+    expect(host.undoStack.peek()?.label).toBe('AI Chat: Left side');
+    expect(api.changes).toEqual({ label: 'Left side', undoSteps: 1 });
+    const second = await op(api, 'Right side', grain(1));
+    // The result keeps the batch's own label; the undo entry names the whole request.
+    expect(second.label).toBe('AI Chat: Right side');
+    await op(api, 'Toe kick', grain(2));
+    expect(host.undoStack.length).toBe(depth + 1);
+    expect(host.undoStack.peek()?.label).toBe('AI Chat: Left side and 2 more changes');
+    expect(api.changes).toEqual({ label: 'Left side and 2 more changes', undoSteps: 1 });
+    expect(root().bodies.size).toBe(4);
+    expect(host.undoStack.undo()).toBe(true);
+    expect(root().bodies.size).toBe(1);
+    expect(host.undoStack.length).toBe(depth);
+    expect(host.undoStack.redo()).toBe(true);
+    expect(root().bodies.size).toBe(4);
+    expect(host.undoStack.length).toBe(depth + 1);
+  });
+
+  it('starts a new entry after an edit, an undo or a redo in between, or another client', async () => {
+    const { api, host, root, addBox, commands } = setup();
+    await op(api, 'A', grain(0));
+    addBox([0, 0, 5], [1, 1, 6]);
+    await op(api, 'B', grain(1));
+    expect(host.undoStack.peek()?.label).toBe('AI Chat: B');
+    expect(api.changes).toEqual({ label: 'A and 1 more change', undoSteps: 2 });
+    // Undo and redo put the same entry back on top, but the model changed in between.
+    expect(host.undoStack.undo()).toBe(true);
+    expect(host.undoStack.redo()).toBe(true);
+    const depth = host.undoStack.length;
+    await op(api, 'C', grain(2));
+    expect(host.undoStack.length).toBe(depth + 1);
+    expect(host.undoStack.peek()?.label).toBe('AI Chat: C');
+    // Another API object never joins this one's entry, and this one does not join the other's.
+    const plugin = new ModelDocumentApi(commands, 'Plugin');
+    await op(plugin, 'P', grain(3));
+    await op(api, 'D', grain(4));
+    expect(host.undoStack.entries.slice(-3).map(e => e.label)).toEqual(['AI Chat: C', 'Plugin: P', 'AI Chat: D']);
+    expect(host.undoStack.undo()).toBe(true);
+    expect(root().bodies.size).toBe(5);
+  });
+
+  it('keeps merging across a failed batch, which changes nothing', async () => {
+    const { api, host, root } = setup();
+    await op(api, 'First', grain(0));
+    const depth = host.undoStack.length;
+    const failed = await failure(() => op(api, 'Broken', { op: 'add_box', as: 'a', min: [5, 0, 0], max: [6, 1, 1] }, { op: 'add_box', as: 'b', min: [8, 0, 0], max: [9, 1, 1] },
+      { op: 'union', refs: ['$a', '$b'] }));
+    expect(failed.error.code).toBe('invalid_geometry');
+    await op(api, 'Second', grain(1));
+    expect(host.undoStack.length).toBe(depth);
+    expect(host.undoStack.peek()?.label).toBe('AI Chat: First and 1 more change');
+    expect(api.changes).toEqual({ label: 'First and 1 more change', undoSteps: 1 });
+    expect(root().bodies.size).toBe(2);
+    expect(host.undoStack.undo()).toBe(true);
+    expect(root().bodies.size).toBe(0);
+    expect(host.undoStack.canUndo).toBe(false);
+  });
+
+  it('drops every name of a merged request when it is undone', async () => {
+    const { api, host } = setup();
+    await op(api, 'a', { op: 'add_box', as: 'one', min: [0, 0, 0], max: [1, 1, 1] });
+    await op(api, 'b', { op: 'add_box', as: 'two', min: [3, 0, 0], max: [4, 1, 1] });
+    expect(host.undoStack.undo()).toBe(true);
+    const next = await op(api, 'c', { op: 'add_tag', name: 'Parts' });
+    expect(next.dropped).toEqual(['one', 'two']);
+  });
+});
+
+describe('ModelDocumentApi failed batches and revisions', () => {
+  const at = (api: ModelDocumentApi, expectedRevision: number, ...operations: unknown[]) => api.apply({ expectedRevision, label: 'x', operations });
+
+  it('accepts the revision a failed batch was planned against, since its own revert changed nothing', async () => {
+    const { api, root } = setup();
+    const planned = api.revision;
+    const failed = await failure(() => at(api, planned, { op: 'add_box', as: 'a', min: [0, 0, 0], max: [1, 1, 1] }, { op: 'add_box', as: 'b', min: [3, 0, 0], max: [4, 1, 1] },
+      { op: 'union', refs: ['$a', '$b'] }));
+    expect(failed.error).toMatchObject({ code: 'invalid_geometry', operationIndex: 2 });
+    // Reverting is a change, so the revision moved on, but the corrected batch still runs against the one it was planned for.
+    expect(api.revision).toBeGreaterThan(planned);
+    const fixed = await at(api, planned, { op: 'add_box', as: 'a', min: [0, 0, 0], max: [1, 1, 1] }, { op: 'add_box', as: 'b', min: [1, 0, 0], max: [2, 1, 1] },
+      { op: 'union', refs: ['$a', '$b'] });
+    expect(fixed.ok).toBe(true);
+    expect(root().bodies.size).toBe(1);
+  });
+
+  it('accepts a revision only its own batches have moved past, as parallel calls of one round send', async () => {
+    const { api, root, addBox } = setup();
+    addBox([0, 0, 5], [1, 1, 6]);
+    const planned = api.revision;
+    await at(api, planned, { op: 'add_box', min: [0, 0, 0], max: [1, 1, 1] });
+    await at(api, planned, { op: 'add_box', min: [2, 0, 0], max: [3, 1, 1] });
+    await at(api, planned, { op: 'add_box', min: [4, 0, 0], max: [5, 1, 1] });
+    expect(root().bodies.size).toBe(4);
+    // A revision from before the first of them, or one never reached, is still stale.
+    expect((await failure(() => at(api, planned - 1, { op: 'add_tag' }))).error.code).toBe('stale_revision');
+    expect((await failure(() => at(api, api.revision + 1, { op: 'add_tag' }))).error.code).toBe('stale_revision');
+  });
+
+  it('refuses a revision when anyone else changed the model after it, or the change was undone', async () => {
+    const { api, host, addBox, commands } = setup();
+    const planned = api.revision;
+    await at(api, planned, { op: 'add_box', min: [0, 0, 0], max: [1, 1, 1] });
+    addBox([5, 0, 0], [6, 1, 1]);
+    const edited = await failure(() => at(api, planned, { op: 'add_tag' }));
+    expect(edited.error).toMatchObject({ code: 'stale_revision', revision: api.revision });
+    const now = api.revision;
+    await at(api, now, { op: 'add_box', min: [8, 0, 0], max: [9, 1, 1] });
+    expect(host.undoStack.undo()).toBe(true);
+    expect((await failure(() => at(api, now, { op: 'add_tag' }))).error.code).toBe('stale_revision');
+    // Another API object's batches are someone else's too.
+    const plugin = new ModelDocumentApi(commands, 'Plugin');
+    const before = api.revision;
+    await at(api, before, { op: 'add_tag' });
+    await at(plugin, api.revision, { op: 'add_tag' });
+    expect((await failure(() => at(api, before, { op: 'add_tag' }))).error.code).toBe('stale_revision');
+  });
+
+  it('names one copy made by move, rotate, mirror or scale with as', async () => {
+    const { api, root } = setup();
+    const made = await api.apply({ expectedRevision: api.revision, label: 'Shelves', operations: [
+      { op: 'add_box', as: 'shelf', min: [0, 0, 0], max: [1, 0.3, 0.02] },
+      { op: 'make_group', as: 'g', refs: ['$shelf'] },
+      { op: 'move', as: 'g2', copy: true, refs: ['$g'], offset: [0, 0, 0.3] },
+      { op: 'rename_instance', ref: '$g2', name: 'Shelf 2' },
+      { op: 'add_box', as: 'side', min: [2, 0, 0], max: [2.02, 0.3, 1] },
+      { op: 'mirror', as: 'side2', copy: true, refs: ['$side'], origin: [3, 0, 0], normal: [1, 0, 0] },
+      { op: 'rotate', as: 'g3', copy: true, refs: ['$g2'], origin: [0, 0, 0], axis: [0, 0, 1], angleDeg: 90 },
+      { op: 'scale', as: 'side3', copy: true, refs: ['$side2'], origin: [4, 0, 0], factors: [1, 1, 0.5] },
+    ] });
+    expect(made.created.g2).toBe([...root().instances.values()].find(i => i.name === 'Shelf 2')!.id);
+    expect(made.created.g3).not.toBe(made.created.g2);
+    expect(root().bodies.has(made.created.side2 as never)).toBe(true);
+    expect(root().bodies.has(made.created.side3 as never)).toBe(true);
+    expect(root().instances.size).toBe(3);
+    expect(root().bodies.size).toBe(3);
+  });
+
+  it('refuses as on an operation that names nothing, or on a transform that is not one copy of one entity, before changing anything', async () => {
+    const { api, addBox } = setup();
+    const a = addBox([0, 0, 0], [1, 1, 1]), b = addBox([2, 0, 0], [3, 1, 1]);
+    const revision = api.revision;
+    const paint = await failure(() => at(api, revision, { op: 'add_tag', as: 't' }, { op: 'assign_tag', as: 'x', refs: [box(a)], tagId: '$t' }));
+    expect(paint.error).toMatchObject({ code: 'invalid_operation', operationIndex: 1 });
+    expect(paint.error.message).toContain('does not name a result');
+    for (const move of [{ op: 'move', as: 'm', refs: [box(a)], offset: [1, 0, 0] }, { op: 'move', as: 'm', copy: true, refs: [box(a), box(b)], offset: [1, 0, 0] },
+      { op: 'move', as: 'm', refs: [box(a)], offset: [1, 0, 0], copies: 3 }]) {
+      const error = await failure(() => at(api, revision, move));
+      expect(error.error).toMatchObject({ code: 'invalid_operation', operationIndex: 0 });
+      expect(error.error.message).toContain('names the copy');
+    }
+    expect(api.revision).toBe(revision);
+  });
+
+  it('lets an operation give again a name it reads, and refuses any other second use before changing anything', async () => {
+    const { api, root } = setup();
+    const result = await at(api, api.revision,
+      { op: 'add_box', as: 'side', min: [0, 0, 0], max: [0.02, 0.5, 0.7] },
+      { op: 'add_box', as: 'dado', min: [-0.01, 0, 0.3], max: [0.01, 0.5, 0.32] },
+      { op: 'subtract', as: 'side', target: '$side', cutters: ['$dado'] },
+      { op: 'add_box', as: 'rail', min: [0.01, 0, 0.6], max: [0.5, 0.02, 0.7] },
+      { op: 'union', as: 'side', refs: ['$side', '$rail'] },
+      { op: 'make_group', as: 'g', refs: ['$side'] });
+    expect(result.rebound).toBeUndefined();
+    expect(root().instances.size).toBe(1);
+    expect(root().bodies.size).toBe(0);
+    const revision = api.revision;
+    const twice = await failure(() => at(api, revision, { op: 'add_box', as: 'a', min: [5, 0, 0], max: [6, 1, 1] }, { op: 'add_box', as: 'a', min: [7, 0, 0], max: [8, 1, 1] }));
+    expect(twice.error).toMatchObject({ code: 'invalid_operation', operationIndex: 1 });
+    expect(twice.error.message).toContain('used twice');
+    expect(api.revision).toBe(revision);
+  });
+
+  it('explains a bare id where a reference is expected', async () => {
+    const { api, addBox } = setup();
+    const id = addBox([0, 0, 0], [1, 1, 1]);
+    const error = await failure(() => at(api, api.revision, { op: 'add_box', as: 'k', min: [0.4, -0.1, 0.4], max: [0.6, 0.1, 0.6] }, { op: 'subtract', target: id, cutters: ['$k'] }));
+    expect(error.error).toMatchObject({ code: 'invalid_operation', operationIndex: 1 });
+    expect(error.error.message).toContain(`{kind: "body", id: ${id}}`);
   });
 });
 

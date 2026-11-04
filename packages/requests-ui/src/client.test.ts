@@ -110,6 +110,10 @@ describe('parseEventStream', () => {
       { type: 'done', messageCount: 1, limitReached: false, ended: false, reason: null, awaitingTools: true },
     ]);
   });
+  it('parses a status line and skips one without text', async () => {
+    const turn = sseResponse([{ event: 'status', data: { phase: 'writing', text: 'Writing the change…' } }, { event: 'status', data: { phase: 'writing', text: ' ' } }], 'whole');
+    expect(await collect(parseEventStream(turn.body!))).toEqual([{ type: 'status', phase: 'writing', text: 'Writing the change…' }]);
+  });
   it('reads the type from the data payload when the event line is absent and skips unknown events', async () => {
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({ start(controller) {

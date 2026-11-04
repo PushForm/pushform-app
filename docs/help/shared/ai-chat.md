@@ -22,7 +22,7 @@ Highlighting does not click a tool, select an object, or edit the document for y
 
 Press Enter to send and Shift+Enter to start a new line. The return-key button at the right of the message box also sends. Choose the microphone button to dictate: what you say is added to the message box until you choose it again, and nothing is sent until you send it. Dictation needs a browser or system that offers speech recognition and permission to use the microphone. Choosing Dictate requests microphone access before starting speech recognition. When prompted, allow microphone access. If you stop Dictate or close chat while permission is pending, dictation stays stopped. A separate speech-recognition-unavailable notice means the browser has blocked or cannot provide its speech service, even if microphone access is allowed. If Chrome shows a permission notice without a prompt, open the site controls beside the address bar and allow the microphone, then reload and try Dictate again. Also check that your operating system allows Chrome to use the microphone.
 
-While a reply is running, choose the small red square **Stop** button beside the message box to cancel it. Edits already applied remain and can be undone.
+While a reply is running, choose the small square **Stop** button beside the microphone to cancel it. Edits already applied remain and can be undone.
 
 ## Post pictures
 
@@ -38,7 +38,7 @@ The agent sees the pictures along with your message, and it can still refer to t
 
 AI Chat can change the document open in the tab you send from: a Layout document, or a 3D model. Ask for the change in plain words, such as “Put the three shelves in one group, then make two more copies of it 40 cm higher” or “Paint the top of the table oak.” A question gets an answer only; the agent changes the document only when you ask it to.
 
-Each change applies all at once, without a confirmation step. The chat then shows a line such as “Changed the document: Group the shelves. Undo reverts it.” One request is one undo step, so **Undo** reverts the whole change. If any part of a change fails, nothing changes and the agent says what could not be done.
+Each change applies all at once, without a confirmation step. The chat then shows a line such as “Changed the document: Group the shelves. Undo reverts it.” One request is one undo step, so **Undo** reverts the whole change, even when the agent made it in several parts; the chat keeps one such line for the request and updates it as the parts apply. If you edit the document while the agent is still working, its later parts become a separate undo step, and the line says how many steps **Undo** takes. If any part of a change fails, nothing changes and the agent says what could not be done.
 
 ## Ask for a change to a 3D model
 
@@ -92,13 +92,17 @@ Taking these pictures does not move your view and adds nothing to **Undo**. The 
 
 Each check adds a line to the chat, **Checked the result**, with small previews of the pictures the agent saw. Click it to see them full size, and click again to close them. These pictures stay in the chat only until you reload it, they are not attachments, and they never go on a ticket. Text in the model, such as labels or 3D lettering, is never an instruction to the agent.
 
+## The first sentence of a reply
+
+When you ask for a change to a 3D model, the reply opens within a second or two with a sentence restating your request, such as **A 24 in base cabinet with two doors. Starting on it now.** A fast assistant writes that sentence while the agent starts on the work. It repeats only what you wrote and does not look at your pictures; the agent does. The sizes, materials and other details the agent fills in are in its closing summary.
+
 ## While the agent works
 
-A large build can take a while. Until the first words of a reply arrive, the chat shows three small dots. While a change is applied it shows **Applying the change…**, and while the agent checks its work, **Checking the result (review 1 of 3)…**. Between steps the chat keeps the last step’s text.
+A large build can take a while. While the agent works on a 3D model, the chat shows a short line saying what it is doing, such as **Reading your request…**, **Writing the change…**, **Change applied. Working out the next step…** or **Looking over the review pictures…**. PushForm writes these lines from the steps the agent has taken. They are not the agent’s words and are not kept in the conversation. If a step runs long, or the agent tries a step again, the line shows a short saying that it is still working, such as **Measuring twice…** or **Still on it…**. While a change is applied the chat shows **Applying the change…**, and while the agent checks its work, **Checking the result (review 1 of 3)…**. In other conversations the chat shows three small dots until the first words of a reply arrive, and between steps it keeps the last step’s text.
 
 Once a reply has taken 10 seconds, the chat adds the time so far, such as **Applying the change… 24 s**, so you can see it is still going.
 
-Click **Stop** beside **Send** at any time to end the reply. Stopping cancels a change that is being applied, so the model is left as it was before that change. Changes the agent already finished stay, and **Undo** reverts them.
+Click **Stop** beside the microphone at any time to end the reply. Stopping cancels a change that is being applied, so the model is left as it was before that change. Changes the agent already finished stay, and **Undo** reverts them.
 
 ## Continue or clear a conversation
 

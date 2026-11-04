@@ -168,19 +168,36 @@ export class UndoStack {
   /**
    * Close the open group. Committing records its edits as one entry (none when nothing changed) and clears redo;
    * otherwise its edits are reverted and the selection restored, leaving the document as it was before the group.
+   *
+   * `merge` continues an earlier entry instead: when it is still the top entry, the group's edits join it (its
+   * patches appended, its inverse prepended, its selection after and label updated), so one undo reverts both. The
+   * caller decides that nothing else happened in between; an entry that is no longer on top gets a new entry as usual.
+   * Returns the entry holding the group's edits, or null when nothing was recorded.
    */
-  endGroup(commit: boolean): void {
+  endGroup(commit: boolean, merge?: { entry: UndoEntry; label: string }): UndoEntry | null {
     const group = this.group;
-    if (!group) return;
+    if (!group) return null;
     this.group = null;
-    if (!group.patches.length) return;
+    if (!group.patches.length) return null;
     const patches = group.patches.flat(), inverse = [...group.inverse].reverse().flat();
     if (commit) {
-      this.push({ label: group.label, commandId: null, params: null, patches, inverse, selectionBefore: group.selectionBefore, selectionAfter: this.selection?.snapshot() ?? [] });
-      return;
+      const selectionAfter = this.selection?.snapshot() ?? [];
+      if (merge && merge.entry === this.peek()) {
+        const e = merge.entry;
+        e.patches = [...e.patches, ...patches];
+        e.inverse = [...inverse, ...e.inverse];
+        e.selectionAfter = selectionAfter;
+        e.label = merge.label;
+        this.redoStack = [];
+        this.emit();
+        return e;
+      }
+      this.push({ label: group.label, commandId: null, params: null, patches, inverse, selectionBefore: group.selectionBefore, selectionAfter });
+      return this.peek();
     }
     this.doc.applyPatches(inverse, patches, 'undo', group.label);
     this.selection?.restore(group.selectionBefore);
+    return null;
   }
 
   private requireGroupOwner(): void {

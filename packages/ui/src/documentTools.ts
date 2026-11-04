@@ -55,10 +55,19 @@ export function viewportRenderer(viewport: Viewport): ModelRenderer {
   };
 }
 
-/** Every applied batch leaves a line in the chat naming its undo entry. */
-function withNotice(result: DocumentToolOutcome): DocumentToolOutcome {
-  const label = String((JSON.parse(result.content) as { label?: unknown }).label ?? '').slice(CLIENT.length + 2);
-  return { ...result, notice: `Changed the document: ${label}. Undo reverts it.` };
+/**
+ * The chat's one line about everything the message's batches changed so far. The chat shows it once per message and
+ * updates it in place, so a change made in several batches still reads as one change with one undo step.
+ */
+function changeNotice(changes: { label: string; undoSteps: number } | null): string | undefined {
+  if (!changes) return undefined;
+  const undo = changes.undoSteps > 1 ? `Undo reverts it in ${changes.undoSteps} steps.` : 'Undo reverts it.';
+  return `Changed the document: ${changes.label}. ${undo}`;
+}
+
+function withNotice(result: DocumentToolOutcome, api: { readonly changes: { label: string; undoSteps: number } | null }): DocumentToolOutcome {
+  const notice = changeNotice(api.changes);
+  return notice ? { ...result, notice } : result;
 }
 
 /**
@@ -85,7 +94,7 @@ export function documentToolsFor(session: DocumentSession, tab: DocumentTab, ope
           const views = (JSON.parse(result.content) as { views: { name: string }[] }).views.map(view => view.name);
           return { content: result.content, isError: false, images: result.images, views };
         }
-        return result.isError || call.name !== MODEL_TOOLS.applyOperations.name ? result : withNotice(result);
+        return result.isError || call.name !== MODEL_TOOLS.applyOperations.name ? result : withNotice(result, api);
       },
     };
   }
@@ -100,7 +109,7 @@ export function documentToolsFor(session: DocumentSession, tab: DocumentTab, ope
       const refused = gone(session, tab, api.revision);
       if (refused) return refused;
       const result = runLayoutTool(api, call.name, call.input);
-      return result.isError || call.name !== LAYOUT_TOOLS.applyOperations.name ? result : withNotice(result);
+      return result.isError || call.name !== LAYOUT_TOOLS.applyOperations.name ? result : withNotice(result, api);
     },
   };
 }

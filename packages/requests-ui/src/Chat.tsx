@@ -133,6 +133,8 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
   const [busy, setBusy] = useState(false);
   const [waitingForGuidance, setWaitingForGuidance] = useState(false);
   const [toolProgress, setToolProgress] = useState<string | null>(null);
+  /** The backend's latest status line for the running turn; cleared when the agent's own words or a tool step take over. */
+  const [statusLine, setStatusLine] = useState<string | null>(null);
   /** When the running turn started, for the elapsed time in its placeholder; null while no turn runs. */
   const [turnStarted, setTurnStarted] = useState<number | null>(null);
   const [error, setError] = useState<{ code: string; message: string; retry?: (() => void) | undefined } | null>(null);
@@ -210,7 +212,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
     const ids = new Set<string>(chat.conversation ? [chat.conversation.id] : []);
     for (const draft of readDrafts(account.id, draftStorage)) if (draftScope(draft) === scopeRef.current) ids.add(draft.conversationId);
     for (const id of ids) { forgetDraft(account.id, id, draftStorage); void client.discardConversation(id).catch(() => {}); }
-    setWaitingForGuidance(false); setToolProgress(null); setTurnStarted(null);
+    setWaitingForGuidance(false); setToolProgress(null); setStatusLine(null); setTurnStarted(null);
     setChat(EMPTY); setText(''); setError(null); setNotice(null); setBusy(false);
   };
   /** Stop: cancels the running turn and any batch in progress; what was already applied stays, undoable. */
@@ -249,7 +251,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
     const live = (): boolean => alive.current && generation.current === gen;
     /** Stop ends the turn here: the calls of a stopped round are never answered. */
     const stopped = (): void => { if (controller.signal.aborted) throw new DOMException('Stopped', 'AbortError'); };
-    setToolProgress(null); setTurnStarted(Date.now());
+    setToolProgress(null); setStatusLine(null); setTurnStarted(Date.now());
     void run(async () => {
       let streamed = '', rateLimited = false, failed = false, resumed = false, conversation = chat.conversation;
       // A conversation the server ended (filed, added, closed) is left behind: this message starts a new one.
@@ -285,6 +287,9 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
         }
         // The document is bound now; switching tabs later never retargets this turn's tool calls.
         const tools = documentTools?.() ?? null;
+        // The turn's one change line, as the transcript holds it and in its newest wording: each applied change
+        // updates it in place rather than adding a line.
+        let shownChange = null as Entry | null, change = null as Entry | null;
         let stream = client.sendMessage(id, body, { ...(intent ? { intent } : {}), document: tools?.document ?? null, signal: controller.signal, attachments: pictureIds });
         for (;;) {
           let requested: readonly ToolCall[] = [];
@@ -292,7 +297,8 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
             if (!live()) return;
             switch (event.type) {
               case 'tool_request': requested = event.calls; break;
-              case 'text': streamed += event.delta; setChat(current => ({ ...current, streaming: streamed })); break;
+              case 'text': streamed += event.delta; setStatusLine(null); setChat(current => ({ ...current, streaming: streamed })); break;
+              case 'status': setStatusLine(event.text); break;
               // Only the path (and title, for the draft) matter here: the brief itself is what the agent writes into the chat.
               case 'brief': path = event.path ?? path; title = event.title ?? title; setChat(current => ({ ...current, path })); remember(id, path, title); break;
               case 'filed': case 'added': {
@@ -329,6 +335,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
             if (call.name === 'ui_highlight') setWaitingForGuidance(true);
             // The placeholder keeps the last step's text until a step with its own text, or the reply, replaces it.
             const progress = reviewProgress(call) ?? tools.progress?.(call);
+            setStatusLine(null);
             if (progress) setToolProgress(progress);
             try { outcome = await tools.run(call, controller.signal); } catch (cause) { outcome = { content: `The editor could not run ${call.name}: ${errorText(cause)}`, isError: true }; }
             if (!live()) return;
@@ -336,11 +343,18 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
             stopped();
             results.push({ toolUseId: call.id, content: outcome.content, isError: outcome.isError, ...(outcome.images?.length ? { images: outcome.images } : {}) });
             const at = new Date().toISOString();
-            if (outcome.notice) lines.push({ role: 'system', text: outcome.notice, at });
+            if (outcome.notice) {
+              const line: Entry = { role: 'system', text: outcome.notice, at: change?.at ?? at }, index = change ? lines.indexOf(change) : -1;
+              if (index >= 0) lines[index] = line;
+              else if (!change) lines.push(line);
+              change = line;
+            }
             if (outcome.images?.length) lines.push({ role: 'review', views: outcome.views ?? [], images: outcome.images, at });
           }
           if (!live()) return;
-          setChat(current => ({ ...current, streaming: '', transcript: [...current.transcript, ...lines] }));
+          const replaced = shownChange, updated = change;
+          setChat(current => ({ ...current, streaming: '', transcript: [...(replaced && updated !== replaced ? current.transcript.map(item => item === replaced ? updated! : item) : current.transcript), ...lines] }));
+          shownChange = change;
           resumed = true;
           stream = client.sendToolResults(id, results, { signal: controller.signal });
         }
@@ -357,7 +371,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
         else throw cause;
       } finally {
         if (turn.current === controller) turn.current = null;
-        if (live()) { setToolProgress(null); setTurnStarted(null); setWaitingForGuidance(false); }
+        if (live()) { setToolProgress(null); setStatusLine(null); setTurnStarted(null); setWaitingForGuidance(false); }
         // A turn the server rejected before answering never received the message: the optimistic copy leaves the transcript.
         // Start over (the requester asked the agent to discard): the transcript goes too, so the greeting and cards return.
         // A message that never reached the agent keeps its pictures in the composer for retry; its uploads are released.
@@ -526,8 +540,12 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
             : <span className="pf-fr-role">{entry.role === 'user' ? 'You' : 'Agent'}</span>}
             {/* The requester's own words stay as typed; the agent's replies are Markdown. */}
             {entry.role === 'user' ? <>{entry.text ? <p>{entry.text}</p> : null}<SentPictures entry={entry} client={client} previews={uploadedPreviews.current} /></> : <MessageMarkdown text={entry.text} />}</div>)}
-        {current.streaming !== null && !waitingForGuidance ? <div className="pf-fr-message is-assistant is-streaming">{current.transcript.at(-1)?.role === 'assistant' ? null : <span className="pf-fr-role">Agent</span>}{current.streaming ? <MessageMarkdown text={current.streaming} /> : <div className="pf-fr-working">
-          {toolProgress ? <p role="status">{toolProgress}</p> : <p className="pf-fr-thinking" role="status" aria-label="Agent is thinking"><span /><span /><span /></p>}
+        {current.streaming !== null && !waitingForGuidance ? <div className="pf-fr-message is-assistant is-streaming">{current.transcript.at(-1)?.role === 'assistant' ? null : <span className="pf-fr-role">Agent</span>}{current.streaming ? <>
+          <MessageMarkdown text={current.streaming} />
+          {/* A status line that arrives after the agent's words (it started writing a change, say) shows beneath them. */}
+          {statusLine ? <div className="pf-fr-working is-after"><p role="status">{statusLine}</p></div> : null}
+        </> : <div className="pf-fr-working">
+          {statusLine ?? toolProgress ? <p role="status">{statusLine ?? toolProgress}</p> : <p className="pf-fr-thinking" role="status" aria-label="Agent is thinking"><span /><span /><span /></p>}
           {turnStarted !== null ? <Elapsed since={turnStarted} /> : null}
         </div>}</div> : null}
         <div ref={transcriptEnd} />

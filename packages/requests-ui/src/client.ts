@@ -93,6 +93,8 @@ export type StreamEvent =
   /** The agent added the requester to an existing request; arrives before the closing `text`. */
   | { readonly type: 'added'; readonly request: FiledRequest }
   | { readonly type: 'error'; readonly code: ErrorCode; readonly message: string }
+  /** What the agent is doing while nothing else arrives (a short line the backend writes, not the agent's words). */
+  | { readonly type: 'status'; readonly phase: string; readonly text: string }
   /** The turn waits for the editor to run these document tool calls and send the results with `sendToolResults`. */
   | { readonly type: 'tool_request'; readonly calls: readonly ToolCall[] }
   /**
@@ -204,6 +206,7 @@ export async function* parseEventStream(body: ReadableStream<Uint8Array>): Async
       case 'brief': return { type, brief: (payload['brief'] as Brief | null | undefined) ?? null, title: nullable(payload['title']),
         path: nullable(payload['path']) as ConversationPath | null, estimatedClass: nullable(payload['estimatedClass']) };
       case 'filed': case 'added': return { type, request: normalizeFiled(payload['request']) };
+      case 'status': { const text = str(payload['text']).trim(); return text ? { type, phase: str(payload['phase']), text: text.slice(0, 200) } : null; }
       case 'error': return { type, code: str(payload['code'], 'unknown') as ErrorCode, message: str(payload['message'], 'Something went wrong.') };
       case 'tool_request': return { type, calls: (Array.isArray(payload['calls']) ? payload['calls'] as Json[] : []).map(c => {
         const review = (c['review'] ?? null) as Json | null;

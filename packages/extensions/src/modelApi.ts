@@ -24,7 +24,7 @@ import {
   type Body, type DocumentState, type EdgeRecord, type EntityContainer, type EntityRef, type FaceRecord, type Material, type Rgb, type Scene, type SceneFlags, type SketchFace,
   type UndoEntry, type UvMapping,
 } from '@pushform/model';
-import type { ToolCallResult } from './layoutApi';
+import { summarizeLabels, type ToolCallResult } from './layoutApi';
 import { frameCamera } from './modelCamera';
 
 /** A structured API error; the message is safe to show to the user and to a model. */
@@ -83,6 +83,30 @@ const hex = (c: Rgb): string => `#${c.map(x => Math.round(Math.min(1, Math.max(0
 const rgb = (color: string): Rgb => [1, 3, 5].map(i => parseInt(color.slice(i, i + 2), 16) / 255) as unknown as Rgb;
 const boundsOut = (b: Box3 | null): ModelBounds | null => (b && !box3IsEmpty(b) ? { min: vec(b.min), max: vec(b.max) } : null);
 const zodMessage = (error: { issues: readonly { path: readonly PropertyKey[]; message: string }[] }): string => error.issues.slice(0, 5).map(i => `${i.path.map(String).join('.') || 'input'}: ${i.message}`).join('; ');
+/** The value at `path` inside `input`, or undefined. */
+const valueAt = (input: unknown, path: readonly PropertyKey[]): unknown =>
+  path.reduce<unknown>((at, key) => (at !== null && typeof at === 'object' ? (at as Record<PropertyKey, unknown>)[key] : undefined), input);
+/**
+ * An operation's schema errors, with a plain id where a reference was expected explained: an id alone does not say
+ * whether it is a solid, a group or another kind.
+ */
+const operationMessage = (raw: unknown, error: { issues: readonly { code: string; path: readonly PropertyKey[]; message: string }[] }): string =>
+  zodMessage({ issues: error.issues.map(issue => {
+    const value = valueAt(raw, issue.path);
+    return issue.code === 'invalid_union' && Number.isInteger(value) && (value as number) >= 0
+      ? { ...issue, message: `${value} is a bare id; a reference is {kind, id}, such as {kind: "body", id: ${value}} for a solid or {kind: "instance", id: ${value}} for a group or placement, or "$name"` }
+      : issue;
+  }) });
+/** Whether an operation refers to `"$name"` anywhere in its input. */
+const readsName = (op: unknown, name: string): boolean => {
+  const target = `$${name}`;
+  const walk = (value: unknown): boolean => typeof value === 'string' ? value === target
+    : Array.isArray(value) ? value.some(walk)
+    : value !== null && typeof value === 'object' ? Object.entries(value).some(([key, v]) => key !== 'as' && walk(v)) : false;
+  return walk(op);
+};
+/** Operations that move or copy entities; with `as`, they name the copy. */
+const TRANSFORM_OPS = new Set<string>(['move', 'rotate', 'scale', 'mirror']);
 const samePath = (a: readonly number[], b: readonly number[]): boolean => a.length === b.length && a.every((x, i) => x === b[i]);
 
 /**
@@ -95,6 +119,15 @@ const samePath = (a: readonly number[], b: readonly number[]): boolean => a.leng
  * one per message the requester sends (`documentToolsFor` runs when the message is sent), so its names last one turn;
  * an extension's names last as long as the host keeps its API object. Names never enter the document. A name keeps
  * the container it was given in; an undone batch's names are dropped, and a later batch may rebind a name.
+ *
+ * A batch's expected revision guards against other edits: it may be any revision since which only this object's own
+ * batches, committed or reverted, changed the model.
+ *
+ * One object serves one request, so its batches are one undo step: a committed batch that follows this object's
+ * previous committed batch, with no other change to the model in between (the requester's edits, undo or redo,
+ * another client's batches), joins that batch's undo entry, which is then labelled for all of them. A reverted batch
+ * in between changes nothing and does not split them. A host gives each request its own object: AI Chat one per
+ * message, an extension's host one per run of the extension.
  */
 export class ModelDocumentApi {
   private readonly host: DocumentHost;
@@ -103,12 +136,32 @@ export class ModelDocumentApi {
   /** Names dropped because their batch was undone, so a use of one can say why it fails. */
   private readonly undone = new Set<string>();
   private batches = 0;
+  /**
+   * Revisions this object's own batches account for: every change from `ownFrom` to `ownTo` was made by a batch
+   * through it, committed or reverted. A batch planned against any of them meets no one else's change, so it runs.
+   */
+  private ownFrom = -1;
+  private ownTo = -1;
+  /** The undo entry the latest committed batch went into, with the labels of the batches it holds, oldest first. */
+  private step: { entry: UndoEntry; labels: string[] } | null = null;
+  /** Labels of every committed batch, oldest first, and how many undo entries hold them. */
+  private readonly committedLabels: string[] = [];
+  private steps = 0;
 
   constructor(private readonly commands: CommandRegistry, private readonly client: string) {
     this.host = hostOf(commands.ctx);
   }
 
   get revision(): number { return this.host.doc.version; }
+
+  /**
+   * What this object's committed batches changed, for one line about all of them: `label` names them as their undo
+   * entries do, without the client's name, and `undoSteps` is how many undo entries hold them (one unless something
+   * else changed the model between them). Null until a batch commits.
+   */
+  get changes(): { label: string; undoSteps: number } | null {
+    return this.committedLabels.length ? { label: summarizeLabels(this.committedLabels), undoSteps: this.steps } : null;
+  }
 
   getDocument(): ModelDocumentSnapshot {
     const state = this.host.doc.state, context = this.host.context;
@@ -435,13 +488,16 @@ export class ModelDocumentApi {
     const operations: ModelOperation[] = batch.operations.map((raw, index) => {
       if (PLANNED.has(raw.op)) throw this.failure('unavailable', `Operation ${index} (${raw.op}) is not available yet in this version. Nothing was changed.`, index);
       const op = modelOperationSchema.safeParse(raw);
-      if (!op.success) throw this.failure('invalid_operation', `Operation ${index}: ${zodMessage(op.error)}`, index);
+      if (!op.success) throw this.failure('invalid_operation', `Operation ${index}: ${operationMessage(raw, op.error)}`, index);
       return op.data;
     });
     const points = operations.reduce((sum, op) => sum + pointCount(op), 0);
     if (points > MODEL_LIMITS.pointsPerBatch) throw this.failure('limit_exceeded', `The batch names ${points} entities and points; the limit is ${MODEL_LIMITS.pointsPerBatch}.`);
-    if (batch.expectedRevision !== this.revision)
-      throw this.failure('stale_revision', `The model changed since revision ${batch.expectedRevision}; it is now at revision ${this.revision}. Read it again before editing.`);
+    this.checkNames(batch.operations, operations);
+    const start = this.revision;
+    const own = this.ownTo === start;
+    if (batch.expectedRevision !== start && !(own && batch.expectedRevision >= this.ownFrom && batch.expectedRevision < start))
+      throw this.failure('stale_revision', `The model changed since revision ${batch.expectedRevision}; it is now at revision ${start}. Read it again before editing.`);
     const host = this.host, undo = host.undoStack;
     const path = (batch.container ?? [...host.context.path]) as Id[];
     this.containerOrFail(path);
@@ -452,10 +508,11 @@ export class ModelDocumentApi {
     const names = new Map(this.names), batchNo = ++this.batches;
     const created = new Map<string, Named>(), rebound: string[] = [];
     const results: ModelBatchResult['results'] = [];
-    const lastEntry = undo.peek();
+    // Nothing but this object's own batches changed the model since its last commit, so this batch joins that entry.
+    const joins = own && this.step && undo.peek() === this.step.entry ? this.step : null;
     const savedPath = [...host.context.path], savedSelection = host.selection.snapshot();
     const deadline = Date.now() + MODEL_LIMITS.kernelSeconds * 1000;
-    let at = 0, failed: ModelApiFailure | null = null;
+    let at = 0, failed: ModelApiFailure | null = null, committed: UndoEntry | null = null;
     undo.beginGroup(label);
     try {
       undo.withinGroup(() => { if (!samePath(path, savedPath)) host.setContext(path); });
@@ -465,9 +522,9 @@ export class ModelDocumentApi {
         if (Date.now() > deadline) throw this.failure('limit_exceeded', `The batch ran longer than ${MODEL_LIMITS.kernelSeconds} seconds and was cancelled. Nothing was changed.`, index);
         const { named, ...result } = await this.run(op, path, names, batchNo, label);
         if ('as' in op && op.as) {
-          if (created.has(op.as)) throw this.failure('invalid_operation', `The name "${op.as}" is used twice in this batch.`, index);
           if (named) {
-            if (names.has(op.as)) rebound.push(op.as);
+            // checkNames allowed a second use only by an operation that reads the name, so it now names the result.
+            if (names.has(op.as) && !created.has(op.as)) rebound.push(op.as);
             names.set(op.as, { named, path: [...path], batch: batchNo, undo: null });
             created.set(op.as, named);
           }
@@ -481,11 +538,19 @@ export class ModelDocumentApi {
     } finally {
       undo.withinGroup(() => { if (!samePath(host.context.path, savedPath)) host.setContext(savedPath); });
       if (!samePath(path, savedPath)) host.selection.restore(savedSelection);
-      undo.endGroup(failed === null);
+      const labels = [...joins?.labels ?? [], batch.label];
+      committed = undo.endGroup(failed === null, joins ? { entry: joins.entry, label: `${this.client}: ${summarizeLabels(labels)}` } : undefined);
+      if (committed) {
+        if (committed === joins?.entry) joins.labels = labels;
+        else { this.step = { entry: committed, labels: [batch.label] }; this.steps++; }
+        this.committedLabels.push(batch.label);
+      }
+      // Committed or reverted, the change is this object's own, so it does not make the client's revision stale.
+      if (!own) this.ownFrom = start;
+      this.ownTo = this.revision;
     }
     // Reverting the batch is itself a change, so a failure reports the revision after it.
     if (failed) throw new ModelApiFailure({ ...failed.error, revision: this.revision });
-    const committed = undo.peek() !== lastEntry ? undo.peek() : null;
     const earlier: Record<string, ModelNameEntry> = {};
     for (const [name, entry] of this.names) if (!created.has(name) && this.alive(entry)) earlier[name] = nameOut(entry.named);
     for (const [name, named] of created) {
@@ -533,6 +598,32 @@ export class ModelDocumentApi {
       case 'dimension': return c.dimensions.has(n.id as Id);
       case 'sectionPlane': return c.sectionPlanes.has(n.id as Id);
       default: return false;
+    }
+  }
+
+  /**
+   * Checks every `as` before anything runs: an operation that names nothing takes none, a transform names only one
+   * copy of one entity, and a name given twice in the batch is given again only by an operation that reads it, whose
+   * result it then names, as a subtract that keeps cutting `"$side"` and names the result `side`.
+   */
+  private checkNames(raw: readonly Record<string, unknown>[], operations: readonly ModelOperation[]): void {
+    const given = new Set<string>();
+    for (const [index, op] of operations.entries()) {
+      const as = 'as' in op ? op.as : undefined;
+      if (as === undefined) {
+        if (raw[index]?.as !== undefined)
+          throw this.failure('invalid_operation', `Operation ${index} (${op.op}) does not name a result, so it takes no "as". Name what the operation acts on where it is made. Nothing was changed.`, index);
+        continue;
+      }
+      if (TRANSFORM_OPS.has(op.op) && 'refs' in op) {
+        const copies = 'copies' in op ? op.copies : undefined;
+        const one = copies === undefined ? 'copy' in op && op.copy === true : copies === 1;
+        if (!one || op.refs.length !== 1)
+          throw this.failure('invalid_operation', `Operation ${index} (${op.op}): "as" names the copy, so it needs copy: true and one entity in refs; for several copies, read their ids from the result's refs. Nothing was changed.`, index);
+      }
+      if (given.has(as) && !readsName(op, as))
+        throw this.failure('invalid_operation', `The name "${as}" is used twice in this batch. An operation may give a name again only when it reads "$${as}", such as a subtract whose target is "$${as}". Nothing was changed.`, index);
+      given.add(as);
     }
   }
 
@@ -646,13 +737,19 @@ export class ModelDocumentApi {
       const definitionId = containerAt(host.doc.state, path).instances.get(instanceId as Id)!.definitionId;
       return { id: instanceId, definitionId, named: { kind: 'instance', id: instanceId, definitionId } };
     };
-    const transform = (refs: EntityRef[], local: MMat4, copy: boolean, copies: number | undefined): Promise<OpResult> => {
+    const transform = async (refs: EntityRef[], local: MMat4, copy: boolean, copies: number | undefined, named = false): Promise<OpResult> => {
       if (refs.some(r => r.kind === 'face')) throw this.failure('invalid_operation', 'Moving a face of a solid is push/pull: use push_pull.');
+      // checkNames let `as` through only for one copy of one reference, but a drawn shape's name stands for its edges.
+      if (named && refs.length !== 1) throw this.failure('invalid_operation', `"as" names one copied solid, group or placement; these refs are ${refs.length} entities. Read the copies' ids from the result's refs.`);
       // The API's matrices are local to the container; the transform commands take world matrices.
       const frame = contextMatrix(host.doc.state, path);
       const world = m4mul(frame, m4mul(local, m4invert(frame) ?? frame));
       const matrices = copies ? arrayMatrices(world, copies, 'external') : [world];
-      return this.transform(matrices.map(m => planTransform(host.doc.state, refs, m, copy || copies !== undefined, label)));
+      const result = await this.transform(matrices.map(m => planTransform(host.doc.state, refs, m, copy || copies !== undefined, label)));
+      const made = result.refs?.length === 1 ? result.refs[0]! : undefined;
+      if (!named) return result;
+      if (!made) throw this.failure('invalid_operation', `"as" names one copy, but the operation made ${result.refs?.length ?? 0}. Read the copies' ids from the result's refs.`);
+      return made.kind === 'instance' ? { ...result, named: instanceResult(made.id).named! } : { ...result, named: { kind: made.kind, id: made.id } };
     };
     const world = (p: Vec3): Vec3 => contextFrame(host.doc.state, path).toWorld(p);
     const bodyOut = (id: number): ModelRef => ({ path: [...path], kind: 'body', id });
@@ -754,10 +851,27 @@ export class ModelDocumentApi {
       case 'union': {
         const [first, ...rest] = op.refs.map((r, i) => solid(r, `Solid ${i}`));
         const deleted: number[] = [];
-        for (const other of rest) {
-          const result = await boolean('union', first!, other);
-          if (result.bodyIds.length !== 1) throw this.failure('invalid_geometry', `Solids ${first!.id} and ${other.id} do not touch, so they cannot become one solid; group them instead.`);
-          deleted.push(...result.deleted);
+        const bounds = (id: number) => meshBounds(containerAt(host.doc.state, path).bodies.get(id as Id)!.mesh);
+        // Join whichever remaining solid touches the solid joined so far, so the order of refs does not matter:
+        // a frame listed as its two stiles and then its rails joins through the rails.
+        let pending = rest.map((r, i) => ({ r, index: i + 1 }));
+        while (pending.length > 0) {
+          let joined: number | undefined;
+          for (const [k, { r }] of pending.entries()) {
+            if (!boxesOverlap(bounds(first!.id), bounds(r.id))) continue;
+            const work = await runSolidsKernel(host, kernelOf(this.commands.ctx), 'union', { a: first!, b: r });
+            if (work.mode !== 'union' || work.result.components.length !== 1) continue;
+            const result = await exec<Promise<SolidsApplyResult>>('solids.union', { a: first!, b: r, precomputed: work });
+            deleted.push(...result.deleted);
+            joined = k;
+            break;
+          }
+          if (joined === undefined) {
+            const which = pending.map(p => p.index), ids = pending.map(p => p.r.id);
+            const list = (xs: number[]) => xs.length === 1 ? `${xs[0]}` : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`;
+            throw this.failure('invalid_geometry', `${which.length === 1 ? 'Ref' : 'Refs'} ${list(which)} (${ids.length === 1 ? 'solid' : 'solids'} ${list(ids)}) ${ids.length === 1 ? 'does' : 'do'} not touch the other solids, so ${ids.length === 1 ? 'it' : 'they'} cannot join them into one solid; put separate parts in one group with make_group instead.`);
+          }
+          pending = pending.filter((_, k) => k !== joined);
         }
         this.checkSolids(path, [first!.id], 'union');
         return { id: first!.id, refs: [bodyOut(first!.id)], deleted: deleted.map(bodyOut), named: { kind: 'body', id: first!.id } };
@@ -904,7 +1018,7 @@ export class ModelDocumentApi {
       }
       case 'fillet_corner':
         return draw(() => exec('sketch.fillet', { vertex: world(op.corner), radius: op.radius, segments: op.segments ?? 12 }), null, null, false, 'rounded corner');
-      case 'mirror': return transform(refsOf(op.refs), reflection(op.origin, unit(op.normal)), op.copy ?? false, undefined);
+      case 'mirror': return transform(refsOf(op.refs), reflection(op.origin, unit(op.normal)), op.copy ?? false, undefined, !!op.as);
       case 'intersect_faces': {
         const faces = only(refsOf(op.refs), ['face', 'sketchFace'], 'Lines are drawn on faces');
         const solids = op.with ? op.with.map((r, i) => solid(r, `Solid ${i}`)) : [];
@@ -1010,9 +1124,9 @@ export class ModelDocumentApi {
         const world = m4transformPoint(contextMatrix(host.doc.state, path), op.position);
         return instanceResult(exec<number>('component.place', { definitionId: definitionOf(op.definitionId), point: world }));
       }
-      case 'move': return transform(refsOf(op.refs), m4translation(op.offset), op.copy ?? false, op.copies);
-      case 'rotate': return transform(refsOf(op.refs), m4rotationAbout(op.origin, unit(op.axis), (op.angleDeg * Math.PI) / 180), op.copy ?? false, op.copies);
-      case 'scale': return transform(refsOf(op.refs), m4scaleAbout(op.origin, op.factors), op.copy ?? false, undefined);
+      case 'move': return transform(refsOf(op.refs), m4translation(op.offset), op.copy ?? false, op.copies, !!op.as);
+      case 'rotate': return transform(refsOf(op.refs), m4rotationAbout(op.origin, unit(op.axis), (op.angleDeg * Math.PI) / 180), op.copy ?? false, op.copies, !!op.as);
+      case 'scale': return transform(refsOf(op.refs), m4scaleAbout(op.origin, op.factors), op.copy ?? false, undefined, !!op.as);
       case 'rename_instance': exec('instance.rename', { ref: only([ref(op.ref)], ['instance'], 'Only groups and placements have instance names')[0], name: op.name }); return {};
       case 'rename_definition': exec('definition.rename', { definitionId: definitionOf(op.definitionId), name: op.name }); return {};
       case 'set_hidden': {

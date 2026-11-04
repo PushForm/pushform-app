@@ -37,6 +37,17 @@ describe('defineTool and withSchema', () => {
 });
 
 describe('runTurn', () => {
+  it('reports each round as its request is sent and each reply block as it starts, with the tool it calls', async () => {
+    const phases: unknown[] = [];
+    await runTurn({
+      client: fakeAnthropic([{ thinking: [''], toolUses: [{ id: 't1', name: 'echo', input: { value: 'a' } }] }, { text: ['Done.'] }]),
+      model: 'claude-sonnet-5-5', system: 's', tools: [echoTool], handlers: { echo: () => 'a' }, messages: [user('hi')], onPhase: (phase) => phases.push(phase),
+    });
+    expect(phases).toEqual([
+      { kind: 'request', round: 0 }, { kind: 'block', block: 'thinking' }, { kind: 'block', block: 'tool_use', tool: 'echo' },
+      { kind: 'request', round: 1 }, { kind: 'block', block: 'text' },
+    ]);
+  });
   it('streams text, runs tools, answers them in one user message and loops until end_turn', async () => {
     const client = fakeAnthropic([
       { text: ['Let me ', 'check.'], toolUses: [{ id: 'tu1', name: 'echo', input: { value: 'a' } }, { id: 'tu2', name: 'echo', input: { value: 'b' } }] },

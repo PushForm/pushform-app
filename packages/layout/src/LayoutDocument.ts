@@ -505,10 +505,20 @@ export class LayoutUndoStack {
     return this.redoEntries.length > 0;
   }
 
-  transact<T>(label: string, fn: (draft: Draft<LayoutDocumentState>) => T): T {
+  /**
+   * Run a transaction and record it as an undo entry. With `merge`, a change made while `merge.entry` is still the
+   * newest entry joins it instead (patches appended, inverse prepended, relabelled), so one undo reverts both; the
+   * caller decides that nothing else changed the document in between.
+   */
+  transact<T>(label: string, fn: (draft: Draft<LayoutDocumentState>) => T, merge?: { entry: object; label: string }): T {
     const tx = this.doc.transact(label, fn);
     if (!tx.nested && tx.patches.length > 0) {
-      this.undoEntries.push({ patches: tx.patches, inverse: tx.inversePatches, label });
+      const top = this.undoEntries.at(-1);
+      if (top && merge?.entry === top) {
+        top.patches = [...top.patches, ...tx.patches];
+        top.inverse = [...tx.inversePatches, ...top.inverse];
+        top.label = merge.label;
+      } else this.undoEntries.push({ patches: tx.patches, inverse: tx.inversePatches, label });
       this.redoEntries = [];
     }
     return tx.value;

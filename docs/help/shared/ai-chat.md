@@ -98,11 +98,11 @@ When you ask for a change to a 3D model, the reply opens within a second or two 
 
 ## While the agent works
 
-A large build can take a while. While the agent works on a 3D model, the chat shows a short line saying what it is doing, such as **Reading your request…**, **Writing the change…**, **Change applied. Working out the next step…** or **Looking over the review pictures…**. PushForm writes these lines from the steps the agent has taken. They are not the agent’s words and are not kept in the conversation. If a step runs long, or the agent tries a step again, the line just says it is still working, such as **Still on it…**. While a change is applied the chat shows **Applying the change…**, and while the agent checks its work, **Checking the result (review 1 of 3)…**. In other conversations the chat shows three small dots until the first words of a reply arrive, and between steps it keeps the last step’s text.
+A large build can take a while. While the agent works on a 3D model, the chat shows a short line saying what it is doing, such as **Reading your request…**, **Writing the change…**, **Change applied. Working out the next step…** or **Looking over the review pictures…**. PushForm writes these lines from the steps the agent has taken. They are not the agent’s words and are not kept in the conversation. If a step runs long, or the agent tries a step again, the line shows a short saying that it is still working, such as **Measuring twice…** or **Still on it…**. While a change is applied the chat shows **Applying the change…**, and while the agent checks its work, **Checking the result (review 1 of 3)…**. In other conversations the chat shows three small dots until the first words of a reply arrive, and between steps it keeps the last step’s text.
 
 Once a reply has taken 10 seconds, the chat adds the time so far, such as **Applying the change… 24 s**, so you can see it is still going.
 
-Click **Stop** beside **Send** at any time to end the reply. Stopping cancels a change that is being applied, so the model is left as it was before that change. Changes the agent already finished stay, and **Undo** reverts them.
+Click **Stop** beside the microphone at any time to end the reply. Stopping cancels a change that is being applied, so the model is left as it was before that change. Changes the agent already finished stay, and **Undo** reverts them.
 
 ## Continue or clear a conversation
 

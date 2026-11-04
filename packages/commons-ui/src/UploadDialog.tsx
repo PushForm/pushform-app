@@ -24,7 +24,7 @@ export interface UploadDialogProps {
   initialFile?: File | undefined;
   snapshotLabel?: string | undefined;
   scopeControl?: ReactNode;
-  inherited?: Pick<CommonsSubmission, 'licenses' | 'credits' | 'source'> | undefined;
+  inherited?: (Pick<CommonsSubmission, 'licenses' | 'credits' | 'source'> & { creator?: string }) | undefined;
   newModelId?: string | undefined;
   onClose(): void; onPublished(modelId: string): void;
 }
@@ -66,6 +66,7 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
   const [cover, setCover] = useState<FileState | null>(null);
   const [save, setSave] = useState<SaveState>('idle');
   const [message, setMessage] = useState('');
+  const [creditCreator, setCreditCreator] = useState(inherited?.creator ?? '');
   const [rights, setRights] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -175,9 +176,11 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
 
   const publicationMetadata = useCallback((...args: Parameters<typeof metadataFor>) => {
     const metadata = metadataFor(...args);
-    if (!inherited) return metadata;
-    return { ...metadata, source: inherited.source, licenses: [...metadata.licenses, ...inherited.licenses], credits: [...metadata.credits, ...inherited.credits] };
-  }, [inherited]);
+    if (!inherited) return args[3]?.source ? { ...metadata, creator: args[3].creator } : metadata;
+    const publisher = args[1];
+    const credits = [...metadata.credits.filter(credit => credit.text !== `Original model by ${publisher}.`), ...inherited.credits, { name: publisher, url: null, text: `Published by ${publisher}.` }];
+    return { ...metadata, creator: creditCreator.trim(), source: inherited.source, licenses: [...metadata.licenses, ...inherited.licenses], credits: [...new Map(credits.map(credit => [JSON.stringify(credit), credit])).values()] };
+  }, [inherited, creditCreator]);
   const creator = profile?.displayName ?? '';
   /** The pending revision changes go into, created on first need: a new model, or the next revision of a published one. */
   const ensureDraft = useCallback(async (): Promise<CommonsOwnRevision> => {
@@ -282,7 +285,7 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
   };
 
   const shareAlike = inherited?.licenses.find(license => /ShareAlike|(?:^|-)SA(?:-| |$)/i.test(license.name));
-  const problem = detailsProblem(details) ?? (shareAlike && details.license !== shareAlike.name ? 'This source requires its ShareAlike license. Choose the same license before publishing.' : null);
+  const problem = (inherited && !creditCreator.trim() ? 'Enter the creator credit.' : null) ?? detailsProblem(details) ?? (shareAlike && details.license !== shareAlike.name ? 'This source requires its ShareAlike license. Choose the same license before publishing.' : null);
   const fileReady = !!modelFile?.asset && !modelFile.upload && !modelFile.error;
   const coverBusy = !!cover && (!!cover.upload || (!cover.asset && !cover.error));
   const hasChanges = !!model?.draft || dirty.current || !model?.published;
@@ -346,6 +349,7 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
         </div>
       </section>
       <section className="upload-form" aria-label="Details">
+        {inherited && <label>Creator credit<input value={creditCreator} maxLength={1000} onChange={event => { setCreditCreator(event.target.value); dirty.current = true; }} /><span className="field-note">Keep the original creator for redistributed work. For your own design using these sources, enter your public name. Original source notices remain attached.</span></label>}
         <label><span className="field-head"><span>Title *</span><span>{details.title.length} / {TITLE_LIMIT}</span></span>
           <input value={details.title} maxLength={TITLE_LIMIT} onChange={(event) => update({ title: event.target.value })}/></label>
         <label><span className="field-head"><span>Description</span><span>Optional · {details.description.length.toLocaleString()} / {DESCRIPTION_LIMIT.toLocaleString()}</span></span>
@@ -375,7 +379,7 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
           {profile?.active && snapshotLabel ? <ol className="dialog-steps"><li aria-current={!reviewing ? 'step' : undefined}>1 Details</li><li aria-current={reviewing ? 'step' : undefined}>2 Review</li></ol> : profile?.active && <ol className="dialog-steps"><li aria-current={step === 'upload' ? 'step' : undefined}>1 Upload</li><li aria-current={step === 'details' ? 'step' : undefined}>2 Details</li></ol>}</div>
         <button type="button" className="dialog-close" aria-label="Close" onClick={onClose}>×</button>
       </header>
-      <div className="dialog-body">{scopeControl}{snapshotLabel && <p>{snapshotLabel}. This exact snapshot is used; later edits stay private.</p>}{inherited && <section aria-label="Retained source licenses"><h3>Original licenses and credits</h3>{inherited.licenses.map((license, index) => <p key={index}>{license.name}: {license.conditions.join('; ')}</p>)}{inherited.credits.map((credit, index) => <p key={index}>{credit.name}: {credit.text}</p>)}</section>}{reviewing ? <section><h3>Review your public snapshot</h3><p>{details.title} by {creator}</p><p>{details.description}</p><p>Commons revision {model?.draft?.number ?? (model?.current?.number ?? 0) + 1}. License: {details.license}</p><p>Private change notes and cloud history are not published. Future edits stay private.</p><label><input type="checkbox" checked={rights} onChange={event => setRights(event.target.checked)} />I have the right to publish this model and its included assets under the listed terms.</label><button type="button" onClick={() => setReviewing(false)}>Back to details</button></section> : body}</div>
+      <div className="dialog-body">{scopeControl}{snapshotLabel && <p>{snapshotLabel}. This exact snapshot is used; later edits stay private.</p>}{inherited && <section aria-label="Retained source licenses"><h3>Original licenses and credits</h3>{inherited.licenses.map((license, index) => <p key={index}>{license.name}: {license.conditions.join('; ')}</p>)}{inherited.credits.map((credit, index) => <p key={index}>{credit.name}: {credit.text}</p>)}</section>}{reviewing ? <section><h3>Review your public snapshot</h3><p>{details.title} by {inherited ? creditCreator : model?.current?.metadata.source ? model.current.metadata.creator : creator}</p><p>{details.description}</p><p>Commons revision {model?.draft?.number ?? (model?.current?.number ?? 0) + 1}. License: {details.license}</p><p>Private change notes and cloud history are not published. Future edits stay private.</p><label><input type="checkbox" checked={rights} onChange={event => setRights(event.target.checked)} />I have the right to publish this model and its included assets under the listed terms.</label><button type="button" onClick={() => setReviewing(false)}>Back to details</button></section> : body}</div>
       {step === 'details' && profile?.active && !loading && filesUrl && <footer className="dialog-foot">
         <span className="save-state" role="status">{message ? <span role="alert">{message}</span> : blocked ?? saveLabel}</span>
         <button type="button" className="secondary" onClick={async () => { dirty.current = dirty.current || !model; if (model || modelFile?.asset) await queueSave(); onClose(); }}>Save draft</button>

@@ -185,3 +185,13 @@ it('takes a saved editor snapshot directly into details and requires a separate 
   fireEvent.click(screen.getByRole('button', { name: 'Publish model' }));
   await waitFor(() => expect(published).toHaveBeenCalledWith('design-snapshot'));
 });
+
+it('retains the original creator when publishing attributed editor content instead of assigning authorship to its uploader', async () => {
+  const f = setup(); const file = new File(['snapshot'], 'Source bench.pf');
+  cloud.upload.mockResolvedValue(asset({ filename: file.name, format: 'pf', size_bytes: file.size })); cloud.stream.mockResolvedValue({ state: 'pending' });
+  const inherited = { creator: 'Original Maker', source: { name: 'Original source', url: 'https://models.example.com/bench' }, licenses: [{ name: 'CC BY 4.0', url: 'https://creativecommons.org/licenses/by/4.0/', commercialUse: 'allowed' as const, conditions: ['Retain creator credit'] }], credits: [{ name: 'Original Maker', url: null, text: 'Original design by Original Maker.' }] };
+  render(<UploadDialog account={f.account} filesUrl="https://files.example.com" modelId={null} initialFile={file} inherited={inherited} snapshotLabel="Private cloud revision 12" onClose={vi.fn()} onPublished={vi.fn()}/>);
+  await waitFor(() => expect(f.rpc).toHaveBeenCalledWith('commons_submit_model', expect.objectContaining({ p_original_work: false, p_metadata: expect.objectContaining({ creator: 'Original Maker', source: inherited.source, credits: expect.arrayContaining(inherited.credits) }) })));
+  const submission = f.rpc.mock.calls.find(([name]) => name === 'commons_submit_model')![1].p_metadata as { credits: { text: string }[] };
+  expect(submission.credits.some(credit => credit.text === 'Original model by Example Maker.')).toBe(false);
+});

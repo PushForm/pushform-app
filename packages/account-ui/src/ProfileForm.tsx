@@ -97,6 +97,14 @@ export function ProfileForm({ profiles, state, submitLabel, savingLabel, termsLo
         onChange={event => set({ mailingOptIn: event.target.checked })} />
       <span>Join the mailing list (optional)</span>
     </label> : null}
+    <fieldset className="pf-profile-choice">
+      <legend>Help improve PushForm</legend>
+      <label className="pf-profile-check pf-profile-analytics">
+        <input type="checkbox" name="analyticsOptIn" checked={input.analyticsOptIn ?? true} disabled={state.saving}
+          onChange={event => set({ analyticsOptIn: event.target.checked })} />
+        <span>Share anonymous usage data to help us improve tools and fix confusing workflows. Your designs, file names, and chat messages stay private.</span>
+      </label>
+    </fieldset>
     {state.error ? <p className="pf-account-error" role="alert">{state.error}</p> : null}
     {saved && !state.error ? <p role="status">Your profile was saved.</p> : null}
     <button className="pf-account-primary" type="submit" disabled={state.saving || !input.acceptTerms}>

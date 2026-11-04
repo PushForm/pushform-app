@@ -93,7 +93,7 @@ export interface AppProps {
   /** AI Chat backend; without it the entry points stay visible but report that requests are unavailable. */
   readonly requests?: RequestsConfig | undefined;
   /** Where product usage events go; without it nothing is recorded. */
-  readonly usage?: UsageSink | undefined;
+  readonly usage?: UsageSink | ((ownerId: string) => UsageSink) | undefined;
   /** The extension runtime's worker sources; without them the extension manager is not offered. */
   readonly extensionRuntime?: ExtensionRuntimeSources | undefined;
   /** Says whether the account is PushForm staff; extensions are offered only to staff until they open to everyone. */
@@ -139,7 +139,7 @@ export function App({ app, cloud: supplied, cloudFiles, profiles, account, billi
   useEffect(() => desktopUpdates()?.start(), []);
   useEffect(() => { if (signedIn) setLastOwner(state.user!.id); }, [signedIn, state.user]);
   const screens = <>
-    {workspaceOwner ? <Workspace key={workspaceOwner} ownerId={workspaceOwner} app={app} cloud={cloud} cloudFiles={cloudFiles} buildInfo={buildInfo} initialScreen={initialScreen} requests={requests} usage={usage} commons={commons} locked={!signedIn || !profileReady} /> : null}
+    {workspaceOwner ? <Workspace key={workspaceOwner} ownerId={workspaceOwner} app={app} cloud={cloud} cloudFiles={cloudFiles} buildInfo={buildInfo} initialScreen={initialScreen} requests={requests} usage={typeof usage === 'function' ? usage(workspaceOwner) : usage} commons={commons} locked={!signedIn || !profileReady} /> : null}
     {!signedIn ? <SignInScreen cloud={cloud} state={state} /> : null}
     {signedIn && !profileReady && profiles ? <ProfileScreen cloud={cloud} session={state} profiles={profiles} state={profileState} /> : null}
     {signedIn && profileReady && account && accountState.ownerId === state.user!.id ? <DeletionBanner account={account} state={accountState} /> : null}
@@ -148,7 +148,7 @@ export function App({ app, cloud: supplied, cloudFiles, profiles, account, billi
   return provided;
 }
 
-type WorkspaceProps = AppProps & { locked: boolean; ownerId: string };
+type WorkspaceProps = Omit<AppProps, 'usage'> & { usage?: UsageSink | undefined; locked: boolean; ownerId: string };
 
 /**
  * Read the image bytes this browser tab kept for refresh before the document session restores its tabs, so a

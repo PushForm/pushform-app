@@ -120,3 +120,21 @@ it('keeps ordinary signup compatible with the original RPC without dropping an e
   expect(await profiles.save({...input,mailingOptIn:false})).toBe(true);
   expect(cloudProfileParams({...input,mailingOptIn:false})).not.toHaveProperty('p_mailing_opt_in');profiles.dispose();
 });
+
+it('checks the undecided form by default without granting consent, and keeps a saved decline unchecked', () => {
+  expect(cloudProfileInput(null).analyticsOptIn).toBe(true);
+  expect(cloudProfileInput({ ...row, analyticsOptIn: false } as unknown as CloudProfile).analyticsOptIn).toBe(false);
+});
+it('does not publish the analytics choice until a profile save succeeds', async () => {
+  const session = fakeSession('alice'), client = fakeClient({ alice: row });
+  const profiles = new CloudProfiles(client as never, session); await settle();
+  expect(profiles.getSnapshot().profile?.analyticsOptIn).toBeNull();
+  client.rpc.mockResolvedValueOnce({ data: null, error: { code: 'offline', message: 'offline' } } as never);
+  expect(await profiles.save({ ...input, analyticsOptIn: true })).toBe(false);
+  expect(profiles.getSnapshot().profile?.analyticsOptIn).toBeNull();
+  client.rpc.mockResolvedValueOnce({ data: { ...row, analytics_opt_in: true, analytics_updated_at: '2026-11-04T06:00:00Z' }, error: null } as never);
+  expect(await profiles.save({ ...input, analyticsOptIn: true })).toBe(true);
+  expect(profiles.getSnapshot().profile?.analyticsOptIn).toBe(true);
+  expect(client.rpc).toHaveBeenLastCalledWith('cloud_save_profile_analytics', expect.objectContaining({ p_analytics_opt_in: true }));
+  profiles.dispose();
+});

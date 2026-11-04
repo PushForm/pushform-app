@@ -2367,6 +2367,8 @@
 .pf-profile-choice legend { width: 100%; margin-bottom: 4px; padding: 0; font-weight: 550; }
 .pf-profile-form .pf-profile-choice label, .pf-profile-form label.pf-profile-check { display: flex; align-items: center; gap: 8px; font-weight: 400; }
 .pf-profile-choice input, .pf-profile-check input { width: auto; margin: 0; accent-color: var(--pf-accent); }
+.pf-profile-form label.pf-profile-analytics { align-items: flex-start; }
+.pf-profile-analytics input[type='checkbox'] { flex: 0 0 16px; width: 16px; height: 16px; margin-top: 2px; }
 .pf-profile-field-error { color: var(--pf-danger); font-size: 13px; font-weight: 400; }
 .pf-profile-choice .pf-profile-field-error { width: 100%; }
 .pf-profile-terms { margin: 0; color: var(--pf-text-muted); }

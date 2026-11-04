@@ -56,6 +56,7 @@ it('holds a new account on the signup step, then opens the workspace once it is 
   const submit = within(step).getByRole('button', { name: 'Continue' }) as HTMLButtonElement;
   expect(submit.disabled).toBe(true);
   expect((within(step).getByRole('checkbox',{name:/Join the mailing list/}) as HTMLInputElement).checked).toBe(false);
+  expect((within(step).getByRole('checkbox', { name: /Share anonymous usage data/ }) as HTMLInputElement).checked).toBe(true);
   expect(within(step).getByRole('link', { name: 'Terms of Use' }).getAttribute('href')).toBe('https://pushform.io/terms.html');
   fireEvent.click(within(step).getByRole('checkbox', { name: /I accept the Terms of Use/ }));
   expect(submit.disabled).toBe(false);
@@ -83,8 +84,8 @@ it('holds a new account on the signup step, then opens the workspace once it is 
   expect(within(step).getByText('Enter your industry.')).toBeTruthy();
   fireEvent.change(within(step).getByLabelText(/Your industry/), { target: { value: 'Theatre' } });
   await act(async () => { fireEvent.click(submit); });
-  expect(rpc).toHaveBeenCalledWith('cloud_save_profile', { p_first_name: 'Ada', p_last_name: 'Lovelace', p_account_type: 'company',
-    p_company_name: 'Analytical Ltd', p_company_size: '11-50', p_industry: 'other', p_industry_other: 'Theatre', p_terms_version: CLOUD_TERMS_VERSION });
+  expect(rpc).toHaveBeenCalledWith('cloud_save_profile_analytics', { p_first_name: 'Ada', p_last_name: 'Lovelace', p_account_type: 'company',
+    p_company_name: 'Analytical Ltd', p_company_size: '11-50', p_industry: 'other', p_industry_other: 'Theatre', p_terms_version: CLOUD_TERMS_VERSION, p_analytics_opt_in: true });
   expect(await screen.findByRole('banner')).toBeTruthy();
   expect(screen.queryByRole('main', { name: 'Set up your account' })).toBeNull();
   // The profile fills the account auto-text.
@@ -125,11 +126,14 @@ it('edits the profile from account details and updates the header and auto-text'
   expect(within(dialog).queryByRole('checkbox', { name: /I accept/ })).toBeNull();
   expect(within(dialog).getByRole('checkbox', { name: /Join the mailing list/ })).toBeTruthy();
   expect(within(dialog).getByText(/You accepted the/)).toBeTruthy();
+  const analytics = within(dialog).getByRole('checkbox', { name: /Share anonymous usage data/ }) as HTMLInputElement;
+  expect(analytics.checked).toBe(true);
+  fireEvent.click(analytics);
   fireEvent.change(within(dialog).getByLabelText(/First name/), { target: { value: 'Augusta' } });
   fireEvent.click(within(dialog).getByRole('radio', { name: 'As an individual' }));
   await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Save profile' })); });
-  expect(rpc).toHaveBeenCalledWith('cloud_save_profile', expect.objectContaining({ p_first_name: 'Augusta', p_account_type: 'individual',
-    p_company_name: null, p_company_size: null, p_terms_version: CLOUD_TERMS_VERSION }));
+  expect(rpc).toHaveBeenCalledWith('cloud_save_profile_analytics', expect.objectContaining({ p_first_name: 'Augusta', p_account_type: 'individual',
+    p_company_name: null, p_company_size: null, p_terms_version: CLOUD_TERMS_VERSION, p_analytics_opt_in: false }));
   expect(within(dialog).getByRole('status').textContent).toBe('Your profile was saved.');
   expect(screen.getByRole('button', { name: 'Account: Augusta Lovelace, artist@example.com' })).toBeTruthy();
   expect(layoutAccountFields().get('FullName')).toBe('Augusta Lovelace');

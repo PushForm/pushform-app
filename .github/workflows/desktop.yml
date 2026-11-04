@@ -185,6 +185,7 @@ jobs:
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
           VITE_FR_REGION: ${{ vars.VITE_FR_REGION }}
+          VITE_POSTHOG_TOKEN: ${{ vars.VITE_POSTHOG_TOKEN }}
       # tauri.release.conf.json bundles the notices as THIRD_PARTY_NOTICES.txt in every installer.
       - shell: bash
         run: test -s apps/web/dist/third-party-notices.txt

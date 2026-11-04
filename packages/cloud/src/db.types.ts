@@ -271,14 +271,14 @@ isOneToOne: true
                   ]
                 },"cloud_profiles": {
                   Row: {
-                    "account_type": string,"company_name": string | null,"company_size": string | null,"completed_at": string,"first_name": string,"industry": string,"industry_other": string | null,"last_name": string,"mailing_opted_in_at": string | null,"owner_id": string,"terms_accepted_at": string,"terms_version": string,"updated_at": string
+                    "account_type": string,"analytics_opt_in": boolean | null,"analytics_updated_at": string | null,"company_name": string | null,"company_size": string | null,"completed_at": string,"first_name": string,"industry": string,"industry_other": string | null,"last_name": string,"mailing_opted_in_at": string | null,"owner_id": string,"terms_accepted_at": string,"terms_version": string,"updated_at": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "account_type": string,"company_name"?: string | null,"company_size"?: string | null,"completed_at"?: string,"first_name": string,"industry": string,"industry_other"?: string | null,"last_name": string,"mailing_opted_in_at"?: string | null,"owner_id": string,"terms_accepted_at": string,"terms_version": string,"updated_at"?: string
+                    "account_type": string,"analytics_opt_in"?: boolean | null,"analytics_updated_at"?: string | null,"company_name"?: string | null,"company_size"?: string | null,"completed_at"?: string,"first_name": string,"industry": string,"industry_other"?: string | null,"last_name": string,"mailing_opted_in_at"?: string | null,"owner_id": string,"terms_accepted_at": string,"terms_version": string,"updated_at"?: string
                   }
                   Update: {
-                    "account_type"?: string,"company_name"?: string | null,"company_size"?: string | null,"completed_at"?: string,"first_name"?: string,"industry"?: string,"industry_other"?: string | null,"last_name"?: string,"mailing_opted_in_at"?: string | null,"owner_id"?: string,"terms_accepted_at"?: string,"terms_version"?: string,"updated_at"?: string
+                    "account_type"?: string,"analytics_opt_in"?: boolean | null,"analytics_updated_at"?: string | null,"company_name"?: string | null,"company_size"?: string | null,"completed_at"?: string,"first_name"?: string,"industry"?: string,"industry_other"?: string | null,"last_name"?: string,"mailing_opted_in_at"?: string | null,"owner_id"?: string,"terms_accepted_at"?: string,"terms_version"?: string,"updated_at"?: string
                   }
                   Relationships: [
 
@@ -1128,6 +1128,9 @@ isOneToOne: false
                            },
 "cloud_save_profile":
 { Args: { "p_account_type": string,"p_company_name": string,"p_company_size": string,"p_first_name": string,"p_industry": string,"p_industry_other": string,"p_last_name": string,"p_mailing_opt_in"?: boolean,"p_terms_version": string }; Returns: Json
+                           },
+"cloud_save_profile_analytics":
+{ Args: { "p_account_type": string,"p_analytics_opt_in": boolean,"p_company_name": string,"p_company_size": string,"p_first_name": string,"p_industry": string,"p_industry_other": string,"p_last_name": string,"p_mailing_opt_in"?: boolean,"p_terms_version": string }; Returns: Json
                            },
 "cloud_save_profile_fields":
 { Args: { "p_account_type": string,"p_company_name": string,"p_company_size": string,"p_first_name": string,"p_industry": string,"p_industry_other": string,"p_last_name": string,"p_terms_version": string }; Returns: Json

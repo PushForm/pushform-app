@@ -94,6 +94,7 @@ h2 { font-size: 29px; letter-spacing: -.8px; font-weight: 500; margin: 0; }
 .commons-account .pf-profile-names { display: flex; gap: 16px; flex-wrap: wrap; }
 .commons-account input, .commons-account select { font: inherit; padding: 8px; min-width: 0; }
 .commons-account label:has(input[type=checkbox]), .commons-account .pf-profile-check { display: flex; align-items: flex-start; gap: 10px; }
+.commons-account .pf-profile-analytics input[type='checkbox'] { flex: 0 0 16px; width: 16px; height: 16px; margin-top: 2px; }
 .commons-account .pf-profile-choice label { display: flex; gap: 10px; margin: 8px 0; }
 .commons-account button, .commons-download button { font: inherit; cursor: pointer; padding: 8px 12px; }
 .commons-account [role=alert], .commons-account .pf-profile-field-error { color: #a42d24; }

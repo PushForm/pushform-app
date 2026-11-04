@@ -1,5 +1,7 @@
 name: ci
 on:
+  push:
+    branches: [staging]
   # main is dispatched by ci-schedule.yml in 15-minute batches; manual runs can bypass the wait.
   workflow_dispatch:
   pull_request:
@@ -43,16 +45,16 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
-  # Deploy the checked main batch to Cloudflare Pages. Needs the repository
+  # Deploy checked main batches and staging pushes to Cloudflare Pages. Needs the environment
   # secrets CLOUDFLARE_API_TOKEN (Workers & Pages: Edit) and CLOUDFLARE_ACCOUNT_ID.
   deploy:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/staging')
     needs: test
     runs-on: ubuntu-24.04
     environment:
-      name: Production
-      url: https://pushform-app.pages.dev
-    concurrency: { group: deploy-production, cancel-in-progress: false }
+      name: ${{ github.ref_name == 'staging' && 'Staging' || 'Production' }}
+      url: ${{ github.ref_name == 'staging' && 'https://staging.pushform-app.pages.dev' || 'https://pushform-app.pages.dev' }}
+    concurrency: { group: 'deploy-${{ github.ref_name == ''staging'' && ''staging'' || ''production'' }}', cancel-in-progress: false }
     steps:
       - uses: actions/checkout@v7
         # The whole history: About PushForm's version counts this week's commits.
@@ -107,12 +109,12 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy apps/web/dist --project-name pushform-app --branch main --commit-hash ${{ github.sha }} --commit-dirty=false
+          command: pages deploy apps/web/dist --project-name pushform-app --branch ${{ github.ref_name }} --commit-hash ${{ github.sha }} --commit-dirty=false
       - name: Verify the published app after edge propagation
         shell: bash
         run: |
           for attempt in 1 2 3 4 5 6; do
-            if node scripts/verify-deploy.mjs https://pushform-app.pages.dev --strict; then
+            if node scripts/verify-deploy.mjs "$DEPLOY_ORIGIN" --strict; then
               exit 0
             fi
             if [[ "$attempt" -lt 6 ]]; then
@@ -122,4 +124,5 @@ jobs:
           done
           exit 1
         env:
+          DEPLOY_ORIGIN: ${{ github.ref_name == 'staging' && 'https://staging.pushform-app.pages.dev' || 'https://pushform-app.pages.dev' }}
           VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}

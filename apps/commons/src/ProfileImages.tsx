@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent, type PointerEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
 import { commonsProfileImageUrl, removeCommonsProfileImage, uploadCommonsProfileImage, type CommonsProfile, type CommonsProfileImageKind,
   type CommonsPublicProfile, type CommonsUploadProgress } from '@pushform/cloud';
 import { MAX_ZOOM, initialCrop, loadSourceImage, outputSize, panCrop, renderCrop, sourceRect, zoomCrop, type Crop, type Size } from './crop';
@@ -125,14 +125,16 @@ function HeroAvatar({name,urls}:{name:string;urls:string[]}){
     <div className="profile-avatar profile-avatar-fallback" aria-hidden="true">{name.slice(0,1).toUpperCase()}</div>;
 }
 /** The public profile heading: the banner across the top with the profile picture overlapping its lower edge. */
-export function ProfileHero({profile,filesUrl}:{profile:CommonsPublicProfile;filesUrl?:string|undefined}){
+/** `actions` sits at the right, just under the banner (the owner's Edit profile link). */
+export function ProfileHero({profile,filesUrl,actions}:{profile:CommonsPublicProfile;filesUrl?:string|undefined;actions?:ReactNode}){
   const banner=profile.bannerImage?commonsProfileImageUrl(filesUrl,profile.bannerImage.id):null;const [bannerFailed,setBannerFailed]=useState(false);
   useEffect(()=>setBannerFailed(false),[banner]);
   const uploaded=profile.avatarImage?commonsProfileImageUrl(filesUrl,profile.avatarImage.id):null;
   const urls=[uploaded,profile.avatarUrl].filter((value):value is string=>!!value);
   return <header className="profile-hero">
     <div className="profile-banner">{banner&&!bannerFailed&&<img src={banner} alt={`${profile.displayName}'s banner`} onError={()=>setBannerFailed(true)}/>}</div>
-    <div className="profile-hero-body"><HeroAvatar name={profile.displayName} urls={urls}/>
-      <div><p className="eyebrow">Community profile</p><h1>{profile.displayName}</h1><p>@{profile.handle}</p></div></div>
+    <div className={actions?'profile-hero-body has-actions':'profile-hero-body'}><HeroAvatar name={profile.displayName} urls={urls}/>
+      <div><p className="eyebrow">Community profile</p><h1>{profile.displayName}</h1><p>@{profile.handle}</p></div>
+      {actions&&<div className="profile-hero-actions">{actions}</div>}</div>
   </header>;
 }

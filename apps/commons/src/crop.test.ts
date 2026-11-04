@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { expect, it, vi } from 'vitest';
+import siteHeaders from '../public/_headers?raw';
 import { clampCrop, initialCrop, panCrop, renderCrop, sourceRect, zoomCrop, type CanvasLike } from './crop';
 
 const photo = { width: 4000, height: 3000 };
@@ -64,4 +65,10 @@ it('flattens an over-limit transparent image and lowers JPEG quality until it fi
   expect(canvases[1]!.encoded.map(value => value.quality)).toEqual([0.9, 0.8]);
   const huge = fakeCanvas({ jpegSizes: [3e6, 3e6, 3e6, 3e6] });
   await expect(renderCrop({} as CanvasImageSource, photo, 'avatar', initialCrop(photo), huge.create)).rejects.toThrow('2 MiB');
+});
+it('is allowed by the site content security policy to show chosen images through blob URLs', () => {
+  // The cropper decodes and previews the chosen file through URL.createObjectURL, which jsdom does not police.
+  const policy = /Content-Security-Policy:\s*(.+)/.exec(siteHeaders)?.[1] ?? '';
+  const images = /(?:^|;)\s*img-src ([^;]+)/.exec(policy)?.[1]?.split(/\s+/) ?? [];
+  expect(images).toContain('blob:');
 });

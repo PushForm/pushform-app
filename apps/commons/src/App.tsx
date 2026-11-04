@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { commonsFileUrl, CommonsUnavailableError } from '@pushform/cloud';
+import { commonsFileUrl, CommonsUnavailableError, type CommonsProfile } from '@pushform/cloud';
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { CommonsProfileEditor, CommonsProfilePageView, CreatorCredit, type ProfileLookup } from './CommonsProfile';
+import { CommonsProfileEditor, CommonsProfilePageView, CreatorCredit, ProfileLink, type ProfileLookup } from './CommonsProfile';
 import { currentCommonsLocation, profileHandleFromPath } from './route';
 import { CommonsAccessGate, CommonsDownloadButton, CommonsMailingPreference } from './CommonsAccess';
 import type { CommonsAccount } from './account';
@@ -15,6 +15,25 @@ const emptyFilters: CatalogFilters = { query: '', category: '', license: '', com
 function modelFromHash(hash:string): string | null {
   const match = /^#models\/([a-z0-9][a-z0-9-]{0,95})$/.exec(hash);
   return match?.[1] ?? null;
+}
+const noSubscription=()=>()=>{};
+/** The signed-in user's own profile: `undefined` while loading, `null` when signed out, absent or unreadable. Reloads after a profile save. */
+function useOwnProfile(account:CommonsAccount|null):CommonsProfile|null|undefined{
+  const session=account?.session;
+  const userId=useSyncExternalStore(session?.subscribe??noSubscription,()=>session?.getSnapshot().user?.id??null);
+  const [own,setOwn]=useState<CommonsProfile|null|undefined>(undefined);const [revision,setRevision]=useState(0);
+  useEffect(()=>{const refresh=()=>setRevision(value=>value+1);window.addEventListener('commons:catalog-changed',refresh);return()=>window.removeEventListener('commons:catalog-changed',refresh);},[]);
+  useEffect(()=>{
+    if(!account||userId===null){setOwn(null);return;}
+    const controller=new AbortController();setOwn(undefined);
+    void account.profiles.mine(controller.signal).then(value=>{if(!controller.signal.aborted)setOwn(value);},()=>{if(!controller.signal.aborted)setOwn(null);});
+    return()=>controller.abort();
+  },[account,userId,revision]);
+  return own;
+}
+/** Opens the user's public profile; signed out, still loading, or without a visible profile it opens the profile editor. */
+function MyProfileLink({own}:{own:CommonsProfile|null|undefined}){
+  return own?.active?<ProfileLink handle={own.handle}>My profile</ProfileLink>:<a href="#account">My profile</a>;
 }
 function ModelDetail({ model, filesUrl, account, editorUrl }: { model: CatalogModel; filesUrl: string | undefined; account:CommonsAccount|null; editorUrl:string|undefined }) {
   return <>
@@ -66,6 +85,7 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
   const profileLookup:ProfileLookup|null=profileHandle!==null?{handle:profileHandle}:legacyPersonId!==null?{id:legacyPersonId}:null;
   const onProfile=profileLookup!==null;
   const heading = useRef<HTMLDivElement>(null);
+  const own=useOwnProfile(account);
   useEffect(() => {
     const update = () => {const next=currentCommonsLocation();setLocation(current=>next.path===current.path&&next.hash===current.hash?current:next);};
     window.addEventListener('hashchange', update);window.addEventListener('popstate', update);
@@ -98,9 +118,9 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
     <a className="skip-link" href="#main">Skip to content</a>
     <header className="site-header"><a className="brand" href="#browse" aria-label="PushForm Commons home">
       <img src="/pf-logo-mark.svg" alt="" width="30" height="30" /><span>PushForm <strong>Commons</strong></span>
-    </a><nav aria-label="Commons">{account&&<><a href="#publish">Publish model</a><a href="#account">My profile</a></>}<a className="editor-link" href="https://app.pushform.io">Open PushForm <span aria-hidden="true">↗</span></a></nav></header>
+    </a><nav aria-label="Commons">{account&&<><a href="#publish">Publish model</a><MyProfileLink own={own}/></>}<a className="editor-link" href="https://app.pushform.io">Open PushForm <span aria-hidden="true">↗</span></a></nav></header>
     <main id="main" ref={heading} tabIndex={-1}>
-      {profileLookup?<CommonsProfilePageView lookup={profileLookup} profiles={account?.profiles??null} filesUrl={filesUrl}/>:hash==='#account'?account?<AccountPage account={account} filesUrl={filesUrl}/>:<section className="status-panel"><h1>Accounts are unavailable in this build.</h1></section>:hash==='#publish'?publishPage??<section className="status-panel"><h1>Publishing is unavailable in this build.</h1></section>:state.kind === 'ready' && selectedId ? selected ? <ModelDetail model={selected} filesUrl={filesUrl} account={account} editorUrl={editorUrl} /> :
+      {profileLookup?<CommonsProfilePageView lookup={profileLookup} profiles={account?.profiles??null} filesUrl={filesUrl} ownProfileId={own?.id??null}/>:hash==='#account'?account?<AccountPage account={account} filesUrl={filesUrl}/>:<section className="status-panel"><h1>Accounts are unavailable in this build.</h1></section>:hash==='#publish'?publishPage??<section className="status-panel"><h1>Publishing is unavailable in this build.</h1></section>:state.kind === 'ready' && selectedId ? selected ? <ModelDetail model={selected} filesUrl={filesUrl} account={account} editorUrl={editorUrl} /> :
         <section className="status-panel"><p className="eyebrow">Model unavailable</p><h1>This model isn’t in the catalog.</h1>
           <p>It may have been removed or the link may be out of date.</p><a href="#browse">Browse models</a></section> : <>
         <section className="hero"><p className="eyebrow">A shared place to start</p>

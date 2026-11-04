@@ -18,13 +18,13 @@ Choose **My profile** to sign in with your PushForm account. A new account compl
 
 Choose a public handle and display name, then optionally add a bio and up to five links. Everything in this form is shown publicly once you save it. Your handle uses 3–32 lowercase letters, numbers or hyphens, starts with a letter and ends with a letter or number. Handles stay reserved and cannot be changed. Your private account name, email, company and projects are not copied into your public profile.
 
-Saving takes you to your public profile page, at `/u/` followed by your handle (for example `commons.pushform.io/u/your-handle`). Use **View your public profile** to open it again later. The page shows your chosen public fields and published models associated with your authorship. Imported models retain their original creator credit; uploading or curating someone else's model does not make you its author.
+Saving takes you to your public profile page, at `/u/` followed by your handle (for example `commons.pushform.io/u/your-handle`). After that, **My profile** opens your public profile page. While you're signed in, your own profile page shows **Edit profile** at the right, just under the banner; choose it to change your profile. The page shows your chosen public fields and published models associated with your authorship. Imported models retain their original creator credit; uploading or curating someone else's model does not make you its author.
 
 If your profile was hidden, saving it makes it visible again. If another tab changed the profile, reload the page before saving your changes. Older profile links continue to work and open the handle address.
 
 ## Add a profile picture and banner
 
-After you publish your profile, **My profile** shows a **Profile picture** and a **Banner** section. Your banner runs across the top of your public profile page, and your profile picture overlaps its lower edge as a circle.
+After you publish your profile, the profile editor (**Edit profile** on your profile page) shows a **Profile picture** and a **Banner** section. Your banner runs across the top of your public profile page, and your profile picture overlaps its lower edge as a circle.
 
 1. Choose **Upload profile picture** or **Upload banner** and pick a PNG or JPEG image up to 20 MiB and 8,192 pixels on each side.
 2. Drag the image to position it and use the **Zoom** slider or the mouse wheel to zoom. With the crop area focused, the arrow keys move the image (hold Shift for larger steps) and plus and minus zoom.

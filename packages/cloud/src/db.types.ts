@@ -325,14 +325,14 @@ isOneToOne: false
                   ]
                 },"commons_assets": {
                   Row: {
-                    "created_at": string,"filename": string,"format": string,"id": string,"object_key": string | null,"revision_id": string,"sha256": string,"size_bytes": number,"status": string,"uploaded_by": string | null,"verified_at": string | null
+                    "created_at": string,"filename": string,"format": string,"id": string,"object_key": string,"revision_id": string,"sha256": string,"size_bytes": number,"status": string,"uploaded_by": string | null,"verified_at": string | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "created_at"?: string,"filename": string,"format": string,"id"?: string,"object_key"?: never,"revision_id": string,"sha256": string,"size_bytes": number,"status"?: string,"uploaded_by"?: string | null,"verified_at"?: string | null
+                    "created_at"?: string,"filename": string,"format": string,"id"?: string,"object_key": string,"revision_id": string,"sha256": string,"size_bytes": number,"status"?: string,"uploaded_by"?: string | null,"verified_at"?: string | null
                   }
                   Update: {
-                    "created_at"?: string,"filename"?: string,"format"?: string,"id"?: string,"object_key"?: never,"revision_id"?: string,"sha256"?: string,"size_bytes"?: number,"status"?: string,"uploaded_by"?: string | null,"verified_at"?: string | null
+                    "created_at"?: string,"filename"?: string,"format"?: string,"id"?: string,"object_key"?: string,"revision_id"?: string,"sha256"?: string,"size_bytes"?: number,"status"?: string,"uploaded_by"?: string | null,"verified_at"?: string | null
                   }
                   Relationships: [
                     {
@@ -405,28 +405,42 @@ isOneToOne: false
                   ]
                 },"commons_render_jobs": {
                   Row: {
-                    "attempts": number,"created_at": string,"error_code": string | null,"format": string,"geometry_sha256": string | null,"geometry_size": number | null,"id": string,"lease_expires_at": string | null,"lease_token": string | null,"metrics": NonNullable<Json>,"next_attempt_at": string,"renderer_version": string,"source_sha256": string,"status": string,"thumbnail_sha256": string | null,"thumbnail_size": number | null,"updated_at": string,"warnings": NonNullable<Json>
+                    "attempts": number,"created_at": string,"error_code": string | null,"format": string,"geometry_sha256": string | null,"geometry_size": number | null,"id": string,"lease_expires_at": string | null,"lease_token": string | null,"metrics": NonNullable<Json>,"next_attempt_at": string,"renderer_version": string,"requested_by": string | null,"source_sha256": string,"status": string,"thumbnail_sha256": string | null,"thumbnail_size": number | null,"updated_at": string,"warnings": NonNullable<Json>
                   }
                   ComputedFields: never
                   Insert: {
-                    "attempts"?: number,"created_at"?: string,"error_code"?: string | null,"format": string,"geometry_sha256"?: string | null,"geometry_size"?: number | null,"id"?: string,"lease_expires_at"?: string | null,"lease_token"?: string | null,"metrics"?: NonNullable<Json>,"next_attempt_at"?: string,"renderer_version": string,"source_sha256": string,"status"?: string,"thumbnail_sha256"?: string | null,"thumbnail_size"?: number | null,"updated_at"?: string,"warnings"?: NonNullable<Json>
+                    "attempts"?: number,"created_at"?: string,"error_code"?: string | null,"format": string,"geometry_sha256"?: string | null,"geometry_size"?: number | null,"id"?: string,"lease_expires_at"?: string | null,"lease_token"?: string | null,"metrics"?: NonNullable<Json>,"next_attempt_at"?: string,"renderer_version": string,"requested_by"?: string | null,"source_sha256": string,"status"?: string,"thumbnail_sha256"?: string | null,"thumbnail_size"?: number | null,"updated_at"?: string,"warnings"?: NonNullable<Json>
                   }
                   Update: {
-                    "attempts"?: number,"created_at"?: string,"error_code"?: string | null,"format"?: string,"geometry_sha256"?: string | null,"geometry_size"?: number | null,"id"?: string,"lease_expires_at"?: string | null,"lease_token"?: string | null,"metrics"?: NonNullable<Json>,"next_attempt_at"?: string,"renderer_version"?: string,"source_sha256"?: string,"status"?: string,"thumbnail_sha256"?: string | null,"thumbnail_size"?: number | null,"updated_at"?: string,"warnings"?: NonNullable<Json>
+                    "attempts"?: number,"created_at"?: string,"error_code"?: string | null,"format"?: string,"geometry_sha256"?: string | null,"geometry_size"?: number | null,"id"?: string,"lease_expires_at"?: string | null,"lease_token"?: string | null,"metrics"?: NonNullable<Json>,"next_attempt_at"?: string,"renderer_version"?: string,"requested_by"?: string | null,"source_sha256"?: string,"status"?: string,"thumbnail_sha256"?: string | null,"thumbnail_size"?: number | null,"updated_at"?: string,"warnings"?: NonNullable<Json>
+                  }
+                  Relationships: [
+
+                  ]
+                },"commons_render_pool": {
+                  Row: {
+                    "generation": number,"id": boolean
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "generation"?: number,"id"?: boolean
+                  }
+                  Update: {
+                    "generation"?: number,"id"?: boolean
                   }
                   Relationships: [
 
                   ]
                 },"commons_revisions": {
                   Row: {
-                    "asset_version": number,"creator_profile_id": string | null,"id": string,"metadata": NonNullable<Json>,"model_id": string,"number": number,"published_at": string | null,"review_note": string | null,"reviewed_at": string | null,"reviewed_by": string | null,"rights_basis": string,"self_service": boolean,"status": string,"submitted_at": string,"submitted_by": string | null
+                    "asset_version": number,"creator_profile_id": string | null,"details_version": number,"id": string,"metadata": NonNullable<Json>,"model_id": string,"number": number,"published_at": string | null,"review_note": string | null,"reviewed_at": string | null,"reviewed_by": string | null,"rights_basis": string,"self_service": boolean,"status": string,"submitted_at": string,"submitted_by": string | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "asset_version"?: number,"creator_profile_id"?: string | null,"id"?: string,"metadata": NonNullable<Json>,"model_id": string,"number": number,"published_at"?: string | null,"review_note"?: string | null,"reviewed_at"?: string | null,"reviewed_by"?: string | null,"rights_basis": string,"self_service"?: boolean,"status"?: string,"submitted_at"?: string,"submitted_by"?: string | null
+                    "asset_version"?: number,"creator_profile_id"?: string | null,"details_version"?: number,"id"?: string,"metadata": NonNullable<Json>,"model_id": string,"number": number,"published_at"?: string | null,"review_note"?: string | null,"reviewed_at"?: string | null,"reviewed_by"?: string | null,"rights_basis": string,"self_service"?: boolean,"status"?: string,"submitted_at"?: string,"submitted_by"?: string | null
                   }
                   Update: {
-                    "asset_version"?: number,"creator_profile_id"?: string | null,"id"?: string,"metadata"?: NonNullable<Json>,"model_id"?: string,"number"?: number,"published_at"?: string | null,"review_note"?: string | null,"reviewed_at"?: string | null,"reviewed_by"?: string | null,"rights_basis"?: string,"self_service"?: boolean,"status"?: string,"submitted_at"?: string,"submitted_by"?: string | null
+                    "asset_version"?: number,"creator_profile_id"?: string | null,"details_version"?: number,"id"?: string,"metadata"?: NonNullable<Json>,"model_id"?: string,"number"?: number,"published_at"?: string | null,"review_note"?: string | null,"reviewed_at"?: string | null,"reviewed_by"?: string | null,"rights_basis"?: string,"self_service"?: boolean,"status"?: string,"submitted_at"?: string,"submitted_by"?: string | null
                   }
                   Relationships: [
                     {
@@ -1176,8 +1190,14 @@ isOneToOne: false
 "commons_catalog_snapshot":
 { Args: Record<PropertyKey, never>; Returns: Json
                            },
+"commons_claim_owner_render":
+{ Args: { "p_asset": string,"p_owner": string,"p_retry"?: boolean,"p_version": string }; Returns: Json
+                           },
 "commons_claim_render":
 { Args: { "p_version": string }; Returns: Json
+                           },
+"commons_delete_draft":
+{ Args: { "p_expected_revision": string,"p_model": string }; Returns: Json
                            },
 "commons_download_asset":
 { Args: { "p_asset": string }; Returns: Json
@@ -1206,6 +1226,9 @@ isOneToOne: false
 "commons_my_profile":
 { Args: Record<PropertyKey, never>; Returns: Json
                            },
+"commons_owner_asset":
+{ Args: { "p_asset": string }; Returns: Json
+                           },
 "commons_profile":
 { Args: { "p_id": string }; Returns: Json
                            },
@@ -1233,8 +1256,34 @@ isOneToOne: false
 "commons_render_asset":
 { Args: { "p_asset": string,"p_version": string }; Returns: Json
                            },
+"commons_render_job":
+{ Args: { "p_asset": string,"p_version": string }; Returns: Json
+                           },
 "commons_render_lease":
 { Args: { "p_job": string,"p_lease": string }; Returns: Json
+                           },
+"commons_render_source":
+{ Args: { "p_format": string,"p_sha": string }; Returns: {
+              "created_at": string,
+"filename": string,
+"format": string,
+"id": string,
+"object_key": string,
+"revision_id": string,
+"sha256": string,
+"size_bytes": number,
+"status": string,
+"uploaded_by": string | null,
+"verified_at": string | null
+            }
+                          SetofOptions: {
+        from: "*"
+        to: "commons_assets"
+        isOneToOne: true
+        isSetofReturn: false
+      } },
+"commons_render_standby":
+{ Args: { "p_advance": boolean }; Returns: number
                            },
 "commons_repair_render":
 { Args: { "p_job": string }; Returns: boolean
@@ -1244,6 +1293,9 @@ isOneToOne: false
                            },
 "commons_save_profile":
 { Args: { "p_avatar_url": string,"p_bio": string,"p_display_name": string,"p_expected_version": number,"p_handle": string,"p_links": Json,"p_public_consent": boolean }; Returns: Json
+                           },
+"commons_self_service_details_valid":
+{ Args: { "p_metadata": Json }; Returns: boolean
                            },
 "commons_set_mailing_preference":
 { Args: { "p_opt_in": boolean }; Returns: Json
@@ -1256,6 +1308,9 @@ isOneToOne: false
                            },
 "commons_text_valid":
 { Args: { "p_empty"?: boolean,"p_max": number,"p_value": Json }; Returns: boolean
+                           },
+"commons_update_draft":
+{ Args: { "p_expected_version": number,"p_metadata": Json,"p_revision": string }; Returns: Json
                            },
 "commons_url_valid":
 { Args: { "p_value": Json }; Returns: boolean

@@ -71,9 +71,13 @@ export function parsePreviewMesh(value: unknown): PreviewMesh {
   return { version: 1, positions: mesh.positions, ...(mesh.colors ? { colors: mesh.colors } : {}) };
 }
 
-export function projectPreview(mesh: PreviewMesh, view: PreviewView = DEFAULT_PREVIEW_VIEW): { points: string; fill: string; depth: number }[] {
+/** A projected face: its outline, shaded fill and depth for painter's ordering. */
+export interface PreviewFace { points: string; fill: string; depth: number }
+
+const LIGHT = (() => { const l = [-.45, .65, .6]; const n = Math.hypot(...l); return l.map(v => v / n); })();
+export function projectPreview(mesh: PreviewMesh, view: PreviewView = DEFAULT_PREVIEW_VIEW): PreviewFace[] {
   const cy = Math.cos(view.yaw), sy = Math.sin(view.yaw), cp = Math.cos(view.pitch), sp = Math.sin(view.pitch);
-  const projected: { points: string; fill: string; depth: number }[] = [];
+  const projected: PreviewFace[] = [];
   for (let i = 0; i < mesh.positions.length; i += 9) {
     const points = [0, 3, 6].map(k => {
       const x = mesh.positions[i + k]!, y = mesh.positions[i + k + 1]!, z = mesh.positions[i + k + 2]!;
@@ -82,17 +86,25 @@ export function projectPreview(mesh: PreviewMesh, view: PreviewView = DEFAULT_PR
     });
     const [a, b, c] = points as [number[], number[], number[]];
     const u = b.map((v, k) => v - a[k]!), v = c.map((n, k) => n - a[k]!);
-    const nx = u[1]! * v[2]! - u[2]! * v[1]!, ny = u[2]! * v[0]! - u[0]! * v[2]!, nz = u[0]! * v[1]! - u[1]! * v[0]!;
-    const length = Math.hypot(nx, ny, nz);
-    const light = length ? .5 + .45 * Math.abs((-.4 * nx + .7 * ny + .6 * nz) / length) : .5;
-    const color = mesh.colors?.slice(i / 3, i / 3 + 3).map(n => n * 255) ?? [152, 182, 168];
-    projected.push({ points: points.map(p => `${(240 + p[0]! * 265 * view.zoom).toFixed(2)},${(200 - p[1]! * 265 * view.zoom).toFixed(2)}`).join(' '),
-      fill: `rgb(${Math.round(color[0]! * light)},${Math.round(color[1]! * light)},${Math.round(color[2]! * light)})`, depth: points.reduce((n, p) => n + p[2]!, 0) });
+    let nx = u[1]! * v[2]! - u[2]! * v[1]!, ny = u[2]! * v[0]! - u[0]! * v[2]!, nz = u[0]! * v[1]! - u[1]! * v[0]!;
+    const length = Math.hypot(nx, ny, nz) || 1;
+    nx /= length; ny /= length; nz /= length;
+    // Two-sided: turn every face towards the viewer, then light it with a key light from the upper left plus ambient.
+    if (nz < 0) { nx = -nx; ny = -ny; nz = -nz; }
+    const diffuse = Math.max(0, nx * LIGHT[0]! + ny * LIGHT[1]! + nz * LIGHT[2]!);
+    const light = Math.min(1.08, .38 + .52 * diffuse + .14 * nz);
+    const color = mesh.colors?.slice(i / 3, i / 3 + 3).map(n => n * 255) ?? [158, 184, 172];
+    const xy = points.map(p => [(240 + p[0]! * 265 * view.zoom).toFixed(2), (200 - p[1]! * 265 * view.zoom).toFixed(2)]);
+    projected.push({ points: xy.map(p => p.join(',')).join(' '),
+      fill: `rgb(${Math.min(255, Math.round(color[0]! * light))},${Math.min(255, Math.round(color[1]! * light))},${Math.min(255, Math.round(color[2]! * light))})`,
+      depth: points.reduce((n, p) => n + p[2]!, 0) });
   }
   return projected.sort((a, b) => a.depth - b.depth);
 }
 
+/** No mesh lines are drawn. Each face is outlined in its own colour, which closes the hairline gaps antialiasing
+ * leaves between triangles, so the surface reads as one shaded shape. */
 export function previewSvg(mesh: PreviewMesh): string {
   return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 400" role="img" aria-label="Model thumbnail"><rect width="480" height="400" fill="#eef0e8"/>' +
-    projectPreview(mesh).map(p => `<polygon points="${p.points}" fill="${p.fill}" stroke="#40584e" stroke-width="0.5" stroke-linejoin="round"/>`).join('') + '</svg>';
+    projectPreview(mesh).map(p => `<polygon points="${p.points}" fill="${p.fill}" stroke="${p.fill}" stroke-width="0.6" stroke-linejoin="round"/>`).join('') + '</svg>';
 }

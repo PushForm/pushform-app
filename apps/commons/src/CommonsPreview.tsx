@@ -71,7 +71,7 @@ function InteractivePreview({ url, model }: { url: string; model: CatalogModel }
         if (event.key === 'ArrowLeft') orbit(-.2); if (event.key === 'ArrowRight') orbit(.2); if (event.key === 'ArrowUp') orbit(0, -.2); if (event.key === 'ArrowDown') orbit(0, .2);
         if (event.key === '+' || event.key === '=') zoom(1.2); if (event.key === '-') zoom(1 / 1.2); if (event.key === '0') setView({ ...DEFAULT_PREVIEW_VIEW }); }}>
       <rect width="480" height="400" fill="#eef0e8"/>
-      {projectPreview(mesh, view).map((face, i) => <polygon key={i} points={face.points} fill={face.fill} stroke="#40584e" strokeWidth=".5" strokeLinejoin="round"/>)}
+      {projectPreview(mesh, view).map((face, i) => <polygon key={i} points={face.points} fill={face.fill} stroke={face.fill} strokeWidth=".6" strokeLinejoin="round"/>)}
     </svg>
     <div className="preview-controls" aria-label="3D preview controls">
       <button aria-label="Rotate left" title="Rotate left" onClick={() => orbit(-.3)}><RotateIcon/></button><button aria-label="Rotate right" title="Rotate right" onClick={() => orbit(.3)}><RotateIcon clockwise/></button>

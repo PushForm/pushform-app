@@ -43,6 +43,17 @@ describe('chat completions client', () => {
     expect(events[6]).toMatchObject({ delta: { type: 'input_json_delta', partial_json: '{"q":"hole"}' } });
   });
 
+  it('keeps two calls apart when a provider streams them under one index', async () => {
+    const client = chatCompletionsClient({ baseURL: 'http://x', apiKey: 'k', fetch: async () => sse([
+      { choices: [{ delta: { tool_calls: [{ index: 0, id: 'a', function: { name: 'search', arguments: '{"q":"one"}' } }] } }] },
+      { choices: [{ delta: { tool_calls: [{ index: 0, id: 'b', function: { name: 'search', arguments: '{"q":"two"}' } }] }, finish_reason: 'tool_calls' }] },
+    ]) });
+    const inputs: string[] = [];
+    for await (const e of await client.messages.create({ model: 'm', max_tokens: 5, stream: true, messages: [{ role: 'user', content: 'x' }] }))
+      if (e.type === 'content_block_delta' && e.delta.type === 'input_json_delta') inputs.push(e.delta.partial_json);
+    expect(inputs).toEqual(['{"q":"one"}', '{"q":"two"}']);
+  });
+
   it('routes by model prefix and strips it', async () => {
     const seen: string[] = [];
     const fake = (name: string): AnthropicLike => ({ messages: { async create(p) { seen.push(`${name}:${p.model}`); return (async function* () {})(); } } });

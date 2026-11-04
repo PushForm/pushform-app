@@ -65,6 +65,8 @@ export async function* messageEvents(body: ReadableStream<Uint8Array>, model: st
   let index = 0, textOpen = false, finish: string | null = null;
   let usage: Chunk['usage'] = undefined;
   const calls = new Map<number, { id?: string; name: string; args: string }>();
+  const slots = new Map<number, number>();
+  let nextKey = 1_000;
   const reader = body.getReader(), decoder = new TextDecoder();
   let buffer = '';
   for (;;) {
@@ -87,11 +89,15 @@ export async function* messageEvents(body: ReadableStream<Uint8Array>, model: st
         yield { type: 'content_block_delta', index, delta: { type: 'text_delta', text: choice.delta.content } } as Anthropic.RawMessageStreamEvent;
       }
       for (const tc of choice.delta?.tool_calls ?? []) {
-        const c = calls.get(tc.index) ?? { name: '', args: '' };
+        // Some providers stream several calls under one index: a new id always starts a new call.
+        let key = slots.get(tc.index) ?? tc.index;
+        const current = calls.get(key);
+        if (tc.id && current?.id && current.id !== tc.id) { key = nextKey++; slots.set(tc.index, key); }
+        const c = calls.get(key) ?? { name: '', args: '' };
         if (tc.id) c.id = tc.id;
         if (tc.function?.name) c.name += tc.function.name;
         if (tc.function?.arguments) c.args += tc.function.arguments;
-        calls.set(tc.index, c);
+        calls.set(key, c);
       }
       if (choice.finish_reason) finish = choice.finish_reason;
     }

@@ -93,6 +93,10 @@
 .pf-fr-attachments ul { margin: 0; padding-left: 16px; color: var(--pf-text-muted); overflow-wrap: anywhere; }
 /* One rounded field: add picture on the left, the growing text box, then send (when there is something to send) and dictation. */
 .pf-fr-composer { display: flex; align-items: flex-end; gap: 4px; flex-shrink: 0; padding: 6px; border: 1px solid var(--pf-border); border-radius: 12px; background: var(--pf-surface-2); }
+.pf-fr-queued { flex-shrink: 0; max-height: 160px; overflow: auto; padding: 8px; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); color: var(--pf-text-muted); font-size: 12px; }
+.pf-fr-queued ol { list-style: none; padding: 0; margin: 4px 0 0; }
+.pf-fr-queued li { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.pf-fr-queued li span { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .pf-fr-composer:focus-within { border-color: color-mix(in srgb, var(--pf-accent) 55%, var(--pf-border)); }
 :is(.pf-fr-popover, .pf-fr-docked) .pf-fr-composer textarea { flex: 1; min-width: 0; min-height: 32px; max-height: 180px; padding: 6px 4px; border: 0; border-radius: 0; background: transparent; resize: none; overflow-y: auto; }
 :is(.pf-fr-popover, .pf-fr-docked) .pf-fr-composer textarea:focus-visible { outline: none; }

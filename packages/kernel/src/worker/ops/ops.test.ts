@@ -273,6 +273,48 @@ describe('boolean', () => {
     const r = await client.boolean({ op: 'subtract', a, b, nextFaceId: 6 });
     expect(r.components).toHaveLength(0);
   });
+
+  // A stile and a rail butted at x = 0.0592, with the rail flush with the stile's bottom, front and back. Each body's
+  // own float32 frame rounds that plane a few nanometres apart, so the two used to stay separate solids.
+  const stile: [Vec3, Vec3] = [[0.002, -0.01905, 0.003], [0.0592, 0, 1.37]];
+  const rail: [Vec3, Vec3] = [[0.0592, -0.01905, 0.003], [0.5498, 0, 0.0602]];
+  const volume = ([min, max]: [Vec3, Vec3]): number => (max[0] - min[0]) * (max[1] - min[1]) * (max[2] - min[2]);
+
+  it('adds solids that share part of a face into one closed solid, keeping face provenance', async () => {
+    const a = await uploadBox(client, newBodyId(), ...stile);
+    const b = await uploadBox(client, newBodyId(), ...rail);
+    const r = await client.boolean({ op: 'add', a, b, nextFaceId: 6 });
+    expect(r.components).toHaveLength(1);
+    const c = r.components[0]!;
+    expect(c.props.volume).toBeCloseTo(volume(stile) + volume(rail), 9);
+    expect(meshEulerCharacteristic(c.mesh)).toBe(2);
+    await expectManifold(client, c.mesh);
+    // The stile's faces keep their ids (the flush front, back and bottom absorb the rail's); the rail's own end and
+    // top get new ids that report the rail as their origin.
+    const ids = faceIds(c.mesh);
+    expect(ids.filter((id) => id < 6)).toEqual([0, 1, 2, 3, 4, 5]);
+    const fresh = ids.filter((id) => id >= 6);
+    expect(fresh).toHaveLength(2);
+    for (const id of fresh) expect(c.faceOrigin.get(id)!.every((o) => o.runId === r.bRunId)).toBe(true);
+    for (const id of ids.filter((id) => id < 6)) expect(c.faceOrigin.get(id)!.some((o) => o.runId === r.aRunId && o.faceId === id)).toBe(true);
+  });
+
+  it('adds solids that share a whole face', async () => {
+    const a = await uploadBox(client, newBodyId(), [0.1015, -0.0508, 0.2604], [0.2795, -0.0381, 0.2731]);
+    const b = await uploadBox(client, newBodyId(), [0.1015, -0.0381, 0.2604], [0.1142, -0.0126, 0.2731]);
+    const r = await client.boolean({ op: 'add', a, b, nextFaceId: 6 });
+    expect(r.components).toHaveLength(1);
+    await expectManifold(client, r.components[0]!.mesh);
+  });
+
+  it('keeps solids that meet only along an edge, or with a gap, apart', async () => {
+    const a = await uploadBox(client, newBodyId(), [0, 0, 0], [1, 1, 1]);
+    const edge = await uploadBox(client, newBodyId(), [1, 1, 0], [2, 2, 1]);
+    expect((await client.boolean({ op: 'add', a, b: edge, nextFaceId: 6 })).components).toHaveLength(2);
+    const s = await uploadBox(client, newBodyId(), ...stile);
+    const apart = await uploadBox(client, newBodyId(), [rail[0][0] + 1e-6, rail[0][1], rail[0][2]], rail[1]);
+    expect((await client.boolean({ op: 'add', a: s, b: apart, nextFaceId: 6 })).components).toHaveLength(2);
+  });
 });
 
 describe('other ops', () => {

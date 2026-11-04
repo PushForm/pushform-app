@@ -71,6 +71,8 @@ export const modelsConfigSchema = z.strictObject({
   /** Turns that offer document tools: the open document makes the turn multi-step geometry work. */
   document: nonEmpty.default('claude-sonnet-5-5'),
   build: nonEmpty.default('claude-opus-5-5'),
+  /** The fast model that restates a request on turns that edit a 3D model while the document model works; null turns it off. */
+  acknowledge: nonEmpty.nullable().default('claude-haiku-5-5'),
 });
 export const rolesConfigSchema = z.strictObject({
   defaultRole: z.enum(['user', 'none']).default('user'),

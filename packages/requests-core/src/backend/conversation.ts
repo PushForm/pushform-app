@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { Tracker, TrackerIssue } from '../adapters/tracker.ts';
 import { TrackerError } from '../adapters/tracker.ts';
 import { briefSchema, completeness, emptyBriefFor, type Brief, type DeclineReason, type Path } from '../agents/brief.ts';
+import { acknowledgeContent, ReplyOpening, startAcknowledgment, type Acknowledgment, type RunningAcknowledgment } from '../agents/acknowledge.ts';
 import { answerPending, runTurn, type RoundPhase, warmPrompt, type AnthropicLike, type WarmClient, type WarmUsage, type ClientToolCall, type PendingClientTools, type ToolCallEvent, type ToolHandler, type ToolResult } from '../agents/client.ts';
 import { retrieveUserHelp, USER_HELP_RULES } from '../agents/digest.ts';
 import { GUIDANCE_RULES } from '../guidance.ts';
@@ -346,7 +347,8 @@ export function historyOf(messages: readonly ConversationMessage[], contextBlock
     if (m.role === 'tool') { tools.push(m); continue; }
     flushTools();
     if (m.role === 'user') out.push({ role: 'user', content: m.attachments?.length ? [...pictureBlocks(m.attachments, images), { type: 'text', text: frameRequesterText(m.text) }] : frameRequesterText(m.text) });
-    else if (m.text.trim()) out.push({ role: 'assistant', content: m.text });
+    // An acknowledgment restated the request for the requester only: no model ever reads it.
+    else if (m.text.trim() && !m.acknowledgment) out.push({ role: 'assistant', content: m.text });
   }
   flushTools();
   // Two consecutive messages of one role are merged so the transcript alternates as the API requires.
@@ -360,6 +362,15 @@ export function historyOf(messages: readonly ConversationMessage[], contextBlock
   if (merged.length && merged[merged.length - 1]!.role === 'user') merged.push({ role: 'assistant', content: [{ type: 'text', text: '(continued)' }] });
   const latest = `${contextBlock}\n\n${frameRequesterText(latestText)}`;
   return [...merged, { role: 'user', content: latestPictures.length ? [...pictureBlocks(latestPictures, images), { type: 'text', text: latest }] : latest }];
+}
+/** The agent's last reply, for the fast model that restates a new message (acknowledgments excluded). */
+export function previousReplyOf(messages: readonly ConversationMessage[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]!;
+    if (m.role === 'user') return null;
+    if (m.role === 'assistant' && !m.acknowledgment && m.text.trim()) return m.text;
+  }
+  return null;
 }
 function blocks(content: Anthropic.MessageParam['content']): Anthropic.ContentBlockParam[] {
   return typeof content === 'string' ? [{ type: 'text', text: content }] : [...(content as Anthropic.ContentBlockParam[])];
@@ -490,6 +501,8 @@ interface TurnRun {
   /** The status line this request opens with, on turns that edit a 3D model, and the last one the turn sent before. */
   status: StatusPick;
   previousStatus?: string | undefined;
+  /** A new message's content for the fast model that restates it (see `acknowledge.ts`); resumed requests have none. */
+  acknowledge?: Anthropic.ContentBlockParam[] | undefined;
   setup: {
     model: string; system: string; tools: Anthropic.Tool[]; context: string; historyLength: number;
     messages: Anthropic.MessageParam[]; document: DocumentCapability | null;
@@ -852,9 +865,21 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       const generationStarted = performance.now();
       const setupMs = Math.round(generationStarted - t.timing.received);
       let firstTextMs: number | null = null;
+      // On a new message to a 3D model, a fast model restates the request while this one works; the two share the text stream.
+      const opening = new ReplyOpening(delta => emit({ event: 'text', data: { delta } }));
+      const ackModel = statusOn && t.acknowledge ? config.models.acknowledge : null;
+      let ack: RunningAcknowledgment | null = null;
+      let acknowledged: Promise<Acknowledgment> | null = null;
+      const say = (delta: string) => { if (opening.agent(delta)) ack?.abort(); };
+      // The acknowledgment is kept as its own message straight after the requester's, never in what a model reads.
+      const keepAcknowledgment = async (): Promise<Acknowledgment | null> => {
+        const a = acknowledged ? await acknowledged : null;
+        if (a?.text) appended.splice(t.leading.length, 0, { role: 'assistant', text: a.text, at: now().toISOString(), acknowledgment: true });
+        return a;
+      };
       let result;
       try {
-        result = await runTurn({
+        const running = runTurn({
           client: anthropic, model: setup.model, system: setup.system, tools: setup.tools, handlers: t.handlers, messages: setup.messages,
           clientTools, resume: setup.resume,
           // A render past the limit is answered here, so the agent finishes instead of the browser drawing again.
@@ -875,7 +900,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
           } } : {}),
           onText: (delta) => {
             firstTextMs ??= Math.round(performance.now() - generationStarted);
-            emit({ event: 'text', data: { delta } });
+            say(delta);
           },
           onToolCall: (call: ToolCallEvent) => {
             if (call.invalidInput !== undefined) deps.log?.(`turn ${id}: ${call.name} input was not valid JSON, asked the model to resend: ${call.invalidInput}`);
@@ -883,8 +908,15 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
             if (store.changed) { store.changed = false; briefEvent(); }
           },
         });
+        if (ackModel && t.acknowledge) {
+          opening.begin();
+          ack = startAcknowledgment({ client: anthropic, model: ackModel, content: t.acknowledge, onText: delta => opening.opening(delta) });
+          acknowledged = ack.done.then(a => { opening.end(); return a; });
+        }
+        result = await running;
       } catch (error) {
         status?.stop();
+        await keepAcknowledgment();
         // A failed model call still keeps the requester's message, the tool calls and the brief the panel already shows
         // (the message budget was spent); the next turn then continues from them.
         try { await persist(); } catch (saveError) { deps.log?.(`turn ${id}: save after failure: ${saveError instanceof Error ? saveError.message : String(saveError)}`); }
@@ -893,6 +925,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       }
       status?.stop();
       const generationMs = Math.round(performance.now() - generationStarted);
+      const acknowledgment = await keepAcknowledgment();
       const reason = store.ended();
       // A turn that also ended the conversation (filed, start over) does not wait for the editor: the calls are dropped.
       const suspended = result.stop === 'client_tools' && !reason ? result.pending : null;
@@ -906,7 +939,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       } : null;
       const cue = turn?.pending.calls.find(call => call.name === 'ui_highlight')?.input as { instruction?: unknown } | undefined;
       const replyText = result.text.trim() || typeof cue?.instruction !== 'string' ? result.text : cue.instruction.slice(0, 400);
-      if (replyText !== result.text) emit({ event: 'text', data: { delta: replyText } });
+      if (replyText !== result.text) say(replyText);
       appended.push({ role: 'assistant', text: replyText, at: now().toISOString(), ...(turn ? { turn } : {}) });
       let saved: Conversation;
       const saveStarted = performance.now();
@@ -925,6 +958,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       const phases = Object.entries(t.timing.phases).map(([name, ms]) => `${name}:${ms}`).join(',') || 'none';
       const roundLog = result.roundStats.map(r => `${r.startMs}/${r.firstMs ?? '-'}/${r.ms}ms,in${r.input},out${r.output},cr${r.cacheRead},cw${r.cacheWrite}`).join(' ');
       deps.log?.(`turn ${id}: model=${setup.model} stop=${result.stop} rounds=${result.rounds} firstTextMs=${firstTextMs ?? 'none'} generationMs=${generationMs} in=${result.usage.inputTokens} out=${result.usage.outputTokens} cacheRead=${result.usage.cacheReadTokens} cacheWrite=${result.usage.cacheWriteTokens} setupMs=${setupMs} setup=${phases}${t.timing.toolChars !== undefined ? ` toolChars=${t.timing.toolChars}` : ''} saveMs=${saveMs} rounds=[${roundLog}]${reason ? ` ended=${reason}` : ''}`);
+      if (acknowledgment) deps.log?.(`acknowledge ${id}: model=${ackModel} outcome=${acknowledgment.outcome} firstMs=${acknowledgment.firstMs ?? 'none'} ms=${acknowledgment.ms} in=${acknowledgment.input} out=${acknowledgment.output} chars=${acknowledgment.text.length}${acknowledgment.error ? ` error=${acknowledgment.error.slice(0, 200)}` : ''}`);
       if (turn) emit({ event: 'tool_request', data: { calls: turn.pending.calls.map(c => {
         const index = reviewIndex.get(c.id);
         return index ? { ...c, review: { index, limit: reviewLimit } } : c;
@@ -984,6 +1018,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       user, conversation, store, handlers: agent.handlers(ctx, store), pathChanged: path !== conversation.path,
       leading: [...closers, { role: 'user', text: body.text, at: base.now, ...(pictures.length ? { attachments: pictures } : {}) }],
       status: messageStatus(),
+      ...(config.models.acknowledge ? { acknowledge: acknowledgeContent({ text: body.text, pictures: pictureBlocks(pictures, images), previousReply: previousReplyOf(prior) }) } : {}),
       setup: {
         ...turnPrompt(config.models, ctx, document), context, historyLength: prior.length, messages: historyOf(prior, context, body.text, pictures, images), document, resume: undefined,
       },

@@ -10,7 +10,7 @@ import { z } from 'zod';
  */
 export interface AnthropicLike {
   messages: {
-    create(params: Anthropic.MessageCreateParamsStreaming, options?: { headers?: Record<string, string> }): PromiseLike<AsyncIterable<Anthropic.RawMessageStreamEvent>>;
+    create(params: Anthropic.MessageCreateParamsStreaming, options?: { headers?: Record<string, string>; signal?: AbortSignal }): PromiseLike<AsyncIterable<Anthropic.RawMessageStreamEvent>>;
   };
 }
 /** The slice of the SDK client `warmPrompt` uses: one non-streaming request. */

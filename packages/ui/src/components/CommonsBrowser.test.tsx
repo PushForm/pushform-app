@@ -3,17 +3,20 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { CommonsAccount } from '@pushform/commons-ui/account';
+import * as cloud from '@pushform/cloud';
+import { encodeModelDocument } from '@pushform/io';
+import { createDocument } from '@pushform/model';
 import { createApp } from '../bootstrap';
 import { DocumentSession } from '../session';
 import { CommonsBrowser } from './CommonsBrowser';
 
 let session: DocumentSession;
-afterEach(() => { cleanup(); session?.dispose(); });
+afterEach(() => { cleanup(); session?.dispose(); vi.restoreAllMocks(); });
 function setup() {
   session = new DocumentSession(createApp({ demo: false, expose: false }), () => createApp({ demo: false, expose: false }), true, null);
   const revision = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   const metadata = { title: 'Garden bench', description: 'A community bench', creator: 'Original maker', category: 'Furniture', tags: [], formats: ['PF'], imageUrl: null, source: null,
-    licenses: [{ name: 'CC BY 4.0', url: 'https://creativecommons.org/licenses/by/4.0/', commercialUse: 'allowed', conditions: ['Credit the maker'] }], credits: [{ name: 'Original maker', url: null, text: 'Original creator' }] };
+    licenses: [{ name: 'CC BY 4.0', url: 'https://creativecommons.org/licenses/by/4.0/', commercialUse: 'allowed' as const, conditions: ['Credit the maker'] }], credits: [{ name: 'Original maker', url: null, text: 'Original creator' }] };
   const files = [{ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: 'bench.pf', format: 'PF', sizeBytes: 100, sha256: 'a'.repeat(64) }];
   const models = [{ ...metadata, files, id: 'bench', revision, publishedAt: '2026-11-04T00:00:00Z' }, { ...metadata, id: 'unknown', title: 'Unknown permission', revision, publishedAt: '2026-11-03T00:00:00Z', licenses: [{ ...metadata.licenses[0], commercialUse: 'unknown' }] }];
   let published: string | null = revision;
@@ -22,10 +25,50 @@ function setup() {
     if (name === 'commons_withdraw_model') published = null;
     const promise = Promise.resolve({ data, error: null }); return Object.assign(promise, { abortSignal: () => promise });
   });
-  const account = { client: { rpc } } as unknown as CommonsAccount;
+  const account = { client: { rpc }, session: { getAccessToken: async () => 'test-token' } } as unknown as CommonsAccount;
   const props = { account, filesUrl: undefined, session, onOpened: vi.fn(), onClose: vi.fn() };
-  return { props, rpc };
+  const source: cloud.OpenedCommonsModel = { name: 'bench.pf', bytes: new Uint8Array(), attribution: {
+    modelId: 'bench', revision, assetId: files[0]!.id, title: metadata.title, creator: metadata.creator,
+    source: metadata.source, licenses: metadata.licenses, credits: metadata.credits,
+    file: { name: files[0]!.name, sizeBytes: files[0]!.sizeBytes, sha256: files[0]!.sha256 },
+  } };
+  return { props, rpc, source };
 }
+it('opens a model with recorded units in a new tab from one action and preserves its credits', async () => {
+  const f = setup(); const original = session.active;
+  vi.spyOn(cloud, 'loadCommonsModel').mockResolvedValue({ ...f.source, bytes: await encodeModelDocument(createDocument()) });
+  render(<CommonsBrowser {...f.props}/>);
+  fireEvent.click(await screen.findByText('Garden bench'));
+  fireEvent.click(screen.getByRole('button', { name: 'Open in new tab' }));
+  await waitFor(() => expect(f.props.onOpened).toHaveBeenCalledOnce());
+  expect(session.tabs).toHaveLength(2);
+  expect(session.tabs).toContain(original);
+  if (session.active.type !== 'model') throw new Error('Expected a model tab');
+  expect(session.active.app.document.doc.state.meta.attributions).toEqual([f.source.attribution]);
+  expect(screen.queryByRole('button', { name: 'Open copy in new tab' })).toBeNull();
+});
+it('still asks for units and up axis before opening a unitless model', async () => {
+  const f = setup();
+  vi.spyOn(cloud, 'loadCommonsModel').mockResolvedValue({ ...f.source, name: 'bench.obj', bytes: new TextEncoder().encode('v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n') });
+  render(<CommonsBrowser {...f.props}/>);
+  fireEvent.click(await screen.findByText('Garden bench'));
+  fireEvent.click(screen.getByRole('button', { name: 'Open in new tab' }));
+  await screen.findByLabelText('Source units');
+  expect(screen.getByLabelText('Up axis')).toBeTruthy();
+  expect(session.tabs).toHaveLength(1);
+  expect(f.props.onOpened).not.toHaveBeenCalled();
+});
+it('keeps the catalog and current documents when direct opening fails', async () => {
+  const f = setup(); const original = session.active;
+  vi.spyOn(cloud, 'loadCommonsModel').mockResolvedValue({ ...f.source, bytes: new Uint8Array([1, 2, 3]) });
+  render(<CommonsBrowser {...f.props}/>);
+  fireEvent.click(await screen.findByText('Garden bench'));
+  fireEvent.click(screen.getByRole('button', { name: 'Open in new tab' }));
+  await screen.findByRole('alert');
+  expect(session.tabs).toEqual([original]);
+  expect(f.props.onOpened).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: 'Open in new tab' })).toBeTruthy();
+});
 it('requests catalog and detail thumbnails with anonymous CORS for the isolated editor', async () => {
   const f = setup(); const view = render(<CommonsBrowser {...f.props} filesUrl="https://files.example.com"/>);
   await screen.findByText('Garden bench');

@@ -50,7 +50,11 @@ export function CommonsBrowser({ account, filesUrl, session, target, onOpened, o
     try {
       const token = await account.session.getAccessToken(); if (!token) throw new Error('Sign in to import Commons models.');
       const source = await loadCommonsModel(filesUrl ?? '', token, { modelId: selected.id, revision: selected.revision, assetId: file.id }, controller.signal);
-      if (!controller.signal.aborted) setPrepared({ source, insert, target: capturedTarget, path });
+      if (controller.signal.aborted) return;
+      if (!insert && !probeMeshImport(source.bytes)) {
+        await openCommonsModel(session, source, controller.signal);
+        if (!controller.signal.aborted) onOpened();
+      } else setPrepared({ source, insert, target: capturedTarget, path });
     } catch (cause) { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'The model could not be downloaded.'); }
     finally { if (!controller.signal.aborted) setBusy(false); }
   };
@@ -110,6 +114,7 @@ export function CommonsBrowser({ account, filesUrl, session, target, onOpened, o
       {selected.source && <a href={selected.source.url} target="_blank" rel="noreferrer">Original source: {selected.source.name}</a>}
       {!target && available.length > 0 && <label>Insert into an open design<select value={catalogTarget} onChange={event => setCatalogTarget(event.target.value)}><option value="">Choose an open design</option>{available.map(tab => <option key={tab.id} value={tab.id}>{tab.name}</option>)}</select></label>}
       <div><button disabled={busy || !selected.files.some(f => isCommonsOpenable(f.name))} onClick={() => { void load(false); }}>Open in new tab</button>{destination && <button disabled={busy || !selected.files.some(f => isCommonsOpenable(f.name))} onClick={() => { void load(true); }}>Insert into {destination!.name}</button>}</div>
+      {busy && <p role="status">Preparing model…</p>}
       {!selected.files.some(f => isCommonsOpenable(f.name)) && <p>A supported representation is required before this model can be opened or inserted.</p>}
     </> : <><div className="pf-commons-filters"><label>Search models<input value={query} onChange={event => setQuery(event.target.value)} /></label><label>Category<select value={category} onChange={event => setCategory(event.target.value)}><option value="">All categories</option>{choices((models ?? []).map(m => m.category))}</select></label><label>License<select value={license} onChange={event => setLicense(event.target.value)}><option value="">All licenses</option>{choices((models ?? []).flatMap(m => m.licenses.map(l => l.name)))}</select></label><label><input type="checkbox" checked={commercial} onChange={event => setCommercial(event.target.checked)} />Commercial use permitted</label></div>
       {!models && !error && <p role="status">Loading Commons…</p>}

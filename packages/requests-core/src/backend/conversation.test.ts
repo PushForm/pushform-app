@@ -796,6 +796,7 @@ describe('document tools', () => {
     await (await call(plain.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'hi' })).text();
     expect(toolNames(plain).some(n => n.startsWith('layout_'))).toBe(false);
     expect(anthropicOf(plain).calls[0]!.model).toBe('claude-haiku-5-5');
+    expect(anthropicOf(plain).calls[0]!.max_tokens).toBe(4096);
     const unknown = harness({ turns: [{ text: ['Hi'] }] });
     await (await call(unknown.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'hi', document: { type: 'layout', apiVersion: 99 } })).text();
     expect(toolNames(unknown).some(n => n.startsWith('layout_'))).toBe(false);
@@ -803,6 +804,7 @@ describe('document tools', () => {
     const first = anthropicOf(h).calls[0]!;
     expect(first.model).toBe('claude-sonnet-5-5');
     expect(first.output_config).toEqual({ effort: 'low' });
+    expect(first.max_tokens).toBe(16_000);
     expect(toolNames(h)).toEqual(expect.arrayContaining(['search_docs', 'layout_get_document', 'layout_list_objects', 'layout_apply_operations']));
     expect((first.system as { text: string }[])[0]!.text).toContain('Editing the open document');
     expect((first.system as { text: string }[])[0]!.text).toContain('you change nothing except the open document');
@@ -814,6 +816,10 @@ describe('document tools', () => {
     await (await call(editable.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'Group the shelves', document: { type: 'model', apiVersion: 1, edit: 1 } })).text();
     const first = anthropicOf(editable).calls[0]!;
     expect(first.model).toBe('claude-sonnet-5-5');
+    // Model edits keep low effort and adaptive thinking, with room for a large batch.
+    expect(first.output_config).toEqual({ effort: 'low' });
+    expect(first).not.toHaveProperty('thinking');
+    expect(first.max_tokens).toBe(32_000);
     expect(toolNames(editable)).toEqual(expect.arrayContaining(['model_get_document', 'model_query', 'model_apply_operations', 'model_view']));
     expect(toolNames(editable).some(name => name.startsWith('layout_'))).toBe(false);
     const system = (first.system as { text: string }[])[0]!.text;
@@ -826,6 +832,7 @@ describe('document tools', () => {
     const guidanceOnly = harness({ turns: [{ text: ['Hi'] }] });
     await (await call(guidanceOnly.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'hi', document: { type: 'model', apiVersion: 1, guidance: 1 } })).text();
     expect(toolNames(guidanceOnly).some(name => name.startsWith('model_'))).toBe(false);
+    expect(anthropicOf(guidanceOnly).calls[0]!.max_tokens).toBe(16_000);
     expect((anthropicOf(guidanceOnly).calls[0]!.system as { text: string }[])[0]!.text).not.toContain('Editing the open 3D model');
   });
 

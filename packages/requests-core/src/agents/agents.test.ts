@@ -345,6 +345,13 @@ it('has the model agent group each door, drawer and face frame as its own named 
   expect(rules).toContain('Then group the parts and assemblies into the whole object and name it');
 });
 
+it('has the model agent build a cabinet in one batch and larger builds one cabinet or major assembly per batch', () => {
+  const rules = MODEL_DOCUMENT_RULES(ctx());
+  expect(rules).not.toContain('Build the whole object in one batch');
+  expect(rules).toContain('Build a single cabinet or other small object in one batch, assemblies included');
+  expect(rules).toContain('such as a run of cabinets or a structure with walls, floors and a roof, send one batch per cabinet or major assembly, then group the whole');
+});
+
 it('has the model agent shape parts with push/pull and cut joinery and openings with subtract', () => {
   const rules = MODEL_DOCUMENT_RULES(ctx());
   expect(rules).toContain('then push_pull it by its thickness');

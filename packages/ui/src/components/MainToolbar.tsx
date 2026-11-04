@@ -84,7 +84,16 @@ export function MainToolbar({ onCommons }: { onCommons?: (() => void) | undefine
           </span>
         </div>
       ))}
-      {onCommons && <div className="pf-layout-ribbon-group" role="group" aria-label="Import"><div className="pf-layout-ribbon-buttons"><button onClick={() => app.commands.tryExecute('file.import')}>From file</button><button onClick={onCommons}>Commons</button></div><span className="pf-layout-ribbon-caption">Import</span></div>}
+      {onCommons && <div className="pf-layout-ribbon-group" role="group" aria-label="Import">
+        <div className="pf-layout-ribbon-buttons">
+          <ToolButton type="button" className="pf-toolbtn" title="From file" aria-label="From file"
+            data-guidance-id="toolbar:import" data-guidance-action="file.import" data-guidance-route="Toolbar > Import > From file"
+            onClick={() => app.commands.tryExecute('file.import')}><Icon name="import" size={24}/></ToolButton>
+          <ToolButton type="button" className="pf-toolbtn" title="Commons" aria-label="Commons"
+            data-guidance-id="toolbar:commons" onClick={onCommons}><Icon name="commons" size={24}/></ToolButton>
+        </div>
+        <span className="pf-layout-ribbon-caption" aria-hidden="true">Import</span>
+      </div>}
     </nav>
   );
 }

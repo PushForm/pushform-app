@@ -2,7 +2,7 @@
 
 ## Import a PNG, JPG, JPEG or SVG image
 
-Click **Import** in the toolbar's **Insert** group, just after Table, and choose your **PNG**, **JPG/JPEG**, or **SVG** file. You can also use **Main menu → Import...** or search for **Import** in command search. These routes open the same file picker.
+Click **Import** in the toolbar's **Import** group, just after Table, and choose your **PNG**, **JPG/JPEG**, or **SVG** file. You can also use **Main menu → Import...** or search for **Import** in command search. These routes open the same file picker.
 
 Import embeds the picture centered on the active page and selects it. Drag the selected image to position it; use its frame handles to resize and hold Shift to keep its proportions. You can rotate it with Rotate or the available frame controls. The picture is kept with the drawing when saved. Undo removes the import.
 
@@ -16,7 +16,7 @@ Importing SVG places the original as an embedded image. Pasting supported SVG ar
 
 ## Find and use the Import control
 
-**Toolbar → Insert → Import** is the picture-icon button after Table. **Main menu → Import...** is the menu alternative. They are the same action, so choose whichever is easier to reach. **Open...** opens a document; **Import** adds content to the page you are already editing.
+**Toolbar → Import → Import** is the picture-icon button after Table. **Main menu → Import...** is the menu alternative. They are the same action, so choose whichever is easier to reach. **Open...** opens a document; **Import** adds content to the page you are already editing.
 
 After clicking Import, choose a supported file and confirm the picker. The image is added only after that choice is successfully read. Merely clicking the button does not mean that a picture has already been placed.
 

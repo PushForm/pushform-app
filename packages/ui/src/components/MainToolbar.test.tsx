@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { afterEach, describe, expect, it } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { InlineBackend, KernelClient } from '@pushform/kernel';
 import type { CommandInfo } from '@pushform/commands';
 import { AppContext } from '../AppContext';
@@ -15,6 +15,7 @@ afterEach(() => {
   cleanup();
   app?.dispose();
   app = null;
+  vi.restoreAllMocks();
 });
 
 function boot(): AppInstance {
@@ -93,6 +94,23 @@ describe('resolveSlots', () => {
 });
 
 describe('MainToolbar', () => {
+  it('uses icon buttons and tooltips for file and Commons import without changing their actions', () => {
+    const a = boot(), onCommons = vi.fn();
+    const execute = vi.spyOn(a.commands, 'tryExecute');
+    render(<AppContext.Provider value={a}><MainToolbar onCommons={onCommons}/></AppContext.Provider>);
+    const group = within(screen.getByRole('group', { name: 'Import' }));
+    const file = group.getByRole('button', { name: 'From file' });
+    const commons = group.getByRole('button', { name: 'Commons' });
+    expect(file.querySelector('svg')).toBeTruthy();
+    expect(commons.querySelector('svg')).toBeTruthy();
+    fireEvent.mouseEnter(file);
+    expect(screen.getByRole('tooltip').textContent).toBe('From file');
+    fireEvent.mouseLeave(file);
+    fireEvent.click(file);
+    expect(execute).toHaveBeenCalledWith('file.import');
+    fireEvent.click(commons);
+    expect(onCommons).toHaveBeenCalledOnce();
+  });
   it('shows stacked slots whose face follows the active tool, and activates tools through commands', () => {
     const a = boot();
     render(

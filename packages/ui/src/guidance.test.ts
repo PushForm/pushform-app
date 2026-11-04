@@ -134,11 +134,11 @@ it('discovers toolbar controls without opening panels or moving focus, and never
   const open = vi.fn();
   root.setAttribute('aria-label', 'Import');
   root.dataset['guidanceAction'] = 'layout.import';
-  root.dataset['guidanceRoute'] = 'Toolbar > Insert > Import';
+  root.dataset['guidanceRoute'] = 'Toolbar > Import > Import';
   root.focus();
   const guide = guidanceFor(session, tab, open);
   const listed = await result(guide('ui_list_targets', { query: 'Import' }));
-  expect(listed).toMatchObject({ editor: 'layout', targets: [expect.objectContaining({ label: 'Import', action: 'layout.import', enabled: true, route: 'Toolbar > Insert > Import' })] });
+  expect(listed).toMatchObject({ editor: 'layout', targets: [expect.objectContaining({ label: 'Import', action: 'layout.import', enabled: true, route: 'Toolbar > Import > Import' })] });
   expect(open).not.toHaveBeenCalled();
   expect(document.activeElement).toBe(root);
   const abort = new AbortController();

@@ -10,7 +10,7 @@ Choose the document type for the work: model geometry in Modeling, or page drawi
 
 **Open…** opens a document or supported source file as a document to work on. **Import...** adds supported content to the editor you are currently using.
 
-In **Layout**, Main menu → Import... and the toolbar's Insert → Import button open the same picker for SVG, PNG, JPG/JPEG images and DXF drawings. Imported pictures are embedded in the active page. In **Modeling**, Import adds supported models or picture files in the current modeling context. Home's **Import files** is a separate batch workflow that saves new library documents without opening them.
+In **Layout**, Main menu → Import... and the toolbar's Import → Import button open the same picker for SVG, PNG, JPG/JPEG images and DXF drawings. Imported pictures are embedded in the active page. In **Modeling**, Import adds supported models or picture files in the current modeling context. Home's **Import files** is a separate batch workflow that saves new library documents without opening them.
 
 ## Save and Save As
 

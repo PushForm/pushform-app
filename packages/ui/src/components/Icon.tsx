@@ -5,7 +5,7 @@ import { AiOutlineTable } from 'react-icons/ai';
 import { BsCloudFog2 } from 'react-icons/bs';
 import type { JSX } from 'react';
 import type { IconType } from 'react-icons';
-import { LuPuzzle } from 'react-icons/lu';
+import { LuLibrary, LuPuzzle } from 'react-icons/lu';
 import { PiAngle, PiBezierCurve, PiTreeView } from 'react-icons/pi';
 import { RiChatDeleteLine, RiChatAiLine } from 'react-icons/ri';
 import { TbLayersUnion, TbOval, TbPackageImport, TbTextSize, TbWriting } from 'react-icons/tb';
@@ -93,6 +93,8 @@ const REACT_ICONS: Record<string, IconType> = {
   'save-as': LuCopy,
   presentation: LuPresentation,
   image: LuImage,
+  import: TbPackageImport,
+  commons: LuLibrary,
   'text-bold': LuBold,
   'text-italic': LuItalic,
   'text-underline': LuUnderline,

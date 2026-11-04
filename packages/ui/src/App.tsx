@@ -458,7 +458,8 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
   return (
     <ThumbnailContext.Provider value={thumbnails}><AppContext.Provider value={modelApp}>
       <div className={`pf-app${commonsShown ? ' pf-commons-active' : ''}`}>
-        <TopBar onModelTab={() => setCommonsShown(false)} commons={commons} commonsActive={commonsShown} onBrowseCommons={() => { setCommonsVisited(true); setCommonsShown(true); }} session={session} cloud={cloud} cloudFiles={cloudFiles} buildInfo={buildInfo} autosave={autosave} onHome={() => setHome(true)}
+        <TopBar onModelTab={() => setCommonsShown(false)} commons={commons} commonsOpen={commonsVisited} commonsActive={commonsShown}
+          onCloseCommons={() => { setCommonsShown(false); setCommonsVisited(false); }} onBrowseCommons={() => { setCommonsVisited(true); setCommonsShown(true); }} session={session} cloud={cloud} cloudFiles={cloudFiles} buildInfo={buildInfo} autosave={autosave} onHome={() => setHome(true)}
           onRequests={() => toggleSidePanel('requests')} onObjects={() => toggleSidePanel('objects')} onClearChat={requestsClient ? clearChat : undefined}
           onExtensions={openExtensions} />
         {commonsVisited && <div className="pf-commons-tab" hidden={!commonsShown}><CommonsBrowser account={commons?.account} filesUrl={commons?.filesUrl} session={session} onClose={() => setCommonsShown(false)} onOpened={() => setCommonsShown(false)} /></div>}

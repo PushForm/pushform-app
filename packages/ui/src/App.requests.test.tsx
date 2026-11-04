@@ -72,6 +72,15 @@ it('highlights Commons while its catalog is active and restores the selected pan
   expect(commons.getAttribute('aria-pressed')).toBe('false');
   expect(commons.classList.contains('is-active')).toBe(false);
   expect(objects.getAttribute('aria-pressed')).toBe('true');
+  fireEvent.click(commons);
+  const tabs = within(screen.getByRole('navigation', { name: 'Open documents' }));
+  expect(tabs.getByRole('button', { name: 'Commons' }).querySelector('svg')).toBeTruthy();
+  fireEvent.click(tabs.getByRole('button', { name: 'Close Commons' }));
+  expect(tabs.queryByRole('button', { name: 'Commons' })).toBeNull();
+  expect(screen.queryByRole('region', { name: 'Commons catalog' })).toBeNull();
+  expect(tabs.getByRole('button', { name: /^3D model:/ }).getAttribute('aria-current')).toBe('page');
+  fireEvent.click(commons);
+  expect(tabs.getByRole('button', { name: 'Commons' }).getAttribute('aria-current')).toBe('page');
 });
 
 it('keeps the conversation in memory across hiding and showing within the session', async () => {
@@ -316,7 +325,7 @@ it('discovers equivalent menu and toolbar import routes while keeping chat open 
     const url = String(input);
     if (url.endsWith('/messages')) return sse([{ event: 'tool_request', data: { calls: [{ id: 'lookup', name: 'ui_list_targets', input: { query: 'Import' } }] } },
       { event: 'done', data: { messageCount: 1, limitReached: false, ended: false, awaitingTools: true } }]);
-    if (url.endsWith('/tool-results')) { answers.push(JSON.parse(init!.body as string)); return sse([{ event: 'text', data: { delta: 'Choose Import in Insert, or Main menu → Import.' } }, { event: 'done', data: { messageCount: 1, limitReached: false } }]); }
+    if (url.endsWith('/tool-results')) { answers.push(JSON.parse(init!.body as string)); return sse([{ event: 'text', data: { delta: 'Choose Import in the Import group, or Main menu → Import.' } }, { event: 'done', data: { messageCount: 1, limitReached: false } }]); }
     return fallback(input, init);
   }));
   render(<App initialScreen="workspace" app={app} cloud={cloud} buildInfo={build} requests={requests} />);
@@ -324,10 +333,10 @@ it('discovers equivalent menu and toolbar import routes while keeping chat open 
   fireEvent.click(icon());
   fireEvent.change(await screen.findByLabelText('Your message'), { target: { value: 'Help me import an image' } });
   fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-  await screen.findByText('Choose Import in Insert, or Main menu → Import.');
+  await screen.findByText('Choose Import in the Import group, or Main menu → Import.');
   const targets = JSON.parse(answers[0]!.results[0]!.content).targets as { id: string; action: string; route: string; enabled: boolean }[];
   expect(targets).toEqual(expect.arrayContaining([
-    expect.objectContaining({ id: 'toolbar:import', action: 'layout.import', enabled: true, route: 'Toolbar > Insert > Import' }),
+    expect.objectContaining({ id: 'toolbar:import', action: 'layout.import', enabled: true, route: 'Toolbar > Import > Import' }),
     expect.objectContaining({ id: 'menu:import', action: 'layout.import', enabled: true, route: 'Main menu > Import...' }),
   ]));
   expect(docked()).not.toBeNull();

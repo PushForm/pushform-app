@@ -84,8 +84,9 @@ function download(bytes: Uint8Array, name: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome, onRequests, onObjects, onClearChat, onExtensions, commons, onBrowseCommons, commonsActive, onModelTab }: {
-  commons?: CommonsOpeningConfig | undefined; onBrowseCommons?: (() => void) | undefined; commonsActive?: boolean | undefined; onModelTab?: (() => void) | undefined;
+export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome, onRequests, onObjects, onClearChat, onExtensions, commons, onBrowseCommons, onCloseCommons, commonsOpen, commonsActive, onModelTab }: {
+  commons?: CommonsOpeningConfig | undefined; onBrowseCommons?: (() => void) | undefined; onCloseCommons?: (() => void) | undefined;
+  commonsOpen?: boolean | undefined; commonsActive?: boolean | undefined; onModelTab?: (() => void) | undefined;
   session: DocumentSession; cloud?: CloudSession | undefined; cloudFiles?: CloudFilesApi | undefined;
   buildInfo?: BuildInfo | undefined;
   autosave?: CloudAutosave | undefined; onHome?: (() => void) | undefined;
@@ -853,7 +854,10 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
         onChange={event => { void importModelFallback(event); }} />
       {saveVersion && autosave && cloudFiles ? <SaveVersionDialog tab={saveVersion} session={session} files={cloudFiles} saves={autosave} onClose={() => setSaveVersion(null)} onShare={commons?.account ? setPublishSnapshot : undefined} /> : null}
       {publishSnapshot && commons?.account ? <PublishSnapshot account={commons.account} filesUrl={commons.filesUrl} snapshot={publishSnapshot} onClose={() => setPublishSnapshot(null)} /> : null}
-      <DocumentTabs onActivate={onModelTab} activeExtra={commonsActive} extraTab={onBrowseCommons ? <div className={`pf-document-tab${commonsActive ? ' is-active' : ''}`}><button type="button" className="pf-document-tab-select" aria-current={commonsActive ? 'page' : undefined} onClick={onBrowseCommons}>Commons</button></div> : undefined} session={session} onClose={closeTab} onNewLayout={newLayout} />
+      <DocumentTabs onActivate={onModelTab} activeExtra={commonsActive} extraTab={commonsOpen && onBrowseCommons ? <div className={`pf-document-tab${commonsActive ? ' is-active' : ''}`}>
+        <button type="button" className="pf-document-tab-select" aria-current={commonsActive ? 'page' : undefined} onClick={onBrowseCommons}><Icon name="commons" size={16}/><span className="pf-document-tab-name">Commons</span></button>
+        <button type="button" className="pf-document-tab-close" aria-label="Close Commons" onClick={onCloseCommons}>×</button>
+      </div> : undefined} session={session} onClose={closeTab} onNewLayout={newLayout} />
       {choosingTemplate ? <LayoutTemplateChooser busy={templateBusy} savedTemplates={cloudFiles ?
         <CloudBrowser api={cloudFiles} session={session} owner={cloudOwner} templatesOnly embedded
           onBusyChange={setTemplateBusy} onClose={() => setChoosingTemplate(false)} /> : undefined} onCancel={() => setChoosingTemplate(false)} onCreate={templateId => {

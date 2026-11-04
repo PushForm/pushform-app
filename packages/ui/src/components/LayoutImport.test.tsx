@@ -28,7 +28,7 @@ function mockImage(fail = false) {
 it('opens the same image picker from Import after Table, the Layout menu, and command search', () => {
   const { tab, input, view, dispose } = setup();
   const picker = vi.spyOn(input, 'click').mockImplementation(() => {});
-  const buttons = within(screen.getByRole('navigation', { name: 'Layout tools' })).getAllByRole('button');
+  const buttons = within(screen.getByRole('group', { name: 'Import' })).getAllByRole('button');
   const labels = buttons.map(button => button.getAttribute('aria-label'));
   expect(labels[labels.indexOf('Table') + 1]).toBe('Import');
   expect(screen.getByRole('button', { name: 'Import' }).querySelector('svg')).toBeTruthy();

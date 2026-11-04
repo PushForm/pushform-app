@@ -231,7 +231,7 @@ const TOOL_GROUPS: { title: string; tools: LayoutTool[] }[] = [
   { title: 'Draw', tools: ['line', 'arc', 'rectangle', 'circle', 'polygon'] },
   { title: 'Modify', tools: ['offset', 'fillet', 'boolean-union'] },
   { title: 'Annotate', tools: ['text', 'label', 'dimension'] },
-  { title: 'Insert', tools: ['table'] },
+  { title: 'Import', tools: ['table'] },
 ];
 const BOOLEAN_TOOLS = [
   { id: 'shape-builder', title: 'Shape Builder', icon: 'tool-shape-builder', key: 'X' },
@@ -3772,9 +3772,9 @@ export function LayoutWorkspace({
               <Icon name={`tool-${item.id}`} size={24} />
             </ToolButton>
           ))}
-          {group.title === 'Insert' ? <>
+          {group.title === 'Import' ? <>
           <ToolButton type="button" className="pf-toolbtn" title="Import" aria-label="Import"
-            data-guidance-id="toolbar:import" data-guidance-action="layout.import" data-guidance-route="Toolbar > Insert > Import"
+            data-guidance-id="toolbar:import" data-guidance-action="layout.import" data-guidance-route="Toolbar > Import > Import"
             onClick={() => tab.commands.execute('layout.import')}><Icon name="image" size={24} /></ToolButton>
           <ToolButton type="button" className={`pf-toolbtn${tool === 'viewport' ? ' is-active' : ''}`} aria-label="Model View" aria-pressed={tool === 'viewport'}
             title={viewportSources.length || cloudApi ? 'Model View' : 'Model View: import a LayOut document with an embedded SketchUp model to add views of it'}

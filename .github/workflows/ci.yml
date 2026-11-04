@@ -86,7 +86,7 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
           VITE_FR_REGION: ${{ vars.VITE_FR_REGION }}
           VITE_POSTHOG_TOKEN: ${{ vars.VITE_POSTHOG_TOKEN }}
-          VITE_COMMONS_ASSETS_URL: ${{ vars.VITE_COMMONS_ASSETS_URL }}
+          VITE_COMMONS_ASSETS_URL: ${{ github.ref_name != 'staging' && vars.VITE_COMMONS_ASSETS_URL || vars.STAGING_COMMONS_ASSETS_URL }}
       - run: test -s apps/web/dist/third-party-notices.txt
       - run: node scripts/check-cloud-config.mjs apps/web/dist
         env:

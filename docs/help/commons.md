@@ -38,23 +38,37 @@ Saved images are public right away while your profile is visible; you don't need
 
 Earlier profiles may show a picture loaded from an address you entered. It keeps showing until you upload a profile picture, which then takes its place. You can no longer enter a picture address.
 
-## Publish a model
+## Upload and publish a model
 
-Publishing needs a public profile. Choose **Publish model**, fill in the title, description, category, tags and file formats, and choose a license:
+Choose **Upload model** in the Commons header. If you don't have a public profile yet, first choose a public handle and display name; models are published under that name.
 
-- **CC BY 4.0**, **CC BY-SA 4.0**, **CC BY-NC 4.0**, **CC BY-NC-SA 4.0**, **CC BY-ND 4.0** or **CC BY-NC-ND 4.0**: Creative Commons licenses that require credit, with the share-alike, non-commercial or no-derivatives conditions their names show. Each links to its license text on the model page.
-- **CC0 1.0**: dedicates the model to the public domain.
+1. Drag a model file into the box, or choose **browse for a file**. Commons accepts SKP, SKB, DAE, KMZ, OBJ, 3DS, STL, DXF, glTF, GLB, STEP, STP, PushForm (PF), FreeCAD (FCStd) and ZIP archives of these, up to 128 MiB. The model stays a private draft until you publish it.
+2. The dialog moves straight to the details while the file uploads. The file row shows **Uploading** with a progress bar, then **Checking file**, then **Converting preview**, and finally **Preview ready** with the preview image. If you already have two previews converting, it shows **Waiting for converter** first.
+3. Check the title, which starts as the file name, and choose a category and a license. A description and a cover photo (PNG or JPEG up to 8 MiB) are optional; without a cover photo, listings use the preview.
+4. Tick the box confirming that you created the model, or have the right to share it and everything it includes under the license you chose. The Terms of Use require this.
+5. Choose **Publish model**. You don't have to wait for the preview to finish.
+
+Your changes save automatically as you type. **Save draft** or **Close** keeps the draft, file and preview under **My models**. If the upload fails, choose **Try again**. If a preview fails because of a converter problem, **Try again** starts a fresh conversion; a model that is too large or complex to preview can still be published.
+
+### Licenses
+
+- **Creative Commons Attribution 4.0** and the other Creative Commons 4.0 licenses (ShareAlike, NonCommercial, NoDerivatives and their combinations): others must credit you, with the conditions each name describes. The dialog shows a one-line summary of the license you choose.
+- **Public domain (CC0 1.0)**: anyone may use the model for any purpose without credit.
 - **Other (describe the terms)**: write your own terms, one per line. They appear on the model page as written, and the model counts as having unknown commercial-use permission.
 
-The model is published under your public profile name. Choose **Save private draft**, attach the model files and an optional preview image, then confirm that you created and own the files, or have the right to redistribute them and everything they include under the license you chose. Choose **Publish model** to make it public. The Terms of Use require you to have these rights.
+## Manage your models
 
-Choose **My models** to see your drafts and published models. From there you can attach files to a draft, publish it, create a correction with new details, or withdraw a published model. Copies people already downloaded keep their licenses.
+**My models** shows each of your models as a card with its preview, status and last change.
+
+- **Edit** reopens the dialog. Changes to a draft save into that draft. Changes to a published model become a new draft that keeps its files, so nothing has to be uploaded again; the published version stays as it is until you choose **Publish changes**. **Replace file** uploads a new model file and converts it.
+- **Delete draft** removes a model you never published. On a published model, **Discard changes** throws away its unpublished draft and keeps the published version.
+- **View** opens a published model's page, and **Withdraw** takes it out of the library. Copies people already downloaded keep their licenses.
 
 ## Preview a model
 
 Commons renders thumbnails from supported model geometry on its server; a contributor does not need to upload a screenshot. An optional uploaded PNG or JPEG is used as the listing image instead. Choose **Explore in 3D** on a model page to rotate the geometry, zoom, or reset the view. Drag to orbit, use the labeled controls, or focus the viewer and use arrow keys, plus/minus, and zero to reset. Previews are available without signing in; original downloads require your PushForm account and initial account setup.
 
-Commons queues server conversion for native PushForm, STEP, FreeCAD and supported mesh files (STL, OBJ, GLB/glTF, COLLADA, 3DS, SKP and model ZIPs). It accepts originals up to 128 MiB for conversion and displays up to 12,000 triangles. It shows geometry and material colors, with no textures, annotations, recorded dimensions, units or fabrication suitability. Unsupported content and models over those limits show an unavailable preview; try **Open in PushForm** or download the original where supported. A failed image falls back to the generated thumbnail when possible.
+Commons converts every format it accepts as soon as the upload is checked: native PushForm, STEP, FreeCAD, SketchUp (SKP and SKB), DXF, KMZ and mesh files (STL, OBJ, GLB/glTF, COLLADA, 3DS and model ZIPs). Drafts get previews too, visible only to you until you publish. It accepts originals up to 128 MiB for conversion and displays up to 12,000 triangles. It shows geometry and material colors, with no textures, annotations, recorded dimensions, units or fabrication suitability. Unsupported content and models over those limits show an unavailable preview; try **Open in PushForm** or download the original where supported. A failed image falls back to the generated thumbnail when possible.
 
 ## Wait for a generated preview
 

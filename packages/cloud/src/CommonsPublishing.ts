@@ -13,13 +13,19 @@ const revisionSchema = z.object({
   id:z.uuid(),model_id:z.string(),number:z.number().int(),metadata:commonsSubmissionSchema,
   status:z.enum(['pending','published','rejected']),asset_version:z.number().int(),rights_basis:z.string(),
   creator_profile_id:z.uuid().nullable(),self_service:z.boolean(),
+  details_version:z.number().int().min(1).default(1),submitted_at:z.string().optional(),published_at:z.string().nullable().optional(),
 }).strip();
 const stateSchema=z.object({
   models:z.array(z.object({id:z.string(),latest_submission:z.uuid().nullable(),published_revision:z.uuid().nullable()}).strip()),
   revisions:z.array(revisionSchema),
+  assets:z.array(commonsUploadSchema).default([]),
 }).strip();
 export type CommonsOwnRevision=z.infer<typeof revisionSchema>;
 export type CommonsOwnModels=z.infer<typeof stateSchema>;
+
+/** The fixed categories self-service models choose from, in display order. */
+export const COMMONS_CATEGORIES=['Furniture','Cabinets and built-ins','Storage and shelving','Joinery and hardware','Jigs and shop fixtures',
+  'Tools and workshop','Outdoor and garden','Decks, fences and sheds','Buildings and rooms','Landscape and site','Toys and games','Home decor','Other'] as const;
 
 function failure(message:string):Error {
   return new Error(message==='commons_onboarding_required'?'Finish your account setup before publishing.':
@@ -29,6 +35,7 @@ function failure(message:string):Error {
     message==='commons_conflict'?'This model changed. Refresh and confirm the current files again.':
     message==='commons_asset_incomplete'?'Attach at least one verified file and finish or remove incomplete uploads.':
     message==='commons_rights_required'?'Confirm your right to redistribute every included file and its notices.':
+    message==='commons_conflict_details'?'These details changed in another tab. Reload to continue.':
     message==='commons_draft_limit'?'Finish an existing draft before starting another model.':
     message==='commons_catalog_limit'?'The library has reached its current publication limit. Try again later.':
     message==='commons_invalid'?'Check the model metadata, license, source and rights declaration.':'Your model could not be saved or published. Try again.');
@@ -48,6 +55,11 @@ export class CommonsPublishing {
     if(rightsBasis.trim().length<20||rightsBasis.trim().length>4000)throw new Error('Describe your redistribution rights in 20–4,000 characters.');
     const checked=commonsSubmissionSchema.safeParse(metadata);if(!checked.success)throw new Error('Check the model metadata, license links and attribution before saving.');
     return revisionSchema.parse(await this.rpc('commons_submit_model',{p_id:id,p_metadata:checked.data,p_rights_basis:rightsBasis,p_original_work:originalWork,p_expected_revision:expectedRevision},signal));
+  }
+  /** Saves a draft's details in place; `expectedVersion` guards against another tab's edits. */
+  async updateDraft(revision:string,metadata:CommonsSubmission,expectedVersion:number,signal?:AbortSignal):Promise<CommonsOwnRevision>{
+    const checked=commonsSubmissionSchema.safeParse(metadata);if(!checked.success)throw new Error('Check the title, category and license before saving.');
+    return revisionSchema.parse(await this.rpc('commons_update_draft',{p_revision:revision,p_metadata:checked.data,p_expected_version:expectedVersion},signal));
   }
   async assets(revision:string,signal?:AbortSignal){return commonsUploadSchema.array().parse(await this.rpc('commons_model_assets',{p_revision:revision},signal));}
   async publish(revision:string,expectedPublished:string|null,assetVersion:number,rightsConfirmed:boolean,signal?:AbortSignal):Promise<CommonsOwnRevision>{

@@ -118,6 +118,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.pf-document-tab-dirty { flex-shrink: 0; color: #800000; font-size: 16px; line-height: 1; }
 .pf-document-tab-close {
   padding: 0 8px;
 }

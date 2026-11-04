@@ -10,7 +10,7 @@ Downloads require the catalog and model to remain available. If a file is unavai
 
 ## Preserve creator notices
 
-Model Info → Credits shows the original source, licenses, conditions and creator notices. Native saves retain those notices. Geometry and image exports from an attributed model are ZIP packages containing the exported file and attribution notices; keep the package together when sharing. Commons currently does not insert files directly into an open project.
+Model Info → Credits shows the original source, licenses, conditions and creator notices. Native saves retain those notices. Geometry and image exports from an attributed model are ZIP packages containing the exported file and attribution notices; keep the package together when sharing. In the editor, choose **Commons** in the left menu bar to browse in a catalog tab. **Open in new tab** makes a separate editable local copy and keeps your catalog search. In a 3D design, **Import ? Commons** in the ribbon opens a picker for that design. Choose a model, inspect its licenses, and select **Insert into** the named design. Choose units when the file has none, then continue to placement. Click to place, press R to rotate 90 degrees, or Escape to cancel. One Undo removes the insertion and its added credits. Existing copies stay on the revision they imported. Unsupported representations explain why an import is unavailable.
 
 ## Your public profile
 

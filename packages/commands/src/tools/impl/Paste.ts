@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import type { Vec2, Vec3 } from '@pushform/core';
-import { m4translation, v3sub } from '@pushform/core';
+import { m4translation, m4mul, m4rotationAxis } from '@pushform/core';
 import type { InferenceResult } from '@pushform/inference';
 import { clipboardRefs, modelClipboard, type ModelClipboard, type ModelClipboardStore } from '../../commands/clipboard';
 import type { OverlayPrimitive } from '../overlay';
-import type { Tool, ToolContext, ToolPointerEvent, ToolStatus } from '../Tool';
+import type { Tool, ToolContext, ToolPointerEvent, ToolKeyEvent, ToolStatus } from '../Tool';
 import { inferenceOverlay } from '../toolUtil';
 import { movedOutline } from './transformShared';
 
@@ -25,13 +25,14 @@ export class PasteTool implements Tool {
   private inference: InferenceResult | null = null;
   private screen: Vec2 | null = null;
   private error: string | null = null;
+  private angle = 0;
 
   constructor(private readonly store: ModelClipboardStore = modelClipboard) {}
 
   activate(ctx: ToolContext): void {
     this.ctx = ctx;
     this.clip = this.store.current;
-    this.point = null;
+    this.point = null; this.angle = 0;
     this.error = null;
   }
   deactivate(): void {
@@ -53,7 +54,7 @@ export class PasteTool implements Tool {
     if (e.button !== 0 || !ctx || !this.clip || !e.inference) return;
     const point = e.inference.point;
     try {
-      ctx.commands.execute('edit.pasteAt', { point: [point[0], point[1], point[2]] });
+      ctx.commands.execute('edit.pasteAt', { point: [point[0], point[1], point[2]], angle: this.angle });
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err);
       ctx.statusChanged();
@@ -62,13 +63,18 @@ export class PasteTool implements Tool {
     ctx.commands.execute('tool.select');
   }
 
+  onKeyDown(event: ToolKeyEvent): boolean {
+    if (event.key.toLowerCase() !== 'r' || event.repeat || event.modifiers.ctrl || event.modifiers.meta) return false;
+    this.angle += Math.PI / 2; this.ctx?.requestRender(); return true;
+  }
+
   onCancel(): void {
     this.ctx?.commands.execute('tool.select');
   }
 
   overlay(): readonly OverlayPrimitive[] {
     const out: OverlayPrimitive[] = [];
-    if (this.clip && this.point) out.push(...movedOutline(this.clip.state, clipboardRefs(this.clip), m4translation(v3sub(this.point, this.clip.insertionPoint))));
+    if (this.clip && this.point) out.push(...movedOutline(this.clip.state, clipboardRefs(this.clip), m4mul(m4translation(this.point), m4mul(m4rotationAxis([0,0,1], this.angle), m4translation([-this.clip.insertionPoint[0], -this.clip.insertionPoint[1], -this.clip.insertionPoint[2]])))));
     out.push(...inferenceOverlay(this.inference, this.screen ?? undefined));
     return out;
   }
@@ -77,7 +83,7 @@ export class PasteTool implements Tool {
     const instructor = this.error
       ? `Paste failed: ${this.error}`
       : this.clip
-        ? 'Click to place the pasted entities. Esc cancels.'
+        ? 'Click to place. R rotates 90 degrees. Esc cancels.'
         : 'Nothing to paste. Copy something first.';
     return { instructor, vcbLabel: '' };
   }

@@ -19,7 +19,7 @@ beforeEach(() => {
   });
 });
 afterEach(() => { cleanups.splice(0).forEach(cleanup => cleanup()); vi.useRealTimers(); vi.restoreAllMocks(); });
-function setup() {
+function setup(automatic = true) {
   let account: string | null = 'alice', sequence = 0;
   const session = new DocumentSession(createApp({ demo: false, expose: false }), () => createApp({ demo: false, expose: false }), true, null);
   const api = {
@@ -33,7 +33,7 @@ function setup() {
       revision: { id: `revision-${sequence}`, document_id: input.fileId ?? `file-${sequence}`, blob_path: '', size_bytes: input.bytes.length, sha256: '', number: sequence } };
     }),
   };
-  const autosave = new CloudAutosave(api, session, () => account, () => {}, 100);
+  const autosave = new CloudAutosave(api, session, () => account, () => {}, 100, automatic);
   cleanups.push(() => { autosave.dispose(); session.dispose(); });
   return { session, api, autosave, switchAccount: (value: string | null) => { account = value; } };
 }
@@ -282,4 +282,33 @@ it('stops saving a file that is in the Trash, keeps the work, and saves again af
   expect(api.save.mock.calls[2]![0]).toMatchObject({ fileId: 'file-1' });
   expect(autosave.state(tab)).toMatchObject({ status: 'saved' });
   expect(autosave.state(tab).code).toBeUndefined();
+});
+
+it('keeps edits local until an explicit save, retains later edits, and reuses unchanged cloud content', async () => {
+  const { session, api, autosave } = setup(false);
+  edit(session.active, 'Local draft');
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(api.save).not.toHaveBeenCalled();
+  await autosave.saveNow(session.active, 'First checkpoint');
+  expect(api.save).toHaveBeenCalledOnce();
+  expect(api.save.mock.calls[0]![0].changeNotes).toBe('First checkpoint');
+  await autosave.saveNow(session.active);
+  expect(api.save).toHaveBeenCalledOnce();
+  edit(session.active, 'Later local changes');
+  autosave.setOnline(false); autosave.setOnline(true);
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(api.save).toHaveBeenCalledOnce();
+  expect(session.isDirty(session.active)).toBe(true);
+});
+
+it('keeps filename-only edits pending after recovery and saves the new cloud name explicitly', async () => {
+  const { session, api, autosave } = setup(false);
+  await autosave.saveNow(session.active);
+  session.rename(session.active.id, 'Renamed local design');
+  expect(autosave.needsSave(session.active)).toBe(true);
+  await vi.advanceTimersByTimeAsync(5000); expect(api.save).toHaveBeenCalledOnce();
+  await autosave.saveNow(session.active, 'Renamed the design');
+  expect(api.save).toHaveBeenCalledTimes(2);
+  expect(api.save.mock.calls[1]![0].name).toBe('Renamed local design.pf');
+  expect(autosave.needsSave(session.active)).toBe(false);
 });

@@ -299,14 +299,14 @@ isOneToOne: true
                   ]
                 },"cloud_revisions": {
                   Row: {
-                    "blob_path": string,"committed_at": string | null,"created_at": string,"document_id": string,"id": string,"name": string,"number": number | null,"owner_id": string,"parent_revision_id": string | null,"sha256": string,"size_bytes": number,"status": string
+                    "blob_path": string,"change_notes": string,"committed_at": string | null,"created_at": string,"document_id": string,"id": string,"name": string,"number": number | null,"owner_id": string,"parent_revision_id": string | null,"sha256": string,"size_bytes": number,"status": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "blob_path": string,"committed_at"?: string | null,"created_at"?: string,"document_id": string,"id"?: string,"name": string,"number"?: number | null,"owner_id": string,"parent_revision_id"?: string | null,"sha256": string,"size_bytes": number,"status"?: string
+                    "blob_path": string,"change_notes"?: string,"committed_at"?: string | null,"created_at"?: string,"document_id": string,"id"?: string,"name": string,"number"?: number | null,"owner_id": string,"parent_revision_id"?: string | null,"sha256": string,"size_bytes": number,"status"?: string
                   }
                   Update: {
-                    "blob_path"?: string,"committed_at"?: string | null,"created_at"?: string,"document_id"?: string,"id"?: string,"name"?: string,"number"?: number | null,"owner_id"?: string,"parent_revision_id"?: string | null,"sha256"?: string,"size_bytes"?: number,"status"?: string
+                    "blob_path"?: string,"change_notes"?: string,"committed_at"?: string | null,"created_at"?: string,"document_id"?: string,"id"?: string,"name"?: string,"number"?: number | null,"owner_id"?: string,"parent_revision_id"?: string | null,"sha256"?: string,"size_bytes"?: number,"status"?: string
                   }
                   Relationships: [
                     {
@@ -1139,6 +1139,9 @@ isOneToOne: false
                            },
 "cloud_restore":
 { Args: { "p_id": string,"p_kind": string }; Returns: Json
+                           },
+"cloud_revision_notes":
+{ Args: { "p_notes": string,"p_revision": string }; Returns: undefined
                            },
 "cloud_save_profile":
 { Args: { "p_account_type": string,"p_company_name": string,"p_company_size": string,"p_first_name": string,"p_industry": string,"p_industry_other": string,"p_last_name": string,"p_mailing_opt_in"?: boolean,"p_terms_version": string }; Returns: Json

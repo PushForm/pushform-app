@@ -14,4 +14,4 @@ Open a Layout drawing and choose **Save as Template…** in the Main menu or com
 
 Choose **New Layout**, then the **My Templates** tab immediately to the right of **Titleblock** to browse your saved templates by project in the same dialog. You can search or change pages there, or switch back to a built-in template tab. Select one and click **Create Layout**, or double-click it. You can also open a template from Home, where it has a distinct icon and a **Layout template** label.
 
-Each use creates a new, untitled drawing with the template's contents and an empty undo history. It autosaves as an ordinary drawing in the template's project and folder. Edit and rename that new drawing as usual; the saved template stays unchanged.
+Each use creates a new, untitled drawing with the template's contents and an empty undo history. Local edits stay on this device; Save version creates a private drawing in the template's project and folder. Edit and rename that new drawing as usual; the saved template stays unchanged.

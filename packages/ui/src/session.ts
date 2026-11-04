@@ -49,6 +49,7 @@ interface TabBase {
   readonly id: string;
   readonly type: 'model' | 'layout';
   name: string;
+  savedCloudName?: string;
   readonly initialVersion: number;
   /**
    * First cloud save is still pending; retained across refresh, including its chosen project and the key that makes
@@ -146,6 +147,7 @@ interface RefreshLayoutTab {
   dirty?: boolean;
   type: 'layout';
   name: string;
+  savedCloudName?: string;
   recoveryId: string;
   content: string;
   savedContent: string;
@@ -157,6 +159,7 @@ interface RefreshLayoutTab {
 interface RefreshModelTab {
   type: 'model';
   name: string;
+  savedCloudName?: string;
   content: string;
   dirty: boolean;
   savedContent?: string;
@@ -230,6 +233,19 @@ export class DocumentSession {
   private refreshRejected: { parts: readonly string[] } | null = null;
   private readonly flushOnLeave = (): void => this.flushRefreshPersistence();
   private nativeWriter: NativeRefreshWriter | undefined;
+  private localStates = new Map<string, object>();
+  private localMetadata = new Map<string, string>();
+  private localListeners = new Set<() => void>();
+  private localRevision = 0;
+  subscribeLocal = (listener: () => void): (() => void) => { this.localListeners.add(listener); return () => { this.localListeners.delete(listener); }; };
+  getLocalRevision = (): number => this.localRevision;
+  localSaveState(tab: DocumentTab): 'saved' | 'waiting' | 'error' | 'unavailable' {
+    if (this.recoveryError) return 'error';
+    if (!this.nativeWriter) return 'unavailable';
+    return this.localStates.get(tab.id) === (tab.type === 'model' ? tab.app.document.doc.state : tab.doc.state) && this.localMetadata.get(tab.id) === JSON.stringify([tab.name, tab.identity, tab.cloudDraft?.key, tab.savedCloudName]) ? 'saved' : 'waiting';
+  }
+  private notifyLocal(): void { this.localRevision++; this.localListeners.forEach(listener => listener()); }
+
   recoveryError: string | null = null;
 
   constructor(
@@ -257,7 +273,13 @@ export class DocumentSession {
     this._activeId = id;
     if (nativeRefresh) this.nativeWriter = new NativeRefreshWriter(nativeRefresh.store, error => {
       this.recoveryError = error instanceof Error ? error.message : 'Native recovery failed';
-      // Do not emit here: a failed persistence write must not schedule itself indefinitely.
+      this.notifyLocal();
+      // Local status notifications never schedule another checkpoint.
+    }, snapshot => {
+      this.nativeRefresh?.remember?.(snapshot);
+      this.localMetadata = new Map(snapshot.entries.map(entry => { const metadata = JSON.parse(entry.metadata) as { name: string; identity?: string; cloudDraft?: CloudDraft; savedCloudName?: string }; return [entry.key, JSON.stringify([metadata.name, metadata.identity, metadata.cloudDraft?.key, metadata.savedCloudName])]; }));
+      this.localStates = new Map(snapshot.entries.map(entry => [entry.key, entry.state]));
+      this.recoveryError = null; this.notifyLocal();
     });
     this.watch(this._tabs[0]!);
     this.restoreForRefresh();
@@ -576,7 +598,7 @@ export class DocumentSession {
     this.emit();
   }
 
-  markModelSaved(id: string, name?: string, identity?: string | null, savedContent?: string): void {
+  markModelSaved(id: string, name?: string, identity?: string | null, savedContent?: string, savedCloudName?: string): void {
     const tab = this._tabs.find((item) => item.id === id);
     if (!tab || tab.type !== 'model') throw new Error('Unknown Modeling tab');
     delete tab.cloudDraft;
@@ -584,11 +606,12 @@ export class DocumentSession {
       tab.name = name.endsWith(MODEL_FILE_EXTENSION) ? name : `${name}${MODEL_FILE_EXTENSION}`;
     if (identity === null) delete tab.identity;
     else if (identity) tab.identity = identity;
+    if (identity?.startsWith('cloud:')) tab.savedCloudName = savedCloudName ?? (name !== undefined ? tab.name : tab.savedCloudName ?? tab.name);
     tab.savedContent = savedContent ?? modelContentKey(tab.app.document.doc);
     this.emit();
   }
 
-  markLayoutSaved(id: string, name?: string, identity?: string | null, savedContent?: string): void {
+  markLayoutSaved(id: string, name?: string, identity?: string | null, savedContent?: string, savedCloudName?: string): void {
     const tab = this._tabs.find((item) => item.id === id);
     if (!tab || tab.type !== 'layout') throw new Error('Unknown Layout tab');
     delete tab.cloudDraft;
@@ -596,6 +619,7 @@ export class DocumentSession {
       tab.name = name.endsWith(LAYOUT_FILE_EXTENSION) ? name : `${name}${LAYOUT_FILE_EXTENSION}`;
     if (identity === null) delete tab.identity;
     else if (identity) tab.identity = identity;
+    if (identity?.startsWith('cloud:')) tab.savedCloudName = savedCloudName ?? (name !== undefined ? tab.name : tab.savedCloudName ?? tab.name);
     tab.savedContent = savedContent ?? layoutContentKey(tab.doc);
     this.cancelRecoveryTimer(tab.recoveryId);
     if (this.recoveryStore) this.queueRecovery(tab.recoveryId, () => this.recoveryStore!.delete(tab.recoveryId));
@@ -809,6 +833,7 @@ export class DocumentSession {
               workspace: { ...useAppStore.getState() },
               savedContent: item.dirty ? (typeof item.savedContent === 'string' ? item.savedContent : '') : modelContentKey(app.document.doc),
               ...(typeof item.identity === 'string' ? { identity: item.identity } : {}),
+              ...(typeof item.savedCloudName === 'string' ? { savedCloudName: item.savedCloudName } : {}),
               ...(item.cloudDraft && typeof item.cloudDraft === 'object' ? { cloudDraft: {
                 ...(typeof item.cloudDraft.projectId === 'string' ? { projectId: item.cloudDraft.projectId } : {}),
                 ...(typeof item.cloudDraft.folderId === 'string' ? { folderId: item.cloudDraft.folderId } : {}),
@@ -839,6 +864,7 @@ export class DocumentSession {
             savedContent: this.nativeRefresh ? item.dirty ? '' : layoutContentKey(doc) : item.savedContent,
             recoveryId: item.recoveryId,
             ...(typeof item.identity === 'string' ? { identity: item.identity } : {}),
+              ...(typeof item.savedCloudName === 'string' ? { savedCloudName: item.savedCloudName } : {}),
             ...(item.cloudDraft && typeof item.cloudDraft === 'object' ? { cloudDraft: {
               ...(typeof item.cloudDraft.projectId === 'string' ? { projectId: item.cloudDraft.projectId } : {}),
               ...(typeof item.cloudDraft.folderId === 'string' ? { folderId: item.cloudDraft.folderId } : {}),
@@ -906,7 +932,7 @@ export class DocumentSession {
       // Placeholder tabs only show a model being opened, so a refresh does not bring them back.
       const kept = this._tabs.filter(tab => !tab.placeholder);
       this.nativeWriter.request({ activeIndex: Math.max(0, kept.indexOf(this.active)), entries: kept.map(tab => {
-        const metadata = JSON.stringify({ type: tab.type, name: tab.name, dirty: this.isDirty(tab),
+        const metadata = JSON.stringify({ type: tab.type, name: tab.name, savedCloudName: tab.savedCloudName, dirty: this.isDirty(tab),
           ...(tab.type === 'layout' ? { recoveryId: tab.recoveryId, activePageId: tab.activePageId, savedContent: '' } : {}),
           ...(tab.identity ? { identity: tab.identity } : {}), ...(tab.cloudDraft ? { cloudDraft: tab.cloudDraft } : {}) });
         if (tab.type === 'model') {
@@ -950,6 +976,29 @@ export class DocumentSession {
     } catch {
       // Serialization or storage failures must not interrupt editing.
     }
+  }
+
+  get localWorkspaceScope(): string | undefined { return this.nativeRefresh?.store.scope; }
+
+  /** Restore another closed tab's durable local working copies without replacing current work. */
+  recoverLocalWorkspace(workspace: NativeRefreshSession): void {
+    for (const entry of workspace.head?.entries ?? []) {
+      const file = workspace.files.get(entry.id); if (!file) continue;
+      let metadata: { name?: string; identity?: string; savedCloudName?: string; dirty?: boolean; cloudDraft?: ModelTab['cloudDraft'] };
+      try { metadata = JSON.parse(entry.metadata) as typeof metadata; } catch { continue; }
+      if (typeof metadata.name !== 'string' || (!metadata.dirty && !metadata.identity && !metadata.cloudDraft)) continue;
+      const identity = typeof metadata.identity === 'string' ? metadata.identity : undefined;
+      if (file.kind === 'model') {
+        const tab = this.openModelCopy(file.file, metadata.name);
+        this.markModelSaved(tab.id, metadata.name, identity, metadata.dirty ? '' : modelContentKey(tab.app.document.doc), metadata.savedCloudName);
+        if (metadata.cloudDraft && typeof metadata.cloudDraft === 'object') tab.cloudDraft = { ...(typeof metadata.cloudDraft.projectId === 'string' ? { projectId: metadata.cloudDraft.projectId } : {}), ...(typeof metadata.cloudDraft.folderId === 'string' || metadata.cloudDraft.folderId === null ? { folderId: metadata.cloudDraft.folderId } : {}), ...(typeof metadata.cloudDraft.key === 'string' ? { key: metadata.cloudDraft.key } : {}) };
+      } else {
+        const tab = this.openLayoutFile(file.file, metadata.name);
+        this.markLayoutSaved(tab.id, metadata.name, identity, metadata.dirty ? '' : layoutContentKey(tab.doc), metadata.savedCloudName);
+        if (metadata.cloudDraft && typeof metadata.cloudDraft === 'object') tab.cloudDraft = { ...(typeof metadata.cloudDraft.projectId === 'string' ? { projectId: metadata.cloudDraft.projectId } : {}), ...(typeof metadata.cloudDraft.folderId === 'string' || metadata.cloudDraft.folderId === null ? { folderId: metadata.cloudDraft.folderId } : {}), ...(typeof metadata.cloudDraft.key === 'string' ? { key: metadata.cloudDraft.key } : {}) };
+      }
+    }
+    this.flushRefreshPersistence();
   }
 
   /** Await all requested binary checkpoints (tests and explicit durability checks). */

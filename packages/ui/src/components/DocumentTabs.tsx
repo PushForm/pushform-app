@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { useEffect, useRef, useState } from 'react';
-import type { JSX } from 'react';
+import type { JSX, ReactNode } from 'react';
 import { TbVector } from 'react-icons/tb';
 import type { DocumentSession } from '../session';
 import { displayDocumentName } from '../documentName';
@@ -11,8 +11,9 @@ import { Icon } from './Icon';
 export function DocumentTabs({
   session,
   onClose,
-  onNewLayout,
+  onNewLayout, extraTab, activeExtra, onActivate,
 }: {
+  extraTab?: ReactNode; activeExtra?: boolean | undefined; onActivate?: (() => void) | undefined;
   session: DocumentSession;
   onClose?: (id: string) => void;
   onNewLayout: () => void;
@@ -32,7 +33,7 @@ export function DocumentTabs({
         return (
           <div
             key={tab.id}
-            className={`pf-document-tab${tab.id === session.activeId ? ' is-active' : ''}`}
+            className={`pf-document-tab${!activeExtra && tab.id === session.activeId ? ' is-active' : ''}`}
           >
             {editing?.id === tab.id ? <input
               className="pf-document-tab-rename"
@@ -52,8 +53,8 @@ export function DocumentTabs({
               className="pf-document-tab-select"
               data-guidance-id={`tab:${tab.id}`}
               aria-label={`${typeLabel}: ${name}`}
-              aria-current={tab.id === session.activeId ? 'page' : undefined}
-              onClick={() => session.activate(tab.id)}
+              aria-current={!activeExtra && tab.id === session.activeId ? 'page' : undefined}
+              onClick={() => { session.activate(tab.id); onActivate?.(); }}
               onDoubleClick={() => { cancelRename.current = false; setEditing({ id: tab.id, name }); }}
             >
               {tab.type === 'model' ? (
@@ -80,6 +81,7 @@ export function DocumentTabs({
           </div>
         );
       })}
+      {extraTab}
     </nav>
   );
 }

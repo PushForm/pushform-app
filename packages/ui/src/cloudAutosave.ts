@@ -15,6 +15,7 @@ interface Entry extends AutosaveState {
   project?: string | undefined; folder?: string | null | undefined; timer?: ReturnType<typeof setTimeout> | undefined;
   running?: Promise<void> | undefined; failures: number;
   pausedIdentity?: string | undefined;
+  notes?: string | undefined;
 }
 const version = (tab: DocumentTab): number => tab.type === 'model' ? tab.app.document.doc.version : tab.doc.version;
 
@@ -31,7 +32,8 @@ export class CloudAutosave {
   private currentOwner = (): string | null => this.owner() === this.accountId ? this.accountId : null;
   private off: () => void;
   constructor(private api: CloudFilesApi, private session: DocumentSession, private owner: () => string | null,
-    private onSaved: (saved: CloudSavedFile, tab: DocumentTab) => void = () => {}, private delay = 1200) {
+    private onSaved: (saved: CloudSavedFile, tab: DocumentTab) => void = () => {}, private delay = 1200,
+    readonly automatic = true) {
     this.accountId = owner();
     for (const tab of session.tabs) this.entries.set(tab.id, this.entry(tab, !!tab.cloudDraft));
     this.off = session.subscribe(() => this.scan());
@@ -41,7 +43,8 @@ export class CloudAutosave {
   getSnapshot = (): number => this.revision;
   state(tab: DocumentTab): AutosaveState { return this.entries.get(tab.id) ?? { status: 'saved' }; }
   private entry(tab: DocumentTab, initial: boolean): Entry {
-    return { status: 'saved', savedName: tab.name, version: version(tab), initial, project: tab.cloudDraft?.projectId, folder: tab.cloudDraft?.folderId, paused: false, blocked: false, failures: 0 };
+    if (cloudLocation(tab.identity) && tab.savedCloudName === undefined) tab.savedCloudName = tab.name;
+    return { status: 'saved', savedName: tab.savedCloudName ?? tab.name, version: version(tab), initial, project: tab.cloudDraft?.projectId, folder: tab.cloudDraft?.folderId, paused: false, blocked: false, failures: 0 };
   }
   private emit(): void { this.revision++; this.listeners.forEach(listener => listener()); }
   private needed(tab: DocumentTab, entry: Entry): boolean {
@@ -59,6 +62,7 @@ export class CloudAutosave {
       const fresh = !entry;
       if (!entry) { entry = this.entry(tab, !cloudLocation(tab.identity)); this.entries.set(tab.id, entry); }
       if (tab.placeholder) continue;
+      if (tab.savedCloudName !== undefined && !entry.running) entry.savedName = tab.savedCloudName;
       if (fresh && entry.initial && !tab.cloudDraft) this.session.setCloudDraft(tab.id);
       // An edited document that was never saved (the startup document) has a first save pending too. Its draft,
       // with the key that keeps a retried first save on one document, reaches the refresh snapshot before the
@@ -78,7 +82,7 @@ export class CloudAutosave {
     clearTimeout(entry.timer); entry.timer = undefined;
     if (entry.blocked || entry.paused || this.disposed) return;
     entry.status = this.online ? 'waiting' : 'offline'; this.emit();
-    if (!this.enabled || !this.online || !this.currentOwner()) return;
+    if (!this.automatic || !this.enabled || !this.online || !this.currentOwner()) return;
     entry.timer = setTimeout(() => { entry.timer = undefined; void this.run(tab, entry).catch(() => {}); }, delay);
   }
   private async defaultProject(): Promise<string> {
@@ -117,7 +121,7 @@ export class CloudAutosave {
     entry.paused = paused; clearTimeout(entry.timer); entry.timer = undefined;
     if (!paused && this.needed(tab, entry)) this.schedule(tab, entry);
   }
-  async saveNow(tab: DocumentTab): Promise<void> {
+  async saveNow(tab: DocumentTab, notes?: string): Promise<void> {
     let entry = this.entries.get(tab.id);
     if (!entry) { entry = this.entry(tab, true); this.entries.set(tab.id, entry); }
     const available = (): void => {
@@ -125,12 +129,17 @@ export class CloudAutosave {
         throw new Error('Cloud saving is unavailable. Your changes are kept on this device.');
     };
     available();
+    entry.notes = notes;
     entry.blocked = false; entry.error = undefined;
     if (entry.running) await entry.running;
     // Explicit Save also establishes the first destination for an unchanged local document.
     if (!cloudLocation(tab.identity)) entry.initial = true;
-    while (this.session.tabs.includes(tab) && this.needed(tab, entry)) { available(); await this.run(tab, entry); }
+    while (this.session.tabs.includes(tab) && this.needed(tab, entry)) {
+      available(); await this.run(tab, entry);
+      if (!this.automatic) break;
+    }
   }
+  needsSave(tab: DocumentTab): boolean { return this.pending(tab); }
   hasPending(): boolean {
     return this.session.tabs.some(tab => this.pending(tab));
   }
@@ -164,7 +173,7 @@ export class CloudAutosave {
         // starts. Drafts made by `track` or a scan are written with the next refresh snapshot.
         this.session.setCloudDraft(tab.id, entry.project, entry.folder); this.session.flushRefreshPersistence();
       }
-      const saved = await saveCloudDocument(this.api, this.session, tab, this.currentOwner, project, tab.name, false, entry.folder ?? null);
+      const saved = await saveCloudDocument(this.api, this.session, tab, this.currentOwner, project, tab.name, false, entry.folder ?? null, entry.notes);
       if (this.disposed) return;
       entry.savedName = saved.file.name;
       entry.initial = false; entry.failures = 0; entry.status = 'saved';
@@ -179,9 +188,10 @@ export class CloudAutosave {
       entry.failures++; throw error;
     }).finally(() => {
       entry.running = undefined;
+      if (!this.automatic && this.session.tabs.includes(tab) && this.needed(tab, entry) && entry.status === 'saved') entry.status = 'waiting';
       if (this.disposed) return;
       this.emit();
-      if (this.session.tabs.includes(tab) && this.needed(tab, entry) && !entry.blocked) {
+      if (this.automatic && this.session.tabs.includes(tab) && this.needed(tab, entry) && !entry.blocked) {
         const retry = entry.failures ? Math.min(30000, 2000 * 2 ** Math.min(entry.failures - 1, 4)) : this.delay;
         if (entry.failures) {
           if (this.enabled && this.online && !entry.paused && this.currentOwner()) entry.timer = setTimeout(() => {

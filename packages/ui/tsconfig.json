@@ -49,6 +49,9 @@
     },
     {
       "path": "../account-ui"
+    },
+    {
+      "path": "../commons-ui"
     }
   ]
 }

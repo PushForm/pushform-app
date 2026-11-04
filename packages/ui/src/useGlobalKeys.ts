@@ -51,5 +51,5 @@ export function useGlobalKeys(app: AppInstance, enabled = true): void {
 
 function isTextField(el: HTMLElement): boolean {
   const tag = el.tagName;
-  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+  return Boolean(el.closest?.('[role=dialog], [aria-modal=true]')) || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
 }

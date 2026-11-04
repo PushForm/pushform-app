@@ -3,12 +3,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { loadCommonsModel, type CloudSession, type CommonsOpenIntent, type OpenedCommonsModel } from '@pushform/cloud';
-import { MESH_UNITS, type MeshUnit } from '@pushform/io';
+import type { CommonsAccount } from '@pushform/commons-ui/account';
+import { MESH_UNITS, probeMeshImport, type MeshUnit } from '@pushform/io';
 import { openCommonsModel } from '../commonsOpening';
 import type { DocumentSession } from '../session';
 import { showToast } from '../toasts';
 
-export interface CommonsOpeningConfig { intent: CommonsOpenIntent | null; filesUrl?: string | undefined; handled(): void }
+export interface CommonsOpeningConfig { intent: CommonsOpenIntent | null; account?: CommonsAccount | undefined; filesUrl?: string | undefined; handled(): void }
 export function CommonsOpening({ intent, filesUrl, cloud, session, done, opened }: { intent: CommonsOpenIntent; filesUrl: string | undefined; cloud: CloudSession | undefined; session: DocumentSession; done(): void; opened(): void }) {
   const [error, setError] = useState<string|null>(null); const [source, setSource] = useState<OpenedCommonsModel|null>(null);
   const [stage, setStage] = useState('Downloading Commons model…'); const [attempt, setAttempt] = useState(0);
@@ -37,7 +38,7 @@ export function CommonsOpening({ intent, filesUrl, cloud, session, done, opened 
   const install = async (model: OpenedCommonsModel, abort: AbortController): Promise<void> => {
     try {
       setSource(null); setStage('Opening a new model…');
-      const result = await openCommonsModel(session, model, abort.signal, /\.(obj|stl|3ds)$/i.test(model.name) ? { unit, up } : undefined);
+      const result = await openCommonsModel(session, model, abort.signal, probeMeshImport(model.bytes) ? { unit, up: probeMeshImport(model.bytes)?.kind === 'dxf' ? 'z' : up } : undefined);
       if (!alive.current || abort.signal.aborted) return;
       showToast(result.warnings.length ? `Commons model opened with ${result.warnings.length} import notices. Original credits are retained.` : 'Commons model opened. Original licenses and credits are retained.');
       opened(); done();
@@ -50,7 +51,7 @@ export function CommonsOpening({ intent, filesUrl, cloud, session, done, opened 
         const token = await cloud?.getAccessToken(); if (!token) throw new Error('Sign in to open this Commons model.');
         const model = await loadCommonsModel(filesUrl ?? '', token, intent, abort.signal);
         if (abort.signal.aborted) return;
-        if (/\.(obj|stl|3ds)$/i.test(model.name)) setSource(model);
+        if (probeMeshImport(model.bytes)) setSource(model);
         else await install(model, abort);
       } catch (cause) { if (!abort.signal.aborted) setError(cause instanceof Error ? cause.message : 'Could not open this model.'); }
     })();
@@ -61,7 +62,7 @@ export function CommonsOpening({ intent, filesUrl, cloud, session, done, opened 
     {error ? <><p role="alert">{error}</p><button onClick={() => setAttempt(n => n + 1)}>Try again</button></> : source ? <>
       <p>{source.attribution.title} by {source.attribution.creator}</p><p>This file does not record its units. Choose how to read its dimensions.</p>
       <label>Units <select value={unit} onChange={event => setUnit(event.target.value as MeshUnit)}>{MESH_UNITS.map(item => <option key={item.unit} value={item.unit}>{item.label}</option>)}</select></label>
-      <label>Up axis <select value={up} onChange={event => setUp(event.target.value as 'z'|'y')}><option value="z">Z up</option><option value="y">Y up</option></select></label>
+      {probeMeshImport(source.bytes)?.kind !== 'dxf' && <label>Up axis <select value={up} onChange={event => setUp(event.target.value as 'z'|'y')}><option value="z">Z up</option><option value="y">Y up</option></select></label>}
       <button onClick={() => { if (controller.current) void install(source, controller.current); }}>Open model</button>
     </> : <p role="status">{stage}</p>}
     <p>Opens a separate model with its original licenses and credits. Your current project stays open.</p>

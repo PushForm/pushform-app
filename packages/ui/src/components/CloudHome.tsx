@@ -5,6 +5,8 @@ import { CLOUD_PAGE_SIZE, cloudFileName, type CloudFile, type CloudFilesApi, typ
 import { LuArrowRight, LuChevronRight, LuClock3, LuEllipsis, LuFolder, LuFolderInput, LuFolderPlus, LuGrid2X2, LuList, LuPencil, LuPlus, LuRefreshCw, LuSearch, LuShieldCheck, LuTrash2, LuUndo2 } from 'react-icons/lu';
 import { RiChatAiLine } from 'react-icons/ri';
 import { useThumbnails } from '../useThumbnails';
+import { LocalWorkspaces } from './LocalWorkspaces';
+import type { DocumentSession } from '../session';
 import { AccountControl } from './AccountControl';
 import { Icon } from './Icon';
 import { ImportDialog, folderTree } from './ImportDialog';
@@ -12,7 +14,9 @@ import { displayDocumentName } from '../documentName';
 import type { BuildInfo } from '../buildInfo';
 import type { DocumentTab } from '../session';
 
-export function CloudHome({ api, cloud, recents, openTabs, ownerId, buildInfo, onResume, onOpen, onCreate, onRequests, requestsOpen = false, onForgetRecents, onRenamed, onMoved, onExtensions }: {
+export function CloudHome({ api, cloud, recents, openTabs, ownerId, buildInfo, onResume, onOpen, onCreate, onRequests, requestsOpen = false, onForgetRecents, onRenamed, onMoved, onExtensions, onCommons, localSession, onLocalOpened }: {
+  localSession?: DocumentSession | undefined; onLocalOpened?: (() => void) | undefined;
+  onCommons?: (() => void) | undefined;
   api: CloudFilesApi | undefined; cloud: CloudSession | undefined; recents: CloudFile[];
   openTabs: readonly DocumentTab[]; onResume: (tab: DocumentTab) => void;
   /** The signed-in account, which scopes the remembered import destination. */
@@ -268,6 +272,7 @@ export function CloudHome({ api, cloud, recents, openTabs, ownerId, buildInfo, o
           </div> : null}
         </div>
         <nav>
+          {onCommons && <button type="button" onClick={onCommons}>Commons</button>}
           <button type="button" aria-current={scope === '' ? 'page' : undefined} onClick={() => choose('')}><Icon name="account" /> Owned by me</button>
           <button type="button" aria-current={recent ? 'page' : undefined} onClick={() => choose('@recent')}><LuClock3 /> Recently opened</button>
           {api?.listTrash ? <button type="button" aria-current={inTrash ? 'page' : undefined} onClick={() => choose('@trash')}><LuTrash2 /> Trash</button> : null}
@@ -285,10 +290,11 @@ export function CloudHome({ api, cloud, recents, openTabs, ownerId, buildInfo, o
             </> : null}
             <button type="button" className="pf-home-refresh" disabled={!api || busy} onClick={() => { setError(null); setRefresh(value => value + 1); }}><LuRefreshCw /> Refresh</button>
           </div></div>
+        {localSession && ownerId && onLocalOpened && <LocalWorkspaces ownerId={ownerId} session={localSession} onOpened={onLocalOpened} />}
         {!api ? <p className="pf-home-error" role="alert">Cloud storage is unavailable for this installation. Please contact the administrator.</p> : null}
         {error ? <p className="pf-home-error" role="alert">{error} <button type="button" onClick={() => { setError(null); setRefresh(value => value + 1); }}>Try again</button></p> : null}
         {creating ? <form className="pf-home-new" onSubmit={submit} aria-label={creating === 'project' ? 'Create project' : 'Create document'}>
-          <div><h2>{creating === 'project' ? 'New project' : creating === 'model' ? 'New model' : 'New drawing'}</h2><p>{creating === 'project' ? 'Keep related documents together.' : 'Your work will save automatically to your private cloud library.'}</p></div>
+          <div><h2>{creating === 'project' ? 'New project' : creating === 'model' ? 'New model' : 'New drawing'}</h2><p>{creating === 'project' ? 'Keep related documents together.' : 'Your work stays on this device until you save a private cloud version.'}</p></div>
           <label>{creating === 'project' ? 'Project name' : 'Document name'}<input ref={nameInput} value={name} maxLength={creating === 'project' ? 100 : 200} disabled={busy} onChange={event => setName(event.target.value)} required /></label>
           {creating !== 'project' ? <label>Project<select value={destination} disabled={busy} onChange={event => { setDestination(event.target.value); setDestinationFolder(null); }}><option value="">Documents</option>{projects.filter(project => project.name.toLowerCase() !== 'documents').map(project => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label> : null}
           {creating !== 'project' ? <label>Folder<select value={destinationFolder ?? ''} disabled={busy} onChange={event => setDestinationFolder(event.target.value || null)}><option value="">Project root</option>{destinationTree.map(item => <option value={item.folder.id} key={item.folder.id}>{`${'\u00a0\u00a0'.repeat(item.depth)}${item.folder.name}`}</option>)}</select></label> : null}
@@ -304,7 +310,7 @@ export function CloudHome({ api, cloud, recents, openTabs, ownerId, buildInfo, o
           <button type="submit" className="pf-home-primary" disabled={busy}>Move</button>
           <button type="button" disabled={busy} onClick={() => setMoving(null)}>Cancel</button></form> : null}
         {!creating && !search && !recent && !scope ? <section className="pf-home-welcome" aria-label="Welcome to PushForm">
-          <div><p className="pf-home-eyebrow">A PLACE FOR YOUR IDEAS</p><h2>Welcome to PushForm</h2><p>Start with a model. Bring it together in a drawing.<br />Your changes save automatically as you work.</p></div>
+          <div><p className="pf-home-eyebrow">A PLACE FOR YOUR IDEAS</p><h2>Welcome to PushForm</h2><p>Start with a model. Bring it together in a drawing.<br />Changes save on this device. Save a version to keep a cloud checkpoint.</p></div>
           <button type="button" className="pf-home-start" aria-label="Create a model" disabled={!api || busy} onClick={() => startCreate('model')}><span className="pf-home-start-icon"><Icon name="document-model" size={42} /></span><span><strong>Create a model</strong><small>Shape your next idea in 3D</small></span><LuArrowRight /></button>
           <button type="button" className="pf-home-start" aria-label="Create a drawing" disabled={!api || busy} onClick={() => startCreate('layout')}><span className="pf-home-start-icon is-layout"><Icon name="document-layout" size={42} /></span><span><strong>Create a drawing</strong><small>Plan, document and present</small></span><LuArrowRight /></button>
           <button type="button" className="pf-home-start" aria-label="Import files" disabled={!api || busy} onClick={startImport}><span className="pf-home-start-icon is-import"><LuFolderInput size={38} /></span><span><strong>Import files</strong><small>SketchUp models and LayOut drawings</small></span><LuArrowRight /></button>

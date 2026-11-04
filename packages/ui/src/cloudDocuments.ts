@@ -16,7 +16,7 @@ function cloudIdentity(ownerId: string, saved: CloudSavedFile): string {
 }
 /** Capture source tab and its saved baseline before the first await, not the tab active on completion. */
 export async function saveCloudDocument(api: CloudFilesApi, session: DocumentSession, tab: DocumentTab,
-  owner: () => string | null, projectId: string, name: string, copy = false, folderId: string | null = null): Promise<CloudSavedFile> {
+  owner: () => string | null, projectId: string, name: string, copy = false, folderId: string | null = null, changeNotes?: string): Promise<CloudSavedFile> {
   const ownerId = owner();
   if (!ownerId) throw new CloudFilesError('auth', 'Sign in again to save cloud files.');
   const originalName = tab.name;
@@ -33,15 +33,15 @@ export async function saveCloudDocument(api: CloudFilesApi, session: DocumentSes
   const update = !copy && location && location.projectId === projectId;
   const bytes = await encoding;
   if (owner() !== ownerId) throw new CloudFilesError('auth', 'Your account session changed. Reopen cloud files after signing in.');
-  const saved = await api.save({ projectId, name: fileName, kind: tab.type, bytes, folderId: update ? undefined : folderId,
+  const saved = await api.save({ changeNotes, projectId, name: fileName, kind: tab.type, bytes, folderId: update ? undefined : folderId,
     fileId: update ? location.fileId : undefined, parentRevisionId: update ? location.revisionId : undefined,
     // A pending first save retried after a crash continues the document it created.
     clientKey: !copy && !location ? tab.cloudDraft?.key : undefined });
   if (owner() !== ownerId) throw new CloudFilesError('auth', 'Your account session changed. Reopen cloud files after signing in.');
   if (!session.tabs.includes(tab)) return saved;
   const identity = cloudIdentity(ownerId, saved);
-  if (tab.type === 'model') session.markModelSaved(tab.id, tab.name === originalName ? saved.file.name : tab.name, identity, savedContent);
-  else session.markLayoutSaved(tab.id, tab.name === originalName ? saved.file.name : tab.name, identity, savedContent);
+  if (tab.type === 'model') session.markModelSaved(tab.id, tab.name === originalName ? saved.file.name : tab.name, identity, savedContent, saved.file.name);
+  else session.markLayoutSaved(tab.id, tab.name === originalName ? saved.file.name : tab.name, identity, savedContent, saved.file.name);
   return saved;
 }
 export async function openCloudDocument(api: CloudFilesApi, session: DocumentSession, file: CloudFile,

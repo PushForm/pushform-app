@@ -39,6 +39,10 @@ import { AboutDialog } from './AboutDialog';
 import { UNKNOWN_BUILD, type BuildInfo } from '../buildInfo';
 import { cloudLocation, saveCloudDocument } from '../cloudDocuments';
 import type { CloudAutosave } from '../cloudAutosave';
+import { PublishSnapshot } from './PublishSnapshot';
+import type { CommonsOpeningConfig } from './CommonsOpening';
+import type { PublishingSnapshot } from './SaveVersionDialog';
+import { SaveVersionDialog } from './SaveVersionDialog';
 import { AutosaveIndicator } from './AutosaveIndicator';
 import { allowOpeningDocument, desktopUpdates } from '../desktopUpdates';
 
@@ -80,7 +84,8 @@ function download(bytes: Uint8Array, name: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome, onRequests, onObjects, onClearChat, onExtensions }: {
+export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome, onRequests, onObjects, onClearChat, onExtensions, commons, onBrowseCommons, commonsActive, onModelTab }: {
+  commons?: CommonsOpeningConfig | undefined; onBrowseCommons?: (() => void) | undefined; commonsActive?: boolean | undefined; onModelTab?: (() => void) | undefined;
   session: DocumentSession; cloud?: CloudSession | undefined; cloudFiles?: CloudFilesApi | undefined;
   buildInfo?: BuildInfo | undefined;
   autosave?: CloudAutosave | undefined; onHome?: (() => void) | undefined;
@@ -101,6 +106,8 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
   clearChatRef.current = onClearChat;
   const [cloudBrowser, setCloudBrowser] = useState<{ saveTab?: DocumentTab; saveAsTemplate?: boolean } | null>(null);
   useEffect(() => () => { if (cloudBrowser?.saveTab && !cloudBrowser.saveAsTemplate) autosave?.pause(cloudBrowser.saveTab, false); }, [autosave, cloudBrowser]);
+  const [publishSnapshot, setPublishSnapshot] = useState<PublishingSnapshot | null>(null);
+  const [saveVersion, setSaveVersion] = useState<DocumentTab | null>(null);
   const [templateBusy, setTemplateBusy] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const cloudSaving = useRef(false);
@@ -665,7 +672,7 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
   const closeTab = (id: string): void => {
     const tab = session.tabs.find((candidate) => candidate.id === id);
     if (!tab) return;
-    if (autosave) {
+    if (autosave?.automatic) {
       if (closingSaves.current.has(id)) return;
       closingSaves.current.add(id);
       void autosave.saveNow(tab).then(() => { session.close(id); }).catch(cause => {
@@ -673,7 +680,7 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
       }).finally(() => closingSaves.current.delete(id));
       return;
     }
-    if (session.isDirty(tab)) {
+    if (session.isDirty(tab) || autosave?.needsSave(tab)) {
       setClosingId(id);
       return;
     }
@@ -718,17 +725,17 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
   const saveTemplate = (): void => {
     if (session.active.type === 'layout' && cloudFiles) setCloudBrowser({ saveTab: session.active, saveAsTemplate: true });
   };
-  const fileActions = useRef({ saveTemplate, save: () => { void saveDocument(session.active); }, saveAs: () => {
+  const fileActions = useRef({ saveTemplate, save: () => { if (autosave && cloudFiles) setSaveVersion(session.active); else void saveDocument(session.active); }, saveAs: () => {
     if (autosave) makeCloudCopy(); else void saveDocument(session.active, true);
   } });
-  fileActions.current = { saveTemplate, save: () => { void saveDocument(session.active); }, saveAs: () => {
+  fileActions.current = { saveTemplate, save: () => { if (autosave && cloudFiles) setSaveVersion(session.active); else void saveDocument(session.active); }, saveAs: () => {
     if (autosave) makeCloudCopy(); else void saveDocument(session.active, true);
   } };
   useEffect(() => {
     const tab = session.active;
     const registry = tab.type === 'model' ? tab.app.commands : tab.commands;
     const off = [registry.register(defineCommand({
-      id: 'file.save', title: 'Save', category: 'file', menu: 'File', icon: 'save',
+      id: 'file.save', title: autosave ? 'Save version' : 'Save', category: 'file', menu: 'File', icon: 'save',
       params: z.object({}), undoable: false, run: () => fileActions.current.save(),
     })), registry.register(defineCommand({
       id: 'file.saveAs', title: 'Save As…', category: 'file', menu: 'File', icon: 'save-as',
@@ -761,7 +768,7 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
       },
     },
     {
-      label: 'Save', command: 'file.save',
+      label: autosave ? 'Save version\u2026' : 'Save', command: 'file.save',
       enabled: true,
       action: () => {
         fileActions.current.save();
@@ -844,14 +851,17 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
       />
       <input ref={modelImportInput} type="file" hidden accept=".skp,.skb,.dae,.obj,.3ds,.stl,.dxf,.gltf,.glb,.step,.stp,.zip,.kmz,.png,.jpg,.jpeg,.gif,.bmp,.webp" aria-label="Import model file"
         onChange={event => { void importModelFallback(event); }} />
-      <DocumentTabs session={session} onClose={closeTab} onNewLayout={newLayout} />
+      {saveVersion && autosave && cloudFiles ? <SaveVersionDialog tab={saveVersion} session={session} files={cloudFiles} saves={autosave} onClose={() => setSaveVersion(null)} onShare={commons?.account ? setPublishSnapshot : undefined} /> : null}
+      {publishSnapshot && commons?.account ? <PublishSnapshot account={commons.account} filesUrl={commons.filesUrl} snapshot={publishSnapshot} onClose={() => setPublishSnapshot(null)} /> : null}
+      <DocumentTabs onActivate={onModelTab} activeExtra={commonsActive} extraTab={onBrowseCommons ? <div className={`pf-document-tab${commonsActive ? ' is-active' : ''}`}><button type="button" className="pf-document-tab-select" aria-current={commonsActive ? 'page' : undefined} onClick={onBrowseCommons}>Commons</button></div> : undefined} session={session} onClose={closeTab} onNewLayout={newLayout} />
       {choosingTemplate ? <LayoutTemplateChooser busy={templateBusy} savedTemplates={cloudFiles ?
         <CloudBrowser api={cloudFiles} session={session} owner={cloudOwner} templatesOnly embedded
           onBusyChange={setTemplateBusy} onClose={() => setChoosingTemplate(false)} /> : undefined} onCancel={() => setChoosingTemplate(false)} onCreate={templateId => {
         session.newLayout(templateId); setChoosingTemplate(false);
       }} /> : null}
+      {autosave && cloudFiles ? <button type="button" onClick={() => setSaveVersion(session.active)}>Save version...</button> : null}
       <CommandSearch source={() => commandSearchSourceFor(session.active)} />
-      {autosave ? <AutosaveIndicator autosave={autosave} tab={active} onSaveCopy={makeCloudCopy} /> : null}
+      {autosave ? <AutosaveIndicator session={session} files={cloudFiles} autosave={autosave} tab={active} onSaveCopy={makeCloudCopy} /> : null}
       <AccountControl cloud={cloud} onExtensions={onExtensions} />
       {aboutOpen ? <AboutDialog build={buildInfo ?? UNKNOWN_BUILD} onClose={() => setAboutOpen(false)} /> : null}
       {cloudBrowser && cloudFiles ? <CloudBrowser api={cloudFiles} session={session} owner={cloudOwner}

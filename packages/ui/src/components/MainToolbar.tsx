@@ -11,7 +11,7 @@ import { ToolStack } from './ToolStack';
 import { resolveGroups } from './toolbarLayout';
 
 /** Horizontal tool row beneath document tabs, ordered by `TOOLBAR_LAYOUT`. */
-export function MainToolbar(): JSX.Element {
+export function MainToolbar({ onCommons }: { onCommons?: (() => void) | undefined }): JSX.Element {
   const app = useApp();
   const activeToolId = useAppStore((s) => s.activeToolId);
   const [commands, setCommands] = useState<CommandInfo[]>(() => app.commands.list());
@@ -84,6 +84,7 @@ export function MainToolbar(): JSX.Element {
           </span>
         </div>
       ))}
+      {onCommons && <div className="pf-layout-ribbon-group" role="group" aria-label="Import"><div className="pf-layout-ribbon-buttons"><button onClick={() => app.commands.tryExecute('file.import')}>From file</button><button onClick={onCommons}>Commons</button></div><span className="pf-layout-ribbon-caption">Import</span></div>}
     </nav>
   );
 }

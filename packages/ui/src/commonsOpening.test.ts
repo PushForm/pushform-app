@@ -3,7 +3,7 @@
 import { afterEach, expect, it } from 'vitest';
 import { createApp } from './bootstrap';
 import { DocumentSession } from './session';
-import { openCommonsModel } from './commonsOpening';
+import { openCommonsModel, placeCommonsModel } from './commonsOpening';
 import { openModelFile, encodeModelDocument } from '@pushform/io';
 import { createDocument } from '@pushform/model';
 import type { OpenedCommonsModel } from '@pushform/cloud';
@@ -61,4 +61,17 @@ it('opens a native model with a fresh document identity while keeping earlier at
   const { session } = setup(); const native = createDocument(); native.transact('Keep earlier notice', draft => { draft.meta.attributions = [{ ...source.attribution, modelId: 'earlier-model' }]; });
   const { tab } = await openCommonsModel(session, { ...source, name: 'native.pf', bytes: await encodeModelDocument(native) }, new AbortController().signal);
   expect(tab.app.document.doc.state.meta.guid).not.toBe(native.state.meta.guid); expect(tab.app.document.doc.state.meta.attributions).toHaveLength(2); expect(session.isDirty(tab)).toBe(true);
+});
+
+it('previews a component without document changes, then inserts geometry and notices as one undoable edit', async () => {
+  const { app, session } = setup(); const tab = session.active;
+  if (tab.type !== 'model') throw new Error('Expected model');
+  const before = app.document.doc.state;
+  await placeCommonsModel(session, tab, source, new AbortController().signal, { unit: 'mm', up: 'z' });
+  expect(app.document.doc.state).toBe(before);
+  app.commands.execute('edit.pasteAt', { point: [0,0,0] });
+  expect(app.document.doc.state.meta.attributions).toEqual([source.attribution]);
+  expect(app.document.doc.state.definitions.get(app.document.doc.state.rootDefinitionId)!.entities.instances.size).toBe(1);
+  app.commands.execute('edit.undo');
+  expect(app.document.doc.state.meta.attributions).toEqual(before.meta.attributions);
 });

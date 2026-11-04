@@ -1,19 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { useSyncExternalStore, type JSX } from 'react';
+import { useEffect, useState, useSyncExternalStore, type JSX } from 'react';
 import { LuCheck, LuCloud, LuCloudOff, LuLoaderCircle } from 'react-icons/lu';
 import type { CloudAutosave } from '../cloudAutosave';
 import { cloudLocation } from '../cloudDocuments';
-import type { DocumentTab } from '../session';
+import type { CloudFilesApi } from '@pushform/cloud';
+import type { DocumentSession, DocumentTab } from '../session';
 
 /** The cloud save state of the active document; a trashed file offers Restore and Save a copy. */
-export function AutosaveIndicator({ autosave, tab, onSaveCopy }: { autosave: CloudAutosave; tab: DocumentTab; onSaveCopy?: (() => void) | undefined }): JSX.Element {
+export function AutosaveIndicator({ autosave, tab, onSaveCopy, session, files }: { autosave: CloudAutosave; tab: DocumentTab; session?: DocumentSession | undefined; files?: CloudFilesApi | undefined; onSaveCopy?: (() => void) | undefined }): JSX.Element {
   useSyncExternalStore(autosave.subscribe, autosave.getSnapshot);
+  const [number, setNumber] = useState<number | null>(null);
+  useSyncExternalStore(session?.subscribeLocal ?? (() => () => {}), session?.getLocalRevision ?? (() => 0));
+  useEffect(() => { let alive = true; setNumber(null); const location = cloudLocation(tab.identity); if (location && files) void files.head(location.fileId).then(head => { if (alive) setNumber(head.file.revision_number); }, () => {}); return () => { alive = false; }; }, [tab.identity, files]);
   const state = autosave.state(tab);
   const trashed = state.code === 'trashed';
-  const label = state.status === 'saving' ? 'Saving…' : state.status === 'waiting' ? 'Changes pending' :
+  const label = !autosave.automatic && session ? `${session.localSaveState(tab) === 'saved' ? 'Saved on this device' : session.localSaveState(tab) === 'waiting' ? 'Saving on this device...' : session.localSaveState(tab) === 'error' ? 'Local save failed' : 'Local recovery unavailable'} - ${number === null ? cloudLocation(tab.identity) ? 'Cloud version saved' : 'Not saved to cloud' : 'Cloud revision ' + number}${state.status === 'waiting' ? ' - local changes' : ''}` : !autosave.automatic && state.status === 'waiting' ? 'Local changes - save a cloud version' : state.status === 'saving' ? 'Saving…' : state.status === 'waiting' ? 'Changes pending' :
     state.status === 'offline' ? 'Offline · changes on this device' : state.status === 'conflict' ? 'Newer cloud version' :
-    state.status === 'error' ? (trashed ? 'In the Trash' : 'Could not save') : cloudLocation(tab.identity) ? 'All changes saved' : 'Not saved yet';
+    state.status === 'error' ? (trashed ? 'In the Trash' : 'Could not save') : cloudLocation(tab.identity) ? 'Cloud version saved' : 'Not saved yet';
   const Glyph = state.status === 'saving' ? LuLoaderCircle : state.status === 'offline' ? LuCloudOff : state.status === 'saved' ? LuCheck : LuCloud;
   return <div className={`pf-autosave is-${state.status}`}>
     <span role="status" aria-label="Cloud save status" title={state.error ?? label}><Glyph aria-hidden="true" /><span>{label}</span></span>

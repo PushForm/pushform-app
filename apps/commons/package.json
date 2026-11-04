@@ -14,7 +14,8 @@
     "react-dom": "^19.0.0",
     "zod": "^4.6.7",
     "@pushform/cloud": "workspace:*",
-    "@pushform/account-ui": "workspace:*"
+    "@pushform/account-ui": "workspace:*",
+    "@pushform/commons-ui": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",

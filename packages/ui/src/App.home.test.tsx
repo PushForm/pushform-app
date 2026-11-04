@@ -41,7 +41,7 @@ async function signedIn() {
     }) };
   return { cloud, api, files };
 }
-it('starts on Home, creates an autosaved document, and returns Home through the brand without closing it', async () => {
+it('starts on Home, keeps a new document local, and returns Home without closing it', async () => {
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
   const cloud = new CloudSession({ initialize: async () => ({ error: null }),
     getSession: async () => ({ data: { session: { user: { id: 'alice', email: 'artist@example.com' }, expires_at: Date.now() / 1000 + 3600 } }, error: null }),
@@ -62,14 +62,15 @@ it('starts on Home, creates an autosaved document, and returns Home through the 
   fireEvent.change(screen.getByLabelText('Document name'), { target: { value: 'Home model' } });
   fireEvent.click(screen.getByRole('button', { name: 'Create document' }));
   await screen.findByLabelText('3D viewport');
-  expect(screen.getByRole('status', { name: 'Cloud save status' }).textContent).toContain('Changes pending');
-  await waitFor(() => expect(api.save).toHaveBeenCalledOnce(), { timeout: 4000 });
-  await waitFor(() => expect(screen.getByRole('status', { name: 'Cloud save status' }).textContent).toContain('All changes saved'));
+  expect(screen.getByRole('status', { name: 'Cloud save status' }).textContent).toContain('local changes');
+  await new Promise(resolve => setTimeout(resolve, 1500));
+  expect(api.save).not.toHaveBeenCalled();
+
   fireEvent.click(screen.getByRole('button', { name: 'PushForm home' }));
   expect(await screen.findByRole('main', { name: 'Cloud document library' })).toBeTruthy(); expect(screen.queryByLabelText('3D viewport')).toBeNull();
   expect(screen.getByRole('button', { name: 'Continue Home model' })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Continue Home model' }));
-  await screen.findByLabelText('3D viewport'); expect(api.save).toHaveBeenCalledOnce();
+  await screen.findByLabelText('3D viewport'); expect(api.save).not.toHaveBeenCalled();
 });
 it('imports files through the dialog straight into the chosen folder without opening them, remembering the destination', async () => {
   const { cloud, api, files } = await signedIn();

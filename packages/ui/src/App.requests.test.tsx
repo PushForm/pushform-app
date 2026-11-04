@@ -77,7 +77,7 @@ it('docks the chat beside the editor from the left menu bar icon, sends the sess
   render(<App initialScreen="workspace" app={app} cloud={cloud} buildInfo={build} requests={requests} />);
   expect(app.commands.has('help.requests')).toBe(true);
   const menu = screen.getByRole('button', { name: 'Main menu' });
-  expect(within(rail()).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Files', 'AI Chat', 'Object browser']);
+  expect(within(rail()).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Files', 'AI Chat', 'Commons', 'Object browser']);
   expect(within(screen.getByRole('navigation', { name: 'Tools' })).queryByRole('button', { name: 'AI Chat' })).toBeNull();
   expect(icon().getAttribute('aria-pressed')).toBe('false');
   fireEvent.mouseEnter(icon());
@@ -156,7 +156,7 @@ it('offers help.requests, keeps workspace keys out of the composer, and docks th
   newLayout();
   // The Layout rail lists the chat, then the object browser; the chat is not in the tool row and stays open across the
   // switch, showing the new document's own conversation.
-  expect(within(rail()).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Files', 'AI Chat', 'Object browser']);
+  expect(within(rail()).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Files', 'AI Chat', 'Commons', 'Object browser']);
   expect(within(screen.getByRole('navigation', { name: 'Layout tools' })).queryByRole('button', { name: 'AI Chat' })).toBeNull();
   expect(docked()).toBeTruthy();
   expect(composerField()).not.toBe(composer);
@@ -169,7 +169,7 @@ it('offers help.requests, keeps workspace keys out of the composer, and docks th
   expect(document.querySelector('.pf-side-dock-objects')?.hasAttribute('hidden')).toBe(false);
   // The model has its own object browser: the open panel stays open and lists the model instead.
   fireEvent.click(screen.getByRole('button', { name: '3D model: Untitled' }));
-  expect(within(rail()).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Files', 'AI Chat', 'Object browser']);
+  expect(within(rail()).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Files', 'AI Chat', 'Commons', 'Object browser']);
   expect(screen.getByRole('button', { name: 'Object browser' }).getAttribute('aria-pressed')).toBe('true');
   expect(screen.getByText('Solids, groups and components you make appear here.')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Object browser' }));

@@ -168,3 +168,20 @@ it('maps routes, file states and details the way the dialog shows them', () => {
   expect(custom.formats).toEqual(['DXF']);
   expect(detailsFromMetadata(custom)).toMatchObject({ license: 'other', terms: 'Personal use.\nNo resale.' });
 });
+
+it('takes a saved editor snapshot directly into details and requires a separate publication review', async () => {
+  const f = setup(); const published = vi.fn();
+  const file = new File(['saved snapshot bytes'], 'Garden bench.pf');
+  cloud.upload.mockResolvedValue(asset({ filename: file.name, format: 'pf', size_bytes: file.size }));
+  cloud.stream.mockResolvedValue({ state: 'pending' });
+  render(<UploadDialog account={f.account} filesUrl="https://files.example.com" modelId={null} newModelId="design-snapshot" initialFile={file} snapshotLabel="Private cloud revision 12" onClose={vi.fn()} onPublished={published}/>);
+  await waitFor(() => expect(cloud.upload).toHaveBeenCalledWith(expect.anything(), expect.anything(), revisionId, file, expect.anything(), expect.anything()));
+  const review = await screen.findByRole('button', { name: 'Review publication' });
+  await waitFor(() => expect((review as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(review);
+  expect(screen.getByText('Review your public snapshot')).toBeTruthy();
+  expect(f.rpc.mock.calls.some(([name]) => name === 'commons_publish_model')).toBe(false);
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('button', { name: 'Publish model' }));
+  await waitFor(() => expect(published).toHaveBeenCalledWith('design-snapshot'));
+});

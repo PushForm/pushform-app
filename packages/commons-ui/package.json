@@ -1,0 +1,22 @@
+{
+  "name": "@pushform/commons-ui",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "exports": {
+    ".": "./src/UploadDialog.tsx",
+    "./UploadDialog": "./src/UploadDialog.tsx",
+    "./modelDetails": "./src/modelDetails.ts",
+    "./account": "./src/account.ts"
+  },
+  "dependencies": {
+    "@pushform/cloud": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0"
+  }
+}

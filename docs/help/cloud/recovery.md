@@ -8,7 +8,7 @@ Edits made during an upload can require a later save. Do not treat a file thumbn
 
 ## Recover from an offline or failed save
 
-Keep the document open and read the status or error. Network failures retry with increasing delays. Reconnecting resumes pending saves while your sign-in session is valid.
+Keep the document open and read the status or error. After a network failure, retry Save version when connected. Reconnecting does not upload local edits automatically.
 
 If an account session expires, sign back into the same account. Do not close or discard the document while relying on unsaved changes. Refresh recovery depends on the browser's ability to keep its local session data.
 
@@ -22,6 +22,10 @@ A copy is a new cloud document, not an overwrite of the other revision. Check it
 
 ## Close a document with pending changes
 
-Closing an editor document first attempts to flush pending cloud changes. If saving fails, the document remains open and offers save, discard or cancel choices. Discard is an explicit decision to give up those pending changes.
+Closing a document with changes since its cloud version offers save, discard or cancel. Choosing Save explicitly uploads a private cloud version. If saving fails, the document remains open. Discard is an explicit decision to give up those pending changes.
 
-Returning Home is different: documents remain open and pending autosaves continue. Use Continue working to return.
+Returning Home is different: documents remain open and local recovery checkpoints continue. Use Continue working to return.
+
+## Recover after closing a browser tab
+
+Home lists **Saved on this device** workspaces from earlier browser tabs for the current account. Choose **Recover workspace** to reopen their locally saved working copies. Recovery keeps other open work and preserves which cloud version each document came from. The earlier checkpoint stays discoverable until the recovered documents have a successful local checkpoint. Other devices see only explicit cloud saves. Clearing this browser's site data removes its local working copies.

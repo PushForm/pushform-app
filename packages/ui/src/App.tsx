@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { JSX } from 'react';
 import { createPortal } from 'react-dom';
+import { CommonsBrowser } from './components/CommonsBrowser';
 import { CommonsOpening, type CommonsOpeningConfig } from './components/CommonsOpening';
 import { AppContext } from './AppContext';
 import { createApp } from './bootstrap';
@@ -20,7 +21,7 @@ import { ToastHost } from './components/ToastHost';
 import { setLayoutCloudModelLoader } from './components/layoutViewportRenders';
 import { DockSlot, SideDock, SideRail, type SideRailItem } from './components/SideRail';
 import { WorkspaceFiles } from './components/WorkspaceFiles';
-import { LuFolderOpen } from 'react-icons/lu';
+import { LuFolderOpen, LuLibrary } from 'react-icons/lu';
 import { ModelObjectBrowser } from './components/ModelObjectBrowser';
 import { ExtensionManager } from './extensions/ExtensionManager';
 import { browserRunsExtensions, createBrowserExtensionPlatform, type ExtensionRuntimeSources } from './extensions/browserExtensionPlatform';
@@ -32,7 +33,7 @@ import { markDesktopShell, syncDesktopTitleBar } from './desktopShell';
 import { allowOpeningDocument, desktopUpdates } from './desktopUpdates';
 import { DesktopUpdates } from './components/DesktopUpdates';
 import { WindowControls } from './components/WindowControls';
-import { DocumentSession, type DocumentTab } from './session';
+import { DocumentSession, type DocumentTab, type ModelTab } from './session';
 import { loadRefreshImages, type RefreshImageStore } from './refreshImages';
 import { paintLoading } from './documentLoading';
 import { WorkspaceLoading } from './components/WorkspaceLoading';
@@ -106,6 +107,9 @@ function platform(): { browser: string; os: string } {
   return { browser: navigator.userAgent || 'unknown', os: data?.platform || navigator.platform || 'unknown' };
 }
 
+function browserLocalStorage(ownerId: string) {
+  try { return accountSessionStorage(ownerId, window.localStorage); } catch { return null; }
+}
 function browserSessionStorage(ownerId: string): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null {
   try {
     return typeof window === 'undefined' ? null : accountSessionStorage(ownerId, window.sessionStorage);
@@ -174,7 +178,7 @@ function Workspace(props: WorkspaceProps): JSX.Element | null {
           typeof indexedDB === 'undefined' ? undefined : loadNativeRefresh(storage, indexedDB, async current => {
             if (!live) return;
             setProgress(current); await paintLoading();
-          }),
+          }, browserLocalStorage(props.ownerId)),
         ]) : Promise.resolve([undefined, undefined] as const));
       } catch { /* Unavailable recovery falls back to Home. */ }
       if (!live) return;
@@ -247,6 +251,9 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
       nativeRefresh,
     ),
   );
+  const [commonsShown, setCommonsShown] = useState(false);
+  const [commonsVisited, setCommonsVisited] = useState(false);
+  const [commonsPicker, setCommonsPicker] = useState<ModelTab | null>(null);
   const [commonsIntent, setCommonsIntent] = useState(() => commons?.intent ?? null);
   const [home, setHome] = useState(() => {
     if (initialScreen) return initialScreen === 'home';
@@ -268,7 +275,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     (saved) => {
       setRecents(updateCloudRecent(ownerId, saved.file)); if (saved.file.kind === 'model') setCloudModelSaves(count => count + 1);
       thumbnails?.saved(saved.file);
-    }) : undefined);
+    }, 1200, false) : undefined);
   // Views of cloud models render from the referenced revision's bytes, fetched only when needed.
   useEffect(() => {
     setLayoutCloudModelLoader(cloudFiles ? async target => (await cloudFiles.openRevision(target.revisionId)).bytes : null);
@@ -295,9 +302,10 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
   const commonsOpening = !locked && commonsIntent ? <CommonsOpening intent={commonsIntent} filesUrl={commons?.filesUrl} cloud={cloud} session={session}
     done={() => { setCommonsIntent(null); commons?.handled(); }} opened={() => setHome(false)} /> : null;
   const active = session.active;
+  useEffect(() => { setCommonsShown(false); }, [session.activeId]);
   const modelApp = active.type === 'model' ? active.app : app;
-  useGlobalKeys(modelApp, active.type === 'model' && !locked && !home);
-  useModelClipboard(modelApp, active.type === 'model' ? active : null, active.type === 'model' && !locked && !home);
+  useGlobalKeys(modelApp, active.type === 'model' && !locked && !home && !commonsShown && !commonsPicker);
+  useModelClipboard(modelApp, active.type === 'model' ? active : null, active.type === 'model' && !locked && !home && !commonsShown && !commonsPicker);
   const extensionWorkspace = useExtensionWorkspace({ platform: extensions, runs: extensionRuns, ownerId, active: home || locked ? null : active,
     openTabs: session.tabs.map(tab => tab.id), sidePanel,
     openPanel: id => setSidePanel(id), closePanel: () => { setGuidanceBrowserTab(null); setSidePanel(null); } });
@@ -379,6 +387,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
   const railItems: SideRailItem[] = [
     { id: 'files', label: 'Files', icon: <LuFolderOpen aria-hidden="true" />, ref: setFilesIcon },
     { id: 'requests', label: 'AI Chat', icon: <RiChatAiLine aria-hidden="true" />, ref: setRequestsIcon },
+    { id: 'commons', label: 'Commons', icon: <LuLibrary aria-hidden="true" /> },
     { id: 'objects', label: 'Object browser', icon: <PiTreeView aria-hidden="true" />, ref: setObjectsIcon },
     ...extensionWorkspace.railItems,
   ];
@@ -388,7 +397,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
   const companionBrowser = guidanceBrowserTab === active.id && sidePanel === 'requests';
   const browserVisible = sidePanel === 'objects' || companionBrowser;
   const sideBar = <>
-    <SideRail items={railItems} active={shownPanel} onToggle={toggleSidePanel} />
+    <SideRail items={railItems} active={shownPanel} onToggle={id => { if (id === 'commons') { setCommonsVisited(true); setCommonsShown(true); } else { setCommonsShown(false); toggleSidePanel(id); } }} />
     <SideDock open={shownPanel !== null}>
       <DockSlot node={filesNode} attached={sidePanel === 'files'} />
       <DockSlot node={chatNode} attached={sidePanel === 'requests'} />
@@ -433,11 +442,11 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
   /** Every document with changes is saved before restarting to update. */
   const feedback = <>
     {commonsOpening}
-    <DesktopUpdates saveAll={async () => { await autosave?.saveAll(); }} />
+    <DesktopUpdates saveAll={async () => { session.flushRefreshPersistence(); await session.settledNativeRecovery(); if (session.tabs.some(tab => (session.isDirty(tab) || autosave?.needsSave(tab)) && session.localSaveState(tab) !== 'saved')) throw new Error('Local recovery could not be confirmed. Save a cloud version or export a file before updating.'); }} />
     <DocumentLoading loading={session.loading} />
   </>;
   if (home) return <ThumbnailContext.Provider value={thumbnails}>
-    <CloudHome api={cloudFiles} cloud={cloud} recents={recents} ownerId={ownerId} buildInfo={buildInfo}
+    <CloudHome localSession={session} onLocalOpened={() => setHome(false)} onCommons={() => { setHome(false); setCommonsVisited(true); setCommonsShown(true); }} api={cloudFiles} cloud={cloud} recents={recents} ownerId={ownerId} buildInfo={buildInfo}
       openTabs={session.tabs.filter(tab => tab.id !== 'tab-1' || tab.identity || session.isDirty(tab))}
       onResume={tab => { session.activate(tab.id); setHome(false); }} onOpen={open} onCreate={create} onRequests={toggleRequests} requestsOpen={requestsPanel?.open ?? false}
       onForgetRecents={forgetRecents} onRenamed={renamed} onMoved={moved} onExtensions={openExtensions} />
@@ -448,15 +457,17 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
   </ThumbnailContext.Provider>;
   return (
     <ThumbnailContext.Provider value={thumbnails}><AppContext.Provider value={modelApp}>
-      <div className="pf-app">
-        <TopBar session={session} cloud={cloud} cloudFiles={cloudFiles} buildInfo={buildInfo} autosave={autosave} onHome={() => setHome(true)}
+      <div className={`pf-app${commonsShown ? ' pf-commons-active' : ''}`}>
+        <TopBar onModelTab={() => setCommonsShown(false)} commons={commons} commonsActive={commonsShown} onBrowseCommons={() => { setCommonsVisited(true); setCommonsShown(true); }} session={session} cloud={cloud} cloudFiles={cloudFiles} buildInfo={buildInfo} autosave={autosave} onHome={() => setHome(true)}
           onRequests={() => toggleSidePanel('requests')} onObjects={() => toggleSidePanel('objects')} onClearChat={requestsClient ? clearChat : undefined}
           onExtensions={openExtensions} />
+        {commonsVisited && <div className="pf-commons-tab" hidden={!commonsShown}><CommonsBrowser account={commons?.account} filesUrl={commons?.filesUrl} session={session} onClose={() => setCommonsShown(false)} onOpened={() => setCommonsShown(false)} /></div>}
+        {commonsPicker && createPortal(<div className="pf-modal-backdrop"><section className="pf-modal pf-commons-picker" role="dialog" aria-modal="true" aria-label="Import from Commons"><CommonsBrowser account={commons?.account} filesUrl={commons?.filesUrl} session={session} target={commonsPicker} onClose={() => setCommonsPicker(null)} onOpened={() => setCommonsPicker(null)} /></section></div>, document.body)}
         {extensionManager}
         {extensionPrint}
         {active.type === 'model' ? (
           <>
-            <MainToolbar />
+            <MainToolbar onCommons={() => { if (active.type === 'model') setCommonsPicker(active); }} />
             <div className="pf-main">
               {sideBar}
               <ViewportView key={active.id} />

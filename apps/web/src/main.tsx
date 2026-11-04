@@ -4,7 +4,7 @@ import './zodConfig';
 import { rootErrorHandlers } from './sentry';
 import { createRoot } from 'react-dom/client';
 import { App } from '@pushform/ui';
-import { cloudSession, cloudFiles, cloudProfiles, cloudAccount, cloudBilling, cloudUsage, cloudStaff, requestsConfig, commonsIntent, clearCommonsIntent } from './cloud';
+import { cloudSession, cloudCommons, cloudFiles, cloudProfiles, cloudAccount, cloudBilling, cloudUsage, cloudStaff, requestsConfig, commonsIntent, clearCommonsIntent } from './cloud';
 import { buildInfo } from './buildInfo';
 import { productUsageForOwner } from './productAnalytics';
 import workerSource, { computeSource } from 'virtual:pushform-extension-worker';
@@ -23,4 +23,4 @@ const productUsage = productUsageForOwner(cloudUsage, cloudSession, cloudProfile
   userAgent: () => navigator.userAgent,
 });
 
-createRoot(document.getElementById('root')!, rootErrorHandlers).render(<App commons={{ intent: commonsIntent, filesUrl: import.meta.env.VITE_COMMONS_ASSETS_URL, handled: clearCommonsIntent }} cloud={cloudSession} cloudFiles={cloudFiles} profiles={cloudProfiles} account={cloudAccount} billing={cloudBilling} usage={productUsage} buildInfo={buildInfo} requests={requestsConfig} extensionRuntime={extensionRuntime} staff={extensionsStaff} />);
+createRoot(document.getElementById('root')!, rootErrorHandlers).render(<App commons={{ account: cloudCommons, intent: commonsIntent, filesUrl: import.meta.env.VITE_COMMONS_ASSETS_URL, handled: clearCommonsIntent }} cloud={cloudSession} cloudFiles={cloudFiles} profiles={cloudProfiles} account={cloudAccount} billing={cloudBilling} usage={productUsage} buildInfo={buildInfo} requests={requestsConfig} extensionRuntime={extensionRuntime} staff={extensionsStaff} />);

@@ -12,6 +12,7 @@ import {
   m4mul,
   m4transformPoint,
   m4translation,
+  m4rotationAxis,
   meshBounds,
   newGuid,
   PushFormError,
@@ -63,6 +64,7 @@ export interface ModelClipboardSource {
 
 /** What Copy puts on the clipboard: a small model holding the copied entities in world coordinates. */
 export interface ModelClipboard {
+  readonly destination?: { readonly guid: string; readonly path: readonly Id[] };
   /** Identifies this copy, so a paste can tell its own clipboard data from another window's. */
   readonly id: string;
   /** The root definition holds the copied entities; the other definitions are the ones its groups and components use. */
@@ -315,7 +317,7 @@ export function copyModelSelection(
   const root: ComponentDefinition = { ...baseRoot, id: state.rootDefinitionId, entities: createEntityContainer() };
   const out: DocumentState = {
     ...base,
-    meta: { ...base.meta, nextId: state.meta.nextId, units: { ...state.meta.units } },
+    meta: { ...base.meta, nextId: state.meta.nextId, units: { ...state.meta.units }, ...(state.meta.attributions ? { attributions: state.meta.attributions } : {}) },
     definitions: new Map([[root.id, root]]),
     rootDefinitionId: root.id,
     tags: structuredClone(state.tags),
@@ -471,6 +473,9 @@ function sameMaterial(a: Material, b: Material): boolean {
 export function pasteModelClipboard(draft: DocumentDraft, clip: ModelClipboard, path: readonly Id[], placement: MMat4 | Mat4, images?: ImageStore | null): EntityRef[] {
   const target = draft as unknown as DocumentState;
   const src = structuredClone(clip.state);
+  const notices = [...(draft.meta.attributions ?? [])];
+  for (const notice of src.meta.attributions ?? []) if (!notices.some(item => item.modelId === notice.modelId && item.revision === notice.revision && item.assetId === notice.assetId)) notices.push(notice);
+  if (notices.length) draft.meta.attributions = notices;
 
   const tagMap = new Map<TagId, TagId>([[src.defaultTagId, target.defaultTagId]]), addedTags: TagId[] = [];
   for (const tag of src.tags.values()) {
@@ -662,6 +667,7 @@ function pasteWith(ctx: CommandContext, label: string, placement: (clip: ModelCl
   const host = hostOf(ctx);
   const clip = clipboardOf(ctx).current;
   if (!clip) throw new PushFormError('paste.empty', 'Nothing to paste');
+  if (clip.destination && (clip.destination.guid !== host.doc.state.meta.guid || clip.destination.path.join('/') !== host.context.path.join('/'))) throw new PushFormError('paste.destination', 'The insertion destination changed. Choose it again.');
   const path = host.context.path;
   let refs: EntityRef[] = [];
   host.edit(label, (draft) => {
@@ -725,11 +731,11 @@ export const editPasteAt = defineCommand({
   id: 'edit.pasteAt',
   title: 'Paste',
   category: 'internal',
-  params: z.object({ point: z.tuple([z.number(), z.number(), z.number()]) }),
+  params: z.object({ point: z.tuple([z.number(), z.number(), z.number()]), angle: z.number().finite().default(0) }),
   undoable: true,
   when: hasClipboard,
   run: (ctx, p): EntityRef[] =>
-    pasteWith(ctx, 'Paste', (clip) => m4translation([p.point[0] - clip.insertionPoint[0], p.point[1] - clip.insertionPoint[1], p.point[2] - clip.insertionPoint[2]])),
+    pasteWith(ctx, 'Paste', (clip) => m4mul(m4translation(p.point), m4mul(m4rotationAxis([0,0,1], p.angle), m4translation([-clip.insertionPoint[0], -clip.insertionPoint[1], -clip.insertionPoint[2]])))),
 });
 
 /** Paste where the copy came from. */

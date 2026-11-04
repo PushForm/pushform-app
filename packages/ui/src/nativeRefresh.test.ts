@@ -2,6 +2,8 @@
 // Copyright 2026 PushForm contributors
 import { afterEach, expect, it, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
+import { localWorkspaces, rememberLocalWorkspace } from './localWorkspaces';
+import { accountSessionStorage } from './accountPersistence';
 import { NativeRecoveryStore } from './nativeRecovery';
 import { loadNativeRefresh, NativeRefreshWriter } from './nativeRefresh';
 import { DocumentSession } from './session';
@@ -101,4 +103,27 @@ it('reports each recovery entry before reading it, including damaged entries', a
   ]);
   expect(loaded!.files.size).toBe(0);
   reads.mockRestore();
+});
+
+it('discovers closed-tab working copies through an account-scoped durable index and recovers them without replacing current work', async () => {
+  const factory = new IDBFactory(), durable = { ...storage(), removeItem() {} }, firstTab = storage();
+  const alice = accountSessionStorage('alice', durable), bob = accountSessionStorage('bob', durable);
+  const native = await loadNativeRefresh(firstTab, factory, undefined, alice);
+  const first = new DocumentSession(createApp({ demo: false, expose: false }), () => createApp({ demo: false, expose: false }), true, null, firstTab, null, native);
+  sessions.push(first); const original = first.active; if (original.type !== 'model') throw new Error('Expected model');
+  first.markModelSaved(original.id, 'Bench.pf', 'cloud:alice:project:file:revision');
+  original.app.document.doc.transact('Local changes', draft => { draft.definitions.get(draft.rootDefinitionId)!.name = 'Locally changed bench'; });
+  first.flushRefreshPersistence(); await first.settledNativeRecovery();
+  const [remembered] = localWorkspaces(alice); expect(remembered!.names).toEqual(['Bench.pf']); expect(localWorkspaces(bob)).toEqual([]);
+  const secondTab = storage(), currentNative = await loadNativeRefresh(secondTab, factory, undefined, alice);
+  expect(currentNative!.store.scope).not.toBe(native!.store.scope);
+  const current = new DocumentSession(createApp({ demo: false, expose: false }), () => createApp({ demo: false, expose: false }), true, null, secondTab, null, currentNative);
+  sessions.push(current); const existing = current.active;
+  const recovered = await loadNativeRefresh({ getItem: () => remembered!.scope, setItem() {} }, factory);
+  current.recoverLocalWorkspace(recovered!); await current.settledNativeRecovery();
+  expect(current.tabs).toContain(existing); expect(current.active.name).toBe('Bench.pf'); expect(current.active.identity).toBe('cloud:alice:project:file:revision'); expect(current.isDirty(current.active)).toBe(true);
+  if (current.active.type === 'model') expect(current.active.app.document.doc.rootDefinition.name).toBe('Locally changed bench');
+  expect(current.localSaveState(current.active)).toBe('saved');
+  rememberLocalWorkspace(alice, remembered!.scope, []);
+  expect(localWorkspaces(alice).map(row => row.scope)).toEqual([currentNative!.store.scope]);
 });

@@ -16,6 +16,9 @@
     },
     {
       "path": "../../packages/account-ui"
+    },
+    {
+      "path": "../../packages/commons-ui"
     }
   ]
 }

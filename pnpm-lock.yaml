@@ -208,6 +208,9 @@ importers:
       '@pushform/cloud':
         specifier: workspace:*
         version: link:../../packages/cloud
+      '@pushform/commons-ui':
+        specifier: workspace:*
+        version: link:../../packages/commons-ui
       react:
         specifier: ^19.0.0
         version: 19.3.1
@@ -382,6 +385,25 @@ importers:
       '@fontsource/roboto':
         specifier: 5.3.0
         version: 5.3.0
+
+  packages/commons-ui:
+    dependencies:
+      '@pushform/cloud':
+        specifier: workspace:*
+        version: link:../cloud
+      react:
+        specifier: ^19.0.0
+        version: 19.3.1
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.3.1(react@19.3.1)
+    devDependencies:
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.3.0
+      '@types/react-dom':
+        specifier: ^19.0.0
+        version: 19.3.0(@types/react@19.3.0)
 
   packages/core: {}
 
@@ -700,6 +722,9 @@ importers:
       '@pushform/commands':
         specifier: workspace:*
         version: link:../commands
+      '@pushform/commons-ui':
+        specifier: workspace:*
+        version: link:../commons-ui
       '@pushform/core':
         specifier: workspace:*
         version: link:../core

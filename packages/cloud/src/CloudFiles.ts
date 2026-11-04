@@ -24,6 +24,7 @@ export interface CloudFile {
 export interface CloudRevision {
   id: string; document_id: string; blob_path: string; size_bytes: number; sha256: string; number: number | null;
   status?: 'pending' | 'ready' | undefined;
+  change_notes?: string;
 }
 export interface CloudSavedFile { file: CloudFile; revision: CloudRevision }
 /** What can be renamed, moved, trashed and restored. */
@@ -36,6 +37,7 @@ export interface CloudTrashItem {
   document_kind?: 'model' | 'layout'; is_template?: boolean;
 }
 export interface CloudSaveInput {
+  changeNotes?: string | undefined;
   projectId: string; name: string; kind: 'model' | 'layout'; bytes: Uint8Array;
   fileId?: string | undefined; parentRevisionId?: string | undefined;
   /** Folder for a new document; null or absent places it at the project root. Existing documents keep their folder. */
@@ -272,6 +274,10 @@ export class CloudFiles implements CloudFilesApi {
       // A retried first save whose earlier attempt committed these bytes: commit the head again (idempotent).
       if (begun.status === 'ready') return await this.commit(begun.id, check);
       ticket = begun;
+      if (input.changeNotes?.trim()) {
+        const notes = await callRpc(this.client, 'cloud_revision_notes', { p_revision: ticket.id, p_notes: input.changeNotes.trim() });
+        check(); if (notes.error) throw notes.error;
+      }
       const uploaded = await this.client.storage.from('cloud-files').upload(ticket.blob_path, new Blob([bytes.buffer]),
         { contentType: 'application/octet-stream', upsert: false });
       check(); if (uploaded.error) throw uploaded.error;

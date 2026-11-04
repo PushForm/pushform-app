@@ -23,7 +23,7 @@ import { issueBody, issueLabels, issueTitle, transcriptUrl } from '../domain/iss
 import { isClosedRequesterState } from '../domain/states.ts';
 import type { Conversation, ConversationKind, ConversationMessage, ConversationPath, MessagePicture, Eligibility, Kind, PanelScreen, Request as PipelineRequest, RequestDetail, SuspendedTurn } from '../domain/types.ts';
 import { CORS_HEADERS, enforceRate, errorResponse, HttpError, httpErrorOf, json, lookupRoles, validateSession, type SessionUser, type SessionValidator } from './auth.ts';
-import { blockStatus, messageStatus, NEXT_STEP, resumeStatus, statusSender, type StatusLine } from './status.ts';
+import { blockStatus, messageStatus, NEXT_STEP, resumeStatus, statusSender, type StatusLine, type StatusPick } from './status.ts';
 import { conversationFromRow, requestDetailFromRow, requestFromRow, type AttachmentKind, type MeView, type ServiceDb, type SqlAttachmentRow, type UserDb } from './db.ts';
 
 /**
@@ -435,7 +435,7 @@ export type SseEvent =
   /** A render call carries `review`: its number among the requester message's allowed reviews, as the backend counts them. */
   | { event: 'tool_request'; data: { calls: (ClientToolCall & { review?: { index: number; limit: number } })[] } }
   | { event: 'error'; data: { code: string; message: string } }
-  /** What a turn that edits a 3D model is doing while nothing else is sent (see `status.ts`); never saved or shown to the model. */
+  /** What a turn that edits a 3D model is doing while nothing else is sent (see `status.ts`); never in the transcript or shown to the model. */
   | { event: 'status'; data: StatusLine }
   /** `ended`: the conversation is closed and the next message needs a new one; `reason` says why (filed, added, start_over, or abusive content). */
   | { event: 'done'; data: { messageCount: number; limitReached: boolean; ended: boolean; reason?: TurnEndReason; awaitingTools?: boolean } };
@@ -483,8 +483,9 @@ interface TurnRun {
   pathChanged: boolean;
   /** Records saved ahead of the turn's own: the requester message (after any closers), or the editor's answers. */
   leading: ConversationMessage[];
-  /** The status line this request opens with, on turns that edit a 3D model. */
-  status: StatusLine;
+  /** The status line this request opens with, on turns that edit a 3D model, and the last one the turn sent before. */
+  status: StatusPick;
+  previousStatus?: string | undefined;
   setup: {
     model: string; system: string; tools: Anthropic.Tool[]; context: string; historyLength: number;
     messages: Anthropic.MessageParam[]; document: DocumentCapability | null;
@@ -826,7 +827,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     // Status lines go to turns that can edit a 3D model, whose rounds can think for a minute before any text.
     const statusOn = clientTools.has(MODEL_TOOLS.applyOperations.name);
     return sseResponse(deps.log, async (send) => {
-      const status = statusOn ? statusSender(line => send({ event: 'status', data: line })) : null;
+      const status = statusOn ? statusSender(line => send({ event: 'status', data: line }), { previous: t.previousStatus }) : null;
       // Anything else sent restarts the status line's silence clock.
       const emit = (e: SseEvent) => { status?.quiet(); send(e); };
       try { await body(emit, status); } finally { status?.stop(); }
@@ -897,6 +898,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
         model: setup.model, system: setup.system, tools: setup.tools, context: setup.context, historyLength: setup.historyLength,
         appended: kept.appended, pending: suspended, rounds: result.rounds, document: setup.document,
         ...(reviews ? { reviews } : {}), ...(Object.keys(kept.renders).length ? { renders: kept.renders } : {}),
+        ...(status?.last() ? { status: status.last()! } : {}),
       } : null;
       const cue = turn?.pending.calls.find(call => call.name === 'ui_highlight')?.input as { instruction?: unknown } | undefined;
       const replyText = result.text.trim() || typeof cue?.instruction !== 'string' ? result.text : cue.instruction.slice(0, 400);
@@ -977,7 +979,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       timing,
       user, conversation, store, handlers: agent.handlers(ctx, store), pathChanged: path !== conversation.path,
       leading: [...closers, { role: 'user', text: body.text, at: base.now, ...(pictures.length ? { attachments: pictures } : {}) }],
-      status: messageStatus(pictures.length > 0),
+      status: messageStatus(),
       setup: {
         ...turnPrompt(config.models, ctx, document), context, historyLength: prior.length, messages: historyOf(prior, context, body.text, pictures, images), document, resume: undefined,
       },
@@ -1040,7 +1042,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     return streamTurn({
       timing,
       user, conversation, store, handlers: agentFor(ctx.path).handlers(ctx, store), pathChanged: false,
-      status: resumeStatus(pending.calls.map(call => ({ name: call.name, isError: answers.get(call.id)?.isError ?? true }))),
+      status: resumeStatus(pending.calls.map(call => ({ name: call.name, isError: answers.get(call.id)?.isError ?? true }))), previousStatus: turn.status,
       // The transcript never keeps a render's pictures: its record names the views in a placeholder instead.
       leading: pending.calls.map(call => {
         const answer = answers.get(call.id);

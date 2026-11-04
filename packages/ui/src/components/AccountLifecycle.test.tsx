@@ -45,6 +45,7 @@ it('marks the account for deletion only after confirming, then offers to cancel 
   const store = fakeStore();
   render(<AccountContext.Provider value={store}><div className="pf-app"><AccountControl cloud={await signedIn()} /></div></AccountContext.Provider>);
   fireEvent.click(screen.getByRole('button', { name: 'Account: artist@example.com' }));
+  fireEvent.click(screen.getByText('Danger Zone'));
   fireEvent.click(screen.getByRole('button', { name: 'Delete account…' }));
   expect(screen.getByText(/In 48 hours we permanently delete your documents/)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Keep my account' }));
@@ -62,6 +63,7 @@ it('requests an export and reports its progress, link expiry, or failure', async
   const store = fakeStore();
   render(<AccountContext.Provider value={store}><AccountControl cloud={await signedIn()} /></AccountContext.Provider>);
   fireEvent.click(screen.getByRole('button', { name: 'Account: artist@example.com' }));
+  fireEvent.click(screen.getByText('Danger Zone'));
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Email me my files' })); });
   expect(store.requestExport).toHaveBeenCalledOnce();
   expect(screen.getByRole('status').textContent).toBe('Preparing your export. We will email artist@example.com a download link when it is ready.');
@@ -77,6 +79,7 @@ it('offers neither action until the account state has loaded, or where it is una
   const store = fakeStore({ status: 'unavailable' });
   render(<AccountContext.Provider value={store}><AccountControl cloud={await signedIn()} /></AccountContext.Provider>);
   fireEvent.click(screen.getByRole('button', { name: 'Account: artist@example.com' }));
+  fireEvent.click(screen.getByText('Danger Zone'));
   expect(screen.queryByRole('heading', { name: 'Delete account' })).toBeNull();
   expect(screen.queryByRole('heading', { name: 'Export your files' })).toBeNull();
 });
@@ -91,4 +94,15 @@ it('shows the red banner with the deletion time while the account is marked, and
   view.rerender(<DeletionBanner account={store} state={store.getSnapshot()} />);
   expect(screen.queryByRole('alert')).toBeNull();
   expect(document.documentElement.classList.contains('pf-has-deletion-banner')).toBe(false);
+});
+
+it('keeps account errors visible while account actions stay collapsed', async () => {
+  const store = fakeStore({ error: 'Your export could not be prepared.' });
+  render(<AccountContext.Provider value={store}><AccountControl cloud={await signedIn()} /></AccountContext.Provider>);
+  fireEvent.click(screen.getByRole('button', { name: 'Account: artist@example.com' }));
+  expect(screen.getByText('Danger Zone').closest('details')?.open).toBe(false);
+  expect(screen.getByRole('alert').textContent).toBe('Your export could not be prepared.');
+  expect(screen.getByRole('alert').closest('details')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Email me my files' }).closest('details')?.open).toBe(false);
+  expect(screen.getByRole('button', { name: 'Delete account…' }).closest('details')?.open).toBe(false);
 });

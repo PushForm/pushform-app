@@ -6,8 +6,9 @@ import { fakeAnthropic, type ScriptedTurn } from '../agents/fakeAnthropic.ts';
 import { loadConfig } from '../config/load.ts';
 import { SAMPLE_CONFIG_INPUT } from '../config/sample.ts';
 import type { ConversationMessage } from '../domain/types.ts';
-import { attachmentSection, closeSuspended, createConversationHandler, formatBytes, historyOf, issueSummaryOf, parseSse, requestIdOfIssue, routePath, type ConversationDeps } from './conversation.ts';
-import { ServiceDb, UserDb } from './db.ts';
+import { SAYINGS } from './status.ts';
+import { attachmentSection, closeSuspended, createConversationHandler, WARM_DOCUMENTS, warmChatPrompts, formatBytes, historyOf, issueSummaryOf, parseSse, requestIdOfIssue, routePath, type ConversationDeps } from './conversation.ts';
+import { conversationFromRow, ServiceDb, UserDb } from './db.ts';
 import { ALICE, ATTACHMENT_ID, attachmentRow, CONVERSATION_ID, conversationRow, FakeRpc, FakeSessions, FakeStorage, FakeTracker, myRoles, REQUEST_ID, requestRow, sqlError, TOKEN, type RpcScript } from './fakes.ts';
 
 const config = loadConfig(SAMPLE_CONFIG_INPUT);
@@ -99,9 +100,12 @@ describe('conversations', () => {
     const scripted = fakeAnthropic([{ text: ['First ', 'step.'] }]);
     let release!: () => void;
     const held = new Promise<void>(resolve => { release = resolve; });
-    const h = harness({ deps: { anthropic: { messages: { stream(params) {
-      const stream = scripted.messages.stream(params);
-      return { [Symbol.asyncIterator]: () => stream[Symbol.asyncIterator](), finalMessage: async () => { await held; return stream.finalMessage(); } };
+    // The stream holds before its last event, so the message is not finished until the test releases it.
+    const h = harness({ deps: { anthropic: { messages: { async create(params) {
+      const stream = await scripted.messages.create(params);
+      return { async *[Symbol.asyncIterator]() {
+        for await (const event of stream) { if (event.type === 'message_stop') await held; yield event; }
+      } };
     } } } } });
     const response = await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'Help' });
     const reader = response.body!.getReader();
@@ -211,6 +215,21 @@ describe('POST /conversations/:id/messages (SSE)', () => {
     expect(ge.map(e => e.event)).toEqual(['text', 'brief', 'done']); expect(ge[2]!.data).toMatchObject({ ended: false });
     expect(((gone.service.named('fr_conversation_append')[0]!.params['p_messages'] as ConversationMessage[])[1] as { output: string }).output).toContain('no longer accepts new subscribers');
     expect(gone.service.named('fr_conversation_close')).toEqual([]);
+  });
+  it('asks the model to resend a tool call whose input streamed as invalid JSON, without failing the turn', async () => {
+    const lines: string[] = [];
+    const h = harness({ deps: { log: (line: string) => lines.push(line) }, turns: [
+      { toolUses: [{ id: 't1', name: 'update_brief', input: null, raw: ['{"section":"problem","text":"Doors rub",]'] }] },
+      { toolUses: [{ id: 't2', name: 'update_brief', input: { section: 'problem', text: 'Doors rub' } }] },
+      { text: ['Noted.'] },
+    ] });
+    const events = parseSse(await (await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'My doors rub' })).text());
+    expect(events.map(e => e.event)).not.toContain('error');
+    expect(events.at(-1)!.event).toBe('done');
+    expect(lines.some(l => l.includes('update_brief input was not valid JSON') && l.includes('"text":"Doors rub",]'))).toBe(true);
+    const messages = h.service.named('fr_conversation_append')[0]!.params['p_messages'] as ConversationMessage[];
+    expect(messages.map(m => m.role)).toEqual(['user', 'tool', 'tool', 'assistant']);
+    expect((messages[1] as { output: string }).output).toMatch(/^Not run: the tool input was not valid JSON/);
   });
   describe('request_file from the chat', () => {
     const ready = conversationRow({ brief: BRIEF, title: 'Lock inference with Shift' });
@@ -527,6 +546,98 @@ describe('POST /conversations/:id/file', () => {
   });
 });
 
+describe('pictures posted with messages', () => {
+  const help = conversationRow({ kind: 'help', path: 'help' });
+  const picture = { id: ATTACHMENT_ID, name: 'shot.png', mime: 'image/png' };
+  const pictured = (over: Parameters<typeof harness>[0] = {}, rows = [attachmentRow()]) => {
+    const storage = new FakeStorage();
+    storage.objects.set(attachmentRow().storage_path, 2048);
+    const h = harness({ turns: [{ text: ['I see a cabinet.'] }], ...over, service: { fr_conversation_get: help, ...over.service }, deps: { storage, ...over.deps } });
+    h.service.tables['fr_attachments'] = rows.map(r => ({ ...r }));
+    return { ...h, storage };
+  };
+  const anthropicOf = (h: Harness) => h.deps.anthropic as ReturnType<typeof fakeAnthropic>;
+  const send = (h: Harness, body: Record<string, unknown>) => call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, body);
+  const lastContent = (h: Harness) => (anthropicOf(h).calls[0]!.messages.at(-1)!.content as { type: string; text?: string; source?: { media_type: string; data: string } }[]);
+
+  it('sends the pictures to the agent before the framed text and stores them on the message', async () => {
+    const h = pictured();
+    await (await send(h, { text: 'Build this', attachments: [ATTACHMENT_ID], document: { type: 'model', apiVersion: 1, edit: 1 } })).text();
+    const content = lastContent(h);
+    expect(content.map(b => b.type)).toEqual(['image', 'text']);
+    expect(content[0]!.source).toEqual({ type: 'base64', media_type: 'image/png', data: btoa(String.fromCharCode(...new Uint8Array(2048))) });
+    expect(content[1]!.text).toContain('Build this');
+    expect((anthropicOf(h).calls[0]!.system as { text: string }[])[0]!.text).toContain('Pictures from the requester');
+    const stored = h.service.named('fr_conversation_append')[0]!.params['p_messages'] as ConversationMessage[];
+    expect(stored[0]).toMatchObject({ role: 'user', text: 'Build this', attachments: [picture] });
+  });
+
+  it('tells the fast model that restates a model request how many pictures came, never what they show', async () => {
+    const h = pictured();
+    await (await send(h, { text: 'Build this', attachments: [ATTACHMENT_ID], document: { type: 'model', apiVersion: 1, edit: 1 } })).text();
+    const content = anthropicOf(h).acknowledgments[0]!.messages[0]!.content as { type: string; text?: string }[];
+    expect(content.map(b => b.type)).toEqual(['text']);
+    expect(content[0]!.text).toBe('<pictures>1</pictures>\n\n<requester_message>\nBuild this\n</requester_message>');
+  });
+
+  it('opens a model turn that carries pictures with the same reading line as any other', async () => {
+    const events = parseSse(await (await send(pictured(), { text: 'Build this', attachments: [ATTACHMENT_ID], document: { type: 'model', apiVersion: 1, edit: 1 } })).text());
+    expect(events[0]).toEqual({ event: 'status', data: { phase: 'reading', text: 'Reading your request…' } });
+  });
+
+  it('accepts a message of pictures alone and refuses one with neither text nor pictures', async () => {
+    const h = pictured();
+    expect((await send(h, { text: '', attachments: [ATTACHMENT_ID] })).status).toBe(200);
+    await status(await send(pictured(), { text: '  ' }), 400, 'invalid');
+  });
+
+  it('shows earlier pictures again in later turns, and a note for a picture removed since', async () => {
+    const earlier: ConversationMessage[] = [{ role: 'user', text: 'Like this one', at: 't', attachments: [picture] }, { role: 'assistant', text: 'Done.', at: 't' }];
+    const kept = pictured({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help', messages: earlier, message_count: 1 }) } });
+    await (await send(kept, { text: 'Make it taller' })).text();
+    const first = anthropicOf(kept).calls[0]!.messages[0]!.content as { type: string }[];
+    expect(first.map(b => b.type)).toEqual(['image', 'text']);
+    const removed = pictured({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help', messages: earlier, message_count: 1 }) } }, []);
+    await (await send(removed, { text: 'Make it taller' })).text();
+    const note = anthropicOf(removed).calls[0]!.messages[0]!.content as { type: string; text?: string }[];
+    expect(note[0]).toEqual({ type: 'text', text: '(The requester removed the picture "shot.png".)' });
+  });
+
+  it('refuses pictures of another conversation or requester, unfinished uploads and oversized images, before the agent runs', async () => {
+    for (const row of [
+      attachmentRow({ conversation_id: '99999999-9999-4999-8999-999999999999' }),
+      attachmentRow({ uploaded_by: '99999999-9999-4999-8999-999999999999' }),
+      attachmentRow({ uploaded_at: null }),
+      attachmentRow({ size: 5 * 1024 * 1024 + 1 }),
+    ]) {
+      const h = pictured({}, [row]);
+      await status(await send(h, { text: 'Build this', attachments: [ATTACHMENT_ID] }), 400, 'invalid');
+      expect(anthropicOf(h).calls).toEqual([]);
+      expect(h.service.named('fr_conversation_append')).toEqual([]);
+    }
+    const unknown = pictured({}, []);
+    await status(await send(unknown, { text: 'Build this', attachments: [ATTACHMENT_ID] }), 400, 'invalid');
+  });
+
+  it('fails the turn for retry when a picture cannot be read, instead of continuing without it', async () => {
+    const h = pictured();
+    h.storage.objects.clear();
+    await status(await send(h, { text: 'Build this', attachments: [ATTACHMENT_ID] }), 503, 'unavailable');
+    expect(anthropicOf(h).calls).toEqual([]);
+  });
+
+  it('keeps the opening pictures when a suspended document turn resumes', async () => {
+    const call1 = { id: 'm1', name: 'model_get_document', input: {} };
+    const first = pictured({ turns: [{ toolUses: [call1] }] });
+    await (await send(first, { text: 'Build this', attachments: [ATTACHMENT_ID], document: { type: 'model', apiVersion: 1, edit: 1 } })).text();
+    const stored = first.service.named('fr_conversation_append')[0]!.params['p_messages'] as ConversationMessage[];
+    const resumed = pictured({ turns: [{ text: ['Built.'] }], service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help', messages: stored, message_count: 1 }) } });
+    await (await call(resumed.handler, 'POST', `/conversations/${CONVERSATION_ID}/tool-results`, { results: [{ toolUseId: 'm1', content: '{"revision":0}', isError: false }] })).text();
+    const opening = anthropicOf(resumed).calls[0]!.messages[0]!.content as { type: string }[];
+    expect(opening.map(b => b.type)).toEqual(['image', 'text']);
+  });
+});
+
 describe('problem-report attachments', () => {
   const problem = conversationRow({ path: 'problem', kind: 'problem' });
   const shot = { kind: 'screenshot', name: 'shot.png', mime: 'image/png', size: 2048 };
@@ -545,9 +656,13 @@ describe('problem-report attachments', () => {
     expect(h.service.named('fr_rate_check')).toHaveLength(1);
     await status(await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/attachments`, { kind: 'document', name: 'plan.pfm', mime: 'application/octet-stream', size: 9000 }), 400, 'invalid');
   });
-  it('refuses other paths, closed conversations, wrong types and sizes, the per-report limit, and a missing bucket', async () => {
+  it('accepts every path, and refuses closed conversations, wrong types and sizes, the per-conversation limit, and a missing bucket', async () => {
     const feature = withStorage({ service: { fr_conversation_get: conversationRow() } });
     await status(await call(feature.handler, 'POST', `/conversations/${CONVERSATION_ID}/attachments`, shot), 200);
+    for (const [kind, path] of [['help', 'help'], ['intake', 'open']] as const) {
+      const chat = withStorage({ service: { fr_conversation_get: conversationRow({ kind, path }) } });
+      await status(await call(chat.handler, 'POST', `/conversations/${CONVERSATION_ID}/attachments`, shot), 200);
+    }
     const closed = withStorage({ service: { fr_conversation_get: conversationRow({ path: 'problem', status: 'filed', closed_at: 't' }) } });
     await status(await call(closed.handler, 'POST', `/conversations/${CONVERSATION_ID}/attachments`, shot), 400, 'invalid');
     const h = withStorage();
@@ -689,13 +804,15 @@ describe('document tools', () => {
     await (await call(plain.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'hi' })).text();
     expect(toolNames(plain).some(n => n.startsWith('layout_'))).toBe(false);
     expect(anthropicOf(plain).calls[0]!.model).toBe('claude-haiku-5-5');
+    expect(anthropicOf(plain).calls[0]!.max_tokens).toBe(4096);
     const unknown = harness({ turns: [{ text: ['Hi'] }] });
     await (await call(unknown.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'hi', document: { type: 'layout', apiVersion: 99 } })).text();
     expect(toolNames(unknown).some(n => n.startsWith('layout_'))).toBe(false);
     const { h } = await suspended();
     const first = anthropicOf(h).calls[0]!;
     expect(first.model).toBe('claude-sonnet-5-5');
-    expect(first.output_config).toEqual({ effort: 'medium' });
+    expect(first.output_config).toEqual({ effort: 'low' });
+    expect(first.max_tokens).toBe(16_000);
     expect(toolNames(h)).toEqual(expect.arrayContaining(['search_docs', 'layout_get_document', 'layout_list_objects', 'layout_apply_operations']));
     expect((first.system as { text: string }[])[0]!.text).toContain('Editing the open document');
     expect((first.system as { text: string }[])[0]!.text).toContain('you change nothing except the open document');
@@ -707,6 +824,10 @@ describe('document tools', () => {
     await (await call(editable.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'Group the shelves', document: { type: 'model', apiVersion: 1, edit: 1 } })).text();
     const first = anthropicOf(editable).calls[0]!;
     expect(first.model).toBe('claude-sonnet-5-5');
+    // Model edits keep low effort and adaptive thinking, with room for a large batch.
+    expect(first.output_config).toEqual({ effort: 'low' });
+    expect(first).not.toHaveProperty('thinking');
+    expect(first.max_tokens).toBe(32_000);
     expect(toolNames(editable)).toEqual(expect.arrayContaining(['model_get_document', 'model_query', 'model_apply_operations', 'model_view']));
     expect(toolNames(editable).some(name => name.startsWith('layout_'))).toBe(false);
     const system = (first.system as { text: string }[])[0]!.text;
@@ -719,6 +840,7 @@ describe('document tools', () => {
     const guidanceOnly = harness({ turns: [{ text: ['Hi'] }] });
     await (await call(guidanceOnly.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'hi', document: { type: 'model', apiVersion: 1, guidance: 1 } })).text();
     expect(toolNames(guidanceOnly).some(name => name.startsWith('model_'))).toBe(false);
+    expect(anthropicOf(guidanceOnly).calls[0]!.max_tokens).toBe(16_000);
     expect((anthropicOf(guidanceOnly).calls[0]!.system as { text: string }[])[0]!.text).not.toContain('Editing the open 3D model');
   });
 
@@ -809,6 +931,54 @@ describe('document tools', () => {
     ]);
   });
 
+  it('resumes a help turn without waiting for the tracker, and logs where the time went', async () => {
+    const { stored } = await suspended();
+    const logged: string[] = [];
+    const h = harness({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help', messages: stored, message_count: 1 }) }, turns: [{ text: ['Done.'] }] });
+    let searches = 0;
+    h.tracker.searchOpen = async () => { searches += 1; return []; };
+    h.deps.log = (line) => { logged.push(line); };
+    const res = await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/tool-results`, { results: [{ toolUseId: 'c1', content: '{"revision":3}', isError: false }] });
+    expect(parseSse(await res.text()).map(e => e.event)).toEqual(['text', 'done']);
+    expect(searches).toBe(0);
+    const line = logged.find(l => l.startsWith(`turn ${CONVERSATION_ID}:`))!;
+    expect(line).toMatch(/cacheRead=\d+ cacheWrite=\d+ setupMs=\d+ setup=auth:\d+,/);
+    expect(line).toContain('toolChars=14');
+    expect(line).toMatch(/rounds=\[\d+\/\d+\/\d+ms,in100,out20,cr0,cw0\]/);
+  });
+
+  it('sends status lines on turns that edit a 3D model: the opening line, a batch being written, and the line for how the last step ended', async () => {
+    const MODEL = { type: 'model', apiVersion: 1, edit: 1 };
+    const apply = { id: 'a1', name: 'model_apply_operations', input: { label: 'Cabinet', operations: [] } };
+    const first = harness({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help' }) }, turns: [{ thinking: [''], text: ['Building it.'], toolUses: [apply] }] });
+    const events = parseSse(await (await call(first.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'Build a cabinet', document: MODEL })).text());
+    expect(events.map(e => e.event)).toEqual(['status', 'text', 'status', 'tool_request', 'done']);
+    expect(events[0]!.data).toEqual({ phase: 'reading', text: 'Reading your request…' });
+    expect(events[2]!.data).toEqual({ phase: 'writing', text: 'Writing the change…' });
+    // Status lines are never saved with the conversation.
+    const stored = first.service.named('fr_conversation_append')[0]!.params['p_messages'] as ConversationMessage[];
+    // Only the suspended turn's state keeps the last line, so the resumed request never opens with the same saying.
+    expect((stored.at(-1) as { turn: { status?: string } }).turn.status).toBe('Writing the change…');
+    expect(JSON.stringify(stored.map(m => ({ ...m, turn: undefined })))).not.toContain('Writing the change');
+    const resume = async (isError: boolean) => {
+      const h = harness({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help', messages: stored, message_count: 1 }) }, turns: [{ text: ['Done.'] }] });
+      const res = await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/tool-results`, { results: [{ toolUseId: 'a1', content: isError ? '{"ok":false}' : '{"ok":true}', isError }] });
+      return parseSse(await res.text());
+    };
+    const applied = await resume(false);
+    expect(applied.map(e => e.event)).toEqual(['status', 'text', 'done']);
+    expect(applied[0]!.data).toEqual({ phase: 'planning', text: 'Change applied. Working out the next step…' });
+    // A refused batch is retried quietly: the line only says the work goes on.
+    const refused = await resume(true);
+    const line = refused[0]!.data as { phase: string; text: string };
+    expect(refused[0]!.event).toBe('status');
+    expect(SAYINGS).toContain(line.text);
+    expect(JSON.stringify(refused.filter(e => e.event === 'status'))).not.toMatch(/fail|reject|refus|error|didn.t apply|fix/i);
+    // Layout documents and guidance-only tabs get none.
+    const { events: layout } = await suspended();
+    expect(layout.map(e => e.event)).not.toContain('status');
+  });
+
   it('rejects results when nothing is waiting or for calls that were not made', async () => {
     const idle = harness();
     await status(await call(idle.handler, 'POST', `/conversations/${CONVERSATION_ID}/tool-results`, { results: [] }), 400, 'invalid');
@@ -870,5 +1040,292 @@ describe('turn setup runs in parallel', () => {
     // Preflight and health never wait for it.
     expect((await failing.handler(new Request('http://x/me', { method: 'OPTIONS' }))).status).toBe(204);
     expect((await call(failing.handler, 'GET', '/health', undefined, null)).status).toBe(200);
+  });
+});
+
+describe('prompt-cache warm-up', () => {
+  /** A client whose non-streaming requests (the warm-ups) are recorded; streaming is not used. */
+  function warmClient(fail?: string) {
+    const created: Record<string, unknown>[] = [];
+    const client = { messages: {
+      async create(params: Record<string, unknown>) {
+        created.push(params);
+        if (fail && JSON.stringify(params).includes(fail)) throw new Error('overloaded');
+        return { content: [], stop_reason: 'max_tokens', usage: { input_tokens: 4, output_tokens: 0, cache_creation_input_tokens: 30_000, cache_read_input_tokens: 0 } };
+      },
+    } };
+    return { client, created };
+  }
+  it('sends each first-message prompt with the exact tools, system prompt and settings of a real first message', async () => {
+    const { client, created } = warmClient();
+    const logs: string[] = [];
+    const results = await warmChatPrompts({ anthropic: client as never, config, log: m => logs.push(m) });
+    expect(results.map(r => r.document)).toEqual(['none', 'model+edit+guidance', 'layout+guidance']);
+    expect(created).toHaveLength(WARM_DOCUMENTS.length);
+    for (const [i, document] of WARM_DOCUMENTS.entries()) {
+      // A real first message from an account at its open-request limit, on another editor: the prefix must still match.
+      const h = harness({ service: { fr_conversation_get: conversationRow({ kind: 'intake', path: 'open' }), fr_request_count_open: 5 }, turns: [{ text: ['Hi.'] }] });
+      await (await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'hi', ...(document ? { document } : {}) })).text();
+      const real = (h.deps.anthropic as ReturnType<typeof fakeAnthropic>).calls[0]!;
+      const warm = created[i]!;
+      expect(warm['model']).toBe(real.model);
+      expect(JSON.stringify(warm['tools'])).toBe(JSON.stringify(real.tools));
+      expect(JSON.stringify(warm['system'])).toBe(JSON.stringify(real.system));
+      expect(warm['tool_choice']).toEqual(real.tool_choice);
+      expect(warm['output_config']).toEqual(real.output_config);
+      expect(warm['thinking']).toEqual(real.thinking);
+      // Prompt only: no output, no streaming, and no rolling breakpoint that would cache the placeholder message.
+      expect(warm['max_tokens']).toBe(0); expect(warm['stream']).toBe(false); expect(warm).not.toHaveProperty('cache_control');
+    }
+    expect(logs[0]).toContain('cacheWrite=30000');
+  });
+  it('logs a failed warm-up and still warms the other prompts', async () => {
+    const { client } = warmClient('layout_');
+    const logs: string[] = [];
+    const results = await warmChatPrompts({ anthropic: client as never, config, log: m => logs.push(m) });
+    expect(results.map(r => r.usage === null)).toEqual([false, false, true]);
+    expect(logs.some(l => l.includes('warm layout+guidance: failed: overloaded'))).toBe(true);
+  });
+});
+
+describe('render review', () => {
+  const MODEL = { type: 'model', apiVersion: 1, edit: 1 };
+  const anthropicOf = (h: Harness) => h.deps.anthropic as ReturnType<typeof fakeAnthropic>;
+  const render = (id: string, input: unknown = {}) => ({ id, name: 'model_render', input });
+  const picture = (tag: string) => ({ mime: 'image/jpeg' as const, data: `/9j/${tag}${'Q'.repeat(40)}` });
+  const json = (value: unknown) => JSON.stringify(value);
+  /** Requests of one conversation in turn, each against the transcript the earlier ones stored, as the database keeps it. */
+  function conversation(limits: Partial<typeof config.limits> = {}) {
+    const stored: ConversationMessage[] = [];
+    const conf = loadConfig({ ...SAMPLE_CONFIG_INPUT, limits: { ...SAMPLE_CONFIG_INPUT.limits, ...limits } });
+    const step = async (turns: ScriptedTurn[], route: 'messages' | 'tool-results', body: unknown) => {
+      const h = harness({ deps: { config: conf }, turns, service: { fr_conversation_get: () => conversationRow({ kind: 'help', path: 'help', messages: [...stored], message_count: stored.filter(m => m.role === 'user').length }) } });
+      const response = await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/${route}`, body);
+      const events = parseSse(await response.text());
+      const appended = (h.service.named('fr_conversation_append')[0]?.params['p_messages'] ?? []) as ConversationMessage[];
+      stored.push(...appended);
+      return { h, events, appended, calls: anthropicOf(h).calls };
+    };
+    const suspendedTurn = () => (stored.at(-1) as Extract<ConversationMessage, { role: 'assistant' }>).turn!;
+    return { stored, step, suspendedTurn };
+  }
+
+  it('offers model_render with the review rule only to a model tab that can edit', async () => {
+    const c = conversation();
+    const { calls } = await c.step([{ text: ['Done.'] }], 'messages', { text: 'Build a cabinet', document: MODEL });
+    expect((calls[0]!.tools ?? []).map(t => (t as { name: string }).name)).toContain('model_render');
+    const system = (calls[0]!.system as { text: string }[])[0]!.text;
+    expect(system).toContain('Render review: after building something or substantially changing geometry, call model_render');
+    expect(system).toContain('at most 3 reviews per message');
+    expect(system).not.toContain('You have no picture of the model');
+    const layout = conversation();
+    const other = await layout.step([{ text: ['Done.'] }], 'messages', { text: 'Add a title', document: { type: 'layout', apiVersion: 1 } });
+    expect((other.calls[0]!.tools ?? []).map(t => (t as { name: string }).name)).not.toContain('model_render');
+  });
+
+  it('gives a turn that offers review its own round limit and keeps 12 rounds for other document turns', async () => {
+    const search = (n: number) => Array.from({ length: n }, (_, i) => ({ toolUses: [{ id: `s${i}`, name: 'search_docs', input: { query: 'shelf' } }] }));
+    const review = conversation({ documentToolRoundsWithReview: 3 });
+    const reviewed = await review.step(search(4), 'messages', { text: 'Build a cabinet', document: MODEL });
+    expect(reviewed.calls).toHaveLength(4);
+    expect(reviewed.appended.at(-1)).toMatchObject({ role: 'assistant', text: expect.stringContaining('I stopped looking things up') });
+    const layout = conversation({ documentToolRoundsWithReview: 3 });
+    const plain = await layout.step(search(13), 'messages', { text: 'Add a title', document: { type: 'layout', apiVersion: 1 } });
+    expect(plain.calls).toHaveLength(13);
+    expect(plain.appended.at(-1)).toMatchObject({ role: 'assistant', text: expect.stringContaining('I stopped looking things up') });
+    // The default for a review turn is 20 rounds.
+    expect(config.limits.documentToolRoundsWithReview).toBe(20);
+  });
+
+  it('sends the pictures to the model as image blocks after the text, and stores only a placeholder naming the views', async () => {
+    const c = conversation();
+    const first = await c.step([{ text: ['Building it.'], toolUses: [render('r1')] }], 'messages', { text: 'Build a cabinet', document: MODEL });
+    expect(first.events.find(e => e.event === 'tool_request')!.data).toEqual({ calls: [{ ...render('r1'), review: { index: 1, limit: 3 } }] });
+    expect(c.suspendedTurn().reviews).toBe(1);
+    const [a, b] = [picture('A'), picture('B')];
+    const resumed = await c.step([{ text: ['The cabinet matches the request.'] }], 'tool-results',
+      { results: [{ toolUseId: 'r1', content: '{"ok":true,"revision":2}', isError: false, images: [a, b] }] });
+    expect(resumed.calls[0]!.messages.at(-1)).toEqual({ role: 'user', content: [{ type: 'tool_result', tool_use_id: 'r1', content: [
+      { type: 'text', text: '{"ok":true,"revision":2}' },
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: a.data } },
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b.data } },
+    ] }] });
+    expect(resumed.appended[0]).toEqual({ role: 'tool', name: 'model_render', toolUseId: 'r1', input: {}, at: '2026-10-23T10:30:00.000Z',
+      output: '{"ok":true,"revision":2}\n(Render pictures not kept: iso; front.)', views: ['iso', 'front'] });
+    // The turn ended: nothing stored, now or in the transcript the panel reads, holds the pictures.
+    expect(json(c.stored)).not.toContain(a.data);
+    expect(json(c.stored)).not.toContain(b.data);
+    const view = harness({ service: { fr_conversation_get: conversationRow({ messages: c.stored, message_count: 1 }) } });
+    const got = await (await call(view.handler, 'GET', `/conversations/${CONVERSATION_ID}`)).json() as { conversation: { messages: Record<string, unknown>[] } };
+    expect(got.conversation.messages.find(m => m['role'] === 'tool')).toMatchObject({ views: ['iso', 'front'] });
+    // A later turn sees the placeholder, never the pictures again.
+    const later = await c.step([{ text: ['Sure.'] }], 'messages', { text: 'Thanks', document: MODEL });
+    expect(json(later.calls[0]!.messages)).not.toContain(a.data);
+    expect(json(later.calls[0]!.messages)).toContain('Render pictures not kept: iso; front.');
+  });
+
+  it('allows 3 reviews per requester message across resumes, keeps each picture once while the turn runs, and answers the 4th itself', async () => {
+    const c = conversation();
+    const [a, b, d] = [picture('A'), picture('B'), picture('D')];
+    await c.step([{ toolUses: [render('r1')] }], 'messages', { text: 'Build a cabinet', document: MODEL });
+    const second = await c.step([{ text: ['The shelf is too low.'], toolUses: [render('r2', { views: [{ direction: 'front' }] })] }], 'tool-results',
+      { results: [{ toolUseId: 'r1', content: '{"ok":true}', isError: false, images: [a] }] });
+    expect(second.events.find(e => e.event === 'tool_request')!.data).toMatchObject({ calls: [{ id: 'r2', review: { index: 2, limit: 3 } }] });
+    // While the turn is suspended the picture is kept once, outside the rounds that name it.
+    expect(c.suspendedTurn()).toMatchObject({ reviews: 2, renders: { 'r1#0': a } });
+    expect(json(c.suspendedTurn().appended)).not.toContain(a.data);
+    const third = await c.step([{ toolUses: [render('r3')] }], 'tool-results', { results: [{ toolUseId: 'r2', content: '{"ok":true}', isError: false, images: [b] }] });
+    // The resumed rounds carry the earlier picture again, exactly as the agent saw it.
+    expect(json(third.calls[0]!.messages)).toContain(a.data);
+    expect(third.events.find(e => e.event === 'tool_request')!.data).toMatchObject({ calls: [{ id: 'r3', review: { index: 3, limit: 3 } }] });
+    expect(c.suspendedTurn()).toMatchObject({ reviews: 3, renders: { 'r2#0': b } });
+    expect(Object.keys(c.suspendedTurn().renders!)).toEqual(['r2#0']);
+    expect(json(c.stored).split(a.data)).toHaveLength(2);
+    const last = await c.step([{ toolUses: [render('r4')] }, { text: ['Fixed the shelf; I could not check the back.'] }], 'tool-results',
+      { results: [{ toolUseId: 'r3', content: '{"ok":true}', isError: false, images: [d] }] });
+    // The 4th render never reaches the browser: the agent gets the limit error and finishes the turn.
+    expect(last.events.map(e => e.event)).not.toContain('tool_request');
+    expect(last.calls).toHaveLength(2);
+    expect(json(last.calls[1]!.messages.at(-1))).toContain('render limit reached; finish and say what you could not verify');
+    expect(last.calls[1]!.messages.at(-1)).toMatchObject({ content: [{ type: 'tool_result', tool_use_id: 'r4', is_error: true }] });
+    expect(last.appended.map(m => m.role)).toEqual(['tool', 'tool', 'assistant']);
+    expect(last.appended[1]).toMatchObject({ name: 'model_render', toolUseId: 'r4', output: expect.stringContaining('render limit reached') });
+    expect(last.appended.at(-1)).not.toHaveProperty('turn');
+    expect(json(last.appended)).not.toContain(d.data);
+    // The next requester message starts a new count.
+    const next = await c.step([{ toolUses: [render('r5')] }], 'messages', { text: 'Now add a door', document: MODEL });
+    expect(next.events.find(e => e.event === 'tool_request')!.data).toMatchObject({ calls: [{ id: 'r5', review: { index: 1, limit: 3 } }] });
+  });
+
+  it('refuses pictures on any result but a render, and pictures past the limits', async () => {
+    const c = conversation();
+    await c.step([{ toolUses: [render('r1'), { id: 'g1', name: 'model_get_document', input: {} }] }], 'messages', { text: 'Build a cabinet', document: MODEL });
+    const tryResults = async (results: unknown[]) => {
+      const h = harness({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help', messages: c.stored, message_count: 1 }) } });
+      return call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/tool-results`, { results });
+    };
+    await status(await tryResults([{ toolUseId: 'g1', content: '{}', images: [picture('A')] }]), 400, 'invalid');
+    await status(await tryResults([{ toolUseId: 'r1', content: '{}', images: [picture('A'), picture('B'), picture('C'), picture('D')] }]), 400, 'invalid');
+    await status(await tryResults([{ toolUseId: 'r1', content: '{}', images: [{ mime: 'image/gif', data: 'R0lG' }] }]), 400, 'invalid');
+    await status(await tryResults([{ toolUseId: 'r1', content: '{}', images: [{ mime: 'image/jpeg', data: 'not base64!' }] }]), 400, 'invalid');
+    await status(await tryResults([{ toolUseId: 'r1', content: '{}', images: [{ mime: 'image/jpeg', data: 'A'.repeat(1_572_868) }] }]), 400, 'invalid');
+  });
+});
+
+describe('acknowledgments on turns that edit a 3D model', () => {
+  const MODEL = { type: 'model', apiVersion: 1, edit: 1 };
+  const help = conversationRow({ kind: 'help', path: 'help' });
+  const read = { id: 'g1', name: 'model_get_document', input: {} };
+  const ACK = 'A 24 in base cabinet with two doors. Starting on it now.';
+  const offConfig = loadConfig({ ...SAMPLE_CONFIG_INPUT, models: { ...SAMPLE_CONFIG_INPUT.models, acknowledge: null } });
+  const run = async (over: { turns: ScriptedTurn[]; acks?: ScriptedTurn[]; messages?: ConversationMessage[]; document?: unknown; text?: string; off?: boolean; anthropic?: ConversationDeps['anthropic'] }) => {
+    const anthropic = fakeAnthropic(over.turns, over.acks ?? [{ text: ['A 24 in base cabinet', ' with two doors. Starting on it now.'] }]);
+    const logged: string[] = [];
+    const h = harness({ service: { fr_conversation_get: over.messages ? conversationRow({ kind: 'help', path: 'help', messages: over.messages, message_count: 1 }) : help },
+      deps: { anthropic: over.anthropic ?? anthropic, log: line => { logged.push(line); }, ...(over.off ? { config: offConfig } : {}) } });
+    const events = parseSse(await (await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: over.text ?? 'A 24 in base cabinet with two doors', document: 'document' in over ? over.document : MODEL })).text());
+    const stored = h.service.named('fr_conversation_append')[0]!.params['p_messages'] as ConversationMessage[];
+    return { anthropic, events, stored, logged, text: events.filter(e => e.event === 'text').map(e => (e.data as { delta: string }).delta).join('') };
+  };
+
+  it('streams the restatement right after the opening status line and keeps it as its own message, apart from the turn', async () => {
+    const { anthropic, events, stored, logged } = await run({ turns: [{ toolUses: [read] }] });
+    expect(events.map(e => e.event)).toEqual(['status', 'text', 'text', 'tool_request', 'done']);
+    expect(events.slice(1, 3).map(e => (e.data as { delta: string }).delta).join('')).toBe(ACK);
+    expect(stored.map(m => m.role)).toEqual(['user', 'assistant', 'assistant']);
+    expect(stored[1]).toEqual({ role: 'assistant', text: ACK, at: '2026-10-23T10:30:00.000Z', acknowledgment: true });
+    expect(stored[2]).toMatchObject({ role: 'assistant', text: '', turn: expect.any(Object) });
+    // The fast model read the framed message only; the agent's own request never mentions the acknowledgment.
+    expect(anthropic.acknowledgments).toHaveLength(1);
+    expect(anthropic.acknowledgments[0]!.model).toBe('claude-haiku-5-5');
+    expect(JSON.stringify(anthropic.acknowledgments[0]!.messages)).toContain('<requester_message>\\nA 24 in base cabinet with two doors\\n</requester_message>');
+    expect(JSON.stringify(anthropic.calls)).not.toContain('Starting on it now');
+    expect(logged.find(l => l.startsWith(`acknowledge ${CONVERSATION_ID}:`))).toMatch(/model=claude-haiku-5-5 outcome=shown firstMs=\d+ ms=\d+ in=100 out=20 chars=56$/);
+    // The turn's own log line is unchanged in form, so readers of it keep matching.
+    expect(logged.find(l => l.startsWith(`turn ${CONVERSATION_ID}: model=`))).not.toContain('acknowledge');
+  });
+
+  it('sends the agent byte-identical requests with acknowledgments on or off, now and in later turns', async () => {
+    const turns = (): ScriptedTurn[] => [{ toolUses: [read] }];
+    const on = await run({ turns: turns() });
+    const off = await run({ turns: turns(), off: true });
+    expect(off.anthropic.acknowledgments).toEqual([]);
+    expect(off.stored.map(m => m.role)).toEqual(['user', 'assistant']);
+    expect(JSON.stringify(on.anthropic.calls)).toBe(JSON.stringify(off.anthropic.calls));
+    // A later message: the stored acknowledgment never reaches the agent's history.
+    const done = (stored: ConversationMessage[]): ConversationMessage[] => [...stored.slice(0, -1), { role: 'assistant', text: 'Built the cabinet.', at: 't' }];
+    const laterOn = await run({ turns: [{ text: ['Done.'] }], messages: done(on.stored), text: 'Make it 30 in wide', off: true });
+    const laterOff = await run({ turns: [{ text: ['Done.'] }], messages: done(off.stored), text: 'Make it 30 in wide', off: true });
+    expect(JSON.stringify(laterOn.anthropic.calls)).toBe(JSON.stringify(laterOff.anthropic.calls));
+    expect(JSON.stringify(laterOn.anthropic.calls)).not.toContain('Starting on it now');
+    // The fast model gets the agent's previous reply for referents, never an earlier acknowledgment.
+    const followUp = await run({ turns: [{ text: ['Done.'] }], messages: done(on.stored), text: 'Make it 30 in wide' });
+    const read2 = JSON.stringify(followUp.anthropic.acknowledgments[0]!.messages);
+    expect(read2).toContain('<previous_reply>\\nBuilt the cabinet.\\n</previous_reply>');
+    expect(read2).not.toContain('Starting on it now');
+  });
+
+  it('round-trips the acknowledgment mark through the stored transcript', () => {
+    const rows = [{ role: 'user', text: 'Hi', at: 't' }, { role: 'assistant', text: ACK, at: 't', acknowledgment: true }, { role: 'assistant', text: 'Done.', at: 't' }];
+    const messages = conversationFromRow(conversationRow({ messages: rows })).messages;
+    expect(messages[1]).toEqual({ role: 'assistant', text: ACK, at: 't', acknowledgment: true });
+    expect(messages[2]).not.toHaveProperty('acknowledgment');
+    expect(JSON.stringify(historyOf(messages, '<ctx/>', 'Next'))).not.toContain('Starting on it now');
+  });
+
+  it('sets the agent words that follow off by a blank line, and drops the acknowledgment when the agent speaks first', async () => {
+    const after = await run({ turns: [{ toolUses: [read] }] });
+    expect(after.text).toBe(ACK);
+    // A slow acknowledgment loses to the agent's own first words: only the agent's words are shown and kept.
+    const builder = fakeAnthropic([{ text: ['Which width do you want?'] }], [{ text: [ACK] }]);
+    const slow: ConversationDeps['anthropic'] = { messages: { async create(params, options) {
+      if (params.system !== builder.calls[0]?.system && typeof params.system === 'string') await new Promise(r => setTimeout(r, 30));
+      return builder.messages.create(params, options);
+    } } };
+    const first = await run({ turns: [], anthropic: slow });
+    expect(first.text).toBe('Which width do you want?');
+    expect(first.stored.map(m => m.role)).toEqual(['user', 'assistant']);
+    // An acknowledgment already speaking holds the agent's words, which then follow after a blank line.
+    const agentLate: ConversationDeps['anthropic'] = { messages: { async create(params, options) {
+      if (typeof params.system !== 'string') await new Promise(r => setTimeout(r, 30));
+      return builder2.messages.create(params, options);
+    } } };
+    const builder2 = fakeAnthropic([{ text: ['Built it.'] }], [{ text: [ACK] }]);
+    const both = await run({ turns: [], anthropic: agentLate });
+    expect(both.text).toBe(`${ACK}\n\nBuilt it.`);
+    expect(both.stored.map(m => [m.role, m.role === 'assistant' ? m.text : null])).toEqual([['user', null], ['assistant', ACK], ['assistant', 'Built it.']]);
+  });
+
+  it('shows and keeps nothing when the fast model has nothing to say or fails', async () => {
+    const nothing = await run({ turns: [{ toolUses: [read] }], acks: [{ text: ['-'] }], text: 'Thanks!' });
+    expect(nothing.text).toBe('');
+    expect(nothing.stored.map(m => m.role)).toEqual(['user', 'assistant']);
+    expect(nothing.logged.find(l => l.startsWith('acknowledge '))).toContain('outcome=nothing');
+    const builder = fakeAnthropic([{ text: ['Done.'] }]);
+    const failing: ConversationDeps['anthropic'] = { messages: { async create(params, options) {
+      if (typeof params.system === 'string') throw new Error('overloaded');
+      return builder.messages.create(params, options);
+    } } };
+    const failed = await run({ turns: [], anthropic: failing });
+    expect(failed.events.map(e => e.event)).toEqual(['status', 'text', 'done']);
+    expect(failed.stored.map(m => m.role)).toEqual(['user', 'assistant']);
+    expect(failed.logged.find(l => l.startsWith('acknowledge '))).toContain('outcome=error');
+  });
+
+  it('runs only on new messages to a 3D model that can be edited', async () => {
+    for (const document of [{ type: 'layout', apiVersion: 1, edit: 1 }, { type: 'model', apiVersion: 1, guidance: 1 }, null]) {
+      const { anthropic, stored } = await run({ turns: [{ text: ['Sure.'] }], document });
+      expect(anthropic.acknowledgments).toEqual([]);
+      expect(stored.some(m => m.role === 'assistant' && m.acknowledgment)).toBe(false);
+    }
+    // A resumed request answers the editor's results: no new acknowledgment.
+    const { stored } = await run({ turns: [{ toolUses: [read] }] });
+    const resumedClient = fakeAnthropic([{ text: ['Done.'] }]);
+    const h = harness({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help', messages: stored, message_count: 1 }) }, deps: { anthropic: resumedClient } });
+    const events = parseSse(await (await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/tool-results`, { results: [{ toolUseId: 'g1', content: '{"revision":1}', isError: false }] })).text());
+    expect(events.map(e => e.event)).toEqual(['status', 'text', 'done']);
+    expect(resumedClient.acknowledgments).toEqual([]);
+    // The resumed request continues from the suspended turn, after the acknowledgment.
+    expect(JSON.stringify(resumedClient.calls[0]!.messages)).not.toContain('Starting on it now');
   });
 });

@@ -8,18 +8,20 @@ import type { ImageId } from '@pushform/core';
 import { allocId, createDocument, ImageStore, DEFAULT_SHADOWS } from '@pushform/model';
 
 const rendered = vi.hoisted(() => ({ snapshots: [] as [number, number][], previews: [] as [number, number][], ready: new Set<string>(),
-  displays: [] as unknown[], shadows: [] as unknown[], fog: [] as unknown[], texturesReady: vi.fn(async () => {}) }));
+  displays: [] as unknown[], shadows: [] as unknown[], fog: [] as unknown[], texturesReady: vi.fn(async () => {}), failure: null as string | null,
+  /** Models loaded while this is set have nothing in them. */
+  empty: false, read: vi.fn(async (_bytes: Uint8Array, _options?: unknown): Promise<unknown> => ({ scenes: [] })) }));
 
 vi.mock('@pushform/io', () => ({
-  readPreservedSketchUpModel: () => new Uint8Array(1),
-  readSketchUpInWorker: async () => ({ scenes: [] }),
+  readPreservedSketchUpModel: (_state: unknown, _archive: string, model: string) => model === 'linked' ? null : new Uint8Array(1),
+  readSketchUpInWorker: rendered.read,
   applySketchUpImport: () => undefined,
   openModelFile: vi.fn(async (bytes: Uint8Array) => ({ images: new Map(), state: { images: new Map(), sceneOrder: [1], tags: new Map(),
     scenes: new Map([[1, { name: `Scene ${bytes.length}`, flags: { useCamera: true, useTags: false }, hiddenTags: [],
       camera: { eye: [1, 2, 3], target: [0, 0, 0], up: [0, 0, 1], perspective: false, fov: 35, height: 4 } }]]) } })),
 }));
 vi.mock('../engine/renderAdapter', () => ({
-  bodiesToRender: () => [], sketchesToRender: () => [], imagesToRender: () => [], displayToRender: () => ({}),
+  bodiesToRender: () => [], sketchesToRender: () => rendered.empty ? [] : [{}], imagesToRender: () => [], displayToRender: () => ({}),
   shadowsToRender: (state: { shadows: unknown }) => state.shadows,
   fogToRender: () => ({ enabled: true, near: 1, far: 20, color: '#eeece6' }),
   withRenderImageStore: (_images: unknown, run: () => unknown) => run(),
@@ -37,6 +39,7 @@ vi.mock('@pushform/render', () => ({
     setShadows(shadows: unknown): void { rendered.shadows.push(shadows); }
     setFog(fog: unknown): void { rendered.fog.push(fog); }
     snapshot(width: number, height: number): string {
+      if (rendered.failure) throw new Error(rendered.failure);
       rendered.snapshots.push([width, height]);
       return `data:image/png;base64,${rendered.snapshots.length}`;
     }
@@ -47,13 +50,16 @@ vi.mock('@pushform/render', () => ({
   },
 }));
 vi.mock('./layoutImage', () => ({
+  LAYOUT_VIEW_EMPTY: 'pushform-view:empty',
+  LAYOUT_VIEW_FAILED: 'pushform-view:failed',
   notifyLayoutImages: () => undefined,
   setLayoutCanvasPicture: (src: string) => rendered.ready.add(src),
   layoutImageReady: (src: string) => rendered.ready.has(src),
   forgetLayoutImage: (src: string) => rendered.ready.delete(src),
 }));
 
-const { layoutViewportPicture, layoutViewportModel, layoutViewportRender, layoutViewportFailure, setLayoutCloudModelLoader,
+const { layoutViewportPicture, layoutViewportModel, layoutViewportRender, layoutViewportFailure, layoutViewportProblem, layoutViewportStatus,
+  layoutViewportWarnings, setLayoutCloudModelLoader,
   retainLayoutViewportModels, peekLayoutViewportModel, settleLayoutViewportRenders, whenLayoutViewportRendersIdle } = await import('./layoutViewportRenders');
 
 const camera: LayoutViewportCamera = { eye: [10, -10, 10], target: [0, 0, 0], up: [0, 0, 1], projection: 'perspective', fov: 35, scale: 1 };
@@ -149,10 +155,84 @@ describe('Layout model view renders', () => {
     expect(rendered.shadows.at(-1)).toEqual(DEFAULT_SHADOWS);
   });
 
+  it('paints nothing for a view whose model shows nothing, without rendering it, and reports it as such', async () => {
+    const entity = { ...view(), points: [[0, 0], [70, 0], [70, 40], [0, 40]] as [number, number][] };
+    entity.image!.viewport!.source = { archiveId: 'a', modelReferenceId: 'empty' };
+    rendered.empty = true;
+    try {
+      // Not rendered yet: the loading placeholder.
+      expect(layoutViewportPicture(state, entity)).toBe('');
+      await settle();
+    } finally { rendered.empty = false; }
+    // The model is read even though it has nothing in it.
+    expect(rendered.read).toHaveBeenLastCalledWith(expect.anything(), { allowEmpty: true });
+    expect(rendered.snapshots).toEqual([]);
+    expect(layoutViewportPicture(state, entity)).toBe('pushform-view:empty');
+    expect(layoutViewportPicture(state, entity, undefined, 300 / 25.4, true)).toBe('pushform-view:empty');
+    expect(layoutViewportPicture(state, entity, { ...camera, eye: [5, 5, 5] }, 4)).toBe('pushform-view:empty');
+    expect(layoutViewportStatus(state, entity)).toBe('empty');
+    await settleLayoutViewportRenders(state, [entity], 5_000, 300);
+    expect(rendered.snapshots).toEqual([]);
+  });
+
+  it('marks a view that cannot be rendered as failed, unless it has an earlier picture to keep', async () => {
+    rendered.read.mockRejectedValueOnce(new Error('The model could not be read.'));
+    const entity = view();
+    entity.image!.viewport!.source = { archiveId: 'a', modelReferenceId: 'unreadable' };
+    expect(layoutViewportPicture(state, entity)).toBe('');
+    await settle();
+    expect(layoutViewportPicture(state, entity)).toBe('pushform-view:failed');
+    expect(layoutViewportStatus(state, entity)).toBe('unavailable');
+    const pictured = { ...entity, id: nextId++, image: { ...entity.image!, src: 'saved-picture' } };
+    expect(layoutViewportPicture(state, pictured)).toBe('saved-picture');
+  });
+
   it("draws the model's fog", async () => {
     layoutViewportPicture(state, view());
     await settle();
     expect(rendered.fog.at(-1)).toEqual({ enabled: true, near: 1, far: 20, color: '#eeece6' });
+  });
+});
+
+describe('Model views that cannot be rendered', () => {
+  it('reports a view whose model is not embedded, once per reason', async () => {
+    const linked = (): LayoutEntity => { const entity = view(); entity.image!.viewport!.source = { archiveId: 'a', modelReferenceId: 'linked' }; return entity; };
+    const views = [linked(), linked(), view()];
+    await settleLayoutViewportRenders(state, views);
+    expect(layoutViewportStatus(state, views[0]!)).toBe('unavailable');
+    expect(layoutViewportProblem(state, views[2]!)).toBeNull();
+    expect(layoutViewportWarnings(state, views)).toEqual([
+      '2 model views could not be rendered: The model is linked to an external file that is not embedded in this document.']);
+    expect(layoutViewportPicture(state, views[0]!)).toBe('pushform-view:failed');
+    // PDF export goes ahead without their pictures (reporting them) instead of refusing.
+    await expect(settleLayoutViewportRenders(state, views, 5_000, 150)).resolves.toBeUndefined();
+    expect(layoutViewportPicture(state, views[0]!, undefined, 150 / 25.4, true)).toBe('pushform-view:failed');
+  });
+
+  it('reports a failed render until a render of the view succeeds', async () => {
+    // A frame size no other test renders, so the render is not already finished.
+    const entity = { ...view(), points: [[0, 0], [91, 0], [91, 47], [0, 47]] as [number, number][] };
+    rendered.failure = 'Out of graphics memory';
+    try {
+      await settleLayoutViewportRenders(state, [entity]);
+    } finally {
+      rendered.failure = null;
+    }
+    expect(layoutViewportStatus(state, entity)).toBe('unavailable');
+    expect(layoutViewportWarnings(state, [entity])).toEqual(['A model view could not be rendered: Out of graphics memory']);
+    expect(layoutViewportPicture(state, entity)).toBe('pushform-view:failed');
+    entity.points = [[0, 0], [93, 0], [93, 47], [0, 47]];
+    await settleLayoutViewportRenders(state, [entity]);
+    expect(layoutViewportProblem(state, entity)).toBeNull();
+    expect(layoutViewportStatus(state, entity)).toBe('current');
+  });
+
+  it('does not report a view showing its current saved render', () => {
+    const entity = view();
+    entity.image!.src = 'data:image/png;base64,saved';
+    entity.image!.viewport!.source = { archiveId: 'a', modelReferenceId: 'linked' };
+    entity.image!.viewport!.cache = { camera, widthMm: 100, heightMm: 50 };
+    expect(layoutViewportProblem(state, entity)).toBeNull();
   });
 });
 
@@ -227,6 +307,19 @@ describe('Cloud model views', () => {
     const render = layoutViewportRender(state, entity);
     expect(render).toMatchObject({ src: expect.stringMatching(/^data:image\/png/), cache: { camera, widthMm: 100, heightMm: 50, sha256: sha } });
     expect(rendered.snapshots.at(-1)).toEqual([591, 295]);
+  });
+
+  it('stores a transparent picture for a view of a cloud model that shows nothing', async () => {
+    setLayoutCloudModelLoader(async () => new Uint8Array(4));
+    const state = cloudState(), entity = cloudView();
+    state.references.get(5)!.target = { kind: 'cloud', documentId: 'empty-model', revisionId: 'rev-4', revisionNumber: 4, sha256: 'e'.repeat(64), pinned: false };
+    rendered.empty = true;
+    try {
+      expect(layoutViewportRender(state, entity)).toBeNull();
+      await settle();
+    } finally { rendered.empty = false; }
+    expect(rendered.snapshots).toEqual([]);
+    expect(layoutViewportRender(state, entity)).toMatchObject({ src: expect.stringMatching(/^data:image\/png;base64,/), cache: { sha256: 'e'.repeat(64) } });
   });
 });
 

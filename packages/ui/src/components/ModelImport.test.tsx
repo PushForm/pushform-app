@@ -10,6 +10,13 @@ import { DocumentSession } from '../session';
 import { TopBar } from './TopBar';
 
 vi.mock('@pushform/io', async original => ({ ...await original<typeof IoModule>(), readSketchUpInWorker: vi.fn() }));
+// Imported section planes carry text labels; laying out their glyphs needs WebGL, which the test DOM lacks.
+// The path is the render package's own copy of the text library, the one its section labels use.
+vi.mock('../../../render/node_modules/troika-three-text', async original => {
+  const troika = await original<{ Text: new () => { sync(callback?: () => void): void } }>();
+  class Text extends troika.Text { override sync(callback?: () => void): void { callback?.(); } }
+  return { ...troika, Text };
+});
 const readModel = vi.mocked(readSketchUpInWorker);
 function scene(): SketchUpImport {
   return { version: '{26}', root: { key: -1, guid: 'ROOT', name: 'Model', image: false, group: false, alwaysFaceCamera: false, shadowsFaceSun: false,

@@ -11,6 +11,7 @@ export function StatusBar(): JSX.Element {
   useCommandNotices(app);
   const instructor = useAppStore((s) => s.instructor);
   const notice = useAppStore((s) => s.notice);
+  const choices = useAppStore((s) => s.toolChoices);
   return (
     <footer className="pf-statusbar">
       <div className="pf-status-left" aria-label="Status hints">
@@ -20,6 +21,22 @@ export function StatusBar(): JSX.Element {
       <div className={`pf-status-mid${notice ? ' pf-status-notice' : ''}`} role="status">
         {notice ?? instructor}
       </div>
+      {choices.map((c) => (
+        <label key={c.id} className="pf-status-choice">
+          <span>{c.label}</span>
+          <select
+            value={c.value}
+            onChange={(e) => {
+              app?.toolManager.choose(c.id, e.target.value);
+              app?.viewport.container?.focus();
+            }}
+          >
+            {c.options.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </label>
+      ))}
     </footer>
   );
 }

@@ -70,7 +70,7 @@ export function writeLayoutDxf(page: LayoutVectorPage, area: LayoutExportArea = 
     const members = page.items.filter(item => layers.get(item.layer) === name);
     pair(2, name); pair(70, 0); pair(62, members.length && members.every(item => item.layerVisible === false) ? -7 : 7); pair(6, 'Continuous');
     if (options.colorByLayer) {
-      const first = members.find(item => item.kind !== 'image');
+      const first = members.find(item => item.kind !== 'image' && item.kind !== 'pattern');
       const color = first?.kind === 'path' ? first.stroke ?? first.fill : first?.kind === 'text' ? first.color : null;
       if (color && /^#[\da-f]{6}/i.test(color)) pair(420, parseInt(color.slice(1, 7), 16));
     }
@@ -125,6 +125,7 @@ export function writeLayoutDxf(page: LayoutVectorPage, area: LayoutExportArea = 
   };
   for (const item of page.items) {
     if (item.kind === 'image') { warnings.add('Pictures and raster model views are omitted from DXF.'); continue; }
+    if (item.kind === 'pattern') { warnings.add('Pattern fills are omitted from DXF; their shapes keep their fill color and stroke.'); continue; }
     if (item.clips.length) warnings.add('DXF does not retain text-box or picture clipping; clipped content can extend beyond its frame.');
     if (item.kind === 'text') {
       if (!item.text.trim()) continue;

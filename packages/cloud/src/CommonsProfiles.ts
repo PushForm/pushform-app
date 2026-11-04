@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { catalogModelSchema, catalogUrlSchema } from './CommonsCatalog';
 import type { Database } from './db.types';
+import { commonsProfileImageSchema } from './CommonsProfileImages';
 
 export const commonsHandleSchema = z.string().trim().toLowerCase().regex(/^[a-z][a-z0-9-]{1,30}[a-z0-9]$/);
 export const commonsProfileFieldsSchema = z.object({
@@ -13,7 +14,8 @@ export const commonsProfileFieldsSchema = z.object({
   avatarUrl: catalogUrlSchema.nullable(),
   links: z.array(z.object({ label: z.string().trim().min(1).max(80).refine(value=>!/\p{Cc}/u.test(value)), url: catalogUrlSchema }).strict()).max(5),
 }).strict();
-export const commonsPublicProfileSchema = commonsProfileFieldsSchema.extend({ id: z.uuid() }).strict();
+// Uploaded images are optional so the client also reads profiles from a service that predates them.
+export const commonsPublicProfileSchema = commonsProfileFieldsSchema.extend({ id: z.uuid(), avatarImage: commonsProfileImageSchema.nullable().optional(), bannerImage: commonsProfileImageSchema.nullable().optional() }).strict();
 export const commonsProfileSchema = commonsPublicProfileSchema.extend({ active: z.boolean(), version: z.number().int().min(1) }).strict();
 export type CommonsProfileFields = z.infer<typeof commonsProfileFieldsSchema>;
 export type CommonsPublicProfile = z.infer<typeof commonsPublicProfileSchema>;
@@ -44,6 +46,10 @@ export class CommonsProfiles {
   async get(id:string,signal?:AbortSignal):Promise<CommonsProfilePage|null>{
     if(!z.uuid().safeParse(id).success)throw new Error('This profile link is invalid.');
     const data=await this.rpc('commons_profile',{p_id:id},signal);return data===null?null:pageSchema.parse(data);
+  }
+  async getByHandle(handle:string,signal?:AbortSignal):Promise<CommonsProfilePage|null>{
+    if(!/^[a-z][a-z0-9-]{1,30}[a-z0-9]$/.test(handle))throw new Error('This profile link is invalid.');
+    const data=await this.rpc('commons_profile_by_handle',{p_handle:handle},signal);return data===null?null:pageSchema.parse(data);
   }
   async mine(signal?:AbortSignal):Promise<CommonsProfile|null>{
     const data=await this.rpc('commons_my_profile',{},signal);return data===null?null:commonsProfileSchema.parse(data);

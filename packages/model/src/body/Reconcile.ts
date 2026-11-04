@@ -157,6 +157,11 @@ export function reconcileBody(body: Body, result: KernelResult): void {
     c.edgeRefs = c.edgeRefs.filter((r) => typeof r === 'string' && edges.has(r as EdgeKey));
     if (c.edgeRefs.length === 0) body.curves.delete(cid);
   }
+  // A cut can keep a curved side while removing its original rim curves. Keep the
+  // surface membership, but detach the reference when that curve no longer exists.
+  for (const s of body.surfaces.values()) {
+    if (s.curveId !== null && !body.curves.has(s.curveId)) s.curveId = null;
+  }
 
   body.faces = faces;
   body.nextFaceId = Math.max(body.nextFaceId, nextFaceId);

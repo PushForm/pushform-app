@@ -122,6 +122,35 @@ describe('LayoutDocumentApi batches', () => {
   });
 });
 
+describe('LayoutDocumentApi one undo step per request', () => {
+  const rect = (api: LayoutDocumentApi, pageId: number, label: string, x: number) =>
+    api.apply({ expectedRevision: api.revision, label, operations: [{ op: 'add_rectangle', pageId, x, y: 0, width: 5, height: 5 }] });
+
+  it('merges batches that follow each other into one entry, and starts a new one after anything else', () => {
+    const { doc, api, pageId } = setup();
+    expect(api.changes).toBeNull();
+    rect(api, pageId, 'Frame', 0);
+    rect(api, pageId, 'Border', 10);
+    // A failed batch in between changes nothing.
+    expect(failure(() => api.apply({ expectedRevision: api.revision, label: 'Broken', operations: [{ op: 'delete', pageId, entityIds: [999] }] })).error.code).toBe('operation_failed');
+    rect(api, pageId, 'Title', 20);
+    expect(api.changes).toEqual({ label: 'Frame and 2 more changes', undoSteps: 1 });
+    expect(doc.undoStack.undo()).toBe(true);
+    expect(objectCount(doc)).toBe(0);
+    expect(doc.undoStack.canUndo).toBe(false);
+    expect(doc.undoStack.redo()).toBe(true);
+    expect(objectCount(doc)).toBe(3);
+    // The redo changed the document, so the next batch is a new step; so is one after another client's batch.
+    rect(api, pageId, 'Note', 30);
+    const other = new LayoutDocumentApi(doc, createLayoutRegistry(doc).commands, { activePageId: () => pageId, selectedEntityIds: () => [] }, 'Plugin');
+    rect(other, pageId, 'Stamp', 40);
+    rect(api, pageId, 'Logo', 50);
+    expect(api.changes).toEqual({ label: 'Frame and 4 more changes', undoSteps: 3 });
+    expect(doc.undoStack.undo()).toBe(true);
+    expect(objectCount(doc)).toBe(5);
+  });
+});
+
 describe('runLayoutTool', () => {
   it('returns JSON results and error results without throwing', () => {
     const { api, pageId } = setup();

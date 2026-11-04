@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import type { Rgb } from '@pushform/model';
+import type { Rgb, TextureGrain } from '@pushform/model';
 import type * as NodeFs from 'node:fs/promises';
 
 /** Built-in finishes. Image maps are bundled locally and embedded in documents when used. */
@@ -16,6 +16,12 @@ export interface LibraryTexture {
   readonly heightPx: number;
   readonly url: string;
   readonly previewUrl: string;
+  /**
+   * Which way the image's grain runs: across its width, down its height, or `none` for a pattern with no single
+   * direction (parquet, herringbone, strand board). Absent means `width`. Measured from the images: the mean
+   * brightness change across the width against the change down the height.
+   */
+  readonly grain?: TextureGrain | undefined;
 }
 
 export interface LibraryMaterial {
@@ -65,7 +71,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_Ash', name: "Ash", category: 'Wood', color: c(172, 148, 125),
     texture: {
-      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024,
+      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/ash_veneer.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/ash_veneer-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -73,7 +79,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_Bamboo', name: "Bamboo", category: 'Wood', color: c(210, 173, 128),
     texture: {
-      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024,
+      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/bamboo_veneer.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/bamboo_veneer-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -81,7 +87,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_bamboo_wall', name: "Bamboo Wall", category: 'Wood', color: c(133, 107, 83),
     texture: {
-      widthM: 2.0, heightM: 2.0, widthPx: 1024, heightPx: 1024,
+      widthM: 2.0, heightM: 2.0, widthPx: 1024, heightPx: 1024, grain: 'height',
       url: new URL('./material-textures/bamboo_wall.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/bamboo_wall-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -89,7 +95,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_bamboo_wall_03', name: "Bamboo Wall 03", category: 'Wood', color: c(149, 115, 85),
     texture: {
-      widthM: 1.85, heightM: 1.85, widthPx: 1024, heightPx: 1024,
+      widthM: 1.85, heightM: 1.85, widthPx: 1024, heightPx: 1024, grain: 'height',
       url: new URL('./material-textures/bamboo_wall_03.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/bamboo_wall_03-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -97,7 +103,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_beam_wall_01', name: "Beam Wall 01", category: 'Wood', color: c(139, 131, 107),
     texture: {
-      widthM: 0.999999, heightM: 0.999999, widthPx: 1024, heightPx: 1024,
+      widthM: 0.999999, heightM: 0.999999, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/beam_wall_01.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/beam_wall_01-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -105,7 +111,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_black_painted_planks', name: "Black Painted Planks", category: 'Wood', color: c(26, 27, 32),
     texture: {
-      widthM: 1.6, heightM: 1.6, widthPx: 1024, heightPx: 1024,
+      widthM: 1.6, heightM: 1.6, widthPx: 1024, heightPx: 1024, grain: 'height',
       url: new URL('./material-textures/black_painted_planks.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/black_painted_planks-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -113,7 +119,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_brown_planks_04', name: "Brown Planks 04", category: 'Wood', color: c(127, 111, 101),
     texture: {
-      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024,
+      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/brown_planks_04.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/brown_planks_04-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -121,7 +127,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_brown_planks_05', name: "Brown Planks 05", category: 'Wood', color: c(154, 148, 136),
     texture: {
-      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024,
+      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/brown_planks_05.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/brown_planks_05-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -129,7 +135,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_brown_planks_07', name: "Brown Planks 07", category: 'Wood', color: c(133, 119, 101),
     texture: {
-      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024,
+      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/brown_planks_07.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/brown_planks_07-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -137,7 +143,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_Cherry', name: "Cherry", category: 'Wood', color: c(224, 176, 132),
     texture: {
-      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024,
+      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/cherry_veneer.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/cherry_veneer-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -145,7 +151,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_dark_wood', name: "Dark Wood", category: 'Wood', color: c(93, 42, 24),
     texture: {
-      widthM: 2.0, heightM: 2.0, widthPx: 1024, heightPx: 1024,
+      widthM: 2.0, heightM: 2.0, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/dark_wood.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/dark_wood-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -153,7 +159,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_diagonal_parquet', name: "Diagonal Parquet", category: 'Wood', color: c(164, 102, 54),
     texture: {
-      widthM: 2.359999, heightM: 2.359999, widthPx: 1024, heightPx: 1024,
+      widthM: 2.359999, heightM: 2.359999, widthPx: 1024, heightPx: 1024, grain: 'none',
       url: new URL('./material-textures/diagonal_parquet.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/diagonal_parquet-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -161,7 +167,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_embedded_plank_flooring', name: "Embedded Plank Flooring", category: 'Wood', color: c(104, 89, 73),
     texture: {
-      widthM: 2.03, heightM: 2.03, widthPx: 1024, heightPx: 1024,
+      widthM: 2.03, heightM: 2.03, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/embedded_plank_flooring.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/embedded_plank_flooring-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -169,7 +175,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_Walnut', name: "Gray Walnut", category: 'Wood', color: c(114, 110, 105),
     texture: {
-      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024,
+      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/american_walnut_veneer.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/american_walnut_veneer-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -177,7 +183,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_grey_lati_veneer', name: "Grey Lati Veneer", category: 'Wood', color: c(133, 106, 84),
     texture: {
-      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024,
+      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/grey_lati_veneer.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/grey_lati_veneer-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -185,7 +191,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_herringbone_parquet', name: "Herringbone Parquet", category: 'Wood', color: c(147, 112, 77),
     texture: {
-      widthM: 3.4, heightM: 3.4, widthPx: 1024, heightPx: 1024,
+      widthM: 3.4, heightM: 3.4, widthPx: 1024, heightPx: 1024, grain: 'none',
       url: new URL('./material-textures/herringbone_parquet.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/herringbone_parquet-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -193,7 +199,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_japanese_cedar_planks', name: "Japanese Cedar Planks", category: 'Wood', color: c(172, 97, 11),
     texture: {
-      widthM: 1.13, heightM: 1.13, widthPx: 1024, heightPx: 1024,
+      widthM: 1.13, heightM: 1.13, widthPx: 1024, heightPx: 1024, grain: 'height',
       url: new URL('./material-textures/japanese_cedar_planks.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/japanese_cedar_planks-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -201,7 +207,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_laminate_floor', name: "Laminate Floor", category: 'Wood', color: c(149, 115, 69),
     texture: {
-      widthM: 2.0, heightM: 2.0, widthPx: 1024, heightPx: 1024,
+      widthM: 2.0, heightM: 2.0, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/laminate_floor.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/laminate_floor-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -209,7 +215,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_laminate_floor_02', name: "Laminate Floor 02", category: 'Wood', color: c(155, 128, 99),
     texture: {
-      widthM: 1.7, heightM: 1.7, widthPx: 1024, heightPx: 1024,
+      widthM: 1.7, heightM: 1.7, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/laminate_floor_02.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/laminate_floor_02-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -217,7 +223,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_laminate_floor_03', name: "Laminate Floor 03", category: 'Wood', color: c(154, 114, 72),
     texture: {
-      widthM: 2.08, heightM: 2.08, widthPx: 1024, heightPx: 1024,
+      widthM: 2.08, heightM: 2.08, widthPx: 1024, heightPx: 1024, grain: 'height',
       url: new URL('./material-textures/laminate_floor_03.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/laminate_floor_03-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -225,7 +231,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_natural_walnut_veneer', name: "Natural Walnut Veneer", category: 'Wood', color: c(136, 126, 114),
     texture: {
-      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024,
+      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/natural_walnut_veneer.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/natural_walnut_veneer-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -233,7 +239,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_oak_veneer_05', name: "Oak Veneer 05", category: 'Wood', color: c(169, 138, 113),
     texture: {
-      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024,
+      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/oak_veneer_05.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/oak_veneer_05-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -241,7 +247,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_oak_wood_planks', name: "Oak Wood Planks", category: 'Wood', color: c(162, 117, 84),
     texture: {
-      widthM: 1.2, heightM: 1.2, widthPx: 1024, heightPx: 1024,
+      widthM: 1.2, heightM: 1.2, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/oak_wood_planks.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/oak_wood_planks-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -249,7 +255,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_oriented_strand_board', name: "Oriented Strand Board", category: 'Wood', color: c(187, 151, 113),
     texture: {
-      widthM: 2.51, heightM: 2.51, widthPx: 1024, heightPx: 1024,
+      widthM: 2.51, heightM: 2.51, widthPx: 1024, heightPx: 1024, grain: 'none',
       url: new URL('./material-textures/oriented_strand_board.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/oriented_strand_board-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -257,7 +263,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_Pine', name: "Pine", category: 'Wood', color: c(104, 57, 7),
     texture: {
-      widthM: 0.74, heightM: 0.74, widthPx: 1024, heightPx: 1024,
+      widthM: 0.74, heightM: 0.74, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/coated_pine.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/coated_pine-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -265,7 +271,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_plywood', name: "Plywood", category: 'Wood', color: c(126, 97, 64),
     texture: {
-      widthM: 0.5, heightM: 0.5, widthPx: 1024, heightPx: 1024,
+      widthM: 0.5, heightM: 0.5, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/plywood.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/plywood-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -273,7 +279,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_rectangular_parquet', name: "Rectangular Parquet", category: 'Wood', color: c(119, 92, 51),
     texture: {
-      widthM: 2.25, heightM: 2.25, widthPx: 1024, heightPx: 1024,
+      widthM: 2.25, heightM: 2.25, widthPx: 1024, heightPx: 1024, grain: 'height',
       url: new URL('./material-textures/rectangular_parquet.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/rectangular_parquet-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -281,7 +287,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_romantic_veneer', name: "Romantic Veneer", category: 'Wood', color: c(210, 190, 166),
     texture: {
-      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024,
+      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/romantic_veneer.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/romantic_veneer-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -289,7 +295,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_rosewood_veneer1', name: "Rosewood Veneer1", category: 'Wood', color: c(109, 50, 16),
     texture: {
-      widthM: 2.43, heightM: 2.43, widthPx: 1024, heightPx: 1024,
+      widthM: 2.43, heightM: 2.43, widthPx: 1024, heightPx: 1024, grain: 'height',
       url: new URL('./material-textures/rosewood_veneer1.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/rosewood_veneer1-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -297,7 +303,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_rough_pine_door', name: "Rough Pine Door", category: 'Wood', color: c(76, 37, 14),
     texture: {
-      widthM: 2.0, heightM: 2.0, widthPx: 1024, heightPx: 1024,
+      widthM: 2.0, heightM: 2.0, widthPx: 1024, heightPx: 1024, grain: 'height',
       url: new URL('./material-textures/rough_pine_door.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/rough_pine_door-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -305,7 +311,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_sapele_veneer', name: "Sapele Veneer", category: 'Wood', color: c(198, 129, 89),
     texture: {
-      widthM: 0.5, heightM: 0.5, widthPx: 1024, heightPx: 1024,
+      widthM: 0.5, heightM: 0.5, widthPx: 1024, heightPx: 1024, grain: 'height',
       url: new URL('./material-textures/sapele_veneer.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/sapele_veneer-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -313,7 +319,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_silver_oak_veneer_01', name: "Silver Oak Veneer 01", category: 'Wood', color: c(220, 191, 158),
     texture: {
-      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024,
+      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/silver_oak_veneer_01.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/silver_oak_veneer_01-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -321,7 +327,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_smoke_speckled_veneer', name: "Smoke Speckled Veneer", category: 'Wood', color: c(96, 80, 68),
     texture: {
-      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024,
+      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/smoke_speckled_veneer.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/smoke_speckled_veneer-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -329,7 +335,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_stained_pine', name: "Stained Pine", category: 'Wood', color: c(93, 50, 30),
     texture: {
-      widthM: 0.9, heightM: 0.9, widthPx: 1024, heightPx: 1024,
+      widthM: 0.9, heightM: 0.9, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/stained_pine.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/stained_pine-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -337,7 +343,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_synthetic_wood', name: "Synthetic Wood", category: 'Wood', color: c(114, 78, 56),
     texture: {
-      widthM: 2.0, heightM: 2.0, widthPx: 1024, heightPx: 1024,
+      widthM: 2.0, heightM: 2.0, widthPx: 1024, heightPx: 1024, grain: 'height',
       url: new URL('./material-textures/synthetic_wood.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/synthetic_wood-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -345,7 +351,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_teak_veneer', name: "Teak Veneer", category: 'Wood', color: c(175, 130, 87),
     texture: {
-      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024,
+      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/teak_veneer.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/teak_veneer-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -353,7 +359,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_walnut_veneer_02', name: "Walnut Veneer 02", category: 'Wood', color: c(169, 137, 113),
     texture: {
-      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024,
+      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/walnut_veneer_02.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/walnut_veneer_02-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -361,7 +367,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_weathered_brown_planks', name: "Weathered Brown Planks", category: 'Wood', color: c(96, 75, 57),
     texture: {
-      widthM: 1.8, heightM: 1.8, widthPx: 1024, heightPx: 1024,
+      widthM: 1.8, heightM: 1.8, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/weathered_brown_planks.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/weathered_brown_planks-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -369,7 +375,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_white_maple_veneer', name: "White Maple Veneer", category: 'Wood', color: c(227, 212, 185),
     texture: {
-      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024,
+      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/white_maple_veneer.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/white_maple_veneer-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -377,7 +383,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_Oak', name: "White Oak", category: 'Wood', color: c(161, 126, 87),
     texture: {
-      widthM: 1.83, heightM: 1.83, widthPx: 1024, heightPx: 1024,
+      widthM: 1.83, heightM: 1.83, widthPx: 1024, heightPx: 1024, grain: 'height',
       url: new URL('./material-textures/oak_veneer_01.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/oak_veneer_01-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -385,7 +391,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_white_oak_veneer', name: "White Oak Veneer", category: 'Wood', color: c(144, 121, 98),
     texture: {
-      widthM: 0.5, heightM: 0.5, widthPx: 1024, heightPx: 1024,
+      widthM: 0.5, heightM: 0.5, widthPx: 1024, heightPx: 1024, grain: 'height',
       url: new URL('./material-textures/white_oak_veneer.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/white_oak_veneer-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -393,7 +399,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_white_planks_clean', name: "White Planks Clean", category: 'Wood', color: c(180, 166, 157),
     texture: {
-      widthM: 1.8, heightM: 1.8, widthPx: 1024, heightPx: 1024,
+      widthM: 1.8, heightM: 1.8, widthPx: 1024, heightPx: 1024, grain: 'height',
       url: new URL('./material-textures/white_planks_clean.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/white_planks_clean-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -401,7 +407,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_wood_cabinet_worn_long', name: "Wood Cabinet Worn Long", category: 'Wood', color: c(88, 47, 11),
     texture: {
-      widthM: 1.0, heightM: 0.5, widthPx: 1024, heightPx: 512,
+      widthM: 1.0, heightM: 0.5, widthPx: 1024, heightPx: 512, grain: 'height',
       url: new URL('./material-textures/wood_cabinet_worn_long.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/wood_cabinet_worn_long-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -409,7 +415,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_wood_floor', name: "Wood Floor", category: 'Wood', color: c(128, 96, 66),
     texture: {
-      widthM: 1.7, heightM: 1.7, widthPx: 1024, heightPx: 1024,
+      widthM: 1.7, heightM: 1.7, widthPx: 1024, heightPx: 1024, grain: 'height',
       url: new URL('./material-textures/wood_floor.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/wood_floor-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -417,7 +423,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_wood_floor_deck', name: "Wood Floor Deck", category: 'Wood', color: c(110, 52, 14),
     texture: {
-      widthM: 1.8, heightM: 1.8, widthPx: 1024, heightPx: 1024,
+      widthM: 1.8, heightM: 1.8, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/wood_floor_deck.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/wood_floor_deck-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -425,7 +431,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_wood_shutter', name: "Wood Shutter", category: 'Wood', color: c(119, 73, 37),
     texture: {
-      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024,
+      widthM: 1.0, heightM: 1.0, widthPx: 1024, heightPx: 1024, grain: 'height',
       url: new URL('./material-textures/wood_shutter.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/wood_shutter-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -433,7 +439,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_wood_table_001', name: "Wood Table 001", category: 'Wood', color: c(62, 25, 10),
     texture: {
-      widthM: 1.5, heightM: 1.5, widthPx: 1024, heightPx: 1024,
+      widthM: 1.5, heightM: 1.5, widthPx: 1024, heightPx: 1024, grain: 'height',
       url: new URL('./material-textures/wood_table_001.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/wood_table_001-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -441,7 +447,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_wood_table_worn', name: "Wood Table Worn", category: 'Wood', color: c(83, 47, 21),
     texture: {
-      widthM: 0.55, heightM: 0.55, widthPx: 1024, heightPx: 1024,
+      widthM: 0.55, heightM: 0.55, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/wood_table_worn.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/wood_table_worn-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -449,7 +455,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_wooden_barrel', name: "Wooden Barrel", category: 'Wood', color: c(64, 51, 43),
     texture: {
-      widthM: 1.29, heightM: 1.29, widthPx: 1024, heightPx: 1024,
+      widthM: 1.29, heightM: 1.29, widthPx: 1024, heightPx: 1024, grain: 'height',
       url: new URL('./material-textures/wooden_barrel.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/wooden_barrel-preview.jpg?no-inline', import.meta.url).href,
     },
@@ -457,7 +463,7 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   {
     key: 'Wood_wooden_rough_planks', name: "Wooden Rough Planks", category: 'Wood', color: c(108, 103, 48),
     texture: {
-      widthM: 2.0, heightM: 2.0, widthPx: 1024, heightPx: 1024,
+      widthM: 2.0, heightM: 2.0, widthPx: 1024, heightPx: 1024, grain: 'width',
       url: new URL('./material-textures/wooden_rough_planks.jpg', import.meta.url).href,
       previewUrl: new URL('./material-textures/wooden_rough_planks-preview.jpg?no-inline', import.meta.url).href,
     },

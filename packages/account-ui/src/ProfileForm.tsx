@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { useEffect, useId, useRef, useState, type FormEvent, type JSX } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent, type JSX, type ReactNode } from 'react';
 import {
   CLOUD_COMPANY_SIZES, CLOUD_INDUSTRIES, CLOUD_TERMS_URL, cloudProfileErrors, cloudProfileInput,
   type CloudCompanySize, type CloudIndustry, type CloudProfileField, type CloudProfileInput, type CloudProfileState,
@@ -11,10 +11,11 @@ import {
  * The profile fields shared by the signup step and account details. Company reveals the company name and
  * size; Other reveals a short description. Field messages appear once a save has been attempted.
  */
-export function ProfileForm({ profiles, state, submitLabel, savingLabel, termsLocked, onSaved }: {
+export function ProfileForm({ profiles, state, submitLabel, savingLabel, termsLocked, onSaved, mailingPreference }: {
   profiles: CloudProfileStore; state: CloudProfileState; submitLabel: string; savingLabel: string;
   /** Account details shows accepted terms as read-only: acceptance cannot be withdrawn. */
   termsLocked: boolean; onSaved?: (() => void) | undefined;
+  mailingPreference?: ReactNode;
 }): JSX.Element {
   const id = useId();
   const [input, setInput] = useState<CloudProfileInput>(() => cloudProfileInput(state.profile));
@@ -97,6 +98,15 @@ export function ProfileForm({ profiles, state, submitLabel, savingLabel, termsLo
         onChange={event => set({ mailingOptIn: event.target.checked })} />
       <span>Join the mailing list (optional)</span>
     </label> : null}
+    {mailingPreference}
+    <fieldset className="pf-profile-choice">
+      <legend>Help improve PushForm</legend>
+      <label className="pf-profile-check pf-profile-analytics">
+        <input type="checkbox" name="analyticsOptIn" checked={input.analyticsOptIn ?? true} disabled={state.saving}
+          onChange={event => set({ analyticsOptIn: event.target.checked })} />
+        <span>Share anonymous usage data to help us improve tools and fix confusing workflows. Your designs, file names, and chat messages stay private.</span>
+      </label>
+    </fieldset>
     {state.error ? <p className="pf-account-error" role="alert">{state.error}</p> : null}
     {saved && !state.error ? <p role="status">Your profile was saved.</p> : null}
     <button className="pf-account-primary" type="submit" disabled={state.saving || !input.acceptTerms}>

@@ -90,9 +90,13 @@ export function fakeBackend(options: FakeBackendOptions = {}) {
     if (segments[0] === 'conversations' && segments[1] && !conversation) return failure(404, 'not_found', 'No such conversation.');
     if (conversation && segments.length === 2 && method === 'GET') return json({ conversation });
     if (conversation && segments[2] === 'messages' && method === 'POST') {
-      const { text, intent } = body as { text: string; intent?: IntentPath };
+      const { text, intent, attachments: ids } = body as { text: string; intent?: IntentPath; attachments?: string[] };
       if (intent !== undefined && !(intent in FAKE_OPENER)) return failure(400, 'invalid', `Unknown intent ${String(intent)}.`);
-      conversation.messages.push({ role: 'user', text, at: new Date().toISOString() });
+      // As the backend does: a message's pictures must be uploaded images of this conversation.
+      const mine = attachments.get(conversation.id) ?? [];
+      const pictures = (ids ?? []).map(id => mine.find(item => item.id === id && item.uploaded));
+      if (pictures.some(item => !item)) return failure(400, 'invalid', 'A picture does not belong to this conversation.');
+      conversation.messages.push({ role: 'user', text, at: new Date().toISOString(), ...(pictures.length ? { pictures: pictures.map(item => ({ id: item!.id, name: item!.name, mime: 'image/png' })) } : {}) });
       conversation.messageCount += 1;
       // An intent card sets the path before the agent answers; the unscripted reply then opens on that path.
       if (intent) conversation.path = intent;
@@ -114,8 +118,8 @@ export function fakeBackend(options: FakeBackendOptions = {}) {
       attachments.set(conversation.id, mine);
       if (segments.length === 3 && method === 'GET') return json({ attachments: mine.filter(item => item.uploaded).map(({ id, kind, name, size }) => ({ id, kind, name, size })) });
       if (segments.length === 3 && method === 'POST') {
-        if (!['feature', 'problem'].includes(conversation.path) || conversation.status !== 'open') return failure(400, 'invalid', 'Attachments belong to open problem reports.');
-        if (mine.length >= 5) return failure(409, 'limit', 'A report takes at most 5 attachments.');
+        if (conversation.status !== 'open') return failure(400, 'invalid', 'The conversation is closed.');
+        if (mine.length >= 5) return failure(409, 'limit', 'A conversation takes at most 5 images.');
         const input = body as { kind: 'screenshot' | 'document'; name: string; mime: string; size: number };
         const item = { id: `att-${nextAttachment++}`, kind: input.kind, name: input.name, size: input.size, uploaded: false };
         mine.push(item);

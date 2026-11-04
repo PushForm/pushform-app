@@ -16,17 +16,59 @@ Model Info → Credits shows the original source, licenses, conditions and creat
 
 Choose **My profile** to sign in with your PushForm account. A new account completes the same private account setup and Terms of Use step used by the editor. Creating a public profile is a separate choice; it is not required to download models.
 
-Choose a public handle and display name, then optionally add a bio, avatar URL and up to five links. Check the public-profile confirmation before saving. Your handle uses 3–32 lowercase letters, numbers or hyphens, starts with a letter and ends with a letter or number. Handles stay reserved and cannot be changed. Your private account name, email, company and projects are not copied into your public profile.
+Choose a public handle and display name, then optionally add a bio and up to five links. Everything in this form is shown publicly once you save it. Your handle uses 3–32 lowercase letters, numbers or hyphens, starts with a letter and ends with a letter or number. Handles stay reserved and cannot be changed. Your private account name, email, company and projects are not copied into your public profile.
 
-Use **View your public profile** to open its shareable page. It shows your chosen public fields and published models associated with your authorship. Imported models retain their original creator credit; uploading or curating someone else's model does not make you its author.
+Saving takes you to your public profile page, at `/u/` followed by your handle (for example `commons.pushform.io/u/your-handle`). After that, **My profile** opens your public profile page. While you're signed in, your own profile page shows **Edit profile** at the right, just under the banner; choose it to change your profile. The page shows your chosen public fields and published models associated with your authorship. Imported models retain their original creator credit; uploading or curating someone else's model does not make you its author.
 
-Use **Hide public profile** to make the page and its creator-account links unavailable. Model license notices and original creator credits remain. Saving with the public confirmation checked makes your profile visible again. If another tab changed the profile, reload before saving your changes.
+If your profile was hidden, saving it makes it visible again. If another tab changed the profile, reload the page before saving your changes. Older profile links continue to work and open the handle address.
+
+## Add a profile picture and banner
+
+After you publish your profile, the profile editor (**Edit profile** on your profile page) shows a **Profile picture** and a **Banner** section. Your banner runs across the top of your public profile page, and your profile picture overlaps its lower edge as a circle.
+
+1. Choose **Upload profile picture** or **Upload banner** and pick a PNG or JPEG image up to 20 MiB and 8,192 pixels on each side.
+2. Drag the image to position it and use the **Zoom** slider or the mouse wheel to zoom. With the crop area focused, the arrow keys move the image (hold Shift for larger steps) and plus and minus zoom.
+3. Check the previews, then choose **Save profile picture** or **Save banner**. Choose **Cancel** to keep your current image.
+
+Commons saves a profile picture at 512 × 512 pixels and a banner at 1500 × 500 pixels. Images with transparency stay PNG; others are saved as JPEG. A saved image must be 2 MiB or smaller. Very detailed transparent images are placed on a white background and saved as JPEG. While the image uploads, a progress bar shows its status, and Commons checks the image before showing it.
+
+## Replace or remove your profile picture and banner
+
+Saved images are public right away while your profile is visible; you don't need to save the profile form. Use **Replace profile picture** or **Replace banner** to choose a new image; the old one stops showing as soon as the new one is saved. Use **Remove profile picture** or **Remove banner** to take an image down. Hidden profiles don't show their images.
+
+Earlier profiles may show a picture loaded from an address you entered. It keeps showing until you upload a profile picture, which then takes its place. You can no longer enter a picture address.
+
+## Upload and publish a model
+
+Choose **Upload model** in the Commons header. If you don't have a public profile yet, first choose a public handle and display name; models are published under that name.
+
+1. Drag a model file into the box, or choose **browse for a file**. Commons accepts SKP, SKB, DAE, KMZ, OBJ, 3DS, STL, DXF, glTF, GLB, STEP, STP, PushForm (PF), FreeCAD (FCStd) and ZIP archives of these, up to 128 MiB. The model stays a private draft until you publish it.
+2. The dialog moves straight to the details while the file uploads. The file row shows **Uploading** with a progress bar, then **Checking file**, then **Converting preview**, and finally **Preview ready** with the preview image. If you already have two previews converting, it shows **Waiting for converter** first.
+3. Check the title, which starts as the file name, and choose a category and a license. A description and a cover photo (PNG or JPEG up to 8 MiB) are optional; without a cover photo, listings use the preview.
+4. Tick the box confirming that you created the model, or have the right to share it and everything it includes under the license you chose. The Terms of Use require this.
+5. Choose **Publish model**. You don't have to wait for the preview to finish.
+
+Your changes save automatically as you type. **Save draft** or **Close** keeps the draft, file and preview under **My models**. If the upload fails, choose **Try again**. If a preview fails because of a converter problem, **Try again** starts a fresh conversion; a model that is too large or complex to preview can still be published.
+
+### Licenses
+
+- **Creative Commons Attribution 4.0** and the other Creative Commons 4.0 licenses (ShareAlike, NonCommercial, NoDerivatives and their combinations): others must credit you, with the conditions each name describes. The dialog shows a one-line summary of the license you choose.
+- **Public domain (CC0 1.0)**: anyone may use the model for any purpose without credit.
+- **Other (describe the terms)**: write your own terms, one per line. They appear on the model page as written, and the model counts as having unknown commercial-use permission.
+
+## Manage your models
+
+**My models** shows each of your models as a card with its preview, status and last change.
+
+- **Edit** reopens the dialog. Changes to a draft save into that draft. Changes to a published model become a new draft that keeps its files, so nothing has to be uploaded again; the published version stays as it is until you choose **Publish changes**. **Replace file** uploads a new model file and converts it.
+- **Delete draft** removes a model you never published. On a published model, **Discard changes** throws away its unpublished draft and keeps the published version.
+- **View** opens a published model's page, and **Withdraw** takes it out of the library. Copies people already downloaded keep their licenses.
 
 ## Preview a model
 
 Commons renders thumbnails from supported model geometry on its server; a contributor does not need to upload a screenshot. An optional uploaded PNG or JPEG is used as the listing image instead. Choose **Explore in 3D** on a model page to rotate the geometry, zoom, or reset the view. Drag to orbit, use the labeled controls, or focus the viewer and use arrow keys, plus/minus, and zero to reset. Previews are available without signing in; original downloads require your PushForm account and initial account setup.
 
-Commons queues server conversion for native PushForm, STEP, FreeCAD and supported mesh files (STL, OBJ, GLB/glTF, COLLADA, 3DS, SKP and model ZIPs). It accepts originals up to 128 MiB for conversion and displays up to 12,000 triangles. It shows geometry and material colors, with no textures, annotations, recorded dimensions, units or fabrication suitability. Unsupported content and models over those limits show an unavailable preview; try **Open in PushForm** or download the original where supported. A failed image falls back to the generated thumbnail when possible.
+Commons converts every format it accepts as soon as the upload is checked: native PushForm, STEP, FreeCAD, SketchUp (SKP and SKB), DXF, KMZ and mesh files (STL, OBJ, GLB/glTF, COLLADA, 3DS and model ZIPs). Drafts get previews too, visible only to you until you publish. It accepts originals up to 128 MiB for conversion and displays up to 12,000 triangles. It shows geometry and material colors, with no textures, annotations, recorded dimensions, units or fabrication suitability. Unsupported content and models over those limits show an unavailable preview; try **Open in PushForm** or download the original where supported. A failed image falls back to the generated thumbnail when possible.
 
 ## Wait for a generated preview
 

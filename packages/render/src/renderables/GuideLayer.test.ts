@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { describe, expect, it } from 'vitest';
-import { GUIDE_EXTENT, GuideLayer, buildGuideGeometry } from './GuideLayer';
+import { GUIDE_EXTENT, GUIDE_POINT_SIZE, GUIDE_POINT_STROKE, GuideLayer, buildGuideGeometry, guidePointGlyph } from './GuideLayer';
 import type { RenderGuides } from '../types';
 
 const guides: RenderGuides = {
@@ -42,6 +42,35 @@ describe('GuideLayer', () => {
     expect(l.isEmpty).toBe(false);
     expect(l.set(null)).toBe(true);
     expect(l.isEmpty).toBe(true);
+    l.dispose();
+  });
+});
+
+describe('guide point glyph', () => {
+  it('is an upright + six pixels across with two-pixel arms, centered on the point', () => {
+    expect(guidePointGlyph()).toEqual([
+      '..##..',
+      '..##..',
+      '######',
+      '######',
+      '..##..',
+      '..##..',
+    ]);
+  });
+
+  it('keeps its pixel size at any distance and scales only with the device pixel ratio', () => {
+    const l = new GuideLayer();
+    const size = l.pointMaterial.uniforms['uSize'], stroke = l.pointMaterial.uniforms['uStroke'];
+    expect(size?.value).toBe(GUIDE_POINT_SIZE);
+    expect(stroke?.value).toBeCloseTo(GUIDE_POINT_STROKE / GUIDE_POINT_SIZE, 12);
+    // the vertex shader sets a fixed point size, with no division by depth
+    expect(l.pointMaterial.vertexShader).toMatch(/gl_PointSize = uSize;/);
+    l.setResolution(800, 600, 2);
+    expect(size?.value).toBe(GUIDE_POINT_SIZE * 2);
+    // at twice the pixels the glyph keeps its shape: arms twice as long and wide
+    expect(guidePointGlyph(GUIDE_POINT_SIZE * 2, GUIDE_POINT_STROKE * 2)).toEqual(
+      guidePointGlyph().flatMap((row) => { const wide = [...row].map((c) => c + c).join(''); return [wide, wide]; }),
+    );
     l.dispose();
   });
 });

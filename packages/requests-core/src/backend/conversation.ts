@@ -5,10 +5,13 @@ import { z } from 'zod';
 import type { Tracker, TrackerIssue } from '../adapters/tracker.ts';
 import { TrackerError } from '../adapters/tracker.ts';
 import { briefSchema, completeness, emptyBriefFor, type Brief, type DeclineReason, type Path } from '../agents/brief.ts';
-import { answerPending, runTurn, type AnthropicLike, type ClientToolCall, type PendingClientTools, type ToolCallEvent, type ToolHandler, type ToolResult } from '../agents/client.ts';
+import { acknowledgeContent, ReplyOpening, startAcknowledgment, type Acknowledgment, type RunningAcknowledgment } from '../agents/acknowledge.ts';
+import { answerPending, runTurn, type RoundPhase, warmPrompt, type AnthropicLike, type WarmClient, type WarmUsage, type ClientToolCall, type PendingClientTools, type ToolCallEvent, type ToolHandler, type ToolResult } from '../agents/client.ts';
 import { retrieveUserHelp, USER_HELP_RULES } from '../agents/digest.ts';
 import { GUIDANCE_RULES } from '../guidance.ts';
-import { DOCUMENT_RULES, MODEL_DOCUMENT_RULES, documentTools, editableDocument, type DocumentCapability } from '../agents/document.ts';
+import { PICTURE_RULES } from '../agents/pictures.ts';
+import { DOCUMENT_RULES, MODEL_DOCUMENT_RULES, RENDER_TOOL, documentTools, editableDocument, type DocumentCapability } from '../agents/document.ts';
+import { MODEL_TOOLS, modelRenderSchema, modelRenderViewName, modelRenderViews } from '@pushform/extension-protocol';
 import type { DigestSection } from '../agents/digest.ts';
 import { helpAgent } from '../agents/help.ts';
 import { intakeAgent } from '../agents/intake.ts';
@@ -19,8 +22,9 @@ import { checkTrackerProjects, checkTrackerStates } from '../config/load.ts';
 import type { Config } from '../config/schema.ts';
 import { issueBody, issueLabels, issueTitle, transcriptUrl } from '../domain/issue.ts';
 import { isClosedRequesterState } from '../domain/states.ts';
-import type { Conversation, ConversationKind, ConversationMessage, ConversationPath, Eligibility, Kind, PanelScreen, Request as PipelineRequest, RequestDetail, SuspendedTurn } from '../domain/types.ts';
+import type { Conversation, ConversationKind, ConversationMessage, ConversationPath, MessagePicture, Eligibility, Kind, PanelScreen, Request as PipelineRequest, RequestDetail, SuspendedTurn } from '../domain/types.ts';
 import { CORS_HEADERS, enforceRate, errorResponse, HttpError, httpErrorOf, json, lookupRoles, validateSession, type SessionUser, type SessionValidator } from './auth.ts';
+import { blockStatus, messageStatus, NEXT_STEP, resumeStatus, statusSender, type StatusLine, type StatusPick } from './status.ts';
 import { conversationFromRow, requestDetailFromRow, requestFromRow, type AttachmentKind, type MeView, type ServiceDb, type SqlAttachmentRow, type UserDb } from './db.ts';
 
 /**
@@ -71,10 +75,88 @@ export const DOCUMENT_TYPE = 'application/octet-stream';
 const ATTACHMENT_URL_SECONDS = 300;
 export const FUNCTION_NAME = 'fr-conversation';
 export const MESSAGE_MAX_CHARS = 4000;
+/** Pictures one message may carry, and the largest picture sent to the model (the model API's own per-image limit). */
+export const PICTURES_PER_MESSAGE = 5;
+export const PICTURE_MAX_BYTES = 5 * 1024 * 1024;
+/** A picture's bytes as the model receives them. */
+export interface PictureData { mime: string; data: string }
 /** Bound on one document tool result the browser returns. */
 export const TOOL_RESULT_MAX_CHARS = 200_000;
-/** Model rounds a document turn may use across all its requests. */
+/** Model rounds a document turn may use across all its requests (with render review: `limits.documentToolRoundsWithReview`). */
 export const DOCUMENT_TOOL_ROUNDS = 12;
+
+/**
+ * How a turn runs, by the document it was sent with: one with a document open plans multi-step geometry and gets more
+ * output and rounds; help and intake stay short. All run at low effort: the model still thinks where a build needs it,
+ * but hidden reasoning was most of an editing turn's output and the requester waits for every token of it. A turn that
+ * edits a 3D model gets the most output, so a large batch is never cut off mid-build; requests stream, so the limit
+ * costs nothing until it is used.
+ */
+export function turnSettings(document: DocumentCapability | null): { effort: 'low' | 'medium'; maxTokens: number; maxToolRounds: number } {
+  if (document === null) return { effort: 'low', maxTokens: 4096, maxToolRounds: 8 };
+  return { effort: 'low', maxTokens: editableDocument(document) === 'model' ? MODEL_EDIT_MAX_TOKENS : 16_000, maxToolRounds: DOCUMENT_TOOL_ROUNDS };
+}
+/** Output limit of one request of a 3D-model editing turn. */
+export const MODEL_EDIT_MAX_TOKENS = 32_000;
+const agentForPath = (path: ConversationPath): ConversationAgent => (path === 'open' ? openAgent : path === 'help' ? helpAgent : path === 'problem' ? problemAgent : intakeAgent);
+/**
+ * The model, system prompt and tools of a turn: they depend only on the path and the open document, never on the
+ * account, so every conversation in the same state shares one prompt-cache prefix. Turns and warm-ups both use this.
+ */
+export function turnPrompt(models: Config['models'], ctx: AgentContext, document: DocumentCapability | null): { model: string; system: string; tools: Anthropic.Tool[] } {
+  const agent = agentForPath(ctx.path);
+  const tools = documentTools(document);
+  const editable = editableDocument(document);
+  return {
+    model: tools.length ? models.document : models.conversation,
+    system: [agent.system(ctx), USER_HELP_RULES, PICTURE_RULES, ...(editable === 'layout' ? [DOCUMENT_RULES(ctx)] : editable === 'model' ? [MODEL_DOCUMENT_RULES(ctx)] : []), ...(document?.guidance ? [GUIDANCE_RULES] : [])].join('\n\n'),
+    tools: [...agent.tools(ctx), ...tools],
+  };
+}
+/**
+ * What a new conversation's first message offers, by what the tab has open: nothing (Home), a model with editing and
+ * UI guidance, a Layout document with UI guidance. These are the prefixes `warmChatPrompts` keeps in the cache.
+ */
+export const WARM_DOCUMENTS: readonly (DocumentCapability | null)[] = [
+  null,
+  { type: 'model', apiVersion: 1, edit: 1, guidance: 1 },
+  { type: 'layout', apiVersion: 1, guidance: 1 },
+];
+/** A first-message context with no account in it: the prompt does not depend on the account (see `turnPrompt`). */
+function warmContext(config: Config, document: DocumentCapability | null): AgentContext {
+  return {
+    host: config.host, accountEmail: '', roles: [], filingAllowed: true,
+    screen: { editor: document?.type ?? 'home', documentType: null, browser: '', os: '' }, build: { version: '', commit: '' }, now: '',
+    path: 'open', brief: null, title: null, messageCount: 1, openRequests: [], openRequestCount: 0,
+    limits: { openRequestsPerAccount: config.limits.openRequestsPerAccount, messagesPerConversation: config.limits.messagesPerConversation },
+    openIssues: [], digest: [], document,
+  };
+}
+/**
+ * Keep the first-message prompts of `WARM_DOCUMENTS` in the prompt cache, so the first message of a conversation does
+ * not wait for ~30k tokens of tools and instructions to be processed. Each entry lives an hour and every read restarts
+ * it, so calling this every half hour costs one cache write per prompt and cheap reads after that. Failures are
+ * logged and skipped: a cold cache only makes the next first message slower.
+ */
+export async function warmChatPrompts(deps: { anthropic: WarmClient; config: Config; log?: ((message: string) => void) | undefined }): Promise<{ document: string; usage: WarmUsage | null }[]> {
+  return Promise.all(WARM_DOCUMENTS.map(async (document) => {
+    const label = document ? `${document.type}${document.edit ? '+edit' : ''}${document.guidance ? '+guidance' : ''}` : 'none';
+    const prompt = turnPrompt(deps.config.models, warmContext(deps.config, document), document);
+    try {
+      const usage = await warmPrompt(deps.anthropic, { ...prompt, effort: turnSettings(document).effort });
+      deps.log?.(`warm ${label}: model=${prompt.model} cacheWrite=${usage.cacheWrite} cacheRead=${usage.cacheRead} in=${usage.input}`);
+      return { document: label, usage };
+    } catch (error) {
+      deps.log?.(`warm ${label}: failed: ${error instanceof Error ? error.message : String(error)}`);
+      return { document: label, usage: null };
+    }
+  }));
+}
+/** Pictures one tool result may carry (a render's views), and the longest base64 text of each (1.5 MB). */
+export const TOOL_IMAGES_PER_RESULT = 3;
+export const TOOL_IMAGE_MAX_CHARS = 1_572_864;
+/** What the agent gets for a render past the turn's limit; the browser never sees the call. */
+export const RENDER_LIMIT_RESULT = JSON.stringify({ ok: false, error: { code: 'limit_exceeded', message: 'render limit reached; finish and say what you could not verify' } });
 const NOT_ANSWERED = 'Not run: the editor did not return a result.';
 const ABANDONED = 'Not run: the requester sent a new message before the editor answered.';
 
@@ -93,9 +175,15 @@ const startSchema = z.object({ kind: z.enum(['help', 'intake']), path: z.enum(['
 /** `intent` is the card the requester clicked; it settles an open conversation's path before the agent runs and is ignored once a path is set. */
 /** `document` is what the sending tab can edit this turn; absent or null offers no document tools. */
 const documentSchema = z.object({ type: z.enum(['layout', 'model']), apiVersion: z.int().min(1), guidance: z.literal(1).optional(), edit: z.literal(1).optional() });
-const messageSchema = z.object({ text: z.string().min(1).max(MESSAGE_MAX_CHARS), intent: z.enum(['help', 'problem', 'feature']).optional(), document: documentSchema.nullable().optional() });
+/** `attachments` are the ids of uploaded pictures of this conversation sent with the message; a message may be pictures alone. */
+const messageSchema = z.object({ text: z.string().max(MESSAGE_MAX_CHARS), intent: z.enum(['help', 'problem', 'feature']).optional(), document: documentSchema.nullable().optional(),
+  attachments: z.array(z.uuid()).max(PICTURES_PER_MESSAGE).optional() })
+  .refine(b => b.text.trim().length > 0 || (b.attachments?.length ?? 0) > 0, { message: 'A message needs text or a picture.', path: ['text'] });
 /** The editor's answers to a suspended turn; a call left out is answered as not run. */
-const toolResultsSchema = z.object({ results: z.array(z.object({ toolUseId: z.string().min(1).max(200), content: z.string().max(TOOL_RESULT_MAX_CHARS), isError: z.boolean().default(false) })).max(20) });
+/** `images` are a render's pictures as base64, in view order; only a `model_render` answer may carry them. */
+const toolImageSchema = z.object({ mime: z.enum(['image/jpeg', 'image/png']), data: z.string().min(1).max(TOOL_IMAGE_MAX_CHARS).regex(/^[A-Za-z0-9+/]+={0,2}$/, 'base64') });
+const toolResultsSchema = z.object({ results: z.array(z.object({ toolUseId: z.string().min(1).max(200), content: z.string().max(TOOL_RESULT_MAX_CHARS), isError: z.boolean().default(false),
+  images: z.array(toolImageSchema).max(TOOL_IMAGES_PER_RESULT).optional() })).max(20) });
 const briefBodySchema = z.object({ brief: briefSchema.nullable(), title: z.string().trim().max(300).nullable().optional() });
 const addMeSchema = z.object({ requestId: z.uuid(), notes: z.string().max(4000).default('') });
 const replySchema = z.object({ text: z.string().trim().min(1).max(4000) });
@@ -154,6 +242,62 @@ export function closeSuspended(messages: readonly ConversationMessage[], at: str
   if (last?.role !== 'assistant' || !last.turn) return [];
   return last.turn.pending.calls.map(call => ({ role: 'tool', name: call.name, toolUseId: call.id, input: call.input, output: ABANDONED, at }));
 }
+/** The view names of a render call, as its placeholder and review line show them. */
+export function renderViewNames(input: unknown): string[] {
+  const parsed = modelRenderSchema.safeParse(input ?? {});
+  return modelRenderViews(parsed.success ? parsed.data : null).map(modelRenderViewName);
+}
+/** What the stored transcript keeps of a render's pictures: a short note naming the views. */
+export function renderPlaceholder(views: readonly string[]): string {
+  return `(Render pictures not kept: ${views.join('; ')}.)`;
+}
+
+/* ---------- render pictures in a suspended turn ---------- */
+
+/** An image block of a suspended turn whose bytes are kept once, in a `renders` record of the turn's messages. */
+const RENDER_REF = 'pf-render:';
+type ImageBlock = Anthropic.ImageBlockParam & { source: Anthropic.Base64ImageSource };
+/** Each render image block of `appended` with its key `<tool use id>#<index>`, in order. */
+function renderBlocks(appended: readonly Anthropic.MessageParam[], visit: (block: ImageBlock, key: string) => Anthropic.ContentBlockParam): Anthropic.MessageParam[] {
+  return appended.map(m => {
+    if (m.role !== 'user' || typeof m.content === 'string') return m;
+    if (!m.content.some(b => b.type === 'tool_result' && Array.isArray(b.content) && b.content.some(c => c.type === 'image'))) return m;
+    return { ...m, content: m.content.map(block => {
+      if (block.type !== 'tool_result' || !Array.isArray(block.content)) return block;
+      let index = 0;
+      return { ...block, content: block.content.map(item => (item.type === 'image' && item.source.type === 'base64'
+        ? visit(item as ImageBlock, `${block.tool_use_id}#${index++}`) : item)) as Anthropic.ToolResultBlockParam['content'] & unknown[] } as Anthropic.ToolResultBlockParam;
+    }) } as Anthropic.MessageParam;
+  });
+}
+/**
+ * A suspended turn's rounds as stored: render pictures become references, and the pictures no earlier message of the
+ * turn keeps are returned to keep with this one. Each picture is stored once while the turn runs.
+ */
+export function keepRenders(appended: readonly Anthropic.MessageParam[], known: ReadonlySet<string>): { appended: Anthropic.MessageParam[]; renders: Record<string, PictureData> } {
+  const renders: Record<string, PictureData> = {};
+  const stored = renderBlocks(appended, (block, key) => {
+    if (block.source.data.startsWith(RENDER_REF)) return block;
+    if (!known.has(key)) renders[key] = { mime: block.source.media_type, data: block.source.data };
+    return { ...block, source: { ...block.source, data: `${RENDER_REF}${key}` } };
+  });
+  return { appended: stored, renders };
+}
+/** The render pictures the turn's messages keep, gathered for a resume. */
+export function turnRenders(messages: readonly ConversationMessage[]): Map<string, PictureData> {
+  const out = new Map<string, PictureData>();
+  for (const m of messages) if (m.role === 'assistant' && m.turn?.renders) for (const [key, image] of Object.entries(m.turn.renders)) out.set(key, image);
+  return out;
+}
+/** A stored turn's rounds with their render pictures back in place; a picture that is gone becomes a note. */
+export function restoreRenders(appended: readonly Anthropic.MessageParam[], renders: ReadonlyMap<string, PictureData>): Anthropic.MessageParam[] {
+  return renderBlocks(appended, block => {
+    if (!block.source.data.startsWith(RENDER_REF)) return block;
+    const image = renders.get(block.source.data.slice(RENDER_REF.length));
+    return image ? { ...block, source: { ...block.source, media_type: image.mime as Anthropic.Base64ImageSource['media_type'], data: image.data } }
+      : { type: 'text', text: '(A render picture is no longer available.)' };
+  });
+}
 export function filedRequestEvent(r: PipelineRequest): FiledRequestEvent {
   return { id: r.id, issueKey: r.issueKey, issueUrl: r.issueUrl, title: r.title, requesterState: r.requesterState, eligibility: r.eligibility };
 }
@@ -179,7 +323,23 @@ export function issueSummaryOf(issue: TrackerIssue, config: Config): OpenIssueSu
  * `tool_use` blocks and one user message of `tool_result` blocks; the latest requester message carries the
  * volatile context block (account, screen, brief, limits) so the cached system prompt stays stable.
  */
-export function historyOf(messages: readonly ConversationMessage[], contextBlock: string, latestText: string): Anthropic.MessageParam[] {
+/** Base64 of bytes, in chunks small enough for String.fromCharCode. */
+function base64Of(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+/** A message's pictures as model content: each image, or a note where the requester removed it. */
+function pictureBlocks(pictures: readonly MessagePicture[] | undefined, images: ReadonlyMap<string, PictureData>): Anthropic.ContentBlockParam[] {
+  return (pictures ?? []).map(p => {
+    const image = images.get(p.id);
+    return image
+      ? { type: 'image' as const, source: { type: 'base64' as const, media_type: image.mime as 'image/png' | 'image/jpeg' | 'image/webp', data: image.data } }
+      : { type: 'text' as const, text: `(The requester removed the picture "${p.name.replace(/["<>]/g, '')}".)` };
+  });
+}
+export function historyOf(messages: readonly ConversationMessage[], contextBlock: string, latestText: string,
+  latestPictures: readonly MessagePicture[] = [], images: ReadonlyMap<string, PictureData> = new Map()): Anthropic.MessageParam[] {
   const out: Anthropic.MessageParam[] = [];
   let tools: Extract<ConversationMessage, { role: 'tool' }>[] = [];
   const flushTools = () => {
@@ -191,8 +351,9 @@ export function historyOf(messages: readonly ConversationMessage[], contextBlock
   for (const m of messages) {
     if (m.role === 'tool') { tools.push(m); continue; }
     flushTools();
-    if (m.role === 'user') out.push({ role: 'user', content: frameRequesterText(m.text) });
-    else if (m.text.trim()) out.push({ role: 'assistant', content: m.text });
+    if (m.role === 'user') out.push({ role: 'user', content: m.attachments?.length ? [...pictureBlocks(m.attachments, images), { type: 'text', text: frameRequesterText(m.text) }] : frameRequesterText(m.text) });
+    // An acknowledgment restated the request for the requester only: no model ever reads it.
+    else if (m.text.trim() && !m.acknowledgment) out.push({ role: 'assistant', content: m.text });
   }
   flushTools();
   // Two consecutive messages of one role are merged so the transcript alternates as the API requires.
@@ -204,7 +365,17 @@ export function historyOf(messages: readonly ConversationMessage[], contextBlock
     merged.push({ role: m.role, content: blocks(m.content) });
   }
   if (merged.length && merged[merged.length - 1]!.role === 'user') merged.push({ role: 'assistant', content: [{ type: 'text', text: '(continued)' }] });
-  return [...merged, { role: 'user', content: `${contextBlock}\n\n${frameRequesterText(latestText)}` }];
+  const latest = `${contextBlock}\n\n${frameRequesterText(latestText)}`;
+  return [...merged, { role: 'user', content: latestPictures.length ? [...pictureBlocks(latestPictures, images), { type: 'text', text: latest }] : latest }];
+}
+/** The agent's last reply, for the fast model that restates a new message (acknowledgments excluded). */
+export function previousReplyOf(messages: readonly ConversationMessage[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]!;
+    if (m.role === 'user') return null;
+    if (m.role === 'assistant' && !m.acknowledgment && m.text.trim()) return m.text;
+  }
+  return null;
 }
 function blocks(content: Anthropic.MessageParam['content']): Anthropic.ContentBlockParam[] {
   return typeof content === 'string' ? [{ type: 'text', text: content }] : [...(content as Anthropic.ContentBlockParam[])];
@@ -281,8 +452,11 @@ export type SseEvent =
   /** The agent added the requester to an existing request; the conversation is complete. */
   | { event: 'added'; data: { request: FiledRequestEvent } }
   /** The turn is suspended until the editor answers these document tool calls through `POST /conversations/:id/tool-results`. */
-  | { event: 'tool_request'; data: { calls: ClientToolCall[] } }
+  /** A render call carries `review`: its number among the requester message's allowed reviews, as the backend counts them. */
+  | { event: 'tool_request'; data: { calls: (ClientToolCall & { review?: { index: number; limit: number } })[] } }
   | { event: 'error'; data: { code: string; message: string } }
+  /** What a turn that edits a 3D model is doing while nothing else is sent (see `status.ts`); never in the transcript or shown to the model. */
+  | { event: 'status'; data: StatusLine }
   /** `ended`: the conversation is closed and the next message needs a new one; `reason` says why (filed, added, start_over, or abusive content). */
   | { event: 'done'; data: { messageCount: number; limitReached: boolean; ended: boolean; reason?: TurnEndReason; awaitingTools?: boolean } };
 export function formatSse(e: SseEvent): string { return `event: ${e.event}\ndata: ${JSON.stringify(e.data)}\n\n`; }
@@ -294,12 +468,15 @@ export function parseSse(text: string): SseEvent[] {
     return { event, data: data ? JSON.parse(data) : {} } as SseEvent;
   });
 }
-function sseResponse(run: (emit: (e: SseEvent) => void) => Promise<void>): Response {
+function sseResponse(log: ((message: string) => void) | undefined, run: (emit: (e: SseEvent) => void) => Promise<void>): Response {
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const emit = (e: SseEvent) => { try { controller.enqueue(encoder.encode(formatSse(e))); } catch { /* client went away */ } };
-      try { await run(emit); } catch (error) { const e = httpErrorOf(error); emit({ event: 'error', data: { code: e.code, message: e.message } }); }
+      try { await run(emit); } catch (error) {
+        // The client sees only the mapped message, so the underlying failure is logged here.
+        if (!(error instanceof HttpError)) log?.(`turn failed: ${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`);
+        const e = httpErrorOf(error); emit({ event: 'error', data: { code: e.code, message: e.message } }); }
       try { controller.close(); } catch { /* already closed */ }
     },
   });
@@ -310,7 +487,15 @@ function sseResponse(run: (emit: (e: SseEvent) => void) => Promise<void>): Respo
 
 type TurnBase = Omit<AgentContext, 'path' | 'brief' | 'title'>;
 /** What one request of a turn runs: a new turn's first request, or a resume after the editor answered. */
+/** When the request arrived and how long each lookup before the model took, for the per-turn latency log. */
+interface TurnTiming { received: number; phases: Record<string, number>; toolChars?: number }
+/** Resolve as `work` does, recording its duration under `name`. */
+function timed<T>(timing: TurnTiming, name: string, work: Promise<T>): Promise<T> {
+  const started = performance.now();
+  return work.finally(() => { timing.phases[name] = Math.round(performance.now() - started); });
+}
 interface TurnRun {
+  timing: TurnTiming;
   user: SessionUser;
   conversation: Conversation;
   store: DbConversationStore;
@@ -318,13 +503,18 @@ interface TurnRun {
   pathChanged: boolean;
   /** Records saved ahead of the turn's own: the requester message (after any closers), or the editor's answers. */
   leading: ConversationMessage[];
+  /** The status line this request opens with, on turns that edit a 3D model, and the last one the turn sent before. */
+  status: StatusPick;
+  previousStatus?: string | undefined;
+  /** A new message's content for the fast model that restates it (see `acknowledge.ts`); resumed requests have none. */
+  acknowledge?: Anthropic.ContentBlockParam[] | undefined;
   setup: {
     model: string; system: string; tools: Anthropic.Tool[]; context: string; historyLength: number;
     messages: Anthropic.MessageParam[]; document: DocumentCapability | null;
-    resume: { appended: Anthropic.MessageParam[]; rounds: number } | undefined;
+    resume: { appended: Anthropic.MessageParam[]; rounds: number; reviews: number; renders: ReadonlySet<string> } | undefined;
   };
 }
-const agentFor = (path: ConversationPath): ConversationAgent => (path === 'open' ? openAgent : path === 'help' ? helpAgent : path === 'problem' ? problemAgent : intakeAgent);
+const agentFor = agentForPath;
 /** The conversation kind a settled path implies: help conversations are kept 30 days, the two filing paths are intake. */
 const kindOf = (path: ConversationPath): ConversationKind => (path === 'help' ? 'help' : 'intake');
 const clientOf = (screen: PanelScreen | null): Record<string, unknown> | null => (screen ? { version: screen.build.version, build: screen.build.commit, editor: screen.editor, browser: screen.browser, os: screen.os } : null);
@@ -450,12 +640,48 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     if (!deps.storage) throw new HttpError('unavailable', 'Attachments are not available right now.');
     return deps.storage;
   };
+
+  /* ---------- pictures posted with messages ---------- */
+
+  /** The pictures a new message names: uploaded images of this conversation by this requester, within the model's size limit. */
+  const messagePictures = async (conversation: Conversation, userId: string, ids: readonly string[]): Promise<MessagePicture[]> => {
+    const unique = [...new Set(ids)];
+    if (!db.rpc.selectIn) throw new HttpError('unavailable', 'Pictures are not available right now.');
+    const rows = await db.rpc.selectIn('fr_attachments', 'id,conversation_id,uploaded_by,kind,name,mime,size,uploaded_at', 'id', unique);
+    return unique.map(id => {
+      const row = rows.find(r => r['id'] === id);
+      if (!row || row['conversation_id'] !== conversation.id || row['uploaded_by'] !== userId) throw new HttpError('invalid', 'A picture does not belong to this conversation.');
+      if (!row['uploaded_at']) throw new HttpError('invalid', `The picture "${String(row['name'])}" has not finished uploading.`);
+      if (!(SCREENSHOT_TYPES as readonly string[]).includes(String(row['mime']))) throw new HttpError('invalid', 'Pictures must be PNG, JPEG or WebP images.');
+      if (Number(row['size']) > PICTURE_MAX_BYTES) throw new HttpError('invalid', `The picture "${String(row['name'])}" is larger than 5 MB.`);
+      return { id, name: String(row['name']), mime: String(row['mime']) };
+    });
+  };
+  /** The bytes of every picture still attached to the conversation among `messages`; removed pictures are left out. */
+  const pictureData = async (messages: readonly ConversationMessage[]): Promise<Map<string, PictureData>> => {
+    const ids = [...new Set(messages.flatMap(m => (m.role === 'user' ? (m.attachments ?? []).map(p => p.id) : [])))];
+    const images = new Map<string, PictureData>();
+    if (!ids.length) return images;
+    if (!db.rpc.selectIn) throw new HttpError('unavailable', 'Pictures are not available right now.');
+    const storage = deps.storage;
+    if (!storage?.read) throw new HttpError('unavailable', 'Pictures are not available right now.');
+    const rows = await db.rpc.selectIn('fr_attachments', 'id,storage_path,mime,uploaded_at', 'id', ids);
+    await Promise.all(rows.filter(r => r['uploaded_at']).map(async row => {
+      try {
+        const blob = await storage.read!(String(row['storage_path']));
+        images.set(String(row['id']), { mime: String(row['mime']), data: base64Of(new Uint8Array(await blob.arrayBuffer())) });
+      } catch (error) {
+        deps.log?.(`picture ${String(row['id'])} not read: ${error instanceof Error ? error.message : String(error)}`);
+        throw new HttpError('unavailable', 'A picture could not be read. Please retry.');
+      }
+    }));
+    return images;
+  };
   /** Reserve an attachment and hand back a URL to upload it to; the requester confirmed its name and size first. */
   const addAttachment = async (req: Request, id: string): Promise<Response> => {
     const user = await session(req);
     const conversation = await loadConversation(id, user);
     if (conversation.status !== 'open') throw new HttpError('invalid', 'The conversation is closed.');
-    if (!['feature', 'problem'].includes(conversation.path)) throw new HttpError('invalid', 'Images belong to a feature request or problem report.');
     const body = await parseBody(req, attachmentBodySchema);
     const storage = storageOrThrow();
     await enforceRate(db, user.id, config.limits.messagesPerMinute);
@@ -464,7 +690,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     let row: SqlAttachmentRow;
     try { row = await db.attachmentAdd(conversation.id, user.id, { kind: body.kind, name: body.name, mime: body.mime, size: body.size, path }); } catch (error) {
       const e = httpErrorOf(error);
-      throw e.code === 'limit' ? new HttpError('limit', 'A report takes at most 5 attachments.') : e;
+      throw e.code === 'limit' ? new HttpError('limit', 'A conversation takes at most 5 images.') : e;
     }
     return json({ attachment: attachmentView(row), uploadUrl: await storage.uploadUrl(path) });
   };
@@ -615,7 +841,20 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     const anthropic = deps.anthropic!;
     const editing = setup.document !== null;
     const clientTools = new Set(documentTools(setup.document).map(tool => tool.name));
-    return sseResponse(async (emit) => {
+    // Render reviews are counted per requester message, across the turn's requests: the count rides in the suspended turn.
+    const reviewing = clientTools.has(RENDER_TOOL);
+    const reviewLimit = config.limits.renderReviewsPerTurn;
+    let reviews = setup.resume?.reviews ?? 0;
+    const reviewIndex = new Map<string, number>();
+    // Status lines go to turns that can edit a 3D model, whose rounds can think for a minute before any text.
+    const statusOn = clientTools.has(MODEL_TOOLS.applyOperations.name);
+    return sseResponse(deps.log, async (send) => {
+      const status = statusOn ? statusSender(line => send({ event: 'status', data: line }), { previous: t.previousStatus }) : null;
+      // Anything else sent restarts the status line's silence clock.
+      const emit = (e: SseEvent) => { status?.quiet(); send(e); };
+      try { await body(emit, status); } finally { status?.stop(); }
+    });
+    async function body(emit: (e: SseEvent) => void, status: ReturnType<typeof statusSender> | null): Promise<void> {
       const appended: ConversationMessage[] = [...t.leading];
       const briefEvent = () => emit({ event: 'brief', data: { brief: store.getBrief(), title: store.getTitle(), path: store.getPath(), estimatedClass: store.getBrief()?.estimatedClass ?? null } });
       if (t.pathChanged) briefEvent();
@@ -629,46 +868,88 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
         emit({ event: 'filed', data: { request: filedRequestEvent(request) } });
       };
       const generationStarted = performance.now();
+      const setupMs = Math.round(generationStarted - t.timing.received);
       let firstTextMs: number | null = null;
+      // On a new message to a 3D model, a fast model restates the request while this one works; the two share the text stream.
+      const opening = new ReplyOpening(delta => emit({ event: 'text', data: { delta } }));
+      const ackModel = statusOn && t.acknowledge ? config.models.acknowledge : null;
+      let ack: RunningAcknowledgment | null = null;
+      let acknowledged: Promise<Acknowledgment> | null = null;
+      const say = (delta: string) => { if (opening.agent(delta)) ack?.abort(); };
+      // The acknowledgment is kept as its own message straight after the requester's, never in what a model reads.
+      const keepAcknowledgment = async (): Promise<Acknowledgment | null> => {
+        const a = acknowledged ? await acknowledged : null;
+        if (a?.text) appended.splice(t.leading.length, 0, { role: 'assistant', text: a.text, at: now().toISOString(), acknowledgment: true });
+        return a;
+      };
       let result;
       try {
-        result = await runTurn({
+        const running = runTurn({
           client: anthropic, model: setup.model, system: setup.system, tools: setup.tools, handlers: t.handlers, messages: setup.messages,
           clientTools, resume: setup.resume,
-          // A turn that can edit the document plans multi-step geometry; help and intake stay short.
-          effort: editing ? 'medium' : 'low', maxTokens: editing ? 16_000 : 4096, maxToolRounds: editing ? DOCUMENT_TOOL_ROUNDS : 8,
-          // Editing turns run many tool rounds; their between-call notes stream so the panel is never silent for the whole turn.
-          progressUpdates: editing,
+          // A render past the limit is answered here, so the agent finishes instead of the browser drawing again.
+          interceptClientCall: (toolCall) => {
+            if (toolCall.name !== RENDER_TOOL) return null;
+            if (reviews >= reviewLimit) return { content: RENDER_LIMIT_RESULT, isError: true };
+            reviews += 1; reviewIndex.set(toolCall.id, reviews);
+            return null;
+          },
+          // A turn that can edit the document plans multi-step geometry; help and intake stay short. Reviewing a
+          // build and fixing what it shows takes more rounds.
+          ...turnSettings(setup.document), ...(editing && reviewing ? { maxToolRounds: config.limits.documentToolRoundsWithReview } : {}),
+          // Progress notes stay off until the hosted model accepts the progress-update display; requesting it fails editing turns.
+          progressUpdates: false,
+          ...(status ? { onPhase: (phase: RoundPhase) => {
+            if (phase.kind === 'request') status.send(phase.round === 0 ? t.status : NEXT_STEP);
+            else { const line = blockStatus(phase); if (line) status.send(line); }
+          } } : {}),
           onText: (delta) => {
             firstTextMs ??= Math.round(performance.now() - generationStarted);
-            emit({ event: 'text', data: { delta } });
+            say(delta);
           },
           onToolCall: (call: ToolCallEvent) => {
+            if (call.invalidInput !== undefined) deps.log?.(`turn ${id}: ${call.name} input was not valid JSON, asked the model to resend: ${call.invalidInput}`);
             appended.push({ role: 'tool', name: call.name, toolUseId: call.id, input: call.input, output: call.result.content.slice(0, 8000), at: now().toISOString() });
             if (store.changed) { store.changed = false; briefEvent(); }
           },
         });
+        if (ackModel && t.acknowledge) {
+          opening.begin();
+          ack = startAcknowledgment({ client: anthropic, model: ackModel, content: t.acknowledge, onText: delta => opening.opening(delta) });
+          acknowledged = ack.done.then(a => { opening.end(); return a; });
+        }
+        result = await running;
       } catch (error) {
+        status?.stop();
+        await keepAcknowledgment();
         // A failed model call still keeps the requester's message, the tool calls and the brief the panel already shows
         // (the message budget was spent); the next turn then continues from them.
         try { await persist(); } catch (saveError) { deps.log?.(`turn ${id}: save after failure: ${saveError instanceof Error ? saveError.message : String(saveError)}`); }
         try { await recordPending(); } catch (fileError) { deps.log?.(`turn ${id}: record after failure: ${fileError instanceof Error ? fileError.message : String(fileError)}`); }
         throw error;
       }
+      status?.stop();
       const generationMs = Math.round(performance.now() - generationStarted);
+      const acknowledgment = await keepAcknowledgment();
       const reason = store.ended();
       // A turn that also ended the conversation (filed, start over) does not wait for the editor: the calls are dropped.
       const suspended = result.stop === 'client_tools' && !reason ? result.pending : null;
-      const turn: SuspendedTurn | null = suspended && setup.document ? {
+      // Render pictures are kept once while the turn runs: this suspension stores only those no earlier one of the turn keeps.
+      const kept = suspended ? keepRenders(result.appended, setup.resume?.renders ?? new Set()) : null;
+      const turn: SuspendedTurn | null = suspended && kept && setup.document ? {
         model: setup.model, system: setup.system, tools: setup.tools, context: setup.context, historyLength: setup.historyLength,
-        appended: result.appended, pending: suspended, rounds: result.rounds, document: setup.document,
+        appended: kept.appended, pending: suspended, rounds: result.rounds, document: setup.document,
+        ...(reviews ? { reviews } : {}), ...(Object.keys(kept.renders).length ? { renders: kept.renders } : {}),
+        ...(status?.last() ? { status: status.last()! } : {}),
       } : null;
       const cue = turn?.pending.calls.find(call => call.name === 'ui_highlight')?.input as { instruction?: unknown } | undefined;
       const replyText = result.text.trim() || typeof cue?.instruction !== 'string' ? result.text : cue.instruction.slice(0, 400);
-      if (replyText !== result.text) emit({ event: 'text', data: { delta: replyText } });
+      if (replyText !== result.text) say(replyText);
       appended.push({ role: 'assistant', text: replyText, at: now().toISOString(), ...(turn ? { turn } : {}) });
       let saved: Conversation;
+      const saveStarted = performance.now();
       try { saved = conversationFromRow(await persist()); } catch (error) { throw httpErrorOf(error); }
+      const saveMs = Math.round(performance.now() - saveStarted);
       if (store.getBrief() || store.getTitle()) briefEvent();
       if (reason === 'filed') await recordPending();
       else if (reason === 'added' && store.added) {
@@ -678,31 +959,39 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
         // The requester asked to start over;: abusive content ends the conversation. Either way it is discarded.
         try { await db.conversationClose(id, user.id, 'discarded'); } catch (error) { deps.log?.(`turn ${id}: close (${reason}): ${error instanceof Error ? error.message : String(error)}`); }
       }
-      deps.log?.(`turn ${id}: model=${setup.model} stop=${result.stop} rounds=${result.rounds} firstTextMs=${firstTextMs ?? 'none'} generationMs=${generationMs} in=${result.usage.inputTokens} out=${result.usage.outputTokens} cacheRead=${result.usage.cacheReadTokens}${reason ? ` ended=${reason}` : ''}`);
-      if (turn) emit({ event: 'tool_request', data: { calls: turn.pending.calls } });
+      // New fields follow cacheRead so readers of the older line keep matching. Each round: start/first/total ms and tokens.
+      const phases = Object.entries(t.timing.phases).map(([name, ms]) => `${name}:${ms}`).join(',') || 'none';
+      const roundLog = result.roundStats.map(r => `${r.startMs}/${r.firstMs ?? '-'}/${r.ms}ms,in${r.input},out${r.output},cr${r.cacheRead},cw${r.cacheWrite}`).join(' ');
+      deps.log?.(`turn ${id}: model=${setup.model} stop=${result.stop} rounds=${result.rounds} firstTextMs=${firstTextMs ?? 'none'} generationMs=${generationMs} in=${result.usage.inputTokens} out=${result.usage.outputTokens} cacheRead=${result.usage.cacheReadTokens} cacheWrite=${result.usage.cacheWriteTokens} setupMs=${setupMs} setup=${phases}${t.timing.toolChars !== undefined ? ` toolChars=${t.timing.toolChars}` : ''} saveMs=${saveMs} rounds=[${roundLog}]${reason ? ` ended=${reason}` : ''}`);
+      if (acknowledgment) deps.log?.(`acknowledge ${id}: model=${ackModel} outcome=${acknowledgment.outcome} firstMs=${acknowledgment.firstMs ?? 'none'} ms=${acknowledgment.ms} in=${acknowledgment.input} out=${acknowledgment.output} chars=${acknowledgment.text.length}${acknowledgment.error ? ` error=${acknowledgment.error.slice(0, 200)}` : ''}`);
+      if (turn) emit({ event: 'tool_request', data: { calls: turn.pending.calls.map(c => {
+        const index = reviewIndex.get(c.id);
+        return index ? { ...c, review: { index, limit: reviewLimit } } : c;
+      }) } });
       emit({ event: 'done', data: { messageCount: saved.messageCount, limitReached: saved.messageCount >= config.limits.messagesPerConversation, ended: reason !== null,
         ...(reason ? { reason } : {}), ...(turn ? { awaitingTools: true } : {}) } });
-    });
+    }
   };
 
   /** A new requester message: one agent turn, with document tools when the browser offers them. */
   const message = async (req: Request, id: string): Promise<Response> => {
+    const timing: TurnTiming = { received: performance.now(), phases: {} };
     // The body is read while the session is checked; an unauthorized request still answers unauthorized first.
-    const [who, parsed] = await Promise.allSettled([session(req), parseBody(req, messageSchema)]);
+    const [who, parsed] = await Promise.allSettled([timed(timing, 'auth', session(req)), parseBody(req, messageSchema)]);
     if (who.status === 'rejected') throw who.reason;
     if (parsed.status === 'rejected') throw parsed.reason;
     const user = who.value, body = parsed.value;
     const userDb = deps.userDb(req);
     // Everything the turn needs before the model starts, at once: one database round trip of waiting instead of five.
-    const loading = loadConversation(id, user);
+    const loading = timed(timing, 'load', loadConversation(id, user));
     const [loaded, rate, account, issues] = await Promise.allSettled([
       loading,
-      enforceRate(db, user.id, config.limits.messagesPerMinute),
-      accountContext(user, userDb),
+      timed(timing, 'rate', enforceRate(db, user.id, config.limits.messagesPerMinute)),
+      timed(timing, 'account', accountContext(user, userDb)),
       loading.then(conversation => {
         const path = conversation.path === 'open' && body.intent ? body.intent : conversation.path;
         // Help and initial routing need no tracker snapshot. Duplicate lookup stays available on demand.
-        return path === 'help' || path === 'open' ? [] : openIssues();
+        return path === 'help' || path === 'open' ? [] : timed(timing, 'issues', openIssues());
       }),
     ]);
     // Failures are reported in the order the checks used to run one by one, so a response never depends on timing.
@@ -721,33 +1010,39 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     const store = storeFor(user, userDb, conversation, base, path);
     const ctx: AgentContext = { ...base, path: store.getPath(), brief: store.getBrief(), title: store.getTitle() };
     const agent = agentFor(ctx.path);
-    const tools = documentTools(document);
     // A turn still waiting for the editor is closed with error results before the new message, so the transcript stays valid.
     const closers = closeSuspended(conversation.messages, base.now);
     const prior = [...conversation.messages, ...closers];
     const help = path === 'help' || path === 'open'
       ? `\n\n<retrieved_help>\n${retrieveUserHelp(deps.digest, body.text.slice(0, 300), ctx.screen.editor)}\n</retrieved_help>` : '';
     const context = agent.context(ctx) + help;
+    const pictures = body.attachments?.length ? await timed(timing, 'pictures', messagePictures(conversation, user.id, body.attachments)) : [];
+    const images = await timed(timing, 'images', pictureData([...prior, { role: 'user', text: body.text, at: base.now, attachments: pictures }]));
     return streamTurn({
+      timing,
       user, conversation, store, handlers: agent.handlers(ctx, store), pathChanged: path !== conversation.path,
-      leading: [...closers, { role: 'user', text: body.text, at: base.now }],
+      leading: [...closers, { role: 'user', text: body.text, at: base.now, ...(pictures.length ? { attachments: pictures } : {}) }],
+      status: messageStatus(),
+      ...(config.models.acknowledge ? { acknowledge: acknowledgeContent({ text: body.text, pictures: pictures.length, previousReply: previousReplyOf(prior) }) } : {}),
       setup: {
-        model: tools.length ? config.models.document : config.models.conversation,
-        system: [agent.system(ctx), USER_HELP_RULES, ...(editableDocument(document) === 'layout' ? [DOCUMENT_RULES(ctx)] : editableDocument(document) === 'model' ? [MODEL_DOCUMENT_RULES(ctx)] : []), ...(document?.guidance ? [GUIDANCE_RULES] : [])].join('\n\n'),
-        tools: [...agent.tools(ctx), ...tools], context, historyLength: prior.length, messages: historyOf(prior, context, body.text), document, resume: undefined,
+        ...turnPrompt(config.models, ctx, document), context, historyLength: prior.length, messages: historyOf(prior, context, body.text, pictures, images), document, resume: undefined,
       },
     });
   };
 
   /** The browser's answers to a suspended turn's document tool calls; the turn continues exactly where it stopped. */
   const toolResults = async (req: Request, id: string): Promise<Response> => {
-    const [who, parsed] = await Promise.allSettled([session(req), parseBody(req, toolResultsSchema)]);
+    const timing: TurnTiming = { received: performance.now(), phases: {} };
+    const [who, parsed] = await Promise.allSettled([timed(timing, 'auth', session(req)), parseBody(req, toolResultsSchema)]);
     if (who.status === 'rejected') throw who.reason;
     if (parsed.status === 'rejected') throw parsed.reason;
     const user = who.value, body = parsed.value;
     const userDb = deps.userDb(req);
     // As for a new message, the lookups start together and their failures are reported in a fixed order.
-    const [loaded, account, issues] = await Promise.allSettled([loadConversation(id, user), accountContext(user, userDb), openIssues()]);
+    const loading = timed(timing, 'load', loadConversation(id, user));
+    const [loaded, account, issues] = await Promise.allSettled([loading, timed(timing, 'account', accountContext(user, userDb)),
+      // As for a new message, help and initial routing need no tracker snapshot.
+      loading.then(conversation => (conversation.path === 'help' || conversation.path === 'open' ? [] : timed(timing, 'issues', openIssues())))]);
     if (loaded.status === 'rejected') throw loaded.reason;
     const conversation = loaded.value;
     if (conversation.status !== 'open') throw new HttpError('invalid', 'The conversation is closed; start a new one.');
@@ -759,8 +1054,10 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     const answers = new Map<string, ToolResult>();
     for (const r of body.results) {
       if (!expected.has(r.toolUseId) || answers.has(r.toolUseId)) throw new HttpError('invalid', `Unexpected tool result for ${r.toolUseId}.`);
-      answers.set(r.toolUseId, { content: r.content, isError: r.isError });
+      if (r.images?.length && turn.pending.calls.find(c => c.id === r.toolUseId)?.name !== RENDER_TOOL) throw new HttpError('invalid', `Only a ${RENDER_TOOL} result carries pictures.`);
+      answers.set(r.toolUseId, { content: r.content, isError: r.isError, ...(r.images?.length ? { images: r.images } : {}) });
     }
+    timing.toolChars = body.results.reduce((sum, r) => sum + r.content.length, 0);
     if (!deps.anthropic) throw new HttpError('unavailable', 'The assistant is not configured (ANTHROPIC_API_KEY missing).');
     if (account.status === 'rejected') throw account.reason;
     if (issues.status === 'rejected') throw issues.reason;
@@ -776,20 +1073,33 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       try { return ['expired', 'cancelled', 'dismissed'].includes((JSON.parse(answer.content) as { status?: string }).status ?? ''); }
       catch { return false; }
     });
-    if (quietCue) return sseResponse(async emit => {
+    if (quietCue) return sseResponse(deps.log, async emit => {
       const messages: ConversationMessage[] = pending.calls.map(call => ({ role: 'tool', name: call.name, toolUseId: call.id,
         input: call.input, output: answers.get(call.id)!.content.slice(0, 8000), at: base.now }));
       const saved = conversationFromRow(await db.conversationAppend(id, user.id, messages, store.getBrief(), store.getTitle(), store.getPath(), null));
       emit({ event: 'done', data: { messageCount: saved.messageCount, limitReached: saved.messageCount >= config.limits.messagesPerConversation, ended: false } });
     });
+    const history = conversation.messages.slice(0, turn.historyLength);
+    const images = await pictureData([...history, opening]);
+    // The render pictures of this turn's earlier suspensions, put back into the rounds the agent saw.
+    const renders = turnRenders(conversation.messages.slice(turn.historyLength));
     return streamTurn({
+      timing,
       user, conversation, store, handlers: agentFor(ctx.path).handlers(ctx, store), pathChanged: false,
-      leading: pending.calls.map(call => ({ role: 'tool' as const, name: call.name, toolUseId: call.id, input: call.input,
-        output: (answers.get(call.id)?.content ?? NOT_ANSWERED).slice(0, 8000), at: base.now })),
+      status: resumeStatus(pending.calls.map(call => ({ name: call.name, isError: answers.get(call.id)?.isError ?? true }))), previousStatus: turn.status,
+      // The transcript never keeps a render's pictures: its record names the views in a placeholder instead.
+      leading: pending.calls.map(call => {
+        const answer = answers.get(call.id);
+        const output = (answer?.content ?? NOT_ANSWERED).slice(0, 8000);
+        if (!answer?.images?.length) return { role: 'tool' as const, name: call.name, toolUseId: call.id, input: call.input, output, at: base.now };
+        const views = renderViewNames(call.input).slice(0, answer.images.length);
+        return { role: 'tool' as const, name: call.name, toolUseId: call.id, input: call.input, output: `${output}\n${renderPlaceholder(views)}`, at: base.now, views };
+      }),
       setup: {
         model: turn.model, system: turn.system, tools: turn.tools as Anthropic.Tool[], context: turn.context, historyLength: turn.historyLength,
-        messages: historyOf(conversation.messages.slice(0, turn.historyLength), turn.context, opening.text), document: turn.document,
-        resume: { appended: [...(turn.appended as Anthropic.MessageParam[]), answerPending(pending, answers)], rounds: turn.rounds },
+        messages: historyOf(history, turn.context, opening.text, opening.attachments ?? [], images), document: turn.document,
+        resume: { appended: [...restoreRenders(turn.appended as Anthropic.MessageParam[], renders), answerPending(pending, answers)], rounds: turn.rounds,
+          reviews: turn.reviews ?? 0, renders: new Set(renders.keys()) },
       },
     });
   };

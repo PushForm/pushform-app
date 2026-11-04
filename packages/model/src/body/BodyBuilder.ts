@@ -90,13 +90,23 @@ interface BoundaryEdge {
   other: number;
 }
 
+/**
+ * Directed triangle edges where the face changes, on welded vertices. A triangle with two corners welded together
+ * has no area and is skipped: its two remaining edges would cancel the neighbouring triangle's edge between them,
+ * losing that edge from its face's loop (a kernel sliver beside a fillet does this).
+ */
 function boundaryEdges(mesh: MeshData, weldTol = LENGTH_TOL): { canon: Int32Array; edges: BoundaryEdge[] } {
   const canon = weldVertices(mesh.verts, weldTol);
   const n = mesh.verts.length / 3;
   const t = mesh.tris;
   const faceOfDirected = new Map<number, number>();
   const triCount = t.length / 3;
+  const collapsed = (i: number): boolean => {
+    const a = canon[t[i * 3]!]!, b = canon[t[i * 3 + 1]!]!, c = canon[t[i * 3 + 2]!]!;
+    return a === b || b === c || a === c;
+  };
   for (let i = 0; i < triCount; i++) {
+    if (collapsed(i)) continue;
     const f = mesh.faceId[i]!;
     for (let k = 0; k < 3; k++) {
       const u = canon[t[i * 3 + k]!]!, v = canon[t[i * 3 + ((k + 1) % 3)]!]!;
@@ -105,6 +115,7 @@ function boundaryEdges(mesh: MeshData, weldTol = LENGTH_TOL): { canon: Int32Arra
   }
   const edges: BoundaryEdge[] = [];
   for (let i = 0; i < triCount; i++) {
+    if (collapsed(i)) continue;
     const f = mesh.faceId[i]!;
     for (let k = 0; k < 3; k++) {
       const u = canon[t[i * 3 + k]!]!, v = canon[t[i * 3 + ((k + 1) % 3)]!]!;

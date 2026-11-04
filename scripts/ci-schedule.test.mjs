@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { describe, expect, it, vi } from 'vitest';
-import { mainCiDecision, scheduleMainCi } from './ci-schedule.mjs';
+import { mainCiDecision, mainCiRetryAt, scheduleMainCi, waitAndScheduleMainCi } from './ci-schedule.mjs';
 
 const now = Date.parse('2026-10-27T12:30:00Z');
 const run = (overrides = {}) => ({
@@ -69,3 +69,35 @@ it('does not dispatch on idle ticks or when GitHub cannot supply the run history
   await expect(scheduleMainCi(github, repo, now)).rejects.toThrow('API unavailable');
   expect(github.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
 });
+
+describe('waiting for the batch window', () => {
+  it('reopens a recent batch one second after its 15-minute window and polls a running one each minute', () => {
+    expect(mainCiRetryAt([run({ run_started_at: '2026-10-27T12:20:00Z' })], now)).toBe(Date.parse('2026-10-27T12:35:01Z'));
+    expect(mainCiRetryAt([run({ status: 'in_progress' })], now)).toBe(now + 60 * 1000);
+    expect(mainCiRetryAt([run()], now)).toBeNull();
+    expect(mainCiRetryAt([], now)).toBeNull();
+  });
+
+  it('waits out the window after a push, then dispatches once', async () => {
+    let clock = now;
+    const github = client([run({ run_started_at: '2026-10-27T12:20:00Z', created_at: '2026-10-27T12:20:00Z' })]);
+    const sleeps = [];
+    const message = await waitAndScheduleMainCi(github, repo, { now: () => clock, sleep: async ms => { sleeps.push(ms); clock += ms; } });
+    expect(message).toContain('Dispatched');
+    expect(sleeps).toEqual([Date.parse('2026-10-27T12:35:01Z') - now]);
+    expect(github.rest.actions.createWorkflowDispatch).toHaveBeenCalledOnce();
+  });
+
+  it('exits at once on an unchanged main and gives up rather than outlive the job', async () => {
+    const idle = client([run({ head_sha: 'new' })]);
+    const sleep = vi.fn();
+    expect(await waitAndScheduleMainCi(idle, repo, { now: () => now, sleep })).toContain('not changed');
+    expect(sleep).not.toHaveBeenCalled();
+    let clock = now;
+    const stuck = client([run({ status: 'in_progress' })]);
+    const message = await waitAndScheduleMainCi(stuck, repo, { now: () => clock, sleep: async ms => { clock += ms; }, maxWaitMs: 5 * 60 * 1000 });
+    expect(message).toContain('Gave up waiting');
+    expect(stuck.rest.actions.createWorkflowDispatch).not.toHaveBeenCalled();
+  });
+});
+

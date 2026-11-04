@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import type { TagId, TagFolderId } from '@pushform/core';
-import type { Tag, TagFolder } from '@pushform/model';
+import type { ImageId, TagId, TagFolderId } from '@pushform/core';
+import type { Tag, TagFolder, TagTexture } from '@pushform/model';
 import { NativeRecordCodec } from './record';
 import type { NativeField, NativeFieldKind, NativeScalar } from './record';
 import { NativeChunkError } from './chunks';
 const f = (id: number, kind: NativeFieldKind, required = true): NativeField => ({ id, kind, required });
-const tag = new NativeRecordCodec({ id: f(1, 'uint32'), name: f(2, 'string'), visible: f(3, 'bool'), color: f(4, 'bytes'), dashes: f(5, 'bytes'), folderId: f(6, 'bytes') } satisfies Record<keyof Tag, NativeField>);
+const tag = new NativeRecordCodec({ id: f(1, 'uint32'), name: f(2, 'string'), visible: f(3, 'bool'), color: f(4, 'bytes'), dashes: f(5, 'bytes'), folderId: f(6, 'bytes'), texture: f(7, 'bytes', false) } satisfies Record<keyof Tag, NativeField>);
+const texture = new NativeRecordCodec({ imageId: f(1, 'uint32'), widthM: f(2, 'double'), heightM: f(3, 'double') } satisfies Record<keyof TagTexture, NativeField>);
 const folder = new NativeRecordCodec({ id: f(1, 'uint32'), name: f(2, 'string'), visible: f(3, 'bool'), parentId: f(4, 'bytes') } satisfies Record<keyof TagFolder, NativeField>);
 const rgb = new NativeRecordCodec({ red: f(1, 'double'), green: f(2, 'double'), blue: f(3, 'double') });
 const nullableId = new NativeRecordCodec({ nullValue: f(2, 'bytes', false), value: f(3, 'uint32', false) });
@@ -15,6 +16,7 @@ const empty = new NativeRecordCodec({});
 export type TagExtensions = Map<string, Uint8Array[]>;
 const fail = (): never => { throw new NativeChunkError('Invalid native tag metadata'); };
 function color(value: unknown): number { if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) return fail(); return value; }
+function size(value: unknown): number { if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return fail(); return value; }
 function read(codec: NativeRecordCodec, bytes: Uint8Array, path: string, extensions: TagExtensions) {
   const record = codec.decode(bytes); if (record.unknownFields.length) extensions.set(path, record.unknownFields); return record.fields;
 }
@@ -33,13 +35,19 @@ function decodeNullable(codec: NativeRecordCodec, bytes: Uint8Array, path: strin
 export function encodeNativeTag(value: Tag, extensions: TagExtensions = new Map()): Uint8Array {
   return write(tag, { id: value.id, name: value.name, visible: value.visible,
     color: write(rgb, { red: color(value.color[0]), green: color(value.color[1]), blue: color(value.color[2]) }, 'color', extensions),
-    dashes: encodeNullable(nullableString, value.dashes, 'dashes', extensions), folderId: encodeNullable(nullableId, value.folderId, 'folderId', extensions) }, '', extensions);
+    dashes: encodeNullable(nullableString, value.dashes, 'dashes', extensions), folderId: encodeNullable(nullableId, value.folderId, 'folderId', extensions),
+    ...(value.texture ? { texture: write(texture, { imageId: value.texture.imageId, widthM: size(value.texture.widthM), heightM: size(value.texture.heightM) }, 'texture', extensions) } : {}) }, '', extensions);
 }
 export function decodeNativeTag(bytes: Uint8Array): { value: Tag; extensions: TagExtensions } {
   const extensions: TagExtensions = new Map(), fields = read(tag, bytes, '', extensions), c = read(rgb, fields.color as Uint8Array, 'color', extensions);
-  return { value: { id: fields.id as TagId, name: fields.name as string, visible: fields.visible as boolean,
+  const value: Tag = { id: fields.id as TagId, name: fields.name as string, visible: fields.visible as boolean,
     color: [color(c.red), color(c.green), color(c.blue)], dashes: decodeNullable(nullableString, fields.dashes as Uint8Array, 'dashes', extensions) as string | null,
-    folderId: decodeNullable(nullableId, fields.folderId as Uint8Array, 'folderId', extensions) as TagFolderId | null }, extensions };
+    folderId: decodeNullable(nullableId, fields.folderId as Uint8Array, 'folderId', extensions) as TagFolderId | null };
+  if (Object.hasOwn(fields, 'texture')) {
+    const t = read(texture, fields.texture as Uint8Array, 'texture', extensions);
+    value.texture = { imageId: t.imageId as ImageId, widthM: size(t.widthM), heightM: size(t.heightM) };
+  }
+  return { value, extensions };
 }
 export function encodeNativeTagFolder(value: TagFolder, extensions: TagExtensions = new Map()): Uint8Array {
   return write(folder, { id: value.id, name: value.name, visible: value.visible, parentId: encodeNullable(nullableId, value.parentId, 'parentId', extensions) }, '', extensions);

@@ -290,6 +290,14 @@ export class ToolManager implements ToolHost {
     this.afterInteraction();
   }
 
+  /** Set a pick list the active tool offers (`ToolStatus.choices`). */
+  choose(id: string, value: string): void {
+    const tool = this.temp ?? this.active;
+    if (!tool?.onChoice) return;
+    this.call(() => tool.onChoice?.(id, value));
+    this.afterInteraction();
+  }
+
   lockEntry(id: string, value: VcbValue | null): void {
     const tool = this.entryTool();
     if (!tool?.onEntryLock) return;
@@ -359,7 +367,7 @@ export class ToolManager implements ToolHost {
   private emitStatus(): void {
     const s = this.status();
     const prev = this.lastStatus;
-    if (s.instructor === prev.instructor && s.vcbLabel === prev.vcbLabel && s.vcbValue === prev.vcbValue && sameFields(s.fields, prev.fields)) return;
+    if (s.instructor === prev.instructor && s.vcbLabel === prev.vcbLabel && s.vcbValue === prev.vcbValue && sameFields(s.fields, prev.fields) && JSON.stringify(s.choices ?? []) === JSON.stringify(prev.choices ?? [])) return;
     this.lastStatus = s;
     this.events.emit('statusChanged', s);
   }

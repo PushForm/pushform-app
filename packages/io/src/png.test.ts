@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { describe, expect, it } from 'vitest';
-import { clearPngColors, decodePng, encodePng } from './png';
+import { clearPngColors, decodePng, encodePng, pngHasTransparency } from './png';
 
 describe('PNG encoding', () => {
   it.each([3, 4] as const)('round-trips %i-channel pixels through every row filter', (channels) => {
@@ -43,5 +43,14 @@ describe('clearing colors', () => {
     expect(clearPngColors(rgb, [])).toBeNull();
     expect(clearPngColors(new Uint8Array([1, 2, 3]), [0])).toBeNull();
     expect(decodePng(clearPngColors(rgb, [0x0a141e])!)!.channels).toBe(4);
+  });
+});
+
+describe('transparency', () => {
+  it('tells an RGBA PNG with a pixel that is not fully opaque from an opaque one', () => {
+    expect(pngHasTransparency(encodePng(2, 1, new Uint8Array([1, 2, 3, 255, 4, 5, 6, 128]), 4))).toBe(true);
+    expect(pngHasTransparency(encodePng(2, 1, new Uint8Array([1, 2, 3, 255, 4, 5, 6, 255]), 4))).toBe(false);
+    expect(pngHasTransparency(encodePng(1, 1, new Uint8Array([1, 2, 3]), 3))).toBe(false);
+    expect(pngHasTransparency(new Uint8Array([1, 2, 3]))).toBe(false);
   });
 });

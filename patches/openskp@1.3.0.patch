@@ -1,5 +1,5 @@
 diff --git a/dist/index.d.mts b/dist/index.d.mts
-index 9be1b32aa8166d5a75f3b9f2faf7a5221c1db088..2593927c9ddbb93af9a5bf924db34418b285436c 100644
+index 9be1b32aa8166d5a75f3b9f2faf7a5221c1db088..1221d91afc80a8398c67502f191afe3a48b414d9 100644
 --- a/dist/index.d.mts
 +++ b/dist/index.d.mts
 @@ -265,12 +265,14 @@ interface SkpModel {
@@ -32,7 +32,7 @@ index 9be1b32aa8166d5a75f3b9f2faf7a5221c1db088..2593927c9ddbb93af9a5bf924db34418
 +     * file does not record them. */
 +    sectionDisplay: { planes: boolean; cuts: boolean } | null;
 +    /** PushForm patch: the model's current rendering options in effect (RenderMode, EdgeDisplayMode,
-+     * BackgroundColor, ...), keyed by the names of Sketchup::RenderingOptions, as numbers, booleans or [r, g, b, a]
++     * BackgroundColor, ...), keyed by option name, as numbers, booleans or [r, g, b, a]
 +     * colors in 0..255; null when the file records none. */
 +    renderingOptions: Record<string, number | boolean | [number, number, number, number]> | null;
  }
@@ -141,7 +141,7 @@ index 9be1b32aa8166d5a75f3b9f2faf7a5221c1db088..2593927c9ddbb93af9a5bf924db34418
      /** Add a FREE linear dimension between two explicit points (inches,
       * world space). `offset` is the dimension line's offset from the
 diff --git a/dist/index.d.ts b/dist/index.d.ts
-index 9be1b32aa8166d5a75f3b9f2faf7a5221c1db088..2593927c9ddbb93af9a5bf924db34418b285436c 100644
+index 9be1b32aa8166d5a75f3b9f2faf7a5221c1db088..1221d91afc80a8398c67502f191afe3a48b414d9 100644
 --- a/dist/index.d.ts
 +++ b/dist/index.d.ts
 @@ -265,12 +265,14 @@ interface SkpModel {
@@ -174,7 +174,7 @@ index 9be1b32aa8166d5a75f3b9f2faf7a5221c1db088..2593927c9ddbb93af9a5bf924db34418
 +     * file does not record them. */
 +    sectionDisplay: { planes: boolean; cuts: boolean } | null;
 +    /** PushForm patch: the model's current rendering options in effect (RenderMode, EdgeDisplayMode,
-+     * BackgroundColor, ...), keyed by the names of Sketchup::RenderingOptions, as numbers, booleans or [r, g, b, a]
++     * BackgroundColor, ...), keyed by option name, as numbers, booleans or [r, g, b, a]
 +     * colors in 0..255; null when the file records none. */
 +    renderingOptions: Record<string, number | boolean | [number, number, number, number]> | null;
  }
@@ -283,10 +283,10 @@ index 9be1b32aa8166d5a75f3b9f2faf7a5221c1db088..2593927c9ddbb93af9a5bf924db34418
      /** Add a FREE linear dimension between two explicit points (inches,
       * world space). `offset` is the dimension line's offset from the
 diff --git a/dist/index.js b/dist/index.js
-index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9ae6c8de9c 100644
+index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..4df24c3bac17128042bdb4e45fc899696e14af0f 100644
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -172,6 +172,268 @@ function readMetaUnits(metaBytes) {
+@@ -172,6 +172,369 @@ function readMetaUnits(metaBytes) {
    }
    return null;
  }
@@ -340,14 +340,109 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
 +  }
 +  return Object.keys(out).length ? out : null;
 +}
++/** PushForm patch: the fields of a legacy (pre-2021) rendering-options record, [name, kind, offset], kind b bool
++ * (1 byte), i int32, c color (r, g, b, a bytes), d float64. The record has no class header: the model's follows the
++ * model's camera near the start of the file, and each scene's follows the scene's camera (or its flags, when the scene
++ * saves no camera). Offsets are those of SketchUp 6 to 2016 files; legacyRenderingOffset gives other formats'. Mapped
++ * from files SketchUp 2027 saved in every format from SketchUp 4 to 2020 with random settings, and checked against the
++ * settings it reads back. */
++var LEGACY_RENDERING_FIELDS = [
++  ["RenderMode", "i", 2], ["ModelTransparency", "b", 6], ["MaterialTransparency", "b", 7], ["JitterEdges", "b", 8],
++  ["EdgeDisplayMode", "i", 9], ["BackgroundColor", "c", 13], ["ForegroundColor", "c", 17], ["HighlightColor", "c", 21],
++  ["ConstructionColor", "c", 25], ["DisplayInstanceAxes", "b", 30], ["DisplayColorByLayer", "b", 31], ["Texture", "b", 32],
++  ["EdgeColorMode", "i", 33], ["ExtendLines", "b", 37], ["LineExtension", "i", 38], ["DrawSilhouettes", "b", 42],
++  ["SilhouetteWidth", "i", 43], ["DrawDepthQue", "b", 47], ["DepthQueWidth", "i", 48], ["DrawLineEnds", "b", 52],
++  ["LineEndWidth", "i", 53], ["DrawProfilesOnly", "b", 57], ["DrawHidden", "b", 58], ["FaceFrontColor", "c", 63],
++  ["FaceBackColor", "c", 67], ["InactiveFade", "d", 71], ["InstanceFade", "d", 79], ["InactiveHidden", "b", 87],
++  ["InstanceHidden", "b", 88], ["DisplayFog", "b", 89], ["FogUseBkColor", "b", 94], ["EdgeType", "i", 115],
++  ["DisplaySketchAxes", "b", 119], ["DisplayText", "b", 120], ["DisplayDims", "b", 121], ["HideConstructionGeometry", "b", 122],
++  ["SkyColor", "c", 123], ["HorizonColor", "c", 127], ["GroundColor", "c", 131], ["DrawHorizon", "b", 135], ["DrawGround", "b", 136],
++  ["DrawUnderground", "b", 137], ["GroundTransparency", "i", 138], ["SectionActiveColor", "c", 142], ["SectionInactiveColor", "c", 146],
++  ["SectionDefaultCutColor", "c", 150], ["SectionCutWidth", "i", 154], ["SectionDisplay", "i", 158], ["TransparencySort", "i", 162],
++  ["LockedColor", "c", 176, 5], ["DisplayWatermarks", "b", 180, 6], ["DrawBackEdges", "b", 189, 8]
++];
++/** PushForm patch: where a field at `base` (a SketchUp 6 to 2016 offset) sits in a file of major version `ver`, or -1
++ * when that format does not store it. SketchUp 4 lacks the depth cue, endpoint and profiles-only fields (47-57) and
++ * SketchUp 5 and older the fog, edge type, axes, text, dimension and guide fields (89-122); SketchUp 2017 adds a byte
++ * at the start, 2018 the section fill color and flag before TransparencySort, 2019 a byte after JitterEdges and 2020 a
++ * hidden-objects flag after DrawHidden. */
++function legacyRenderingOffset(base, ver) {
++  let at = base;
++  if (ver <= 5) {
++    if (base >= 89 && base <= 122) return -1;
++    if (base >= 123) at -= 34;
++  }
++  if (ver <= 4) {
++    if (base >= 47 && base <= 57) return -1;
++    if (base >= 58) at -= 11;
++  }
++  if (ver >= 17) at += 1;
++  if (ver >= 19 && base >= 9) at += 1;
++  if (ver >= 20 && base >= 59) at += 1;
++  if (ver >= 18 && base >= 162) at += 5;
++  return at;
++}
++/** PushForm patch: the legacy rendering-options record at `at` in a file of major version `ver`, as option name ->
++ * value, or null when the bytes there are not one. Display Section Planes and Display Section Cuts are bits 0 and 1
++ * of one int32 (`SectionDisplay` here, split into the two options). Files older than SketchUp 2018 store no section
++ * fill, which then is off; before SketchUp 2020 one flag shows both hidden geometry and hidden objects. */
++function readLegacyRenderingRecord(bytes, at, ver) {
++  if (!(ver >= 4 && ver <= 20) || at < 0) return null;
++  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
++  const fields = [];
++  for (const [name, kind, base, since] of LEGACY_RENDERING_FIELDS) {
++    if (since !== void 0 && ver < since) continue;
++    const offset = legacyRenderingOffset(base, ver);
++    if (offset >= 0) fields.push([name, kind, offset]);
++  }
++  const later = (ver >= 19 ? 1 : 0) + (ver >= 20 ? 1 : 0);
++  if (ver >= 18) fields.push(["SectionDefaultFillColor", "c", 163 + later], ["SectionCutFilled", "b", 167 + later]);
++  if (ver >= 20) fields.push(["DrawHiddenObjects", "b", 61]);
++  const out = {};
++  for (const [name, kind, offset] of fields) {
++    const p = at + offset;
++    if (p + (kind === "d" ? 8 : kind === "b" ? 1 : 4) > bytes.length) return null;
++    if (kind === "b") {
++      if (bytes[p] > 1) return null;
++      out[name] = bytes[p] === 1;
++    } else if (kind === "c") out[name] = [bytes[p], bytes[p + 1], bytes[p + 2], bytes[p + 3]];
++    else if (kind === "i") out[name] = view.getInt32(p, true);
++    else out[name] = view.getFloat64(p, true);
++  }
++  const bits = out.SectionDisplay;
++  delete out.SectionDisplay;
++  // Settings outside their ranges mean these bytes are not a rendering-options record.
++  if (!(out.RenderMode >= 0 && out.RenderMode <= 6) || !(out.EdgeDisplayMode === 0 || out.EdgeDisplayMode === 1) ||
++    !(out.EdgeColorMode >= 0 && out.EdgeColorMode <= 2) || !(bits >= 0 && bits <= 3) ||
++    !(out.GroundTransparency >= 0 && out.GroundTransparency <= 100)) return null;
++  out.DisplaySectionPlanes = (bits & 1) !== 0;
++  out.DisplaySectionCuts = (bits & 2) !== 0;
++  if (ver < 18) out.SectionCutFilled = false;
++  if (ver < 20) out.DrawHiddenObjects = out.DrawHidden;
++  else out.DrawHidden = out.DrawHidden || out.DrawHiddenObjects;
++  return out;
++}
++/** PushForm patch: the model's rendering-options record in a legacy file of major version `ver`: it follows the
++ * model's camera, the first CCamera record. The camera record is 137 bytes, a u16, a description string and 33 bytes
++ * (8 in SketchUp 5 and older files). */
++function readLegacyModelRendering(bytes, ver) {
++  const at = findSequence(bytes, [7, 0, 67, 67, 97, 109, 101, 114, 97]);
++  if (at < 4 || bytes[at - 4] !== 255 || bytes[at - 3] !== 255) return null;
++  let p = at + 9 + 137 + 2;
++  if (p + 4 > bytes.length || bytes[p] !== 255 || bytes[p + 1] !== 254 || bytes[p + 2] !== 255 || bytes[p + 3] === 255) return null;
++  p += 4 + 2 * bytes[p + 3] + (ver <= 5 ? 8 : 33);
++  return readLegacyRenderingRecord(bytes, p, ver);
++}
 +/** PushForm patch: the model's Display Section Planes and Display Section Cuts rendering options, or null when the
 + * file does not record them. VFF model.dat keeps the rendering options as tagged records in a 0x733c record inside a
 + * 0x01fb wrapper; tag 0x7375 is an int32 whose bit 0 is Display Section Planes and bit 1 Display Section Cuts. Legacy
-+ * files keep each style's settings as (id, 1, type, value) items; item 7013 (int32) is the same bit field, and the
-+ * model's active style, which holds the current settings, is written last. */
-+function readSectionDisplay(bytes, legacy) {
++ * files keep the same bits in the model's rendering-options record (readLegacyModelRendering); a file whose record
++ * cannot be found falls back to item 7013 of its last style item run. */
++function readSectionDisplay(bytes, legacy, ver) {
 +  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 +  let value = null;
++  const record = legacy ? readLegacyModelRendering(bytes, ver) : null;
++  if (record) return { planes: record.DisplaySectionPlanes, cuts: record.DisplaySectionCuts };
 +  if (legacy) {
 +    const item = [101, 27, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0];
 +    for (let at = findSequence(bytes, item); at >= 0 && at + 16 <= bytes.length; at = findSequence(bytes, item, at + 1)) {
@@ -372,7 +467,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
 +  }
 +  return value === null ? null : { planes: (value & 1) !== 0, cuts: (value & 2) !== 0 };
 +}
-+/** PushForm patch: SketchUp rendering options (the names of Sketchup::RenderingOptions) by the tag of their value in
++/** PushForm patch: Rendering options, by option name, from the tag of their value in
 + * VFF model.dat's 0x733c record: b boolean (1 byte), i int32, c color (r, g, b, a bytes), d float64. Checked against
 + * fixtures with distinctive values (packages/testing/assets/sketchup/style-*.skp). */
 +var RENDERING_OPTION_TAGS = {
@@ -413,8 +508,9 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
 +/** PushForm patch: the items of the model's current style in a legacy file, id -> value. Each style is a run of
 + * (int32 id, int32 count 1, int32 type, value) items in ascending id order (type 1 bool, 4 int32, 5 color bytes,
 + * 6 and 7 float64) starting at item 1000. Sketchy-edge styles embed stroke images after item 1013, and a few bytes
-+ * separate the 5000s from the 7000s, so parsing resumes at the next item with a higher id. The model's current style,
-+ * which holds the settings it shows, is the last run. */
++ * separate the 5000s from the 7000s, so parsing resumes at the next item with a higher id. The last run is taken: this
++ * is the fallback for a file whose rendering-options record cannot be found, and the last run is not always the
++ * current style. */
 +function readLegacyStyleItems(bytes) {
 +  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 +  const sizes = { 1: 1, 4: 4, 5: 4, 6: 8, 7: 8 };
@@ -454,7 +550,8 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
 + * names, as numbers, booleans or [r, g, b, a] colors; null when the file records none. VFF model.dat: the 0x733c
 + * record's values (RENDERING_OPTION_TAGS); its BackgroundColor and ForegroundColor are (0, 0, 0, 0) in some files,
 + * where the current style's items 4000 and 1014 (`styleInts`, from the last style.xml) hold them. Legacy files: the
-+ * items of the current style (readLegacyStyleItems, STYLE_ITEM_OPTIONS). */
++ * model's rendering-options record (readLegacyModelRendering), or, when it cannot be found, the items of the last
++ * style item run (readLegacyStyleItems, STYLE_ITEM_OPTIONS). */
 +/** PushForm patch: the options of one 0x733c rendering-options record body (a scene's saved style, CViewPage item 29005). */
 +function decodeRenderingRecordBody(bytes, start, end) {
 +  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -512,7 +609,11 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
 +  }
 +  return Object.keys(out).length ? out : null;
 +}
-+function readRenderingOptions(bytes, legacy, styleInts) {
++function readRenderingOptions(bytes, legacy, styleInts, ver) {
++  if (legacy) {
++    const record = readLegacyModelRendering(bytes, ver);
++    if (record) return record;
++  }
 +  const out = {};
 +  const put = (name, kind, value) => {
 +    if (kind === "c") { if (Array.isArray(value)) out[name] = value; else if (typeof value === "number") out[name] = intColor(value); }
@@ -555,7 +656,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
  var MAX_UNCOMPRESSED_ENTRY_BYTES = 16 * 1024 * 1024 * 1024;
  var MAX_COMPRESSION_RATIO = 1e3;
  var RATIO_CHECK_THRESHOLD_BYTES = 1024 * 1024;
-@@ -411,23 +673,32 @@ var SkpParseError = class _SkpParseError extends Error {
+@@ -411,23 +774,32 @@ var SkpParseError = class _SkpParseError extends Error {
  // src/edge-flags.ts
  var EdgeFlagStore = class {
    constructor() {
@@ -593,7 +694,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    ensureSlot(id) {
      if (!this.initialized) {
        this.baseId = id;
-@@ -436,19 +707,24 @@ var EdgeFlagStore = class {
+@@ -436,19 +808,24 @@ var EdgeFlagStore = class {
        this.initialized = true;
        return 0;
      }
@@ -620,7 +721,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
        this.present = nextPresent;
        this.baseId = id;
        return 0;
-@@ -466,7 +742,15 @@ var EdgeFlagStore = class {
+@@ -466,7 +843,15 @@ var EdgeFlagStore = class {
      return slot;
    }
    set(id, flags) {
@@ -636,7 +737,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
      if ((this.present[slot >> 3] & 1 << (slot & 7)) === 0) {
        this.present[slot >> 3] |= 1 << (slot & 7);
        this.count++;
-@@ -477,6 +761,7 @@ var EdgeFlagStore = class {
+@@ -477,6 +862,7 @@ var EdgeFlagStore = class {
     * matching `Map.prototype.get`, so callers' `?? 0` fallbacks behave
     * exactly as before. */
    get(id) {
@@ -644,7 +745,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
      if (!this.initialized) return void 0;
      const slot = this.slotFor(id);
      if (slot < 0 || slot >= this.flags.length) return void 0;
-@@ -641,6 +926,24 @@ function findFlat(seq, tag) {
+@@ -641,6 +1027,24 @@ function findFlat(seq, tag) {
    }
    return null;
  }
@@ -669,7 +770,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
  function extractUvTransforms(dc05Payload) {
    const dd05 = findFlat(tlvFlat(dc05Payload), "DD05");
    if (dd05 === null) return [null, null];
-@@ -671,6 +974,104 @@ function extractUvTransforms(dc05Payload) {
+@@ -671,6 +1075,104 @@ function extractUvTransforms(dc05Payload) {
    }
    return [result[0], result[1]];
  }
@@ -774,7 +875,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
  function extractGeometryFromNodes(elements, builder, options) {
    for (const el of elements) {
      const tag = el.tag;
-@@ -691,14 +1092,51 @@ function extractGeometryFromNodes(elements, builder, options) {
+@@ -691,13 +1193,50 @@ function extractGeometryFromNodes(elements, builder, options) {
          const v1 = v1Node ? parseVarInt(v1Node.payload, 0, v1Node.payload.length) : null;
          const v2 = v2Node ? parseVarInt(v2Node.payload, 0, v2Node.payload.length) : null;
          builder.edges.set(eId, [v1, v2]);
@@ -793,8 +894,8 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
 +            const p = d207.payload;
 +            (builder.edgeLayers ??= /* @__PURE__ */ new Map()).set(eId, p.length === 1 ? p[0] : parseVarInt(p, 0, p.length));
 +          }
-         }
-       }
++        }
++      }
 +    } else if (tag === "9613" || tag === "9713") {
 +      // 9713 and its records arrive as parsed containers, 9613 as one payload; read both as child lists.
 +      const items = (node) => node.children.length > 0 ? node.children : tlvFlat(node.payload).map(([t, p]) => ({ tag: t, payload: p, children: [] }));
@@ -813,7 +914,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
 +          for (let i = 0; i < 16; i++) v.push(readF64(geometry.payload, i * 8));
 +          // centre, normal, plane offset, x axis, y axis, radius, start and end angles
 +          Object.assign(c, { center: v.slice(0, 3), normal: v.slice(3, 6), xaxis: v.slice(7, 10), yaxis: v.slice(10, 13), start: v[14], end: v[15] });
-+        }
+         }
 +        (builder.curves ??= /* @__PURE__ */ new Map()).set(id, readArcCurveRecord(id, c));
 +      }
 +    } else if (tag === "9813") {
@@ -822,11 +923,10 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
 +      for (const record of records) {
 +        const text = readVffText(record);
 +        if (text !== null) builder.texts.push(text);
-+      }
+       }
      } else if (tag === "AC0D") {
        const fId = extractEntityId(el);
-       if (fId !== null) {
-@@ -748,7 +1186,9 @@ function extractGeometryFromNodes(elements, builder, options) {
+@@ -748,7 +1287,9 @@ function extractGeometryFromNodes(elements, builder, options) {
          let faceMatId = null;
          let uvFront = null;
          let uvBack = null;
@@ -836,7 +936,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
          const d007 = el.children.find((c) => c.tag === "D007");
          if (d007) {
            const d107 = d007.children.find((c) => c.tag === "D107");
-@@ -758,11 +1198,17 @@ function extractGeometryFromNodes(elements, builder, options) {
+@@ -758,11 +1299,17 @@ function extractGeometryFromNodes(elements, builder, options) {
            const dc05 = d007.children.find((c) => c.tag === "DC05");
            if (dc05) {
              [uvFront, uvBack] = extractUvTransforms(dc05.payload);
@@ -854,7 +954,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
          }
          let backMatId = null;
          const af0d = el.children.find((c) => c.tag === "AF0D");
-@@ -776,9 +1222,16 @@ function extractGeometryFromNodes(elements, builder, options) {
+@@ -776,9 +1323,16 @@ function extractGeometryFromNodes(elements, builder, options) {
            backMaterialId: backMatId,
            uvTransform: uvFront,
            uvTransformBack: uvBack,
@@ -872,7 +972,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
      } else if (tag === "6419") {
        const nodesToSearch = el.children.length > 0 ? el.children : [el];
        let guid = null;
-@@ -849,7 +1302,167 @@ function extractGeometryFromNodes(elements, builder, options) {
+@@ -849,7 +1403,167 @@ function extractGeometryFromNodes(elements, builder, options) {
      }
    }
  }
@@ -1041,7 +1141,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    for (const el of nodes) {
      if (el.tag === "993A") {
        for (const child of el.children) {
-@@ -868,23 +1481,56 @@ function collectLayers(nodes, layerIdToName = /* @__PURE__ */ new Map(), options
+@@ -868,23 +1582,56 @@ function collectLayers(nodes, layerIdToName = /* @__PURE__ */ new Map(), options
              let lName = "";
              try {
                const decoder = new TextDecoder("utf-8");
@@ -1105,7 +1205,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
      }
    }
    return layerIdToName;
-@@ -895,6 +1541,7 @@ function collectDefs(nodes, defsDict = /* @__PURE__ */ new Map(), options) {
+@@ -895,6 +1642,7 @@ function collectDefs(nodes, defsDict = /* @__PURE__ */ new Map(), options) {
        let guid = null;
        let name = null;
        let isImage = false;
@@ -1113,7 +1213,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
        let facesCamera = false;
        let shadowsFaceSun = false;
        for (const child of el.children) {
-@@ -915,6 +1562,7 @@ function collectDefs(nodes, defsDict = /* @__PURE__ */ new Map(), options) {
+@@ -915,6 +1663,7 @@ function collectDefs(nodes, defsDict = /* @__PURE__ */ new Map(), options) {
            }
          } else if (child.tag === "8315" && child.payload.length > 0) {
            isImage = parseVarInt(child.payload, 0, child.payload.length) === 2;
@@ -1121,7 +1221,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
          } else if (child.tag === "581B") {
            let pos = 0;
            const pl = child.payload;
-@@ -938,6 +1586,7 @@ function collectDefs(nodes, defsDict = /* @__PURE__ */ new Map(), options) {
+@@ -938,6 +1687,7 @@ function collectDefs(nodes, defsDict = /* @__PURE__ */ new Map(), options) {
            guid: guid || "",
            name: name || "",
            isImage,
@@ -1129,7 +1229,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
            alwaysFacesCamera: facesCamera,
            shadowsFaceSun,
            builder
-@@ -1225,23 +1874,27 @@ function parseStyleXml(xmlText) {
+@@ -1225,23 +1975,27 @@ function parseStyleXml(xmlText) {
    const nameMatch = attrsString.match(/\bname\s*=\s*(?:"([^"]*)"|'([^']*)')/);
    const name = nameMatch ? nameMatch[1] !== void 0 ? nameMatch[1] : nameMatch[2] : "";
    const colors = {};
@@ -1159,7 +1259,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    };
  }
  function lstripChars(s, chars) {
-@@ -1656,11 +2309,16 @@ function buildModelFromParsed(parsed) {
+@@ -1656,11 +2410,16 @@ function buildModelFromParsed(parsed) {
    const {
      version,
      units,
@@ -1176,7 +1276,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
      materialIdToName,
      materialsMap,
      materialsByFolder,
-@@ -1676,7 +2334,16 @@ function buildModelFromParsed(parsed) {
+@@ -1676,7 +2435,16 @@ function buildModelFromParsed(parsed) {
      }
      materialsById.set(mId, mat);
    }
@@ -1194,7 +1294,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
      name,
      color: { r: c[0], g: c[1], b: c[2] },
      hidden: layerHidden.get(name) ?? false
-@@ -1684,13 +2351,16 @@ function buildModelFromParsed(parsed) {
+@@ -1684,13 +2452,16 @@ function buildModelFromParsed(parsed) {
    const finalMaterialsList = Array.from(materialsMap.values());
    const finalPagesList = pages.map((pg) => ({
      name: pg.name,
@@ -1212,7 +1312,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    }));
    const finalDimensionsList = dimensions.map((dm) => ({
      a: dm.a,
-@@ -1704,7 +2374,7 @@ function buildModelFromParsed(parsed) {
+@@ -1704,7 +2475,7 @@ function buildModelFromParsed(parsed) {
    const finalDefinitions = /* @__PURE__ */ new Map();
    let rootDefinition = null;
    for (const [id, d] of defsDict.entries()) {
@@ -1221,7 +1321,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
      if (typeof id === "number") {
        finalDefinitions.set(id, defn);
      } else {
-@@ -1721,15 +2391,21 @@ function buildModelFromParsed(parsed) {
+@@ -1721,15 +2492,21 @@ function buildModelFromParsed(parsed) {
      // matching the .NET and Dart ports' `Root`/`root` field.
      root: rootDefinition ?? { id: 0, guid: "ROOT", name: "ROOT_MODEL", vertices: [], edges: [], faces: [], instances: [], sectionPlanes: [], texts: [], dimensions: [], constructionLines: [], constructionPoints: [], isImage: false, alwaysFacesCamera: false, shadowsFaceSun: false },
      layers: finalLayersList,
@@ -1245,7 +1345,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    const vertices = Array.from(d.builder.vertices.entries()).map(([vId, [x, y, z]]) => ({
      id: vId,
      x,
-@@ -1744,7 +2420,9 @@ function buildDefinition(id, d, layerIdToName) {
+@@ -1744,7 +2521,9 @@ function buildDefinition(id, d, layerIdToName) {
        v2Id: v2 ?? 0,
        soft: (flags & 8) !== 0,
        smooth: (flags & 16) !== 0,
@@ -1256,7 +1356,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
      };
    });
    const faces = Array.from(d.builder.faces.entries()).map(([fId, fData]) => ({
-@@ -1757,7 +2435,10 @@ function buildDefinition(id, d, layerIdToName) {
+@@ -1757,7 +2536,10 @@ function buildDefinition(id, d, layerIdToName) {
      uvTransformBack: fData.uvTransformBack ?? null,
      uvProjected: fData.uvProjected ?? false,
      uvProjectedBack: fData.uvProjectedBack ?? false,
@@ -1268,7 +1368,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    }));
    const instances = d.builder.instances.map((inst) => ({
      name: inst.name,
-@@ -1773,29 +2454,47 @@ function buildDefinition(id, d, layerIdToName) {
+@@ -1773,29 +2555,47 @@ function buildDefinition(id, d, layerIdToName) {
      plane: sp.plane || [0, 0, 1, 0],
      name: sp.name || "",
      label: sp.label || "",
@@ -1325,7 +1425,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    }));
    return {
      id,
-@@ -1811,6 +2510,8 @@ function buildDefinition(id, d, layerIdToName) {
+@@ -1811,6 +2611,8 @@ function buildDefinition(id, d, layerIdToName) {
      constructionLines,
      constructionPoints,
      isImage: d.isImage,
@@ -1334,7 +1434,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
      alwaysFacesCamera: d.alwaysFacesCamera,
      shadowsFaceSun: d.shadowsFaceSun || false
    };
-@@ -2192,6 +2893,24 @@ function findCountAfterV20Filler(data, countPos, limit, ar) {
+@@ -2192,6 +2994,40 @@ function findCountAfterV20Filler(data, countPos, limit, ar) {
    }
    return null;
  }
@@ -1356,10 +1456,26 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
 +  const roots = view.getUint32(at + 4, true);
 +  return roots > 0 && roots <= 5e6 && plausibleListTag(ar, data, at + 8) ? at + 4 : null;
 +}
++/** PushForm patch: the position of the root entity count after the empty definition list of an empty model behind a
++ * v20 filler: definition count 0 at 9 bytes after the marker, then root entity count 0, relationship count 0 and no
++ * active section plane. */
++function emptyModelAfterV20Filler(data, countPos) {
++  let markerAt = -1;
++  for (let i = countPos; i < countPos + 12 && i + 4 <= data.length; i++) {
++    if (data[i] === 255 && data[i + 1] === 254 && data[i + 2] === 255) {
++      markerAt = i;
++      break;
++    }
++  }
++  if (markerAt < 0 || data[markerAt + 3] !== 0) return null;
++  const at = markerAt + 4 + 9;
++  if (at + 14 > data.length) return null;
++  return data.subarray(at, at + 14).every((b) => b === 0) ? at + 4 : null;
++}
  function retryCountAfterV20Filler(r, countPos, limit, ar) {
    const hit = findCountAfterV20Filler(r.data, countPos, limit, ar);
    if (hit === null) return null;
-@@ -2257,6 +2976,27 @@ function isClassRef(data, p, slot) {
+@@ -2257,6 +3093,27 @@ function isClassRef(data, p, slot) {
    }
    return p + 6 <= data.length && view.getUint16(p, true) === 32767 && view.getUint32(p + 2, true) === (2147483648 | slot) >>> 0;
  }
@@ -1387,7 +1503,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
  var R = class {
    constructor(data, pos = 0) {
      this.data = data;
-@@ -2356,6 +3096,7 @@ var Archive = class {
+@@ -2356,6 +3213,7 @@ var Archive = class {
      this.ver = ver;
      this.hasPid = ver >= 17;
      this.r = new R(data);
@@ -1395,7 +1511,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    }
    alloc(entry) {
      const s = this.nextSlot;
-@@ -2425,7 +3166,7 @@ var Archive = class {
+@@ -2425,7 +3283,7 @@ var Archive = class {
        this.currentClass = prevClass;
      }
      this.slots.set(slot, ["obj", name, value]);
@@ -1404,7 +1520,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
        this.annotWatermark = this.nextSlot;
      }
      return [slot, name, value];
-@@ -2483,15 +3224,15 @@ function drawbase(ar, r) {
+@@ -2483,15 +3341,15 @@ function drawbase(ar, r) {
    const tag = r.peekU16();
    let layer;
    if (layCls !== void 0 && tag === (32768 | layCls)) {
@@ -1423,7 +1539,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    } else {
      layer = r.u16();
    }
-@@ -2526,9 +3267,15 @@ function readCurve(ar, r) {
+@@ -2526,9 +3384,15 @@ function readCurve(ar, r) {
  }
  function readArcCurve(ar, r) {
    preamble(ar, r);
@@ -1442,7 +1558,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
  }
  function registerBurn(ar, delta) {
    ar.burns.push([ar.annotWatermark + ar.cumDelta, delta]);
-@@ -2646,7 +3393,11 @@ function readAttrNamed(ar, r) {
+@@ -2646,7 +3510,11 @@ function readAttrNamed(ar, r) {
      if (key === "") break;
      entries[key] = readTyped(r.u8());
    }
@@ -1455,7 +1571,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    return { k: "dict", name: dictname, entries };
  }
  var DYNAMIC_ATTRIBUTES_DICT_NAME = "dynamic_attributes";
-@@ -2672,10 +3423,11 @@ function extractLegacyDynamicProperties(attrs) {
+@@ -2672,10 +3540,11 @@ function extractLegacyDynamicProperties(attrs) {
  function readLayer(ar, r) {
    preamble(ar, r);
    const name = r.utf16();
@@ -1471,7 +1587,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    r.utf16();
    const flags = r.u16();
    if (flags & 255) {
-@@ -2686,11 +3438,21 @@ function readLayer(ar, r) {
+@@ -2686,11 +3555,21 @@ function readLayer(ar, r) {
    const rgba = r.raw(4);
    r.utf16();
    r.raw(21);
@@ -1495,7 +1611,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    if (!(dib && typeof dib === "object" && dib.k === "dib")) {
      throw new LegacyParseError(`texture object is not a dib ${r.ctx()}`);
    }
-@@ -2708,16 +3470,22 @@ function textureBlock(ar, r) {
+@@ -2708,16 +3587,22 @@ function textureBlock(ar, r) {
    const blob = r.raw(8);
    const opacity = r.f64();
    const useOp = r.u8();
@@ -1520,7 +1636,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    };
  }
  function readMaterial(ar, r) {
-@@ -2740,10 +3508,12 @@ function readMaterial(ar, r) {
+@@ -2740,10 +3625,12 @@ function readMaterial(ar, r) {
      out.opacity = tex.opacity;
      out.use_opacity = tex.use_opacity;
      out.tex_dib = tex.tex_dib;
@@ -1533,7 +1649,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    }
    return out;
  }
-@@ -2756,6 +3526,13 @@ function readDib(ar, r) {
+@@ -2756,6 +3643,13 @@ function readDib(ar, r) {
    const data = r.raw(length);
    return { k: "dib", subtype, data };
  }
@@ -1547,7 +1663,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
  function readFtc(ar, r) {
    preamble(ar, r);
    r.u32();
-@@ -2775,15 +3552,22 @@ function readFtc(ar, r) {
+@@ -2775,15 +3669,22 @@ function readFtc(ar, r) {
      front_pins: frontPins,
      back_pins: backPins,
      front_projected: Boolean(fflags & 2),
@@ -1573,8 +1689,25 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
  }
  function readThumbnail(ar, r) {
    preamble(ar, r);
-@@ -2836,7 +3620,7 @@ function strictNextTag(ar, data, at, allowNull = true) {
+@@ -2834,9 +3735,24 @@ function strictNextTag(ar, data, at, allowNull = true) {
+   }
+   return false;
  }
++/** PushForm patch: whether a definition's trailer starts at `at`: a zero relationship count followed by the active
++ * section plane reference (a u16, or 0x7fff and a u32), the 16-byte GUID and a UTF-16 name; or a nonzero count followed
++ * by a CRelationship record (its class record, or a reference to it). */
++function definitionTrailerAt(ar, data, at) {
++  if (at + 10 > data.length) return false;
++  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
++  const count = view.getUint32(at, true);
++  if (count === 0) {
++    const name = at + 4 + (view.getUint16(at + 4, true) === 32767 ? 6 : 2) + 16;
++    return name + 3 <= data.length && bytesEqual(data.subarray(name, name + 3), STR_MARKER);
++  }
++  if (count > 1e5) return false;
++  const tag = view.getUint16(at + 4, true), slot = ar.classSlot.get("CRelationship");
++  return tag === 65535 ? matchesAscii(data, at + 10, "CRelationship") : slot !== void 0 && tag === (32768 | slot);
++}
  function readConstructionLine(ar, r) {
    preamble(ar, r);
 -  drawbase(ar, r);
@@ -1582,16 +1715,15 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    const point = r.f64s(3);
    const direction = r.f64s(3);
    const [startParam, endParam] = r.f64s(2);
-@@ -2844,7 +3628,18 @@ function readConstructionLine(ar, r) {
+@@ -2844,7 +3760,17 @@ function readConstructionLine(ar, r) {
    if (k === null) {
      const dflt = ar.ver === 17 ? 7 : 4;
      const order = [dflt, ...[0, 4, 7].filter((c) => c !== dflt)];
-+    // A final guide may be followed by the definition trailer, not an object tag.
-+    // Prefer its zero relationship count and UTF-16 name marker over ambiguous zeros.
++    // A final guide may be followed by the definition trailer, not an object tag: a relationship count, the
++    // relationships, the active section plane reference and the definition's GUID and name. Prefer that shape over
++    // ambiguous zeros.
 +    for (const cand of order) {
-+      const at = r.pos + cand;
-+      if (at + 25 <= r.data.length && r.data.subarray(at, at + 4).every(b => b === 0) &&
-+          bytesEqual(r.data.subarray(at + 22, at + 25), STR_MARKER)) {
++      if (definitionTrailerAt(ar, r.data, r.pos + cand)) {
 +        k = cand;
 +        break;
 +      }
@@ -1601,7 +1733,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
        for (const cand of order) {
          if (strictNextTag(ar, r.data, r.pos + cand, allowNull)) {
            k = cand;
-@@ -2859,7 +3654,7 @@ function readConstructionLine(ar, r) {
+@@ -2859,7 +3785,7 @@ function readConstructionLine(ar, r) {
    const huge = 1e20;
    const start = Math.abs(startParam) >= huge ? null : [point[0] + direction[0] * startParam, point[1] + direction[1] * startParam, point[2] + direction[2] * startParam];
    const end = Math.abs(endParam) >= huge ? null : [point[0] + direction[0] * endParam, point[1] + direction[1] * endParam, point[2] + direction[2] * endParam];
@@ -1610,7 +1742,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
  }
  function readConstructionPoint(ar, r) {
    preamble(ar, r);
-@@ -2887,30 +3682,54 @@ function readSectionPlane(ar, r) {
+@@ -2887,30 +3813,54 @@ function readSectionPlane(ar, r) {
    return { k: "sectionplane", plane, name, label, db };
  }
  function readSkFont(ar, r) {
@@ -1679,7 +1811,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    let p = r.pos;
    let idx;
    while (true) {
-@@ -2919,11 +3738,15 @@ function readText(ar, r) {
+@@ -2919,11 +3869,15 @@ function readText(ar, r) {
        throw new LegacyParseError(`text delimiter not found ${r.ctx()}`);
      }
      const blk = r.data.subarray(idx - 11, idx);
@@ -1696,7 +1828,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    r.raw(idx - r.pos);
    const text = r.utf16();
    r.raw(5);
-@@ -2939,7 +3762,98 @@ function readText(ar, r) {
+@@ -2939,7 +3893,98 @@ function readText(ar, r) {
      r.raw(6);
      attach.push(val);
    }
@@ -1796,7 +1928,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
  }
  function readEntityList(ar, r, count, owner) {
    const ents = [];
-@@ -3029,7 +3943,9 @@ function readDefinition(ar, r) {
+@@ -3029,7 +4074,9 @@ function readDefinition(ar, r) {
    for (let i = 0; i < nrel; i++) {
      ar.readObject(r, "CRelationship");
    }
@@ -1807,7 +1939,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    if (!bytesEqual(r.peek(19).subarray(16, 19), STR_MARKER)) {
      for (let skip = 1; skip <= 4; skip++) {
        const at = r.pos + skip;
-@@ -3068,6 +3984,7 @@ function readDefinition(ar, r) {
+@@ -3068,6 +4115,7 @@ function readDefinition(ar, r) {
      name,
      guid: toHex(guid),
      ents,
@@ -1815,7 +1947,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
      faces_camera: Boolean(behavior & 1),
      shadows_face_sun: Boolean(behavior & 2)
    };
-@@ -3082,12 +3999,33 @@ function readInstance(ar, r) {
+@@ -3082,12 +4130,33 @@ function readInstance(ar, r) {
    }
    const xf = r.f64s(13);
    const name = r.utf16();
@@ -1852,7 +1984,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    CVertex: readVertex,
    CEdge: readEdge,
    CCurve: readCurve,
-@@ -3097,7 +4035,7 @@ var READERS = {
+@@ -3097,7 +4166,7 @@ var READERS = {
    CFace: readFace,
    CLayer: readLayer,
    CMaterial: readMaterial,
@@ -1861,7 +1993,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    CAttributeContainer: readAttrContainer,
    CAttributeNamed: readAttrNamed,
    CCamera: readCamera,
-@@ -3113,6 +4051,7 @@ var READERS = {
+@@ -3113,6 +4182,7 @@ var READERS = {
    CSectionPlane: readSectionPlane,
    CSkFont: readSkFont,
    CDimensionLinear: readDimLinear,
@@ -1869,7 +2001,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    CText: readText
  };
  function isLegacy(data) {
-@@ -3281,14 +4220,24 @@ function walkModel(data, ver, start, matCount, base) {
+@@ -3281,14 +4351,32 @@ function walkModel(data, ver, start, matCount, base) {
      }
      break;
    }
@@ -1893,11 +2025,19 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
 +    } else {
 +      const retry = retryCountAfterV20Filler(r, r.pos - 4, 1e6, ar);
 +      if (retry !== null) defCount = retry;
++      else {
++        // PushForm patch: an empty model also stores 0 for its root entities, and no relationships or active section.
++        const none = emptyModelAfterV20Filler(r.data, r.pos - 4);
++        if (none !== null) {
++          r.pos = none;
++          defCount = 0;
++        }
++      }
 +    }
    }
    if (defCount > 1e6) {
      throw new LegacyParseError("implausible definition count");
-@@ -3315,7 +4264,197 @@ function walkModel(data, ver, start, matCount, base) {
+@@ -3315,7 +4403,201 @@ function walkModel(data, ver, start, matCount, base) {
      throw new LegacyParseError("implausible root entity count");
    }
    const root = readEntityList(ar, r, rootCount, "root");
@@ -2056,8 +2196,11 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
 +      r.utf16();
 +      const flags = r.u32();
 +      // A scene that does not save its camera stores none.
++      const cameraAt = r.pos;
 +      const [, cn, camera] = ar.readObject(r, "CCamera");
 +      if (cn !== "CCamera" && cn !== null) break;
++      // PushForm patch: the scene's rendering-options record follows its camera, or its flags when it has none.
++      const record = readLegacyRenderingRecord(data, cn === "CCamera" ? r.pos : cameraAt, ar.ver);
 +      // The record must end where the next scene starts: at the class reference every later scene repeats,
 +      // or, before that is known, at any class reference followed shortly by a scene name.
 +      const last = pages.length + 1 === count, known = pageTag;
@@ -2072,9 +2215,10 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
 +      const layout = ar.versionMap.get("CViewPage") ?? schema;
 +      const tail = findPageTail(data, r.pos, flags, layerSlots, isNext, layout === null || layout >= 12);
 +      if (tail === null) break;
-+      // PushForm patch: the style the scene saved is an item run (from item 1000) between the camera and the tail.
-+      const styleRun = findSequence(data, [232, 3, 0, 0, 1, 0, 0, 0], r.pos);
-+      const renderingOptions = styleRun >= 0 && styleRun < tail.end ? decodeLegacyStyleRun(data, styleRun, tail.end) : null;
++      // PushForm patch: without that record, the style the scene saved as an item run (from item 1000) between the
++      // camera and the tail.
++      const styleRun = record ? -1 : findSequence(data, [232, 3, 0, 0, 1, 0, 0, 0], r.pos);
++      const renderingOptions = record ?? (styleRun >= 0 && styleRun < tail.end ? decodeLegacyStyleRun(data, styleRun, tail.end) : null);
 +      pages.push({
 +        name,
 +        eye: camera ? camera.eye : null,
@@ -2096,7 +2240,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
  }
  var LegacyBuilder = class {
    constructor() {
-@@ -3344,7 +4483,15 @@ function addEdge(builder, slot, e, slots) {
+@@ -3344,7 +4626,15 @@ function addEdge(builder, slot, e, slots) {
      }
    }
    builder.edges.set(slot, [v1, v2]);
@@ -2112,7 +2256,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    const flags = (db.soft ? 8 : 0) | (db.smooth ? 16 : 0) | (db.hidden ? 1 : 0);
    if (flags) {
      builder.edgeFlags.set(slot, flags);
-@@ -3378,7 +4525,8 @@ function fillBuilder(builder, ents, slots) {
+@@ -3378,7 +4668,8 @@ function fillBuilder(builder, ents, slots) {
          uvTransformBack: null,
          uvProjected: false,
          uvProjectedBack: false,
@@ -2122,7 +2266,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
        };
        const attrs = v.attrs;
        if (attrs && typeof attrs === "object") {
-@@ -3388,6 +4536,8 @@ function fillBuilder(builder, ents, slots) {
+@@ -3388,6 +4679,8 @@ function fillBuilder(builder, ents, slots) {
              face.uvTransformBack = [...cv.back];
              face.uvProjected = cv.front_projected;
              face.uvProjectedBack = cv.back_projected;
@@ -2131,7 +2275,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
            }
          }
        }
-@@ -3419,32 +4569,63 @@ function fillBuilder(builder, ents, slots) {
+@@ -3419,32 +4712,63 @@ function fillBuilder(builder, ents, slots) {
          properties: {}
        });
      } else if (k === "sectionplane") {
@@ -2200,7 +2344,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
        });
      }
    }
-@@ -3477,6 +4658,7 @@ function parseLegacyToRaw(data, options) {
+@@ -3477,6 +4801,7 @@ function parseLegacyToRaw(data, options) {
      throw e;
    }
    const { ar, root, layers, materials } = walkResult;
@@ -2208,7 +2352,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    const slots = ar.slots;
    emitLog(options, "debug", `Legacy walk complete: ${materials.length} materials, ${layers.length} layers`);
    const imageDefIds = /* @__PURE__ */ new Set();
-@@ -3485,6 +4667,12 @@ function parseLegacyToRaw(data, options) {
+@@ -3485,6 +4810,12 @@ function parseLegacyToRaw(data, options) {
        imageDefIds.add(ent[2].def);
      }
    }
@@ -2221,7 +2365,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    const materialsMap = /* @__PURE__ */ new Map();
    const materialIdToName = /* @__PURE__ */ new Map();
    for (const [s, v] of materials) {
-@@ -3498,10 +4686,11 @@ function parseLegacyToRaw(data, options) {
+@@ -3498,10 +4829,11 @@ function parseLegacyToRaw(data, options) {
      const colorized = v.colorized || false;
      let texture = null;
      if ("tex_dib" in v) {
@@ -2236,7 +2380,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
        const fname = v.tex_file || `${v.name}${ext}`;
        texture = { filename: fname, width: v.tex_w, height: v.tex_h, data: texData };
      }
-@@ -3511,10 +4700,8 @@ function parseLegacyToRaw(data, options) {
+@@ -3511,10 +4843,8 @@ function parseLegacyToRaw(data, options) {
        transparency: trans,
        id: null,
        texture,
@@ -2248,7 +2392,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
      };
      materialsMap.set(v.name, matObj);
      materialIdToName.set(s, v.name);
-@@ -3544,10 +4731,12 @@ function parseLegacyToRaw(data, options) {
+@@ -3544,10 +4874,12 @@ function parseLegacyToRaw(data, options) {
          const d = ent[2];
          const b = new LegacyBuilder();
          fillBuilder(b, d.ents, slots);
@@ -2261,7 +2405,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
            alwaysFacesCamera: d.faces_camera || false,
            shadowsFaceSun: d.shadows_face_sun || false,
            builder: b
-@@ -3568,6 +4757,7 @@ function parseLegacyToRaw(data, options) {
+@@ -3568,6 +4900,7 @@ function parseLegacyToRaw(data, options) {
    }
    const rootBuilder = new LegacyBuilder();
    fillBuilder(rootBuilder, root, slots);
@@ -2269,13 +2413,13 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    defsDict.set("ROOT", {
      guid: "ROOT",
      name: "ROOT_MODEL",
-@@ -3587,14 +4777,17 @@ function parseLegacyToRaw(data, options) {
+@@ -3587,14 +4920,17 @@ function parseLegacyToRaw(data, options) {
      // that's a VFF/ZIP-only construct - so there is no known source for
      // the model's unit-system string here.
      units: null,
 +    unitsOptions: readUnitsOptions(data, true),
-+    sectionDisplay: readSectionDisplay(data, true),
-+    renderingOptions: readRenderingOptions(data, true, null),
++    sectionDisplay: readSectionDisplay(data, true, ar.ver),
++    renderingOptions: readRenderingOptions(data, true, null, ar.ver),
      layerColors,
      layerHidden,
      layerIdToName,
@@ -2292,7 +2436,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
      dimensions: [],
      materialIdToName,
      materialsMap,
-@@ -3795,8 +4988,16 @@ function parsePages(node) {
+@@ -3795,8 +5131,16 @@ function parsePages(node) {
            fov: 35,
            parallel: false,
            orthoHeight: 0,
@@ -2310,18 +2454,19 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
          const head = tlvItemsInt(tlvFindInt(items, 28500));
          const name = tlvFindInt(head, 28501);
          if (name !== null && name.length > 0) {
-@@ -3823,7 +5024,9 @@ function parsePages(node) {
+@@ -3823,7 +5167,10 @@ function parsePages(node) {
            page.hiddenLayerIds.push(parseVarInt(hidden, off + 1, ln));
            off += 1 + ln;
          }
 -        if (page.eye !== null && page.target !== null) pages.push(page);
-+        // A scene that does not save its camera stores none; it still saves its other properties.
++        // A scene that does not save its camera stores none; it still saves its other properties. A scene's name may
++        // be empty.
 +        const camera = page.eye !== null && page.target !== null, noCamera = page.eye === null && page.target === null;
-+        if (camera || noCamera && page.name !== "") pages.push(page);
++        if (camera || noCamera) pages.push(page);
        }
      }
    }
-@@ -12319,6 +13522,15 @@ var ComponentDefinitionBuilder = class {
+@@ -12319,6 +13666,15 @@ var ComponentDefinitionBuilder = class {
        options.smoothEdges ?? false
      );
    }
@@ -2337,7 +2482,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    addPolyline(points, options = {}) {
      this.checkWritable("polylines");
      const pts = points.map(toPoint3);
-@@ -12854,6 +14066,15 @@ var SkpBuilder = class {
+@@ -12854,6 +14210,15 @@ var SkpBuilder = class {
    }
    /** Add one freeform polyline curve - a chain of straight edges grouped
     * into one genuine SketchUp "Curve" entity, no face. */
@@ -2353,7 +2498,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    addPolyline(points, options = {}) {
      const pts = points.map(toPoint3);
      if (pts.length < 2) throw new SkpWriteError("a polyline needs at least 2 points");
-@@ -13305,6 +14526,8 @@ function parseToRaw(buffer, options) {
+@@ -13305,6 +14670,8 @@ function parseToRaw(buffer, options) {
    const materialFiles = contents.materialFiles;
    emitLog(options, "debug", `Detected version ${version} (VFF/ZIP container)`);
    const units = contents.metaData ? readMetaUnits(contents.metaData) : null;
@@ -2362,7 +2507,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    const layerColors = /* @__PURE__ */ new Map();
    const layerHidden = /* @__PURE__ */ new Map();
    const materialsMap = /* @__PURE__ */ new Map();
-@@ -13361,6 +14584,7 @@ function parseToRaw(buffer, options) {
+@@ -13361,6 +14728,7 @@ function parseToRaw(buffer, options) {
      }
    }
    const styles = [];
@@ -2370,7 +2515,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    for (const [name, xmlBytes] of Object.entries(materialFiles)) {
      const lowerName = name.toLowerCase();
      if (lowerName.startsWith("styles/") && lowerName.endsWith("style.xml")) {
-@@ -13374,14 +14598,19 @@ function parseToRaw(buffer, options) {
+@@ -13374,14 +14742,19 @@ function parseToRaw(buffer, options) {
              frontColor: parsedStyle.frontColor,
              backColor: parsedStyle.backColor
            });
@@ -2390,7 +2535,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
    function collectMaterialIds(nodes) {
      for (const el of nodes) {
        if (el.tag === "C832") {
-@@ -13419,8 +14648,9 @@ function parseToRaw(buffer, options) {
+@@ -13419,8 +14792,9 @@ function parseToRaw(buffer, options) {
    let pageNode = null;
    for (const { index, total, node: el } of iterTopLevelLazy(modelData, 0, modelData.length)) {
      try {
@@ -2401,7 +2546,7 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
        collectDefs([el], defsDict, options);
        scanVertexPositions(el, vertexPositions);
        scanInstanceTransforms(el, instanceWorld);
-@@ -13466,14 +14696,21 @@ function parseToRaw(buffer, options) {
+@@ -13466,14 +14840,21 @@ function parseToRaw(buffer, options) {
      shadowsFaceSun: false,
      builder: rootBuilder
    });
@@ -2424,10 +2569,10 @@ index 0cfe5b588feaede837aa36e21dd8f3481a70e7a5..f5c43d727ac22888920075f926317f9a
      materialsMap,
      materialsByFolder,
 diff --git a/dist/index.mjs b/dist/index.mjs
-index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c97401623bee5873 100644
+index 072a58c74a7a14721b99537f7eaf09902d898ca5..8c49a05f6da5316b6e30192845627aaf7e18d38d 100644
 --- a/dist/index.mjs
 +++ b/dist/index.mjs
-@@ -102,6 +102,268 @@ function readMetaUnits(metaBytes) {
+@@ -102,6 +102,369 @@ function readMetaUnits(metaBytes) {
    }
    return null;
  }
@@ -2481,14 +2626,109 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
 +  }
 +  return Object.keys(out).length ? out : null;
 +}
++/** PushForm patch: the fields of a legacy (pre-2021) rendering-options record, [name, kind, offset], kind b bool
++ * (1 byte), i int32, c color (r, g, b, a bytes), d float64. The record has no class header: the model's follows the
++ * model's camera near the start of the file, and each scene's follows the scene's camera (or its flags, when the scene
++ * saves no camera). Offsets are those of SketchUp 6 to 2016 files; legacyRenderingOffset gives other formats'. Mapped
++ * from files SketchUp 2027 saved in every format from SketchUp 4 to 2020 with random settings, and checked against the
++ * settings it reads back. */
++var LEGACY_RENDERING_FIELDS = [
++  ["RenderMode", "i", 2], ["ModelTransparency", "b", 6], ["MaterialTransparency", "b", 7], ["JitterEdges", "b", 8],
++  ["EdgeDisplayMode", "i", 9], ["BackgroundColor", "c", 13], ["ForegroundColor", "c", 17], ["HighlightColor", "c", 21],
++  ["ConstructionColor", "c", 25], ["DisplayInstanceAxes", "b", 30], ["DisplayColorByLayer", "b", 31], ["Texture", "b", 32],
++  ["EdgeColorMode", "i", 33], ["ExtendLines", "b", 37], ["LineExtension", "i", 38], ["DrawSilhouettes", "b", 42],
++  ["SilhouetteWidth", "i", 43], ["DrawDepthQue", "b", 47], ["DepthQueWidth", "i", 48], ["DrawLineEnds", "b", 52],
++  ["LineEndWidth", "i", 53], ["DrawProfilesOnly", "b", 57], ["DrawHidden", "b", 58], ["FaceFrontColor", "c", 63],
++  ["FaceBackColor", "c", 67], ["InactiveFade", "d", 71], ["InstanceFade", "d", 79], ["InactiveHidden", "b", 87],
++  ["InstanceHidden", "b", 88], ["DisplayFog", "b", 89], ["FogUseBkColor", "b", 94], ["EdgeType", "i", 115],
++  ["DisplaySketchAxes", "b", 119], ["DisplayText", "b", 120], ["DisplayDims", "b", 121], ["HideConstructionGeometry", "b", 122],
++  ["SkyColor", "c", 123], ["HorizonColor", "c", 127], ["GroundColor", "c", 131], ["DrawHorizon", "b", 135], ["DrawGround", "b", 136],
++  ["DrawUnderground", "b", 137], ["GroundTransparency", "i", 138], ["SectionActiveColor", "c", 142], ["SectionInactiveColor", "c", 146],
++  ["SectionDefaultCutColor", "c", 150], ["SectionCutWidth", "i", 154], ["SectionDisplay", "i", 158], ["TransparencySort", "i", 162],
++  ["LockedColor", "c", 176, 5], ["DisplayWatermarks", "b", 180, 6], ["DrawBackEdges", "b", 189, 8]
++];
++/** PushForm patch: where a field at `base` (a SketchUp 6 to 2016 offset) sits in a file of major version `ver`, or -1
++ * when that format does not store it. SketchUp 4 lacks the depth cue, endpoint and profiles-only fields (47-57) and
++ * SketchUp 5 and older the fog, edge type, axes, text, dimension and guide fields (89-122); SketchUp 2017 adds a byte
++ * at the start, 2018 the section fill color and flag before TransparencySort, 2019 a byte after JitterEdges and 2020 a
++ * hidden-objects flag after DrawHidden. */
++function legacyRenderingOffset(base, ver) {
++  let at = base;
++  if (ver <= 5) {
++    if (base >= 89 && base <= 122) return -1;
++    if (base >= 123) at -= 34;
++  }
++  if (ver <= 4) {
++    if (base >= 47 && base <= 57) return -1;
++    if (base >= 58) at -= 11;
++  }
++  if (ver >= 17) at += 1;
++  if (ver >= 19 && base >= 9) at += 1;
++  if (ver >= 20 && base >= 59) at += 1;
++  if (ver >= 18 && base >= 162) at += 5;
++  return at;
++}
++/** PushForm patch: the legacy rendering-options record at `at` in a file of major version `ver`, as option name ->
++ * value, or null when the bytes there are not one. Display Section Planes and Display Section Cuts are bits 0 and 1
++ * of one int32 (`SectionDisplay` here, split into the two options). Files older than SketchUp 2018 store no section
++ * fill, which then is off; before SketchUp 2020 one flag shows both hidden geometry and hidden objects. */
++function readLegacyRenderingRecord(bytes, at, ver) {
++  if (!(ver >= 4 && ver <= 20) || at < 0) return null;
++  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
++  const fields = [];
++  for (const [name, kind, base, since] of LEGACY_RENDERING_FIELDS) {
++    if (since !== void 0 && ver < since) continue;
++    const offset = legacyRenderingOffset(base, ver);
++    if (offset >= 0) fields.push([name, kind, offset]);
++  }
++  const later = (ver >= 19 ? 1 : 0) + (ver >= 20 ? 1 : 0);
++  if (ver >= 18) fields.push(["SectionDefaultFillColor", "c", 163 + later], ["SectionCutFilled", "b", 167 + later]);
++  if (ver >= 20) fields.push(["DrawHiddenObjects", "b", 61]);
++  const out = {};
++  for (const [name, kind, offset] of fields) {
++    const p = at + offset;
++    if (p + (kind === "d" ? 8 : kind === "b" ? 1 : 4) > bytes.length) return null;
++    if (kind === "b") {
++      if (bytes[p] > 1) return null;
++      out[name] = bytes[p] === 1;
++    } else if (kind === "c") out[name] = [bytes[p], bytes[p + 1], bytes[p + 2], bytes[p + 3]];
++    else if (kind === "i") out[name] = view.getInt32(p, true);
++    else out[name] = view.getFloat64(p, true);
++  }
++  const bits = out.SectionDisplay;
++  delete out.SectionDisplay;
++  // Settings outside their ranges mean these bytes are not a rendering-options record.
++  if (!(out.RenderMode >= 0 && out.RenderMode <= 6) || !(out.EdgeDisplayMode === 0 || out.EdgeDisplayMode === 1) ||
++    !(out.EdgeColorMode >= 0 && out.EdgeColorMode <= 2) || !(bits >= 0 && bits <= 3) ||
++    !(out.GroundTransparency >= 0 && out.GroundTransparency <= 100)) return null;
++  out.DisplaySectionPlanes = (bits & 1) !== 0;
++  out.DisplaySectionCuts = (bits & 2) !== 0;
++  if (ver < 18) out.SectionCutFilled = false;
++  if (ver < 20) out.DrawHiddenObjects = out.DrawHidden;
++  else out.DrawHidden = out.DrawHidden || out.DrawHiddenObjects;
++  return out;
++}
++/** PushForm patch: the model's rendering-options record in a legacy file of major version `ver`: it follows the
++ * model's camera, the first CCamera record. The camera record is 137 bytes, a u16, a description string and 33 bytes
++ * (8 in SketchUp 5 and older files). */
++function readLegacyModelRendering(bytes, ver) {
++  const at = findSequence(bytes, [7, 0, 67, 67, 97, 109, 101, 114, 97]);
++  if (at < 4 || bytes[at - 4] !== 255 || bytes[at - 3] !== 255) return null;
++  let p = at + 9 + 137 + 2;
++  if (p + 4 > bytes.length || bytes[p] !== 255 || bytes[p + 1] !== 254 || bytes[p + 2] !== 255 || bytes[p + 3] === 255) return null;
++  p += 4 + 2 * bytes[p + 3] + (ver <= 5 ? 8 : 33);
++  return readLegacyRenderingRecord(bytes, p, ver);
++}
 +/** PushForm patch: the model's Display Section Planes and Display Section Cuts rendering options, or null when the
 + * file does not record them. VFF model.dat keeps the rendering options as tagged records in a 0x733c record inside a
 + * 0x01fb wrapper; tag 0x7375 is an int32 whose bit 0 is Display Section Planes and bit 1 Display Section Cuts. Legacy
-+ * files keep each style's settings as (id, 1, type, value) items; item 7013 (int32) is the same bit field, and the
-+ * model's active style, which holds the current settings, is written last. */
-+function readSectionDisplay(bytes, legacy) {
++ * files keep the same bits in the model's rendering-options record (readLegacyModelRendering); a file whose record
++ * cannot be found falls back to item 7013 of its last style item run. */
++function readSectionDisplay(bytes, legacy, ver) {
 +  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 +  let value = null;
++  const record = legacy ? readLegacyModelRendering(bytes, ver) : null;
++  if (record) return { planes: record.DisplaySectionPlanes, cuts: record.DisplaySectionCuts };
 +  if (legacy) {
 +    const item = [101, 27, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0];
 +    for (let at = findSequence(bytes, item); at >= 0 && at + 16 <= bytes.length; at = findSequence(bytes, item, at + 1)) {
@@ -2513,7 +2753,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
 +  }
 +  return value === null ? null : { planes: (value & 1) !== 0, cuts: (value & 2) !== 0 };
 +}
-+/** PushForm patch: SketchUp rendering options (the names of Sketchup::RenderingOptions) by the tag of their value in
++/** PushForm patch: Rendering options, by option name, from the tag of their value in
 + * VFF model.dat's 0x733c record: b boolean (1 byte), i int32, c color (r, g, b, a bytes), d float64. Checked against
 + * fixtures with distinctive values (packages/testing/assets/sketchup/style-*.skp). */
 +var RENDERING_OPTION_TAGS = {
@@ -2554,8 +2794,9 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
 +/** PushForm patch: the items of the model's current style in a legacy file, id -> value. Each style is a run of
 + * (int32 id, int32 count 1, int32 type, value) items in ascending id order (type 1 bool, 4 int32, 5 color bytes,
 + * 6 and 7 float64) starting at item 1000. Sketchy-edge styles embed stroke images after item 1013, and a few bytes
-+ * separate the 5000s from the 7000s, so parsing resumes at the next item with a higher id. The model's current style,
-+ * which holds the settings it shows, is the last run. */
++ * separate the 5000s from the 7000s, so parsing resumes at the next item with a higher id. The last run is taken: this
++ * is the fallback for a file whose rendering-options record cannot be found, and the last run is not always the
++ * current style. */
 +function readLegacyStyleItems(bytes) {
 +  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 +  const sizes = { 1: 1, 4: 4, 5: 4, 6: 8, 7: 8 };
@@ -2595,7 +2836,8 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
 + * names, as numbers, booleans or [r, g, b, a] colors; null when the file records none. VFF model.dat: the 0x733c
 + * record's values (RENDERING_OPTION_TAGS); its BackgroundColor and ForegroundColor are (0, 0, 0, 0) in some files,
 + * where the current style's items 4000 and 1014 (`styleInts`, from the last style.xml) hold them. Legacy files: the
-+ * items of the current style (readLegacyStyleItems, STYLE_ITEM_OPTIONS). */
++ * model's rendering-options record (readLegacyModelRendering), or, when it cannot be found, the items of the last
++ * style item run (readLegacyStyleItems, STYLE_ITEM_OPTIONS). */
 +/** PushForm patch: the options of one 0x733c rendering-options record body (a scene's saved style, CViewPage item 29005). */
 +function decodeRenderingRecordBody(bytes, start, end) {
 +  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -2653,7 +2895,11 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
 +  }
 +  return Object.keys(out).length ? out : null;
 +}
-+function readRenderingOptions(bytes, legacy, styleInts) {
++function readRenderingOptions(bytes, legacy, styleInts, ver) {
++  if (legacy) {
++    const record = readLegacyModelRendering(bytes, ver);
++    if (record) return record;
++  }
 +  const out = {};
 +  const put = (name, kind, value) => {
 +    if (kind === "c") { if (Array.isArray(value)) out[name] = value; else if (typeof value === "number") out[name] = intColor(value); }
@@ -2696,7 +2942,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
  var MAX_UNCOMPRESSED_ENTRY_BYTES = 16 * 1024 * 1024 * 1024;
  var MAX_COMPRESSION_RATIO = 1e3;
  var RATIO_CHECK_THRESHOLD_BYTES = 1024 * 1024;
-@@ -341,23 +603,32 @@ var SkpParseError = class _SkpParseError extends Error {
+@@ -341,23 +704,32 @@ var SkpParseError = class _SkpParseError extends Error {
  // src/edge-flags.ts
  var EdgeFlagStore = class {
    constructor() {
@@ -2734,7 +2980,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    ensureSlot(id) {
      if (!this.initialized) {
        this.baseId = id;
-@@ -366,19 +637,24 @@ var EdgeFlagStore = class {
+@@ -366,19 +738,24 @@ var EdgeFlagStore = class {
        this.initialized = true;
        return 0;
      }
@@ -2761,7 +3007,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
        this.present = nextPresent;
        this.baseId = id;
        return 0;
-@@ -396,7 +672,15 @@ var EdgeFlagStore = class {
+@@ -396,7 +773,15 @@ var EdgeFlagStore = class {
      return slot;
    }
    set(id, flags) {
@@ -2777,7 +3023,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
      if ((this.present[slot >> 3] & 1 << (slot & 7)) === 0) {
        this.present[slot >> 3] |= 1 << (slot & 7);
        this.count++;
-@@ -407,6 +691,7 @@ var EdgeFlagStore = class {
+@@ -407,6 +792,7 @@ var EdgeFlagStore = class {
     * matching `Map.prototype.get`, so callers' `?? 0` fallbacks behave
     * exactly as before. */
    get(id) {
@@ -2785,7 +3031,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
      if (!this.initialized) return void 0;
      const slot = this.slotFor(id);
      if (slot < 0 || slot >= this.flags.length) return void 0;
-@@ -571,6 +856,24 @@ function findFlat(seq, tag) {
+@@ -571,6 +957,24 @@ function findFlat(seq, tag) {
    }
    return null;
  }
@@ -2810,7 +3056,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
  function extractUvTransforms(dc05Payload) {
    const dd05 = findFlat(tlvFlat(dc05Payload), "DD05");
    if (dd05 === null) return [null, null];
-@@ -601,6 +904,104 @@ function extractUvTransforms(dc05Payload) {
+@@ -601,6 +1005,104 @@ function extractUvTransforms(dc05Payload) {
    }
    return [result[0], result[1]];
  }
@@ -2915,7 +3161,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
  function extractGeometryFromNodes(elements, builder, options) {
    for (const el of elements) {
      const tag = el.tag;
-@@ -621,14 +1022,51 @@ function extractGeometryFromNodes(elements, builder, options) {
+@@ -621,13 +1123,50 @@ function extractGeometryFromNodes(elements, builder, options) {
          const v1 = v1Node ? parseVarInt(v1Node.payload, 0, v1Node.payload.length) : null;
          const v2 = v2Node ? parseVarInt(v2Node.payload, 0, v2Node.payload.length) : null;
          builder.edges.set(eId, [v1, v2]);
@@ -2934,8 +3180,8 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
 +            const p = d207.payload;
 +            (builder.edgeLayers ??= /* @__PURE__ */ new Map()).set(eId, p.length === 1 ? p[0] : parseVarInt(p, 0, p.length));
 +          }
-         }
-       }
++        }
++      }
 +    } else if (tag === "9613" || tag === "9713") {
 +      // 9713 and its records arrive as parsed containers, 9613 as one payload; read both as child lists.
 +      const items = (node) => node.children.length > 0 ? node.children : tlvFlat(node.payload).map(([t, p]) => ({ tag: t, payload: p, children: [] }));
@@ -2954,7 +3200,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
 +          for (let i = 0; i < 16; i++) v.push(readF64(geometry.payload, i * 8));
 +          // centre, normal, plane offset, x axis, y axis, radius, start and end angles
 +          Object.assign(c, { center: v.slice(0, 3), normal: v.slice(3, 6), xaxis: v.slice(7, 10), yaxis: v.slice(10, 13), start: v[14], end: v[15] });
-+        }
+         }
 +        (builder.curves ??= /* @__PURE__ */ new Map()).set(id, readArcCurveRecord(id, c));
 +      }
 +    } else if (tag === "9813") {
@@ -2963,11 +3209,10 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
 +      for (const record of records) {
 +        const text = readVffText(record);
 +        if (text !== null) builder.texts.push(text);
-+      }
+       }
      } else if (tag === "AC0D") {
        const fId = extractEntityId(el);
-       if (fId !== null) {
-@@ -678,7 +1116,9 @@ function extractGeometryFromNodes(elements, builder, options) {
+@@ -678,7 +1217,9 @@ function extractGeometryFromNodes(elements, builder, options) {
          let faceMatId = null;
          let uvFront = null;
          let uvBack = null;
@@ -2977,7 +3222,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
          const d007 = el.children.find((c) => c.tag === "D007");
          if (d007) {
            const d107 = d007.children.find((c) => c.tag === "D107");
-@@ -688,11 +1128,17 @@ function extractGeometryFromNodes(elements, builder, options) {
+@@ -688,11 +1229,17 @@ function extractGeometryFromNodes(elements, builder, options) {
            const dc05 = d007.children.find((c) => c.tag === "DC05");
            if (dc05) {
              [uvFront, uvBack] = extractUvTransforms(dc05.payload);
@@ -2995,7 +3240,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
          }
          let backMatId = null;
          const af0d = el.children.find((c) => c.tag === "AF0D");
-@@ -706,9 +1152,16 @@ function extractGeometryFromNodes(elements, builder, options) {
+@@ -706,9 +1253,16 @@ function extractGeometryFromNodes(elements, builder, options) {
            backMaterialId: backMatId,
            uvTransform: uvFront,
            uvTransformBack: uvBack,
@@ -3013,7 +3258,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
      } else if (tag === "6419") {
        const nodesToSearch = el.children.length > 0 ? el.children : [el];
        let guid = null;
-@@ -779,7 +1232,167 @@ function extractGeometryFromNodes(elements, builder, options) {
+@@ -779,7 +1333,167 @@ function extractGeometryFromNodes(elements, builder, options) {
      }
    }
  }
@@ -3182,7 +3427,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    for (const el of nodes) {
      if (el.tag === "993A") {
        for (const child of el.children) {
-@@ -798,23 +1411,56 @@ function collectLayers(nodes, layerIdToName = /* @__PURE__ */ new Map(), options
+@@ -798,23 +1512,56 @@ function collectLayers(nodes, layerIdToName = /* @__PURE__ */ new Map(), options
              let lName = "";
              try {
                const decoder = new TextDecoder("utf-8");
@@ -3246,7 +3491,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
      }
    }
    return layerIdToName;
-@@ -825,6 +1471,7 @@ function collectDefs(nodes, defsDict = /* @__PURE__ */ new Map(), options) {
+@@ -825,6 +1572,7 @@ function collectDefs(nodes, defsDict = /* @__PURE__ */ new Map(), options) {
        let guid = null;
        let name = null;
        let isImage = false;
@@ -3254,7 +3499,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
        let facesCamera = false;
        let shadowsFaceSun = false;
        for (const child of el.children) {
-@@ -845,6 +1492,7 @@ function collectDefs(nodes, defsDict = /* @__PURE__ */ new Map(), options) {
+@@ -845,6 +1593,7 @@ function collectDefs(nodes, defsDict = /* @__PURE__ */ new Map(), options) {
            }
          } else if (child.tag === "8315" && child.payload.length > 0) {
            isImage = parseVarInt(child.payload, 0, child.payload.length) === 2;
@@ -3262,7 +3507,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
          } else if (child.tag === "581B") {
            let pos = 0;
            const pl = child.payload;
-@@ -868,6 +1516,7 @@ function collectDefs(nodes, defsDict = /* @__PURE__ */ new Map(), options) {
+@@ -868,6 +1617,7 @@ function collectDefs(nodes, defsDict = /* @__PURE__ */ new Map(), options) {
            guid: guid || "",
            name: name || "",
            isImage,
@@ -3270,7 +3515,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
            alwaysFacesCamera: facesCamera,
            shadowsFaceSun,
            builder
-@@ -1155,23 +1804,27 @@ function parseStyleXml(xmlText) {
+@@ -1155,23 +1905,27 @@ function parseStyleXml(xmlText) {
    const nameMatch = attrsString.match(/\bname\s*=\s*(?:"([^"]*)"|'([^']*)')/);
    const name = nameMatch ? nameMatch[1] !== void 0 ? nameMatch[1] : nameMatch[2] : "";
    const colors = {};
@@ -3300,7 +3545,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    };
  }
  function lstripChars(s, chars) {
-@@ -1586,11 +2239,16 @@ function buildModelFromParsed(parsed) {
+@@ -1586,11 +2340,16 @@ function buildModelFromParsed(parsed) {
    const {
      version,
      units,
@@ -3317,7 +3562,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
      materialIdToName,
      materialsMap,
      materialsByFolder,
-@@ -1606,7 +2264,16 @@ function buildModelFromParsed(parsed) {
+@@ -1606,7 +2365,16 @@ function buildModelFromParsed(parsed) {
      }
      materialsById.set(mId, mat);
    }
@@ -3335,7 +3580,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
      name,
      color: { r: c[0], g: c[1], b: c[2] },
      hidden: layerHidden.get(name) ?? false
-@@ -1614,13 +2281,16 @@ function buildModelFromParsed(parsed) {
+@@ -1614,13 +2382,16 @@ function buildModelFromParsed(parsed) {
    const finalMaterialsList = Array.from(materialsMap.values());
    const finalPagesList = pages.map((pg) => ({
      name: pg.name,
@@ -3353,7 +3598,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    }));
    const finalDimensionsList = dimensions.map((dm) => ({
      a: dm.a,
-@@ -1634,7 +2304,7 @@ function buildModelFromParsed(parsed) {
+@@ -1634,7 +2405,7 @@ function buildModelFromParsed(parsed) {
    const finalDefinitions = /* @__PURE__ */ new Map();
    let rootDefinition = null;
    for (const [id, d] of defsDict.entries()) {
@@ -3362,7 +3607,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
      if (typeof id === "number") {
        finalDefinitions.set(id, defn);
      } else {
-@@ -1651,15 +2321,21 @@ function buildModelFromParsed(parsed) {
+@@ -1651,15 +2422,21 @@ function buildModelFromParsed(parsed) {
      // matching the .NET and Dart ports' `Root`/`root` field.
      root: rootDefinition ?? { id: 0, guid: "ROOT", name: "ROOT_MODEL", vertices: [], edges: [], faces: [], instances: [], sectionPlanes: [], texts: [], dimensions: [], constructionLines: [], constructionPoints: [], isImage: false, alwaysFacesCamera: false, shadowsFaceSun: false },
      layers: finalLayersList,
@@ -3386,7 +3631,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    const vertices = Array.from(d.builder.vertices.entries()).map(([vId, [x, y, z]]) => ({
      id: vId,
      x,
-@@ -1674,7 +2350,9 @@ function buildDefinition(id, d, layerIdToName) {
+@@ -1674,7 +2451,9 @@ function buildDefinition(id, d, layerIdToName) {
        v2Id: v2 ?? 0,
        soft: (flags & 8) !== 0,
        smooth: (flags & 16) !== 0,
@@ -3397,7 +3642,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
      };
    });
    const faces = Array.from(d.builder.faces.entries()).map(([fId, fData]) => ({
-@@ -1687,7 +2365,10 @@ function buildDefinition(id, d, layerIdToName) {
+@@ -1687,7 +2466,10 @@ function buildDefinition(id, d, layerIdToName) {
      uvTransformBack: fData.uvTransformBack ?? null,
      uvProjected: fData.uvProjected ?? false,
      uvProjectedBack: fData.uvProjectedBack ?? false,
@@ -3409,7 +3654,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    }));
    const instances = d.builder.instances.map((inst) => ({
      name: inst.name,
-@@ -1703,29 +2384,47 @@ function buildDefinition(id, d, layerIdToName) {
+@@ -1703,29 +2485,47 @@ function buildDefinition(id, d, layerIdToName) {
      plane: sp.plane || [0, 0, 1, 0],
      name: sp.name || "",
      label: sp.label || "",
@@ -3466,7 +3711,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    }));
    return {
      id,
-@@ -1741,6 +2440,8 @@ function buildDefinition(id, d, layerIdToName) {
+@@ -1741,6 +2541,8 @@ function buildDefinition(id, d, layerIdToName) {
      constructionLines,
      constructionPoints,
      isImage: d.isImage,
@@ -3475,7 +3720,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
      alwaysFacesCamera: d.alwaysFacesCamera,
      shadowsFaceSun: d.shadowsFaceSun || false
    };
-@@ -2122,6 +2823,24 @@ function findCountAfterV20Filler(data, countPos, limit, ar) {
+@@ -2122,6 +2924,40 @@ function findCountAfterV20Filler(data, countPos, limit, ar) {
    }
    return null;
  }
@@ -3497,10 +3742,26 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
 +  const roots = view.getUint32(at + 4, true);
 +  return roots > 0 && roots <= 5e6 && plausibleListTag(ar, data, at + 8) ? at + 4 : null;
 +}
++/** PushForm patch: the position of the root entity count after the empty definition list of an empty model behind a
++ * v20 filler: definition count 0 at 9 bytes after the marker, then root entity count 0, relationship count 0 and no
++ * active section plane. */
++function emptyModelAfterV20Filler(data, countPos) {
++  let markerAt = -1;
++  for (let i = countPos; i < countPos + 12 && i + 4 <= data.length; i++) {
++    if (data[i] === 255 && data[i + 1] === 254 && data[i + 2] === 255) {
++      markerAt = i;
++      break;
++    }
++  }
++  if (markerAt < 0 || data[markerAt + 3] !== 0) return null;
++  const at = markerAt + 4 + 9;
++  if (at + 14 > data.length) return null;
++  return data.subarray(at, at + 14).every((b) => b === 0) ? at + 4 : null;
++}
  function retryCountAfterV20Filler(r, countPos, limit, ar) {
    const hit = findCountAfterV20Filler(r.data, countPos, limit, ar);
    if (hit === null) return null;
-@@ -2187,6 +2906,27 @@ function isClassRef(data, p, slot) {
+@@ -2187,6 +3023,27 @@ function isClassRef(data, p, slot) {
    }
    return p + 6 <= data.length && view.getUint16(p, true) === 32767 && view.getUint32(p + 2, true) === (2147483648 | slot) >>> 0;
  }
@@ -3528,7 +3789,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
  var R = class {
    constructor(data, pos = 0) {
      this.data = data;
-@@ -2286,6 +3026,7 @@ var Archive = class {
+@@ -2286,6 +3143,7 @@ var Archive = class {
      this.ver = ver;
      this.hasPid = ver >= 17;
      this.r = new R(data);
@@ -3536,7 +3797,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    }
    alloc(entry) {
      const s = this.nextSlot;
-@@ -2355,7 +3096,7 @@ var Archive = class {
+@@ -2355,7 +3213,7 @@ var Archive = class {
        this.currentClass = prevClass;
      }
      this.slots.set(slot, ["obj", name, value]);
@@ -3545,7 +3806,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
        this.annotWatermark = this.nextSlot;
      }
      return [slot, name, value];
-@@ -2413,15 +3154,15 @@ function drawbase(ar, r) {
+@@ -2413,15 +3271,15 @@ function drawbase(ar, r) {
    const tag = r.peekU16();
    let layer;
    if (layCls !== void 0 && tag === (32768 | layCls)) {
@@ -3564,7 +3825,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    } else {
      layer = r.u16();
    }
-@@ -2456,9 +3197,15 @@ function readCurve(ar, r) {
+@@ -2456,9 +3314,15 @@ function readCurve(ar, r) {
  }
  function readArcCurve(ar, r) {
    preamble(ar, r);
@@ -3583,7 +3844,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
  }
  function registerBurn(ar, delta) {
    ar.burns.push([ar.annotWatermark + ar.cumDelta, delta]);
-@@ -2576,7 +3323,11 @@ function readAttrNamed(ar, r) {
+@@ -2576,7 +3440,11 @@ function readAttrNamed(ar, r) {
      if (key === "") break;
      entries[key] = readTyped(r.u8());
    }
@@ -3596,7 +3857,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    return { k: "dict", name: dictname, entries };
  }
  var DYNAMIC_ATTRIBUTES_DICT_NAME = "dynamic_attributes";
-@@ -2602,10 +3353,11 @@ function extractLegacyDynamicProperties(attrs) {
+@@ -2602,10 +3470,11 @@ function extractLegacyDynamicProperties(attrs) {
  function readLayer(ar, r) {
    preamble(ar, r);
    const name = r.utf16();
@@ -3612,7 +3873,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    r.utf16();
    const flags = r.u16();
    if (flags & 255) {
-@@ -2616,11 +3368,21 @@ function readLayer(ar, r) {
+@@ -2616,11 +3485,21 @@ function readLayer(ar, r) {
    const rgba = r.raw(4);
    r.utf16();
    r.raw(21);
@@ -3636,7 +3897,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    if (!(dib && typeof dib === "object" && dib.k === "dib")) {
      throw new LegacyParseError(`texture object is not a dib ${r.ctx()}`);
    }
-@@ -2638,16 +3400,22 @@ function textureBlock(ar, r) {
+@@ -2638,16 +3517,22 @@ function textureBlock(ar, r) {
    const blob = r.raw(8);
    const opacity = r.f64();
    const useOp = r.u8();
@@ -3661,7 +3922,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    };
  }
  function readMaterial(ar, r) {
-@@ -2670,10 +3438,12 @@ function readMaterial(ar, r) {
+@@ -2670,10 +3555,12 @@ function readMaterial(ar, r) {
      out.opacity = tex.opacity;
      out.use_opacity = tex.use_opacity;
      out.tex_dib = tex.tex_dib;
@@ -3674,7 +3935,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    }
    return out;
  }
-@@ -2686,6 +3456,13 @@ function readDib(ar, r) {
+@@ -2686,6 +3573,13 @@ function readDib(ar, r) {
    const data = r.raw(length);
    return { k: "dib", subtype, data };
  }
@@ -3688,7 +3949,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
  function readFtc(ar, r) {
    preamble(ar, r);
    r.u32();
-@@ -2705,15 +3482,22 @@ function readFtc(ar, r) {
+@@ -2705,15 +3599,22 @@ function readFtc(ar, r) {
      front_pins: frontPins,
      back_pins: backPins,
      front_projected: Boolean(fflags & 2),
@@ -3714,8 +3975,25 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
  }
  function readThumbnail(ar, r) {
    preamble(ar, r);
-@@ -2766,7 +3550,7 @@ function strictNextTag(ar, data, at, allowNull = true) {
+@@ -2764,9 +3665,24 @@ function strictNextTag(ar, data, at, allowNull = true) {
+   }
+   return false;
  }
++/** PushForm patch: whether a definition's trailer starts at `at`: a zero relationship count followed by the active
++ * section plane reference (a u16, or 0x7fff and a u32), the 16-byte GUID and a UTF-16 name; or a nonzero count followed
++ * by a CRelationship record (its class record, or a reference to it). */
++function definitionTrailerAt(ar, data, at) {
++  if (at + 10 > data.length) return false;
++  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
++  const count = view.getUint32(at, true);
++  if (count === 0) {
++    const name = at + 4 + (view.getUint16(at + 4, true) === 32767 ? 6 : 2) + 16;
++    return name + 3 <= data.length && bytesEqual(data.subarray(name, name + 3), STR_MARKER);
++  }
++  if (count > 1e5) return false;
++  const tag = view.getUint16(at + 4, true), slot = ar.classSlot.get("CRelationship");
++  return tag === 65535 ? matchesAscii(data, at + 10, "CRelationship") : slot !== void 0 && tag === (32768 | slot);
++}
  function readConstructionLine(ar, r) {
    preamble(ar, r);
 -  drawbase(ar, r);
@@ -3723,16 +4001,15 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    const point = r.f64s(3);
    const direction = r.f64s(3);
    const [startParam, endParam] = r.f64s(2);
-@@ -2774,7 +3558,18 @@ function readConstructionLine(ar, r) {
+@@ -2774,7 +3690,17 @@ function readConstructionLine(ar, r) {
    if (k === null) {
      const dflt = ar.ver === 17 ? 7 : 4;
      const order = [dflt, ...[0, 4, 7].filter((c) => c !== dflt)];
-+    // A final guide may be followed by the definition trailer, not an object tag.
-+    // Prefer its zero relationship count and UTF-16 name marker over ambiguous zeros.
++    // A final guide may be followed by the definition trailer, not an object tag: a relationship count, the
++    // relationships, the active section plane reference and the definition's GUID and name. Prefer that shape over
++    // ambiguous zeros.
 +    for (const cand of order) {
-+      const at = r.pos + cand;
-+      if (at + 25 <= r.data.length && r.data.subarray(at, at + 4).every(b => b === 0) &&
-+          bytesEqual(r.data.subarray(at + 22, at + 25), STR_MARKER)) {
++      if (definitionTrailerAt(ar, r.data, r.pos + cand)) {
 +        k = cand;
 +        break;
 +      }
@@ -3742,7 +4019,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
        for (const cand of order) {
          if (strictNextTag(ar, r.data, r.pos + cand, allowNull)) {
            k = cand;
-@@ -2789,7 +3584,7 @@ function readConstructionLine(ar, r) {
+@@ -2789,7 +3715,7 @@ function readConstructionLine(ar, r) {
    const huge = 1e20;
    const start = Math.abs(startParam) >= huge ? null : [point[0] + direction[0] * startParam, point[1] + direction[1] * startParam, point[2] + direction[2] * startParam];
    const end = Math.abs(endParam) >= huge ? null : [point[0] + direction[0] * endParam, point[1] + direction[1] * endParam, point[2] + direction[2] * endParam];
@@ -3751,7 +4028,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
  }
  function readConstructionPoint(ar, r) {
    preamble(ar, r);
-@@ -2817,30 +3612,54 @@ function readSectionPlane(ar, r) {
+@@ -2817,30 +3743,54 @@ function readSectionPlane(ar, r) {
    return { k: "sectionplane", plane, name, label, db };
  }
  function readSkFont(ar, r) {
@@ -3820,7 +4097,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    let p = r.pos;
    let idx;
    while (true) {
-@@ -2849,11 +3668,15 @@ function readText(ar, r) {
+@@ -2849,11 +3799,15 @@ function readText(ar, r) {
        throw new LegacyParseError(`text delimiter not found ${r.ctx()}`);
      }
      const blk = r.data.subarray(idx - 11, idx);
@@ -3837,7 +4114,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    r.raw(idx - r.pos);
    const text = r.utf16();
    r.raw(5);
-@@ -2869,7 +3692,98 @@ function readText(ar, r) {
+@@ -2869,7 +3823,98 @@ function readText(ar, r) {
      r.raw(6);
      attach.push(val);
    }
@@ -3937,7 +4214,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
  }
  function readEntityList(ar, r, count, owner) {
    const ents = [];
-@@ -2959,7 +3873,9 @@ function readDefinition(ar, r) {
+@@ -2959,7 +4004,9 @@ function readDefinition(ar, r) {
    for (let i = 0; i < nrel; i++) {
      ar.readObject(r, "CRelationship");
    }
@@ -3948,7 +4225,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    if (!bytesEqual(r.peek(19).subarray(16, 19), STR_MARKER)) {
      for (let skip = 1; skip <= 4; skip++) {
        const at = r.pos + skip;
-@@ -2998,6 +3914,7 @@ function readDefinition(ar, r) {
+@@ -2998,6 +4045,7 @@ function readDefinition(ar, r) {
      name,
      guid: toHex(guid),
      ents,
@@ -3956,7 +4233,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
      faces_camera: Boolean(behavior & 1),
      shadows_face_sun: Boolean(behavior & 2)
    };
-@@ -3012,12 +3929,33 @@ function readInstance(ar, r) {
+@@ -3012,12 +4060,33 @@ function readInstance(ar, r) {
    }
    const xf = r.f64s(13);
    const name = r.utf16();
@@ -3993,7 +4270,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    CVertex: readVertex,
    CEdge: readEdge,
    CCurve: readCurve,
-@@ -3027,7 +3965,7 @@ var READERS = {
+@@ -3027,7 +4096,7 @@ var READERS = {
    CFace: readFace,
    CLayer: readLayer,
    CMaterial: readMaterial,
@@ -4002,7 +4279,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    CAttributeContainer: readAttrContainer,
    CAttributeNamed: readAttrNamed,
    CCamera: readCamera,
-@@ -3043,6 +3981,7 @@ var READERS = {
+@@ -3043,6 +4112,7 @@ var READERS = {
    CSectionPlane: readSectionPlane,
    CSkFont: readSkFont,
    CDimensionLinear: readDimLinear,
@@ -4010,7 +4287,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    CText: readText
  };
  function isLegacy(data) {
-@@ -3211,14 +4150,24 @@ function walkModel(data, ver, start, matCount, base) {
+@@ -3211,14 +4281,32 @@ function walkModel(data, ver, start, matCount, base) {
      }
      break;
    }
@@ -4034,11 +4311,19 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
 +    } else {
 +      const retry = retryCountAfterV20Filler(r, r.pos - 4, 1e6, ar);
 +      if (retry !== null) defCount = retry;
++      else {
++        // PushForm patch: an empty model also stores 0 for its root entities, and no relationships or active section.
++        const none = emptyModelAfterV20Filler(r.data, r.pos - 4);
++        if (none !== null) {
++          r.pos = none;
++          defCount = 0;
++        }
++      }
 +    }
    }
    if (defCount > 1e6) {
      throw new LegacyParseError("implausible definition count");
-@@ -3245,7 +4194,197 @@ function walkModel(data, ver, start, matCount, base) {
+@@ -3245,7 +4333,201 @@ function walkModel(data, ver, start, matCount, base) {
      throw new LegacyParseError("implausible root entity count");
    }
    const root = readEntityList(ar, r, rootCount, "root");
@@ -4197,8 +4482,11 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
 +      r.utf16();
 +      const flags = r.u32();
 +      // A scene that does not save its camera stores none.
++      const cameraAt = r.pos;
 +      const [, cn, camera] = ar.readObject(r, "CCamera");
 +      if (cn !== "CCamera" && cn !== null) break;
++      // PushForm patch: the scene's rendering-options record follows its camera, or its flags when it has none.
++      const record = readLegacyRenderingRecord(data, cn === "CCamera" ? r.pos : cameraAt, ar.ver);
 +      // The record must end where the next scene starts: at the class reference every later scene repeats,
 +      // or, before that is known, at any class reference followed shortly by a scene name.
 +      const last = pages.length + 1 === count, known = pageTag;
@@ -4213,9 +4501,10 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
 +      const layout = ar.versionMap.get("CViewPage") ?? schema;
 +      const tail = findPageTail(data, r.pos, flags, layerSlots, isNext, layout === null || layout >= 12);
 +      if (tail === null) break;
-+      // PushForm patch: the style the scene saved is an item run (from item 1000) between the camera and the tail.
-+      const styleRun = findSequence(data, [232, 3, 0, 0, 1, 0, 0, 0], r.pos);
-+      const renderingOptions = styleRun >= 0 && styleRun < tail.end ? decodeLegacyStyleRun(data, styleRun, tail.end) : null;
++      // PushForm patch: without that record, the style the scene saved as an item run (from item 1000) between the
++      // camera and the tail.
++      const styleRun = record ? -1 : findSequence(data, [232, 3, 0, 0, 1, 0, 0, 0], r.pos);
++      const renderingOptions = record ?? (styleRun >= 0 && styleRun < tail.end ? decodeLegacyStyleRun(data, styleRun, tail.end) : null);
 +      pages.push({
 +        name,
 +        eye: camera ? camera.eye : null,
@@ -4237,7 +4526,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
  }
  var LegacyBuilder = class {
    constructor() {
-@@ -3274,7 +4413,15 @@ function addEdge(builder, slot, e, slots) {
+@@ -3274,7 +4556,15 @@ function addEdge(builder, slot, e, slots) {
      }
    }
    builder.edges.set(slot, [v1, v2]);
@@ -4253,7 +4542,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    const flags = (db.soft ? 8 : 0) | (db.smooth ? 16 : 0) | (db.hidden ? 1 : 0);
    if (flags) {
      builder.edgeFlags.set(slot, flags);
-@@ -3308,7 +4455,8 @@ function fillBuilder(builder, ents, slots) {
+@@ -3308,7 +4598,8 @@ function fillBuilder(builder, ents, slots) {
          uvTransformBack: null,
          uvProjected: false,
          uvProjectedBack: false,
@@ -4263,7 +4552,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
        };
        const attrs = v.attrs;
        if (attrs && typeof attrs === "object") {
-@@ -3318,6 +4466,8 @@ function fillBuilder(builder, ents, slots) {
+@@ -3318,6 +4609,8 @@ function fillBuilder(builder, ents, slots) {
              face.uvTransformBack = [...cv.back];
              face.uvProjected = cv.front_projected;
              face.uvProjectedBack = cv.back_projected;
@@ -4272,7 +4561,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
            }
          }
        }
-@@ -3349,32 +4499,63 @@ function fillBuilder(builder, ents, slots) {
+@@ -3349,32 +4642,63 @@ function fillBuilder(builder, ents, slots) {
          properties: {}
        });
      } else if (k === "sectionplane") {
@@ -4341,7 +4630,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
        });
      }
    }
-@@ -3407,6 +4588,7 @@ function parseLegacyToRaw(data, options) {
+@@ -3407,6 +4731,7 @@ function parseLegacyToRaw(data, options) {
      throw e;
    }
    const { ar, root, layers, materials } = walkResult;
@@ -4349,7 +4638,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    const slots = ar.slots;
    emitLog(options, "debug", `Legacy walk complete: ${materials.length} materials, ${layers.length} layers`);
    const imageDefIds = /* @__PURE__ */ new Set();
-@@ -3415,6 +4597,12 @@ function parseLegacyToRaw(data, options) {
+@@ -3415,6 +4740,12 @@ function parseLegacyToRaw(data, options) {
        imageDefIds.add(ent[2].def);
      }
    }
@@ -4362,7 +4651,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    const materialsMap = /* @__PURE__ */ new Map();
    const materialIdToName = /* @__PURE__ */ new Map();
    for (const [s, v] of materials) {
-@@ -3428,10 +4616,11 @@ function parseLegacyToRaw(data, options) {
+@@ -3428,10 +4759,11 @@ function parseLegacyToRaw(data, options) {
      const colorized = v.colorized || false;
      let texture = null;
      if ("tex_dib" in v) {
@@ -4377,7 +4666,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
        const fname = v.tex_file || `${v.name}${ext}`;
        texture = { filename: fname, width: v.tex_w, height: v.tex_h, data: texData };
      }
-@@ -3441,10 +4630,8 @@ function parseLegacyToRaw(data, options) {
+@@ -3441,10 +4773,8 @@ function parseLegacyToRaw(data, options) {
        transparency: trans,
        id: null,
        texture,
@@ -4389,7 +4678,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
      };
      materialsMap.set(v.name, matObj);
      materialIdToName.set(s, v.name);
-@@ -3474,10 +4661,12 @@ function parseLegacyToRaw(data, options) {
+@@ -3474,10 +4804,12 @@ function parseLegacyToRaw(data, options) {
          const d = ent[2];
          const b = new LegacyBuilder();
          fillBuilder(b, d.ents, slots);
@@ -4402,7 +4691,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
            alwaysFacesCamera: d.faces_camera || false,
            shadowsFaceSun: d.shadows_face_sun || false,
            builder: b
-@@ -3498,6 +4687,7 @@ function parseLegacyToRaw(data, options) {
+@@ -3498,6 +4830,7 @@ function parseLegacyToRaw(data, options) {
    }
    const rootBuilder = new LegacyBuilder();
    fillBuilder(rootBuilder, root, slots);
@@ -4410,13 +4699,13 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    defsDict.set("ROOT", {
      guid: "ROOT",
      name: "ROOT_MODEL",
-@@ -3517,14 +4707,17 @@ function parseLegacyToRaw(data, options) {
+@@ -3517,14 +4850,17 @@ function parseLegacyToRaw(data, options) {
      // that's a VFF/ZIP-only construct - so there is no known source for
      // the model's unit-system string here.
      units: null,
 +    unitsOptions: readUnitsOptions(data, true),
-+    sectionDisplay: readSectionDisplay(data, true),
-+    renderingOptions: readRenderingOptions(data, true, null),
++    sectionDisplay: readSectionDisplay(data, true, ar.ver),
++    renderingOptions: readRenderingOptions(data, true, null, ar.ver),
      layerColors,
      layerHidden,
      layerIdToName,
@@ -4433,7 +4722,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
      dimensions: [],
      materialIdToName,
      materialsMap,
-@@ -3725,8 +4918,16 @@ function parsePages(node) {
+@@ -3725,8 +5061,16 @@ function parsePages(node) {
            fov: 35,
            parallel: false,
            orthoHeight: 0,
@@ -4451,18 +4740,19 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
          const head = tlvItemsInt(tlvFindInt(items, 28500));
          const name = tlvFindInt(head, 28501);
          if (name !== null && name.length > 0) {
-@@ -3753,7 +4954,9 @@ function parsePages(node) {
+@@ -3753,7 +5097,10 @@ function parsePages(node) {
            page.hiddenLayerIds.push(parseVarInt(hidden, off + 1, ln));
            off += 1 + ln;
          }
 -        if (page.eye !== null && page.target !== null) pages.push(page);
-+        // A scene that does not save its camera stores none; it still saves its other properties.
++        // A scene that does not save its camera stores none; it still saves its other properties. A scene's name may
++        // be empty.
 +        const camera = page.eye !== null && page.target !== null, noCamera = page.eye === null && page.target === null;
-+        if (camera || noCamera && page.name !== "") pages.push(page);
++        if (camera || noCamera) pages.push(page);
        }
      }
    }
-@@ -12249,6 +13452,15 @@ var ComponentDefinitionBuilder = class {
+@@ -12249,6 +13596,15 @@ var ComponentDefinitionBuilder = class {
        options.smoothEdges ?? false
      );
    }
@@ -4478,7 +4768,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    addPolyline(points, options = {}) {
      this.checkWritable("polylines");
      const pts = points.map(toPoint3);
-@@ -12784,6 +13996,15 @@ var SkpBuilder = class {
+@@ -12784,6 +14140,15 @@ var SkpBuilder = class {
    }
    /** Add one freeform polyline curve - a chain of straight edges grouped
     * into one genuine SketchUp "Curve" entity, no face. */
@@ -4494,7 +4784,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    addPolyline(points, options = {}) {
      const pts = points.map(toPoint3);
      if (pts.length < 2) throw new SkpWriteError("a polyline needs at least 2 points");
-@@ -13235,6 +14456,8 @@ function parseToRaw(buffer, options) {
+@@ -13235,6 +14600,8 @@ function parseToRaw(buffer, options) {
    const materialFiles = contents.materialFiles;
    emitLog(options, "debug", `Detected version ${version} (VFF/ZIP container)`);
    const units = contents.metaData ? readMetaUnits(contents.metaData) : null;
@@ -4503,7 +4793,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    const layerColors = /* @__PURE__ */ new Map();
    const layerHidden = /* @__PURE__ */ new Map();
    const materialsMap = /* @__PURE__ */ new Map();
-@@ -13291,6 +14514,7 @@ function parseToRaw(buffer, options) {
+@@ -13291,6 +14658,7 @@ function parseToRaw(buffer, options) {
      }
    }
    const styles = [];
@@ -4511,7 +4801,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    for (const [name, xmlBytes] of Object.entries(materialFiles)) {
      const lowerName = name.toLowerCase();
      if (lowerName.startsWith("styles/") && lowerName.endsWith("style.xml")) {
-@@ -13304,14 +14528,19 @@ function parseToRaw(buffer, options) {
+@@ -13304,14 +14672,19 @@ function parseToRaw(buffer, options) {
              frontColor: parsedStyle.frontColor,
              backColor: parsedStyle.backColor
            });
@@ -4531,7 +4821,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
    function collectMaterialIds(nodes) {
      for (const el of nodes) {
        if (el.tag === "C832") {
-@@ -13349,8 +14578,9 @@ function parseToRaw(buffer, options) {
+@@ -13349,8 +14722,9 @@ function parseToRaw(buffer, options) {
    let pageNode = null;
    for (const { index, total, node: el } of iterTopLevelLazy(modelData, 0, modelData.length)) {
      try {
@@ -4542,7 +4832,7 @@ index 072a58c74a7a14721b99537f7eaf09902d898ca5..0974e0a29ff781c802edc6f7c9740162
        collectDefs([el], defsDict, options);
        scanVertexPositions(el, vertexPositions);
        scanInstanceTransforms(el, instanceWorld);
-@@ -13396,14 +14626,21 @@ function parseToRaw(buffer, options) {
+@@ -13396,14 +14770,21 @@ function parseToRaw(buffer, options) {
      shadowsFaceSun: false,
      builder: rootBuilder
    });

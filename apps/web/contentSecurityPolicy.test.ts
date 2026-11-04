@@ -56,7 +56,7 @@ describe('contentSecurityPolicy', () => {
 
   it('skips missing or invalid URLs and a disabled Sentry DSN', () => {
     const policy = directives(contentSecurityPolicy('web', { supabaseUrls: ['', 'not a url'], sentryDsn: sentryDsnFor({ VITE_SENTRY_DSN: '' }, true) }));
-    expect(policy.get('connect-src')).toEqual(["'self'", 'https://cdn.jsdelivr.net', 'https://fonts.googleapis.com', 'https://fonts.gstatic.com', 'blob:', 'data:']);
+    expect(policy.get('connect-src')).toEqual(["'self'", 'https://us.i.posthog.com', 'https://cdn.jsdelivr.net', 'https://fonts.googleapis.com', 'https://fonts.gstatic.com', 'blob:', 'data:']);
     expect(policy.has('report-uri')).toBe(false);
   });
 

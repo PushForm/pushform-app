@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { validLayoutModelAnnotation, validLayoutTable, validTableFrame, LAYOUT_OBJECT_NAME_MAX, isCloudSource, isCloudReference, LAYOUT_VIEWPORT_FACE_STYLES, LAYOUT_PAGE_NUMBER_STYLES } from '@pushform/layout';
+import { validLayoutFillPattern, validLayoutModelAnnotation, validLayoutTable, validTableFrame, LAYOUT_OBJECT_NAME_MAX, isCloudSource, isCloudReference, LAYOUT_VIEWPORT_FACE_STYLES, LAYOUT_PAGE_NUMBER_STYLES } from '@pushform/layout';
 import { strFromU8, strToU8, zipSync } from 'fflate';
 import { validLayoutContourStarts, LayoutDocument, LAYOUT_FORMAT_VERSION, type LayoutDocumentState, type LayoutEntity } from '@pushform/layout';
 import { readNativeArchive } from './nativeArchive';
@@ -223,6 +223,7 @@ export function validLayoutEntityContent(entity: LayoutEntity): boolean {
   const dash = entity.style?.strokeDashMm;
   if (dash !== undefined && (!Array.isArray(dash) || dash.length % 2 !== 0 ||
     !dash.every(length => Number.isFinite(length) && length > 0))) return false;
+  if (entity.style?.fillPattern !== undefined && !validLayoutFillPattern(entity.style.fillPattern)) return false;
   if (entity.name !== undefined && (typeof entity.name !== 'string' || entity.name.length > LAYOUT_OBJECT_NAME_MAX)) return false;
   if (entity.locked !== undefined && typeof entity.locked !== 'boolean') return false;
   if (entity.hidden !== undefined && typeof entity.hidden !== 'boolean') return false;

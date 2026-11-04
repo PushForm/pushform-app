@@ -4,7 +4,7 @@ import { entitiesForLayer, isViewport, layoutFrameSize, type LayoutDocumentState
 import { GOOGLE_LAYOUT_FONTS } from './layoutFontCatalog';
 import { prepareLayoutPages } from './layoutPrint';
 import { prepareLayoutImages } from './layoutImage';
-import { layoutViewportPicture, settleLayoutViewportRenders } from './layoutViewportRenders';
+import { layoutViewportPicture, layoutViewportWarnings, settleLayoutViewportRenders } from './layoutViewportRenders';
 import { drawLayoutVectorPage } from './layoutVectorDrawing';
 import { safeLayoutExportName } from './layoutImageExport';
 import { encodeImage, rasterizeImage } from '../rasterizeImage';
@@ -79,5 +79,7 @@ export async function exportLayoutPdf(state: LayoutDocumentState, ids: readonly 
   }
   const { writeLayoutPdf } = await import('./layoutPdf');
   const result = await writeLayoutPdf(pages, loadPdfWebFont);
-  return signal?.aborted ? null : { ...result, name: `${safeLayoutExportName(documentName.replace(/\.(pfl|layout)$/i, ''))}.pdf`, mime: 'application/pdf', extension: 'pdf' };
+  // A view without a picture exports as nothing; the export notes say which could not be rendered and why.
+  const warnings = [...layoutViewportWarnings(state, entities), ...result.warnings];
+  return signal?.aborted ? null : { ...result, warnings, name: `${safeLayoutExportName(documentName.replace(/\.(pfl|layout)$/i, ''))}.pdf`, mime: 'application/pdf', extension: 'pdf' };
 }

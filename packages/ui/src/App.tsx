@@ -42,13 +42,14 @@ import { loadNativeRefresh, type NativeRefreshProgress, type NativeRefreshSessio
 import { useGlobalKeys } from './useGlobalKeys';
 import { useModelClipboard } from './modelClipboard';
 import { useProductUsage } from './usage';
-import { CloudSession, cloudProfileComplete, type CloudAccountStore, type CloudFilesApi, type CloudFile, type CloudProfileStore, type UsageSink } from '@pushform/cloud';
+import { CloudSession, cloudProfileComplete, type CloudAccountStore, type CloudBillingStore, type CloudFilesApi, type CloudFile, type CloudProfileStore, type UsageSink } from '@pushform/cloud';
 import { defaultLayoutRecoveryStore } from '@pushform/io';
 import { accountRecoveryStore, accountSessionStorage } from './accountPersistence';
 import { SignInScreen } from './components/SignInScreen';
 import { ProfileScreen } from './components/ProfileForm';
 import { ProfileContext, useProfileState } from './profileContext';
 import { AccountContext, useAccountState } from './accountContext';
+import { BillingContext } from './billingContext';
 import { DeletionBanner } from './components/AccountLifecycle';
 import { useAccountAutoText } from './accountAutoText';
 import type { BuildInfo } from './buildInfo';
@@ -86,6 +87,7 @@ export interface AppProps {
   readonly profiles?: CloudProfileStore | undefined;
   /** Account deletion and file export: the account dialog's sections and the deletion banner. */
   readonly account?: CloudAccountStore | undefined;
+  readonly billing?: CloudBillingStore | undefined;
   /** Version, commit and build time of the running bundle, shown by About PushForm; unknown when omitted. */
   readonly buildInfo?: BuildInfo | undefined;
   /** Embedding hosts can choose the first screen; otherwise refresh resumes the account's previous screen. */
@@ -93,7 +95,7 @@ export interface AppProps {
   /** AI Chat backend; without it the entry points stay visible but report that requests are unavailable. */
   readonly requests?: RequestsConfig | undefined;
   /** Where product usage events go; without it nothing is recorded. */
-  readonly usage?: UsageSink | undefined;
+  readonly usage?: UsageSink | ((ownerId: string) => UsageSink) | undefined;
   /** The extension runtime's worker sources; without them the extension manager is not offered. */
   readonly extensionRuntime?: ExtensionRuntimeSources | undefined;
   /** Says whether the account is PushForm staff; extensions are offered only to staff until they open to everyone. */
@@ -126,7 +128,7 @@ const WORKSPACE_SCREEN_KEY = 'pushform:workspace-screen:v1';
  * Required account gate. The document engine is first created after successful sign-in; the workspace stays locked
  * until the account's signup step is complete.
  */
-export function App({ app, cloud: supplied, cloudFiles, profiles, account, buildInfo, initialScreen, requests, usage, commons, extensionRuntime, staff }: AppProps = {}): JSX.Element {
+export function App({ app, cloud: supplied, cloudFiles, profiles, account, billing, buildInfo, initialScreen, requests, usage, commons, extensionRuntime, staff }: AppProps = {}): JSX.Element {
   const [unconfigured] = useState(() => new CloudSession(null));
   const cloud = supplied ?? unconfigured;
   const state = useSyncExternalStore(cloud.subscribe, cloud.getSnapshot);
@@ -143,16 +145,16 @@ export function App({ app, cloud: supplied, cloudFiles, profiles, account, build
   useEffect(() => desktopUpdates()?.start(), []);
   useEffect(() => { if (signedIn) setLastOwner(state.user!.id); }, [signedIn, state.user]);
   const screens = <>
-    {workspaceOwner ? <Workspace key={workspaceOwner} ownerId={workspaceOwner} app={app} cloud={cloud} cloudFiles={cloudFiles} buildInfo={buildInfo} initialScreen={initialScreen} requests={requests} usage={usage} commons={commons} extensionRuntime={extensionRuntime} staff={staff} locked={!signedIn || !profileReady} /> : null}
+    {workspaceOwner ? <Workspace key={workspaceOwner} ownerId={workspaceOwner} app={app} cloud={cloud} cloudFiles={cloudFiles} buildInfo={buildInfo} initialScreen={initialScreen} requests={requests} usage={typeof usage === 'function' ? usage(workspaceOwner) : usage} commons={commons} extensionRuntime={extensionRuntime} staff={staff} locked={!signedIn || !profileReady} /> : null}
     {!signedIn ? <SignInScreen cloud={cloud} state={state} /> : null}
     {signedIn && !profileReady && profiles ? <ProfileScreen cloud={cloud} session={state} profiles={profiles} state={profileState} /> : null}
     {signedIn && profileReady && account && accountState.ownerId === state.user!.id ? <DeletionBanner account={account} state={accountState} /> : null}
   </>;
-  const provided = <ProfileContext.Provider value={profiles ?? null}><AccountContext.Provider value={account ?? null}>{screens}<ToastHost /><WindowControls /></AccountContext.Provider></ProfileContext.Provider>;
+  const provided = <ProfileContext.Provider value={profiles ?? null}><AccountContext.Provider value={account ?? null}><BillingContext.Provider value={billing ?? null}>{screens}<ToastHost /><WindowControls /></BillingContext.Provider></AccountContext.Provider></ProfileContext.Provider>;
   return provided;
 }
 
-type WorkspaceProps = AppProps & { locked: boolean; ownerId: string };
+type WorkspaceProps = Omit<AppProps, 'usage'> & { usage?: UsageSink | undefined; locked: boolean; ownerId: string };
 
 /**
  * Read the image bytes this browser tab kept for refresh before the document session restores its tabs, so a

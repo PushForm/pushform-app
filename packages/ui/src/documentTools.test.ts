@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LAYOUT_TOOLS } from '@pushform/extension-protocol';
 import { LayoutDocumentApi, runLayoutTool } from '@pushform/extensions';
 import { createApp } from './bootstrap';
@@ -9,6 +9,7 @@ import { DocumentSession } from './session';
 
 let session: DocumentSession | null = null;
 afterEach(() => {
+  vi.restoreAllMocks();
   session?.dispose();
   session = null;
 });
@@ -44,6 +45,71 @@ describe('documentToolsFor', () => {
     const switched = await tools.run({ ...call, input: { ...call.input, expectedRevision: tab.app.document.doc.version } });
     expect(JSON.parse(switched.content).error.code).toBe('unavailable');
     expect(root().instances.size).toBe(0);
+  });
+
+  it('makes all of one message\'s batches one undo step, with one change line describing them all', async () => {
+    const s = open();
+    const tab = s.active;
+    if (tab.type !== 'model') throw new Error('expected a model tab');
+    const tools = documentToolsFor(s, tab)!;
+    const doc = tab.app.document.doc, undo = tab.app.document.undoStack, depth = undo.length;
+    const grain = (label: string, x: number) => tools.run({ id: label, name: 'model_apply_operations',
+      input: { expectedRevision: doc.version, label, operations: [{ op: 'add_box', min: [x, 0, 0], max: [x + 0.5, 0.5, 0.5] }] } });
+    expect((await grain('Grain left side', 0)).notice).toBe('Changed the document: Grain left side. Undo reverts it.');
+    expect((await grain('Grain right side', 1)).notice).toBe('Changed the document: Grain left side and 1 more change. Undo reverts it.');
+    expect((await grain('Grain toe kick', 2)).notice).toBe('Changed the document: Grain left side and 2 more changes. Undo reverts it.');
+    expect(undo.length).toBe(depth + 1);
+    expect(undo.peek()?.label).toBe('AI Chat: Grain left side and 2 more changes');
+    const root = () => tab.app.document.doc.rootDefinition.entities;
+    expect(root().bodies.size).toBe(3);
+    // The requester edits meanwhile: the next batch is its own undo step, and the line says how many there are.
+    tab.app.commands.execute('model.addBox', { min: [5, 0, 0], max: [6, 1, 1] });
+    expect((await grain('Grain back', 3)).notice).toBe('Changed the document: Grain left side and 3 more changes. Undo reverts it in 2 steps.');
+    expect(tab.app.commands.execute('edit.undo')).toBe(true);
+    expect(tab.app.commands.execute('edit.undo')).toBe(true);
+    expect(tab.app.commands.execute('edit.undo')).toBe(true);
+    expect(root().bodies.size).toBe(0);
+    // A new message gets a new API object, so its batches are a new undo step.
+    const next = documentToolsFor(s, tab)!;
+    const fresh = await next.run({ id: 'n', name: 'model_apply_operations', input: { expectedRevision: doc.version, label: 'Shelf', operations: [{ op: 'add_box', min: [0, 0, 0], max: [1, 1, 1] }] } });
+    expect(fresh.notice).toBe('Changed the document: Shelf. Undo reverts it.');
+  });
+
+  it('renders the bound model offscreen as JPEG pictures for review without moving the view or adding undo', async () => {
+    const s = open();
+    const tab = s.active;
+    if (tab.type !== 'model') throw new Error('expected a model tab');
+    tab.app.commands.execute('model.addBox', { min: [0, 0, 0], max: [1, 0.5, 2] });
+    const tools = documentToolsFor(s, tab)!;
+    const viewport = tab.app.viewport;
+    const before = viewport.camera.getState(), undo = tab.app.document.undoStack.peek();
+    // Headless: no renderer, so the call answers unavailable.
+    const headless = await tools.run({ id: 'r0', name: 'model_render', input: {} });
+    expect(headless.isError).toBe(true);
+    expect(JSON.parse(headless.content).error.code).toBe('unavailable');
+    expect(headless.images).toBeUndefined();
+    // With the tab's viewport drawing (mocked here), each view is one JPEG at most 1024 pixels on its longer side.
+    const sizes: [number, number][] = [];
+    const snapshot = vi.spyOn(viewport, 'snapshotInto').mockImplementation((target, width, height) => { sizes.push([width, height]); target.width = width; target.height = height; return true; });
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(function (this: HTMLCanvasElement, done: BlobCallback, type?: string) { done({ type, arrayBuffer: async () => new Uint8Array([0xff, 0xd8, 0xff, 1, 2, 3]).buffer } as unknown as Blob); });
+    expect(tools.progress?.({ id: 'r1', name: 'model_render', input: {} })).toBe('Checking the result…');
+    const outcome = await tools.run({ id: 'r1', name: 'model_render', input: {} });
+    expect(outcome.isError).toBe(false);
+    expect(outcome.notice).toBeUndefined();
+    expect(outcome.images).toEqual([{ mime: 'image/jpeg', data: '/9j/AQID' }, { mime: 'image/jpeg', data: '/9j/AQID' }]);
+    expect(outcome.views).toEqual(['iso', 'front']);
+    expect(JSON.parse(outcome.content)).toMatchObject({ ok: true, views: [{ name: 'iso' }, { name: 'front' }] });
+    expect(snapshot).toHaveBeenCalledTimes(2);
+    for (const [w, h] of sizes) expect(Math.max(w, h)).toBeLessThanOrEqual(1024);
+    expect(Math.max(...sizes[0]!)).toBe(1024);
+    // The framed cameras differ from the requester's, which stays as it was; nothing joins the undo history.
+    expect(snapshot.mock.calls[0]![3]).not.toEqual(before);
+    expect(viewport.camera.getState()).toEqual(before);
+    expect(tab.app.document.undoStack.peek()).toBe(undo);
+    const three = await tools.run({ id: 'r2', name: 'model_render', input: { views: [{ direction: 'top' }, { direction: 'left', orbitDeg: { horizontal: 20 } }, { direction: 'back', subject: 'model' }] } });
+    expect(three.views).toEqual(['top', 'left, orbited', 'back of the model']);
+    const four = await tools.run({ id: 'r3', name: 'model_render', input: { views: [{ direction: 'top' }, { direction: 'top' }, { direction: 'top' }, { direction: 'top' }] } });
+    expect(JSON.parse(four.content).error.code).toBe('invalid_operation');
   });
 
   it('edits the tab it was bound to as one undo entry and returns a transcript line', async () => {

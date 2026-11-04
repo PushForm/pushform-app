@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Plugin } from 'vite';
 import { FRAME_BOOTSTRAP_SHA256 } from '@pushform/extensions/frame-bootstrap';
+import { ANALYTICS_HOST } from './src/productAnalyticsHost';
 import { PRODUCTION_SENTRY_DSN } from './src/sentryDsn';
 
 /**
@@ -83,6 +84,7 @@ export function contentSecurityPolicy(surface: CspSurface, input: CspInput): str
       ...supabase.map(socket),
       ...backends,
       sentry,
+      product && ANALYTICS_HOST,
       // The desktop shell's IPC (Tauri 2).
       surface === 'desktop' && 'ipc:',
       surface === 'desktop' && 'http://ipc.localhost',

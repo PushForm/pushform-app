@@ -10,9 +10,11 @@ Run **About PushForm** from command search to see the running version and build 
 
 A browser refresh can load a newer web build. Your document session is restored when the browser's saved session is available.
 
-## Read the license and find the source code
+## Read the license, the source code and third-party notices
 
 PushForm is open source. In **About PushForm**, choose **GNU GPLv3 license** to read the license in a new tab, or **Source code on GitHub** to open the public repository. Use Tab to reach the links, or Shift+Tab to move back. Escape closes About.
+
+PushForm includes open-source software from other projects. Choose **Third-party notices** in About to read their licenses and copyright notices. The web editor opens them in a new tab. The desktop app opens the `THIRD_PARTY_NOTICES.txt` file installed with it in your text viewer.
 
 ## Check for desktop updates
 

@@ -1,14 +1,18 @@
 name: ci-schedule
 on:
-  # Manual runs let you check the scheduler itself without waiting for GitHub's cron.
+  # A push waits for the next 15-minute window and then starts one CI batch for the latest main. GitHub's cron often
+  # drops frequent schedules, so it is only a backstop. Manual runs check the scheduler itself.
+  push:
+    branches: [main]
   workflow_dispatch:
   schedule:
     # Offset from the top of the hour, when GitHub's scheduler is busiest.
     - cron: '7,22,37,52 * * * *'
 
+# A newer push or tick replaces a waiting run; it waits for the same window, so the batch is never postponed.
 concurrency:
   group: ci-schedule-main
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -17,12 +21,12 @@ permissions:
 jobs:
   schedule:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with: { persist-credentials: false }
       - uses: actions/github-script@v7
         with:
           script: |
-            const { scheduleMainCi } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-schedule.mjs`);
-            core.info(await scheduleMainCi(github, context.repo));
+            const { waitAndScheduleMainCi } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-schedule.mjs`);
+            core.info(await waitAndScheduleMainCi(github, context.repo, { log: message => core.info(message) }));

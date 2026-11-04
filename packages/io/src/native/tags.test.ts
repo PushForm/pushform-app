@@ -2,7 +2,7 @@
 // Copyright 2026 PushForm contributors
 import { fileURLToPath } from 'node:url';
 import protobuf from 'protobufjs';
-import type { TagId, TagFolderId } from '@pushform/core';
+import type { ImageId, TagId, TagFolderId } from '@pushform/core';
 import type { Tag, TagFolder } from '@pushform/model';
 import { describe, expect, it } from 'vitest';
 import { decodeNativeTag, decodeNativeTagFolder, encodeNativeTag, encodeNativeTagFolder, validateNativeTagHierarchy } from './tags';
@@ -18,6 +18,16 @@ describe('native tags and folders', () => {
     }
     const value: TagFolder = { id: 2 as TagFolderId, name: 'Structure', visible: false, parentId: null };
     expect(decodeNativeTagFolder(encodeNativeTagFolder(value)).value).toEqual(value);
+  });
+  it('stores a tag texture only when the tag has one, and rejects unusable sizes', () => {
+    const schema = root.lookupType('pushform.native.Tag');
+    const plain = encodeNativeTag(tag());
+    expect(Object.hasOwn(decodeNativeTag(plain).value, 'texture')).toBe(false);
+    expect((schema.decode(plain) as unknown as { texture?: unknown }).texture).toBeFalsy();
+    const value: Tag = { ...tag(), texture: { imageId: 9 as ImageId, widthM: 1.2192, heightM: 0.6096 } }, bytes = encodeNativeTag(value);
+    expect(decodeNativeTag(bytes).value).toEqual(value);
+    expect(Array.from(schema.encode(schema.decode(bytes)).finish())).toEqual(Array.from(bytes));
+    expect(() => encodeNativeTag({ ...value, texture: { imageId: 9 as ImageId, widthM: 0, heightM: 1 } })).toThrow();
   });
   it('preserves nested unknown fields when a known property changes', () => {
     const future = protobuf.Root.fromJSON(root.toJSON()); future.lookupType('pushform.native.Rgb').add(new protobuf.Field('extra', 90, 'bytes')); future.resolveAll();

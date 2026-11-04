@@ -22,6 +22,18 @@ describe('native material adapter', () => {
       expect(Array.from(schema.encode(schema.decode(bytes)).finish())).toEqual(Array.from(bytes));
     }
   });
+  it('round-trips the grain axis and leaves it absent in older records', () => {
+    for (const grain of [undefined, 'width', 'height', 'none'] as const) {
+      const value = fixture();
+      if (grain) value.texture!.grain = grain;
+      const bytes = encodeNativeMaterial(value), decoded = decodeNativeMaterial(bytes);
+      expect(decoded.value.texture!.grain).toBe(grain);
+      expect(Object.hasOwn(decoded.value.texture!, 'grain')).toBe(grain !== undefined);
+      expect(Array.from(schema.encode(schema.decode(bytes)).finish())).toEqual(Array.from(bytes));
+    }
+    const wire = schema.decode(encodeNativeMaterial(fixture())) as unknown as { texture: { value: { grain?: number } } };
+    wire.texture.value.grain = 7; expect(() => decodeNativeMaterial(schema.encode(wire).finish())).toThrow();
+  });
   it('retains unknown texture fields while editing width', () => {
     const future = protobuf.Root.fromJSON(root.toJSON()); future.lookupType('pushform.native.MaterialTexture').add(new protobuf.Field('futureData', 90, 'bytes')); future.resolveAll();
     const newer = future.lookupType('pushform.native.Material');

@@ -35,6 +35,9 @@ jobs:
       - run: pnpm test
       - run: pnpm commons:build
       - run: pnpm license-check
+      # The build writes the third-party notices, listing the Rust crates with cargo-about; in CI it fails without it.
+      - uses: taiki-e/install-action@v2
+        with: { tool: cargo-about }
       # Vite's chunk rendering and hidden source maps exceed Node's ~2 GiB runner default.
       - run: pnpm build
         env:
@@ -61,6 +64,10 @@ jobs:
       # The web bundle includes the STEP reader the test job built.
       - uses: actions/download-artifact@v8
         with: { name: step-reader-wasm, path: packages/io/wasm }
+      # The third-party notices in the bundle list the Rust crates of the STEP reader and the desktop app.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with: { tool: cargo-about }
       - run: echo "VITE_RELEASE=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
       # The cloud configuration is baked into public assets, so it is checked before the build and in the built files
       # before anything is uploaded.
@@ -76,6 +83,9 @@ jobs:
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
           VITE_FR_REGION: ${{ vars.VITE_FR_REGION }}
+          VITE_POSTHOG_TOKEN: ${{ vars.VITE_POSTHOG_TOKEN }}
+          VITE_COMMONS_ASSETS_URL: ${{ vars.VITE_COMMONS_ASSETS_URL }}
+      - run: test -s apps/web/dist/third-party-notices.txt
       - run: node scripts/check-cloud-config.mjs apps/web/dist
         env:
           VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}

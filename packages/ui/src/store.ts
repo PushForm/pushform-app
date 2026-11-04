@@ -3,7 +3,7 @@
 import { create } from 'zustand';
 import { readNavigationCubePreference } from './navCubePreference';
 import { DEFAULT_DISPLAY } from '@pushform/commands';
-import type { DisplayState, EntryField } from '@pushform/commands';
+import type { DisplayState, EntryField, ToolChoice } from '@pushform/commands';
 import type { EntityRef } from '@pushform/model';
 
 export const PANEL_IDS = [
@@ -47,6 +47,8 @@ export interface AppState {
   vcbValue: string;
   /** Value fields the active tool draws in the viewport (`ToolStatus.fields`). */
   entryFields: readonly EntryField[];
+  /** Pick lists the active tool offers (`ToolStatus.choices`), shown in the status bar. */
+  toolChoices: readonly ToolChoice[];
   /** Text typed into value fields, by field id; a field without a draft shows its live value. */
   entryDrafts: Readonly<Record<string, string>>;
   /** Field being typed in, or null. `value` is the field typing opens beside the pointer. */
@@ -77,7 +79,7 @@ export interface AppState {
   setActiveTool(id: string | null): void;
   togglePanel(id: PanelId): void;
   closePanel(): void;
-  setStatus(s: { instructor: string; vcbLabel: string; vcbValue?: string | undefined; fields?: readonly EntryField[] | undefined }): void;
+  setStatus(s: { instructor: string; vcbLabel: string; vcbValue?: string | undefined; fields?: readonly EntryField[] | undefined; choices?: readonly ToolChoice[] | undefined }): void;
   /** Start or continue typing in field `id` with `text`. */
   setEntryDraft(id: string, text: string): void;
   /** Drop a field's typed text. */
@@ -116,6 +118,7 @@ export const useAppStore = create<AppState>()((set) => ({
   vcbLabel: '',
   vcbValue: '',
   entryFields: [],
+  toolChoices: [],
   entryDrafts: {},
   entryFocus: null,
   entryError: null,
@@ -136,7 +139,7 @@ export const useAppStore = create<AppState>()((set) => ({
   setActiveTool: (activeToolId) => set({ activeToolId }),
   togglePanel: (id) => set((s) => ({ openPanel: s.openPanel === id ? null : id })),
   closePanel: () => set({ openPanel: null }),
-  setStatus: (st) => set({ instructor: st.instructor, vcbLabel: st.vcbLabel, vcbValue: st.vcbValue ?? '', entryFields: st.fields ?? [] }),
+  setStatus: (st) => set({ instructor: st.instructor, vcbLabel: st.vcbLabel, vcbValue: st.vcbValue ?? '', entryFields: st.fields ?? [], toolChoices: st.choices ?? [] }),
   setEntryDraft: (id, text) => set((s) => ({ entryDrafts: { ...s.entryDrafts, [id]: text }, entryFocus: id, entryError: s.entryError === id ? null : s.entryError })),
   clearEntryDraft: (id) =>
     set((s) => {

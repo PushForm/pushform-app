@@ -324,6 +324,47 @@ describe('Chat', () => {
     view.unmount();
     expect(signal?.aborted).toBe(true);
   });
+  it('shows animated thinking dots until the first words of a reply arrive', async () => {
+    const backend = fakeBackend();
+    let push: ((chunk: string) => void) | undefined;
+    const slow: typeof fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (!url.endsWith('/messages')) return backend.fetch(input, init);
+      return new Response(new ReadableStream<Uint8Array>({ start(controller) { push = (chunk) => controller.enqueue(new TextEncoder().encode(chunk)); } }), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    };
+    const client = new RequestsClient({ baseUrl: BASE, apikey: 'k', getToken: async () => 'jwt-token', fetch: slow });
+    render(<Chat client={client} account={account} screen={screenInfo} onClose={() => {}} />);
+    fireEvent.change(await screen.findByLabelText('Your message'), { target: { value: 'hello' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    const dots = await screen.findByRole('status', { name: 'Agent is thinking' });
+    expect(dots.querySelectorAll('span')).toHaveLength(3);
+    push!('event: text\ndata: {"delta":"Hello"}\n\n');
+    await waitFor(() => expect(screen.queryByRole('status', { name: 'Agent is thinking' })).toBeNull());
+    expect(document.querySelector('.is-streaming')?.textContent).toContain('Hello');
+  });
+  it('shows the backend status line in place of the dots, hides it when the agent speaks, and shows a later one beneath its words', async () => {
+    const backend = fakeBackend();
+    let push: ((chunk: string) => void) | undefined;
+    const slow: typeof fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (!url.endsWith('/messages')) return backend.fetch(input, init);
+      return new Response(new ReadableStream<Uint8Array>({ start(controller) { push = (chunk) => controller.enqueue(new TextEncoder().encode(chunk)); } }), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    };
+    const client = new RequestsClient({ baseUrl: BASE, apikey: 'k', getToken: async () => 'jwt-token', fetch: slow });
+    render(<Chat client={client} account={account} screen={screenInfo} onClose={() => {}} />);
+    fireEvent.change(await screen.findByLabelText('Your message'), { target: { value: 'Build a cabinet' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await screen.findByRole('status', { name: 'Agent is thinking' });
+    push!('event: status\ndata: {"phase":"reading","text":"Reading your request…"}\n\n');
+    await waitFor(() => expect(document.querySelector('.is-streaming .pf-fr-working')?.textContent).toBe('Reading your request…'));
+    expect(screen.queryByRole('status', { name: 'Agent is thinking' })).toBeNull();
+    push!('event: text\ndata: {"delta":"Building the box."}\n\n');
+    await waitFor(() => expect(document.querySelector('.is-streaming')?.textContent).toContain('Building the box.'));
+    expect(document.querySelector('.is-streaming')?.textContent).not.toContain('Reading your request…');
+    push!('event: status\ndata: {"phase":"writing","text":"Writing the change…"}\n\n');
+    await waitFor(() => expect(document.querySelector('.is-streaming .pf-fr-working.is-after')?.textContent).toBe('Writing the change…'));
+    expect(document.querySelector('.is-streaming')?.textContent).toContain('Building the box.');
+  });
   it('shows a short muted notice when the message limit is reached and never a message counter', async () => {
     setup({ turns: [[text('That is all I can take; send it or stop?'), briefEvent({ ...featureBrief, desired: 'x' }, 'T'), done(30, true)]] });
     await say('hello');
@@ -443,6 +484,32 @@ describe('document editing', () => {
     const at = (needle: string) => lines.findIndex(line => line.includes(needle));
     expect(at('Adding a title block.')).toBeLessThan(at('Changed the document: Title block.'));
     expect(at('Changed the document: Title block.')).toBeLessThan(at('Done: the title block'));
+  });
+  it('shows one change line per message, updated in place as later batches of the turn apply', async () => {
+    let applied = 0;
+    const run = vi.fn(() => {
+      applied += 1;
+      return { content: '{"ok":true}', isError: false, notice: applied === 1 ? 'Changed the document: Grain left side. Undo reverts it.' : `Changed the document: Grain left side and ${applied - 1} more change${applied === 2 ? '' : 's'}. Undo reverts it.` };
+    });
+    const two: FakeTurn = { event: 'tool_request', data: { calls: [{ ...call, id: 'c2' }, { ...call, id: 'c3' }] } };
+    setup({ turns: [[text('Setting the grain.'), toolRequest, awaiting], [text('Now the rest.'), two, awaiting], [toolRequest, awaiting], [text('Done.'), done(1)],
+      [toolRequest, awaiting], [text('Again.'), done(2)]] },
+      { documentTools: () => ({ document: LAYOUT, run }) });
+    await say('Set the grain on every part');
+    await waitFor(() => expect(log().textContent).toContain('Done.'));
+    const system = () => [...log().querySelectorAll('.pf-fr-message.is-system')].map(el => el.textContent);
+    expect(run).toHaveBeenCalledTimes(4);
+    expect(system()).toEqual(['Changed the document: Grain left side and 3 more changes. Undo reverts it.']);
+    // The line stays where the first change was made.
+    const lines = [...log().querySelectorAll('.pf-fr-message')].map(el => el.textContent ?? '');
+    const at = (needle: string) => lines.findIndex(line => line.includes(needle));
+    expect(at('Setting the grain.')).toBeLessThan(at('Changed the document'));
+    expect(at('Changed the document')).toBeLessThan(at('Now the rest.'));
+    // The next message gets a line of its own.
+    applied = 0;
+    await say('Once more');
+    await waitFor(() => expect(log().textContent).toContain('Again.'));
+    expect(system()).toEqual(['Changed the document: Grain left side and 3 more changes. Undo reverts it.', 'Changed the document: Grain left side. Undo reverts it.']);
   });
   it('shows a reply split by tool calls under one Agent label and drops blank text before a call', async () => {
     const run = vi.fn(() => ({ content: '{"ok":true,"revision":1}', isError: false }));
@@ -595,6 +662,66 @@ describe('Chat docked', () => {
   });
 });
 
+describe('pictures in messages', () => {
+  const choosePictures = (...files: File[]): void => { fireEvent.change(screen.getByLabelText('Picture files'), { target: { files } }); };
+  const png = (name: string): File => new File(['pixels'], name, { type: 'image/png' });
+  const pending = (): HTMLElement | null => screen.queryByRole('list', { name: 'Pictures to send' });
+
+  it('adds pictures with the Add picture control, shows them removable, and sends them with the next message on any path', async () => {
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() }));
+    const { backend } = setup();
+    expect(await screen.findByRole('button', { name: 'Add picture' })).toBeTruthy();
+    choosePictures(png('cabinet.png'), png('door.png'));
+    await waitFor(() => expect(within(pending()!).getAllByRole('listitem')).toHaveLength(2));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove door.png' }));
+    await waitFor(() => expect(within(pending()!).getAllByRole('listitem')).toHaveLength(1));
+    await say('Build this cabinet');
+    expect(pending()).toBeNull();
+    const message = backend.calls.findLast(c => c.path.endsWith('/messages'))!;
+    expect(message.body).toMatchObject({ text: 'Build this cabinet', attachments: ['att-1'] });
+    const complete = backend.calls.findIndex(c => c.path.endsWith('/complete'));
+    expect(complete).toBeGreaterThan(0); expect(complete).toBeLessThan(backend.calls.indexOf(message));
+    expect(within(log()).getByRole('list', { name: 'Pictures' })).toBeTruthy();
+    expect(backend.conversations.get('conv-1')?.messages[0]).toMatchObject({ role: 'user', pictures: [{ id: 'att-1', name: 'cabinet.png' }] });
+  });
+
+  it('sends a message of pictures alone, and adds pasted images', async () => {
+    const { backend } = setup();
+    const box = await screen.findByLabelText('Your message');
+    fireEvent.paste(box, { clipboardData: { files: [png('pasted.png')] } });
+    await waitFor(() => expect(pending()).not.toBeNull());
+    const sendButton = screen.getByRole('button', { name: 'Send' });
+    await waitFor(() => expect(sendButton.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(sendButton);
+    await waitFor(() => expect(backend.calls.some(c => c.path.endsWith('/messages'))).toBe(true));
+    expect(backend.calls.findLast(c => c.path.endsWith('/messages'))!.body).toMatchObject({ text: '', attachments: ['att-1'] });
+  });
+
+  it('refuses files that are not PNG, JPEG or WebP pictures with a notice', async () => {
+    setup();
+    await screen.findByRole('button', { name: 'Add picture' });
+    choosePictures(new File(['x'], 'notes.txt', { type: 'text/plain' }));
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('notes.txt is not a PNG, JPEG or WebP image.'));
+    expect(pending()).toBeNull();
+  });
+
+  it('keeps the message and its pictures in the composer when an upload fails', async () => {
+    const { backend } = setup();
+    await screen.findByRole('button', { name: 'Add picture' });
+    choosePictures(png('cabinet.png'));
+    await waitFor(() => expect(pending()).not.toBeNull());
+    // The storage upload succeeds but the size check fails: completion is refused.
+    const stored = backend.uploads; const set = stored.set.bind(stored);
+    stored.set = ((key: string) => set(key, -1)) as typeof stored.set;
+    fireEvent.change(screen.getByLabelText('Your message'), { target: { value: 'Build this' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('does not match'));
+    expect(within(pending()!).getAllByRole('listitem')).toHaveLength(1);
+    expect((screen.getByLabelText('Your message') as HTMLTextAreaElement).value).toBe('Build this');
+    expect(backend.calls.some(c => c.path.endsWith('/messages'))).toBe(false);
+  });
+});
+
 describe('ticket images', () => {
   const chooseFiles = (...files: File[]): void => { fireEvent.change(screen.getByLabelText('Image files'), { target: { files } }); };
   const readyImages = async (): Promise<void> => { await waitFor(() => expect(screen.getByRole('button', { name: 'Upload images' }).hasAttribute('disabled')).toBe(false)); };
@@ -721,4 +848,158 @@ it('shows instructions before waiting and cancels the old cue when the user send
   expect(log().textContent).toContain('We can try something else.');
   expect(backend.calls.some(call => call.path.endsWith('/tool-results'))).toBe(false);
   await act(async () => {});
+});
+
+describe('composer', () => {
+  it('shows the send key only when there is text', async () => {
+    setup();
+    const box = await screen.findByLabelText('Your message');
+    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull();
+    fireEvent.change(box, { target: { value: 'Hello' } });
+    expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy();
+  });
+  it('disables dictation where speech recognition is unavailable', async () => {
+    setup();
+    expect((await screen.findByRole('button', { name: 'Dictate' })).hasAttribute('disabled')).toBe(true);
+  });
+  it('appends dictated phrases to the draft and stops on a second press', async () => {
+    const instances: { onresult: ((event: unknown) => void) | null; onend: (() => void) | null; stop: () => void }[] = [];
+    vi.stubGlobal('webkitSpeechRecognition', class {
+      continuous = false; interimResults = false; lang = '';
+      onresult: ((event: unknown) => void) | null = null; onerror = null; onend: (() => void) | null = null;
+      constructor() { instances.push(this); }
+      start(): void {}
+      stop(): void { this.onend?.(); }
+      abort(): void {}
+    });
+    setup();
+    const box = await screen.findByLabelText<HTMLTextAreaElement>('Your message');
+    fireEvent.change(box, { target: { value: 'Make it' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Dictate' }));
+    expect(screen.getByRole('button', { name: 'Stop dictation' }).getAttribute('aria-pressed')).toBe('true');
+    const final = Object.assign([{ transcript: 'two feet wide' }], { isFinal: true });
+    act(() => { instances[0]!.onresult?.({ resultIndex: 0, results: [final] }); });
+    expect(box.value).toBe('Make it two feet wide');
+    fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
+    expect(screen.getByRole('button', { name: 'Dictate' }).getAttribute('aria-pressed')).toBe('false');
+  });
+});
+
+describe('render review and progress', () => {
+  const MODEL = { type: 'model', apiVersion: 1, edit: 1 } as const;
+  const awaiting: FakeTurn = { event: 'done', data: { messageCount: 1, limitReached: false, ended: false, awaitingTools: true } };
+  const apply = { id: 'a1', name: 'model_apply_operations', input: { label: 'Cabinet' } };
+  const query = { id: 'q1', name: 'model_query', input: {} };
+  const renderCall = { id: 'r1', name: 'model_render', input: {}, review: { index: 2, limit: 3 } };
+  const progress = (call: { name: string }) => (call.name === 'model_apply_operations' ? 'Applying the change…' : undefined);
+  const placeholder = (): string => document.querySelector('.is-streaming .pf-fr-working')?.textContent ?? '';
+  /** A tool run that waits until the test lets it finish, or until the turn is stopped. */
+  function held() {
+    const pending: { call: { id: string; name: string }; finish: (outcome: Record<string, unknown>) => void; signal: AbortSignal | undefined }[] = [];
+    const run = vi.fn((call: { id: string; name: string }, signal?: AbortSignal) => new Promise<{ content: string; isError: boolean }>(resolve => {
+      signal?.addEventListener('abort', () => resolve({ content: '{"ok":false,"error":{"code":"cancelled"}}', isError: true }), { once: true });
+      pending.push({ call, finish: outcome => resolve(outcome as { content: string; isError: boolean }), signal });
+    }));
+    return { run, pending };
+  }
+  const send = async (message: string): Promise<void> => {
+    fireEvent.change(await screen.findByLabelText('Your message'), { target: { value: message } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+  };
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('reads "Checking the result (review N of 3)…" from the backend count, keeps the last step between steps, and shows a collapsed review line', async () => {
+    const { run, pending } = held();
+    const image = { mime: 'image/jpeg' as const, data: '/9j/AQID' };
+    const { backend } = setup({ turns: [[text('Building it.'), { event: 'status', data: { phase: 'writing', text: 'Writing the change…' } }, { event: 'tool_request', data: { calls: [apply, query] } }, awaiting],
+      [{ event: 'tool_request', data: { calls: [renderCall] } }, awaiting], [text('It matches the request.'), done(1)]] },
+    { documentTools: () => ({ document: MODEL, run, progress }) });
+    await send('Build a cabinet');
+    // The editor's own step replaces the backend's status line while it runs.
+    await waitFor(() => expect(placeholder()).toBe('Applying the change…'));
+    expect(document.querySelector('.is-streaming')?.textContent).not.toContain('Writing the change…');
+    act(() => pending[0]!.finish({ content: '{"ok":true}', isError: false, notice: 'Changed the document: Cabinet. Undo reverts it.' }));
+    // A step without its own text keeps the last step's.
+    await waitFor(() => expect(pending).toHaveLength(2));
+    expect(placeholder()).toBe('Applying the change…');
+    act(() => pending[1]!.finish({ content: '{"entities":[]}', isError: false }));
+    await waitFor(() => expect(pending).toHaveLength(3));
+    await waitFor(() => expect(placeholder()).toBe('Checking the result (review 2 of 3)…'));
+    act(() => pending[2]!.finish({ content: '{"ok":true}', isError: false, images: [image, image], views: ['iso', 'front'] }));
+    await waitFor(() => expect(log().textContent).toContain('It matches the request.'));
+    expect(backend.calls.filter(c => c.path.endsWith('/tool-results')).at(-1)?.body).toEqual({ results: [{ toolUseId: 'r1', content: '{"ok":true}', isError: false, images: [image, image] }] });
+    // The review line: compact, collapsed, with small previews; it opens to the full pictures.
+    const toggle = screen.getByRole('button', { name: 'Checked the result' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.querySelectorAll('img')).toHaveLength(2);
+    expect(screen.queryByRole('img', { name: 'Render, iso' })).toBeNull();
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByRole('img', { name: 'Render, iso' }).getAttribute('src')).toBe('data:image/jpeg;base64,/9j/AQID');
+    expect(screen.getByRole('img', { name: 'Render, front' })).toBeTruthy();
+    fireEvent.click(toggle);
+    expect(screen.queryByRole('img', { name: 'Render, iso' })).toBeNull();
+    // It is not a change line, which stays the one for the batch.
+    const lines = [...log().querySelectorAll('.pf-fr-message.is-system')].map(el => el.textContent);
+    expect(lines).toEqual(['Changed the document: Cabinet. Undo reverts it.', 'Checked the result']);
+  });
+
+  it('adds the running time to the placeholder after 10 seconds, each second, and tells screen readers only now and then', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { run } = held();
+    setup({ turns: [[{ event: 'tool_request', data: { calls: [apply] } }, awaiting]] }, { documentTools: () => ({ document: MODEL, run, progress }) });
+    await send('Build a cabinet');
+    await waitFor(() => expect(placeholder()).toBe('Applying the change…'));
+    act(() => { vi.advanceTimersByTime(8_000); });
+    expect(placeholder()).toBe('Applying the change…');
+    act(() => { vi.advanceTimersByTime(16_000); });
+    expect(placeholder()).toMatch(/^Applying the change… 2[45] s$/);
+    const shown = Number(/(\d+) s$/.exec(placeholder())![1]);
+    act(() => { vi.advanceTimersByTime(1_000); });
+    expect(placeholder()).toBe(`Applying the change… ${shown + 1} s`);
+    expect(document.querySelector('.pf-fr-elapsed')!.getAttribute('aria-hidden')).toBe('true');
+    expect(document.querySelector('.pf-fr-sr')).toBeNull();
+    act(() => { vi.advanceTimersByTime(10_000); });
+    expect(document.querySelector('.pf-fr-sr')?.textContent).toBe('Still working, 30 seconds.');
+  });
+
+  it('stops the turn with Stop: the running batch is cancelled, nothing more is sent, and the reply so far stays', async () => {
+    const { run, pending } = held();
+    const { backend } = setup({ turns: [[text('Building it.'), { event: 'tool_request', data: { calls: [apply] } }, awaiting]] },
+      { documentTools: () => ({ document: MODEL, run, progress }) });
+    await send('Build a cabinet');
+    await waitFor(() => expect(placeholder()).toBe('Applying the change…'));
+    expect(screen.queryByRole('alert')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    expect(pending[0]!.signal?.aborted).toBe(true);
+    await settled();
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+    expect(backend.calls.some(c => c.path.endsWith('/tool-results'))).toBe(false);
+    expect(log().textContent).toContain('Building it.');
+    expect(log().textContent).toContain('Build a cabinet');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect((screen.getByLabelText('Your message') as HTMLTextAreaElement).disabled).toBe(false);
+  });
+
+  it('shows a reloaded review as a line without pictures, naming its views', async () => {
+    const conversation = { id: 'conv-r', kind: 'help', path: 'help' as const, status: 'open', title: null, brief: null, messageCount: 1, requestId: null, updatedAt: '2026-11-02T10:00:00Z',
+      messages: [{ role: 'user', text: 'Build a cabinet', at: 't1' }, { role: 'tool', text: '', at: 't2', views: ['iso', 'front'] } as { role: string; text: string; at: string }, { role: 'assistant', text: 'Built it.', at: 't3' }] };
+    rememberDraft(account.id, { conversationId: 'conv-r', path: 'help', title: null });
+    setup({ openConversations: [conversation] });
+    const toggle = await screen.findByRole('button', { name: 'Checked the result' });
+    fireEvent.click(toggle);
+    expect(log().textContent).toContain('Pictures are not kept after the reply. Views: iso; front.');
+  });
+
+  it('shows a reloaded acknowledgment as the opening of the reply, under one Agent label', async () => {
+    const conversation = { id: 'conv-a', kind: 'help', path: 'help' as const, status: 'open', title: null, brief: null, messageCount: 1, requestId: null, updatedAt: '2026-11-04T10:00:00Z',
+      messages: [{ role: 'user', text: 'A 24 in base cabinet', at: 't1' }, { role: 'assistant', text: 'A 24 in base cabinet. Starting on it now.', at: 't2', acknowledgment: true } as { role: string; text: string; at: string },
+        { role: 'tool', text: '', at: 't3' }, { role: 'assistant', text: 'Built it.', at: 't4' }] };
+    rememberDraft(account.id, { conversationId: 'conv-a', path: 'help', title: null });
+    setup({ openConversations: [conversation] });
+    await waitFor(() => expect(log().textContent).toContain('Built it.'));
+    expect(log().textContent).toContain('A 24 in base cabinet. Starting on it now.');
+    // The greeting, the requester, then one label over the acknowledgment and the reply that follows it.
+    expect([...log().querySelectorAll('.pf-fr-role')].map(el => el.textContent)).toEqual(['Agent', 'You', 'Agent']);
+  });
 });

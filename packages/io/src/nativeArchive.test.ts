@@ -27,6 +27,27 @@ describe('native archive bounds', () => {
     expect(Object.keys(files)).toEqual(['model.json']);
   });
 
+  it('reads entry names stored as UTF-8 without the UTF-8 flag, and keeps single-byte names as they are', () => {
+    const bytes = zipSync({ 'ref/模型.skp': strToU8('a'), 'ref/cafX.png': strToU8('b') });
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let end = bytes.length - 22;
+    while (view.getUint32(end, true) !== 0x06054b50) end--;
+    for (let at = view.getUint32(end + 16, true), index = view.getUint16(end + 10, true); index > 0; index--) {
+      const length = view.getUint16(at + 28, true), local = view.getUint32(at + 42, true);
+      view.setUint16(at + 8, view.getUint16(at + 8, true) & ~0x800, true);
+      view.setUint16(local + 6, view.getUint16(local + 6, true) & ~0x800, true);
+      // The second name in a single-byte encoding: é as the one byte 0xE9, which is not UTF-8.
+      for (const name of [at + 46, local + 30]) {
+        const x = bytes.subarray(name, name + length).indexOf(0x58);
+        if (x >= 0) bytes[name + x] = 0xe9;
+      }
+      at += 46 + length + view.getUint16(at + 30, true) + view.getUint16(at + 32, true);
+    }
+    const files = readNativeArchive(bytes, { extension: '.layout', supported: name => name === 'ref/模型.skp' || name === 'ref/café.png' });
+    expect(Object.keys(files).sort()).toEqual(['ref/café.png', 'ref/模型.skp']);
+    expect(files['ref/模型.skp']).toEqual(strToU8('a'));
+  });
+
   it('rejects archives with more entries than the bound before inflating anything', () => {
     const files: Zippable = {};
     for (let i = 0; i <= NATIVE_ARCHIVE_MAX_ENTRIES; i++) files[`images/${i}.png`] = [new Uint8Array(1), { level: 0 }];

@@ -56,6 +56,34 @@ it('maps a colorized material to its colorized texture and a plain one to the im
   materials.dispose(); textures.dispose();
 });
 
+it('shows through the transparent pixels of a texture once its image has loaded, and keeps opaque ones opaque', () => {
+  const loads = new Map<string, () => void>();
+  vi.spyOn(TextureLoader.prototype, 'load').mockImplementation((url, onLoad) => {
+    const texture = new Texture();
+    loads.set(url, () => { texture.image = Object.assign(document.createElement('canvas'), { width: 2, height: 2 }); onLoad?.(texture); });
+    return texture;
+  });
+  const textures = new TextureCache(), materials = new TexturedMaterialCache(textures);
+  const clear = materials.get({ id: 1, color: '#000000', alpha: 1, textureUrl: 'blob:hatch' }, 'front', false, true);
+  expect(clear.transparent).toBe(false);
+  expect(clear.alphaTest).toBe(0);
+  stubCanvas([0, 0, 0, 0]);
+  loads.get('blob:hatch')!();
+  expect(textures.hasAlpha('blob:hatch')).toBe(true);
+  expect(clear.transparent).toBe(true);
+  expect(clear.alphaTest).toBeGreaterThan(0);
+  // A material made after the image loaded starts out see-through; its color-only twin is unaffected.
+  expect(materials.get({ id: 1, color: '#000000', alpha: 1, textureUrl: 'blob:hatch' }, 'back', false, true).transparent).toBe(true);
+  expect(materials.get({ id: 1, color: '#000000', alpha: 1, textureUrl: 'blob:hatch' }, 'back', false, false).transparent).toBe(false);
+  vi.mocked(HTMLCanvasElement.prototype.getContext).mockRestore();
+  stubCanvas([90, 60, 30, 255]);
+  const wood = materials.get({ id: 2, color: '#000000', alpha: 1, textureUrl: 'blob:wood' }, 'front', false, true);
+  loads.get('blob:wood')!();
+  expect(textures.hasAlpha('blob:wood')).toBe(false);
+  expect(wood.transparent).toBe(false);
+  expect(wood.alphaTest).toBe(0);
+  materials.dispose(); textures.dispose();
+});
 
 it('waits for texture decoding before export and reports failed images', async () => {
   const loads: (() => void)[] = [], errors: (() => void)[] = [];

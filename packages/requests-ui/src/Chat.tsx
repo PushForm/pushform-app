@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type JSX } from 'react';
-import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_REPORT, formatBytes, RequestsError, SCREENSHOT_TYPES, type Attachment, type AttachmentFile, type Conversation, type ConversationPath, type ConversationSummary, type DocumentDescriptor, type IntentPath, type Me, type Message, type RequestsClient, type ScreenInfo, type ToolCall, type ToolCallResult } from './client';
+import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type JSX } from 'react';
+import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_REPORT, formatBytes, RequestsError, SCREENSHOT_TYPES, type Attachment, type AttachmentFile, type Conversation, type ConversationPath, type ConversationSummary, type DocumentDescriptor, type IntentPath, type Me, type Message, type RequestsClient, type ScreenInfo, type ToolCall, type ToolCallResult, type ToolImage } from './client';
 import { draftScope, forgetDraft, HOME_SCOPE, readDrafts, rememberDraft } from './drafts';
 import { DockedPanel } from './DockedPanel';
 import { Popover } from './Popover';
 import { MessageMarkdown } from './MessageMarkdown';
+import { useDictation } from './useDictation';
+import { imageFiles, preparePicture, PICTURES_PER_MESSAGE } from './pictures';
 
 export interface ChatProps {
   readonly client: RequestsClient;
@@ -53,14 +55,24 @@ export interface DocumentToolSession {
   /** What the chat shows while a call runs, for a call that takes noticeable time; undefined keeps the usual placeholder. */
   progress?(call: ToolCall): string | undefined;
 }
-export interface DocumentToolOutcome { readonly content: string; readonly isError: boolean; readonly notice?: string | undefined }
+/** `images` are a render's pictures for the agent, and `views` name them for the review line. */
+export interface DocumentToolOutcome {
+  readonly content: string; readonly isError: boolean; readonly notice?: string | undefined;
+  readonly images?: readonly ToolImage[] | undefined; readonly views?: readonly string[] | undefined;
+}
 
 type View =
   | { readonly kind: 'unavailable'; readonly message: string }
   | { readonly kind: 'chat' };
 
 /** A transcript line: a persisted message, or a local system line such as "Filed as CUS-12". */
-type Entry = Message | { readonly role: 'system'; readonly text: string; readonly at: string };
+/** `local`: the pictures of a message sent from this panel, shown from their files until the conversation reloads. */
+/**
+ * `review`: a render review's line, with the pictures the agent saw while they are still in this panel (none after a
+ * reload: the backend does not keep them). Review lines are transcript-only, never change lines.
+ */
+type Entry = (Message & { readonly local?: readonly AttachmentFile[] | undefined }) | { readonly role: 'system'; readonly text: string; readonly at: string }
+  | { readonly role: 'review'; readonly views: readonly string[]; readonly images: readonly ToolImage[]; readonly at: string };
 
 interface ChatState {
   /**
@@ -89,7 +101,15 @@ export const SLASH_COMMANDS: readonly { readonly name: string; readonly descript
   { name: 'clear', description: 'Clear this chat and start a new conversation for this document.' },
 ];
 const slashName = (message: string): string => message.slice(1).split(/\s/, 1)[0]!.toLowerCase();
-const visible = (messages: readonly Message[]): Message[] => messages.filter(message => message.role !== 'tool' && (message.role !== 'assistant' || !!message.text.trim()));
+const visible = (messages: readonly Message[]): Entry[] => messages.flatMap((message): Entry[] => {
+  if (message.role === 'tool') return message.reviewed?.length ? [{ role: 'review', views: message.reviewed, images: [], at: message.at }] : [];
+  return message.role !== 'assistant' || !!message.text.trim() ? [message] : [];
+});
+/** The placeholder adds the turn's running time once the turn has run this long. */
+export const ELAPSED_AFTER_SECONDS = 10;
+/** Screen readers hear that the agent is still working at this interval, never every second. */
+const ANNOUNCE_EVERY_SECONDS = 30;
+const reviewProgress = (call: ToolCall): string | undefined => (call.review ? `Checking the result (review ${call.review.index} of ${call.review.limit})…` : undefined);
 const errorText = (cause: unknown): string => cause instanceof Error ? cause.message : 'Something went wrong.';
 const EMPTY: ChatState = { conversation: null, transcript: [], streaming: null, path: 'open', messageCount: 0, limitReached: false };
 function fromConversation(conversation: Conversation): ChatState {
@@ -113,6 +133,10 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
   const [busy, setBusy] = useState(false);
   const [waitingForGuidance, setWaitingForGuidance] = useState(false);
   const [toolProgress, setToolProgress] = useState<string | null>(null);
+  /** The backend's latest status line for the running turn; cleared when the agent's own words or a tool step take over. */
+  const [statusLine, setStatusLine] = useState<string | null>(null);
+  /** When the running turn started, for the elapsed time in its placeholder; null while no turn runs. */
+  const [turnStarted, setTurnStarted] = useState<number | null>(null);
   const [error, setError] = useState<{ code: string; message: string; retry?: (() => void) | undefined } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [retryTick, setRetryTick] = useState(0);
@@ -188,9 +212,11 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
     const ids = new Set<string>(chat.conversation ? [chat.conversation.id] : []);
     for (const draft of readDrafts(account.id, draftStorage)) if (draftScope(draft) === scopeRef.current) ids.add(draft.conversationId);
     for (const id of ids) { forgetDraft(account.id, id, draftStorage); void client.discardConversation(id).catch(() => {}); }
-    setWaitingForGuidance(false);
+    setWaitingForGuidance(false); setToolProgress(null); setStatusLine(null); setTurnStarted(null);
     setChat(EMPTY); setText(''); setError(null); setNotice(null); setBusy(false);
   };
+  /** Stop: cancels the running turn and any batch in progress; what was already applied stays, undoable. */
+  const stop = (): void => { turn.current?.abort(); };
   const clearsSeen = useRef(0);
   useEffect(() => {
     if (clearSignal <= clearsSeen.current) return;
@@ -210,20 +236,27 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
     const body = message.trim();
     if (!intent && body.startsWith('/')) { runSlash(body); return; }
     if ((busy && !waitingForGuidance) || !attachmentsReady) return;
-    if (!body) return;
+    // Pictures in the composer go with a typed message, never with an intent card.
+    const outgoing = intent ? [] : pictures;
+    if (!body && !outgoing.length) return;
     if (waitingForGuidance) { generation.current += 1; turn.current?.abort(); setWaitingForGuidance(false); }
     onMessage?.();
     const at = new Date().toISOString();
     started.current = true;
     setText(''); setNotice(null); setError(null);
-    setChat(current => ({ ...current, transcript: [...current.transcript, { role: 'user', text: body, at }], streaming: '' }));
+    if (outgoing.length) setPictures([]);
+    setChat(current => ({ ...current, transcript: [...current.transcript, { role: 'user', text: body, at, ...(outgoing.length ? { local: outgoing } : {}) }], streaming: '' }));
     const controller = new AbortController(); turn.current = controller;
     const gen = generation.current;
     const live = (): boolean => alive.current && generation.current === gen;
+    /** Stop ends the turn here: the calls of a stopped round are never answered. */
+    const stopped = (): void => { if (controller.signal.aborted) throw new DOMException('Stopped', 'AbortError'); };
+    setToolProgress(null); setStatusLine(null); setTurnStarted(Date.now());
     void run(async () => {
       let streamed = '', rateLimited = false, failed = false, resumed = false, conversation = chat.conversation;
       // A conversation the server ended (filed, added, closed) is left behind: this message starts a new one.
       let ended = false, startOver = false, path = conversation ? chat.path : 'open', title = conversation?.title ?? null;
+      const pictureIds: string[] = [];
       try {
         if (!conversation) {
           try {
@@ -243,16 +276,29 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
           setAttachments(current => [...current, attached]);
           setLocalImages(current => current.filter(item => item !== file));
         }
+        // The message's pictures are uploaded before the message is sent; on a filing path they are the ticket's images too.
+        for (const file of outgoing) {
+          let attached: Attachment;
+          try { attached = await client.attach(id, file); } catch (cause) { failed = true; throw cause; }
+          if (!live()) return;
+          uploadedPreviews.current.set(attached.id, file.blob);
+          pictureIds.push(attached.id);
+          if (path === 'problem' || path === 'feature') setAttachments(current => [...current, attached]);
+        }
         // The document is bound now; switching tabs later never retargets this turn's tool calls.
         const tools = documentTools?.() ?? null;
-        let stream = client.sendMessage(id, body, { ...(intent ? { intent } : {}), document: tools?.document ?? null, signal: controller.signal });
+        // The turn's one change line, as the transcript holds it and in its newest wording: each applied change
+        // updates it in place rather than adding a line.
+        let shownChange = null as Entry | null, change = null as Entry | null;
+        let stream = client.sendMessage(id, body, { ...(intent ? { intent } : {}), document: tools?.document ?? null, signal: controller.signal, attachments: pictureIds });
         for (;;) {
           let requested: readonly ToolCall[] = [];
           for await (const event of stream) {
             if (!live()) return;
             switch (event.type) {
               case 'tool_request': requested = event.calls; break;
-              case 'text': streamed += event.delta; setChat(current => ({ ...current, streaming: streamed })); break;
+              case 'text': streamed += event.delta; setStatusLine(null); setChat(current => ({ ...current, streaming: streamed })); break;
+              case 'status': setStatusLine(event.text); break;
               // Only the path (and title, for the draft) matter here: the brief itself is what the agent writes into the chat.
               case 'brief': path = event.path ?? path; title = event.title ?? title; setChat(current => ({ ...current, path })); remember(id, path, title); break;
               case 'filed': case 'added': {
@@ -281,22 +327,34 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
           const cueInstruction = requested.find(call => call.name === 'ui_highlight')?.input as { instruction?: unknown } | undefined;
           const instructionText = partial.trim() ? partial : typeof cueInstruction?.instruction === 'string' ? cueInstruction.instruction.slice(0, 400) : '';
           if (instructionText.trim()) setChat(current => ({ ...current, streaming: '', transcript: [...current.transcript, { role: 'assistant', text: instructionText, at: new Date().toISOString() }] }));
-          const results: ToolCallResult[] = [], notices: string[] = [];
+          const results: ToolCallResult[] = [], lines: Entry[] = [];
           for (const call of requested) {
             let outcome: DocumentToolOutcome;
             if (!live()) return;
+            stopped();
             if (call.name === 'ui_highlight') setWaitingForGuidance(true);
-            setToolProgress(tools.progress?.(call) ?? null);
-            try { outcome = await tools.run(call, controller.signal); } catch (cause) { outcome = { content: `The editor could not run ${call.name}: ${errorText(cause)}`, isError: true }; } finally { if (alive.current) setToolProgress(null); }
+            // The placeholder keeps the last step's text until a step with its own text, or the reply, replaces it.
+            const progress = reviewProgress(call) ?? tools.progress?.(call);
+            setStatusLine(null);
+            if (progress) setToolProgress(progress);
+            try { outcome = await tools.run(call, controller.signal); } catch (cause) { outcome = { content: `The editor could not run ${call.name}: ${errorText(cause)}`, isError: true }; }
             if (!live()) return;
             setWaitingForGuidance(false);
-            results.push({ toolUseId: call.id, content: outcome.content, isError: outcome.isError });
-            if (outcome.notice) notices.push(outcome.notice);
+            stopped();
+            results.push({ toolUseId: call.id, content: outcome.content, isError: outcome.isError, ...(outcome.images?.length ? { images: outcome.images } : {}) });
+            const at = new Date().toISOString();
+            if (outcome.notice) {
+              const line: Entry = { role: 'system', text: outcome.notice, at: change?.at ?? at }, index = change ? lines.indexOf(change) : -1;
+              if (index >= 0) lines[index] = line;
+              else if (!change) lines.push(line);
+              change = line;
+            }
+            if (outcome.images?.length) lines.push({ role: 'review', views: outcome.views ?? [], images: outcome.images, at });
           }
           if (!live()) return;
-          const shown = new Date().toISOString();
-          setChat(current => ({ ...current, streaming: '', transcript: [...current.transcript,
-            ...notices.map(text => ({ role: 'system' as const, text, at: shown }))] }));
+          const replaced = shownChange, updated = change;
+          setChat(current => ({ ...current, streaming: '', transcript: [...(replaced && updated !== replaced ? current.transcript.map(item => item === replaced ? updated! : item) : current.transcript), ...lines] }));
+          shownChange = change;
           resumed = true;
           stream = client.sendToolResults(id, results, { signal: controller.signal });
         }
@@ -305,14 +363,25 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
         if (ended) forgetDraft(account.id, id, draftStorage);
       } catch (cause) {
         if (!live()) return;
+        // Stopped by the requester: the reply so far stays, with no error.
+        if (controller.signal.aborted) return;
         failed = true;
         if (cause instanceof RequestsError && cause.code === 'rate_limited') rateLimited = true;
         else if (cause instanceof RequestsError && cause.code === 'limit') setChat(current => ({ ...current, limitReached: true }));
         else throw cause;
       } finally {
         if (turn.current === controller) turn.current = null;
+        if (live()) { setToolProgress(null); setStatusLine(null); setTurnStarted(null); setWaitingForGuidance(false); }
         // A turn the server rejected before answering never received the message: the optimistic copy leaves the transcript.
         // Start over (the requester asked the agent to discard): the transcript goes too, so the greeting and cards return.
+        // A message that never reached the agent keeps its pictures in the composer for retry; its uploads are released.
+        if (failed && !resumed && outgoing.length && live()) {
+          setPictures(current => [...outgoing, ...current].slice(0, PICTURES_PER_MESSAGE));
+          if (!intent) setText(current => current || body);
+          const released = [...pictureIds], from = conversation?.id;
+          if (from) for (const attachmentId of released) void client.removeAttachment(from, attachmentId).catch(() => {});
+          setAttachments(current => current.filter(item => !released.includes(item.id)));
+        }
         if (live()) setChat(current => startOver ? EMPTY : ({ ...current, streaming: null,
           ...(ended ? { conversation: null, path: 'open' as const, messageCount: 0, limitReached: false } : {}),
           transcript: streamed.trim() ? [...current.transcript, { role: 'assistant', text: streamed, at: new Date().toISOString() }]
@@ -330,6 +399,37 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
   const [attachmentsReady, setAttachmentsReady] = useState(true);
   const [attachmentRetry, setAttachmentRetry] = useState(0);
   const picker = useRef<HTMLInputElement>(null);
+  // Pictures waiting in the composer for the next message, on every path.
+  const [pictures, setPictures] = useState<readonly AttachmentFile[]>([]);
+  const [dropping, setDropping] = useState(false);
+  const picturePicker = useRef<HTMLInputElement>(null);
+  const addPictures = (files: readonly File[]): void => {
+    if (!files.length) return;
+    void (async () => {
+      const prepared = await Promise.all(files.map(file => preparePicture(file, file.name || 'Pasted picture.png')));
+      if (!alive.current) return;
+      const refused = prepared.flatMap(p => (p.ok ? [] : [p.reason]));
+      const ready = prepared.flatMap(p => (p.ok ? [p.file] : []));
+      setPictures(current => {
+        const room = PICTURES_PER_MESSAGE - current.length;
+        if (ready.length > room) refused.push(`A message takes at most ${PICTURES_PER_MESSAGE} pictures.`);
+        return [...current, ...ready.slice(0, Math.max(0, room))];
+      });
+      setNotice(refused.length ? refused.join(' ') : null);
+    })();
+  };
+  const pickPictures = (event: ChangeEvent<HTMLInputElement>): void => { const files = Array.from(event.target.files ?? []); event.target.value = ''; addPictures(files); };
+  const pastePictures = (event: ClipboardEvent<HTMLTextAreaElement>): void => {
+    const files = imageFiles(event.clipboardData?.files);
+    if (files.length) { event.preventDefault(); addPictures(files); }
+  };
+  const hasFiles = (event: DragEvent): boolean => Array.from(event.dataTransfer?.types ?? []).includes('Files');
+  const dragOver = (event: DragEvent<HTMLDivElement>): void => { if (hasFiles(event)) { event.preventDefault(); setDropping(true); } };
+  const drop = (event: DragEvent<HTMLDivElement>): void => {
+    if (!hasFiles(event)) return;
+    event.preventDefault(); setDropping(false);
+    addPictures(imageFiles(event.dataTransfer.files));
+  };
   const capture = useRef(captureScreenshot); capture.current = captureScreenshot;
   const autoRemoved = useRef(new Set<string>());
   const reporting = conversationId !== null && (chat.path === 'problem' || chat.path === 'feature');
@@ -395,6 +495,20 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
     });
   };
 
+  // Dictated phrases join the draft with a space, as if typed.
+  const dictation = useDictation(phrase => setText(draft => draft && !/\s$/.test(draft) ? `${draft} ${phrase}` : draft + phrase));
+  const textLocked = busy && !waitingForGuidance && chat.streaming !== null;
+  useEffect(() => { if (textLocked || !open) dictation.stop(); }, [textLocked, open]);
+  // The composer grows with its text up to its CSS max-height, then scrolls.
+  useLayoutEffect(() => {
+    const box = composer.current;
+    if (!box) return;
+    box.style.height = 'auto';
+    box.style.height = `${box.scrollHeight}px`;
+  }, [text, view.kind]);
+
+  // A turn is running from the send until its last stream ends; Stop is offered all that time.
+  const working = turnStarted !== null;
   // Typing "/" lists the commands that match what follows it.
   const slashMatches = text.startsWith('/') && !/\s/.test(text) ? SLASH_COMMANDS.filter(command => command.name.startsWith(text.slice(1).toLowerCase())) : [];
   let body: JSX.Element;
@@ -404,7 +518,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
     const current = chat;
     const greeted = current.transcript.length === 0 || current.transcript[0]?.role === 'user';
     const showCards = current.transcript.length === 0 && current.streaming === null;
-    body = <div className="pf-fr-chat">
+    body = <div className={`pf-fr-chat${dropping ? ' is-dropping' : ''}`} onDragOver={dragOver} onDragLeave={() => setDropping(false)} onDrop={drop}>
       <div className="pf-fr-transcript" role="log" aria-label="Conversation" aria-live="polite">
         {greeted ? <div className="pf-fr-message is-assistant"><span className="pf-fr-role">Agent</span><MessageMarkdown text={GREETING} /></div> : null}
         {showCards ? <div className="pf-fr-cards" role="group" aria-label="What would you like to do?">
@@ -418,14 +532,22 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
             </div>;
           })}
         </div> : null}
-        {current.transcript.map((entry, index) => entry.role === 'system'
+        {current.transcript.map((entry, index) => entry.role === 'review' ? <ReviewLine key={index} entry={entry} />
+          : entry.role === 'system'
           ? <p key={index} className="pf-fr-message is-system pf-fr-muted" role="status">{entry.text}</p>
           // A reply split by tool calls reads as one message, under one label.
           : <div key={index} className={`pf-fr-message is-${entry.role}`}>{entry.role === 'assistant' && current.transcript[index - 1]?.role === 'assistant' ? null
             : <span className="pf-fr-role">{entry.role === 'user' ? 'You' : 'Agent'}</span>}
             {/* The requester's own words stay as typed; the agent's replies are Markdown. */}
-            {entry.role === 'user' ? <p>{entry.text}</p> : <MessageMarkdown text={entry.text} />}</div>)}
-        {current.streaming !== null && !waitingForGuidance ? <div className="pf-fr-message is-assistant is-streaming">{current.transcript.at(-1)?.role === 'assistant' ? null : <span className="pf-fr-role">Agent</span>}{current.streaming ? <MessageMarkdown text={current.streaming} /> : <p>{toolProgress ?? '…'}</p>}</div> : null}
+            {entry.role === 'user' ? <>{entry.text ? <p>{entry.text}</p> : null}<SentPictures entry={entry} client={client} previews={uploadedPreviews.current} /></> : <MessageMarkdown text={entry.text} />}</div>)}
+        {current.streaming !== null && !waitingForGuidance ? <div className="pf-fr-message is-assistant is-streaming">{current.transcript.at(-1)?.role === 'assistant' ? null : <span className="pf-fr-role">Agent</span>}{current.streaming ? <>
+          <MessageMarkdown text={current.streaming} />
+          {/* A status line that arrives after the agent's words (it started writing a change, say) shows beneath them. */}
+          {statusLine ? <div className="pf-fr-working is-after"><p role="status">{statusLine}</p></div> : null}
+        </> : <div className="pf-fr-working">
+          {statusLine ?? toolProgress ? <p role="status">{statusLine ?? toolProgress}</p> : <p className="pf-fr-thinking" role="status" aria-label="Agent is thinking"><span /><span /><span /></p>}
+          {turnStarted !== null ? <Elapsed since={turnStarted} /> : null}
+        </div>}</div> : null}
         <div ref={transcriptEnd} />
       </div>
       {current.limitReached ? <p className="pf-fr-muted pf-fr-limit" role="status">This conversation reached its {messageLimit}-message limit.</p> : null}
@@ -446,11 +568,24 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
         <button type="button" disabled={busy || full || !attachmentsReady} onClick={() => picker.current?.click()}>Upload images</button>
         <input ref={picker} type="file" multiple accept={SCREENSHOT_TYPES.join(',')} hidden aria-label="Image files" onChange={pickImages} />
       </div> : null}
+      {dictation.error ? <p className="pf-fr-notice" role="status">{dictation.error}</p> : null}
+      {pictures.length ? <ul className="pf-fr-pictures" aria-label="Pictures to send">{pictures.map((file, index) => <li key={`${file.name}-${index}`}>
+        <AttachmentPreview item={file} client={client} blob={file.blob} />
+        <button type="button" aria-label={`Remove ${file.name}`} onClick={() => setPictures(current => current.filter(item => item !== file))}>×</button>
+      </li>)}</ul> : null}
       <form className="pf-fr-composer" aria-label="Message" onSubmit={submit}>
+        <button type="button" className="pf-fr-icon" aria-label="Add picture" title="Add picture (or paste or drop an image)"
+          disabled={(busy && !waitingForGuidance) || pictures.length >= PICTURES_PER_MESSAGE} onClick={() => picturePicker.current?.click()}>{PLUS_ICON}</button>
+        <input ref={picturePicker} type="file" multiple accept={SCREENSHOT_TYPES.join(',')} hidden aria-label="Picture files" onChange={pickPictures} />
         <textarea ref={composer} data-autofocus data-submit-on-enter aria-label="Your message" rows={1} value={text} maxLength={4000}
-          disabled={busy && !waitingForGuidance && current.streaming !== null}
+          disabled={textLocked} onPaste={pastePictures}
           placeholder={!current.conversation ? 'Describe what you need' : reporting ? 'Type your answer, or say skip' : 'Ask a follow-up question'} onChange={event => setText(event.target.value)} />
-        <button type="submit" className="pf-fr-primary pf-fr-send" disabled={(busy && !waitingForGuidance) || !attachmentsReady || !text.trim()}>Send</button>
+        {working ? <button type="button" className="pf-fr-stop" aria-label="Stop" title="Stop" onClick={stop}><span aria-hidden="true" /></button> : null}
+        {/* Enter sends and Shift+Enter starts a new line; the return key appears once there is something to send. */}
+        {text.trim() || pictures.length ? <button type="submit" className="pf-fr-icon" aria-label="Send" title="Send (Enter)" disabled={(busy && !waitingForGuidance) || !attachmentsReady}>{RETURN_ICON}</button> : null}
+        <button type="button" className={`pf-fr-icon${dictation.listening ? ' is-listening' : ''}`} aria-label={dictation.listening ? 'Stop dictation' : 'Dictate'} aria-pressed={dictation.listening}
+          title={dictation.supported ? (dictation.listening ? 'Stop dictation' : 'Dictate') : 'Dictation is not available here'}
+          disabled={!dictation.supported || textLocked} onClick={dictation.toggle}>{MIC_ICON}</button>
       </form>
     </div>;
   }
@@ -460,8 +595,55 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
   </Shell>;
 }
 
+/**
+ * The running time of a turn, once it has run 10 seconds, updated each second. It is for the eye only: screen readers
+ * hear a short "still working" note every 30 seconds instead of every tick.
+ */
+function Elapsed({ since }: { since: number }): JSX.Element | null {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [since]);
+  const seconds = Math.max(0, Math.floor((now - since) / 1000));
+  if (seconds < ELAPSED_AFTER_SECONDS) return null;
+  return <>
+    <span className="pf-fr-elapsed" aria-hidden="true"> {seconds} s</span>
+    {seconds >= ANNOUNCE_EVERY_SECONDS ? <span className="pf-fr-sr">Still working, {Math.floor(seconds / ANNOUNCE_EVERY_SECONDS) * ANNOUNCE_EVERY_SECONDS} seconds.</span> : null}
+  </>;
+}
+
+/**
+ * A render review in the transcript: "Checked the result" with small previews, collapsed, opening to the full pictures.
+ * The pictures are the ones the browser drew for the agent; after a reload only the views are named.
+ */
+function ReviewLine({ entry }: { entry: Extract<Entry, { role: 'review' }> }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const src = (image: ToolImage): string => `data:${image.mime};base64,${image.data}`;
+  const named = (index: number): string => entry.views[index] ?? `view ${index + 1}`;
+  return <div className="pf-fr-message is-system pf-fr-review">
+    <button type="button" className="pf-fr-review-toggle" aria-expanded={open} onClick={() => setOpen(value => !value)}>
+      <span>Checked the result</span>
+      {entry.images.length ? <span className="pf-fr-review-thumbs" aria-hidden="true">{entry.images.map((image, index) => <img key={index} src={src(image)} alt="" />)}</span> : null}
+    </button>
+    {open ? (entry.images.length
+      ? <div className="pf-fr-review-pictures">{entry.images.map((image, index) => <figure key={index}><img src={src(image)} alt={`Render, ${named(index)}`} /><figcaption>{named(index)}</figcaption></figure>)}</div>
+      : <p className="pf-fr-muted">Pictures are not kept after the reply. Views: {entry.views.join('; ')}.</p>) : null}
+  </div>;
+}
+
+/** The pictures of a sent message: from their files when sent here, otherwise downloaded by id. */
+function SentPictures({ entry, client, previews }: { entry: Message & { readonly local?: readonly AttachmentFile[] | undefined }; client: RequestsClient; previews: ReadonlyMap<string, Blob> }): JSX.Element | null {
+  const items = entry.local ?? entry.pictures ?? [];
+  if (!items.length) return null;
+  return <ul className="pf-fr-sent-pictures" aria-label="Pictures">{items.map((item, index) => <li key={'id' in item ? item.id : `local-${index}`}>
+    <AttachmentPreview item={item} client={client} blob={'blob' in item ? item.blob : previews.get(item.id)} />
+  </li>)}</ul>;
+}
+
 /** CORS downloads become local previews, independent of signed-link expiry and COEP image blocking. */
-function AttachmentPreview({ item, client, blob }: { item: Attachment | AttachmentFile; client: RequestsClient; blob: Blob | undefined }): JSX.Element | null {
+function AttachmentPreview({ item, client, blob }: { item: Attachment | AttachmentFile | { readonly id: string; readonly name: string }; client: RequestsClient; blob: Blob | undefined }): JSX.Element | null {
   const [src, setSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -479,3 +661,8 @@ function AttachmentPreview({ item, client, blob }: { item: Attachment | Attachme
   if (failed) return <button type="button" onClick={() => setAttempt(n => n + 1)}>Retry preview for {item.name}</button>;
   return src ? <img src={src} alt={item.name} onError={() => setFailed(true)} /> : null;
 }
+
+const icon = (path: JSX.Element): JSX.Element => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">{path}</svg>;
+const PLUS_ICON = icon(<path d="M12 5v14M5 12h14" />);
+const RETURN_ICON = icon(<path d="M19 6v5a3 3 0 0 1-3 3H6m4-4-4 4 4 4" />);
+const MIC_ICON = icon(<><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" /></>);

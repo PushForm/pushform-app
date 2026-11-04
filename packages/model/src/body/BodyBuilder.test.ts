@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { meshBox, meshSignedVolume, type FaceLocalId, type Id, type TagId } from '@pushform/core';
 import { createDocument } from '../Document';
-import { bodyFromMesh, carryEdgeProps, deriveEdges, overlapRatio } from './BodyBuilder';
+import { bodyFromMesh, buildFaceRecords, carryEdgeProps, deriveEdges, overlapRatio } from './BodyBuilder';
 import { applyKernelResult, findBody } from './Reconcile';
 import { computeRegions, RegionCache, regionAt } from './Regions';
 import { createImprintGraph, type Body } from '../entities/body';
@@ -187,5 +187,16 @@ describe('findBody', () => {
     const { doc, id } = makeBox();
     expect(findBody(doc.state, id)?.definition.id).toBe(doc.state.rootDefinitionId);
     expect(findBody(doc.state, 9999 as Id)).toBeUndefined();
+  });
+});
+
+describe('buildFaceRecords', () => {
+  it('keeps a face\'s loop when a sliver triangle collapses as its corners weld', () => {
+    // A square face C-A-B-D, with a sliver A-A\'-B whose corner A\' lies within the weld tolerance of A.
+    const verts = new Float64Array([0, 1, 0, /* A */ 1, 1, 0, /* A' */ 1, 1 + 5e-8, 0, /* B */ 1, 0, 0, /* D */ 0, 0, 0]);
+    const C = 0, A = 1, A2 = 2, B = 3, D = 4;
+    const tris = new Uint32Array([C, B, A, /* sliver */ A, B, A2, D, B, C]);
+    const { faces } = buildFaceRecords({ verts, tris, faceId: new Uint32Array([0, 0, 0]) }, TAG);
+    expect(faces.get(0 as FaceLocalId)!.loops.map(loop => loop.length)).toEqual([4]);
   });
 });

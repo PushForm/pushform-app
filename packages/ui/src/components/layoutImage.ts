@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { pathSegment, type LayoutEntity } from '@pushform/layout';
+import { isPdfPicture, loadPdfPicture, pdfPicture, pdfPictureState } from './layoutPdfPicture';
 
 type Point = [number, number];
 
@@ -25,11 +26,29 @@ export const layoutImageLoads = {
   version: (): number => generation,
 };
 
-export type LayoutImageState = 'loaded' | 'failed' | 'pending';
+/**
+ * The picture of a model view whose model shows nothing in it: the view paints only its background, if any, in the
+ * workspace, print and export alike.
+ */
+export const LAYOUT_VIEW_EMPTY = 'pushform-view:empty';
+/**
+ * The picture of a model view that could not be rendered and has no earlier picture to keep: in the workspace it
+ * paints the failed-picture marker, so a failure is not missed; print and export paint nothing and report it.
+ */
+export const LAYOUT_VIEW_FAILED = 'pushform-view:failed';
+const isMarker = (src: string): boolean => src === LAYOUT_VIEW_EMPTY || src === LAYOUT_VIEW_FAILED;
 
-/** How a picture would paint right now: decoded, its error placeholder, or (not yet requested or still loading) its loading placeholder. */
+export type LayoutImageState = 'loaded' | 'empty' | 'failed' | 'pending';
+
+/**
+ * How a picture would paint right now: decoded, nothing (an empty model view), its failed-picture marker, or (not yet
+ * requested or still loading) its loading placeholder.
+ */
 export function layoutImageState(src: string): LayoutImageState {
+  if (src === LAYOUT_VIEW_EMPTY) return 'empty';
+  if (src === LAYOUT_VIEW_FAILED) return 'failed';
   if (canvases.has(src)) return 'loaded';
+  if (isPdfPicture(src)) return pdfPictureState(src);
   const image = images.get(src);
   if (!image || !image.complete) return 'pending';
   return image.naturalWidth > 0 ? 'loaded' : 'failed';
@@ -42,7 +61,7 @@ export function setLayoutCanvasPicture(src: string, canvas: HTMLCanvasElement): 
 
 /** Whether `src` would paint now; starts loading it otherwise, and repaints once it has. */
 export function layoutImageReady(src: string): boolean {
-  return loadedImage(src) !== null;
+  return isMarker(src) || loadedImage(src) !== null;
 }
 
 /** Drops a picture nothing paints anymore, so finished viewport renders do not accumulate. */
@@ -51,9 +70,16 @@ export function forgetLayoutImage(src: string): void {
   canvases.delete(src);
 }
 
+/** The decoded picture for `src`, or null while it loads (it repaints once loaded) or when it cannot be shown. */
+export function layoutPicture(src: string): HTMLImageElement | HTMLCanvasElement | null {
+  return loadedImage(src);
+}
+
 function loadedImage(src: string): HTMLImageElement | HTMLCanvasElement | null {
+  if (isMarker(src)) return null;
   const canvas = canvases.get(src);
   if (canvas) return canvas;
+  if (isPdfPicture(src)) return pdfPicture(src, notifyLayoutImages);
   let image = images.get(src);
   if (!image) {
     image = new Image();
@@ -67,11 +93,14 @@ function loadedImage(src: string): HTMLImageElement | HTMLCanvasElement | null {
 
 /**
  * Paint an image entity into its frame (top-left, top-right, bottom-right, bottom-left), cropped by its clip.
- * A viewport paints `src`, the picture its renderer chose (`layoutViewportPicture`), over its background.
+ * A viewport paints `src`, the picture its renderer chose (`layoutViewportPicture`), over its background. A picture
+ * still loading shows the loading placeholder, an empty view nothing, and a failed one the failed-picture marker.
+ * For `output` (print, page images, PDF and SVG), a view without a picture paints nothing but its background, whether
+ * empty, failed or still missing its picture: the export reports failed views instead.
  */
-export function paintLayoutImage(ctx: CanvasRenderingContext2D, entity: LayoutEntity, selected: boolean, src = entity.image?.src ?? ''): void {
+export function paintLayoutImage(ctx: CanvasRenderingContext2D, entity: LayoutEntity, selected: boolean, src = entity.image?.src ?? '', output = false): void {
   const image = entity.image;
-  const [topLeft, topRight, , bottomLeft] = entity.points as Point[];
+  const [topLeft, topRight, bottomRight, bottomLeft] = entity.points as Point[];
   if (!image || !topLeft || !topRight || !bottomLeft) return;
   ctx.save();
   ctx.transform(topRight[0] - topLeft[0], topRight[1] - topLeft[1], bottomLeft[0] - topLeft[0], bottomLeft[1] - topLeft[1], ...topLeft);
@@ -94,11 +123,28 @@ export function paintLayoutImage(ctx: CanvasRenderingContext2D, entity: LayoutEn
   }
   const loaded = src ? loadedImage(src) : null;
   if (loaded) ctx.drawImage(loaded, 0, 0, 1, 1);
-  else if (!background) {
+  // Placeholders are for the workspace: print and export leave a view without a picture empty.
+  const placeholder = !loaded && !(output && image.viewport);
+  const failed = placeholder && src === LAYOUT_VIEW_FAILED;
+  if (failed) {
+    // A gray box crossed in red, as a picture that cannot be shown; the cross is drawn below, in page units.
+    ctx.fillStyle = '#c8c8c8';
+    ctx.fillRect(0, 0, 1, 1);
+  } else if (placeholder && src !== LAYOUT_VIEW_EMPTY && !background) {
     ctx.fillStyle = '#eef1f5';
     ctx.fillRect(0, 0, 1, 1);
   }
   ctx.restore();
+  if (failed && bottomRight) {
+    ctx.save();
+    ctx.strokeStyle = '#d81e1e';
+    ctx.lineWidth = 0.5 * 25.4 / 72;
+    ctx.beginPath();
+    ctx.moveTo(...topLeft); ctx.lineTo(...bottomRight);
+    ctx.moveTo(...topRight); ctx.lineTo(...bottomLeft);
+    ctx.stroke();
+    ctx.restore();
+  }
   if (selected) {
     ctx.save();
     ctx.strokeStyle = '#1e63d1';
@@ -113,11 +159,16 @@ export function paintLayoutImage(ctx: CanvasRenderingContext2D, entity: LayoutEn
   }
 }
 
-/** Printing waits for visible pictures instead of emitting their loading placeholders. */
+/** Printing waits for visible pictures, and the pictures of pattern fills, instead of emitting their loading placeholders. */
 export async function prepareLayoutImages(entities: readonly LayoutEntity[], source = (entity: LayoutEntity) => entity.image?.src ?? ''): Promise<void> {
-  const sources = new Set(entities.flatMap(entity => entity.image && source(entity) ? [source(entity)] : []));
+  const sources = new Set(entities.flatMap(entity => entity.image && source(entity) && !isMarker(source(entity)) ? [source(entity)] : []));
+  for (const entity of entities) if (entity.closed && entity.style?.fillPattern) sources.add(entity.style.fillPattern.src);
   await Promise.all([...sources].map(async src => {
     if (canvases.has(src)) return;
+    if (isPdfPicture(src)) {
+      await loadPdfPicture(src).catch(() => { throw new Error('A picture could not be loaded. Check the document images and try again.'); });
+      return;
+    }
     loadedImage(src);
     const image = images.get(src)!;
     if (!image.complete) await new Promise<void>((resolve, reject) => {

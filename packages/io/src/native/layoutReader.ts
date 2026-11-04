@@ -124,6 +124,8 @@ export async function readNativeLayout(source: NativeFileSource, options: { sign
     }
     const entity = await readNativeLayoutEntity(entityRecords(), columns, assets, signal);
     if (entity.image) usedAssets.add(entity.image.reference.assetId);
+    const patternAsset = entity.header.metadata.extensions.fillPatternAsset;
+    if (patternAsset !== undefined) { if (!assets.has(patternAsset)) return fail('Missing native Layout pattern asset'); usedAssets.add(patternAsset); }
     if (entity.connections) usedAssets.add(entity.connections.snapshotAssetId);
     if (first.unknownFields.length) entity.outerHeaderUnknown = first.unknownFields;
     hasUnsupportedExtensions ||= hasExtensions({ data: { ...entity.data, text: undefined, table: undefined, dimension: undefined, angularDimension: undefined, labelAnchor: undefined, modelAnnotation: undefined },

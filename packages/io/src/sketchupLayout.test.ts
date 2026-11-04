@@ -63,6 +63,20 @@ function layoutFile(page: string, master = '', visibility = '1,1,1', masterIds =
   });
 }
 
+/** The archive with every entry's UTF-8 name flag cleared, as some writers store UTF-8 names. */
+function withoutUtf8Flag(bytes: Uint8Array): Uint8Array {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let end = bytes.length - 22;
+  while (view.getUint32(end, true) !== 0x06054b50) end--;
+  for (let at = view.getUint32(end + 16, true), index = view.getUint16(end + 10, true); index > 0; index--) {
+    view.setUint16(at + 8, view.getUint16(at + 8, true) & ~0x800, true);
+    const local = view.getUint32(at + 42, true);
+    view.setUint16(local + 6, view.getUint16(local + 6, true) & ~0x800, true);
+    at += 46 + view.getUint16(at + 28, true) + view.getUint16(at + 30, true) + view.getUint16(at + 32, true);
+  }
+  return bytes;
+}
+
 const PROPERTIES = `<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
 <documentProperties xmlns="http://sketchup.google.com/schemas/layout/1.0/documentproperties" xmlns:dp="http://sketchup.google.com/schemas/1.0/documentproperties" xmlns:ldp="http://sketchup.google.com/schemas/layout/1.0/documentproperties">
   <dp:path>C:/Users/Example/Documents/Drawing.layout</dp:path>
@@ -470,6 +484,24 @@ describe('SketchUp LayOut import', () => {
     expect(readOriginalLayoutArchive(decodeLayoutDocument(encodeLayoutDocument(doc)).state, archiveId)).toEqual(readOriginalLayoutArchive(doc.state, archiveId));
   });
 
+  it('finds an embedded model whose non-ASCII entry name is stored as UTF-8 without the UTF-8 flag', () => {
+    const view = (id: string, ref: string) => `<e:skpModelRef id="${id}">
+      <e:placedFileReference><e:rectangleBase x="1" y="1" width="2" height="1" /></e:placedFileReference>
+      <e:camera projection="perspective" /><r:skpFileReference r:id="${ref}" />
+    </e:skpModelRef>`;
+    const files = unzipSync(layoutFile(page(view('id40', 'idModel') + view('id41', 'idMissing'), onLayer('id10', ['id40', 'id41']))));
+    const modelBytes = new Uint8Array([7, 7, 7]), name = 'ref/12_Модель 模型_5.skp';
+    files[name] = modelBytes;
+    files['references.xml'] = strToU8(strFromU8(files['references.xml']!).replace('</references>',
+      `<r:skpFileReference r:id="idModel" internalTarget="${name}" /><r:skpFileReference r:id="idMissing" internalTarget="ref/34_Gone_6.skp" /></references>`));
+    const { doc, warnings } = importSketchUpLayout(withoutUtf8Flag(zipSync(files)));
+    const [archiveId] = [...doc.state.modelArchives!][0]!;
+    expect(readPreservedSketchUpModel(doc.state, archiveId, 'idModel')).toEqual(modelBytes);
+    expect(readPreservedSketchUpModel(doc.state, archiveId, 'idMissing')).toBeNull();
+    // Only the view whose model is absent from the file, and which has no saved picture, is reported.
+    expect(warnings).toContain('a SketchUp viewport without a cached render whose model is not embedded in the file shows no picture');
+  });
+
   it('preserves namespace bindings, dependent vector resources, and shared model references without id collisions', async () => {
     const model = `<e:skpModelRef id="id1" xmlns:custom="urn:custom" custom:id="do-not-remap" note="a &gt; b">
       <e:placedFileReference><e:rectangleBase x="1" y="1" width="4" height="4" /></e:placedFileReference>
@@ -560,6 +592,22 @@ describe('SketchUp LayOut import', () => {
     const state = importSketchUpLayout(zipSync(files)).doc.state, p = state.pages.get(state.pageOrder[0]!)!;
     const src = p.entities.get(p.entityOrder[0]!)!.image!.src;
     expect([...decodePng(Uint8Array.from(atob(src.slice('data:image/png;base64,'.length)), c => c.charCodeAt(0)))!.pixels]).toEqual([0, 0, 0, 255, 255, 255]);
+  });
+
+  it('keeps a raster render that already leaves out its backdrop as stored, sky and background colored texture included', () => {
+    const bytes = new Uint8Array(readFileSync(new URL('../../testing/assets/layout/background-off-texture-2027.layout', import.meta.url)));
+    const stored = Object.values(unzipSync(bytes, { filter: file => file.name.startsWith('ref/') && file.name.endsWith('.png') }))[0]!;
+    const { doc } = importSketchUpLayout(bytes);
+    const p = doc.state.pages.get(doc.state.pageOrder[0]!)!;
+    const view = [...p.entities.values()].find(entity => entity.image?.viewport)!.image!;
+    expect(view.viewport!.background).toBeNull();
+    const src = Uint8Array.from(atob(view.src.slice('data:image/png;base64,'.length)), c => c.charCodeAt(0));
+    expect(src).toEqual(stored);
+    const { pixels } = decodePng(src)!;
+    const opaque = (rgb: number) => { let count = 0; for (let q = 0; q < pixels.length; q += 4) if (pixels[q + 3] === 255 && (pixels[q]! << 16 | pixels[q + 1]! << 8 | pixels[q + 2]!) === rgb) count++; return count; };
+    // The texture's stripes in the sky and background colors.
+    expect(opaque(0xc85028)).toBeGreaterThan(1000);
+    expect(opaque(0x28a05a)).toBeGreaterThan(1000);
   });
 
   it('keeps each model view\'s face style, edges and X-ray from LayOut\'s rendering options', () => {
@@ -826,6 +874,59 @@ describe('SketchUp LayOut import', () => {
     expect(warnings).toContain('TIFF images compressed with JPEG are not supported');
     expect(warnings).toContain('an image that could not be read was shown as a placeholder');
     expect(warnings.some((warning) => /images of type/.test(warning))).toBe(false);
+  });
+
+  it('keeps placed PDF pictures as the PDF file, in their frame, crop and rotation, through save, reopen and export', async () => {
+    const bytes = new Uint8Array(readFileSync(new URL('../../testing/assets/layout/pdf-picture-2027.layout', import.meta.url)));
+    const stored = unzipSync(bytes)['ref/3436053323_two-shapes_2.pdf']!;
+    const { doc, warnings } = importSketchUpLayout(bytes);
+    expect(warnings).toEqual([]);
+    const pictures = (state: typeof doc.state) => {
+      const p = state.pages.get(state.pageOrder[0]!)!;
+      return p.entityOrder.map((id) => p.entities.get(id)!).filter((entity) => entity.kind === 'image');
+    };
+    const pdfOf = (src: string) => Uint8Array.from(atob(src.replace('data:application/pdf;base64,', '')), (c) => c.charCodeAt(0));
+    const [plain, cropped, turned] = pictures(doc.state);
+    for (const picture of [plain, cropped, turned]) {
+      expect(picture!.image!.src.startsWith('data:application/pdf;base64,')).toBe(true);
+      expect(pdfOf(picture!.image!.src)).toEqual(stored);
+    }
+    expect(plain!.points.map(inches)).toEqual([[0.5, 0.5], [3.5, 0.5], [3.5, 2.5], [0.5, 2.5]]);
+    expect(plain!.image!.clip).toBeUndefined();
+    // The crop covers the frame's left two thirds and its middle three fifths, in the frame's own unit square.
+    expect(cropped!.image!.clip!.points.map(([x, y]) => [Math.round(x * 1e4) / 1e4, Math.round(y * 1e4) / 1e4]))
+      .toEqual([[0, 0.2], [0.6667, 0.2], [0.6667, 0.8], [0, 0.8]]);
+    // The 2 × 3 in frame keeps its size, turned 30° (clockwise on the page, whose y axis points down).
+    const [a, b, , d] = turned!.points.map(inches) as [number, number][];
+    expect(Math.hypot(b![0] - a![0], b![1] - a![1])).toBeCloseTo(2, 5);
+    expect(Math.hypot(d![0] - a![0], d![1] - a![1])).toBeCloseTo(3, 5);
+    expect(Math.atan2(b![1] - a![1], b![0] - a![0]) * 180 / Math.PI).toBeCloseTo(30, 4);
+
+    const reopened = decodeLayoutDocument(encodeLayoutDocument(doc));
+    expect(pictures(reopened.state).map((picture) => picture.image!.src)).toEqual([plain, cropped, turned].map((picture) => picture!.image!.src));
+    const exported = await exportSketchUpLayout(reopened.state);
+    expect(exported.warnings).toEqual([]);
+    const output = unzipSync(exported.bytes);
+    const pdfs = Object.keys(output).filter((name) => name.endsWith('.pdf'));
+    // One stored PDF for the three pictures, written unchanged.
+    expect(pdfs).toHaveLength(1);
+    expect(output[pdfs[0]!]).toEqual(stored);
+    const again = importSketchUpLayout(exported.bytes);
+    expect(pictures(again.doc.state).map((picture) => pdfOf(picture.image!.src))).toEqual([stored, stored, stored]);
+  });
+
+  it('shows the missing-picture placeholder for a placed .pdf that is not a PDF', () => {
+    const placed = `<e:image id="id40">
+        <e:placedFileReference><e:rectangleBase x="1" y="1" width="2" height="1.5" /></e:placedFileReference>
+        <r:imageFileReference r:id="id4" />
+      </e:image>`;
+    const files = unzipSync(layoutFile(page(placed, onLayer('id10', ['id40'])), '', '1,1,1', ['id90'], '', { 'ref/plan.pdf': PNG }));
+    files['references.xml'] = strToU8(strFromU8(files['references.xml']!).replace('</references>', '<r:imageFileReference r:id="id4" internalTarget="ref/plan.pdf" /></references>'));
+    const { doc, warnings } = importSketchUpLayout(zipSync(files));
+    const p = doc.state.pages.get(doc.state.pageOrder[0]!)!;
+    expect(p.entityOrder.map((id) => p.entities.get(id)!.kind)).toEqual(['path', 'path', 'path']);
+    expect(warnings).toContain('a PDF image that is not a PDF file could not be read');
+    expect(warnings).toContain('an image that could not be read was shown as a placeholder');
   });
 
   it('preserves dashed paths, keeps their arrows as line styles, and splits dimensions', () => {
@@ -1167,10 +1268,16 @@ describe('SketchUp LayOut import', () => {
       '3.705927,0.6757834,3.111473,3.683638,2.703447,3.683638', 'WAND 1\\par\\par 4.2m x 16\\par 67.2 x 15.6W');
     // A consistent first-line connection: the box's top is half a line above the leader.
     const top = label(70, 9, 5, 'x="5" y="5" width="1" height="0.3"', '4,4,4.5,5.08,5,5.08', 'First\\par Second');
-    const { doc } = importSketchUpLayout(layoutFile(page(stale + top, onLayer('id10', ['id60', 'id70']))));
+    // The same box and leader with an automatic connection: the leader meets the text where the box sets it.
+    const automatic = label(80, 1, 10, 'x="1.0360858" y="2.2169719" width="1.6638889" height="1.8520833"',
+      '3.705927,0.6757834,3.111473,3.683638,2.703447,3.683638', 'WAND 1\\par\\par 4.2m x 16\\par 67.2 x 15.6W');
+    const { doc } = importSketchUpLayout(layoutFile(page(stale + top + automatic, onLayer('id10', ['id60', 'id70', 'id80']))));
     const pageState = doc.state.pages.get(doc.state.pageOrder[0]!)!;
-    const [moved, kept] = pageState.entityOrder.map((id) => pageState.entities.get(id)!);
-    const halfLine = 10 * 1.15 / 2 * 25.4 / 72, end = 3.683638 * 25.4;
+    const [moved, kept, unmoved] = pageState.entityOrder.map((id) => pageState.entities.get(id)!);
+    // The painted line: without a canvas to measure on, Arial's ascent and descent (0.905 and 0.212 em).
+    const halfLine = 10 * (0.905 + 0.212) / 2 * 25.4 / 72, end = 3.683638 * 25.4;
+    expect(unmoved!.points[0]![1]).toBeCloseTo(2.2169719 * 25.4, 9);
+    expect(unmoved!.text!.leaderOffsetMm).toBeCloseTo((3.683638 - (2.2169719 + 1.8520833 / 2)) * 25.4, 6);
     expect(moved!.points[1]![1]).toBeCloseTo(end + halfLine, 6);
     expect(moved!.points[1]![1] - moved!.points[0]![1]).toBeCloseTo(1.8520833 * 25.4, 6);
     expect(moved!.text!.vertical).toBe('bottom');
@@ -1181,6 +1288,66 @@ describe('SketchUp LayOut import', () => {
     expect(kept!.points[0]![1]).toBeCloseTo(5 * 25.4, 9);
     expect(kept!.text!.leaderOffsetMm).toBeCloseTo((5.08 - 5.15) * 25.4, 6);
     expect(layoutLabelLeader(kept!)!.start[1]).toBeCloseTo(5.08 * 25.4, 6);
+  });
+
+  const connectedDimension = (id: string, [ax, ay]: [number, number], [bx, by]: [number, number], arrow = 1) => `
+    <e:linearDimension id="${id}">
+      <e:dimensionText id="${id}t" anchorType="5" growMode="0">
+        <e:placedFileReference><e:rectangleBase x="${ax}" y="${ay - 0.8}" width="1" height="0.2" /></e:placedFileReference>
+        <e:rtfTextRep>${RTF('&lt;&gt;')}</e:rtfTextRep>
+      </e:dimensionText>
+      <ld:startConnectionPoint x="${ax}" y="${ay}" /><ld:endConnectionPoint x="${bx}" y="${by}" />
+      <e:dimensionLine id="${id}l"><e:graphicEntity shouldFill="0" />
+        <e:elements>0,1</e:elements><e:points2f>${ax},${ay - 0.5},${bx},${by - 0.5}</e:points2f>
+        <e:arrowData startArrowType="${arrow}" startArrowSize="1" endArrowType="${arrow}" endArrowSize="1" /></e:dimensionLine>
+    </e:linearDimension>`;
+  const vertexConnection = (x: number, y: number, path: string, index: number, dimension: string, end: number) => `<connection>
+    <connectionPoint ver="2" type="1" x="${x}" y="${y}" dirx="0" diry="0" param1="${index}" param2="0" l:ref="${path}" />
+    <dimensionConnectionPoint l:ref="${dimension}" componentId="${end}" /></connection>`;
+
+  it('drops the connections to an id that names an object on more than one page', () => {
+    // Page 1 has paths id40 and id41; page 2 has another path id40. Each dimension measures its path's first segment.
+    const first = `<e:path id="id40"><e:elements>0,1</e:elements><e:points2f>1,1,4,1</e:points2f></e:path>
+      <e:path id="id41"><e:elements>0,1</e:elements><e:points2f>1,5,4,5</e:points2f></e:path>
+      ${connectedDimension('id50', [1, 1], [4, 1])}${connectedDimension('id52', [1, 5], [4, 5])}`;
+    const second = `<e:path id="id40"><e:elements>0,1</e:elements><e:points2f>2,2,6,2</e:points2f></e:path>${connectedDimension('id51', [2, 2], [6, 2])}`;
+    const connections = (lines: string[]) => `<connectionManager>${lines.join('')}</connectionManager>`;
+    const files = unzipSync(layoutFile(page(first, onLayer('id10', ['id40', 'id41', 'id50', 'id52'])) + connections([
+      vertexConnection(1, 1, 'id40', 0, 'id50', 5), vertexConnection(4, 1, 'id40', 1, 'id50', 6),
+      vertexConnection(1, 5, 'id41', 0, 'id52', 5), vertexConnection(4, 5, 'id41', 1, 'id52', 6),
+    ])));
+    files['pages/page2.xml'] = strToU8(`<?xml version="1.0" ?><page xmlns="http://sketchup.google.com/schemas/layout/1.0/page" ${NS}>${
+      page(second, onLayer('id10', ['id40', 'id51']))}${connections([vertexConnection(2, 2, 'id40', 0, 'id51', 5), vertexConnection(6, 2, 'id40', 1, 'id51', 6)])}</page>`);
+    files['document.xml'] = strToU8(strFromU8(files['document.xml']!).replace('</ld:pageManager>',
+      '<ld:pageRef r:id="id5" name="Second"><r:layerVisibility>1,1,1</r:layerVisibility></ld:pageRef></ld:pageManager>'));
+    files['references.xml'] = strToU8(strFromU8(files['references.xml']!).replace('</references>',
+      '<r:pageFileReference r:id="id5" internalTarget="pages/page2.xml" /></references>'));
+    const { doc, warnings } = importSketchUpLayout(zipSync(files));
+    const dimensions = doc.state.pageOrder.flatMap(id => [...doc.state.pages.get(id)!.entities.values()].filter(entity => entity.dimension));
+    expect(dimensions).toHaveLength(3);
+    const [onFirst, unique, onSecond] = dimensions;
+    // Which page's id40 a connection meant cannot be told, so both dimensions keep their points, unattached.
+    expect(onFirst!.dimension!.anchors).toEqual([null, null]);
+    expect(onSecond!.dimension!.anchors).toEqual([null, null]);
+    expect(onSecond!.points[0]!.map(v => v / 25.4)).toEqual([2, 2]);
+    expect(unique!.dimension!.anchors.map(anchor => anchor?.pointIndex)).toEqual([0, 1]);
+    expect(warnings).toContain('dimensions and labels attached to shapes that were not imported keep their points but are no longer attached (4×)');
+  });
+
+  it('draws dimension and label end styles it has no style for as arrows, and says so', () => {
+    const label = `<e:label id="id60" connectionType="9" extensionLineLength="0"><e:bodyOffset x="0" y="0" />
+      <e:leaderLine id="id61"><e:elements>0,1</e:elements><e:points2f>1,4,2,4</e:points2f>
+        <e:arrowData startArrowType="7" startArrowSize="1" endArrowType="0" endArrowSize="1" /></e:leaderLine>
+      <e:labelText id="id62" anchorType="5" growMode="0"><e:placedFileReference><e:rectangleBase x="2" y="3.9" width="1" height="0.2" /></e:placedFileReference>
+        <e:rtfTextRep>${RTF('Square')}</e:rtfTextRep></e:labelText></e:label>`;
+    const known = connectedDimension('id51', [1, 6], [4, 6], 13);
+    const { doc, warnings } = importSketchUpLayout(layoutFile(page(connectedDimension('id50', [1, 1], [4, 1], 12) + known + label, onLayer('id10', ['id50', 'id51', 'id60']))));
+    const all = [...doc.state.pages.get(doc.state.pageOrder[0]!)!.entities.values()];
+    expect(all.filter(entity => entity.dimension).map(entity => entity.dimension!.endpoint)).toEqual(['arrow', 'tick']);
+    expect(all.find(entity => entity.kind === 'label')!.text!.endpoint).toBe('arrow');
+    expect(warnings).toContain('dimension end style 12 was drawn as an arrow');
+    expect(warnings).toContain('label end style 7 was drawn as an arrow');
+    expect(warnings.filter(warning => warning.includes('end style'))).toHaveLength(2);
   });
 
   it('imports images, styled and rotated text, arrows, a dimension, and a label LayOut 2027 wrote', () => {

@@ -73,6 +73,14 @@ export function decodePng(bytes: Uint8Array): { width: number; height: number; c
   return { width, height, channels, pixels };
 }
 
+/** Whether an 8-bit RGBA PNG has a pixel that is not fully opaque; false for RGB and for PNGs `decodePng` cannot read. */
+export function pngHasTransparency(bytes: Uint8Array): boolean {
+  const image = decodePng(bytes);
+  if (!image || image.channels !== 4) return false;
+  for (let q = 3; q < image.pixels.length; q += 4) if (image.pixels[q]! < 255) return true;
+  return false;
+}
+
 /**
  * The PNG with every pixel within `tolerance` of one of `colors` (0xRRGGBB) made transparent, or null when it is not
  * an 8-bit RGB or RGBA PNG or no pixel matches.

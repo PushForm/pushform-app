@@ -22,6 +22,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "license-check": "node scripts/license-check.mjs",
+    "notices": "node scripts/third-party-notices.mjs",
     "spdx-check": "node scripts/spdx-headers.mjs --check",
     "spec-check": "node scripts/spec-ids.mjs",
     "commons:dev": "pnpm --filter @pushform/app-commons dev",

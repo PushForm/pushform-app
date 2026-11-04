@@ -12,9 +12,15 @@ Open a SketchUp **.layout** file to bring its pages and supported content into L
 
 An imported model viewport can retain a saved LayOut picture while offering model-view editing where its source is available. Do not assume an external model link is accessible just because its picture appears.
 
+A PDF placed as a picture in a LayOut document shows its first page in the picture's frame, with its crop and rotation. The first time a document with a PDF picture is shown, the page can take a moment to appear. The PDF itself is kept, so saving and exporting back to LayOut write it unchanged. Pictures in formats PushForm cannot read, such as EPS, PSD, or HEIC, show a gray box crossed in red and are listed in the import notes.
+
 Some LayOut files contain objects saved with unusable numbers. A dimension saved without a valid position is skipped, and a model viewport whose saved camera cannot show the model keeps only its saved picture (or an empty frame). The import notes list what was skipped; the rest of the document opens normally.
 
 If import still reports invalid or nonfinite numeric data, repair the source drawing and save a new copy in SketchUp LayOut before trying again. The failed import leaves your open drawings unchanged.
+
+## Pattern fills in LayOut documents
+
+Shapes with a pattern fill, such as a concrete, brick, soil or gravel hatch, keep it: the pattern picture repeats across the shape with its original position, scale and rotation, over the shape's fill color and under its outline. It shows in the workspace, prints, and exports to PDF, SVG, page images and back to LayOut; DXF leaves the pattern out and keeps the shape's fill color and outline. Pattern fills cannot be added or changed yet, and the pattern stays where it is on the page when you move or reshape its shape. A pattern whose picture is missing from the file is left out and listed in the import notes.
 
 ## Import DXF into a drawing
 

@@ -25,22 +25,13 @@ ${FEEDBACK_RULES}
 - Starting over: when the requester clearly asks to start over or drop this report, call start_over; if anything substantial has been gathered, ask once whether they really want to drop it and call it only after a yes.
 - Do not promise a fix or a date. Say what happens next: a maintainer reviews the report and the requester gets email updates at their account address.`;
 
-const LIMITS = (ctx: AgentContext) => {
-  const parts: string[] = [];
-  if (ctx.messageCount > ctx.limits.messagesPerConversation) parts.push(`This conversation has reached its ${ctx.limits.messagesPerConversation}-message limit. Do not ask further questions; only offer to send the report as it stands (show it and ask for a yes, then request_file) or to stop (start_over).`);
-  else if (ctx.messageCount === ctx.limits.messagesPerConversation) parts.push(`This is the requester's last message in this conversation (${ctx.limits.messagesPerConversation}-message limit). Record what they said, then say the limit is reached and that they can send the report as it stands or stop; ask nothing further.`);
-  if (ctx.openRequestCount >= ctx.limits.openRequestsPerAccount) parts.push(`The account has ${ctx.openRequestCount} open requests, the limit. Explain this, list the open requests from <context>, and offer Add me to a matching open request; do not offer a new filing.`);
-  if (!ctx.filingAllowed) parts.push('Filing is not available for this account in this product. You can still help; say that filing is not available when asked.');
-  return parts.length ? `\n\nCurrent limits:\n- ${parts.join('\n- ')}` : '';
-};
-
 export const PROBLEM_SYSTEM = (ctx: AgentContext) => `${RULES(ctx)}
 
 You are on the problem path: something does not work as specified or as it used to. Only when the requester selected the card without describing the issue, open with this question; otherwise use their description without asking it again: "${problemOpeningQuestion(ctx)}"
 
 Record what the requester already said with update_brief (steps, expected, happened). Optional frequency and impact are recorded only when volunteered; do not ask for them. The Area comes from the editor without confirmation. If the problem is understandable, search_open_issues and go straight to a concise title/summary for sending. Do not ask what they expected when their stated intent already makes it clear (for example, undoing a rectangle means removing that rectangle). Otherwise ask at most one essential clarification. Never require a step-by-step account just to send feedback.
 
-Do not require a documentation search or give unsolicited troubleshooting before filing a report. If you answer a product how-to question, use search_docs. Suggest switching to a feature request only when the requester wants a new capability, and call switch_path only after they agree; carry their answers over.${LIMITS(ctx)}`;
+Do not require a documentation search or give unsolicited troubleshooting before filing a report. If you answer a product how-to question, use search_docs. Suggest switching to a feature request only when the requester wants a new capability, and call switch_path only after they agree; carry their answers over.`;
 
 /** Problem report intake: same tools and handlers as the feature path, a different prompt. */
 export const problemAgent: ConversationAgent = {

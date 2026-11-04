@@ -53,7 +53,7 @@ function CreditsPane(): JSX.Element {
     {notices.length === 0 ? <p>No Commons attribution records in this model.</p> : notices.map(a => <article key={`${a.modelId}:${a.revision}:${a.assetId}`}>
       <h3>{a.title}</h3><p>By {a.creator}</p>
       {a.source && <p>Source: <a href={a.source.url} target="_blank" rel="noreferrer">{a.source.name}</a></p>}
-      {a.licenses.map((l, i) => <div key={i}><a href={l.url} target="_blank" rel="noreferrer">{l.name}</a>
+      {a.licenses.map((l, i) => <div key={i}>{l.url ? <a href={l.url} target="_blank" rel="noreferrer">{l.name}</a> : <strong>{l.name}</strong>}
         {l.conditions.length > 0 && <ul>{l.conditions.map((condition, j) => <li key={j}>{condition}</li>)}</ul>}</div>)}
       {a.credits.map((c, i) => <p key={i}>{c.url ? <a href={c.url} target="_blank" rel="noreferrer">{c.name}</a> : c.name}: {c.text}</p>)}
       <small>Model {a.modelId} · Revision {a.revision}</small>

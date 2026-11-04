@@ -57,7 +57,8 @@ if (useWorkingTree) {
 try {
   console.log(`deploy: building ${branch} @ ${sha.slice(0, 7)} in ${buildRoot}`);
   if (worktree) run('pnpm', ['install', '--frozen-lockfile', '--prefer-offline'], buildRoot);
-  run('pnpm', ['build'], buildRoot, { VITE_RELEASE: sha.slice(0, 7) });
+  // A deployed build must list every third-party crate, so it fails without cargo-about.
+  run('pnpm', ['build'], buildRoot, { VITE_RELEASE: sha.slice(0, 7), PUSHFORM_NOTICES: 'complete' });
   const dist = join(buildRoot, 'apps/web/dist');
   run('node', [join(repo, 'scripts/sentry-sourcemaps.mjs'), dist], buildRoot, { VITE_RELEASE: sha.slice(0, 7) });
   stripMaps(dist);

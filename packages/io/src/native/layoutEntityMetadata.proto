@@ -6,6 +6,16 @@ message LayoutEntityOptionalBytes { required uint32 state = 1; optional bytes va
 message LayoutEntityStyle {
   required bytes base = 1; // LayoutDefaultStyle
   optional LayoutEntityOptionalBytes stroke_dash_mm = 2; // Float64 sequence
+  optional LayoutEntityOptionalBytes fill_pattern = 3; // LayoutFillPattern
+}
+message LayoutFillPattern {
+  required uint32 asset_id = 1; // image asset of the tiled picture
+  required double tile_width_mm = 2;
+  required double tile_height_mm = 3;
+  required double origin_x_mm = 4;
+  required double origin_y_mm = 5;
+  required double scale = 6;
+  required double rotation_deg = 7;
 }
 message LayoutEntityMetadata {
   required uint32 id = 1;

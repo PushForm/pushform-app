@@ -202,12 +202,17 @@ export function messagesFromRows(value: unknown): ConversationMessage[] {
   const out: ConversationMessage[] = [];
   for (const m of value) {
     const r = asRecord(m); if (!r) continue;
-    if (r['role'] === 'user' && typeof r['text'] === 'string') out.push({ role: 'user', text: r['text'], at: str(r['at']) });
+    if (r['role'] === 'user' && typeof r['text'] === 'string') {
+      const pictures = Array.isArray(r['attachments']) ? r['attachments'].map(asRecord).filter((p): p is Record<string, unknown> => !!p && typeof p['id'] === 'string')
+        .map(p => ({ id: str(p['id']), name: str(p['name']), mime: str(p['mime']) })) : [];
+      out.push({ role: 'user', text: r['text'], at: str(r['at']), ...(pictures.length ? { attachments: pictures } : {}) });
+    }
     else if (r['role'] === 'assistant' && typeof r['text'] === 'string') {
       const turn = asRecord(r['turn']);
-      out.push({ role: 'assistant', text: r['text'], at: str(r['at']), ...(turn ? { turn: turn as unknown as SuspendedTurn } : {}) });
+      out.push({ role: 'assistant', text: r['text'], at: str(r['at']), ...(turn ? { turn: turn as unknown as SuspendedTurn } : {}), ...(r['acknowledgment'] === true ? { acknowledgment: true as const } : {}) });
     }
-    else if (r['role'] === 'tool' && typeof r['name'] === 'string') out.push({ role: 'tool', name: r['name'], toolUseId: str(r['toolUseId']), input: r['input'], output: str(r['output']), at: str(r['at']) });
+    else if (r['role'] === 'tool' && typeof r['name'] === 'string') out.push({ role: 'tool', name: r['name'], toolUseId: str(r['toolUseId']), input: r['input'], output: str(r['output']), at: str(r['at']),
+      ...(Array.isArray(r['views']) ? { views: (r['views'] as unknown[]).map(v => str(v)) } : {}) });
   }
   return out;
 }

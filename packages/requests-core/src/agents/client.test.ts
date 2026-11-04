@@ -3,8 +3,9 @@
 import { describe, expect, it } from 'vitest';
 import type Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
-import { PROGRESS_UPDATES_BETA, REFUSAL_TEXT, ROUNDS_TEXT, TRUNCATED_TEXT, answerPending, defineLooseTool, defineTool, messageText, runTurn, stripUnsupportedKeywords, withSchema } from './client.ts';
+import { PROGRESS_UPDATES_BETA, REFUSAL_TEXT, ROUNDS_TEXT, TRUNCATED_TEXT, type AnthropicLike, answerPending, defineLooseTool, defineTool, flattenTuples, messageText, runTurn, stripUnsupportedKeywords, withSchema } from './client.ts';
 import { fakeAnthropic } from './fakeAnthropic.ts';
+import { layoutDocumentTools, modelDocumentTools } from './document.ts';
 
 const echoTool = defineTool('echo', 'Echo the input.', z.object({ value: z.string() }));
 const user = (text: string): Anthropic.MessageParam => ({ role: 'user', content: text });
@@ -36,6 +37,17 @@ describe('defineTool and withSchema', () => {
 });
 
 describe('runTurn', () => {
+  it('reports each round as its request is sent and each reply block as it starts, with the tool it calls', async () => {
+    const phases: unknown[] = [];
+    await runTurn({
+      client: fakeAnthropic([{ thinking: [''], toolUses: [{ id: 't1', name: 'echo', input: { value: 'a' } }] }, { text: ['Done.'] }]),
+      model: 'claude-sonnet-5-5', system: 's', tools: [echoTool], handlers: { echo: () => 'a' }, messages: [user('hi')], onPhase: (phase) => phases.push(phase),
+    });
+    expect(phases).toEqual([
+      { kind: 'request', round: 0 }, { kind: 'block', block: 'thinking' }, { kind: 'block', block: 'tool_use', tool: 'echo' },
+      { kind: 'request', round: 1 }, { kind: 'block', block: 'text' },
+    ]);
+  });
   it('streams text, runs tools, answers them in one user message and loops until end_turn', async () => {
     const client = fakeAnthropic([
       { text: ['Let me ', 'check.'], toolUses: [{ id: 'tu1', name: 'echo', input: { value: 'a' } }, { id: 'tu2', name: 'echo', input: { value: 'b' } }] },
@@ -63,11 +75,28 @@ describe('runTurn', () => {
     const client = fakeAnthropic([{ text: ['ok'] }]);
     await runTurn({ client, model: 'claude-haiku-5-5', system: 'stable', tools: [echoTool], handlers: {}, messages: [user('hi')] });
     const p = client.calls[0]!;
-    expect(p.system).toEqual([{ type: 'text', text: 'stable', cache_control: { type: 'ephemeral' } }]);
+    // The shared tools and system prompt stay cached for an hour; a rolling breakpoint caches the transcript so far.
+    expect(p.system).toEqual([{ type: 'text', text: 'stable', cache_control: { type: 'ephemeral', ttl: '1h' } }]);
+    expect(p.cache_control).toEqual({ type: 'ephemeral' });
+    expect(p.messages).toEqual([user('hi')]);
     expect(p.output_config).toEqual({ effort: 'low' });
     expect(p.tool_choice).toEqual({ type: 'auto' });
     expect(p).not.toHaveProperty('thinking');
     expect(p.tools?.[0]).toMatchObject({ strict: true });
+  });
+  it('reports timing and tokens of every round', async () => {
+    const client = fakeAnthropic([
+      { toolUses: [{ id: 'tu1', name: 'echo', input: { text: 'a' } }], usage: { cache_read_input_tokens: 900, cache_creation_input_tokens: 50 } },
+      { text: ['done'] },
+    ]);
+    const r = await runTurn({ client, model: 'm', system: 's', tools: [echoTool], handlers: { echo: () => 'ok' }, messages: [user('hi')] });
+    expect(r.roundStats).toHaveLength(2);
+    expect(r.roundStats[0]).toMatchObject({ input: 100, output: 20, cacheRead: 900, cacheWrite: 50 });
+    for (const round of r.roundStats) {
+      expect(round.firstMs).not.toBeNull();
+      expect(round.startMs).toBeLessThanOrEqual(round.firstMs!);
+      expect(round.firstMs!).toBeLessThanOrEqual(round.ms);
+    }
   });
   it('omits tools and tool_choice when the agent has none', async () => {
     const client = fakeAnthropic([{ text: ['ok'] }]);
@@ -153,6 +182,57 @@ describe('client tools', () => {
     expect(r.appended.map((m) => m.role)).toEqual(['assistant', 'user', 'assistant']);
   });
 
+  describe('tool input that streamed as invalid JSON', () => {
+    const malformed = ['{"ops":["add_box",[0,-0.5334,0,],', '"max":[0,0,0]]}'];
+    it('answers the call with an error instead of failing the turn, so the model can send it again', async () => {
+      const client = fakeAnthropic([
+        { text: ['Adding the side.'], toolUses: [{ id: 'c1', name: 'edit', input: null, raw: malformed }] },
+        { toolUses: [{ id: 'c2', name: 'edit', input: { ops: ['add_box'] } }] },
+      ]);
+      const events: { id: string; isError: boolean | undefined; invalidInput: string | undefined }[] = [];
+      const r = await runTurn({ client, model: 'm', system: 's', tools: [editTool], messages: [user('hi')], handlers: {}, clientTools: new Set(['edit']),
+        onToolCall: (c) => events.push({ id: c.id, isError: c.result.isError, invalidInput: c.invalidInput }) });
+      // The bad call never reaches the editor; the resent one does.
+      expect(r.stop).toBe('client_tools');
+      expect(r.pending?.calls).toEqual([{ id: 'c2', name: 'edit', input: { ops: ['add_box'] } }]);
+      expect(r.rounds).toBe(2);
+      expect(events).toEqual([{ id: 'c1', isError: true, invalidInput: malformed.join('') }]);
+      const assistant = r.appended[0]!.content as Anthropic.ContentBlock[];
+      expect(assistant.find((b) => b.type === 'tool_use')).toMatchObject({ id: 'c1', input: {} });
+      const results = r.appended[1]!.content as Anthropic.ToolResultBlockParam[];
+      expect(results).toHaveLength(1);
+      expect(results[0]).toMatchObject({ tool_use_id: 'c1', is_error: true });
+      expect(String(results[0]!.content)).toMatch(/^Not run: the tool input was not valid JSON \(.+\)\. Send the call again with valid JSON\.$/);
+      expect(client.calls[1]!.messages.at(-1)).toEqual(r.appended[1]);
+    });
+    it('still reads the rest of the message: other calls run, and stop reason and usage are kept', async () => {
+      const client = fakeAnthropic([
+        { toolUses: [{ id: 'bad', name: 'echo', input: null, raw: ['{"value":"a"'] }, { id: 'good', name: 'echo', input: { value: 'b' } }], usage: { input_tokens: 300, output_tokens: 40 } },
+        { text: ['Done.'] },
+      ]);
+      const r = await runTurn({ client, model: 'm', system: 's', tools: [echoTool], messages: [user('hi')], handlers: { echo: withSchema(z.object({ value: z.string() }), ({ value }) => `echo:${value}`) } });
+      expect(r.stop).toBe('end_turn');
+      expect(r.text).toBe('Done.');
+      const results = r.appended[1]!.content as Anthropic.ToolResultBlockParam[];
+      expect(results.map((b) => [b.tool_use_id, b.is_error ?? false])).toEqual([['bad', true], ['good', false]]);
+      expect(results[1]!.content).toBe('echo:b');
+      expect(r.usage).toMatchObject({ inputTokens: 400, outputTokens: 60 });
+    });
+    it('treats input that parses to something other than an object as invalid', async () => {
+      const client = fakeAnthropic([{ toolUses: [{ id: 'arr', name: 'echo', input: null, raw: ['[1,2]'] }] }, { text: ['ok'] }]);
+      const r = await runTurn({ client, model: 'm', system: 's', tools: [echoTool], messages: [user('hi')], handlers: { echo: () => 'ran' } });
+      expect((r.appended[1]!.content as Anthropic.ToolResultBlockParam[])[0]).toMatchObject({ tool_use_id: 'arr', is_error: true });
+    });
+  });
+  it('fails a stream that ends before the message is complete', async () => {
+    const events: Anthropic.RawMessageStreamEvent[] = [];
+    const client: AnthropicLike = { messages: { async create(params) {
+      for await (const e of await fakeAnthropic([{ text: ['Hel'] }]).messages.create(params)) if (e.type !== 'message_stop') events.push(e);
+      return { async *[Symbol.asyncIterator]() { yield* events; } };
+    } } };
+    await expect(runTurn({ client, model: 'm', system: 's', tools: [], messages: [user('hi')], handlers: {} })).rejects.toThrow(/ended before the message was complete/);
+  });
+
   describe('progress updates', () => {
     const turns = () => [
       { thinking: ['Reading the ', 'walls first.'], toolUses: [{ id: 'tu1', name: 'echo', input: { value: 'a' } }] },
@@ -178,5 +258,23 @@ describe('client tools', () => {
       expect(client.calls[0]).not.toHaveProperty('thinking');
       expect(client.headers[0]).toBeUndefined();
     });
+  });
+});
+
+describe('tuple schemas', () => {
+  const schema = z.object({ at: z.tuple([z.number(), z.number(), z.number()]), pair: z.tuple([z.string(), z.number()]) });
+  const hasPrefixItems = (node: unknown): boolean => JSON.stringify(node).includes('prefixItems');
+  it('become plain arrays the API accepts, in strict and loose tools', () => {
+    expect(hasPrefixItems(defineTool('t', 'd', schema).input_schema)).toBe(false);
+    expect(hasPrefixItems(defineLooseTool('t', 'd', schema).input_schema)).toBe(false);
+    const props = (defineLooseTool('t', 'd', schema).input_schema as { properties: Record<string, Record<string, unknown>> }).properties;
+    expect(props['at']).toMatchObject({ type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 });
+    expect(props['pair']!['items']).toEqual({ anyOf: [{ type: 'string' }, { type: 'number' }] });
+  });
+  it('never reach the API from the document tools', () => {
+    for (const tool of [...layoutDocumentTools, ...modelDocumentTools]) expect(hasPrefixItems(tool.input_schema), tool.name).toBe(false);
+  });
+  it('leave a property named prefixItems alone', () => {
+    expect(flattenTuples({ type: 'object', properties: { prefixItems: { type: 'string' } } })).toEqual({ type: 'object', properties: { prefixItems: { type: 'string' } } });
   });
 });

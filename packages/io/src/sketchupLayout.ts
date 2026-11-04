@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { strFromU8, strToU8, unzipSync } from 'fflate';
+import { strFromU8, strToU8 } from 'fflate';
 import {
   LAYOUT_FORMAT_VERSION,
   LAYOUT_AUTO_TEXT_TAGS,
@@ -18,13 +18,15 @@ import {
   importLayoutText,
   layoutPathAnchorAt,
   layoutTextCenter,
-  layoutTextStyleAt,
+  layoutTextLineHeightMm,
   rotateLayoutPoint,
   MAX_TABLE_AXIS,
   layoutDashMm,
   layoutArrowFromFile,
   LAYOUT_DEFAULT_ARROW_SIZE_PT,
+  LAYOUT_PATTERN_DEFAULT_DPI,
   type LayoutArrow,
+  type LayoutFillPattern,
   validLayoutTable,
   validTableFrame,
   type LayoutDocumentState,
@@ -42,13 +44,15 @@ import {
   type LayoutViewportCamera,
 } from '@pushform/layout';
 import { newGuid, type LengthFormat } from '@pushform/core';
-import { DEFAULT_SHADOWS, type ShadowSettings } from '@pushform/model';
+import { DEFAULT_SHADOWS, imageSizeFromHeader, type ShadowSettings } from '@pushform/model';
 import { child, childrenNamed, parseXml, type XmlElement } from './xml';
 import { readLayOutCamera, viewportCameraFromLayOut } from './sketchupViewportCamera';
 import { validateImportedLayoutState } from './layoutImportValidation';
-import { clearPngColors } from './png';
+import { clearPngColors, pngHasTransparency } from './png';
+import { imagePixelsPerInch } from './imageResolution';
 import { pngIsBlank } from './pngBlank';
 import { TiffError, tiffToPng } from './tiff';
+import { unzipEntries } from './nativeArchive';
 
 /**
  * Import of SketchUp LayOut documents (a zip of XML parts, unchanged in structure from LayOut 2013
@@ -119,6 +123,11 @@ const PREFIXES = {
   'http://sketchup.google.com/schemas/layout/1.0/references': 'r',
   'http://sketchup.google.com/schemas/layout/1.0/layout': 'l',
 };
+/** A PDF file starts with `%PDF-` within its first 1024 bytes. */
+function isPdf(bytes: Uint8Array): boolean {
+  const head = strFromU8(bytes.subarray(0, 1024), true);
+  return head.includes('%PDF-');
+}
 const IMAGE_TYPES: Record<string, string> = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', bmp: 'image/bmp', webp: 'image/webp',
 };
@@ -140,13 +149,19 @@ export function isSketchUpLayoutFile(name: string): boolean {
 /** Inflate, parse and convert a .layout archive in one synchronous pass; browsers run this in a worker (see sketchupLayoutClient). */
 export function prepareSketchUpLayout(bytes: Uint8Array, fileName = 'Imported', options: { preserveSources?: boolean } = {}): PreparedSketchUpLayout {
   let files: Record<string, Uint8Array>;
+  /** Embedded models, by entry name. */
+  const models = new Set<string>();
   try {
     // Model bytes remain in the preserved compressed package; display conversion need not inflate them.
-    files = unzipSync(bytes, { filter: (file) => !file.name.toLowerCase().endsWith('.skp') });
+    files = unzipEntries(bytes, name => {
+      if (!name.toLowerCase().endsWith('.skp')) return true;
+      models.add(name);
+      return false;
+    });
   } catch {
     throw new Error('Invalid .layout archive');
   }
-  const prepared = new Importer(files, fileName, options.preserveSources === false ? undefined : bytes).run();
+  const prepared = new Importer(files, fileName, options.preserveSources === false ? undefined : bytes, models).run();
   validateImportedLayoutState(prepared.state);
   return prepared;
 }
@@ -174,7 +189,8 @@ class Importer {
   /** Viewports name their preserved package before it is assembled at the end of the import. */
   private readonly archiveId = newGuid();
 
-  constructor(private readonly files: Record<string, Uint8Array>, private readonly fileName: string, private readonly originalArchive?: Uint8Array) {}
+  constructor(private readonly files: Record<string, Uint8Array>, private readonly fileName: string, private readonly originalArchive?: Uint8Array,
+    private readonly embeddedModels: ReadonlySet<string> = new Set()) {}
 
   run(): PreparedSketchUpLayout {
     const document = this.xml('document.xml');
@@ -602,7 +618,7 @@ class Importer {
     // Closed subpaths, and the open ones of a filled path without arrows, stay one compound path. Open
     // contours fill as if closed but keep their closing segment undrawn; a lone point draws nothing and is dropped.
     const compound = subpaths.length > 1 && (subpaths.every(subpath => subpath.closed && subpath.points.length >= 3) ||
-      Boolean(graphic && fills(graphic)) && !startArrow && !endArrow);
+      Boolean(graphic && (fills(graphic) || patterned(graphic))) && !startArrow && !endArrow);
     const contours = compound ? subpaths.filter(subpath => subpath.points.length >= (subpath.closed ? 3 : 2)) : [];
     if (contours.length === 1) return this.pathEntity(contours[0]!, graphic, layerId);
     if (contours.length > 1) {
@@ -619,14 +635,14 @@ class Importer {
       ...(index === 0 && startArrow ? { startArrow } : {}),
       ...(index === subpaths.length - 1 && endArrow ? { endArrow } : {}),
     }));
-    if (!compound && subpaths.length > 1 && graphic && fills(graphic)) this.warn('filled paths with arrows were split into separate shapes, one per subpath');
+    if (!compound && subpaths.length > 1 && graphic && (fills(graphic) || patterned(graphic))) this.warn('filled paths with arrows were split into separate shapes, one per subpath');
     return entities;
   }
 
   private pathEntity(subpath: Subpath, graphic: XmlElement | undefined, layerId: number,
     arrows: { startArrow?: LayoutArrow; endArrow?: LayoutArrow } = {}): LayoutEntity[] {
     if (subpath.points.length < 2 && !subpath.closed) return [];
-    const style = pathStyle(graphic);
+    const style = pathStyle(graphic, this.fillPattern(graphic));
     if (!style) return [];
     const entity = (closed: boolean, entityStyle: NonNullable<LayoutEntity['style']>): LayoutEntity => ({
       id: this.allocId(), kind: 'path', layerId,
@@ -636,14 +652,44 @@ class Importer {
       style: entityStyle,
     });
     // An open path fills as if it were closed but strokes only its drawn segments.
-    if (!subpath.closed && style.fillColor && subpath.points.length >= 3) {
+    if (!subpath.closed && (style.fillColor || style.fillPattern) && subpath.points.length >= 3) {
       const stroked = style.strokeColor !== '#00000000';
+      const { fillPattern: _pattern, ...strokeStyle } = style;
       return [
         entity(true, { ...style, strokeColor: '#00000000' }),
-        ...(stroked ? [entity(false, { ...style, fillColor: null, ...arrows })] : []),
+        ...(stroked ? [entity(false, { ...strokeStyle, fillColor: null, ...arrows })] : []),
       ];
     }
     return [entity(subpath.closed, subpath.closed ? style : { ...style, ...arrows })];
+  }
+
+  /**
+   * A graphic entity's pattern fill: its picture (the `fill.imagepattern` image reference), origin in page inches,
+   * scale and counterclockwise rotation in degrees. One copy of the picture is its pixel size at its stored
+   * resolution, or at 96 pixels per inch without one. A pattern whose picture is missing or unreadable is dropped.
+   */
+  private fillPattern(graphic: XmlElement | undefined): LayoutFillPattern | undefined {
+    if (!graphic || !patterned(graphic)) return undefined;
+    const refId = graphic.children.find(item => item.name === 'imageFileReference' && item.attrs.tag === 'fill.imagepattern')?.attrs['r:id'];
+    const target = refId ? this.references.get(refId)?.attrs.internalTarget : undefined;
+    const bytes = target ? this.files[target] : undefined;
+    const mime = target && /.png$/i.test(target) ? 'image/png' : target && /.jpe?g$/i.test(target) ? 'image/jpeg' : undefined;
+    const size = bytes && mime ? imageSizeFromHeader(bytes) : null;
+    if (!bytes || !mime || !size || !size.width || !size.height) {
+      this.warn(bytes ? 'pattern fills whose picture could not be read were left out' : 'pattern fills whose picture is missing were left out');
+      return undefined;
+    }
+    let src = this.dataUrls.get(target!);
+    if (!src) { src = `data:${mime};base64,${base64(bytes)}`; this.dataUrls.set(target!, src); }
+    const [dpiX, dpiY] = imagePixelsPerInch(bytes) ?? [LAYOUT_PATTERN_DEFAULT_DPI, LAYOUT_PATTERN_DEFAULT_DPI];
+    const scale = num(graphic, 'fillImageScale', 1), rotationDeg = num(graphic, 'fillImageRotation', 0);
+    return {
+      src,
+      tileMm: [size.width / dpiX * MM_PER_INCH, size.height / dpiY * MM_PER_INCH],
+      originMm: [num(graphic, 'fillImageOriginX', 0) * MM_PER_INCH, num(graphic, 'fillImageOriginY', 0) * MM_PER_INCH],
+      scale: Number.isFinite(scale) && scale > 0 ? scale : 1,
+      rotationDeg: Number.isFinite(rotationDeg) ? rotationDeg : 0,
+    };
   }
 
   /** An open, stroked path's start and end arrows. LayOut's underrun and overrun ends are not arrows. */
@@ -661,12 +707,20 @@ class Importer {
     return { ...(startArrow ? { startArrow } : {}), ...(endArrow ? { endArrow } : {}) };
   }
 
+  /** A dimension's or label's end style by its `arrowData` code; one PushForm has no style for is drawn as an arrow. */
+  private endpoint<T extends string>(styles: Record<number, T>, code: number, owner: 'dimension' | 'label'): T | 'arrow' {
+    const style = styles[code];
+    if (style !== undefined) return style;
+    this.warn(`${owner} end style ${code} was drawn as an arrow`);
+    return 'arrow';
+  }
+
   private shape(element: XmlElement, layerId: number): LayoutEntity[] {
     const base = child(element, 'rectangleBase');
     if (!base) return [];
     const { x, y, width, height, transform } = rectangle(base);
     const rounding = num(element, 'rounding', 0);
-    // `shape` follows Layout::Rectangle::TYPE_*: 0 normal, 1 rounded, 2 lozenge, 3 bulged.
+    // `shape` is the stored rectangle type: 0 normal, 1 rounded, 2 lozenge, 3 bulged.
     const variant = element.name === 'ellipse' ? 'ellipse' : element.attrs.shape ?? '0';
     if (!['ellipse', '0', '1', '2', '3'].includes(variant)) this.warn(`rectangle variant ${variant} was imported as a plain rectangle`);
     const subpath = variant === 'ellipse' ? ellipse(x, y, width, height)
@@ -696,7 +750,7 @@ class Importer {
     // A LayOut text box can be filled and stroked like a shape; PushForm text cannot, so the box is
     // drawn as a rectangle behind the text.
     const boxGraphic = child(base, 'graphicEntity');
-    const box = boxGraphic && (fills(boxGraphic) || strokes(boxGraphic))
+    const box = boxGraphic && (fills(boxGraphic) || strokes(boxGraphic) || patterned(boxGraphic))
       ? this.pathEntity(transformSubpath(roundedRectangle(x, y, width, height, 0), transform), boxGraphic, layerId) : [];
     return [...box, {
       id: this.allocId(), kind: 'text', layerId,
@@ -799,13 +853,14 @@ class Importer {
     // An absent strokeWidth is LayOut's 1 pt default.
     const weight = num(graphic?.attrs.strokeWidth !== undefined ? graphic : lineGraphic ?? element, 'strokeWidth', 1);
     const arrows = child(lineElement!, 'arrowData');
-    const endpoint = DIMENSION_ENDPOINT[Number(arrows?.attrs.startArrowType ?? 0)] ?? 'arrow';
+    const endpoint = this.endpoint(DIMENSION_ENDPOINT, Number(arrows?.attrs.startArrowType ?? 0), 'dimension');
     const arrowPt = num(arrows ?? element, 'startArrowSize', 3);
     const extension = child(element, 'extensionLine1');
     const extensionPath = extension ? parsePath(extension)[0] : undefined;
     const extensionArrows = extension && child(extension, 'arrowData');
     const measuredGap = extensionPath?.points[0] ? Math.hypot(extensionPath.points[0][0] - a[0], extensionPath.points[0][1] - a[1]) : NaN;
-    const gap = Number.isFinite(measuredGap) ? measuredGap : 0.125;
+    // A gap that cannot be measured is 1/8 in, the gap a new dimension is written with.
+    const gap = Number.isFinite(measuredGap) ? measuredGap : DEFAULT_EXTENSION_GAP_IN;
     // A blank body that is not automatic is custom text the author cleared.
     const template = (element.attrs.dimensionString ?? (element.attrs.autoText === '1' || !rtf ? '<>' : shown ?? '')).replace(/\r\n?/g, '\n');
     return {
@@ -960,12 +1015,13 @@ class Importer {
     const elbow = leader.points.length >= 3;
     const angle = body.text!.rotationDeg ?? 0;
     let points = body.points;
-    // An unbounded label's text is set from its leader's end, and its stored box can be stale; one whose anchored
-    // edge lies more than half a line from where that puts it moves there, keeping its size.
-    if (!body.text!.bounded && angle === 0) {
+    // An unbounded label connected to a line of its text is set from its leader's end, and its stored box can be
+    // stale; one whose anchored edge lies more than half a line from where that puts it moves there, keeping its size.
+    // Lines are measured as they are painted. A label whose connection is automatic keeps its box.
+    if (!body.text!.bounded && angle === 0 && element.attrs.connectionType !== LABEL_CONNECTION_AUTO) {
       const end = toMm(leader.points.at(-1)!)[1];
       const top = Math.min(points[0]![1], points[1]![1]), bottom = Math.max(points[0]![1], points[1]![1]);
-      const vertical = body.text!.vertical, half = labelLineHalfHeightMm(body.text!, vertical === 'bottom');
+      const vertical = body.text!.vertical, half = layoutTextLineHeightMm(body.text!, vertical === 'bottom') / 2;
       const shift = vertical === 'top' ? end - half - top : vertical === 'bottom' ? end + half - bottom : end - (top + bottom) / 2;
       if (Math.abs(shift) > half) points = points.map(([x, y]): Point => [x, y + shift]);
     }
@@ -977,7 +1033,7 @@ class Importer {
     return [...boxes, {
       ...body, kind: 'label',
       points: [...points, local(leader.points[0]!), ...(elbow ? [local(leader.points.at(-2)!)] : [])],
-      text: { ...body.text!, leader: elbow ? 'elbow' : 'straight', endpoint: LABEL_ENDPOINT[arrow] ?? 'arrow',
+      text: { ...body.text!, leader: elbow ? 'elbow' : 'straight', endpoint: this.endpoint(LABEL_ENDPOINT, arrow, 'label'),
         ...(Math.abs(offset) > LABEL_OFFSET_EPSILON_MM ? { leaderOffsetMm: offset } : {}) },
     }];
   }
@@ -1036,8 +1092,15 @@ class Importer {
     const options = childrenNamed(child(element, 'renderingOptions') ?? element, 'entry');
     const backgroundEntry = options.find((entry) => entry.attrs.key === 'BackgroundColor');
     const backgroundColor = element.attrs.displayBackground === '1' && backgroundEntry ? color(backgroundEntry.attrs.value, '#ffffff') : null;
-    // With it off, the cached raster render still holds the sky and background, which are not drawn.
-    // A color the model itself draws in (faces, edges) or white paper is kept: clearing it would cut into the model.
+    // LayOut's render mode shows in which caches it stored: a picture (raster), paths (vector), or both
+    // (hybrid: the picture's faces under the paths' edges).
+    const rasterId = child(element, 'imageFileReference')?.attrs['r:id'];
+    const rasterTarget = rasterId ? this.references.get(rasterId)?.attrs.internalTarget : undefined;
+    const rasterBytes = rasterTarget && /\.png$/i.test(rasterTarget) ? this.files[rasterTarget] : undefined;
+    // With Background off, a raster render with transparency already leaves out the sky and background, and its opaque
+    // pixels are all model, even those in the sky or background color (a texture, a face). A fully opaque render
+    // still holds them, so those two colors are cleared from it, except a color the model itself draws in
+    // (faces, edges) or white paper: clearing it would cut into the model.
     const rgbOf = (key: string): number | null => {
       const value = options.find((entry) => entry.attrs.key === key)?.attrs.value;
       if (value === undefined || !Number.isFinite(Number(value))) return null;
@@ -1045,16 +1108,12 @@ class Importer {
       return (abgr & 0xff) << 16 | (abgr >>> 8 & 0xff) << 8 | (abgr >>> 16 & 0xff);
     };
     const modelColors = [0xffffff, ...['FaceFrontColor', 'FaceBackColor', 'ForegroundColor'].map(rgbOf)];
-    const backdrop = element.attrs.displayBackground === '1' ? [] : ['SkyColor', 'BackgroundColor']
+    const backdrop = element.attrs.displayBackground === '1' || !rasterBytes || pngHasTransparency(rasterBytes) ? [] : ['SkyColor', 'BackgroundColor']
       .map(rgbOf).filter((rgb): rgb is number => rgb !== null && !modelColors.includes(rgb));
-    // LayOut's render mode shows in which caches it stored: a picture (raster), paths (vector), or both
-    // (hybrid: the picture's faces under the paths' edges).
-    const rasterId = child(element, 'imageFileReference')?.attrs['r:id'];
-    const rasterTarget = rasterId ? this.references.get(rasterId)?.attrs.internalTarget : undefined;
     const renderable = Boolean(this.originalArchive && modelReferenceId && this.references.get(modelReferenceId)?.name === 'skpFileReference');
     // A file sometimes holds a blank raster render, meant to be drawn again from its model; a model view does that.
     // (Render timestamps older than the view's last change are not a reliable sign: those renders are still current.)
-    const blank = renderable && Boolean(rasterTarget && this.files[rasterTarget] && /\.png$/i.test(rasterTarget) && pngIsBlank(this.files[rasterTarget]!));
+    const blank = renderable && Boolean(rasterBytes && pngIsBlank(rasterBytes));
     const raster = blank ? null : this.imageUrl(rasterId, backdrop);
     const imageRect = child(element, 'imageRect');
     const vector = this.vectorSvg(child(element, 'vectorFileReference')?.attrs['r:id'], base,
@@ -1070,6 +1129,9 @@ class Importer {
       const viewportCamera = modelCamera;
       // A blank raster render is stale even beside vector edges: the model is rendered instead.
       const picture = blank ? null : vector ?? raster;
+      const modelTarget = this.references.get(modelReferenceId)?.attrs.internalTarget;
+      if (!picture && !(modelTarget && this.embeddedModels.has(modelTarget)))
+        this.warn('a SketchUp viewport without a cached render whose model is not embedded in the file shows no picture');
       const entity = this.imageEntity(base, picture ?? '', placed, layerId);
       entity.image!.viewport = {
         source: { archiveId: this.archiveId, modelReferenceId }, templateId: originalId, originalId,
@@ -1131,7 +1193,7 @@ class Importer {
     return url;
   }
 
-  /** Placed pictures: browser formats as stored, SVG with a size to draw at, and TIFF converted to PNG. */
+  /** Placed pictures: browser formats and PDFs as stored, SVG with a size to draw at, and TIFF converted to PNG. */
   private pictureUrl(bytes: Uint8Array, extension: string): string | null {
     const type = extension.toLowerCase();
     if (type === 'tif' || type === 'tiff') {
@@ -1143,6 +1205,12 @@ class Importer {
       }
     }
     if (type === 'svg') return `data:image/svg+xml;base64,${base64(strToU8(sizedSvg(strFromU8(bytes))))}`;
+    // A PDF stays the file itself; the app draws its first page.
+    if (type === 'pdf') {
+      if (isPdf(bytes)) return `data:application/pdf;base64,${base64(bytes)}`;
+      this.warn('a PDF image that is not a PDF file could not be read');
+      return null;
+    }
     const mime = IMAGE_TYPES[type];
     if (!mime) { this.warn(`images of type .${extension} are not supported`); return null; }
     return `data:${mime};base64,${base64(bytes)}`;
@@ -1290,6 +1358,10 @@ function fills(graphic: XmlElement): boolean {
   return graphic.attrs.shouldFill !== '0';
 }
 
+function patterned(graphic: XmlElement): boolean {
+  return graphic.attrs.shouldFillPattern === '1';
+}
+
 function strokes(graphic: XmlElement): boolean {
   return graphic.attrs.shouldStroke !== '0';
 }
@@ -1307,10 +1379,10 @@ function sameEdge(a: LayoutTableEdge, b: LayoutTableEdge): boolean {
 }
 
 /** Defaults when the file gives none: filled white and stroked 1 pt black unless the graphic entity says otherwise. */
-function pathStyle(graphic: XmlElement | undefined): LayoutEntity['style'] | null {
+function pathStyle(graphic: XmlElement | undefined, fillPattern?: LayoutFillPattern): LayoutEntity['style'] | null {
   const fill = !graphic || fills(graphic) ? color(graphic?.attrs.fillColor, '#ffffff') : null;
   const stroke = !graphic || strokes(graphic);
-  if (!fill && !stroke) return null;
+  if (!fill && !stroke && !fillPattern) return null;
   const width = graphic ? num(graphic, 'strokeWidth', 1) : 1;
   const strokeWeightPt = stroke ? (width > 0 ? width : 0.1) : 0.1;
   const patternId = graphic?.attrs.strokeDashPattern;
@@ -1326,6 +1398,7 @@ function pathStyle(graphic: XmlElement | undefined): LayoutEntity['style'] | nul
     strokeWeightPt,
     ...(strokeDashMm ? { strokeDashMm } : {}),
     fillColor: fill,
+    ...(fillPattern ? { fillPattern } : {}),
   };
 }
 
@@ -1522,6 +1595,8 @@ const DIMENSION_ENDPOINT: Record<number, LayoutLinearDimension['endpoint']> = {
 const LABEL_ENDPOINT: Record<number, LayoutText['endpoint']> = {
   0: 'none', 1: 'arrow', 2: 'arrow', 3: 'arrow', 4: 'arrow', 17: 'arrow', 18: 'arrow', 5: 'dot', 6: 'dot',
 };
+/** The extension-line gap, in inches, of a dimension whose stored gap cannot be measured. */
+const DEFAULT_EXTENSION_GAP_IN = 0.125;
 /** `unitsInfo unit` codes: inches 0, feet 1, millimeters 2, centimeters 3, meters 4, points 5; angles in degrees 9 or radians 10. */
 const LINEAR_UNITS: Record<number, LayoutLinearDimension['units']> = { 0: 'inch', 1: 'ft', 2: 'mm', 3: 'cm', 4: 'm', 5: 'pt' };
 const UNIT_RADIANS = 10;
@@ -1646,17 +1721,8 @@ function toMm([x, y]: Point): Point {
 
 /** A label leader within this of the box's center meets it at the center. */
 const LABEL_OFFSET_EPSILON_MM = 0.05;
-/** A line's height in ems, for placing a stale label box: lines are 1.1 (Arial) to 1.2 (Verdana) em. */
-const LABEL_LINE_EM = 1.15;
-
-/** Half the height of a text's first or last line, by its largest font. */
-function labelLineHalfHeightMm(text: LayoutText, last: boolean): number {
-  const breakAt = last ? text.content.lastIndexOf('\n') : text.content.indexOf('\n');
-  const start = last ? breakAt + 1 : 0, end = last || breakAt < 0 ? text.content.length : breakAt;
-  let size = layoutTextStyleAt(text, Math.min(start, Math.max(0, text.content.length - 1))).fontSizePt;
-  for (let index = start; index < end; index++) size = Math.max(size, layoutTextStyleAt(text, index).fontSizePt);
-  return size * LABEL_LINE_EM / 2 * MM_PER_INCH / 72;
-}
+/** A label's `connectionType` when its leader meets the text wherever the box puts it. */
+const LABEL_CONNECTION_AUTO = '1';
 
 function handleToMm(handle: LayoutPathHandle): LayoutPathHandle {
   return {

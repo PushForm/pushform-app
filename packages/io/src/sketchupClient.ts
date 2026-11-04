@@ -21,13 +21,15 @@ export function readSketchUpInWorker(bytes: Uint8Array, options: {
   maxStepBytes?: number | undefined;
   /** Triangle count above which the model imports as mesh parts; tests lower it. */
   meshPartThreshold?: number | undefined;
+  /** Accept a SketchUp model with nothing in it instead of rejecting it, for a model view of an empty model. */
+  allowEmpty?: boolean | undefined;
   /** Parts of a STEP file as they are meshed, to draw before the import finishes (other formats send none). */
   onPreview?: StepPreviewListener | undefined;
 } = {}): Promise<SketchUpImport> {
   if (options.signal?.aborted) return Promise.reject(new DOMException('Import cancelled.', 'AbortError'));
   const step = isStepBytes(bytes), limit = step ? options.maxStepBytes ?? MAX_SKETCHUP_BYTES : MAX_SKETCHUP_BYTES;
   if (bytes.byteLength > limit) return Promise.reject(new Error(`${step ? 'STEP' : 'Model'} files larger than ${limit / (1024 * 1024)} MiB are not supported yet.`));
-  const limits = { stepBytes: options.maxStepBytes, meshPartThreshold: options.meshPartThreshold };
+  const limits = { stepBytes: options.maxStepBytes, meshPartThreshold: options.meshPartThreshold, allowEmpty: options.allowEmpty };
   // Inline path for headless callers and test environments. Browsers use the worker, except for a STEP file the host
   // converts natively: that call is made from the window and does its work outside the page.
   if (typeof Worker === 'undefined' || (step && hasNativeStepReader())) return readModelImport(bytes, options.onProgress, options.mesh, limits, options.signal, options.onPreview).then(scene => {

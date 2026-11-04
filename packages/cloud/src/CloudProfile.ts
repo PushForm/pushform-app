@@ -45,6 +45,8 @@ export interface CloudProfile {
   readonly termsAcceptedAt: string;
   readonly completedAt: string;
   readonly updatedAt: string;
+  readonly analyticsOptIn?: boolean | null;
+  readonly analyticsUpdatedAt?: string | null;
 }
 /** What the signup step and account details submit. `acceptTerms` accepts CLOUD_TERMS_VERSION; it cannot be withdrawn. */
 export interface CloudProfileInput {
@@ -58,6 +60,8 @@ export interface CloudProfileInput {
   acceptTerms: boolean;
   /** Optional mailing-list choice on initial account setup; independent of accepting the Terms. */
   mailingOptIn?: boolean;
+  /** Only a successful profile submission establishes the analytics choice. */
+  analyticsOptIn?: boolean;
 }
 export type CloudProfileField = 'firstName' | 'lastName' | 'accountType' | 'companyName' | 'companySize' | 'industry' | 'industryOther' | 'acceptTerms';
 
@@ -73,8 +77,8 @@ export function cloudProfileInput(profile: CloudProfile | null): CloudProfileInp
   return profile ? {
     firstName: profile.firstName, lastName: profile.lastName, accountType: profile.accountType,
     companyName: profile.companyName ?? '', companySize: profile.companySize, industry: profile.industry,
-    industryOther: profile.industryOther ?? '', acceptTerms: cloudProfileComplete(profile),
-  } : { firstName: '', lastName: '', accountType: null, companyName: '', companySize: null, industry: null, industryOther: '', acceptTerms: false };
+    industryOther: profile.industryOther ?? '', acceptTerms: cloudProfileComplete(profile), analyticsOptIn: profile.analyticsOptIn ?? true,
+  } : { firstName: '', lastName: '', accountType: null, companyName: '', companySize: null, industry: null, industryOther: '', acceptTerms: false, analyticsOptIn: true };
 }
 
 function hasControl(value: string): boolean { return /\p{Cc}/u.test(value); }
@@ -118,12 +122,14 @@ interface ProfileRow {
   first_name: string; last_name: string; account_type: CloudAccountType; company_name: string | null;
   company_size: CloudCompanySize | null; industry: CloudIndustry; industry_other: string | null; terms_version: string;
   terms_accepted_at: string; completed_at: string; updated_at: string;
+  analytics_opt_in?: boolean | null; analytics_updated_at?: string | null;
 }
 function fromRow(row: ProfileRow): CloudProfile {
   return {
     firstName: row.first_name, lastName: row.last_name, accountType: row.account_type, companyName: row.company_name,
     companySize: row.company_size, industry: row.industry, industryOther: row.industry_other, termsVersion: row.terms_version,
     termsAcceptedAt: row.terms_accepted_at, completedAt: row.completed_at, updatedAt: row.updated_at,
+    analyticsOptIn: row.analytics_opt_in ?? null, analyticsUpdatedAt: row.analytics_updated_at ?? null,
   };
 }
 function message(error: unknown, fallback: string): string {
@@ -210,7 +216,10 @@ export class CloudProfiles implements CloudProfileStore {
     }
     this.update({ saving: true, error: null });
     try {
-      const { data, error } = await callRpc(this.client, 'cloud_save_profile', cloudProfileParams(input));
+      const params = cloudProfileParams(input);
+      const { data, error } = input.analyticsOptIn === undefined
+        ? await callRpc(this.client, 'cloud_save_profile', params)
+        : await callRpc(this.client, 'cloud_save_profile_analytics', { ...params, p_analytics_opt_in: input.analyticsOptIn });
       if (epoch !== this.epoch) return false;
       if (error) {
         if (input.mailingOptIn && error.code === 'PGRST202') {this.update({saving:false,error:'Email updates are not available on this installation yet. Uncheck the optional email choice to continue.'});return false;}

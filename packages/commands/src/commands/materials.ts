@@ -17,7 +17,7 @@ import {
   uvClone,
   uvRebaseSides,
 } from '@pushform/model';
-import type { Body, DocumentDraft, DocumentState, EntityContainer, EntityRef, ImageAsset, Material, MaterialTexture, Rgb, Sketch, UvMapping } from '@pushform/model';
+import type { Body, DocumentDraft, DocumentState, EntityContainer, EntityRef, ImageAsset, Material, MaterialTexture, Rgb, Sketch, TextureGrain, UvMapping } from '@pushform/model';
 import { allocId, entityRefKey } from '@pushform/model';
 import { defineCommand } from '../registry/Command';
 import type { AnyCommand } from '../registry/Command';
@@ -50,6 +50,8 @@ const textureSchema = z.object({
   /** Colorize the texture toward the material color. */
   colorize: z.boolean().optional(),
   colorizeType: z.enum(['shift', 'tint']).optional(),
+  /** Which way the image's grain runs; absent means along its width. */
+  grain: z.enum(['width', 'height', 'none']).optional(),
 });
 const uvSchema = z.union([
   z.object({ kind: z.literal('auto') }),
@@ -416,7 +418,7 @@ export const materialCreate = defineCommand({
       let texture: MaterialTexture | null = null;
       if (p.texture) {
         texture = { imageId: ensureDocumentImage(host, draft, p.texture.imageId), widthM: p.texture.widthM, heightM: p.texture.heightM, colorize: p.texture.colorize ?? false,
-          ...(p.texture.colorizeType ? { colorizeType: p.texture.colorizeType } : {}) };
+          ...(p.texture.colorizeType ? { colorizeType: p.texture.colorizeType } : {}), ...(p.texture.grain ? { grain: p.texture.grain } : {}) };
       }
       const m = createMaterial(draft, { name: p.name ?? 'Material', color: p.color as Rgb, alpha: p.alpha, texture });
       return m.id as number;
@@ -459,6 +461,7 @@ export const materialUpdate = defineCommand({
           heightM: p.texture.heightM ?? prev?.heightM ?? 1,
           colorize: p.texture.colorize ?? prev?.colorize ?? false,
           ...((p.texture.colorizeType ?? prev?.colorizeType) ? { colorizeType: p.texture.colorizeType ?? prev?.colorizeType } : {}),
+          ...((p.texture.grain ?? prev?.grain) ? { grain: p.texture.grain ?? prev?.grain } : {}),
         };
       }
       return true;
@@ -600,46 +603,58 @@ export const materialFromLibrary = defineCommand({
   id: 'material.fromLibrary',
   title: 'Add Library Material',
   category: 'edit',
-  params: z.object({ key: z.string(), activate: z.boolean().default(true) }),
+  params: z.object({
+    key: z.string(),
+    activate: z.boolean().default(true),
+    /** The loaded texture from `loadLibraryMaterial` for this key. */
+    precomputed: z.custom<LibraryMaterialWork>((v) => typeof v === 'object' && v !== null && 'texture' in v).optional(),
+  }),
   undoable: false,
   async run(ctx, p): Promise<number> {
     const host = hostOf(ctx);
     const entry = libraryMaterial(p.key);
     if (!entry) throw new PushFormError('material.library', `Unknown library material ${p.key}`);
     // Reuse an in-model copy of the same library entry (one "In Model" copy is kept).
-    for (const m of host.doc.state.materials.values()) {
-      if (m.name === entry.name) {
-        if (p.activate) activeMaterialOf(ctx).set(m.id);
-        return m.id;
-      }
+    const existing = [...host.doc.state.materials.values()].find((m) => m.name === entry.name);
+    if (existing) {
+      if (p.activate) activeMaterialOf(ctx).set(existing.id);
+      return existing.id;
     }
-    let texture: { imageId: number; widthM: number; heightM: number } | null = null;
-    if (entry.texture) {
-      const jpeg = await loadLibraryTexture(entry.key);
-      if (jpeg) {
-        const asset = await host.images.put(jpeg, 'image/jpeg', `${entry.name}.jpg`, { width: entry.texture.widthPx, height: entry.texture.heightPx });
-        texture = { imageId: asset.id, widthM: entry.texture.widthM, heightM: entry.texture.heightM };
-      }
-    }
-    for (const m of host.doc.state.materials.values()) {
-      if (m.name === entry.name) {
-        if (p.activate) activeMaterialOf(ctx).set(m.id);
-        return m.id;
-      }
+    const { texture } = p.precomputed ?? (await loadLibraryMaterial(host, p.key));
+    const again = [...host.doc.state.materials.values()].find((m) => m.name === entry.name);
+    if (again) {
+      if (p.activate) activeMaterialOf(ctx).set(again.id);
+      return again.id;
     }
     const id = host.transact('Add Material', () =>
       host.edit('Add Material', (draft) => {
         const tex: MaterialTexture | null = texture
-          ? { imageId: ensureDocumentImage(host, draft, texture.imageId), widthM: texture.widthM, heightM: texture.heightM, colorize: false }
+          ? { imageId: ensureDocumentImage(host, draft, texture.imageId), widthM: texture.widthM, heightM: texture.heightM, colorize: false, ...(texture.grain ? { grain: texture.grain } : {}) }
           : null;
         return createMaterial(draft, { name: entry.name, color: entry.color, alpha: entry.alpha, texture: tex }).id as number;
       }),
-      { commandId: 'material.fromLibrary', params: p },
+      { commandId: 'material.fromLibrary', params: { key: p.key, activate: p.activate } },
     );
     if (p.activate) activeMaterialOf(ctx).set(id);
     return id;
   },
 });
+
+/** A library material's texture, loaded and stored as an image before the document changes; null without a texture. */
+export interface LibraryMaterialWork {
+  readonly texture: { imageId: number; widthM: number; heightM: number; grain?: TextureGrain | undefined } | null;
+}
+
+/** Load a library entry's texture into the image store. Changes no document state. */
+export async function loadLibraryMaterial(host: DocumentHost, key: string): Promise<LibraryMaterialWork> {
+  const entry = libraryMaterial(key);
+  if (!entry) throw new PushFormError('material.library', `Unknown library material ${key}`);
+  if (!entry.texture) return { texture: null };
+  const jpeg = await loadLibraryTexture(entry.key);
+  if (!jpeg) return { texture: null };
+  const asset = await host.images.put(jpeg, 'image/jpeg', `${entry.name}.jpg`, { width: entry.texture.widthPx, height: entry.texture.heightPx });
+  return { texture: { imageId: asset.id, widthM: entry.texture.widthM, heightM: entry.texture.heightM, ...(entry.texture.grain ? { grain: entry.texture.grain } : {}) } };
+}
 
 export const materialLibraryList = defineCommand({
   id: 'material.library',

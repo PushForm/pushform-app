@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { entitiesForLayer, layoutPaperUnits, isLayoutLayerVisible, layoutPathArrows, layoutPathContours, pathSegment, type LayoutDocumentState, type LayoutPage } from '@pushform/layout';
+import { entitiesForLayer, layoutFillPatternMatrix, layoutPaperUnits, isLayoutLayerVisible, layoutPathArrows, layoutPathContours, pathSegment, type LayoutDocumentState, type LayoutFillPattern, type LayoutPage } from '@pushform/layout';
 import { vectorPoint, type LayoutVectorIdentity, type LayoutVectorItem, type LayoutVectorPage, type VectorMatrix, type VectorPath } from '@pushform/io';
 import { paintLayoutText, type LayoutPaintedGlyph } from './layoutText';
 import { paintLayoutDimension, paintAngularDimension } from './layoutDimension';
 import { paintLayoutTable } from './layoutTable';
 import { paintLayoutImage } from './layoutImage';
+import { paintLayoutFillPattern } from './layoutFillPattern';
 import { layoutViewportPicture } from './layoutViewportRenders';
 
 /** The Canvas2D operations used by Layout's content painters, recorded without rasterizing paths or text. */
@@ -86,6 +87,12 @@ export class LayoutVectorRecorder {
       weight, dash, layer: this.layer, clips: [...this.state.clips] });
   }
   fill(rule?: CanvasFillRule): void { this.record(this.fillStyle, null, rule === 'evenodd'); }
+  /** A pattern fill of the current path, kept as a repeating picture rather than painted tiles. */
+  fillPattern(pattern: LayoutFillPattern, evenodd: boolean): void {
+    const m = this.state.matrix, [a, b, c, d, e, f] = layoutFillPatternMatrix(pattern);
+    const matrix: VectorMatrix = [m[0] * a + m[2] * b, m[1] * a + m[3] * b, m[0] * c + m[2] * d, m[1] * c + m[3] * d, ...vectorPoint(m, e, f)];
+    this.items.push({ ...this.object, kind: 'pattern', path: { segments: [...this.path.segments] }, evenodd, src: pattern.src, matrix, layer: this.layer, clips: [...this.state.clips] });
+  }
   stroke(): void { this.record(null, this.strokeStyle); }
   fillRect(x: number, y: number, w: number, h: number): void {
     const previous = this.path; this.beginPath(); this.rect(x, y, w, h); this.fill(); this.path = previous;
@@ -137,7 +144,7 @@ export function drawLayoutVectorPage(state: LayoutDocumentState, page: LayoutPag
       if (entity.table) { paintLayoutTable(ctx, entity, page, state, false, paintTextBlock); continue; }
       if (entity.image) {
         if (options.includeImages === false) recorder.items.push({ ...recorder.object, kind: 'image', src: '', x: 0, y: 0, width: 0, height: 0, matrix: [1, 0, 0, 1, 0, 0], clips: [], layer: recorder.layer });
-        else paintLayoutImage(ctx, entity, false, layoutViewportPicture(state, entity, undefined, options.exportDpi === undefined ? undefined : options.exportDpi / 25.4, options.exportDpi !== undefined));
+        else paintLayoutImage(ctx, entity, false, layoutViewportPicture(state, entity, undefined, options.exportDpi === undefined ? undefined : options.exportDpi / 25.4, options.exportDpi !== undefined), true);
         continue;
       }
       if (entity.text) { paintLayoutText(ctx, entity, page, state, false, paintTextBlock); continue; }
@@ -156,6 +163,7 @@ export function drawLayoutVectorPage(state: LayoutDocumentState, page: LayoutPag
       };
       trace();
       if (entity.closed && entity.style?.fillColor) { ctx.fillStyle = entity.style.fillColor; ctx.fill(entity.contourStarts ? 'evenodd' : 'nonzero'); }
+      if (entity.closed) paintLayoutFillPattern(ctx, entity.style?.fillPattern, Boolean(entity.contourStarts));
       if (entity.openContours) trace(entity.openContours);
       ctx.strokeStyle = entity.style?.strokeColor ?? state.defaultStyle.strokeColor;
       ctx.lineWidth = (entity.style?.strokeWeightPt ?? state.defaultStyle.strokeWeightPt) * 25.4 / 72;

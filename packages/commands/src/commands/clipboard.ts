@@ -426,7 +426,7 @@ export function copyModelSelection(
   for (const id of [...out.materials.keys()]) if (!usedMaterials.has(id)) out.materials.delete(id);
   for (const tag of out.tags.values()) tag.folderId = null;
   const blobs = new Map<ImageId, ImageBlob>();
-  for (const m of out.materials.values()) {
+  for (const m of [...out.materials.values(), ...out.tags.values()]) {
     const imageId = m.texture?.imageId;
     const asset = imageId === undefined ? undefined : state.images.get(imageId);
     if (!asset) continue;
@@ -461,7 +461,7 @@ function sameMaterial(a: Material, b: Material): boolean {
   if ((a.name !== b.name && a.name.replace(/#\d+$/, '') !== b.name) || !sameColor(a, b)) return false;
   if (!a.texture || !b.texture) return a.texture === b.texture;
   return a.texture.imageId === b.texture.imageId && a.texture.widthM === b.texture.widthM && a.texture.heightM === b.texture.heightM && a.texture.colorize === b.texture.colorize &&
-    (a.texture.colorizeType ?? 'shift') === (b.texture.colorizeType ?? 'shift');
+    (a.texture.colorizeType ?? 'shift') === (b.texture.colorizeType ?? 'shift') && (a.texture.grain ?? 'width') === (b.texture.grain ?? 'width');
 }
 
 /**
@@ -472,7 +472,7 @@ export function pasteModelClipboard(draft: DocumentDraft, clip: ModelClipboard, 
   const target = draft as unknown as DocumentState;
   const src = structuredClone(clip.state);
 
-  const tagMap = new Map<TagId, TagId>([[src.defaultTagId, target.defaultTagId]]);
+  const tagMap = new Map<TagId, TagId>([[src.defaultTagId, target.defaultTagId]]), addedTags: TagId[] = [];
   for (const tag of src.tags.values()) {
     if (tagMap.has(tag.id)) continue;
     const same = [...target.tags.values()].find((t) => t.name === tag.name);
@@ -483,6 +483,7 @@ export function pasteModelClipboard(draft: DocumentDraft, clip: ModelClipboard, 
     const id = allocId<TagId>(draft);
     target.tags.set(id, { ...tag, id, folderId: null });
     tagMap.set(tag.id, id);
+    addedTags.push(id);
   }
 
   const imageMap = new Map<ImageId, ImageId>();
@@ -501,6 +502,14 @@ export function pasteModelClipboard(draft: DocumentDraft, clip: ModelClipboard, 
     if (blob && images) images.register(copy, blob.bytes, blob.mime);
   }
 
+  // Tags added above refer to the pasted images; a texture whose image did not come along is dropped.
+  for (const id of addedTags) {
+    const tag = target.tags.get(id), imageId = tag?.texture ? imageMap.get(tag.texture.imageId) : undefined;
+    if (tag?.texture) {
+      if (imageId === undefined) delete tag.texture;
+      else tag.texture = { ...tag.texture, imageId };
+    }
+  }
   const materialMap = new Map<MaterialId, MaterialId>([[src.defaultMaterialId, target.defaultMaterialId]]);
   for (const m of src.materials.values()) {
     if (materialMap.has(m.id)) continue;

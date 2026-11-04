@@ -107,6 +107,34 @@ export type Database = {
                   Relationships: [
 
                   ]
+                },"cloud_billing_accounts": {
+                  Row: {
+                    "billing_interval": string | null,"cancel_at_period_end": boolean,"current_period_end": string | null,"customer_id": string | null,"deletion_cleared_at": string | null,"lock_expires_at": string | null,"lock_token": string | null,"owner_id": string,"price_id": string | null,"status": string,"subscription_id": string | null,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "billing_interval"?: string | null,"cancel_at_period_end"?: boolean,"current_period_end"?: string | null,"customer_id"?: string | null,"deletion_cleared_at"?: string | null,"lock_expires_at"?: string | null,"lock_token"?: string | null,"owner_id": string,"price_id"?: string | null,"status"?: string,"subscription_id"?: string | null,"updated_at"?: string
+                  }
+                  Update: {
+                    "billing_interval"?: string | null,"cancel_at_period_end"?: boolean,"current_period_end"?: string | null,"customer_id"?: string | null,"deletion_cleared_at"?: string | null,"lock_expires_at"?: string | null,"lock_token"?: string | null,"owner_id"?: string,"price_id"?: string | null,"status"?: string,"subscription_id"?: string | null,"updated_at"?: string
+                  }
+                  Relationships: [
+
+                  ]
+                },"cloud_billing_events": {
+                  Row: {
+                    "event_created": number,"event_id": string,"owner_id": string,"processed_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "event_created": number,"event_id": string,"owner_id": string,"processed_at"?: string
+                  }
+                  Update: {
+                    "event_created"?: number,"event_id"?: string,"owner_id"?: string,"processed_at"?: string
+                  }
+                  Relationships: [
+
+                  ]
                 },"cloud_documents": {
                   Row: {
                     "client_key": string | null,"created_at": string,"current_revision_id": string | null,"folder_id": string | null,"id": string,"is_template": boolean,"kind": string,"name": string,"owner_id": string,"project_id": string,"purge_after": string | null,"revision_number": number,"size_bytes": number,"trash_op": string | null,"trashed_at": string | null,"updated_at": string
@@ -243,14 +271,14 @@ isOneToOne: true
                   ]
                 },"cloud_profiles": {
                   Row: {
-                    "account_type": string,"company_name": string | null,"company_size": string | null,"completed_at": string,"first_name": string,"industry": string,"industry_other": string | null,"last_name": string,"mailing_opted_in_at": string | null,"owner_id": string,"terms_accepted_at": string,"terms_version": string,"updated_at": string
+                    "account_type": string,"analytics_opt_in": boolean | null,"analytics_updated_at": string | null,"company_name": string | null,"company_size": string | null,"completed_at": string,"first_name": string,"industry": string,"industry_other": string | null,"last_name": string,"mailing_opted_in_at": string | null,"owner_id": string,"terms_accepted_at": string,"terms_version": string,"updated_at": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "account_type": string,"company_name"?: string | null,"company_size"?: string | null,"completed_at"?: string,"first_name": string,"industry": string,"industry_other"?: string | null,"last_name": string,"mailing_opted_in_at"?: string | null,"owner_id": string,"terms_accepted_at": string,"terms_version": string,"updated_at"?: string
+                    "account_type": string,"analytics_opt_in"?: boolean | null,"analytics_updated_at"?: string | null,"company_name"?: string | null,"company_size"?: string | null,"completed_at"?: string,"first_name": string,"industry": string,"industry_other"?: string | null,"last_name": string,"mailing_opted_in_at"?: string | null,"owner_id": string,"terms_accepted_at": string,"terms_version": string,"updated_at"?: string
                   }
                   Update: {
-                    "account_type"?: string,"company_name"?: string | null,"company_size"?: string | null,"completed_at"?: string,"first_name"?: string,"industry"?: string,"industry_other"?: string | null,"last_name"?: string,"mailing_opted_in_at"?: string | null,"owner_id"?: string,"terms_accepted_at"?: string,"terms_version"?: string,"updated_at"?: string
+                    "account_type"?: string,"analytics_opt_in"?: boolean | null,"analytics_updated_at"?: string | null,"company_name"?: string | null,"company_size"?: string | null,"completed_at"?: string,"first_name"?: string,"industry"?: string,"industry_other"?: string | null,"last_name"?: string,"mailing_opted_in_at"?: string | null,"owner_id"?: string,"terms_accepted_at"?: string,"terms_version"?: string,"updated_at"?: string
                   }
                   Relationships: [
 
@@ -297,14 +325,14 @@ isOneToOne: false
                   ]
                 },"commons_assets": {
                   Row: {
-                    "created_at": string,"filename": string,"format": string,"id": string,"object_key": string | null,"revision_id": string,"sha256": string,"size_bytes": number,"status": string,"uploaded_by": string | null,"verified_at": string | null
+                    "created_at": string,"filename": string,"format": string,"id": string,"object_key": string,"revision_id": string,"sha256": string,"size_bytes": number,"status": string,"uploaded_by": string | null,"verified_at": string | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "created_at"?: string,"filename": string,"format": string,"id"?: string,"object_key"?: never,"revision_id": string,"sha256": string,"size_bytes": number,"status"?: string,"uploaded_by"?: string | null,"verified_at"?: string | null
+                    "created_at"?: string,"filename": string,"format": string,"id"?: string,"object_key": string,"revision_id": string,"sha256": string,"size_bytes": number,"status"?: string,"uploaded_by"?: string | null,"verified_at"?: string | null
                   }
                   Update: {
-                    "created_at"?: string,"filename"?: string,"format"?: string,"id"?: string,"object_key"?: never,"revision_id"?: string,"sha256"?: string,"size_bytes"?: number,"status"?: string,"uploaded_by"?: string | null,"verified_at"?: string | null
+                    "created_at"?: string,"filename"?: string,"format"?: string,"id"?: string,"object_key"?: string,"revision_id"?: string,"sha256"?: string,"size_bytes"?: number,"status"?: string,"uploaded_by"?: string | null,"verified_at"?: string | null
                   }
                   Relationships: [
                     {
@@ -341,6 +369,26 @@ isOneToOne: false
       referencedColumns: ["model_id","id"]
     }
                   ]
+                },"commons_profile_images": {
+                  Row: {
+                    "created_at": string,"format": string,"height": number,"id": string,"kind": string,"object_key": string | null,"profile_id": string,"removed_at": string | null,"sha256": string,"size_bytes": number,"status": string,"uploaded_by": string | null,"verified_at": string | null,"width": number
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "created_at"?: string,"format": string,"height": number,"id"?: string,"kind": string,"object_key"?: never,"profile_id": string,"removed_at"?: string | null,"sha256": string,"size_bytes": number,"status"?: string,"uploaded_by"?: string | null,"verified_at"?: string | null,"width": number
+                  }
+                  Update: {
+                    "created_at"?: string,"format"?: string,"height"?: number,"id"?: string,"kind"?: string,"object_key"?: never,"profile_id"?: string,"removed_at"?: string | null,"sha256"?: string,"size_bytes"?: number,"status"?: string,"uploaded_by"?: string | null,"verified_at"?: string | null,"width"?: number
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "commons_profile_images_profile_id_fkey"
+      columns: ["profile_id"]
+isOneToOne: false
+      referencedRelation: "commons_profiles"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"commons_profiles": {
                   Row: {
                     "active": boolean,"avatar_url": string | null,"bio": string,"created_at": string,"display_name": string,"handle": string,"id": string,"links": NonNullable<Json>,"public_consent_at": string,"updated_at": string,"user_id": string | null,"version": number,"commons_profile_public": Json | null
@@ -357,28 +405,42 @@ isOneToOne: false
                   ]
                 },"commons_render_jobs": {
                   Row: {
-                    "attempts": number,"created_at": string,"error_code": string | null,"format": string,"geometry_sha256": string | null,"geometry_size": number | null,"id": string,"lease_expires_at": string | null,"lease_token": string | null,"metrics": NonNullable<Json>,"next_attempt_at": string,"renderer_version": string,"source_sha256": string,"status": string,"thumbnail_sha256": string | null,"thumbnail_size": number | null,"updated_at": string,"warnings": NonNullable<Json>
+                    "attempts": number,"created_at": string,"error_code": string | null,"format": string,"geometry_sha256": string | null,"geometry_size": number | null,"id": string,"lease_expires_at": string | null,"lease_token": string | null,"metrics": NonNullable<Json>,"next_attempt_at": string,"renderer_version": string,"requested_by": string | null,"source_sha256": string,"status": string,"thumbnail_sha256": string | null,"thumbnail_size": number | null,"updated_at": string,"warnings": NonNullable<Json>
                   }
                   ComputedFields: never
                   Insert: {
-                    "attempts"?: number,"created_at"?: string,"error_code"?: string | null,"format": string,"geometry_sha256"?: string | null,"geometry_size"?: number | null,"id"?: string,"lease_expires_at"?: string | null,"lease_token"?: string | null,"metrics"?: NonNullable<Json>,"next_attempt_at"?: string,"renderer_version": string,"source_sha256": string,"status"?: string,"thumbnail_sha256"?: string | null,"thumbnail_size"?: number | null,"updated_at"?: string,"warnings"?: NonNullable<Json>
+                    "attempts"?: number,"created_at"?: string,"error_code"?: string | null,"format": string,"geometry_sha256"?: string | null,"geometry_size"?: number | null,"id"?: string,"lease_expires_at"?: string | null,"lease_token"?: string | null,"metrics"?: NonNullable<Json>,"next_attempt_at"?: string,"renderer_version": string,"requested_by"?: string | null,"source_sha256": string,"status"?: string,"thumbnail_sha256"?: string | null,"thumbnail_size"?: number | null,"updated_at"?: string,"warnings"?: NonNullable<Json>
                   }
                   Update: {
-                    "attempts"?: number,"created_at"?: string,"error_code"?: string | null,"format"?: string,"geometry_sha256"?: string | null,"geometry_size"?: number | null,"id"?: string,"lease_expires_at"?: string | null,"lease_token"?: string | null,"metrics"?: NonNullable<Json>,"next_attempt_at"?: string,"renderer_version"?: string,"source_sha256"?: string,"status"?: string,"thumbnail_sha256"?: string | null,"thumbnail_size"?: number | null,"updated_at"?: string,"warnings"?: NonNullable<Json>
+                    "attempts"?: number,"created_at"?: string,"error_code"?: string | null,"format"?: string,"geometry_sha256"?: string | null,"geometry_size"?: number | null,"id"?: string,"lease_expires_at"?: string | null,"lease_token"?: string | null,"metrics"?: NonNullable<Json>,"next_attempt_at"?: string,"renderer_version"?: string,"requested_by"?: string | null,"source_sha256"?: string,"status"?: string,"thumbnail_sha256"?: string | null,"thumbnail_size"?: number | null,"updated_at"?: string,"warnings"?: NonNullable<Json>
+                  }
+                  Relationships: [
+
+                  ]
+                },"commons_render_pool": {
+                  Row: {
+                    "generation": number,"id": boolean
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "generation"?: number,"id"?: boolean
+                  }
+                  Update: {
+                    "generation"?: number,"id"?: boolean
                   }
                   Relationships: [
 
                   ]
                 },"commons_revisions": {
                   Row: {
-                    "asset_version": number,"creator_profile_id": string | null,"id": string,"metadata": NonNullable<Json>,"model_id": string,"number": number,"published_at": string | null,"review_note": string | null,"reviewed_at": string | null,"reviewed_by": string | null,"rights_basis": string,"self_service": boolean,"status": string,"submitted_at": string,"submitted_by": string | null
+                    "asset_version": number,"creator_profile_id": string | null,"details_version": number,"id": string,"metadata": NonNullable<Json>,"model_id": string,"number": number,"published_at": string | null,"review_note": string | null,"reviewed_at": string | null,"reviewed_by": string | null,"rights_basis": string,"self_service": boolean,"status": string,"submitted_at": string,"submitted_by": string | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "asset_version"?: number,"creator_profile_id"?: string | null,"id"?: string,"metadata": NonNullable<Json>,"model_id": string,"number": number,"published_at"?: string | null,"review_note"?: string | null,"reviewed_at"?: string | null,"reviewed_by"?: string | null,"rights_basis": string,"self_service"?: boolean,"status"?: string,"submitted_at"?: string,"submitted_by"?: string | null
+                    "asset_version"?: number,"creator_profile_id"?: string | null,"details_version"?: number,"id"?: string,"metadata": NonNullable<Json>,"model_id": string,"number": number,"published_at"?: string | null,"review_note"?: string | null,"reviewed_at"?: string | null,"reviewed_by"?: string | null,"rights_basis": string,"self_service"?: boolean,"status"?: string,"submitted_at"?: string,"submitted_by"?: string | null
                   }
                   Update: {
-                    "asset_version"?: number,"creator_profile_id"?: string | null,"id"?: string,"metadata"?: NonNullable<Json>,"model_id"?: string,"number"?: number,"published_at"?: string | null,"review_note"?: string | null,"reviewed_at"?: string | null,"reviewed_by"?: string | null,"rights_basis"?: string,"self_service"?: boolean,"status"?: string,"submitted_at"?: string,"submitted_by"?: string | null
+                    "asset_version"?: number,"creator_profile_id"?: string | null,"details_version"?: number,"id"?: string,"metadata"?: NonNullable<Json>,"model_id"?: string,"number"?: number,"published_at"?: string | null,"review_note"?: string | null,"reviewed_at"?: string | null,"reviewed_by"?: string | null,"rights_basis"?: string,"self_service"?: boolean,"status"?: string,"submitted_at"?: string,"submitted_by"?: string | null
                   }
                   Relationships: [
                     {
@@ -938,6 +1000,33 @@ isOneToOne: false
 "cloud_begin_save":
 { Args: { "p_client_key"?: string,"p_document"?: string,"p_folder"?: string,"p_is_template"?: boolean,"p_kind": string,"p_name": string,"p_parent"?: string,"p_project": string,"p_sha256": string,"p_size": number }; Returns: Json
                            },
+"cloud_billing_apply_subscription":
+{ Args: { "p_cancel_at_period_end": boolean,"p_current_period_end": string,"p_customer_id": string,"p_event_created": number,"p_event_id": string,"p_interval": string,"p_owner": string,"p_price_id": string,"p_status": string,"p_subscription_id": string,"p_token": string }; Returns: boolean
+                           },
+"cloud_billing_ensure_customer":
+{ Args: { "p_customer_id": string,"p_owner": string,"p_token": string }; Returns: Json
+                           },
+"cloud_billing_find_customer":
+{ Args: { "p_customer_id": string }; Returns: Json
+                           },
+"cloud_billing_lock":
+{ Args: { "p_owner": string }; Returns: Json
+                           },
+"cloud_billing_record_cancellation":
+{ Args: { "p_owner": string,"p_subscription_id": string,"p_token": string }; Returns: boolean
+                           },
+"cloud_billing_record_deletion_cleanup":
+{ Args: { "p_owner": string,"p_token": string }; Returns: boolean
+                           },
+"cloud_billing_renew":
+{ Args: { "p_owner": string,"p_token": string }; Returns: boolean
+                           },
+"cloud_billing_status":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"cloud_billing_unlock":
+{ Args: { "p_owner": string,"p_token": string }; Returns: boolean
+                           },
 "cloud_cancel_account_deletion":
 { Args: Record<PropertyKey, never>; Returns: boolean
                            },
@@ -1054,6 +1143,9 @@ isOneToOne: false
 "cloud_save_profile":
 { Args: { "p_account_type": string,"p_company_name": string,"p_company_size": string,"p_first_name": string,"p_industry": string,"p_industry_other": string,"p_last_name": string,"p_mailing_opt_in"?: boolean,"p_terms_version": string }; Returns: Json
                            },
+"cloud_save_profile_analytics":
+{ Args: { "p_account_type": string,"p_analytics_opt_in": boolean,"p_company_name": string,"p_company_size": string,"p_first_name": string,"p_industry": string,"p_industry_other": string,"p_last_name": string,"p_mailing_opt_in"?: boolean,"p_terms_version": string }; Returns: Json
+                           },
 "cloud_save_profile_fields":
 { Args: { "p_account_type": string,"p_company_name": string,"p_company_size": string,"p_first_name": string,"p_industry": string,"p_industry_other": string,"p_last_name": string,"p_terms_version": string }; Returns: Json
                            },
@@ -1089,20 +1181,32 @@ isOneToOne: false
 "commons_asset_editor":
 { Args: { "p_revision": string }; Returns: string
                            },
+"commons_begin_profile_image":
+{ Args: { "p_format": string,"p_height": number,"p_kind": string,"p_sha256": string,"p_size_bytes": number,"p_width": number }; Returns: Json
+                           },
 "commons_catalog":
 { Args: Record<PropertyKey, never>; Returns: Json
                            },
 "commons_catalog_snapshot":
 { Args: Record<PropertyKey, never>; Returns: Json
                            },
+"commons_claim_owner_render":
+{ Args: { "p_asset": string,"p_owner": string,"p_retry"?: boolean,"p_version": string }; Returns: Json
+                           },
 "commons_claim_render":
 { Args: { "p_version": string }; Returns: Json
+                           },
+"commons_delete_draft":
+{ Args: { "p_expected_revision": string,"p_model": string }; Returns: Json
                            },
 "commons_download_asset":
 { Args: { "p_asset": string }; Returns: Json
                            },
 "commons_finish_asset":
 { Args: { "p_asset": string,"p_sha256": string,"p_size_bytes": number }; Returns: Json
+                           },
+"commons_finish_profile_image":
+{ Args: { "p_image": string,"p_sha256": string,"p_size_bytes": number }; Returns: Json
                            },
 "commons_finish_render":
 { Args: { "p_job": string,"p_lease": string,"p_result": Json }; Returns: boolean
@@ -1122,8 +1226,23 @@ isOneToOne: false
 "commons_my_profile":
 { Args: Record<PropertyKey, never>; Returns: Json
                            },
+"commons_owner_asset":
+{ Args: { "p_asset": string }; Returns: Json
+                           },
 "commons_profile":
 { Args: { "p_id": string }; Returns: Json
+                           },
+"commons_profile_by_handle":
+{ Args: { "p_handle": string }; Returns: Json
+                           },
+"commons_profile_image":
+{ Args: { "p_image": string }; Returns: Json
+                           },
+"commons_profile_image_public":
+{ Args: { "p_kind": string,"p_profile": string }; Returns: Json
+                           },
+"commons_profile_image_upload":
+{ Args: { "p_image": string }; Returns: Json
                            },
 "commons_profile_public":
 { Args: { "p": Omit<Database["public"]['Tables']["commons_profiles"]['Row'], Database["public"]['Tables']["commons_profiles"]['ComputedFields']> }; Returns: Json
@@ -1131,11 +1250,40 @@ isOneToOne: false
 "commons_publish_model":
 { Args: { "p_expected_asset_version": number,"p_expected_published": string,"p_revision": string,"p_rights_confirmed": boolean }; Returns: Json
                            },
+"commons_remove_profile_image":
+{ Args: { "p_kind": string }; Returns: Json
+                           },
 "commons_render_asset":
+{ Args: { "p_asset": string,"p_version": string }; Returns: Json
+                           },
+"commons_render_job":
 { Args: { "p_asset": string,"p_version": string }; Returns: Json
                            },
 "commons_render_lease":
 { Args: { "p_job": string,"p_lease": string }; Returns: Json
+                           },
+"commons_render_source":
+{ Args: { "p_format": string,"p_sha": string }; Returns: {
+              "created_at": string,
+"filename": string,
+"format": string,
+"id": string,
+"object_key": string,
+"revision_id": string,
+"sha256": string,
+"size_bytes": number,
+"status": string,
+"uploaded_by": string | null,
+"verified_at": string | null
+            }
+                          SetofOptions: {
+        from: "*"
+        to: "commons_assets"
+        isOneToOne: true
+        isSetofReturn: false
+      } },
+"commons_render_standby":
+{ Args: { "p_advance": boolean }; Returns: number
                            },
 "commons_repair_render":
 { Args: { "p_job": string }; Returns: boolean
@@ -1145,6 +1293,9 @@ isOneToOne: false
                            },
 "commons_save_profile":
 { Args: { "p_avatar_url": string,"p_bio": string,"p_display_name": string,"p_expected_version": number,"p_handle": string,"p_links": Json,"p_public_consent": boolean }; Returns: Json
+                           },
+"commons_self_service_details_valid":
+{ Args: { "p_metadata": Json }; Returns: boolean
                            },
 "commons_set_mailing_preference":
 { Args: { "p_opt_in": boolean }; Returns: Json
@@ -1157,6 +1308,9 @@ isOneToOne: false
                            },
 "commons_text_valid":
 { Args: { "p_empty"?: boolean,"p_max": number,"p_value": Json }; Returns: boolean
+                           },
+"commons_update_draft":
+{ Args: { "p_expected_version": number,"p_metadata": Json,"p_revision": string }; Returns: Json
                            },
 "commons_url_valid":
 { Args: { "p_value": Json }; Returns: boolean

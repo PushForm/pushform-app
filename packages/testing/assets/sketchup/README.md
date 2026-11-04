@@ -175,3 +175,29 @@ The 2017 and 2020 formats have no tag folders: the 2017 copy keeps `Old` visible
 All three copies store the same scene style names and flags. PushForm's reader reads the scene styles of all three, but recovers no loose geometry from the 2020 copy (0 faces, though the file holds the cube), so Open reports no supported geometry for it; the tests use the 2027 and 2017 copies, and the 2020 copy stays here for that reader gap. A 2021+ scene keeps its saved style as a whole 0x733c rendering-options record inside its page record (item 29005); a pre-2021 `CViewPage` record keeps it as a style item run (from item 1000) between the camera and the record's tail. Open should give `Plan` a style of its own named `Plan style` with those settings, make `Perspective` use the model's style (its saved settings are the current ones), and leave `NoStyle` without a style.
 
 In 2021+ files the model's current rendering options are tagged values in model.dat's 0x733c record; `BackgroundColor` and `ForegroundColor` there are (0, 0, 0, 0) in some files (`section-display-2027.skp`, meaning white and black), where the current style's `style.xml`, written last as `<name>_1`, holds them as items 4000 and 1014. Pre-2021 files keep each style as a run of (id, 1, type, value) items in the ids `style.xml` uses, the current style last; sketchy-edge styles embed stroke images after item 1013. Open should give the model each file's face style, edge, background and modeling settings; Import into another model leaves that model's style alone.
+
+## Current settings and scene styles (SketchUp 2027, 2020 and 2017 formats)
+
+`styles-current-2027.skp`, `styles-current-2020.skp` and `styles-current-2017.skp` were built in SketchUp 2027 and saved in the current format and down to the 2020 and 2017 formats: a 1 m cube (10" here) with an active section plane, and three styles loaded from the shipped Wireframe, Hidden Line and X-ray styles, each changed and then saved by a scene:
+
+- `Wire`: background 200 40 40, Display Section Planes on, Display Section Cuts off.
+- `Hidden`: background 40 200 40, planes off, cuts on.
+- `Xray`: background 40 40 200, planes and cuts on.
+
+The model then went back to `Wire`'s style and changed its settings without saving them to any style: background 12 34 56, section planes and cuts off, edges colored by axis. Open should show those current settings, and give each scene its own style. Pre-2021 files keep the current settings in a rendering-options record after the model's camera, and each scene's after the scene's camera; the last style saved in the file is a different one.
+
+## Guide last with relationships (SketchUp 2017 and 2020 formats)
+
+`guide-last-relationship-2017.skp` and `guide-last-relationship-2020.skp` were built in SketchUp 2027 and saved down to those formats. A group (definition `Group1`) holds a 10" cube, a 2" square component `Tag` glued to the cube's top face, an active section plane at x = 5" facing +X and, last, a guide from (1, 2, 3)" to (4, 6, 3)". The glued component makes the definition store a relationship after its last entity.
+
+## Empty model (SketchUp 2020 format)
+
+`empty-2020.skp` is a new, empty model saved from SketchUp 2027 down to the 2020 format. Open should report that the file has no geometry, not that it is damaged.
+
+## Scenes without a name or camera (SketchUp 2027 and 2017 formats)
+
+`unnamed-scene-2027.skp` and `unnamed-scene-2017.skp` were built in SketchUp 2027 (the 2017 copy saved down): a 10" cube and three scenes, `Named` (saves no camera), one whose name was cleared (saves no camera) and `4` (saves its camera, eye (-50, -40, 30)"). Open should create all three.
+
+## SketchUp 5 format
+
+`basics-sketchup5.skp` was built in SketchUp 2027 and saved down to the SketchUp 5 format: a group `Box` holding a 10" cube painted `Plain` (30 60 90), a 10" sheet with the textured material `Checker` (the `colorize-shifted.png` image, 10" tiles), a scene `View` (eye (40, -30, 25)"), and rendering options Hidden Line with background 210 220 230 and edges 90 20 20. SketchUp 5 files store textures inline and end the camera record early.

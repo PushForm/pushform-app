@@ -429,6 +429,18 @@
           "default": "claude-opus-5-5",
           "type": "string",
           "minLength": 1
+        },
+        "acknowledge": {
+          "default": "claude-haiku-5-5",
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -687,6 +699,18 @@
         },
         "liveDataBranches": {
           "default": 3,
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "renderReviewsPerTurn": {
+          "default": 3,
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "documentToolRoundsWithReview": {
+          "default": 20,
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 9007199254740991

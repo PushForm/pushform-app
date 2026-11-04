@@ -8,7 +8,7 @@ export interface ModelAttribution {
   title: string;
   creator: string;
   source: { name: string; url: string } | null;
-  licenses: { name: string; url: string; commercialUse: 'allowed' | 'restricted' | 'unknown'; conditions: string[] }[];
+  licenses: { name: string; url: string | null; commercialUse: 'allowed' | 'restricted' | 'unknown'; conditions: string[] }[];
   credits: { name: string; url: string | null; text: string }[];
   file: { name: string; sizeBytes: number; sha256: string };
 }
@@ -26,7 +26,7 @@ export function parseModelAttributions(value: unknown): ModelAttribution[] {
     if (!record(a) || !text(a.modelId, 96) || !text(a.revision) || !text(a.assetId) || !text(a.title) || !text(a.creator)
       || !(a.source === null || record(a.source) && text(a.source.name) && url(a.source.url))
       || !Array.isArray(a.licenses) || a.licenses.length < 1 || a.licenses.length > 50
-      || a.licenses.some(l => !record(l) || !text(l.name) || !url(l.url) || !['allowed', 'restricted', 'unknown'].includes(l.commercialUse as string) || !Array.isArray(l.conditions) || l.conditions.length > 50 || l.conditions.some(c => !text(c)))
+      || a.licenses.some(l => !record(l) || !text(l.name) || !(l.url === null || url(l.url)) || !['allowed', 'restricted', 'unknown'].includes(l.commercialUse as string) || !Array.isArray(l.conditions) || l.conditions.length > 50 || l.conditions.some(c => !text(c)))
       || !Array.isArray(a.credits) || a.credits.length < 1 || a.credits.length > 100
       || a.credits.some(c => !record(c) || !text(c.name) || !(c.url === null || url(c.url)) || typeof c.text !== 'string' || c.text.length > 4000)
       || !record(a.file) || !text(a.file.name, 180) || typeof a.file.sizeBytes !== 'number' || !Number.isSafeInteger(a.file.sizeBytes) || a.file.sizeBytes < 1 || a.file.sizeBytes > 134217728

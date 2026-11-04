@@ -6,7 +6,7 @@
  * body's extent, not its distance from the origin; the Manifold itself lives in world coordinates.
  */
 import type { Manifold, ManifoldToplevel, Mesh } from 'manifold-3d';
-import { box3Center, box3FromPositions } from '@pushform/core';
+import { box3Center, box3FromPositions, type Vec3 } from '@pushform/core';
 import { KernelError, type ManifoldStatus } from '../protocol';
 
 /** Triangles with per-triangle provenance, as read back from a Manifold. */
@@ -51,17 +51,19 @@ function statusOf(e: unknown): ManifoldStatus {
 
 /**
  * Create a Manifold (in world coordinates) from a triangle soup. Returns the status instead of
- * throwing when Manifold rejects the input.
+ * throwing when Manifold rejects the input. Positions are uploaded relative to `center`, by default
+ * the soup's bounds centre; solids uploaded around one shared centre round a plane they share the
+ * same way, so faces that coincide in the soups coincide in the Manifolds.
  */
 export function tryManifoldFromSoup(
   wasm: ManifoldToplevel,
   soup: TriangleSoup,
   runId: number,
+  center: Vec3 = box3Center(box3FromPositions(soup.verts)),
 ): { manifold: Manifold; status: 'NoError' } | { manifold?: undefined; status: ManifoldStatus } {
   if (soup.tris.length === 0 || soup.tris.length % 3 !== 0 || soup.faceId.length !== soup.tris.length / 3) {
     return { status: 'FaceIDWrongLength' };
   }
-  const center = box3Center(box3FromPositions(soup.verts));
   let local: Manifold;
   try {
     // The JS wrapper throws ManifoldError (with `.code`) when status() !== 'NoError'.
@@ -80,8 +82,8 @@ export function tryManifoldFromSoup(
 }
 
 /** Like {@link tryManifoldFromSoup} but throws a `ManifoldError` KernelError on failure. */
-export function manifoldFromSoup(wasm: ManifoldToplevel, soup: TriangleSoup, runId: number): Manifold {
-  const r = tryManifoldFromSoup(wasm, soup, runId);
+export function manifoldFromSoup(wasm: ManifoldToplevel, soup: TriangleSoup, runId: number, center?: Vec3): Manifold {
+  const r = tryManifoldFromSoup(wasm, soup, runId, center);
   if (r.manifold === undefined) throw new KernelError('ManifoldError', `Mesh rejected by Manifold: ${r.status}`, { status: r.status });
   return r.manifold;
 }

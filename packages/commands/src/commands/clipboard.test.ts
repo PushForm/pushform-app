@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { afterEach, describe, expect, it } from 'vitest';
-import type { DefId, Id, Mat4, MaterialId, Vec3 } from '@pushform/core';
+import type { DefId, Id, ImageId, Mat4, MaterialId, TagId, Vec3 } from '@pushform/core';
 import { m4translation, meshBounds } from '@pushform/core';
 import { containerAt, type Body, type EntityRef } from '@pushform/model';
 import { z } from 'zod';
@@ -118,6 +118,27 @@ describe('edit.copy / edit.paste', () => {
     const [again] = b.registry.execute('edit.pasteInPlace') as EntityRef[];
     expect(b.body(again!.id).materialId).toBe(pasted.materialId);
     expect([...b.host.doc.state.materials.values()].filter((m) => m.name.startsWith('Red'))).toHaveLength(2);
+  });
+
+  it('carries a tag texture image into another model', () => {
+    const a = setup(), b = setup();
+    const box = a.addBox();
+    const image = 950 as ImageId, lawn = 960 as TagId;
+    a.host.doc.transact('tag', (draft) => {
+      draft.images.set(image, { id: image, name: 'grass.png', mime: 'image/png', width: 2, height: 2, sha256: 'grass' });
+      draft.tags.set(lawn, { id: lawn, name: 'Lawn', visible: true, color: [0, 0, 0], dashes: null, folderId: null, texture: { imageId: image, widthM: 1, heightM: 2 } });
+      draft.meta.nextId = 1000;
+      containerAt(draft as never, []).bodies.get(box as Id)!.tagId = lawn;
+    });
+    b.host.doc.transact('ids', (draft) => { draft.meta.nextId = 2000; });
+    a.select([a.bodyRef(box)]);
+    a.registry.execute('edit.copy');
+    const [ref] = b.registry.execute('edit.pasteInPlace') as EntityRef[];
+    const tag = b.host.doc.state.tags.get(b.body(ref!.id).tagId)!;
+    expect(tag.name).toBe('Lawn');
+    expect(tag.texture).toMatchObject({ widthM: 1, heightM: 2 });
+    expect(tag.texture!.imageId).not.toBe(image);
+    expect(b.host.doc.state.images.get(tag.texture!.imageId)).toMatchObject({ name: 'grass.png', sha256: 'grass' });
   });
 
   it('copies a face of a solid as a sheet face with its edges', () => {

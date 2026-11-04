@@ -215,6 +215,21 @@ export interface LayoutViewport {
   display?: LayoutViewportDisplay;
 }
 
+/**
+ * A picture tiled in rows and columns across a closed shape and clipped to it. One copy has its top-left
+ * corner at `originMm` and measures `tileMm` times `scale`; the tiles turn counterclockwise on the page by
+ * `rotationDeg` about the origin. The pattern is anchored to the paper, not to the shape.
+ */
+export interface LayoutFillPattern {
+  /** data: URL of the picture (PNG or JPEG). */
+  src: string;
+  /** One copy's size at scale 1, paper millimeters: the picture's pixels at its stored resolution. */
+  tileMm: [number, number];
+  originMm: [number, number];
+  scale: number;
+  rotationDeg: number;
+}
+
 /** One grid line's stroke; a transparent color hides the line. */
 export interface LayoutTableEdge {
   nativeUnknownFields?: Uint8Array[];
@@ -316,6 +331,8 @@ export interface LayoutEntity {
     /** Alternating dash and gap lengths in paper millimeters; absent or empty means solid. */
     strokeDashMm?: number[];
     fillColor: string | null;
+    /** A picture repeated across the shape, painted over its fill color and under its stroke; closed shapes only. */
+    fillPattern?: LayoutFillPattern;
     /** Arrows at an open shape's first and last points; closed shapes draw none. */
     startArrow?: LayoutArrow;
     endArrow?: LayoutArrow;
@@ -488,10 +505,20 @@ export class LayoutUndoStack {
     return this.redoEntries.length > 0;
   }
 
-  transact<T>(label: string, fn: (draft: Draft<LayoutDocumentState>) => T): T {
+  /**
+   * Run a transaction and record it as an undo entry. With `merge`, a change made while `merge.entry` is still the
+   * newest entry joins it instead (patches appended, inverse prepended, relabelled), so one undo reverts both; the
+   * caller decides that nothing else changed the document in between.
+   */
+  transact<T>(label: string, fn: (draft: Draft<LayoutDocumentState>) => T, merge?: { entry: object; label: string }): T {
     const tx = this.doc.transact(label, fn);
     if (!tx.nested && tx.patches.length > 0) {
-      this.undoEntries.push({ patches: tx.patches, inverse: tx.inversePatches, label });
+      const top = this.undoEntries.at(-1);
+      if (top && merge?.entry === top) {
+        top.patches = [...top.patches, ...tx.patches];
+        top.inverse = [...tx.inversePatches, ...top.inverse];
+        top.label = merge.label;
+      } else this.undoEntries.push({ patches: tx.patches, inverse: tx.inversePatches, label });
       this.redoEntries = [];
     }
     return tx.value;

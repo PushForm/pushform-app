@@ -115,7 +115,11 @@ export function probeMeshImport(bytes: Uint8Array): { kind: MeshFormatKind; exte
 }
 
 /** Per-call import limits: the largest STEP file to read, and the triangle count above which a model imports as mesh parts. */
-export interface ImportLimits { stepBytes?: number | undefined; meshPartThreshold?: number | undefined }
+export interface ImportLimits {
+  stepBytes?: number | undefined; meshPartThreshold?: number | undefined;
+  /** Accept a SketchUp model with nothing in it instead of rejecting it, for a model view of an empty model. */
+  allowEmpty?: boolean | undefined;
+}
 const parts = (limits: ImportLimits | undefined): MeshPartOptions => limits?.meshPartThreshold === undefined ? {} : { meshPartThreshold: limits.meshPartThreshold };
 
 /**
@@ -136,5 +140,5 @@ export function readModelImport(bytes: Uint8Array, onProgress?: (p: ImportProgre
   if (isStlBytes(bytes)) return readStl(bytes, options ?? DEFAULT_MESH_OPTIONS.stl, onProgress, parts(limits));
   if (isDxfBytes(bytes)) return readDxf(bytes, options ?? DEFAULT_MESH_OPTIONS.dxf, onProgress);
   if (isObjText(bytes)) return readObj(bytes, options ?? DEFAULT_MESH_OPTIONS.obj, onProgress, undefined, parts(limits));
-  return readSketchUp(bytes, onProgress);
+  return readSketchUp(bytes, onProgress, limits?.allowEmpty ? { allowEmpty: true } : {});
 }

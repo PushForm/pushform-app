@@ -22,8 +22,14 @@ If you use an individual account, company-only fields are not required. Closing 
 
 Local editing can continue offline while your sign-in session remains valid. If the session expires, the workspace locks until you sign in. Open documents and undo history remain in memory for the same account in the same page.
 
-Signing out signs out other tabs sharing that browser session, but not other devices. Signing in as a different account uses that account's own workspace and recovery data.
+To sign out, open account details and expand **Danger Zone** below Extensions, then choose **Sign out**. Signing out signs out other tabs sharing that browser session, but not other devices. Signing in as a different account uses that account's own workspace and recovery data.
 
 ## Mailing list
 
 “Join the mailing list” is optional and unchecked at signup. To join or leave later, open your account and change the same checkbox. Your preference saves immediately; a failed save shows an error so you can retry. Delivery-service outages do not prevent account setup or profile editing. You can also unsubscribe using a link in any mailing-list email; that stops those emails but does not change the checkbox in account details.
+
+## Help improve PushForm
+
+The profile form includes **Help improve PushForm**. Its checkbox starts checked when you have not saved a choice. Analytics starts only after you submit the form successfully with this choice checked. Uncheck it before continuing to decline.
+
+To change your choice later, open your account, change the checkbox, and choose **Save profile**. PushForm shares anonymous counts of sessions, document activity, tool groups and AI Help use. Your designs, file names and chat messages stay private. Analytics uses no cookies or persistent visitor identity and honors Do Not Track and Global Privacy Control. Accounts with no saved choice do not participate.

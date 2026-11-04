@@ -5,8 +5,8 @@ import type { Box3, Id, Mat4, MMat4, MaterialId, MeshData, PlaneBasis, TagId, Ve
 import { DEFAULT_FOG, DEFAULT_SHADOWS } from '@pushform/model';
 import { solarPosition, sunDirection } from '@pushform/render';
 import type { RenderFog, RenderShadows } from '@pushform/render';
-import { containerAt, contentWorldBounds, contextMatrix, dimensionDrawing, dimensionText, imageEntityCorners, imprintEdgesWorld, pathKey, resolveDimension, sketchFaceLoops, tagVisible, walkInstances } from '@pushform/model';
-import type { Body, ComponentDefinition, DocumentState, EntityContainer, EntityRef, ImageEntity, ImageStore, Material, MeshPart, MeshPartGeometry, Sketch, Style, UvMapping } from '@pushform/model';
+import { UV_AUTO, containerAt, contentWorldBounds, contextMatrix, dimensionDrawing, dimensionText, imageEntityCorners, imprintEdgesWorld, pathKey, resolveDimension, sketchFaceLoops, tagVisible, walkInstances } from '@pushform/model';
+import type { Body, ComponentDefinition, DocumentState, EntityContainer, EntityRef, ImageEntity, ImageStore, Material, MeshPart, MeshPartGeometry, Sketch, Style, Tag, UvMapping } from '@pushform/model';
 import { DEFAULT_RENDER_BACKGROUND, renderKey } from '@pushform/render';
 import type {
   EntityHighlight,
@@ -113,8 +113,8 @@ export function faceMaterialsToRender(
   opts: RenderAdapterOptions = {},
   path: readonly Id[] = [],
 ): ReadonlyMap<number, RenderFaceMaterial> {
-  if (colorByTagOn(state)) return tagFaceMaterials(state, body, inherited?.color);
   const images = opts.images ?? renderImages;
+  if (colorByTagOn(state)) return tagFaceMaterials(state, body, inherited, images);
   const overrides = opts.uvOverrides;
   const prefix = `${renderKey(path, body.id)}#`;
   const overridden = overrides && overrides.size > 0 ? [...overrides.keys()].some((k) => k.startsWith(prefix)) : false;
@@ -308,7 +308,7 @@ export function instancesToRender(state: DocumentState): RenderInstance[] {
     const byTag = colorByTagOn(state);
     const color = byTag ? effectiveTagColor(state, v.instance.tagId, colors.get(parentKey)) : materialColor(state, v.instance.materialId) ?? colors.get(parentKey);
     colors.set(key, color);
-    const material = byTag ? tagRenderMaterial(color) : renderMaterial(state, v.instance.materialId) ?? materials.get(parentKey) ?? null;
+    const material = byTag ? effectiveTagMaterial(state, v.instance.tagId, materials.get(parentKey) ?? null, renderImages) : renderMaterial(state, v.instance.materialId) ?? materials.get(parentKey) ?? null;
     materials.set(key, material);
     const parent = shadows.get(parentKey) ?? { cast: true, receive: true };
     const shadow = { cast: parent.cast && v.instance.castShadows !== false, receive: parent.receive && v.instance.receiveShadows !== false };
@@ -661,11 +661,13 @@ export function containerSketchToRender(
     if (!tagVisible(state, face.tagId)) continue;
     const front = byTag ? effectiveTagColor(state, face.tagId, defaultColor) : materialColor(state, face.frontMaterialId) ?? defaultColor;
     const back = byTag ? front : materialColor(state, face.backMaterialId) ?? defaultColor;
-    const frontMaterial = byTag ? null : renderMaterial(state, face.frontMaterialId, images) ?? inheritedMaterial;
-    const backMaterial = byTag ? null : renderMaterial(state, face.backMaterialId, images) ?? inheritedMaterial;
-    const uvOverride = opts.uvOverrides?.get(`${uvPrefix}${face.id}`);
+    // A tag's texture lies on the face's own plane: the face's texture placement is its material's.
+    const tagMaterial = byTag ? effectiveTagMaterial(state, face.tagId, inheritedMaterial, images) : null;
+    const frontMaterial = byTag ? tagMaterial : renderMaterial(state, face.frontMaterialId, images) ?? inheritedMaterial;
+    const backMaterial = byTag ? tagMaterial : renderMaterial(state, face.backMaterialId, images) ?? inheritedMaterial;
+    const uvOverride = byTag ? undefined : opts.uvOverrides?.get(`${uvPrefix}${face.id}`);
     if (uvOverride) uvToken += `${face.id}:${uvOverride.kind === 'auto' ? 'auto' : `${uvOverride.kind}:${uvOverride.matrix.join(',')}`};`;
-    const uv = uvOverride ?? face.uv;
+    const uv = byTag ? UV_AUTO : uvOverride ?? face.uv;
     let loops = sketchFaceLoops(sketch, face);
     let basis = face.basis;
     let uvBasis: PlaneBasis | undefined;
@@ -679,7 +681,7 @@ export function containerSketchToRender(
       basis = planeBasis(m4transformPoint(matrix, basis.origin), v3normalize(v3cross(u, v)));
     }
     faces.push({ id: face.id, loops, basis, frontColor: front, backColor: back, hidden: face.hidden, frontMaterial, backMaterial, uv,
-      ...(face.uvBack ? { uvBack: face.uvBack } : {}), ...(uvBasis ? { uvBasis } : {}) });
+      ...(face.uvBack && !byTag ? { uvBack: face.uvBack } : {}), ...(uvBasis ? { uvBasis } : {}) });
   }
   const edges: RenderSketch['edges'][number][] = [];
   for (const e of sketch.edges.values()) {
@@ -913,28 +915,44 @@ function effectiveTagColor(state: DocumentState, id: TagId, inherited?: string):
 }
 
 const EMPTY_FACE_MATERIALS: ReadonlyMap<number, RenderFaceMaterial> = new Map();
-const tagMaterials = new Map<string, RenderMaterial>();
-function tagRenderMaterial(color: string | undefined): RenderMaterial | null {
-  if (!color) return null;
-  let material = tagMaterials.get(color);
-  if (!material) { material = { id: -1, color, alpha: 1 }; tagMaterials.set(color, material); }
+// Identity-stable per tag object and image store, so the renderer's material diff fires only when a tag changed.
+const tagMaterialCache = new WeakMap<Tag, { images: ImageStore | null; material: RenderMaterial }>();
+/** What Color by Tag draws for a tag: its color, opaque, and its texture when it has one (never colorized). */
+function tagRenderMaterial(state: DocumentState, id: TagId, images: ImageStore | null = renderImages): RenderMaterial | null {
+  const tag = state.tags.get(id);
+  if (!tag) return null;
+  const cached = tagMaterialCache.get(tag);
+  if (cached && cached.images === images) return cached.material;
+  const material: RenderMaterial = { id: -1, color: rgbToCss(tag.color), alpha: 1 };
+  if (tag.texture) {
+    const url = images?.objectUrl(tag.texture.imageId);
+    Object.assign(material, { widthM: tag.texture.widthM, heightM: tag.texture.heightM, ...(url ? { textureUrl: url } : {}) });
+  }
+  tagMaterialCache.set(tag, { images, material });
   return material;
 }
-const tagFacesCache = new WeakMap<Body['faces'], { token: object; variants: Map<string | undefined, ReadonlyMap<number, RenderFaceMaterial>> }>();
-/** Tag colors replace both face materials, including their opacity and texture. */
-function tagFaceMaterials(state: DocumentState, body: Body, inherited?: string): ReadonlyMap<number, RenderFaceMaterial> {
-  const token = tagStyleToken(state), color = effectiveTagColor(state, body.tagId, inherited);
+/** Untagged geometry inherits its containing placement's tag material before the root default (as `effectiveTagColor`). */
+function effectiveTagMaterial(state: DocumentState, id: TagId, inherited: RenderMaterial | null, images: ImageStore | null): RenderMaterial | null {
+  return id === state.defaultTagId ? inherited ?? tagRenderMaterial(state, id, images) : tagRenderMaterial(state, id, images) ?? inherited;
+}
+const tagFacesCache = new WeakMap<Body['faces'], { token: object; images: ImageStore | null; variants: Map<RenderMaterial | null, ReadonlyMap<number, RenderFaceMaterial>> }>();
+/**
+ * Tag materials replace both face materials, including their opacity and texture. A tag's texture lies on the
+ * face's own plane (the automatic placement): the face's texture placement belongs to its material.
+ */
+function tagFaceMaterials(state: DocumentState, body: Body, inherited: RenderMaterial | null, images: ImageStore | null): ReadonlyMap<number, RenderFaceMaterial> {
+  const token = tagStyleToken(state), bodyMaterial = effectiveTagMaterial(state, body.tagId, inherited, images);
   const cached = tagFacesCache.get(body.faces);
-  const variants = cached?.token === token ? cached.variants : new Map<string | undefined, ReadonlyMap<number, RenderFaceMaterial>>();
-  const existing = variants.get(color);
+  const variants = cached?.token === token && cached.images === images ? cached.variants : new Map<RenderMaterial | null, ReadonlyMap<number, RenderFaceMaterial>>();
+  const existing = variants.get(bodyMaterial);
   if (existing) return existing;
   const out = new Map<number, RenderFaceMaterial>();
   for (const face of body.faces.values()) {
-    const material = tagRenderMaterial(effectiveTagColor(state, face.tagId, color));
-    out.set(face.id, { front: material, back: material, uv: { kind: 'auto' }, basis: face.basis });
+    const material = effectiveTagMaterial(state, face.tagId, bodyMaterial, images);
+    out.set(face.id, { front: material, back: material, uv: UV_AUTO, basis: face.basis });
   }
-  variants.set(color, out);
-  tagFacesCache.set(body.faces, { token, variants });
+  variants.set(bodyMaterial, out);
+  tagFacesCache.set(body.faces, { token, images, variants });
   return out;
 }
 

@@ -26,6 +26,15 @@ describe('bundled material library', () => {
     expect(sources.textures.filter((m) => m.sourceCategory.startsWith('Asphalt & Bitumen/'))).toHaveLength(12);
   });
 
+  it('records which way each wood image\'s grain runs, and none for patterns', () => {
+    const grain = (key: string) => BUILTIN_LIBRARY.find((m) => m.key === key)!.texture!.grain;
+    const woods = BUILTIN_LIBRARY.filter((m) => m.category === 'Wood');
+    expect(woods.every((m) => m.texture?.grain !== undefined)).toBe(true);
+    for (const key of ['Wood_Cherry', 'Wood_Walnut', 'Wood_white_maple_veneer', 'Wood_Ash', 'Wood_plywood', 'Wood_teak_veneer']) expect(grain(key), key).toBe('width');
+    for (const key of ['Wood_Oak', 'Wood_white_oak_veneer', 'Wood_sapele_veneer', 'Wood_rosewood_veneer1', 'Wood_wooden_barrel']) expect(grain(key), key).toBe('height');
+    for (const key of ['Wood_herringbone_parquet', 'Wood_diagonal_parquet', 'Wood_oriented_strand_board']) expect(grain(key), key).toBe('none');
+  });
+
   it('ships valid full resolution maps and compact previews with documented provenance', async () => {
     const hashes = new Set<string>();
     for (const material of BUILTIN_LIBRARY) {

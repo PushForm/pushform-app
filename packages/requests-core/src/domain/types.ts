@@ -78,12 +78,25 @@ export interface SuspendedTurn {
   pending: { calls: { id: string; name: string; input: unknown }[]; results: unknown[]; order: string[] };
   rounds: number;
   document: { type: 'layout' | 'model'; apiVersion: number; readonly guidance?: 1 | undefined };
+  /** Render reviews the requester message has made so far, across the turn's requests. */
+  reviews?: number;
+  /**
+   * Render pictures first kept by this suspension, by `<tool use id>#<index>`. `appended` names them instead of
+   * repeating their bytes, so each picture is stored once while the turn runs; the transcript never holds them.
+   */
+  renders?: Record<string, { mime: string; data: string }>;
+  /** The last status line the suspended request showed, so the next request does not repeat it as its first saying. */
+  status?: string;
 }
+/** A picture the requester posted with a message: an image attachment of the conversation. */
+export interface MessagePicture { id: string; name: string; mime: string }
 /** A visible chat message; `tool` messages record the model's tool use and are hidden from the UI. */
 export type ConversationMessage =
-  | { role: 'user'; text: string; at: string }
-  | { role: 'assistant'; text: string; at: string; turn?: SuspendedTurn }
-  | { role: 'tool'; name: string; toolUseId: string; input: unknown; output: string; at: string };
+  | { role: 'user'; text: string; at: string; attachments?: MessagePicture[] }
+  /** `acknowledgment`: the opening line that restates a request while the agent works; shown, but never sent to a model. */
+  | { role: 'assistant'; text: string; at: string; turn?: SuspendedTurn; acknowledgment?: true }
+  /** `views`: a render review's views; its pictures are not kept, and `output` names them in a placeholder. */
+  | { role: 'tool'; name: string; toolUseId: string; input: unknown; output: string; at: string; views?: string[] };
 export interface Conversation {
   id: string;
   kind: ConversationKind;

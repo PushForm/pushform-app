@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { App } from './App';
 import { exampleModel } from './catalog.fixture';
 import type { CatalogLoader, CatalogModel } from './catalog';
+import type { CommonsAccount } from './account';
 
 beforeEach(() => window.history.replaceState(null, '', '/'));
 afterEach(cleanup);
@@ -90,6 +91,46 @@ it('requires account access for downloads and explains missing file configuratio
 it('opens public profile routes independently of catalog availability',async()=>{
   const id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';window.history.replaceState(null,'','/#people/'+id);
   render(<App loadCatalog={null}/>);expect(await screen.findByText('Profiles are unavailable in this build.')).toBeTruthy();expect(screen.queryByText('The Commons catalog isn’t available yet.')).toBeNull();
+});
+
+const profilePage={profile:{id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',handle:'example-maker',displayName:'Example Maker',bio:'',avatarUrl:null,links:[]},models:[exampleModel()]};
+it('opens a public profile at its handle path and returns hash links from it to the catalog root',async()=>{
+  window.history.replaceState(null,'','/u/example-maker');const getByHandle=vi.fn().mockResolvedValue(profilePage);
+  render(<App loadCatalog={async()=>[exampleModel()]} account={{profiles:{getByHandle}} as unknown as CommonsAccount}/>);
+  expect(await screen.findByRole('heading',{name:'Example Maker'})).toBeTruthy();expect(getByHandle).toHaveBeenCalledWith('example-maker',expect.anything());
+  window.history.pushState(null,'','/u/example-maker#models/workshop-hinge');fireEvent(window,new HashChangeEvent('hashchange'));
+  expect(await screen.findByRole('heading',{name:'Workshop hinge',level:1})).toBeTruthy();expect(window.location.pathname).toBe('/');expect(window.location.hash).toBe('#models/workshop-hinge');
+  window.history.pushState(null,'','/u/example-maker');fireEvent(window,new PopStateEvent('popstate'));expect(await screen.findByRole('heading',{name:'Example Maker'})).toBeTruthy();
+});
+it('moves older account-ID profile links to the handle path',async()=>{
+  window.history.replaceState(null,'','/#people/'+profilePage.profile.id);const get=vi.fn().mockResolvedValue(profilePage);
+  render(<App loadCatalog={null} account={{profiles:{get,getByHandle:vi.fn()}} as unknown as CommonsAccount}/>);
+  expect(await screen.findByRole('heading',{name:'Example Maker'})).toBeTruthy();await waitFor(()=>expect(window.location.pathname).toBe('/u/example-maker'));expect(window.location.hash).toBe('');
+});
+const signedIn=(profiles:Record<string,unknown>)=>({session:{subscribe:()=>()=>{},getSnapshot:()=>({user:{id:'user-1'}})},profiles}) as unknown as CommonsAccount;
+it('opens the signed-in user’s public profile from My profile and shows Edit profile only on it',async()=>{
+  const mine=vi.fn().mockResolvedValue({...profilePage.profile,active:true,version:1});
+  const getByHandle=vi.fn().mockImplementation(async(handle:string)=>handle==='example-maker'?profilePage:{profile:{...profilePage.profile,id:'cccccccc-cccc-4ccc-8ccc-cccccccccccc',handle:'other-maker',displayName:'Other Maker'},models:[]});
+  render(<App loadCatalog={async()=>[]} account={signedIn({mine,getByHandle})}/>);
+  await waitFor(()=>expect(screen.getByRole('link',{name:'My profile'}).getAttribute('href')).toBe('/u/example-maker'));
+  fireEvent.click(screen.getByRole('link',{name:'My profile'}));expect(window.location.pathname).toBe('/u/example-maker');
+  expect(await screen.findByRole('heading',{name:'Example Maker'})).toBeTruthy();
+  expect(screen.getByRole('link',{name:'Edit profile'}).getAttribute('href')).toBe('#account');
+  window.history.pushState(null,'','/u/other-maker');fireEvent(window,new PopStateEvent('popstate'));
+  expect(await screen.findByRole('heading',{name:'Other Maker'})).toBeTruthy();expect(screen.queryByRole('link',{name:'Edit profile'})).toBeNull();
+});
+it('sends My profile to the profile editor without a visible public profile and hides Edit profile when signed out',async()=>{
+  const view=render(<App loadCatalog={async()=>[]} account={signedIn({mine:vi.fn().mockResolvedValue(null)})}/>);
+  expect((await screen.findByRole('link',{name:'My profile'})).getAttribute('href')).toBe('#account');view.unmount();
+  window.history.replaceState(null,'','/u/example-maker');const mine=vi.fn();
+  render(<App loadCatalog={async()=>[]} account={{session:{subscribe:()=>()=>{},getSnapshot:()=>({user:null})},profiles:{mine,getByHandle:vi.fn().mockResolvedValue(profilePage)}} as unknown as CommonsAccount}/>);
+  expect(await screen.findByRole('heading',{name:'Example Maker'})).toBeTruthy();expect(screen.queryByRole('link',{name:'Edit profile'})).toBeNull();expect(mine).not.toHaveBeenCalled();
+  expect(screen.getByRole('link',{name:'My profile'}).getAttribute('href')).toBe('#account');
+});
+it('links model creator credits to the creator handle path',async()=>{
+  window.history.replaceState(null,'','/#models/workshop-hinge');
+  render(<App loadCatalog={async()=>[exampleModel({creatorProfile:{id:profilePage.profile.id,handle:'example-maker',displayName:'Example Maker'}})]}/>);
+  expect((await screen.findByRole('link',{name:'Example Maker'})).getAttribute('href')).toBe('/u/example-maker');
 });
 
 it('offers a real model-specific Open in PushForm action and explains unsupported original downloads', async () => {

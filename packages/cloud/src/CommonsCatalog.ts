@@ -38,7 +38,8 @@ export const catalogModelSchema = z.object({
   imageUrl: catalogUrlSchema.nullable(),
   source: z.object({ name: text, url: catalogUrlSchema }).strict().nullable(),
   licenses: z.array(z.object({
-    name: text, url: catalogUrlSchema,
+    // Custom terms written by the publisher have no license link.
+    name: text, url: catalogUrlSchema.nullable(),
     commercialUse: z.enum(['allowed', 'restricted', 'unknown']),
     conditions: z.array(text).max(50),
   }).strict()).min(1).max(50),

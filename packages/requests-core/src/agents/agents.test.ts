@@ -7,7 +7,7 @@ import { emptyFeatureBrief, emptyProblemReport, type FeatureBrief, type ProblemR
 import { runTurn } from './client.ts';
 import { fakeAnthropic } from './fakeAnthropic.ts';
 import { GENERAL_KNOWLEDGE_RULE, helpAgent, HELP_PROCEDURE_RULES } from './help.ts';
-import { MODEL_DOCUMENT_RULES } from './document.ts';
+import { MODEL_DOCUMENT_RULES, modelDocumentTools } from './document.ts';
 import { openAgent } from './open.ts';
 import { splitMarkdownSections } from './digest.ts';
 import { GUIDANCE_RULES } from '../guidance.ts';
@@ -61,19 +61,25 @@ describe('framing', () => {
 });
 
 describe('intake tools', () => {
-  it('exposes request_file once the brief has substance, filing is allowed and the account is under its open-request limit', () => {
+  it('offers every account the same tools and system prompt, with the limits in the per-turn context', () => {
     const substance: FeatureBrief = { ...emptyFeatureBrief(), desired: 'Hold Shift to lock it' };
-    expect(names(briefTools(ctx()))).not.toContain('request_file');
-    expect(names(briefTools(ctx({ brief: substance })))).toContain('request_file');
-    expect(names(briefTools(ctx({ brief: substance, filingAllowed: false })))).not.toContain('request_file');
-    expect(names(briefTools(ctx()))).toContain('start_over');
     const five = Array.from({ length: 5 }, (_, i) => ({ id: `r${i}`, issueKey: `FRQ-${i}`, title: 't', requesterState: 'Submitted' }));
+    // One shared prompt-cache prefix: neither the brief, filing permission nor the open-request count changes the tools or system prompt.
+    const variants = [ctx(), ctx({ brief: substance }), ctx({ brief: substance, filingAllowed: false }), ctx({ brief: substance, openRequestCount: 5 }), ctx({ messageCount: 30 })];
+    for (const agent of [intakeAgent, problemAgent, openAgent]) {
+      for (const v of variants) {
+        expect(JSON.stringify(agent.tools(v))).toBe(JSON.stringify(agent.tools(variants[0]!)));
+        expect(agent.system(v)).toBe(agent.system(variants[0]!));
+      }
+    }
+    expect(names(briefTools(ctx()))).toEqual(expect.arrayContaining(['request_file', 'start_over']));
+    expect(intakeAgent.system(ctx({ openRequestCount: 5 }))).not.toContain('offer Add me');
+    expect(intakeAgent.context(ctx({ openRequestCount: 5 }))).toContain('offer Add me');
     // The limit counts the account's own open filings; requests joined with Add me (listed in openRequests) do not count.
-    expect(names(briefTools(ctx({ brief: substance, openRequestCount: 5 })))).not.toContain('request_file');
-    expect(names(briefTools(ctx({ brief: substance, openRequests: five, openRequestCount: 0 })))).toContain('request_file');
-    expect(intakeAgent.system(ctx({ openRequestCount: 5 }))).toContain('offer Add me');
-    expect(intakeAgent.system(ctx({ openRequests: five, openRequestCount: 0 }))).not.toContain('offer Add me');
-    expect(problemAgent.system(ctx({ openRequestCount: 5 }))).toContain('offer Add me');
+    expect(intakeAgent.context(ctx({ openRequests: five, openRequestCount: 0 }))).not.toContain('offer Add me');
+    expect(problemAgent.context(ctx({ path: 'problem', openRequestCount: 5 }))).toContain('offer Add me');
+    expect(intakeAgent.context(ctx({ filingAllowed: false }))).toContain('Filing is not available');
+    expect(helpAgent.context(ctx({ path: 'help', brief: null, filingAllowed: false }))).not.toContain('current_limits');
     expect(intakeAgent.context(ctx({ openRequests: five, openRequestCount: 1 }))).toContain('open_requests_filed_by_this_account: 1 of 5');
   });
   it('tells the agent to show the brief and wait for an explicit yes before filing, and never to mention a button', () => {
@@ -85,12 +91,11 @@ describe('intake tools', () => {
   });
   it('records the 30th message and restricts the conversation only after it', () => {
     expect(names(briefTools(ctx({ messageCount: 30 })))).toContain('update_brief');
-    expect(intakeAgent.system(ctx({ messageCount: 30 }))).toContain('last message');
-    expect(problemAgent.system(ctx({ messageCount: 30 }))).toContain('last message');
-    expect(names(briefTools(ctx({ messageCount: 31 })))).toEqual(['decline', 'start_over']);
-    expect(names(briefTools(ctx({ messageCount: 31, brief: { ...emptyFeatureBrief(), problem: 'x' } })))).toEqual(['request_file', 'decline', 'start_over']);
-    expect(intakeAgent.system(ctx({ messageCount: 31 }))).toContain('30-message limit');
-    expect(intakeAgent.system(ctx({ messageCount: 29 }))).not.toContain('-message limit');
+    expect(intakeAgent.context(ctx({ messageCount: 30 }))).toContain('last message');
+    expect(problemAgent.context(ctx({ path: 'problem', messageCount: 30 }))).toContain('send the report as it stands');
+    expect(names(briefTools(ctx({ messageCount: 31 })))).toEqual(['request_file', 'decline', 'start_over']);
+    expect(intakeAgent.context(ctx({ messageCount: 31 }))).toContain('30-message limit');
+    expect(intakeAgent.context(ctx({ messageCount: 29 }))).not.toContain('-message limit');
   });
   it('updates the brief through the tool loop and proposes a title', async () => {
     const store = new MemoryConversationStore(emptyFeatureBrief(), null, 'feature', issues);
@@ -199,13 +204,15 @@ describe('intake tools', () => {
       { text: ['I still need the problem or the behavior you want before I can send it.'] },
     ]);
     const c = ctx({ brief: empty.getBrief() });
-    const r = await runTurn({ client, model: 'm', system: intakeAgent.system(c), tools: [...intakeAgent.tools(c), intakeAgent.tools(ctx({ brief: { ...emptyFeatureBrief(), desired: 'x' } })).find((t) => t.name === 'request_file')!], handlers: intakeAgent.handlers(c, empty), messages: msgs('just send it') });
-    expect(names(intakeAgent.tools(c))).not.toContain('request_file');
+    const r = await runTurn({ client, model: 'm', system: intakeAgent.system(c), tools: intakeAgent.tools(c), handlers: intakeAgent.handlers(c, empty), messages: msgs('just send it') });
     const result = (r.appended[1]?.content as Anthropic.ToolResultBlockParam[])[0]!;
     expect(result.is_error).toBe(true); expect(String(result.content)).toContain('neither the problem nor the desired behavior'); expect(String(result.content)).toContain('Ask for the Problem or the Desired behavior instead of filing');
     expect(empty.filings).toEqual([]); expect(empty.ended()).toBeNull();
     const disabled = intakeAgent.handlers(ctx({ filingAllowed: false }), new MemoryConversationStore({ ...emptyFeatureBrief(), desired: 'x' }, 'T', 'feature'));
     expect(await disabled['request_file']!({ confirmation: 'yes' })).toMatchObject({ isError: true, content: expect.stringContaining('not available') });
+    const full = new MemoryConversationStore({ ...emptyFeatureBrief(), desired: 'x' }, 'T', 'feature');
+    expect(await intakeAgent.handlers(ctx({ openRequestCount: 5 }), full)['request_file']!({ confirmation: 'yes' })).toMatchObject({ isError: true, content: expect.stringContaining('the limit is 5') });
+    expect(full.filings).toEqual([]);
     const down = new MemoryConversationStore({ ...emptyFeatureBrief(), desired: 'x', estimatedClass: 'C2' }, 'T', 'feature', [], 2);
     down.fileError = new Error('Filing failed: Could not reach Linear. Your brief is kept; try again in a moment.');
     const failed = await intakeAgent.handlers(ctx(), down)['request_file']!({ confirmation: 'yes' });
@@ -323,9 +330,71 @@ it('sends a model change on the open path to the document tools, never to layout
 it('has the model agent build requested objects from boxes, every named part included, and say what is left', () => {
   const rules = MODEL_DOCUMENT_RULES(ctx());
   expect(rules).toContain('is a request for a change');
-  expect(rules).toContain('add_box is the one operation that creates geometry');
+  expect(rules).toContain('Build simple parts from boxes (add_box)');
   expect(rules).toContain('Make every part the requester named, with its count');
   expect(rules).toContain('say plainly what is left');
+  expect(rules).not.toContain('not available yet');
+});
+
+it('has the model agent group each door, drawer and face frame as its own named assembly of named parts', () => {
+  const rules = MODEL_DOCUMENT_RULES(ctx());
+  expect(rules).toContain('Group each assembly made and hung as one unit, named for it');
+  expect(rules).toContain('every door ("Door", holding its stiles, rails and panel)');
+  expect(rules).toContain('every drawer (its front, and its box if built) and the face frame');
+  expect(rules).toContain('Its parts stay separate named groups inside it, never one solid');
+  expect(rules).toContain('Then group the parts and assemblies into the whole object and name it');
+});
+
+it('has the model agent build a cabinet in one batch and larger builds one cabinet or major assembly per batch', () => {
+  const rules = MODEL_DOCUMENT_RULES(ctx());
+  expect(rules).not.toContain('Build the whole object in one batch');
+  expect(rules).toContain('Build a single cabinet or other small object in one batch, assemblies included');
+  expect(rules).toContain('such as a run of cabinets or a structure with walls, floors and a roof, send one batch per cabinet or major assembly, then group the whole');
+});
+
+it('has the model agent shape parts with push/pull and cut joinery and openings with subtract', () => {
+  const rules = MODEL_DOCUMENT_RULES(ctx());
+  expect(rules).toContain('then push_pull it by its thickness');
+  expect(rules).toContain('Cut joinery and openings with subtract');
+  expect(rules).toContain('a door\'s panel sits in grooves');
+  expect(rules).toContain('a sink cutout is a box through the countertop');
+  expect(rules).toContain('Cut and join solids before grouping them');
+  expect(rules).toContain('Names carry across your model_apply_operations calls for this message');
+  expect(rules).toContain('never work around it by converting a solid into loose geometry');
+});
+
+it('has the model agent finish parts, use library woods and check for overlaps after building', () => {
+  const rules = MODEL_DOCUMENT_RULES(ctx());
+  expect(rules).toContain('fillet_edges and chamfer_edges round over or bevel edges');
+  expect(rules).toContain('pick edges by face, which never goes stale');
+  expect(rules).toContain('{between: [faceA, faceB]}');
+  expect(rules).toContain('add_material with a library key');
+  expect(rules).toContain('call model_find_overlaps');
+  expect(rules).toContain('only when asked');
+});
+
+it('gives the model agent a raised-panel and bead recipe with wide, shallow bevels and router profiles', () => {
+  const rules = MODEL_DOCUMENT_RULES(ctx());
+  expect(rules).toContain('its opening plus twice the groove depth');
+  expect(rules).toContain('a tongue about 1/4 to 5/16 in thick');
+  expect(rules).toContain('wide and shallow, never 45 degrees');
+  expect(rules).toContain('distance2 down the edges');
+  expect(rules).toContain('profile_edges profile "bead" on its inside edges');
+  expect(rules).toContain('bead the stiles and rails before joining them');
+});
+
+it('gives the model agent casework finish and grain conventions it can verify', () => {
+  const rules = MODEL_DOCUMENT_RULES(ctx());
+  expect(rules).toContain('prefinished maple plywood inside');
+  expect(rules).toContain('take the paint or stain asked for');
+  expect(rules).toContain('Grain runs vertical on stiles, sides, door panels and slab doors, horizontal on rails and drawer fronts');
+  expect(rules).toContain('Paint inside and outside faces separately');
+  expect(rules).toContain('reports grain as a direction');
+});
+
+it('offers the overlap and material library reads with the model tools', () => {
+  const names = modelDocumentTools.map(tool => tool.name);
+  expect(names).toEqual(expect.arrayContaining(['model_find_overlaps', 'model_material_library']));
 });
 
 it('never reports a dismissed or missing highlight to the requester as a failure', () => {

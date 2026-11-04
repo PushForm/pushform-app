@@ -46,3 +46,22 @@ it('rejects invalid groups, dash patterns, identities, kind codes and optional w
     expect(() => decodeNativeLayoutEntityMetadata(schema.encode({ ...plain, ...patch }).finish())).toThrow();
   }
 });
+it('stores a pattern fill with its picture as a document asset, and keeps an explicitly undefined one', () => {
+  const fillPattern = { src: 'data:image/png;base64,AAAA', tileMm: [10.16, 5.08] as [number, number], originMm: [25.4, -3] as [number, number], scale: 0.5, rotationDeg: 45 };
+  const value: NativeLayoutEntityMetadata = { ...fixture(), style: { ...fixture().style!, fillPattern } };
+  const sources: string[] = [];
+  const bytes = encodeNativeLayoutEntityMetadata(value, undefined, src => sources.push(src) + 6);
+  expect(sources).toEqual([fillPattern.src]);
+  expect(Array.from(schema.encode(schema.decode(bytes)).finish())).toEqual(Array.from(bytes));
+  const decoded = decodeNativeLayoutEntityMetadata(bytes);
+  // The picture comes back from the document's assets.
+  expect(decoded.extensions.fillPatternAsset).toBe(7);
+  expect(decoded.value.style!.fillPattern).toEqual({ ...fillPattern, src: '' });
+  expect(() => encodeNativeLayoutEntityMetadata(value)).toThrow();
+  for (const invalid of [{ scale: 0 }, { tileMm: [0, 1] }, { rotationDeg: NaN }, { src: 'data:image/gif;base64,AAAA' }])
+    expect(() => encodeNativeLayoutEntityMetadata({ ...value, style: { ...value.style!, fillPattern: { ...fillPattern, ...invalid } as typeof fillPattern } }, undefined, () => 1)).toThrow();
+  const empty: NativeLayoutEntityMetadata = { ...fixture() };
+  Object.defineProperty(empty.style!, 'fillPattern', { value: undefined, enumerable: true });
+  const next = decodeNativeLayoutEntityMetadata(encodeNativeLayoutEntityMetadata(empty)).value;
+  expect(Object.hasOwn(next.style!, 'fillPattern')).toBe(true); expect(next).toEqual(empty);
+});

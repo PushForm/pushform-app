@@ -12,6 +12,7 @@ import { applySketchUpImport } from './sketchupDocument';
 import { isSketchUpModelFile, prepareSketchUp, readSketchUp, sketchUpDisplay, sketchUpTransform, sketchUpUnits } from './sketchup';
 import { decodeModelDocument, encodeModelDocument, modelJson } from './modelFile';
 import { encodePng } from './png';
+import { readSketchUpInWorker } from './sketchupClient';
 
 const cube: [number, number, number][][] = [
   [[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]],
@@ -58,6 +59,55 @@ describe('SketchUp import', () => {
     const [a, b] = [counts(older), counts(filler)];
     expect(b.bodies).toBe(1);
     expect({ bodies: b.bodies, sheetFaces: b.sheetFaces, looseEdges: b.looseEdges, scenes: b.scenes }).toEqual({ bodies: a.bodies, sheetFaces: a.sheetFaces, looseEdges: a.looseEdges, scenes: a.scenes });
+  });
+
+  it.each([2017, 2020])('reads a SketchUp %s definition whose last guide is followed by relationships and an active section plane', async year => {
+    // Group1 holds a cube, a component glued to its top face (a relationship), an active section plane and, last, a guide.
+    const bytes = readFileSync(new URL(`../../testing/assets/sketchup/guide-last-relationship-${year}.skp`, import.meta.url));
+    const model = parseSkp(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+    const group = [...model.definitions.values()].find(d => d.name === 'Group1')!;
+    expect(group.faces).toHaveLength(6);
+    expect(group.instances).toHaveLength(1);
+    expect(group.sectionPlanes).toHaveLength(1);
+    expect(group.constructionLines).toHaveLength(1);
+    const guide = group.constructionLines[0]!;
+    expect(guide.start).toEqual([1, 2, 3]);
+    guide.end!.forEach((v, i) => expect(v).toBeCloseTo([4, 6, 3][i]!, 9));
+    const scene = await readSketchUp(bytes);
+    expect([...scene.definitions.values()].find(d => d.name === 'Group1')?.guides).toHaveLength(1);
+  });
+
+  it('reads an empty 2020-format model as empty, not as a damaged file', async () => {
+    const bytes = readFileSync(new URL('../../testing/assets/sketchup/empty-2020.skp', import.meta.url));
+    const model = parseSkp(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+    expect({ faces: model.root.faces.length, edges: model.root.edges.length, instances: model.root.instances.length, definitions: model.definitions.size })
+      .toEqual({ faces: 0, edges: 0, instances: 0, definitions: 0 });
+    await expect(readSketchUp(bytes)).rejects.toThrow(/No supported geometry/);
+    // A model view of an empty model reads it as empty instead (the worker path takes the same option).
+    const empty = await readSketchUp(bytes, undefined, { allowEmpty: true });
+    expect({ solids: empty.root.solids.length, sheets: empty.root.sheets.length, edges: empty.root.edges.length, definitions: empty.definitions.size })
+      .toEqual({ solids: 0, sheets: 0, edges: 0, definitions: 0 });
+    await expect(readSketchUpInWorker(new Uint8Array(bytes), { allowEmpty: true })).resolves.toMatchObject({ definitions: new Map() });
+  });
+
+  it('reads a SketchUp 5 file: its group, textured material, scene and rendering options', async () => {
+    const bytes = readFileSync(new URL('../../testing/assets/sketchup/basics-sketchup5.skp', import.meta.url));
+    const model = parseSkp(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+    expect(model.version).toBe('{5.0.1}');
+    const checker = model.materials.find(m => m.name === 'Checker')!;
+    expect(checker.texture).toMatchObject({ width: 10, height: 10 });
+    expect([...checker.texture!.data!.subarray(1, 4)]).toEqual([0x50, 0x4e, 0x47]);
+    expect(model.materials.find(m => m.name === 'Plain')!.color).toMatchObject({ r: 30, g: 60, b: 90 });
+    const scene = await readSketchUp(bytes), doc = createDocument();
+    const report = doc.transact('Open fixture', draft => applySketchUpImport(draft, scene)).value;
+    expect(report).toMatchObject({ bodies: 1, sheetFaces: 1, definitions: 1, instances: 1, scenes: 1 });
+    const view = doc.state.scenes.get(doc.state.sceneOrder[0]!)!;
+    expect(view.name).toBe('View');
+    view.camera.eye.forEach((v, i) => expect(v).toBeCloseTo([40, -30, 25][i]! * 0.0254, 9));
+    const style = doc.state.styles.get(doc.state.activeStyleId)!;
+    expect(style.faces.mode).toBe('hiddenLine');
+    expect(style.background.color).toEqual([210 / 255, 220 / 255, 230 / 255]);
+    expect(style.edges.color).toEqual([90 / 255, 20 / 255, 20 / 255]);
   });
 
   it('reads the committed fixture with analytical one-meter volume and holed sheet area', async () => {
@@ -347,11 +397,16 @@ describe('SketchUp import', () => {
       expect(activeStyle(into).modeling).toEqual(before);
     });
 
-  it('opens a file that records no section display with its section planes hidden and its cuts showing', async () => {
+  it('opens a file that records no section display with the format default: section planes and cuts both shown', async () => {
     const scene = await readSketchUp(readFileSync(new URL('../../testing/assets/sketchup/section-display-2027.skp', import.meta.url)));
+    expect(scene.root.sectionPlanes.length).toBeGreaterThan(0);
     const doc = createDocument();
+    doc.transact('Hide sections', draft => {
+      const modeling = draft.styles.get(draft.activeStyleId)!.modeling;
+      modeling.sectionPlanesVisible = false; modeling.sectionCutsVisible = false;
+    });
     doc.transact('Open fixture', draft => applySketchUpImport(draft, { ...scene, sectionDisplay: null }));
-    expect(activeStyle(doc).modeling).toMatchObject({ sectionPlanesVisible: false, sectionCutsVisible: true });
+    expect(activeStyle(doc).modeling).toMatchObject({ sectionPlanesVisible: true, sectionCutsVisible: true });
   });
 
   it('reads no section display from a 2021+ file whose rendering options lack it', () => {
@@ -713,6 +768,16 @@ describe('SketchUp import', () => {
     expect(keepsTags!.hiddenTags).toEqual([]);
     close(keepsTags!.camera.eye, [-4, -4, 3]);
     expect(keepsTags!.camera.fov).toBeCloseTo(50, 9);
+  });
+
+  it.each([2017, 2027])('opens a SketchUp %s scene without a name or camera', async year => {
+    const bytes = readFileSync(new URL(`../../testing/assets/sketchup/unnamed-scene-${year}.skp`, import.meta.url));
+    const scene = await readSketchUp(bytes), doc = createDocument();
+    expect(scene.scenes.map(s => [s.name, s.camera !== null])).toEqual([['Named', false], ['', false], ['4', true]]);
+    expect(scene.warnings.filter(w => /camera|scene\(s\)/.test(w))).toEqual([]);
+    expect(doc.transact('Open fixture', draft => applySketchUpImport(draft, scene)).value.scenes).toBe(3);
+    const scenes = doc.state.sceneOrder.map(id => doc.state.scenes.get(id)!);
+    expect(scenes.map(s => [s.name, s.flags.useCamera])).toEqual([['Named', false], ['', false], ['4', true]]);
   });
 
   it.each([2017, 2020, 2027])('reads the hidden tags of a last scene that saves no axes in a SketchUp %s file', async year => {
@@ -1276,9 +1341,11 @@ describe('SketchUp styles', () => {
     expect(style.modeling).toMatchObject({
       hiddenGeometry: true, guidesVisible: false, modelAxesVisible: false, colorByTag: true,
       sectionPlanesVisible: true, sectionCutsVisible: true, sectionFillEnabled: false, sectionLineWidth: 7,
-      activeSection: rgb(11, 12, 13), inactiveSection: rgb(14, 15, 16), sectionFill: rgb(17, 18, 19), sectionLine: rgb(0, 0, 0),
+      activeSection: rgb(11, 12, 13), inactiveSection: rgb(14, 15, 16), sectionLine: rgb(0, 0, 0),
       selected: rgb(0, 1, 255), locked: rgb(255, 0, 0), guides: rgb(0, 0, 0),
     });
+    // Files older than SketchUp 2018 store no section fill: the 2017 copy keeps the default fill color.
+    expect(style.modeling.sectionFill).toEqual(name.endsWith('2017') ? activeStyle(createDocument()).modeling.sectionFill : rgb(17, 18, 19));
   });
 
   it.each(['style-hiddenline-2027', 'style-hiddenline-2017'])('opens a hidden-line file with edges off, edges by material and the sky and ground on (%s)', async name => {
@@ -1289,9 +1356,10 @@ describe('SketchUp styles', () => {
       endpoints: false, endpointLength: 3, jitter: false, backEdges: true, color: rgb(60, 70, 80), colorMode: 'byMaterial',
     });
     expect(style.background).toMatchObject({ color: rgb(250, 240, 230), sky: true, skyColor: rgb(100, 150, 250), ground: true, groundColor: rgb(120, 110, 100) });
+    // Files older than SketchUp 2018 store no section fill, which is then off.
     expect(style.modeling).toMatchObject({
       hiddenGeometry: false, guidesVisible: true, modelAxesVisible: true, colorByTag: false,
-      sectionPlanesVisible: false, sectionCutsVisible: false, sectionFillEnabled: true, sectionLineWidth: 2,
+      sectionPlanesVisible: false, sectionCutsVisible: false, sectionFillEnabled: !name.endsWith('2017'), sectionLineWidth: 2,
     });
   });
 
@@ -1318,6 +1386,22 @@ describe('SketchUp styles', () => {
     expect(scene.display?.edges.color).toEqual([0, 0, 0]);
     expect(style.background.color).toEqual([1, 1, 1]);
     expect(style.faces).toMatchObject({ mode: 'shadedWithTextures', frontColor: rgb(225, 225, 200), backColor: rgb(128, 128, 200) });
+  });
+
+  // styles-current-*.skp: three scenes each save their own style (Wire, Hidden, Xray); the model then shows Wire's
+  // style with settings changed after the scenes were saved, which no saved style holds.
+  it.each(['styles-current-2017', 'styles-current-2020', 'styles-current-2027'])('opens the model\'s current settings, not its last saved style, and each scene\'s own style (%s)', async name => {
+    const { scene, style, doc } = await open(name);
+    expect(style.faces.mode).toBe('wireframe');
+    expect(style.background.color).toEqual(rgb(12, 34, 56));
+    expect(style.edges.colorMode).toBe('byAxis');
+    expect(style.modeling).toMatchObject({ sectionPlanesVisible: false, sectionCutsVisible: false });
+    expect(scene.sectionDisplay).toEqual({ planes: false, cuts: false });
+    expect(scene.scenes.map(saved => [saved.name, saved.display?.faces.mode, saved.display?.background.color, saved.display?.edges.colorMode])).toEqual([
+      ['Wire', 'wireframe', rgb(200, 40, 40), 'allSame'], ['Hidden', 'hiddenLine', rgb(40, 200, 40), 'allSame'], ['Xray', 'xray', rgb(40, 40, 200), 'allSame'],
+    ]);
+    expect(doc.state.sceneOrder.map(id => doc.state.styles.get(doc.state.scenes.get(id)!.styleId!)!.background.color))
+      .toEqual([rgb(200, 40, 40), rgb(40, 200, 40), rgb(40, 40, 200)]);
   });
 
   it('keeps the style across native save and reopen, and leaves the destination style alone on Import', async () => {

@@ -8,7 +8,7 @@ import { UNKNOWN_BUILD, formatBuildDate } from '../buildInfo';
 afterEach(() => { cleanup(); document.body.innerHTML = ''; });
 
 describe('AboutDialog', () => {
-  it('shows version, build commit, UTC build time and copyright, and closes with its button or Escape', () => {
+  it('shows version, build commit, UTC build time, copyright and the license, source and notices links, and closes with its button or Escape', () => {
     const onClose = vi.fn();
     render(<AboutDialog build={{ version: '26.44.42', commit: 'f2c30d4', date: '2026-10-22T14:03:27.000Z' }} onClose={onClose} />);
     const dialog = screen.getByRole('dialog', { name: 'About PushForm' });
@@ -34,6 +34,15 @@ describe('AboutDialog', () => {
     expect(source.getAttribute('href')).toBe('https://github.com/PushForm/pushform-app');
     expect(source.getAttribute('target')).toBe('_blank');
     expect(source.getAttribute('rel')).toBe('noopener noreferrer');
+    fireEvent.keyDown(window, { key: 'Tab' });
+    const notices = screen.getByRole('link', { name: 'Third-party notices' });
+    expect(document.activeElement).toBe(notices);
+    expect(notices.getAttribute('href')).toBe('/third-party-notices.txt');
+    expect(notices.getAttribute('target')).toBe('_blank');
+    expect(notices.getAttribute('rel')).toBe('noopener noreferrer');
+    // In the browser the link opens the notices itself: the click is not cancelled and no message appears.
+    expect(fireEvent.click(notices)).toBe(true);
+    expect(screen.queryByRole('status')).toBeNull();
     fireEvent.keyDown(window, { key: 'Tab' });
     const icons = screen.getByRole('link', { name: 'Game Icons' });
     expect(document.activeElement).toBe(icons);

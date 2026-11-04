@@ -572,9 +572,9 @@ describe('pictures posted with messages', () => {
     expect(stored[0]).toMatchObject({ role: 'user', text: 'Build this', attachments: [picture] });
   });
 
-  it('opens a model turn with the pictures status line when the message carries pictures', async () => {
+  it('opens a model turn that carries pictures with the same reading line as any other', async () => {
     const events = parseSse(await (await send(pictured(), { text: 'Build this', attachments: [ATTACHMENT_ID], document: { type: 'model', apiVersion: 1, edit: 1 } })).text());
-    expect(events[0]).toEqual({ event: 'status', data: { phase: 'reading', text: 'Looking at your pictures…' } });
+    expect(events[0]).toEqual({ event: 'status', data: { phase: 'reading', text: 'Reading your request…' } });
   });
 
   it('accepts a message of pictures alone and refuses one with neither text nor pictures', async () => {

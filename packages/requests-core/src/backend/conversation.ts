@@ -979,7 +979,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       timing,
       user, conversation, store, handlers: agent.handlers(ctx, store), pathChanged: path !== conversation.path,
       leading: [...closers, { role: 'user', text: body.text, at: base.now, ...(pictures.length ? { attachments: pictures } : {}) }],
-      status: messageStatus(pictures.length > 0),
+      status: messageStatus(),
       setup: {
         ...turnPrompt(config.models, ctx, document), context, historyLength: prior.length, messages: historyOf(prior, context, body.text, pictures, images), document, resume: undefined,
       },

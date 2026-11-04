@@ -8,9 +8,8 @@ const seeded = (seed: number) => () => { seed = (seed * 1103515245 + 12345) % 21
 const FAILURE = /fail|reject|refus|error|didn.t apply|wrong|problem|fix/i;
 
 describe('status line texts', () => {
-  it('opens a new message by reading the request, or the pictures when it has any', () => {
-    expect(messageStatus(false)).toEqual({ phase: 'reading', text: 'Reading your request…' });
-    expect(messageStatus(true)).toEqual({ phase: 'reading', text: 'Looking at your pictures…' });
+  it('opens a new message by reading the request, with or without pictures', () => {
+    expect(messageStatus()).toEqual({ phase: 'reading', text: 'Reading your request…' });
   });
   it('opens a resumed turn from how the last step ended, and a refused change only as a saying', () => {
     const apply = (isError: boolean) => ({ name: 'model_apply_operations', isError });

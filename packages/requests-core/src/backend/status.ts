@@ -35,9 +35,9 @@ export const SAYINGS = [
 /** Silence before the first long-silence line, then before the second one. */
 export const QUIET_MS = [15_000, 20_000] as const;
 
-/** The line a turn's first request opens with. */
-export function messageStatus(pictures: boolean): StatusLine {
-  return pictures ? { phase: 'reading', text: 'Looking at your pictures…' } : { phase: 'reading', text: 'Reading your request…' };
+/** The line a turn's first request opens with, with or without pictures. */
+export function messageStatus(): StatusLine {
+  return { phase: 'reading', text: 'Reading your request…' };
 }
 
 /** The line a resumed turn opens with, from the browser's answers to the calls it suspended on. */

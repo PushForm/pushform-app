@@ -12,7 +12,7 @@ export function CommonsModelDetail({ model, filesUrl, busy, importing, destinati
 }) {
   const file = model.files.find(item => /\.pf$/i.test(item.name)) ?? model.files.find(item => isCommonsOpenable(item.name));
   const open = <button type="button" className={!importing ? 'pf-commons-primary' : ''} disabled={busy || !file} onClick={onOpen}>Open in new tab<LuArrowUpRight aria-hidden="true"/></button>;
-  const insert = destinationName && <button type="button" className={importing ? 'pf-commons-primary' : ''} disabled={busy || !file} onClick={onInsert}>Insert into {destinationName}</button>;
+  const insert = destinationName && <button type="button" className={importing ? 'pf-commons-primary' : ''} disabled={busy || !file} onClick={onInsert}>Import into {destinationName}</button>;
   return <article className="pf-commons-detail">
     <button type="button" className="pf-commons-back" onClick={onBack}><LuArrowLeft aria-hidden="true"/>Back to results</button>
     <div className="pf-commons-detail-hero">

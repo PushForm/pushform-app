@@ -429,6 +429,18 @@
           "default": "claude-opus-5-5",
           "type": "string",
           "minLength": 1
+        },
+        "acknowledge": {
+          "default": "claude-haiku-5-5",
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false

@@ -209,7 +209,7 @@ export function messagesFromRows(value: unknown): ConversationMessage[] {
     }
     else if (r['role'] === 'assistant' && typeof r['text'] === 'string') {
       const turn = asRecord(r['turn']);
-      out.push({ role: 'assistant', text: r['text'], at: str(r['at']), ...(turn ? { turn: turn as unknown as SuspendedTurn } : {}) });
+      out.push({ role: 'assistant', text: r['text'], at: str(r['at']), ...(turn ? { turn: turn as unknown as SuspendedTurn } : {}), ...(r['acknowledgment'] === true ? { acknowledgment: true as const } : {}) });
     }
     else if (r['role'] === 'tool' && typeof r['name'] === 'string') out.push({ role: 'tool', name: r['name'], toolUseId: str(r['toolUseId']), input: r['input'], output: str(r['output']), at: str(r['at']),
       ...(Array.isArray(r['views']) ? { views: (r['views'] as unknown[]).map(v => str(v)) } : {}) });

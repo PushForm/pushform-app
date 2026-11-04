@@ -93,7 +93,8 @@ export interface MessagePicture { id: string; name: string; mime: string }
 /** A visible chat message; `tool` messages record the model's tool use and are hidden from the UI. */
 export type ConversationMessage =
   | { role: 'user'; text: string; at: string; attachments?: MessagePicture[] }
-  | { role: 'assistant'; text: string; at: string; turn?: SuspendedTurn }
+  /** `acknowledgment`: the opening line that restates a request while the agent works; shown, but never sent to a model. */
+  | { role: 'assistant'; text: string; at: string; turn?: SuspendedTurn; acknowledgment?: true }
   /** `views`: a render review's views; its pictures are not kept, and `output` names them in a placeholder. */
   | { role: 'tool'; name: string; toolUseId: string; input: unknown; output: string; at: string; views?: string[] };
 export interface Conversation {

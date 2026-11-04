@@ -990,4 +990,16 @@ describe('render review and progress', () => {
     fireEvent.click(toggle);
     expect(log().textContent).toContain('Pictures are not kept after the reply. Views: iso; front.');
   });
+
+  it('shows a reloaded acknowledgment as the opening of the reply, under one Agent label', async () => {
+    const conversation = { id: 'conv-a', kind: 'help', path: 'help' as const, status: 'open', title: null, brief: null, messageCount: 1, requestId: null, updatedAt: '2026-11-04T10:00:00Z',
+      messages: [{ role: 'user', text: 'A 24 in base cabinet', at: 't1' }, { role: 'assistant', text: 'A 24 in base cabinet. Starting on it now.', at: 't2', acknowledgment: true } as { role: string; text: string; at: string },
+        { role: 'tool', text: '', at: 't3' }, { role: 'assistant', text: 'Built it.', at: 't4' }] };
+    rememberDraft(account.id, { conversationId: 'conv-a', path: 'help', title: null });
+    setup({ openConversations: [conversation] });
+    await waitFor(() => expect(log().textContent).toContain('Built it.'));
+    expect(log().textContent).toContain('A 24 in base cabinet. Starting on it now.');
+    // The greeting, the requester, then one label over the acknowledgment and the reply that follows it.
+    expect([...log().querySelectorAll('.pf-fr-role')].map(el => el.textContent)).toEqual(['Agent', 'You', 'Agent']);
+  });
 });

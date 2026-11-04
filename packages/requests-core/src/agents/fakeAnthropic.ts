@@ -2,6 +2,7 @@
 // Copyright 2026 PushForm contributors
 import type Anthropic from '@anthropic-ai/sdk';
 import type { AnthropicLike } from './client.ts';
+import { ACKNOWLEDGE_SYSTEM } from './acknowledge.ts';
 
 /** One scripted assistant message: text deltas, tool calls and how the message stopped. */
 export interface ScriptedTurn {
@@ -13,18 +14,29 @@ export interface ScriptedTurn {
   stopReason?: Anthropic.StopReason;
   usage?: Partial<Anthropic.Usage>;
 }
-export interface FakeAnthropic extends AnthropicLike { calls: Anthropic.MessageCreateParamsStreaming[]; headers: (Record<string, string> | undefined)[] }
+export interface FakeAnthropic extends AnthropicLike {
+  calls: Anthropic.MessageCreateParamsStreaming[];
+  headers: (Record<string, string> | undefined)[];
+  /** Acknowledgment requests, kept apart from `calls` so scripted turns and their checks stay those of the main model. */
+  acknowledgments: Anthropic.MessageCreateParamsStreaming[];
+}
 
-/** A client whose `messages.create` stream yields the scripted events in order, so tool loops are tested without the network. */
-export function fakeAnthropic(turns: ScriptedTurn[]): FakeAnthropic {
-  const queue = [...turns];
+/**
+ * A client whose `messages.create` stream yields the scripted events in order, so tool loops are tested without the network.
+ * Acknowledgment requests are answered from `acknowledgments` in order, and with a hyphen (nothing to say) once those run out.
+ */
+export function fakeAnthropic(turns: ScriptedTurn[], acknowledgments: ScriptedTurn[] = []): FakeAnthropic {
+  const queue = [...turns], acks = [...acknowledgments];
   const calls: Anthropic.MessageCreateParamsStreaming[] = [];
   const headers: (Record<string, string> | undefined)[] = [];
+  const acknowledged: Anthropic.MessageCreateParamsStreaming[] = [];
   return {
     calls,
     headers,
+    acknowledgments: acknowledged,
     messages: {
       async create(params, options) {
+        if (params.system === ACKNOWLEDGE_SYSTEM) { acknowledged.push(params); return scriptedStream(acks.shift() ?? { text: ['-'] }); }
         calls.push(params); headers.push(options?.headers);
         const turn = queue.shift();
         if (!turn) throw new Error('fakeAnthropic: no scripted turn left');

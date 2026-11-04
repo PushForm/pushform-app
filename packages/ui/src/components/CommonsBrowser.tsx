@@ -4,12 +4,13 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { LuLibrary } from 'react-icons/lu';
 import { UploadDialog } from '@pushform/commons-ui';
-import { CommonsPublishing, deleteCommonsDraft, type CommonsOwnModels, readCommonsCatalog, isCommonsOpenable, loadCommonsModel, commonsFileUrl, type CatalogModel, type OpenedCommonsModel } from '@pushform/cloud';
+import { CommonsPublishing, deleteCommonsDraft, type CommonsOwnModels, readCommonsCatalog, isCommonsOpenable, loadCommonsModel, type CatalogModel, type OpenedCommonsModel } from '@pushform/cloud';
 import type { CommonsAccount } from '@pushform/commons-ui/account';
 import { MESH_UNITS, probeMeshImport, type MeshUnit } from '@pushform/io';
 import { openCommonsModel, placeCommonsModel } from '../commonsOpening';
 import type { DocumentSession, ModelTab } from '../session';
 import { CommonsModelDetail } from './CommonsModelDetail';
+import { CommonsModelImage } from './CommonsModelImage';
 
 export function CommonsBrowser({ account, filesUrl, session, target, onOpened, onClose }: {
   account: CommonsAccount | undefined; filesUrl: string | undefined; session: DocumentSession;
@@ -128,7 +129,7 @@ export function CommonsBrowser({ account, filesUrl, session, target, onOpened, o
     /> : <><div className="pf-commons-filters"><label>Search models<input value={query} onChange={event => setQuery(event.target.value)} /></label><label>Category<select value={category} onChange={event => setCategory(event.target.value)}><option value="">All categories</option>{choices((models ?? []).map(m => m.category))}</select></label><label>License<select value={license} onChange={event => setLicense(event.target.value)}><option value="">All licenses</option>{choices((models ?? []).flatMap(m => m.licenses.map(l => l.name)))}</select></label><label><input type="checkbox" checked={commercial} onChange={event => setCommercial(event.target.checked)} />Commercial use permitted</label></div>
       {!models && !error && <p role="status">Loading Commons…</p>}
       {models && !shown.length && <p>No matching models. <button onClick={() => { setQuery('');setCategory('');setLicense('');setCommercial(false); }}>Clear filters</button></p>}
-      <div className="pf-commons-grid">{shown.map(model => <button key={model.id} onClick={() => setSelected(model)}><img crossOrigin="anonymous" referrerPolicy="no-referrer" alt="" src={model.imageUrl ?? commonsFileUrl(filesUrl, 'thumbnails', model.files[0]?.id ?? '') ?? undefined}/><strong>{model.title}</strong><span>by {model.creator}</span><span>{model.licenses.map(l => l.name).join(', ')}</span><span>{model.formats.join(', ')}</span></button>)}</div>
+      <div className="pf-commons-grid">{shown.map(model => <button key={model.id} onClick={() => setSelected(model)}><CommonsModelImage key={model.revision} model={model} filesUrl={filesUrl} decorative/><strong>{model.title}</strong><span>by {model.creator}</span><span>{model.licenses.map(l => l.name).join(', ')}</span><span>{model.formats.join(', ')}</span></button>)}</div>
     </>}
     </div>
   </section>;

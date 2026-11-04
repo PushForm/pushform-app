@@ -79,9 +79,11 @@ it('requests catalog and detail thumbnails with anonymous CORS for the isolated 
   };
   assertImage(view.container.querySelector('img')!);
   fireEvent.click(screen.getByText('Garden bench'));
+  expect(screen.getByRole('img', { name: 'Loading preview for Garden bench' })).toBeTruthy();
+  fireEvent.load(view.container.querySelector('.pf-commons-detail-image img')!);
   assertImage(screen.getByRole('img', { name: 'Garden bench' }));
   fireEvent.error(screen.getByRole('img', { name: 'Garden bench' }));
-  expect(screen.getByText('Preview unavailable')).toBeTruthy();
+  expect(screen.getByRole('img', { name: 'Preview unavailable for Garden bench' })).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Open in new tab' })).toBeTruthy();
 });
 it('retains browsing state when hidden and excludes unknown permissions from commercial-use results', async () => {

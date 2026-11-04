@@ -1,20 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { useState, type ReactNode } from 'react';
-import { LuArrowLeft, LuArrowUpRight, LuImageOff } from 'react-icons/lu';
-import { commonsFileUrl, isCommonsOpenable, type CatalogModel } from '@pushform/cloud';
-import { isPreviewModelFile } from '@pushform/cloud/preview';
-
-function ModelImage({ model, filesUrl }: { model: CatalogModel; filesUrl: string | undefined }) {
-  const [failed, setFailed] = useState<string[]>([]);
-  const geometry = model.files.find(file => isPreviewModelFile(file.name));
-  const sources = [model.previewImage ? commonsFileUrl(filesUrl, 'images', model.previewImage.id) : null,
-    model.imageUrl, geometry ? commonsFileUrl(filesUrl, 'thumbnails', geometry.id) : null];
-  const src = sources.find((url): url is string => !!url && !failed.includes(url));
-  return src ? <img src={src} alt={model.title} crossOrigin="anonymous" referrerPolicy="no-referrer"
-    onError={() => setFailed(current => [...current, src])} />
-    : <div className="pf-commons-preview-unavailable"><LuImageOff aria-hidden="true"/><span>Preview unavailable</span></div>;
-}
+import type { ReactNode } from 'react';
+import { LuArrowLeft, LuArrowUpRight } from 'react-icons/lu';
+import { isCommonsOpenable, type CatalogModel } from '@pushform/cloud';
+import { CommonsModelImage } from './CommonsModelImage';
 
 export function CommonsModelDetail({ model, filesUrl, busy, importing, destinationName, destinationPicker, onBack, onOpen, onInsert }: {
   model: CatalogModel; filesUrl: string | undefined; busy: boolean; importing: boolean;
@@ -28,7 +17,7 @@ export function CommonsModelDetail({ model, filesUrl, busy, importing, destinati
     <button type="button" className="pf-commons-back" onClick={onBack}><LuArrowLeft aria-hidden="true"/>Back to results</button>
     <div className="pf-commons-detail-hero">
       <figure className="pf-commons-detail-preview">
-        <div className="pf-commons-detail-image"><ModelImage key={model.id + model.revision} model={model} filesUrl={filesUrl}/></div>
+        <div className="pf-commons-detail-image"><CommonsModelImage key={model.id + model.revision} model={model} filesUrl={filesUrl}/></div>
         <figcaption><span>Model preview</span><span>{model.formats.join(' · ')}</span></figcaption>
       </figure>
       <div className="pf-commons-detail-summary">

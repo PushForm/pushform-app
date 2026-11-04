@@ -4,6 +4,6 @@ You can browse Commons without signing in. To download a model, choose **Downloa
 
 The initial form also offers **Join the mailing list (optional)**. This checkbox starts unchecked. Leaving it unchecked does not prevent downloading or using PushForm. You can change your email-updates choice from your Commons account later.
 
-A public creator profile is optional and separate from your private account details. Downloading does not require publishing your name, bio, avatar or projects to the community.
+A public creator profile is optional and separate from your private account details. Downloading does not require publishing your name, bio, profile images or projects to the community.
 
 Downloads contain the original file and its attribution notices in a ZIP. Keep the license and creator credits when reusing the model. If sign-in or account setup fails, retry from the displayed message; a failed download leaves existing projects unchanged.

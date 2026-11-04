@@ -369,6 +369,26 @@ isOneToOne: false
       referencedColumns: ["model_id","id"]
     }
                   ]
+                },"commons_profile_images": {
+                  Row: {
+                    "created_at": string,"format": string,"height": number,"id": string,"kind": string,"object_key": string | null,"profile_id": string,"removed_at": string | null,"sha256": string,"size_bytes": number,"status": string,"uploaded_by": string | null,"verified_at": string | null,"width": number
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "created_at"?: string,"format": string,"height": number,"id"?: string,"kind": string,"object_key"?: never,"profile_id": string,"removed_at"?: string | null,"sha256": string,"size_bytes": number,"status"?: string,"uploaded_by"?: string | null,"verified_at"?: string | null,"width": number
+                  }
+                  Update: {
+                    "created_at"?: string,"format"?: string,"height"?: number,"id"?: string,"kind"?: string,"object_key"?: never,"profile_id"?: string,"removed_at"?: string | null,"sha256"?: string,"size_bytes"?: number,"status"?: string,"uploaded_by"?: string | null,"verified_at"?: string | null,"width"?: number
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "commons_profile_images_profile_id_fkey"
+      columns: ["profile_id"]
+isOneToOne: false
+      referencedRelation: "commons_profiles"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"commons_profiles": {
                   Row: {
                     "active": boolean,"avatar_url": string | null,"bio": string,"created_at": string,"display_name": string,"handle": string,"id": string,"links": NonNullable<Json>,"public_consent_at": string,"updated_at": string,"user_id": string | null,"version": number,"commons_profile_public": Json | null
@@ -1144,6 +1164,9 @@ isOneToOne: false
 "commons_asset_editor":
 { Args: { "p_revision": string }; Returns: string
                            },
+"commons_begin_profile_image":
+{ Args: { "p_format": string,"p_height": number,"p_kind": string,"p_sha256": string,"p_size_bytes": number,"p_width": number }; Returns: Json
+                           },
 "commons_catalog":
 { Args: Record<PropertyKey, never>; Returns: Json
                            },
@@ -1158,6 +1181,9 @@ isOneToOne: false
                            },
 "commons_finish_asset":
 { Args: { "p_asset": string,"p_sha256": string,"p_size_bytes": number }; Returns: Json
+                           },
+"commons_finish_profile_image":
+{ Args: { "p_image": string,"p_sha256": string,"p_size_bytes": number }; Returns: Json
                            },
 "commons_finish_render":
 { Args: { "p_job": string,"p_lease": string,"p_result": Json }; Returns: boolean
@@ -1183,11 +1209,23 @@ isOneToOne: false
 "commons_profile_by_handle":
 { Args: { "p_handle": string }; Returns: Json
                            },
+"commons_profile_image":
+{ Args: { "p_image": string }; Returns: Json
+                           },
+"commons_profile_image_public":
+{ Args: { "p_kind": string,"p_profile": string }; Returns: Json
+                           },
+"commons_profile_image_upload":
+{ Args: { "p_image": string }; Returns: Json
+                           },
 "commons_profile_public":
 { Args: { "p": Omit<Database["public"]['Tables']["commons_profiles"]['Row'], Database["public"]['Tables']["commons_profiles"]['ComputedFields']> }; Returns: Json
                            },
 "commons_publish_model":
 { Args: { "p_expected_asset_version": number,"p_expected_published": string,"p_revision": string,"p_rights_confirmed": boolean }; Returns: Json
+                           },
+"commons_remove_profile_image":
+{ Args: { "p_kind": string }; Returns: Json
                            },
 "commons_render_asset":
 { Args: { "p_asset": string,"p_version": string }; Returns: Json

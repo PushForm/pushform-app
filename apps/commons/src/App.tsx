@@ -100,7 +100,7 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
       <img src="/pf-logo-mark.svg" alt="" width="30" height="30" /><span>PushForm <strong>Commons</strong></span>
     </a><nav aria-label="Commons">{account&&<><a href="#publish">Publish model</a><a href="#account">My profile</a></>}<a className="editor-link" href="https://app.pushform.io">Open PushForm <span aria-hidden="true">↗</span></a></nav></header>
     <main id="main" ref={heading} tabIndex={-1}>
-      {profileLookup?<CommonsProfilePageView lookup={profileLookup} profiles={account?.profiles??null}/>:hash==='#account'?account?<AccountPage account={account}/>:<section className="status-panel"><h1>Accounts are unavailable in this build.</h1></section>:hash==='#publish'?publishPage??<section className="status-panel"><h1>Publishing is unavailable in this build.</h1></section>:state.kind === 'ready' && selectedId ? selected ? <ModelDetail model={selected} filesUrl={filesUrl} account={account} editorUrl={editorUrl} /> :
+      {profileLookup?<CommonsProfilePageView lookup={profileLookup} profiles={account?.profiles??null} filesUrl={filesUrl}/>:hash==='#account'?account?<AccountPage account={account} filesUrl={filesUrl}/>:<section className="status-panel"><h1>Accounts are unavailable in this build.</h1></section>:hash==='#publish'?publishPage??<section className="status-panel"><h1>Publishing is unavailable in this build.</h1></section>:state.kind === 'ready' && selectedId ? selected ? <ModelDetail model={selected} filesUrl={filesUrl} account={account} editorUrl={editorUrl} /> :
         <section className="status-panel"><p className="eyebrow">Model unavailable</p><h1>This model isn’t in the catalog.</h1>
           <p>It may have been removed or the link may be out of date.</p><a href="#browse">Browse models</a></section> : <>
         <section className="hero"><p className="eyebrow">A shared place to start</p>
@@ -138,10 +138,10 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
   </div>;
 }
 
-function AccountPage({account}:{account:CommonsAccount}){
+function AccountPage({account,filesUrl}:{account:CommonsAccount;filesUrl:string|undefined}){
   const state=useSyncExternalStore(account.session.subscribe,account.session.getSnapshot);
   return <CommonsAccessGate account={account}><div key={state.user?.id??'signed-out'}>
-    <CommonsProfileEditor profiles={account.profiles}/><CommonsMailingPreference account={account}/>
+    <CommonsProfileEditor profiles={account.profiles} images={filesUrl?{filesUrl,token:async()=>{const value=await account.session.getAccessToken();if(!value)throw new Error('Sign in to change your profile images.');return value;}}:undefined}/><CommonsMailingPreference account={account}/>
     <button onClick={()=>void account.session.signOut()} disabled={state.pending!==null}>Sign out</button>
   </div></CommonsAccessGate>;
 }

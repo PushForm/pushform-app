@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent, type MouseEvent, type ReactNode } from 'react';
 import { commonsProfileFieldsSchema, type CommonsProfile, type CommonsProfileFields, type CommonsProfilePage, type CommonsProfiles } from '@pushform/cloud';
 import { navigateCommons, profilePath } from './route';
+import { ProfileHero, ProfileImagesEditor, type ProfileImageServices } from './ProfileImages';
 
 /** Links to a public profile page and opens it without reloading Commons. */
 export function ProfileLink({handle,children}:{handle:string;children:ReactNode}){
@@ -17,7 +18,7 @@ export function CreatorCredit({model}:{model:{creator:string;creatorProfile?:{ha
 }
 /** Opens a profile by handle, or by account ID for older links, which then move to the handle address. */
 export type ProfileLookup={handle:string}|{id:string};
-export function CommonsProfilePageView({lookup,profiles}:{lookup:ProfileLookup;profiles:CommonsProfiles|null}){
+export function CommonsProfilePageView({lookup,profiles,filesUrl}:{lookup:ProfileLookup;profiles:CommonsProfiles|null;filesUrl?:string|undefined}){
   const [page,setPage]=useState<CommonsProfilePage|null|undefined>();const [error,setError]=useState(false);const [attempt,setAttempt]=useState(0);
   const shown=useRef<CommonsProfilePage|null|undefined>(undefined);shown.current=page;
   const handle='handle' in lookup?lookup.handle:null;const id='id' in lookup?lookup.id:null;
@@ -36,18 +37,14 @@ export function CommonsProfilePageView({lookup,profiles}:{lookup:ProfileLookup;p
   if(page===undefined)return <p className="status-panel" role="status">Loading profile…</p>;
   if(page===null)return <section className="status-panel"><h1>This profile isn’t available.</h1><p>It may be hidden or the account may have been removed.</p><a href="#browse">Browse models</a></section>;
   return <article className="profile-page"><a className="back-link" href="#browse">← All models</a>
-    <header className="profile-heading"><ProfileAvatar name={page.profile.displayName} url={page.profile.avatarUrl}/><div><p className="eyebrow">Community profile</p><h1>{page.profile.displayName}</h1><p>@{page.profile.handle}</p></div></header>
+    <ProfileHero profile={page.profile} filesUrl={filesUrl}/>
     {page.profile.bio&&<p className="profile-bio">{page.profile.bio}</p>}
     {page.profile.links.length>0&&<ul className="profile-links">{page.profile.links.map((link,index)=><li key={index}><a href={link.url} target="_blank" rel="noreferrer noopener">{link.label} ↗</a></li>)}</ul>}
     <h2>Published models</h2>{page.models.length===0?<p>No published models to show.</p>:<div className="profile-models">{page.models.map(model=><article key={model.id}><p className="eyebrow">{model.category}</p><h3><a href={`#models/${model.id}`}>{model.title}</a></h3><p>{model.description}</p><p>{model.licenses.map(license=>license.name).join(' · ')}</p></article>)}</div>}
   </article>;
 }
-function ProfileAvatar({name,url}:{name:string;url:string|null}){
-  const [failed,setFailed]=useState(false);useEffect(()=>setFailed(false),[url]);
-  return url&&!failed?<img className="profile-avatar" src={url} alt={`${name}'s avatar`} referrerPolicy="no-referrer" onError={()=>setFailed(true)}/>:<div className="profile-avatar profile-avatar-fallback" aria-hidden="true">{name.slice(0,1).toUpperCase()}</div>;
-}
 const emptyFields:CommonsProfileFields={handle:'',displayName:'',bio:'',avatarUrl:null,links:[]};
-export function CommonsProfileEditor({profiles}:{profiles:CommonsProfiles}){
+export function CommonsProfileEditor({profiles,images}:{profiles:CommonsProfiles;images?:ProfileImageServices|undefined}){
   const [profile,setProfile]=useState<CommonsProfile|null|undefined>();const [fields,setFields]=useState<CommonsProfileFields>(emptyFields);
   const [error,setError]=useState('');const [message,setMessage]=useState('');const [busy,setBusy]=useState(false);
   useEffect(()=>{
@@ -55,6 +52,8 @@ export function CommonsProfileEditor({profiles}:{profiles:CommonsProfiles}){
     void profiles.mine(controller.signal).then(value=>{if(!controller.signal.aborted){setProfile(value);setFields(value?{handle:value.handle,displayName:value.displayName,bio:value.bio,avatarUrl:value.avatarUrl,links:value.links}:emptyFields);}},()=>{if(!controller.signal.aborted)setError('Your public profile could not be loaded. Try again.');});
     return()=>controller.abort();
   },[profiles]);
+  // Image changes do not affect the form or its version, so only the image fields are refreshed.
+  const imagesChanged=async()=>{const value=await profiles.mine();setProfile(current=>current&&value?{...current,avatarImage:value.avatarImage,bannerImage:value.bannerImage}:current);};
   const update=(patch:Partial<CommonsProfileFields>)=>{setFields(current=>({...current,...patch}));setMessage('');};
   const save=(event:FormEvent)=>{
     event.preventDefault();setError('');setMessage('');
@@ -69,13 +68,12 @@ export function CommonsProfileEditor({profiles}:{profiles:CommonsProfiles}){
     {error&&<p role="alert">{error}</p>}{message&&<p role="status">{message}</p>}
     {profile===undefined?!error&&<p role="status">Loading your profile…</p>:<>
       {profile&&<p>{profile.active?<ProfileLink handle={profile.handle}>View your public profile</ProfileLink>:'Your profile is currently hidden.'}</p>}
+      {images&&(profile?<ProfileImagesEditor profile={profile} services={images} onChanged={imagesChanged}/>:<p className="field-note">You can add a profile picture and a banner after you publish your profile.</p>)}
       <form onSubmit={save} className="profile-form">
         <label>Public handle<input value={fields.handle} onChange={event=>update({handle:event.target.value.toLowerCase()})} required pattern="[a-z][a-z0-9-]{1,30}[a-z0-9]" minLength={3} maxLength={32} disabled={busy||profile!==null}/></label>
         <p className="field-note">3–32 lowercase letters, numbers or hyphens; start with a letter and end with a letter or number. Your handle stays reserved and cannot be changed.</p>
         <label>Display name<input value={fields.displayName} onChange={event=>update({displayName:event.target.value})} required maxLength={100} disabled={busy}/></label>
         <label>Bio<textarea value={fields.bio} onChange={event=>update({bio:event.target.value})} maxLength={2000} rows={4} disabled={busy}/></label>
-        <label>Avatar URL (optional)<input type="url" value={fields.avatarUrl??''} onChange={event=>update({avatarUrl:event.target.value||null})} placeholder="https://example.com/avatar.jpg" disabled={busy}/></label>
-        <p className="field-note">Use an image you may share. External images load from their hosting site.</p>
         <fieldset disabled={busy}><legend>Public links (optional)</legend>{fields.links.map((link,index)=><div className="profile-link-fields" key={index}>
           <label>Link {index+1} label<input value={link.label} maxLength={80} required onChange={event=>update({links:fields.links.map((item,i)=>i===index?{...item,label:event.target.value}:item)})}/></label>
           <label>Link {index+1} URL<input type="url" value={link.url} required onChange={event=>update({links:fields.links.map((item,i)=>i===index?{...item,url:event.target.value}:item)})}/></label>

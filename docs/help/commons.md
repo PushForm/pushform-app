@@ -16,11 +16,27 @@ Model Info → Credits shows the original source, licenses, conditions and creat
 
 Choose **My profile** to sign in with your PushForm account. A new account completes the same private account setup and Terms of Use step used by the editor. Creating a public profile is a separate choice; it is not required to download models.
 
-Choose a public handle and display name, then optionally add a bio, avatar URL and up to five links. Everything in this form is shown publicly once you save it. Your handle uses 3–32 lowercase letters, numbers or hyphens, starts with a letter and ends with a letter or number. Handles stay reserved and cannot be changed. Your private account name, email, company and projects are not copied into your public profile.
+Choose a public handle and display name, then optionally add a bio and up to five links. Everything in this form is shown publicly once you save it. Your handle uses 3–32 lowercase letters, numbers or hyphens, starts with a letter and ends with a letter or number. Handles stay reserved and cannot be changed. Your private account name, email, company and projects are not copied into your public profile.
 
 Saving takes you to your public profile page, at `/u/` followed by your handle (for example `commons.pushform.io/u/your-handle`). Use **View your public profile** to open it again later. The page shows your chosen public fields and published models associated with your authorship. Imported models retain their original creator credit; uploading or curating someone else's model does not make you its author.
 
 If your profile was hidden, saving it makes it visible again. If another tab changed the profile, reload the page before saving your changes. Older profile links continue to work and open the handle address.
+
+## Add a profile picture and banner
+
+After you publish your profile, **My profile** shows a **Profile picture** and a **Banner** section. Your banner runs across the top of your public profile page, and your profile picture overlaps its lower edge as a circle.
+
+1. Choose **Upload profile picture** or **Upload banner** and pick a PNG or JPEG image up to 20 MiB and 8,192 pixels on each side.
+2. Drag the image to position it and use the **Zoom** slider or the mouse wheel to zoom. With the crop area focused, the arrow keys move the image (hold Shift for larger steps) and plus and minus zoom.
+3. Check the previews, then choose **Save profile picture** or **Save banner**. Choose **Cancel** to keep your current image.
+
+Commons saves a profile picture at 512 × 512 pixels and a banner at 1500 × 500 pixels. Images with transparency stay PNG; others are saved as JPEG. A saved image must be 2 MiB or smaller. Very detailed transparent images are placed on a white background and saved as JPEG. While the image uploads, a progress bar shows its status, and Commons checks the image before showing it.
+
+## Replace or remove your profile picture and banner
+
+Saved images are public right away while your profile is visible; you don't need to save the profile form. Use **Replace profile picture** or **Replace banner** to choose a new image; the old one stops showing as soon as the new one is saved. Use **Remove profile picture** or **Remove banner** to take an image down. Hidden profiles don't show their images.
+
+Earlier profiles may show a picture loaded from an address you entered. It keeps showing until you upload a profile picture, which then takes its place. You can no longer enter a picture address.
 
 ## Preview a model
 

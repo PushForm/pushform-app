@@ -6,6 +6,12 @@ Open **AI Chat** in the left menu bar of an editor. On Home, use its chat button
 
 You can ask for help, report a problem, or request a feature. For a problem, describe what you did and what happened. Before filing a ticket, the chat shows a brief for you to check and asks you to confirm.
 
+## Queue a follow-up
+
+While the agent is working, keep typing and press Enter or the return-key button to **Queue message**. Messages appear under **Queued messages** and send one at a time after successful replies. Choose **Remove** beside a queued message to cancel it. Pictures stay with the message you queued.
+
+**Stop**, an error, or an ended conversation pauses the queue. Choose **Send next** to resume it. Hiding and reopening chat keeps its queue in memory; **Clear Chat** removes it. Queued document requests stay bound to the design they were sent from.
+
 ## Ask to see a control
 
 When you ask how to perform a task, the agent can highlight the next useful control without a separate request. You can also ask “Show me the Polygon button.” When on-screen guidance is available, the agent reveals the control and highlights it with a pulsing glow for five seconds. With reduced motion enabled, the emphasis stays steady.

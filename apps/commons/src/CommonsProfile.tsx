@@ -1,21 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { useEffect, useRef, useState, type FormEvent, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { commonsProfileFieldsSchema, type CommonsProfile, type CommonsProfileFields, type CommonsProfilePage, type CommonsProfiles } from '@pushform/cloud';
 import { navigateCommons, profilePath } from './route';
+import { ModelCard, ProfileLink } from './ModelCard';
 import { ProfileHero, ProfileImagesEditor, type ProfileImageServices } from './ProfileImages';
 
-/** Links to a public profile page and opens it without reloading Commons. */
-export function ProfileLink({handle,children}:{handle:string;children:ReactNode}){
-  const open=(event:MouseEvent<HTMLAnchorElement>)=>{
-    if(event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;
-    event.preventDefault();navigateCommons(profilePath(handle));
-  };
-  return <a href={profilePath(handle)} onClick={open}>{children}</a>;
-}
-export function CreatorCredit({model}:{model:{creator:string;creatorProfile?:{handle:string}|null}}){
-  return <>By {model.creatorProfile?<ProfileLink handle={model.creatorProfile.handle}>{model.creator}</ProfileLink>:model.creator}</>;
-}
+export { ProfileLink, CreatorCredit } from './ModelCard';
 /** Opens a profile by handle, or by account ID for older links, which then move to the handle address. */
 export type ProfileLookup={handle:string}|{id:string};
 /** `ownProfileId` is the signed-in user's own profile ID; that profile shows an Edit profile link. */
@@ -41,7 +32,7 @@ export function CommonsProfilePageView({lookup,profiles,filesUrl,ownProfileId=nu
     <ProfileHero profile={page.profile} filesUrl={filesUrl} actions={ownProfileId!==null&&page.profile.id===ownProfileId?<a className="button-link secondary" href="#account">Edit profile</a>:undefined}/>
     {page.profile.bio&&<p className="profile-bio">{page.profile.bio}</p>}
     {page.profile.links.length>0&&<ul className="profile-links">{page.profile.links.map((link,index)=><li key={index}><a href={link.url} target="_blank" rel="noreferrer noopener">{link.label} ↗</a></li>)}</ul>}
-    <h2>Published models</h2>{page.models.length===0?<p>No published models to show.</p>:<div className="profile-models">{page.models.map(model=><article key={model.id}><p className="eyebrow">{model.category}</p><h3><a href={`#models/${model.id}`}>{model.title}</a></h3><p>{model.description}</p><p>{model.licenses.map(license=>license.name).join(' · ')}</p></article>)}</div>}
+    <h2>Published models</h2>{page.models.length===0?<p>No published models to show.</p>:<div className="model-grid profile-models">{page.models.map(model=><ModelCard key={model.id} model={model} filesUrl={filesUrl}/>)}</div>}
   </article>;
 }
 const emptyFields:CommonsProfileFields={handle:'',displayName:'',bio:'',avatarUrl:null,links:[]};

@@ -3,11 +3,12 @@
 import { commonsFileUrl, CommonsUnavailableError, type CommonsProfile } from '@pushform/cloud';
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { CommonsProfileEditor, CommonsProfilePageView, CreatorCredit, ProfileLink, type ProfileLookup } from './CommonsProfile';
+import { ModelCard } from './ModelCard';
 import { currentCommonsLocation, profileHandleFromPath } from './route';
 import { publishRoute, type PublishRoute } from './PublishPage';
 import { CommonsAccessGate, CommonsDownloadButton, CommonsMailingPreference } from './CommonsAccess';
 import type { CommonsAccount } from './account';
-import { CommonsModelPreview, CommonsThumbnail } from './CommonsPreview';
+import { CommonsModelPreview } from './CommonsPreview';
 import { CommonsOpenAction } from './CommonsOpenAction';
 import { filterModels, type CatalogFilters, type CatalogLoader, type CatalogModel } from './catalog';
 
@@ -143,12 +144,7 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
           {state.kind === 'error' && <section className="status-panel" role="alert"><h3>We couldn’t load the catalog.</h3><p>Please try again in a moment.</p><button onClick={() => setAttempt((value) => value + 1)}>Try again</button></section>}
           {state.kind === 'ready' && <>
             <p className="result-count" role="status">{shown.length} {shown.length === 1 ? 'model' : 'models'}{filters.query && ` matching “${filters.query}”`}</p>
-            {shown.length ? <div className="model-grid">{shown.map((model) => <article className="model-card" key={model.id}>
-              <a href={`#models/${model.id}`} className="model-art" aria-label={`View ${model.title}`}><CommonsThumbnail key={model.id + model.revision} model={model} filesUrl={filesUrl} /></a>
-              <div className="card-body"><p className="eyebrow">{model.category}</p><h3><a href={`#models/${model.id}`}>{model.title}</a></h3>
-                <p className="creator"><CreatorCredit model={model}/></p><p className="license-label">{model.licenses.map((license) => license.name).join(' · ')}</p>
-                {model.source && <p className="source-label">From {model.source.name}</p>}</div>
-            </article>)}</div> : <section className="status-panel"><h3>{models.length ? 'No models match those filters.' : 'The library is ready for its first models.'}</h3>
+            {shown.length ? <div className="model-grid">{shown.map((model) => <ModelCard key={model.id} model={model} filesUrl={filesUrl} />)}</div> : <section className="status-panel"><h3>{models.length ? 'No models match those filters.' : 'The library is ready for its first models.'}</h3>
               <p>{models.length ? 'Try a different search or broaden your filters.' : 'Published models will appear here.'}</p>
               {models.length > 0 && <button onClick={() => setFilters(emptyFilters)}>Clear filters</button>}</section>}
           </>}

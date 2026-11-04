@@ -57,7 +57,7 @@ const newLayout = (): void => {
   fireEvent.click(screen.getByRole('button', { name: 'Create Layout' }));
 };
 
-it('highlights Commons while its catalog is active and restores the selected panel on close', () => {
+it('highlights Commons while its catalog is active and restores the selected panel on returning to a model', () => {
   render(<App initialScreen="workspace" app={app} cloud={cloud} buildInfo={build} requests={requests} />);
   const objects = within(rail()).getByRole('button', { name: 'Object browser' });
   const commons = within(rail()).getByRole('button', { name: 'Commons' });
@@ -68,7 +68,7 @@ it('highlights Commons while its catalog is active and restores the selected pan
   expect(commons.classList.contains('is-active')).toBe(true);
   expect(objects.getAttribute('aria-pressed')).toBe('false');
   expect(within(rail()).getAllByRole('button', { pressed: true })).toEqual([commons]);
-  fireEvent.click(within(screen.getByRole('region', { name: 'Commons catalog' })).getByRole('button', { name: 'Close' }));
+  fireEvent.click(screen.getByRole('button', { name: /^3D model:/ }));
   expect(commons.getAttribute('aria-pressed')).toBe('false');
   expect(commons.classList.contains('is-active')).toBe(false);
   expect(objects.getAttribute('aria-pressed')).toBe('true');

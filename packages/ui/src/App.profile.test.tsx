@@ -93,11 +93,13 @@ it('holds a new account on the signup step, then opens the workspace once it is 
   expect(layoutAccountFields().get('CompanyName')).toBe('Analytical Ltd');
 });
 
-it('opens the workspace directly for a completed profile and names the account in the header', async () => {
+it('opens the workspace directly for a completed profile and identifies the compact account control', async () => {
   const { reads } = await setup(complete);
   expect(await screen.findByRole('banner')).toBeTruthy();
   expect(screen.queryByRole('main', { name: 'Set up your account' })).toBeNull();
-  expect(screen.getByRole('button', { name: 'Account: Ada Lovelace, artist@example.com' }).textContent).toBe('Ada Lovelace');
+  const account = screen.getByRole('button', { name: 'Account: Ada Lovelace, artist@example.com' });
+  expect(account.title).toBe('Account: Ada Lovelace (artist@example.com)');
+  expect(account.textContent).toBe('');
   expect(reads).toHaveBeenCalledOnce();
 });
 

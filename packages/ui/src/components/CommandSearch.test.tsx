@@ -87,6 +87,23 @@ describe('searchCommands', () => {
 });
 
 describe('CommandSearch', () => {
+  it('opens compact search from its icon, the keyboard and the search command, then dismisses outside', () => {
+    const a = boot();
+    render(<CommandSearch compact source={() => modelSource(a)}/>);
+    const trigger = screen.getByRole('button', { name: 'Search commands' });
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(trigger);
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    expect(document.activeElement).toBe(input());
+    fireEvent.keyDown(input(), { key: 'Escape' });
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.pointerDown(document.body);
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    act(() => { input().blur(); a.commands.execute('view.search'); });
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+  });
   it('filters as you type, shows name, shortcut and icon, runs on Enter and returns focus', () => {
     const a = boot();
     const onExecuted = vi.fn();

@@ -149,13 +149,14 @@ export async function streamCommonsRender(base: string, token: string, asset: st
   return last;
 }
 
-/** The signed-in owner's preview thumbnail (drafts included): an SVG image, or the job's state while there is none. */
+/** The signed-in owner's preview thumbnail (drafts included): an image, or the job's state while there is none. */
 export async function fetchCommonsThumbnail(base: string, token: string, asset: string, signal: AbortSignal, fetcher: typeof fetch = fetch):
   Promise<{ kind: 'image'; blob: Blob } | { kind: 'status'; status: string; error: string | null }> {
   const url = commonsFileUrl(base, 'thumbnails', asset); if (!url) throw new Error('Model previews are not configured.');
   if (!token || /\s/.test(token)) throw new Error('Sign in to see your model previews.');
   const response = await fetcher(url, { headers: { Authorization: `Bearer ${token}` }, signal, credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer' });
-  if (response.status === 200 && response.headers.get('Content-Type')?.startsWith('image/svg+xml')) return { kind: 'image', blob: new Blob([await response.arrayBuffer()], { type: 'image/svg+xml' }) };
+  const type = response.headers.get('Content-Type')?.split(';')[0]?.trim() ?? '';
+  if (response.status === 200 && (type === 'image/png' || type === 'image/svg+xml')) return { kind: 'image', blob: new Blob([await response.arrayBuffer()], { type }) };
   const body = await response.json().catch(() => null) as { status?: unknown; error?: unknown } | null;
   return { kind: 'status', status: typeof body?.status === 'string' ? body.status : response.status === 404 ? 'missing' : 'failed', error: typeof body?.error === 'string' ? body.error : null };
 }

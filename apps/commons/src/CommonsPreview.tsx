@@ -2,7 +2,7 @@
 // Copyright 2026 PushForm contributors
 import { useEffect, useRef, useState } from 'react';
 import { commonsFileUrl, type CatalogModel } from '@pushform/cloud';
-import { DEFAULT_PREVIEW_VIEW, isPreviewModelFile, parsePreviewMesh, projectPreview, type PreviewMesh } from '@pushform/cloud/preview';
+import { DEFAULT_PREVIEW_VIEW, isPreviewModelFile, parsePreviewMesh, rasterPreview, type PreviewMesh, type PreviewView } from '@pushform/cloud/preview';
 
 const geometryFile = (model: CatalogModel) => model.files.find(file => isPreviewModelFile(file.name));
 export function CommonsThumbnail({ model, filesUrl }: { model: CatalogModel; filesUrl: string | undefined }) {
@@ -37,6 +37,7 @@ function InteractivePreview({ url, model }: { url: string; model: CatalogModel }
   const [mesh, setMesh] = useState<PreviewMesh | null>(null), [error, setError] = useState(''), [attempt, setAttempt] = useState(0);
   const [view, setView] = useState({ ...DEFAULT_PREVIEW_VIEW });
   const drag = useRef<{ x: number; y: number } | null>(null);
+  const [moving, setMoving] = useState(false);
   useEffect(() => {
     if (status.status !== 'ready') return;
     const abort = new AbortController(); setMesh(null); setError('');
@@ -63,16 +64,13 @@ function InteractivePreview({ url, model }: { url: string; model: CatalogModel }
   if (error) return <div className="preview-error"><CommonsThumbnail model={model} filesUrl={new URL(url).origin}/><p role="alert">{error}</p><button onClick={() => { setAttempt(value => value + 1); status.refresh(); }}>Retry preview</button></div>;
   if (!mesh) return <div className="preview-loading" role="status">{status.status === 'queued' ? 'Model preview is queued…' : 'Rendering model preview…'}</div>;
   return <>
-    <svg className="preview-viewer" viewBox="0 0 480 400" tabIndex={0} role="img" aria-label={`Interactive 3D preview of ${model.title}. Use arrow keys to rotate, plus or minus to zoom, and zero to reset.`}
-      onPointerDown={event => { if(event.button!==0)return; drag.current = { x: event.clientX, y: event.clientY }; event.currentTarget.setPointerCapture(event.pointerId); }}
+    <PreviewCanvas mesh={mesh} view={view} moving={moving} tabIndex={0} role="img" aria-label={`Interactive 3D preview of ${model.title}. Use arrow keys to rotate, plus or minus to zoom, and zero to reset.`}
+      onPointerDown={event => { if(event.button!==0)return; drag.current = { x: event.clientX, y: event.clientY }; setMoving(true); event.currentTarget.setPointerCapture(event.pointerId); }}
       onPointerMove={event => { const previous = drag.current; if (previous) { orbit((event.clientX - previous.x) / 120, (event.clientY - previous.y) / 120); drag.current = { x: event.clientX, y: event.clientY }; } }}
-      onPointerUp={() => { drag.current = null; }} onPointerCancel={() => { drag.current = null; }} onLostPointerCapture={() => { drag.current = null; }}
+      onPointerUp={() => { drag.current = null; setMoving(false); }} onPointerCancel={() => { drag.current = null; setMoving(false); }} onLostPointerCapture={() => { drag.current = null; setMoving(false); }}
       onKeyDown={event => { if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','+','=','-','0'].includes(event.key)) event.preventDefault();
         if (event.key === 'ArrowLeft') orbit(-.2); if (event.key === 'ArrowRight') orbit(.2); if (event.key === 'ArrowUp') orbit(0, -.2); if (event.key === 'ArrowDown') orbit(0, .2);
-        if (event.key === '+' || event.key === '=') zoom(1.2); if (event.key === '-') zoom(1 / 1.2); if (event.key === '0') setView({ ...DEFAULT_PREVIEW_VIEW }); }}>
-      <rect width="480" height="400" fill="#eef0e8"/>
-      {projectPreview(mesh, view).map((face, i) => <polygon key={i} points={face.points} fill={face.fill} stroke={face.fill} strokeWidth=".6" strokeLinejoin="round"/>)}
-    </svg>
+        if (event.key === '+' || event.key === '=') zoom(1.2); if (event.key === '-') zoom(1 / 1.2); if (event.key === '0') setView({ ...DEFAULT_PREVIEW_VIEW }); }}/>
     <div className="preview-controls" aria-label="3D preview controls">
       <button aria-label="Rotate left" title="Rotate left" onClick={() => orbit(-.3)}><RotateIcon/></button><button aria-label="Rotate right" title="Rotate right" onClick={() => orbit(.3)}><RotateIcon clockwise/></button>
       <button aria-label="Tilt up" onClick={() => orbit(0, -.2)}>↑</button><button aria-label="Tilt down" onClick={() => orbit(0, .2)}>↓</button>
@@ -80,6 +78,22 @@ function InteractivePreview({ url, model }: { url: string; model: CatalogModel }
       <button onClick={() => setView({ ...DEFAULT_PREVIEW_VIEW })}>Reset view</button>
     </div><p className="preview-caption">Drag to rotate · use controls to zoom. Geometry and material colors; textures, units and dimensions are not shown.</p>
   </>;
+}
+
+/** Draws the model with the shared depth-buffered renderer: quicker while dragging, antialiased when it stops. */
+function PreviewCanvas({ mesh, view, moving, ...props }: { mesh: PreviewMesh; view: PreviewView; moving: boolean } & React.CanvasHTMLAttributes<HTMLCanvasElement>) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const element = canvas.current; if (!element) return;
+    const frame = requestAnimationFrame(() => {
+      const ratio = Math.min(2, window.devicePixelRatio || 1), width = Math.round((element.clientWidth || 480) * ratio), height = Math.round(width * 400 / 480);
+      if (element.width !== width || element.height !== height) { element.width = width; element.height = height; }
+      const pixels = rasterPreview(mesh, view, { width, height, supersample: moving ? 1 : 2, edgeWidth: 1.6 * ratio });
+      element.getContext('2d')?.putImageData(new ImageData(new Uint8ClampedArray(pixels), width, height), 0, 0);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [mesh, view, moving]);
+  return <canvas ref={canvas} className="preview-viewer" data-view={`${view.yaw.toFixed(3)} ${view.pitch.toFixed(3)} ${view.zoom.toFixed(3)}`} {...props}/>;
 }
 
 function RotateIcon({ clockwise = false }: { clockwise?: boolean }) {

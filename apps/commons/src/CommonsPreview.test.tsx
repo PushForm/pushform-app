@@ -22,8 +22,8 @@ describe('Commons previews',()=>{
   it('loads a public derivative only on request and supports orbit, zoom and reset',async()=>{
     const fetcher=vi.fn().mockImplementation(async(url:string)=>String(url).includes('/preview-status/')?new Response(JSON.stringify({status:'ready',error:null}),{headers:{'Content-Type':'application/json'}}):new Response(JSON.stringify({modelId:model.id,revision:model.revision,mesh:{version:1,positions:[-.5,-.5,-.5,.5,-.5,-.5,-.5,.5,.5]}}),{headers:{'Content-Type':'application/json'}}));vi.stubGlobal('fetch',fetcher);
     const {container}=render(<CommonsModelPreview model={model} filesUrl="http://localhost:8792"/>);expect(fetcher.mock.calls.some(call=>String(call[0]).includes('/previews/'))).toBe(false);
-    fireEvent.click(screen.getByText('Explore in 3D'));await waitFor(()=>expect(container.querySelectorAll('polygon')).toHaveLength(1));
-    const points=()=>container.querySelector('polygon')?.getAttribute('points');const initial=points();
+    fireEvent.click(screen.getByText('Explore in 3D'));await waitFor(()=>expect(container.querySelectorAll('canvas.preview-viewer')).toHaveLength(1));
+    const points=()=>container.querySelector('canvas.preview-viewer')?.getAttribute('data-view');const initial=points();
     fireEvent.click(screen.getByLabelText('Rotate right'));expect(points()).not.toBe(initial);
     fireEvent.click(screen.getByText('Reset view'));expect(points()).toBe(initial);
     fireEvent.click(screen.getByLabelText('Zoom in'));expect(points()).not.toBe(initial);

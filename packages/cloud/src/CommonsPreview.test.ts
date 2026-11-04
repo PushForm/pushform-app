@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_PREVIEW_VIEW, normalizePreview, parsePreviewMesh, PREVIEW_BYTE_LIMIT, PREVIEW_TRIANGLE_LIMIT, projectPreview, previewSvg, stlPreview } from './CommonsPreview';
+import { DEFAULT_PREVIEW_VIEW, rasterPreview, normalizePreview, parsePreviewMesh, PREVIEW_BYTE_LIMIT, PREVIEW_TRIANGLE_LIMIT, projectPreview, previewSvg, stlPreview } from './CommonsPreview';
 const ascii = (vertices = 'vertex 0 0 0\nvertex 10 0 0\nvertex 0 10 10') => new TextEncoder().encode(`solid test\nfacet normal 0 0 1\nouter loop\n${vertices}\nendloop\nendfacet\nendsolid test`);
 describe('geometry display derivatives', () => {
   it('renders actual ASCII geometry and changes its projection when orbiting or zooming', () => {
@@ -33,4 +33,20 @@ describe('geometry display derivatives', () => {
 it('keeps per-triangle material colors through normalization and rejects invalid color data',()=>{
  const mesh=normalizePreview([0,0,0,10,0,0,0,10,10],[1,0,0]);expect(parsePreviewMesh(mesh).colors).toEqual([1,0,0]);expect(projectPreview(mesh)[0]!.fill).toMatch(/^rgb\(\d+,0,0\)$/);
  expect(()=>parsePreviewMesh({...mesh,colors:[1,0]})).toThrow();expect(()=>normalizePreview([0,0,0,1,0,0,0,1,0],[2,0,0])).toThrow();
+});
+
+it('draws nearer surfaces over farther ones and outlines only real edges', () => {
+  // Two squares facing the viewer, the nearer one smaller and drawn first: depth decides, not drawing order.
+  const square = (half: number, z: number, split: boolean) => split
+    ? [-half, -half, z, half, -half, z, half, half, z, -half, -half, z, half, half, z, -half, half, z]
+    : [-half, -half, z, half, -half, z, -half, half, z, half, -half, z, half, half, z, -half, half, z];
+  const view = { yaw: 0, pitch: -Math.PI / 2, zoom: 1 };
+  const mesh = normalizePreview([...square(.2, -1, true), ...square(.5, 0, false)], [1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1]);
+  const pixels = rasterPreview(mesh, view, { width: 120, height: 100, supersample: 1, edgeWidth: 1 });
+  const at = (x: number, y: number) => Array.from(pixels.subarray((y * 120 + x) * 4, (y * 120 + x) * 4 + 3));
+  const centre = at(60, 50), side = at(35, 50);
+  expect(centre[0]).toBeGreaterThan(centre[2]!);
+  expect(side[2]).toBeGreaterThan(side[0]!);
+  // The diagonal seam between the near square's two triangles is not outlined.
+  expect(at(55, 45)).toEqual(at(65, 55));
 });

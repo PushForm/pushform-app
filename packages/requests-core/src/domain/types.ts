@@ -85,6 +85,8 @@ export interface SuspendedTurn {
    * repeating their bytes, so each picture is stored once while the turn runs; the transcript never holds them.
    */
   renders?: Record<string, { mime: string; data: string }>;
+  /** The last status line the suspended request showed, so the next request does not repeat it as its first saying. */
+  status?: string;
 }
 /** A picture the requester posted with a message: an image attachment of the conversation. */
 export interface MessagePicture { id: string; name: string; mime: string }

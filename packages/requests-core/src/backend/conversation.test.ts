@@ -6,6 +6,7 @@ import { fakeAnthropic, type ScriptedTurn } from '../agents/fakeAnthropic.ts';
 import { loadConfig } from '../config/load.ts';
 import { SAMPLE_CONFIG_INPUT } from '../config/sample.ts';
 import type { ConversationMessage } from '../domain/types.ts';
+import { SAYINGS } from './status.ts';
 import { attachmentSection, closeSuspended, createConversationHandler, WARM_DOCUMENTS, warmChatPrompts, formatBytes, historyOf, issueSummaryOf, parseSse, requestIdOfIssue, routePath, type ConversationDeps } from './conversation.ts';
 import { ServiceDb, UserDb } from './db.ts';
 import { ALICE, ATTACHMENT_ID, attachmentRow, CONVERSATION_ID, conversationRow, FakeRpc, FakeSessions, FakeStorage, FakeTracker, myRoles, REQUEST_ID, requestRow, sqlError, TOKEN, type RpcScript } from './fakes.ts';
@@ -941,7 +942,9 @@ describe('document tools', () => {
     expect(events[2]!.data).toEqual({ phase: 'writing', text: 'Writing the change…' });
     // Status lines are never saved with the conversation.
     const stored = first.service.named('fr_conversation_append')[0]!.params['p_messages'] as ConversationMessage[];
-    expect(JSON.stringify(stored)).not.toContain('Writing the change');
+    // Only the suspended turn's state keeps the last line, so the resumed request never opens with the same saying.
+    expect((stored.at(-1) as { turn: { status?: string } }).turn.status).toBe('Writing the change…');
+    expect(JSON.stringify(stored.map(m => ({ ...m, turn: undefined })))).not.toContain('Writing the change');
     const resume = async (isError: boolean) => {
       const h = harness({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help', messages: stored, message_count: 1 }) }, turns: [{ text: ['Done.'] }] });
       const res = await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/tool-results`, { results: [{ toolUseId: 'a1', content: isError ? '{"ok":false}' : '{"ok":true}', isError }] });
@@ -950,7 +953,12 @@ describe('document tools', () => {
     const applied = await resume(false);
     expect(applied.map(e => e.event)).toEqual(['status', 'text', 'done']);
     expect(applied[0]!.data).toEqual({ phase: 'planning', text: 'Change applied. Working out the next step…' });
-    expect((await resume(true))[0]!.data).toEqual({ phase: 'fixing', text: 'That change didn’t apply. Working out a fix…' });
+    // A refused batch is retried quietly: the line only says the work goes on.
+    const refused = await resume(true);
+    const line = refused[0]!.data as { phase: string; text: string };
+    expect(refused[0]!.event).toBe('status');
+    expect(SAYINGS).toContain(line.text);
+    expect(JSON.stringify(refused.filter(e => e.event === 'status'))).not.toMatch(/fail|reject|refus|error|didn.t apply|fix/i);
     // Layout documents and guidance-only tabs get none.
     const { events: layout } = await suspended();
     expect(layout.map(e => e.event)).not.toContain('status');

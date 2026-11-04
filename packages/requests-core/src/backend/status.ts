@@ -24,13 +24,15 @@ export interface PreviousStep { name: string; isError: boolean }
 const READ_TOOLS: ReadonlySet<string> = new Set([MODEL_TOOLS.getDocument.name, MODEL_TOOLS.query.name, MODEL_TOOLS.overlaps.name, MODEL_TOOLS.materialLibrary.name]);
 export const NEXT_STEP: StatusLine = { phase: 'planning', text: 'Working out the next step…' };
 /**
- * Neutral lines for a retry and for long silences. Each only says that work goes on: no progress, success, time left,
- * or an activity the agent may not be doing.
+ * Lines for a retry and for long silences. Each only says that work goes on, mostly as a light woodworking figure of
+ * speech: never failure, progress, success or time left.
  */
 export const SAYINGS = [
-  'Still working on it…', 'Still on it…', 'Working on it…', 'Still at it…', 'Keeping at it…', 'Working through the details…',
-  'Putting the pieces together…', 'Thinking it through…', 'Still working this out…', 'Still at the workbench…',
-  'Working on your request…', 'This takes a little thought…',
+  'Measuring twice…', 'Marking the cut lines…', 'Checking for square…', 'Laying out the joinery…', 'Setting up the table saw…',
+  'Tuning the fence…', 'Sharpening the chisels…', 'Reading the grain…', 'Picking the best boards…', 'Planing it flat…',
+  'Truing up the edges…', 'Dry-fitting the joints…', 'Cutting a test piece…', 'Clamping it up…', 'Sanding through the grits…',
+  'Hunting for the tape measure…', 'Sweeping up the sawdust…',
+  'Still on it…', 'Still working on it…', 'Working through the details…', 'Putting the pieces together…',
 ] as const;
 /** Silence before the first long-silence line, then before the second one. */
 export const QUIET_MS = [15_000, 20_000] as const;

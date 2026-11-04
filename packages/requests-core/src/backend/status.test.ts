@@ -30,13 +30,13 @@ describe('status line texts', () => {
     expect(blockStatus({ kind: 'block', block: 'thinking' })).toBeNull();
     expect(blockStatus({ kind: 'block', block: 'text' })).toBeNull();
   });
-  it('keeps the sayings short and neutral: no failure, progress, time or specific activity', () => {
+  it('keeps the sayings short and neutral: no failure, progress, success or time', () => {
     expect(SAYINGS.length).toBeGreaterThanOrEqual(10);
     expect(new Set(SAYINGS).size).toBe(SAYINGS.length);
     for (const saying of SAYINGS) {
       expect(saying.split(/\s+/).length).toBeLessThan(8);
       expect(saying).not.toMatch(FAILURE);
-      expect(saying).not.toMatch(/almost|nearly|done|finish|soon|minute|second|check|measur|cutting|applied/i);
+      expect(saying).not.toMatch(/almost|nearly|done|finish|soon|minute|second|applied|ready|complete/i);
     }
   });
 });

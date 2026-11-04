@@ -209,7 +209,7 @@ describe('Layout tool commands', () => {
       .filter((l) => l !== null && !/tools$/.test(l));
     expect(labels.slice(0, 6)).toEqual(['Select', 'Move', 'Rotate', 'Scale', 'Eraser', 'Line']);
     expect([...document.querySelectorAll('.pf-layout-ribbon-group')].map(group => group.getAttribute('aria-label')))
-      .toEqual(['Transform', 'Draw', 'Modify', 'Annotate', 'Insert', 'Present']);
+      .toEqual(['Transform', 'Draw', 'Modify', 'Annotate', 'Import', 'Present']);
     expect(labels.at(-1)).toBe('Presentation mode');
     session.dispose();
     app.dispose();

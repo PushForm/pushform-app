@@ -1132,7 +1132,7 @@ describe('Object browser in the left menu bar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'New document' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Layout' }));
     fireEvent.click(screen.getByRole('button', { name: 'Create Layout' }));
-    expect(within(rail()).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Files', 'AI Chat', 'Commons', 'Object browser']);
+    expect(within(rail()).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Files', 'AI Chat', 'Object browser', 'Commons']);
     const objects = within(rail()).getByRole('button', { name: 'Object browser' });
     // A new Layout document opens with the browser shown.
     expect(objects.getAttribute('aria-pressed')).toBe('true');

@@ -387,8 +387,8 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
   const railItems: SideRailItem[] = [
     { id: 'files', label: 'Files', icon: <LuFolderOpen aria-hidden="true" />, ref: setFilesIcon },
     { id: 'requests', label: 'AI Chat', icon: <RiChatAiLine aria-hidden="true" />, ref: setRequestsIcon },
-    { id: 'commons', label: 'Commons', icon: <LuLibrary aria-hidden="true" /> },
     { id: 'objects', label: 'Object browser', icon: <PiTreeView aria-hidden="true" />, ref: setObjectsIcon },
+    { id: 'commons', label: 'Commons', icon: <LuLibrary aria-hidden="true" /> },
     ...extensionWorkspace.railItems,
   ];
   /** An extension panel that is no longer available (turned off, or not for this editor) counts as closed. */

@@ -85,13 +85,18 @@ export const TOOL_RESULT_MAX_CHARS = 200_000;
 export const DOCUMENT_TOOL_ROUNDS = 12;
 
 /**
- * How a turn runs: one that can edit the document plans multi-step geometry and gets more output and rounds; help and
- * intake stay short. Both run at low effort: the model still thinks where a build needs it, but hidden reasoning was
- * most of an editing turn's output and the requester waits for every token of it.
+ * How a turn runs, by the document it was sent with: one with a document open plans multi-step geometry and gets more
+ * output and rounds; help and intake stay short. All run at low effort: the model still thinks where a build needs it,
+ * but hidden reasoning was most of an editing turn's output and the requester waits for every token of it. A turn that
+ * edits a 3D model gets the most output, so a large batch is never cut off mid-build; requests stream, so the limit
+ * costs nothing until it is used.
  */
-export function turnSettings(editing: boolean): { effort: 'low' | 'medium'; maxTokens: number; maxToolRounds: number } {
-  return editing ? { effort: 'low', maxTokens: 16_000, maxToolRounds: DOCUMENT_TOOL_ROUNDS } : { effort: 'low', maxTokens: 4096, maxToolRounds: 8 };
+export function turnSettings(document: DocumentCapability | null): { effort: 'low' | 'medium'; maxTokens: number; maxToolRounds: number } {
+  if (document === null) return { effort: 'low', maxTokens: 4096, maxToolRounds: 8 };
+  return { effort: 'low', maxTokens: editableDocument(document) === 'model' ? MODEL_EDIT_MAX_TOKENS : 16_000, maxToolRounds: DOCUMENT_TOOL_ROUNDS };
 }
+/** Output limit of one request of a 3D-model editing turn. */
+export const MODEL_EDIT_MAX_TOKENS = 32_000;
 const agentForPath = (path: ConversationPath): ConversationAgent => (path === 'open' ? openAgent : path === 'help' ? helpAgent : path === 'problem' ? problemAgent : intakeAgent);
 /**
  * The model, system prompt and tools of a turn: they depend only on the path and the open document, never on the
@@ -137,7 +142,7 @@ export async function warmChatPrompts(deps: { anthropic: WarmClient; config: Con
     const label = document ? `${document.type}${document.edit ? '+edit' : ''}${document.guidance ? '+guidance' : ''}` : 'none';
     const prompt = turnPrompt(deps.config.models, warmContext(deps.config, document), document);
     try {
-      const usage = await warmPrompt(deps.anthropic, { ...prompt, effort: turnSettings(document !== null).effort });
+      const usage = await warmPrompt(deps.anthropic, { ...prompt, effort: turnSettings(document).effort });
       deps.log?.(`warm ${label}: model=${prompt.model} cacheWrite=${usage.cacheWrite} cacheRead=${usage.cacheRead} in=${usage.input}`);
       return { document: label, usage };
     } catch (error) {
@@ -866,7 +871,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
           },
           // A turn that can edit the document plans multi-step geometry; help and intake stay short. Reviewing a
           // build and fixing what it shows takes more rounds.
-          ...turnSettings(editing), ...(editing && reviewing ? { maxToolRounds: config.limits.documentToolRoundsWithReview } : {}),
+          ...turnSettings(setup.document), ...(editing && reviewing ? { maxToolRounds: config.limits.documentToolRoundsWithReview } : {}),
           // Progress notes stay off until the hosted model accepts the progress-update display; requesting it fails editing turns.
           progressUpdates: false,
           ...(status ? { onPhase: (phase: RoundPhase) => {

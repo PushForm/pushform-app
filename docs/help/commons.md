@@ -16,11 +16,11 @@ Model Info → Credits shows the original source, licenses, conditions and creat
 
 Choose **My profile** to sign in with your PushForm account. A new account completes the same private account setup and Terms of Use step used by the editor. Creating a public profile is a separate choice; it is not required to download models.
 
-Choose a public handle and display name, then optionally add a bio, avatar URL and up to five links. Check the public-profile confirmation before saving. Your handle uses 3–32 lowercase letters, numbers or hyphens, starts with a letter and ends with a letter or number. Handles stay reserved and cannot be changed. Your private account name, email, company and projects are not copied into your public profile.
+Choose a public handle and display name, then optionally add a bio, avatar URL and up to five links. Everything in this form is shown publicly once you save it. Your handle uses 3–32 lowercase letters, numbers or hyphens, starts with a letter and ends with a letter or number. Handles stay reserved and cannot be changed. Your private account name, email, company and projects are not copied into your public profile.
 
-Use **View your public profile** to open its shareable page. It shows your chosen public fields and published models associated with your authorship. Imported models retain their original creator credit; uploading or curating someone else's model does not make you its author.
+Saving takes you to your public profile page, at `/u/` followed by your handle (for example `commons.pushform.io/u/your-handle`). Use **View your public profile** to open it again later. The page shows your chosen public fields and published models associated with your authorship. Imported models retain their original creator credit; uploading or curating someone else's model does not make you its author.
 
-Use **Hide public profile** to make the page and its creator-account links unavailable. Model license notices and original creator credits remain. Saving with the public confirmation checked makes your profile visible again. If another tab changed the profile, reload before saving your changes.
+If your profile was hidden, saving it makes it visible again. If another tab changed the profile, reload the page before saving your changes. Older profile links continue to work and open the handle address.
 
 ## Preview a model
 

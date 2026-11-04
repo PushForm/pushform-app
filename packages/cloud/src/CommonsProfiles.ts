@@ -45,6 +45,10 @@ export class CommonsProfiles {
     if(!z.uuid().safeParse(id).success)throw new Error('This profile link is invalid.');
     const data=await this.rpc('commons_profile',{p_id:id},signal);return data===null?null:pageSchema.parse(data);
   }
+  async getByHandle(handle:string,signal?:AbortSignal):Promise<CommonsProfilePage|null>{
+    if(!/^[a-z][a-z0-9-]{1,30}[a-z0-9]$/.test(handle))throw new Error('This profile link is invalid.');
+    const data=await this.rpc('commons_profile_by_handle',{p_handle:handle},signal);return data===null?null:pageSchema.parse(data);
+  }
   async mine(signal?:AbortSignal):Promise<CommonsProfile|null>{
     const data=await this.rpc('commons_my_profile',{},signal);return data===null?null:commonsProfileSchema.parse(data);
   }

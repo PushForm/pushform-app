@@ -13,6 +13,11 @@ it('reads a strict public profile page and never accepts private account fields'
   const {profiles,rpc}=client({profile:{...fields,id},models:[]});expect(await profiles.get(id)).toMatchObject({profile:{id,handle:fields.handle},models:[]});expect(rpc).toHaveBeenCalledWith('commons_profile',{p_id:id});
   const bad=client({profile:{...fields,id,email:'private@example.com'},models:[]});await expect(bad.profiles.get(id)).rejects.toThrow();
 });
+it('reads a public profile page by its handle and rejects malformed handles before networking',async()=>{
+  const {profiles,rpc}=client({profile:{...fields,id},models:[]});expect(await profiles.getByHandle('example-maker')).toMatchObject({profile:{id,handle:fields.handle}});expect(rpc).toHaveBeenCalledWith('commons_profile_by_handle',{p_handle:'example-maker'});
+  await expect(profiles.getByHandle('../escape')).rejects.toThrow('invalid');await expect(profiles.getByHandle('Example-Maker')).rejects.toThrow('invalid');expect(rpc).toHaveBeenCalledTimes(1);
+  expect(await client(null).profiles.getByHandle('missing-maker')).toBeNull();
+});
 it('validates profile links and IDs before networking and supports cancellation',async()=>{
   const {profiles,rpc,abortSignal}=client(mine);await expect(profiles.get('../escape')).rejects.toThrow('invalid');expect(rpc).not.toHaveBeenCalled();
   expect(commonsProfileFieldsSchema.safeParse({...fields,avatarUrl:'javascript:alert(1)'}).success).toBe(false);

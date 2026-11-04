@@ -2,7 +2,8 @@
 // Copyright 2026 PushForm contributors
 import { commonsFileUrl, CommonsUnavailableError } from '@pushform/cloud';
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { CommonsProfileEditor, CommonsProfilePageView, CreatorCredit } from './CommonsProfile';
+import { CommonsProfileEditor, CommonsProfilePageView, CreatorCredit, type ProfileLookup } from './CommonsProfile';
+import { currentCommonsLocation, profileHandleFromPath } from './route';
 import { CommonsAccessGate, CommonsDownloadButton, CommonsMailingPreference } from './CommonsAccess';
 import type { CommonsAccount } from './account';
 import { CommonsModelPreview, CommonsThumbnail } from './CommonsPreview';
@@ -57,14 +58,18 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
   const [attempt, setAttempt] = useState(0);
   useEffect(()=>{const refresh=()=>setAttempt(value=>value+1);window.addEventListener('commons:catalog-changed',refresh);return()=>window.removeEventListener('commons:catalog-changed',refresh);},[]);
   const [filters, setFilters] = useState<CatalogFilters>(emptyFilters);
-  const [hash,setHash]=useState(window.location.hash);
+  const [location,setLocation]=useState(currentCommonsLocation);
+  const hash=location.hash;
   const selectedId=modelFromHash(hash);
-  const personId=/^#people\/([a-f0-9-]{36})$/.exec(hash)?.[1]??null;
+  const profileHandle=hash===''||hash==='#main'?profileHandleFromPath(location.path):null;
+  const legacyPersonId=/^#people\/([a-f0-9-]{36})$/.exec(hash)?.[1]??null;
+  const profileLookup:ProfileLookup|null=profileHandle!==null?{handle:profileHandle}:legacyPersonId!==null?{id:legacyPersonId}:null;
+  const onProfile=profileLookup!==null;
   const heading = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const update = () => setHash(window.location.hash);
-    window.addEventListener('hashchange', update);
-    return () => window.removeEventListener('hashchange', update);
+    const update = () => {const next=currentCommonsLocation();setLocation(current=>next.path===current.path&&next.hash===current.hash?current:next);};
+    window.addEventListener('hashchange', update);window.addEventListener('popstate', update);
+    return () => {window.removeEventListener('hashchange', update);window.removeEventListener('popstate', update);};
   }, []);
   useEffect(() => {
     if (!loadCatalog) { setState({ kind: 'unconfigured' }); return; }
@@ -79,14 +84,14 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
   const shown = filterModels(models, filters);
   const selected = selectedId ? models.find((model) => model.id === selectedId) : null;
   useEffect(() => {
-    if(personId)return;
+    if(onProfile)return;
     if(hash==='#account'||hash==='#publish'){document.title=hash==='#account'?'Your profile — PushForm Commons':'Publish model — PushForm Commons';heading.current?.focus({preventScroll:true});return;}
     document.title = selected ? `${selected.title} — PushForm Commons` : 'PushForm Commons — Models for your next project';
     if (state.kind !== 'ready' || !window.location.hash) return;
     heading.current?.focus({ preventScroll: true });
     const target = selectedId ? heading.current : document.getElementById('browse');
     target?.scrollIntoView?.({ block: 'start' });
-  }, [selected, selectedId, state.kind,personId,hash]);
+  }, [selected, selectedId, state.kind,onProfile,hash]);
   const options = (values: string[]) => [...new Set(values)].sort().map((value) => <option key={value} value={value}>{value}</option>);
   const update = (patch: Partial<CatalogFilters>) => setFilters((current) => ({ ...current, ...patch }));
   return <div className="commons">
@@ -95,7 +100,7 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
       <img src="/pf-logo-mark.svg" alt="" width="30" height="30" /><span>PushForm <strong>Commons</strong></span>
     </a><nav aria-label="Commons">{account&&<><a href="#publish">Publish model</a><a href="#account">My profile</a></>}<a className="editor-link" href="https://app.pushform.io">Open PushForm <span aria-hidden="true">↗</span></a></nav></header>
     <main id="main" ref={heading} tabIndex={-1}>
-      {personId?<CommonsProfilePageView id={personId} profiles={account?.profiles??null}/>:hash==='#account'?account?<AccountPage account={account}/>:<section className="status-panel"><h1>Accounts are unavailable in this build.</h1></section>:hash==='#publish'?publishPage??<section className="status-panel"><h1>Publishing is unavailable in this build.</h1></section>:state.kind === 'ready' && selectedId ? selected ? <ModelDetail model={selected} filesUrl={filesUrl} account={account} editorUrl={editorUrl} /> :
+      {profileLookup?<CommonsProfilePageView lookup={profileLookup} profiles={account?.profiles??null}/>:hash==='#account'?account?<AccountPage account={account}/>:<section className="status-panel"><h1>Accounts are unavailable in this build.</h1></section>:hash==='#publish'?publishPage??<section className="status-panel"><h1>Publishing is unavailable in this build.</h1></section>:state.kind === 'ready' && selectedId ? selected ? <ModelDetail model={selected} filesUrl={filesUrl} account={account} editorUrl={editorUrl} /> :
         <section className="status-panel"><p className="eyebrow">Model unavailable</p><h1>This model isn’t in the catalog.</h1>
           <p>It may have been removed or the link may be out of date.</p><a href="#browse">Browse models</a></section> : <>
         <section className="hero"><p className="eyebrow">A shared place to start</p>

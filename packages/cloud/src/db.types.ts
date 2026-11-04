@@ -1180,6 +1180,9 @@ isOneToOne: false
 "commons_profile":
 { Args: { "p_id": string }; Returns: Json
                            },
+"commons_profile_by_handle":
+{ Args: { "p_handle": string }; Returns: Json
+                           },
 "commons_profile_public":
 { Args: { "p": Omit<Database["public"]['Tables']["commons_profiles"]['Row'], Database["public"]['Tables']["commons_profiles"]['ComputedFields']> }; Returns: Json
                            },

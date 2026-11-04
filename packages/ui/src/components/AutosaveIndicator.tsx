@@ -7,25 +7,45 @@ import { cloudLocation } from '../cloudDocuments';
 import type { CloudFilesApi } from '@pushform/cloud';
 import type { DocumentSession, DocumentTab } from '../session';
 
-/** The cloud save state of the active document; a trashed file offers Restore and Save a copy. */
-export function AutosaveIndicator({ autosave, tab, onSaveCopy, session, files }: { autosave: CloudAutosave; tab: DocumentTab; session?: DocumentSession | undefined; files?: CloudFilesApi | undefined; onSaveCopy?: (() => void) | undefined }): JSX.Element {
+/** Save details live beside the active document's tool hints, with recovery actions above the footer. */
+export function AutosaveIndicator({ autosave, tab, onSaveCopy, onSave, session, files }: {
+  autosave: CloudAutosave; tab: DocumentTab; session: DocumentSession; files?: CloudFilesApi | undefined;
+  onSaveCopy?: (() => void) | undefined; onSave?: (() => void) | undefined;
+}): JSX.Element {
   useSyncExternalStore(autosave.subscribe, autosave.getSnapshot);
+  useSyncExternalStore(session.subscribeLocal, session.getLocalRevision);
+  useSyncExternalStore(session.subscribe, () => session.revision);
   const [number, setNumber] = useState<number | null>(null);
-  useSyncExternalStore(session?.subscribeLocal ?? (() => () => {}), session?.getLocalRevision ?? (() => 0));
-  useEffect(() => { let alive = true; setNumber(null); const location = cloudLocation(tab.identity); if (location && files) void files.head(location.fileId).then(head => { if (alive) setNumber(head.file.revision_number); }, () => {}); return () => { alive = false; }; }, [tab.identity, files]);
-  const state = autosave.state(tab);
+  const [details, setDetails] = useState(false);
+  useEffect(() => {
+    let alive = true; setNumber(null); setDetails(false);
+    const location = cloudLocation(tab.identity);
+    if (location && files) void files.head(location.fileId).then(head => { if (alive) setNumber(head.file.revision_number); }, () => {});
+    return () => { alive = false; };
+  }, [tab.id, tab.identity, files]);
+  const state = autosave.state(tab), local = session.localSaveState(tab);
+  const localLabel = local === 'saved' ? 'Saved on device' : local === 'waiting' ? 'Saving on device…' : local === 'error' ? 'Local save failed' : 'Local recovery unavailable';
   const trashed = state.code === 'trashed';
-  const label = !autosave.automatic && session ? `${session.localSaveState(tab) === 'saved' ? 'Saved on this device' : session.localSaveState(tab) === 'waiting' ? 'Saving on this device...' : session.localSaveState(tab) === 'error' ? 'Local save failed' : 'Local recovery unavailable'} - ${number === null ? cloudLocation(tab.identity) ? 'Cloud version saved' : 'Not saved to cloud' : 'Cloud revision ' + number}${state.status === 'waiting' ? ' - local changes' : ''}` : !autosave.automatic && state.status === 'waiting' ? 'Local changes - save a cloud version' : state.status === 'saving' ? 'Saving…' : state.status === 'waiting' ? 'Changes pending' :
-    state.status === 'offline' ? 'Offline · changes on this device' : state.status === 'conflict' ? 'Newer cloud version' :
-    state.status === 'error' ? (trashed ? 'In the Trash' : 'Could not save') : cloudLocation(tab.identity) ? 'Cloud version saved' : 'Not saved yet';
-  const Glyph = state.status === 'saving' ? LuLoaderCircle : state.status === 'offline' ? LuCloudOff : state.status === 'saved' ? LuCheck : LuCloud;
-  return <div className={`pf-autosave is-${state.status}`}>
-    <span role="status" aria-label="Cloud save status" title={state.error ?? label}><Glyph aria-hidden="true" /><span>{label}</span></span>
-    {state.error ? <span className="pf-autosave-error" role="alert">{state.error}
-      {trashed ? <>
-        <button type="button" onClick={() => { void autosave.restore(tab).catch(() => {}); }}>Restore</button>
-        {onSaveCopy ? <button type="button" onClick={onSaveCopy}>Save a copy</button> : null}
-      </> : state.status !== 'conflict' ? <button type="button" onClick={() => { void autosave.saveNow(tab).catch(() => {}); }}>Retry</button> : null}
-    </span> : null}
+  const cloudLabel = state.status === 'saving' ? 'Saving cloud version…' : state.status === 'offline' ? 'Offline' : state.status === 'conflict' ? 'Cloud conflict' : state.status === 'error' ? trashed ? 'In the Trash' : 'Cloud save failed' : number !== null ? 'Cloud v' + number : cloudLocation(tab.identity) ? 'Cloud saved' : 'Not saved to cloud';
+  const label = autosave.automatic ? cloudLabel : localLabel + ' · ' + cloudLabel + (state.status === 'waiting' ? ' · local changes' : '');
+  const Glyph = state.status === 'saving' ? LuLoaderCircle : state.status === 'offline' || state.status === 'error' ? LuCloudOff : local === 'saved' || state.status === 'saved' ? LuCheck : LuCloud;
+  const expanded = details || !!state.error || local === 'error';
+  return <div className={`pf-autosave is-${state.status}${local === 'error' ? ' is-local-error' : ''}`}>
+    <button type="button" className="pf-save-status-trigger" aria-label="Save details" aria-expanded={expanded} onClick={() => setDetails(value => !value)} title={label}>
+      <span role="status" aria-label="Cloud save status"><Glyph aria-hidden="true"/><span>{label}</span></span>
+    </button>
+    {expanded && <section className="pf-save-status-panel" aria-label="Save details">
+      <strong>Document save status</strong>
+      <dl><div><dt>On this device</dt><dd>{localLabel}</dd></div><div><dt>Cloud</dt><dd>{cloudLabel}</dd></div></dl>
+      {state.error && <p role="alert">{state.error}</p>}
+      {local === 'error' && <p role="alert">{session.recoveryError ?? 'The local recovery copy could not be saved.'}</p>}
+      <div className="pf-save-status-actions">
+        {trashed ? <><button type="button" className="pf-dialog-btn" onClick={() => { void autosave.restore(tab).catch(() => {}); }}>Restore</button>
+          {onSaveCopy && <button type="button" className="pf-dialog-btn" onClick={() => { setDetails(false); onSaveCopy(); }}>Save a copy</button>}</>
+          : state.error && state.status !== 'conflict' ? <button type="button" className="pf-dialog-btn" onClick={() => { void autosave.saveNow(tab).catch(() => {}); }}>Retry</button> : null}
+        {!state.error && onSave && <button type="button" className="pf-dialog-btn is-primary" onClick={() => { setDetails(false); onSave(); }}>Save version</button>}
+        {!state.error && local !== 'error' && <button type="button" className="pf-dialog-btn" onClick={() => setDetails(false)}>Close</button>}
+      </div>
+    </section>}
   </div>;
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { afterEach, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { CloudSession, type AuthApi, type CloudFile, type CloudFilesApi, type CloudSavedFile } from '@pushform/cloud';
 import { encodeLayoutDocument, encodeModelDocument } from '@pushform/io';
 import { createApp } from '../bootstrap';
@@ -142,7 +142,7 @@ it('keeps browsing and cloud save in the menu without a cloud-files header butto
     expect(screen.getByRole('menuitem', { name: 'Browse Cloud…' })).toBeTruthy();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Save to Cloud…' }));
     await screen.findByRole('button', { name: 'Architecture' });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(session.active.identity).toBe('cloud:alice:project:file:revision');
     fireEvent.click(screen.getByRole('button', { name: 'Main menu' }));

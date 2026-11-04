@@ -114,8 +114,8 @@ function AccountDialog({ cloud, state, profiles, profileState, account, accountS
       {profiles ? <section className="pf-account-profile" aria-labelledby="pf-account-profile-title">
         <h3 id="pf-account-profile-title">Profile</h3>
         <p>Your name and company also fill the account auto-text in Layout documents.</p>
-        <MailingPreference key={profileState.ownerId} profiles={profiles} />
-        <ProfileForm profiles={profiles} state={profileState} submitLabel="Save profile" savingLabel="Saving…" termsLocked />
+        <ProfileForm profiles={profiles} state={profileState} submitLabel="Save profile" savingLabel="Saving…" termsLocked
+          mailingPreference={<MailingPreference key={profileState.ownerId} profiles={profiles} />} />
       </section> : null}
       {billing && billingState.ownerId === state.user?.id ? <AccountBilling key={billingState.ownerId} billing={billing} state={billingState} /> : null}
       {accountState.ownerId === state.user?.id && accountState.error ? <p className="pf-account-error" role="alert">{accountState.error}</p> : null}

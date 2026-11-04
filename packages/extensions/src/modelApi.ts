@@ -851,10 +851,27 @@ export class ModelDocumentApi {
       case 'union': {
         const [first, ...rest] = op.refs.map((r, i) => solid(r, `Solid ${i}`));
         const deleted: number[] = [];
-        for (const other of rest) {
-          const result = await boolean('union', first!, other);
-          if (result.bodyIds.length !== 1) throw this.failure('invalid_geometry', `Solids ${first!.id} and ${other.id} do not touch, so they cannot become one solid; group them instead.`);
-          deleted.push(...result.deleted);
+        const bounds = (id: number) => meshBounds(containerAt(host.doc.state, path).bodies.get(id as Id)!.mesh);
+        // Join whichever remaining solid touches the solid joined so far, so the order of refs does not matter:
+        // a frame listed as its two stiles and then its rails joins through the rails.
+        let pending = rest.map((r, i) => ({ r, index: i + 1 }));
+        while (pending.length > 0) {
+          let joined: number | undefined;
+          for (const [k, { r }] of pending.entries()) {
+            if (!boxesOverlap(bounds(first!.id), bounds(r.id))) continue;
+            const work = await runSolidsKernel(host, kernelOf(this.commands.ctx), 'union', { a: first!, b: r });
+            if (work.mode !== 'union' || work.result.components.length !== 1) continue;
+            const result = await exec<Promise<SolidsApplyResult>>('solids.union', { a: first!, b: r, precomputed: work });
+            deleted.push(...result.deleted);
+            joined = k;
+            break;
+          }
+          if (joined === undefined) {
+            const which = pending.map(p => p.index), ids = pending.map(p => p.r.id);
+            const list = (xs: number[]) => xs.length === 1 ? `${xs[0]}` : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`;
+            throw this.failure('invalid_geometry', `${which.length === 1 ? 'Ref' : 'Refs'} ${list(which)} (${ids.length === 1 ? 'solid' : 'solids'} ${list(ids)}) ${ids.length === 1 ? 'does' : 'do'} not touch the other solids, so ${ids.length === 1 ? 'it' : 'they'} cannot join them into one solid; put separate parts in one group with make_group instead.`);
+          }
+          pending = pending.filter((_, k) => k !== joined);
         }
         this.checkSolids(path, [first!.id], 'union');
         return { id: first!.id, refs: [bodyOut(first!.id)], deleted: deleted.map(bodyOut), named: { kind: 'body', id: first!.id } };

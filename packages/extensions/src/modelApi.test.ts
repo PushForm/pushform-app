@@ -444,6 +444,46 @@ describe('ModelDocumentApi geometry', () => {
     expect(root().bodies.has(e as never)).toBe(false);
   });
 
+  it('joins butted parts in any ref order, and names the solids that touch nothing', async () => {
+    const { api, root } = setup();
+    // A face frame listed stile, stile, rails: the stiles meet only through the rails, and every joint is a shared face.
+    const frame = await api.apply({ expectedRevision: api.revision, label: 'Frame', operations: [
+      { op: 'add_box', as: 'ls', min: [0, -0.01905, 0], max: [0.0381, 0, 0.8763] },
+      { op: 'add_box', as: 'rs', min: [0.4191, -0.01905, 0], max: [0.4572, 0, 0.8763] },
+      { op: 'add_box', as: 'bottom', min: [0.0381, -0.01905, 0], max: [0.4191, 0, 0.0381] },
+      { op: 'add_box', as: 'middle', min: [0.0381, -0.01905, 0.6], max: [0.4191, 0, 0.6381] },
+      { op: 'add_box', as: 'top', min: [0.0381, -0.01905, 0.8382], max: [0.4191, 0, 0.8763] },
+      { op: 'union', as: 'frame', refs: ['$ls', '$rs', '$bottom', '$middle', '$top'] },
+    ] });
+    const { ls, rs, bottom, middle, top } = frame.created as { ls: number; rs: number; bottom: number; middle: number; top: number };
+    expect(frame.results[5]).toMatchObject({ id: ls });
+    expect(frame.results[5]!.deleted!.map(d => d.id).sort((x, y) => x - y)).toEqual([rs, bottom, middle, top].sort((x, y) => x - y));
+    expect(root().bodies.size).toBe(1);
+    const volume = 2 * 0.0381 * 0.8763 * 0.01905 + 3 * 0.381 * 0.0381 * 0.01905;
+    expect(root().bodies.get(ls as never)!.props.volume).toBeCloseTo(volume, 9);
+    // A pull: a bar and two posts behind it, flush with its ends, top and bottom.
+    const pull = await api.apply({ expectedRevision: api.revision, label: 'Pull', operations: [
+      { op: 'add_box', as: 'bar', min: [1.1015, -0.0508, 0.2604], max: [1.2795, -0.0381, 0.2731] },
+      { op: 'add_box', as: 'p1', min: [1.1015, -0.0381, 0.2604], max: [1.1142, -0.0126, 0.2731] },
+      { op: 'add_box', as: 'p2', min: [1.2668, -0.0381, 0.2604], max: [1.2795, -0.0126, 0.2731] },
+      { op: 'union', refs: ['$p1', '$bar', '$p2'] },
+    ] });
+    expect(pull.results[3]!.deleted).toHaveLength(2);
+    expect(root().bodies.size).toBe(2);
+    // Two parts that touch nothing fail by ref index and solid id, and the batch changes nothing.
+    const revision = api.revision;
+    const error = (await failure(() => api.apply({ expectedRevision: revision, label: 'x', operations: [
+      { op: 'add_box', as: 'a', min: [3, 0, 0], max: [3.5, 0.02, 0.5] },
+      { op: 'add_box', as: 'b', min: [3.5, 0, 0], max: [4, 0.02, 0.5] },
+      { op: 'add_box', as: 'c', min: [5, 0, 0], max: [5.5, 0.02, 0.5] },
+      { op: 'add_box', as: 'd', min: [3.5 + 1e-6, 1, 0], max: [4, 1.02, 0.5] },
+      { op: 'union', refs: ['$a', '$c', '$b', '$d'] },
+    ] }))).error;
+    expect(error).toMatchObject({ code: 'invalid_geometry', operationIndex: 4 });
+    expect(error.message).toMatch(/^Refs 1 and 3 \(solids \d+ and \d+\) do not touch the other solids, .*make_group/);
+    expect(root().bodies.size).toBe(2);
+  });
+
   it('subtracts several cutters and can keep them; refuses a cut that leaves nothing or targets a group', async () => {
     const { api, root, addBox } = setup();
     const panel = addBox([0, 0, 0], [1, 0.02, 1]);

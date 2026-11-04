@@ -1,18 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { LuLibrary } from 'react-icons/lu';
 import { UploadDialog } from '@pushform/commons-ui';
 import { CommonsPublishing, deleteCommonsDraft, type CommonsOwnModels, readCommonsCatalog, isCommonsOpenable, loadCommonsModel, commonsFileUrl, type CatalogModel, type OpenedCommonsModel } from '@pushform/cloud';
 import type { CommonsAccount } from '@pushform/commons-ui/account';
 import { MESH_UNITS, probeMeshImport, type MeshUnit } from '@pushform/io';
 import { openCommonsModel, placeCommonsModel } from '../commonsOpening';
 import type { DocumentSession, ModelTab } from '../session';
+import { CommonsModelDetail } from './CommonsModelDetail';
 
 export function CommonsBrowser({ account, filesUrl, session, target, onOpened, onClose }: {
   account: CommonsAccount | undefined; filesUrl: string | undefined; session: DocumentSession;
   target?: ModelTab | undefined; onOpened(): void; onClose(): void;
 }) {
+  const id = useId();
   const [own, setOwn] = useState<CommonsOwnModels | null>(null);
   const [mine, setMine] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
@@ -95,10 +98,21 @@ export function CommonsBrowser({ account, filesUrl, session, target, onOpened, o
   const choices = (values: string[]) => [...new Set(values)].sort().map(value => <option key={value}>{value}</option>);
   const shown = (models ?? []).filter(m => `${m.title} ${m.description} ${m.creator}`.toLowerCase().includes(query.toLowerCase()) && (!category || m.category === category) && (!license || m.licenses.some(l => l.name === license)) && (!commercial || m.licenses.every(l => l.commercialUse === 'allowed'))).sort((a,b) => b.publishedAt.localeCompare(a.publishedAt) || a.id.localeCompare(b.id));
   return <section ref={root} onKeyDown={event => { if (!target) return; if (event.key === 'Escape') { run.current?.abort(); onClose(); } if (event.key === 'Tab') { const controls = [...root.current!.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), summary, a[href]')]; const index = controls.indexOf(document.activeElement as HTMLElement); if (controls.length && (index < 0 || event.shiftKey && index === 0 || !event.shiftKey && index === controls.length - 1)) { event.preventDefault(); controls[event.shiftKey ? controls.length - 1 : 0]?.focus(); } } }} className="pf-commons-browser" aria-label={target ? 'Import from Commons' : 'Commons catalog'}>
-    <header><div><h2>{target ? 'Import from Commons' : 'Commons'}</h2>{target && <p>Destination: {target.name}</p>}</div>{target && <button onClick={() => { run.current?.abort(); onClose(); }}>Close</button>}</header>
-    {!target && <nav aria-label="Commons sections"><button aria-pressed={!mine} onClick={() => setMine(false)}>Browse</button><button aria-pressed={mine} onClick={() => setMine(true)}>My models</button></nav>}
+    <header><div><h2>{target ? 'Import from Commons' : <><LuLibrary aria-hidden="true"/>Commons</>}</h2>{target ? <p>Destination: {target.name}</p> : <p className="pf-commons-tagline">Good projects start with shared ideas.</p>}</div>{target && <button onClick={() => { run.current?.abort(); onClose(); }}>Close</button>}</header>
+    {!target && <div className="pf-tabs pf-commons-tabs" role="tablist" aria-label="Commons sections">{['Browse', 'My models'].map((label, index) => {
+      const selected = mine === (index === 1);
+      return <button key={label} type="button" role="tab" className={`pf-tab${selected ? ' is-active' : ''}`}
+        id={`${id}-tab-${index}`} aria-controls={`${id}-panel`} aria-selected={selected} tabIndex={selected ? 0 : -1}
+        onClick={() => setMine(index === 1)} onKeyDown={event => {
+          if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+          event.preventDefault(); event.stopPropagation();
+          const next = event.key === 'Home' ? 0 : event.key === 'End' ? 1 : mine ? 0 : 1;
+          setMine(next === 1); document.getElementById(`${id}-tab-${next}`)?.focus();
+        }}>{label}</button>;
+    })}</div>}
     {editing && account && createPortal(<div className="pf-publishing-host"><UploadDialog account={account} filesUrl={filesUrl} modelId={editing} onClose={() => { setEditing(null); setAttempt(value => value + 1); }} onPublished={() => { setEditing(null); setAttempt(value => value + 1); }} /></div>, document.body)}
     {error && <p role="alert">{error} <button onClick={() => setAttempt(value => value + 1)}>Try again</button></p>}
+    <div role={!target ? 'tabpanel' : undefined} id={`${id}-panel`} aria-labelledby={!target ? `${id}-tab-${mine ? 1 : 0}` : undefined}>
     {mine && !target ? <section aria-label="My Commons models">
       {confirm && <section role="alertdialog" aria-label={confirm.kind === 'draft' ? 'Delete draft' : 'Withdraw model'}><p>{confirm.kind === 'draft' ? 'Delete this private draft? The working document and any published revision are retained.' : 'Withdraw the public model and stop new downloads? Existing copies keep their original rights.'}</p><button disabled={busy} onClick={() => setConfirm(null)}>Cancel</button><button disabled={busy} onClick={() => { void modifyOwn(); }}>Confirm</button></section>}
       {!own && <p role="status">Loading your Commons models...</p>}
@@ -108,18 +122,14 @@ export function CommonsBrowser({ account, filesUrl, session, target, onOpened, o
       {meshProbe && <><p>This file does not record units. Choose how to read its dimensions.</p><label>Source units<select value={unit} onChange={event => setUnit(event.target.value as MeshUnit)}>{MESH_UNITS.map(item => <option key={item.unit} value={item.unit}>{item.label}</option>)}</select></label>{meshProbe.kind !== 'dxf' && <label>Up axis<select value={up} onChange={event => setUp(event.target.value as 'y' | 'z')}><option value="z">Z up</option><option value="y">Y up</option></select></label>}</>}
       <p>{prepared.insert ? 'Preview placement in the current design. Escape cancels; click to commit one undoable insertion.' : 'Open a separate local copy in a new model tab. The catalog keeps your search.'}</p>
       <button disabled={busy} onClick={() => setPrepared(null)}>Back</button><button disabled={busy} onClick={() => { void install(); }}>{busy ? 'Preparing…' : prepared.insert ? 'Continue to placement' : 'Open copy in new tab'}</button>
-    </> : selected ? <><button onClick={() => setSelected(null)}>Back to results</button><h3>{selected.title}</h3><p>by {selected.creator}</p><p>{selected.description}</p>
-      <img crossOrigin="anonymous" referrerPolicy="no-referrer" alt={selected.title} src={selected.imageUrl ?? commonsFileUrl(filesUrl, 'thumbnails', selected.files[0]?.id ?? '') ?? undefined} />
-      <p>Formats: {selected.formats.join(', ')}</p><h3>Licenses & credits</h3>{selected.licenses.map((l,i) => <p key={i}>{l.url ? <a href={l.url} target="_blank" rel="noreferrer">{l.name}</a> : l.name}: {l.conditions.join('; ')}</p>)}{selected.credits.map((c,i) => <p key={i}>{c.name}: {c.text}</p>)}
-      {selected.source && <a href={selected.source.url} target="_blank" rel="noreferrer">Original source: {selected.source.name}</a>}
-      {!target && available.length > 0 && <label>Insert into an open design<select value={catalogTarget} onChange={event => setCatalogTarget(event.target.value)}><option value="">Choose an open design</option>{available.map(tab => <option key={tab.id} value={tab.id}>{tab.name}</option>)}</select></label>}
-      <div><button disabled={busy || !selected.files.some(f => isCommonsOpenable(f.name))} onClick={() => { void load(false); }}>Open in new tab</button>{destination && <button disabled={busy || !selected.files.some(f => isCommonsOpenable(f.name))} onClick={() => { void load(true); }}>Insert into {destination!.name}</button>}</div>
-      {busy && <p role="status">Preparing model…</p>}
-      {!selected.files.some(f => isCommonsOpenable(f.name)) && <p>A supported representation is required before this model can be opened or inserted.</p>}
-    </> : <><div className="pf-commons-filters"><label>Search models<input value={query} onChange={event => setQuery(event.target.value)} /></label><label>Category<select value={category} onChange={event => setCategory(event.target.value)}><option value="">All categories</option>{choices((models ?? []).map(m => m.category))}</select></label><label>License<select value={license} onChange={event => setLicense(event.target.value)}><option value="">All licenses</option>{choices((models ?? []).flatMap(m => m.licenses.map(l => l.name)))}</select></label><label><input type="checkbox" checked={commercial} onChange={event => setCommercial(event.target.checked)} />Commercial use permitted</label></div>
+    </> : selected ? <CommonsModelDetail model={selected} filesUrl={filesUrl} busy={busy} importing={!!target}
+      destinationName={destination?.name} onBack={() => setSelected(null)} onOpen={() => { void load(false); }} onInsert={() => { void load(true); }}
+      destinationPicker={!target && available.length > 0 && <label>Insert into an open design<select value={catalogTarget} onChange={event => setCatalogTarget(event.target.value)}><option value="">Choose an open design</option>{available.map(tab => <option key={tab.id} value={tab.id}>{tab.name}</option>)}</select></label>}
+    /> : <><div className="pf-commons-filters"><label>Search models<input value={query} onChange={event => setQuery(event.target.value)} /></label><label>Category<select value={category} onChange={event => setCategory(event.target.value)}><option value="">All categories</option>{choices((models ?? []).map(m => m.category))}</select></label><label>License<select value={license} onChange={event => setLicense(event.target.value)}><option value="">All licenses</option>{choices((models ?? []).flatMap(m => m.licenses.map(l => l.name)))}</select></label><label><input type="checkbox" checked={commercial} onChange={event => setCommercial(event.target.checked)} />Commercial use permitted</label></div>
       {!models && !error && <p role="status">Loading Commons…</p>}
       {models && !shown.length && <p>No matching models. <button onClick={() => { setQuery('');setCategory('');setLicense('');setCommercial(false); }}>Clear filters</button></p>}
       <div className="pf-commons-grid">{shown.map(model => <button key={model.id} onClick={() => setSelected(model)}><img crossOrigin="anonymous" referrerPolicy="no-referrer" alt="" src={model.imageUrl ?? commonsFileUrl(filesUrl, 'thumbnails', model.files[0]?.id ?? '') ?? undefined}/><strong>{model.title}</strong><span>by {model.creator}</span><span>{model.licenses.map(l => l.name).join(', ')}</span><span>{model.formats.join(', ')}</span></button>)}</div>
     </>}
+    </div>
   </section>;
 }

@@ -80,6 +80,9 @@ it('requests catalog and detail thumbnails with anonymous CORS for the isolated 
   assertImage(view.container.querySelector('img')!);
   fireEvent.click(screen.getByText('Garden bench'));
   assertImage(screen.getByRole('img', { name: 'Garden bench' }));
+  fireEvent.error(screen.getByRole('img', { name: 'Garden bench' }));
+  expect(screen.getByText('Preview unavailable')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Open in new tab' })).toBeTruthy();
 });
 it('retains browsing state when hidden and excludes unknown permissions from commercial-use results', async () => {
   const f = setup(); const view = render(<div><CommonsBrowser {...f.props}/></div>);
@@ -92,9 +95,23 @@ it('retains browsing state when hidden and excludes unknown permissions from com
   expect((screen.getByLabelText('Search models') as HTMLInputElement).value).toBe('Garden');
   expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(true);
 });
+it('switches between Commons sections with the shared tabs and keyboard navigation', async () => {
+  const f = setup(); render(<CommonsBrowser {...f.props}/>);
+  const browse = screen.getByRole('tab', { name: 'Browse', selected: true });
+  fireEvent.change(screen.getByLabelText('Search models'), { target: { value: 'Garden' } });
+  fireEvent.keyDown(browse, { key: 'ArrowRight' });
+  const mine = screen.getByRole('tab', { name: 'My models', selected: true });
+  expect(document.activeElement).toBe(mine);
+  await screen.findByText('Published revision 2');
+  expect(screen.getByRole('tabpanel', { name: 'My models' })).toBeTruthy();
+  fireEvent.keyDown(mine, { key: 'Home' });
+  expect(document.activeElement).toBe(browse);
+  expect(screen.getByRole('tabpanel', { name: 'Browse' })).toBeTruthy();
+  expect((screen.getByLabelText('Search models') as HTMLInputElement).value).toBe('Garden');
+});
 it('shows the owned publication and requires confirmation before withdrawing its exact public revision', async () => {
   const f = setup(); render(<CommonsBrowser {...f.props}/>);
-  fireEvent.click(screen.getByRole('button', { name: 'My models' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'My models' }));
   await screen.findByText('Published revision 2');
   fireEvent.click(screen.getByRole('button', { name: 'Withdraw' }));
   expect(f.rpc.mock.calls.some(([name]) => name === 'commons_withdraw_model')).toBe(false);

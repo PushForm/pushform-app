@@ -59,7 +59,6 @@ function MyModels({ account, filesUrl, route, catalogReady }: { account: Commons
   return <section className="publish-page my-models">
     <div className="section-heading">
       <div><p className="eyebrow">Your contributions</p><h1 ref={heading} tabIndex={-1}>My models</h1></div>
-      <a className="button-link" href="#upload">Upload model</a>
     </div>
     {error && <section className="status-panel" role="alert"><p>{error}</p><button onClick={() => { setError(''); reload(); }}>Try again</button></section>}
     {message && <p role="status" className="page-message">{message}</p>}

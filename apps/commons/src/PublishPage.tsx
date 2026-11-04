@@ -5,6 +5,7 @@ import { CommonsPublishing, commonsFileKind, deleteCommonsDraft, fetchCommonsIma
 import type { CommonsAccount } from './account';
 import { CommonsAccessGate } from './CommonsAccess';
 import { UploadDialog } from './UploadDialog';
+import { ModelCard, ModelGrid } from './ModelCard';
 
 /** `#my-models`, `#upload` (new model) and `#edit/<model>` all show My models; the last two open the dialog over it. */
 export type PublishRoute = { kind: 'list' } | { kind: 'upload' } | { kind: 'edit'; model: string };
@@ -64,14 +65,14 @@ function MyModels({ account, filesUrl, route, catalogReady }: { account: Commons
     {message && <p role="status" className="page-message">{message}</p>}
     {!state && !error ? <p role="status">Loading your models…</p> : state && cards.length === 0 ? <section className="status-panel">
       <h3>You haven’t uploaded a model yet.</h3><p>Drop a model file to start. It stays private until you publish it.</p><a className="button-link" href="#upload">Upload model</a></section>
-      : <div className="model-cards">{cards.map((card) => <ModelCard key={card.id + card.revision.id} card={card} filesUrl={filesUrl} token={token} api={api}
-        onChanged={(note) => { setMessage(note); reload(); }}/>)}</div>}
+      : <ModelGrid className="my-model-grid">{cards.map((card) => <OwnModelCard key={card.id + card.revision.id} card={card} filesUrl={filesUrl} token={token} api={api}
+        onChanged={(note) => { setMessage(note); reload(); }}/>)}</ModelGrid>}
     {route.kind !== 'list' && <UploadDialog key={route.kind === 'edit' ? route.model : 'new'} account={account} filesUrl={filesUrl}
       modelId={route.kind === 'edit' ? route.model : null} onClose={close} onPublished={published}/>}
   </section>;
 }
 
-function ModelCard({ card, filesUrl, token, api, onChanged }: { card: Card; filesUrl: string | undefined; token: () => Promise<string>; api: CommonsPublishing; onChanged(note: string): void }): JSX.Element {
+function OwnModelCard({ card, filesUrl, token, api, onChanged }: { card: Card; filesUrl: string | undefined; token: () => Promise<string>; api: CommonsPublishing; onChanged(note: string): void }): JSX.Element {
   const [image, setImage] = useState<string | null>(null);
   const [preview, setPreview] = useState<'loading' | 'converting' | 'none'>('loading');
   const [confirm, setConfirm] = useState<'delete' | 'withdraw' | null>(null);
@@ -103,16 +104,12 @@ function ModelCard({ card, filesUrl, token, api, onChanged }: { card: Card; file
     card.published ? 'Draft changes discarded.' : 'Draft deleted.');
   const withdraw = () => run(async () => { await api.withdraw(card.id, card.published!); window.dispatchEvent(new Event('commons:catalog-changed')); }, 'Model withdrawn. Copies people already downloaded keep their licenses.');
   const updated = card.revision.submitted_at ? new Date(card.revision.submitted_at).toLocaleDateString() : null;
-  const title = card.revision.metadata.title;
-  return <article className="model-card own-card">
-    <a className="model-art" href={`#edit/${card.id}`} aria-label={`Edit ${title}`}>
-      {image ? <img src={image} alt=""/> : <div className="missing-image"><span aria-hidden="true">◇</span><span>{preview === 'converting' ? 'Converting preview' : preview === 'loading' ? 'Loading preview' : 'No preview'}</span></div>}
-    </a>
-    <div className="card-body">
-      <h3><a href={`#edit/${card.id}`}>{title}</a></h3>
+  const meta = card.revision.metadata;
+  return <ModelCard model={{ ...meta, id: card.id, revision: card.revision.id }} filesUrl={filesUrl} href={`#edit/${card.id}`}
+    art={image ? <img src={image} alt=""/> : <div className="missing-image"><span aria-hidden="true">◇</span><span>{preview === 'converting' ? 'Converting preview' : preview === 'loading' ? 'Loading preview' : 'No preview'}</span></div>}
+    footer={<div className="own-card-footer">
       <p className="card-status"><span className={card.published ? 'chip chip-strong' : 'chip'}>{card.published ? 'Published' : 'Draft'}</span>
-        {card.published && card.draft && <span className="chip">Unpublished changes</span>}</p>
-      {updated && <p className="card-meta">Updated {updated}</p>}
+        {card.published && card.draft && <span className="chip">Unpublished changes</span>}{updated && <span className="card-meta">Updated {updated}</span>}</p>
       {error && <p role="alert">{error}</p>}
       {confirm ? <p className="card-actions">
         <span>{confirm === 'delete' ? (card.published ? 'Discard these changes?' : 'Delete this draft?') : 'Withdraw this model?'}</span>
@@ -125,6 +122,5 @@ function ModelCard({ card, filesUrl, token, api, onChanged }: { card: Card; file
         {card.draft && <button type="button" className="link-button" onClick={() => setConfirm('delete')}>{card.published ? 'Discard changes' : 'Delete draft'}</button>}
         {card.published && <button type="button" className="link-button" onClick={() => setConfirm('withdraw')}>Withdraw</button>}
       </p>}
-    </div>
-  </article>;
+    </div>}/>;
 }

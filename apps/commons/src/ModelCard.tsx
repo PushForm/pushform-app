@@ -16,12 +16,21 @@ export function ProfileLink({handle,children}:{handle:string;children:ReactNode}
 export function CreatorCredit({model}:{model:{creator:string;creatorProfile?:{handle:string}|null}}){
   return <>By {model.creatorProfile?<ProfileLink handle={model.creatorProfile.handle}>{model.creator}</ProfileLink>:model.creator}</>;
 }
-/** A model in a list: the browse grid and profile pages show the same card. */
-export function ModelCard({ model, filesUrl }: { model: CatalogModel; filesUrl: string | undefined }) {
+/** The one card used for every grid of models: the library, profile pages and My models. `art` replaces the
+ * public thumbnail (My models shows owner-only previews of drafts) and `footer` adds status and actions. */
+export function ModelCard({ model, filesUrl, href = `#models/${model.id}`, art, footer }: {
+  model: Pick<CatalogModel, 'id' | 'revision' | 'title' | 'category' | 'licenses' | 'source' | 'creator'> & Partial<CatalogModel>;
+  filesUrl: string | undefined; href?: string; art?: ReactNode; footer?: ReactNode;
+}) {
   return <article className="model-card">
-    <a href={`#models/${model.id}`} className="model-art" aria-label={`View ${model.title}`}><CommonsThumbnail key={model.id + model.revision} model={model} filesUrl={filesUrl} /></a>
-    <div className="card-body"><p className="eyebrow">{model.category}</p><h3><a href={`#models/${model.id}`}>{model.title}</a></h3>
+    <a href={href} className="model-art" aria-label={`${href.startsWith('#edit/') ? 'Edit' : 'View'} ${model.title}`}>
+      {art ?? <CommonsThumbnail key={model.id + model.revision} model={model as CatalogModel} filesUrl={filesUrl} />}</a>
+    <div className="card-body"><p className="eyebrow">{model.category}</p><h3><a href={href}>{model.title}</a></h3>
       <p className="creator"><CreatorCredit model={model}/></p><p className="license-label">{model.licenses.map((license) => license.name).join(' · ')}</p>
-      {model.source && <p className="source-label">From {model.source.name}</p>}</div>
+      {model.source && <p className="source-label">From {model.source.name}</p>}
+      {footer}</div>
   </article>;
+}
+export function ModelGrid({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={className ? `model-grid ${className}` : 'model-grid'}>{children}</div>;
 }

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { commonsProfileFieldsSchema, type CommonsProfile, type CommonsProfileFields, type CommonsProfilePage, type CommonsProfiles } from '@pushform/cloud';
 import { navigateCommons, profilePath } from './route';
-import { ModelCard, ProfileLink } from './ModelCard';
+import { ModelCard, ModelGrid, ProfileLink } from './ModelCard';
 import { ProfileHero, ProfileImagesEditor, type ProfileImageServices } from './ProfileImages';
 
 export { ProfileLink, CreatorCredit } from './ModelCard';
@@ -32,7 +32,7 @@ export function CommonsProfilePageView({lookup,profiles,filesUrl,ownProfileId=nu
     <ProfileHero profile={page.profile} filesUrl={filesUrl} actions={ownProfileId!==null&&page.profile.id===ownProfileId?<a className="button-link secondary" href="#account">Edit profile</a>:undefined}/>
     {page.profile.bio&&<p className="profile-bio">{page.profile.bio}</p>}
     {page.profile.links.length>0&&<ul className="profile-links">{page.profile.links.map((link,index)=><li key={index}><a href={link.url} target="_blank" rel="noreferrer noopener">{link.label} ↗</a></li>)}</ul>}
-    <h2>Published models</h2>{page.models.length===0?<p>No published models to show.</p>:<div className="model-grid profile-models">{page.models.map(model=><ModelCard key={model.id} model={model} filesUrl={filesUrl}/>)}</div>}
+    <h2>Published models</h2>{page.models.length===0?<p>No published models to show.</p>:<ModelGrid className="profile-models">{page.models.map(model=><ModelCard key={model.id} model={model} filesUrl={filesUrl}/>)}</ModelGrid>}
   </article>;
 }
 const emptyFields:CommonsProfileFields={handle:'',displayName:'',bio:'',avatarUrl:null,links:[]};

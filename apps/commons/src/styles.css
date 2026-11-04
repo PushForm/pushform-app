@@ -190,9 +190,9 @@ button.secondary { background:transparent; color:var(--ink); border:1px solid #b
 .my-models .section-heading { margin-bottom: 8px; }
 .my-models h1 { font-size: clamp(32px, 4vw, 48px); letter-spacing: -1.5px; margin: 0; }
 .page-message { margin: 16px 0 0; color: var(--muted); }
-.model-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 24px; margin: 28px 0 60px; }
-.own-card .card-body { display: grid; gap: 10px; padding: 16px; }
-.card-status { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
+.my-model-grid { margin: 28px 0 60px; }
+.own-card-footer { display: grid; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.card-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; }
 .chip { display: inline-block; border: 1px solid #bfc6b8; border-radius: 999px; padding: 2px 10px; font-size: 12px; }
 .chip-strong { border-color: var(--accent); background: #fbeee8; }
 .card-meta { margin: 0; font-size: 12px; color: var(--muted); }
@@ -258,4 +258,4 @@ button.secondary { background:transparent; color:var(--ink); border:1px solid #b
   .dialog-foot { flex-wrap: wrap; }
   .save-state { flex-basis: 100%; }
 }
-.own-card .model-art { text-decoration: none; color: inherit; }
+.model-card .model-art { text-decoration: none; color: inherit; }

@@ -107,6 +107,20 @@ describe('license-check --notices', () => {
     expect(auditLicenses(root).packages.map((p) => p.name)).toEqual(['builder', 'lib']);
   });
 
+  it('leaves out the subtree of a package that is not shipped, but the full audit still reaches it', () => {
+    const root = workspace({
+      'pnpm-workspace.yaml': 'packages:\n  - apps/*\n',
+      'package.json': { name: 'root', private: true },
+      'apps/web/package.json': { name: 'web', dependencies: { pixels: '1' } },
+      'apps/web/node_modules/pixels/package.json': { name: 'pixels', version: '1.0.0', license: 'MIT', dependencies: { image: '1' } },
+      'node_modules/image/package.json': { name: 'image', version: '1.0.0', license: 'Apache-2.0', optionalDependencies: { 'image-native': '1' } },
+      'node_modules/image-native/package.json': { name: 'image-native', version: '1.0.0', license: 'LGPL-3.0-or-later' },
+    });
+    const shipped = auditLicenses(root, { from: ['apps/web'], skip: new Map([['image', 'runs only under Node']]) });
+    expect(shipped.packages.map((p) => p.name)).toEqual(['pixels']);
+    expect(auditLicenses(root).packages.map((p) => p.name)).toEqual(['image', 'image-native', 'pixels']);
+  });
+
   it('reads license and NOTICE files at the top of a package and one directory down, not in node_modules', () => {
     const dir = workspace({
       'LICENSE.md': 'MIT License\r\n\r\nCopyright (c) A   \r\n',

@@ -128,9 +128,10 @@ const productionDeps = (manifest) => [
  * (never `devDependencies`), with its license, its directory and the chain that first reached it, and the policy
  * problems found. Optional dependencies that are not installed (other platforms' binaries) cannot be read and are
  * skipped. `from` (directories relative to the root) starts the walk at those workspace packages only, following
- * their workspace dependencies, instead of at every workspace package.
+ * their workspace dependencies, instead of at every workspace package. `skip` names packages whose subtree the walk
+ * leaves out entirely.
  */
-export function auditLicenses(root, { from } = {}) {
+export function auditLicenses(root, { from, skip = new Map() } = {}) {
   const workspace = new Set(workspaceDirs(root).map((dir) => realpathSync(dir)));
   const starts = from ? from.map((dir) => realpathSync(join(root, dir))) : [...workspace];
   const packages = new Map();
@@ -140,6 +141,7 @@ export function auditLicenses(root, { from } = {}) {
   while (queue.length) {
     const { dir, chain } = queue.shift();
     for (const dep of productionDeps(readJson(join(dir, 'package.json')))) {
+      if (skip.has(dep.name)) continue;
       const found = resolvePackage(dep.name, dir);
       if (!found) {
         if (!dep.optional) problems.push(`${dep.name}: not installed (needed by ${chain.join(' > ')})`);
@@ -165,6 +167,15 @@ export function auditLicenses(root, { from } = {}) {
 
 /** The directories of the workspace packages whose production dependencies ship in the web and desktop apps. */
 export const SHIPPED = ['apps/web', 'apps/desktop'];
+
+/**
+ * Production dependencies that only run under Node, never in the web bundle or the desktop app, each with the reason.
+ * The notices walk leaves out their subtrees, including the platform-specific native binaries a machine happens to
+ * install; the full license check still audits them.
+ */
+export const NOT_SHIPPED = new Map([
+  ['sharp', 'Node image library behind ndarray-pixels\' Node entry point; browser builds use its canvas entry point'],
+]);
 
 /**
  * Shipped packages whose published package carries no license file, each with the reason it is accepted. Their notices
@@ -273,7 +284,7 @@ export function formatGroups(title, intro, groups, label) {
 
 /** The npm section of the third-party notices: its text, package and group counts, and what keeps it incomplete. */
 export function npmNoticesSection(root) {
-  const { packages, problems } = auditLicenses(root, { from: SHIPPED });
+  const { packages, problems } = auditLicenses(root, { from: SHIPPED, skip: NOT_SHIPPED });
   const notices = npmNotices(packages);
   const text = formatGroups('JavaScript packages',
     `The web app, and the desktop app's interface, include these ${packages.length} npm packages. Packages that share`

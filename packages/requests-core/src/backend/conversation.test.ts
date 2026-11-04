@@ -572,6 +572,14 @@ describe('pictures posted with messages', () => {
     expect(stored[0]).toMatchObject({ role: 'user', text: 'Build this', attachments: [picture] });
   });
 
+  it('tells the fast model that restates a model request how many pictures came, never what they show', async () => {
+    const h = pictured();
+    await (await send(h, { text: 'Build this', attachments: [ATTACHMENT_ID], document: { type: 'model', apiVersion: 1, edit: 1 } })).text();
+    const content = anthropicOf(h).acknowledgments[0]!.messages[0]!.content as { type: string; text?: string }[];
+    expect(content.map(b => b.type)).toEqual(['text']);
+    expect(content[0]!.text).toBe('<pictures>1</pictures>\n\n<requester_message>\nBuild this\n</requester_message>');
+  });
+
   it('opens a model turn that carries pictures with the same reading line as any other', async () => {
     const events = parseSse(await (await send(pictured(), { text: 'Build this', attachments: [ATTACHMENT_ID], document: { type: 'model', apiVersion: 1, edit: 1 } })).text());
     expect(events[0]).toEqual({ event: 'status', data: { phase: 'reading', text: 'Reading your request…' } });

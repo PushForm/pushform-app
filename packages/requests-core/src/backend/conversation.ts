@@ -1018,7 +1018,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       user, conversation, store, handlers: agent.handlers(ctx, store), pathChanged: path !== conversation.path,
       leading: [...closers, { role: 'user', text: body.text, at: base.now, ...(pictures.length ? { attachments: pictures } : {}) }],
       status: messageStatus(),
-      ...(config.models.acknowledge ? { acknowledge: acknowledgeContent({ text: body.text, pictures: pictureBlocks(pictures, images), previousReply: previousReplyOf(prior) }) } : {}),
+      ...(config.models.acknowledge ? { acknowledge: acknowledgeContent({ text: body.text, pictures: pictures.length, previousReply: previousReplyOf(prior) }) } : {}),
       setup: {
         ...turnPrompt(config.models, ctx, document), context, historyLength: prior.length, messages: historyOf(prior, context, body.text, pictures, images), document, resume: undefined,
       },

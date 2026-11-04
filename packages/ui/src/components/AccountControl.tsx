@@ -31,7 +31,7 @@ function accountFocusTargets(root: HTMLElement): HTMLElement[] {
   });
 }
 
-export function AccountControl({ cloud: supplied, onExtensions }: { cloud?: CloudSession | undefined;
+export function AccountControl({ cloud: supplied, onExtensions, compact = false }: { cloud?: CloudSession | undefined; compact?: boolean;
   /** Opens the extension manager; the account dialog offers it when given. */
   onExtensions?: (() => void) | undefined }): JSX.Element {
   const [unconfigured] = useState(() => new CloudSession(null));
@@ -51,10 +51,10 @@ export function AccountControl({ cloud: supplied, onExtensions }: { cloud?: Clou
   const profile = profileState.ownerId === state.user.id ? profileState.profile : null;
   const name = profile ? cloudProfileFullName(profile) : state.user.email;
   return <>
-    <button type="button" className="pf-account-button"
+    <button type="button" className={`pf-account-button${compact ? ' is-compact' : ''}`}
       aria-label={`Account: ${profile ? `${name}, ${state.user.email}` : name}`}
       title={`Account: ${profile ? `${name} (${state.user.email})` : name}`} onClick={() => setOpen(true)}>
-      <Icon name="account" /><span>{name}</span>
+      <Icon name="account" />{!compact && <span>{name}</span>}
     </button>
     {open ? <AccountDialog cloud={cloud} state={state} profiles={profile ? profiles : null} profileState={profileState}
       account={account && accountState.ownerId === state.user.id && accountState.status === 'ready' ? account : null} accountState={accountState}

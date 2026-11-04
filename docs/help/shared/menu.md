@@ -14,7 +14,11 @@ In **Layout**, Main menu → Import... and the toolbar's Import → Import butto
 
 ## Save and Save As
 
-Cloud-connected documents save automatically, and the header shows the current save status. **Save** writes through the document's file-save flow. **Save As…** creates a separate cloud document, or opens the local save flow in installations without autosave.
+Working changes are checkpointed on this device. The bottom status bar shows local recovery and cloud save status, alongside tool guidance; Layout also keeps its page and zoom controls. Click the save status for details or recovery actions.
+
+Use the **Save** icon in the header or **Cmd+S / Ctrl+S** to save the active document, including in the browser. Cloud-connected documents open **Save version**, with optional change notes and community sharing. A cloud revision is created only when you explicitly save. Installations without cloud saving use the document's local file-save flow. **Save As…** creates a separate cloud document or local copy.
+
+When closing a modified tab, **Save** writes its pending changes before closing it, **Discard** closes without saving them, and **Cancel** keeps it open. Saving progress and failures appear in that dialog. A failed save keeps the document open for retry.
 
 **Save As…** also lets you resolve a conflict by creating a separate library document without overwriting another revision.
 
@@ -26,11 +30,11 @@ Cloud-connected documents save automatically, and the header shows the current s
 
 ## Find the same action with command search
 
-Use Ctrl/Cmd+K and type a visible action name such as **Import**, **Export**, or **Print**. Search reflects the current editor and whether the action can run. A toolbar button, menu entry and command-search result can be different routes to the same operation, rather than three different capabilities.
+Click the **Search commands** icon or use Ctrl/Cmd+K, then type a visible action name such as **Import**, **Export**, or **Print**. Search reflects the current editor and whether the action can run. A toolbar button, menu entry and command-search result can be different routes to the same operation, rather than three different capabilities.
 
 ## Rename an open document
 
-Double-click the document name in its open tab and type a new name. Press Enter or click outside the field to apply it; press Escape to cancel. Cloud documents save the new name automatically. Leave the field empty to keep the previous name.
+Double-click the document name in its open tab and type a new name. Press Enter or click outside the field to apply it; press Escape to cancel. Save a cloud version to upload the new name. Leave the field empty to keep the previous name.
 
 ## Save As and pane commands
 

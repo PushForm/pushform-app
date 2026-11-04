@@ -6,6 +6,7 @@ import type { CommandInfo, CommandRegistry, Keymap } from '@pushform/commands';
 import { useAppStore } from '../store';
 import type { CommandSearchSource } from './commandSearchSource';
 import { Icon } from './Icon';
+import { ToolButton } from './ToolButton';
 
 /** DOM id of the search input, so `view.search` can focus it. */
 export const COMMAND_SEARCH_INPUT_ID = 'pf-command-search';
@@ -18,6 +19,7 @@ export interface CommandSearchProps {
    * tab switch is picked up without remounting.
    */
   readonly source: () => CommandSearchSource;
+  readonly compact?: boolean;
 }
 
 export interface SearchItem {
@@ -36,13 +38,21 @@ export interface SearchItem {
  * Cmd/Ctrl+K (and the `view.search` command) focus it; typing filters; ArrowUp/Down move; Enter
  * runs; Escape clears and leaves. Results show icon, name and shortcut.
  */
-export function CommandSearch({ source }: CommandSearchProps): JSX.Element {
+export function CommandSearch({ source, compact = false }: CommandSearchProps): JSX.Element {
   const listId = useId();
   const input = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState(false);
   const [active, setActive] = useState(0);
   const [tick, setTick] = useState(0);
+  const [expanded, setExpanded] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!compact || !expanded) return;
+    const outside = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) { setExpanded(false); setFocused(false); } };
+    document.addEventListener('pointerdown', outside);
+    return () => document.removeEventListener('pointerdown', outside);
+  }, [compact, expanded]);
 
   // Cmd/Ctrl+K from anywhere, including text fields, focuses the search.
   useEffect(() => {
@@ -80,6 +90,7 @@ export function CommandSearch({ source }: CommandSearchProps): JSX.Element {
     setQuery('');
     setActive(0);
     input.current?.blur();
+    setExpanded(false);
   };
   const run = (item: SearchItem): void => {
     if (!item.enabled) return;
@@ -114,7 +125,10 @@ export function CommandSearch({ source }: CommandSearchProps): JSX.Element {
   };
 
   return (
-    <div className="pf-cmd-search">
+    <div ref={root} className={`pf-cmd-search${compact ? ' is-compact' : ''}${expanded ? ' is-expanded' : ''}`}>
+      {compact && <ToolButton type="button" className="pf-iconbtn" aria-label="Search commands" title={`Search commands (${shortcutHint()})`}
+        aria-expanded={expanded} onClick={() => { if (expanded) close(); else { setExpanded(true); input.current?.focus(); input.current?.select(); } }}><Icon name="search" size={20}/></ToolButton>}
+      <div className="pf-cmd-search-field">
       <Icon name="search" size={16} />
       <input
         ref={input}
@@ -129,14 +143,15 @@ export function CommandSearch({ source }: CommandSearchProps): JSX.Element {
         aria-activedescendant={open ? optionId(listId, highlighted) : undefined}
         placeholder={`Search tools and commands (${shortcutHint()})`}
         autoComplete="off"
+        tabIndex={compact && !expanded ? -1 : undefined}
         spellCheck={false}
         value={query}
         onChange={(e) => {
           setQuery(e.target.value);
           setActive(0);
         }}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
+        onFocus={() => { setFocused(true); setExpanded(true); }}
+        onBlur={event => { setFocused(false); if (compact && !root.current?.contains(event.relatedTarget as Node | null)) setExpanded(false); }}
         onKeyDown={onKeyDown}
       />
       {open ? (
@@ -166,6 +181,7 @@ export function CommandSearch({ source }: CommandSearchProps): JSX.Element {
           ))}
         </ul>
       ) : null}
+      </div>
     </div>
   );
 }

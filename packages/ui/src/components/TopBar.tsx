@@ -43,7 +43,8 @@ import { PublishSnapshot } from './PublishSnapshot';
 import type { CommonsOpeningConfig } from './CommonsOpening';
 import type { PublishingSnapshot } from './SaveVersionDialog';
 import { SaveVersionDialog } from './SaveVersionDialog';
-import { AutosaveIndicator } from './AutosaveIndicator';
+import { ToolButton } from './ToolButton';
+import { UnsavedChangesDialog } from './UnsavedChangesDialog';
 import { allowOpeningDocument, desktopUpdates } from '../desktopUpdates';
 
 interface FilePickerWindow {
@@ -128,6 +129,7 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
   const handleLoad = useRef<Promise<void>>(Promise.resolve());
   const [choosingTemplate, setChoosingTemplate] = useState(false);
   const [closingId, setClosingId] = useState<string | null>(null);
+  const [closingBusy, setClosingBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [importNotice, setImportNotice] = useState<{ fileName: string; warnings: string[]; exported?: boolean; format?: string } | null>(null);
   /** The open OBJ, 3DS or unitless DXF import options and how to answer them. */
@@ -682,6 +684,7 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
       return;
     }
     if (session.isDirty(tab) || autosave?.needsSave(tab)) {
+      setError(null);
       setClosingId(id);
       return;
     }
@@ -692,8 +695,9 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
   };
 
   const finishClose = async (choice: 'save' | 'discard' | 'cancel'): Promise<void> => {
+    if (closingId && closingSaves.current.has(closingId)) return;
     if (choice === 'cancel') {
-      setClosingId(null);
+      setError(null); setClosingId(null);
       return;
     }
     const tab = session.tabs.find((candidate) => candidate.id === closingId);
@@ -701,14 +705,21 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
       setClosingId(null);
       return;
     }
-    if (choice === 'save') {
-      if (!(await saveDocument(tab))) return;
-    }
-    session.close(tab.id, true);
-    handles.current.delete(tab.id);
-    if (tab.identity?.startsWith('browser:'))
-      void handleStore.current?.delete(tab.identity).catch(() => {});
-    setClosingId(null);
+    closingSaves.current.add(tab.id); setClosingBusy(true);
+    try {
+      if (choice === 'save') {
+        if (!(await saveDocument(tab))) return;
+        if (session.isDirty(tab) || autosave?.needsSave(tab)) {
+          setError('New changes were made while saving. Save again before closing.');
+          return;
+        }
+      }
+      session.close(tab.id, true);
+      handles.current.delete(tab.id);
+      if (tab.identity?.startsWith('browser:'))
+        void handleStore.current?.delete(tab.identity).catch(() => {});
+      setError(null); setClosingId(null);
+    } finally { closingSaves.current.delete(tab.id); setClosingBusy(false); }
   };
 
   const active = session.active;
@@ -733,11 +744,21 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
     if (autosave) makeCloudCopy(); else void saveDocument(session.active, true);
   } };
   useEffect(() => {
+    const saveKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== 's') return;
+      event.preventDefault(); event.stopPropagation();
+      if (event.repeat || commonsActive || document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      fileActions.current.save();
+    };
+    window.addEventListener('keydown', saveKey, true);
+    return () => window.removeEventListener('keydown', saveKey, true);
+  }, [commonsActive]);
+  useEffect(() => {
     const tab = session.active;
     const registry = tab.type === 'model' ? tab.app.commands : tab.commands;
     const off = [registry.register(defineCommand({
       id: 'file.save', title: autosave ? 'Save version' : 'Save', category: 'file', menu: 'File', icon: 'save',
-      params: z.object({}), undoable: false, run: () => fileActions.current.save(),
+      keybinding: 'Mod+S', params: z.object({}), undoable: false, run: () => fileActions.current.save(),
     })), registry.register(defineCommand({
       id: 'file.saveAs', title: 'Save As…', category: 'file', menu: 'File', icon: 'save-as',
       params: z.object({}), undoable: false, run: () => fileActions.current.saveAs(),
@@ -863,14 +884,15 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
           onBusyChange={setTemplateBusy} onClose={() => setChoosingTemplate(false)} /> : undefined} onCancel={() => setChoosingTemplate(false)} onCreate={templateId => {
         session.newLayout(templateId); setChoosingTemplate(false);
       }} /> : null}
-      {autosave && cloudFiles ? <button type="button" onClick={() => setSaveVersion(session.active)}>Save version...</button> : null}
-      <CommandSearch source={() => commandSearchSourceFor(session.active)} />
-      {autosave ? <AutosaveIndicator session={session} files={cloudFiles} autosave={autosave} tab={active} onSaveCopy={makeCloudCopy} /> : null}
-      <AccountControl cloud={cloud} onExtensions={onExtensions} />
+      <ToolButton type="button" className="pf-iconbtn pf-document-save" aria-label={autosave ? 'Save version' : 'Save'}
+        title={`${autosave ? 'Save version' : 'Save'} (${typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘S' : 'Ctrl+S'})`}
+        disabled={commonsActive} onClick={() => fileActions.current.save()}><Icon name="save" size={20}/></ToolButton>
+      <CommandSearch compact source={() => commandSearchSourceFor(session.active)} />
+      <AccountControl compact cloud={cloud} onExtensions={onExtensions} />
       {aboutOpen ? <AboutDialog build={buildInfo ?? UNKNOWN_BUILD} onClose={() => setAboutOpen(false)} /> : null}
       {cloudBrowser && cloudFiles ? <CloudBrowser api={cloudFiles} session={session} owner={cloudOwner}
         saveTab={cloudBrowser.saveTab} saveAsTemplate={cloudBrowser.saveAsTemplate} forceCopy={!!autosave} onClose={closeCloudBrowser} /> : null}
-      {error || session.recoveryError ? (
+      {!closingId && (error || session.recoveryError) ? (
         <span className="pf-file-error" role="alert">
           {error ?? session.recoveryError}
         </span>
@@ -904,41 +926,8 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
       {modelImportNotice ? <ModelImportDialog {...modelImportNotice} onClose={() => {
         modelImportRun.current?.abort(); setModelImportNotice(null);
       }} /> : null}
-      {closingId ? (
-        <div className="pf-modal-backdrop">
-          <div className="pf-modal" role="dialog" aria-modal="true" aria-label="Unsaved changes">
-            <p>
-              Save changes before closing this {closingTab?.type === 'layout' ? 'Layout' : 'Modeling'} document?
-            </p>
-            <div className="pf-modal-actions">
-              <button
-                type="button"
-                onClick={() => {
-                  void finishClose('save');
-                }}
-              >
-                Save
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  void finishClose('discard');
-                }}
-              >
-                Discard
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  void finishClose('cancel');
-                }}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      {closingId && <UnsavedChangesDialog name={closingTab?.name ?? 'this document'} busy={closingBusy} error={error}
+        onChoose={choice => { void finishClose(choice); }}/>}
       {!closingId && recoveries.length > 0 ? (
         <div className="pf-modal-backdrop">
           <div className="pf-modal" role="dialog" aria-modal="true" aria-label="Recover Layout document">

@@ -105,13 +105,26 @@ function movedOutlineInContext(state: DocumentState, refs: readonly EntityRef[],
         const inst = root.instances.get(ref.id);
         const def = inst && state.definitions.get(inst.definitionId);
         if (!inst || !def) break;
-        const im = m4mul(mm, inst.transform);
-        for (const b of def.entities.bodies.values()) for (const e of b.edges.values()) push(e.polyline.map((p) => m4transformPoint(im, p)));
-        for (const part of def.entities.meshParts.values()) for (const line of meshPartEdgePolylines(part.geometry)) push(line.map((p) => m4transformPoint(im, p)));
-        for (const e of def.entities.sketch.edges.values()) {
-          const a = def.entities.sketch.vertices.get(e.a), b = def.entities.sketch.vertices.get(e.b);
-          if (a && b) push([m4transformPoint(im, a.p), m4transformPoint(im, b.p)]);
-        }
+        const draw = (entities: EntityContainer, matrix: Mat4 | MMat4, ancestors: ReadonlySet<number>): void => {
+          const point = (p: Vec3): Vec3 => m4transformPoint(matrix, p);
+          for (const body of entities.bodies.values()) for (const edge of body.edges.values()) push(edge.polyline.map(point));
+          for (const part of entities.meshParts.values()) for (const line of meshPartEdgePolylines(part.geometry)) push(line.map(point));
+          for (const edge of entities.sketch.edges.values()) {
+            const a = entities.sketch.vertices.get(edge.a), b = entities.sketch.vertices.get(edge.b);
+            if (a && b) push([point(a.p), point(b.p)]);
+          }
+          for (const image of entities.images.values()) {
+            const corners = imageEntityCorners(image);
+            push([...corners, corners[0]!].map(point));
+          }
+          for (const child of entities.instances.values()) {
+            if (ancestors.has(child.definitionId)) continue;
+            const childDef = state.definitions.get(child.definitionId);
+            if (!childDef) continue;
+            draw(childDef.entities, m4mul(matrix, child.transform), new Set([...ancestors, child.definitionId]));
+          }
+        };
+        draw(def.entities, m4mul(mm, inst.transform), new Set([def.id]));
         break;
       }
       case 'image': {

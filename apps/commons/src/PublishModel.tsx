@@ -5,18 +5,29 @@ import { CommonsPublishing, uploadCommonsFile, removeCommonsFile, type CloudSess
 
 export interface PublishModelProps {
   client:ReturnType<typeof createBrowserRpc>['client'];session:CloudSession;filesUrl?:string;profile:{id:string;displayName:string};
+  /** `publish` starts a new model; `manage` lists the user's models for corrections, files and withdrawal. */
+  mode?:'publish'|'manage';
 }
-const licenses={
-  'CC BY 4.0':{url:'https://creativecommons.org/licenses/by/4.0/',commercialUse:'allowed' as const,conditions:['Credit the original creator.']},
-  'CC BY-NC 4.0':{url:'https://creativecommons.org/licenses/by-nc/4.0/',commercialUse:'restricted' as const,conditions:['Credit the original creator.','Non-commercial use only.']},
+const credit='Credit the creator.';
+/** The licenses a publisher can choose. Other records the publisher's own terms, which have no standard license link. */
+export const publishLicenses={
+  'CC BY 4.0':{url:'https://creativecommons.org/licenses/by/4.0/',commercialUse:'allowed' as const,conditions:[credit]},
+  'CC BY-SA 4.0':{url:'https://creativecommons.org/licenses/by-sa/4.0/',commercialUse:'allowed' as const,conditions:[credit,'Share adaptations under the same license.']},
+  'CC BY-NC 4.0':{url:'https://creativecommons.org/licenses/by-nc/4.0/',commercialUse:'restricted' as const,conditions:[credit,'Non-commercial use only.']},
+  'CC BY-NC-SA 4.0':{url:'https://creativecommons.org/licenses/by-nc-sa/4.0/',commercialUse:'restricted' as const,conditions:[credit,'Non-commercial use only.','Share adaptations under the same license.']},
+  'CC BY-ND 4.0':{url:'https://creativecommons.org/licenses/by-nd/4.0/',commercialUse:'allowed' as const,conditions:[credit,'Do not share modified versions.']},
+  'CC BY-NC-ND 4.0':{url:'https://creativecommons.org/licenses/by-nc-nd/4.0/',commercialUse:'restricted' as const,conditions:[credit,'Non-commercial use only.','Do not share modified versions.']},
   'CC0 1.0':{url:'https://creativecommons.org/publicdomain/zero/1.0/',commercialUse:'allowed' as const,conditions:[]},
 };
+type LicenseChoice=keyof typeof publishLicenses|'other';
+export const CUSTOM_LICENSE='Custom license';
+const rightsBasis='I created and own this model, or have the right to redistribute it and every included file under the selected license.';
 
 /** A draft and its files stay private until their owner explicitly publishes. */
-export function PublishModel({client,session,filesUrl,profile}:PublishModelProps):JSX.Element {
+export function PublishModel({client,session,filesUrl,profile,mode='publish'}:PublishModelProps):JSX.Element {
   const api=useMemo(()=>new CommonsPublishing(client),[client]);
   const [state,setState]=useState<CommonsOwnModels|null>(null);const [selected,setSelected]=useState('');
-  const [editing,setEditing]=useState(true);const [copyFrom,setCopyFrom]=useState<CommonsOwnRevision|null>(null);
+  const [editing,setEditing]=useState(mode==='publish');const [copyFrom,setCopyFrom]=useState<CommonsOwnRevision|null>(null);
   const [busy,setBusy]=useState(false);const [error,setError]=useState<string|null>(null);const [message,setMessage]=useState('');
   const control=useRef<AbortController|null>(null);
   const refresh=async()=>{const next=await api.mine();setState(next);return next;};
@@ -27,13 +38,13 @@ export function PublishModel({client,session,filesUrl,profile}:PublishModelProps
     try{await work(abort.signal);}catch(failure){setError(abort.signal.aborted?'Operation cancelled. Refresh to check any upload that finished.':failure instanceof Error?failure.message:'The operation could not be completed.');}
     finally{setBusy(false);control.current=null;}
   };
-  return <section className="publish-page"><a href="#browse">← Browse models</a><h1>Publish a model</h1>
-    <p>Share your work with the community. Saving a draft keeps it private until you choose Publish.</p>
+  const manage=mode==='manage';
+  return <section className="publish-page"><a href="#browse">← Browse models</a><h1>{manage?'My models':'Publish a model'}</h1>
+    <p>{manage?'Your drafts and published models. Choose one to attach files, publish, correct or withdraw it.':'Share your work with the community. Saving a draft keeps it private until you choose Publish.'}</p>
     {error&&<p role="alert">{error}</p>}{message&&<p role="status">{message}</p>}
-    <h2>Your models</h2>{!state?<p role="status">Loading your models…</p>:state.models.length===0?<p>You haven’t published a model yet.</p>:<ul className="own-models">{state.models.map(model=>{
+    {manage&&(!state?<p role="status">Loading your models…</p>:state.models.length===0?<p>You haven’t published a model yet. <a href="#publish">Publish a model</a></p>:<ul className="own-models">{state.models.map(model=>{
       const latest=state.revisions.find(item=>item.id===model.latest_submission);return <li key={model.id}><button disabled={busy} onClick={()=>{setSelected(model.latest_submission??'');setEditing(false);setError(null);}}>{latest?.metadata.title??model.id}</button> <span>{model.published_revision?'Published':latest?.status==='pending'?'Draft':'Unpublished'}</span></li>;
-    })}</ul>}
-    <button disabled={busy} onClick={()=>{setSelected('');setCopyFrom(null);setEditing(true);setError(null);}}>New model</button>
+    })}</ul>)}
     {!editing&&revision&&<><h2>{revision.metadata.title}</h2><p>Revision {revision.number} · {revision.status}</p>
       {revision.status==='published'&&<a href={`#models/${encodeURIComponent(revision.model_id)}`}>View published model</a>}
       <button disabled={busy} onClick={()=>{setCopyFrom(revision);setEditing(true);}}>Create a correction</button>
@@ -54,23 +65,21 @@ export function PublishModel({client,session,filesUrl,profile}:PublishModelProps
 function ModelForm({profile,previous,busy,save}:{profile:{displayName:string};previous:CommonsOwnRevision|null;busy:boolean;save:(metadata:CommonsSubmission,basis:string,original:boolean)=>Promise<void>}):JSX.Element {
   const meta=previous?.metadata;const [title,setTitle]=useState(meta?.title??'');const [description,setDescription]=useState(meta?.description??'');
   const [category,setCategory]=useState(meta?.category??'Hardware and joinery');const [tags,setTags]=useState(meta?.tags.join(', ')??'');
-  const [original,setOriginal]=useState(previous?previous.creator_profile_id!==null:true);const [creator,setCreator]=useState(meta?.creator??'');
-  const [license,setLicense]=useState<keyof typeof licenses>((meta?.licenses[0]?.name??'') in licenses ? meta!.licenses[0]!.name as keyof typeof licenses : 'CC BY 4.0');const [licenseName,setLicenseName]=useState(meta?.licenses[0]?.name??'');const [licenseUrl,setLicenseUrl]=useState(meta?.licenses[0]?.url??'');
-  const [commercial,setCommercial]=useState<'allowed'|'restricted'|'unknown'>(meta?.licenses[0]?.commercialUse??'unknown');const [conditions,setConditions]=useState(meta?.licenses[0]?.conditions.join('\n')??'');
-  const [sourceName,setSourceName]=useState(meta?.source?.name??'');const [sourceUrl,setSourceUrl]=useState(meta?.source?.url??'');
-  const [credits,setCredits]=useState(meta?.credits??[{name:'',url:null,text:''}]);
-  const [extraLicenses,setExtraLicenses]=useState(meta?.licenses.slice(1).map(item=>({...item,conditions:item.conditions.join('\n')}))??[]);const [formats,setFormats]=useState(meta?.formats.join(', ')??'STL');
-  const [basis,setBasis]=useState(previous?.rights_basis??'I created this model and may distribute all included files under the selected license.');
+  const [formats,setFormats]=useState(meta?.formats.join(', ')??'STL');
+  const first=meta?.licenses[0];
+  const [license,setLicense]=useState<LicenseChoice>(!first?'CC BY 4.0':first.name in publishLicenses?first.name as keyof typeof publishLicenses:'other');
+  const [terms,setTerms]=useState(first&&!(first.name in publishLicenses)?[...(first.name===CUSTOM_LICENSE?[]:[first.name]),...first.conditions].join('\n'):'');
   const [formError,setFormError]=useState('');
   const submit=(event:FormEvent)=>{
     event.preventDefault();setFormError('');
-    if(!original&&(!sourceName.trim()||!sourceUrl.trim()||!creator.trim()||!licenseName.trim()||!licenseUrl.trim())){setFormError('Include the original creator, source and exact upstream license.');return;}
-    const name=original?profile.displayName:creator.trim();
+    const lines=terms.split('\n').map(value=>value.trim()).filter(Boolean);
+    if(license==='other'&&(lines.length===0||lines.length>50||lines.some(line=>line.length>1000))){setFormError('Describe your license terms in up to 50 lines of at most 1,000 characters each.');return;}
+    const name=profile.displayName;
+    const chosen=license==='other'?{name:CUSTOM_LICENSE,url:null,commercialUse:'unknown' as const,conditions:lines}:{name:license,...publishLicenses[license],conditions:[...publishLicenses[license].conditions]};
+    // A correction keeps notices recorded on earlier revisions; new models credit the publisher.
     const metadata:CommonsSubmission={title:title.trim(),description,category:category.trim(),creator:name,tags:tags.split(',').map(value=>value.trim()).filter(Boolean),formats:formats.split(',').map(value=>value.trim().toUpperCase()).filter(Boolean),imageUrl:meta?.imageUrl??null,
-      source:sourceUrl.trim()?{name:sourceName.trim()||'Original source',url:sourceUrl.trim()}:null,
-      licenses:[...(original?[{name:license,...licenses[license]}]:[{name:licenseName.trim(),url:licenseUrl.trim(),commercialUse:commercial,conditions:conditions.split('\n').map(value=>value.trim()).filter(Boolean)}]),...extraLicenses.map(item=>({...item,conditions:item.conditions.split('\n').map(value=>value.trim()).filter(Boolean)}))],
-      credits:credits.map(item=>({name:item.name.trim()||name,url:item.url?.trim()||null,text:item.text.trim()||`Original model by ${name}.`}))};
-    void save(metadata,basis,original);
+      source:meta?.source??null,licenses:[chosen,...(meta?.licenses.slice(1)??[])],credits:meta?.credits??[{name,url:null,text:`Original model by ${name}.`}]};
+    void save(metadata,rightsBasis,true);
   };
   return <form className="publish-form" onSubmit={submit}><h2>{previous?'Create a new revision':'Model details'}</h2>
     <label>Title<input required maxLength={1000} value={title} onChange={event=>setTitle(event.target.value)} disabled={busy}/></label>
@@ -78,32 +87,10 @@ function ModelForm({profile,previous,busy,save}:{profile:{displayName:string};pr
     <label>Category<input required maxLength={1000} value={category} onChange={event=>setCategory(event.target.value)} disabled={busy}/></label>
     <label>Tags (comma separated)<input value={tags} onChange={event=>setTags(event.target.value)} disabled={busy}/></label>
     <label>File formats (comma separated)<input required value={formats} onChange={event=>setFormats(event.target.value)} disabled={busy}/></label>
-    <label>Authorship<select value={original?'original':'redistributed'} onChange={event=>{const own=event.target.value==='original';setOriginal(own);setBasis(own?'I created this model and may distribute all included files under the selected license.':'');}} disabled={busy}><option value="original">My original work</option><option value="redistributed">Redistributed with permission</option></select></label>
-    {original?<label>License<select value={license} onChange={event=>setLicense(event.target.value as keyof typeof licenses)} disabled={busy}>{Object.keys(licenses).map(value=><option key={value}>{value}</option>)}</select></label>:<>
-      <label>Original creator<input required value={creator} onChange={event=>setCreator(event.target.value)} disabled={busy}/></label>
-      <label>Original license name and version<input required value={licenseName} onChange={event=>setLicenseName(event.target.value)} disabled={busy}/></label>
-      <label>Original license URL<input type="url" required value={licenseUrl} onChange={event=>setLicenseUrl(event.target.value)} disabled={busy}/></label>
-      <label>Commercial permission<select value={commercial} onChange={event=>setCommercial(event.target.value as typeof commercial)} disabled={busy}><option value="unknown">Unknown</option><option value="allowed">Allowed</option><option value="restricted">Restricted</option></select></label>
-      <label>License conditions (one per line)<textarea value={conditions} onChange={event=>setConditions(event.target.value)} disabled={busy}/></label>
-    </>}
-    {extraLicenses.map((item,index)=><fieldset key={index}><legend>Additional asset license {index+1}</legend>
-      <label>License name and version<input required value={item.name} onChange={event=>setExtraLicenses(rows=>rows.map((row,i)=>i===index?{...row,name:event.target.value}:row))} disabled={busy}/></label>
-      <label>License URL<input required type="url" value={item.url} onChange={event=>setExtraLicenses(rows=>rows.map((row,i)=>i===index?{...row,url:event.target.value}:row))} disabled={busy}/></label>
-      <label>Commercial use<select value={item.commercialUse} onChange={event=>setExtraLicenses(rows=>rows.map((row,i)=>i===index?{...row,commercialUse:event.target.value as typeof item.commercialUse}:row))} disabled={busy}><option value="unknown">Unknown</option><option value="allowed">Allowed</option><option value="restricted">Restricted</option></select></label>
-      <label>Required conditions<textarea value={item.conditions} onChange={event=>setExtraLicenses(rows=>rows.map((row,i)=>i===index?{...row,conditions:event.target.value}:row))} disabled={busy}/></label>
-      <button type="button" disabled={busy} onClick={()=>setExtraLicenses(rows=>rows.filter((_,i)=>i!==index))}>Remove additional license {index+1}</button>
-    </fieldset>)}
-    <button type="button" disabled={busy||extraLicenses.length>=49} onClick={()=>setExtraLicenses(rows=>[...rows,{name:'',url:'',commercialUse:'unknown',conditions:''}])}>Add another asset license</button>
-    <label>Source name<input required={!original} value={sourceName} onChange={event=>setSourceName(event.target.value)} disabled={busy}/></label>
-    <label>Source URL<input type="url" required={!original} value={sourceUrl} onChange={event=>setSourceUrl(event.target.value)} disabled={busy}/></label>
-    {credits.map((item,index)=><fieldset key={index}><legend>Attribution {index+1}</legend>
-      <label>Credit name<input value={item.name} placeholder={original?profile.displayName:creator} onChange={event=>setCredits(rows=>rows.map((row,i)=>i===index?{...row,name:event.target.value}:row))} disabled={busy}/></label>
-      <label>Credit URL<input type="url" value={item.url??''} onChange={event=>setCredits(rows=>rows.map((row,i)=>i===index?{...row,url:event.target.value||null}:row))} disabled={busy}/></label>
-      <label>Attribution and included notices<textarea maxLength={4000} value={item.text} onChange={event=>setCredits(rows=>rows.map((row,i)=>i===index?{...row,text:event.target.value}:row))} disabled={busy}/></label>
-      {credits.length>1&&<button type="button" disabled={busy} onClick={()=>setCredits(rows=>rows.filter((_,i)=>i!==index))}>Remove attribution {index+1}</button>}
-    </fieldset>)}
-    <button type="button" disabled={busy||credits.length>=100} onClick={()=>setCredits(rows=>[...rows,{name:'',url:null,text:''}])}>Add attribution</button>
-    <label>Redistribution rights declaration<textarea required minLength={20} maxLength={4000} value={basis} onChange={event=>setBasis(event.target.value)} disabled={busy}/></label>
+    <label>License<select value={license} onChange={event=>setLicense(event.target.value as LicenseChoice)} disabled={busy}>
+      {Object.keys(publishLicenses).map(value=><option key={value} value={value}>{value}</option>)}<option value="other">Other (describe the terms)</option>
+    </select></label>
+    {license==='other'&&<label>License terms<textarea required value={terms} onChange={event=>setTerms(event.target.value)} disabled={busy} placeholder="Describe how others may use, share and credit this model."/></label>}
     {formError&&<p role="alert">{formError}</p>}<button disabled={busy} type="submit">Save private draft</button>
   </form>;
 }
@@ -121,9 +108,9 @@ function DraftFiles({api,revision,filesUrl,busy,run,token,refresh,published,done
     }}/></label>{!filesUrl&&<p>File uploads are unavailable in this build.</p>}
       <label>Preview image (optional PNG or JPEG, up to 8 MiB)<input type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" disabled={busy||!filesUrl||files?.some(file=>/\.(png|jpe?g)$/i.test(file.filename))} onChange={event=>{
         const file=event.target.files?.[0];event.target.value='';if(file)void run(async(signal)=>{setConfirmed(false);await uploadCommonsFile(filesUrl!,await token(),revision.id,file,signal);await reload();done('Preview image uploaded and verified.');});
-      }}/></label><p>Commons generates a preview from supported model geometry. An uploaded image becomes the listing image. Include any required image credits and licenses in the model details.</p>
+      }}/></label><p>Commons generates a preview from supported model geometry. An uploaded image becomes the listing image. The selected license also applies to the image.</p>
       <p>Publishing makes these files and their license notices available to the community.</p>
-      <label className="publish-confirm"><input type="checkbox" checked={confirmed} onChange={event=>setConfirmed(event.target.checked)} disabled={busy}/>I have permission to redistribute every included file and have preserved all required licenses, conditions and credits.</label>
+      <label className="publish-confirm"><input type="checkbox" checked={confirmed} onChange={event=>setConfirmed(event.target.checked)} disabled={busy}/>I created and own these files, or have the right to redistribute them and everything they include under the selected license.</label>
       <button disabled={busy||!confirmed||!files?.some(file=>!/\.(png|jpe?g)$/i.test(file.filename))||files.some(file=>file.status!=='ready')} onClick={()=>void run(async(signal)=>{await api.publish(revision.id,published,revision.asset_version,confirmed,signal);window.dispatchEvent(new Event('commons:catalog-changed'));await reload();done('Model published.');})}>Publish model</button>
     </>}
   </section>;

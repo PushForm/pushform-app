@@ -38,6 +38,18 @@ Saved images are public right away while your profile is visible; you don't need
 
 Earlier profiles may show a picture loaded from an address you entered. It keeps showing until you upload a profile picture, which then takes its place. You can no longer enter a picture address.
 
+## Publish a model
+
+Publishing needs a public profile. Choose **Publish model**, fill in the title, description, category, tags and file formats, and choose a license:
+
+- **CC BY 4.0**, **CC BY-SA 4.0**, **CC BY-NC 4.0**, **CC BY-NC-SA 4.0**, **CC BY-ND 4.0** or **CC BY-NC-ND 4.0**: Creative Commons licenses that require credit, with the share-alike, non-commercial or no-derivatives conditions their names show. Each links to its license text on the model page.
+- **CC0 1.0**: dedicates the model to the public domain.
+- **Other (describe the terms)**: write your own terms, one per line. They appear on the model page as written, and the model counts as having unknown commercial-use permission.
+
+The model is published under your public profile name. Choose **Save private draft**, attach the model files and an optional preview image, then confirm that you created and own the files, or have the right to redistribute them and everything they include under the license you chose. Choose **Publish model** to make it public. The Terms of Use require you to have these rights.
+
+Choose **My models** to see your drafts and published models. From there you can attach files to a draft, publish it, create a correction with new details, or withdraw a published model. Copies people already downloaded keep their licenses.
+
 ## Preview a model
 
 Commons renders thumbnails from supported model geometry on its server; a contributor does not need to upload a screenshot. An optional uploaded PNG or JPEG is used as the listing image instead. Choose **Explore in 3D** on a model page to rotate the geometry, zoom, or reset the view. Drag to orbit, use the labeled controls, or focus the viewer and use arrow keys, plus/minus, and zero to reset. Previews are available without signing in; original downloads require your PushForm account and initial account setup.

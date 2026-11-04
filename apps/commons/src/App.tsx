@@ -57,7 +57,7 @@ function ModelDetail({ model, filesUrl, account, editorUrl }: { model: CatalogMo
         </section>}
         <section className="rights" aria-label="Licenses and attribution"><h2>Licenses & attribution</h2>
           {model.licenses.map((license, index) => <div key={index}>
-            <h3><a href={license.url} rel="noreferrer" target="_blank">{license.name} ↗</a></h3>
+            <h3>{license.url?<a href={license.url} rel="noreferrer" target="_blank">{license.name} ↗</a>:license.name}</h3>
             <p>{license.commercialUse === 'allowed' ? 'Commercial use permitted under this license.' :
               license.commercialUse === 'restricted' ? 'Commercial use is restricted by this license.' : 'Commercial-use permission has not been established.'}</p>
             {license.conditions.length > 0 && <ul>{license.conditions.map((condition, i) => <li key={i}>{condition}</li>)}</ul>}
@@ -72,7 +72,7 @@ function ModelDetail({ model, filesUrl, account, editorUrl }: { model: CatalogMo
   </>;
 }
 
-export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUrl }: { loadCatalog: CatalogLoader | null; filesUrl?: string | undefined; account?:CommonsAccount|null; publishPage?:ReactNode;editorUrl?:string|undefined }) {
+export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUrl }: { loadCatalog: CatalogLoader | null; filesUrl?: string | undefined; account?:CommonsAccount|null; publishPage?:((mode:'publish'|'manage')=>ReactNode)|undefined;editorUrl?:string|undefined }) {
   const [state, setState] = useState<CatalogState>({ kind: loadCatalog ? 'loading' : 'unconfigured' });
   const [attempt, setAttempt] = useState(0);
   useEffect(()=>{const refresh=()=>setAttempt(value=>value+1);window.addEventListener('commons:catalog-changed',refresh);return()=>window.removeEventListener('commons:catalog-changed',refresh);},[]);
@@ -105,7 +105,7 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
   const selected = selectedId ? models.find((model) => model.id === selectedId) : null;
   useEffect(() => {
     if(onProfile)return;
-    if(hash==='#account'||hash==='#publish'){document.title=hash==='#account'?'Your profile — PushForm Commons':'Publish model — PushForm Commons';heading.current?.focus({preventScroll:true});return;}
+    if(hash==='#account'||hash==='#publish'||hash==='#my-models'){document.title=hash==='#account'?'Your profile — PushForm Commons':hash==='#publish'?'Publish model — PushForm Commons':'My models — PushForm Commons';heading.current?.focus({preventScroll:true});return;}
     document.title = selected ? `${selected.title} — PushForm Commons` : 'PushForm Commons — Models for your next project';
     if (state.kind !== 'ready' || !window.location.hash) return;
     heading.current?.focus({ preventScroll: true });
@@ -118,9 +118,9 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
     <a className="skip-link" href="#main">Skip to content</a>
     <header className="site-header"><a className="brand" href="#browse" aria-label="PushForm Commons home">
       <img src="/pf-logo-mark.svg" alt="" width="30" height="30" /><span>PushForm <strong>Commons</strong></span>
-    </a><nav aria-label="Commons">{account&&<><a href="#publish">Publish model</a><MyProfileLink own={own}/></>}<a className="editor-link" href="https://app.pushform.io">Open PushForm <span aria-hidden="true">↗</span></a></nav></header>
+    </a><nav aria-label="Commons">{account&&<><a href="#publish">Publish model</a><a href="#my-models">My models</a><MyProfileLink own={own}/></>}<a className="editor-link" href="https://app.pushform.io">Open PushForm <span aria-hidden="true">↗</span></a></nav></header>
     <main id="main" ref={heading} tabIndex={-1}>
-      {profileLookup?<CommonsProfilePageView lookup={profileLookup} profiles={account?.profiles??null} filesUrl={filesUrl} ownProfileId={own?.id??null}/>:hash==='#account'?account?<AccountPage account={account} filesUrl={filesUrl}/>:<section className="status-panel"><h1>Accounts are unavailable in this build.</h1></section>:hash==='#publish'?publishPage??<section className="status-panel"><h1>Publishing is unavailable in this build.</h1></section>:state.kind === 'ready' && selectedId ? selected ? <ModelDetail model={selected} filesUrl={filesUrl} account={account} editorUrl={editorUrl} /> :
+      {profileLookup?<CommonsProfilePageView lookup={profileLookup} profiles={account?.profiles??null} filesUrl={filesUrl} ownProfileId={own?.id??null}/>:hash==='#account'?account?<AccountPage account={account} filesUrl={filesUrl}/>:<section className="status-panel"><h1>Accounts are unavailable in this build.</h1></section>:hash==='#publish'||hash==='#my-models'?publishPage?.(hash==='#publish'?'publish':'manage')??<section className="status-panel"><h1>Publishing is unavailable in this build.</h1></section>:state.kind === 'ready' && selectedId ? selected ? <ModelDetail model={selected} filesUrl={filesUrl} account={account} editorUrl={editorUrl} /> :
         <section className="status-panel"><p className="eyebrow">Model unavailable</p><h1>This model isn’t in the catalog.</h1>
           <p>It may have been removed or the link may be out of date.</p><a href="#browse">Browse models</a></section> : <>
         <section className="hero"><p className="eyebrow">A shared place to start</p>

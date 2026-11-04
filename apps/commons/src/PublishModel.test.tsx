@@ -8,7 +8,7 @@ const metadata={title:'Contributor fixture',description:'A model for publishing 
   licenses:[{name:'CC0 1.0',url:'https://creativecommons.org/publicdomain/zero/1.0/',commercialUse:'allowed',conditions:[] as string[]}],credits:[{name:'Example Maker',url:'https://example.com/maker',text:'Original author notice.'}]};
 const draft={id:revisionId,model_id:'contributor-model',number:1,status:'pending',asset_version:2,rights_basis:'Original files owned by this contributor.',creator_profile_id:profileId,self_service:true,metadata};
 const asset={id:assetId,revision_id:revisionId,filename:'original.stl',format:'stl',size_bytes:3,sha256:'a'.repeat(64),status:'ready',created_at:'2026-10-31T00:00:00Z',verified_at:'2026-10-31T00:00:01Z'};
-function setup(existing=false,value=draft){
+function setup(existing=false,value=draft,mode:'publish'|'manage'=existing?'manage':'publish'){
   let current=existing?{models:[{id:value.model_id,latest_submission:revisionId,published_revision:null as string|null}],revisions:[value]}:{models:[],revisions:[]};
   const rpc=vi.fn((name:string,args:Record<string,unknown>)=>{const execute=async()=>{
     if(name==='commons_my_models')return{data:current,error:null};
@@ -17,11 +17,11 @@ function setup(existing=false,value=draft){
     if(name==='commons_publish_model'){current={models:[{id:value.model_id,latest_submission:revisionId,published_revision:revisionId}],revisions:[{...value,status:'published'}]};return{data:current.revisions[0],error:null};}
     throw new Error('Unexpected operation');
   };const promise=execute();return Object.assign(promise,{abortSignal:()=>promise});});
-  render(<PublishModel client={{rpc} as unknown as PublishModelProps['client']} session={{getAccessToken:async()=>'token'} as PublishModelProps['session']} filesUrl="http://localhost:8788" profile={{id:profileId,displayName:'Example Maker'}}/>);return rpc;
+  render(<PublishModel client={{rpc} as unknown as PublishModelProps['client']} session={{getAccessToken:async()=>'token'} as PublishModelProps['session']} filesUrl="http://localhost:8788" profile={{id:profileId,displayName:'Example Maker'}} mode={mode}/>);return rpc;
 }
 afterEach(cleanup);
 it('saves a private structured draft without a staff approval operation',async()=>{
-  const rpc=setup();await screen.findByText('You haven’t published a model yet.');
+  const rpc=setup();await screen.findByRole('heading',{name:'Model details'});expect(screen.queryByRole('button',{name:'New model'})).toBeNull();
   fireEvent.change(screen.getByLabelText('Title'),{target:{value:'My shelf bracket'}});
   fireEvent.click(screen.getByRole('button',{name:'Save private draft'}));
   await screen.findByText('Draft saved. Attach files, then publish when ready.');
@@ -33,7 +33,7 @@ it('saves a private structured draft without a staff approval operation',async()
 it('requires explicit rights confirmation for the exact verified asset version and publishes directly',async()=>{
   const rpc=setup(true);fireEvent.click(await screen.findByRole('button',{name:'Contributor fixture'}));await screen.findByText(/original.stl ·/);
   const publish=screen.getByRole('button',{name:'Publish model'}) as HTMLButtonElement;expect(publish.disabled).toBe(true);
-  fireEvent.click(screen.getByRole('checkbox',{name:/I have permission to redistribute/}));expect(publish.disabled).toBe(false);fireEvent.click(publish);
+  fireEvent.click(screen.getByRole('checkbox',{name:/have the right to redistribute them/}));expect(publish.disabled).toBe(false);fireEvent.click(publish);
   await screen.findByText('Model published.');
   expect(rpc).toHaveBeenCalledWith('commons_publish_model',{p_revision:revisionId,p_expected_published:null,p_expected_asset_version:2,p_rights_confirmed:true});
 });
@@ -44,4 +44,22 @@ it('retains every original license and attribution URL when creating a correctio
   await waitFor(()=>expect(rpc.mock.calls.some(([name])=>name==='commons_submit_model')).toBe(true));
   const submitted=rpc.mock.calls.find(([name])=>name==='commons_submit_model')![1].p_metadata as typeof metadata;
   expect(submitted.licenses).toEqual(previous.metadata.licenses);expect(submitted.credits).toEqual(previous.metadata.credits);
+});
+it('offers only the Creative Commons licenses or the publisher’s own terms, with no authorship, attribution or extra license fields',async()=>{
+  const rpc=setup();await screen.findByRole('heading',{name:'Model details'});expect(screen.queryByRole('button',{name:'New model'})).toBeNull();
+  for(const label of ['Authorship','Original creator','Credit name','Redistribution rights declaration','Original license URL'])expect(screen.queryByLabelText(label)).toBeNull();
+  for(const name of ['Add attribution','Add another asset license'])expect(screen.queryByRole('button',{name})).toBeNull();
+  const options=Array.from((screen.getByLabelText('License') as HTMLSelectElement).options).map(option=>option.textContent);
+  expect(options).toEqual(['CC BY 4.0','CC BY-SA 4.0','CC BY-NC 4.0','CC BY-NC-SA 4.0','CC BY-ND 4.0','CC BY-NC-ND 4.0','CC0 1.0','Other (describe the terms)']);
+  fireEvent.change(screen.getByLabelText('Title'),{target:{value:'Garden gate'}});fireEvent.change(screen.getByLabelText('License'),{target:{value:'other'}});
+  fireEvent.change(screen.getByLabelText('License terms'),{target:{value:'Personal use only.\n\nAsk before selling copies.'}});
+  fireEvent.click(screen.getByRole('button',{name:'Save private draft'}));await screen.findByText('Draft saved. Attach files, then publish when ready.');
+  const args=rpc.mock.calls.find(([name])=>name==='commons_submit_model')![1];
+  expect(args.p_original_work).toBe(true);expect(String(args.p_rights_basis)).toContain('right to redistribute');
+  expect((args.p_metadata as typeof metadata).licenses).toEqual([{name:'Custom license',url:null,commercialUse:'unknown',conditions:['Personal use only.','Ask before selling copies.']}]);
+  expect((args.p_metadata as typeof metadata).credits).toEqual([{name:'Example Maker',url:null,text:'Original model by Example Maker.'}]);
+});
+it('lists the user’s models only on My models, with a link to publish when there are none',async()=>{
+  setup(false,draft,'manage');expect(await screen.findByRole('heading',{name:'My models'})).toBeTruthy();
+  expect(await screen.findByRole('link',{name:'Publish a model'})).toBeTruthy();expect(screen.queryByRole('heading',{name:'Model details'})).toBeNull();
 });

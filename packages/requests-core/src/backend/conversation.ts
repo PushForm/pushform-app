@@ -5,12 +5,12 @@ import { z } from 'zod';
 import type { Tracker, TrackerIssue } from '../adapters/tracker.ts';
 import { TrackerError } from '../adapters/tracker.ts';
 import { briefSchema, completeness, emptyBriefFor, type Brief, type DeclineReason, type Path } from '../agents/brief.ts';
-import { answerPending, runTurn, warmPrompt, type AnthropicLike, type WarmClient, type WarmUsage, type ClientToolCall, type PendingClientTools, type ToolCallEvent, type ToolHandler, type ToolResult } from '../agents/client.ts';
+import { answerPending, runTurn, type RoundPhase, warmPrompt, type AnthropicLike, type WarmClient, type WarmUsage, type ClientToolCall, type PendingClientTools, type ToolCallEvent, type ToolHandler, type ToolResult } from '../agents/client.ts';
 import { retrieveUserHelp, USER_HELP_RULES } from '../agents/digest.ts';
 import { GUIDANCE_RULES } from '../guidance.ts';
 import { PICTURE_RULES } from '../agents/pictures.ts';
 import { DOCUMENT_RULES, MODEL_DOCUMENT_RULES, RENDER_TOOL, documentTools, editableDocument, type DocumentCapability } from '../agents/document.ts';
-import { modelRenderSchema, modelRenderViewName, modelRenderViews } from '@pushform/extension-protocol';
+import { MODEL_TOOLS, modelRenderSchema, modelRenderViewName, modelRenderViews } from '@pushform/extension-protocol';
 import type { DigestSection } from '../agents/digest.ts';
 import { helpAgent } from '../agents/help.ts';
 import { intakeAgent } from '../agents/intake.ts';
@@ -23,6 +23,7 @@ import { issueBody, issueLabels, issueTitle, transcriptUrl } from '../domain/iss
 import { isClosedRequesterState } from '../domain/states.ts';
 import type { Conversation, ConversationKind, ConversationMessage, ConversationPath, MessagePicture, Eligibility, Kind, PanelScreen, Request as PipelineRequest, RequestDetail, SuspendedTurn } from '../domain/types.ts';
 import { CORS_HEADERS, enforceRate, errorResponse, HttpError, httpErrorOf, json, lookupRoles, validateSession, type SessionUser, type SessionValidator } from './auth.ts';
+import { blockStatus, messageStatus, NEXT_STEP, resumeStatus, statusSender, type StatusLine } from './status.ts';
 import { conversationFromRow, requestDetailFromRow, requestFromRow, type AttachmentKind, type MeView, type ServiceDb, type SqlAttachmentRow, type UserDb } from './db.ts';
 
 /**
@@ -434,6 +435,8 @@ export type SseEvent =
   /** A render call carries `review`: its number among the requester message's allowed reviews, as the backend counts them. */
   | { event: 'tool_request'; data: { calls: (ClientToolCall & { review?: { index: number; limit: number } })[] } }
   | { event: 'error'; data: { code: string; message: string } }
+  /** What a turn that edits a 3D model is doing while nothing else is sent (see `status.ts`); never saved or shown to the model. */
+  | { event: 'status'; data: StatusLine }
   /** `ended`: the conversation is closed and the next message needs a new one; `reason` says why (filed, added, start_over, or abusive content). */
   | { event: 'done'; data: { messageCount: number; limitReached: boolean; ended: boolean; reason?: TurnEndReason; awaitingTools?: boolean } };
 export function formatSse(e: SseEvent): string { return `event: ${e.event}\ndata: ${JSON.stringify(e.data)}\n\n`; }
@@ -480,6 +483,8 @@ interface TurnRun {
   pathChanged: boolean;
   /** Records saved ahead of the turn's own: the requester message (after any closers), or the editor's answers. */
   leading: ConversationMessage[];
+  /** The status line this request opens with, on turns that edit a 3D model. */
+  status: StatusLine;
   setup: {
     model: string; system: string; tools: Anthropic.Tool[]; context: string; historyLength: number;
     messages: Anthropic.MessageParam[]; document: DocumentCapability | null;
@@ -818,7 +823,15 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     const reviewLimit = config.limits.renderReviewsPerTurn;
     let reviews = setup.resume?.reviews ?? 0;
     const reviewIndex = new Map<string, number>();
-    return sseResponse(deps.log, async (emit) => {
+    // Status lines go to turns that can edit a 3D model, whose rounds can think for a minute before any text.
+    const statusOn = clientTools.has(MODEL_TOOLS.applyOperations.name);
+    return sseResponse(deps.log, async (send) => {
+      const status = statusOn ? statusSender(line => send({ event: 'status', data: line })) : null;
+      // Anything else sent restarts the status line's silence clock.
+      const emit = (e: SseEvent) => { status?.quiet(); send(e); };
+      try { await body(emit, status); } finally { status?.stop(); }
+    });
+    async function body(emit: (e: SseEvent) => void, status: ReturnType<typeof statusSender> | null): Promise<void> {
       const appended: ConversationMessage[] = [...t.leading];
       const briefEvent = () => emit({ event: 'brief', data: { brief: store.getBrief(), title: store.getTitle(), path: store.getPath(), estimatedClass: store.getBrief()?.estimatedClass ?? null } });
       if (t.pathChanged) briefEvent();
@@ -851,6 +864,10 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
           ...turnSettings(editing), ...(editing && reviewing ? { maxToolRounds: config.limits.documentToolRoundsWithReview } : {}),
           // Progress notes stay off until the hosted model accepts the progress-update display; requesting it fails editing turns.
           progressUpdates: false,
+          ...(status ? { onPhase: (phase: RoundPhase) => {
+            if (phase.kind === 'request') status.send(phase.round === 0 ? t.status : NEXT_STEP);
+            else { const line = blockStatus(phase); if (line) status.send(line); }
+          } } : {}),
           onText: (delta) => {
             firstTextMs ??= Math.round(performance.now() - generationStarted);
             emit({ event: 'text', data: { delta } });
@@ -862,12 +879,14 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
           },
         });
       } catch (error) {
+        status?.stop();
         // A failed model call still keeps the requester's message, the tool calls and the brief the panel already shows
         // (the message budget was spent); the next turn then continues from them.
         try { await persist(); } catch (saveError) { deps.log?.(`turn ${id}: save after failure: ${saveError instanceof Error ? saveError.message : String(saveError)}`); }
         try { await recordPending(); } catch (fileError) { deps.log?.(`turn ${id}: record after failure: ${fileError instanceof Error ? fileError.message : String(fileError)}`); }
         throw error;
       }
+      status?.stop();
       const generationMs = Math.round(performance.now() - generationStarted);
       const reason = store.ended();
       // A turn that also ended the conversation (filed, start over) does not wait for the editor: the calls are dropped.
@@ -906,7 +925,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       }) } });
       emit({ event: 'done', data: { messageCount: saved.messageCount, limitReached: saved.messageCount >= config.limits.messagesPerConversation, ended: reason !== null,
         ...(reason ? { reason } : {}), ...(turn ? { awaitingTools: true } : {}) } });
-    });
+    }
   };
 
   /** A new requester message: one agent turn, with document tools when the browser offers them. */
@@ -958,6 +977,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       timing,
       user, conversation, store, handlers: agent.handlers(ctx, store), pathChanged: path !== conversation.path,
       leading: [...closers, { role: 'user', text: body.text, at: base.now, ...(pictures.length ? { attachments: pictures } : {}) }],
+      status: messageStatus(pictures.length > 0),
       setup: {
         ...turnPrompt(config.models, ctx, document), context, historyLength: prior.length, messages: historyOf(prior, context, body.text, pictures, images), document, resume: undefined,
       },
@@ -1020,6 +1040,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     return streamTurn({
       timing,
       user, conversation, store, handlers: agentFor(ctx.path).handlers(ctx, store), pathChanged: false,
+      status: resumeStatus(pending.calls.map(call => ({ name: call.name, isError: answers.get(call.id)?.isError ?? true }))),
       // The transcript never keeps a render's pictures: its record names the views in a placeholder instead.
       leading: pending.calls.map(call => {
         const answer = answers.get(call.id);

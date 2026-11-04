@@ -571,6 +571,11 @@ describe('pictures posted with messages', () => {
     expect(stored[0]).toMatchObject({ role: 'user', text: 'Build this', attachments: [picture] });
   });
 
+  it('opens a model turn with the pictures status line when the message carries pictures', async () => {
+    const events = parseSse(await (await send(pictured(), { text: 'Build this', attachments: [ATTACHMENT_ID], document: { type: 'model', apiVersion: 1, edit: 1 } })).text());
+    expect(events[0]).toEqual({ event: 'status', data: { phase: 'reading', text: 'Looking at your pictures…' } });
+  });
+
   it('accepts a message of pictures alone and refuses one with neither text nor pictures', async () => {
     const h = pictured();
     expect((await send(h, { text: '', attachments: [ATTACHMENT_ID] })).status).toBe(200);
@@ -924,6 +929,31 @@ describe('document tools', () => {
     expect(line).toMatch(/cacheRead=\d+ cacheWrite=\d+ setupMs=\d+ setup=auth:\d+,/);
     expect(line).toContain('toolChars=14');
     expect(line).toMatch(/rounds=\[\d+\/\d+\/\d+ms,in100,out20,cr0,cw0\]/);
+  });
+
+  it('sends status lines on turns that edit a 3D model: the opening line, a batch being written, and the line for how the last step ended', async () => {
+    const MODEL = { type: 'model', apiVersion: 1, edit: 1 };
+    const apply = { id: 'a1', name: 'model_apply_operations', input: { label: 'Cabinet', operations: [] } };
+    const first = harness({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help' }) }, turns: [{ thinking: [''], text: ['Building it.'], toolUses: [apply] }] });
+    const events = parseSse(await (await call(first.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'Build a cabinet', document: MODEL })).text());
+    expect(events.map(e => e.event)).toEqual(['status', 'text', 'status', 'tool_request', 'done']);
+    expect(events[0]!.data).toEqual({ phase: 'reading', text: 'Reading your request…' });
+    expect(events[2]!.data).toEqual({ phase: 'writing', text: 'Writing the change…' });
+    // Status lines are never saved with the conversation.
+    const stored = first.service.named('fr_conversation_append')[0]!.params['p_messages'] as ConversationMessage[];
+    expect(JSON.stringify(stored)).not.toContain('Writing the change');
+    const resume = async (isError: boolean) => {
+      const h = harness({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help', messages: stored, message_count: 1 }) }, turns: [{ text: ['Done.'] }] });
+      const res = await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/tool-results`, { results: [{ toolUseId: 'a1', content: isError ? '{"ok":false}' : '{"ok":true}', isError }] });
+      return parseSse(await res.text());
+    };
+    const applied = await resume(false);
+    expect(applied.map(e => e.event)).toEqual(['status', 'text', 'done']);
+    expect(applied[0]!.data).toEqual({ phase: 'planning', text: 'Change applied. Working out the next step…' });
+    expect((await resume(true))[0]!.data).toEqual({ phase: 'fixing', text: 'That change didn’t apply. Working out a fix…' });
+    // Layout documents and guidance-only tabs get none.
+    const { events: layout } = await suspended();
+    expect(layout.map(e => e.event)).not.toContain('status');
   });
 
   it('rejects results when nothing is waiting or for calls that were not made', async () => {

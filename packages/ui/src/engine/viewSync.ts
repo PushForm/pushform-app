@@ -2,7 +2,7 @@
 // Copyright 2026 PushForm contributors
 import type { DisplayState } from '@pushform/commands';
 import { displayFromStyle } from '@pushform/commands';
-import type { DocumentState } from '@pushform/model';
+import type { DocumentState, ImageStore } from '@pushform/model';
 import type { Viewport } from '@pushform/render';
 import { useAppStore } from '../store';
 import { backgroundToRender, displayToRender, fogToRender, shadowsToRender } from './renderAdapter';
@@ -12,11 +12,13 @@ import { backgroundToRender, displayToRender, fogToRender, shadowsToRender } fro
  * viewport. The bootstrap calls this from `syncBodies` (every document change) so the active
  * style is the single source for display settings; `view.*` commands patch the style.
  */
-export function applyDocumentView(viewport: Viewport, state: DocumentState): void {
+export function applyDocumentView(viewport: Viewport, state: DocumentState, images?: ImageStore): void {
   viewport.setDisplay(displayToRender(state));
   viewport.setSky(backgroundToRender(state));
   viewport.setShadows(shadowsToRender(state));
   viewport.setFog(fogToRender(state));
+  const env = state.styles.get(state.activeStyleId)?.environment;
+  viewport.setEnvironment(env ?? null, state.sceneLights ?? [], env?.skyboxImageId ? images?.objectUrl(env.skyboxImageId) : undefined);
 }
 
 /**

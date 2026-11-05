@@ -27,3 +27,4 @@ export * from './dimensions';
 export * from './statistics';
 
 export * from './attribution';
+export * from './environment';

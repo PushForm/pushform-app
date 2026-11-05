@@ -1712,6 +1712,17 @@
 }
 
 /* Styles panel */
+.pf-styles .pf-tabs-sub { flex-wrap: wrap; }
+.pf-environment { display: grid; gap: 10px; min-width: 0; }
+.pf-env-field { display: grid; gap: 5px; min-width: 0; }
+.pf-env-field > input[type='range'] { width: 100%; margin: 0; accent-color: var(--pf-accent); }
+.pf-env-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.pf-env-between { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.pf-env-editor { display: grid; gap: 9px; border-top: 1px solid var(--pf-border); padding-top: 12px; }
+.pf-env-light-list { display: grid; gap: 5px; }
+.pf-env-light-list > button { text-align: left; overflow-wrap: anywhere; }
+.pf-environment .pf-form-actions { flex-wrap: wrap; gap: 6px; }
+.pf-environment details > summary { margin: 5px 0; cursor: pointer; }
 .pf-tabs {
   display: flex;
   gap: 2px;

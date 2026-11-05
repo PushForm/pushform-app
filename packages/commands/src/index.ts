@@ -129,6 +129,7 @@ export { selectableOf, enterPathOf } from './tools/impl/Select';
 export * from './commands/tags';
 export * from './commands/scenes';
 export * from './commands/styles';
+export * from './commands/environment';
 export * from './commands/shadows';
 export * from './commands/fog';
 export * from './commands/modelInfo';

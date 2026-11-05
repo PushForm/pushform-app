@@ -65,6 +65,7 @@ function syncEnvironment(state: DocumentState, patch: ShadowPatch): void {
   if (patch.useSunForShading !== undefined) env.sunEnabled = patch.useSunForShading;
   if (patch.light !== undefined) env.sunIntensity = patch.light / 50;
   if (patch.dark !== undefined) env.skyLight = patch.dark / 100;
+  if (['enabled', 'useSunForShading', 'light', 'dark'].some(key => patch[key as keyof ShadowPatch] !== undefined)) env.preset = 'custom';
 }
 
 export const shadowsSet = defineCommand({

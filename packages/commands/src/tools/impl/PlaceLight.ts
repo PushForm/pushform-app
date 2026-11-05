@@ -15,10 +15,12 @@ export class PlaceLightTool implements Tool {
   private position: Vec3 | null = null;
   private pointer: ToolPointerEvent | null = null;
   private options: SceneLightPatch = {};
+  private error = '';
   activate(ctx: ToolContext): void {
     this.ctx = ctx;
     this.position = null;
     this.pointer = null;
+    this.error = '';
     this.options =
       (ctx.commands.ctx.services.get('sceneLightPlacement') as SceneLightPatch | undefined) ?? {};
     ctx.commands.ctx.services.delete('sceneLightPlacement');
@@ -30,6 +32,7 @@ export class PlaceLightTool implements Tool {
   onCancel(): void {
     this.position = null;
     this.pointer = null;
+    this.error = '';
     this.ctx?.requestRender();
   }
   hasPendingWork(): boolean {
@@ -57,6 +60,11 @@ export class PlaceLightTool implements Tool {
     const ctx = this.ctx;
     const result = ctx.commands.tryExecute('light.create', params);
     if (result.ok) ctx.commands.ctx.tools?.activate('select');
+    else {
+      this.error =
+        result.error instanceof Error ? result.error.message : 'The light could not be placed.';
+      ctx.statusChanged();
+    }
   }
   overlay(): readonly OverlayPrimitive[] {
     const event = this.pointer,
@@ -77,9 +85,11 @@ export class PlaceLightTool implements Tool {
   }
   status() {
     return {
-      instructor: this.position
-        ? 'Click the point the light should aim at. Escape cancels.'
-        : 'Click to place the light. Escape cancels.',
+      instructor:
+        this.error ||
+        (this.position
+          ? 'Click the point the light should aim at. Escape cancels.'
+          : 'Click to place the light. Escape cancels.'),
       vcbLabel: '',
     };
   }

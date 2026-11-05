@@ -2287,6 +2287,9 @@
 .pf-account-button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pf-account-button:disabled { opacity: .65; cursor: wait; }
 .pf-modal.pf-account-dialog { box-sizing: border-box; width: min(440px, calc(100vw - 36px)); min-width: 0; max-height: calc(100dvh - 36px); padding: 24px; overflow: auto; color: var(--pf-text); font: 14px/1.5 var(--pf-font); overflow-wrap: anywhere; }
+.pf-account-session-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.pf-account-session-row p { min-width: 0; overflow-wrap: anywhere; }
+.pf-account-session-row button { flex-shrink: 0; margin-left: auto; }
 .pf-account-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .pf-account-heading h2 { margin: 0; font-size: 20px; }
 .pf-account-title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }

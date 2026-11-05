@@ -67,13 +67,14 @@ it('does not auto-download stale, malformed, wrong-route or nonmatching asset in
   const base={version:1,assetId:file.id,route:'#models/example-part',requestedAt:Date.now()};
   for(const value of [JSON.stringify({...base,requestedAt:Date.now()-15*60*1000}),'{bad-json',JSON.stringify({...base,route:'https://untrusted.example/'}),JSON.stringify({...base,assetId:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'}),JSON.stringify({...base,route:'#models/other-model'}),JSON.stringify({...base,requestedAt:Date.now()+60000}),JSON.stringify({...base,token:'must-never-be-accepted'})]){
     sessionStorage.setItem('pushform:commons:download',value);const view=render(<CommonsDownloadButton account={auth} filesUrl="https://files.example" file={file}/>);
-    expect(screen.queryByRole('button',{name:'Cancel download'})).toBeNull();expect(fetcher).not.toHaveBeenCalled();view.unmount();
+    expect(screen.queryByRole('status')).toBeNull();expect(fetcher).not.toHaveBeenCalled();view.unmount();
   }
 });
-it('lets a visitor cancel a pending authenticated download without retaining an automatic transfer intent',async()=>{
+it('keeps a pending download ready for sign-in without a cancel control',async()=>{
   const auth=account(null,false);const file={id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',name:'part.step',format:'STEP',sizeBytes:3,sha256:'a'.repeat(64)};
   window.history.replaceState(null,'','/#models/example-part');render(<CommonsDownloadButton account={auth} filesUrl="https://files.example" file={file}/>);
   fireEvent.click(screen.getByRole('button',{name:'Download ZIP — part.step'}));await screen.findByRole('heading',{name:'Sign in to continue'});
-  expect(sessionStorage.getItem('pushform:commons:download')).not.toBeNull();fireEvent.click(screen.getByRole('button',{name:'Cancel download'}));
-  expect(sessionStorage.getItem('pushform:commons:download')).toBeNull();expect(sessionStorage.getItem('pushform:commons:return')).toBeNull();expect(screen.queryByRole('heading',{name:'Sign in to continue'})).toBeNull();
+  expect(sessionStorage.getItem('pushform:commons:download')).not.toBeNull();
+  expect(screen.queryByRole('button',{name:'Cancel download'})).toBeNull();
+  expect(sessionStorage.getItem('pushform:commons:return')).toBe('#models/example-part');
 });

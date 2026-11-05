@@ -117,7 +117,7 @@ export function CommonsDownloadButton({account,filesUrl,file}:{account?:CommonsA
   if(!account)return <span>Sign-in is unavailable in this build.</span>;
   return <div className="commons-download">
     <button onClick={()=>{rememberCommonsReturnRoute();rememberDownload(file.id);setRequest(value=>({count:value.count+1,assetId:file.id,route:window.location.hash}));}}>Download ZIP — {file.name}</button>
-    {active&&<><button onClick={()=>{clearDownload(file.id);setRequest(value=>({...value,count:0}));}}>Cancel download</button><CommonsAccessGate account={account}><DownloadTransfer key={`${file.id}:${request.count}`} account={account} filesUrl={filesUrl!} file={file}/></CommonsAccessGate></>}
+    {active&&<CommonsAccessGate account={account}><DownloadTransfer key={`${file.id}:${request.count}`} account={account} filesUrl={filesUrl!} file={file}/></CommonsAccessGate>}
   </div>;
 }
 function DownloadTransfer({account,filesUrl,file}:{account:CommonsAccessAccount;filesUrl:string;file:CommonsFile}):JSX.Element {

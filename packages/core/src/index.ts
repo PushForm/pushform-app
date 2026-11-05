@@ -7,3 +7,4 @@ export * from './units';
 export * from './events';
 export * from './result';
 export * from './mesh';
+export * from './studioLighting';

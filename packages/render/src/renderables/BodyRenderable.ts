@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import type { Vec3 } from '@pushform/core';
-import { BackSide, BufferAttribute, BufferGeometry, Color, FrontSide, Group, Mesh, MeshLambertMaterial, ShaderChunk, Vector2 } from 'three';
+import { STUDIO_LIGHTING, STUDIO_KEY, type Vec3 } from '@pushform/core';
+import { BackSide, BufferAttribute, BufferGeometry, Color, FrontSide, Group, Mesh, MeshLambertMaterial, ShaderChunk, Vector2, Vector3 } from 'three';
 import type { Material, WebGLProgramParametersWithUniforms } from 'three';
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import type { RenderBody, RenderFaceGroup, RenderPath, RenderFaceCamera } from '../types';
@@ -51,6 +51,10 @@ export const hiddenLineShade = { value: new Vector2(0, 1) };
  * shared by every patched material, set by `SceneSync`.
  */
 export const cameraLight = { value: 0 };
+/** Local comparison controls: disable to reproduce the previous camera lighting. */
+export const studioLight = { value: 0 };
+export const studioLightLevels = { value: new Vector3(STUDIO_LIGHTING.soft.ambient, STUDIO_LIGHTING.soft.facing, STUDIO_LIGHTING.soft.key) };
+
 export const CAMERA_LIGHT = { ambient: 0.391, facing: 0.8125 } as const;
 
 /** Dashed grey of hidden-geometry edges. */
@@ -75,12 +79,14 @@ export function patchSelectTint(material: Material, color?: number): void {
     shader.uniforms['uPfSelectColor'] = { value: tint };
     shader.uniforms['uPfHiddenShade'] = hiddenLineShade;
     shader.uniforms['uPfCameraLight'] = cameraLight;
+    shader.uniforms['uPfStudioLight'] = studioLight;
+    shader.uniforms['uPfStudioLevels'] = studioLightLevels;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nattribute float flags;\nvarying float vPfFlags;\nattribute float uvq;\nvarying float vPfUvQ;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvPfFlags = flags;')
       .replace('#include <uv_vertex>', '#include <uv_vertex>\nvPfUvQ = 1.0 + uvq;\n#ifdef USE_MAP\nvMapUv = ( mapTransform * vec3( MAP_UV, vPfUvQ ) ).xy;\n#endif');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform vec3 uPfSelectColor;\nuniform vec2 uPfHiddenShade;\nuniform float uPfCameraLight;\nvarying float vPfFlags;\nvarying float vPfUvQ;')
+      .replace('#include <common>', '#include <common>\nuniform vec3 uPfSelectColor;\nuniform vec2 uPfHiddenShade;\nuniform float uPfCameraLight;\nuniform float uPfStudioLight;\nuniform vec3 uPfStudioLevels;\nvarying float vPfFlags;\nvarying float vPfUvQ;')
       .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
 if ( uPfHiddenShade.x > 0.5 ) {
   vec3 pfSun = reflectedLight.directDiffuse;
@@ -93,6 +99,11 @@ if ( uPfHiddenShade.x > 0.5 ) {
   vec3 pfLit = min( pfColor * ( ${CAMERA_LIGHT.ambient} + ${CAMERA_LIGHT.facing} * max( normal.z, 0.0 ) ), vec3( 1.0 ) );
   reflectedLight.directDiffuse = vec3( 0.0 );
   reflectedLight.indirectDiffuse = sRGBTransferEOTF( vec4( pfLit, 1.0 ) ).rgb;
+  if ( uPfStudioLight > 0.5 ) {
+    float pfKey = max( dot( normal, vec3( ${STUDIO_KEY.join(', ')} ) ), 0.0 );
+    float pfLevel = min( 1.0, uPfStudioLevels.x + uPfStudioLevels.y * max( normal.z, 0.0 ) + uPfStudioLevels.z * pfKey );
+    reflectedLight.indirectDiffuse = min( diffuseColor.rgb * pfLevel, vec3( 1.0 ) );
+  }
 }`)
       .replace('#include <map_fragment>', ShaderChunk.map_fragment.replace('texture2D( map, vMapUv )', 'texture2D( map, vMapUv / vPfUvQ )'))
       .replace(

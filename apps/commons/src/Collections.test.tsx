@@ -2,7 +2,7 @@
 // Copyright 2026 PushForm contributors
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { CloudSession, CommonsCollections, type AuthApi, type CommonsCollection, type CommonsFeaturedState } from '@pushform/cloud';
+import { CloudSession, CommonsCollections, type AuthApi, type CommonsCollection, type CommonsFeaturedState, type CommonsProfiles } from '@pushform/cloud';
 import type { CommonsAccount } from './account';
 import { App } from './App';
 import { exampleModel } from './catalog.fixture';
@@ -10,6 +10,7 @@ import { exampleModel } from './catalog.fixture';
 const collection: CommonsCollection = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', title: 'Workshop essentials', description: 'Useful fittings for the workshop.', visibility: 'public', version: 1, modelIds: ['workshop-hinge'], curator: { handle: 'example-maker', displayName: 'Example Maker' }, updatedAt: '2026-11-04T00:00:00Z' };
 const model = exampleModel();
 const disposals: (() => void)[] = [];
+const publicProfile = { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', handle: 'example-maker', displayName: 'Example Maker', bio: '', avatarUrl: null, links: [] };
 beforeEach(() => window.history.replaceState(null, '', '/'));
 afterEach(() => { cleanup(); disposals.splice(0).forEach(dispose => dispose()); });
 async function setup(role = 'none', own = true) {
@@ -151,4 +152,52 @@ it('shows imported creator cards and opens their credited models without implyin
   vi.mocked(auth.collections.creditedCreator).mockResolvedValue(null);
   window.location.hash = '#creators/credited-' + 'b'.repeat(32); fireEvent(window, new HashChangeEvent('hashchange'));
   expect(await screen.findByRole('heading', { name: 'This creator listing is unavailable.' })).toBeTruthy();
+});
+it('shows only the viewed profile’s public collections and opens their detail page', async () => {
+  const auth = await setup();
+  auth.account.profiles = { mine: async () => ({ ...publicProfile, active: true, version: 1 }), getByHandle: async () => ({ profile: publicProfile, models: [] }) } as unknown as CommonsProfiles;
+  vi.spyOn(auth.collections, 'mine').mockResolvedValue([{ ...collection, title: 'Private workshop', visibility: 'private' }]);
+  const publicDiscovery = await auth.collections.discovery();
+  vi.spyOn(auth.collections, 'discovery').mockResolvedValue({ ...publicDiscovery, featured: [], collections: [collection,
+    { ...collection, id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', title: 'Another maker collection', curator: { handle: 'another-maker', displayName: 'Example Maker' } },
+    { ...collection, id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', title: 'Unattributed collection', curator: null },
+  ] });
+  window.history.replaceState(null, '', '/u/example-maker');
+  render(<App {...auth} loadCatalog={async () => [model]} />);
+  const region = within(await screen.findByRole('region', { name: 'Public collections' }));
+  const link = await region.findByRole('link', { name: 'View collection Workshop essentials' });
+  expect(region.queryByText('Private workshop')).toBeNull();
+  expect(region.queryByText('Another maker collection')).toBeNull();
+  expect(region.queryByText('Unattributed collection')).toBeNull();
+  expect(region.getByRole('img', { name: 'Workshop essentials, 1 available models' })).toBeTruthy();
+  window.location.href = (link as HTMLAnchorElement).href;
+  fireEvent(window, new HashChangeEvent('hashchange'));
+  expect(await screen.findByRole('heading', { name: 'Workshop essentials', level: 1 })).toBeTruthy();
+  expect(window.location.pathname).toBe('/');
+});
+it('updates public collections when navigating to a profile without collections', async () => {
+  const auth = await setup('none', false);
+  auth.account.profiles = { mine: async () => null, getByHandle: async (handle: string) => ({ profile: { ...publicProfile, handle }, models: [] }) } as unknown as CommonsProfiles;
+  window.history.replaceState(null, '', '/u/example-maker');
+  render(<App {...auth} loadCatalog={async () => [model]} />);
+  await screen.findByRole('link', { name: 'View collection Workshop essentials' });
+  window.history.pushState(null, '', '/u/another-maker');
+  fireEvent(window, new PopStateEvent('popstate'));
+  expect(await screen.findByText('No public collections to show.')).toBeTruthy();
+  expect(screen.queryByRole('link', { name: 'View collection Workshop essentials' })).toBeNull();
+});
+it('distinguishes collection loading and failure from an empty profile and retries', async () => {
+  const auth = await setup('none', false);
+  auth.account.profiles = { mine: async () => null, getByHandle: async () => ({ profile: publicProfile, models: [] }) } as unknown as CommonsProfiles;
+  let reject!: (reason: Error) => void;
+  const discovery = vi.spyOn(auth.collections, 'discovery').mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; }));
+  window.history.replaceState(null, '', '/u/example-maker');
+  render(<App {...auth} loadCatalog={async () => [model]} />);
+  expect(await screen.findByText('Loading collections…')).toBeTruthy();
+  reject(new Error('Collections are temporarily unavailable.'));
+  expect(await screen.findByRole('alert')).toBeTruthy();
+  expect(screen.queryByText('No public collections to show.')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry collections' }));
+  expect(await screen.findByRole('link', { name: 'View collection Workshop essentials' })).toBeTruthy();
+  expect(discovery).toHaveBeenCalledTimes(2);
 });

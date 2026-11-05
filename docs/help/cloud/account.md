@@ -32,7 +32,7 @@ To sign out, open account details and choose **Sign out** at the top right, besi
 
 The profile form includes **Help improve PushForm**. Its checkbox starts checked when you have not saved a choice. Analytics starts only after you submit the form successfully with this choice checked. Uncheck it before continuing to decline.
 
-To change your choice later, open your account, change the checkbox, and choose **Save profile**. PushForm shares anonymous counts of sessions, document activity, tool groups and AI Help use. Your designs, file names and chat messages stay private. Analytics uses no cookies or persistent visitor identity and honors Do Not Track and Global Privacy Control. Accounts with no saved choice do not participate.
+To change your choice later, open your account, change the checkbox, and choose **Save profile**. PushForm shares anonymous counts of sessions, document activity, tool groups and AI Help use. Your designs, file names and chat messages stay private. PostHog analytics uses no cookies or persistent visitor identity and honors Do Not Track and Global Privacy Control. Accounts with no saved choice do not participate.
 
 ## Campaign links
 

@@ -56,7 +56,7 @@ it('holds a new account on the signup step, then opens the workspace once it is 
   const submit = within(step).getByRole('button', { name: 'Continue' }) as HTMLButtonElement;
   expect(submit.disabled).toBe(true);
   expect((within(step).getByRole('checkbox',{name:/Join the mailing list/}) as HTMLInputElement).checked).toBe(false);
-  expect((within(step).getByRole('checkbox', { name: /Share anonymous usage data/ }) as HTMLInputElement).checked).toBe(true);
+  expect((within(step).getByRole('checkbox', { name: /Share usage data.*private project milestones linked to your account/ }) as HTMLInputElement).checked).toBe(true);
   expect(within(step).getByRole('link', { name: 'Terms of Use' }).getAttribute('href')).toBe('https://pushform.io/terms.html');
   fireEvent.click(within(step).getByRole('checkbox', { name: /I accept the Terms of Use/ }));
   expect(submit.disabled).toBe(false);
@@ -128,7 +128,7 @@ it('edits the profile from account details and updates the header and auto-text'
   expect(within(dialog).queryByRole('checkbox', { name: /I accept/ })).toBeNull();
   expect(within(dialog).getByRole('checkbox', { name: /Join the mailing list/ })).toBeTruthy();
   expect(within(dialog).getByText(/You accepted the/)).toBeTruthy();
-  const analytics = within(dialog).getByRole('checkbox', { name: /Share anonymous usage data/ }) as HTMLInputElement;
+  const analytics = within(dialog).getByRole('checkbox', { name: /Share usage data/ }) as HTMLInputElement;
   expect(analytics.checked).toBe(true);
   fireEvent.click(analytics);
   fireEvent.change(within(dialog).getByLabelText(/First name/), { target: { value: 'Augusta' } });

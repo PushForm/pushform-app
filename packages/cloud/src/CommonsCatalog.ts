@@ -48,7 +48,7 @@ export const catalogModelSchema = z.object({
   credits: z.array(z.object({ name: text, url: catalogUrlSchema.nullable(), text: z.string().max(4000) }).strict()).min(1).max(100),
 }).strict();
 
-export const catalogSchema = z.object({ version: z.literal(1), models: z.array(catalogModelSchema).max(1000) }).strict()
+export const catalogSchema = z.object({ version: z.literal(1), models: z.array(catalogModelSchema) }).strict()
   .superRefine((catalog, context) => {
     const ids = new Set<string>();
     for (const model of catalog.models) {

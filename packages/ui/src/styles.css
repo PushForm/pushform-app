@@ -3194,6 +3194,35 @@ h4.pf-xui-text { font-size: 12px; }
 .pf-save-version, .pf-save-version *, .pf-commons-browser, .pf-commons-browser *, .pf-publishing-host, .pf-publishing-host * { box-sizing: border-box; }
 .pf-save-version h2 { overflow-wrap: anywhere; }
 
-.pf-publishing-host .upload-dialog button:not(.dialog-close) { border: 1px solid var(--pf-accent); border-radius: 6px; padding: 9px 16px; font: inherit; font-weight: 600; color: #fff; background: var(--pf-accent); cursor: pointer; }
+/* The sharing dialog is portalled outside .pf-app, so its controls need explicit shell styling. */
+.pf-publishing-host .dialog-backdrop { padding: 4vh 16px; background: #0006; }
+.pf-publishing-host .upload-dialog { max-height: 92dvh; border: 1px solid var(--pf-border); border-radius: 8px; box-shadow: 0 16px 48px #0004; overflow: hidden; }
+.pf-publishing-host .dialog-head, .pf-publishing-host .dialog-foot { flex-shrink: 0; background: var(--pf-surface); }
+.pf-publishing-host .dialog-head { padding: 20px 24px 16px; gap: 16px; }
+.pf-publishing-host .dialog-head h2 { font-size: 20px; line-height: 1.3; letter-spacing: normal; }
+.pf-publishing-host .dialog-body { padding: 24px; overflow-y: auto; min-height: 0; }
+.pf-publishing-host .dialog-foot { padding: 16px 24px; flex-wrap: wrap; }
+.pf-publishing-host .upload-details { gap: 24px; }
+.pf-publishing-host .upload-files, .pf-publishing-host .upload-form { min-width: 0; }
+.pf-publishing-host .snapshot-note { background: var(--pf-surface-2); }
+.pf-publishing-host .upload-form input:not([type=checkbox]), .pf-publishing-host .upload-form textarea,
+.pf-publishing-host .upload-form select, .pf-publishing-host .profile-step input,
+.pf-publishing-host .dialog-body > label select { width: 100%; min-width: 0; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); padding: 8px 10px; font: inherit; color: var(--pf-text); background: var(--pf-surface); }
+.pf-publishing-host textarea { resize: vertical; }
+.pf-publishing-host input[type=checkbox] { accent-color: var(--pf-accent); }
+.pf-publishing-host .dialog-body > label { display: grid; gap: 6px; margin-bottom: 16px; }
+.pf-publishing-host .upload-dialog button { min-height: 34px; border: 1px solid var(--pf-accent); border-radius: var(--pf-radius); padding: 7px 12px; font: inherit; font-weight: 600; color: #fff; background: var(--pf-accent); cursor: pointer; }
 .pf-publishing-host .upload-dialog button.secondary { border-color: var(--pf-border); color: var(--pf-text); background: var(--pf-surface); }
+.pf-publishing-host .upload-dialog button.link-button { border: 0; color: var(--pf-accent); background: transparent; text-decoration: underline; }
+.pf-publishing-host .upload-dialog button.dialog-close { display: grid; place-items: center; flex: none; width: 32px; height: 32px; min-height: 32px; padding: 0; border-color: transparent; color: var(--pf-text-muted); background: transparent; font-size: 22px; }
+.pf-publishing-host .upload-dialog button:hover:not(:disabled) { filter: brightness(.94); }
+.pf-publishing-host .upload-dialog button.secondary:hover:not(:disabled), .pf-publishing-host .upload-dialog button.dialog-close:hover { background: var(--pf-surface-2); filter: none; }
 .pf-publishing-host .upload-dialog button:disabled { opacity: .5; cursor: default; }
+.pf-publishing-host .upload-dialog :is(button, input, select, textarea):focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 2px; }
+.pf-publishing-host .drop-zone { background: var(--pf-surface-2); border-color: var(--pf-border); }
+.pf-publishing-host .drop-zone.dragging { background: var(--pf-accent-bg); border-color: var(--pf-accent); }
+@media (max-width: 720px) {
+  .pf-publishing-host .dialog-backdrop { padding: 0; }
+  .pf-publishing-host .upload-dialog { max-height: 100dvh; border-radius: 0; }
+  .pf-publishing-host .dialog-head, .pf-publishing-host .dialog-body, .pf-publishing-host .dialog-foot { padding-left: 18px; padding-right: 18px; }
+}

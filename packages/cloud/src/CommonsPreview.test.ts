@@ -50,3 +50,41 @@ it('draws nearer surfaces over farther ones and outlines only real edges', () =>
   // The diagonal seam between the near square's two triangles is not outlined.
   expect(at(55, 45)).toEqual(at(65, 55));
 });
+
+
+it('projects the front-right-top isometric basis with Z up and correct near-face depth', () => {
+  const mesh = { version: 1 as const, positions: [0, 0, 0, 1, 0, 0, 0, 1, 0] };
+  const face = projectPreview(mesh)[0]!;
+  const points = face.points.split(' ').map(point => point.split(',').map(Number));
+  const origin = points[0]!, x = points[1]!, y = points[2]!;
+  // +X goes down-right; +Y goes up-right. Front (-Y) and right (+X) face the camera.
+  expect(x[0]! - origin[0]!).toBeCloseTo(265 / Math.sqrt(2), 1);
+  expect(y[0]! - origin[0]!).toBeCloseTo(265 / Math.sqrt(2), 1);
+  expect(x[1]! - origin[1]!).toBeCloseTo(265 / Math.sqrt(6), 1);
+  expect(y[1]! - origin[1]!).toBeCloseTo(-265 / Math.sqrt(6), 1);
+  expect(face.depth).toBeCloseTo(0);
+  const raised = projectPreview({ ...mesh, positions: mesh.positions.map((n, i) => i % 3 === 2 ? n + 1 : n) })[0]!;
+  expect(raised.depth - face.depth).toBeCloseTo(Math.sqrt(3));
+  const translated = (axis: number, amount: number) => projectPreview({ ...mesh, positions: mesh.positions.map((n, i) => i % 3 === axis ? n + amount : n) })[0]!.depth;
+  expect(translated(0, 1)).toBeGreaterThan(face.depth);
+  expect(translated(1, -1)).toBeGreaterThan(face.depth);
+});
+
+
+it('rasterizes the front, right and top faces of an asymmetric-colored cube in the same isometric view', () => {
+  const corners = [[-.5,-.5,-.5],[.5,-.5,-.5],[.5,.5,-.5],[-.5,.5,-.5],[-.5,-.5,.5],[.5,-.5,.5],[.5,.5,.5],[-.5,.5,.5]];
+  const positions: number[] = [], colors: number[] = [];
+  const faces = [[0,1,5,4], [1,2,6,5], [4,5,6,7], [2,3,7,6], [3,0,4,7], [0,3,2,1]];
+  faces.forEach((face, index) => {
+    for (const triangle of [[0,1,2], [0,2,3]]) {
+      for (const vertex of triangle) positions.push(...corners[face[vertex]!]!);
+      colors.push(...(index === 0 ? [1,0,0] : index === 1 ? [0,1,0] : index === 2 ? [0,0,1] : [1,1,0]));
+    }
+  });
+  const pixels = rasterPreview({ version: 1, positions, colors }, undefined, { width: 120, height: 100, fit: true });
+  for (const [x,y,channel] of [[36,64,0], [84,64,1], [60,22,2]]) {
+    const rgb = pixels.slice((y! * 120 + x!) * 4, (y! * 120 + x!) * 4 + 3);
+    expect(rgb[channel!]!).toBeGreaterThan(50);
+    expect([...rgb].filter((_, i) => i !== channel)).toEqual([0,0]);
+  }
+});

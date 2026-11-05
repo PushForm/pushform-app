@@ -6,7 +6,8 @@ export const PREVIEW_TRIANGLE_LIMIT = 12000;
 export interface PreviewMesh { version: 1; positions: number[]; colors?: number[] }
 export const COMMONS_RENDER_VERSION = 'display-2';
 export const isPreviewModelFile = (name: string): boolean => /\.(pf|step|stp|fcstd|stl|obj|glb|gltf|dae|3ds|skp|zip)$/i.test(name);
-export const DEFAULT_PREVIEW_VIEW = { yaw: -.65, pitch: .45, zoom: 1 };
+// Front-right-top isometric view: eye along +X, -Y, +Z with world Z up.
+export const DEFAULT_PREVIEW_VIEW = { yaw: -Math.PI / 4, pitch: Math.asin(1 / Math.sqrt(3)), zoom: 1 };
 export interface PreviewView { yaw: number; pitch: number; zoom: number }
 
 export function stlPreview(bytes: Uint8Array): PreviewMesh {
@@ -81,7 +82,7 @@ export function projectPreview(mesh: PreviewMesh, view: PreviewView = DEFAULT_PR
   for (let i = 0; i < mesh.positions.length; i += 9) {
     const points = [0, 3, 6].map(k => {
       const x = mesh.positions[i + k]!, y = mesh.positions[i + k + 1]!, z = mesh.positions[i + k + 2]!;
-      const rx = cy * x - sy * y, ry = sy * x + cy * y;
+      const rx = cy * x - sy * y, ry = -(sy * x + cy * y);
       return [rx, cp * z - sp * ry, cp * ry + sp * z];
     });
     const [a, b, c] = points as [number[], number[], number[]];
@@ -139,7 +140,7 @@ export function rasterPreview(mesh: PreviewMesh, view: PreviewView = DEFAULT_PRE
     // Fit the projected model into the frame with a margin, centred.
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     for (let i = 0; i < p.length; i += 3) {
-      const x = p[i]!, y = p[i + 1]!, z = p[i + 2]!, rx = cy * x - sy * y, ry = sy * x + cy * y, vy = cp * z - sp * ry;
+      const x = p[i]!, y = p[i + 1]!, z = p[i + 2]!, rx = cy * x - sy * y, ry = -(sy * x + cy * y), vy = cp * z - sp * ry;
       if (rx < minX) minX = rx; if (rx > maxX) maxX = rx; if (vy < minY) minY = vy; if (vy > maxY) maxY = vy;
     }
     const margin = .1, spanX = Math.max(1e-6, maxX - minX), spanY = Math.max(1e-6, maxY - minY);
@@ -153,7 +154,7 @@ export function rasterPreview(mesh: PreviewMesh, view: PreviewView = DEFAULT_PRE
     const i = t * 9;
     for (let k = 0; k < 3; k++) {
       const x = p[i + k * 3]!, y = p[i + k * 3 + 1]!, z = p[i + k * 3 + 2]!;
-      const rx = cy * x - sy * y, ry = sy * x + cy * y;
+      const rx = cy * x - sy * y, ry = -(sy * x + cy * y);
       vx3[k] = rx; vy3[k] = cp * z - sp * ry; sz[k] = cp * ry + sp * z;
       sx[k] = ox + rx * unit; syy[k] = oy - vy3[k]! * unit;
     }

@@ -115,3 +115,5 @@ export type { RenderMaterial, RenderUvMapping, RenderFaceMaterial, RenderFaceGro
 export { faceMaterialNeedsGroup } from './renderables/buildGeometry';
 export { TextureCache, TexturedMaterialCache, colorizedImageUrl, needsOwnMaterial } from './materials/TextureCache';
 export type { TexturedDisplay } from './materials/TextureCache';
+
+export { studioLight, studioLightLevels } from './renderables/BodyRenderable';

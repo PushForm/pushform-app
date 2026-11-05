@@ -22,6 +22,8 @@ export interface UploadDialogProps {
   /** The model to edit, or null to upload a new one. */
   modelId: string | null;
   initialFile?: File | undefined;
+  /** A preview rendered by the editor from its captured camera and saved revision. */
+  initialImage?: File | undefined;
   snapshotLabel?: string | undefined;
   scopeControl?: ReactNode;
   inherited?: (Pick<CommonsSubmission, 'licenses' | 'credits' | 'source'> & { creator?: string }) | undefined;
@@ -55,7 +57,7 @@ export function fileStatus(file: FileState): { label: string; detail: string | n
   return { label: 'File checked', detail: null, tone: 'good', progress: null };
 }
 
-export function UploadDialog({ account, filesUrl, modelId, initialFile, newModelId, snapshotLabel, scopeControl, inherited, onClose, onPublished }: UploadDialogProps): JSX.Element {
+export function UploadDialog({ account, filesUrl, modelId, initialFile, initialImage, newModelId, snapshotLabel, scopeControl, inherited, onClose, onPublished }: UploadDialogProps): JSX.Element {
   const api = useMemo(() => new CommonsPublishing(account.client), [account.client]);
   const [profile, setProfile] = useState<CommonsProfile | null | undefined>();
   const [loadError, setLoadError] = useState('');
@@ -244,7 +246,7 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
         { onProgress: (progress) => set((value) => value && value.name === file.name ? { ...value, upload: progress } : value) });
       filesRef.current = [...filesRef.current.filter((name) => name !== previous?.name), file.name];
       set((value) => value && value.name === file.name ? { ...value, asset, upload: null } : value);
-      if (kind === 'model') { dirty.current = true; void queueSave(); void startRender(asset); }
+      if (kind === 'model') { dirty.current = true; void queueSave(); if (initialImage) setModelFile(value => value ? { ...value, image: blobUrl(initialImage), render: { state: 'ready', triangles: null, durationMs: null } } : value); else void startRender(asset); }
       else set((value) => value && value.name === file.name ? { ...value, image: blobUrl(file) } : value);
     } catch (failure) {
       if (control.current.signal.aborted) return;
@@ -266,6 +268,13 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
     seeded.current = true;
     chooseModel(initialFile);
   }, [initialFile, profile, loading, loadError]);
+
+  const seededImage = useRef(false);
+  useEffect(() => {
+    if (!initialImage || seededImage.current || !modelFile?.asset) return;
+    seededImage.current = true;
+    void uploadInto(initialImage, 'image');
+  }, [initialImage, modelFile?.asset, cover]);
 
   const chooseCover = (file: File | undefined) => {
     if (!file) return;
@@ -289,7 +298,8 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
   const fileReady = !!modelFile?.asset && !modelFile.upload && !modelFile.error;
   const coverBusy = !!cover && (!!cover.upload || (!cover.asset && !cover.error));
   const hasChanges = !!model?.draft || dirty.current || !model?.published;
-  const canPublish = fileReady && !coverBusy && !problem && rights && !publishing && hasChanges;
+  const previewReady = !initialImage || (!!cover?.asset && !cover.error);
+  const canPublish = previewReady && fileReady && !coverBusy && !problem && rights && !publishing && hasChanges;
   const publish = async () => {
     if (!canPublish) return;
     setPublishing(true); setMessage('');
@@ -334,16 +344,16 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
           <div className="file-actions">
             {modelFile.error && !modelFile.asset && <button type="button" className="secondary" onClick={() => fileInput.current?.click()}>Try again</button>}
             {modelFile.render.state === 'failed' && modelFile.render.retry && modelFile.asset && <button type="button" className="secondary" onClick={() => void startRender(modelFile.asset!, true)}>Try again</button>}
-            <button type="button" className="secondary" disabled={!!modelFile.upload} onClick={() => fileInput.current?.click()}>Replace file</button>
+            {!snapshotLabel && <button type="button" className="secondary" disabled={!!modelFile.upload} onClick={() => fileInput.current?.click()}>Replace file</button>}
           </div>
         </div>}
         {!modelFile && <button type="button" onClick={() => fileInput.current?.click()}>Choose a model file</button>}
         <div className="cover-field">
-          {cover?.image ? <img src={cover.image} alt="Cover photo"/> : null}
+          {cover?.image && cover.name !== initialImage?.name ? <img src={cover.image} alt="Cover photo"/> : null}
           {cover ? <p className="file-detail">{cover.error ?? (cover.upload ? fileStatus(cover).label : cover.name)}</p> : null}
           <div className="file-actions">
-            <button type="button" className="secondary" disabled={coverBusy} onClick={() => coverInput.current?.click()}>{cover ? 'Replace cover photo' : 'Add a cover photo'}</button>
-            {cover && !coverBusy && <button type="button" className="secondary" onClick={() => void removeCover()}>Remove</button>}
+            <button type="button" className="secondary" disabled={coverBusy} onClick={() => coverInput.current?.click()}>{cover && cover.name !== initialImage?.name ? 'Replace cover photo' : 'Add a cover photo'}</button>
+            {cover && cover.name !== initialImage?.name && !coverBusy && <button type="button" className="secondary" onClick={() => void removeCover()}>Remove</button>}
           </div>
           <p className="file-detail">Optional. PNG or JPEG, up to 8 MiB. Without one, the preview is used.</p>
         </div>
@@ -371,7 +381,7 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
   })();
 
   const saveLabel = save === 'saving' ? 'Saving…' : save === 'saved' ? 'Draft saved' : save === 'error' ? 'Not saved' : model?.draft ? 'Draft saved' : '';
-  const blocked = step === 'details' && profile?.active ? (!modelFile ? 'Add a model file.' : !fileReady ? (modelFile.error ? 'Upload the model file again.' : 'Waiting for the file check.') : problem ?? (!rights && (!snapshotLabel || reviewing) ? 'Confirm your right to share it.' : !hasChanges ? 'No changes to publish.' : null)) : null;
+  const blocked = step === 'details' && profile?.active ? (!modelFile ? 'Add a model file.' : !fileReady ? (modelFile.error ? 'Upload the model file again.' : 'Waiting for the file check.') : !previewReady ? (cover?.error ?? 'Uploading your current-view preview.') : problem ?? (!rights && (!snapshotLabel || reviewing) ? 'Confirm your right to share it.' : !hasChanges ? 'No changes to publish.' : null)) : null;
   return <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <div ref={dialog} className={`upload-dialog${!profile?.active ? ' upload-dialog-profile' : ''}`} role="dialog" aria-modal="true" aria-labelledby="upload-dialog-title">
       <header className="dialog-head">
@@ -383,7 +393,7 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
       {step === 'details' && profile?.active && !loading && filesUrl && <footer className="dialog-foot">
         <span className="save-state" role="status">{message ? <span role="alert">{message}</span> : blocked ?? saveLabel}</span>
         <button type="button" className="secondary" onClick={async () => { dirty.current = dirty.current || !model; if (model || modelFile?.asset) await queueSave(); onClose(); }}>Save draft</button>
-        <button type="button" disabled={snapshotLabel && !reviewing ? !fileReady || coverBusy || !!problem || publishing || !hasChanges : !canPublish} onClick={() => { if (!snapshotLabel || reviewing) void publish(); else { setRights(false); setReviewing(true); } }}>{publishing ? 'Publishing…' : snapshotLabel && !reviewing ? 'Review publication' : model?.published ? 'Publish changes' : 'Publish model'}</button>
+        <button type="button" disabled={snapshotLabel && !reviewing ? !fileReady || !previewReady || coverBusy || !!problem || publishing || !hasChanges : !canPublish} onClick={() => { if (!snapshotLabel || reviewing) void publish(); else { setRights(false); setReviewing(true); } }}>{publishing ? 'Publishing…' : snapshotLabel && !reviewing ? 'Review publication' : model?.published ? 'Publish changes' : 'Publish model'}</button>
       </footer>}
       <input ref={fileInput} type="file" hidden accept={ACCEPT} aria-label="Choose a model file" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; chooseModel(file); }}/>
       <input ref={coverInput} type="file" hidden accept="image/png,image/jpeg,.png,.jpg,.jpeg" aria-label="Choose a cover photo" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; chooseCover(file); }}/>

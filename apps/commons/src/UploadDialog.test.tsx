@@ -211,3 +211,17 @@ it('explains invalid handles inline without saving and clears errors when correc
   fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
   expect(await screen.findByText('Drag a model file here')).toBeTruthy();
 });
+
+
+it('uses the editor-rendered current view and uploads it without waiting for server rendering', async () => {
+  const f = setup();
+  const file = new File(['snapshot'], 'cabinet.pf');
+  const image = new File(['png'], 'current-view.png', { type: 'image/png' });
+  cloud.upload.mockImplementation(async (_url, _token, _revision, source) => asset({ filename: source.name, format: source === file ? 'pf' : 'png', size_bytes: source.size, id: source === file ? assetId : 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' }));
+  render(<UploadDialog account={f.account} filesUrl="https://files.example.com" modelId={null} initialFile={file} initialImage={image} snapshotLabel="Private cloud revision 12" onClose={vi.fn()} onPublished={vi.fn()} />);
+  await waitFor(() => expect(cloud.upload).toHaveBeenCalledWith(expect.anything(), expect.anything(), revisionId, image, expect.anything(), expect.anything()));
+  expect(cloud.stream).not.toHaveBeenCalled();
+  expect(screen.getByRole('img', { name: 'Preview of cabinet' }).getAttribute('src')).toBe('blob:preview');
+  expect(screen.queryByRole('button', { name: 'Replace file' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull();
+});

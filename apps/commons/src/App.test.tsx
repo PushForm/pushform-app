@@ -150,3 +150,12 @@ it('refreshes discovery after a contributor publishes without requiring a full p
   fireEvent(window,new Event('commons:catalog-changed'));
   expect(await screen.findByRole('link',{name:'View Workshop hinge'})).toBeTruthy();expect(loader).toHaveBeenCalledTimes(2);
 });
+
+it('lists each license name once on a model card while retaining its metadata records', async () => {
+  const model = exampleModel();
+  model.licenses = [model.licenses[0]!, { ...model.licenses[0]! }];
+  render(<App loadCatalog={async () => [model]} />);
+  await screen.findByText('Workshop hinge');
+  expect(screen.getAllByText(model.licenses[0]!.name, { selector: '.license-label' })).toHaveLength(1);
+  expect(model.licenses).toHaveLength(2);
+});

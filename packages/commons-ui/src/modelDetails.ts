@@ -71,6 +71,17 @@ export function formatsOf(fileNames: string[]): string[] {
   return formats.length ? formats : ['PF'];
 }
 
+/** Remove identical notices while keeping distinct versions, URLs and conditions intact. */
+export function uniqueLicenses(licenses: CommonsSubmission['licenses']): CommonsSubmission['licenses'] {
+  const seen = new Set<string>();
+  return licenses.filter(license => {
+    const key = JSON.stringify([license.name, license.url, license.commercialUse, [...license.conditions].sort()]);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 /** The submission for these details. Earlier notices on the revision (source, credits, extra licenses) are kept. */
 export function metadataFor(details: ModelDetails, creator: string, fileNames: string[], previous?: CommonsSubmission): CommonsSubmission {
   const license = details.license === 'other'
@@ -79,7 +90,7 @@ export function metadataFor(details: ModelDetails, creator: string, fileNames: s
   return {
     title: details.title.trim(), description: details.description, category: details.category, creator,
     tags: previous?.tags ?? [], formats: formatsOf(fileNames), imageUrl: previous?.imageUrl ?? null, source: previous?.source ?? null,
-    licenses: [license, ...(previous?.licenses.slice(1) ?? [])],
+    licenses: uniqueLicenses(previous?.source ? previous.licenses : [license, ...(previous?.licenses.slice(1) ?? [])]),
     credits: previous?.credits ?? [{ name: creator, url: null, text: `Original model by ${creator}.` }],
   };
 }

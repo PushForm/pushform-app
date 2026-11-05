@@ -217,3 +217,35 @@ it('explains invalid handles inline without saving and clears errors when correc
   fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
   expect(await screen.findByText('Drag a model file here')).toBeTruthy();
 });
+
+it('keeps a copied source license exactly once through repeated draft saves without adding an original-work license', async () => {
+  const f = setup();
+  const license = { name: 'CC BY 3.0', url: 'https://creativecommons.org/licenses/by/3.0/', commercialUse: 'allowed' as const, conditions: ['Retain original creator credit.'] };
+  const inherited = { creator: 'Original Maker', source: { name: 'Source', url: 'https://models.example.com/chair' }, licenses: Array.from({ length: 5 }, () => ({ ...license })), credits: [{ name: 'Original Maker', url: null, text: 'Original chair.' }] };
+  const file = new File(['snapshot'], 'Chair.pf');
+  cloud.upload.mockResolvedValue(asset({ filename: file.name, format: 'pf', size_bytes: file.size }));
+  cloud.stream.mockResolvedValue({ state: 'pending' });
+  render(<UploadDialog account={f.account} filesUrl="https://files.example.com" modelId={null} initialFile={file} inherited={inherited} snapshotLabel="Private cloud revision 1" onClose={vi.fn()} onPublished={vi.fn()}/>);
+  await waitFor(() => expect(cloud.upload).toHaveBeenCalled());
+  expect(screen.queryByLabelText(/License \*/)).toBeNull();
+  expect(screen.getByText('Source licenses retained')).toBeTruthy();
+  for (const title of ['Textured chair', 'Finished chair']) {
+    fireEvent.change(screen.getByLabelText(/Title/), { target: { value: title } });
+    await waitFor(() => expect(f.rpc).toHaveBeenCalledWith('commons_update_draft', expect.objectContaining({ p_metadata: expect.objectContaining({ title, licenses: [license] }) })), { timeout: 2000 });
+  }
+  for (const [name, args] of f.rpc.mock.calls) if (name === 'commons_submit_model' || name === 'commons_update_draft') expect((args.p_metadata as { licenses: unknown[] }).licenses).toEqual([license]);
+  fireEvent.click(screen.getByRole('button', { name: 'Review publication' }));
+  expect(screen.getByText(/License: CC BY 3.0/)).toBeTruthy();
+});
+
+it('preserves source license versions and distinct terms on corrections', async () => {
+  const { uniqueLicenses } = await import('./modelDetails');
+  const first = { name: 'CC BY 3.0', url: 'https://creativecommons.org/licenses/by/3.0/', commercialUse: 'allowed' as const, conditions: ['Credit A.', 'Keep notice.'] };
+  const second = { ...first, conditions: ['Credit B.'] };
+  const previous = { ...metadataFor({ title: 'Chair', description: '', category: 'Furniture', license: 'CC BY 4.0', terms: '' }, 'Maker', ['chair.pf']), source: { name: 'Source', url: 'https://models.example.com/chair' }, licenses: [first, { ...first, conditions: [...first.conditions].reverse() }, second] };
+  expect(uniqueLicenses(previous.licenses)).toEqual([first, second]);
+  const details = detailsFromMetadata(previous);
+  const corrected = metadataFor({ ...details, title: 'Textured chair' }, 'Maker', ['chair.pf'], previous);
+  expect(corrected.licenses).toEqual([first, second]);
+  expect(corrected.licenses.some(license => license.name === 'Custom license' || license.name === 'CC BY 4.0')).toBe(false);
+});

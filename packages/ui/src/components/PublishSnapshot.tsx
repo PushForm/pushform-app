@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { UploadDialog } from '@pushform/commons-ui';
+import { uniqueLicenses } from '@pushform/commons-ui/modelDetails';
 import type { CommonsAccount } from '@pushform/commons-ui/account';
 import { cloudChecksum, CommonsPublishing, type CommonsSubmission } from '@pushform/cloud';
 import type { PublishingSnapshot } from './SaveVersionDialog';
@@ -28,7 +29,7 @@ export function PublishSnapshot({ account, filesUrl, snapshot, onClose }: { acco
       const notices = file.state.meta.attributions ?? [];
       if (notices.some(n => n.licenses.some(l => /NoDerivatives|\bND\b/i.test(l.name)))) throw new Error('This design includes a source with a no-derivatives condition. A compliant publication must be established before sharing this copy.');
       const mine = await new CommonsPublishing(account.client).mine();
-      const inherited = notices.length ? { creator: [...new Set(notices.map(notice => notice.creator))].join(', ').slice(0,1000), source: notices[0]!.source ?? { name: 'PushForm Commons', url: `https://commons.pushform.io/#models/${notices[0]!.modelId}` }, licenses: notices.flatMap(n => n.licenses), credits: notices.flatMap(n => n.credits) } : undefined;
+      const inherited = notices.length ? { creator: [...new Set(notices.map(notice => notice.creator))].join(', ').slice(0,1000), source: notices[0]!.source ?? { name: 'PushForm Commons', url: `https://commons.pushform.io/#models/${notices[0]!.modelId}` }, licenses: uniqueLicenses(notices.flatMap(n => n.licenses)), credits: notices.flatMap(n => n.credits) } : undefined;
       if (alive) setSetup({ id, existing: mine.models.some(m => m.id === id), file: new File([new Uint8Array(bytes)], name, { type: 'application/octet-stream' }), ...(inherited ? { inherited } : {}) });
     })().catch(cause => { if (alive) setError(cause.message); });
     return () => { alive = false; };

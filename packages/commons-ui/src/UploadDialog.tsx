@@ -6,7 +6,7 @@ import { COMMONS_FILE_LIMIT, COMMONS_IMAGE_LIMIT, COMMONS_MODEL_EXTENSIONS, Comm
   type CommonsSubmission, type CommonsRenderEvent, type CommonsUpload, type CommonsUploadProgress } from '@pushform/cloud';
 import type { CommonsAccount } from './account';
 import { CATEGORIES, DESCRIPTION_LIMIT, RIGHTS_BASIS, TITLE_LIMIT, detailsFromMetadata, detailsProblem, formatBytes, metadataFor, publishLicenses,
-  titleFromFileName, type LicenseChoice, type LicenseKey, type ModelDetails } from './modelDetails';
+  titleFromFileName, uniqueLicenses, type LicenseChoice, type LicenseKey, type ModelDetails } from './modelDetails';
 
 /** One file in the dialog: its upload, then (for the model file) its conversion. */
 interface FileState {
@@ -179,7 +179,7 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
     if (!inherited) return args[3]?.source ? { ...metadata, creator: args[3].creator } : metadata;
     const publisher = args[1];
     const credits = [...metadata.credits.filter(credit => credit.text !== `Original model by ${publisher}.`), ...inherited.credits, { name: publisher, url: null, text: `Published by ${publisher}.` }];
-    return { ...metadata, creator: creditCreator.trim(), source: inherited.source, licenses: [...metadata.licenses, ...inherited.licenses], credits: [...new Map(credits.map(credit => [JSON.stringify(credit), credit])).values()] };
+    return { ...metadata, creator: creditCreator.trim(), source: inherited.source, licenses: uniqueLicenses(inherited.licenses), credits: [...new Map(credits.map(credit => [JSON.stringify(credit), credit])).values()] };
   }, [inherited, creditCreator]);
   const creator = profile?.displayName ?? '';
   /** The pending revision changes go into, created on first need: a new model, or the next revision of a published one. */
@@ -219,7 +219,7 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
       dirty.current = true; setSave('error');
       setMessage(failure instanceof Error ? failure.message : 'Your changes could not be saved.');
     }
-  }, [api, creator, ensureDraft]);
+  }, [api, creator, ensureDraft, publicationMetadata]);
   const queueSave = useCallback(() => { saving.current = saving.current.then(saveNow); return saving.current; }, [saveNow]);
 
   const update = (patch: Partial<ModelDetails>) => { setDetails((value) => ({ ...value, ...patch })); dirty.current = true; setSave('idle'); setMessage(''); };
@@ -284,8 +284,8 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
     } catch (failure) { setMessage(failure instanceof Error ? failure.message : 'The cover photo could not be removed.'); }
   };
 
-  const shareAlike = inherited?.licenses.find(license => /ShareAlike|(?:^|-)SA(?:-| |$)/i.test(license.name));
-  const problem = (inherited && !creditCreator.trim() ? 'Enter the creator credit.' : null) ?? detailsProblem(details) ?? (shareAlike && details.license !== shareAlike.name ? 'This source requires its ShareAlike license. Choose the same license before publishing.' : null);
+  const retainedLicenses = inherited ? uniqueLicenses(inherited.licenses) : model?.current?.metadata.source ? uniqueLicenses(model.current.metadata.licenses) : null;
+  const problem = (inherited && !creditCreator.trim() ? 'Enter the creator credit.' : null) ?? detailsProblem(details);
   const fileReady = !!modelFile?.asset && !modelFile.upload && !modelFile.error;
   const coverBusy = !!cover && (!!cover.upload || (!cover.asset && !cover.error));
   const hasChanges = !!model?.draft || dirty.current || !model?.published;
@@ -356,6 +356,7 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
           <textarea value={details.description} maxLength={DESCRIPTION_LIMIT} rows={5} placeholder="What it is, how it is built, sizes and materials" onChange={(event) => update({ description: event.target.value })}/></label>
         <label><span className="field-head"><span>Category *</span></span>
           <select value={details.category} onChange={(event) => update({ category: event.target.value })}>{CATEGORIES.map((category) => <option key={category}>{category}</option>)}</select></label>
+        {retainedLicenses ? <div className="retained-license"><strong>Source licenses retained</strong><p>{[...new Set(retainedLicenses.map(license => license.name))].join(' · ')}</p><p className="field-note">This copy keeps the original licenses and credits. Publishing it does not add a new license.</p></div> : <>
         <label><span className="field-head"><span>License *</span></span>
           <select value={details.license} onChange={(event) => update({ license: event.target.value as LicenseChoice })}>
             {(Object.keys(publishLicenses) as LicenseKey[]).map((key) => <option key={key} value={key}>{publishLicenses[key].label}</option>)}
@@ -363,7 +364,7 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
           </select></label>
         <p className="field-note">{details.license === 'other' ? 'Describe how others may use, share and credit this model.' : publishLicenses[details.license].summary}</p>
         {details.license === 'other' && <label><span className="field-head"><span>License terms *</span></span>
-          <textarea value={details.terms} rows={4} onChange={(event) => update({ terms: event.target.value })}/></label>}
+          <textarea value={details.terms} rows={4} onChange={(event) => update({ terms: event.target.value })}/></label>}</>}
         {!snapshotLabel && <label className="rights"><input type="checkbox" checked={rights} onChange={(event) => setRights(event.target.checked)}/>
           <span>I created this model, or have the right to share it and everything it includes under this license.</span></label>}
       </section>
@@ -379,7 +380,7 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
           {profile?.active && snapshotLabel ? <ol className="dialog-steps"><li aria-current={!reviewing ? 'step' : undefined}>1 Details</li><li aria-current={reviewing ? 'step' : undefined}>2 Review</li></ol> : profile?.active && <ol className="dialog-steps"><li aria-current={step === 'upload' ? 'step' : undefined}>1 Upload</li><li aria-current={step === 'details' ? 'step' : undefined}>2 Details</li></ol>}</div>
         <button type="button" className="dialog-close" aria-label="Close" onClick={onClose}>×</button>
       </header>
-      <div className="dialog-body">{scopeControl}{snapshotLabel && <p className="snapshot-note">{snapshotLabel}. This exact snapshot is used; later edits stay private.</p>}{inherited && <section aria-label="Retained source licenses"><h3>Original licenses and credits</h3>{inherited.licenses.map((license, index) => <p key={index}>{license.name}: {license.conditions.join('; ')}</p>)}{inherited.credits.map((credit, index) => <p key={index}>{credit.name}: {credit.text}</p>)}</section>}{reviewing ? <section><h3>Review your public snapshot</h3><p>{details.title} by {inherited ? creditCreator : model?.current?.metadata.source ? model.current.metadata.creator : creator}</p><p>{details.description}</p><p>Commons revision {model?.draft?.number ?? (model?.current?.number ?? 0) + 1}. License: {details.license}</p><p>Private change notes and cloud history are not published. Future edits stay private.</p><label><input type="checkbox" checked={rights} onChange={event => setRights(event.target.checked)} />I have the right to publish this model and its included assets under the listed terms.</label></section> : body}</div>
+      <div className="dialog-body">{scopeControl}{snapshotLabel && <p className="snapshot-note">{snapshotLabel}. This exact snapshot is used; later edits stay private.</p>}{inherited && <section aria-label="Retained source licenses"><h3>Original licenses and credits</h3>{uniqueLicenses(inherited.licenses).map((license, index) => <p key={index}>{license.name}: {license.conditions.join('; ')}</p>)}{inherited.credits.map((credit, index) => <p key={index}>{credit.name}: {credit.text}</p>)}</section>}{reviewing ? <section><h3>Review your public snapshot</h3><p>{details.title} by {inherited ? creditCreator : model?.current?.metadata.source ? model.current.metadata.creator : creator}</p><p>{details.description}</p><p>Commons revision {model?.draft?.number ?? (model?.current?.number ?? 0) + 1}. License: {retainedLicenses ? [...new Set(retainedLicenses.map(license => license.name))].join(' · ') : details.license}</p><p>Private change notes and cloud history are not published. Future edits stay private.</p><label><input type="checkbox" checked={rights} onChange={event => setRights(event.target.checked)} />I have the right to publish this model and its included assets under the listed terms.</label></section> : body}</div>
       {step === 'details' && profile?.active && !loading && filesUrl && <footer className="dialog-foot">
         {reviewing && <button type="button" className="secondary review-back" onClick={() => setReviewing(false)}>Back to details</button>}
         {(!reviewing || message || blocked) && <span className="save-state" role="status">{message ? <span role="alert">{message}</span> : blocked ?? saveLabel}</span>}

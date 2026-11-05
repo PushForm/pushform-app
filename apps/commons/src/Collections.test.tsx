@@ -152,3 +152,21 @@ it('shows imported creator cards and opens their credited models without implyin
   window.location.hash = '#creators/credited-' + 'b'.repeat(32); fireEvent(window, new HashChangeEvent('hashchange'));
   expect(await screen.findByRole('heading', { name: 'This creator listing is unavailable.' })).toBeTruthy();
 });
+
+it('hydrates featured models independently from the first browse page and its filters', async () => {
+  const auth = await setup();
+  const other = exampleModel({ id: 'later-model', title: 'Browse result' });
+  const browse = vi.fn().mockResolvedValue({ models: [other], total: 1, categories: [], licenses: [], next: null });
+  const byIds = vi.fn().mockResolvedValue([model]);
+  const loadCatalog = Object.assign(vi.fn().mockResolvedValue([]), { browse, byIds });
+  render(<App {...auth} loadCatalog={loadCatalog}/>);
+  const featured = within(await screen.findByRole('region', { name: 'Featured' }));
+  await featured.findByRole('link', { name: model.title });
+  expect(byIds).toHaveBeenCalledWith([model.id], expect.any(AbortSignal));
+  expect(loadCatalog).not.toHaveBeenCalled();
+  const calls = byIds.mock.calls.length;
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'no matching featured model' } });
+  await waitFor(() => expect(browse).toHaveBeenLastCalledWith(expect.objectContaining({ query: 'no matching featured model' }), null, expect.any(AbortSignal)));
+  expect(byIds.mock.calls.length).toBe(calls);
+  expect(featured.getByRole('link', { name: model.title })).toBeTruthy();
+});

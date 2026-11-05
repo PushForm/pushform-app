@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { catalogSchema, catalogUrlSchema as link, createCommonsClient, readCommonsCatalog, type BrowserCloudConfig, type CatalogModel } from '@pushform/cloud';
+import { catalogSchema, catalogUrlSchema as link, createCommonsClient, createCommonsBrowseLoader, createCommonsModelsLoader, readCommonsCatalog, type CommonsBrowseLoader, type CommonsModelsLoader, type BrowserCloudConfig, type CatalogModel } from '@pushform/cloud';
 export { catalogSchema, type CatalogModel } from '@pushform/cloud';
 
 export interface CatalogFilters { query: string; category: string; license: string; commercial: boolean }
-export type CatalogLoader = (signal: AbortSignal) => Promise<CatalogModel[]>;
+export type CatalogLoader = ((signal: AbortSignal) => Promise<CatalogModel[]>) & { browse?: CommonsBrowseLoader; byIds?: CommonsModelsLoader };
 
 export function filterModels(models: CatalogModel[], filters: CatalogFilters): CatalogModel[] {
   const words = filters.query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
@@ -55,7 +55,7 @@ export function configuredCatalogLoader(env: Record<string, string | undefined>)
   if (!config.url && !config.publishableKey) return null;
   try {
     const client = createCommonsClient(config);
-    return async (signal) => readCommonsCatalog(client, signal);
+    return Object.assign(async (signal: AbortSignal) => readCommonsCatalog(client, signal), { browse: createCommonsBrowseLoader(client), byIds: createCommonsModelsLoader(client) });
   } catch {
     return async () => { throw new Error('Invalid catalog configuration.'); };
   }

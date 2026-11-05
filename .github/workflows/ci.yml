@@ -170,7 +170,9 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy apps/commons/dist --project-name pushform-commons --branch main --commit-hash ${{ github.sha }} --commit-dirty=false
+          # Run from the app directory so Pages also bundles its functions/ (page tags, sitemap, robots.txt).
+          workingDirectory: apps/commons
+          command: pages deploy dist --project-name pushform-commons --branch main --commit-hash ${{ github.sha }} --commit-dirty=false
       - name: Verify Commons serves this build
         shell: bash
         run: |
@@ -181,6 +183,12 @@ jobs:
             if [[ "$attempt" -lt 6 ]]; then sleep 10; fi
           done
           exit 1
+      - name: Verify Commons serves search tags, a sitemap and robots.txt
+        shell: bash
+        run: |
+          curl -fsS https://commons.pushform.io/robots.txt | grep -q "^Sitemap: https://commons.pushform.io/sitemap.xml"
+          curl -fsS https://commons.pushform.io/sitemap.xml | grep -q "<urlset"
+          curl -fsS https://commons.pushform.io/ | grep -q "rel=\"canonical\""
 
   # Deploy checked main batches and staging pushes to Cloudflare Pages. Needs the environment
   # secrets CLOUDFLARE_API_TOKEN (Workers & Pages: Edit) and CLOUDFLARE_ACCOUNT_ID.

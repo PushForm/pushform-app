@@ -93,8 +93,8 @@ it('opens a private draft from the owner profile grid without public catalog mem
   const grid = within(await screen.findByRole('region', { name: 'My Models' }));
   const link = await grid.findByRole('link', { name: model.title });
   expect(grid.getByText('Draft')).toBeTruthy();
-  expect(link.getAttribute('href')).toBe('#models/' + model.id);
-  window.location.hash = link.getAttribute('href')!; fireEvent(window, new HashChangeEvent('hashchange'));
+  expect(link.getAttribute('href')).toBe('/models/' + model.id);
+  window.history.pushState(null, '', link.getAttribute('href')!); fireEvent(window, new PopStateEvent('popstate'));
   expect(await screen.findByRole('heading', { name: model.title, level: 1 })).toBeTruthy();
   expect(screen.getByText(/Private draft/)).toBeTruthy();
   expect(screen.getByRole('link', { name: 'Edit model' })).toBeTruthy();
@@ -118,7 +118,7 @@ it('retains a failed deletion for retry and returns successful withdrawal to the
   fireEvent.click(await screen.findByRole('button', { name: 'Delete model' }));
   fireEvent.click(screen.getByRole('button', { name: 'Delete this model' }));
   expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'This model changed. Refresh and confirm the current files again.');
-  expect(window.location.hash).toBe('#models/' + model.id);
+  expect(window.location.pathname).toBe('/models/' + model.id);
   expect((screen.getByRole('button', { name: 'Delete this model' }) as HTMLButtonElement).disabled).toBe(false);
   f.state.withdrawError = false; fireEvent.click(screen.getByRole('button', { name: 'Delete this model' }));
   await waitFor(() => expect(window.location.pathname).toBe('/u/example-maker'));
@@ -147,7 +147,7 @@ it('does not withdraw a publication when deleting its draft fails', async () => 
   fireEvent.click(screen.getByRole('button', { name: 'Delete this model' }));
   expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Draft files could not be removed.');
   expect(f.rpc).not.toHaveBeenCalledWith('commons_withdraw_model', expect.anything());
-  expect(window.location.hash).toBe('#models/' + model.id);
+  expect(window.location.pathname).toBe('/models/' + model.id);
   expect((screen.getByRole('button', { name: 'Delete this model' }) as HTMLButtonElement).disabled).toBe(false);
 });
 
@@ -161,7 +161,7 @@ it('does not delete draft files twice when withdrawal fails and is retried', asy
   await screen.findByRole('alert');
   expect(cloud.deleteDraft).toHaveBeenCalledTimes(1);
   expect(f.rpc.mock.calls.filter(([name]) => name === 'commons_withdraw_model')).toHaveLength(1);
-  expect(window.location.hash).toBe('#models/' + model.id);
+  expect(window.location.pathname).toBe('/models/' + model.id);
   f.state.withdrawError = false;
   fireEvent.click(screen.getByRole('button', { name: 'Delete this model' }));
   await waitFor(() => expect(window.location.pathname).toBe('/u/example-maker'));

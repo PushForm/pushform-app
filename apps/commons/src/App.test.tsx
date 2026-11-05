@@ -94,12 +94,12 @@ it('opens public profile routes independently of catalog availability',async()=>
 });
 
 const profilePage={profile:{id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',handle:'example-maker',displayName:'Example Maker',bio:'',avatarUrl:null,links:[]},models:[exampleModel()]};
-it('opens a public profile at its handle path and returns hash links from it to the catalog root',async()=>{
+it('opens a public profile at its handle path and moves older model hash links from it to the model path',async()=>{
   window.history.replaceState(null,'','/u/example-maker');const getByHandle=vi.fn().mockResolvedValue(profilePage);
   render(<App loadCatalog={async()=>[exampleModel()]} account={{profiles:{getByHandle}} as unknown as CommonsAccount}/>);
   expect(await screen.findByRole('heading',{name:'Example Maker'})).toBeTruthy();expect(getByHandle).toHaveBeenCalledWith('example-maker',expect.anything());
   window.history.pushState(null,'','/u/example-maker#models/workshop-hinge');fireEvent(window,new HashChangeEvent('hashchange'));
-  expect(await screen.findByRole('heading',{name:'Workshop hinge',level:1})).toBeTruthy();expect(window.location.pathname).toBe('/');expect(window.location.hash).toBe('#models/workshop-hinge');
+  expect(await screen.findByRole('heading',{name:'Workshop hinge',level:1})).toBeTruthy();expect(window.location.pathname).toBe('/models/workshop-hinge');expect(window.location.hash).toBe('');
   window.history.pushState(null,'','/u/example-maker');fireEvent(window,new PopStateEvent('popstate'));expect(await screen.findByRole('heading',{name:'Example Maker'})).toBeTruthy();
 });
 it('moves older account-ID profile links to the handle path',async()=>{
@@ -158,4 +158,29 @@ it('lists each license name once on a model card while retaining its metadata re
   await screen.findByText('Workshop hinge');
   expect(screen.getAllByText(model.licenses[0]!.name, { selector: '.license-label' })).toHaveLength(1);
   expect(model.licenses).toHaveLength(2);
+});
+
+it('serves a model at its own path with search tags, and keeps a missing model out of results', async () => {
+  window.history.replaceState(null, '', '/models/workshop-hinge');
+  const view = render(<App loadCatalog={async () => [exampleModel()]} />);
+  expect(await screen.findByRole('heading', { name: 'Workshop hinge', level: 1 })).toBeTruthy();
+  expect(document.title).toBe('Workshop hinge — Hardware 3D model | PushForm Commons');
+  expect(document.head.querySelector('link[rel="canonical"]')?.getAttribute('href')).toBe('https://commons.pushform.io/models/workshop-hinge');
+  expect(document.head.querySelector('meta[name="robots"]')?.getAttribute('content')).not.toContain('noindex');
+  expect(document.head.querySelector('script[type="application/ld+json"]')?.textContent).toContain('"@type":"3DModel"');
+  view.unmount();
+  window.history.replaceState(null, '', '/models/removed-model');
+  render(<App loadCatalog={async () => [exampleModel()]} />);
+  await screen.findByText(/may have been removed/);
+  expect(document.head.querySelector('meta[name="robots"]')?.getAttribute('content')).toContain('noindex');
+});
+
+it('opens a model from the library without leaving the page and links to it by path', async () => {
+  window.history.replaceState(null, '', '/');
+  render(<App loadCatalog={async () => [exampleModel()]} />);
+  const link = (await screen.findAllByRole('link', { name: 'Workshop hinge' }))[0]!;
+  expect(link.getAttribute('href')).toBe('/models/workshop-hinge');
+  fireEvent.click(link);
+  expect(await screen.findByRole('heading', { name: 'Workshop hinge', level: 1 })).toBeTruthy();
+  expect(window.location.pathname).toBe('/models/workshop-hinge');
 });

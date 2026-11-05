@@ -24,6 +24,21 @@ function setup() {
 }
 
 describe('text commands', () => {
+  it('hides and shows text with undo and redo, removing hidden text from selection', () => {
+    const { registry, host, text } = setup();
+    const ref = registry.execute('text.add', { kind: 'screen', screen: [0, 0], text: 'Title' }) as EntityRef;
+    const entries = host.undoStack.length;
+    expect(registry.execute('text.setHidden', { refs: [ref], hidden: true })).toBe(1);
+    expect(text(ref).hidden).toBe(true);
+    expect(host.selection.refs).toEqual([]);
+    expect(host.undoStack.length).toBe(entries + 1);
+    host.undo();
+    expect(text(ref).hidden).toBe(false);
+    host.redo();
+    expect(text(ref).hidden).toBe(true);
+    registry.execute('text.setHidden', { refs: [ref], hidden: false });
+    expect(text(ref).hidden).toBe(false);
+  });
   it('adds leader text with a pushpin offset and screen text at view fractions, selecting it', () => {
     const { registry, host, text } = setup();
     const leader = registry.execute('text.add', { kind: 'leader', anchor: [1, 2, 0], label: [2, 3, 1], text: '4 m²' }) as EntityRef;

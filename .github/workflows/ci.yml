@@ -186,9 +186,16 @@ jobs:
       - name: Verify Commons serves search tags, a sitemap and robots.txt
         shell: bash
         run: |
-          curl -fsS https://commons.pushform.io/robots.txt | grep -q "^Sitemap: https://commons.pushform.io/sitemap.xml"
-          curl -fsS https://commons.pushform.io/sitemap.xml | grep -q "<urlset"
-          curl -fsS https://commons.pushform.io/ | grep -q "rel=\"canonical\""
+          check() {
+            curl -fsS https://commons.pushform.io/robots.txt | grep -q "^Sitemap: https://commons.pushform.io/sitemap.xml" &&
+            curl -fsS https://commons.pushform.io/sitemap.xml | grep -q "<urlset" &&
+            curl -fsS https://commons.pushform.io/ | grep -q "rel=\"canonical\""
+          }
+          for attempt in 1 2 3 4 5 6; do
+            if check; then exit 0; fi
+            if [[ "$attempt" -lt 6 ]]; then sleep 10; fi
+          done
+          exit 1
 
   # Deploy checked main batches and staging pushes to Cloudflare Pages. Needs the environment
   # secrets CLOUDFLARE_API_TOKEN (Workers & Pages: Edit) and CLOUDFLARE_ACCOUNT_ID.

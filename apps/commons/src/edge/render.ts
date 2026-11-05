@@ -66,13 +66,15 @@ export function loadCatalog(config: SeoConfig, deps: EdgeDeps = {}): Promise<Loa
     try {
       if (config.catalogUrl) {
         const response = await (deps.fetcher ?? fetch)(config.catalogUrl, { redirect: 'error', signal: AbortSignal.timeout(8000), headers: { Accept: 'application/json' } });
-        return response.ok ? { kind: 'ok', value: parseCommonsCatalog(await response.json()) } : { kind: 'error' };
+        if (!response.ok) { console.error(`Commons catalog snapshot request failed with status ${response.status}`); return { kind: 'error' }; }
+        return { kind: 'ok', value: parseCommonsCatalog(await response.json()) };
       }
       if (!config.supabaseUrl || !config.publishableKey) return { kind: 'unavailable' };
       const { status, body } = await rpc(config, 'commons_catalog', {}, deps);
       if (isUnavailable(body)) return { kind: 'unavailable' };
-      return status === 200 ? { kind: 'ok', value: parseCommonsCatalog(body) } : { kind: 'error' };
-    } catch { return { kind: 'error' }; }
+      if (status !== 200) { console.error(`Commons catalog request failed with status ${status}`); return { kind: 'error' }; }
+      return { kind: 'ok', value: parseCommonsCatalog(body) };
+    } catch (error) { console.error('Commons catalog could not be loaded', error instanceof Error ? error.message : error); return { kind: 'error' }; }
   });
 }
 

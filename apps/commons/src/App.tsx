@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import { BrowseImagesProvider } from '@pushform/commons-ui/BrowseImages';
 import { useBrowsePaging, MoreBrowseResults } from '@pushform/commons-ui/BrowsePaging';
 import { sortedModelFiles } from './modelFiles';
 import { commonsFileUrl, CommonsUnavailableError, type CommonsProfile, type CommonsCollections } from '@pushform/cloud';
@@ -134,7 +135,7 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
   }, [selected, selectedId, state.kind,onProfile,hash,collectionRoute,location.path]);
   const options = (values: string[]) => [...new Set(values)].sort().map((value) => <option key={value} value={value}>{value}</option>);
   const update = (patch: Partial<CatalogFilters>) => setFilters((current) => ({ ...current, ...patch }));
-  return <CollectionsProvider service={collections} account={account}><div className="commons">
+  return <CollectionsProvider service={collections} account={account}><BrowseImagesProvider value={paged ? paging.images : null}><div className="commons">
     <a className="skip-link" href="#main">Skip to content</a>
     <header className="site-header"><a className="brand" href="#browse" aria-label="PushForm Commons home">
       <img src="/pf-logo-mark.svg" alt="" width="30" height="30" /><span>PushForm <strong>Commons</strong></span>
@@ -176,7 +177,7 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
       </>}
     </main>
     <footer className="site-footer"><span>Good projects start with shared ideas.</span><div><a href="https://pushform.io">PushForm</a><a href="https://pushform.io/terms">Terms</a><a href="https://pushform.io/privacy">Privacy</a></div></footer>
-  </div></CollectionsProvider>;
+  </div></BrowseImagesProvider></CollectionsProvider>;
 }
 
 function AccountPage({account,filesUrl}:{account:CommonsAccount;filesUrl:string|undefined}){

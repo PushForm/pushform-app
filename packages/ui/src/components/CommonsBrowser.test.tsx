@@ -135,6 +135,7 @@ it('keeps the catalog and current documents when direct opening fails', async ()
   expect(screen.getByRole('button', { name: 'Open in new tab' })).toBeTruthy();
 });
 it('requests catalog and detail thumbnails with anonymous CORS for the isolated editor', async () => {
+  vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Prefetch unavailable'));
   const f = setup(); const view = render(<CommonsBrowser {...f.props} filesUrl="https://files.example.com"/>);
   await screen.findByText('Garden bench');
   const assertImage = (image: HTMLImageElement) => {
@@ -142,6 +143,7 @@ it('requests catalog and detail thumbnails with anonymous CORS for the isolated 
     expect(image.crossOrigin).toBe('anonymous');
     expect(image.getAttribute('referrerpolicy')).toBe('no-referrer');
   };
+  await waitFor(() => expect(view.container.querySelector('img')).not.toBeNull());
   assertImage(view.container.querySelector('img')!);
   fireEvent.click(screen.getByText('Garden bench'));
   expect(screen.getByRole('img', { name: 'Loading preview for Garden bench' })).toBeTruthy();

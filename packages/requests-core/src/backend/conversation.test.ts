@@ -9,7 +9,7 @@ import type { ConversationMessage } from '../domain/types.ts';
 import { SAYINGS } from './status.ts';
 import { attachmentSection, closeSuspended, createConversationHandler, WARM_DOCUMENTS, warmChatPrompts, formatBytes, historyOf, issueSummaryOf, parseSse, requestIdOfIssue, routePath, type ConversationDeps } from './conversation.ts';
 import { conversationFromRow, ServiceDb, UserDb } from './db.ts';
-import { ALICE, ATTACHMENT_ID, attachmentRow, CONVERSATION_ID, conversationRow, FakeRpc, FakeSessions, FakeStorage, FakeTracker, myRoles, REQUEST_ID, requestRow, sqlError, TOKEN, type RpcScript } from './fakes.ts';
+import { ALICE, ATTACHMENT_ID, attachmentRow, CONVERSATION_ID, CREDITS, conversationRow, FakeRpc, FakeSessions, FakeStorage, FakeTracker, myRoles, REQUEST_ID, requestRow, sqlError, TOKEN, type RpcScript } from './fakes.ts';
 
 const config = loadConfig(SAMPLE_CONFIG_INPUT);
 const BRIEF = { kind: 'feature', problem: 'I cannot lock the inference direction', workaround: null, desired: 'Hold Shift to lock it', acceptance: [], mustNotChange: null, area: 'Modeling', importance: null, estimatedClass: 'C3' };
@@ -23,7 +23,7 @@ function harness(over: { service?: Record<string, RpcScript>; user?: Record<stri
     fr_conversation_close: (p) => conversationRow({ status: p['p_status'] as string, closed_at: 't' }), fr_rate_check: true, fr_request_count_open: 0,
     fr_request_file: (p) => requestRow({ issue_id: p['p_issue_id'] as string, issue_key: p['p_issue_key'] as string, issue_url: p['p_issue_url'] as string, title: p['p_title'] as string, eligibility: p['p_eligibility'] as string }),
     fr_attachment_list: [], fr_attachment_bind: { request_id: REQUEST_ID, removed: [] },
-    fr_request_add_me: requestRow(), fr_outbox_enqueue: 'ob-1', ...over.service,
+    fr_request_add_me: requestRow(), fr_outbox_enqueue: 'ob-1', ai_credit_sync: CREDITS, ai_credit_record: CREDITS, ...over.service,
   }, 'service');
   const user = new FakeRpc({ fr_my_roles: myRoles(), fr_list_my_requests: [requestRow()], fr_get_request: requestRow(), fr_withdraw: requestRow({ requester_state: 'Withdrawn', state: 'Canceled' }), fr_reply: { ok: true, outbox_id: 'o', request: requestRow() }, ...over.user }, 'user');
   const tracker = new FakeTracker();
@@ -70,35 +70,44 @@ describe('routing, CORS and auth', () => {
   it('GET /me reads roles through the user-scoped RPC carrying the session header, never the service RPC', async () => {
     const h = harness({ user: { fr_my_roles: myRoles({ roles: [{ role: 'builder', org_id: null }], effective: 'builder', open_requests: 2 }) } });
     const me = await status(await call(h.handler, 'GET', '/me'), 200);
-    expect(me).toEqual({ email: ALICE.email, roles: [{ role: 'builder', orgId: null }], effective: 'builder', filingDisabled: false, buildsDisabled: false, trialsDisabled: false, openRequests: 2, limits: { openRequestsPerAccount: 5, messagesPerConversation: 30 } });
-    expect(h.user.calls.map(c => c.name)).toEqual(['fr_my_roles']); expect(h.service.calls).toEqual([]); expect(h.authHeaders).toEqual([`Bearer ${TOKEN}`]);
+    expect(me).toEqual({ email: ALICE.email, roles: [{ role: 'builder', orgId: null }], effective: 'builder', filingDisabled: false, buildsDisabled: false, trialsDisabled: false, openRequests: 2, limits: { openRequestsPerAccount: 5 }, credits: CREDITS });
+    expect(h.user.calls.map(c => c.name)).toEqual(['fr_my_roles']); expect(h.service.calls.map(c => c.name)).toEqual(['ai_credit_sync']); expect(h.authHeaders).toEqual([`Bearer ${TOKEN}`]);
   });
 });
 
 describe('conversations', () => {
-  it.each([
-    ['STAFF@PushForm.IO', true, null],
-    ['staff@pushform.io', false, 30],
-    ['staff@sub.pushform.io', true, 30],
-    ['staff@pushform.io.example.com', true, 30],
-    ['staff@otherpushform.io', true, 30],
-  ] as const)('uses the authenticated, confirmed exact domain for %s', async (email, emailVerified, limit) => {
-    const h = harness({
-      deps: { auth: new FakeSessions({ [TOKEN]: { ...ALICE, email, emailVerified } }) },
-      // A different email from the role RPC must never grant the exemption.
-      user: { fr_my_roles: myRoles({ email: 'staff@pushform.io' }) },
-      service: { fr_conversation_get: conversationRow({ message_count: 30 }), fr_conversation_append: conversationRow({ message_count: 31 }) },
-    });
-    const me = await (await call(h.handler, 'GET', '/me')).json();
-    expect(me.limits.messagesPerConversation).toBe(limit);
-    const response = await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'Keep going' });
-    if (limit === null) {
-      expect(parseSse(await response.text()).at(-1)).toMatchObject({ event: 'done', data: { messageCount: 31, limitReached: false } });
-      expect(h.service.named('fr_conversation_append')).toHaveLength(1);
-    } else {
-      await status(response, 409, 'limit');
-      expect(h.service.named('fr_conversation_append')).toHaveLength(0);
-    }
+  it('refuses a new message with a credits_exhausted error, without running the model, when the account is out of credits', async () => {
+    const free = harness({ service: { ai_credit_sync: { plan: 'free', remaining: 0, allowance: 3_000_000, refill: { kind: 'none' } } } });
+    const res = await call(free.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'Keep going' });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: { code: 'limit', kind: 'credits_exhausted', message: "You've used your free AI credits. Subscribe to keep chatting." } });
+    expect((free.deps.anthropic as ReturnType<typeof fakeAnthropic>).calls).toHaveLength(0);
+    expect(free.service.named('fr_conversation_append')).toHaveLength(0);
+    const paid = harness({ service: { ai_credit_sync: { plan: 'paid', remaining: 0, allowance: 1_600_000, refill: { kind: 'monthly', at: '2026-12-05T10:00:00Z' } } } });
+    const paidRes = await call(paid.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'Keep going' });
+    expect(await paidRes.json()).toMatchObject({ error: { kind: 'credits_exhausted', message: "You've used this month's AI credits. They refill on December 5, 2026." } });
+  });
+  it('does not limit a conversation by its message count', async () => {
+    const h = harness({ service: { fr_conversation_get: conversationRow({ message_count: 300 }), fr_conversation_append: conversationRow({ message_count: 301 }) } });
+    const events = parseSse(await (await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'Keep going' })).text());
+    expect(events.at(-1)).toMatchObject({ event: 'done', data: { messageCount: 301, limitReached: false } });
+  });
+  it('meters every model round with its model and token counts, and reports exhaustion on the done event', async () => {
+    const h = harness({ service: { ai_credit_record: { plan: 'free', remaining: 0, allowance: 3_000_000, refill: { kind: 'none' } } }, turns: [{ text: ['Hello'], usage: { input_tokens: 400, output_tokens: 30, cache_read_input_tokens: 2000 } }] });
+    const events = parseSse(await (await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'Hi' })).text());
+    const recorded = h.service.named('ai_credit_record');
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]!.params).toMatchObject({ p_owner: ALICE.id, p_conversation: CONVERSATION_ID, p_provider: 'anthropic', p_model: config.models.conversation,
+      p_input: 400, p_output: 30, p_cache_read: 2000, p_cache_write: 0, p_estimated: false, p_org: null });
+    expect(String(recorded[0]!.params['p_call_id'])).toMatch(/:0$/);
+    expect(events.at(-1)!.data).toMatchObject({ limitReached: true, limitMessage: "You've used your free AI credits. Subscribe to keep chatting.", credits: { remaining: 0 } });
+  });
+  it('ends a turn after the round that uses the last credits, without running that round tool calls', async () => {
+    const h = harness({ service: { ai_credit_record: { plan: 'free', remaining: 0, allowance: 3_000_000, refill: { kind: 'none' } } },
+      turns: [{ toolUses: [{ id: 't1', name: 'search_docs', input: { query: 'inference' } }] }, { text: ['never reached'] }] });
+    await (await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'How do I lock inference?' })).text();
+    expect((h.deps.anthropic as ReturnType<typeof fakeAnthropic>).calls).toHaveLength(1);
+    expect(h.service.named('ai_credit_record')).toHaveLength(1);
   });
   it('retains rate limiting for confirmed company accounts', async () => {
     const h = harness({ deps: { auth: new FakeSessions({ [TOKEN]: { ...ALICE, email: 'staff@pushform.io', emailVerified: true } }) }, service: { fr_rate_check: false } });
@@ -194,9 +203,9 @@ describe('POST /conversations/:id/messages (SSE)', () => {
     expect(events.map(e => e.event)).toEqual(['brief', 'text', 'text', 'brief', 'done']);
     expect(events[0]!.data).toMatchObject({ brief: { kind: 'feature', problem: 'I cannot lock the inference direction' }, title: null, path: 'feature', estimatedClass: null });
     expect(events[1]!.data).toEqual({ delta: 'Noted' });
-    expect(events[4]!.data).toEqual({ messageCount: 1, limitReached: false, ended: false });
-    // Rate check first, roles and own requests through the user RPC, the owner-only open count, then one append with user, tool, tool, assistant.
-    expect(h.service.calls.map(c => c.name)).toEqual(['fr_conversation_get', 'fr_rate_check', 'fr_request_count_open', 'fr_conversation_append']);
+    expect(events[4]!.data).toMatchObject({ messageCount: 1, limitReached: false, ended: false });
+    // Rate check first, roles and own requests through the user RPC, the owner-only open count, then one append with user, tool, tool, assistant. Credits are read before the model runs and each of its two rounds is metered.
+    expect(h.service.calls.map(c => c.name)).toEqual(['fr_conversation_get', 'fr_rate_check', 'fr_request_count_open', 'ai_credit_sync', 'ai_credit_record', 'ai_credit_record', 'fr_conversation_append']);
     expect(h.user.calls.map(c => c.name).sort()).toEqual(['fr_list_my_requests', 'fr_my_roles']);
     const append = h.service.named('fr_conversation_append')[0]!.params;
     const messages = append['p_messages'] as ConversationMessage[];
@@ -227,7 +236,7 @@ describe('POST /conversations/:id/messages (SSE)', () => {
     const events = parseSse(await (await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'yes, add me' })).text());
     expect(events.map(e => e.event)).toEqual(['text', 'brief', 'added', 'done']);
     expect(events[2]!.data).toEqual({ request: { id: REQUEST_ID, issueKey: 'FRQ-123', issueUrl: 'https://linear.app/pushform/issue/FRQ-123', title: 'Lock inference with Shift', requesterState: 'Submitted', eligibility: 'none' } });
-    expect(events[3]!.data).toEqual({ messageCount: 1, limitReached: false, ended: true, reason: 'added' });
+    expect(events[3]!.data).toMatchObject({ messageCount: 1, limitReached: false, ended: true, reason: 'added' });
     expect(h.service.named('fr_request_add_me')[0]!.params).toEqual({ p_host: 'pushform', p_request: REQUEST_ID, p_owner: ALICE.id, p_email: ALICE.email, p_notes: 'Also on Layout pages' });
     // The transcript, including the closing text, is saved before the conversation closes.
     const names = h.service.calls.map(c => c.name);
@@ -270,7 +279,7 @@ describe('POST /conversations/:id/messages (SSE)', () => {
       const events = parseSse(await (await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'yes, send it' })).text());
       expect(events.map(e => e.event)).toEqual(['text', 'brief', 'filed', 'done']);
       expect(events[2]!.data).toEqual({ request: { id: REQUEST_ID, issueKey: 'FRQ-101', issueUrl: 'https://linear.app/pushform/issue/FRQ-101', title: 'Lock inference with Shift', requesterState: 'Submitted', eligibility: 'none' } });
-      expect(events[3]!.data).toEqual({ messageCount: 1, limitReached: false, ended: true, reason: 'filed' });
+      expect(events[3]!.data).toMatchObject({ messageCount: 1, limitReached: false, ended: true, reason: 'filed' });
       expect(h.tracker.created).toHaveLength(1);
       expect(h.tracker.created[0]).toMatchObject({ title: 'Lock inference with Shift', kind: 'feature', labels: ['feature', 'area:modeling', 'source:in-app', ] });
       // The transcript (user, tool, assistant) is appended before fr_request_file closes the conversation; the comment follows.
@@ -308,7 +317,7 @@ describe('POST /conversations/:id/messages (SSE)', () => {
       h.tracker.failCreate = new TrackerError('unavailable', 'Could not reach Linear.');
       const events = parseSse(await (await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'yes' })).text());
       expect(events.map(e => e.event)).toEqual(['text', 'brief', 'done']);
-      expect(events[2]!.data).toEqual({ messageCount: 1, limitReached: false, ended: false });
+      expect(events[2]!.data).toMatchObject({ messageCount: 1, limitReached: false, ended: false });
       const tool = (h.service.named('fr_conversation_append')[0]!.params['p_messages'] as ConversationMessage[])[1] as { output: string };
       expect(tool.output).toContain('Filing failed: Could not reach Linear.');
       expect(tool.output).toContain('they can confirm again');
@@ -339,7 +348,7 @@ describe('POST /conversations/:id/messages (SSE)', () => {
     const h = harness({ turns: [{ toolUses: [{ id: 't1', name: 'start_over', input: { reason: 'asked to start over' } }] }, { text: ['Dropped. Your next message starts fresh.'] }] });
     const events = parseSse(await (await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'start over please' })).text());
     expect(events.map(e => e.event)).toEqual(['text', 'brief', 'done']);
-    expect(events[2]!.data).toEqual({ messageCount: 1, limitReached: false, ended: true, reason: 'start_over' });
+    expect(events[2]!.data).toMatchObject({ messageCount: 1, limitReached: false, ended: true, reason: 'start_over' });
     const names = h.service.calls.map(c => c.name);
     expect(names.slice(names.indexOf('fr_conversation_append'))).toEqual(['fr_conversation_append', 'fr_conversation_close']);
     expect(h.service.named('fr_conversation_close')[0]!.params).toEqual({ p_id: CONVERSATION_ID, p_owner: ALICE.id, p_status: 'discarded' });
@@ -362,7 +371,7 @@ describe('POST /conversations/:id/messages (SSE)', () => {
     const h = harness({ turns: [{ toolUses: [{ id: 't1', name: 'decline', input: { reason: 'abusive' } }] }, { text: ['I cannot file this.'] }] });
     const events = parseSse(await (await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'abuse' })).text());
     expect(events.map(e => e.event)).toEqual(['text', 'brief', 'done']);
-    expect(events[2]!.data).toEqual({ messageCount: 1, limitReached: false, ended: true, reason: 'abusive' });
+    expect(events[2]!.data).toMatchObject({ messageCount: 1, limitReached: false, ended: true, reason: 'abusive' });
     expect(h.service.named('fr_conversation_close')[0]!.params).toEqual({ p_id: CONVERSATION_ID, p_owner: ALICE.id, p_status: 'discarded' });
     const polite = harness({ turns: [{ toolUses: [{ id: 't1', name: 'decline', input: { reason: 'off_topic' } }] }, { text: ['Not for this product.'] }] });
     await call(polite.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'zebra' });
@@ -378,13 +387,12 @@ describe('POST /conversations/:id/messages (SSE)', () => {
     expect(h.service.calls.filter(c => c.name !== 'fr_rate_check' && c.name !== 'fr_conversation_get')).toEqual([]);
     expect(h.user.named('fr_reply')).toEqual([]);
   });
-  it('answers 429 when the rate check fails, 409 at the message limit, 400 for empty text, and 404 for other accounts', async () => {
+  it('answers 429 when the rate check fails, 400 for empty text, and 404 for other accounts', async () => {
     const limited = harness({ service: { fr_rate_check: false } });
     const res = await call(limited.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'hi' });
     await status(res, 429, 'rate_limited'); expect(res.headers.get('retry-after')).toBe('60');
     expect(limited.service.named('fr_conversation_append')).toEqual([]);
-    const full = harness({ service: { fr_conversation_get: conversationRow({ message_count: 30 }) } });
-    await status(await call(full.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'hi' }), 409, 'limit');
+    const full = harness();
     await status(await call(full.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: '' }), 400, 'invalid');
     // A filed conversation is complete: the next message needs a new conversation.
     const closed = harness({ service: { fr_conversation_get: conversationRow({ status: 'filed', request_id: REQUEST_ID, closed_at: 't' }) } });
@@ -400,11 +408,11 @@ describe('POST /conversations/:id/messages (SSE)', () => {
     expect(events[0]!.data).toMatchObject({ path: 'feature', brief: { kind: 'feature' } });
     expect(h.service.named('fr_conversation_append')[0]!.params).toMatchObject({ p_path: 'feature', p_brief: { kind: 'feature' } });
   });
-  it('uses the help agent on the help path, reports persistence failures as an error event, and marks the limit on the last message', async () => {
+  it('uses the help agent on the help path, and reports persistence failures as an error event', async () => {
     const help = harness({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help' }), fr_conversation_append: conversationRow({ message_count: 30 }) }, turns: [{ text: ['Shift locks it.'] }] });
     const events = parseSse(await (await call(help.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'How do I lock inference?' })).text());
     expect(events.map(e => e.event)).toEqual(['text', 'done']);
-    expect(events[1]!.data).toEqual({ messageCount: 30, limitReached: true, ended: false });
+    expect(events[1]!.data).toMatchObject({ messageCount: 30, limitReached: false, ended: false });
     const system = (help.deps.anthropic as ReturnType<typeof fakeAnthropic>).calls[0]!.system as { text: string }[];
     expect(system[0]!.text).toContain('Help assistant');
     const failing = harness({ service: { fr_conversation_append: () => sqlError('fr_limit') } });
@@ -923,7 +931,7 @@ describe('document tools', () => {
     const { h, stored, events } = await suspended();
     expect(events.map(e => e.event)).toEqual(['text', 'tool_request', 'done']);
     expect(events[1]!.data).toEqual({ calls: [getDocument] });
-    expect(events[2]!.data).toEqual({ messageCount: 1, limitReached: false, ended: false, awaitingTools: true });
+    expect(events[2]!.data).toMatchObject({ messageCount: 1, limitReached: false, ended: false, awaitingTools: true });
     expect(stored.map(m => m.role)).toEqual(['user', 'assistant']);
     const last = stored[1] as Extract<ConversationMessage, { role: 'assistant' }>;
     expect(last.text).toBe('Let me look.');

@@ -92,7 +92,8 @@ export const boundariesConfigSchema = z.strictObject({
 });
 export const limitsConfigSchema = z.strictObject({
   openRequestsPerAccount: z.int().positive().default(5),
-  messagesPerConversation: z.int().positive().default(30),
+  /** Retired: a conversation is bounded by the account's AI credits. Accepted so older configuration files still load, and ignored. */
+  messagesPerConversation: z.int().positive().optional(),
   messagesPerMinute: z.int().positive().default(20),
   concurrentRuns: z.int().positive().default(2),
   runWallClockMinutes: z.int().positive().default(120),

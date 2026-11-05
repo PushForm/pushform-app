@@ -17,7 +17,7 @@ export interface OwnRequestSummary { id: string; issueKey: string; title: string
 /** The panel's view of the client (brief §HTTP contract `screen`), without the build, which travels separately. */
 export interface ScreenContext { editor: 'home' | 'model' | 'layout'; documentType: string | null; browser: string; os: string }
 export interface BuildContext { version: string; commit: string }
-export interface AgentLimits { openRequestsPerAccount: number; messagesPerConversation: number | null }
+export interface AgentLimits { openRequestsPerAccount: number }
 
 /** Everything an agent turn knows besides the transcript; assembled by the backend, never by the model. */
 export interface AgentContext {

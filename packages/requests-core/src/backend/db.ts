@@ -3,6 +3,7 @@
 import { parseBrief } from '../agents/brief.ts';
 import { configHash } from '../config/load.ts';
 import type { Config } from '../config/schema.ts';
+import type { CreditSummary, CreditsPort, UsageCall } from './credits.ts';
 import type {
   Brief, ChangeClass, Conversation, ConversationKind, ConversationMessage, ConversationPath, ConversationStatus, Eligibility, Kind, PanelScreen,
   Request, RequestDetail, RequesterState, Role, RoleGrant, SuspendedTurn, Treatment,
@@ -81,7 +82,7 @@ export interface SqlConversationRow {
 export interface SqlMyRoles {
   email: string; roles: { role: string; org_id: string | null }[]; effective: string;
   filing_disabled: boolean; builds_disabled: boolean; trials_disabled: boolean; open_requests: number;
-  limits: { openRequestsPerAccount: number; messagesPerConversation: number };
+  limits: { openRequestsPerAccount: number };
 }
 export interface SqlOutboxRow {
   id: string; kind: string; target: string; payload: Record<string, unknown>; request_id: string | null; attempts: number;
@@ -179,7 +180,7 @@ export interface SqlRunPayload {
 
 export interface MeView {
   email: string; roles: RoleGrant[]; effective: Role; filingDisabled: boolean; buildsDisabled: boolean; trialsDisabled: boolean;
-  openRequests: number; limits: { openRequestsPerAccount: number; messagesPerConversation: number | null };
+  openRequests: number; limits: { openRequestsPerAccount: number };
 }
 export interface OpenConversationView { id: string; kind: ConversationKind; path: ConversationPath; title: string | null; updatedAt: string; messageCount: number }
 
@@ -235,7 +236,7 @@ export function meFromRow(row: SqlMyRoles, config: Config): MeView {
   return {
     email: row.email, roles: row.roles.map(r => ({ role: r.role as RoleGrant['role'], orgId: r.org_id ?? null })), effective: row.effective as Role,
     filingDisabled: row.filing_disabled, buildsDisabled: row.builds_disabled, trialsDisabled: row.trials_disabled, openRequests: row.open_requests,
-    limits: { openRequestsPerAccount: config.limits.openRequestsPerAccount, messagesPerConversation: config.limits.messagesPerConversation },
+    limits: { openRequestsPerAccount: config.limits.openRequestsPerAccount },
   };
 }
 
@@ -246,7 +247,7 @@ export interface FileRequestInput {
   eligibility: Eligibility; issueId: string; issueKey: string; issueUrl: string; client: Record<string, unknown> | null;
 }
 /** Functions the pipeline backend calls with the service-role key; accounts arrive as explicit parameters. */
-export class ServiceDb {
+export class ServiceDb implements CreditsPort {
   constructor(readonly rpc: Rpc) {}
   private call<T>(name: string, params: Record<string, unknown>): Promise<T> { return this.rpc.rpc(name, params) as Promise<T>; }
 
@@ -275,6 +276,15 @@ export class ServiceDb {
   }
   /** Records one message; false when the account sent more than `limit` in the last minute. */
   rateCheck(ownerId: string, limit: number): Promise<boolean> { return this.call('fr_rate_check', { p_owner: ownerId, p_limit: limit }); }
+  /** Reconciles the account's AI credit buckets with its plan (seed, monthly refill, end of subscription) and returns the summary. */
+  creditSync(ownerId: string): Promise<CreditSummary> { return this.call('ai_credit_sync', { p_owner: ownerId }); }
+  /** Meters one model call: debits its weighted tokens and appends a usage event. Idempotent on the call id. */
+  creditRecord(call: UsageCall): Promise<CreditSummary> {
+    return this.call('ai_credit_record', {
+      p_call_id: call.callId, p_owner: call.ownerId, p_turn: call.turnId, p_conversation: call.conversationId, p_org: call.orgId, p_path: call.path,
+      p_provider: call.provider, p_model: call.model, p_input: call.input, p_output: call.output, p_cache_read: call.cacheRead, p_cache_write: call.cacheWrite, p_estimated: call.estimated,
+    });
+  }
   requestCountOpen(ownerId: string): Promise<number> { return this.call('fr_request_count_open', { p_owner: ownerId }); }
   requestFile(input: FileRequestInput): Promise<SqlRequestRow> {
     return this.call('fr_request_file', {

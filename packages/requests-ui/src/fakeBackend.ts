@@ -60,7 +60,7 @@ export function fakeBackend(options: FakeBackendOptions = {}) {
   const attachments = new Map<string, { id: string; kind: 'screenshot' | 'document'; name: string; size: number; uploaded: boolean }[]>();
   const uploads = new Map<string, number>();
   const me: Me = { email: 'artist@example.com', roles: [], effective: 'user', filingDisabled: false, buildsDisabled: false, trialsDisabled: false, openRequests: 0,
-    limits: { openRequestsPerAccount: 5, messagesPerConversation: 30 }, ...options.me };
+    limits: { openRequestsPerAccount: 5 }, credits: { plan: 'free', remaining: 3_000_000, allowance: 3_000_000, refill: { kind: 'none' } }, ...options.me };
   const fetchImpl: typeof fetch = async (input, init) => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
     const method = init?.method ?? 'GET', path = url.pathname.slice(new URL(BASE).pathname.length) || '/';

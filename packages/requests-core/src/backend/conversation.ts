@@ -23,7 +23,8 @@ import type { Config } from '../config/schema.ts';
 import { issueBody, issueLabels, issueTitle, transcriptUrl } from '../domain/issue.ts';
 import { isClosedRequesterState } from '../domain/states.ts';
 import type { Conversation, ConversationKind, ConversationMessage, ConversationPath, MessagePicture, Eligibility, Kind, PanelScreen, Request as PipelineRequest, RequestDetail, SuspendedTurn } from '../domain/types.ts';
-import { CORS_HEADERS, conversationMessageLimit, enforceRate, errorResponse, HttpError, httpErrorOf, json, lookupRoles, validateSession, type SessionUser, type SessionValidator } from './auth.ts';
+import { creditsExhaustedMessage, usagePathOf, usageOfRound, type CreditSummary } from './credits.ts';
+import { CORS_HEADERS, enforceRate, errorResponse, HttpError, httpErrorOf, json, lookupRoles, validateSession, type SessionUser, type SessionValidator } from './auth.ts';
 import { blockStatus, messageStatus, NEXT_STEP, resumeStatus, statusSender, type StatusLine, type StatusPick } from './status.ts';
 import { conversationFromRow, requestDetailFromRow, requestFromRow, type AttachmentKind, type MeView, type ServiceDb, type SqlAttachmentRow, type UserDb } from './db.ts';
 
@@ -128,7 +129,7 @@ function warmContext(config: Config, document: DocumentCapability | null): Agent
     host: config.host, accountEmail: '', roles: [], filingAllowed: true,
     screen: { editor: document?.type ?? 'home', documentType: null, browser: '', os: '' }, build: { version: '', commit: '' }, now: '',
     path: 'open', brief: null, title: null, messageCount: 1, openRequests: [], openRequestCount: 0,
-    limits: { openRequestsPerAccount: config.limits.openRequestsPerAccount, messagesPerConversation: config.limits.messagesPerConversation },
+    limits: { openRequestsPerAccount: config.limits.openRequestsPerAccount },
     openIssues: [], digest: [], document,
   };
 }
@@ -454,11 +455,11 @@ export type SseEvent =
   /** The turn is suspended until the editor answers these document tool calls through `POST /conversations/:id/tool-results`. */
   /** A render call carries `review`: its number among the requester message's allowed reviews, as the backend counts them. */
   | { event: 'tool_request'; data: { calls: (ClientToolCall & { review?: { index: number; limit: number } })[] } }
-  | { event: 'error'; data: { code: string; message: string } }
+  | { event: 'error'; data: { code: string; message: string; kind?: string } }
   /** What a turn that edits a 3D model is doing while nothing else is sent (see `status.ts`); never in the transcript or shown to the model. */
   | { event: 'status'; data: StatusLine }
   /** `ended`: the conversation is closed and the next message needs a new one; `reason` says why (filed, added, start_over, or abusive content). */
-  | { event: 'done'; data: { messageCount: number; limitReached: boolean; ended: boolean; reason?: TurnEndReason; awaitingTools?: boolean } };
+  | { event: 'done'; data: { messageCount: number; limitReached: boolean; limitMessage?: string; credits?: CreditSummary; ended: boolean; reason?: TurnEndReason; awaitingTools?: boolean } };
 export function formatSse(e: SseEvent): string { return `event: ${e.event}\ndata: ${JSON.stringify(e.data)}\n\n`; }
 /** Parse an SSE body back into events (used by the panel client and tests). */
 export function parseSse(text: string): SseEvent[] {
@@ -476,7 +477,7 @@ function sseResponse(log: ((message: string) => void) | undefined, run: (emit: (
       try { await run(emit); } catch (error) {
         // The client sees only the mapped message, so the underlying failure is logged here.
         if (!(error instanceof HttpError)) log?.(`turn failed: ${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`);
-        const e = httpErrorOf(error); emit({ event: 'error', data: { code: e.code, message: e.message } }); }
+        const e = httpErrorOf(error); emit({ event: 'error', data: { code: e.code, message: e.message, ...(e.kind ? { kind: e.kind } : {}) } }); }
       try { controller.close(); } catch { /* already closed */ }
     },
   });
@@ -521,10 +522,6 @@ const clientOf = (screen: PanelScreen | null): Record<string, unknown> | null =>
 
 export function createConversationHandler(deps: ConversationDeps): (req: Request) => Promise<Response> {
   const { config, db } = deps;
-  const atMessageLimit = (user: SessionUser, count: number): boolean => {
-    const limit = conversationMessageLimit(user, config);
-    return limit !== null && count >= limit;
-  };
   const now = () => deps.now?.() ?? new Date();
   const ttl = (deps.openIssuesTtlSeconds ?? 60) * 1000;
   let issueCache: { at: number; issues: OpenIssueSummary[] } | null = null;
@@ -588,7 +585,8 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
   const me = async (req: Request): Promise<Response> => {
     const user = await session(req);
     const view = await lookupRoles(deps.userDb(req), config);
-    return json({ ...view, limits: { ...view.limits, messagesPerConversation: conversationMessageLimit(user, config) } });
+    let credits: CreditSummary; try { credits = await db.creditSync(user.id); } catch (error) { throw httpErrorOf(error); }
+    return json({ ...view, credits });
   };
   const listOpen = async (req: Request): Promise<Response> => {
     const user = await session(req);
@@ -694,7 +692,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     let row: SqlAttachmentRow;
     try { row = await db.attachmentAdd(conversation.id, user.id, { kind: body.kind, name: body.name, mime: body.mime, size: body.size, path }); } catch (error) {
       const e = httpErrorOf(error);
-      throw e.code === 'limit' ? new HttpError('limit', 'A conversation takes at most 5 images.') : e;
+      throw e.code === 'limit' ? new HttpError('limit', 'A conversation takes at most 5 pictures.', undefined, 'images') : e;
     }
     return json({ attachment: attachmentView(row), uploadUrl: await storage.uploadUrl(path) });
   };
@@ -736,7 +734,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     const roles = await lookupRoles(userDb, config);
     if (!filingAllowed(roles)) throw new HttpError('forbidden', 'Filing is not available for this account.');
     let open: number; try { open = await db.requestCountOpen(user.id); } catch (error) { throw httpErrorOf(error); }
-    if (open >= config.limits.openRequestsPerAccount) throw new HttpError('limit', `You already have ${open} open requests; the limit is ${config.limits.openRequestsPerAccount}. Add yourself to an existing request instead.`);
+    if (open >= config.limits.openRequestsPerAccount) throw new HttpError('limit', `You already have ${open} open requests; the limit is ${config.limits.openRequestsPerAccount}. Add yourself to an existing request instead.`, undefined, 'open_requests');
     const tracker = deps.tracker;
     if (!tracker) throw new HttpError('tracker_unavailable', 'The tracker is not configured (LINEAR_TOKEN missing). Your brief is kept.');
     await ensureStates(tracker);
@@ -818,7 +816,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     return {
       host: config.host, accountEmail: user.email, roles: roles.roles.map(r => r.role), filingAllowed: filingAllowed(roles),
       screen: { editor: screen.editor, documentType: screen.documentType ?? null, browser: screen.browser, os: screen.os }, build: screen.build, now: now().toISOString(),
-      messageCount, openRequests, openRequestCount, limits: { openRequestsPerAccount: config.limits.openRequestsPerAccount, messagesPerConversation: conversationMessageLimit(user, config) },
+      messageCount, openRequests, openRequestCount, limits: { openRequestsPerAccount: config.limits.openRequestsPerAccount },
       openIssues: issues, digest: deps.digest, document,
     };
   };
@@ -886,11 +884,23 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
         if (a?.text) appended.splice(t.leading.length, 0, { role: 'assistant', text: a.text, at: now().toISOString(), acknowledgment: true });
         return a;
       };
+      // Every model round of the turn is metered as it completes (the credits ledger), so a failed or cut-off turn still
+      // pays for the rounds that finished; the last summary tells the client whether the account has credits left.
+      const turnKey = crypto.randomUUID();
+      let credits = null as CreditSummary | null;
+      const usagePath = usagePathOf(conversation.path === 'open' ? store.getPath() : conversation.path, editing);
+      const meter = async (callId: string, call: { path: typeof usagePath; model: string; input: number; output: number; cacheRead: number; cacheWrite: number }): Promise<void> => {
+        try {
+          credits = await db.creditRecord({ callId, ownerId: user.id, turnId: turnKey, conversationId: id, orgId: null, provider: 'anthropic', estimated: false, ...call });
+        } catch (error) { deps.log?.(`turn ${id}: usage not recorded (${callId}): ${error instanceof Error ? error.message : String(error)}`); }
+      };
       let result;
       try {
         const running = runTurn({
           client: anthropic, model: setup.model, system: setup.system, tools: setup.tools, handlers: t.handlers, messages: setup.messages,
           clientTools, resume: setup.resume,
+          // Metering: a round that leaves the account without credits ends the turn after it (nothing is left half applied).
+          afterRound: async (stat, round) => { await meter(`${turnKey}:${round}`, { path: usagePath, model: setup.model, ...usageOfRound(stat) }); return credits === null || credits.remaining > 0; },
           // A render past the limit is answered here, so the agent finishes instead of the browser drawing again.
           interceptClientCall: (toolCall) => {
             if (toolCall.name !== RENDER_TOOL) return null;
@@ -935,6 +945,9 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       status?.stop();
       const generationMs = Math.round(performance.now() - generationStarted);
       const acknowledgment = await keepAcknowledgment();
+      if (acknowledgment && ackModel && (acknowledgment.input || acknowledgment.output)) {
+        await meter(`${turnKey}:ack`, { path: 'acknowledge', model: ackModel, input: acknowledgment.input, output: acknowledgment.output, cacheRead: 0, cacheWrite: 0 });
+      }
       const reason = store.ended();
       // A turn that also ended the conversation (filed, start over) does not wait for the editor: the calls are dropped.
       const suspended = result.stop === 'client_tools' && !reason ? result.pending : null;
@@ -972,7 +985,9 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
         const index = reviewIndex.get(c.id);
         return index ? { ...c, review: { index, limit: reviewLimit } } : c;
       }) } });
-      emit({ event: 'done', data: { messageCount: saved.messageCount, limitReached: atMessageLimit(user, saved.messageCount), ended: reason !== null,
+      const exhausted = credits !== null && credits.remaining <= 0;
+      emit({ event: 'done', data: { messageCount: saved.messageCount, limitReached: exhausted, ended: reason !== null,
+        ...(exhausted ? { limitMessage: creditsExhaustedMessage(credits!) } : {}), ...(credits ? { credits } : {}),
         ...(reason ? { reason } : {}), ...(turn ? { awaitingTools: true } : {}) } });
     }
   };
@@ -988,7 +1003,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     const userDb = deps.userDb(req);
     // Everything the turn needs before the model starts, at once: one database round trip of waiting instead of five.
     const loading = timed(timing, 'load', loadConversation(id, user));
-    const [loaded, rate, account, issues] = await Promise.allSettled([
+    const [loaded, rate, account, issues, creditState] = await Promise.allSettled([
       loading,
       timed(timing, 'rate', enforceRate(db, user.id, config.limits.messagesPerMinute)),
       timed(timing, 'account', accountContext(user, userDb)),
@@ -997,16 +1012,18 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
         // Help and initial routing need no tracker snapshot. Duplicate lookup stays available on demand.
         return path === 'help' || path === 'open' ? [] : timed(timing, 'issues', openIssues());
       }),
+      timed(timing, 'credits', db.creditSync(user.id)),
     ]);
     // Failures are reported in the order the checks used to run one by one, so a response never depends on timing.
     if (loaded.status === 'rejected') throw loaded.reason;
     const conversation = loaded.value;
     if (conversation.status !== 'open') throw new HttpError('invalid', 'The conversation is closed; start a new one.');
-    if (atMessageLimit(user, conversation.messageCount)) throw new HttpError('limit', `This conversation reached its ${config.limits.messagesPerConversation}-message limit. Send the brief as it stands or start over.`);
     if (rate.status === 'rejected') throw rate.reason;
     if (!deps.anthropic) throw new HttpError('unavailable', 'The assistant is not configured (ANTHROPIC_API_KEY missing).');
     if (account.status === 'rejected') throw account.reason;
     if (issues.status === 'rejected') throw issues.reason;
+    if (creditState.status === 'rejected') throw httpErrorOf(creditState.reason);
+    if (creditState.value.remaining <= 0) throw new HttpError('limit', creditsExhaustedMessage(creditState.value), creditState.value, 'credits_exhausted');
     const document = body.document && documentTools(body.document).length ? body.document : null;
     const base = turnBase(user, conversation, conversation.messageCount + 1, document, account.value, issues.value);
     // A clicked card settles an open conversation's path before the agent runs; the card label is the first message.
@@ -1081,7 +1098,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       const messages: ConversationMessage[] = pending.calls.map(call => ({ role: 'tool', name: call.name, toolUseId: call.id,
         input: call.input, output: answers.get(call.id)!.content.slice(0, 8000), at: base.now }));
       const saved = conversationFromRow(await db.conversationAppend(id, user.id, messages, store.getBrief(), store.getTitle(), store.getPath(), null));
-      emit({ event: 'done', data: { messageCount: saved.messageCount, limitReached: atMessageLimit(user, saved.messageCount), ended: false } });
+      emit({ event: 'done', data: { messageCount: saved.messageCount, limitReached: false, ended: false } });
     });
     const history = conversation.messages.slice(0, turn.historyLength);
     const images = await pictureData([...history, opening]);

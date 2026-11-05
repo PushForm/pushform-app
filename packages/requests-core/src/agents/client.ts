@@ -96,7 +96,7 @@ export function withSchema<S extends z.ZodType>(schema: S, run: (input: z.output
 export interface ToolCallEvent { id: string; name: string; input: unknown; result: ToolResult; invalidInput?: string }
 export interface TurnUsage { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }
 /** `client_tools`: the turn is suspended until the browser answers the calls in `pending`. */
-export type TurnStop = 'end_turn' | 'max_tokens' | 'refusal' | 'tool_rounds' | 'client_tools' | 'other';
+export type TurnStop = 'end_turn' | 'max_tokens' | 'refusal' | 'tool_rounds' | 'client_tools' | 'credits' | 'other';
 /** A tool call the browser runs against its open document. */
 export interface ClientToolCall { id: string; name: string; input: unknown }
 /**
@@ -116,6 +116,11 @@ export interface RunTurnOptions {
   onToolCall?: (call: ToolCallEvent) => void;
   /** Where each model round is: called as a round's request is sent, and as each content block of its reply starts. */
   onPhase?: (phase: RoundPhase) => void;
+  /**
+   * Called after each model round with its token use (rounds count from 0 within this call), before any of its tool calls run.
+   * Metering lives here. Answering false ends the turn after this round, as at the round limit: its tool calls are not run.
+   */
+  afterRound?: ((stat: RoundStat, round: number) => Promise<boolean>) | undefined;
   maxToolRounds?: number;
   maxTokens?: number;
   effort?: 'low' | 'medium' | 'high';
@@ -246,15 +251,17 @@ export async function runTurn(options: RunTurnOptions): Promise<RunTurnResult> {
     roundStats.push({ startMs: startMs ?? 0, firstMs, ms: Math.round(performance.now() - roundStarted), input: message.usage.input_tokens, output: message.usage.output_tokens,
       cacheRead: message.usage.cache_read_input_tokens ?? 0, cacheWrite: message.usage.cache_creation_input_tokens ?? 0 });
     appended.push({ role: 'assistant', content: message.content });
+    const outOfCredits = options.afterRound ? !(await options.afterRound(roundStats[roundStats.length - 1]!, roundStats.length - 1)) : false;
     const toolUses = message.content.filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
     const reason = message.stop_reason;
-    if (reason === 'refusal' || reason === 'max_tokens' || (reason !== 'tool_use' && toolUses.length === 0) || rounds >= maxRounds) {
+    if (reason === 'refusal' || reason === 'max_tokens' || (reason !== 'tool_use' && toolUses.length === 0) || rounds >= maxRounds || outOfCredits) {
       if (toolUses.length) {
-        const note = reason === 'refusal' ? 'Not run: the turn was refused.' : reason === 'max_tokens' ? 'Not run: the reply was cut off at the token limit.' : 'Not run: the tool round limit for this turn was reached.';
+        const note = reason === 'refusal' ? 'Not run: the turn was refused.' : reason === 'max_tokens' ? 'Not run: the reply was cut off at the token limit.' : outOfCredits ? 'Not run: the account is out of AI credits.' : 'Not run: the tool round limit for this turn was reached.';
         appended.push({ role: 'user', content: toolUses.map((t) => ({ type: 'tool_result' as const, tool_use_id: t.id, content: note, is_error: true })) });
       }
       if (reason === 'refusal') { stop = 'refusal'; if (!text.trim()) emit(REFUSAL_TEXT); }
       else if (reason === 'max_tokens') { stop = 'max_tokens'; emit(TRUNCATED_TEXT); }
+      else if (outOfCredits && (toolUses.length || reason === 'tool_use')) stop = 'credits';
       else if (toolUses.length) { stop = 'tool_rounds'; emit(ROUNDS_TEXT); }
       else stop = reason === 'end_turn' ? 'end_turn' : 'other';
       break;

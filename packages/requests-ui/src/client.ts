@@ -6,6 +6,15 @@
  * reply for agent turns (the browser never holds tracker credentials).
  */
 
+/** Why the server refused or ended a turn: its message says which, and this lets the chat treat the cause properly. */
+export type LimitKind = 'credits_exhausted' | 'open_requests' | 'images' | 'rate_limited';
+/** An account's AI allowance. Every field is concrete: there is no unlimited plan, and a free account has no refill. */
+export interface Credits {
+  readonly plan: 'free' | 'paid';
+  readonly remaining: number;
+  readonly allowance: number;
+  readonly refill: { readonly kind: 'none' } | { readonly kind: 'monthly'; readonly at: string };
+}
 export type ErrorCode = 'unauthorized' | 'forbidden' | 'not_found' | 'invalid' | 'rate_limited' | 'limit' |
   'tracker_unavailable' | 'config_invalid' | 'network' | 'unknown';
 export type ConversationKind = 'help' | 'intake' | 'feedback';
@@ -58,7 +67,8 @@ export interface Me {
   readonly buildsDisabled: boolean;
   readonly trialsDisabled: boolean;
   readonly openRequests: number;
-  readonly limits: { readonly openRequestsPerAccount: number; readonly messagesPerConversation: number | null };
+  readonly limits: { readonly openRequestsPerAccount: number };
+  readonly credits: Credits | null;
 }
 export interface ConversationSummary {
   readonly id: string; readonly kind: ConversationKind; readonly path: ConversationPath;
@@ -92,7 +102,7 @@ export type StreamEvent =
   | { readonly type: 'filed'; readonly request: FiledRequest }
   /** The agent added the requester to an existing request; arrives before the closing `text`. */
   | { readonly type: 'added'; readonly request: FiledRequest }
-  | { readonly type: 'error'; readonly code: ErrorCode; readonly message: string }
+  | { readonly type: 'error'; readonly code: ErrorCode; readonly message: string; readonly kind: LimitKind | null }
   /** What the agent is doing while nothing else arrives (a short line the backend writes, not the agent's words). */
   | { readonly type: 'status'; readonly phase: string; readonly text: string }
   /** The turn waits for the editor to run these document tool calls and send the results with `sendToolResults`. */
@@ -101,7 +111,7 @@ export type StreamEvent =
    * `ended`: the server closed the conversation (after a filing or Add me, a start over, or abusive content);
    * the next message starts a new one. `reason` is `start_over` when the requester asked to discard it.
    */
-  | { readonly type: 'done'; readonly messageCount: number; readonly limitReached: boolean; readonly ended: boolean; readonly reason: string | null; readonly awaitingTools: boolean };
+  | { readonly type: 'done'; readonly messageCount: number; readonly limitReached: boolean; readonly limitMessage: string | null; readonly credits: Credits | null; readonly ended: boolean; readonly reason: string | null; readonly awaitingTools: boolean };
 
 /**
  * A document tool call the agent asked the editor to run. `review` numbers a render review among the turn's allowed
@@ -134,7 +144,7 @@ export function formatBytes(n: number): string {
 }
 
 export class RequestsError extends Error {
-  constructor(readonly code: ErrorCode, message: string, readonly status = 0) { super(message); this.name = 'RequestsError'; }
+  constructor(readonly code: ErrorCode, message: string, readonly status = 0, readonly kind: LimitKind | null = null) { super(message); this.name = 'RequestsError'; }
 }
 
 export interface RequestsClientOptions {
@@ -199,7 +209,7 @@ export async function* parseEventStream(body: ReadableStream<Uint8Array>): Async
     }
     if (!data) return null;
     let payload: Json;
-    try { payload = JSON.parse(data) as Json; } catch { return { type: 'error', code: 'unknown', message: 'The server sent an unreadable event.' }; }
+    try { payload = JSON.parse(data) as Json; } catch { return { type: 'error', code: 'unknown', message: 'The server sent an unreadable event.', kind: null }; }
     const type = name || str(payload['type']);
     switch (type) {
       case 'text': return { type, delta: str(payload['delta'] ?? payload['text']) };
@@ -207,13 +217,13 @@ export async function* parseEventStream(body: ReadableStream<Uint8Array>): Async
         path: nullable(payload['path']) as ConversationPath | null, estimatedClass: nullable(payload['estimatedClass']) };
       case 'filed': case 'added': return { type, request: normalizeFiled(payload['request']) };
       case 'status': { const text = str(payload['text']).trim(); return text ? { type, phase: str(payload['phase']), text: text.slice(0, 200) } : null; }
-      case 'error': return { type, code: str(payload['code'], 'unknown') as ErrorCode, message: str(payload['message'], 'Something went wrong.') };
+      case 'error': return { type, code: str(payload['code'], 'unknown') as ErrorCode, message: str(payload['message'], 'Something went wrong.'), kind: nullable(payload['kind']) as LimitKind | null };
       case 'tool_request': return { type, calls: (Array.isArray(payload['calls']) ? payload['calls'] as Json[] : []).map(c => {
         const review = (c['review'] ?? null) as Json | null;
         return { id: str(c['id']), name: str(c['name']), input: c['input'] ?? {},
           ...(review && num(review['index']) > 0 ? { review: { index: num(review['index']), limit: num(review['limit'], num(review['index'])) } } : {}) };
       }) };
-      case 'done': return { type, messageCount: num(payload['messageCount'] ?? payload['message_count']), limitReached: Boolean(payload['limitReached'] ?? payload['limit_reached']), ended: Boolean(payload['ended']), reason: nullable(payload['reason']), awaitingTools: Boolean(payload['awaitingTools']) };
+      case 'done': return { type, messageCount: num(payload['messageCount'] ?? payload['message_count']), limitReached: Boolean(payload['limitReached'] ?? payload['limit_reached']), limitMessage: nullable(payload['limitMessage']), credits: normalizeCredits(payload['credits']), ended: Boolean(payload['ended']), reason: nullable(payload['reason']), awaitingTools: Boolean(payload['awaitingTools']) };
       default: return null;
     }
   };
@@ -260,15 +270,16 @@ export class RequestsClient {
     return region ? `${this.base}${path}${path.includes('?') ? '&' : '?'}forceFunctionRegion=${encodeURIComponent(region)}` : `${this.base}${path}`;
   }
   private static async errorOf(response: Response): Promise<RequestsError> {
-    let code: ErrorCode = 'unknown', message = `The requests service answered ${response.status}.`;
+    let code: ErrorCode = 'unknown', message = `The requests service answered ${response.status}.`, kind: LimitKind | null = null;
     try {
-      const error = ((await response.json()) as { error?: { code?: string; message?: string } }).error;
+      const error = ((await response.json()) as { error?: { code?: string; message?: string; kind?: string } }).error;
       if (error?.code) code = error.code as ErrorCode;
+      if (error?.kind) kind = error.kind as LimitKind;
       if (error?.message) message = error.message;
     } catch { /* Non-JSON body; keep the status message. */ }
     if (code === 'unknown') code = response.status === 401 ? 'unauthorized' : response.status === 403 ? 'forbidden' : response.status === 404 ? 'not_found'
       : response.status === 429 ? 'rate_limited' : response.status === 409 ? 'limit' : response.status === 502 ? 'tracker_unavailable' : 'unknown';
-    return new RequestsError(code, message, response.status);
+    return new RequestsError(code, message, response.status, kind);
   }
   private async json<T>(method: string, path: string, body?: unknown): Promise<T> {
     return (await this.request(method, path, body)).json() as Promise<T>;
@@ -280,7 +291,7 @@ export class RequestsClient {
     return { email: str(row['email']), roles: Array.isArray(row['roles']) ? row['roles'] as Me['roles'] : [],
       effective: str(row['effective'], 'user') as EffectiveRole, filingDisabled: Boolean(row['filingDisabled']),
       buildsDisabled: Boolean(row['buildsDisabled']), trialsDisabled: Boolean(row['trialsDisabled']), openRequests: num(row['openRequests']),
-      limits: { openRequestsPerAccount: num(limits['openRequestsPerAccount'], 5), messagesPerConversation: limits['messagesPerConversation'] === null ? null : num(limits['messagesPerConversation'], 30) } };
+      limits: { openRequestsPerAccount: num(limits['openRequestsPerAccount'], 5) }, credits: normalizeCredits(row['credits']) };
   }
   async listOpenConversations(): Promise<ConversationSummary[]> {
     const row = await this.json<Json>('GET', '/conversations/open');
@@ -361,4 +372,14 @@ export class RequestsClient {
     if (!response.body) throw new RequestsError('unknown', 'The requests service sent no reply.');
     yield* parseEventStream(response.body);
   }
+}
+
+/** A credits summary from the server, or null when it is missing or malformed (an older backend sends none). */
+function normalizeCredits(value: unknown): Credits | null {
+  if (value === null || typeof value !== 'object') return null;
+  const v = value as Record<string, unknown>;
+  if ((v['plan'] !== 'free' && v['plan'] !== 'paid') || typeof v['remaining'] !== 'number' || typeof v['allowance'] !== 'number') return null;
+  const refill = v['refill'] as Record<string, unknown> | null | undefined;
+  return { plan: v['plan'], remaining: v['remaining'], allowance: v['allowance'],
+    refill: refill?.['kind'] === 'monthly' && typeof refill['at'] === 'string' ? { kind: 'monthly', at: refill['at'] } : { kind: 'none' } };
 }

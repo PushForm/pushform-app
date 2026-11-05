@@ -365,25 +365,34 @@ describe('Chat', () => {
     await waitFor(() => expect(document.querySelector('.is-streaming .pf-fr-working.is-after')?.textContent).toBe('Writing the change…'));
     expect(document.querySelector('.is-streaming')?.textContent).toContain('Building the box.');
   });
-  it('continues beyond 30 messages without a limit notice when the backend returns no limit', async () => {
-    setup({ me: { limits: { openRequestsPerAccount: 5, messagesPerConversation: null } }, turns: [[text('Continue'), done(31, false)], [text('Still continuing'), done(32, false)]] });
+  it('keeps chatting past thirty messages with no limit notice while the account has credits', async () => {
+    setup({ turns: [[text('Continue'), done(31, false)], [text('Still continuing'), done(32, false)]] });
     await say('First message');
     expect(document.querySelector('.pf-fr-limit')).toBeNull();
     await say('Next message');
     expect(log().textContent).toContain('Still continuing');
     expect(document.querySelector('.pf-fr-limit')).toBeNull();
   });
-  it('shows a short muted notice when the message limit is reached and never a message counter', async () => {
-    setup({ turns: [[text('That is all I can take; send it or stop?'), briefEvent({ ...featureBrief, desired: 'x' }, 'T'), done(30, true)]] });
+  it('shows the server sentence as a short muted notice when credits run out, never a counter or an empty number', async () => {
+    const sentence = "You've used your free AI credits. Subscribe to keep chatting.";
+    setup({ turns: [[text('That is all for now.'), briefEvent({ ...featureBrief, desired: 'x' }, 'T'), { event: 'done', data: { messageCount: 3, limitReached: true, limitMessage: sentence } }]] });
     await say('hello');
     const notice = screen.getByRole('status');
-    expect(notice.textContent).toBe('This conversation reached its 30-message limit.');
+    expect(notice.textContent).toBe(sentence);
+    expect(notice.textContent).not.toMatch(/-message|undefined|null/);
     expect(notice.classList.contains('pf-fr-muted')).toBe(true);
     expect(document.querySelector('.pf-fr-count')).toBeNull();
-    expect(screen.queryByText(/of 30 messages/)).toBeNull();
     expect(screen.queryByRole('group', { name: 'Open requests' })).toBeNull();
-    // The agent still takes the answer to its final question; the backend enforces the limit.
-    expect(screen.getByLabelText('Your message').hasAttribute('disabled')).toBe(false);
+  });
+  it('falls back to a plain sentence when a server reports a limit without saying why, and warns once credits run low', async () => {
+    setup({ turns: [[text('Hm.'), done(3, true)]] });
+    await say('hello');
+    expect(screen.getByRole('status').textContent).toBe('This conversation cannot take more messages right now.');
+  });
+  it('warns when ten percent or less of the allowance remains, and says nothing above that', async () => {
+    setup({ me: { credits: { plan: 'paid', remaining: 150_000, allowance: 1_600_000, refill: { kind: 'monthly', at: '2026-12-05T10:00:00Z' } } }, turns: [[text('Ok'), done(2, false)]] });
+    await say('hello');
+    expect(document.querySelector('.pf-fr-limit')?.textContent).toBe("You are running low on this month's AI credits.");
   });
   it('draws the greeting, cards and composer before the backend answers, then applies the profile', async () => {
     const backend = fakeBackend({ me: { effective: 'none' } });

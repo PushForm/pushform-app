@@ -132,6 +132,13 @@ Choose **Report a problem** or **Request a feature or change** and briefly descr
 
 Keep or remove the automatic screenshot, or use **Upload images** to add PNG, JPEG or WebP files. Previews stay available while you chat. If a preview cannot load, choose **Retry preview**. After sending, chat gives a plain ticket reference such as CUS-3; follow up with support using that reference.
 
-## Conversation length
+## AI credits
 
-A conversation allows up to 30 messages from you. Accounts with a confirmed `@pushform.io` email address are exempt from this message-count limit, including in existing conversations. Other rate and size limits still apply.
+Chat uses AI credits, which are counted from the text and pictures it reads and writes, so a long conversation or a large document uses more. There is no limit on how many messages a conversation can hold.
+
+- A free account has a one-time set of AI credits. They do not refill.
+- A subscription includes a set of AI credits that refills every month, including for yearly subscriptions. Credits left over at the end of a month do not carry over.
+- When about a tenth of your credits are left, chat says so in a short note under the conversation.
+- When they run out, chat explains it. A free account can subscribe to continue. A subscriber sees the date the credits refill. Everything outside chat keeps working: your files, editing, saving, importing and exporting.
+
+If you are sending messages too quickly, chat asks you to wait a moment. A conversation also takes at most 5 pictures, and an account can have at most 5 open requests.

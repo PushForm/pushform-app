@@ -33,7 +33,7 @@ export const SAMPLE_CONFIG_INPUT: ConfigInput = {
     },
   },
   limits: {
-    openRequestsPerAccount: 5, messagesPerConversation: 30, messagesPerMinute: 20, concurrentRuns: 2, runWallClockMinutes: 120,
+    openRequestsPerAccount: 5, messagesPerMinute: 20, concurrentRuns: 2, runWallClockMinutes: 120,
     runBudgetUsd: 20, trialDays: 3, verdictGraceHours: 24, rounds: 2, dailyRuns: 6, liveDataBranches: 3,
     renderReviewsPerTurn: 3, documentToolRoundsWithReview: 20,
   },

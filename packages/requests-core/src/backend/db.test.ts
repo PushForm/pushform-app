@@ -53,8 +53,8 @@ describe('row conversion', () => {
     expect(messagesFromRows('nope')).toEqual([]);
   });
   it('maps fr_my_roles and takes the limits from the config, not the SQL defaults', () => {
-    const me = meFromRow(myRoles({ roles: [{ role: 'maintainer', org_id: null }], effective: 'maintainer', limits: { openRequestsPerAccount: 99, messagesPerConversation: 99 } }), config);
-    expect(me).toMatchObject({ effective: 'maintainer', roles: [{ role: 'maintainer', orgId: null }], limits: { openRequestsPerAccount: 5, messagesPerConversation: 30 } });
+    const me = meFromRow(myRoles({ roles: [{ role: 'maintainer', org_id: null }], effective: 'maintainer', limits: { openRequestsPerAccount: 99 } }), config);
+    expect(me).toMatchObject({ effective: 'maintainer', roles: [{ role: 'maintainer', orgId: null }], limits: { openRequestsPerAccount: 5 } });
   });
 });
 

@@ -67,8 +67,6 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
   const [save, setSave] = useState<SaveState>('idle');
   const [message, setMessage] = useState('');
   const [creditCreator, setCreditCreator] = useState(inherited?.creator ?? '');
-  const [rights, setRights] = useState(false);
-  const [reviewing, setReviewing] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(modelId !== null);
@@ -289,7 +287,7 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
   const fileReady = !!modelFile?.asset && !modelFile.upload && !modelFile.error;
   const coverBusy = !!cover && (!!cover.upload || (!cover.asset && !cover.error));
   const hasChanges = !!model?.draft || dirty.current || !model?.published;
-  const canPublish = fileReady && !coverBusy && !problem && rights && !publishing && hasChanges;
+  const canPublish = fileReady && !coverBusy && !problem && !publishing && hasChanges;
   const publish = async () => {
     if (!canPublish) return;
     setPublishing(true); setMessage('');
@@ -365,27 +363,24 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
         <p className="field-note">{details.license === 'other' ? 'Describe how others may use, share and credit this model.' : publishLicenses[details.license].summary}</p>
         {details.license === 'other' && <label><span className="field-head"><span>License terms *</span></span>
           <textarea value={details.terms} rows={4} onChange={(event) => update({ terms: event.target.value })}/></label>}</>}
-        {!snapshotLabel && <label className="rights"><input type="checkbox" checked={rights} onChange={(event) => setRights(event.target.checked)}/>
-          <span>I created this model, or have the right to share it and everything it includes under this license.</span></label>}
       </section>
     </div>;
   })();
 
   const saveLabel = save === 'saving' ? 'Saving…' : save === 'saved' ? 'Draft saved' : save === 'error' ? 'Not saved' : model?.draft ? 'Draft saved' : '';
-  const blocked = step === 'details' && profile?.active ? (!modelFile ? 'Add a model file.' : !fileReady ? (modelFile.error ? 'Upload the model file again.' : 'Waiting for the file check.') : problem ?? (!rights && (!snapshotLabel || reviewing) ? 'Confirm your right to share it.' : !hasChanges ? 'No changes to publish.' : null)) : null;
+  const blocked = step === 'details' && profile?.active ? (!modelFile ? 'Add a model file.' : !fileReady ? (modelFile.error ? 'Upload the model file again.' : 'Waiting for the file check.') : problem ?? (!hasChanges ? 'No changes to publish.' : null)) : null;
   return <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <div ref={dialog} className={`upload-dialog${!profile?.active ? ' upload-dialog-profile' : ''}`} role="dialog" aria-modal="true" aria-labelledby="upload-dialog-title">
       <header className="dialog-head">
         <div><h2 id="upload-dialog-title" ref={heading} tabIndex={-1}>{snapshotLabel ? 'Share with the community' : editing ? 'Edit model' : 'Upload model'}</h2>
-          {profile?.active && snapshotLabel ? <ol className="dialog-steps"><li aria-current={!reviewing ? 'step' : undefined}>1 Details</li><li aria-current={reviewing ? 'step' : undefined}>2 Review</li></ol> : profile?.active && <ol className="dialog-steps"><li aria-current={step === 'upload' ? 'step' : undefined}>1 Upload</li><li aria-current={step === 'details' ? 'step' : undefined}>2 Details</li></ol>}</div>
+          {profile?.active && !snapshotLabel && <ol className="dialog-steps"><li aria-current={step === 'upload' ? 'step' : undefined}>1 Upload</li><li aria-current={step === 'details' ? 'step' : undefined}>2 Details</li></ol>}</div>
         <button type="button" className="dialog-close" aria-label="Close" onClick={onClose}>×</button>
       </header>
-      <div className="dialog-body">{scopeControl}{snapshotLabel && <p className="snapshot-note">{snapshotLabel}. This exact snapshot is used; later edits stay private.</p>}{inherited && <section aria-label="Retained source licenses"><h3>Original licenses and credits</h3>{uniqueLicenses(inherited.licenses).map((license, index) => <p key={index}>{license.name}: {license.conditions.join('; ')}</p>)}{inherited.credits.map((credit, index) => <p key={index}>{credit.name}: {credit.text}</p>)}</section>}{reviewing ? <section><h3>Review your public snapshot</h3><p>{details.title} by {inherited ? creditCreator : model?.current?.metadata.source ? model.current.metadata.creator : creator}</p><p>{details.description}</p><p>Commons revision {model?.draft?.number ?? (model?.current?.number ?? 0) + 1}. License: {retainedLicenses ? [...new Set(retainedLicenses.map(license => license.name))].join(' · ') : details.license}</p><p>Private change notes and cloud history are not published. Future edits stay private.</p><label><input type="checkbox" checked={rights} onChange={event => setRights(event.target.checked)} />I have the right to publish this model and its included assets under the listed terms.</label></section> : body}</div>
+      <div className="dialog-body">{scopeControl}{snapshotLabel && <p className="snapshot-note">{snapshotLabel}. This exact snapshot is used; later edits stay private.</p>}{inherited && <section aria-label="Retained source licenses"><h3>Original licenses and credits</h3>{uniqueLicenses(inherited.licenses).map((license, index) => <p key={index}>{license.name}: {license.conditions.join('; ')}</p>)}{inherited.credits.map((credit, index) => <p key={index}>{credit.name}: {credit.text}</p>)}</section>}{body}</div>
       {step === 'details' && profile?.active && !loading && filesUrl && <footer className="dialog-foot">
-        {reviewing && <button type="button" className="secondary review-back" onClick={() => setReviewing(false)}>Back to details</button>}
-        {(!reviewing || message || blocked) && <span className="save-state" role="status">{message ? <span role="alert">{message}</span> : blocked ?? saveLabel}</span>}
+        <span className="save-state" role="status">{message ? <span role="alert">{message}</span> : blocked ?? saveLabel}</span>
         <button type="button" className="secondary" onClick={async () => { dirty.current = dirty.current || !model; if (model || modelFile?.asset) await queueSave(); onClose(); }}>Save draft</button>
-        <button type="button" disabled={snapshotLabel && !reviewing ? !fileReady || coverBusy || !!problem || publishing || !hasChanges : !canPublish} onClick={() => { if (!snapshotLabel || reviewing) void publish(); else { setRights(false); setReviewing(true); } }}>{publishing ? 'Publishing…' : snapshotLabel && !reviewing ? 'Review publication' : model?.published ? 'Publish changes' : 'Publish model'}</button>
+        <button type="button" disabled={!canPublish} onClick={() => void publish()}>{publishing ? 'Publishing…' : model?.published ? 'Publish changes' : 'Publish model'}</button>
       </footer>}
       <input ref={fileInput} type="file" hidden accept={ACCEPT} aria-label="Choose a model file" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; chooseModel(file); }}/>
       <input ref={coverInput} type="file" hidden accept="image/png,image/jpeg,.png,.jpg,.jpeg" aria-label="Choose a cover photo" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; chooseCover(file); }}/>

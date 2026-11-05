@@ -51,8 +51,8 @@ export function SaveVersionDialog({ tab, session, files, saves, onClose, onShare
   }}><h2>Save {tab.name}</h2><p>{changed ? 'Next cloud revision' : 'Current cloud revision'}: <strong>{number ?? 'Loading…'}</strong></p>
     {!changed && <p>No changes since the last save. This version will be reused.</p>}
     <label>Change notes (optional)<textarea value={notes} maxLength={4000} disabled={busy || !changed} onChange={event => setNotes(event.target.value)} /></label>
-    {tab.type === 'model' && onShare && <label><input type="checkbox" checked={share} disabled={busy} onChange={event => setShare(event.target.checked)} /> Share with the community<p>After saving, review the public model and its license before publishing to Commons.</p></label>}
-    <p>This cloud version is private. Publishing requires a separate confirmation.</p>
+    {tab.type === 'model' && onShare && <label><input type="checkbox" checked={share} disabled={busy} onChange={event => setShare(event.target.checked)} /> Share with the community<p>After saving, add public details and choose a license, then publish to Commons.</p></label>}
+    <p>This cloud version is private. Only choosing Publish makes a model public.</p>
     {error && <p role="alert">{error}</p>}<div className="pf-modal-actions"><button disabled={busy} onClick={onClose}>Cancel</button><button disabled={busy || number === null} onClick={() => { void save(); }}>{busy ? 'Saving…' : share ? 'Save & continue to publishing' : changed ? 'Save version' : 'Done'}</button></div>
   </section></div>, document.body);
 }

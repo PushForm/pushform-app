@@ -1336,6 +1336,9 @@ isOneToOne: false
 "commons_catalog":
 { Args: Record<PropertyKey, never>; Returns: Json
                            },
+"commons_catalog_page":
+{ Args: { "p_after"?: string,"p_as_of"?: string,"p_limit"?: number }; Returns: Json
+                           },
 "commons_catalog_snapshot":
 { Args: Record<PropertyKey, never>; Returns: Json
                            },

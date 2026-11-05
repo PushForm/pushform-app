@@ -31,7 +31,7 @@ export type CommonsDiscovery = z.infer<typeof commonsDiscoverySchema>;
 const adminFeaturedItemSchema = z.object({ id: z.uuid(), type: z.enum(['model', 'collection']), targetId: z.string(), title: z.string(), available: z.boolean() }).strict();
 export const commonsFeaturedStateSchema = z.object({
   version: z.number().int().positive(), enabled: z.boolean(), items: z.array(adminFeaturedItemSchema).max(24),
-  models: z.array(catalogModelSchema).max(1000), collections: z.array(commonsCollectionSchema).max(1000),
+  models: z.array(catalogModelSchema), collections: z.array(commonsCollectionSchema).max(1000),
 }).strict();
 export type CommonsFeaturedState = z.infer<typeof commonsFeaturedStateSchema>;
 

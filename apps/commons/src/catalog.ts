@@ -37,7 +37,6 @@ export function createCatalogLoader(endpoint: string | undefined, fetcher: typeo
       });
       if (!response.ok) throw new Error('Catalog request failed.');
       const body = await response.text();
-      if (new TextEncoder().encode(body).byteLength > 2 * 1024 * 1024) throw new Error('Catalog response is too large.');
       const parsed = catalogSchema.safeParse(JSON.parse(body));
       if (!parsed.success) throw new Error('Catalog metadata is invalid.');
       return parsed.data.models;
@@ -56,15 +55,7 @@ export function configuredCatalogLoader(env: Record<string, string | undefined>)
   if (!config.url && !config.publishableKey) return null;
   try {
     const client = createCommonsClient(config);
-    return async (signal) => {
-      const controller = new AbortController();
-      const abort = () => controller.abort();
-      signal.addEventListener('abort', abort, { once: true });
-      if (signal.aborted) controller.abort();
-      const timeout = setTimeout(abort, 15000);
-      try { return await readCommonsCatalog(client, controller.signal); }
-      finally { clearTimeout(timeout); signal.removeEventListener('abort', abort); }
-    };
+    return async (signal) => readCommonsCatalog(client, signal);
   } catch {
     return async () => { throw new Error('Invalid catalog configuration.'); };
   }

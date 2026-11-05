@@ -21,7 +21,7 @@ function setup() {
   const models = [{ ...metadata, files, id: 'bench', revision, publishedAt: '2026-11-04T00:00:00Z' }, { ...metadata, id: 'unknown', title: 'Unknown permission', revision, publishedAt: '2026-11-03T00:00:00Z', licenses: [{ ...metadata.licenses[0], commercialUse: 'unknown' }] }];
   let published: string | null = revision;
   const rpc = vi.fn((name: string) => {
-    const data = name === 'commons_catalog' ? { version: 1, models } : name === 'commons_my_models' ? { models: [{ id: 'bench', latest_submission: revision, published_revision: published }], revisions: [{ id: revision, model_id: 'bench', number: 2, metadata, status: 'published', asset_version: 1, rights_basis: 'Original work created by me', creator_profile_id: null, self_service: true }], assets: [] } : null;
+    const data = name === 'commons_catalog_page' ? { version: 1, models, nextCursor: null, asOf: '2026-11-05T00:00:00Z' } : name === 'commons_catalog' ? { version: 1, models } : name === 'commons_my_models' ? { models: [{ id: 'bench', latest_submission: revision, published_revision: published }], revisions: [{ id: revision, model_id: 'bench', number: 2, metadata, status: 'published', asset_version: 1, rights_basis: 'Original work created by me', creator_profile_id: null, self_service: true }], assets: [] } : null;
     if (name === 'commons_withdraw_model') published = null;
     const promise = Promise.resolve({ data, error: null }); return Object.assign(promise, { abortSignal: () => promise });
   });

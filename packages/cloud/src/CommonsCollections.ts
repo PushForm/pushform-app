@@ -5,6 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from './db.types';
 import type { RpcArgs, RpcName } from './rpc';
 import { catalogModelSchema } from './CommonsCatalog';
+import { commonsPublicProfileSchema } from './CommonsProfiles';
 
 const modelId = z.string().regex(/^[a-z0-9][a-z0-9-]{0,95}$/);
 const unique = <T>(items: T[]) => new Set(items).size === items.length;
@@ -17,21 +18,22 @@ export const commonsCollectionSchema = z.object({
 }).strict();
 export type CommonsCollection = z.infer<typeof commonsCollectionSchema>;
 export type CollectionFields = Pick<CommonsCollection, 'title' | 'description' | 'visibility' | 'modelIds'>;
-export const commonsFeaturedItemSchema = z.object({ id: z.uuid(), type: z.enum(['model', 'collection']), targetId: z.string().min(1).max(96) }).strict()
+export const commonsFeaturedItemSchema = z.object({ id: z.uuid(), type: z.enum(['model', 'collection', 'creator']), targetId: z.string().min(1).max(96) }).strict()
   .refine(item => (item.type === 'model' ? modelId : z.uuid()).safeParse(item.targetId).success, 'Invalid featured target.');
 export const commonsDiscoverySchema = z.object({
-  version: z.literal(1), collections: z.array(commonsCollectionSchema).max(1000), featured: z.array(commonsFeaturedItemSchema).max(24),
+  version: z.literal(1), creators: z.array(commonsPublicProfileSchema).max(24).default([]), collections: z.array(commonsCollectionSchema).max(1000), featured: z.array(commonsFeaturedItemSchema).max(24),
 }).strict().superRefine((value, ctx) => {
+  if (!unique(value.creators.map(item => item.id))) ctx.addIssue({ code: 'custom', message: 'Duplicate creator.' });
   if (!unique(value.collections.map(item => item.id)) || !unique(value.featured.map(item => item.id)) || !unique(value.featured.map(item => item.type + ':' + item.targetId))) {
     ctx.addIssue({ code: 'custom', message: 'Duplicate discovery entry.' });
   }
   if (value.collections.some(item => item.visibility !== 'public')) ctx.addIssue({ code: 'custom', message: 'Private collection in public discovery.' });
 });
 export type CommonsDiscovery = z.infer<typeof commonsDiscoverySchema>;
-const adminFeaturedItemSchema = z.object({ id: z.uuid(), type: z.enum(['model', 'collection']), targetId: z.string(), title: z.string(), available: z.boolean() }).strict();
+const adminFeaturedItemSchema = z.object({ id: z.uuid(), type: z.enum(['model', 'collection', 'creator']), targetId: z.string(), title: z.string(), available: z.boolean() }).strict();
 export const commonsFeaturedStateSchema = z.object({
   version: z.number().int().positive(), enabled: z.boolean(), items: z.array(adminFeaturedItemSchema).max(24),
-  models: z.array(catalogModelSchema).max(1000), collections: z.array(commonsCollectionSchema).max(1000),
+  creators: z.array(commonsPublicProfileSchema).default([]), models: z.array(catalogModelSchema).max(1000), collections: z.array(commonsCollectionSchema).max(1000),
 }).strict();
 export type CommonsFeaturedState = z.infer<typeof commonsFeaturedStateSchema>;
 
@@ -45,7 +47,7 @@ export function commonsCollectionError(error: { message?: string }): Error {
     commons_collection_conflict: 'This collection changed in another tab. Reload the collection before saving your changes.',
     commons_collection_limit: 'The collection limit has been reached. Remove an unused collection or try again later.',
     commons_model_unavailable: 'A selected model is no longer published. Reload and choose an available model.',
-    commons_feature_unavailable: 'Only published models and nonempty public collections can be featured.',
+    commons_feature_unavailable: 'Only published models, nonempty public collections and active public creators can be featured.',
     commons_feature_limit: 'Up to 24 items can be featured. Remove an item before adding another.',
     commons_feature_conflict: 'The featured list changed. Reload it before changing the order.',
     commons_feature_invalid: 'The featured selection is invalid. Reload and try again.',
@@ -91,7 +93,7 @@ export class CommonsCollections {
   async featured(signal?: AbortSignal): Promise<CommonsFeaturedState> {
     return commonsFeaturedStateSchema.parse(await this.request('admin_commons_featured', {}, signal));
   }
-  async feature(type: 'model' | 'collection', targetId: string): Promise<CommonsFeaturedState> {
+  async feature(type: 'model' | 'collection' | 'creator', targetId: string): Promise<CommonsFeaturedState> {
     return commonsFeaturedStateSchema.parse(await this.request('admin_commons_feature', { p_type: type, p_target_id: targetId }));
   }
   async updateFeatured(ids: string[], expectedVersion: number): Promise<CommonsFeaturedState> {

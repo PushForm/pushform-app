@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { commonsProfileFieldsSchema, type CommonsProfile, type CommonsProfileFields, type CommonsProfilePage, type CommonsProfiles } from '@pushform/cloud';
 import { navigateCommons, profilePath } from './route';
 import { ModelCard, ModelGrid, ProfileLink } from './ModelCard';
+import { FeatureAction } from './Collections';
 import { ProfileHero, ProfileImagesEditor, type ProfileImageServices } from './ProfileImages';
 
 export { ProfileLink, CreatorCredit } from './ModelCard';
@@ -29,7 +30,7 @@ export function CommonsProfilePageView({lookup,profiles,filesUrl,ownProfileId=nu
   if(page===undefined)return <p className="status-panel" role="status">Loading profile…</p>;
   if(page===null)return <section className="status-panel"><h1>This profile isn’t available.</h1><p>It may be hidden or the account may have been removed.</p><a href="#browse">Browse models</a></section>;
   return <article className="profile-page"><a className="back-link" href="#browse">← All models</a>
-    <ProfileHero profile={page.profile} filesUrl={filesUrl} actions={ownProfileId!==null&&page.profile.id===ownProfileId?<a className="button-link secondary" href="#account">Edit profile</a>:undefined}/>
+    <ProfileHero profile={page.profile} filesUrl={filesUrl} actions={<>{ownProfileId!==null&&page.profile.id===ownProfileId&&<a className="button-link secondary" href="#account">Edit profile</a>}<FeatureAction key={page.profile.id} type="creator" targetId={page.profile.id}/></>}/>
     {page.profile.bio&&<p className="profile-bio">{page.profile.bio}</p>}
     {page.profile.links.length>0&&<ul className="profile-links">{page.profile.links.map((link,index)=><li key={index}><a href={link.url} target="_blank" rel="noreferrer noopener">{link.label} ↗</a></li>)}</ul>}
     <h2>Published models</h2>{page.models.length===0?<p>No published models to show.</p>:<ModelGrid className="profile-models">{page.models.map(model=><ModelCard key={model.id} model={model} filesUrl={filesUrl}/>)}</ModelGrid>}

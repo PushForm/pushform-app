@@ -21,3 +21,12 @@ it('treats an empty or malformed optional file origin as unconfigured', () => {
   expect(commonsFileUrl('', 'thumbnails')).toBeNull();
   expect(commonsFileUrl('not a URL', 'thumbnails')).toBeNull();
 });
+
+it('validates public featured creators without accepting private profile fields', () => {
+  const creator = { id: collection.id, handle: 'test-maker', displayName: 'Test Maker', bio: '', avatarUrl: null, links: [] };
+  const good = { version: 1, collections: [], creators: [creator], featured: [{ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', type: 'creator', targetId: creator.id }] };
+  expect(commonsDiscoverySchema.safeParse(good).success).toBe(true);
+  expect(commonsDiscoverySchema.safeParse({ ...good, creators: [creator, creator] }).success).toBe(false);
+  expect(commonsDiscoverySchema.safeParse({ ...good, creators: [{ ...creator, user_id: 'private-account' }] }).success).toBe(false);
+  expect(commonsDiscoverySchema.safeParse({ ...good, featured: [{ ...good.featured[0], targetId: 'test-maker' }] }).success).toBe(false);
+});

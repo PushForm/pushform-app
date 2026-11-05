@@ -459,14 +459,14 @@ isOneToOne: true
                   ]
                 },"commons_models": {
                   Row: {
-                    "created_at": string,"id": string,"last_number": number,"latest_submission": string | null,"owner_id": string | null,"published_revision": string | null
+                    "created_at": string,"curation_version": number,"id": string,"last_number": number,"latest_submission": string | null,"low_interest": boolean,"owner_id": string | null,"published_revision": string | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "created_at"?: string,"id": string,"last_number"?: number,"latest_submission"?: string | null,"owner_id"?: string | null,"published_revision"?: string | null
+                    "created_at"?: string,"curation_version"?: number,"id": string,"last_number"?: number,"latest_submission"?: string | null,"low_interest"?: boolean,"owner_id"?: string | null,"published_revision"?: string | null
                   }
                   Update: {
-                    "created_at"?: string,"id"?: string,"last_number"?: number,"latest_submission"?: string | null,"owner_id"?: string | null,"published_revision"?: string | null
+                    "created_at"?: string,"curation_version"?: number,"id"?: string,"last_number"?: number,"latest_submission"?: string | null,"low_interest"?: boolean,"owner_id"?: string | null,"published_revision"?: string | null
                   }
                   Relationships: [
                     {
@@ -974,6 +974,9 @@ isOneToOne: false
 "admin_commons_begin_asset":
 { Args: { "p_filename": string,"p_revision": string,"p_sha256": string,"p_size_bytes": number }; Returns: Json
                            },
+"admin_commons_browse_visibility":
+{ Args: { "p_after_id"?: string,"p_limit"?: number,"p_query"?: string,"p_visibility"?: string }; Returns: Json
+                           },
 "admin_commons_feature":
 { Args: { "p_target_id": string,"p_type": string }; Returns: Json
                            },
@@ -994,6 +997,9 @@ isOneToOne: false
                            },
 "admin_commons_rollout":
 { Args: { "p_enabled": boolean,"p_policy_version": string }; Returns: undefined
+                           },
+"admin_commons_set_low_interest":
+{ Args: { "p_low_interest": boolean,"p_models": Json }; Returns: undefined
                            },
 "admin_commons_submit":
 { Args: { "p_expected_revision"?: string,"p_id": string,"p_metadata": Json,"p_rights_basis": string }; Returns: Json

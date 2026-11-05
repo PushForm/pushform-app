@@ -2,6 +2,8 @@
 
 PushForm Commons is a community model catalog with its own website. Browse models, search by name or description, and filter by category or license. The commercial-use filter includes models only when every listed license explicitly permits commercial use; read all listed conditions before reuse.
 
+The unfiltered browse view omits models marked low interest by Commons admins. Search or apply any category, license, or commercial-use filter to find matching models from the full library. These models remain available through direct links, creator pages, and collections.
+
 Open a model to see its original creator next to the title. Source information, licenses and required credits are grouped under **Licenses & attribution**. When files are available, choose **Download ZIP** next to a filename. The package contains the unchanged original in `files/`, an `ATTRIBUTION.json` record and a README. Keep required credits and license notices with reused files. A free download does not remove license conditions.
 
 ## Browse featured projects and collections
@@ -119,3 +121,10 @@ Creators credited on imported models can also be featured without a Commons acco
 ## Browse a large library
 
 Commons and the editor’s Commons browser load a small first set of models, then add more as you scroll. The next two sets and their thumbnail images are prepared in advance for smoother scrolling. **Load more models** also works with a keyboard. If a later set fails, your current results stay visible and **Retry loading more** tries again. Search and filters cover the entire library, including models that have not appeared on screen yet.
+
+
+## Manage default browse visibility
+
+In **Admin → Commons → Browse visibility**, admins can search published models and filter by **All models**, **Default browse**, or **Low interest**. Choose **Mark low interest** on a model to omit it from unfiltered browsing, or **Restore to default browse** to bring it back. For a group, select the relevant models or **Select this page**, then use the bulk action. Selection applies only to the displayed page.
+
+Changes apply immediately to new browse requests and persist when a model is updated. Search and filters still find matching low-interest models. If another admin changed a selected model, reload the list and review the current flags before trying again.

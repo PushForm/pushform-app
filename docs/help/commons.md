@@ -120,7 +120,7 @@ Creators credited on imported models can also be featured without a Commons acco
 
 ## Browse a large library
 
-Commons and the editor’s Commons browser load a small first set of models, then add more as you scroll. The next two sets and their thumbnail images are prepared in advance for smoother scrolling. **Load more models** also works with a keyboard. If a later set fails, your current results stay visible and **Retry loading more** tries again. Search and filters cover the entire library, including models that have not appeared on screen yet.
+Commons and the editor’s Commons browser load a small first set of models, then add more as you scroll. The next two sets and their thumbnail images are prepared in advance for smoother scrolling. On the Commons website, search and filters stay at the top as you browse. Once you scroll past their original position, the footer slides up with the PushForm, Terms, and Privacy links, so you can reach them without scrolling through the whole library. Scroll back to the original filter position and the footer slides away. **Load more models** also works with a keyboard. If a later set fails, your current results stay visible and **Retry loading more** tries again. Search and filters cover the entire library, including models that have not appeared on screen yet.
 
 
 ## Manage default browse visibility

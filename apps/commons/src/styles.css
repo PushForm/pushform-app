@@ -89,7 +89,7 @@ h2 { font-size: 29px; letter-spacing: -.8px; font-weight: 500; margin: 0; }
 .catalog-tabs { display:flex; gap:26px; border-bottom:1px solid var(--line); margin-top:20px; }
 .catalog-tabs a { text-decoration:none; padding:12px 0; color:var(--muted); margin-bottom:-1px; }
 .catalog-tabs a[aria-selected=true] { border-bottom:2px solid var(--accent); color:var(--ink); }
-.catalog-tabs + .filters { margin-top:22px; }
+
 .primary-button, .secondary-button { display:inline-flex; justify-content:center; align-items:center; gap:6px; border-radius:5px; padding:10px 14px; text-decoration:none; font:inherit; font-size:14px; }
 .primary-button { background:var(--ink); color:white; }
 button.secondary-button, a.secondary-button { border:1px solid var(--line); background:white; color:var(--ink); }
@@ -354,3 +354,15 @@ button.secondary { background:transparent; color:var(--ink); border:1px solid #b
 .creator-art { text-decoration:none; aspect-ratio:1.6; display:flex; align-items:center; justify-content:center; background:#edf0e8; color:var(--accent); font-size:64px; }
 .creator-art img { width:40%; aspect-ratio:1; border-radius:50%; object-fit:cover; }
 .commons-load-more { display:flex; flex-direction:column; align-items:center; gap:12px; padding:28px 0; }
+
+/* Keep search at the top and the site links within reach during long browsing sessions. */
+.browse-filter-marker { height: 1px; margin-top: 22px; margin-bottom: -1px; }
+.browse-sticky-filters { position: sticky; top: 0; z-index: 5; padding: 12px 0 16px; background: #f8f8f2; border-bottom: 1px solid var(--line); }
+.browse-sticky-filters .filters { margin: 0; }
+.site-footer-shell.is-floating { position: fixed; z-index: 10; left: 0; right: 0; bottom: 0; background: #f8f8f2; border-top: 1px solid var(--line); box-shadow: 0 -8px 28px #182c2c12; animation: browse-footer-out 200ms ease-in both; }
+.site-footer-shell.is-floating.is-visible { animation: browse-footer-in 200ms ease-out both; }
+.site-footer-shell.is-floating .site-footer { max-width: 1500px; margin: auto; padding: 18px 6% calc(18px + env(safe-area-inset-bottom)); border: 0; }
+@keyframes browse-footer-in { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes browse-footer-out { from { transform: translateY(0); } to { transform: translateY(100%); } }
+@media (max-width: 600px) { .site-footer-shell.is-floating .site-footer { gap: 12px; padding-top: 14px; padding-bottom: calc(14px + env(safe-area-inset-bottom)); } }
+@media (prefers-reduced-motion: reduce) { .site-footer-shell.is-floating, .site-footer-shell.is-floating.is-visible { animation-duration: 0.01ms; } }

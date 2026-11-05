@@ -20,6 +20,8 @@ On your collection's page, choose **Edit collection** to change its details or v
 
 Collections follow each model's current published version. Withdrawn models disappear from public collection views, and making a collection private removes it from public browsing and Featured. A collection does not transfer ownership or replace its models' licenses and credits. **Delete collection** removes only the collection; its models stay in Commons.
 
+Public profiles show the creator's **Public collections** below their published models. Collections appear once they contain a model available in Commons. Open a collection card to browse its models. Private collections appear only in **My collections**, including when you view your own public profile.
+
 ## Feature a model or collection
 
 Commons admins see **Feature** on published model pages and nonempty public collection pages. It adds the item to the end of Featured immediately; **Featured · Manage** opens the admin manager. Other accounts do not see this action.

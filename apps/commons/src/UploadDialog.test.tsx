@@ -180,6 +180,12 @@ it('takes a saved editor snapshot directly into details and requires a separate 
   await waitFor(() => expect((review as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(review);
   expect(screen.getByText('Review your public snapshot')).toBeTruthy();
+  const back = screen.getByRole('button', { name: 'Back to details' });
+  expect(back.closest('footer')).toBe(screen.getByRole('button', { name: 'Publish model' }).closest('footer'));
+  expect(screen.queryByText('Draft saved')).toBeNull();
+  fireEvent.click(back);
+  expect(screen.getByDisplayValue('Garden bench')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Review publication' }));
   expect(f.rpc.mock.calls.some(([name]) => name === 'commons_publish_model')).toBe(false);
   fireEvent.click(screen.getByRole('checkbox'));
   fireEvent.click(screen.getByRole('button', { name: 'Publish model' }));

@@ -27,6 +27,8 @@ import {
   type LayoutRecoveryMetadata,
   type LayoutRecoveryStore,
 } from '@pushform/io';
+import type { ProjectActivitySink } from '@pushform/cloud';
+import { SessionProjectActivity, type stateOf } from './projectActivity';
 import { DocumentLoading } from './documentLoading';
 import { useAppStore, type AppState } from './store';
 import type { AppInstance } from './bootstrap';
@@ -231,7 +233,9 @@ export class DocumentSession {
   /** The snapshot the storage accepted, and the tab contents it rejected (not retried until one changes). */
   private refreshWritten: { parts: readonly string[]; activeIndex: number } | null = null;
   private refreshRejected: { parts: readonly string[] } | null = null;
-  private readonly flushOnLeave = (): void => this.flushRefreshPersistence();
+  private readonly flushOnLeave = (): void => { this.flushRefreshPersistence(); };
+  private readonly closeForActivity = (): void => { for (const tab of this._tabs) this.projectActivity.closed(tab); };
+  private projectActivity: SessionProjectActivity;
   private nativeWriter: NativeRefreshWriter | undefined;
   private localStates = new Map<string, object>();
   private localMetadata = new Map<string, string>();
@@ -257,7 +261,9 @@ export class DocumentSession {
     /** Where image bytes are kept for refresh; `loadRefreshImages` gives IndexedDB. */
     private readonly refreshImageStore: RefreshImageStore | null = refreshStorage ? new SessionStorageRefreshImages(refreshStorage) : null,
     private readonly nativeRefresh?: NativeRefreshSession,
+    activity?: ProjectActivitySink,
   ) {
+    this.projectActivity = new SessionProjectActivity(activity);
     const id = this.nextId();
     this._tabs = [
       {
@@ -280,10 +286,16 @@ export class DocumentSession {
       this.localMetadata = new Map(snapshot.entries.map(entry => { const metadata = JSON.parse(entry.metadata) as { name: string; identity?: string; cloudDraft?: CloudDraft; savedCloudName?: string }; return [entry.key, JSON.stringify([metadata.name, metadata.identity, metadata.cloudDraft?.key, metadata.savedCloudName])]; }));
       this.localStates = new Map(snapshot.entries.map(entry => [entry.key, entry.state]));
       this.recoveryError = null; this.notifyLocal();
+      for (const entry of snapshot.entries) {
+        const tab = this._tabs.find(t => t.id === entry.key);
+        if (tab) this.projectActivity.savedSnapshot(tab, entry.state as ReturnType<typeof stateOf>);
+      }
     });
     this.watch(this._tabs[0]!);
     this.restoreForRefresh();
+    if (this.restoredForRefresh && this.nativeRefresh) for (const tab of this._tabs) this.projectActivity.opened(tab, 'local');
     this.nativeRefresh?.files.clear();
+    if (activity && typeof window !== 'undefined') window.addEventListener('pagehide', this.closeForActivity);
     if (this.refreshStorage && typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
       window.addEventListener('pagehide', this.flushOnLeave);
       window.addEventListener('beforeunload', this.flushOnLeave);
@@ -397,7 +409,9 @@ export class DocumentSession {
     if (existing) return existing;
     const doc = new LayoutDocument(opened.state);
     layoutContentKey.prime(doc, opened.contentIdentity);
-    return this.addLayoutTab(doc, name.endsWith(LAYOUT_FILE_EXTENSION) ? name : `${name}${LAYOUT_FILE_EXTENSION}`, opened.contentIdentity, identity);
+    const tab = this.addLayoutTab(doc, name.endsWith(LAYOUT_FILE_EXTENSION) ? name : `${name}${LAYOUT_FILE_EXTENSION}`, opened.contentIdentity, identity);
+    this.projectActivity.opened(tab, identity?.startsWith('cloud:') ? 'cloud' : 'local', !identity);
+    return tab;
   }
 
   /** Instantiate saved template content with a fresh document identity and empty undo history. */
@@ -424,7 +438,9 @@ export class DocumentSession {
     const { doc, warnings, properties } = source instanceof Uint8Array ? importSketchUpLayout(source, name) : source;
     const base = isSketchUpLayoutFile(name) ? name.slice(0, -SKETCHUP_LAYOUT_EXTENSION.length) : name;
     // An empty saved baseline keeps the converted document dirty until it is saved as .pfl.
-    return { tab: this.addLayoutTab(doc, `${base}${LAYOUT_FILE_EXTENSION}`, ''), warnings, properties };
+    const tab = this.addLayoutTab(doc, `${base}${LAYOUT_FILE_EXTENSION}`, '');
+    this.projectActivity.opened(tab, 'local', true);
+    return { tab, warnings, properties };
   }
 
   private addLayoutTab(doc: LayoutDocument, name: string, savedContent: string, identity?: string, cloudDraft?: CloudDraft): LayoutTab {
@@ -464,6 +480,7 @@ export class DocumentSession {
   /** Install a prepared model as a new unsaved document without sharing a cloud/file identity. */
   openModelCopy(opened: Pick<OpenedModelFile, 'state' | 'images'>, name: string): ModelTab {
     const tab = this.addModelTab(opened.state, name, '', undefined, opened.images);
+    this.projectActivity.opened(tab, 'local', true);
     tab.app.viewport.camera.zoomExtents();
     return tab;
   }
@@ -473,6 +490,7 @@ export class DocumentSession {
     const existing = this.existingModelTab(identity);
     if (existing) return existing;
     const tab = this.addModelTab(opened.state, name, opened.contentIdentity, identity, opened.images, true);
+    this.projectActivity.opened(tab, identity?.startsWith('cloud:') ? 'cloud' : 'local', !identity);
     tab.app.viewport.camera.zoomExtents();
     return tab;
   }
@@ -492,6 +510,7 @@ export class DocumentSession {
     const report = doc.transact(`Open ${modelImportFormat(name).name} model`, draft => applySketchUpImport(draft, scene, { images })).value;
     const tab = this.addModelTab(doc.state, `${modelImportBaseName(name)}${MODEL_FILE_EXTENSION}`, '', undefined,
       new Map([...images.entries()].map(([id, entry]) => [id, entry.blob])));
+    this.projectActivity.opened(tab, 'local', true);
     tab.app.viewport.camera.zoomExtents();
     return { tab, report };
   }
@@ -598,6 +617,8 @@ export class DocumentSession {
     this.emit();
   }
 
+  recordCloudProjectSave(tab: DocumentTab, content: string): void { this.projectActivity.cloudSaved(tab, content); }
+
   markModelSaved(id: string, name?: string, identity?: string | null, savedContent?: string, savedCloudName?: string): void {
     const tab = this._tabs.find((item) => item.id === id);
     if (!tab || tab.type !== 'model') throw new Error('Unknown Modeling tab');
@@ -674,6 +695,7 @@ export class DocumentSession {
     if (index < 0 || this._tabs.length === 1) return false;
     const tab = this._tabs[index]!;
     if (this.isDirty(tab) && !discardChanges) return false;
+    this.projectActivity.closed(tab);
     const wasActive = id === this._activeId;
     if (wasActive) this.parkActive();
     this._tabs = this._tabs.filter((t) => t.id !== id);
@@ -702,6 +724,8 @@ export class DocumentSession {
   }
 
   dispose(): void {
+    if (typeof window !== 'undefined') window.removeEventListener('pagehide', this.closeForActivity);
+    this.closeForActivity();
     void this.flushLayoutRecovery();
     // Before any app is disposed: the snapshot reads live document state.
     this.flushRefreshPersistence();
@@ -723,10 +747,12 @@ export class DocumentSession {
   }
 
   private watch(tab: DocumentTab): void {
+    this.projectActivity.watch(tab);
     const doc = tab.type === 'model' ? tab.app.document.doc : tab.doc;
     this.offs.set(
       tab.id,
-      doc.events.on('change', () => {
+      doc.events.on('change', change => {
+        this.projectActivity.changed(tab, change);
         this.emit();
         if (tab.type === 'layout') this.scheduleRecovery(tab);
       }),

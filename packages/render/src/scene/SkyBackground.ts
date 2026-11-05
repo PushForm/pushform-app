@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { BufferAttribute, BufferGeometry, Color, Matrix4, Mesh, PerspectiveCamera, SRGBColorSpace, ShaderMaterial, Vector3 } from 'three';
+import { BufferAttribute, BufferGeometry, Color, Matrix4, Mesh, PerspectiveCamera, SRGBColorSpace, ShaderMaterial, TextureLoader, NoColorSpace, Vector3 } from 'three';
+import type { Texture } from 'three';
+import type { EnvironmentSky } from '@pushform/model';
 import type { Camera } from 'three';
 import { DEFAULT_RENDER_FOG } from '../types';
 import type { RenderBackground, RenderFog } from '../types';
@@ -36,6 +38,9 @@ uniform float uFogOn;
 uniform float uFogNear;
 uniform float uFogFar;
 uniform vec3 uFogColor;
+uniform sampler2D uPanorama;
+uniform float uPanoramaOn;
+uniform float uPanoramaRotation;
 varying vec2 vNdc;
 void main() {
   vec4 far = uInvViewProj * vec4(vNdc, 1.0, 1.0);
@@ -60,6 +65,10 @@ void main() {
     float fogF = clamp((hit * dot(dir, uForward) - uFogNear) / max(uFogFar - uFogNear, 0.001), 0.0, 1.0);
     color = mix(color, uFogColor, uFogOn * uGround * fogF);
   }
+  if (uPanoramaOn > 0.5) {
+    vec2 uv = vec2(fract(atan(dir.y, dir.x) / 6.28318530718 + 0.5 + uPanoramaRotation), acos(clamp(dir.z, -1.0, 1.0)) / 3.14159265359);
+    color = texture2D(uPanorama, uv).rgb;
+  }
   gl_FragColor = vec4(color, 1.0);
 }`;
 
@@ -70,6 +79,12 @@ void main() {
  * same orientation is used so a horizon still appears.
  */
 export class SkyBackground extends Mesh<BufferGeometry, ShaderMaterial> {
+  ready: Promise<void> = Promise.resolve();
+  private settings: RenderBackground = DEFAULT_RENDER_BACKGROUND;
+  private mode: EnvironmentSky | null = null;
+  private imageUrl: string | undefined;
+  private image: Texture | null = null;
+  private generation = 0;
   private readonly virtual = new PerspectiveCamera(35, 1, 0.1, 10);
   private readonly inv = new Matrix4();
   private readonly eye = new Vector3();
@@ -96,6 +111,9 @@ export class SkyBackground extends Mesh<BufferGeometry, ShaderMaterial> {
         uFogNear: { value: 0 },
         uFogFar: { value: 100 },
         uFogColor: { value: new Vector3() },
+        uPanorama: { value: null },
+        uPanoramaOn: { value: 0 },
+        uPanoramaRotation: { value: 0 },
       },
     });
     super(geo, mat);
@@ -106,6 +124,7 @@ export class SkyBackground extends Mesh<BufferGeometry, ShaderMaterial> {
   }
 
   setSettings(s: RenderBackground): void {
+    this.settings = s;
     const u = this.material.uniforms;
     (u.uColor!.value as Color).set(s.color);
     (u.uSkyColor!.value as Color).set(s.skyColor);
@@ -113,6 +132,27 @@ export class SkyBackground extends Mesh<BufferGeometry, ShaderMaterial> {
     u.uSky!.value = s.sky ? 1 : 0;
     u.uGround!.value = s.ground ? 1 : 0;
     u.uGroundOpacity!.value = 1 - Math.min(1, Math.max(0, s.groundTransparency));
+    if (this.mode === 'solid' || this.mode === 'image') { u.uSky!.value = 0; u.uGround!.value = 0; }
+    if (this.mode === 'clear' || this.mode === 'overcast' || this.mode === 'night') {
+      const colors = this.mode === 'night' ? ['#080e1b', '#162644', '#090e18'] : this.mode === 'overcast' ? ['#dfe4eb', '#b8c3ce', '#aab0b7'] : ['#edf3f9', '#86b7ee', '#c6c5bd'];
+      (u.uColor!.value as Color).set(colors[0]!); (u.uSkyColor!.value as Color).set(colors[1]!); (u.uGroundColor!.value as Color).set(colors[2]!);
+      u.uSky!.value = 1; u.uGround!.value = 1;
+    }
+  }
+
+  setEnvironment(mode: EnvironmentSky | null, imageUrl?: string, rotation = 0): void {
+    this.mode = mode; this.setSettings(this.settings);
+    this.material.uniforms.uPanoramaRotation!.value = rotation / 360;
+    this.material.uniforms.uPanoramaOn!.value = mode === 'image' && this.image ? 1 : 0;
+    if (imageUrl === this.imageUrl) return;
+    this.imageUrl = imageUrl; const generation = ++this.generation;
+    if (!imageUrl) { this.image?.dispose(); this.image = null; this.material.uniforms.uPanorama!.value = null; this.material.uniforms.uPanoramaOn!.value = 0; this.ready = Promise.resolve(); return; }
+    this.ready = new TextureLoader().loadAsync(imageUrl).then(texture => {
+      if (generation !== this.generation) { texture.dispose(); return; }
+      texture.colorSpace = NoColorSpace; texture.flipY = false; this.image?.dispose(); this.image = texture;
+      this.material.uniforms.uPanorama!.value = texture; this.material.uniforms.uPanoramaOn!.value = this.mode === 'image' ? 1 : 0;
+    });
+    void this.ready.catch(() => {});
   }
 
   /**
@@ -146,6 +186,7 @@ export class SkyBackground extends Mesh<BufferGeometry, ShaderMaterial> {
   }
 
   dispose(): void {
+    this.generation++; this.image?.dispose();
     this.geometry.dispose();
     this.material.dispose();
   }

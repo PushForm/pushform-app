@@ -89,6 +89,13 @@ describe('intake tools', () => {
       expect(system).not.toMatch(/File request button|Add me button/);
     }
   });
+  it('keeps all brief tools and omits limit instructions for unlimited conversations', () => {
+    const unlimited = ctx({ messageCount: 100, limits: { openRequestsPerAccount: 5, messagesPerConversation: null } });
+    expect(names(briefTools(unlimited))).toContain('update_brief');
+    expect(intakeAgent.context(unlimited)).not.toContain('last message');
+    expect(intakeAgent.context(unlimited)).not.toContain('-message limit');
+    expect(intakeAgent.context(unlimited)).toContain('100 of unlimited');
+  });
   it('records the 30th message and restricts the conversation only after it', () => {
     expect(names(briefTools(ctx({ messageCount: 30 })))).toContain('update_brief');
     expect(intakeAgent.context(ctx({ messageCount: 30 }))).toContain('last message');

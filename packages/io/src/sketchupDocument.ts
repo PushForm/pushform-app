@@ -347,6 +347,7 @@ export function applySketchUpImport(
   if (options.groupName === undefined) {
     const style = draft.styles.get(draft.activeStyleId);
     if (style) {
+      delete style.environment;
       const sections = scene.sectionDisplay ?? SKP_DEFAULT_SECTION_DISPLAY;
       style.modeling.sectionPlanesVisible = sections.planes;
       style.modeling.sectionCutsVisible = sections.cuts;
@@ -373,6 +374,7 @@ export function applySketchUpImport(
       if (existing !== undefined) return existing;
       const id = allocId<StyleId>(draft);
       const style = createDefaultStyle(id);
+      delete style.environment;
       style.name = `${saved.name} style`; style.description = `The style scene "${saved.name}" saved in the SketchUp file.`;
       Object.assign(style.edges, settings.edges); Object.assign(style.faces, settings.faces);
       Object.assign(style.background, settings.background); Object.assign(style.modeling, settings.modeling);

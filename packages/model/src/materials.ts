@@ -109,6 +109,7 @@ export function imagesInUse(state: DocumentState): Set<number> {
   for (const t of state.tags.values()) if (t.texture) used.add(t.texture.imageId);
   for (const def of state.definitions.values()) for (const img of def.entities.images.values()) used.add(img.imageId);
   for (const s of state.styles.values()) for (const w of s.watermarks) used.add(w.imageId);
+  for (const s of state.styles.values()) if (s.environment?.skyboxImageId) used.add(s.environment.skyboxImageId);
   return used;
 }
 

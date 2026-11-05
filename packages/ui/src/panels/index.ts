@@ -7,7 +7,6 @@ import { MaterialsPanel } from './MaterialsPanel';
 import { ComponentsPanel } from './ComponentsPanel';
 import { StylesPanel } from './StylesPanel';
 import { ScenesPanel } from './ScenesPanel';
-import { ShadowsPanel } from './ShadowsPanel';
 import { DisplayPanel } from './DisplayPanel';
 import { ModelInfoPanel } from './ModelInfoPanel';
 import { SoftenEdgesPanel } from './SoftenEdgesPanel';
@@ -27,7 +26,6 @@ export const PANELS: readonly PanelSpec[] = [
   { id: 'components', title: 'Components', component: ComponentsPanel },
   { id: 'styles', title: 'Styles', component: StylesPanel },
   { id: 'scenes', title: 'Scenes', component: ScenesPanel },
-  { id: 'shadows', title: 'Shadows', component: ShadowsPanel },
   { id: 'display', title: 'Display', component: DisplayPanel },
   { id: 'modelInfo', title: 'Model Info', component: ModelInfoPanel },
   { id: 'softenEdges', title: 'Soften Edges', component: SoftenEdgesPanel },

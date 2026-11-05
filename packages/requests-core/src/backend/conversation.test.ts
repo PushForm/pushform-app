@@ -76,6 +76,34 @@ describe('routing, CORS and auth', () => {
 });
 
 describe('conversations', () => {
+  it.each([
+    ['STAFF@PushForm.IO', true, null],
+    ['staff@pushform.io', false, 30],
+    ['staff@sub.pushform.io', true, 30],
+    ['staff@pushform.io.example.com', true, 30],
+    ['staff@otherpushform.io', true, 30],
+  ] as const)('uses the authenticated, confirmed exact domain for %s', async (email, emailVerified, limit) => {
+    const h = harness({
+      deps: { auth: new FakeSessions({ [TOKEN]: { ...ALICE, email, emailVerified } }) },
+      // A different email from the role RPC must never grant the exemption.
+      user: { fr_my_roles: myRoles({ email: 'staff@pushform.io' }) },
+      service: { fr_conversation_get: conversationRow({ message_count: 30 }), fr_conversation_append: conversationRow({ message_count: 31 }) },
+    });
+    const me = await (await call(h.handler, 'GET', '/me')).json();
+    expect(me.limits.messagesPerConversation).toBe(limit);
+    const response = await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'Keep going' });
+    if (limit === null) {
+      expect(parseSse(await response.text()).at(-1)).toMatchObject({ event: 'done', data: { messageCount: 31, limitReached: false } });
+      expect(h.service.named('fr_conversation_append')).toHaveLength(1);
+    } else {
+      await status(response, 409, 'limit');
+      expect(h.service.named('fr_conversation_append')).toHaveLength(0);
+    }
+  });
+  it('retains rate limiting for confirmed company accounts', async () => {
+    const h = harness({ deps: { auth: new FakeSessions({ [TOKEN]: { ...ALICE, email: 'staff@pushform.io', emailVerified: true } }) }, service: { fr_rate_check: false } });
+    await status(await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'Hello' }), 429, 'rate_limited');
+  });
   it.each(['help', 'open'] as const)('prefetches bounded current-editor help on %s without waiting for the tracker', async path => {
     const h = harness({ service: { fr_conversation_get: conversationRow({ path, screen: { editor: 'layout', build: { version: 'v', commit: 'c' }, browser: 'test', os: 'test' } }) }, deps: { digest: [
       { path: 'docs/help/layout/images.md', heading: 'Import images', anchor: 'import', text: 'Import PNG images using Import in the toolbar.' },

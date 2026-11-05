@@ -104,7 +104,7 @@ export function ProfileForm({ profiles, state, submitLabel, savingLabel, termsLo
       <label className="pf-profile-check pf-profile-analytics">
         <input type="checkbox" name="analyticsOptIn" checked={input.analyticsOptIn ?? true} disabled={state.saving}
           onChange={event => set({ analyticsOptIn: event.target.checked })} />
-        <span>Share anonymous usage data to help us improve tools and fix confusing workflows. Your designs, file names, and chat messages stay private.</span>
+        <span>Share usage data to help us improve tools and fix confusing workflows. This includes anonymous activity counts and private project milestones linked to your account. Your designs, file names, and chat messages stay private.</span>
       </label>
     </fieldset>
     {state.error ? <p className="pf-account-error" role="alert">{state.error}</p> : null}

@@ -1413,8 +1413,9 @@ describe('SketchUp styles', () => {
     expect(activeStyle(into)).toEqual(before);
   });
 
-  it('leaves the default style when a file records no rendering options', async () => {
+  it('keeps legacy lighting and default display when a file records no rendering options', async () => {
     const scene = await readSketchUp(fixture('style-wireframe-2027')), doc = createDocument(), before = structuredClone(activeStyle(doc));
+    delete before.environment;
     doc.transact('Open fixture', draft => applySketchUpImport(draft, { ...scene, display: null, sectionDisplay: null }));
     expect(activeStyle(doc)).toEqual(before);
     expect(sketchUpDisplay(null)).toBeNull();

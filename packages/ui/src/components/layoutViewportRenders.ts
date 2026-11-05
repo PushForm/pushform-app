@@ -419,9 +419,12 @@ async function drain(): Promise<void> {
           // The view's own sun and shadows, else the model's.
           view.setShadows(shadowsToRender(shadows ? { ...model.state, shadows } : model.state));
           view.setFog(fogToRender(model.state));
+          const environment = model.state.styles.get(model.state.activeStyleId)?.environment;
+          view.setEnvironment(environment ?? null, model.state.sceneLights ?? [], environment?.skyboxImageId ? model.images.objectUrl(environment.skyboxImageId) : undefined);
           if (!job.preview) {
             const urls = [...model.images.entries()].map(([id]) => model.images.objectUrl(id)).filter((url): url is string => !!url);
             await view.sceneSync.textures.whenReady(30_000, urls);
+            await view.environmentReady;
           }
           const opts = { shift: job.shift, background: job.background };
           if (job.preview) {

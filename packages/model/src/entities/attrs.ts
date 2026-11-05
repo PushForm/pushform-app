@@ -2,6 +2,7 @@
 // Copyright 2026 PushForm contributors
 import type { Id, ImageId, MaterialId, SceneId, StyleId, TagFolderId, TagId, Vec3 } from '@pushform/core';
 import type { ColorizeType } from '../colorize';
+import type { EnvironmentSettings } from '../environment';
 
 export type Rgb = readonly [number, number, number]; // 0..1
 
@@ -177,6 +178,8 @@ export interface ModelingColors {
   colorByTag?: boolean | undefined;
 }
 export interface Style {
+  /** Absent in older files: retain their original camera/sun lighting. */
+  environment?: EnvironmentSettings;
   id: StyleId;
   name: string;
   description: string;

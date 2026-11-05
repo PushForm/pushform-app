@@ -365,6 +365,14 @@ describe('Chat', () => {
     await waitFor(() => expect(document.querySelector('.is-streaming .pf-fr-working.is-after')?.textContent).toBe('Writing the change…'));
     expect(document.querySelector('.is-streaming')?.textContent).toContain('Building the box.');
   });
+  it('continues beyond 30 messages without a limit notice when the backend returns no limit', async () => {
+    setup({ me: { limits: { openRequestsPerAccount: 5, messagesPerConversation: null } }, turns: [[text('Continue'), done(31, false)], [text('Still continuing'), done(32, false)]] });
+    await say('First message');
+    expect(document.querySelector('.pf-fr-limit')).toBeNull();
+    await say('Next message');
+    expect(log().textContent).toContain('Still continuing');
+    expect(document.querySelector('.pf-fr-limit')).toBeNull();
+  });
   it('shows a short muted notice when the message limit is reached and never a message counter', async () => {
     setup({ turns: [[text('That is all I can take; send it or stop?'), briefEvent({ ...featureBrief, desired: 'x' }, 'T'), done(30, true)]] });
     await say('hello');

@@ -197,7 +197,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
 
   // Optimistic until the profile arrives; the backend enforces roles on every call.
   const filingAllowed = !me || (me.effective !== 'none' && !me.filingDisabled);
-  const messageLimit = me?.limits.messagesPerConversation ?? 30;
+  const messageLimit = me ? me.limits.messagesPerConversation : 30;
   const run = async (action: () => Promise<void>): Promise<void> => {
     const gen = generation.current;
     const live = (): boolean => alive.current && generation.current === gen;
@@ -338,7 +338,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
               case 'done':
                 completed = !event.awaitingTools;
                 ended = event.ended; startOver = ended && event.reason === 'start_over';
-                setChat(current => ({ ...current, messageCount: event.messageCount, limitReached: !ended && (event.limitReached || event.messageCount >= messageLimit) }));
+                setChat(current => ({ ...current, messageCount: event.messageCount, limitReached: !ended && event.limitReached }));
                 break;
             }
           }

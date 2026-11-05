@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright 2026 PushForm contributors
+syntax = "proto2";
+package pushform.native;
+message Environment {
+  required string preset=1; required bool studio_enabled=2; required double brightness=3;
+  required double fill=4; required double facing=5; required double key=6;
+  required double azimuth=7; required double elevation=8; required bool follow_camera=9;
+  required bool studio_shadows=10; required bool sun_enabled=11; required double sun_intensity=12;
+  required bool sun_shadows=13; required double sky_light=14; required string sky=15;
+  required uint32 skybox_image_id=16; required double sky_rotation=17; required bool scene_lights_enabled=18;
+}
+message SceneLight {
+  required uint32 id=1; required string name=2; required string type=3;
+  required double px=4; required double py=5; required double pz=6;
+  required double tx=7; required double ty=8; required double tz=9;
+  required double lumens=10; required double temperature=11; required bool enabled=12;
+  required bool cast_shadow=13; required double angle=14; required double penumbra=15;
+  required double width=16; required double height=17;
+}

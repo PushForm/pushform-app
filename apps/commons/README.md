@@ -31,6 +31,12 @@ Published file descriptors contain a stable UUID, filename, format, byte count a
 
 The endpoint must expose only approved public metadata, with previews and metadata cleared for distribution. Acquisition manifests and raw source files are not public catalog responses. The producer is responsible for verifying rights, provenance and publication eligibility before emitting records; client validation is not a rights review. Model links currently use `#models/<id>` so direct links work on a static host without rewrites.
 
+## Collections and featured discovery
+
+With account configuration present, public discovery loads collections and the ordered mixed featured list. Routes are `#collections`, `#collections/<uuid>`, `#collections/new` and `#my-collections`. Collection ownership, public visibility and admin featuring are enforced by authenticated database operations. New collections are private, support up to 100 ordered model references, and preserve each member's existing rights. The initial limits are 100 collections per account, 1,000 public collections and 24 featured items. A collection follows the model's current publication; withdrawn models are omitted from its public view.
+
+Commons restores its account session at startup so authorized accounts can see Feature actions directly on details. Set optional `VITE_PUSHFORM_ADMIN_URL` to override the public admin-console origin used by Manage links (for example, a separate staging console). Only existing Admin/Owner roles can feature; public-profile settings and an account's email spelling do not grant this permission.
+
 ## Contributor accounts
 
 The independent catalog client remains anonymous and stateless. Account actions use the shared PushForm session separately: initial name/details/Terms onboarding is the same form as the editor, and optional mailing signup starts unchecked. Existing completed accounts skip that form. A public profile is an explicit opt-in with a stable public ID/handle; it never publishes private account details. The Publish model flow saves private drafts and verified files before a deliberate publication action, without staff approval.

@@ -43,7 +43,7 @@ function clearDownload(assetId:string):void {
 function shouldResumeDownload(assetId:string):boolean {
   const pending=pendingDownload();return pending?.assetId===assetId&&pending.route===window.location.hash;
 }
-const validReturn = (value: string | null): value is string => value !== null && /^(#models\/[a-z0-9][a-z0-9-]{0,95}|#account|#publish)$/.test(value);
+const validReturn = (value: string | null): value is string => value !== null && /^(#models\/[a-z0-9][a-z0-9-]{0,95}|#collections\/(new|[a-f0-9-]{36})|#my-collections|#account|#publish)$/.test(value);
 /** Keep only a local Commons route while the ordinary email callback clears authentication parameters. */
 export function rememberCommonsReturnRoute(): void {
   try { if (validReturn(window.location.hash)) sessionStorage.setItem(RETURN_KEY, window.location.hash); } catch { /* Storage may be unavailable. */ }
@@ -85,7 +85,7 @@ function SignIn({session}:{session:CloudSession}):JSX.Element {
   if(state.status==='restoring')return <p role="status">Restoring your session…</p>;
   const submit=(event:FormEvent):void=>{event.preventDefault();rememberCommonsReturnRoute();void (state.emailSentTo?session.verifyCode(code):session.sendSignInEmail(email));};
   return <section className="commons-account" aria-label="Sign in to Commons"><h2>Sign in to continue</h2>
-    <p>Use your PushForm account to download models. New accounts complete the same account setup as the editor.</p>
+    <p>Use your PushForm account to download models and create collections. New accounts complete the same account setup as the editor.</p>
     <form onSubmit={submit}>{state.emailSentTo?<><p>Enter the code sent to <strong>{state.emailSentTo}</strong>.</p><label>Email code <input autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6,10}" maxLength={10} required value={code} onChange={event=>setCode(event.target.value.replace(/\s/g,''))} disabled={state.pending!==null}/></label></>:<label>Email address <input type="email" autoComplete="email" required value={email} onChange={event=>setEmail(event.target.value)} disabled={state.pending!==null}/></label>}
       {state.error&&<p role="alert">{state.error}</p>}<button disabled={state.pending!==null}>{state.emailSentTo?'Verify code':'Send sign-in email'}</button>
       {state.emailSentTo&&<button type="button" disabled={state.pending!==null} onClick={()=>session.changeEmail()}>Use a different email</button>}

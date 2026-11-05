@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { commonsFileUrl, CommonsUnavailableError, type CommonsProfile } from '@pushform/cloud';
+import { commonsFileUrl, CommonsUnavailableError, type CommonsProfile, type CommonsCollections } from '@pushform/cloud';
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { CommonsProfileEditor, CommonsProfilePageView, CreatorCredit, ProfileLink, type ProfileLookup } from './CommonsProfile';
 import { ModelCard, ModelGrid } from './ModelCard';
@@ -11,6 +11,7 @@ import type { CommonsAccount } from './account';
 import { CommonsModelPreview } from './CommonsPreview';
 import { CommonsOpenAction } from './CommonsOpenAction';
 import { filterModels, type CatalogFilters, type CatalogLoader, type CatalogModel } from './catalog';
+import { CollectionsProvider, CollectionsRoute, FeaturedSection, FeatureAction, ModelCollectionAction, PublicCollectionResults, CommonsAdminLink } from './Collections';
 
 type CatalogState = { kind: 'unconfigured' | 'loading' | 'error' } | { kind: 'ready'; models: CatalogModel[] };
 const emptyFilters: CatalogFilters = { query: '', category: '', license: '', commercial: false };
@@ -51,6 +52,7 @@ function ModelDetail({ model, filesUrl, account, editorUrl }: { model: CatalogMo
           <div><dt>Published</dt><dd>{new Date(model.publishedAt).toLocaleDateString()}</dd></div></dl>
         {model.source && <p className="source">Sourced from <a href={model.source.url} rel="noreferrer" target="_blank">{model.source.name} ↗</a></p>}
         <CommonsOpenAction model={model} editorUrl={editorUrl} />
+        <div className="collection-actions"><ModelCollectionAction model={model} /><FeatureAction key={model.id} type="model" targetId={model.id} eligible={model.files.length > 0} /></div>
         {model.files.length > 0 && <section className="downloads" aria-label="Model files"><h2>Model files</h2>
           <p>Each ZIP download includes the original file, licenses and creator credits.</p>
           <ul>{model.files.map((file) => <li key={file.id}><span>{file.name} · {(file.sizeBytes / 1024).toFixed(1)} KiB</span>
@@ -74,13 +76,15 @@ function ModelDetail({ model, filesUrl, account, editorUrl }: { model: CatalogMo
   </>;
 }
 
-export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUrl }: { loadCatalog: CatalogLoader | null; filesUrl?: string | undefined; account?:CommonsAccount|null; publishPage?:((route:PublishRoute,catalogReady:boolean)=>ReactNode)|undefined;editorUrl?:string|undefined }) {
+export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUrl, collections=null }: { loadCatalog: CatalogLoader | null; filesUrl?: string | undefined; account?:CommonsAccount|null; publishPage?:((route:PublishRoute,catalogReady:boolean)=>ReactNode)|undefined;editorUrl?:string|undefined;collections?:CommonsCollections|null }) {
   const [state, setState] = useState<CatalogState>({ kind: loadCatalog ? 'loading' : 'unconfigured' });
   const [attempt, setAttempt] = useState(0);
   useEffect(()=>{const refresh=()=>setAttempt(value=>value+1);window.addEventListener('commons:catalog-changed',refresh);return()=>window.removeEventListener('commons:catalog-changed',refresh);},[]);
   const [filters, setFilters] = useState<CatalogFilters>(emptyFilters);
   const [location,setLocation]=useState(currentCommonsLocation);
   const hash=location.hash;
+  const onCollections=hash==='#collections';
+  const collectionRoute=hash==='#my-collections'||hash.startsWith('#collections/');
   const selectedId=modelFromHash(hash);
   const profileHandle=hash===''||hash==='#main'?profileHandleFromPath(location.path):null;
   const legacyPersonId=/^#people\/([a-f0-9-]{36})$/.exec(hash)?.[1]??null;
@@ -107,34 +111,40 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
   const selected = selectedId ? models.find((model) => model.id === selectedId) : null;
   useEffect(() => {
     if(onProfile)return;
+    if(collectionRoute){heading.current?.focus({preventScroll:true});heading.current?.scrollIntoView?.({block:'start'});return;}
     if(hash==='#account'||publishRoute(hash)){document.title=hash==='#account'?'Your profile — PushForm Commons':'My models — PushForm Commons';heading.current?.focus({preventScroll:true});return;}
     document.title = selected ? `${selected.title} — PushForm Commons` : 'PushForm Commons — Models for your next project';
     if (state.kind !== 'ready' || !window.location.hash) return;
-    heading.current?.focus({ preventScroll: true });
+    if (!document.activeElement?.closest('.catalog-tabs')) heading.current?.focus({ preventScroll: true });
     const target = selectedId ? heading.current : document.getElementById('browse');
     target?.scrollIntoView?.({ block: 'start' });
-  }, [selected, selectedId, state.kind,onProfile,hash]);
+  }, [selected, selectedId, state.kind,onProfile,hash,collectionRoute]);
   const options = (values: string[]) => [...new Set(values)].sort().map((value) => <option key={value} value={value}>{value}</option>);
   const update = (patch: Partial<CatalogFilters>) => setFilters((current) => ({ ...current, ...patch }));
-  return <div className="commons">
+  return <CollectionsProvider service={collections} account={account}><div className="commons">
     <a className="skip-link" href="#main">Skip to content</a>
     <header className="site-header"><a className="brand" href="#browse" aria-label="PushForm Commons home">
       <img src="/pf-logo-mark.svg" alt="" width="30" height="30" /><span>PushForm <strong>Commons</strong></span>
-    </a><nav aria-label="Commons">{account&&<><a className="nav-upload" href="#upload">Upload model</a><a href="#my-models">My models</a><MyProfileLink own={own}/></>}<a className="editor-link" href="https://app.pushform.io">Open PushForm <span aria-hidden="true">↗</span></a></nav></header>
+    </a><nav aria-label="Commons"><a href="#collections">Collections</a>{account&&<><a href="#my-collections">My collections</a><a className="nav-upload" href="#upload">Upload model</a><a href="#my-models">My models</a><MyProfileLink own={own}/></>}<a className="editor-link" href="https://app.pushform.io">Open PushForm <span aria-hidden="true">↗</span></a><CommonsAdminLink/></nav></header>
     <main id="main" ref={heading} tabIndex={-1}>
-      {profileLookup?<CommonsProfilePageView lookup={profileLookup} profiles={account?.profiles??null} filesUrl={filesUrl} ownProfileId={own?.id??null}/>:hash==='#account'?account?<AccountPage account={account} filesUrl={filesUrl}/>:<section className="status-panel"><h1>Accounts are unavailable in this build.</h1></section>:publishRoute(hash)?publishPage?.(publishRoute(hash)!,state.kind==='ready')??<section className="status-panel"><h1>Publishing is unavailable in this build.</h1></section>:state.kind === 'ready' && selectedId ? selected ? <ModelDetail model={selected} filesUrl={filesUrl} account={account} editorUrl={editorUrl} /> :
+      {collectionRoute?<CollectionsRoute route={hash} models={models} filesUrl={filesUrl}/>:profileLookup?<CommonsProfilePageView lookup={profileLookup} profiles={account?.profiles??null} filesUrl={filesUrl} ownProfileId={own?.id??null}/>:hash==='#account'?account?<AccountPage account={account} filesUrl={filesUrl}/>:<section className="status-panel"><h1>Accounts are unavailable in this build.</h1></section>:publishRoute(hash)?publishPage?.(publishRoute(hash)!,state.kind==='ready')??<section className="status-panel"><h1>Publishing is unavailable in this build.</h1></section>:state.kind === 'ready' && selectedId ? selected ? <ModelDetail model={selected} filesUrl={filesUrl} account={account} editorUrl={editorUrl} /> :
         <section className="status-panel"><p className="eyebrow">Model unavailable</p><h1>This model isn’t in the catalog.</h1>
           <p>It may have been removed or the link may be out of date.</p><a href="#browse">Browse models</a></section> : <>
         <section className="hero"><p className="eyebrow">A shared place to start</p>
-          <h1>Your next project<br />starts with <em>an idea.</em></h1>
-          <p>Find community-built models for the things you want to make.<br className="desktop-break" /> From the smallest fitting to the whole workshop.</p>
-          <div className="hero-rule"><span>Models for makers</span><span>PushForm Commons</span></div>
+          <h1>Good projects start<br />with <em>shared ideas.</em></h1>
+          <p>Find a model. Explore a collection. Make it your own.</p>
         </section>
+        <FeaturedSection models={models} filesUrl={filesUrl}/>
         <section id="browse" aria-labelledby="browse-title" className="browse">
-          <div className="section-heading"><div><p className="eyebrow">Find your starting point</p><h2 id="browse-title">Browse models</h2></div>
-            {state.kind === 'ready' && <span className="catalog-count">{models.length} {models.length === 1 ? 'model' : 'models'}</span>}</div>
-          <div className="filters" role="search" aria-label="Search models">
-            <label className="search-field"><span>Search models</span><input type="search" placeholder="Try a chair, hinge or garden bench…" value={filters.query} onChange={(event) => update({ query: event.target.value })} /></label>
+          <div className="section-heading"><div><p className="eyebrow">Find your starting point</p><h2 id="browse-title">{onCollections?'Browse collections':'Browse models'}</h2></div>
+            {account ? <a className="secondary-button" href="#collections/new">New collection</a> : state.kind === 'ready' && <span className="catalog-count">{models.length} {models.length === 1 ? 'model' : 'models'}</span>}</div>
+          <div className="catalog-tabs" role="tablist" aria-label="Browse Commons" onKeyDown={event=>{
+            const keys=['ArrowLeft','ArrowRight','Home','End'];if(!keys.includes(event.key))return;event.preventDefault();
+            const next=event.key==='Home'?false:event.key==='End'?true:!onCollections;
+            window.location.hash=next?'#collections':'#browse';document.getElementById(next?'browse-collections-tab':'browse-models-tab')?.focus();
+          }}><a role="tab" id="browse-models-tab" aria-selected={!onCollections} aria-controls="catalog-results" href="#browse">Models</a><a role="tab" id="browse-collections-tab" aria-selected={onCollections} aria-controls="catalog-results" href="#collections">Collections</a></div>
+          <div className="filters" role="search" aria-label={onCollections?'Search collections':'Search models'}>
+            <label className="search-field"><span>{onCollections?'Search collections':'Search models'}</span><input type="search" placeholder={onCollections?'Try workshop essentials or outdoor projects…':'Try a chair, hinge or garden bench…'} value={filters.query} onChange={(event) => update({ query: event.target.value })} /></label>
             <label><span>Category</span><select value={filters.category} onChange={(event) => update({ category: event.target.value })}><option value="">All categories</option>{options(models.map((model) => model.category))}</select></label>
             <label><span>License</span><select value={filters.license} onChange={(event) => update({ license: event.target.value })}><option value="">All licenses</option>{options(models.flatMap((model) => model.licenses.map((license) => license.name)))}</select></label>
             <label className="commercial"><input type="checkbox" checked={filters.commercial} onChange={(event) => update({ commercial: event.target.checked })} />Commercial use permitted</label>
@@ -142,17 +152,17 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
           {state.kind === 'unconfigured' && <section className="status-panel" role="status"><span className="status-icon" aria-hidden="true">◇</span><h3>A place for what you’ll make next.</h3><p>The Commons catalog isn’t available yet. Check back as the library takes shape.</p></section>}
           {state.kind === 'loading' && <p className="status-panel" role="status">Loading models…</p>}
           {state.kind === 'error' && <section className="status-panel" role="alert"><h3>We couldn’t load the catalog.</h3><p>Please try again in a moment.</p><button onClick={() => setAttempt((value) => value + 1)}>Try again</button></section>}
-          {state.kind === 'ready' && <>
+          <div id="catalog-results" role="tabpanel" aria-labelledby={onCollections?'browse-collections-tab':'browse-models-tab'}>{onCollections?<PublicCollectionResults models={models} filesUrl={filesUrl} filters={filters}/>:state.kind === 'ready' && <>
             <p className="result-count" role="status">{shown.length} {shown.length === 1 ? 'model' : 'models'}{filters.query && ` matching “${filters.query}”`}</p>
             {shown.length ? <ModelGrid>{shown.map((model) => <ModelCard key={model.id} model={model} filesUrl={filesUrl} />)}</ModelGrid> : <section className="status-panel"><h3>{models.length ? 'No models match those filters.' : 'The library is ready for its first models.'}</h3>
               <p>{models.length ? 'Try a different search or broaden your filters.' : 'Published models will appear here.'}</p>
               {models.length > 0 && <button onClick={() => setFilters(emptyFilters)}>Clear filters</button>}</section>}
-          </>}
+          </>}</div>
         </section>
       </>}
     </main>
     <footer className="site-footer"><span>Good projects start with shared ideas.</span><div><a href="https://pushform.io">PushForm</a><a href="https://pushform.io/terms">Terms</a><a href="https://pushform.io/privacy">Privacy</a></div></footer>
-  </div>;
+  </div></CollectionsProvider>;
 }
 
 function AccountPage({account,filesUrl}:{account:CommonsAccount;filesUrl:string|undefined}){

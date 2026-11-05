@@ -14,7 +14,7 @@ Use the **Models** and **Collections** tabs below Featured to search the library
 
 ## Create and manage collections
 
-Any signed-in PushForm user can create collections. Choose **New Collection** beside **My Collections** on your profile, or **New collection** in the library. Complete account setup if needed, then enter a title and optional description. Collections start **Public — visible in Commons**; choose **Private — only you** to keep one private. A public creator profile is optional; if you have an active public profile it appears as the collection's curator.
+Any signed-in PushForm user can create collections. Choose **New Collection** beside **My Collections** on your profile. Complete account setup if needed, then enter a title and optional description. Collections start **Public — visible in Commons**; choose **Private — only you** to keep one private. A public creator profile is optional; if you have an active public profile it appears as the collection's curator.
 
 On a model page, **Save to collection** adds or removes that model using your collection checkboxes. **New private collection** creates a collection and saves the model into it in one action.
 

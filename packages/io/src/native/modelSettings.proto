@@ -2,6 +2,7 @@ syntax = "proto2";
 package pushform.native;
 import "modelMeta.proto";
 import "viewSettings.proto";
+import "environment.proto";
 message OptionalFog { oneof state { EmptyState undefined_value=1; Fog value=3; } }
 message ModelSettings {
   required ModelMeta meta=1;
@@ -12,4 +13,5 @@ message ModelSettings {
   repeated uint32 scene_order=6 [packed=true];
   required Shadows shadows=7;
   optional OptionalFog fog=8;
+  repeated SceneLight scene_lights=9;
 }

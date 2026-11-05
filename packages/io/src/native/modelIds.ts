@@ -7,6 +7,7 @@ import type { NativePackedModel } from './modelReader';
 type ModelIds = Pick<NativePackedModel, 'settings' | 'catalogs' | 'definitions'>;
 /** Persistent IDs share one allocator. Body face IDs and imprint IDs are owner-local. */
 function* persistentIds(model: ModelIds): Generator<number> {
+  for (const light of model.settings.sceneLights ?? []) yield light.id;
   yield* model.definitions.keys();
   for (const map of Object.values(model.catalogs.values)) yield* map.keys();
   for (const definition of model.definitions.values()) {

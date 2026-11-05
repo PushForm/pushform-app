@@ -45,6 +45,7 @@ PushForm has two editors: **Modeling** for 3D work and **Layout** for drawings o
 - [Delete objects and erase sketch geometry](modeling/deleting.md)
 - [Selection, Object browser and Entity Info](modeling/selection.md)
 - [Materials, tags, hidden geometry and styles](modeling/materials-styles.md)
+- [Lighting, environments, skyboxes and scene lights](modeling/lighting.md)
 - [Groups and components](modeling/components.md)
 - [Dimensions, 3D text and pictures](modeling/annotations.md)
 - [Inference locks and section views](modeling/inference-sections.md)

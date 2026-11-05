@@ -24,6 +24,7 @@ import { reconcileNativeTagFields } from './nativeTagFields';
 import { reconcileNativeSettingsFields } from './nativeSettingsFields';
 import { FORMAT_VERSION, type DocumentState } from './entities/document';
 import type { FogSettings, Material, SceneFlags, ShadowSettings, Style, Tag } from './entities/attrs';
+import { environmentPreset } from './environment';
 
 let immerConfigured = false;
 /** Enables immer Map/Set and patch support exactly once (safe to call repeatedly). */
@@ -277,6 +278,7 @@ export const DEFAULT_SCENE_FLAGS: SceneFlags = {
 
 export function createDefaultStyle(id: StyleId): Style {
   return {
+    environment: environmentPreset('bright'),
     id,
     name: 'Default',
     description: 'Shaded with textures, profiles on, white background with sky and ground.',

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { commonsProfileFieldsSchema, type CommonsProfile, type CommonsProfileFields, type CommonsProfilePage, type CommonsProfiles } from '@pushform/cloud';
 import { navigateCommons, profilePath } from './route';
 import { ModelCard, ModelGrid, ProfileLink } from './ModelCard';
@@ -11,7 +11,7 @@ export { ProfileLink, CreatorCredit } from './ModelCard';
 /** Opens a profile by handle, or by account ID for older links, which then move to the handle address. */
 export type ProfileLookup={handle:string}|{id:string};
 /** `ownProfileId` is the signed-in user's own profile ID; that profile shows an Edit profile link. */
-export function CommonsProfilePageView({lookup,profiles,filesUrl,ownProfileId=null}:{lookup:ProfileLookup;profiles:CommonsProfiles|null;filesUrl?:string|undefined;ownProfileId?:string|null}){
+export function CommonsProfilePageView({lookup,profiles,filesUrl,ownProfileId=null,renderCollections}:{lookup:ProfileLookup;profiles:CommonsProfiles|null;filesUrl?:string|undefined;ownProfileId?:string|null;renderCollections?:(handle:string)=>ReactNode}){
   const [page,setPage]=useState<CommonsProfilePage|null|undefined>();const [error,setError]=useState(false);const [attempt,setAttempt]=useState(0);
   const shown=useRef<CommonsProfilePage|null|undefined>(undefined);shown.current=page;
   const handle='handle' in lookup?lookup.handle:null;const id='id' in lookup?lookup.id:null;
@@ -34,6 +34,7 @@ export function CommonsProfilePageView({lookup,profiles,filesUrl,ownProfileId=nu
     {page.profile.bio&&<p className="profile-bio">{page.profile.bio}</p>}
     {page.profile.links.length>0&&<ul className="profile-links">{page.profile.links.map((link,index)=><li key={index}><a href={link.url} target="_blank" rel="noreferrer noopener">{link.label} ↗</a></li>)}</ul>}
     <h2>Published models</h2>{page.models.length===0?<p>No published models to show.</p>:<ModelGrid className="profile-models">{page.models.map(model=><ModelCard key={model.id} model={model} filesUrl={filesUrl}/>)}</ModelGrid>}
+    {renderCollections?.(page.profile.handle)}
   </article>;
 }
 const emptyFields:CommonsProfileFields={handle:'',displayName:'',bio:'',avatarUrl:null,links:[]};

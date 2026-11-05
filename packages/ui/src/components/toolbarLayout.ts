@@ -50,7 +50,6 @@ export const TOOLBAR_GROUPS: readonly { title: string; slots: readonly Slot[] }[
       stack('Edge', 'fillet', 'chamfer', 'profile'),
       stack(
         'Solid',
-        'solid.outerShell',
         'solid.union',
         'solid.subtract',
         'solid.trim',

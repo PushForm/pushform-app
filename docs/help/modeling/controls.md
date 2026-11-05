@@ -16,9 +16,9 @@ Use **Line** for straight edges or **Freehand** for a drawn stroke. The Shape st
 
 ## Solid tools
 
-The Solid stack includes **Outer Shell**, **Union**, **Subtract**, **Trim**, **Intersect** and **Split**. These operate on solids, unlike Layout's page-based Boolean tools. Use the tool matching whether you want to combine volumes, remove one volume from another, keep their overlap, or divide them.
+The Solid stack includes **Union**, **Subtract**, **Trim**, **Intersect** and **Split**. These operate on solids, unlike Layout's page-based Boolean tools. Use the tool matching whether you want to combine volumes, remove one volume from another, keep their overlap, or divide them.
 
-The inputs and the result must be valid solids in the current editing context. With no preselection, click the first solid then the second to apply. For Subtract and Trim, pick the cutter first and the target second. Subtract consumes the cutter; Trim keeps it. Two preselected solids apply on activation. A loose edge or zero-thickness sheet is not a solid operand. Undo restores a completed operation.
+The inputs and the result must be valid solids in the current editing context. With no preselection, click the first solid then the second to apply. For Subtract and Trim, pick the cutter first and the target second. Subtract consumes the cutter; Trim keeps it. Union accepts two or more preselected solids; the other operations accept exactly two. The operation applies on activation. A loose edge or zero-thickness sheet is not a solid operand. Undo restores a completed operation.
 
 ## Inspect, Paint and Tag
 

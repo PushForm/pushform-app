@@ -283,6 +283,7 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, initialI
     void uploadInto(file, 'image');
   };
   const removeCover = async () => {
+    if (initialImage) { await uploadInto(initialImage, 'image'); return; }
     if (!filesUrl || !cover?.asset) { setCover(null); return; }
     try {
       const draft = await ensureDraft();
@@ -352,6 +353,7 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, initialI
           {cover?.image && cover.name !== initialImage?.name ? <img src={cover.image} alt="Cover photo"/> : null}
           {cover ? <p className="file-detail">{cover.error ?? (cover.upload ? fileStatus(cover).label : cover.name)}</p> : null}
           <div className="file-actions">
+            {initialImage && cover?.error && cover.name === initialImage.name && <button type="button" className="secondary" onClick={() => void uploadInto(initialImage, 'image')}>Retry preview upload</button>}
             <button type="button" className="secondary" disabled={coverBusy} onClick={() => coverInput.current?.click()}>{cover && cover.name !== initialImage?.name ? 'Replace cover photo' : 'Add a cover photo'}</button>
             {cover && cover.name !== initialImage?.name && !coverBusy && <button type="button" className="secondary" onClick={() => void removeCover()}>Remove</button>}
           </div>

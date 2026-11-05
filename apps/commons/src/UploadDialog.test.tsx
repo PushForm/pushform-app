@@ -230,4 +230,26 @@ it('uses the editor-rendered current view and uploads it without waiting for ser
   expect(screen.getByRole('img', { name: 'Preview of cabinet' }).getAttribute('src')).toBe('blob:preview');
   expect(screen.queryByRole('button', { name: 'Replace file' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull();
+  const cover = new File(['photo'], 'cover.png', { type: 'image/png' });
+  fireEvent.change(screen.getByLabelText('Choose a cover photo'), { target: { files: [cover] } });
+  await screen.findByRole('img', { name: 'Cover photo' });
+  fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+  await waitFor(() => expect(cloud.upload.mock.calls.filter(call => call[3] === image)).toHaveLength(2));
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Review publication' }) as HTMLButtonElement).disabled).toBe(false));
+  expect(screen.queryByRole('img', { name: 'Cover photo' })).toBeNull();
+});
+
+it('lets the publisher retry a failed current-view upload before reviewing publication', async () => {
+  const f = setup();
+  const file = new File(['snapshot'], 'cabinet.pf');
+  const image = new File(['png'], 'current-view.png', { type: 'image/png' });
+  let failed = false;
+  cloud.upload.mockImplementation(async (_url, _token, _revision, source) => {
+    if (source === image && !failed) { failed = true; throw new Error('Preview upload interrupted.'); }
+    return asset({ filename: source.name, format: source === file ? 'pf' : 'png', size_bytes: source.size });
+  });
+  render(<UploadDialog account={f.account} filesUrl="https://files.example.com" modelId={null} initialFile={file} initialImage={image} snapshotLabel="Private cloud revision 12" onClose={vi.fn()} onPublished={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Retry preview upload' }));
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Review publication' }) as HTMLButtonElement).disabled).toBe(false));
+  expect(cloud.upload.mock.calls.filter(call => call[3] === image)).toHaveLength(2);
 });

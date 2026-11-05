@@ -41,6 +41,14 @@ it('never exposes an anonymous file link and downloads using the current session
   expect(screen.queryByRole('link')).toBeNull();fireEvent.click(screen.getByRole('button',{name:'Download ZIP — part.step'}));
   await waitFor(()=>expect(create).toHaveBeenCalledOnce());expect(new Headers(fetcher.mock.calls[0]![1]!.headers).get('Authorization')).toBe('Bearer test-session');
 });
+it('does not append a second ZIP suffix to archive downloads',async()=>{
+  const auth=account(row);vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response('ZIP',{headers:{'Content-Type':'application/zip'}}));
+  Object.defineProperty(URL,'createObjectURL',{value:vi.fn(()=> 'blob:archive'),configurable:true});Object.defineProperty(URL,'revokeObjectURL',{value:vi.fn(),configurable:true});
+  let filename='';vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(function(this:HTMLAnchorElement){filename=this.download;});
+  render(<CommonsDownloadButton account={auth} filesUrl="https://files.example" file={{id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',name:'source-notices.zip',format:'ZIP',sizeBytes:3,sha256:'a'.repeat(64)}}/>);
+  fireEvent.click(screen.getByRole('button',{name:'Download ZIP — source-notices.zip'}));
+  await waitFor(()=>expect(filename).toBe('source-notices.zip'));
+});
 it('preserves only safe local routes through the email callback',()=>{
   window.history.replaceState(null,'','/#models/example-part');rememberCommonsReturnRoute();window.history.replaceState(null,'','/');restoreCommonsReturnRoute();expect(window.location.hash).toBe('#models/example-part');
   sessionStorage.setItem('pushform:commons:return','https://untrusted.example/');window.history.replaceState(null,'','/');restoreCommonsReturnRoute();expect(window.location.hash).toBe('');
@@ -67,13 +75,14 @@ it('does not auto-download stale, malformed, wrong-route or nonmatching asset in
   const base={version:1,assetId:file.id,route:'#models/example-part',requestedAt:Date.now()};
   for(const value of [JSON.stringify({...base,requestedAt:Date.now()-15*60*1000}),'{bad-json',JSON.stringify({...base,route:'https://untrusted.example/'}),JSON.stringify({...base,assetId:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'}),JSON.stringify({...base,route:'#models/other-model'}),JSON.stringify({...base,requestedAt:Date.now()+60000}),JSON.stringify({...base,token:'must-never-be-accepted'})]){
     sessionStorage.setItem('pushform:commons:download',value);const view=render(<CommonsDownloadButton account={auth} filesUrl="https://files.example" file={file}/>);
-    expect(screen.queryByRole('button',{name:'Cancel download'})).toBeNull();expect(fetcher).not.toHaveBeenCalled();view.unmount();
+    expect(screen.queryByRole('status')).toBeNull();expect(fetcher).not.toHaveBeenCalled();view.unmount();
   }
 });
-it('lets a visitor cancel a pending authenticated download without retaining an automatic transfer intent',async()=>{
+it('keeps a pending download ready for sign-in without a cancel control',async()=>{
   const auth=account(null,false);const file={id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',name:'part.step',format:'STEP',sizeBytes:3,sha256:'a'.repeat(64)};
   window.history.replaceState(null,'','/#models/example-part');render(<CommonsDownloadButton account={auth} filesUrl="https://files.example" file={file}/>);
   fireEvent.click(screen.getByRole('button',{name:'Download ZIP — part.step'}));await screen.findByRole('heading',{name:'Sign in to continue'});
-  expect(sessionStorage.getItem('pushform:commons:download')).not.toBeNull();fireEvent.click(screen.getByRole('button',{name:'Cancel download'}));
-  expect(sessionStorage.getItem('pushform:commons:download')).toBeNull();expect(sessionStorage.getItem('pushform:commons:return')).toBeNull();expect(screen.queryByRole('heading',{name:'Sign in to continue'})).toBeNull();
+  expect(sessionStorage.getItem('pushform:commons:download')).not.toBeNull();
+  expect(screen.queryByRole('button',{name:'Cancel download'})).toBeNull();
+  expect(sessionStorage.getItem('pushform:commons:return')).toBe('#models/example-part');
 });

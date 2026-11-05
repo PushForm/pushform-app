@@ -1,0 +1,23 @@
+name: Prepare STEP modules
+description: Restore matching compiled modules or build both WebAssembly targets
+runs:
+  using: composite
+  steps:
+    - uses: dtolnay/rust-toolchain@stable
+      with: { targets: 'wasm32-wasip1, wasm32-wasip1-threads' }
+    - id: rust-version
+      shell: bash
+      run: echo "hash=$(rustc -Vv | sha256sum | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@v4
+      id: step-wasm
+      with:
+        path: packages/io/wasm/*.wasm
+        key: step-wasm-v1-${{ runner.os }}-${{ steps.rust-version.outputs.hash }}-${{ hashFiles('crates/**', '!crates/**/target/**', '.cargo/**', 'rust-toolchain*', 'scripts/build-step-reader.mjs') }}
+    - uses: Swatinem/rust-cache@v2
+      if: steps.step-wasm.outputs.cache-hit != 'true'
+      with: { workspaces: crates/step-reader }
+    - shell: bash
+      if: steps.step-wasm.outputs.cache-hit != 'true'
+      run: node scripts/build-step-reader.mjs
+    - shell: bash
+      run: node scripts/build-step-reader.mjs --check

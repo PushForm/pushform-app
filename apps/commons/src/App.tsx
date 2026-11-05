@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import { sortedModelFiles } from './modelFiles';
 import { commonsFileUrl, CommonsUnavailableError, type CommonsProfile, type CommonsCollections } from '@pushform/cloud';
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { CommonsProfileEditor, CommonsProfilePageView, CreatorCredit, ProfileLink, type ProfileLookup } from './CommonsProfile';
@@ -54,7 +55,7 @@ function ModelDetail({ model, filesUrl, account, editorUrl }: { model: CatalogMo
         <div className="collection-actions"><ModelCollectionAction model={model} /><FeatureAction key={model.id} type="model" targetId={model.id} eligible={model.files.length > 0} /></div>
         {model.files.length > 0 && <section className="downloads" aria-label="Model files"><h2>Model files</h2>
           <p>Each ZIP download includes the original file, licenses and creator credits.</p>
-          <ul>{model.files.map((file) => <li key={file.id}><span>{file.name} · {(file.sizeBytes / 1024).toFixed(1)} KiB</span>
+          <ul>{sortedModelFiles(model.files).map((file) => <li key={file.id}><span>{file.name} · {(file.sizeBytes / 1024).toFixed(1)} KiB</span>
             {commonsFileUrl(filesUrl, 'downloads', file.id) ? <CommonsDownloadButton account={account??undefined} filesUrl={filesUrl} file={file}/> : <span>Downloads are unavailable in this build.</span>}
           </li>)}</ul>
         </section>}
@@ -125,7 +126,7 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
     <a className="skip-link" href="#main">Skip to content</a>
     <header className="site-header"><a className="brand" href="#browse" aria-label="PushForm Commons home">
       <img src="/pf-logo-mark.svg" alt="" width="30" height="30" /><span>PushForm <strong>Commons</strong></span>
-    </a><nav aria-label="Commons"><a href="#collections">Collections</a>{account&&<><a href="#my-collections">My collections</a><a className="nav-upload" href="#upload">Upload model</a><a href="#my-models">My models</a><MyProfileLink own={own}/></>}<a className="editor-link" href="https://app.pushform.io">Open PushForm <span aria-hidden="true">↗</span></a><CommonsAdminLink/></nav></header>
+    </a><nav aria-label="Commons">{account&&<a className="nav-upload" href="#upload">Upload model</a>}<a href="#collections">Collections</a>{account&&<><a href="#my-collections">My collections</a><a href="#my-models">My models</a><MyProfileLink own={own}/></>}<a className="editor-link" href="https://app.pushform.io">Open PushForm <span aria-hidden="true">↗</span></a><CommonsAdminLink/></nav></header>
     <main id="main" ref={heading} tabIndex={-1}>
       {collectionRoute?<CollectionsRoute route={hash} models={models} filesUrl={filesUrl}/>:profileLookup?<CommonsProfilePageView lookup={profileLookup} profiles={account?.profiles??null} filesUrl={filesUrl} ownProfileId={own?.id??null}/>:hash==='#account'?account?<AccountPage account={account} filesUrl={filesUrl}/>:<section className="status-panel"><h1>Accounts are unavailable in this build.</h1></section>:publishRoute(hash)?publishPage?.(publishRoute(hash)!,state.kind==='ready')??<section className="status-panel"><h1>Publishing is unavailable in this build.</h1></section>:state.kind === 'ready' && selectedId ? selected ? <ModelDetail model={selected} filesUrl={filesUrl} account={account} editorUrl={editorUrl} /> :
         <section className="status-panel"><p className="eyebrow">Model unavailable</p><h1>This model isn’t in the catalog.</h1>

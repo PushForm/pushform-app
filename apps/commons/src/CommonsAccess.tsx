@@ -117,7 +117,7 @@ export function CommonsDownloadButton({account,filesUrl,file}:{account?:CommonsA
   if(!account)return <span>Sign-in is unavailable in this build.</span>;
   return <div className="commons-download">
     <button onClick={()=>{rememberCommonsReturnRoute();rememberDownload(file.id);setRequest(value=>({count:value.count+1,assetId:file.id,route:window.location.hash}));}}>Download ZIP — {file.name}</button>
-    {active&&<><button onClick={()=>{clearDownload(file.id);setRequest(value=>({...value,count:0}));}}>Cancel download</button><CommonsAccessGate account={account}><DownloadTransfer key={`${file.id}:${request.count}`} account={account} filesUrl={filesUrl!} file={file}/></CommonsAccessGate></>}
+    {active&&<CommonsAccessGate account={account}><DownloadTransfer key={`${file.id}:${request.count}`} account={account} filesUrl={filesUrl!} file={file}/></CommonsAccessGate>}
   </div>;
 }
 function DownloadTransfer({account,filesUrl,file}:{account:CommonsAccessAccount;filesUrl:string;file:CommonsFile}):JSX.Element {
@@ -128,7 +128,7 @@ function DownloadTransfer({account,filesUrl,file}:{account:CommonsAccessAccount;
       const token=await account.session.getAccessToken();if(!token)throw new Error('Sign in again to download this model.');
       const blob=await downloadCommonsFile(filesUrl,token,file.id,controller.signal);
       if(!live||account.session.getSnapshot().user?.id!==owner)return;
-      const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=file.name+'.zip';link.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
+      const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=/\.zip$/i.test(file.name)?file.name:file.name+'.zip';link.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
       clearDownload(file.id);
       setResult({error:null,done:true});
     })().catch(error=>{if(live&&!controller.signal.aborted)setResult({error:error instanceof Error?error.message:'Could not download this model.',done:false});});

@@ -10,6 +10,14 @@ const file={id,name:'test.stl',format:'STL',sizeBytes:100,sha256:'a'.repeat(64)}
 const model=catalogModelSchema.parse(exampleModel({revision:'22222222-2222-4222-8222-222222222222',files:[file]}));
 afterEach(()=>{cleanup();vi.unstubAllGlobals();});
 describe('Commons previews',()=>{
+  it('previews the native model instead of an alphabetically earlier notice archive or FreeCAD source',async()=>{
+    const fetcher=vi.fn().mockImplementation(async()=>new Response(JSON.stringify({status:'ready',error:null}),{headers:{'Content-Type':'application/json'}}));
+    vi.stubGlobal('fetch',fetcher);
+    const files=['a-notices.zip','b-source.FCStd','c-model.step','d-model.pf'].map((name,index)=>({...file,name,id:`11111111-1111-4111-8111-11111111111${index}`}));
+    render(<CommonsThumbnail model={{...model,files}} filesUrl="http://localhost:8792"/>);
+    expect((await screen.findByRole('img')).getAttribute('src')).toBe(`http://localhost:8792/thumbnails/${files[3]!.id}`);
+    expect(fetcher).toHaveBeenCalledWith(`http://localhost:8792/preview-status/${files[3]!.id}`,expect.anything());
+  });
   it('prefers an uploaded image and falls back to geometry when images fail',async()=>{
     vi.stubGlobal('fetch',vi.fn().mockImplementation(async()=>new Response(JSON.stringify({status:'ready',error:null}),{headers:{'Content-Type':'application/json'}})));
     render(<CommonsThumbnail model={{...model,previewImage:{...file,name:'photo.png',format:'PNG'},imageUrl:'https://example.com/photo.jpg'}} filesUrl="http://localhost:8792"/>);

@@ -101,3 +101,5 @@ Commons converts every format it accepts as soon as the upload is checked: nativ
 A new publication may show **Rendering preview…** while its server job waits or runs. Commons updates the image when rendering finishes. Identical files reuse cached geometry and thumbnails. An uploaded PNG/JPEG still takes precedence as the listing image. If a render fails, the model page explains the failure and retains its original-file and license information. Try **Open in PushForm** or download the original where supported.
 
 FreeCAD previews use visible saved BREP shapes, without running document scripts or recomputing the model. Assembly links/group placements and files without stored shape geometry are not supported by this preview converter.
+
+When several files are available, downloads put the native PushForm model first, then STEP and common exchange formats, with FreeCAD sources last. The preview also prefers the native model over source and notice archives. Downloads include attribution in a ZIP package; an archive download keeps a single `.zip` filename suffix.

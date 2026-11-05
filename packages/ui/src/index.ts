@@ -56,3 +56,5 @@ export { prepareLayoutFonts } from './components/layoutFonts';
 export { prepareLayoutImages } from './components/layoutImage';
 export { layoutViewportPicture, layoutViewportWarnings, settleLayoutViewportRenders } from './components/layoutViewportRenders';
 export type { ExtensionRuntimeSources } from './extensions/browserExtensionPlatform';
+
+export { modelPicture, type ModelPictureOptions } from './modelPicture';

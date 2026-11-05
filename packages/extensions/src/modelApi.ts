@@ -1175,7 +1175,7 @@ export class ModelDocumentApi {
         const materialId = op.materialId === null ? null : idOf(op.materialId, 'material');
         if (materialId !== null && !host.doc.state.materials.has(materialId as never)) throw this.failure('invalid_reference', `There is no material ${materialId}.`);
         const refs = only(refsOf(op.refs), ['face', 'body', 'sketchFace', 'instance'], 'Only faces, solids, groups and placements can be painted');
-        return { count: exec<{ painted: number }>('paint.apply', { refs, materialId, side: op.side ?? 'front' }).painted };
+        return { count: exec<{ painted: number }>('paint.apply', { refs, materialId, side: op.side ?? 'front', recursive: op.recursive ?? false }).painted };
       }
       case 'add_scene': {
         if (op.name) this.uniqueSceneName(op.name, null);

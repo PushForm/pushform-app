@@ -145,6 +145,16 @@ export function PublicCollectionResults({ models, filesUrl, filters }: { models:
     {shown.length ? <ModelGrid>{shown.map(collection => <CollectionCard key={collection.id} collection={collection} models={models} filesUrl={filesUrl} />)}</ModelGrid> : <p>No public collections match those filters.</p>}
   </>;
 }
+export function ProfileCollections({ handle, models, filesUrl }: { handle: string; models: CatalogModel[]; filesUrl: string | undefined }) {
+  const { discovery, error, refresh, service } = useCollections();
+  if (!service) return null;
+  const collections = discovery?.collections.filter(collection => collection.visibility === 'public' && collection.curator?.handle === handle);
+  return <section className="profile-collections" aria-labelledby="profile-collections-title">
+    <h2 id="profile-collections-title">Public collections</h2>
+    {error ? <div role="alert"><p>{error}</p><button onClick={refresh}>Retry collections</button></div> : !collections ? <p role="status">Loading collections…</p> : collections.length ?
+      <ModelGrid>{collections.map(collection => <CollectionCard key={collection.id} collection={collection} models={models} filesUrl={filesUrl} />)}</ModelGrid> : <p>No public collections to show.</p>}
+  </section>;
+}
 function OwnedCollections({ models, filesUrl }: { models: CatalogModel[]; filesUrl: string | undefined }) {
   const { own, ownError, refresh } = useCollectionsAfterSetup();
   if (ownError) return <div role="alert"><p>{ownError}</p><button onClick={refresh}>Reload my collections</button></div>;

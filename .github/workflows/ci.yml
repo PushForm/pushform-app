@@ -4,50 +4,148 @@ on:
     branches: [staging]
   # main is dispatched by ci-schedule.yml in 15-minute batches; manual runs can bypass the wait.
   workflow_dispatch:
+    inputs:
+      full_validation:
+        description: Run all checks and deploy both sites regardless of changed paths
+        type: boolean
+        default: false
   pull_request:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
-  test:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      plan: ${{ steps.scope.outputs.plan }}
+      checks: ${{ steps.scope.outputs.checks }}
+      web: ${{ steps.scope.outputs.web }}
+      commons: ${{ steps.scope.outputs.commons }}
+      wasm: ${{ steps.scope.outputs.wasm }}
+    steps:
+      - uses: actions/checkout@v7
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v7
+        with: { node-version: 24 }
+      - uses: actions/github-script@v7
+        id: baseline
+        with:
+          result-encoding: string
+          script: |
+            if (context.payload.pull_request) return context.payload.pull_request.base.sha;
+            try {
+              const { data } = await github.rest.actions.listWorkflowRuns({ ...context.repo,
+                workflow_id: 'ci.yml', branch: context.ref.replace('refs/heads/', ''), status: 'success', per_page: 100 });
+              return data.workflow_runs.find(run => run.event !== 'pull_request' && run.id !== context.runId)?.head_sha ?? '';
+            } catch (error) { core.warning(`Full validation: ${error.message}`); return ''; }
+      - id: scope
+        run: node scripts/ci-plan.mjs plan
+        env:
+          CI_BASE: ${{ steps.baseline.outputs.result }}
+          CI_PULL_REQUEST: ${{ github.event_name == 'pull_request' }}
+          CI_FULL: ${{ inputs.full_validation == true }}
+
+  step-reader:
+    needs: plan
+    if: needs.plan.outputs.wasm == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
-        with: { node-version: 24, cache: pnpm }
-      - run: pnpm install --frozen-lockfile
-      # The STEP reader is Rust compiled to WebAssembly; the desktop build needs the same toolchain.
-      - uses: dtolnay/rust-toolchain@stable
-        with: { targets: 'wasm32-wasip1, wasm32-wasip1-threads' }
-      - uses: Swatinem/rust-cache@v2
-        with: { workspaces: crates/step-reader }
-      - run: pnpm build:step-reader
-      # The deploy job bundles the same modules rather than building them again.
+        with: { node-version: 24 }
+      - uses: ./.github/actions/step-reader
       - uses: actions/upload-artifact@v7
         with:
           name: step-reader-wasm
           path: packages/io/wasm/*.wasm
           if-no-files-found: error
           retention-days: 1
-      - run: pnpm typecheck
-      - run: pnpm lint
-      - run: pnpm test
-      - run: pnpm commons:build
+  typecheck:
+    needs: plan
+    if: needs.plan.outputs.checks == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: node scripts/ci-plan.mjs typecheck
+        env: { CI_PLAN: '${{ needs.plan.outputs.plan }}' }
+
+  lint:
+    needs: plan
+    if: needs.plan.outputs.checks == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: node scripts/ci-plan.mjs lint
+        env: { CI_PLAN: '${{ needs.plan.outputs.plan }}' }
+
+  policy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
       - run: pnpm license-check
-      # The build writes the third-party notices, listing the Rust crates with cargo-about; in CI it fails without it.
+      - run: pnpm spdx-check
+
+  unit:
+    needs: [plan, step-reader]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.checks == 'true' && (needs.step-reader.result == 'success' || needs.step-reader.result == 'skipped') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - uses: actions/download-artifact@v8
+        if: needs.plan.outputs.wasm == 'true'
+        with: { name: step-reader-wasm, path: packages/io/wasm }
+      - run: node scripts/ci-plan.mjs test
+        env: { CI_PLAN: '${{ needs.plan.outputs.plan }}' }
+
+  build-web:
+    needs: [plan, step-reader]
+    if: ${{ !cancelled() && needs.plan.outputs.web == 'true' && needs.step-reader.result == 'success' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with: { fetch-depth: 0 }
+      - uses: ./.github/actions/setup
+      - uses: actions/download-artifact@v8
+        with: { name: step-reader-wasm, path: packages/io/wasm }
+      - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@v2
         with: { tool: cargo-about }
-      # Vite's chunk rendering and hidden source maps exceed Node's ~2 GiB runner default.
       - run: pnpm build
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
+  build-commons:
+    needs: plan
+    if: needs.plan.outputs.commons == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: pnpm commons:build
+
+  # Keep one required status while independent checks run concurrently.
+  test:
+    needs: [plan, step-reader, typecheck, lint, policy, unit, build-web, build-commons]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - env: { RESULTS: '${{ toJSON(needs) }}' }
+        run: |
+          node -e 'const jobs = JSON.parse(process.env.RESULTS); if (Object.values(jobs).some(j => !["success", "skipped"].includes(j.result))) process.exit(1)'
+
   deploy-commons:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-    needs: test
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.plan.outputs.commons == 'true'
+    needs: [test, plan]
     runs-on: ubuntu-24.04
     environment: Production
     concurrency: { group: deploy-commons-production, cancel-in-progress: false }
@@ -87,8 +185,8 @@ jobs:
   # Deploy checked main batches and staging pushes to Cloudflare Pages. Needs the environment
   # secrets CLOUDFLARE_API_TOKEN (Workers & Pages: Edit) and CLOUDFLARE_ACCOUNT_ID.
   deploy:
-    if: (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/staging')
-    needs: test
+    if: needs.plan.outputs.web == 'true' && ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/staging'))
+    needs: [test, plan]
     runs-on: ubuntu-24.04
     environment:
       name: ${{ github.ref_name == 'staging' && 'Staging' || 'Production' }}

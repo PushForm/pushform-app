@@ -195,3 +195,19 @@ it('retains the original creator when publishing attributed editor content inste
   const submission = f.rpc.mock.calls.find(([name]) => name === 'commons_submit_model')![1].p_metadata as { credits: { text: string }[] };
   expect(submission.credits.some(credit => credit.text === 'Original model by Example Maker.')).toBe(false);
 });
+
+it('explains invalid handles inline without saving and clears errors when corrected', async () => {
+  const f = setup({ activeProfile: false });
+  render(<UploadDialog account={f.account} filesUrl="https://files.example.com" modelId={null} onClose={vi.fn()} onPublished={vi.fn()}/>);
+  const handle = await screen.findByLabelText('Public handle');
+  fireEvent.change(handle, { target: { value: '@maker' } });
+  fireEvent.change(screen.getByLabelText('Display name'), { target: { value: 'Maker' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('leave out the @');
+  expect(handle.getAttribute('aria-invalid')).toBe('true');
+  expect(f.account.profiles.save).not.toHaveBeenCalled();
+  fireEvent.change(handle, { target: { value: 'new-maker' } });
+  expect(screen.queryByRole('alert')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+  expect(await screen.findByText('Drag a model file here')).toBeTruthy();
+});

@@ -3139,6 +3139,20 @@ h4.pf-xui-text { font-size: 12px; }
 .profile-step { display: grid; gap: 16px; max-width: 460px; }
 .profile-step label { display: grid; gap: 6px; font-weight: 600; font-size: 14px; }
 .profile-step input { border: 1px solid #b8c1b5; border-radius: 6px; padding: 10px 12px; font: inherit; font-weight: 400; }
+
+.upload-dialog-profile { width: min(560px, 100%); }
+.dialog-head h2 { margin: 0; }
+.snapshot-note { margin: 0 0 22px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.profile-step { max-width: none; gap: 8px; font-size: 14px; line-height: 1.5; }
+.profile-step > p:first-child { margin: 0 0 12px; color: var(--muted); }
+.profile-step label { margin-top: 8px; }
+.profile-step input { width: 100%; min-width: 0; }
+.profile-step .profile-hint { margin: 0; color: var(--muted); font-size: 12px; }
+.profile-step .profile-error { margin: 4px 0; color: #b43c32; font-size: 13px; }
+.profile-step input[aria-invalid='true'] { border-color: #b43c32; }
+.profile-step button { justify-self: end; margin-top: 16px; min-width: 112px; }
+.profile-step input:focus-visible, .upload-dialog button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 @media (max-width: 720px) {
   .upload-details { grid-template-columns: 1fr; }
   .dialog-backdrop { padding: 0; }
@@ -3151,7 +3165,7 @@ h4.pf-xui-text { font-size: 12px; }
 }
 
 .pf-publishing-host .dialog-backdrop { z-index: 1100; }
-.pf-publishing-host .upload-dialog { color: var(--pf-text); background: var(--pf-surface); }
+.pf-publishing-host .upload-dialog { font: 13px/1.5 var(--pf-font); color: var(--pf-text); background: var(--pf-surface); }
 .pf-publishing-host input, .pf-publishing-host textarea, .pf-publishing-host select { background: var(--pf-surface); color: var(--pf-text); }
 
 .pf-save-version { width: min(620px, calc(100vw - 32px)); font: 13px/1.45 var(--pf-font); color: var(--pf-text); background: var(--pf-surface); }
@@ -3176,3 +3190,7 @@ h4.pf-xui-text { font-size: 12px; }
 
 .pf-save-version, .pf-save-version *, .pf-commons-browser, .pf-commons-browser *, .pf-publishing-host, .pf-publishing-host * { box-sizing: border-box; }
 .pf-save-version h2 { overflow-wrap: anywhere; }
+
+.pf-publishing-host .upload-dialog button:not(.dialog-close) { border: 1px solid var(--pf-accent); border-radius: 6px; padding: 9px 16px; font: inherit; font-weight: 600; color: #fff; background: var(--pf-accent); cursor: pointer; }
+.pf-publishing-host .upload-dialog button.secondary { border-color: var(--pf-border); color: var(--pf-text); background: var(--pf-surface); }
+.pf-publishing-host .upload-dialog button:disabled { opacity: .5; cursor: default; }

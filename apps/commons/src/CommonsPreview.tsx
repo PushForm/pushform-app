@@ -3,8 +3,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { commonsFileUrl, type CatalogModel } from '@pushform/cloud';
 import { DEFAULT_PREVIEW_VIEW, isPreviewModelFile, parsePreviewMesh, rasterPreview, type PreviewMesh, type PreviewView } from '@pushform/cloud/preview';
+import { sortedModelFiles } from './modelFiles';
 
-const geometryFile = (model: CatalogModel) => model.files.find(file => isPreviewModelFile(file.name));
+const geometryFile = (model: CatalogModel) => {
+  const files = sortedModelFiles(model.files).filter(file => isPreviewModelFile(file.name));
+  return files.find(file => !/\.zip$/i.test(file.name)) ?? files[0];
+};
 export function CommonsThumbnail({ model, filesUrl }: { model: CatalogModel; filesUrl: string | undefined }) {
   const generated = geometryFile(model);
   const target = useRef<HTMLElement|null>(null);

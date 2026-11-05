@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import { sortedModelFiles } from './modelFiles';
 import { commonsFileUrl, CommonsUnavailableError, type CommonsProfile, type CommonsCollections } from '@pushform/cloud';
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { CommonsProfileEditor, CommonsProfilePageView, CreatorCredit, ProfileLink, type ProfileLookup } from './CommonsProfile';
@@ -55,7 +56,7 @@ function ModelDetail({ model, filesUrl, account, editorUrl }: { model: CatalogMo
         <div className="collection-actions"><ModelCollectionAction model={model} /><FeatureAction key={model.id} type="model" targetId={model.id} eligible={model.files.length > 0} /></div>
         {model.files.length > 0 && <section className="downloads" aria-label="Model files"><h2>Model files</h2>
           <p>Each ZIP download includes the original file, licenses and creator credits.</p>
-          <ul>{model.files.map((file) => <li key={file.id}><span>{file.name} · {(file.sizeBytes / 1024).toFixed(1)} KiB</span>
+          <ul>{sortedModelFiles(model.files).map((file) => <li key={file.id}><span>{file.name} · {(file.sizeBytes / 1024).toFixed(1)} KiB</span>
             {commonsFileUrl(filesUrl, 'downloads', file.id) ? <CommonsDownloadButton account={account??undefined} filesUrl={filesUrl} file={file}/> : <span>Downloads are unavailable in this build.</span>}
           </li>)}</ul>
         </section>}

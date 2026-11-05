@@ -41,6 +41,14 @@ it('never exposes an anonymous file link and downloads using the current session
   expect(screen.queryByRole('link')).toBeNull();fireEvent.click(screen.getByRole('button',{name:'Download ZIP — part.step'}));
   await waitFor(()=>expect(create).toHaveBeenCalledOnce());expect(new Headers(fetcher.mock.calls[0]![1]!.headers).get('Authorization')).toBe('Bearer test-session');
 });
+it('does not append a second ZIP suffix to archive downloads',async()=>{
+  const auth=account(row);vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response('ZIP',{headers:{'Content-Type':'application/zip'}}));
+  Object.defineProperty(URL,'createObjectURL',{value:vi.fn(()=> 'blob:archive'),configurable:true});Object.defineProperty(URL,'revokeObjectURL',{value:vi.fn(),configurable:true});
+  let filename='';vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(function(this:HTMLAnchorElement){filename=this.download;});
+  render(<CommonsDownloadButton account={auth} filesUrl="https://files.example" file={{id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',name:'source-notices.zip',format:'ZIP',sizeBytes:3,sha256:'a'.repeat(64)}}/>);
+  fireEvent.click(screen.getByRole('button',{name:'Download ZIP — source-notices.zip'}));
+  await waitFor(()=>expect(filename).toBe('source-notices.zip'));
+});
 it('preserves only safe local routes through the email callback',()=>{
   window.history.replaceState(null,'','/#models/example-part');rememberCommonsReturnRoute();window.history.replaceState(null,'','/');restoreCommonsReturnRoute();expect(window.location.hash).toBe('#models/example-part');
   sessionStorage.setItem('pushform:commons:return','https://untrusted.example/');window.history.replaceState(null,'','/');restoreCommonsReturnRoute();expect(window.location.hash).toBe('');

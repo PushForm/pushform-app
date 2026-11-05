@@ -4,6 +4,11 @@ on:
     branches: [staging]
   # main is dispatched by ci-schedule.yml in 15-minute batches; manual runs can bypass the wait.
   workflow_dispatch:
+    inputs:
+      full_validation:
+        description: Run all checks and deploy both sites regardless of changed paths
+        type: boolean
+        default: false
   pull_request:
 
 concurrency:
@@ -44,6 +49,7 @@ jobs:
         env:
           CI_BASE: ${{ steps.baseline.outputs.result }}
           CI_PULL_REQUEST: ${{ github.event_name == 'pull_request' }}
+          CI_FULL: ${{ inputs.full_validation == true }}
 
   step-reader:
     needs: plan

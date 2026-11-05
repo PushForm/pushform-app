@@ -45,7 +45,7 @@ export function planChanges(files, projects) {
   }
   const paths = [...selected].sort();
   return { full, paths, typecheck: projects.filter(p => selected.has(p.path) && p.typecheck).map(p => p.path).sort(),
-    tests: full ? ['.'] : paths, lint: full ? ['.'] : paths,
+    tests: full ? ['.'] : paths.length ? [...paths, 'scripts'] : [], lint: full ? ['.'] : paths,
     web: selected.has('apps/web'), commons: selected.has('apps/commons'),
     wasm: full || selected.has('packages/io') || selected.has('apps/web') };
 }
@@ -68,7 +68,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   else {
     let files = null;
     const base = process.env.CI_BASE;
-    if (/^[a-f0-9]{40}$/.test(base ?? '')) {
+    if (process.env.CI_FULL !== 'true' && /^[a-f0-9]{40}$/.test(base ?? '')) {
       try {
         const from = process.env.CI_PULL_REQUEST === 'true'
           ? execFileSync('git', ['merge-base', base, 'HEAD'], { encoding: 'utf8' }).trim() : base;

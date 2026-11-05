@@ -26,7 +26,7 @@ it('starts sharing unchecked, saves private change notes, and only hands the exa
   fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Reinforced legs' } });
   fireEvent.click(screen.getByRole('checkbox'));
   fireEvent.click(screen.getByRole('button', { name: 'Save & continue to publishing' }));
-  await waitFor(() => expect(f.onShare).toHaveBeenCalledWith(f.snapshot));
+  await waitFor(() => expect(f.onShare).toHaveBeenCalledWith(expect.objectContaining({ ...f.snapshot, view: expect.objectContaining({ camera: expect.objectContaining({ eye: expect.any(Array), up: expect.any(Array) }) }) })));
   expect(f.saveNow).toHaveBeenCalledWith(session.active, 'Reinforced legs');
   expect(f.files.openRevision).toHaveBeenCalledWith('revision');
 });

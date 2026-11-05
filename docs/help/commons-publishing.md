@@ -23,3 +23,9 @@ Use **Your models** to reopen a draft, create a correction or withdraw your publ
 After saving a private draft, use **Preview image** to attach one PNG or JPEG. The image must be no larger than 8 MiB, 8,192 pixels on either side, or 20 megapixels. Remove the current image before replacing it. Include the image’s required licenses and creator credits in the model details. An image alone cannot be published as a model.
 
 Commons generates its own thumbnail from supported geometry when no image is supplied, using the same front-right-top isometric orientation as the editor. An uploaded image becomes the listing image; the interactive geometry preview remains available. The image stays private until you publish and becomes unavailable when the model is withdrawn.
+
+## Preview from the editor
+
+When sharing from PushForm, frame your model before saving and continuing to publication. The preview uses Bright studio lighting with your current zoom, framing, roll, orientation and projection. It renders the exact saved revision without changing your working view or the model's saved lighting. The preview uploads with the private draft and becomes its listing image; you can replace it with a cover photo.
+
+A file uploaded directly to Commons receives a Bright studio preview from a fitted front-right-top Iso view. Both paths preserve supported materials and embedded textures. Commons does not offer a lighting selector.

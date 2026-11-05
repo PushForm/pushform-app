@@ -148,7 +148,7 @@ function CommonsApp({ loadCatalog, filesUrl, account=null, publishPage, editorUr
         <FeaturedSection models={models} filesUrl={filesUrl}/>
         <section id="browse" aria-labelledby="browse-title" className="browse">
           <div className="section-heading"><div><p className="eyebrow">Find your starting point</p><h2 id="browse-title">{onCollections?'Browse collections':'Browse models'}</h2></div>
-            {account ? <a className="secondary-button" href="#collections/new">New collection</a> : state.kind === 'ready' && <span className="catalog-count">{models.length} {models.length === 1 ? 'model' : 'models'}</span>}</div>
+            {!account && state.kind === 'ready' && <span className="catalog-count">{models.length} {models.length === 1 ? 'model' : 'models'}</span>}</div>
           <div className="catalog-tabs" role="tablist" aria-label="Browse Commons" onKeyDown={event=>{
             const keys=['ArrowLeft','ArrowRight','Home','End'];if(!keys.includes(event.key))return;event.preventDefault();
             const next=event.key==='Home'?false:event.key==='End'?true:!onCollections;

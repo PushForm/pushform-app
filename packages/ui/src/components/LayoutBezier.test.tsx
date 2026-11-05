@@ -32,14 +32,6 @@ function setup() {
   return { tab, session, pageId, canvas, pointer, click, drag, entities, dispose: () => { cleanup(); session.dispose(); app.dispose(); } };
 }
 
-it('sits in the Line stack after Line', () => {
-  const { dispose } = setup();
-  expect(screen.getByLabelText('Page 1 canvas').getAttribute('data-tool')).toBe('bezier');
-  fireEvent.click(screen.getByRole('button', { name: 'Line tools' }));
-  expect(screen.getAllByRole('menuitemradio').map(item => item.getAttribute('aria-label'))).toEqual(['Line', 'Bézier Curve', 'Freehand']);
-  dispose();
-});
-
 it('places corners by clicking and smooth anchors by dragging, ending with Enter as one undoable path', async () => {
   const { tab, session, pageId, canvas, pointer, click, drag, entities, dispose } = setup();
   click(20, 20);

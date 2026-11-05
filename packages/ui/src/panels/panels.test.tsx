@@ -2,7 +2,6 @@
 // Copyright 2026 PushForm contributors
 import { afterEach, describe, expect, it } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { edgeCommands, lastOpCommands, viewCommands } from '@pushform/commands';
 import { InlineBackend, KernelClient } from '@pushform/kernel';
 import type { JSX } from 'react';
 import { AppContext } from '../AppContext';
@@ -25,8 +24,6 @@ afterEach(() => {
 
 function boot(): AppInstance {
   const a = createApp({ demo: false, expose: false, kernel: new KernelClient(new InlineBackend()) });
-  // the bootstrap integrator registers these; tests add them when missing
-  for (const list of [viewCommands, lastOpCommands, edgeCommands]) for (const c of list) if (!a.commands.has(c.id)) a.commands.register(c);
   app = a;
   return a;
 }

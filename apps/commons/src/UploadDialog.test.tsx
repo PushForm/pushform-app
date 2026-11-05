@@ -4,7 +4,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { CommonsRenderEvent, CommonsUpload, CommonsUploadProgress } from '@pushform/cloud';
 import { UploadDialog, fileStatus } from './UploadDialog';
-import { PublishPage, publishRoute } from './PublishPage';
+import { publishRoute } from './PublishPage';
+import { OwnModelsProvider, OwnModelGrid, OwnedDraftDetail, useOwnModels } from './OwnModels';
 import { detailsFromMetadata, detailsProblem, metadataFor, titleFromFileName } from './modelDetails';
 import type { CommonsAccount } from './account';
 
@@ -56,7 +57,7 @@ beforeEach(() => {
   Object.defineProperty(URL, 'revokeObjectURL', { value: vi.fn(), configurable: true });
   cloud.thumbnail.mockResolvedValue({ kind: 'image', blob: new Blob(['<svg/>'], { type: 'image/svg+xml' }) });
 });
-afterEach(() => { cleanup(); vi.clearAllMocks(); window.location.hash = ''; });
+afterEach(() => { cleanup(); vi.clearAllMocks(); window.history.replaceState(null, '', '/'); });
 
 it('starts a private draft from a dropped file, shows upload and conversion progress, and publishes once confirmed', async () => {
   const f = setup();
@@ -133,20 +134,25 @@ it('edits a published model without a new revision until something changes, then
   expect(cloud.upload).not.toHaveBeenCalled();
 });
 
-it('lists drafts and published models as cards and deletes a draft after confirming', async () => {
+it('opens a saved draft from the profile and deletes it from its detail page after confirming', async () => {
   const draft = { id: revisionId, model_id: 'model-draft', number: 1, status: 'pending', asset_version: 1, rights_basis: 'x'.repeat(30), creator_profile_id: profileId, self_service: true, details_version: 1, submitted_at: '2026-11-03T00:00:00Z',
     metadata: metadataFor({ title: 'Planter box', description: '', category: 'Outdoor and garden', license: 'CC BY 4.0', terms: '' }, 'Example Maker', ['box.stl']) };
   const f = setup({ models: [{ id: 'model-draft', latest_submission: revisionId, published_revision: null }], revisions: [draft], assets: [asset({ filename: 'box.stl', format: 'stl' })] });
   cloud.thumbnail.mockResolvedValue({ kind: 'status', status: 'rendering', error: null });
-  render(<PublishPage account={f.account} filesUrl="https://files.example.com" route={{ kind: 'list' }} catalogReady={false}/>);
+  function DraftPage() {
+    const model = useOwnModels().models?.[0];
+    return model ? <OwnedDraftDetail model={model} filesUrl="https://files.example.com"/> : null;
+  }
+  const view = render(<OwnModelsProvider account={f.account}><OwnModelGrid filesUrl="https://files.example.com"/></OwnModelsProvider>);
   expect(await screen.findByRole('heading', { name: 'Planter box' })).toBeTruthy();
   expect(screen.getByText('Draft')).toBeTruthy();
-  expect(await screen.findByText('Converting preview')).toBeTruthy();
-  expect(screen.queryByRole('link', { name: 'View' })).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Delete draft' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+  expect(screen.getByRole('link', { name: 'Planter box' }).getAttribute('href')).toBe('#models/model-draft');
+  expect(screen.queryByRole('button', { name: 'Delete model' })).toBeNull();
+  view.rerender(<OwnModelsProvider account={f.account}><DraftPage/></OwnModelsProvider>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Delete model' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Delete this model' }));
   await waitFor(() => expect(cloud.deleteDraft).toHaveBeenCalledWith('https://files.example.com', 'token', 'model-draft', revisionId, expect.anything()));
-  expect(await screen.findByText('Draft deleted.')).toBeTruthy();
+  await waitFor(() => expect(window.location.pathname).toBe('/u/example-maker'));
 });
 
 it('maps routes, file states and details the way the dialog shows them', () => {
@@ -154,6 +160,7 @@ it('maps routes, file states and details the way the dialog shows them', () => {
   expect(publishRoute('#publish')).toEqual({ kind: 'upload' });
   expect(publishRoute('#edit/model-abc')).toEqual({ kind: 'edit', model: 'model-abc' });
   expect(publishRoute('#models/model-abc')).toBeNull();
+  expect(publishRoute('#my-models')).toBeNull();
   const file = { name: 'a.stl', size: 10, asset: null, upload: null, error: null, render: { state: 'idle' as const }, image: null };
   expect(fileStatus({ ...file, upload: { stage: 'verifying', loaded: 10, total: 10 } }).label).toBe('Checking file');
   expect(fileStatus({ ...file, asset: asset(), render: { state: 'waiting' } }).label).toBe('Waiting for converter');

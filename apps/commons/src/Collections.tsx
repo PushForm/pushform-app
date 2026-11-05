@@ -7,6 +7,7 @@ import { CommonsAccessGate } from './CommonsAccess';
 import { CommonsThumbnail } from './CommonsPreview';
 import { ModelCard, ModelGrid, ProfileLink } from './ModelCard';
 import { filterModels, type CatalogFilters, type CatalogModel } from './catalog';
+import { navigateCommons, profilePath } from './route';
 
 const noSubscribe = () => () => {};
 const message = (error: unknown) => error instanceof Error ? error.message : 'This request failed. Try again.';
@@ -145,15 +146,26 @@ export function PublicCollectionResults({ models, filesUrl, filters }: { models:
     {shown.length ? <ModelGrid>{shown.map(collection => <CollectionCard key={collection.id} collection={collection} models={models} filesUrl={filesUrl} />)}</ModelGrid> : <p>No public collections match those filters.</p>}
   </>;
 }
-export function ProfileCollections({ handle, models, filesUrl }: { handle: string; models: CatalogModel[]; filesUrl: string | undefined }) {
-  const { discovery, error, refresh, service } = useCollections();
+export function ProfileCollections({ handle, owner = false, profileId, models, filesUrl }: { handle: string; owner?: boolean; profileId?: string; models: CatalogModel[]; filesUrl: string | undefined }) {
+  const { discovery, error, refresh, service, userId } = useCollections();
   if (!service) return null;
+  const isOwner = owner && userId !== null && userId === profileId;
   const collections = discovery?.collections.filter(collection => collection.visibility === 'public' && collection.curator?.handle === handle);
   return <section className="profile-collections" aria-labelledby="profile-collections-title">
-    <h2 id="profile-collections-title">Public collections</h2>
-    {error ? <div role="alert"><p>{error}</p><button onClick={refresh}>Retry collections</button></div> : !collections ? <p role="status">Loading collections…</p> : collections.length ?
+    <div className="section-heading"><h2 id="profile-collections-title">{isOwner ? 'My Collections' : 'Public collections'}</h2>
+      {isOwner && <a className="primary-button" href="#collections/new">New Collection</a>}
+    </div>
+    {isOwner ? <OwnedCollections models={models} filesUrl={filesUrl} /> : error ? <div role="alert"><p>{error}</p><button onClick={refresh}>Retry collections</button></div> : !collections ? <p role="status">Loading collections…</p> : collections.length ?
       <ModelGrid>{collections.map(collection => <CollectionCard key={collection.id} collection={collection} models={models} filesUrl={filesUrl} />)}</ModelGrid> : <p>No public collections to show.</p>}
   </section>;
+}
+async function returnToOwnerProfile(account: CommonsAccount | null): Promise<void> {
+  try {
+    const profile = await account?.profiles.mine();
+    navigateCommons(profile?.active ? profilePath(profile.handle) : '/#account');
+  } catch {
+    navigateCommons('/#account');
+  }
 }
 function OwnedCollections({ models, filesUrl }: { models: CatalogModel[]; filesUrl: string | undefined }) {
   const { own, ownError, refresh } = useCollectionsAfterSetup();
@@ -163,16 +175,12 @@ function OwnedCollections({ models, filesUrl }: { models: CatalogModel[]; filesU
 }
 export function CollectionsRoute({ route, models, filesUrl }: { route: string; models: CatalogModel[]; filesUrl: string | undefined }) {
   const { service, account, userId } = useCollections();
-  useEffect(() => { if (route === '#my-collections' || route === '#collections/new') document.title = `${route === '#my-collections' ? 'My collections' : 'New collection'} — PushForm Commons`; }, [route]);
+  useEffect(() => { if (route === '#collections/new') document.title = 'New collection — PushForm Commons'; }, [route]);
   if (!service) return <section className="status-panel"><h1>Collections are unavailable in this build.</h1></section>;
-  if (route === '#my-collections' || route === '#collections/new') {
+  if (route === '#collections/new') {
     if (!account) return <p>Sign-in is unavailable in this build.</p>;
     return <CommonsAccessGate account={account}><section className="collection-page" key={userId}>
-      <a className="back-link" href="#collections">← All collections</a>
-      {route === '#collections/new' ? <><h1>New collection</h1><CollectionEditor models={models} filesUrl={filesUrl} collection={null} onCancel={() => { window.location.hash = '#my-collections'; }} /></> : <>
-        <div className="section-heading"><h1>My collections</h1><a className="primary-button" href="#collections/new">New collection</a></div>
-        <OwnedCollections models={models} filesUrl={filesUrl} />
-      </>}
+      <h1>New collection</h1><CollectionEditor models={models} filesUrl={filesUrl} collection={null} onCancel={() => { void returnToOwnerProfile(account); }} />
     </section></CommonsAccessGate>;
   }
   const id = /^#collections\/([a-f0-9-]{36})$/.exec(route)?.[1];
@@ -209,8 +217,8 @@ function CollectionDetail({ id, models, filesUrl }: { id: string; models: Catalo
   </section>;
 }
 function CollectionEditor({ collection, models, filesUrl, onCancel, onSaved }: { collection: CommonsCollection | null; models: CatalogModel[]; filesUrl: string | undefined; onCancel: () => void; onSaved?: (value: CommonsCollection) => void }) {
-  const { service, refresh } = useCollections();
-  const [fields, setFields] = useState<CollectionFields>(() => collection ? { title: collection.title, description: collection.description, visibility: collection.visibility, modelIds: [...collection.modelIds] } : { title: '', description: '', visibility: 'private', modelIds: [] });
+  const { service, refresh, account } = useCollections();
+  const [fields, setFields] = useState<CollectionFields>(() => collection ? { title: collection.title, description: collection.description, visibility: collection.visibility, modelIds: [...collection.modelIds] } : { title: '', description: '', visibility: 'public', modelIds: [] });
   // Keep the version the editor opened with. A refresh must never silently rebase a stale draft.
   const [expectedVersion] = useState(collection?.version ?? null);
   const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null); const [confirmDelete, setConfirmDelete] = useState(false);
@@ -240,7 +248,7 @@ function CollectionEditor({ collection, models, filesUrl, onCancel, onSaved }: {
     <div className="collection-actions"><button type="submit" disabled={busy || !fields.title.trim()}>{busy ? 'Saving…' : 'Save collection'}</button><button type="button" className="secondary-button" disabled={busy} onClick={onCancel}>Cancel</button>
       {collection && <button type="button" className="text-button" disabled={busy} onClick={() => setConfirmDelete(true)}>Delete collection</button>}</div>
     {confirmDelete && collection && <div className="collection-delete" role="group" aria-label="Delete collection confirmation"><p>Delete “{collection.title}”? Its models stay in Commons.</p><button type="button" disabled={busy} onClick={() => {
-      setBusy(true); setError(null); void service!.delete(collection.id, expectedVersion!).then(() => { refresh(); window.location.hash = '#my-collections'; }, error => setError(message(error))).finally(() => setBusy(false));
+      setBusy(true); setError(null); void service!.delete(collection.id, expectedVersion!).then(async () => { refresh(); await returnToOwnerProfile(account); }, error => setError(message(error))).finally(() => setBusy(false));
     }}>Delete this collection</button> <button type="button" className="secondary-button" disabled={busy} onClick={() => setConfirmDelete(false)}>Keep collection</button></div>}
   </form>;
 }

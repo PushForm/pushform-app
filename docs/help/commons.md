@@ -2,7 +2,7 @@
 
 PushForm Commons is a community model catalog with its own website. Browse models, search by name or description, and filter by category or license. The commercial-use filter includes models only when every listed license explicitly permits commercial use; read all listed conditions before reuse.
 
-Open a model to see its original creator, source, licenses and attribution notices. When files are available, choose **Download ZIP** next to a filename. The package contains the unchanged original in `files/`, an `ATTRIBUTION.json` record and a README. Keep required credits and license notices with reused files. A free download does not remove license conditions.
+Open a model to see its original creator next to the title. Source information, licenses and required credits are grouped under **Licenses & attribution**. When files are available, choose **Download ZIP** next to a filename. The package contains the unchanged original in `files/`, an `ATTRIBUTION.json` record and a README. Keep required credits and license notices with reused files. A free download does not remove license conditions.
 
 ## Browse featured projects and collections
 
@@ -12,7 +12,7 @@ Use the **Models** and **Collections** tabs below Featured to search the library
 
 ## Create and manage collections
 
-Any signed-in PushForm user can create collections. Choose **New collection** or **My collections**, complete account setup if needed, then enter a title and optional description. Collections start **Private — only you**. Choose **Public — visible in Commons** when you want to share one. A public creator profile is optional; if you have an active public profile it appears as the collection's curator.
+Any signed-in PushForm user can create collections. Choose **New Collection** beside **My Collections** on your profile, or **New collection** in the library. Complete account setup if needed, then enter a title and optional description. Collections start **Public — visible in Commons**; choose **Private — only you** to keep one private. A public creator profile is optional; if you have an active public profile it appears as the collection's curator.
 
 On a model page, **Save to collection** adds or removes that model using your collection checkboxes. **New private collection** creates a collection and saves the model into it in one action.
 
@@ -20,7 +20,7 @@ On your collection's page, choose **Edit collection** to change its details or v
 
 Collections follow each model's current published version. Withdrawn models disappear from public collection views, and making a collection private removes it from public browsing and Featured. A collection does not transfer ownership or replace its models' licenses and credits. **Delete collection** removes only the collection; its models stay in Commons.
 
-Public profiles show the creator's **Public collections** below their published models. Collections appear once they contain a model available in Commons. Open a collection card to browse its models. Private collections appear only in **My collections**, including when you view your own public profile.
+Your own profile shows **My Collections** above **My Models**, including your private and empty collections, saved drafts and published models. Other visitors see only **Public collections** and published models; public collections appear once they contain an available model. Open a collection card to browse its models.
 
 ## Feature a model or collection
 
@@ -76,7 +76,7 @@ Choose **Upload model** in the Commons header. If you don't have a public profil
 4. Tick the box confirming that you created the model, or have the right to share it and everything it includes under the license you chose. The Terms of Use require this.
 5. Choose **Publish model**. You don't have to wait for the preview to finish.
 
-Your changes save automatically as you type. **Save draft** or **Close** keeps the draft, file and preview under **My models**. If the upload fails, choose **Try again**. If a preview fails because of a converter problem, **Try again** starts a fresh conversion; a model that is too large or complex to preview can still be published.
+Your changes save automatically as you type. **Save draft** or **Close** keeps the draft, file and preview under **My Models** on your profile. If the upload fails, choose **Try again**. If a preview fails because of a converter problem, **Try again** starts a fresh conversion; a model that is too large or complex to preview can still be published.
 
 ### Licenses
 
@@ -86,11 +86,10 @@ Your changes save automatically as you type. **Save draft** or **Close** keeps t
 
 ## Manage your models
 
-**My models** shows each of your models as a card with its preview, status and last change.
+Choose **My profile**, then open a card under **My Models**. Your model's detail page offers **Edit model** and **Delete model**. These controls appear only for the signed-in owner.
 
-- **Edit** reopens the dialog. Changes to a draft save into that draft. Changes to a published model become a new draft that keeps its files, so nothing has to be uploaded again; the published version stays as it is until you choose **Publish changes**. **Replace file** uploads a new model file and converts it.
-- **Delete draft** removes a model you never published. On a published model, **Discard changes** throws away its unpublished draft and keeps the published version.
-- **View** opens a published model's page, and **Withdraw** takes it out of the library. Copies people already downloaded keep their licenses.
+- **Edit model** reopens the dialog. Changes to a draft save into that draft. Changes to a published model become a new draft that keeps its files, so nothing has to be uploaded again; the published version stays as it is until you choose **Publish changes**. **Replace file** uploads a new model file and converts it.
+- **Delete model** asks you to confirm. It removes a private draft or takes a published model and its unpublished changes out of the library. Copies people already downloaded keep their licenses. After deletion, you return to your profile.
 
 ## Preview a model
 

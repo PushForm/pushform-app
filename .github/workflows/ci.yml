@@ -186,10 +186,15 @@ jobs:
       - name: Verify Commons serves search tags, a sitemap and robots.txt
         shell: bash
         run: |
+          # Download to files first: grep -q exits at the first match and would make curl fail on the large sitemap.
           check() {
-            curl -fsS https://commons.pushform.io/robots.txt | grep -q "^Sitemap: https://commons.pushform.io/sitemap.xml" &&
-            curl -fsS https://commons.pushform.io/sitemap.xml | grep -q "<urlset" &&
-            curl -fsS https://commons.pushform.io/ | grep -q "rel=\"canonical\""
+            local dir; dir="$(mktemp -d)"
+            curl -fsS -o "$dir/robots" https://commons.pushform.io/robots.txt &&
+            curl -fsS -o "$dir/sitemap" https://commons.pushform.io/sitemap.xml &&
+            curl -fsS -o "$dir/home" https://commons.pushform.io/ &&
+            grep -q "^Sitemap: https://commons.pushform.io/sitemap.xml" "$dir/robots" &&
+            grep -q "<urlset" "$dir/sitemap" &&
+            grep -q "rel=\"canonical\"" "$dir/home"
           }
           for attempt in 1 2 3 4 5 6; do
             if check; then exit 0; fi

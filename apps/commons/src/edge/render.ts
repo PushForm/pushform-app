@@ -50,7 +50,7 @@ async function cached<T>(key: string, deps: EdgeDeps, produce: () => Promise<Loa
 
 async function rpc(config: SeoConfig, name: string, args: object, deps: EdgeDeps): Promise<{ status: number; body: unknown }> {
   const response = await (deps.fetcher ?? fetch)(`${config.supabaseUrl.replace(/\/$/, '')}/rest/v1/rpc/${name}`, {
-    method: 'POST', redirect: 'error', signal: AbortSignal.timeout(8000),
+    method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(8000),
     headers: { apikey: config.publishableKey, Authorization: `Bearer ${config.publishableKey}`, 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify(args),
   });
@@ -65,7 +65,7 @@ export function loadCatalog(config: SeoConfig, deps: EdgeDeps = {}): Promise<Loa
   return cached('catalog', deps, async () => {
     try {
       if (config.catalogUrl) {
-        const response = await (deps.fetcher ?? fetch)(config.catalogUrl, { redirect: 'error', signal: AbortSignal.timeout(8000), headers: { Accept: 'application/json' } });
+        const response = await (deps.fetcher ?? fetch)(config.catalogUrl, { redirect: 'manual', signal: AbortSignal.timeout(8000), headers: { Accept: 'application/json' } });
         if (!response.ok) { console.error(`Commons catalog snapshot request failed with status ${response.status}`); return { kind: 'error' }; }
         return { kind: 'ok', value: parseCommonsCatalog(await response.json()) };
       }

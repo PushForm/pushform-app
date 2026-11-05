@@ -65,6 +65,11 @@ describe('model pages', () => {
     const response = await renderPage(at('https://abc123.pushform-commons.pages.dev/models/workshop-hinge'), env(), { kind: 'model', id: 'workshop-hinge' }, { fetcher: rpcFetcher({ commons_catalog: ok(catalog()) }) });
     expect(response.headers.get('X-Robots-Tag')).toBe('noindex, nofollow');
   });
+  it('never ask the fetch for redirect "error", which the Workers runtime rejects', async () => {
+    const fetcher = rpcFetcher({ commons_catalog: ok(catalog()) });
+    await renderPage(at('https://commons.pushform.io/models/workshop-hinge'), env(), { kind: 'model', id: 'workshop-hinge' }, { fetcher });
+    expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ redirect: 'manual' });
+  });
   it('read the catalog once while it is cached', async () => {
     const fetcher = rpcFetcher({ commons_catalog: ok(catalog()) });
     const deps = { fetcher, cache: memoryCache() };

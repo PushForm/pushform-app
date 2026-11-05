@@ -81,7 +81,7 @@ export const MENU_COMMANDS = {
 } as const;
 
 /** Solid Tools: the pair operations take the first-selected solid as `a` (the cutter of Subtract and Trim). */
-const SOLID_PAIR_TOOLS = [['Union', 'solids.union'], ['Subtract', 'solids.subtract'], ['Trim', 'solids.trim'], ['Intersect', 'solids.intersect'], ['Split', 'solids.split']] as const;
+const SOLID_PAIR_TOOLS = [['Subtract', 'solids.subtract'], ['Trim', 'solids.trim'], ['Intersect', 'solids.intersect'], ['Split', 'solids.split']] as const;
 const FLIP_AXES = [['Red', 'x'], ['Green', 'y'], ['Blue', 'z']] as const;
 
 type RefClass = 'edge' | 'face' | 'sketch' | 'body' | 'meshPart' | 'instance' | 'sectionPlane' | 'text' | 'image' | 'other';
@@ -234,7 +234,7 @@ function flipSubmenu(refs: readonly EntityRef[], disabled: boolean): ContextMenu
   };
 }
 
-/** `Solid Tools ›`: the pair operations for exactly two solids, Outer Shell for two or more. */
+/** `Solid Tools ›`: the pair operations for exactly two solids, Union for two or more. */
 function solidToolsSubmenu(state: DocumentState, refs: readonly EntityRef[]): ContextMenuItem {
   const bodies = refs.map((r) => ({ kind: 'body' as const, path: [...r.path], id: r.id }));
   const solid = refs.every((r) => containerOf(state, r)?.bodies.get(r.id)?.valid === true);
@@ -242,8 +242,8 @@ function solidToolsSubmenu(state: DocumentState, refs: readonly EntityRef[]): Co
     label: 'Solid Tools',
     command: '',
     children: [
+      { label: 'Union', command: 'solids.union', params: { bodies }, disabled: !solid || bodies.length < 2 },
       ...SOLID_PAIR_TOOLS.map(([label, command]) => ({ label, command, params: { a: bodies[0], b: bodies[1] }, disabled: !solid || bodies.length !== 2 })),
-      { label: 'Outer Shell', command: 'solids.outerShell', params: { bodies }, disabled: !solid || bodies.length < 2 },
     ],
   };
 }

@@ -30,11 +30,12 @@ const KIND_ICONS: Record<ModelBrowserKind, ReactNode> = {
   component: <Icon name="outliner-component" size={18} />,
   solid: <PiCube />,
   meshPart: <PiCube />,
+  text: <Icon name="tool-text" size={18} />,
 };
-const KIND_NAMES: Record<ModelBrowserKind, string> = { group: 'Group', component: 'Component', solid: 'Solid', meshPart: 'Mesh Part' };
+const KIND_NAMES: Record<ModelBrowserKind, string> = { group: 'Group', component: 'Component', solid: 'Solid', meshPart: 'Mesh Part', text: 'Text' };
 
 /**
- * The Model object browser: the model's solids, groups and components in the left menu bar's docked
+ * The Model object browser: the model's solids, text, groups and components in the left menu bar's docked
  * panel, with the Layout object browser's look and keys. Selection, hiding, locking and renames go through commands.
  */
 export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void) | undefined }): JSX.Element {
@@ -141,8 +142,8 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
     }
   };
   const startRename = (node: ModelBrowserNode): void => {
-    // Solids have no stored name to edit; mesh part names are read-only here too.
-    if (node.kind === 'solid' || node.kind === 'meshPart') return;
+    // Only group and component instance names are editable here.
+    if (node.kind !== 'group' && node.kind !== 'component') return;
     pendingFocus.current = null;
     editingRef.current = node; setEditing(node); setFocusKey(node.key);
   };
@@ -157,7 +158,7 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
     if (name ? name !== node.label : node.custom) run('instance.rename', { ref: node.ref, name });
   };
   const setHidden = (node: ModelBrowserNode, hidden: boolean): void =>
-    run(node.kind === 'solid' || node.kind === 'meshPart' ? 'bodies.setHidden' : 'instance.setHidden', { refs: [node.ref], hidden });
+    run(node.kind === 'text' ? 'text.setHidden' : node.kind === 'solid' || node.kind === 'meshPart' ? 'bodies.setHidden' : 'instance.setHidden', { refs: [node.ref], hidden });
   /** The modeler's own context menu for the item, which selects it first as a right-click in the viewport does. */
   const openMenu = (node: ModelBrowserNode, x: number, y: number): void => {
     setFocusKey(node.key);
@@ -282,7 +283,7 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
       <ul ref={treeRef} role="tree" aria-label="Object browser" aria-multiselectable="true" className="pf-layout-browser-tree" onKeyDown={onTreeKeyDown}>
         {tree.map((node, index) => renderNode(node, tree.length, index + 1))}
       </ul>
-      {tree.length ? null : <p className="pf-model-browser-empty">Solids, groups and components you make appear here.</p>}
+      {tree.length ? null : <p className="pf-model-browser-empty">Solids, groups, components and text you make appear here.</p>}
     </div>
     <div role="tabpanel" id={`${idPrefix}-tags-panel`} aria-labelledby={`${idPrefix}-tags-tab`} hidden={section !== 'tags'}
       onKeyDown={event => {

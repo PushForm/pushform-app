@@ -228,7 +228,7 @@ describe('contextMenu.itemsFor', () => {
     expect(flip([g, c]).children!.every((i) => i.disabled)).toBe(true);
   });
 
-  it('Solid Tools: the pair operations for exactly two solids in selection order, Outer Shell for two or more', () => {
+  it('Solid Tools: the pair operations for exactly two solids in selection order, Union for two or more', () => {
     const { host } = setup();
     host.doc.transact('bodies', (draft) => {
       const bodies = draft.definitions.get(draft.rootDefinitionId)!.entities.bodies;
@@ -238,12 +238,12 @@ describe('contextMenu.itemsFor', () => {
     const body = (id: number): EntityRef => ({ kind: 'body', path: [], id: id as Id });
     const tools = (refs: EntityRef[]) => contextMenu.itemsFor(host.doc.state, refs).find((i) => i.label === 'Solid Tools')!.children!;
     const enabled = (refs: EntityRef[]) => tools(refs).filter((i) => !i.disabled).map((i) => i.label);
-    expect(tools([body(7)]).map((i) => i.label)).toEqual(['Union', 'Subtract', 'Trim', 'Intersect', 'Split', 'Outer Shell']);
+    expect(tools([body(7)]).map((i) => i.label)).toEqual(['Union', 'Subtract', 'Trim', 'Intersect', 'Split']);
     expect(enabled([body(7)])).toEqual([]);
-    expect(enabled([body(8), body(7)])).toEqual(['Union', 'Subtract', 'Trim', 'Intersect', 'Split', 'Outer Shell']);
+    expect(enabled([body(8), body(7)])).toEqual(['Union', 'Subtract', 'Trim', 'Intersect', 'Split']);
     expect(tools([body(8), body(7)])[1]).toMatchObject({ command: 'solids.subtract', params: { a: { kind: 'body', path: [], id: 8 }, b: { kind: 'body', path: [], id: 7 } } });
-    expect(enabled([body(7), body(8), body(9)])).toEqual(['Outer Shell']);
-    expect(tools([body(7), body(8), body(9)])[5]).toMatchObject({ command: 'solids.outerShell', params: { bodies: [7, 8, 9].map((id) => ({ kind: 'body', path: [], id })) } });
+    expect(enabled([body(7), body(8), body(9)])).toEqual(['Union']);
+    expect(tools([body(7), body(8), body(9)])[0]).toMatchObject({ command: 'solids.union', params: { bodies: [7, 8, 9].map((id) => ({ kind: 'body', path: [], id })) } });
     expect(enabled([body(7), body(10)])).toEqual([]); // not a solid
     expect(enabled([body(7), body(99)])).toEqual([]); // gone
   });

@@ -20,12 +20,11 @@ import { rootContainerOf } from './offset';
  * - trim: b − a → cutter a kept, b modified
  * - intersect: a ∩ b → a survives, b deleted
  * - split: a ∩ b, a − b, b − a → both replaced by every piece
- * - outerShell: iterated union of n bodies → the first survives
  * Each is one undo entry; the kernel runs first. "Solid" = `body.valid`.
  */
 
-export type SolidMode = 'union' | 'subtract' | 'trim' | 'intersect' | 'split' | 'outerShell';
-export const SOLID_MODES: readonly SolidMode[] = ['union', 'subtract', 'trim', 'intersect', 'split', 'outerShell'];
+export type SolidMode = 'union' | 'subtract' | 'trim' | 'intersect' | 'split';
+export const SOLID_MODES: readonly SolidMode[] = ['union', 'subtract', 'trim', 'intersect', 'split'];
 
 const pathSchema = z.array(z.number().int().nonnegative()).default([]);
 export const BodyRefSchema = z.object({ kind: z.literal('body'), path: pathSchema, id: z.number().int().nonnegative() });
@@ -245,7 +244,7 @@ function pairCommand(mode: SolidsPairMode) {
 }
 
 /** Union: a ∪ b; `a` survives and `b` is deleted. */
-export const solidsUnion = pairCommand('union');
+const solidsUnionPair = pairCommand('union');
 /** Subtract: `a` is the cutter (deleted), `b` is cut. */
 export const solidsSubtract = pairCommand('subtract');
 /** Trim: like Subtract but the cutter `a` stays. */
@@ -255,18 +254,36 @@ export const solidsIntersect = pairCommand('intersect');
 /** Split: both bodies are replaced by a ∩ b, a − b and b − a (every connected piece its own body). */
 export const solidsSplit = pairCommand('split');
 
-/** Outer Shell: iterated union of all given bodies; the first survives, the others are deleted. */
-export const solidsOuterShell = defineCommand({
-  id: 'solids.outerShell',
-  title: 'Outer Shell',
+/** Pack disconnected intermediate components into one kernel input without dropping any solids. */
+function combinedMesh(components: readonly KernelComponent[]): MeshData {
+  const verts = new Float64Array(components.reduce((n, c) => n + c.mesh.verts.length, 0));
+  const tris = new Uint32Array(components.reduce((n, c) => n + c.mesh.tris.length, 0));
+  const faceId = new Uint32Array(tris.length / 3);
+  let vertexOffset = 0, triangleOffset = 0;
+  for (const { mesh } of components) {
+    verts.set(mesh.verts, vertexOffset);
+    for (let i = 0; i < mesh.tris.length; i++) tris[triangleOffset + i] = mesh.tris[i]! + vertexOffset / 3;
+    faceId.set(mesh.faceId, triangleOffset / 3);
+    vertexOffset += mesh.verts.length;
+    triangleOffset += mesh.tris.length;
+  }
+  return { verts, tris, faceId };
+}
+
+/** Union: iterated union of all given bodies; the first survives, the others are deleted. */
+export const solidsUnion = defineCommand({
+  id: 'solids.union',
+  title: 'Union',
   category: 'edit',
-  params: z.object({ bodies: z.array(BodyRefSchema).min(2) }),
+  params: z.union([z.object({ bodies: z.array(BodyRefSchema).min(2) }), pairParams]),
   undoable: false,
   async run(ctx, p): Promise<SolidsApplyResult> {
+    if (!('bodies' in p)) return solidsUnionPair.run(ctx, p) as Promise<SolidsApplyResult>;
+    if (p.bodies.length === 2) return solidsUnionPair.run(ctx, { a: p.bodies[0]!, b: p.bodies[1]! }) as Promise<SolidsApplyResult>;
     const host = hostOf(ctx);
     const kernel = kernelOf(ctx);
-    const bodies = p.bodies.map((r) => solidOf(host, r, 'Outer Shell'));
-    if (new Set(bodies.map((b) => b.id)).size !== bodies.length) throw new PushFormError('solids.target', 'Outer Shell: the same body was given twice');
+    const bodies = p.bodies.map((r) => solidOf(host, r, 'Union'));
+    if (new Set(bodies.map((b) => b.id)).size !== bodies.length) throw new PushFormError('solids.target', 'Union: the same body was given twice');
     const first = bodies[0]!;
     for (const b of bodies) await kernel.ensureBody(b.id, b.version, b.mesh);
     let cur = { bodyId: first.id as number, version: first.version };
@@ -285,7 +302,7 @@ export const solidsOuterShell = defineCommand({
         if (!main) break;
         if (i + 1 < bodies.length) {
           const temp = { bodyId: TEMP_BODY_BASE + (tempCounter++ % 0xffff), version: i };
-          await kernel.ensureBody(temp.bodyId, temp.version, main.mesh);
+          await kernel.ensureBody(temp.bodyId, temp.version, combinedMesh(components));
           temps.push(temp);
           cur = temp;
         }
@@ -293,11 +310,11 @@ export const solidsOuterShell = defineCommand({
     } finally {
       for (const t of temps) void kernel.release(t.bodyId, t.version).catch(() => undefined);
     }
-    return host.transact('Outer Shell', () =>
-      host.edit('Outer Shell', (draft) => {
+    return host.transact('Union', () =>
+      host.edit('Union', (draft) => {
         const root = draftRoot(draft, host);
-        const f = assertUnchanged(root, first, 'Outer Shell');
-        for (const b of bodies.slice(1)) assertUnchanged(root, b, 'Outer Shell');
+        const f = assertUnchanged(root, first, 'Union');
+        for (const b of bodies.slice(1)) assertUnchanged(root, b, 'Union');
         const bodyIds = applyComponents(draft, root, f, components, selfRunId, nextFaceId);
         const deleted: number[] = bodyIds.includes(f.id) ? [] : [f.id];
         for (const b of bodies.slice(1)) {
@@ -310,7 +327,7 @@ export const solidsOuterShell = defineCommand({
   },
 });
 
-export const solidCommands: readonly AnyCommand[] = [solidsUnion, solidsSubtract, solidsTrim, solidsIntersect, solidsSplit, solidsOuterShell];
+export const solidCommands: readonly AnyCommand[] = [solidsUnion, solidsSubtract, solidsTrim, solidsIntersect, solidsSplit];
 
 /** Command id for a Solid Tools mode. */
 export const solidCommandId = (mode: SolidMode): string => `solids.${mode}`;

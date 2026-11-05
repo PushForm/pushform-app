@@ -184,4 +184,27 @@ export const textDelete = defineCommand({
   },
 });
 
-export const textCommands: readonly AnyCommand[] = [textAdd, textEdit, textSetArrow, textSetLeader, textDelete];
+export const textSetHidden = defineCommand({
+  id: 'text.setHidden',
+  title: 'Hide Text',
+  category: 'edit',
+  params: z.object({ refs: z.array(EntityRefSchema).min(1), hidden: z.boolean() }),
+  undoable: true,
+  run(ctx, p): number {
+    const host = hostOf(ctx);
+    const refs = textRefs(ctx, p.refs);
+    let count = 0;
+    host.edit(p.hidden ? 'Hide Text' : 'Show Text', draft => {
+      for (const ref of refs) {
+        const text = draftContainerAt(draft, ref.path).texts.get(ref.id);
+        if (!text || text.hidden === p.hidden) continue;
+        text.hidden = p.hidden;
+        count++;
+      }
+    });
+    if (p.hidden && count) host.selection.remove(refs);
+    return count;
+  },
+});
+
+export const textCommands: readonly AnyCommand[] = [textAdd, textEdit, textSetArrow, textSetLeader, textDelete, textSetHidden];

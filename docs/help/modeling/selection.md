@@ -2,19 +2,19 @@
 
 ## Find a solid, group or component
 
-Open **Object browser** in the left menu bar and choose **Objects**. It lists loose solids, groups and components. Groups and components start collapsed. Expand the ones you want to inspect; selecting an item elsewhere reveals its ancestors. Loose solids appear as **Solid N** in creation order; those numbers can change as the model changes.
+Open **Object browser** in the left menu bar and choose **Objects**. It lists loose solids, groups, components and text annotations. Screen and leader text appear by their contents, including inside groups and components. Groups and components start collapsed. Expand the ones you want to inspect; selecting an item elsewhere reveals its ancestors. Loose solids appear as **Solid N** in creation order; those numbers can change as the model changes.
 
 Click an item, or focus it and press Enter, to select it. The viewport shows the selection: a selected solid is outlined in the selection color with its faces tinted, and a selected group or component shows its bounding box. Shift-click selects the range from the last clicked item and all children, including children inside collapsed items; Ctrl/Cmd-click adds, and Ctrl/Cmd+Shift-click removes. Selecting something elsewhere reveals it in the browser: clicking a solid in the viewport, or one of its faces or edges, marks that solid, and clicking a group or component marks that item.
 
 ## Rename or edit a group
 
-Double-click a group or component's name in the Object browser, or press F2, to rename the instance. Clearing the instance name shows its definition name again. Loose solids cannot be renamed there.
+Double-click a group or component's name in the Object browser, or press F2, to rename the instance. Clearing the instance name shows its definition name again. Loose solids and text cannot be renamed there. To change annotation contents, use **Edit Text** in its context menu.
 
 Renaming does not enter the group. Use **Edit Group** or **Edit Component** in its context menu to work inside it. The open item is marked **Open for editing**. Geometry commands act in the current editing context.
 
 ## Hide or lock an item
 
-Use the Object browser's eye to hide or show a solid, group or component. Groups and components also have a lock button. Hiding a selected solid removes it from selection and from normal picking.
+Use the Object browser's eye to hide or show a solid, group, component or text annotation. Groups and components also have a lock button. Hiding a selected solid removes it from selection and from normal picking.
 
 Hidden items appear dimmed in the browser with a crossed-out eye. Hiding a tag or tag folder in **Tags** also marks all affected objects and their descendants hidden in **Objects**. Their eye controls are disabled while a tag or ancestor hides them; show that tag or ancestor first. Objects you hid individually remain hidden when the tag is shown again.
 

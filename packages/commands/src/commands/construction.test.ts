@@ -163,16 +163,44 @@ describe('solids.*', () => {
     expect(b2()).toHaveLength(2);
   });
 
-  it('outer shell of three overlapping boxes → one body', async () => {
+  it('union of three overlapping boxes → one body', async () => {
     const { registry, bodies, addBox, bodyRef } = setup();
     const a = addBox([0, 0, 0], [1, 1, 1]);
     const b = addBox([0.5, 0, 0], [1.5, 1, 1]);
     const c = addBox([1, 0, 0], [2, 1, 1]);
-    const res = (await registry.execute('solids.outerShell', { bodies: [bodyRef(a), bodyRef(b), bodyRef(c)] })) as SolidsApplyResult;
+    const res = (await registry.execute('solids.union', { bodies: [bodyRef(a), bodyRef(b), bodyRef(c)] })) as SolidsApplyResult;
     expect(res.bodyIds).toEqual([a]);
     expect(bodies()).toHaveLength(1);
     expect(bodies()[0]!.props.volume).toBeCloseTo(2, 6);
     expect(meshTopologyProblems(bodies()[0]!.mesh)).toEqual([]);
+  });
+
+  it.each([false, true])('unions multiple solids without dropping disconnected pieces (bridge: %s), with undo and redo', async (bridge) => {
+    const { registry, bodies, addBox, bodyRef, host } = setup();
+    const a = addBox([0, 0, 0], [1, 1, 1]);
+    const b = addBox([3, 0, 0], [4, 1, 1]);
+    const c = bridge ? addBox([0.5, 0, 0], [3.5, 1, 1]) : addBox([6, 0, 0], [7, 1, 1]);
+    const entries = host.undoStack.length;
+    await registry.execute('solids.union', { bodies: [a, b, c].map(bodyRef) });
+    expect(bodies()).toHaveLength(bridge ? 1 : 3);
+    expect(bodies().reduce((sum, body) => sum + body.props.volume, 0)).toBeCloseTo(bridge ? 4 : 3, 6);
+    for (const body of bodies()) expect(meshTopologyProblems(body.mesh)).toEqual([]);
+    expect(host.undoStack.length).toBe(entries + 1);
+    expect(host.undo()).toBe(true);
+    expect(bodies()).toHaveLength(3);
+    expect(host.redo()).toBe(true);
+    expect(bodies()).toHaveLength(bridge ? 1 : 3);
+  });
+
+  it('runs Union on three preselected solids and does not register Outer Shell', async () => {
+    const { registry, tools, bodies, addBox, host } = setup();
+    const ids = [addBox([0, 0, 0], [1, 1, 1]), addBox([0.5, 0, 0], [1.5, 1, 1]), addBox([1, 0, 0], [2, 1, 1])];
+    host.selection.set(ids.map(id => ({ kind: 'body' as const, path: [], id: id as Id })));
+    expect(registry.has('solids.outerShell')).toBe(false);
+    tools.activate('solid.union');
+    await (tools.activeTool as SolidTool).settled;
+    expect(bodies()).toHaveLength(1);
+    expect(bodies()[0]!.props.volume).toBeCloseTo(2, 6);
   });
 
   it('rejects a non-solid body', async () => {

@@ -15,7 +15,6 @@ const TITLES: Record<SolidMode, string> = {
   trim: 'Trim',
   intersect: 'Intersect',
   split: 'Split',
-  outerShell: 'Outer Shell',
 };
 
 /** Instructor text per mode and step (Solid Tools). */
@@ -25,14 +24,13 @@ const PROMPTS: Record<SolidMode, readonly [string, string]> = {
   trim: ['① Select the solid to trim with (it stays).', '② Select the solid to trim.'],
   intersect: ['① Select the first solid.', '② Select the second solid: only the shared volume is kept.'],
   split: ['① Select the first solid.', '② Select the second solid: both are split into pieces.'],
-  outerShell: ['① Select the first solid (or preselect several).', '② Select the next solid to shell with.'],
 };
 
 const SELECTED_COLOR = '#f9a825';
 
 /**
  * Solid Tools: one instance per mode (`solid.union`, `solid.subtract`, …). Click the first solid
- * (cursor ①), then the second (②) → runs `solids.<mode>`. With two (or, for Outer Shell, n)
+ * (cursor ①), then the second (②) → runs `solids.<mode>`. With two (or, for Union, n)
  * bodies preselected the operation runs on activation. "Solid" = `body.valid`; a body that is
  * not valid reports an error in the status bar.
  */
@@ -65,7 +63,7 @@ export class SolidTool implements Tool {
     this.first = null;
     this.lastError = null;
     const ids = selectionBodyIds(hostOfTool(ctx));
-    if (this.mode === 'outerShell' ? ids.length >= 2 : ids.length === 2) this.run(ids);
+    if (this.mode === 'union' ? ids.length >= 2 : ids.length === 2) this.run(ids);
   }
   deactivate(): void {
     this.first = null;
@@ -131,7 +129,7 @@ export class SolidTool implements Tool {
     this.first = null;
     const path = [...hostOfTool(ctx).context.path] as number[];
     const refs = ids.map((id) => ({ kind: 'body' as const, path, id: id as number }));
-    const params = this.mode === 'outerShell' ? { bodies: refs } : { a: refs[0], b: refs[1] };
+    const params = this.mode === 'union' ? { bodies: refs } : { a: refs[0], b: refs[1] };
     this.queue = this.queue
       .then(async () => {
         await ctx.commands.execute(solidCommandId(this.mode), params);

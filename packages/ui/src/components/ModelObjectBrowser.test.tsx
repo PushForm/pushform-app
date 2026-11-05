@@ -6,7 +6,7 @@ import { tagCommands } from '@pushform/commands';
 import { meshBox } from '@pushform/core';
 import type { Id } from '@pushform/core';
 import { InlineBackend, KernelClient } from '@pushform/kernel';
-import { bodyFromMesh, containerAt } from '@pushform/model';
+import { bodyFromMesh, containerAt, type EntityRef } from '@pushform/model';
 import { AppContext } from '../AppContext';
 import { createApp } from '../bootstrap';
 import type { AppInstance } from '../bootstrap';
@@ -55,6 +55,35 @@ const item = (name: string): HTMLElement =>
 const row = (name: string): HTMLElement => item(name).querySelector<HTMLElement>(':scope > .pf-layout-browser-row')!;
 
 describe('ModelObjectBrowser', () => {
+  it('lists screen and nested leader text, selects and reveals it, and updates after edits and visibility undo', () => {
+    const a = boot();
+    const screenRef = a.commands.execute('text.add', { kind: 'screen', screen: [0.1, 0.2], text: 'Project title' }) as EntityRef;
+    const group = addInstance(a, { name: 'Frame' });
+    a.commands.execute('context.enter', { path: [group] });
+    const leaderRef = a.commands.execute('text.add', { kind: 'leader', anchor: [0, 0, 0], label: [1, 1, 0], text: 'Cut\nhere' }) as EntityRef;
+    a.commands.execute('context.exitAll');
+    a.document.selection.clear();
+    mount(a);
+    expect(names()).toEqual(['Project title', 'Frame']);
+    fireEvent.click(row('Project title'));
+    expect(a.document.selection.refs).toEqual([screenRef]);
+    expect(within(row('Project title')).getByRole('img', { name: 'Text' })).toBeTruthy();
+    act(() => a.document.selection.set([leaderRef]));
+    expect(names()).toEqual(['Project title', 'Frame', 'Cut here']);
+    expect(item('Cut here').getAttribute('aria-selected')).toBe('true');
+    act(() => { a.commands.execute('text.edit', { ref: screenRef, text: 'New title' }); });
+    expect(names()[0]).toBe('New title');
+    fireEvent.click(row('New title'));
+    fireEvent.click(within(row('New title')).getByRole('button', { name: 'Show New title' }));
+    expect(containerAt(a.document.doc.state, []).texts.get(screenRef.id)?.hidden).toBe(true);
+    expect(a.document.selection.refs).toEqual([]);
+    expect(item('New title').classList.contains('is-hidden')).toBe(true);
+    act(() => { a.document.undo(); });
+    expect(item('New title').classList.contains('is-hidden')).toBe(false);
+    fireEvent.contextMenu(row('New title'));
+    expect(useAppStore.getState().contextMenu?.refs).toEqual([screenRef]);
+  });
+
   it('manages tags in a sub-tab and updates tag dots and custom pill tooltips through edits and undo', () => {
     const a = boot();
     for (const command of tagCommands) if (!a.commands.has(command.id)) a.commands.register(command);

@@ -15,7 +15,7 @@ import { TapeTool } from './impl/Tape';
 /**
  * Fresh instances of the construction / solid tools for `ToolManager.register`: Tape Measure (T),
  * Dimension, Protractor, Axes, Offset (F), Follow Me, Fillet, Chamfer and one Solid Tool per mode (`solid.union`,
- * `solid.subtract`, `solid.trim`, `solid.intersect`, `solid.split`, `solid.outerShell`).
+ * `solid.subtract`, `solid.trim`, `solid.intersect`, `solid.split`).
  * They need the `guideCommands`, `dimensionCommands`, `axesCommands`, `offsetCommands`, `followMeCommands`,
  * `edgeBlendCommands` and `solidCommands` arrays registered on the same registry.
  */

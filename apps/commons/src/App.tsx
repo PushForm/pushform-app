@@ -13,6 +13,8 @@ import { CommonsAccessGate, CommonsDownloadButton, CommonsMailingPreference } fr
 import type { CommonsAccount } from './account';
 import { CommonsModelPreview } from './CommonsPreview';
 import { CommonsOpenAction } from './CommonsOpenAction';
+import { BrowseFilters } from './BrowseFilters';
+import { SiteFooter } from './SiteFooter';
 import { filterModels, type CatalogFilters, type CatalogLoader, type CatalogModel } from './catalog';
 import { ProfileCollections, CreditedCreatorPage, CollectionsProvider, CollectionsRoute, FeaturedSection, FeatureAction, ModelCollectionAction, PublicCollectionResults, CommonsAdminLink } from './Collections';
 
@@ -84,6 +86,7 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
   const [attempt, setAttempt] = useState(0);
   useEffect(()=>{const refresh=()=>setAttempt(value=>value+1);window.addEventListener('commons:catalog-changed',refresh);return()=>window.removeEventListener('commons:catalog-changed',refresh);},[]);
   const [filters, setFilters] = useState<CatalogFilters>(emptyFilters);
+  const [footerDocked, setFooterDocked] = useState(false);
   const [location,setLocation]=useState(currentCommonsLocation);
   const hash=location.hash;
   const onCollections=hash==='#collections';
@@ -133,7 +136,6 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
     target?.scrollIntoView?.({ block: 'start' });
     focusedRoute.current.done = true;
   }, [selected, selectedId, state.kind,onProfile,hash,collectionRoute,location.path]);
-  const options = (values: string[]) => [...new Set(values)].sort().map((value) => <option key={value} value={value}>{value}</option>);
   const update = (patch: Partial<CatalogFilters>) => setFilters((current) => ({ ...current, ...patch }));
   return <CollectionsProvider service={collections} account={account}><BrowseImagesProvider value={paged ? paging.images : null}><div className="commons">
     <a className="skip-link" href="#main">Skip to content</a>
@@ -157,12 +159,9 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
             const next=event.key==='Home'?false:event.key==='End'?true:!onCollections;
             window.location.hash=next?'#collections':'#browse';document.getElementById(next?'browse-collections-tab':'browse-models-tab')?.focus();
           }}><a role="tab" id="browse-models-tab" aria-selected={!onCollections} aria-controls="catalog-results" href="#browse">Models</a><a role="tab" id="browse-collections-tab" aria-selected={onCollections} aria-controls="catalog-results" href="#collections">Collections</a></div>
-          <div className="filters" role="search" aria-label={onCollections?'Search collections':'Search models'}>
-            <label className="search-field"><span>{onCollections?'Search collections':'Search models'}</span><input type="search" maxLength={200} placeholder={onCollections?'Try workshop essentials or outdoor projects…':'Try a chair, hinge or garden bench…'} value={filters.query} onChange={(event) => update({ query: event.target.value })} /></label>
-            <label><span>Category</span><select value={filters.category} onChange={(event) => update({ category: event.target.value })}><option value="">All categories</option>{options(paged ? paging.categories : models.map((model) => model.category))}</select></label>
-            <label><span>License</span><select value={filters.license} onChange={(event) => update({ license: event.target.value })}><option value="">All licenses</option>{options(paged ? paging.licenses : models.flatMap((model) => model.licenses.map((license) => license.name)))}</select></label>
-            <label className="commercial"><input type="checkbox" checked={filters.commercial} onChange={(event) => update({ commercial: event.target.checked })} />Commercial use permitted</label>
-          </div>
+          <BrowseFilters onDockChange={setFooterDocked} filters={filters} update={update} collections={onCollections}
+            categories={paged ? paging.categories : models.map(model => model.category)}
+            licenses={paged ? paging.licenses : models.flatMap(model => model.licenses.map(license => license.name))}>
           {state.kind === 'unconfigured' && <section className="status-panel" role="status"><span className="status-icon" aria-hidden="true">◇</span><h3>A place for what you’ll make next.</h3><p>The Commons catalog isn’t available yet. Check back as the library takes shape.</p></section>}
           {state.kind === 'loading' && <p className="status-panel" role="status">Loading models…</p>}
           {state.kind === 'error' && <section className="status-panel" role="alert"><h3>We couldn’t load the catalog.</h3><p>Please try again in a moment.</p><button onClick={() => setAttempt((value) => value + 1)}>Try again</button></section>}
@@ -173,10 +172,11 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
               {(models.length > 0 || paged && (filters.query || filters.category || filters.license || filters.commercial)) && <button onClick={() => setFilters(emptyFilters)}>Clear filters</button>}</section>}
             {paged && <MoreBrowseResults count={shown.length} more={paging.more} loading={paging.loadingMore} error={paging.error} onMore={paging.loadMore}/>}
           </>}</div>
+          </BrowseFilters>
         </section>
       </>}
     </main>
-    <footer className="site-footer"><span>Good projects start with shared ideas.</span><div><a href="https://pushform.io">PushForm</a><a href="https://pushform.io/terms">Terms</a><a href="https://pushform.io/privacy">Privacy</a></div></footer>
+    <SiteFooter docked={footerDocked} />
   </div></BrowseImagesProvider></CollectionsProvider>;
 }
 

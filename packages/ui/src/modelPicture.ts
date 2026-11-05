@@ -3,6 +3,7 @@
 import type { DocumentState, ImageStore } from '@pushform/model';
 import { Viewport, studioLight, studioLightLevels, type CameraState } from '@pushform/render';
 import { STUDIO_LIGHTING } from '@pushform/core';
+import { environmentPreset } from '@pushform/model';
 import { withRenderImageStore, bodiesToRender, sketchesToRender, imagesToRender, dimensionsToRender, textsToRender, guidesToRender } from './engine/renderAdapter';
 import { sectionsToRender } from './engine/sectionAdapter';
 import { applyDocumentView } from './engine/viewSync';
@@ -22,8 +23,11 @@ export async function modelPicture(state: DocumentState, images: ImageStore, opt
     withRenderImageStore(images, () => { viewport.setBodies(bodiesToRender(state)); viewport.setSketches(sketchesToRender(state)); });
     viewport.setImages(imagesToRender(state, images)); viewport.setSections(sectionsToRender(state));
     viewport.setDimensions(dimensionsToRender(state)); viewport.setTexts(textsToRender(state)); viewport.setGuides(guidesToRender(state));
-    applyDocumentView(viewport, state);
-    if (options.lighting && options.lighting !== 'document') viewport.setShadows({ ...viewport.shadows, enabled: false, useSunForShading: false });
+    applyDocumentView(viewport, state, images);
+    if (options.lighting && options.lighting !== 'document') {
+      viewport.setShadows({ ...viewport.shadows, enabled: false, useSunForShading: false });
+      viewport.setEnvironment(options.lighting === 'bright' || options.lighting === 'soft' ? environmentPreset(options.lighting) : null, []);
+    }
     viewport.camera.setSize(options.width, options.height);
     if (options.camera) viewport.camera.setState(options.camera);
     else {
@@ -40,14 +44,15 @@ export async function modelPicture(state: DocumentState, images: ImageStore, opt
         }
       } else viewport.camera.zoomExtents();
     }
-    await viewport.sceneSync.textures.whenReady();
+    await Promise.all([viewport.sceneSync.textures.whenReady(), viewport.environmentReady]);
     await Promise.all([viewport.sceneSync.dimensions.ready, viewport.sceneSync.texts.prepare(), viewport.sceneSync.sections.ready]);
     const before = studioLight.value, levels = studioLightLevels.value.clone();
     try {
       studioLight.value = options.lighting === 'soft' || options.lighting === 'bright' ? 1 : 0;
       if (options.lighting === 'soft' || options.lighting === 'bright') { const p = STUDIO_LIGHTING[options.lighting]; studioLightLevels.value.set(p.ambient, p.facing, p.key); }
       const picture = document.createElement('canvas');
-      return viewport.snapshotInto(picture, options.width, options.height, viewport.camera.getState(), { background: options.background ?? '#ffffff' }) ? picture : null;
+      const environmentBackground = options.background === undefined && (options.lighting === undefined || options.lighting === 'document') && !!state.styles.get(state.activeStyleId)?.environment;
+      return viewport.snapshotInto(picture, options.width, options.height, viewport.camera.getState(), { background: options.background ?? '#ffffff', environmentBackground }) ? picture : null;
     } finally { studioLight.value = before; studioLightLevels.value.copy(levels); }
   } finally { const renderer = viewport.renderer; viewport.dispose(); renderer?.forceContextLoss(); }
 }

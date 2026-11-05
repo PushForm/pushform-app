@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import type { ProjectActivitySink } from '@pushform/cloud';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { JSX } from 'react';
 import { createPortal } from 'react-dom';
@@ -94,6 +95,8 @@ export interface AppProps {
   readonly initialScreen?: 'home' | 'workspace' | undefined;
   /** AI Chat backend; without it the entry points stay visible but report that requests are unavailable. */
   readonly requests?: RequestsConfig | undefined;
+  /** Optional private measurements of completed document work. */
+  readonly activity?: ProjectActivitySink | ((ownerId: string) => ProjectActivitySink) | undefined;
   /** Where product usage events go; without it nothing is recorded. */
   readonly usage?: UsageSink | ((ownerId: string) => UsageSink) | undefined;
   /** The extension runtime's worker sources; without them the extension manager is not offered. */
@@ -127,7 +130,7 @@ const WORKSPACE_SCREEN_KEY = 'pushform:workspace-screen:v1';
  * Required account gate. The document engine is first created after successful sign-in; the workspace stays locked
  * until the account's signup step is complete.
  */
-export function App({ app, cloud: supplied, cloudFiles, profiles, account, billing, buildInfo, initialScreen, requests, usage, commons }: AppProps = {}): JSX.Element {
+export function App({ app, cloud: supplied, cloudFiles, profiles, account, billing, buildInfo, initialScreen, requests, usage, activity, commons }: AppProps = {}): JSX.Element {
   const [unconfigured] = useState(() => new CloudSession(null));
   const cloud = supplied ?? unconfigured;
   const state = useSyncExternalStore(cloud.subscribe, cloud.getSnapshot);
@@ -144,7 +147,7 @@ export function App({ app, cloud: supplied, cloudFiles, profiles, account, billi
   useEffect(() => desktopUpdates()?.start(), []);
   useEffect(() => { if (signedIn) setLastOwner(state.user!.id); }, [signedIn, state.user]);
   const screens = <>
-    {workspaceOwner ? <Workspace key={workspaceOwner} ownerId={workspaceOwner} app={app} cloud={cloud} cloudFiles={cloudFiles} buildInfo={buildInfo} initialScreen={initialScreen} requests={requests} usage={typeof usage === 'function' ? usage(workspaceOwner) : usage} commons={commons} locked={!signedIn || !profileReady} /> : null}
+    {workspaceOwner ? <Workspace key={workspaceOwner} ownerId={workspaceOwner} app={app} cloud={cloud} cloudFiles={cloudFiles} buildInfo={buildInfo} initialScreen={initialScreen} requests={requests} activity={typeof activity === 'function' ? activity(workspaceOwner) : activity} usage={typeof usage === 'function' ? usage(workspaceOwner) : usage} commons={commons} locked={!signedIn || !profileReady} /> : null}
     {!signedIn ? <SignInScreen cloud={cloud} state={state} /> : null}
     {signedIn && !profileReady && profiles ? <ProfileScreen cloud={cloud} session={state} profiles={profiles} state={profileState} /> : null}
     {signedIn && profileReady && account && accountState.ownerId === state.user!.id ? <DeletionBanner account={account} state={accountState} /> : null}
@@ -153,13 +156,16 @@ export function App({ app, cloud: supplied, cloudFiles, profiles, account, billi
   return provided;
 }
 
-type WorkspaceProps = Omit<AppProps, 'usage'> & { usage?: UsageSink | undefined; locked: boolean; ownerId: string };
+type WorkspaceProps = Omit<AppProps, 'usage' | 'activity'> & { activity?: ProjectActivitySink | undefined; usage?: UsageSink | undefined; locked: boolean; ownerId: string };
 
 /**
  * Read the image bytes this browser tab kept for refresh before the document session restores its tabs, so a
  * refreshed model reopens with its textures.
  */
 function Workspace(props: WorkspaceProps): JSX.Element | null {
+  // Install recovered documents only after the saved account choices are available. Keep an existing session while locked.
+  const [started, setStarted] = useState(!props.locked);
+  useEffect(() => { if (!props.locked) setStarted(true); }, [props.locked]);
   // Hosts supplying an already-built app have no refresh recovery to defer. Normal startup paints feedback first.
   const [images, setImages] = useState<{ store: RefreshImageStore | undefined; native?: NativeRefreshSession | undefined } | null>(
     () => props.app ? { store: undefined } : null);
@@ -189,11 +195,11 @@ function Workspace(props: WorkspaceProps): JSX.Element | null {
     })();
     return () => { live = false; };
   }, []); // Read once: the workspace is keyed by its owner.
-  return images ? <WorkspaceSession {...props} refreshImages={images.store} nativeRefresh={images.native} /> : props.locked ? null : <WorkspaceLoading progress={progress} />;
+  return images && started ? <WorkspaceSession {...props} refreshImages={images.store} nativeRefresh={images.native} /> : props.locked ? null : <WorkspaceLoading progress={progress} />;
 }
 
 /** Keep the document session in memory while locked; unmount all interactive workspace UI. */
-function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScreen, requests, usage: usageSink, extensionRuntime, staff, commons, locked, ownerId, refreshImages, nativeRefresh }: WorkspaceProps & { refreshImages: RefreshImageStore | undefined; nativeRefresh: NativeRefreshSession | undefined }): JSX.Element | null {
+function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScreen, requests, usage: usageSink, activity, extensionRuntime, staff, commons, locked, ownerId, refreshImages, nativeRefresh }: WorkspaceProps & { refreshImages: RefreshImageStore | undefined; nativeRefresh: NativeRefreshSession | undefined }): JSX.Element | null {
   // Home pops the chat down under its header icon; the account email is the requester identity.
   /** Mounted on first open and kept mounted while closed, so the conversation survives closing and reopening. */
   const [requestsPanel, setRequestsPanel] = useState<{ anchor: HTMLElement | null; open: boolean } | null>(null);
@@ -250,6 +256,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
       given ? null : browserSessionStorage(ownerId),
       refreshImages,
       nativeRefresh,
+      activity,
     ),
   );
   const [commonsShown, setCommonsShown] = useState(false);

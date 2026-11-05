@@ -179,7 +179,7 @@ export interface SqlRunPayload {
 
 export interface MeView {
   email: string; roles: RoleGrant[]; effective: Role; filingDisabled: boolean; buildsDisabled: boolean; trialsDisabled: boolean;
-  openRequests: number; limits: { openRequestsPerAccount: number; messagesPerConversation: number };
+  openRequests: number; limits: { openRequestsPerAccount: number; messagesPerConversation: number | null };
 }
 export interface OpenConversationView { id: string; kind: ConversationKind; path: ConversationPath; title: string | null; updatedAt: string; messageCount: number }
 

@@ -2,6 +2,7 @@ syntax = "proto2";
 package pushform.native;
 import "material.proto";
 import "modelMeta.proto";
+import "environment.proto";
 message EdgeStyle {
   required bool edges=1; required bool profiles=2; required double profile_width=3; required bool depth_cue=4;
   required uint32 depth_cue_levels=5; required bool extension=6; required double extension_length=7; required bool endpoints=8;
@@ -29,4 +30,5 @@ message Watermark { required uint32 image_id=1; required uint32 position=2; requ
 message Style {
   required uint32 id=1; required string name=2; required string description=3; required EdgeStyle edges=4;
   required FaceStyle faces=5; required BackgroundStyle background=6; required ModelingColors modeling=7; repeated Watermark watermarks=8;
+  optional Environment environment=9;
 }

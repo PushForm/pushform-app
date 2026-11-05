@@ -6,6 +6,6 @@ The initial form also offers **Join the mailing list (optional)**. This checkbox
 
 A public creator profile is optional and separate from your private account details. Downloading does not require publishing your name, bio, profile images or projects to the community.
 
-The same signed-in account can create and manage model collections from **My collections** or **Save to collection** on a model page. A public profile is optional for this too. New collections are private until you explicitly choose Public. Featuring public collections and models requires Commons admin permission.
+The same signed-in account can create and manage model collections from **My collections** or **Save to collection** on a model page. A public profile is optional for this too. The new-collection form defaults to Public; you can choose Private before saving. The **New private collection** shortcut on a model page creates a private collection. Featuring public collections and models requires Commons admin permission.
 
 Downloads contain the original file and its attribution notices in a ZIP. Keep the license and creator credits when reusing the model. If sign-in or account setup fails, retry from the displayed message; a failed download leaves existing projects unchanged.

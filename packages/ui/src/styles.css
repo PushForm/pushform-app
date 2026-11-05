@@ -3136,6 +3136,7 @@ h4.pf-xui-text { font-size: 12px; }
 .upload-form .rights { display: flex; align-items: flex-start; gap: 10px; font-weight: 400; font-size: 14px; }
 .upload-form .rights input { width: 18px; height: 18px; margin: 1px 0 0; flex: none; }
 .dialog-foot { display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 16px 28px; border-top: 1px solid var(--line); }
+.review-back { margin-right: auto; }
 .save-state { margin-right: auto; font-size: 13px; color: var(--muted); }
 .save-state [role='alert'] { color: #a42d24; }
 .dialog-foot button:disabled { opacity: .45; cursor: default; }

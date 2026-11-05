@@ -51,6 +51,12 @@ describe('catalog boundary', () => {
     controller.abort();
     await expect(request).rejects.toMatchObject({ name: 'AbortError' });
   });
+  it('retains complete legacy snapshots beyond the former count and byte ceilings',async()=>{
+    const models=Array.from({length:1001},(_,index)=>exampleModel({id:`model-${index}`,description:'x'.repeat(2500)}));
+    const body=JSON.stringify({version:1,models});expect(body.length).toBeGreaterThan(2097152);
+    const loader=createCatalogLoader('https://example.com/catalog.json',vi.fn<typeof fetch>().mockResolvedValue(new Response(body)))!;
+    expect(await loader(new AbortController().signal)).toHaveLength(1001);
+  });
 });
 
 it('does not fall back to an empty catalog when cloud configuration is partial or invalid', async () => {

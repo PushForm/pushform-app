@@ -103,3 +103,5 @@ A new publication may show **Rendering preview…** while its server job waits o
 FreeCAD previews use visible saved BREP shapes, without running document scripts or recomputing the model. Assembly links/group placements and files without stored shape geometry are not supported by this preview converter.
 
 When several files are available, downloads put the native PushForm model first, then STEP and common exchange formats, with FreeCAD sources last. The preview also prefers the native model over source and notice archives. Downloads include attribution in a ZIP package; an archive download keeps a single `.zip` filename suffix.
+
+Commons has no fixed limit on the total number of published models. Individual models still need supported files, complete attribution and redistribution rights, and must meet the file size limits.

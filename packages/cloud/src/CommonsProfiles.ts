@@ -21,7 +21,7 @@ export type CommonsProfileFields = z.infer<typeof commonsProfileFieldsSchema>;
 export type CommonsPublicProfile = z.infer<typeof commonsPublicProfileSchema>;
 export type CommonsProfile = z.infer<typeof commonsProfileSchema>;
 export interface CommonsProfilePage { profile: CommonsPublicProfile; models: z.infer<typeof catalogModelSchema>[] }
-const pageSchema = z.object({profile:commonsPublicProfileSchema,models:z.array(catalogModelSchema).max(1000)}).strict();
+const pageSchema = z.object({profile:commonsPublicProfileSchema,models:z.array(catalogModelSchema)}).strict();
 
 export function commonsProfileError(error: {message?:string}):Error {
   const message=error.message??'';

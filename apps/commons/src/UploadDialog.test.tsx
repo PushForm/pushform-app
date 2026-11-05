@@ -274,6 +274,7 @@ it('uses the editor-rendered current view and uploads it without waiting for ser
   expect(screen.getByRole('img', { name: 'Preview of cabinet' }).getAttribute('src')).toBe('blob:preview');
   expect(screen.queryByRole('button', { name: 'Replace file' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull();
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Add a cover photo' }) as HTMLButtonElement).disabled).toBe(false));
   const cover = new File(['photo'], 'cover.png', { type: 'image/png' });
   fireEvent.change(screen.getByLabelText('Choose a cover photo'), { target: { files: [cover] } });
   await screen.findByRole('img', { name: 'Cover photo' });

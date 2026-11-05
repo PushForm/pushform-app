@@ -1339,8 +1339,17 @@ isOneToOne: false
 "commons_begin_profile_image":
 { Args: { "p_format": string,"p_height": number,"p_kind": string,"p_sha256": string,"p_size_bytes": number,"p_width": number }; Returns: Json
                            },
+"commons_browse":
+{ Args: { "p_after_id"?: string,"p_after_published_at"?: string,"p_as_of"?: string,"p_category"?: string,"p_commercial"?: boolean,"p_license"?: string,"p_limit"?: number,"p_query"?: string }; Returns: Json
+                           },
 "commons_catalog":
 { Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"commons_catalog_items":
+{ Args: { "p_ids": (string)[] }; Returns: Json
+                           },
+"commons_catalog_models":
+{ Args: { "p_ids": (string)[] }; Returns: Json
                            },
 "commons_catalog_page":
 { Args: { "p_after"?: string,"p_as_of"?: string,"p_limit"?: number }; Returns: Json

@@ -3235,3 +3235,4 @@ h4.pf-xui-text { font-size: 12px; }
   .pf-publishing-host .upload-dialog { max-height: 100dvh; border-radius: 0; }
   .pf-publishing-host .dialog-head, .pf-publishing-host .dialog-body, .pf-publishing-host .dialog-foot { padding-left: 18px; padding-right: 18px; }
 }
+.pf-commons-browser .commons-load-more { display:flex; flex-direction:column; align-items:center; gap:12px; padding:24px 0; }

@@ -18,6 +18,8 @@ On a model page, **Save to collection** adds or removes that model using your co
 
 On your collection's page, choose **Edit collection** to change its details or visibility, remove models, and use **Move up** or **Move down** to set their order. To add models, open a model's page and choose **Save to collection**. The first four available models form its cover. Choose **Save collection** to apply your edits. You can keep up to 100 collections with up to 100 models each. If someone edits the same collection in another tab, reload before saving again; a failed save keeps your draft available for correction.
 
+## Collection visibility and credits
+
 Collections follow each model's current published version. Withdrawn models disappear from public collection views, and making a collection private removes it from public browsing and Featured. A collection does not transfer ownership or replace its models' licenses and credits. **Delete collection** removes only the collection; its models stay in Commons.
 
 Public profiles show the creator's **Public collections** below their published models. Collections appear once they contain a model available in Commons. Open a collection card to browse its models. Private collections appear only in **My collections**, including when you view your own public profile.
@@ -113,3 +115,7 @@ Commons has no fixed limit on the total number of published models. Individual m
 The Featured section highlights models, collections and creators. Choose a creator card to visit their public profile. Commons admins can choose **Feature** on a public profile, or use **Admin → Featured → Add featured item** and filter by **Creators**. Search by name or handle, then add the creator. Move and remove creators using the same controls as other featured items. Hidden or deleted profiles do not appear on the homepage.
 
 Creators credited on imported models can also be featured without a Commons account. In the picker, **Credited creator** entries show their source library. Their pages list currently published models carrying those credits; they are not account profiles. The same creator name from different source libraries appears separately. Models linked to an account profile remain associated with that profile.
+
+## Browse a large library
+
+Commons and the editor’s Commons browser load a small first set of models, then add more as you scroll. The next set is prepared in advance. **Load more models** also works with a keyboard. If a later set fails, your current results stay visible and **Retry loading more** tries again. Search and filters cover the entire library, including models that have not appeared on screen yet.

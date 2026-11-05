@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import { useBrowsePaging, MoreBrowseResults } from '@pushform/commons-ui/BrowsePaging';
 import { sortedModelFiles } from './modelFiles';
 import { commonsFileUrl, CommonsUnavailableError, type CommonsProfile, type CommonsCollections } from '@pushform/cloud';
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
@@ -78,7 +79,7 @@ function ModelDetail({ model, filesUrl, account, editorUrl }: { model: CatalogMo
 }
 
 export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUrl, collections=null }: { loadCatalog: CatalogLoader | null; filesUrl?: string | undefined; account?:CommonsAccount|null; publishPage?:((route:PublishRoute,catalogReady:boolean)=>ReactNode)|undefined;editorUrl?:string|undefined;collections?:CommonsCollections|null }) {
-  const [state, setState] = useState<CatalogState>({ kind: loadCatalog ? 'loading' : 'unconfigured' });
+  const [fullState, setState] = useState<CatalogState>({ kind: loadCatalog ? 'loading' : 'unconfigured' });
   const [attempt, setAttempt] = useState(0);
   useEffect(()=>{const refresh=()=>setAttempt(value=>value+1);window.addEventListener('commons:catalog-changed',refresh);return()=>window.removeEventListener('commons:catalog-changed',refresh);},[]);
   const [filters, setFilters] = useState<CatalogFilters>(emptyFilters);
@@ -92,7 +93,11 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
   const profileLookup:ProfileLookup|null=profileHandle!==null?{handle:profileHandle}:legacyPersonId!==null?{id:legacyPersonId}:null;
   const creditedCreatorId=/^#creators\/(credited-[a-f0-9]{32})$/.exec(hash)?.[1]??null;
   const onProfile=profileLookup!==null||creditedCreatorId!==null;
+  const paged = Boolean(loadCatalog?.browse && location.path === '/' && ['', '#browse', '#main'].includes(hash));
+  const paging = useBrowsePaging(paged ? loadCatalog?.browse ?? null : null, filters, attempt, filesUrl);
+  const state: CatalogState = paged ? paging.loading ? { kind: 'loading' } : paging.error && !paging.models.length ? { kind: paging.error instanceof CommonsUnavailableError ? 'unconfigured' : 'error' } : { kind: 'ready', models: paging.models } : fullState;
   const heading = useRef<HTMLDivElement>(null);
+  const focusedRoute = useRef<{ key: string; done: boolean }>({ key: '', done: false });
   const own=useOwnProfile(account);
   useEffect(() => {
     const update = () => {const next=currentCommonsLocation();setLocation(current=>next.path===current.path&&next.hash===current.hash?current:next);};
@@ -100,27 +105,33 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
     return () => {window.removeEventListener('hashchange', update);window.removeEventListener('popstate', update);};
   }, []);
   useEffect(() => {
+    if (paged) return;
     if (!loadCatalog) { setState({ kind: 'unconfigured' }); return; }
     const controller = new AbortController();
     setState({ kind: 'loading' });
-    void loadCatalog(controller.signal).then((models) => {
+    const request = selectedId && loadCatalog.byIds ? loadCatalog.byIds([selectedId], controller.signal) : loadCatalog(controller.signal);
+    void request.then((models) => {
       if (!controller.signal.aborted) setState({ kind: 'ready', models });
     }).catch((error: unknown) => { if (!controller.signal.aborted) setState({ kind: error instanceof CommonsUnavailableError ? 'unconfigured' : 'error' }); });
     return () => controller.abort();
-  }, [loadCatalog, attempt]);
+  }, [loadCatalog, attempt, paged, selectedId]);
   const models = state.kind === 'ready' ? state.models : [];
-  const shown = filterModels(models, filters);
+  const shown = paged ? models : filterModels(models, filters);
   const selected = selectedId ? models.find((model) => model.id === selectedId) : null;
   useEffect(() => {
-    if(onProfile)return;
-    if(collectionRoute){heading.current?.focus({preventScroll:true});heading.current?.scrollIntoView?.({block:'start'});return;}
-    if(hash==='#account'||publishRoute(hash)){document.title=hash==='#account'?'Your profile — PushForm Commons':'My models — PushForm Commons';heading.current?.focus({preventScroll:true});return;}
+    const key = location.path + hash;
+    if (focusedRoute.current.key !== key) focusedRoute.current = { key, done: false };
+    const focusHeading = () => { if (!focusedRoute.current.done) heading.current?.focus({ preventScroll: true }); };
+    if(onProfile){focusedRoute.current.done=true;return;}
+    if(collectionRoute){if(!focusedRoute.current.done){focusHeading();heading.current?.scrollIntoView?.({block:'start'});}focusedRoute.current.done=true;return;}
+    if(hash==='#account'||publishRoute(hash)){document.title=hash==='#account'?'Your profile — PushForm Commons':'My models — PushForm Commons';focusHeading();focusedRoute.current.done=true;return;}
     document.title = selected ? `${selected.title} — PushForm Commons` : 'PushForm Commons — Models for your next project';
-    if (state.kind !== 'ready' || !window.location.hash) return;
-    if (!document.activeElement?.closest('.catalog-tabs')) heading.current?.focus({ preventScroll: true });
+    if (state.kind !== 'ready' || !window.location.hash || focusedRoute.current.done) return;
+    if (!document.activeElement?.closest('.catalog-tabs')) focusHeading();
     const target = selectedId ? heading.current : document.getElementById('browse');
     target?.scrollIntoView?.({ block: 'start' });
-  }, [selected, selectedId, state.kind,onProfile,hash,collectionRoute]);
+    focusedRoute.current.done = true;
+  }, [selected, selectedId, state.kind,onProfile,hash,collectionRoute,location.path]);
   const options = (values: string[]) => [...new Set(values)].sort().map((value) => <option key={value} value={value}>{value}</option>);
   const update = (patch: Partial<CatalogFilters>) => setFilters((current) => ({ ...current, ...patch }));
   return <CollectionsProvider service={collections} account={account}><div className="commons">
@@ -136,29 +147,30 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
           <h1>Good projects start<br />with <em>shared ideas.</em></h1>
           <p>Find a model. Explore a collection. Make it your own.</p>
         </section>
-        <FeaturedSection models={models} filesUrl={filesUrl}/>
+        <FeaturedSection models={models} filesUrl={filesUrl} loadModels={loadCatalog?.byIds}/>
         <section id="browse" aria-labelledby="browse-title" className="browse">
           <div className="section-heading"><div><p className="eyebrow">Find your starting point</p><h2 id="browse-title">{onCollections?'Browse collections':'Browse models'}</h2></div>
-            {account ? <a className="secondary-button" href="#collections/new">New collection</a> : state.kind === 'ready' && <span className="catalog-count">{models.length} {models.length === 1 ? 'model' : 'models'}</span>}</div>
+            {account ? <a className="secondary-button" href="#collections/new">New collection</a> : state.kind === 'ready' && <span className="catalog-count">{paged ? paging.total : models.length} {(paged ? paging.total : models.length) === 1 ? 'model' : 'models'}</span>}</div>
           <div className="catalog-tabs" role="tablist" aria-label="Browse Commons" onKeyDown={event=>{
             const keys=['ArrowLeft','ArrowRight','Home','End'];if(!keys.includes(event.key))return;event.preventDefault();
             const next=event.key==='Home'?false:event.key==='End'?true:!onCollections;
             window.location.hash=next?'#collections':'#browse';document.getElementById(next?'browse-collections-tab':'browse-models-tab')?.focus();
           }}><a role="tab" id="browse-models-tab" aria-selected={!onCollections} aria-controls="catalog-results" href="#browse">Models</a><a role="tab" id="browse-collections-tab" aria-selected={onCollections} aria-controls="catalog-results" href="#collections">Collections</a></div>
           <div className="filters" role="search" aria-label={onCollections?'Search collections':'Search models'}>
-            <label className="search-field"><span>{onCollections?'Search collections':'Search models'}</span><input type="search" placeholder={onCollections?'Try workshop essentials or outdoor projects…':'Try a chair, hinge or garden bench…'} value={filters.query} onChange={(event) => update({ query: event.target.value })} /></label>
-            <label><span>Category</span><select value={filters.category} onChange={(event) => update({ category: event.target.value })}><option value="">All categories</option>{options(models.map((model) => model.category))}</select></label>
-            <label><span>License</span><select value={filters.license} onChange={(event) => update({ license: event.target.value })}><option value="">All licenses</option>{options(models.flatMap((model) => model.licenses.map((license) => license.name)))}</select></label>
+            <label className="search-field"><span>{onCollections?'Search collections':'Search models'}</span><input type="search" maxLength={200} placeholder={onCollections?'Try workshop essentials or outdoor projects…':'Try a chair, hinge or garden bench…'} value={filters.query} onChange={(event) => update({ query: event.target.value })} /></label>
+            <label><span>Category</span><select value={filters.category} onChange={(event) => update({ category: event.target.value })}><option value="">All categories</option>{options(paged ? paging.categories : models.map((model) => model.category))}</select></label>
+            <label><span>License</span><select value={filters.license} onChange={(event) => update({ license: event.target.value })}><option value="">All licenses</option>{options(paged ? paging.licenses : models.flatMap((model) => model.licenses.map((license) => license.name)))}</select></label>
             <label className="commercial"><input type="checkbox" checked={filters.commercial} onChange={(event) => update({ commercial: event.target.checked })} />Commercial use permitted</label>
           </div>
           {state.kind === 'unconfigured' && <section className="status-panel" role="status"><span className="status-icon" aria-hidden="true">◇</span><h3>A place for what you’ll make next.</h3><p>The Commons catalog isn’t available yet. Check back as the library takes shape.</p></section>}
           {state.kind === 'loading' && <p className="status-panel" role="status">Loading models…</p>}
           {state.kind === 'error' && <section className="status-panel" role="alert"><h3>We couldn’t load the catalog.</h3><p>Please try again in a moment.</p><button onClick={() => setAttempt((value) => value + 1)}>Try again</button></section>}
           <div id="catalog-results" role="tabpanel" aria-labelledby={onCollections?'browse-collections-tab':'browse-models-tab'}>{onCollections?<PublicCollectionResults models={models} filesUrl={filesUrl} filters={filters}/>:state.kind === 'ready' && <>
-            <p className="result-count" role="status">{shown.length} {shown.length === 1 ? 'model' : 'models'}{filters.query && ` matching “${filters.query}”`}</p>
-            {shown.length ? <ModelGrid>{shown.map((model) => <ModelCard key={model.id} model={model} filesUrl={filesUrl} />)}</ModelGrid> : <section className="status-panel"><h3>{models.length ? 'No models match those filters.' : 'The library is ready for its first models.'}</h3>
-              <p>{models.length ? 'Try a different search or broaden your filters.' : 'Published models will appear here.'}</p>
-              {models.length > 0 && <button onClick={() => setFilters(emptyFilters)}>Clear filters</button>}</section>}
+            <p className="result-count" role="status">{paged && paging.more ? `${shown.length} of ${paging.total}` : shown.length} {(paged ? paging.total : shown.length) === 1 ? 'model' : 'models'}{filters.query && ` matching “${filters.query}”`}</p>
+            {shown.length ? <ModelGrid>{shown.map((model) => <ModelCard key={model.id} model={model} filesUrl={filesUrl} />)}</ModelGrid> : <section className="status-panel"><h3>{(models.length || paged && (filters.query || filters.category || filters.license || filters.commercial)) ? 'No models match those filters.' : 'The library is ready for its first models.'}</h3>
+              <p>{(models.length || paged && (filters.query || filters.category || filters.license || filters.commercial)) ? 'Try a different search or broaden your filters.' : 'Published models will appear here.'}</p>
+              {(models.length > 0 || paged && (filters.query || filters.category || filters.license || filters.commercial)) && <button onClick={() => setFilters(emptyFilters)}>Clear filters</button>}</section>}
+            {paged && <MoreBrowseResults count={shown.length} more={paging.more} loading={paging.loadingMore} error={paging.error} onMore={paging.loadMore}/>}
           </>}</div>
         </section>
       </>}

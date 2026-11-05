@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
 import { commonsProfileImageUrl } from '@pushform/cloud';
 import { profilePath } from './route';
-import type { CommonsCreditedCreator, CommonsPublicProfile, CollectionFields, CommonsCollection, CommonsCollections, CommonsDiscovery } from '@pushform/cloud';
+import type { CommonsModelsLoader, CommonsCreditedCreator, CommonsPublicProfile, CollectionFields, CommonsCollection, CommonsCollections, CommonsDiscovery } from '@pushform/cloud';
 import type { CommonsAccount } from './account';
 import { CommonsAccessGate } from './CommonsAccess';
 import { CommonsThumbnail } from './CommonsPreview';
@@ -86,7 +86,7 @@ export function CollectionMosaic({ collection, models, filesUrl }: { collection:
   </div>;
 }
 export function CollectionCard({ collection, models, filesUrl, privateLabel = false }: { collection: CommonsCollection; models: CatalogModel[]; filesUrl: string | undefined; privateLabel?: boolean }) {
-  const count = collection.modelIds.filter(id => models.some(model => model.id === id)).length;
+  const count = privateLabel ? collection.modelIds.filter(id => models.some(model => model.id === id)).length : collection.modelIds.length;
   return <article className="model-card collection-card">
     <a href={`#collections/${collection.id}`} aria-label={`View collection ${collection.title}`}><CollectionMosaic collection={collection} models={models} filesUrl={filesUrl} /></a>
     <div className="card-body"><p className="eyebrow">Collection · {count} {count === 1 ? 'model' : 'models'}{privateLabel ? ` · ${collection.visibility}` : ''}</p>
@@ -140,12 +140,25 @@ export function CreditedCreatorPage({ id, models, filesUrl }: { id: string; mode
     <h2>Published models</h2><ModelGrid>{models.filter(model => creator.modelIds.includes(model.id)).map(model => <ModelCard key={model.id} model={model} filesUrl={filesUrl} />)}</ModelGrid>
   </article>;
 }
-export function FeaturedSection({ models, filesUrl }: { models: CatalogModel[]; filesUrl: string | undefined }) {
+export function FeaturedSection({ models, filesUrl, loadModels }: { models: CatalogModel[]; filesUrl: string | undefined; loadModels?: CommonsModelsLoader | undefined }) {
   const { service, discovery, error, refresh, canFeature } = useCollections();
   const [page, setPage] = useState(0);
-  const items = discovery?.featured.filter(item => item.type === 'model' ? models.some(model => model.id === item.targetId) : item.type === 'credited_creator' ? discovery.creditedCreators.some(creator => creator.id === item.targetId) : item.type === 'creator' ? discovery.creators.some(creator => creator.id === item.targetId) : discovery.collections.some(collection => collection.id === item.targetId)) ?? [];
+  const items = discovery?.featured.filter(item => item.type === 'model' ? Boolean(loadModels) || models.some(model => model.id === item.targetId) : item.type === 'credited_creator' ? discovery.creditedCreators.some(creator => creator.id === item.targetId) : item.type === 'creator' ? discovery.creators.some(creator => creator.id === item.targetId) : discovery.collections.some(collection => collection.id === item.targetId)) ?? [];
   const pages = Math.ceil(items.length / 3);
   const currentPage = Math.min(page, Math.max(0, pages - 1));
+  const ids = items.slice(currentPage * 3, currentPage * 3 + 3).flatMap(item => item.type === 'model' ? [item.targetId]
+    : item.type === 'collection' ? discovery?.collections.find(value => value.id === item.targetId)?.modelIds.slice(0, 4) ?? []
+    : item.type === 'credited_creator' ? discovery?.creditedCreators.find(value => value.id === item.targetId)?.modelIds.slice(0, 1) ?? [] : []).join(',');
+  const [extra, setExtra] = useState<CatalogModel[]>([]);
+  const [modelError, setModelError] = useState<string | null>(null);
+  useEffect(() => {
+    setExtra([]); setModelError(null);
+    if (!loadModels || !ids) return;
+    const controller = new AbortController();
+    void loadModels(ids.split(','), controller.signal).then(value => { if (!controller.signal.aborted) setExtra(value); }, error => { if (!controller.signal.aborted) setModelError(message(error)); });
+    return () => controller.abort();
+  }, [loadModels, ids, discovery]);
+  const featuredModels = [...extra, ...models.filter(model => !extra.some(value => value.id === model.id))];
   if (!service) return null;
   return <section className="featured-section" aria-labelledby="featured-title">
     <div className="section-heading"><div><h2 id="featured-title">Featured</h2><p className="section-description">Models, collections and creators, picked for makers.</p></div>{canFeature && <a href={adminUrl}>Manage featured</a>}</div>
@@ -153,7 +166,7 @@ export function FeaturedSection({ models, filesUrl }: { models: CatalogModel[]; 
       <ModelGrid className="featured-grid">{items.slice(currentPage * 3, currentPage * 3 + 3).map(item => {
         if (item.type === 'credited_creator') {
           const creator = discovery.creditedCreators.find(value => value.id === item.targetId);
-          return creator ? <CreditedCreatorCard key={item.id} creator={creator} models={models} filesUrl={filesUrl} /> : null;
+          return creator ? <CreditedCreatorCard key={item.id} creator={creator} models={featuredModels} filesUrl={filesUrl} /> : null;
         }
         if (item.type === 'creator') {
           const creator = discovery.creators.find(value => value.id === item.targetId);
@@ -161,12 +174,13 @@ export function FeaturedSection({ models, filesUrl }: { models: CatalogModel[]; 
         }
         if (item.type === 'collection') {
           const collection = discovery.collections.find(value => value.id === item.targetId);
-          return collection ? <CollectionCard key={item.id} collection={collection} models={models} filesUrl={filesUrl} /> : null;
+          return collection ? <CollectionCard key={item.id} collection={collection} models={featuredModels} filesUrl={filesUrl} /> : null;
         }
-        const model = models.find(value => value.id === item.targetId);
+        const model = featuredModels.find(value => value.id === item.targetId);
         return model ? <ModelCard key={item.id} model={model} filesUrl={filesUrl} typeLabel="Model" /> : null;
       })}</ModelGrid>
       {pages > 1 && <div className="featured-pagination" aria-label="Featured pages"><button className="secondary-button" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>Previous featured</button><span role="status">{currentPage * 3 + 1}–{Math.min(items.length, currentPage * 3 + 3)} of {items.length}</span><button className="secondary-button" disabled={currentPage === pages - 1} onClick={() => setPage(currentPage + 1)}>Next featured</button></div>}
+      {modelError && <p role="alert">{modelError} <button onClick={refresh}>Retry featured models</button></p>}
       {items.length === 0 && <p className="section-description">Featured projects will appear here.</p>}
     </>}
   </section>;

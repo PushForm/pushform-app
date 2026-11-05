@@ -3,8 +3,9 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { LuLibrary } from 'react-icons/lu';
+import { useBrowsePaging, MoreBrowseResults } from '@pushform/commons-ui/BrowsePaging';
 import { UploadDialog } from '@pushform/commons-ui';
-import { CommonsPublishing, deleteCommonsDraft, type CommonsOwnModels, readCommonsCatalog, isCommonsOpenable, loadCommonsModel, type CatalogModel, type OpenedCommonsModel } from '@pushform/cloud';
+import { CommonsPublishing, deleteCommonsDraft, type CommonsOwnModels, createCommonsBrowseLoader, isCommonsOpenable, loadCommonsModel, type CatalogModel, type OpenedCommonsModel } from '@pushform/cloud';
 import type { CommonsAccount } from '@pushform/commons-ui/account';
 import { MESH_UNITS, probeMeshImport, type MeshImportOptions, type MeshUnit } from '@pushform/io';
 import { openCommonsModel, placeCommonsModel } from '../commonsOpening';
@@ -23,7 +24,7 @@ export function CommonsBrowser({ account, filesUrl, session, target, onOpened, o
   const [mine, setMine] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<{ id: string; revision: string; kind: 'draft' | 'published' } | null>(null);
-  const [models, setModels] = useState<CatalogModel[] | null>(null); const [error, setError] = useState('');
+  const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0); const [query, setQuery] = useState('');
   const [category, setCategory] = useState(''); const [license, setLicense] = useState(''); const [commercial, setCommercial] = useState(false);
   const [selected, setSelected] = useState<CatalogModel | null>(null); const [busy, setBusy] = useState(false);
@@ -41,12 +42,10 @@ export function CommonsBrowser({ account, filesUrl, session, target, onOpened, o
     if (app) app.inert = true; root.current?.querySelector<HTMLElement>('button')?.focus();
     return () => { if (app) app.inert = inert; if (focus?.isConnected) focus.focus(); };
   }, [target]);
-  useEffect(() => {
-    const controller = new AbortController(); setModels(null); setError('');
-    if (!account) { setError('Commons is not configured in this build.'); return; }
-    void readCommonsCatalog(account.client, controller.signal).then(items => { setModels(items); setSelected(current => current ? items.find(item => item.id === current.id) ?? null : null); }, cause => { if (!controller.signal.aborted) setError(cause.message); });
-    return () => { controller.abort(); run.current?.abort(); };
-  }, [account, attempt]);
+  const browseLoader = useMemo(() => account ? createCommonsBrowseLoader(account.client) : null, [account]);
+  const paging = useBrowsePaging(mine && !target ? null : browseLoader, { query, category, license, commercial }, attempt, filesUrl);
+  const models = paging.loading ? null : paging.models;
+  useEffect(() => () => run.current?.abort(), []);
   const installModel = async (model: PreparedModel, signal: AbortSignal, mesh?: MeshImportOptions) => {
     if (model.insert) {
       if (!model.target || !session.tabs.includes(model.target) || model.target.app.document.context.path.join('/') !== model.path) throw new Error('The target design or editing context changed. Choose it again.');
@@ -105,7 +104,7 @@ export function CommonsBrowser({ account, filesUrl, session, target, onOpened, o
     finally { setBusy(false); }
   };
   const choices = (values: string[]) => [...new Set(values)].sort().map(value => <option key={value}>{value}</option>);
-  const shown = (models ?? []).filter(m => `${m.title} ${m.description} ${m.creator}`.toLowerCase().includes(query.toLowerCase()) && (!category || m.category === category) && (!license || m.licenses.some(l => l.name === license)) && (!commercial || m.licenses.every(l => l.commercialUse === 'allowed'))).sort((a,b) => b.publishedAt.localeCompare(a.publishedAt) || a.id.localeCompare(b.id));
+  const shown = models ?? [];
   return <section ref={root} onKeyDown={event => { if (!target) return; if (event.key === 'Escape') { run.current?.abort(); onClose(); } if (event.key === 'Tab') { const controls = [...root.current!.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), summary, a[href]')]; const index = controls.indexOf(document.activeElement as HTMLElement); if (controls.length && (index < 0 || event.shiftKey && index === 0 || !event.shiftKey && index === controls.length - 1)) { event.preventDefault(); controls[event.shiftKey ? controls.length - 1 : 0]?.focus(); } } }} className="pf-commons-browser" aria-label={target ? 'Import from Commons' : 'Commons catalog'}>
     <header><div><h2>{target ? 'Import from Commons' : <><LuLibrary aria-hidden="true"/>Commons</>}</h2>{target ? <p>Destination: {target.name}</p> : <p className="pf-commons-tagline">Good projects start with shared ideas.</p>}</div>{target && <button onClick={() => { run.current?.abort(); onClose(); }}>Close</button>}</header>
     {!target && <div className="pf-tabs pf-commons-tabs" role="tablist" aria-label="Commons sections">{['Browse', 'My models'].map((label, index) => {
@@ -120,7 +119,7 @@ export function CommonsBrowser({ account, filesUrl, session, target, onOpened, o
         }}>{label}</button>;
     })}</div>}
     {editing && account && createPortal(<div className="pf-publishing-host"><UploadDialog account={account} filesUrl={filesUrl} modelId={editing} onClose={() => { setEditing(null); setAttempt(value => value + 1); }} onPublished={() => { setEditing(null); setAttempt(value => value + 1); }} /></div>, document.body)}
-    {error && <p role="alert">{error} <button onClick={() => setAttempt(value => value + 1)}>Try again</button></p>}
+    {(error || !account || paging.error && !models?.length) && <p role="alert">{error || (!account ? 'Commons is not configured in this build.' : paging.error?.message)} <button onClick={() => setAttempt(value => value + 1)}>Try again</button></p>}
     <div role={!target ? 'tabpanel' : undefined} id={`${id}-panel`} aria-labelledby={!target ? `${id}-tab-${mine ? 1 : 0}` : undefined}>
     {mine && !target ? <section aria-label="My Commons models">
       {confirm && <section role="alertdialog" aria-label={confirm.kind === 'draft' ? 'Delete draft' : 'Withdraw model'}><p>{confirm.kind === 'draft' ? 'Delete this private draft? The working document and any published revision are retained.' : 'Withdraw the public model and stop new downloads? Existing copies keep their original rights.'}</p><button disabled={busy} onClick={() => setConfirm(null)}>Cancel</button><button disabled={busy} onClick={() => { void modifyOwn(); }}>Confirm</button></section>}
@@ -133,10 +132,12 @@ export function CommonsBrowser({ account, filesUrl, session, target, onOpened, o
     </> : selected ? <CommonsModelDetail model={selected} filesUrl={filesUrl} busy={busy} importing={!!target}
       destinationName={destination?.name} onBack={() => setSelected(null)} onOpen={() => { void load(false); }} onInsert={() => { void load(true); }}
       destinationPicker={!target && available.length > 0 && <label>Import into an open design<select value={catalogTarget} onChange={event => setCatalogTarget(event.target.value)}><option value="">Choose an open design</option>{available.map(tab => <option key={tab.id} value={tab.id}>{tab.name}</option>)}</select></label>}
-    /> : <><div className="pf-commons-filters"><label>Search models<input value={query} onChange={event => setQuery(event.target.value)} /></label><label>Category<select value={category} onChange={event => setCategory(event.target.value)}><option value="">All categories</option>{choices((models ?? []).map(m => m.category))}</select></label><label>License<select value={license} onChange={event => setLicense(event.target.value)}><option value="">All licenses</option>{choices((models ?? []).flatMap(m => m.licenses.map(l => l.name)))}</select></label><label><input type="checkbox" checked={commercial} onChange={event => setCommercial(event.target.checked)} />Commercial use permitted</label></div>
-      {!models && !error && <p role="status">Loading Commons…</p>}
-      {models && !shown.length && <p>No matching models. <button onClick={() => { setQuery('');setCategory('');setLicense('');setCommercial(false); }}>Clear filters</button></p>}
+    /> : <><div className="pf-commons-filters"><label>Search models<input maxLength={200} value={query} onChange={event => setQuery(event.target.value)} /></label><label>Category<select value={category} onChange={event => setCategory(event.target.value)}><option value="">All categories</option>{choices(paging.categories)}</select></label><label>License<select value={license} onChange={event => setLicense(event.target.value)}><option value="">All licenses</option>{choices(paging.licenses)}</select></label><label><input type="checkbox" checked={commercial} onChange={event => setCommercial(event.target.checked)} />Commercial use permitted</label></div>
+      {account && !models && !error && !paging.error && <p role="status">Loading Commons…</p>}
+      {models && !shown.length && !paging.error && <p>No matching models. <button onClick={() => { setQuery('');setCategory('');setLicense('');setCommercial(false); }}>Clear filters</button></p>}
+      <p role="status">{paging.loading ? '' : `${shown.length} of ${paging.total} models`}</p>
       <div className="pf-commons-grid">{shown.map(model => <button key={model.id} onClick={() => setSelected(model)}><CommonsModelImage key={model.revision} model={model} filesUrl={filesUrl} decorative/><strong>{model.title}</strong><span>by {model.creator}</span><span>{[...new Set(model.licenses.map(l => l.name))].join(', ')}</span><span>{model.formats.join(', ')}</span></button>)}</div>
+      <MoreBrowseResults count={shown.length} more={paging.more} loading={paging.loadingMore} error={paging.error} onMore={paging.loadMore}/>
     </>}
     </div>
   </section>;

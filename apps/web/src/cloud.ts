@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { CloudSession, createBrowserCloud, rememberCommonsOpen, forgetCommonsOpen } from '@pushform/cloud';
+import { CloudSession, createBrowserCloud, rememberCommonsOpen, forgetCommonsOpen, rememberCampaign, forgetCampaign } from '@pushform/cloud';
 import type { RequestsConfig } from '@pushform/ui';
 
 export function configuredCloud() {
   const url = import.meta.env.VITE_SUPABASE_URL;
   const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY;
-  const none = { commons: undefined, session: new CloudSession(null), files: undefined, profiles: undefined, account: undefined, billing: undefined, usage: undefined, staff: undefined };
+  const none = { commons: undefined, session: new CloudSession(null), files: undefined, profiles: undefined, account: undefined, billing: undefined, usage: undefined, staff: undefined, campaign: undefined };
   if (!url || !publishableKey) return none;
   try { return createBrowserCloud({ url, publishableKey }); }
   catch { return none; }
@@ -27,6 +27,13 @@ export function configuredRequests(): RequestsConfig | undefined {
 }
 
 const commonsStorage = (() => { try { return window.sessionStorage; } catch { return null; } })();
+export const campaignToken = rememberCampaign(new URL(window.location.href), commonsStorage);
+const campaignUrl = new URL(window.location.href);
+if (campaignUrl.searchParams.has('campaignHandoff')) {
+  campaignUrl.searchParams.delete('campaignHandoff');
+  window.history.replaceState(window.history.state, '', campaignUrl.pathname + campaignUrl.search + campaignUrl.hash);
+}
+export const clearCampaign = () => forgetCampaign(commonsStorage);
 export const commonsIntent = rememberCommonsOpen(new URL(window.location.href), commonsStorage);
 export function clearCommonsIntent(): void {
   forgetCommonsOpen(commonsStorage);
@@ -34,6 +41,6 @@ export function clearCommonsIntent(): void {
   for (const name of ['commonsModel', 'commonsRevision', 'commonsAsset']) url.searchParams.delete(name);
   window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
 }
-export const { session: cloudSession, files: cloudFiles, profiles: cloudProfiles, account: cloudAccount, billing: cloudBilling, usage: cloudUsage, staff: cloudStaff, commons: cloudCommons } = configuredCloud();
+export const { session: cloudSession, files: cloudFiles, profiles: cloudProfiles, account: cloudAccount, billing: cloudBilling, usage: cloudUsage, staff: cloudStaff, campaign: cloudCampaign, commons: cloudCommons } = configuredCloud();
 export const requestsConfig = configuredRequests();
 if (import.meta.hot) import.meta.hot.dispose(() => cloudSession.dispose());

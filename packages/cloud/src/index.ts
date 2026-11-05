@@ -24,3 +24,5 @@ export * from './CommonsProfiles';
 export * from './CommonsProfileImages';
 export * from './CommonsOpen';
 export * from './CommonsCollections';
+
+export * from './CloudCampaign';

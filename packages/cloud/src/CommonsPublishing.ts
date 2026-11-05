@@ -50,6 +50,11 @@ export class CommonsPublishing {
     if(result.error)throw failure(result.error.message);return result.data;
   }
   async mine(signal?:AbortSignal):Promise<CommonsOwnModels>{return stateSchema.parse(await this.rpc('commons_my_models',{},signal));}
+  /** Reads one owned model's current revisions and files, independently of account library size. */
+  async model(id:string,signal?:AbortSignal):Promise<CommonsOwnModels>{
+    if(!/^[a-z0-9][a-z0-9-]{0,95}$/.test(id))throw new Error('Use a lowercase model identifier with letters, numbers and hyphens.');
+    return stateSchema.parse(await this.rpc('commons_my_model',{p_id:id},signal));
+  }
   async submit(id:string,metadata:CommonsSubmission,rightsBasis:string,originalWork:boolean,expectedRevision:string|null,signal?:AbortSignal):Promise<CommonsOwnRevision>{
     if(!/^[a-z0-9][a-z0-9-]{0,95}$/.test(id))throw new Error('Use a lowercase model identifier with letters, numbers and hyphens.');
     if(rightsBasis.trim().length<20||rightsBasis.trim().length>4000)throw new Error('Describe your redistribution rights in 20–4,000 characters.');

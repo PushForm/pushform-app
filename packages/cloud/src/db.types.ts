@@ -1414,6 +1414,9 @@ isOneToOne: false
 "commons_my_collections":
 { Args: Record<PropertyKey, never>; Returns: Json
                            },
+"commons_my_model":
+{ Args: { "p_id": string }; Returns: Json
+                           },
 "commons_my_models":
 { Args: Record<PropertyKey, never>; Returns: Json
                            },

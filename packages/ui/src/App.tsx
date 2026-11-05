@@ -163,6 +163,9 @@ type WorkspaceProps = Omit<AppProps, 'usage' | 'activity'> & { activity?: Projec
  * refreshed model reopens with its textures.
  */
 function Workspace(props: WorkspaceProps): JSX.Element | null {
+  // Install recovered documents only after the saved account choices are available. Keep an existing session while locked.
+  const [started, setStarted] = useState(!props.locked);
+  useEffect(() => { if (!props.locked) setStarted(true); }, [props.locked]);
   // Hosts supplying an already-built app have no refresh recovery to defer. Normal startup paints feedback first.
   const [images, setImages] = useState<{ store: RefreshImageStore | undefined; native?: NativeRefreshSession | undefined } | null>(
     () => props.app ? { store: undefined } : null);
@@ -192,7 +195,7 @@ function Workspace(props: WorkspaceProps): JSX.Element | null {
     })();
     return () => { live = false; };
   }, []); // Read once: the workspace is keyed by its owner.
-  return images ? <WorkspaceSession {...props} refreshImages={images.store} nativeRefresh={images.native} /> : props.locked ? null : <WorkspaceLoading progress={progress} />;
+  return images && started ? <WorkspaceSession {...props} refreshImages={images.store} nativeRefresh={images.native} /> : props.locked ? null : <WorkspaceLoading progress={progress} />;
 }
 
 /** Keep the document session in memory while locked; unmount all interactive workspace UI. */

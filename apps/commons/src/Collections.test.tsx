@@ -25,7 +25,7 @@ async function setup(role = 'none', own = true) {
     if (name === 'admin_session') data = { role };
     if (name === 'commons_my_collections') data = collections;
     if (name === 'commons_collection') data = collection;
-    if (name === 'commons_discovery') data = { version: 1, creators: [], collections: [collection], featured: featured.map(({ id, type, targetId }) => ({ id, type, targetId })) };
+    if (name === 'commons_discovery') data = { version: 1, creditedCreators: [], creators: [], collections: [collection], featured: featured.map(({ id, type, targetId }) => ({ id, type, targetId })) };
     if (name === 'commons_save_collection') {
       const saved = { ...collection, title: args!.p_title, description: args!.p_description, visibility: args!.p_public ? 'public' : 'private', modelIds: args!.p_model_ids, version: 2 };
       collections = [saved as CommonsCollection]; data = saved;
@@ -56,7 +56,7 @@ it('places mixed featured content above filters and keeps it unchanged when brow
 it('keeps longer featured lists in one three-card page and makes later entries reachable', async () => {
   const auth = await setup();
   const models = Array.from({ length: 4 }, (_, index) => exampleModel({ id: `featured-${index}`, title: `Featured project ${index}` }));
-  vi.spyOn(auth.collections, 'discovery').mockResolvedValue({ version: 1, creators: [], collections: [], featured: models.map((value, index) => ({ id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`, type: 'model', targetId: value.id })) });
+  vi.spyOn(auth.collections, 'discovery').mockResolvedValue({ version: 1, creditedCreators: [], creators: [], collections: [], featured: models.map((value, index) => ({ id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`, type: 'model', targetId: value.id })) });
   render(<App {...auth} loadCatalog={async () => models} />);
   const featured = within(await screen.findByRole('region', { name: 'Featured' }));
   await featured.findByRole('link', { name: 'Featured project 0' });
@@ -70,7 +70,7 @@ it('keeps longer featured lists in one three-card page and makes later entries r
 it('preserves keyboard focus between browse tabs and excludes mixed-rights collections from commercial results', async () => {
   const auth = await setup();
   const restricted = exampleModel({ id: 'restricted-model', title: 'Restricted model', licenses: [{ ...model.licenses[0]!, commercialUse: 'restricted' }] });
-  vi.spyOn(auth.collections, 'discovery').mockResolvedValue({ version: 1, creators: [], collections: [{ ...collection, modelIds: [model.id, restricted.id] }], featured: [] });
+  vi.spyOn(auth.collections, 'discovery').mockResolvedValue({ version: 1, creditedCreators: [], creators: [], collections: [{ ...collection, modelIds: [model.id, restricted.id] }], featured: [] });
   render(<App {...auth} loadCatalog={async () => [model, restricted]} />);
   const modelsTab = screen.getByRole('tab', { name: 'Models' }); modelsTab.focus();
   fireEvent.keyDown(modelsTab, { key: 'ArrowRight' });
@@ -117,10 +117,10 @@ it('features a creator from their profile and shows their public card on the hom
   const creator = { id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', handle: 'test-maker', displayName: 'Test Maker', bio: '', avatarUrl: 'https://example.com/avatar.jpg', links: [] };
   auth.account.profiles.getByHandle = vi.fn().mockResolvedValue({ profile: creator, models: [] });
   let items: CommonsFeaturedState['items'] = [];
-  vi.spyOn(auth.collections, 'discovery').mockImplementation(async () => ({ version: 1, collections: [], creators: items.length ? [creator] : [], featured: items.map(({ id, type, targetId }) => ({ id, type, targetId })) }));
+  vi.spyOn(auth.collections, 'discovery').mockImplementation(async () => ({ version: 1, creditedCreators: [], collections: [], creators: items.length ? [creator] : [], featured: items.map(({ id, type, targetId }) => ({ id, type, targetId })) }));
   const feature = vi.spyOn(auth.collections, 'feature').mockImplementation(async () => {
     items = [{ id: collection.id, type: 'creator', targetId: creator.id, title: creator.displayName, available: true }];
-    return { version: 2, enabled: true, items, creators: [creator], collections: [], models: [] };
+    return { version: 2, enabled: true, items, creditedCreators: [], creators: [creator], collections: [], models: [] };
   });
   window.history.replaceState(null, '', '/u/test-maker');
   render(<App {...auth} loadCatalog={async () => [model]} />);
@@ -134,6 +134,24 @@ it('features a creator from their profile and shows their public card on the hom
   fireEvent.error(link.querySelector('img')!);
   expect(link.querySelector('img')).toBeNull();
   expect(featured.getByText('@test-maker')).toBeTruthy();
+});
+
+it('shows imported creator cards and opens their credited models without implying an account', async () => {
+  const auth = await setup();
+  const creator = { id: 'credited-' + 'a'.repeat(32), displayName: 'Example Creator', sourceName: 'Example Library', modelIds: [model.id] };
+  vi.spyOn(auth.collections, 'discovery').mockResolvedValue({ version: 1, creators: [], creditedCreators: [creator], collections: [], featured: [{ id: collection.id, type: 'credited_creator', targetId: creator.id }] });
+  vi.spyOn(auth.collections, 'creditedCreator').mockResolvedValue(creator);
+  render(<App {...auth} loadCatalog={async () => [model]} />);
+  const link = await screen.findByRole('link', { name: 'View creator Example Creator' });
+  expect(link.getAttribute('href')).toBe('#creators/' + creator.id);
+  window.location.hash = '#creators/' + creator.id; fireEvent(window, new HashChangeEvent('hashchange'));
+  await screen.findByRole('heading', { name: 'Example Creator' });
+  expect(screen.getByText(/not a Commons account profile/)).toBeTruthy();
+  expect(screen.getByRole('link', { name: model.title })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Feature' })).toBeNull();
+  vi.mocked(auth.collections.creditedCreator).mockResolvedValue(null);
+  window.location.hash = '#creators/credited-' + 'b'.repeat(32); fireEvent(window, new HashChangeEvent('hashchange'));
+  expect(await screen.findByRole('heading', { name: 'This creator listing is unavailable.' })).toBeTruthy();
 });
 it('shows only the viewed profile’s public collections and opens their detail page', async () => {
   const auth = await setup();

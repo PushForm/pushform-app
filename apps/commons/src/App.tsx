@@ -12,7 +12,7 @@ import type { CommonsAccount } from './account';
 import { CommonsModelPreview } from './CommonsPreview';
 import { CommonsOpenAction } from './CommonsOpenAction';
 import { filterModels, type CatalogFilters, type CatalogLoader, type CatalogModel } from './catalog';
-import { ProfileCollections, CollectionsProvider, CollectionsRoute, FeaturedSection, FeatureAction, ModelCollectionAction, PublicCollectionResults, CommonsAdminLink } from './Collections';
+import { ProfileCollections, CreditedCreatorPage, CollectionsProvider, CollectionsRoute, FeaturedSection, FeatureAction, ModelCollectionAction, PublicCollectionResults, CommonsAdminLink } from './Collections';
 
 type CatalogState = { kind: 'unconfigured' | 'loading' | 'error' } | { kind: 'ready'; models: CatalogModel[] };
 const emptyFilters: CatalogFilters = { query: '', category: '', license: '', commercial: false };
@@ -90,7 +90,8 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
   const profileHandle=hash===''||hash==='#main'?profileHandleFromPath(location.path):null;
   const legacyPersonId=/^#people\/([a-f0-9-]{36})$/.exec(hash)?.[1]??null;
   const profileLookup:ProfileLookup|null=profileHandle!==null?{handle:profileHandle}:legacyPersonId!==null?{id:legacyPersonId}:null;
-  const onProfile=profileLookup!==null;
+  const creditedCreatorId=/^#creators\/(credited-[a-f0-9]{32})$/.exec(hash)?.[1]??null;
+  const onProfile=profileLookup!==null||creditedCreatorId!==null;
   const heading = useRef<HTMLDivElement>(null);
   const own=useOwnProfile(account);
   useEffect(() => {
@@ -128,7 +129,7 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
       <img src="/pf-logo-mark.svg" alt="" width="30" height="30" /><span>PushForm <strong>Commons</strong></span>
     </a><nav aria-label="Commons">{account&&<a className="nav-upload" href="#upload">Upload model</a>}<a href="#collections">Collections</a>{account&&<><a href="#my-collections">My collections</a><a href="#my-models">My models</a><MyProfileLink own={own}/></>}<a className="editor-link" href="https://app.pushform.io">Open PushForm <span aria-hidden="true">↗</span></a><CommonsAdminLink/></nav></header>
     <main id="main" ref={heading} tabIndex={-1}>
-      {collectionRoute?<CollectionsRoute route={hash} models={models} filesUrl={filesUrl}/>:profileLookup?<CommonsProfilePageView lookup={profileLookup} profiles={account?.profiles??null} filesUrl={filesUrl} ownProfileId={own?.id??null} renderCollections={handle=><ProfileCollections handle={handle} models={models} filesUrl={filesUrl}/>}/>:hash==='#account'?account?<AccountPage account={account} filesUrl={filesUrl}/>:<section className="status-panel"><h1>Accounts are unavailable in this build.</h1></section>:publishRoute(hash)?publishPage?.(publishRoute(hash)!,state.kind==='ready')??<section className="status-panel"><h1>Publishing is unavailable in this build.</h1></section>:state.kind === 'ready' && selectedId ? selected ? <ModelDetail model={selected} filesUrl={filesUrl} account={account} editorUrl={editorUrl} /> :
+      {creditedCreatorId?<CreditedCreatorPage key={creditedCreatorId} id={creditedCreatorId} models={models} filesUrl={filesUrl}/>:collectionRoute?<CollectionsRoute route={hash} models={models} filesUrl={filesUrl}/>:profileLookup?<CommonsProfilePageView lookup={profileLookup} profiles={account?.profiles??null} filesUrl={filesUrl} ownProfileId={own?.id??null} renderCollections={handle=><ProfileCollections handle={handle} models={models} filesUrl={filesUrl}/>}/>:hash==='#account'?account?<AccountPage account={account} filesUrl={filesUrl}/>:<section className="status-panel"><h1>Accounts are unavailable in this build.</h1></section>:publishRoute(hash)?publishPage?.(publishRoute(hash)!,state.kind==='ready')??<section className="status-panel"><h1>Publishing is unavailable in this build.</h1></section>:state.kind === 'ready' && selectedId ? selected ? <ModelDetail model={selected} filesUrl={filesUrl} account={account} editorUrl={editorUrl} /> :
         <section className="status-panel"><p className="eyebrow">Model unavailable</p><h1>This model isn’t in the catalog.</h1>
           <p>It may have been removed or the link may be out of date.</p><a href="#browse">Browse models</a></section> : <>
         <section className="hero"><p className="eyebrow">A shared place to start</p>

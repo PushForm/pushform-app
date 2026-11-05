@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
 import { commonsProfileImageUrl } from '@pushform/cloud';
 import { profilePath } from './route';
-import type { CommonsPublicProfile, CollectionFields, CommonsCollection, CommonsCollections, CommonsDiscovery } from '@pushform/cloud';
+import type { CommonsCreditedCreator, CommonsPublicProfile, CollectionFields, CommonsCollection, CommonsCollections, CommonsDiscovery } from '@pushform/cloud';
 import type { CommonsAccount } from './account';
 import { CommonsAccessGate } from './CommonsAccess';
 import { CommonsThumbnail } from './CommonsPreview';
@@ -107,10 +107,43 @@ export function CreatorCard({ creator, filesUrl }: { creator: CommonsPublicProfi
     <div className="card-body"><p className="eyebrow">Creator</p><h3><ProfileLink handle={creator.handle}>{creator.displayName}</ProfileLink></h3><p className="creator">@{creator.handle}</p></div>
   </article>;
 }
+function CreditedCreatorCard({ creator, models, filesUrl }: { creator: CommonsCreditedCreator; models: CatalogModel[]; filesUrl: string | undefined }) {
+  const firstModel = models.find(model => creator.modelIds.includes(model.id));
+  return <article className="model-card creator-card">
+    <a className="model-art" href={`#creators/${creator.id}`} aria-label={`View creator ${creator.displayName}`}>
+      {firstModel && <CommonsThumbnail model={firstModel} filesUrl={filesUrl} />}
+    </a>
+    <div className="card-body"><p className="eyebrow">Credited creator</p><h3><a href={`#creators/${creator.id}`}>{creator.displayName}</a></h3><p className="creator">{creator.sourceName} · {creator.modelIds.length} {creator.modelIds.length === 1 ? 'model' : 'models'}</p></div>
+  </article>;
+}
+export function CreditedCreatorPage({ id, models, filesUrl }: { id: string; models: CatalogModel[]; filesUrl: string | undefined }) {
+  const { service, revision } = useCollections();
+  const [creator, setCreator] = useState<CommonsCreditedCreator | null | undefined>();
+  const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    setCreator(undefined); setError(null);
+    if (!service) return;
+    const controller = new AbortController();
+    void service.creditedCreator(id, controller.signal).then(value => { if (!controller.signal.aborted) setCreator(value); }, error => { if (!controller.signal.aborted) setError(message(error)); });
+    return () => controller.abort();
+  }, [id, service, revision, attempt]);
+  useEffect(() => { document.title = creator ? `${creator.displayName} — PushForm Commons` : 'Credited creator — PushForm Commons'; }, [creator]);
+  if (!service) return <section className="status-panel"><h1>Creator listings are unavailable in this build.</h1></section>;
+  if (error) return <section className="status-panel" role="alert"><p>{error}</p><button onClick={() => setAttempt(value => value + 1)}>Retry creator</button></section>;
+  if (creator === undefined) return <p role="status">Loading creator…</p>;
+  if (creator === null) return <section className="status-panel"><h1>This creator listing is unavailable.</h1><a href="#browse">Browse models</a></section>;
+  return <article className="profile-page"><a className="back-link" href="#browse">← All models</a>
+    <p className="eyebrow">Credited creator · {creator.sourceName}</p><h1>{creator.displayName}</h1>
+    <p>Models from {creator.sourceName} credit {creator.displayName} as their creator. This listing is based on the models’ source credits and is not a Commons account profile.</p>
+    <FeatureAction key={creator.id} type="credited_creator" targetId={creator.id} />
+    <h2>Published models</h2><ModelGrid>{models.filter(model => creator.modelIds.includes(model.id)).map(model => <ModelCard key={model.id} model={model} filesUrl={filesUrl} />)}</ModelGrid>
+  </article>;
+}
 export function FeaturedSection({ models, filesUrl }: { models: CatalogModel[]; filesUrl: string | undefined }) {
   const { service, discovery, error, refresh, canFeature } = useCollections();
   const [page, setPage] = useState(0);
-  const items = discovery?.featured.filter(item => item.type === 'model' ? models.some(model => model.id === item.targetId) : item.type === 'creator' ? discovery.creators.some(creator => creator.id === item.targetId) : discovery.collections.some(collection => collection.id === item.targetId)) ?? [];
+  const items = discovery?.featured.filter(item => item.type === 'model' ? models.some(model => model.id === item.targetId) : item.type === 'credited_creator' ? discovery.creditedCreators.some(creator => creator.id === item.targetId) : item.type === 'creator' ? discovery.creators.some(creator => creator.id === item.targetId) : discovery.collections.some(collection => collection.id === item.targetId)) ?? [];
   const pages = Math.ceil(items.length / 3);
   const currentPage = Math.min(page, Math.max(0, pages - 1));
   if (!service) return null;
@@ -118,6 +151,10 @@ export function FeaturedSection({ models, filesUrl }: { models: CatalogModel[]; 
     <div className="section-heading"><div><h2 id="featured-title">Featured</h2><p className="section-description">Models, collections and creators, picked for makers.</p></div>{canFeature && <a href={adminUrl}>Manage featured</a>}</div>
     {error ? <div role="alert"><p>{error}</p><button onClick={refresh}>Retry featured</button></div> : !discovery ? <p role="status">Loading featured models, collections and creators…</p> : <>
       <ModelGrid className="featured-grid">{items.slice(currentPage * 3, currentPage * 3 + 3).map(item => {
+        if (item.type === 'credited_creator') {
+          const creator = discovery.creditedCreators.find(value => value.id === item.targetId);
+          return creator ? <CreditedCreatorCard key={item.id} creator={creator} models={models} filesUrl={filesUrl} /> : null;
+        }
         if (item.type === 'creator') {
           const creator = discovery.creators.find(value => value.id === item.targetId);
           return creator ? <CreatorCard key={item.id} creator={creator} filesUrl={filesUrl} /> : null;
@@ -134,7 +171,7 @@ export function FeaturedSection({ models, filesUrl }: { models: CatalogModel[]; 
     </>}
   </section>;
 }
-export function FeatureAction({ type, targetId, eligible = true }: { type: 'model' | 'collection' | 'creator'; targetId: string; eligible?: boolean }) {
+export function FeatureAction({ type, targetId, eligible = true }: { type: 'model' | 'collection' | 'creator' | 'credited_creator'; targetId: string; eligible?: boolean }) {
   const context = useContext(Context);
   const { service, discovery, canFeature, refresh } = context ?? {};
   const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null); const [added, setAdded] = useState(false);

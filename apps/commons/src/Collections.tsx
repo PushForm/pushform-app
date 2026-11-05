@@ -200,7 +200,7 @@ function CollectionDetail({ id, models, filesUrl }: { id: string; models: Catalo
 }
 function CollectionEditor({ collection, models, filesUrl, onCancel, onSaved }: { collection: CommonsCollection | null; models: CatalogModel[]; filesUrl: string | undefined; onCancel: () => void; onSaved?: (value: CommonsCollection) => void }) {
   const { service, refresh } = useCollections();
-  const [fields, setFields] = useState<CollectionFields>(() => collection ? { title: collection.title, description: collection.description, visibility: collection.visibility, modelIds: [...collection.modelIds] } : { title: '', description: '', visibility: 'private', modelIds: [] });
+  const [fields, setFields] = useState<CollectionFields>(() => collection ? { title: collection.title, description: collection.description, visibility: collection.visibility, modelIds: [...collection.modelIds] } : { title: '', description: '', visibility: 'public', modelIds: [] });
   // Keep the version the editor opened with. A refresh must never silently rebase a stale draft.
   const [expectedVersion] = useState(collection?.version ?? null);
   const [query, setQuery] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null); const [confirmDelete, setConfirmDelete] = useState(false);

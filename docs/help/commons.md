@@ -2,7 +2,7 @@
 
 PushForm Commons is a community model catalog with its own website. Browse models, search by name or description, and filter by category or license. The commercial-use filter includes models only when every listed license explicitly permits commercial use; read all listed conditions before reuse.
 
-Open a model to see its original creator, source, licenses and attribution notices. When files are available, choose **Download ZIP** next to a filename. The package contains the unchanged original in `files/`, an `ATTRIBUTION.json` record and a README. Keep required credits and license notices with reused files. A free download does not remove license conditions.
+Open a model to see its original creator next to the title. Source information, licenses and required credits are grouped under **Licenses & attribution**. When files are available, choose **Download ZIP** next to a filename. The package contains the unchanged original in `files/`, an `ATTRIBUTION.json` record and a README. Keep required credits and license notices with reused files. A free download does not remove license conditions.
 
 ## Browse featured projects and collections
 
@@ -12,7 +12,7 @@ Use the **Models** and **Collections** tabs below Featured to search the library
 
 ## Create and manage collections
 
-Any signed-in PushForm user can create collections. Choose **New collection** or **My collections**, complete account setup if needed, then enter a title and optional description. Collections start **Private — only you**. Choose **Public — visible in Commons** when you want to share one. A public creator profile is optional; if you have an active public profile it appears as the collection's curator.
+Any signed-in PushForm user can create collections. Choose **New collection** or **My collections**, complete account setup if needed, then enter a title and optional description. The new-collection form defaults to **Public — visible in Commons**. Choose **Private — only you** before saving if you want a private collection. A public creator profile is optional; if you have an active public profile it appears as the collection's curator.
 
 On a model page, **Save to collection** adds or removes that model using your collection checkboxes. **New private collection** creates a collection and saves the model into it in one action.
 

@@ -252,8 +252,9 @@ export const modelOperationSchema = z.discriminatedUnion('op', [
     .refine(o => (o.color === undefined) !== (o.library === undefined), 'Give either color or library.')
     .describe('Create a plain-color material, or add one from the built-in library. Returns its id; "$name" then works wherever a material id is accepted.'),
   z.object({ op: z.literal('paint'), refs: refs.describe('Faces, solids, sketch faces, groups or placements.'),
-    materialId: idOrName.nullable().describe('null restores the default material.'), side: z.enum(['front', 'back']).optional().describe('Faces only; default front.') })
-    .describe('Paint faces, or whole solids, groups and placements, with a material.'),
+    materialId: idOrName.nullable().describe('null restores the default material.'), side: z.enum(['front', 'back', 'both']).optional().describe('Face sides to replace; default front.'),
+    recursive: z.boolean().optional().describe('true paints all nested parts and explicit face materials inside groups/components in one operation. Shared component definitions change every placement. Default false: groups only set an inherited material, leaving explicit child materials unchanged.') })
+    .describe('Paint all refs together. For an entire group or component use recursive: true to replace nested face materials, without entering each part. Without recursion only default-material children inherit group paint.'),
   z.object({ op: z.literal('add_scene'), as: localName.optional(), name: name.optional(), description: z.string().max(2000).optional(), saves: sceneSaves.optional(),
     includeInAnimation: z.boolean().optional().describe('Default true.'), camera: modelCameraSchema.optional().describe('Save this camera without moving the view. Default: the current view.') })
     .describe('Add a scene at the end of the scene order and make it the active scene. Scene names are unique. Returns its id.'),

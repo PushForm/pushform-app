@@ -45,6 +45,45 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
+  deploy-commons:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-24.04
+    environment: Production
+    concurrency: { group: deploy-commons-production, cancel-in-progress: false }
+    env:
+      VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+      VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+      VITE_COMMONS_ASSETS_URL: ${{ vars.VITE_COMMONS_ASSETS_URL }}
+      VITE_PUSHFORM_ADMIN_URL: ${{ vars.VITE_PUSHFORM_ADMIN_URL }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Build the configured Commons site
+        run: |
+          node scripts/check-cloud-config.mjs
+          pnpm commons:build
+          node scripts/check-cloud-config.mjs apps/commons/dist
+      - uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy apps/commons/dist --project-name pushform-commons --branch main --commit-hash ${{ github.sha }} --commit-dirty=false
+      - name: Verify Commons serves this build
+        shell: bash
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if node scripts/verify-static-deploy.mjs https://commons.pushform.io apps/commons/dist; then
+              exit 0
+            fi
+            if [[ "$attempt" -lt 6 ]]; then sleep 10; fi
+          done
+          exit 1
+
   # Deploy checked main batches and staging pushes to Cloudflare Pages. Needs the environment
   # secrets CLOUDFLARE_API_TOKEN (Workers & Pages: Edit) and CLOUDFLARE_ACCOUNT_ID.
   deploy:

@@ -12,7 +12,7 @@ afterEach(() => { for (const session of sessions.splice(0)) session.dispose(); }
 function session(): HeadlessSession { const s = new HeadlessSession(); sessions.push(s); return s; }
 
 const curvedBooleanCases = [8, 24].flatMap(segments =>
-  (['subtract', 'trim', 'union', 'intersect', 'split', 'outerShell'] as const).flatMap(mode =>
+  (['subtract', 'trim', 'union', 'intersect', 'split'] as const).flatMap(mode =>
     [false, true].flatMap(curvedFirst =>
       (mode === 'trim' && curvedFirst ? [1, 2] : [2]).map(depth => ({ segments, mode, curvedFirst, depth })))));
 
@@ -33,7 +33,7 @@ it.each(curvedBooleanCases)('round-trips $mode with a $segments-segment cylinder
   const cylinder = await registry.execute('pushpull.apply', { target: { kind: 'sketchFace', id: face.id }, distance: depth * inch, mode: 'newBody' }) as PushPullApplyResult;
   const cylinderId = cylinder.bodyIds[0]!;
   const [a, b] = (curvedFirst ? [cylinderId, stud] : [stud, cylinderId]).map(id => ({ kind: 'body', id }));
-  await registry.execute(`solids.${mode}`, mode === 'outerShell' ? { bodies: [a, b] } : { a, b });
+  await registry.execute(`solids.${mode}`, { a, b });
   const bodies = [...host.doc.rootDefinition.entities.bodies.values()];
   const area = segments / 2 * radius ** 2 * Math.sin(2 * Math.PI / segments);
   const studVolume = 1.5 * 3.5 * (94.125 - 1.5) * inch ** 3;

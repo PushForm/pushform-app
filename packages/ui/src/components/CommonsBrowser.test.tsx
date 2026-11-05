@@ -34,6 +34,71 @@ function setup() {
   } };
   return { props, rpc, source };
 }
+async function nativeSource(source: cloud.OpenedCommonsModel) {
+  const app = createApp({ demo: true, expose: false });
+  try { return { ...source, bytes: await encodeModelDocument(app.document.doc) }; }
+  finally { app.dispose(); }
+}
+it.each(['picker', 'catalog'] as const)('starts placement directly from the %s and commits geometry and credits together', async entry => {
+  const f = setup(), target = session.active;
+  if (target.type !== 'model') throw new Error('Expected a model');
+  target.app.document.edit('Name design', draft => { draft.definitions.get(draft.rootDefinitionId)!.name = 'Current design'; });
+  const before = target.app.document.doc.state;
+  vi.spyOn(cloud, 'loadCommonsModel').mockResolvedValue(await nativeSource(f.source));
+  render(<CommonsBrowser {...f.props} target={entry === 'picker' ? target : undefined}/>);
+  fireEvent.click(await screen.findByText('Garden bench'));
+  if (entry === 'catalog') fireEvent.change(screen.getByLabelText('Import into an open design'), { target: { value: target.id } });
+  fireEvent.click(screen.getByRole('button', { name: 'Import into ' + target.name }));
+  await waitFor(() => expect(f.props.onOpened).toHaveBeenCalledOnce());
+  expect(screen.queryByRole('button', { name: 'Continue to placement' })).toBeNull();
+  expect(target.app.toolManager.activeToolId).toBe('paste');
+  expect(target.app.toolManager.activeTool?.status().instructor).toBe('Click to place. R rotates 90 degrees. Esc cancels.');
+  expect(target.app.document.doc.state).toBe(before);
+  target.app.commands.execute('edit.pasteAt', { point: [0, 0, 0] });
+  expect(target.app.document.doc.state.meta.attributions).toEqual([f.source.attribution]);
+  expect(target.app.document.doc.state.definitions.get(before.rootDefinitionId)!.entities.instances.size).toBe(1);
+  target.app.commands.execute('edit.undo');
+  expect(target.app.document.doc.state.meta.attributions).toEqual(before.meta.attributions);
+  expect(target.app.document.doc.state.definitions.get(before.rootDefinitionId)!.entities.instances.size).toBe(0);
+});
+it('keeps unit and orientation choices for a unitless import, then starts placement', async () => {
+  const f = setup(), target = session.active;
+  if (target.type !== 'model') throw new Error('Expected a model');
+  const before = target.app.document.doc.state;
+  vi.spyOn(cloud, 'loadCommonsModel').mockResolvedValue({ ...f.source, name: 'bench.obj', bytes: new TextEncoder().encode('v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n') });
+  render(<CommonsBrowser {...f.props} target={target}/>);
+  fireEvent.click(await screen.findByText('Garden bench'));
+  fireEvent.click(screen.getByRole('button', { name: 'Import into ' + target.name }));
+  await screen.findByLabelText('Source units');
+  fireEvent.change(screen.getByLabelText('Source units'), { target: { value: 'm' } });
+  fireEvent.change(screen.getByLabelText('Up axis'), { target: { value: 'y' } });
+  expect(f.props.onOpened).not.toHaveBeenCalled();
+  expect(target.app.document.doc.state).toBe(before);
+  fireEvent.click(screen.getByRole('button', { name: 'Import model' }));
+  await waitFor(() => expect(f.props.onOpened).toHaveBeenCalledOnce());
+  expect(target.app.toolManager.activeToolId).toBe('paste');
+  target.app.commands.execute('tool.cancel');
+  expect(target.app.toolManager.activeToolId).toBe('select');
+  expect(target.app.document.doc.state).toBe(before);
+});
+it('rejects a destination closed during the download without starting placement', async () => {
+  const f = setup(), target = session.active;
+  if (target.type !== 'model') throw new Error('Expected a model');
+  let finish!: (source: cloud.OpenedCommonsModel) => void;
+  const loaded = vi.spyOn(cloud, 'loadCommonsModel').mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const source = await nativeSource(f.source);
+  render(<CommonsBrowser {...f.props} target={target}/>);
+  fireEvent.click(await screen.findByText('Garden bench'));
+  fireEvent.click(screen.getByRole('button', { name: 'Import into ' + target.name }));
+  await waitFor(() => expect(loaded).toHaveBeenCalledOnce());
+  session.newModel(); session.close(target.id, true);
+  const before = session.active;
+  finish(source);
+  expect((await screen.findByRole('alert')).textContent).toContain('target design or editing context changed');
+  expect(f.props.onOpened).not.toHaveBeenCalled();
+  expect(session.active).toBe(before);
+  expect(session.active.type === 'model' && session.active.app.toolManager.activeToolId).not.toBe('paste');
+});
 it('opens a model with recorded units in a new tab from one action and preserves its credits', async () => {
   const f = setup(); const original = session.active;
   vi.spyOn(cloud, 'loadCommonsModel').mockResolvedValue({ ...f.source, bytes: await encodeModelDocument(createDocument()) });

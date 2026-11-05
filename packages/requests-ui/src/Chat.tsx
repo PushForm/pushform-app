@@ -88,6 +88,8 @@ interface ChatState {
   readonly limitReached: boolean;
 }
 
+interface QueuedMessage { readonly id: number; readonly text: string; readonly pictures: readonly AttachmentFile[]; readonly tools: DocumentToolSession | null }
+
 /** The first assistant message, rendered locally and never persisted. */
 export const GREETING = 'How can I help you?';
 export const INTENT_CARDS: readonly { readonly intent: IntentPath; readonly label: string; readonly detail: string }[] = [
@@ -131,6 +133,10 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
   const [chat, setChat] = useState<ChatState>(EMPTY);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
+  const [queued, setQueued] = useState<readonly QueuedMessage[]>([]);
+  const queuedRef = useRef<readonly QueuedMessage[]>([]), nextQueuedId = useRef(0);
+  const [queuePaused, setQueuePaused] = useState(false);
+  const replaceQueue = (items: readonly QueuedMessage[]): void => { queuedRef.current = items; setQueued(items); };
   const [waitingForGuidance, setWaitingForGuidance] = useState(false);
   const [toolProgress, setToolProgress] = useState<string | null>(null);
   /** The backend's latest status line for the running turn; cleared when the agent's own words or a tool step take over. */
@@ -148,6 +154,12 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
   scopeRef.current = scope;
   /** Bumped by Clear Chat: work started before it never touches the cleared chat. */
   const generation = useRef(0);
+  useEffect(() => {
+    replaceQueue([]); setQueuePaused(false); setChat(EMPTY); setText(''); setBusy(false);
+    setTurnStarted(null); setWaitingForGuidance(false); setToolProgress(null); setStatusLine(null); setError(null);
+    setPictures([]); setLocalImages([]); setAttachments([]); uploadedPreviews.current.clear();
+    return () => { generation.current += 1; turn.current?.abort(); turn.current = null; };
+  }, [client, account.id]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; turn.current?.abort(); }; }, []);
 
   // Resume the open conversation this browser remembers for the account; otherwise greet. Nothing waits on the
@@ -214,9 +226,10 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
     for (const id of ids) { forgetDraft(account.id, id, draftStorage); void client.discardConversation(id).catch(() => {}); }
     setWaitingForGuidance(false); setToolProgress(null); setStatusLine(null); setTurnStarted(null);
     setChat(EMPTY); setText(''); setError(null); setNotice(null); setBusy(false);
+    replaceQueue([]); setQueuePaused(false);
   };
   /** Stop: cancels the running turn and any batch in progress; what was already applied stays, undoable. */
-  const stop = (): void => { turn.current?.abort(); };
+  const stop = (): void => { setQueuePaused(true); turn.current?.abort(); };
   const clearsSeen = useRef(0);
   useEffect(() => {
     if (clearSignal <= clearsSeen.current) return;
@@ -232,19 +245,26 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
   };
 
   /** Sends a typed message or an intent card; the first one also creates the conversation with `path: 'open'`. */
-  const send = (message: string, intent?: IntentPath): void => {
+  const send = (message: string, intent?: IntentPath, pending?: QueuedMessage): void => {
     const body = message.trim();
     if (!intent && body.startsWith('/')) { runSlash(body); return; }
-    if ((busy && !waitingForGuidance) || !attachmentsReady) return;
+    if (!attachmentsReady) return;
     // Pictures in the composer go with a typed message, never with an intent card.
-    const outgoing = intent ? [] : pictures;
+    const outgoing = intent ? [] : pending?.pictures ?? pictures;
     if (!body && !outgoing.length) return;
+    if (!pending && !intent && ((turn.current && !waitingForGuidance) || queuedRef.current.length)) {
+      replaceQueue([...queuedRef.current, { id: nextQueuedId.current++, text: body, pictures: outgoing, tools: documentTools?.() ?? null }]);
+      setText(''); setPictures([]); setNotice(null);
+      if (!turn.current) setQueuePaused(false);
+      return;
+    }
+    if (busy && !waitingForGuidance) return;
     if (waitingForGuidance) { generation.current += 1; turn.current?.abort(); setWaitingForGuidance(false); }
     onMessage?.();
     const at = new Date().toISOString();
     started.current = true;
-    setText(''); setNotice(null); setError(null);
-    if (outgoing.length) setPictures([]);
+    if (!pending) { setText(''); if (outgoing.length) setPictures([]); }
+    setNotice(null); setError(null); setQueuePaused(false);
     setChat(current => ({ ...current, transcript: [...current.transcript, { role: 'user', text: body, at, ...(outgoing.length ? { local: outgoing } : {}) }], streaming: '' }));
     const controller = new AbortController(); turn.current = controller;
     const gen = generation.current;
@@ -253,7 +273,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
     const stopped = (): void => { if (controller.signal.aborted) throw new DOMException('Stopped', 'AbortError'); };
     setToolProgress(null); setStatusLine(null); setTurnStarted(Date.now());
     void run(async () => {
-      let streamed = '', rateLimited = false, failed = false, resumed = false, conversation = chat.conversation;
+      let streamed = '', rateLimited = false, failed = false, resumed = false, completed = false, conversation = chat.conversation;
       // A conversation the server ended (filed, added, closed) is left behind: this message starts a new one.
       let ended = false, startOver = false, path = conversation ? chat.path : 'open', title = conversation?.title ?? null;
       const pictureIds: string[] = [];
@@ -286,7 +306,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
           if (path === 'problem' || path === 'feature') setAttachments(current => [...current, attached]);
         }
         // The document is bound now; switching tabs later never retargets this turn's tool calls.
-        const tools = documentTools?.() ?? null;
+        const tools = pending ? pending.tools : documentTools?.() ?? null;
         // The turn's one change line, as the transcript holds it and in its newest wording: each applied change
         // updates it in place rather than adding a line.
         let shownChange = null as Entry | null, change = null as Entry | null;
@@ -312,10 +332,11 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
                 failed = true;
                 if (event.code === 'rate_limited') rateLimited = true;
                 else if (event.code === 'limit') setChat(current => ({ ...current, limitReached: true }));
-                else if (event.code === 'tracker_unavailable') setError({ code: event.code, message: event.message, retry: intent ? undefined : () => send(body) });
+                else if (event.code === 'tracker_unavailable') setError({ code: event.code, message: event.message, retry: intent ? undefined : pending ? () => setQueuePaused(false) : () => send(body) });
                 else setError({ code: event.code, message: event.message });
                 break;
               case 'done':
+                completed = !event.awaitingTools;
                 ended = event.ended; startOver = ended && event.reason === 'start_over';
                 setChat(current => ({ ...current, messageCount: event.messageCount, limitReached: !ended && (event.limitReached || event.messageCount >= messageLimit) }));
                 break;
@@ -372,12 +393,13 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
       } finally {
         if (turn.current === controller) turn.current = null;
         if (live()) { setToolProgress(null); setStatusLine(null); setTurnStarted(null); setWaitingForGuidance(false); }
+        if (live() && (!completed || failed || rateLimited || ended || controller.signal.aborted)) setQueuePaused(true);
+        if (live() && pending && failed && !resumed) replaceQueue([pending, ...queuedRef.current]);
         // A turn the server rejected before answering never received the message: the optimistic copy leaves the transcript.
         // Start over (the requester asked the agent to discard): the transcript goes too, so the greeting and cards return.
         // A message that never reached the agent keeps its pictures in the composer for retry; its uploads are released.
         if (failed && !resumed && outgoing.length && live()) {
-          setPictures(current => [...outgoing, ...current].slice(0, PICTURES_PER_MESSAGE));
-          if (!intent) setText(current => current || body);
+          if (!pending) { setPictures(current => [...outgoing, ...current].slice(0, PICTURES_PER_MESSAGE)); if (!intent) setText(current => current || body); }
           const released = [...pictureIds], from = conversation?.id;
           if (from) for (const attachmentId of released) void client.removeAttachment(from, attachmentId).catch(() => {});
           setAttachments(current => current.filter(item => !released.includes(item.id)));
@@ -387,7 +409,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
           transcript: streamed.trim() ? [...current.transcript, { role: 'assistant', text: streamed, at: new Date().toISOString() }]
             : failed && !resumed ? current.transcript.filter(item => !(item.role === 'user' && item.at === at && item.text === body)) : current.transcript }));
       }
-      if (rateLimited && live()) { setNotice('You are sending messages quickly. Please wait a minute and send again.'); if (!intent) setText(body); }
+      if (rateLimited && live()) { setNotice('You are sending messages quickly. Please wait a minute and send again.'); if (!intent && !pending) setText(body); }
     });
   };
   const submit = (event: FormEvent): void => { event.preventDefault(); send(text); };
@@ -497,7 +519,15 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
 
   // Dictated phrases join the draft with a space, as if typed.
   const dictation = useDictation(phrase => setText(draft => draft && !/\s$/.test(draft) ? `${draft} ${phrase}` : draft + phrase));
-  const textLocked = busy && !waitingForGuidance && chat.streaming !== null;
+  // A turn runs until its last stream ends; the requester can queue another message meanwhile.
+  const working = turnStarted !== null;
+  const textLocked = busy && !working;
+  const sendRef = useRef(send); sendRef.current = send;
+  useEffect(() => {
+    if (!open || busy || queuePaused || turn.current || !attachmentsReady) return;
+    const next = queuedRef.current[0]; if (!next) return;
+    replaceQueue(queuedRef.current.slice(1)); sendRef.current(next.text, undefined, next);
+  }, [open, busy, queued, queuePaused, attachmentsReady]);
   useEffect(() => { if (textLocked || !open) dictation.stop(); }, [textLocked, open]);
   // The composer grows with its text up to its CSS max-height, then scrolls.
   useLayoutEffect(() => {
@@ -507,8 +537,6 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
     box.style.height = `${box.scrollHeight}px`;
   }, [text, view.kind]);
 
-  // A turn is running from the send until its last stream ends; Stop is offered all that time.
-  const working = turnStarted !== null;
   // Typing "/" lists the commands that match what follows it.
   const slashMatches = text.startsWith('/') && !/\s/.test(text) ? SLASH_COMMANDS.filter(command => command.name.startsWith(text.slice(1).toLowerCase())) : [];
   let body: JSX.Element;
@@ -573,16 +601,22 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
         <AttachmentPreview item={file} client={client} blob={file.blob} />
         <button type="button" aria-label={`Remove ${file.name}`} onClick={() => setPictures(current => current.filter(item => item !== file))}>×</button>
       </li>)}</ul> : null}
+      {queued.length > 0 && <section className="pf-fr-queued" aria-label="Queued messages">
+        <p role="status">{queuePaused ? 'Queued messages paused' : `Queued messages (${queued.length})`}</p>
+        <ol>{queued.map(item => <li key={item.id}><span>{item.text || 'Pictures'}{item.pictures.length > 0 ? ` (${item.pictures.length} ${item.pictures.length === 1 ? 'picture' : 'pictures'})` : ''}</span>
+          <button type="button" aria-label={`Remove queued message: ${item.text || 'Pictures'}`} onClick={() => replaceQueue(queuedRef.current.filter(queued => queued.id !== item.id))}>Remove</button></li>)}</ol>
+        {queuePaused && !working && <button type="button" disabled={busy || !attachmentsReady} onClick={() => setQueuePaused(false)}>Send next</button>}
+      </section>}
       <form className="pf-fr-composer" aria-label="Message" onSubmit={submit}>
         <button type="button" className="pf-fr-icon" aria-label="Add picture" title="Add picture (or paste or drop an image)"
-          disabled={(busy && !waitingForGuidance) || pictures.length >= PICTURES_PER_MESSAGE} onClick={() => picturePicker.current?.click()}>{PLUS_ICON}</button>
+          disabled={textLocked || pictures.length >= PICTURES_PER_MESSAGE} onClick={() => picturePicker.current?.click()}>{PLUS_ICON}</button>
         <input ref={picturePicker} type="file" multiple accept={SCREENSHOT_TYPES.join(',')} hidden aria-label="Picture files" onChange={pickPictures} />
         <textarea ref={composer} data-autofocus data-submit-on-enter aria-label="Your message" rows={1} value={text} maxLength={4000}
           disabled={textLocked} onPaste={pastePictures}
-          placeholder={!current.conversation ? 'Describe what you need' : reporting ? 'Type your answer, or say skip' : 'Ask a follow-up question'} onChange={event => setText(event.target.value)} />
+          placeholder={working && !waitingForGuidance ? 'Queue a follow-up message' : !current.conversation ? 'Describe what you need' : reporting ? 'Type your answer, or say skip' : 'Ask a follow-up question'} onChange={event => setText(event.target.value)} />
         {working ? <button type="button" className="pf-fr-stop" aria-label="Stop" title="Stop" onClick={stop}><span aria-hidden="true" /></button> : null}
         {/* Enter sends and Shift+Enter starts a new line; the return key appears once there is something to send. */}
-        {text.trim() || pictures.length ? <button type="submit" className="pf-fr-icon" aria-label="Send" title="Send (Enter)" disabled={(busy && !waitingForGuidance) || !attachmentsReady}>{RETURN_ICON}</button> : null}
+        {text.trim() || pictures.length ? <button type="submit" className="pf-fr-icon" aria-label={working && !waitingForGuidance ? 'Queue message' : 'Send'} title={working && !waitingForGuidance ? 'Queue message (Enter)' : 'Send (Enter)'} disabled={textLocked || !attachmentsReady}>{RETURN_ICON}</button> : null}
         <button type="button" className={`pf-fr-icon${dictation.listening ? ' is-listening' : ''}`} aria-label={dictation.listening ? 'Stop dictation' : 'Dictate'} aria-pressed={dictation.listening}
           title={dictation.supported ? (dictation.listening ? 'Stop dictation' : 'Dictate') : 'Dictation is not available here'}
           disabled={!dictation.supported || textLocked} onClick={dictation.toggle}>{MIC_ICON}</button>

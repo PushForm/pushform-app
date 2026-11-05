@@ -6,11 +6,13 @@ import { LuLibrary } from 'react-icons/lu';
 import { UploadDialog } from '@pushform/commons-ui';
 import { CommonsPublishing, deleteCommonsDraft, type CommonsOwnModels, readCommonsCatalog, isCommonsOpenable, loadCommonsModel, type CatalogModel, type OpenedCommonsModel } from '@pushform/cloud';
 import type { CommonsAccount } from '@pushform/commons-ui/account';
-import { MESH_UNITS, probeMeshImport, type MeshUnit } from '@pushform/io';
+import { MESH_UNITS, probeMeshImport, type MeshImportOptions, type MeshUnit } from '@pushform/io';
 import { openCommonsModel, placeCommonsModel } from '../commonsOpening';
 import type { DocumentSession, ModelTab } from '../session';
 import { CommonsModelDetail } from './CommonsModelDetail';
 import { CommonsModelImage } from './CommonsModelImage';
+
+interface PreparedModel { source: OpenedCommonsModel; insert: boolean; target: ModelTab | undefined; path: string | undefined }
 
 export function CommonsBrowser({ account, filesUrl, session, target, onOpened, onClose }: {
   account: CommonsAccount | undefined; filesUrl: string | undefined; session: DocumentSession;
@@ -28,7 +30,7 @@ export function CommonsBrowser({ account, filesUrl, session, target, onOpened, o
   const [catalogTarget, setCatalogTarget] = useState('');
   const available = session.tabs.filter((tab): tab is ModelTab => tab.type === 'model' && (!!tab.identity || session.isDirty(tab) || !!tab.cloudDraft));
   const destination = target ?? available.find(tab => tab.id === catalogTarget);
-  const [prepared, setPrepared] = useState<{ source: OpenedCommonsModel; insert: boolean; target: ModelTab | undefined; path: string | undefined } | null>(null);
+  const [prepared, setPrepared] = useState<PreparedModel | null>(null);
   const meshProbe = useMemo(() => prepared ? probeMeshImport(prepared.source.bytes) : null, [prepared]);
   const [unit, setUnit] = useState<MeshUnit>('mm'); const [up, setUp] = useState<'z' | 'y'>('z');
   const root = useRef<HTMLElement>(null);
@@ -45,6 +47,12 @@ export function CommonsBrowser({ account, filesUrl, session, target, onOpened, o
     void readCommonsCatalog(account.client, controller.signal).then(items => { setModels(items); setSelected(current => current ? items.find(item => item.id === current.id) ?? null : null); }, cause => { if (!controller.signal.aborted) setError(cause.message); });
     return () => { controller.abort(); run.current?.abort(); };
   }, [account, attempt]);
+  const installModel = async (model: PreparedModel, signal: AbortSignal, mesh?: MeshImportOptions) => {
+    if (model.insert) {
+      if (!model.target || !session.tabs.includes(model.target) || model.target.app.document.context.path.join('/') !== model.path) throw new Error('The target design or editing context changed. Choose it again.');
+      await placeCommonsModel(session, model.target, model.source, signal, mesh);
+    } else await openCommonsModel(session, model.source, signal, mesh);
+  };
   const load = async (insert: boolean) => {
     if (!selected || !account || busy) return;
     const file = selected.files.find(f => /\.pf$/i.test(f.name)) ?? selected.files.find(f => isCommonsOpenable(f.name));
@@ -55,10 +63,11 @@ export function CommonsBrowser({ account, filesUrl, session, target, onOpened, o
       const token = await account.session.getAccessToken(); if (!token) throw new Error('Sign in to import Commons models.');
       const source = await loadCommonsModel(filesUrl ?? '', token, { modelId: selected.id, revision: selected.revision, assetId: file.id }, controller.signal);
       if (controller.signal.aborted) return;
-      if (!insert && !probeMeshImport(source.bytes)) {
-        await openCommonsModel(session, source, controller.signal);
+      const model = { source, insert, target: capturedTarget, path };
+      if (!probeMeshImport(source.bytes)) {
+        await installModel(model, controller.signal);
         if (!controller.signal.aborted) onOpened();
-      } else setPrepared({ source, insert, target: capturedTarget, path });
+      } else setPrepared(model);
     } catch (cause) { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'The model could not be downloaded.'); }
     finally { if (!controller.signal.aborted) setBusy(false); }
   };
@@ -67,8 +76,7 @@ export function CommonsBrowser({ account, filesUrl, session, target, onOpened, o
     const controller = new AbortController(); run.current = controller; setBusy(true); setError('');
     try {
       const mesh = meshProbe ? { unit, up: meshProbe.kind === 'dxf' ? 'z' as const : up } : undefined;
-      if (prepared.insert) { if (!prepared.target || !session.tabs.includes(prepared.target) || prepared.target.app.document.context.path.join('/') !== prepared.path) throw new Error('The target design or editing context changed. Choose it again.'); await placeCommonsModel(session, prepared.target, prepared.source, controller.signal, mesh); }
-      else await openCommonsModel(session, prepared.source, controller.signal, mesh);
+      await installModel(prepared, controller.signal, mesh);
       if (!controller.signal.aborted) { setPrepared(null); onOpened(); }
     } catch (cause) { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'The model could not be opened.'); }
     finally { if (!controller.signal.aborted) setBusy(false); }
@@ -119,13 +127,12 @@ export function CommonsBrowser({ account, filesUrl, session, target, onOpened, o
       {!own && <p role="status">Loading your Commons models...</p>}
       {own?.models.length === 0 && <p>Your publishing drafts and published models will appear here.</p>}
       {own?.models.map(model => { const latest = own.revisions.find(r => r.id === model.latest_submission); const published = own.revisions.find(r => r.id === model.published_revision); const draft = latest?.status === 'pending' ? latest : null; const current = draft ?? published ?? latest; return <article key={model.id}><h3>{current?.metadata.title ?? model.id}</h3><p>{draft ? 'Private draft' : published ? 'Published revision ' + published.number : 'Withdrawn'}</p>{(draft || published) && <button onClick={() => setEditing(model.id)}>{draft ? 'Continue draft' : 'Edit publication'}</button>}{draft && <button onClick={() => setConfirm({ id: model.id, revision: draft.id, kind: 'draft' })}>Delete draft</button>}{published && <button onClick={() => setConfirm({ id: model.id, revision: published.id, kind: 'published' })}>Withdraw</button>}</article>; })}
-    </section> : prepared ? <><h3>{prepared.source.attribution.title}</h3><p>{prepared.source.attribution.creator} · Original licenses and credits retained.</p>
+    </section> : prepared ? <><h3>{prepared.source.attribution.title}</h3>
       {meshProbe && <><p>This file does not record units. Choose how to read its dimensions.</p><label>Source units<select value={unit} onChange={event => setUnit(event.target.value as MeshUnit)}>{MESH_UNITS.map(item => <option key={item.unit} value={item.unit}>{item.label}</option>)}</select></label>{meshProbe.kind !== 'dxf' && <label>Up axis<select value={up} onChange={event => setUp(event.target.value as 'y' | 'z')}><option value="z">Z up</option><option value="y">Y up</option></select></label>}</>}
-      <p>{prepared.insert ? 'Preview placement in the current design. Escape cancels; click to commit one undoable insertion.' : 'Open a separate local copy in a new model tab. The catalog keeps your search.'}</p>
-      <button disabled={busy} onClick={() => setPrepared(null)}>Back</button><button disabled={busy} onClick={() => { void install(); }}>{busy ? 'Preparing…' : prepared.insert ? 'Continue to placement' : 'Open copy in new tab'}</button>
+      <button disabled={busy} onClick={() => setPrepared(null)}>Back</button><button disabled={busy} onClick={() => { void install(); }}>{busy ? 'Preparing…' : prepared.insert ? 'Import model' : 'Open model'}</button>
     </> : selected ? <CommonsModelDetail model={selected} filesUrl={filesUrl} busy={busy} importing={!!target}
       destinationName={destination?.name} onBack={() => setSelected(null)} onOpen={() => { void load(false); }} onInsert={() => { void load(true); }}
-      destinationPicker={!target && available.length > 0 && <label>Insert into an open design<select value={catalogTarget} onChange={event => setCatalogTarget(event.target.value)}><option value="">Choose an open design</option>{available.map(tab => <option key={tab.id} value={tab.id}>{tab.name}</option>)}</select></label>}
+      destinationPicker={!target && available.length > 0 && <label>Import into an open design<select value={catalogTarget} onChange={event => setCatalogTarget(event.target.value)}><option value="">Choose an open design</option>{available.map(tab => <option key={tab.id} value={tab.id}>{tab.name}</option>)}</select></label>}
     /> : <><div className="pf-commons-filters"><label>Search models<input value={query} onChange={event => setQuery(event.target.value)} /></label><label>Category<select value={category} onChange={event => setCategory(event.target.value)}><option value="">All categories</option>{choices((models ?? []).map(m => m.category))}</select></label><label>License<select value={license} onChange={event => setLicense(event.target.value)}><option value="">All licenses</option>{choices((models ?? []).flatMap(m => m.licenses.map(l => l.name)))}</select></label><label><input type="checkbox" checked={commercial} onChange={event => setCommercial(event.target.checked)} />Commercial use permitted</label></div>
       {!models && !error && <p role="status">Loading Commons…</p>}
       {models && !shown.length && <p>No matching models. <button onClick={() => { setQuery('');setCategory('');setLicense('');setCommercial(false); }}>Clear filters</button></p>}

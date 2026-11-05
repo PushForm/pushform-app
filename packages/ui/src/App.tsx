@@ -14,6 +14,7 @@ import { captureRequestScreenshot } from './requestScreenshot';
 import { PanelHost } from './components/PanelHost';
 import { RightStrip } from './components/RightStrip';
 import { StatusBar } from './components/StatusBar';
+import { AutosaveIndicator } from './components/AutosaveIndicator';
 import { TopBar } from './components/TopBar';
 import { ViewportView } from './components/ViewportView';
 import { LayoutWorkspace } from './components/LayoutWorkspace';
@@ -396,6 +397,9 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
   /** The rail and its dock open the editor area, in the right-hand panels' band between tool row and status bar. */
   const companionBrowser = guidanceBrowserTab === active.id && sidePanel === 'requests';
   const browserVisible = sidePanel === 'objects' || companionBrowser;
+  const saveStatus = commonsShown ? <span className="pf-local-file-status">Commons</span> : autosave ? <AutosaveIndicator autosave={autosave} session={session} files={cloudFiles} tab={active}
+    onSave={() => session.activeCommands.tryExecute('file.save')} onSaveCopy={() => session.activeCommands.tryExecute('file.saveAs')}/>
+    : <span className="pf-local-file-status">{session.isDirty(active) ? 'Unsaved changes' : active.identity ? 'File saved' : 'Not saved yet'}</span>;
   const sideBar = <>
     <SideRail items={railItems} active={commonsShown ? 'commons' : shownPanel} onToggle={id => { if (id === 'commons') { setCommonsVisited(true); setCommonsShown(true); } else { setCommonsShown(false); toggleSidePanel(id); } }} />
     <SideDock open={shownPanel !== null}>
@@ -475,10 +479,11 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
               <PanelHost />
               <RightStrip />
             </div>
-            <StatusBar />
+            <StatusBar saveStatus={saveStatus} units={commonsShown ? undefined : active.app.document.doc.state.meta.units.lengthUnit}
+              hint={commonsShown ? 'Browse community models. Open a document tab to keep working.' : undefined}/>
           </>
         ) : (
-          <LayoutWorkspace key={active.id} tab={active} session={session} leading={sideBar}
+          <LayoutWorkspace key={active.id} tab={active} session={session} leading={sideBar} saveStatus={saveStatus} catalogActive={commonsShown}
             objectBrowser={{ host: objectHost, open: browserVisible, onClose: closeObjects }}
             cloud={cloudFiles ? { api: cloudFiles, owner, session, saves: cloudModelSaves } : undefined} />
         )}

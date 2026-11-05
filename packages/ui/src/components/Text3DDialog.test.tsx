@@ -12,7 +12,7 @@ import { createApp } from '../bootstrap';
 import type { AppInstance } from '../bootstrap';
 import { installUiCommands } from '../engine/uiCommands';
 import { useAppStore } from '../store';
-import { TOOLBAR_LAYOUT } from './toolbarLayout';
+import { TOOLBAR_GROUPS } from './toolbarLayout';
 import { DialogHost } from './MakeComponentDialog';
 
 const require = createRequire(import.meta.url);
@@ -48,9 +48,12 @@ function boot(): AppInstance {
 }
 
 describe('Text3DDialog', () => {
-  it('sits in the Measure stack after Text', () => {
-    const measure = TOOLBAR_LAYOUT.find((s) => s.kind === 'stack' && s.title === 'Measure');
-    expect(measure && measure.kind === 'stack' ? measure.entries : []).toContainEqual({ command: 'ui.text3d', icon: 'tool-text3d' });
+  it('sits in the Draw group in the Text stack after Text', () => {
+    const draw = TOOLBAR_GROUPS.find(group => group.title === 'Draw');
+    const text = draw?.slots.find(slot => slot.kind === 'stack' && slot.title === 'Text');
+    expect(text?.kind === 'stack' ? text.entries : []).toEqual([
+      'text', { command: 'ui.text3d', icon: 'tool-text3d' },
+    ]);
   });
 
   it('opens from ui.text3d, creates the component and hands it to the Place Component tool', async () => {

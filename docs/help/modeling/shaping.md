@@ -26,11 +26,11 @@ To bore a round hole, draw a circle outside the target, use **Push/Pull** to mak
 
 This is Modeling's cutter-first order. Layout's Difference uses target-first order. A loose edge or a flat sketch face cannot serve as a solid cutter.
 
-## Combine solids with Union or Outer Shell
+## Combine solids with Union
 
-Choose **Union** or **Outer Shell** from the Solid dropdown, click the first solid, then click the second. The second click applies the combination. Use valid solids in the same editing context. Escape cancels before the second pick; Undo restores the original solids after application.
+Choose **Union** from the Solid dropdown, click the first solid, then click the second. The second click applies the combination. Use valid solids in the same editing context. Escape cancels before the second pick; Undo restores the original solids after application.
 
-You can also preselect two solids and choose Union to apply immediately. Outer Shell accepts two or more preselected solids and applies on activation. With no preselection it works by picking two solids at a time.
+You can also select two or more solids and choose **Union** to combine all of them immediately in one undoable step. Disconnected pieces remain separate solids. With no preselection it works by picking two solids at a time.
 
 ## Keep overlapping volume with Intersect or Split
 

@@ -44,6 +44,7 @@ import { layoutViewportModel, layoutViewportPicture, layoutViewportSources } fro
 import { initialViewportCamera, orbitViewportCamera, panViewportCamera, zoomViewportCamera } from './layoutViewportCameras';
 import { LayoutViewportPanel } from './LayoutViewportPanel';
 import { Icon } from './Icon';
+import { StatusHint } from './StatusBar';
 import { useLayoutShapeBuilder } from './useLayoutShapeBuilder';
 import { LayoutShapeBuilderPreview } from './LayoutShapeBuilderPreview';
 import { ToolStack } from './ToolStack';
@@ -983,12 +984,16 @@ export function LayoutWorkspace({
   session,
   leading,
   objectBrowser,
+  saveStatus,
+  catalogActive = false,
   cloud,
 }: {
   tab: LayoutTab;
   session: DocumentSession;
   /** The left menu bar and its dock, first in the editor band below the tool row, mirroring the settings panel. */
   leading?: ReactNode;
+  saveStatus?: ReactNode;
+  catalogActive?: boolean;
   /** The left menu bar's docked Object browser: rendered into `host` while `open`. */
   objectBrowser?: { readonly host: HTMLElement | null; readonly open: boolean; readonly onClose: () => void } | undefined;
   /** Cloud files for model references; `saves` counts cloud model saves in this session, each prompting a freshness check. */
@@ -4301,9 +4306,9 @@ export function LayoutWorkspace({
           </LayoutAccordion>
         </aside>
       </div>
-      <div className="pf-layout-footer">
-        <div className="pf-layout-footer-spacer" role="status">
-          {tool === 'select' && importNote !== null ? importNote : tool === 'select' ? navigatingViewportId !== null ? vcbError ?? 'Drag to orbit, Shift+drag or middle-drag to pan, and scroll to zoom the view. Click outside it or press Esc when done.'
+      <footer className="pf-layout-footer pf-statusbar" aria-label="Document status">
+        <StatusHint className="pf-layout-footer-spacer">
+          {catalogActive ? 'Browse community models. Open a document tab to keep working.' : tool === 'select' && importNote !== null ? importNote : tool === 'select' ? navigatingViewportId !== null ? vcbError ?? 'Drag to orbit, Shift+drag or middle-drag to pan, and scroll to zoom the view. Click outside it or press Esc when done.'
             : editingPathId !== null ? 'Drag vertices to edit. Delete removes the selected vertex. Esc returns to object selection.'
             : scalePreview ? 'Resizing: hold Shift to maintain aspect ratio, Alt to keep the center. Release to finish.'
             : 'Click to select, drag to move, or use the handles to resize (hold Shift to maintain aspect ratio, Alt to keep the center). Double-click to edit vertices.'
@@ -4347,8 +4352,10 @@ export function LayoutWorkspace({
             : polygonTool === 'polygon' ? `Inscribed: choose the center, then a vertex on the reference circle. ${polygonAlt ? 'Release Alt/Option to return to Circumscribed.' : 'Hold Alt/Option for Circumscribed.'} Type a number followed by s to set the sides.`
             : polygonTool === 'circumscribed-polygon' ? `Circumscribed: choose the center, then a side midpoint on the inner circle. ${polygonAlt ? 'Release Alt/Option to return to Inscribed.' : 'Hold Alt/Option for Inscribed.'} Type a number followed by s to set the sides.`
             : tool === 'label' ? labelDraft?.bend ? 'Move horizontally and click to place the text.' : labelDraft ? 'Click to place the leader bend.' : 'Click where the arrow should point.' : ''}
-        </div>
-        <div ref={zoomMenuRef} className="pf-layout-zoom">
+        </StatusHint>
+        {saveStatus}
+        <span className="pf-status-units" hidden={catalogActive}>Page {tab.doc.state.pageOrder.indexOf(page.id) + 1}/{tab.doc.state.pageOrder.length}</span>
+        <div ref={zoomMenuRef} className="pf-layout-zoom" hidden={catalogActive}>
           {zoomMenuOpen ? (
             <div className="pf-layout-zoom-menu" role="menu" aria-label="Layout zoom options">
               {ZOOM_PRESETS.map((percent) => (
@@ -4378,7 +4385,7 @@ export function LayoutWorkspace({
           </button>
         </div>
         {vcbError ? <span className="pf-layout-vcb-error" role="alert">{vcbError}</span> : null}
-      </div>
+      </footer>
     </>
   );
 }

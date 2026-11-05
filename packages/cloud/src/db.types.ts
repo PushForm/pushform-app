@@ -23,7 +23,21 @@ export type Database = {
           }
         },"public": {
           Tables: {
-            "admin_audit": {
+            "account_campaign_touches": {
+                  Row: {
+                    "campaign": string,"content": string,"evidence": string,"medium": string,"observed_at": string,"owner_id": string,"recorded_at": string,"source": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "campaign": string,"content": string,"evidence": string,"medium": string,"observed_at": string,"owner_id": string,"recorded_at"?: string,"source": string
+                  }
+                  Update: {
+                    "campaign"?: string,"content"?: string,"evidence"?: string,"medium"?: string,"observed_at"?: string,"owner_id"?: string,"recorded_at"?: string,"source"?: string
+                  }
+                  Relationships: [
+
+                  ]
+                },"admin_audit": {
                   Row: {
                     "action": string,"actor": string,"at": string,"id": number,"params": NonNullable<Json>
                   }
@@ -89,6 +103,20 @@ export type Database = {
                   }
                   Update: {
                     "app_build"?: string | null,"app_version"?: string | null,"category"?: string | null,"client_at"?: string | null,"count"?: number,"created_at"?: string,"document_type"?: string | null,"duration_seconds"?: number | null,"id"?: never,"kind"?: string,"owner_id"?: string,"tool"?: string | null
+                  }
+                  Relationships: [
+
+                  ]
+                },"campaign_handoffs": {
+                  Row: {
+                    "claimed_by": string | null,"created_at": string,"expires_at": string,"token": string,"touches": NonNullable<Json>
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "claimed_by"?: string | null,"created_at"?: string,"expires_at"?: string,"token"?: string,"touches": NonNullable<Json>
+                  }
+                  Update: {
+                    "claimed_by"?: string | null,"created_at"?: string,"expires_at"?: string,"token"?: string,"touches"?: NonNullable<Json>
                   }
                   Relationships: [
 
@@ -342,6 +370,86 @@ isOneToOne: false
       referencedRelation: "commons_revisions"
       referencedColumns: ["id"]
     }
+                  ]
+                },"commons_collection_models": {
+                  Row: {
+                    "collection_id": string,"model_id": string,"position": number
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "collection_id": string,"model_id": string,"position": number
+                  }
+                  Update: {
+                    "collection_id"?: string,"model_id"?: string,"position"?: number
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "commons_collection_models_collection_id_fkey"
+      columns: ["collection_id"]
+isOneToOne: false
+      referencedRelation: "commons_collections"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "commons_collection_models_model_id_fkey"
+      columns: ["model_id"]
+isOneToOne: false
+      referencedRelation: "commons_models"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"commons_collections": {
+                  Row: {
+                    "created_at": string,"description": string,"id": string,"owner_id": string,"public": boolean,"title": string,"updated_at": string,"version": number
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "created_at"?: string,"description"?: string,"id"?: string,"owner_id": string,"public"?: boolean,"title": string,"updated_at"?: string,"version"?: number
+                  }
+                  Update: {
+                    "created_at"?: string,"description"?: string,"id"?: string,"owner_id"?: string,"public"?: boolean,"title"?: string,"updated_at"?: string,"version"?: number
+                  }
+                  Relationships: [
+
+                  ]
+                },"commons_featured": {
+                  Row: {
+                    "collection_id": string | null,"id": string,"model_id": string | null,"position": number
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "collection_id"?: string | null,"id"?: string,"model_id"?: string | null,"position": number
+                  }
+                  Update: {
+                    "collection_id"?: string | null,"id"?: string,"model_id"?: string | null,"position"?: number
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "commons_featured_collection_id_fkey"
+      columns: ["collection_id"]
+isOneToOne: true
+      referencedRelation: "commons_collections"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "commons_featured_model_id_fkey"
+      columns: ["model_id"]
+isOneToOne: true
+      referencedRelation: "commons_models"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"commons_featured_state": {
+                  Row: {
+                    "id": boolean,"version": number
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "id"?: boolean,"version"?: number
+                  }
+                  Update: {
+                    "id"?: boolean,"version"?: number
+                  }
+                  Relationships: [
+
                   ]
                 },"commons_models": {
                   Row: {
@@ -846,6 +954,12 @@ isOneToOne: false
 "admin_commons_begin_asset":
 { Args: { "p_filename": string,"p_revision": string,"p_sha256": string,"p_size_bytes": number }; Returns: Json
                            },
+"admin_commons_feature":
+{ Args: { "p_target_id": string,"p_type": string }; Returns: Json
+                           },
+"admin_commons_featured":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
 "admin_commons_publish":
 { Args: { "p_expected_asset_version"?: number,"p_expected_published": string,"p_note": string,"p_revision": string,"p_rights_confirmed": boolean }; Returns: Json
                            },
@@ -863,6 +977,9 @@ isOneToOne: false
                            },
 "admin_commons_submit":
 { Args: { "p_expected_revision"?: string,"p_id": string,"p_metadata": Json,"p_rights_basis": string }; Returns: Json
+                           },
+"admin_commons_update_featured":
+{ Args: { "p_expected_version": number,"p_ids": (string)[] }; Returns: Json
                            },
 "admin_commons_withdraw":
 { Args: { "p_expected_published": string,"p_id": string,"p_reason": string }; Returns: undefined
@@ -986,6 +1103,12 @@ isOneToOne: false
 "app_record_events":
 { Args: { "p_events": Json }; Returns: number
                            },
+"campaign_create_handoff":
+{ Args: { "p_touches": Json }; Returns: string
+                           },
+"campaign_validate_touches":
+{ Args: { "p_touches": Json }; Returns: boolean
+                           },
 "cloud_abort_save":
 { Args: { "p_revision": string }; Returns: undefined
                            },
@@ -1029,6 +1152,9 @@ isOneToOne: false
                            },
 "cloud_cancel_account_deletion":
 { Args: Record<PropertyKey, never>; Returns: boolean
+                           },
+"cloud_claim_campaign":
+{ Args: { "p_expected_owner": string,"p_token": string }; Returns: number
                            },
 "cloud_claim_exports":
 { Args: { "p_limit": number }; Returns: {
@@ -1199,8 +1325,23 @@ isOneToOne: false
 "commons_claim_render":
 { Args: { "p_version": string }; Returns: Json
                            },
+"commons_collection":
+{ Args: { "p_id": string }; Returns: Json
+                           },
+"commons_collection_available":
+{ Args: { "p_id": string }; Returns: boolean
+                           },
+"commons_collection_json":
+{ Args: { "p": Omit<Database["public"]['Tables']["commons_collections"]['Row'], Database["public"]['Tables']["commons_collections"]['ComputedFields']>,"p_owner"?: boolean }; Returns: Json
+                           },
+"commons_delete_collection":
+{ Args: { "p_expected_version": number,"p_id": string }; Returns: undefined
+                           },
 "commons_delete_draft":
 { Args: { "p_expected_revision": string,"p_model": string }; Returns: Json
+                           },
+"commons_discovery":
+{ Args: Record<PropertyKey, never>; Returns: Json
                            },
 "commons_download_asset":
 { Args: { "p_asset": string }; Returns: Json
@@ -1222,6 +1363,12 @@ isOneToOne: false
                            },
 "commons_model_assets":
 { Args: { "p_revision": string }; Returns: Json
+                           },
+"commons_model_available":
+{ Args: { "p_id": string }; Returns: boolean
+                           },
+"commons_my_collections":
+{ Args: Record<PropertyKey, never>; Returns: Json
                            },
 "commons_my_models":
 { Args: Record<PropertyKey, never>; Returns: Json
@@ -1293,6 +1440,9 @@ isOneToOne: false
                            },
 "commons_require_download_access":
 { Args: Record<PropertyKey, never>; Returns: boolean
+                           },
+"commons_save_collection":
+{ Args: { "p_description": string,"p_expected_version": number,"p_id": string,"p_model_ids": (string)[],"p_public": boolean,"p_title": string }; Returns: Json
                            },
 "commons_save_profile":
 { Args: { "p_avatar_url": string,"p_bio": string,"p_display_name": string,"p_expected_version": number,"p_handle": string,"p_links": Json,"p_public_consent": boolean }; Returns: Json

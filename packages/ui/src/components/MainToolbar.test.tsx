@@ -145,6 +145,19 @@ describe('MainToolbar', () => {
     expect(names()).not.toContain('Freehand');
     expect(names()).not.toContain('Position Texture');
     expect(names()).toContain('Line');
+    const draw = within(screen.getByRole('group', { name: 'Draw' }));
+    fireEvent.click(draw.getByRole('button', { name: 'Text' }));
+    expect(a.toolManager.activeToolId).toBe('text');
+    fireEvent.click(draw.getByRole('button', { name: 'Text tools' }));
+    expect(screen.getAllByRole('menuitemradio').map(item => item.getAttribute('aria-label'))).toEqual([
+      'Text', '3D Text',
+    ]);
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Text' }));
+    fireEvent.click(within(screen.getByRole('group', { name: 'Inspect' })).getByRole('button', { name: 'Measure tools' }));
+    expect(screen.getAllByRole('menuitemradio').map(item => item.getAttribute('aria-label'))).toEqual([
+      'Tape Measure', 'Dimension', 'Protractor', 'Axes',
+    ]);
+    fireEvent.keyDown(screen.getByRole('menuitemradio', { name: 'Dimension' }), { key: 'Escape' });
     // picking from the flyout activates the tool and the face follows
     fireEvent.click(screen.getByRole('button', { name: 'Line tools' }));
     fireEvent.click(screen.getByRole('menuitemradio', { name: 'Freehand' }));

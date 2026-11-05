@@ -16,15 +16,17 @@ Use **Line** for straight edges or **Freehand** for a drawn stroke. The Shape st
 
 ## Solid tools
 
-The Solid stack includes **Outer Shell**, **Union**, **Subtract**, **Trim**, **Intersect** and **Split**. These operate on solids, unlike Layout's page-based Boolean tools. Use the tool matching whether you want to combine volumes, remove one volume from another, keep their overlap, or divide them.
+The Solid stack includes **Union**, **Subtract**, **Trim**, **Intersect** and **Split**. These operate on solids, unlike Layout's page-based Boolean tools. Use the tool matching whether you want to combine volumes, remove one volume from another, keep their overlap, or divide them.
 
-The inputs and the result must be valid solids in the current editing context. With no preselection, click the first solid then the second to apply. For Subtract and Trim, pick the cutter first and the target second. Subtract consumes the cutter; Trim keeps it. Two preselected solids apply on activation. A loose edge or zero-thickness sheet is not a solid operand. Undo restores a completed operation.
+The inputs and the result must be valid solids in the current editing context. With no preselection, click the first solid then the second to apply. For Subtract and Trim, pick the cutter first and the target second. Subtract consumes the cutter; Trim keeps it. Union accepts two or more preselected solids; the other operations accept exactly two. The operation applies on activation. A loose edge or zero-thickness sheet is not a solid operand. Undo restores a completed operation.
 
 ## Inspect, Paint and Tag
 
 The **Inspect** group contains the **Measure** dropdown and a **Section Plane** button. Section Plane creates a cutaway view to inspect the model’s interior.
 
-**Tape Measure** and **Protractor** help measure distances and angles. **Dimension** adds measured annotations. **Text** annotates the model; **3D Text** creates letter geometry. **Axes** works with the coordinate reference rather than placing ordinary text or geometry.
+**Tape Measure** and **Protractor** help measure distances and angles. **Dimension** adds measured annotations. **Axes** works with the coordinate reference rather than placing ordinary text or geometry.
+
+The **Text** dropdown in **Draw** contains **Text** for model annotations and **3D Text** for letter geometry.
 
 **Paint Bucket** applies the chosen material. **Tag** is for model organization; tag visibility can hide content from drawing, picking and snapping. Select the appropriate operation instead of treating every visual change as geometry editing.
 

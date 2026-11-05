@@ -18,7 +18,7 @@ To hide or show the cube, choose **View › Navigation Cube**, or tick **Navigat
 
 ## Move geometry from a base point
 
-Select the geometry, choose **Move**, and click a base point. Move the pointer to preview the destination, then click again to finish. You can also press, drag and release. While positioning, type a distance and press Enter for an exact move along the current direction. Escape cancels the preview.
+Select the geometry, choose **Move**, and click a base point. Move the pointer to preview the destination, then click again to finish. You can also press, drag and release. While positioning, type a distance and press Enter for an exact move along the current direction. Escape cancels the preview. The moving outline includes geometry inside nested groups and components.
 
 Tap Ctrl to toggle copying before placement; check for **Copy** in the status. Work inside the group or component you intend to edit. Moving a component instance differs from editing the geometry shared by its instances.
 

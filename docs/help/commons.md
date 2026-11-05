@@ -1,8 +1,30 @@
 # Download models from Commons
 
-PushForm Commons is a community model catalog with its own website. The hosted library is not available yet. Browse models, search by name or description, and filter by category or license. The commercial-use filter includes models only when every listed license explicitly permits commercial use; read all listed conditions before reuse.
+PushForm Commons is a community model catalog with its own website. Browse models, search by name or description, and filter by category or license. The commercial-use filter includes models only when every listed license explicitly permits commercial use; read all listed conditions before reuse.
 
 Open a model to see its original creator, source, licenses and attribution notices. When files are available, choose **Download ZIP** next to a filename. The package contains the unchanged original in `files/`, an `ATTRIBUTION.json` record and a README. Keep required credits and license notices with reused files. A free download does not remove license conditions.
+
+## Browse featured projects and collections
+
+The Commons website shows **Featured** above search and filters, three projects at a time. Use **Next featured** and **Previous featured** to browse more. This section mixes individual models with collections of related models. A collection card has a mosaic cover and a **Collection** label; opening it shows the curator, description and its available models. Open any model in the collection to read its own license and credits or open it in PushForm.
+
+Use the **Models** and **Collections** tabs below Featured to search the library. Filtering changes those results while the featured selection stays in place. Collections match their titles, descriptions, curators and member model names; category and license filters include collections with a matching model. **Commercial use permitted** includes a collection only when all its available models explicitly permit commercial use under every listed license. Read each model's conditions before reuse.
+
+## Create and manage collections
+
+Any signed-in PushForm user can create collections. Choose **New collection** or **My collections**, complete account setup if needed, then enter a title and optional description. Collections start **Private — only you**. Choose **Public — visible in Commons** when you want to share one. A public creator profile is optional; if you have an active public profile it appears as the collection's curator.
+
+On a model page, **Save to collection** adds or removes that model using your collection checkboxes. **New private collection** creates a collection and saves the model into it in one action.
+
+On your collection's page, choose **Edit collection** to change its details or visibility, add or remove models, and use **Move up** or **Move down** to set their order. The first four available models form its cover. Choose **Save collection** to apply your edits. You can keep up to 100 collections with up to 100 models each. If someone edits the same collection in another tab, reload before saving again; a failed save keeps your draft available for correction.
+
+Collections follow each model's current published version. Withdrawn models disappear from public collection views, and making a collection private removes it from public browsing and Featured. A collection does not transfer ownership or replace its models' licenses and credits. **Delete collection** removes only the collection; its models stay in Commons.
+
+## Feature a model or collection
+
+Commons admins see **Feature** on published model pages and nonempty public collection pages. It adds the item to the end of Featured immediately; **Featured · Manage** opens the admin manager. Other accounts do not see this action.
+
+In **Admin → Commons → Featured**, choose **Add featured item**, search for a model or collection, then feature it. **Move up** and **Move down** change the homepage order. **Remove** takes an entry out of Featured without deleting its model or collection. Entries that become private, empty or withdrawn stay in the manager as unavailable and are hidden from the homepage. If the list changed in another session, use **Reload list** before changing it again.
 
 ## Open a model in PushForm
 
@@ -10,7 +32,11 @@ Downloads require the catalog and model to remain available. If a file is unavai
 
 ## Preserve creator notices
 
-Model Info → Credits shows the original source, licenses, conditions and creator notices. Native saves retain those notices. Geometry and image exports from an attributed model are ZIP packages containing the exported file and attribution notices; keep the package together when sharing. In the editor, choose **Commons** directly below **Object browser** in the left menu bar to browse in a catalog tab. The Commons document tab has a books icon and an **×** close button. Close it to return to your design, and reopen it from the sidebar. Use the **Browse** and **My models** tabs to switch between the catalog and your publications. The model detail view places the preview beside its title, creator and main action, with licenses and credits below. A centered cube on a greenish-gray background appears while a preview loads or when no preview is available. The blue **Open in new tab** button opens a separate editable local copy directly and keeps your catalog search. Only files without recorded units need an extra step to choose units and, where applicable, up axis. In a 3D design, the **Commons** books icon in the ribbon's **Import** group opens a picker for that design. Choose a model, inspect its licenses, and select **Insert into** the named design. Choose units when the file has none, then continue to placement. Click to place, press R to rotate 90 degrees, or Escape to cancel. One Undo removes the insertion and its added credits. Existing copies stay on the revision they imported. Unsupported representations explain why an import is unavailable.
+Model Info → Credits shows the original source, licenses, conditions and creator notices. Native saves retain those notices. Geometry and image exports from an attributed model are ZIP packages containing the exported file and attribution notices; keep the package together when sharing. In the editor, choose **Commons** directly below **Object browser** in the left menu bar to browse in a catalog tab. The Commons document tab has a books icon and an **×** close button. Close it to return to your design, and reopen it from the sidebar. Use the **Browse** and **My models** tabs to switch between the catalog and your publications. The model detail view places the preview beside its title, creator and main action, with licenses and credits below. A centered cube on a greenish-gray background appears while a preview loads or when no preview is available. The blue **Open in new tab** button opens a separate editable local copy directly and keeps your catalog search. Only files without recorded units need an extra step to choose units and, where applicable, up axis.
+
+## Import into your current design
+
+In a 3D design, the **Commons** books icon in the ribbon's **Import** group opens a picker for that design. Choose a model, inspect its licenses, and select **Import into** the named design. After download and validation, the picker closes and the model follows your cursor for placement. Only files without recorded units ask for units and, where applicable, up axis first. The bottom status bar shows the placement controls: click to place, press R to rotate 90 degrees, or Escape to cancel. Original licenses and credits are attached automatically when you place the model. One Undo removes the insertion and its added credits. Existing copies stay on the revision they imported. Unsupported representations explain why an import is unavailable.
 
 ## Your public profile
 

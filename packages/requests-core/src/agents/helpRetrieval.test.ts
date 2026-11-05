@@ -78,7 +78,7 @@ describe('user manual retrieval over the actual corpus', () => {
     ['model', 'Subtract', ['Click the cutter first', 'second click applies', 'removes the cutter']],
     ['model', 'Trim', ['Click the cutter first', '**Trim** keeps the cutter']],
     ['model', 'Union', ['click the first solid', 'second click applies']],
-    ['model', 'Outer Shell', ['two or more preselected solids', 'Escape']],
+    ['model', 'Union', ['two or more solids', 'Escape']],
     ['model', 'Intersect', ['second click applies', 'shared volume', '**Undo**']],
     ['model', 'Split', ['second click applies', 'separate solid pieces']],
     ['model', 'Move', ['click a base point', 'click again to finish', 'Escape']],

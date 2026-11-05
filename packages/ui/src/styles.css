@@ -13,7 +13,7 @@
   --pf-accent-bg: #dce8fb;
   --pf-danger: #c62828;
   --pf-topbar-h: 40px;
-  --pf-statusbar-h: 26px;
+  --pf-statusbar-h: 30px;
   --pf-toolbar-w: 42px;
   --pf-panel-w: 300px;
   --pf-panel-font-size: 12px;
@@ -118,6 +118,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.pf-document-tab-dirty { flex-shrink: 0; color: #800000; font-size: 16px; line-height: 1; }
 .pf-document-tab-close {
   padding: 0 8px;
 }
@@ -561,6 +562,13 @@
   background: var(--pf-bg);
   color: var(--pf-text-muted);
 }
+.pf-cmd-search-field { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+.pf-cmd-search.is-compact { width: 34px; height: 32px; flex: none; padding: 0; border: 0; background: transparent; }
+.pf-cmd-search.is-compact > .pf-iconbtn { width: 32px; height: 32px; }
+.pf-cmd-search.is-compact:not(.is-expanded) .pf-cmd-search-field { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); }
+.pf-cmd-search.is-compact.is-expanded .pf-cmd-search-field { position: absolute; right: 0; top: calc(100% + 6px); z-index: 40; width: min(360px, calc(100vw - 24px)); min-height: 40px; padding: 8px 12px; border: 1px solid var(--pf-border); border-radius: 6px; background: var(--pf-surface); box-shadow: 0 8px 24px #0002; }
+.pf-account-button.is-compact { width: 32px; height: 32px; min-width: 32px; padding: 5px; justify-content: center; border-radius: 50%; }
+.pf-document-save { width: 32px; height: 32px; flex: none; }
 .pf-cmd-search:focus-within {
   border-color: var(--pf-accent);
   color: var(--pf-text);
@@ -876,7 +884,11 @@
   padding: 0 8px 0 24px;
   background: var(--pf-surface);
   border-top: 1px solid var(--pf-border);
+  min-width: 0;
+  font: 12px/1.3 var(--pf-font);
 }
+.pf-status-units { flex: none; color: var(--pf-text-muted); font-size: 11px; white-space: nowrap; }
+.pf-local-file-status { flex: none; color: var(--pf-text-muted); font-size: 11px; }
 .pf-status-left {
   display: flex;
   align-items: center;
@@ -894,6 +906,7 @@
 .pf-status-choice select { height: 20px; padding: 0 4px; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); color: var(--pf-text); background: var(--pf-surface-2); font: inherit; }
 .pf-status-mid {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2420,13 +2433,30 @@
 
 /* The account's cloud library is the product entry screen. */
 button.pf-brand { border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
-.pf-autosave { position: relative; flex-shrink: 0; font-size: 11px; color: var(--pf-text-muted); }
-.pf-autosave > span[role='status'] { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+.pf-autosave { position: relative; flex: 0 1 auto; min-width: 0; max-width: min(48%, 480px); font-size: 11px; color: var(--pf-text-muted); }
+.pf-save-status-trigger { display: block; width: 100%; min-width: 0; padding: 3px 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.pf-save-status-trigger [role='status'] { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+.pf-save-status-trigger [role='status'] > span { overflow: hidden; text-overflow: ellipsis; }
 .pf-autosave svg { width: 14px; height: 14px; flex-shrink: 0; }
-.pf-autosave.is-saving > span > svg { animation: pf-autosave-spin 1.2s linear infinite; }
-.pf-autosave.is-error, .pf-autosave.is-conflict { color: var(--pf-danger); }
-.pf-autosave-error { position: absolute; right: 0; top: 26px; z-index: 50; width: min(330px, 80vw); padding: 12px; border: 1px solid var(--pf-border); border-radius: 6px; background: var(--pf-surface); color: var(--pf-text); box-shadow: 0 8px 24px #0002; font-size: 12px; }
-.pf-autosave-error button { margin: 6px 0 0 6px; cursor: pointer; }
+.pf-autosave.is-saving .pf-save-status-trigger svg { animation: pf-autosave-spin 1.2s linear infinite; }
+.pf-autosave.is-error, .pf-autosave.is-conflict, .pf-autosave.is-local-error { color: var(--pf-danger); }
+.pf-save-status-panel { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 100; width: min(330px, 80vw); padding: 16px; border: 1px solid var(--pf-border); border-radius: 6px; background: var(--pf-surface); color: var(--pf-text); box-shadow: 0 8px 24px #0002; font: 12px/1.5 var(--pf-font); }
+.pf-save-status-panel dl > div { display: flex; justify-content: space-between; gap: 16px; margin: 10px 0; }
+.pf-save-status-panel dt { color: var(--pf-text-muted); }
+.pf-save-status-panel dd { margin: 0; text-align: right; }
+.pf-save-status-panel [role='alert'] { color: var(--pf-danger); }
+.pf-app[inert] .pf-save-status-panel { visibility: hidden; pointer-events: none; }
+.pf-save-status-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
+.pf-unsaved-dialog, .pf-unsaved-dialog * { box-sizing: border-box; }
+.pf-unsaved-dialog { width: min(440px, calc(100vw - 32px)); padding: 24px; font: 13px/1.5 var(--pf-font); color: var(--pf-text); }
+.pf-unsaved-dialog h2 { font-size: 20px; line-height: 1.3; margin: 0 0 12px; overflow-wrap: anywhere; }
+.pf-unsaved-dialog p { margin: 12px 0; }
+.pf-unsaved-dialog .pf-modal-actions { justify-content: flex-end; flex-wrap: wrap; gap: 8px; border-top: 1px solid var(--pf-border); padding-top: 16px; margin-top: 24px; }
+.pf-unsaved-error { color: var(--pf-danger); }
+@media (prefers-color-scheme: dark) {
+  .pf-unsaved-dialog .pf-dialog-btn.is-primary { color: #14213a; }
+  .pf-unsaved-error, .pf-save-status-panel [role='alert'], .pf-autosave.is-error, .pf-autosave.is-conflict, .pf-autosave.is-local-error { color: #ffaaa4; }
+}
 @keyframes pf-autosave-spin { to { transform: rotate(360deg); } }
 .pf-home { height: 100dvh; overflow: hidden; background: var(--pf-surface); font: 14px/1.5 var(--pf-font); }
 .pf-home button, .pf-home input, .pf-home select { font: inherit; }

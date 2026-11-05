@@ -63,7 +63,7 @@ export function DocumentTabs({
                 <TbVector size={16} aria-hidden="true" />
               )}
               <span className="pf-document-tab-name">{name}</span>
-              {session.isDirty(tab) ? <span aria-label="Unsaved changes">•</span> : null}
+              {session.isDirty(tab) ? <span className="pf-document-tab-dirty" aria-label="Unsaved changes">•</span> : null}
             </button>}
             {session.tabs.length > 1 ? (
               <button

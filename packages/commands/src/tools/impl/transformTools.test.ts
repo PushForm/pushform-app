@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import type { Vec2, Vec3 } from '@pushform/core';
+import type { Id, Vec2, Vec3 } from '@pushform/core';
 import { meshBounds, v3dist } from '@pushform/core';
 import { meshTopologyProblems } from '@pushform/kernel';
 import { freeInference, GROUND_PLANE, SNAP_COLORS, type InferenceResult, type PickHit } from '@pushform/inference';
@@ -14,6 +14,7 @@ import { disposeKernels, installPolyMeshStub, ISO_CAMERA, setupCommands, TOP_CAM
 import type { MoveTool } from './Move';
 import type { RotateTool } from './Rotate';
 import type { ScaleTool } from './Scale';
+import { groupCommands, type MakeResult } from '../../commands/groups';
 import { worldToScreen } from './transformShared';
 
 beforeAll(installPolyMeshStub);
@@ -85,6 +86,38 @@ describe('MoveTool', () => {
     expect(meshTopologyProblems(body(id).mesh)).toEqual([]);
     expect(host.undo()).toBe(true);
     expect(near(meshBounds(body(id).mesh).min, [0, 0, 0])).toBe(true);
+  });
+
+  it('previews nested groups while dragging without changing the document until release', async () => {
+    const { host, tools, registry, addBox } = setup();
+    registry.registerAll(groupCommands);
+    host.selection.set([bodyRef(addBox([4, 5, 0], [5, 6, 1]))]);
+    registry.execute('component.make', {});
+    registry.execute('group.make', {});
+    const outer = registry.execute('group.make', {}) as MakeResult;
+    const before = host.doc.state;
+    const entries = host.undoStack.length;
+    tools.activate('move');
+    const tool = tools.activeTool as MoveTool;
+    tools.pointerDown(at(TOP_CAMERA, [0, 0, 0]));
+    tools.pointerMove(at(TOP_CAMERA, [3, 2, 0]));
+    const outlines = tools.overlay().filter((o) => o.kind === 'polyline' && o.width === 1);
+    expect(outlines).toHaveLength(12);
+    const points = outlines.flatMap((o) => o.kind === 'polyline' ? o.points : []);
+    expect(Math.min(...points.map((p) => p[0]))).toBeCloseTo(7);
+    expect(Math.min(...points.map((p) => p[1]))).toBeCloseTo(7);
+    expect(host.doc.state).toBe(before);
+    expect(host.undoStack.length).toBe(entries);
+    tools.pointerUp(at(TOP_CAMERA, [3, 2, 0]));
+    await tool.settled;
+    expect(host.undoStack.length).toBe(entries + 1);
+    const instance = host.doc.state.definitions.get(host.doc.state.rootDefinitionId)!.entities.instances.get(outer.instanceId as Id)!;
+    expect(instance.transform[12]).toBeCloseTo(before.definitions.get(before.rootDefinitionId)!.entities.instances.get(outer.instanceId as Id)!.transform[12]! + 3);
+    expect(instance.transform[13]).toBeCloseTo(before.definitions.get(before.rootDefinitionId)!.entities.instances.get(outer.instanceId as Id)!.transform[13]! + 2);
+    expect(host.undo()).toBe(true);
+    expect(host.doc.state.definitions.get(host.doc.state.rootDefinitionId)!.entities.instances.get(outer.instanceId as Id)!.transform).toEqual(
+      before.definitions.get(before.rootDefinitionId)!.entities.instances.get(outer.instanceId as Id)!.transform,
+    );
   });
 
   it('Down arrow locks the move perpendicular to the last inferred edge, and a typed length moves along it', async () => {

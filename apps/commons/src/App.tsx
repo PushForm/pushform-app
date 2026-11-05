@@ -2,14 +2,15 @@
 // Copyright 2026 PushForm contributors
 import { BrowseImagesProvider } from '@pushform/commons-ui/BrowseImages';
 import { useBrowsePaging, MoreBrowseResults } from '@pushform/commons-ui/BrowsePaging';
-import { sortedModelFiles } from './modelFiles';
 import { commonsFileUrl, CommonsUnavailableError, type CommonsProfile, type CommonsCollections } from '@pushform/cloud';
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { CommonsProfileEditor, CommonsProfilePageView, CreatorCredit, ProfileLink, type ProfileLookup } from './CommonsProfile';
 import { ModelCard, ModelGrid } from './ModelCard';
-import { currentCommonsLocation, profileHandleFromPath } from './route';
+import { currentCommonsLocation, navigateCommons, profileHandleFromPath, profilePath } from './route';
+import { OwnModelsProvider, OwnModelGrid, OwnedDraftDetail, OwnerModelActions, useOwnModels } from './OwnModels';
 import { publishRoute, type PublishRoute } from './PublishPage';
 import { CommonsAccessGate, CommonsDownloadButton, CommonsMailingPreference } from './CommonsAccess';
+import { sortedModelFiles } from './modelFiles';
 import type { CommonsAccount } from './account';
 import { CommonsModelPreview } from './CommonsPreview';
 import { CommonsOpenAction } from './CommonsOpenAction';
@@ -44,6 +45,7 @@ function MyProfileLink({own}:{own:CommonsProfile|null|undefined}){
   return own?.active?<ProfileLink handle={own.handle}>My profile</ProfileLink>:<a href="#account">My profile</a>;
 }
 function ModelDetail({ model, filesUrl, account, editorUrl }: { model: CatalogModel; filesUrl: string | undefined; account:CommonsAccount|null; editorUrl:string|undefined }) {
+  const owned = useOwnModels().models?.find(value => value.id === model.id);
   return <>
     <a className="back-link" href="#browse">← All models</a>
     <article className="model-detail">
@@ -55,6 +57,7 @@ function ModelDetail({ model, filesUrl, account, editorUrl }: { model: CatalogMo
         <dl className="metadata"><div><dt>Formats</dt><dd>{model.formats.join(', ')}</dd></div>
           <div><dt>Revision</dt><dd>{model.revision}</dd></div>
           <div><dt>Published</dt><dd>{new Date(model.publishedAt).toLocaleDateString()}</dd></div></dl>
+        {owned && <OwnerModelActions key={owned.id} model={owned} filesUrl={filesUrl} />}
         <CommonsOpenAction model={model} editorUrl={editorUrl} />
         <div className="collection-actions"><ModelCollectionAction model={model} /><FeatureAction key={model.id} type="model" targetId={model.id} eligible={model.files.length > 0} /></div>
         {model.files.length > 0 && <section className="downloads" aria-label="Model files"><h2>Model files</h2>
@@ -81,7 +84,7 @@ function ModelDetail({ model, filesUrl, account, editorUrl }: { model: CatalogMo
   </>;
 }
 
-export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUrl, collections=null }: { loadCatalog: CatalogLoader | null; filesUrl?: string | undefined; account?:CommonsAccount|null; publishPage?:((route:PublishRoute,catalogReady:boolean)=>ReactNode)|undefined;editorUrl?:string|undefined;collections?:CommonsCollections|null }) {
+function CommonsApp({ loadCatalog, filesUrl, account=null, publishPage, editorUrl, collections=null }: { loadCatalog: CatalogLoader | null; filesUrl?: string | undefined; account?:CommonsAccount|null; publishPage?:((route:PublishRoute,catalogReady:boolean)=>ReactNode)|undefined;editorUrl?:string|undefined;collections?:CommonsCollections|null }) {
   const [fullState, setState] = useState<CatalogState>({ kind: loadCatalog ? 'loading' : 'unconfigured' });
   const [attempt, setAttempt] = useState(0);
   useEffect(()=>{const refresh=()=>setAttempt(value=>value+1);window.addEventListener('commons:catalog-changed',refresh);return()=>window.removeEventListener('commons:catalog-changed',refresh);},[]);
@@ -90,7 +93,9 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
   const [location,setLocation]=useState(currentCommonsLocation);
   const hash=location.hash;
   const onCollections=hash==='#collections';
-  const collectionRoute=hash==='#my-collections'||hash.startsWith('#collections/');
+  const collectionRoute=hash.startsWith('#collections/');
+  const legacyOwnRoute=hash==='#my-models'||hash==='#my-collections';
+  const ownedModels=useOwnModels();
   const selectedId=modelFromHash(hash);
   const profileHandle=hash===''||hash==='#main'?profileHandleFromPath(location.path):null;
   const legacyPersonId=/^#people\/([a-f0-9-]{36})$/.exec(hash)?.[1]??null;
@@ -103,6 +108,11 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
   const heading = useRef<HTMLDivElement>(null);
   const focusedRoute = useRef<{ key: string; done: boolean }>({ key: '', done: false });
   const own=useOwnProfile(account);
+  useEffect(() => {
+    if (!legacyOwnRoute || own === undefined) return;
+    if (own?.active) navigateCommons(profilePath(own.handle), true);
+    else window.location.hash = '#account';
+  }, [legacyOwnRoute, own]);
   useEffect(() => {
     const update = () => {const next=currentCommonsLocation();setLocation(current=>next.path===current.path&&next.hash===current.hash?current:next);};
     window.addEventListener('hashchange', update);window.addEventListener('popstate', update);
@@ -128,7 +138,7 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
     const focusHeading = () => { if (!focusedRoute.current.done) heading.current?.focus({ preventScroll: true }); };
     if(onProfile){focusedRoute.current.done=true;return;}
     if(collectionRoute){if(!focusedRoute.current.done){focusHeading();heading.current?.scrollIntoView?.({block:'start'});}focusedRoute.current.done=true;return;}
-    if(hash==='#account'||publishRoute(hash)){document.title=hash==='#account'?'Your profile — PushForm Commons':'My models — PushForm Commons';focusHeading();focusedRoute.current.done=true;return;}
+    if(hash==='#account'||publishRoute(hash)){document.title=hash==='#account'?'Your profile — PushForm Commons':`${publishRoute(hash)?.kind==='edit'?'Edit model':'Upload model'} — PushForm Commons`;focusHeading();focusedRoute.current.done=true;return;}
     document.title = selected ? `${selected.title} — PushForm Commons` : 'PushForm Commons — Models for your next project';
     if (state.kind !== 'ready' || !window.location.hash || focusedRoute.current.done) return;
     if (!document.activeElement?.closest('.catalog-tabs')) focusHeading();
@@ -141,10 +151,10 @@ export function App({ loadCatalog, filesUrl, account=null, publishPage, editorUr
     <a className="skip-link" href="#main">Skip to content</a>
     <header className="site-header"><a className="brand" href="#browse" aria-label="PushForm Commons home">
       <img src="/pf-logo-mark.svg" alt="" width="30" height="30" /><span>PushForm <strong>Commons</strong></span>
-    </a><nav aria-label="Commons">{account&&<a className="nav-upload" href="#upload">Upload model</a>}<a href="#collections">Collections</a>{account&&<><a href="#my-collections">My collections</a><a href="#my-models">My models</a><MyProfileLink own={own}/></>}<a className="editor-link" href="https://app.pushform.io">Open PushForm <span aria-hidden="true">↗</span></a><CommonsAdminLink/></nav></header>
+    </a><nav aria-label="Commons">{account&&<a className="nav-upload" href="#upload">Upload model</a>}<a href="#collections">Collections</a>{account&&<><MyProfileLink own={own}/></>}<a className="editor-link" href="https://app.pushform.io">Open PushForm <span aria-hidden="true">↗</span></a><CommonsAdminLink/></nav></header>
     <main id="main" ref={heading} tabIndex={-1}>
-      {creditedCreatorId?<CreditedCreatorPage key={creditedCreatorId} id={creditedCreatorId} models={models} filesUrl={filesUrl}/>:collectionRoute?<CollectionsRoute route={hash} models={models} filesUrl={filesUrl}/>:profileLookup?<CommonsProfilePageView lookup={profileLookup} profiles={account?.profiles??null} filesUrl={filesUrl} ownProfileId={own?.id??null} renderCollections={handle=><ProfileCollections handle={handle} models={models} filesUrl={filesUrl}/>}/>:hash==='#account'?account?<AccountPage account={account} filesUrl={filesUrl}/>:<section className="status-panel"><h1>Accounts are unavailable in this build.</h1></section>:publishRoute(hash)?publishPage?.(publishRoute(hash)!,state.kind==='ready')??<section className="status-panel"><h1>Publishing is unavailable in this build.</h1></section>:state.kind === 'ready' && selectedId ? selected ? <ModelDetail model={selected} filesUrl={filesUrl} account={account} editorUrl={editorUrl} /> :
-        <section className="status-panel"><p className="eyebrow">Model unavailable</p><h1>This model isn’t in the catalog.</h1>
+      {creditedCreatorId?<CreditedCreatorPage key={creditedCreatorId} id={creditedCreatorId} models={models} filesUrl={filesUrl}/>:legacyOwnRoute?<p className="status-panel" role="status">Opening your profile...</p>:collectionRoute?<CollectionsRoute route={hash} models={models} filesUrl={filesUrl}/>:profileLookup?<CommonsProfilePageView lookup={profileLookup} profiles={account?.profiles??null} filesUrl={filesUrl} ownProfileId={own?.id??null} renderCollections={(handle,owner,profileId)=><ProfileCollections handle={handle} owner={owner} profileId={profileId} models={models} filesUrl={filesUrl}/>} renderOwnModels={()=><OwnModelGrid filesUrl={filesUrl}/>}/>:hash==='#account'?account?<AccountPage account={account} filesUrl={filesUrl}/>:<section className="status-panel"><h1>Accounts are unavailable in this build.</h1></section>:publishRoute(hash)?publishPage?.(publishRoute(hash)!,state.kind==='ready')??<section className="status-panel"><h1>Publishing is unavailable in this build.</h1></section>:selectedId && (state.kind === 'ready' || ownedModels.models?.some(model=>model.id===selectedId)) ? selected ? <ModelDetail model={selected} filesUrl={filesUrl} account={account} editorUrl={editorUrl} /> :
+        ownedModels.models?.find(model=>model.id===selectedId) ? <OwnedDraftDetail key={selectedId} model={ownedModels.models.find(model=>model.id===selectedId)!} filesUrl={filesUrl}/> : account && ownedModels.userId && !ownedModels.models && !ownedModels.error ? <p role="status">Loading your model...</p> : <section className="status-panel"><p className="eyebrow">Model unavailable</p><h1>This model isn’t in the catalog.</h1>
           <p>It may have been removed or the link may be out of date.</p><a href="#browse">Browse models</a></section> : <>
         <section className="hero"><p className="eyebrow">A shared place to start</p>
           <h1>Good projects start<br />with <em>shared ideas.</em></h1>
@@ -186,4 +196,8 @@ function AccountPage({account,filesUrl}:{account:CommonsAccount;filesUrl:string|
     <CommonsProfileEditor profiles={account.profiles} images={filesUrl?{filesUrl,token:async()=>{const value=await account.session.getAccessToken();if(!value)throw new Error('Sign in to change your profile images.');return value;}}:undefined}/><CommonsMailingPreference account={account}/>
     <button onClick={()=>void account.session.signOut()} disabled={state.pending!==null}>Sign out</button>
   </div></CommonsAccessGate>;
+}
+
+export function App(props: Parameters<typeof CommonsApp>[0]) {
+  return <OwnModelsProvider account={props.account ?? null}><CommonsApp {...props}/></OwnModelsProvider>;
 }

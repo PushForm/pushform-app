@@ -24,7 +24,9 @@ The inputs and the result must be valid solids in the current editing context. W
 
 The **Inspect** group contains the **Measure** dropdown and a **Section Plane** button. Section Plane creates a cutaway view to inspect the model’s interior.
 
-**Tape Measure** and **Protractor** help measure distances and angles. **Dimension** adds measured annotations. **Text** annotates the model; **3D Text** creates letter geometry. **Axes** works with the coordinate reference rather than placing ordinary text or geometry.
+**Tape Measure** and **Protractor** help measure distances and angles. **Dimension** adds measured annotations. **Axes** works with the coordinate reference rather than placing ordinary text or geometry.
+
+The **Text** dropdown in **Draw** contains **Text** for model annotations and **3D Text** for letter geometry.
 
 **Paint Bucket** applies the chosen material. **Tag** is for model organization; tag visibility can hide content from drawing, picking and snapping. Select the appropriate operation instead of treating every visual change as geometry editing.
 

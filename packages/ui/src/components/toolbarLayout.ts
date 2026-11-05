@@ -38,6 +38,7 @@ export const TOOLBAR_GROUPS: readonly { title: string; slots: readonly Slot[] }[
       stack('Line', 'line', 'freehand'),
       stack('Shape', 'rectangle', 'rotrect', 'circle', 'polygon'),
       stack('Arc', 'arc', 'arc2', 'arc3', 'pie'),
+      stack('Text', 'text', command('ui.text3d', 'tool-text3d')),
     ],
   },
   {
@@ -65,8 +66,6 @@ export const TOOLBAR_GROUPS: readonly { title: string; slots: readonly Slot[] }[
         'Measure',
         'tape',
         'dimension',
-        'text',
-        command('ui.text3d', 'tool-text3d'),
         'protractor',
         'axes',
       ),

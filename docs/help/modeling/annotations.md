@@ -2,7 +2,7 @@
 
 ## Place and edit Text in a model
 
-Choose **Text** from the Measure dropdown. Click a face, edge or snapped point to anchor leader text, then click where its label should sit. The initial text describes the face's area, edge's length or point's coordinates. Clicking empty space instead places screen text.
+Choose **Text** from the **Draw** group. Click a face, edge or snapped point to anchor leader text, then click where its label should sit. The initial text describes the face's area, edge's length or point's coordinates. Clicking empty space instead places screen text.
 
 The text opens for editing after placement. Type your wording, then press Enter or click elsewhere to keep it. Shift+Enter starts a new line. Escape cancels the text edit, or cancels a leader before its second placement click. To edit existing text, double-click it with Select or choose **Edit Text** from its context menu.
 
@@ -20,7 +20,7 @@ Radius and diameter dimensions can be switched in Entity Info while keeping the 
 
 ## Place 3D text
 
-Choose **3D Text** from the Measure stack or command search. Enter text, font, weight, alignment and height. Choose filled text, and enable extrusion with a nonzero depth when you want solids. Height and depth use the model's units.
+Choose **3D Text** from the **Text** dropdown in **Draw** or command search. Enter text, font, weight, alignment and height. Choose filled text, and enable extrusion with a nonzero depth when you want solids. Height and depth use the model's units.
 
 Click **Place** after correcting any validation messages, then click in the model to place the text component carried by the pointer. Escape cancels that placement but keeps the new definition in Components. Height means capital-letter height. The supported font choices are Roboto, Noto Serif and Roboto Mono.
 

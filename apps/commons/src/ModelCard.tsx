@@ -26,7 +26,7 @@ export function ModelCard({ model, filesUrl, href = `#models/${model.id}`, art, 
     <a href={href} className="model-art" aria-label={`${href.startsWith('#edit/') ? 'Edit' : 'View'} ${model.title}`}>
       {art ?? <CommonsThumbnail key={model.id + model.revision} model={model as CatalogModel} filesUrl={filesUrl} />}</a>
     <div className="card-body"><p className="eyebrow">{typeLabel ? `${typeLabel} · ${model.formats?.join(' · ') ?? model.category}` : model.category}</p><h3><a href={href}>{model.title}</a></h3>
-      <p className="creator"><CreatorCredit model={model}/></p><p className="license-label">{model.licenses.map((license) => license.name).join(' · ')}</p>
+      <p className="creator"><CreatorCredit model={model}/></p><p className="license-label">{[...new Set(model.licenses.map((license) => license.name))].join(' · ')}</p>
       {footer}</div>
   </article>;
 }

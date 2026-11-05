@@ -10,7 +10,7 @@ Click the **PushForm** logo or name in an editor to return Home. Returning Home 
 
 Working changes save locally on this device. Choose **Save version** in the header, Main menu, or command search to create a private cloud checkpoint. The dialog shows the next revision number and accepts optional change notes. Saving unchanged content reuses the current cloud revision. The status distinguishes local checkpoint progress from the last successful cloud version. Local storage failures are reported; another device opens the last cloud version, not later local changes.
 
-**Share with the community** starts unchecked. Check it and choose **Save & continue to publishing** to review the saved snapshot for Commons. A separate Publish confirmation makes it public. Cancelling publication retains the private cloud version. Private change notes are not published.
+**Share with the community** starts unchecked. Check it and choose **Save & continue to publishing** to add public details and a license for the saved snapshot in Commons. Choose **Publish model** on that screen to make it public. Cancelling publication retains the private cloud version. Private change notes are not published.
 
 If a save conflicts with a newer cloud revision, automatic retries stop. **Save As…** lets you save a separate file.
 

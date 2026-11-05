@@ -58,7 +58,7 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); window.location.hash = ''; });
 
-it('starts a private draft from a dropped file, shows upload and conversion progress, and publishes once confirmed', async () => {
+it('starts a private draft from a dropped file, shows upload and conversion progress, and publishes directly from details', async () => {
   const f = setup();
   let progress: ((value: CommonsUploadProgress) => void) | undefined;
   let finishUpload: (value: CommonsUpload) => void = () => {};
@@ -84,10 +84,13 @@ it('starts a private draft from a dropped file, shows upload and conversion prog
   expect(screen.getByText('Converting preview')).toBeTruthy();
 
   const publish = screen.getByRole('button', { name: 'Publish model' }) as HTMLButtonElement;
+  expect(publish.disabled).toBe(false);
+  expect(screen.queryByRole('checkbox')).toBeNull();
+  fireEvent.change(screen.getByLabelText(/Title/), { target: { value: '' } });
   expect(publish.disabled).toBe(true);
-  expect(screen.getByText('Confirm your right to share it.')).toBeTruthy();
+  expect(screen.getByText('Add a title.')).toBeTruthy();
+  fireEvent.change(screen.getByLabelText(/Title/), { target: { value: 'shop bench' } });
   fireEvent.change(screen.getByLabelText(/Category/), { target: { value: 'Furniture' } });
-  fireEvent.click(screen.getByRole('checkbox'));
   expect(publish.disabled).toBe(false);
   await act(async () => { emit!({ state: 'ready', triangles: 1200, durationMs: 40 }); finishRender({ state: 'ready', triangles: 1200, durationMs: 40 }); });
   expect(await screen.findByText('Preview ready')).toBeTruthy();
@@ -124,7 +127,6 @@ it('edits a published model without a new revision until something changes, then
   render(<UploadDialog account={f.account} filesUrl="https://files.example.com" modelId="model-bench" onClose={vi.fn()} onPublished={vi.fn()}/>);
   expect(await screen.findByDisplayValue('Bench')).toBeTruthy();
   expect(screen.getByText('bench.skb')).toBeTruthy();
-  fireEvent.click(screen.getByRole('checkbox'));
   expect((screen.getByRole('button', { name: 'Publish changes' }) as HTMLButtonElement).disabled).toBe(true);
   expect(f.rpc).not.toHaveBeenCalledWith('commons_submit_model', expect.anything());
   fireEvent.change(screen.getByDisplayValue('Bench'), { target: { value: 'Garden bench' } });
@@ -169,25 +171,21 @@ it('maps routes, file states and details the way the dialog shows them', () => {
   expect(detailsFromMetadata(custom)).toMatchObject({ license: 'other', terms: 'Personal use.\nNo resale.' });
 });
 
-it('takes a saved editor snapshot directly into details and requires a separate publication review', async () => {
+it('publishes a saved editor snapshot directly from details without a review step or rights checkbox', async () => {
   const f = setup(); const published = vi.fn();
   const file = new File(['saved snapshot bytes'], 'Garden bench.pf');
   cloud.upload.mockResolvedValue(asset({ filename: file.name, format: 'pf', size_bytes: file.size }));
   cloud.stream.mockResolvedValue({ state: 'pending' });
   render(<UploadDialog account={f.account} filesUrl="https://files.example.com" modelId={null} newModelId="design-snapshot" initialFile={file} snapshotLabel="Private cloud revision 12" onClose={vi.fn()} onPublished={published}/>);
   await waitFor(() => expect(cloud.upload).toHaveBeenCalledWith(expect.anything(), expect.anything(), revisionId, file, expect.anything(), expect.anything()));
-  const review = await screen.findByRole('button', { name: 'Review publication' });
-  await waitFor(() => expect((review as HTMLButtonElement).disabled).toBe(false));
-  fireEvent.click(review);
-  expect(screen.getByText('Review your public snapshot')).toBeTruthy();
-  const back = screen.getByRole('button', { name: 'Back to details' });
-  expect(back.closest('footer')).toBe(screen.getByRole('button', { name: 'Publish model' }).closest('footer'));
-  expect(screen.queryByText('Draft saved')).toBeNull();
-  fireEvent.click(back);
+  const publish = await screen.findByRole('button', { name: 'Publish model' });
+  await waitFor(() => expect((publish as HTMLButtonElement).disabled).toBe(false));
   expect(screen.getByDisplayValue('Garden bench')).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: 'Review publication' }));
+  expect(screen.getByText(/Private cloud revision 12/)).toBeTruthy();
+  expect(screen.queryByRole('checkbox')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Review publication' })).toBeNull();
+  expect(screen.queryByText('2 Review')).toBeNull();
   expect(f.rpc.mock.calls.some(([name]) => name === 'commons_publish_model')).toBe(false);
-  fireEvent.click(screen.getByRole('checkbox'));
   fireEvent.click(screen.getByRole('button', { name: 'Publish model' }));
   await waitFor(() => expect(published).toHaveBeenCalledWith('design-snapshot'));
 });
@@ -218,6 +216,52 @@ it('explains invalid handles inline without saving and clears errors when correc
   expect(await screen.findByText('Drag a model file here')).toBeTruthy();
 });
 
+it('keeps a copied source license exactly once through repeated draft saves without adding an original-work license', async () => {
+  const f = setup();
+  const license = { name: 'CC BY 3.0', url: 'https://creativecommons.org/licenses/by/3.0/', commercialUse: 'allowed' as const, conditions: ['Retain original creator credit.'] };
+  const inherited = { creator: 'Original Maker', source: { name: 'Source', url: 'https://models.example.com/chair' }, licenses: Array.from({ length: 5 }, () => ({ ...license })), credits: [{ name: 'Original Maker', url: null, text: 'Original chair.' }] };
+  const file = new File(['snapshot'], 'Chair.pf');
+  cloud.upload.mockResolvedValue(asset({ filename: file.name, format: 'pf', size_bytes: file.size }));
+  cloud.stream.mockResolvedValue({ state: 'pending' });
+  render(<UploadDialog account={f.account} filesUrl="https://files.example.com" modelId={null} initialFile={file} inherited={inherited} snapshotLabel="Private cloud revision 1" onClose={vi.fn()} onPublished={vi.fn()}/>);
+  await waitFor(() => expect(cloud.upload).toHaveBeenCalled());
+  expect(screen.queryByLabelText(/License \*/)).toBeNull();
+  expect(screen.getByText('Source licenses retained')).toBeTruthy();
+  for (const title of ['Textured chair', 'Finished chair']) {
+    fireEvent.change(screen.getByLabelText(/Title/), { target: { value: title } });
+    await waitFor(() => expect(f.rpc).toHaveBeenCalledWith('commons_update_draft', expect.objectContaining({ p_metadata: expect.objectContaining({ title, licenses: [license] }) })), { timeout: 2000 });
+  }
+  for (const [name, args] of f.rpc.mock.calls) if (name === 'commons_submit_model' || name === 'commons_update_draft') expect((args.p_metadata as { licenses: unknown[] }).licenses).toEqual([license]);
+  expect(screen.getByText('CC BY 3.0')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Publish model' }));
+  await waitFor(() => expect(f.rpc).toHaveBeenCalledWith('commons_publish_model', expect.objectContaining({ p_rights_confirmed: true })));
+  expect((f.state.revisions[0]!.metadata as { licenses: unknown[] }).licenses).toEqual([license]);
+});
+
+it('preserves source license versions and distinct terms on corrections', async () => {
+  const { uniqueLicenses } = await import('./modelDetails');
+  const first = { name: 'CC BY 3.0', url: 'https://creativecommons.org/licenses/by/3.0/', commercialUse: 'allowed' as const, conditions: ['Credit A.', 'Keep notice.'] };
+  const second = { ...first, conditions: ['Credit B.'] };
+  const previous = { ...metadataFor({ title: 'Chair', description: '', category: 'Furniture', license: 'CC BY 4.0', terms: '' }, 'Maker', ['chair.pf']), source: { name: 'Source', url: 'https://models.example.com/chair' }, licenses: [first, { ...first, conditions: [...first.conditions].reverse() }, second] };
+  expect(uniqueLicenses(previous.licenses)).toEqual([first, second]);
+  const details = detailsFromMetadata(previous);
+  const corrected = metadataFor({ ...details, title: 'Textured chair' }, 'Maker', ['chair.pf'], previous);
+  expect(corrected.licenses).toEqual([first, second]);
+  expect(corrected.licenses.some(license => license.name === 'Custom license' || license.name === 'CC BY 4.0')).toBe(false);
+});
+
+it('saves an editor snapshot draft without publishing', async () => {
+  const f = setup(); const closed = vi.fn(); const published = vi.fn();
+  const file = new File(['saved snapshot bytes'], 'Private bench.pf');
+  cloud.upload.mockResolvedValue(asset({ filename: file.name, format: 'pf', size_bytes: file.size }));
+  cloud.stream.mockResolvedValue({ state: 'pending' });
+  render(<UploadDialog account={f.account} filesUrl="https://files.example.com" modelId={null} initialFile={file} snapshotLabel="Private cloud revision 3" onClose={closed} onPublished={published}/>);
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Publish model' }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+  await waitFor(() => expect(closed).toHaveBeenCalledOnce());
+  expect(published).not.toHaveBeenCalled();
+  expect(f.rpc.mock.calls.some(([name]) => name === 'commons_publish_model')).toBe(false);
+});
 
 it('uses the editor-rendered current view and uploads it without waiting for server rendering', async () => {
   const f = setup();
@@ -230,16 +274,17 @@ it('uses the editor-rendered current view and uploads it without waiting for ser
   expect(screen.getByRole('img', { name: 'Preview of cabinet' }).getAttribute('src')).toBe('blob:preview');
   expect(screen.queryByRole('button', { name: 'Replace file' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull();
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Add a cover photo' }) as HTMLButtonElement).disabled).toBe(false));
   const cover = new File(['photo'], 'cover.png', { type: 'image/png' });
   fireEvent.change(screen.getByLabelText('Choose a cover photo'), { target: { files: [cover] } });
   await screen.findByRole('img', { name: 'Cover photo' });
   fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
   await waitFor(() => expect(cloud.upload.mock.calls.filter(call => call[3] === image)).toHaveLength(2));
-  await waitFor(() => expect((screen.getByRole('button', { name: 'Review publication' }) as HTMLButtonElement).disabled).toBe(false));
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Publish model' }) as HTMLButtonElement).disabled).toBe(false));
   expect(screen.queryByRole('img', { name: 'Cover photo' })).toBeNull();
 });
 
-it('lets the publisher retry a failed current-view upload before reviewing publication', async () => {
+it('lets the publisher retry a failed current-view upload before publication', async () => {
   const f = setup();
   const file = new File(['snapshot'], 'cabinet.pf');
   const image = new File(['png'], 'current-view.png', { type: 'image/png' });
@@ -249,7 +294,12 @@ it('lets the publisher retry a failed current-view upload before reviewing publi
     return asset({ filename: source.name, format: source === file ? 'pf' : 'png', size_bytes: source.size });
   });
   render(<UploadDialog account={f.account} filesUrl="https://files.example.com" modelId={null} initialFile={file} initialImage={image} snapshotLabel="Private cloud revision 12" onClose={vi.fn()} onPublished={vi.fn()} />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Retry preview upload' }));
-  await waitFor(() => expect((screen.getByRole('button', { name: 'Review publication' }) as HTMLButtonElement).disabled).toBe(false));
+  const retry = await screen.findByRole('button', { name: 'Retry preview upload' });
+  expect((screen.getByRole('button', { name: 'Publish model' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(f.rpc.mock.calls.some(([name]) => name === 'commons_publish_model')).toBe(false);
+  fireEvent.click(retry);
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Publish model' }) as HTMLButtonElement).disabled).toBe(false));
   expect(cloud.upload.mock.calls.filter(call => call[3] === image)).toHaveLength(2);
+  fireEvent.click(screen.getByRole('button', { name: 'Publish model' }));
+  await waitFor(() => expect(f.rpc).toHaveBeenCalledWith('commons_publish_model', expect.objectContaining({ p_rights_confirmed: true })));
 });

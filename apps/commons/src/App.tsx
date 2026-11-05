@@ -50,7 +50,6 @@ function ModelDetail({ model, filesUrl, account, editorUrl }: { model: CatalogMo
         <dl className="metadata"><div><dt>Formats</dt><dd>{model.formats.join(', ')}</dd></div>
           <div><dt>Revision</dt><dd>{model.revision}</dd></div>
           <div><dt>Published</dt><dd>{new Date(model.publishedAt).toLocaleDateString()}</dd></div></dl>
-        {model.source && <p className="source">Sourced from <a href={model.source.url} rel="noreferrer" target="_blank">{model.source.name} ↗</a></p>}
         <CommonsOpenAction model={model} editorUrl={editorUrl} />
         <div className="collection-actions"><ModelCollectionAction model={model} /><FeatureAction key={model.id} type="model" targetId={model.id} eligible={model.files.length > 0} /></div>
         {model.files.length > 0 && <section className="downloads" aria-label="Model files"><h2>Model files</h2>
@@ -60,6 +59,7 @@ function ModelDetail({ model, filesUrl, account, editorUrl }: { model: CatalogMo
           </li>)}</ul>
         </section>}
         <section className="rights" aria-label="Licenses and attribution"><h2>Licenses & attribution</h2>
+          {model.source && <p className="source">Source: <a href={model.source.url} rel="noreferrer" target="_blank">{model.source.name} ↗</a></p>}
           {model.licenses.map((license, index) => <div key={index}>
             <h3>{license.url?<a href={license.url} rel="noreferrer" target="_blank">{license.name} ↗</a>:license.name}</h3>
             <p>{license.commercialUse === 'allowed' ? 'Commercial use permitted under this license.' :

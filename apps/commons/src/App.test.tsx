@@ -16,12 +16,12 @@ it('makes unavailable configuration and an empty published catalog distinct', as
   view.rerender(<App loadCatalog={async () => []} />);
   expect(await screen.findByText('The library is ready for its first models.')).toBeTruthy();
 });
-it('searches and combines filters, clears them and shows source attribution on cards', async () => {
+it('searches and combines filters, clears them and keeps creator credits on cards', async () => {
   const first = exampleModel();
   const second = exampleModel({ id: 'garden-bench', title: 'Garden bench', category: 'Furniture', licenses: [{ ...first.licenses[0]!, name: 'Personal use', commercialUse: 'restricted' }] });
   render(<App loadCatalog={async () => [first, second]} />);
   await screen.findByRole('link', { name: 'View Workshop hinge' });
-  expect(screen.getAllByText('From Example Library')).toHaveLength(2);
+  expect(screen.getAllByText('By Example Maker')).toHaveLength(2);
   fireEvent.click(screen.getByRole('checkbox', { name: 'Commercial use permitted' }));
   expect(screen.queryByRole('link', { name: 'View Garden bench' })).toBeNull();
   fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'Furniture' } });

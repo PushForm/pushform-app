@@ -9,7 +9,7 @@ import {
 } from '@pushform/commands';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { MODEL_TOOLS, type ModelBatchResult } from '@pushform/extension-protocol';
+import { MODEL_TOOLS, type ModelBatchResult, type ModelOperation } from '@pushform/extension-protocol';
 import { basisToLocal } from '@pushform/core';
 import { uvAt } from '@pushform/model';
 import { InlineBackend, KernelClient } from '@pushform/kernel';
@@ -1194,5 +1194,75 @@ describe('runModelTool', () => {
     expect(stale.isError).toBe(true);
     expect(JSON.parse(stale.content).error.code).toBe('stale_revision');
     expect(JSON.parse((await runModelTool(api, 'model_teleport', {})).content).error.code).toBe('invalid_operation');
+  });
+});
+
+
+describe('recursive assembly painting', () => {
+  it('replaces explicit materials on 36 nested parts in one paint and undoes the whole finish', async () => {
+    const { api: seedApi, host, commands } = setup();
+    const operations: ModelOperation[] = [{ op: 'add_material', as: 'old', color: '#888888' }];
+    for (let i = 0; i < 36; i++) operations.push(
+      { op: 'add_box', as: `body${i}`, min: [i * 2, 0, 0], max: [i * 2 + 1, 1, 1] },
+      { op: 'paint', refs: [`$body${i}`], materialId: '$old', side: 'both' },
+      { op: 'make_group', as: `part${i}`, refs: [`$body${i}`] },
+    );
+    operations.push({ op: 'make_group', as: 'chair', refs: Array.from({ length: 36 }, (_, i) => `$part${i}`) });
+    const seed = await seedApi.apply({ expectedRevision: seedApi.revision, label: 'Seed chair', operations });
+    const api = new ModelDocumentApi(commands, 'AI Chat');
+    const depth = host.undoStack.length;
+    const painted = await api.apply({ expectedRevision: api.revision, label: 'Finish chair', operations: [
+      { op: 'add_material', as: 'finish', color: '#552211' },
+      { op: 'paint', refs: [{ kind: 'instance', id: seed.created.chair! }], materialId: '$finish', recursive: true, side: 'both' },
+    ] });
+    expect(painted.results[1]!.count).toBe(73); // Chair + 36 part groups + 36 solids.
+    const assertFinish = (material: number) => {
+      let solids = 0;
+      for (const definition of host.doc.state.definitions.values()) for (const body of definition.entities.bodies.values()) {
+        solids++;
+        expect(body.materialId).toBe(material);
+        for (const face of body.faces.values()) expect([face.frontMaterialId, face.backMaterialId]).toEqual([material, material]);
+      }
+      expect(solids).toBe(36);
+    };
+    assertFinish(painted.created.finish!);
+    expect(host.undoStack.length).toBe(depth + 1);
+    host.undo();
+    assertFinish(seed.created.old!);
+    expect(host.doc.state.materials.has(painted.created.finish as never)).toBe(false);
+    host.redo();
+    assertFinish(painted.created.finish!);
+  });
+
+  it('keeps ordinary group inheritance and face-side scope, deduplicates shared components, and rolls back failures', async () => {
+    const { api, host, addBox } = setup();
+    const id = addBox([0, 0, 0], [1, 1, 1]);
+    const untouched = addBox([20, 0, 0], [21, 1, 1]);
+    const seed = await api.apply({ expectedRevision: api.revision, label: 'Seed', operations: [
+      { op: 'add_material', as: 'old', color: '#888888' },
+      { op: 'add_material', as: 'finish', color: '#552211' },
+      { op: 'paint', refs: [box(id)], materialId: '$old', side: 'both' },
+      { op: 'make_component', as: 'part', refs: [box(id)], name: 'Slat' },
+      { op: 'place_component', as: 'copy', definitionId: '$part', position: [2, 0, 0] },
+    ] });
+    const body = () => host.doc.state.definitions.get(seed.results[3]!.definitionId as never)!.entities.bodies.get(id as never)!;
+    const refs = [{ kind: 'instance' as const, id: seed.created.part! }, { kind: 'instance' as const, id: seed.created.copy! }];
+    await api.apply({ expectedRevision: api.revision, label: 'Inherited', operations: [{ op: 'paint', refs, materialId: seed.created.finish! }] });
+    expect(body().materialId).toBe(seed.created.old);
+    const depth = host.undoStack.length;
+    const failed = await failure(() => api.apply({ expectedRevision: api.revision, label: 'Fail', operations: [
+      { op: 'paint', refs, materialId: seed.created.finish!, recursive: true },
+      { op: 'paint', refs, materialId: 999999 },
+    ] }));
+    expect(failed.error.code).toBe('invalid_reference');
+    expect(body().materialId).toBe(seed.created.old);
+    expect(host.undoStack.length).toBe(depth);
+    const result = await api.apply({ expectedRevision: api.revision, label: 'Finish both', operations: [{ op: 'paint', refs, materialId: seed.created.finish!, recursive: true, side: 'back' }] });
+    expect(result.results[0]!.count).toBe(3); // Both placements, shared solid once.
+    expect(host.doc.rootDefinition.entities.bodies.get(untouched as never)!.materialId).toBeNull();
+    for (const face of body().faces.values()) expect([face.frontMaterialId, face.backMaterialId]).toEqual([seed.created.old, seed.created.finish]);
+    await api.apply({ expectedRevision: api.revision, label: 'Default', operations: [{ op: 'paint', refs, materialId: null, recursive: true, side: 'both' }] });
+    expect(body().materialId).toBeNull();
+    for (const face of body().faces.values()) expect([face.frontMaterialId, face.backMaterialId]).toEqual([null, null]);
   });
 });

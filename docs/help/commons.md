@@ -118,4 +118,4 @@ Creators credited on imported models can also be featured without a Commons acco
 
 ## Browse a large library
 
-Commons and the editor’s Commons browser load a small first set of models, then add more as you scroll. The next set is prepared in advance. **Load more models** also works with a keyboard. If a later set fails, your current results stay visible and **Retry loading more** tries again. Search and filters cover the entire library, including models that have not appeared on screen yet.
+Commons and the editor’s Commons browser load a small first set of models, then add more as you scroll. The next two sets and their thumbnail images are prepared in advance for smoother scrolling. **Load more models** also works with a keyboard. If a later set fails, your current results stay visible and **Retry loading more** tries again. Search and filters cover the entire library, including models that have not appeared on screen yet.

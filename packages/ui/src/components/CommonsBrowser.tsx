@@ -3,6 +3,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { LuLibrary } from 'react-icons/lu';
+import { BrowseImagesProvider } from '@pushform/commons-ui/BrowseImages';
 import { useBrowsePaging, MoreBrowseResults } from '@pushform/commons-ui/BrowsePaging';
 import { UploadDialog } from '@pushform/commons-ui';
 import { CommonsPublishing, deleteCommonsDraft, type CommonsOwnModels, createCommonsBrowseLoader, isCommonsOpenable, loadCommonsModel, type CatalogModel, type OpenedCommonsModel } from '@pushform/cloud';
@@ -105,7 +106,7 @@ export function CommonsBrowser({ account, filesUrl, session, target, onOpened, o
   };
   const choices = (values: string[]) => [...new Set(values)].sort().map(value => <option key={value}>{value}</option>);
   const shown = models ?? [];
-  return <section ref={root} onKeyDown={event => { if (!target) return; if (event.key === 'Escape') { run.current?.abort(); onClose(); } if (event.key === 'Tab') { const controls = [...root.current!.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), summary, a[href]')]; const index = controls.indexOf(document.activeElement as HTMLElement); if (controls.length && (index < 0 || event.shiftKey && index === 0 || !event.shiftKey && index === controls.length - 1)) { event.preventDefault(); controls[event.shiftKey ? controls.length - 1 : 0]?.focus(); } } }} className="pf-commons-browser" aria-label={target ? 'Import from Commons' : 'Commons catalog'}>
+  return <BrowseImagesProvider value={paging.images}><section ref={root} onKeyDown={event => { if (!target) return; if (event.key === 'Escape') { run.current?.abort(); onClose(); } if (event.key === 'Tab') { const controls = [...root.current!.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), summary, a[href]')]; const index = controls.indexOf(document.activeElement as HTMLElement); if (controls.length && (index < 0 || event.shiftKey && index === 0 || !event.shiftKey && index === controls.length - 1)) { event.preventDefault(); controls[event.shiftKey ? controls.length - 1 : 0]?.focus(); } } }} className="pf-commons-browser" aria-label={target ? 'Import from Commons' : 'Commons catalog'}>
     <header><div><h2>{target ? 'Import from Commons' : <><LuLibrary aria-hidden="true"/>Commons</>}</h2>{target ? <p>Destination: {target.name}</p> : <p className="pf-commons-tagline">Good projects start with shared ideas.</p>}</div>{target && <button onClick={() => { run.current?.abort(); onClose(); }}>Close</button>}</header>
     {!target && <div className="pf-tabs pf-commons-tabs" role="tablist" aria-label="Commons sections">{['Browse', 'My models'].map((label, index) => {
       const selected = mine === (index === 1);
@@ -140,5 +141,5 @@ export function CommonsBrowser({ account, filesUrl, session, target, onOpened, o
       <MoreBrowseResults count={shown.length} more={paging.more} loading={paging.loadingMore} error={paging.error} onMore={paging.loadMore}/>
     </>}
     </div>
-  </section>;
+  </section></BrowseImagesProvider>;
 }

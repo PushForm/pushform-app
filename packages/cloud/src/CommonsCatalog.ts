@@ -5,9 +5,11 @@ import { z } from 'zod';
 /** Public catalog metadata only. Original model files are published separately. */
 const text = z.string().trim().min(1).max(1000);
 export const catalogUrlSchema = z.string().url().max(2048).refine((value) => {
-  const url = new URL(value);
-  return !url.username && !url.password && (url.protocol === 'https:' ||
-    (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)));
+  try {
+    const url = new URL(value);
+    return !url.username && !url.password && (url.protocol === 'https:' ||
+      (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)));
+  } catch { return false; }
 }, 'Expected an HTTPS URL (HTTP is allowed on localhost).');
 
 export const commonsFileSchema = z.object({

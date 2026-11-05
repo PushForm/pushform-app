@@ -32,6 +32,8 @@ Use Styles for the background, face display and supported edge settings. Front a
 
 Settings that are not rendered yet are disabled with an explanation. Changing display colors does not paint the underlying faces.
 
+**Styles → Edit → Environment** contains studio lighting, sun and sky settings, skyboxes and placed scene lights. See [Lighting and environments](lighting.md) for previewing, saving and reusing a look.
+
 ## Soften, smooth or hide an edge
 
 Select the edge and use **Soft**, **Smooth**, or **Hidden** in Entity Info where available. Hiding an edge changes its display; it does not remove the boundary needed by a solid.

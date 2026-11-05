@@ -66,6 +66,7 @@ import {
   tagCommands,
   sceneCommands,
   styleCommands,
+  environmentCommands,
   shadowCommands,
   fogCommands,
   modelInfoCommands,
@@ -173,6 +174,7 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
   commands.registerAll(tagCommands);
   commands.registerAll(sceneCommands);
   commands.registerAll(styleCommands);
+  commands.registerAll(environmentCommands);
   commands.registerAll(shadowCommands);
   commands.registerAll(fogCommands);
   commands.registerAll(materialCommands);
@@ -252,7 +254,7 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
     viewport.setImages(imagesToRender(state));
     viewport.setAxes(axesToRender(state));
     viewport.setSky(backgroundToRender(state));
-    applyDocumentView(viewport, state);
+    applyDocumentView(viewport, state, tx.images);
     syncDisplayStoreFromStyle(state);
     viewport.setEditContext(editContextToRender(state, tx.context.path));
     syncHighlights();

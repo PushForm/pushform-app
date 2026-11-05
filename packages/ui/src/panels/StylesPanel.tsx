@@ -9,9 +9,10 @@ import { useApp } from '../AppContext';
 import { installUiServices } from '../engine/uiServices';
 import { useDocumentState } from '../hooks/useDocument';
 import { cssToRgb, rgbToCss } from './colors';
+import { EnvironmentPane } from './EnvironmentPane';
 
 type Tab = 'select' | 'edit';
-type Pane = 'edge' | 'face' | 'background' | 'modeling';
+type Pane = 'edge' | 'face' | 'environment' | 'background' | 'modeling';
 
 const FACE_MODES: readonly (readonly [FaceStyleMode, string])[] = [
   ['wireframe', 'Wireframe'],
@@ -83,12 +84,12 @@ function Check({ label, checked, onChange, disabled, note }: { label: string; ch
  * Create / Delete / Reset) and Edit tab with the Edge, Face, Background and Modeling panes.
  * Every edit goes through `style.update` on the active style, which drives the viewport.
  */
-export function StylesPanel(): JSX.Element {
+export function StylesPanel({ environment = false }: { environment?: boolean } = {}): JSX.Element {
   const app = useApp();
   const state = useDocumentState();
   useEffect(() => installUiServices(app.commands), [app]);
-  const [tab, setTab] = useState<Tab>('select');
-  const [pane, setPane] = useState<Pane>('edge');
+  const [tab, setTab] = useState<Tab>(environment ? 'edit' : 'select');
+  const [pane, setPane] = useState<Pane>(environment ? 'environment' : 'edge');
   const style = state.styles.get(state.activeStyleId);
   const run = (id: string, params?: unknown) => app.commands.tryExecute(id, params);
   const patch = (p: StylePatch) => run('style.update', { patch: p });
@@ -143,6 +144,7 @@ export function StylesPanel(): JSX.Element {
               [
                 ['edge', 'Edge'],
                 ['face', 'Face'],
+                ['environment', 'Environment'],
                 ['background', 'Background'],
                 ['modeling', 'Modeling'],
               ] as const
@@ -182,6 +184,7 @@ export function StylesPanel(): JSX.Element {
               <ColorRow label="Edge color" value={style.edges.color} onChange={(rgb) => patch({ edges: { color: rgb } })} />
             </>
           ) : null}
+          {pane === 'environment' && <EnvironmentPane style={style}/>}
           {pane === 'face' ? (
             <>
               <ColorRow label="Front color" value={style.faces.frontColor} onChange={(rgb) => patch({ faces: { frontColor: rgb } })} />

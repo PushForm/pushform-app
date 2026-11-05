@@ -10,8 +10,8 @@ import { ProfileHero, ProfileImagesEditor, type ProfileImageServices } from './P
 export { ProfileLink, CreatorCredit } from './ModelCard';
 /** Opens a profile by handle, or by account ID for older links, which then move to the handle address. */
 export type ProfileLookup={handle:string}|{id:string};
-/** `ownProfileId` is the signed-in user's own profile ID; that profile shows an Edit profile link. */
-export function CommonsProfilePageView({lookup,profiles,filesUrl,ownProfileId=null,renderCollections}:{lookup:ProfileLookup;profiles:CommonsProfiles|null;filesUrl?:string|undefined;ownProfileId?:string|null;renderCollections?:(handle:string)=>ReactNode}){
+/** `ownProfileId` identifies the signed-in owner's profile and its management controls. */
+export function CommonsProfilePageView({lookup,profiles,filesUrl,ownProfileId=null,renderCollections,renderOwnModels}:{lookup:ProfileLookup;profiles:CommonsProfiles|null;filesUrl?:string|undefined;ownProfileId?:string|null;renderCollections?:(handle:string,isOwner:boolean,profileId:string)=>ReactNode;renderOwnModels?:()=>ReactNode}){
   const [page,setPage]=useState<CommonsProfilePage|null|undefined>();const [error,setError]=useState(false);const [attempt,setAttempt]=useState(0);
   const shown=useRef<CommonsProfilePage|null|undefined>(undefined);shown.current=page;
   const handle='handle' in lookup?lookup.handle:null;const id='id' in lookup?lookup.id:null;
@@ -29,12 +29,13 @@ export function CommonsProfilePageView({lookup,profiles,filesUrl,ownProfileId=nu
   if(error)return <section className="status-panel" role="alert"><h1>We couldn’t load this profile.</h1><button onClick={()=>setAttempt(value=>value+1)}>Try again</button></section>;
   if(page===undefined)return <p className="status-panel" role="status">Loading profile…</p>;
   if(page===null)return <section className="status-panel"><h1>This profile isn’t available.</h1><p>It may be hidden or the account may have been removed.</p><a href="#browse">Browse models</a></section>;
+  const isOwner=ownProfileId!==null&&page.profile.id===ownProfileId;
   return <article className="profile-page"><a className="back-link" href="#browse">← All models</a>
     <ProfileHero profile={page.profile} filesUrl={filesUrl} actions={<>{ownProfileId!==null&&page.profile.id===ownProfileId&&<a className="button-link secondary" href="#account">Edit profile</a>}<FeatureAction key={page.profile.id} type="creator" targetId={page.profile.id}/></>}/>
     {page.profile.bio&&<p className="profile-bio">{page.profile.bio}</p>}
     {page.profile.links.length>0&&<ul className="profile-links">{page.profile.links.map((link,index)=><li key={index}><a href={link.url} target="_blank" rel="noreferrer noopener">{link.label} ↗</a></li>)}</ul>}
-    <h2>Published models</h2>{page.models.length===0?<p>No published models to show.</p>:<ModelGrid className="profile-models">{page.models.map(model=><ModelCard key={model.id} model={model} filesUrl={filesUrl}/>)}</ModelGrid>}
-    {renderCollections?.(page.profile.handle)}
+    {renderCollections?.(page.profile.handle,isOwner,page.profile.id)}
+    {isOwner&&renderOwnModels?renderOwnModels():<><h2>Published models</h2>{page.models.length===0?<p>No published models to show.</p>:<ModelGrid className="profile-models">{page.models.map(model=><ModelCard key={model.id} model={model} filesUrl={filesUrl}/>)}</ModelGrid>}</>}
   </article>;
 }
 const emptyFields:CommonsProfileFields={handle:'',displayName:'',bio:'',avatarUrl:null,links:[]};

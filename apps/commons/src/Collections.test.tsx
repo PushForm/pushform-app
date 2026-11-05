@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { CloudSession, CommonsCollections, type AuthApi, type CommonsCollection, type CommonsFeaturedState, type CommonsProfiles } from '@pushform/cloud';
 import type { CommonsAccount } from './account';
 import { App } from './App';
+import { CollectionsProvider, CollectionsRoute, ProfileCollections } from './Collections';
 import { exampleModel } from './catalog.fixture';
 
 const collection: CommonsCollection = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', title: 'Workshop essentials', description: 'Useful fittings for the workshop.', visibility: 'public', version: 1, modelIds: ['workshop-hinge'], curator: { handle: 'example-maker', displayName: 'Example Maker' }, updatedAt: '2026-11-04T00:00:00Z' };
@@ -173,7 +174,7 @@ it('hydrates featured models independently from the first browse page and its fi
 });
 it('shows only the viewed profile’s public collections and opens their detail page', async () => {
   const auth = await setup();
-  auth.account.profiles = { mine: async () => ({ ...publicProfile, active: true, version: 1 }), getByHandle: async () => ({ profile: publicProfile, models: [] }) } as unknown as CommonsProfiles;
+  auth.account.profiles = { mine: async () => ({ ...publicProfile, active: true, version: 1 }), getByHandle: async () => ({ profile: { ...publicProfile, id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' }, models: [] }) } as unknown as CommonsProfiles;
   vi.spyOn(auth.collections, 'mine').mockResolvedValue([{ ...collection, title: 'Private workshop', visibility: 'private' }]);
   const publicDiscovery = await auth.collections.discovery();
   vi.spyOn(auth.collections, 'discovery').mockResolvedValue({ ...publicDiscovery, featured: [], collections: [collection,
@@ -218,4 +219,45 @@ it('distinguishes collection loading and failure from an empty profile and retri
   fireEvent.click(screen.getByRole('button', { name: 'Retry collections' }));
   expect(await screen.findByRole('link', { name: 'View collection Workshop essentials' })).toBeTruthy();
   expect(discovery).toHaveBeenCalledTimes(2);
+});
+
+it('shows all owner collections with creation controls and never leaks them to a visitor or stale session',async()=>{
+  const auth=await setup();
+  const privateCollection={...collection,id:'dddddddd-dddd-4ddd-8ddd-dddddddddddd',title:'Private workshop',visibility:'private' as const};
+  vi.spyOn(auth.collections,'mine').mockResolvedValue([collection,privateCollection]);
+  const content=(owner:boolean,profileId:string)=><CollectionsProvider service={auth.collections} account={auth.account}><ProfileCollections handle={publicProfile.handle} owner={owner} profileId={profileId} models={[model]} filesUrl={undefined}/></CollectionsProvider>;
+  const view=render(content(true,publicProfile.id));
+  const region=within(await screen.findByRole('region',{name:'My Collections'}));
+  expect(await region.findByRole('link',{name:'View collection Private workshop'})).toBeTruthy();
+  expect(region.getByRole('link',{name:'New Collection'}).getAttribute('href')).toBe('#collections/new');
+  view.rerender(content(false,publicProfile.id));
+  const visitor=within(await screen.findByRole('region',{name:'Public collections'}));
+  expect(await visitor.findByRole('link',{name:'View collection Workshop essentials'})).toBeTruthy();
+  expect(visitor.queryByText('Private workshop')).toBeNull();expect(visitor.queryByRole('link',{name:'New Collection'})).toBeNull();
+  view.rerender(content(true,'another-account'));
+  expect(await screen.findByRole('region',{name:'Public collections'})).toBeTruthy();
+  expect(screen.queryByText('Private workshop')).toBeNull();expect(screen.queryByRole('link',{name:'New Collection'})).toBeNull();
+});
+it('defaults new collections to public and cancels back to the active owner profile',async()=>{
+  const auth=await setup();auth.account.profiles={mine:async()=>({...publicProfile,active:true,version:1})} as unknown as CommonsProfiles;
+  render(<CollectionsProvider service={auth.collections} account={auth.account}><CollectionsRoute route="#collections/new" models={[model]} filesUrl={undefined}/></CollectionsProvider>);
+  const select=await screen.findByLabelText('Visibility') as HTMLSelectElement;expect(select.value).toBe('public');
+  fireEvent.change(select,{target:{value:'private'}});expect(select.value).toBe('private');
+  fireEvent.click(screen.getByRole('button',{name:'Cancel'}));
+  await waitFor(()=>expect(window.location.pathname).toBe('/u/example-maker'));expect(window.location.hash).toBe('');
+});
+it('returns creation cancellation to account setup when no active profile is available',async()=>{
+  const auth=await setup();
+  render(<CollectionsProvider service={auth.collections} account={auth.account}><CollectionsRoute route="#collections/new" models={[model]} filesUrl={undefined}/></CollectionsProvider>);
+  fireEvent.click(await screen.findByRole('button',{name:'Cancel'}));
+  await waitFor(()=>expect(window.location.hash).toBe('#account'));expect(window.location.pathname).toBe('/');
+});
+it('deletes an owned collection from its editor and returns to the owner profile',async()=>{
+  const auth=await setup();auth.account.profiles={mine:async()=>({...publicProfile,active:true,version:1})} as unknown as CommonsProfiles;
+  vi.spyOn(auth.collections,'delete').mockResolvedValue(undefined);
+  render(<CollectionsProvider service={auth.collections} account={auth.account}><CollectionsRoute route={'#collections/'+collection.id} models={[model]} filesUrl={undefined}/></CollectionsProvider>);
+  fireEvent.click(await screen.findByRole('button',{name:'Edit collection'}));fireEvent.click(screen.getByRole('button',{name:'Delete collection'}));
+  fireEvent.click(screen.getByRole('button',{name:'Delete this collection'}));
+  await waitFor(()=>expect(auth.collections.delete).toHaveBeenCalledWith(collection.id,1));
+  await waitFor(()=>expect(window.location.pathname).toBe('/u/example-maker'));expect(window.location.hash).toBe('');
 });

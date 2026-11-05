@@ -45,3 +45,18 @@ it('links original author credit only when an account association is established
   const view=render(<CreatorCredit model={{creator:'Original Author',creatorProfile:null}}/>);expect(screen.queryByRole('link')).toBeNull();view.rerender(<CreatorCredit model={{creator:'Original Author',creatorProfile:{handle:'original-author'}}}/>);const link=screen.getByRole('link',{name:'Original Author'});expect(link.getAttribute('href')).toBe('/u/original-author');
   fireEvent.click(link);expect(window.location.pathname).toBe('/u/original-author');
 });
+
+it('places collections before published models and keeps owner model management private',async()=>{
+  const profiles={getByHandle:vi.fn().mockResolvedValue({profile:{...fields,id},models:[exampleModel()]})} as unknown as CommonsProfiles;
+  const renderCollections=vi.fn((handle:string,owner:boolean,profileId:string)=><section aria-label="Test collections">{handle}:{String(owner)}:{profileId}</section>);
+  const renderOwnModels=vi.fn(()=><section aria-label="Owner models">Private draft controls</section>);
+  const view=render(<CommonsProfilePageView lookup={{handle:fields.handle}} profiles={profiles} ownProfileId={id} renderCollections={renderCollections} renderOwnModels={renderOwnModels}/>);
+  const collections=await screen.findByRole('region',{name:'Test collections'});
+  expect(renderCollections).toHaveBeenLastCalledWith(fields.handle,true,id);
+  expect(collections.compareDocumentPosition(screen.getByRole('region',{name:'Owner models'}))&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.queryByRole('heading',{name:'Published models'})).toBeNull();
+  view.rerender(<CommonsProfilePageView lookup={{handle:fields.handle}} profiles={profiles} ownProfileId="another-account" renderCollections={renderCollections} renderOwnModels={renderOwnModels}/>);
+  expect(renderCollections).toHaveBeenLastCalledWith(fields.handle,false,id);
+  expect(screen.queryByRole('region',{name:'Owner models'})).toBeNull();
+  expect(collections.compareDocumentPosition(screen.getByRole('heading',{name:'Published models'}))&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});

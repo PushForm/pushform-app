@@ -163,7 +163,9 @@ button:disabled { opacity:.6; cursor:default; }
 .profile-bio { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.7; }
 .profile-links { display:flex; flex-wrap:wrap; list-style:none; padding:0; gap:22px; margin:24px 0 42px; }
 .profile-models { margin:20px 0 60px; }
-.profile-collections { margin-top:40px; }
+.profile-collections { margin:40px 0; }
+.profile-collections .section-heading { flex-wrap:nowrap; }
+.profile-collections .section-heading > a { margin-left:auto; flex-shrink:0; }
 .profile-collections .model-grid { margin-top:20px; }
 .profile-form { display:grid; gap:20px; margin:32px 0; }
 .profile-form label { display:grid; gap:8px; font-size:.95rem; }

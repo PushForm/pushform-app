@@ -131,3 +131,7 @@ When a tool is inside a toolbar dropdown, AI Chat opens that dropdown and highli
 Choose **Report a problem** or **Request a feature or change** and briefly describe it. Chat uses the current workspace and what you have already said; it may ask one essential follow-up, then shows a short summary for you to confirm. Frequency and impact are optional. You can correct the summary before sending.
 
 Keep or remove the automatic screenshot, or use **Upload images** to add PNG, JPEG or WebP files. Previews stay available while you chat. If a preview cannot load, choose **Retry preview**. After sending, chat gives a plain ticket reference such as CUS-3; follow up with support using that reference.
+
+## Conversation length
+
+A conversation allows up to 30 messages from you. Accounts with a confirmed `@pushform.io` email address are exempt from this message-count limit, including in existing conversations. Other rate and size limits still apply.

@@ -23,7 +23,7 @@ import type { Config } from '../config/schema.ts';
 import { issueBody, issueLabels, issueTitle, transcriptUrl } from '../domain/issue.ts';
 import { isClosedRequesterState } from '../domain/states.ts';
 import type { Conversation, ConversationKind, ConversationMessage, ConversationPath, MessagePicture, Eligibility, Kind, PanelScreen, Request as PipelineRequest, RequestDetail, SuspendedTurn } from '../domain/types.ts';
-import { CORS_HEADERS, enforceRate, errorResponse, HttpError, httpErrorOf, json, lookupRoles, validateSession, type SessionUser, type SessionValidator } from './auth.ts';
+import { CORS_HEADERS, conversationMessageLimit, enforceRate, errorResponse, HttpError, httpErrorOf, json, lookupRoles, validateSession, type SessionUser, type SessionValidator } from './auth.ts';
 import { blockStatus, messageStatus, NEXT_STEP, resumeStatus, statusSender, type StatusLine, type StatusPick } from './status.ts';
 import { conversationFromRow, requestDetailFromRow, requestFromRow, type AttachmentKind, type MeView, type ServiceDb, type SqlAttachmentRow, type UserDb } from './db.ts';
 
@@ -521,6 +521,10 @@ const clientOf = (screen: PanelScreen | null): Record<string, unknown> | null =>
 
 export function createConversationHandler(deps: ConversationDeps): (req: Request) => Promise<Response> {
   const { config, db } = deps;
+  const atMessageLimit = (user: SessionUser, count: number): boolean => {
+    const limit = conversationMessageLimit(user, config);
+    return limit !== null && count >= limit;
+  };
   const now = () => deps.now?.() ?? new Date();
   const ttl = (deps.openIssuesTtlSeconds ?? 60) * 1000;
   let issueCache: { at: number; issues: OpenIssueSummary[] } | null = null;
@@ -582,9 +586,9 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
   };
 
   const me = async (req: Request): Promise<Response> => {
-    await session(req);
+    const user = await session(req);
     const view = await lookupRoles(deps.userDb(req), config);
-    return json(view);
+    return json({ ...view, limits: { ...view.limits, messagesPerConversation: conversationMessageLimit(user, config) } });
   };
   const listOpen = async (req: Request): Promise<Response> => {
     const user = await session(req);
@@ -814,7 +818,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     return {
       host: config.host, accountEmail: user.email, roles: roles.roles.map(r => r.role), filingAllowed: filingAllowed(roles),
       screen: { editor: screen.editor, documentType: screen.documentType ?? null, browser: screen.browser, os: screen.os }, build: screen.build, now: now().toISOString(),
-      messageCount, openRequests, openRequestCount, limits: { openRequestsPerAccount: config.limits.openRequestsPerAccount, messagesPerConversation: config.limits.messagesPerConversation },
+      messageCount, openRequests, openRequestCount, limits: { openRequestsPerAccount: config.limits.openRequestsPerAccount, messagesPerConversation: conversationMessageLimit(user, config) },
       openIssues: issues, digest: deps.digest, document,
     };
   };
@@ -968,7 +972,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
         const index = reviewIndex.get(c.id);
         return index ? { ...c, review: { index, limit: reviewLimit } } : c;
       }) } });
-      emit({ event: 'done', data: { messageCount: saved.messageCount, limitReached: saved.messageCount >= config.limits.messagesPerConversation, ended: reason !== null,
+      emit({ event: 'done', data: { messageCount: saved.messageCount, limitReached: atMessageLimit(user, saved.messageCount), ended: reason !== null,
         ...(reason ? { reason } : {}), ...(turn ? { awaitingTools: true } : {}) } });
     }
   };
@@ -998,7 +1002,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     if (loaded.status === 'rejected') throw loaded.reason;
     const conversation = loaded.value;
     if (conversation.status !== 'open') throw new HttpError('invalid', 'The conversation is closed; start a new one.');
-    if (conversation.messageCount >= config.limits.messagesPerConversation) throw new HttpError('limit', `This conversation reached its ${config.limits.messagesPerConversation}-message limit. Send the brief as it stands or start over.`);
+    if (atMessageLimit(user, conversation.messageCount)) throw new HttpError('limit', `This conversation reached its ${config.limits.messagesPerConversation}-message limit. Send the brief as it stands or start over.`);
     if (rate.status === 'rejected') throw rate.reason;
     if (!deps.anthropic) throw new HttpError('unavailable', 'The assistant is not configured (ANTHROPIC_API_KEY missing).');
     if (account.status === 'rejected') throw account.reason;
@@ -1077,7 +1081,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       const messages: ConversationMessage[] = pending.calls.map(call => ({ role: 'tool', name: call.name, toolUseId: call.id,
         input: call.input, output: answers.get(call.id)!.content.slice(0, 8000), at: base.now }));
       const saved = conversationFromRow(await db.conversationAppend(id, user.id, messages, store.getBrief(), store.getTitle(), store.getPath(), null));
-      emit({ event: 'done', data: { messageCount: saved.messageCount, limitReached: saved.messageCount >= config.limits.messagesPerConversation, ended: false } });
+      emit({ event: 'done', data: { messageCount: saved.messageCount, limitReached: atMessageLimit(user, saved.messageCount), ended: false } });
     });
     const history = conversation.messages.slice(0, turn.historyLength);
     const images = await pictureData([...history, opening]);

@@ -4,7 +4,7 @@ import type { Config } from '../config/schema.ts';
 import { DbError, meFromRow, type MeView, type ServiceDb, type UserDb } from './db.ts';
 
 /** The verified session: Supabase `auth.getUser(token)` reduced to what the backend uses. */
-export interface SessionUser { id: string; email: string }
+export interface SessionUser { id: string; email: string; emailVerified?: boolean }
 export interface SessionValidator { getUser(token: string): Promise<SessionUser | null> }
 
 /** HTTP error codes of the fr-conversation contract plus `unavailable` for a database that cannot be reached. */
@@ -60,7 +60,12 @@ export async function validateSession(req: Request, validator: SessionValidator)
   let user: SessionUser | null;
   try { user = await validator.getUser(token); } catch { throw new HttpError('unauthorized', 'The session could not be verified.'); }
   if (!user?.id || !user.email) throw new HttpError('unauthorized', 'The session is invalid or expired.');
-  return { id: user.id, email: user.email.trim().toLowerCase() };
+  return { id: user.id, email: user.email.trim().toLowerCase(), ...(user.emailVerified === true ? { emailVerified: true } : {}) };
+}
+/** The verified account domain can exempt a conversation from its message-count ceiling. */
+export function conversationMessageLimit(user: SessionUser, config: Config): number | null {
+  return user.emailVerified === true && /^[^@]+@pushform\.io$/i.test(user.email.trim())
+    ? null : config.limits.messagesPerConversation;
 }
 /** Roles and switches of the account through the user-scoped RPC; limits come from the config. */
 export async function lookupRoles(userDb: UserDb, config: Config): Promise<MeView> {

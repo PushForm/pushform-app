@@ -23,7 +23,21 @@ export type Database = {
           }
         },"public": {
           Tables: {
-            "admin_audit": {
+            "account_campaign_touches": {
+                  Row: {
+                    "campaign": string,"content": string,"evidence": string,"medium": string,"observed_at": string,"owner_id": string,"recorded_at": string,"source": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "campaign": string,"content": string,"evidence": string,"medium": string,"observed_at": string,"owner_id": string,"recorded_at"?: string,"source": string
+                  }
+                  Update: {
+                    "campaign"?: string,"content"?: string,"evidence"?: string,"medium"?: string,"observed_at"?: string,"owner_id"?: string,"recorded_at"?: string,"source"?: string
+                  }
+                  Relationships: [
+
+                  ]
+                },"admin_audit": {
                   Row: {
                     "action": string,"actor": string,"at": string,"id": number,"params": NonNullable<Json>
                   }
@@ -89,6 +103,20 @@ export type Database = {
                   }
                   Update: {
                     "app_build"?: string | null,"app_version"?: string | null,"category"?: string | null,"client_at"?: string | null,"count"?: number,"created_at"?: string,"document_type"?: string | null,"duration_seconds"?: number | null,"id"?: never,"kind"?: string,"owner_id"?: string,"tool"?: string | null
+                  }
+                  Relationships: [
+
+                  ]
+                },"campaign_handoffs": {
+                  Row: {
+                    "claimed_by": string | null,"created_at": string,"expires_at": string,"token": string,"touches": NonNullable<Json>
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "claimed_by"?: string | null,"created_at"?: string,"expires_at"?: string,"token"?: string,"touches": NonNullable<Json>
+                  }
+                  Update: {
+                    "claimed_by"?: string | null,"created_at"?: string,"expires_at"?: string,"token"?: string,"touches"?: NonNullable<Json>
                   }
                   Relationships: [
 
@@ -1075,6 +1103,12 @@ isOneToOne: false
 "app_record_events":
 { Args: { "p_events": Json }; Returns: number
                            },
+"campaign_create_handoff":
+{ Args: { "p_touches": Json }; Returns: string
+                           },
+"campaign_validate_touches":
+{ Args: { "p_touches": Json }; Returns: boolean
+                           },
 "cloud_abort_save":
 { Args: { "p_revision": string }; Returns: undefined
                            },
@@ -1118,6 +1152,9 @@ isOneToOne: false
                            },
 "cloud_cancel_account_deletion":
 { Args: Record<PropertyKey, never>; Returns: boolean
+                           },
+"cloud_claim_campaign":
+{ Args: { "p_expected_owner": string,"p_token": string }; Returns: number
                            },
 "cloud_claim_exports":
 { Args: { "p_limit": number }; Returns: {

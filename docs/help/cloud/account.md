@@ -33,3 +33,9 @@ To sign out, open account details and expand **Danger Zone** below Extensions, t
 The profile form includes **Help improve PushForm**. Its checkbox starts checked when you have not saved a choice. Analytics starts only after you submit the form successfully with this choice checked. Uncheck it before continuing to decline.
 
 To change your choice later, open your account, change the checkbox, and choose **Save profile**. PushForm shares anonymous counts of sessions, document activity, tool groups and AI Help use. Your designs, file names and chat messages stay private. Analytics uses no cookies or persistent visitor identity and honors Do Not Track and Global Privacy Control. Accounts with no saved choice do not participate.
+
+## Campaign links
+
+When you follow a campaign link on the website and open the web app, a temporary token can preserve the source through sign-in. If you have saved an affirmative analytics choice, PushForm can save that source privately with your account. Your account identity is not sent to PostHog. The website Privacy page lets you turn off remembering campaign links; browser privacy signals also prevent capture.
+
+Desktop use of the same account can be associated with a source already saved by the web app. Downloading an installer directly does not transfer campaign history. A missing source stays unknown.

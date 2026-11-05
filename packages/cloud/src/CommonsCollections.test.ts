@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { expect, it } from 'vitest';
-import { commonsDiscoverySchema, commonsCollectionError } from './CommonsCollections';
+import { commonsDiscoverySchema, commonsCollectionError, commonsFeaturedStateSchema } from './CommonsCollections';
 import { commonsFileUrl } from './CommonsFiles';
 const collection = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', title: 'Fixtures', description: '', visibility: 'public', version: 1, updatedAt: '2026-11-04T00:00:00Z', curator: null, modelIds: ['example-model'] };
 it('rejects private collection data, duplicate entries and malformed typed targets in public discovery', () => {
@@ -20,4 +20,8 @@ it('explains conflict and permission failures without exposing server diagnostic
 it('treats an empty or malformed optional file origin as unconfigured', () => {
   expect(commonsFileUrl('', 'thumbnails')).toBeNull();
   expect(commonsFileUrl('not a URL', 'thumbnails')).toBeNull();
+});
+it('retains more than a thousand available models when editing featured collections',()=>{
+  const models=Array.from({length:1001},(_,index)=>({id:`model-${index}`,revision:'revision',title:'Part',description:'',creator:'Maker',category:'Other',tags:[],formats:['PF'],imageUrl:null,source:null,publishedAt:'2026-11-05T00:00:00Z',licenses:[{name:'CC0',url:null,commercialUse:'allowed',conditions:[]}],credits:[{name:'Maker',url:null,text:'Original model'}]}));
+  expect(commonsFeaturedStateSchema.parse({version:1,enabled:true,items:[],collections:[],models}).models).toHaveLength(1001);
 });

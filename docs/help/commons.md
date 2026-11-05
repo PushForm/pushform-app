@@ -105,3 +105,7 @@ FreeCAD previews use visible saved BREP shapes, without running document scripts
 When several files are available, downloads put the native PushForm model first, then STEP and common exchange formats, with FreeCAD sources last. The preview also prefers the native model over source and notice archives. Downloads include attribution in a ZIP package; an archive download keeps a single `.zip` filename suffix.
 
 Commons has no fixed limit on the total number of published models. Individual models still need supported files, complete attribution and redistribution rights, and must meet the file size limits.
+
+## Featured creators
+
+The Featured section highlights models, collections and creators. Choose a creator card to visit their public profile. Commons admins can choose **Feature** on a public profile, or use **Admin → Featured → Add featured item** and filter by **Creators**. Search by name or handle, then add the creator. Move and remove creators using the same controls as other featured items. Hidden or deleted profiles do not appear on the homepage.

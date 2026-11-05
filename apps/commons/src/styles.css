@@ -349,3 +349,6 @@ button.secondary { background:transparent; color:var(--ink); border:1px solid #b
 @media (forced-colors: active) {
   :root select { appearance: auto; background-image: none; padding-right: 12px; }
 }
+
+.creator-art { text-decoration:none; aspect-ratio:1.6; display:flex; align-items:center; justify-content:center; background:#edf0e8; color:var(--accent); font-size:64px; }
+.creator-art img { width:40%; aspect-ratio:1; border-radius:50%; object-fit:cover; }

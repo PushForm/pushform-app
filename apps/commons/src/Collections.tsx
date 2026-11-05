@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { createContext, useCallback, useContext, useEffect, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
-import type { CollectionFields, CommonsCollection, CommonsCollections, CommonsDiscovery } from '@pushform/cloud';
+import { commonsProfileImageUrl } from '@pushform/cloud';
+import { profilePath } from './route';
+import type { CommonsPublicProfile, CollectionFields, CommonsCollection, CommonsCollections, CommonsDiscovery } from '@pushform/cloud';
 import type { CommonsAccount } from './account';
 import { CommonsAccessGate } from './CommonsAccess';
 import { CommonsThumbnail } from './CommonsPreview';
@@ -92,17 +94,34 @@ export function CollectionCard({ collection, models, filesUrl, privateLabel = fa
     </div>
   </article>;
 }
+export function CreatorCard({ creator, filesUrl }: { creator: CommonsPublicProfile; filesUrl: string | undefined }) {
+  const uploaded = creator.avatarImage ? commonsProfileImageUrl(filesUrl, creator.avatarImage.id) : null;
+  const urls = [uploaded, creator.avatarUrl].filter((url): url is string => Boolean(url));
+  const [failed, setFailed] = useState(0);
+  const imageKey = urls.join(' ');
+  useEffect(() => setFailed(0), [imageKey]);
+  return <article className="model-card creator-card">
+    <a className="creator-art" href={profilePath(creator.handle)} aria-label={`View creator ${creator.displayName}`}>
+      {urls[failed] ? <img src={urls[failed]} alt="" referrerPolicy="no-referrer" onError={() => setFailed(value => value + 1)} /> : <span aria-hidden="true">{creator.displayName.slice(0, 1).toUpperCase()}</span>}
+    </a>
+    <div className="card-body"><p className="eyebrow">Creator</p><h3><ProfileLink handle={creator.handle}>{creator.displayName}</ProfileLink></h3><p className="creator">@{creator.handle}</p></div>
+  </article>;
+}
 export function FeaturedSection({ models, filesUrl }: { models: CatalogModel[]; filesUrl: string | undefined }) {
   const { service, discovery, error, refresh, canFeature } = useCollections();
   const [page, setPage] = useState(0);
-  const items = discovery?.featured.filter(item => item.type === 'model' ? models.some(model => model.id === item.targetId) : discovery.collections.some(collection => collection.id === item.targetId)) ?? [];
+  const items = discovery?.featured.filter(item => item.type === 'model' ? models.some(model => model.id === item.targetId) : item.type === 'creator' ? discovery.creators.some(creator => creator.id === item.targetId) : discovery.collections.some(collection => collection.id === item.targetId)) ?? [];
   const pages = Math.ceil(items.length / 3);
   const currentPage = Math.min(page, Math.max(0, pages - 1));
   if (!service) return null;
   return <section className="featured-section" aria-labelledby="featured-title">
-    <div className="section-heading"><div><h2 id="featured-title">Featured</h2><p className="section-description">Useful models and collections, picked for makers.</p></div>{canFeature && <a href={adminUrl}>Manage featured</a>}</div>
-    {error ? <div role="alert"><p>{error}</p><button onClick={refresh}>Retry featured</button></div> : !discovery ? <p role="status">Loading featured models and collections…</p> : <>
+    <div className="section-heading"><div><h2 id="featured-title">Featured</h2><p className="section-description">Models, collections and creators, picked for makers.</p></div>{canFeature && <a href={adminUrl}>Manage featured</a>}</div>
+    {error ? <div role="alert"><p>{error}</p><button onClick={refresh}>Retry featured</button></div> : !discovery ? <p role="status">Loading featured models, collections and creators…</p> : <>
       <ModelGrid className="featured-grid">{items.slice(currentPage * 3, currentPage * 3 + 3).map(item => {
+        if (item.type === 'creator') {
+          const creator = discovery.creators.find(value => value.id === item.targetId);
+          return creator ? <CreatorCard key={item.id} creator={creator} filesUrl={filesUrl} /> : null;
+        }
         if (item.type === 'collection') {
           const collection = discovery.collections.find(value => value.id === item.targetId);
           return collection ? <CollectionCard key={item.id} collection={collection} models={models} filesUrl={filesUrl} /> : null;
@@ -115,15 +134,16 @@ export function FeaturedSection({ models, filesUrl }: { models: CatalogModel[]; 
     </>}
   </section>;
 }
-export function FeatureAction({ type, targetId, eligible = true }: { type: 'model' | 'collection'; targetId: string; eligible?: boolean }) {
-  const { service, discovery, canFeature, refresh } = useCollections();
+export function FeatureAction({ type, targetId, eligible = true }: { type: 'model' | 'collection' | 'creator'; targetId: string; eligible?: boolean }) {
+  const context = useContext(Context);
+  const { service, discovery, canFeature, refresh } = context ?? {};
   const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null); const [added, setAdded] = useState(false);
   if (!canFeature || !service) return null;
   const featured = added || discovery?.featured.some(item => item.type === type && item.targetId === targetId);
   return <div className="feature-action">
     {featured ? <a className="secondary-button" href={adminUrl}>Featured · Manage</a> : <button type="button" className="secondary-button" disabled={busy || !eligible} onClick={() => {
       setBusy(true); setError(null);
-      void service.feature(type, targetId).then(() => { setAdded(true); refresh(); }, error => setError(message(error))).finally(() => setBusy(false));
+      void service.feature(type, targetId).then(() => { setAdded(true); refresh?.(); }, error => setError(message(error))).finally(() => setBusy(false));
     }}>{busy ? 'Featuring…' : 'Feature'}</button>}
     {!eligible && !featured && <p className="section-description">Only nonempty public collections can be featured.</p>}
     {error && <p role="alert">{error}</p>}

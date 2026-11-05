@@ -413,14 +413,14 @@ isOneToOne: false
                   ]
                 },"commons_featured": {
                   Row: {
-                    "collection_id": string | null,"id": string,"model_id": string | null,"position": number
+                    "collection_id": string | null,"creator_id": string | null,"id": string,"model_id": string | null,"position": number
                   }
                   ComputedFields: never
                   Insert: {
-                    "collection_id"?: string | null,"id"?: string,"model_id"?: string | null,"position": number
+                    "collection_id"?: string | null,"creator_id"?: string | null,"id"?: string,"model_id"?: string | null,"position": number
                   }
                   Update: {
-                    "collection_id"?: string | null,"id"?: string,"model_id"?: string | null,"position"?: number
+                    "collection_id"?: string | null,"creator_id"?: string | null,"id"?: string,"model_id"?: string | null,"position"?: number
                   }
                   Relationships: [
                     {
@@ -428,6 +428,12 @@ isOneToOne: false
       columns: ["collection_id"]
 isOneToOne: true
       referencedRelation: "commons_collections"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "commons_featured_creator_id_fkey"
+      columns: ["creator_id"]
+isOneToOne: true
+      referencedRelation: "commons_profiles"
       referencedColumns: ["id"]
     },{
       foreignKeyName: "commons_featured_model_id_fkey"

@@ -223,7 +223,7 @@ function CollectionEditor({ collection, models, filesUrl, onCancel, onSaved }: {
   const [fields, setFields] = useState<CollectionFields>(() => collection ? { title: collection.title, description: collection.description, visibility: collection.visibility, modelIds: [...collection.modelIds] } : { title: '', description: '', visibility: 'public', modelIds: [] });
   // Keep the version the editor opened with. A refresh must never silently rebase a stale draft.
   const [expectedVersion] = useState(collection?.version ?? null);
-  const [query, setQuery] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null); const [confirmDelete, setConfirmDelete] = useState(false);
+  const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null); const [confirmDelete, setConfirmDelete] = useState(false);
   const patch = (value: Partial<CollectionFields>) => setFields(current => ({ ...current, ...value }));
   const move = (index: number, offset: number) => { const ids = [...fields.modelIds]; [ids[index], ids[index + offset]] = [ids[index + offset]!, ids[index]!]; patch({ modelIds: ids }); };
   const submit = (event: FormEvent) => {
@@ -232,7 +232,6 @@ function CollectionEditor({ collection, models, filesUrl, onCancel, onSaved }: {
       refresh(); if (onSaved) onSaved(value); else window.location.hash = `#collections/${value.id}`;
     }, error => setError(message(error))).finally(() => setBusy(false));
   };
-  const available = filterModels(models, { query, category: '', license: '', commercial: false }).filter(model => !fields.modelIds.includes(model.id));
   return <form className="collection-editor" aria-label={collection ? 'Edit collection' : 'Create collection'} onSubmit={submit}>
     <div className="collection-form-fields"><label>Collection title<input required maxLength={100} value={fields.title} onChange={event => patch({ title: event.target.value })} disabled={busy} /></label>
       <label>Visibility<select value={fields.visibility} onChange={event => patch({ visibility: event.target.value as CollectionFields['visibility'] })} disabled={busy}><option value="private">Private — only you</option><option value="public">Public — visible in Commons</option></select></label>
@@ -247,8 +246,6 @@ function CollectionEditor({ collection, models, filesUrl, onCancel, onSaved }: {
         <button type="button" className="secondary-button" disabled={busy} aria-label={`Remove ${model?.title ?? 'unavailable model'} from collection`} onClick={() => patch({ modelIds: fields.modelIds.filter(value => value !== id) })}>Remove</button>
       </div></li>;
     })}</ol>
-    <label className="collection-search">Find models to add<input type="search" placeholder="Search published models" value={query} onChange={event => setQuery(event.target.value)} /></label>
-    <div className="collection-add-results">{available.slice(0, 12).map(model => <button key={model.id} className="secondary-button" type="button" disabled={busy || fields.modelIds.length >= 100} onClick={() => patch({ modelIds: [...fields.modelIds, model.id] })}>Add {model.title}</button>)}{available.length === 0 && <p>No more published models match.</p>}</div>
     {error && <div role="alert"><p>{error}</p><button type="button" className="secondary-button" onClick={() => { refresh(); onCancel(); }}>Close editor and reload</button></div>}
     <div className="collection-actions"><button type="submit" disabled={busy || !fields.title.trim()}>{busy ? 'Saving…' : 'Save collection'}</button><button type="button" className="secondary-button" disabled={busy} onClick={onCancel}>Cancel</button>
       {collection && <button type="button" className="text-button" disabled={busy} onClick={() => setConfirmDelete(true)}>Delete collection</button>}</div>

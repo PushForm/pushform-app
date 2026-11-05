@@ -413,14 +413,14 @@ isOneToOne: false
                   ]
                 },"commons_featured": {
                   Row: {
-                    "collection_id": string | null,"creator_id": string | null,"id": string,"model_id": string | null,"position": number
+                    "collection_id": string | null,"creator_id": string | null,"credited_creator_id": string | null,"id": string,"model_id": string | null,"position": number
                   }
                   ComputedFields: never
                   Insert: {
-                    "collection_id"?: string | null,"creator_id"?: string | null,"id"?: string,"model_id"?: string | null,"position": number
+                    "collection_id"?: string | null,"creator_id"?: string | null,"credited_creator_id"?: string | null,"id"?: string,"model_id"?: string | null,"position": number
                   }
                   Update: {
-                    "collection_id"?: string | null,"creator_id"?: string | null,"id"?: string,"model_id"?: string | null,"position"?: number
+                    "collection_id"?: string | null,"creator_id"?: string | null,"credited_creator_id"?: string | null,"id"?: string,"model_id"?: string | null,"position"?: number
                   }
                   Relationships: [
                     {
@@ -1362,6 +1362,12 @@ isOneToOne: false
                            },
 "commons_collection_json":
 { Args: { "p": Omit<Database["public"]['Tables']["commons_collections"]['Row'], Database["public"]['Tables']["commons_collections"]['ComputedFields']>,"p_owner"?: boolean }; Returns: Json
+                           },
+"commons_credited_creator":
+{ Args: { "p_id": string }; Returns: Json
+                           },
+"commons_credited_creators":
+{ Args: Record<PropertyKey, never>; Returns: Json
                            },
 "commons_delete_collection":
 { Args: { "p_expected_version": number,"p_id": string }; Returns: undefined

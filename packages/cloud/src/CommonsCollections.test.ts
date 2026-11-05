@@ -35,3 +35,12 @@ it('retains more than a thousand available models when editing featured collecti
   const models=Array.from({length:1001},(_,index)=>({id:`model-${index}`,revision:'revision',title:'Part',description:'',creator:'Maker',category:'Other',tags:[],formats:['PF'],imageUrl:null,source:null,publishedAt:'2026-11-05T00:00:00Z',licenses:[{name:'CC0',url:null,commercialUse:'allowed',conditions:[]}],credits:[{name:'Maker',url:null,text:'Original model'}]}));
   expect(commonsFeaturedStateSchema.parse({version:1,enabled:true,items:[],collections:[],models}).models).toHaveLength(1001);
 });
+
+it('validates credited-creator targets and source-scoped public data', () => {
+  const creator = { id: 'credited-' + 'a'.repeat(32), displayName: 'Maker', sourceName: 'Parts Library', modelIds: ['imported-model'] };
+  const good = { version: 1, collections: [], creditedCreators: [creator], featured: [{ id: collection.id, type: 'credited_creator', targetId: creator.id }] };
+  expect(commonsDiscoverySchema.safeParse(good).success).toBe(true);
+  expect(commonsDiscoverySchema.safeParse({ ...good, creditedCreators: [creator, creator] }).success).toBe(false);
+  expect(commonsDiscoverySchema.safeParse({ ...good, creditedCreators: [{ ...creator, email: 'private@example.com' }] }).success).toBe(false);
+  expect(commonsDiscoverySchema.safeParse({ ...good, featured: [{ ...good.featured[0], targetId: 'arbitrary-name' }] }).success).toBe(false);
+});

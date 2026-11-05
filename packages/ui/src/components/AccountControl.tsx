@@ -110,7 +110,12 @@ function AccountDialog({ cloud, state, profiles, profileState, account, accountS
         <button type="button" className="pf-iconbtn" aria-label="Close account dialog" onClick={onClose}><Icon name="close" /></button>
       </div>
       {state.error ? <p className="pf-account-error" role="alert">{state.error}</p> : null}
-      <p>Signed in as <strong>{state.user?.email}</strong></p>
+      <div className="pf-account-session-row">
+        <p>Signed in as <strong>{state.user?.email}</strong></p>
+        <button className="pf-btn" type="button" disabled={pending} onClick={() => {
+          void cloud.signOut().then(ok => { if (ok) close.current(); });
+        }}>{state.pending === 'signingOut' ? 'Signing out…' : 'Sign out'}</button>
+      </div>
       {profiles ? <section className="pf-account-profile" aria-labelledby="pf-account-profile-title">
         <h3 id="pf-account-profile-title">Profile</h3>
         <p>Your name and company also fill the account auto-text in Layout documents.</p>
@@ -131,10 +136,6 @@ function AccountDialog({ cloud, state, profiles, profileState, account, accountS
             <ExportSection account={account} state={accountState} email={state.user?.email ?? 'your email address'} />
             <DeletionSection account={account} state={accountState} />
           </> : null}
-          <p>Signing out returns you to the sign-in screen. Your open documents will be available when you sign back in.</p>
-          <button className="pf-account-primary" type="button" disabled={pending} onClick={() => {
-            void cloud.signOut().then(ok => { if (ok) close.current(); });
-          }}>{state.pending === 'signingOut' ? 'Signing out…' : 'Sign out'}</button>
         </div>
       </details>
     </div>

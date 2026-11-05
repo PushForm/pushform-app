@@ -191,6 +191,18 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
     }));
   }, [session, session.activeId]);
 
+  useEffect(() => {
+    if (!cloud) return;
+    const active = session.active;
+    const registry = active.type === 'model' ? active.app.commands : active.commands;
+    return registry.register(defineCommand({
+      id: 'account.logout', title: 'Sign out', category: 'file',
+      icon: 'account', params: z.object({}), undoable: false,
+      when: () => cloud.getSnapshot().status === 'signedIn' && cloud.getSnapshot().pending === null,
+      run: () => { void cloud.signOut(); },
+    }));
+  }, [session, session.activeId, cloud]);
+
   // About is app-wide, so command search offers it in whichever document type is active.
   useEffect(() => {
     const active = session.active;

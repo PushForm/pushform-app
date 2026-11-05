@@ -42,6 +42,7 @@ export async function saveCloudDocument(api: CloudFilesApi, session: DocumentSes
   const identity = cloudIdentity(ownerId, saved);
   if (tab.type === 'model') session.markModelSaved(tab.id, tab.name === originalName ? saved.file.name : tab.name, identity, savedContent, saved.file.name);
   else session.markLayoutSaved(tab.id, tab.name === originalName ? saved.file.name : tab.name, identity, savedContent, saved.file.name);
+  session.recordCloudProjectSave(tab, savedContent);
   return saved;
 }
 export async function openCloudDocument(api: CloudFilesApi, session: DocumentSession, file: CloudFile,

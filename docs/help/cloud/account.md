@@ -39,3 +39,11 @@ To change your choice later, open your account, change the checkbox, and choose 
 When you follow a campaign link on the website and open the web app, a temporary token can preserve the source through sign-in. If you have saved an affirmative analytics choice, PushForm can save that source privately with your account. Your account identity is not sent to PostHog. The website Privacy page lets you turn off remembering campaign links; browser privacy signals also prevent capture.
 
 Desktop use of the same account can be associated with a source already saved by the web app. Downloading an installer directly does not transfer campaign history. A missing source stays unknown.
+
+## Project-completion measurements
+
+With **Help improve PushForm** enabled, private account measurements can record when you start a project, make a design edit, save it successfully, close it, and reopen the saved version. Successful local working-copy checkpoints and cloud saves are distinguished. Selecting objects, moving the camera, opening an already-open tab, failed saves and corrupt files do not establish project completion.
+
+Activation means completing that sequence within seven days of your first observed project start. This measurement window never limits your unlimited free access. Older activity is not reconstructed from your files.
+
+These private records use opaque document identifiers and saved-state fingerprints, not your design contents, names, file paths or chat messages. They are not sent to PostHog. Turning off the saved analytics choice or using Do Not Track or Global Privacy Control stops new observations and clears pending measurements from this browser.

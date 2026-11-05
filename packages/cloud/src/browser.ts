@@ -4,6 +4,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from './db.types';
 import { commonsIntentFromUrl } from './CommonsOpen';
 import { CommonsProfiles } from './CommonsProfiles';
+import { CloudProjectActivity } from './ProjectActivity';
 import { CloudCampaign } from './CloudCampaign';
 import { CloudAccount } from './CloudAccount';
 import { CloudBilling, billingReturnFromUrl } from './CloudBilling';
@@ -49,7 +50,7 @@ function browserClient(config: BrowserCloudConfig, browser: Pick<Window, 'locati
 
 /** Construct once at app boot; SDK owns persistence, refresh, locks and cross-tab auth notifications. */
 export function createBrowserCloud(config: BrowserCloudConfig, browser: Pick<Window, 'location' | 'history'> = window): {
-  session: CloudSession; files: CloudFiles; profiles: CloudProfiles; account: CloudAccount; billing: CloudBilling; usage: CloudUsage; staff: CloudStaff; campaign: CloudCampaign; commons: { client: SupabaseClient<Database>; session: CloudSession; profiles: CommonsProfiles };
+  session: CloudSession; files: CloudFiles; profiles: CloudProfiles; account: CloudAccount; billing: CloudBilling; usage: CloudUsage; staff: CloudStaff; campaign: CloudCampaign; activity: CloudProjectActivity; commons: { client: SupabaseClient<Database>; session: CloudSession; profiles: CommonsProfiles };
 } {
   const returned = billingReturnFromUrl(new URL(browser.location.href));
   if (returned) {
@@ -64,7 +65,7 @@ export function createBrowserCloud(config: BrowserCloudConfig, browser: Pick<Win
   const profiles = new CloudProfiles(client, session);
   const account = new CloudAccount(client, session);
   const billing = new CloudBilling(client, session, returned);
-  return { session, files, profiles, account, billing, commons: { client, session, profiles: new CommonsProfiles(client) }, usage: new CloudUsage(client, session), staff: new CloudStaff(client), campaign: new CloudCampaign(client) };
+  return { session, files, profiles, account, billing, commons: { client, session, profiles: new CommonsProfiles(client) }, usage: new CloudUsage(client, session), staff: new CloudStaff(client), campaign: new CloudCampaign(client), activity: new CloudProjectActivity(client, session, profiles) };
 }
 
 /**

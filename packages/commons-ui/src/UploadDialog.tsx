@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type JSX, type ReactNode } from 'react';
-import { COMMONS_FILE_LIMIT, COMMONS_IMAGE_LIMIT, COMMONS_MODEL_EXTENSIONS, CommonsPublishing, commonsFileKind, fetchCommonsImage, fetchCommonsThumbnail,
+import { useCallback, useId, useEffect, useMemo, useRef, useState, type DragEvent, type JSX, type ReactNode } from 'react';
+import { COMMONS_FILE_LIMIT, COMMONS_IMAGE_LIMIT, COMMONS_MODEL_EXTENSIONS, CommonsPublishing, commonsHandleSchema, commonsFileKind, fetchCommonsImage, fetchCommonsThumbnail,
   removeCommonsFile, streamCommonsRender, uploadCommonsFile, type CommonsOwnModels, type CommonsOwnRevision, type CommonsProfile,
   type CommonsSubmission, type CommonsRenderEvent, type CommonsUpload, type CommonsUploadProgress } from '@pushform/cloud';
 import type { CommonsAccount } from './account';
@@ -373,13 +373,13 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
   const saveLabel = save === 'saving' ? 'Saving…' : save === 'saved' ? 'Draft saved' : save === 'error' ? 'Not saved' : model?.draft ? 'Draft saved' : '';
   const blocked = step === 'details' && profile?.active ? (!modelFile ? 'Add a model file.' : !fileReady ? (modelFile.error ? 'Upload the model file again.' : 'Waiting for the file check.') : problem ?? (!rights && (!snapshotLabel || reviewing) ? 'Confirm your right to share it.' : !hasChanges ? 'No changes to publish.' : null)) : null;
   return <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    <div ref={dialog} className="upload-dialog" role="dialog" aria-modal="true" aria-labelledby="upload-dialog-title">
+    <div ref={dialog} className={`upload-dialog${!profile?.active ? ' upload-dialog-profile' : ''}`} role="dialog" aria-modal="true" aria-labelledby="upload-dialog-title">
       <header className="dialog-head">
         <div><h2 id="upload-dialog-title" ref={heading} tabIndex={-1}>{snapshotLabel ? 'Share with the community' : editing ? 'Edit model' : 'Upload model'}</h2>
           {profile?.active && snapshotLabel ? <ol className="dialog-steps"><li aria-current={!reviewing ? 'step' : undefined}>1 Details</li><li aria-current={reviewing ? 'step' : undefined}>2 Review</li></ol> : profile?.active && <ol className="dialog-steps"><li aria-current={step === 'upload' ? 'step' : undefined}>1 Upload</li><li aria-current={step === 'details' ? 'step' : undefined}>2 Details</li></ol>}</div>
         <button type="button" className="dialog-close" aria-label="Close" onClick={onClose}>×</button>
       </header>
-      <div className="dialog-body">{scopeControl}{snapshotLabel && <p>{snapshotLabel}. This exact snapshot is used; later edits stay private.</p>}{inherited && <section aria-label="Retained source licenses"><h3>Original licenses and credits</h3>{inherited.licenses.map((license, index) => <p key={index}>{license.name}: {license.conditions.join('; ')}</p>)}{inherited.credits.map((credit, index) => <p key={index}>{credit.name}: {credit.text}</p>)}</section>}{reviewing ? <section><h3>Review your public snapshot</h3><p>{details.title} by {inherited ? creditCreator : model?.current?.metadata.source ? model.current.metadata.creator : creator}</p><p>{details.description}</p><p>Commons revision {model?.draft?.number ?? (model?.current?.number ?? 0) + 1}. License: {details.license}</p><p>Private change notes and cloud history are not published. Future edits stay private.</p><label><input type="checkbox" checked={rights} onChange={event => setRights(event.target.checked)} />I have the right to publish this model and its included assets under the listed terms.</label><button type="button" onClick={() => setReviewing(false)}>Back to details</button></section> : body}</div>
+      <div className="dialog-body">{scopeControl}{snapshotLabel && <p className="snapshot-note">{snapshotLabel}. This exact snapshot is used; later edits stay private.</p>}{inherited && <section aria-label="Retained source licenses"><h3>Original licenses and credits</h3>{inherited.licenses.map((license, index) => <p key={index}>{license.name}: {license.conditions.join('; ')}</p>)}{inherited.credits.map((credit, index) => <p key={index}>{credit.name}: {credit.text}</p>)}</section>}{reviewing ? <section><h3>Review your public snapshot</h3><p>{details.title} by {inherited ? creditCreator : model?.current?.metadata.source ? model.current.metadata.creator : creator}</p><p>{details.description}</p><p>Commons revision {model?.draft?.number ?? (model?.current?.number ?? 0) + 1}. License: {details.license}</p><p>Private change notes and cloud history are not published. Future edits stay private.</p><label><input type="checkbox" checked={rights} onChange={event => setRights(event.target.checked)} />I have the right to publish this model and its included assets under the listed terms.</label><button type="button" onClick={() => setReviewing(false)}>Back to details</button></section> : body}</div>
       {step === 'details' && profile?.active && !loading && filesUrl && <footer className="dialog-foot">
         <span className="save-state" role="status">{message ? <span role="alert">{message}</span> : blocked ?? saveLabel}</span>
         <button type="button" className="secondary" onClick={async () => { dirty.current = dirty.current || !model; if (model || modelFile?.asset) await queueSave(); onClose(); }}>Save draft</button>
@@ -393,21 +393,31 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
 
 /** A first-time contributor creates a public profile before publishing. */
 function ProfileStep({ account, profile, onReady }: { account: CommonsAccount; profile: CommonsProfile | null; onReady(profile: CommonsProfile): void }): JSX.Element {
+  const fieldId = useId();
   const [handle, setHandle] = useState(profile?.handle ?? '');
   const [name, setName] = useState(profile?.displayName ?? '');
   const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
+  const [handleError, setHandleError] = useState('');
   const submit = async () => {
+    const parsed = commonsHandleSchema.safeParse(handle);
+    if (!parsed.success) { setHandleError(parsed.error.issues[0]?.message ?? 'Check your public handle.'); return; }
+    setHandleError('');
+    if (!name.trim()) { setError('Enter a display name.'); return; }
     setBusy(true); setError('');
     try {
       onReady(await account.profiles.save({ handle, displayName: name, bio: profile?.bio ?? '', avatarUrl: profile?.avatarUrl ?? null, links: profile?.links ?? [] }, profile?.version ?? null, true));
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'Your public profile could not be saved.'); }
     finally { setBusy(false); }
   };
-  return <form className="profile-step" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
+  return <form className="profile-step" noValidate onSubmit={(event) => { event.preventDefault(); void submit(); }}>
     <p>Models are published under your public profile. Choose how you appear; your account details stay private.</p>
-    <label>Public handle<input value={handle} onChange={(event) => setHandle(event.target.value.toLowerCase())} disabled={busy || !!profile} required pattern="[a-z][a-z0-9-]{1,30}[a-z0-9]" minLength={3} maxLength={32}/></label>
-    <label>Display name<input value={name} onChange={(event) => setName(event.target.value)} disabled={busy} required maxLength={100}/></label>
-    {error && <p role="alert">{error}</p>}
+    <label htmlFor={`${fieldId}-handle`}>Public handle</label>
+    <input id={`${fieldId}-handle`} value={handle} onChange={(event) => { setHandle(event.target.value.toLowerCase()); setHandleError(''); setError(''); }} disabled={busy || !!profile} required minLength={3} maxLength={32} autoCapitalize="none" spellCheck={false} aria-describedby={`${fieldId}-hint${handleError ? ` ${fieldId}-error` : ''}`} aria-invalid={!!handleError}/>
+    <p id={`${fieldId}-hint`} className="profile-hint">3–32 lowercase letters, numbers or hyphens. Start with a letter, end with a letter or number. No @ needed.</p>
+    {handleError && <p id={`${fieldId}-error`} className="profile-error" role="alert">{handleError}</p>}
+    <label htmlFor={`${fieldId}-name`}>Display name</label>
+    <input id={`${fieldId}-name`} value={name} onChange={(event) => { setName(event.target.value); setError(''); }} disabled={busy} required maxLength={100}/>
+    {error && <p className="profile-error" role="alert">{error}</p>}
     <button type="submit" disabled={busy}>{busy ? 'Saving…' : 'Continue'}</button>
   </form>;
 }

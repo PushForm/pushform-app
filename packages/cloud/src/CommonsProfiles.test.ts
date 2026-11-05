@@ -32,3 +32,9 @@ it('reports actionable conflicts and hides raw provider errors',async()=>{
   await expect(client(null,{message:'commons_profile_conflict'}).profiles.hide(1)).rejects.toThrow('another tab');
   await expect(client(null,{message:'private credentials or diagnostics'}).profiles.mine()).rejects.toThrow('could not be loaded or saved');
 });
+it('rejects invalid profile fields with readable messages before networking', async () => {
+  const { profiles, rpc } = client(mine);
+  await expect(profiles.save({ ...fields, handle: '@example' }, null, true)).rejects.toThrow('leave out the @');
+  await expect(profiles.save({ ...fields, displayName: ' ' }, null, true)).rejects.toThrow('Check the profile fields');
+  expect(rpc).not.toHaveBeenCalled();
+});

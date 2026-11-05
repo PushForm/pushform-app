@@ -150,3 +150,4 @@ it('refreshes discovery after a contributor publishes without requiring a full p
   fireEvent(window,new Event('commons:catalog-changed'));
   expect(await screen.findByRole('link',{name:'View Workshop hinge'})).toBeTruthy();expect(loader).toHaveBeenCalledTimes(2);
 });
+

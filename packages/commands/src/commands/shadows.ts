@@ -55,6 +55,17 @@ export function clampDay(month: number, day: number): number {
 }
 
 const draftState = (draft: DocumentDraft): DocumentState => draft as unknown as DocumentState;
+function syncEnvironment(state: DocumentState, patch: ShadowPatch): void {
+  const env = state.styles.get(state.activeStyleId)?.environment;
+  if (!env) return;
+  if (patch.enabled !== undefined) {
+    if (env.sunEnabled) env.sunShadows = patch.enabled;
+    else env.studioShadows = patch.enabled;
+  }
+  if (patch.useSunForShading !== undefined) env.sunEnabled = patch.useSunForShading;
+  if (patch.light !== undefined) env.sunIntensity = patch.light / 50;
+  if (patch.dark !== undefined) env.skyLight = patch.dark / 100;
+}
 
 export const shadowsSet = defineCommand({
   id: 'shadows.set',
@@ -68,6 +79,7 @@ export const shadowsSet = defineCommand({
       const s = draftState(draft).shadows;
       for (const [k, v] of Object.entries(p.patch)) if (v !== undefined) (s as unknown as Record<string, unknown>)[k] = v;
       s.day = clampDay(s.month, s.day);
+      syncEnvironment(draftState(draft), p.patch);
     });
     return host.doc.state.shadows;
   },
@@ -103,6 +115,7 @@ export const shadowsToggle = defineCommand({
     const next = p.value ?? !host.doc.state.shadows.enabled;
     host.edit(next ? 'Show Shadows' : 'Hide Shadows', (draft) => {
       draftState(draft).shadows.enabled = next;
+      syncEnvironment(draftState(draft), { enabled: next });
     });
     return next;
   },
@@ -117,6 +130,7 @@ export const shadowsReset = defineCommand({
   run(ctx): void {
     hostOf(ctx).edit('Reset Shadows', (draft) => {
       draft.shadows = { ...DEFAULT_SHADOWS };
+      syncEnvironment(draftState(draft), DEFAULT_SHADOWS);
     });
   },
 });

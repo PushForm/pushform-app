@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { commonsProfileFieldsSchema, type CommonsProfile, type CommonsProfileFields, type CommonsProfilePage, type CommonsProfiles } from '@pushform/cloud';
+import { commonsProfileFieldsSchema, commonsProfileImageUrl, type CommonsProfile, type CommonsProfileFields, type CommonsProfilePage, type CommonsProfiles } from '@pushform/cloud';
 import { navigateCommons, profilePath } from './route';
+import { applySeo, normalizeSiteUrl, profileSeo, utilitySeo } from './seo';
 import { ModelCard, ModelGrid, ProfileLink } from './ModelCard';
 import { FeatureAction } from './Collections';
 import { ProfileHero, ProfileImagesEditor, type ProfileImageServices } from './ProfileImages';
@@ -24,7 +25,12 @@ export function CommonsProfilePageView({lookup,profiles,filesUrl,ownProfileId=nu
     void request.then(value=>{if(controller.signal.aborted)return;setPage(value);if(handle===null&&value)navigateCommons(profilePath(value.profile.handle),true);},()=>{if(!controller.signal.aborted)setError(true);});
     return()=>controller.abort();
   },[handle,id,profiles,attempt]);
-  useEffect(()=>{document.title=page?`${page.profile.displayName} — PushForm Commons`:'Profile — PushForm Commons';},[page]);
+  useEffect(()=>{
+    const ctx={siteUrl:normalizeSiteUrl(import.meta.env.VITE_COMMONS_SITE_URL),filesUrl};
+    if(page){const avatar=page.profile.avatarImage?commonsProfileImageUrl(filesUrl,page.profile.avatarImage.id):null;applySeo(profileSeo(page.profile,page.models,ctx,avatar));}
+    else if(page===null)applySeo(utilitySeo('Profile not found',ctx));
+    else document.title='Profile — PushForm Commons';
+  },[page,filesUrl]);
   if(!profiles)return <section className="status-panel"><h1>Profiles are unavailable in this build.</h1><a href="#browse">Browse models</a></section>;
   if(error)return <section className="status-panel" role="alert"><h1>We couldn’t load this profile.</h1><button onClick={()=>setAttempt(value=>value+1)}>Try again</button></section>;
   if(page===undefined)return <p className="status-panel" role="status">Loading profile…</p>;

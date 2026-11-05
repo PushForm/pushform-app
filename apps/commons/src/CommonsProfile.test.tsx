@@ -11,7 +11,7 @@ const profile={...fields,id,active:true,version:1};
 afterEach(()=>{cleanup();window.history.replaceState(null,'','/');});
 it('shows public creator information and established published model links without fabricated social activity',async()=>{
   const getByHandle=vi.fn().mockResolvedValue({profile:{...fields,id},models:[exampleModel()]});const profiles={getByHandle} as unknown as CommonsProfiles;
-  render(<CommonsProfilePageView lookup={{handle:'example-maker'}} profiles={profiles}/>);expect(getByHandle).toHaveBeenCalledWith('example-maker',expect.anything());expect(await screen.findByRole('heading',{name:'Example Maker'})).toBeTruthy();expect(screen.getByRole('link',{name:'Workshop hinge'}).getAttribute('href')).toBe('#models/workshop-hinge');expect(screen.getByRole('link',{name:'Portfolio ↗'}).getAttribute('rel')).toContain('noreferrer');expect(screen.queryByText(/Level 1/)).toBeNull();
+  render(<CommonsProfilePageView lookup={{handle:'example-maker'}} profiles={profiles}/>);expect(getByHandle).toHaveBeenCalledWith('example-maker',expect.anything());expect(await screen.findByRole('heading',{name:'Example Maker'})).toBeTruthy();expect(screen.getByRole('link',{name:'Workshop hinge'}).getAttribute('href')).toBe('/models/workshop-hinge');expect(screen.getByRole('link',{name:'Portfolio ↗'}).getAttribute('rel')).toContain('noreferrer');expect(screen.queryByText(/Level 1/)).toBeNull();
 });
 it('distinguishes an unavailable profile from loading failure and offers retry',async()=>{
   const getByHandle=vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(null);render(<CommonsProfilePageView lookup={{handle:'example-maker'}} profiles={{getByHandle} as unknown as CommonsProfiles}/>);

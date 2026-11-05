@@ -3,10 +3,11 @@
 import { BrowseImagesProvider } from '@pushform/commons-ui/BrowseImages';
 import { useBrowsePaging, MoreBrowseResults } from '@pushform/commons-ui/BrowsePaging';
 import { commonsFileUrl, CommonsUnavailableError, type CommonsProfile, type CommonsCollections } from '@pushform/cloud';
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { CommonsProfileEditor, CommonsProfilePageView, CreatorCredit, ProfileLink, type ProfileLookup } from './CommonsProfile';
 import { ModelCard, ModelGrid } from './ModelCard';
-import { currentCommonsLocation, navigateCommons, profileHandleFromPath, profilePath } from './route';
+import { currentCommonsLocation, modelIdFromPath, navigateCommons, openInApp, profileHandleFromPath, profilePath } from './route';
+import { applySeo, homeSeo, modelSeo, normalizeSiteUrl, utilitySeo } from './seo';
 import { OwnModelsProvider, OwnModelGrid, OwnedDraftDetail, OwnerModelActions, useOwnModels } from './OwnModels';
 import { publishRoute, type PublishRoute } from './PublishPage';
 import { CommonsAccessGate, CommonsDownloadButton, CommonsMailingPreference } from './CommonsAccess';
@@ -21,10 +22,6 @@ import { ProfileCollections, CreditedCreatorPage, CollectionsProvider, Collectio
 
 type CatalogState = { kind: 'unconfigured' | 'loading' | 'error' } | { kind: 'ready'; models: CatalogModel[] };
 const emptyFilters: CatalogFilters = { query: '', category: '', license: '', commercial: false };
-function modelFromHash(hash:string): string | null {
-  const match = /^#models\/([a-z0-9][a-z0-9-]{0,95})$/.exec(hash);
-  return match?.[1] ?? null;
-}
 const noSubscription=()=>()=>{};
 /** The signed-in user's own profile: `undefined` while loading, `null` when signed out, absent or unreadable. Reloads after a profile save. */
 function useOwnProfile(account:CommonsAccount|null):CommonsProfile|null|undefined{
@@ -47,7 +44,7 @@ function MyProfileLink({own}:{own:CommonsProfile|null|undefined}){
 function ModelDetail({ model, filesUrl, account, editorUrl }: { model: CatalogModel; filesUrl: string | undefined; account:CommonsAccount|null; editorUrl:string|undefined }) {
   const owned = useOwnModels().models?.find(value => value.id === model.id);
   return <>
-    <a className="back-link" href="#browse">← All models</a>
+    <a className="back-link" href="/#browse" onClick={event=>openInApp(event,'/#browse')}>← All models</a>
     <article className="model-detail">
       <div className="detail-image"><CommonsModelPreview key={model.id + model.revision} model={model} filesUrl={filesUrl} /></div>
       <div>
@@ -96,7 +93,7 @@ function CommonsApp({ loadCatalog, filesUrl, account=null, publishPage, editorUr
   const collectionRoute=hash.startsWith('#collections/');
   const legacyOwnRoute=hash==='#my-models'||hash==='#my-collections';
   const ownedModels=useOwnModels();
-  const selectedId=modelFromHash(hash);
+  const selectedId=modelIdFromPath(location.path);
   const profileHandle=hash===''||hash==='#main'?profileHandleFromPath(location.path):null;
   const legacyPersonId=/^#people\/([a-f0-9-]{36})$/.exec(hash)?.[1]??null;
   const profileLookup:ProfileLookup|null=profileHandle!==null?{handle:profileHandle}:legacyPersonId!==null?{id:legacyPersonId}:null;
@@ -132,6 +129,19 @@ function CommonsApp({ loadCatalog, filesUrl, account=null, publishPage, editorUr
   const models = state.kind === 'ready' ? state.models : [];
   const shown = paged ? models : filterModels(models, filters);
   const selected = selectedId ? models.find((model) => model.id === selectedId) : null;
+  const seoContext = useMemo(() => ({ siteUrl: normalizeSiteUrl(import.meta.env.VITE_COMMONS_SITE_URL), filesUrl }), [filesUrl]);
+  // Search and social tags follow the route. Until the catalog is ready the tags the edge worker wrote stay in place.
+  useEffect(() => {
+    if (onProfile) return;
+    if (collectionRoute || legacyOwnRoute || hash === '#account' || publishRoute(hash)) { applySeo({ ...utilitySeo('Commons', seoContext), title: document.title }); return; }
+    if (selectedId) {
+      if (selected) applySeo(modelSeo(selected, seoContext));
+      else if (state.kind === 'ready') applySeo(utilitySeo(ownedModels.models?.some(model => model.id === selectedId) ? 'Your model' : 'Model not found', seoContext));
+      return;
+    }
+    if (state.kind === 'ready') applySeo(homeSeo(state.models, seoContext));
+    else if (state.kind === 'unconfigured') applySeo(utilitySeo('Models', seoContext));
+  }, [onProfile, collectionRoute, legacyOwnRoute, hash, selectedId, selected, state, seoContext, ownedModels.models]);
   useEffect(() => {
     const key = location.path + hash;
     if (focusedRoute.current.key !== key) focusedRoute.current = { key, done: false };
@@ -139,8 +149,7 @@ function CommonsApp({ loadCatalog, filesUrl, account=null, publishPage, editorUr
     if(onProfile){focusedRoute.current.done=true;return;}
     if(collectionRoute){if(!focusedRoute.current.done){focusHeading();heading.current?.scrollIntoView?.({block:'start'});}focusedRoute.current.done=true;return;}
     if(hash==='#account'||publishRoute(hash)){document.title=hash==='#account'?'Your profile — PushForm Commons':`${publishRoute(hash)?.kind==='edit'?'Edit model':'Upload model'} — PushForm Commons`;focusHeading();focusedRoute.current.done=true;return;}
-    document.title = selected ? `${selected.title} — PushForm Commons` : 'PushForm Commons — Models for your next project';
-    if (state.kind !== 'ready' || !window.location.hash || focusedRoute.current.done) return;
+    if (state.kind !== 'ready' || (!window.location.hash && !selectedId) || focusedRoute.current.done) return;
     if (!document.activeElement?.closest('.catalog-tabs')) focusHeading();
     const target = selectedId ? heading.current : document.getElementById('browse');
     target?.scrollIntoView?.({ block: 'start' });
@@ -149,13 +158,13 @@ function CommonsApp({ loadCatalog, filesUrl, account=null, publishPage, editorUr
   const update = (patch: Partial<CatalogFilters>) => setFilters((current) => ({ ...current, ...patch }));
   return <CollectionsProvider service={collections} account={account}><BrowseImagesProvider value={paged ? paging.images : null}><div className="commons">
     <a className="skip-link" href="#main">Skip to content</a>
-    <header className="site-header"><a className="brand" href="#browse" aria-label="PushForm Commons home">
+    <header className="site-header"><a className="brand" href="/" onClick={event=>openInApp(event,'/')} aria-label="PushForm Commons home">
       <img src="/pf-logo-mark.svg" alt="" width="30" height="30" /><span>PushForm <strong>Commons</strong></span>
     </a><nav aria-label="Commons">{account&&<a className="nav-upload" href="#upload">Upload model</a>}<a href="#collections">Collections</a>{account&&<><MyProfileLink own={own}/></>}<a className="editor-link" href="https://app.pushform.io">Open PushForm <span aria-hidden="true">↗</span></a><CommonsAdminLink/></nav></header>
     <main id="main" ref={heading} tabIndex={-1}>
       {creditedCreatorId?<CreditedCreatorPage key={creditedCreatorId} id={creditedCreatorId} models={models} filesUrl={filesUrl}/>:legacyOwnRoute?<p className="status-panel" role="status">Opening your profile...</p>:collectionRoute?<CollectionsRoute route={hash} models={models} filesUrl={filesUrl}/>:profileLookup?<CommonsProfilePageView lookup={profileLookup} profiles={account?.profiles??null} filesUrl={filesUrl} ownProfileId={own?.id??null} renderCollections={(handle,owner,profileId)=><ProfileCollections handle={handle} owner={owner} profileId={profileId} models={models} filesUrl={filesUrl}/>} renderOwnModels={()=><OwnModelGrid filesUrl={filesUrl}/>}/>:hash==='#account'?account?<AccountPage account={account} filesUrl={filesUrl}/>:<section className="status-panel"><h1>Accounts are unavailable in this build.</h1></section>:publishRoute(hash)?publishPage?.(publishRoute(hash)!,state.kind==='ready')??<section className="status-panel"><h1>Publishing is unavailable in this build.</h1></section>:selectedId && (state.kind === 'ready' || ownedModels.models?.some(model=>model.id===selectedId)) ? selected ? <ModelDetail model={selected} filesUrl={filesUrl} account={account} editorUrl={editorUrl} /> :
         ownedModels.models?.find(model=>model.id===selectedId) ? <OwnedDraftDetail key={selectedId} model={ownedModels.models.find(model=>model.id===selectedId)!} filesUrl={filesUrl}/> : account && ownedModels.userId && !ownedModels.models && !ownedModels.error ? <p role="status">Loading your model...</p> : <section className="status-panel"><p className="eyebrow">Model unavailable</p><h1>This model isn’t in the catalog.</h1>
-          <p>It may have been removed or the link may be out of date.</p><a href="#browse">Browse models</a></section> : <>
+          <p>It may have been removed or the link may be out of date.</p><a href="/#browse" onClick={event=>openInApp(event,'/#browse')}>Browse models</a></section> : <>
         <section className="hero"><p className="eyebrow">A shared place to start</p>
           <h1>Good projects start<br />with <em>shared ideas.</em></h1>
           <p>Find a model. Explore a collection. Make it your own.</p>

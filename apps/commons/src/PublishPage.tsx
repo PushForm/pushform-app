@@ -5,6 +5,7 @@ import type { CommonsAccount } from './account';
 import { CommonsAccessGate } from './CommonsAccess';
 import { UploadDialog } from './UploadDialog';
 import { openOwnProfile } from './OwnModels';
+import { modelPath, navigateCommons } from './route';
 
 /** Upload and edit routes open the contributor dialog. */
 export type PublishRoute = { kind: 'upload' } | { kind: 'edit'; model: string };
@@ -18,11 +19,11 @@ export function PublishPage({ account, filesUrl, route, catalogReady }: { accoun
   const user = useSyncExternalStore(account.session.subscribe, account.session.getSnapshot).user;
   const close = () => {
     window.dispatchEvent(new Event('commons:catalog-changed'));
-    if (route.kind === 'edit') window.location.hash = `#models/${route.model}`;
+    if (route.kind === 'edit') navigateCommons(modelPath(route.model));
     else void openOwnProfile(account);
   };
   const published = (model: string) => {
-    if (catalogReady) window.location.hash = `#models/${model}`;
+    if (catalogReady) navigateCommons(modelPath(model));
     else void openOwnProfile(account);
   };
   return <CommonsAccessGate account={account}><section className="publish-page" key={user?.id ?? 'signed-out'}>

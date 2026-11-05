@@ -148,7 +148,7 @@ it('opens a saved draft from the profile and deletes it from its detail page aft
   const view = render(<OwnModelsProvider account={f.account}><OwnModelGrid filesUrl="https://files.example.com"/></OwnModelsProvider>);
   expect(await screen.findByRole('heading', { name: 'Planter box' })).toBeTruthy();
   expect(screen.getByText('Draft')).toBeTruthy();
-  expect(screen.getByRole('link', { name: 'Planter box' }).getAttribute('href')).toBe('#models/model-draft');
+  expect(screen.getByRole('link', { name: 'Planter box' }).getAttribute('href')).toBe('/models/model-draft');
   expect(screen.queryByRole('button', { name: 'Delete model' })).toBeNull();
   view.rerender(<OwnModelsProvider account={f.account}><DraftPage/></OwnModelsProvider>);
   fireEvent.click(await screen.findByRole('button', { name: 'Delete model' }));

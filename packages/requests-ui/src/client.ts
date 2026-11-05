@@ -58,7 +58,7 @@ export interface Me {
   readonly buildsDisabled: boolean;
   readonly trialsDisabled: boolean;
   readonly openRequests: number;
-  readonly limits: { readonly openRequestsPerAccount: number; readonly messagesPerConversation: number };
+  readonly limits: { readonly openRequestsPerAccount: number; readonly messagesPerConversation: number | null };
 }
 export interface ConversationSummary {
   readonly id: string; readonly kind: ConversationKind; readonly path: ConversationPath;
@@ -280,7 +280,7 @@ export class RequestsClient {
     return { email: str(row['email']), roles: Array.isArray(row['roles']) ? row['roles'] as Me['roles'] : [],
       effective: str(row['effective'], 'user') as EffectiveRole, filingDisabled: Boolean(row['filingDisabled']),
       buildsDisabled: Boolean(row['buildsDisabled']), trialsDisabled: Boolean(row['trialsDisabled']), openRequests: num(row['openRequests']),
-      limits: { openRequestsPerAccount: num(limits['openRequestsPerAccount'], 5), messagesPerConversation: num(limits['messagesPerConversation'], 30) } };
+      limits: { openRequestsPerAccount: num(limits['openRequestsPerAccount'], 5), messagesPerConversation: limits['messagesPerConversation'] === null ? null : num(limits['messagesPerConversation'], 30) } };
   }
   async listOpenConversations(): Promise<ConversationSummary[]> {
     const row = await this.json<Json>('GET', '/conversations/open');

@@ -487,7 +487,7 @@ export const DEFAULT_RENDER_SHADOWS: RenderShadows = {
   sunUp: true,
   light: 80,
   dark: 45,
-  useSunForShading: true,
+  useSunForShading: false,
   onFaces: true,
   onGround: true,
   fromEdges: false,

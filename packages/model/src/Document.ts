@@ -249,7 +249,7 @@ export const DEFAULT_SHADOWS: ShadowSettings = {
   northAngle: 0,
   light: 80,
   dark: 45,
-  useSunForShading: true,
+  useSunForShading: false,
   onGround: true,
   onFaces: true,
   fromEdges: false,

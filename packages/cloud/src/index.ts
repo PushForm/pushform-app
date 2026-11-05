@@ -26,3 +26,4 @@ export * from './CommonsOpen';
 export * from './CommonsCollections';
 
 export * from './CloudCampaign';
+export * from './ProjectActivity';

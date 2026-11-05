@@ -7,7 +7,7 @@ import type * as BootstrapModule from './bootstrap';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
-import { CloudSession, type AuthApi } from '@pushform/cloud';
+import { CLOUD_TERMS_VERSION, CloudProfiles, CloudSession, type AuthApi } from '@pushform/cloud';
 import { App } from './App';
 import { createApp } from './bootstrap';
 import { paintLoading } from './documentLoading';
@@ -53,4 +53,22 @@ it('paints recovery feedback before storage reads or engine creation and clears 
   await waitFor(() => expect(screen.queryByRole('main', { name: 'Loading workspace' })).toBeNull());
   expect(createApp).toHaveBeenCalledOnce();
   expect(document.documentElement.classList.contains('pf-document-loading')).toBe(false);
+});
+
+it('waits for saved account choices before installing recovered documents', async () => {
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+  vi.stubGlobal('indexedDB', new IDBFactory());
+  cloud = new CloudSession({ initialize: async () => ({ error: null }),
+    getSession: async () => ({ data: { session: { user: { id: 'alice', email: 'artist@example.com' }, expires_at: Date.now() / 1000 + 3600 } }, error: null }),
+    onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
+  } as unknown as AuthApi);
+  let finish!: (value: unknown) => void;
+  const profiles = new CloudProfiles({ from: () => ({ select: () => ({ eq: () => ({ maybeSingle: () => new Promise(resolve => { finish = resolve; }) }) }) }) } as never, cloud);
+  try {
+    await cloud.start();render(<App cloud={cloud} profiles={profiles} initialScreen="workspace" />);
+    await waitFor(() => expect(loadNativeRefresh).toHaveBeenCalled());
+    expect(createApp).not.toHaveBeenCalled();
+    await act(async () => { finish({ data: {first_name:'Ada',last_name:'Lovelace',account_type:'individual',company_name:null,company_size:null,industry:'engineering',industry_other:null,terms_version:CLOUD_TERMS_VERSION,terms_accepted_at:'2026-10-27T00:00:00Z',completed_at:'2026-10-27T00:00:00Z',updated_at:'2026-10-27T00:00:00Z',analytics_opt_in:true,analytics_updated_at:'2026-10-27T00:00:00Z'},error:null}); });
+    expect(await screen.findByRole('banner')).toBeTruthy();expect(createApp).toHaveBeenCalledOnce();
+  } finally { profiles.dispose(); }
 });

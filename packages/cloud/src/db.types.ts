@@ -915,6 +915,20 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"project_activity_events": {
+                  Row: {
+                    "document_key": string,"document_type": string,"event_id": string,"evidence": string,"file_id": string | null,"fingerprint": string,"kind": string,"occurred_at": string,"owner_id": string,"recorded_at": string,"revision_id": string | null,"storage": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "document_key": string,"document_type": string,"event_id": string,"evidence"?: string,"file_id"?: string | null,"fingerprint": string,"kind": string,"occurred_at": string,"owner_id": string,"recorded_at"?: string,"revision_id"?: string | null,"storage": string
+                  }
+                  Update: {
+                    "document_key"?: string,"document_type"?: string,"event_id"?: string,"evidence"?: string,"file_id"?: string | null,"fingerprint"?: string,"kind"?: string,"occurred_at"?: string,"owner_id"?: string,"recorded_at"?: string,"revision_id"?: string | null,"storage"?: string
+                  }
+                  Relationships: [
+
+                  ]
                 }
           }
           Views: {
@@ -1103,6 +1117,9 @@ isOneToOne: false
 "app_record_events":
 { Args: { "p_events": Json }; Returns: number
                            },
+"app_record_project_events":
+{ Args: { "p_events": Json,"p_expected_owner": string }; Returns: number
+                           },
 "campaign_create_handoff":
 { Args: { "p_touches": Json }; Returns: string
                            },
@@ -1232,6 +1249,9 @@ isOneToOne: false
                            },
 "cloud_pending_blob":
 { Args: { "p_path": string }; Returns: boolean
+                           },
+"cloud_project_progress":
+{ Args: { "p_expected_owner": string }; Returns: Json
                            },
 "cloud_purge_account":
 { Args: { "p_owner": string }; Returns: Json

@@ -4,6 +4,7 @@ import { afterEach, expect, it } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { InlineBackend, KernelClient } from '@pushform/kernel';
 import type { EdgeBlendTool } from '@pushform/commands';
+import type { EntityRef } from '@pushform/model';
 import { freeInference, GROUND_PLANE } from '@pushform/inference';
 import { AppContext } from '../AppContext';
 import { createApp } from '../bootstrap';
@@ -105,4 +106,23 @@ it('shows the shape just drawn as applied, and goes back to the next one after a
   expect(screen.getByRole('toolbar').textContent).toMatch(/Polygon applied/);
   act(() => { a.commands.execute('edit.undo'); });
   expect(bar().classList.contains('is-applied')).toBe(false);
+});
+
+it('shows a selected model text\'s style row and sets its font size, emphasis and color', () => {
+  const a = mount();
+  const ref = a.commands.execute('text.add', { kind: 'screen', screen: [0.2, 0.2], text: 'Title' }) as EntityRef;
+  act(() => a.toolManager.activate('select'));
+  act(() => { a.document.selection.set([ref]); });
+  const toolbar = screen.getByRole('toolbar', { name: 'Text options' });
+  expect(bar().classList.contains('is-shown')).toBe(true);
+  const text = () => a.document.doc.rootDefinition.entities.texts.get(ref.id)!;
+  act(() => { fireEvent.click(within(toolbar).getByRole('button', { name: 'Text bold' })); });
+  expect(text().bold).toBe(true);
+  act(() => { fireEvent.change(within(toolbar).getByLabelText('Text size'), { target: { value: '20' } }); });
+  expect(text().fontSizePt).toBe(20);
+  act(() => { fireEvent.change(within(toolbar).getByLabelText('Text color'), { target: { value: '#ff0000' } }); });
+  expect(text().color).toEqual([1, 0, 0]);
+  // nothing selected: no bar for Select
+  act(() => { a.document.selection.set([]); });
+  expect(bar().classList.contains('is-shown')).toBe(false);
 });

@@ -60,6 +60,24 @@ describe('text commands', () => {
     expect(root().order).not.toContain(ref.id);
   });
 
+  it('sets the font, size, emphasis and color in one step, leaving the rest as it is', () => {
+    const { registry, host, text } = setup();
+    const ref = registry.execute('text.add', { kind: 'screen', screen: [0, 0], text: 'Title' }) as EntityRef;
+    expect(text(ref)).toMatchObject({ fontFamily: 'Arial', fontSizePt: 12 });
+    const entries = host.undoStack.length;
+    registry.execute('text.setStyle', { refs: [ref], fontFamily: 'Roboto', fontSizePt: 18, bold: true, color: [1, 0, 0] });
+    expect(text(ref)).toMatchObject({ fontFamily: 'Roboto', fontSizePt: 18, bold: true, color: [1, 0, 0] });
+    expect(text(ref).italic).toBeFalsy();
+    expect(host.undoStack.length).toBe(entries + 1);
+    expect(host.undoStack.peek()?.label).toBe('Text Style');
+    registry.execute('text.setStyle', { refs: [ref], italic: true });
+    expect(text(ref)).toMatchObject({ fontFamily: 'Roboto', bold: true, italic: true });
+    host.undo();
+    host.undo();
+    expect(text(ref)).toMatchObject({ fontFamily: 'Arial', fontSizePt: 12 });
+    expect(() => registry.execute('text.setStyle', { refs: [ref], fontSizePt: 0 })).toThrow();
+  });
+
   it('sets arrows, and keeps the label in place on screen when the leader changes', () => {
     const { registry, camera, text } = setup();
     const ref = registry.execute('text.add', { kind: 'leader', anchor: [0, 0, 0], label: [1, 1, 0], text: 'A' }) as EntityRef;

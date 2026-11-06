@@ -9,6 +9,8 @@ import { useApp } from '../AppContext';
 import type { AppInstance } from '../bootstrap';
 import { useAppStore } from '../store';
 import { Icon } from './Icon';
+import { useSelectionRefs } from '../hooks/useSelection';
+import { ModelTextStyleRow } from './ModelTextStyleRow';
 
 /** How long the pointer rests over an empty part of the bar before it fades. */
 const REST_MS = 150;
@@ -51,19 +53,27 @@ export function ToolOptionsBar(): JSX.Element {
   const settings = useAppStore((s) => s.toolSettings);
   const placing = useAppStore((s) => s.toolPlacing);
   const applied = useAppStore((s) => s.toolApplied);
-  useAppStore((s) => s.activeToolId);
+  const activeToolId = useAppStore((s) => s.activeToolId);
+  const dialog = useAppStore((s) => s.dialog);
+  const dialogRef = useAppStore((s) => s.dialogRef);
+  const selection = useSelectionRefs();
   const tool = app.toolManager.visualTool;
+  // A model text's style row: for the text being edited, or one text selected with Select.
+  const styled = dialog === 'editText' && dialogRef?.kind === 'text' ? dialogRef
+    : activeToolId === 'select' && selection.length === 1 && selection[0]!.kind === 'text' ? selection[0]! : null;
   return (
     <ToolOptionsBarView
-      tool={tool ? { id: tool.id, title: tool.title } : null}
-      settings={settings}
+      tool={styled ? { id: 'text', title: 'Text' } : tool ? { id: tool.id, title: tool.title } : null}
+      settings={styled ? [] : settings}
       placing={placing}
       applied={applied}
       mac={app.keymap.platform === 'mac'}
       onSetting={(id, value) => app.toolManager.setting(id, value)}
       read={(quantity, text) => readQuantity(app, quantity, text)}
       onLeave={() => app.viewport.container?.focus()}
-    />
+    >
+      {styled ? <ModelTextStyleRow app={app} target={styled} /> : null}
+    </ToolOptionsBarView>
   );
 }
 

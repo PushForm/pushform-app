@@ -116,6 +116,39 @@ export const textSetArrow = defineCommand({
   },
 });
 
+/** Font, size, emphasis and color of texts, as one undo step; values left out stay as they are. */
+export const textSetStyle = defineCommand({
+  id: 'text.setStyle',
+  title: 'Text Style',
+  category: 'edit',
+  params: z.object({
+    refs: z.array(EntityRefSchema).optional(),
+    fontFamily: z.string().trim().min(1).optional(),
+    fontSizePt: z.number().finite().positive().max(1000).optional(),
+    bold: z.boolean().optional(),
+    italic: z.boolean().optional(),
+    /** 0–1 RGB. */
+    color: z.tuple([z.number().min(0).max(1), z.number().min(0).max(1), z.number().min(0).max(1)]).optional(),
+  }),
+  undoable: true,
+  run(ctx, p) {
+    const host = hostOf(ctx);
+    const refs = textRefs(ctx, p.refs);
+    host.edit('Text Style', (draft) => {
+      for (const r of refs) {
+        const t = draftContainerAt(draft, r.path).texts.get(r.id);
+        if (!t) continue;
+        if (p.fontFamily !== undefined) t.fontFamily = p.fontFamily;
+        if (p.fontSizePt !== undefined) t.fontSizePt = p.fontSizePt;
+        if (p.bold !== undefined) t.bold = p.bold;
+        if (p.italic !== undefined) t.italic = p.italic;
+        if (p.color !== undefined) t.color = [...p.color] as [number, number, number];
+      }
+    });
+    return { count: refs.length };
+  },
+});
+
 /** The current view's right and up directions (world), from the camera. */
 function viewAxes(ctx: CommandContext): { right: Vec3; up: Vec3 } | null {
   const cam = ctx.camera?.getState();
@@ -207,4 +240,4 @@ export const textSetHidden = defineCommand({
   },
 });
 
-export const textCommands: readonly AnyCommand[] = [textAdd, textEdit, textSetArrow, textSetLeader, textDelete, textSetHidden];
+export const textCommands: readonly AnyCommand[] = [textAdd, textEdit, textSetArrow, textSetStyle, textSetLeader, textDelete, textSetHidden];

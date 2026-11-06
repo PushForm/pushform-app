@@ -181,6 +181,21 @@ export class OffsetTool implements Tool {
     this.execute({ ...last.params, distance });
   }
 
+  /** The bar switched Allow overlaps just after an offset: redo it that way, as one undo step. */
+  adjustLast(id: string): boolean {
+    const last = this.lastCommit;
+    if (id !== 'overlaps' || !this.ctx || !last?.entry) return false;
+    const host = hostOfTool(this.ctx);
+    if (host.undoStack.peek() !== last.entry || !host.undo()) return false;
+    this.execute({ ...last.params, allowOverlap: this.overlaps });
+    if (this.lastCommit === null) {
+      // the original stays; lastError says why
+      host.redo();
+      this.lastCommit = last;
+    }
+    return true;
+  }
+
   onCancel(): void {
     this.state = IDLE;
     this.lastCommit = null;
@@ -353,6 +368,7 @@ export class OffsetTool implements Tool {
       this.ctx.commands.execute('sketch.offset', params);
       this.lastDistance = params.distance;
       this.lastCommit = { params, entry: host.undoStack.peek() };
+      this.ctx.committed?.();
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       this.lastCommit = null;

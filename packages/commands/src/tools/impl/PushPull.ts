@@ -277,9 +277,24 @@ export class PushPullTool implements Tool {
     if (!last) return;
     // Re-editing a loose face's pull keeps its direction.
     const distance = isLoose(last.params.target) ? (Math.sign(last.params.distance) || 1) * v.meters : v.meters;
-    const params: PushPullApplyParams = { target: last.params.target, distance, mode: last.params.mode };
-    last.params = params;
     this.lastDistance = distance;
+    this.redoLast(last, { target: last.params.target, distance, mode: last.params.mode });
+    this.ctx?.statusChanged();
+  }
+
+  /** The bar switched New body just after a pull: redo that pull in the new mode, as one undo step. */
+  adjustLast(id: string): boolean {
+    const last = this.lastCommit;
+    if (id !== 'newBody' || !last) return false;
+    this.redoLast(last, { ...last.params, mode: this.mode });
+    this.ctx?.statusChanged();
+    return true;
+  }
+
+  /** Undo the last pull and apply it again with `params` (one undo entry); the original stays if that fails. */
+  private redoLast(last: LastCommit, params: PushPullApplyParams): void {
+    const previous = last.params;
+    last.params = params;
     this.enqueue(async () => {
       if (!last.applied || this.lastCommit !== last) return;
       const ctx = this.ctx;
@@ -288,10 +303,17 @@ export class PushPullTool implements Tool {
       // Only re-edit when our commit is still the last thing that happened to the document.
       if (host.undoStack.peek()?.label !== 'Push/Pull' || !host.undo()) return;
       last.applied = false;
-      await ctx.commands.execute('pushpull.apply', params);
+      try {
+        await ctx.commands.execute('pushpull.apply', params);
+      } catch (err) {
+        host.redo();
+        last.params = previous;
+        last.applied = true;
+        throw err;
+      }
       last.applied = true;
+      ctx.committed?.();
     });
-    this.ctx?.statusChanged();
   }
 
   onCancel(): void {
@@ -459,6 +481,7 @@ export class PushPullTool implements Tool {
     this.enqueue(async () => {
       await ctx.commands.execute('pushpull.apply', precomputed ? { ...params, precomputed } : params);
       last.applied = true;
+      ctx.committed?.();
     });
     ctx.statusChanged();
     ctx.requestRender();

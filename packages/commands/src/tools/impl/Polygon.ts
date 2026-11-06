@@ -67,6 +67,10 @@ export class PolygonTool extends CircleTool {
     ];
   }
 
+  protected override adjustable(id: string): boolean {
+    return id === 'mode' || super.adjustable(id);
+  }
+
   protected override applySetting(id: string, value: ToolSettingValue): boolean {
     if (id !== 'mode') return super.applySetting(id, value);
     if (value !== 'inscribed' && value !== 'circumscribed') return false;

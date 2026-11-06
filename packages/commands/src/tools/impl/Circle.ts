@@ -222,6 +222,21 @@ export class CircleTool implements Tool {
     this.ctx?.statusChanged();
   }
 
+  /** The bar changed `id` just after a commit: redraw that shape with the new value, as one undo step. */
+  adjustLast(id: string): boolean {
+    if (!this.ctx || !this.last || !this.adjustable(id)) return false;
+    const next: CircleParams = { ...this.last.params, segments: this.segments };
+    if (!undoLast(this.ctx, this.last)) return false;
+    this.execute(next);
+    this.ctx.requestRender();
+    return true;
+  }
+
+  /** Bar controls that change the last shape. */
+  protected adjustable(id: string): boolean {
+    return id === 'sides';
+  }
+
   /** Apply a bar control; false when it is not one of this tool's. */
   protected applySetting(id: string, value: ToolSettingValue): boolean {
     if (id !== 'sides') return false;
@@ -320,6 +335,7 @@ export class CircleTool implements Tool {
     const payload: AddCurveInput = { points: tess.points, closed: true, curve: tess.curve };
     const res = ctx.commands.execute('sketch.addCurve', payload) as AddCurveResult;
     this.last = { params, entry: hostOfTool(ctx).undoStack.peek() };
+    ctx.committed?.();
     return res;
   }
 

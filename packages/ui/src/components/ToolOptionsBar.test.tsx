@@ -4,6 +4,7 @@ import { afterEach, expect, it } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { InlineBackend, KernelClient } from '@pushform/kernel';
 import type { EdgeBlendTool } from '@pushform/commands';
+import { freeInference, GROUND_PLANE } from '@pushform/inference';
 import { AppContext } from '../AppContext';
 import { createApp } from '../bootstrap';
 import type { AppInstance } from '../bootstrap';
@@ -90,4 +91,18 @@ it('Focus Tool Options moves keyboard focus into the bar and back to the view', 
   expect(document.activeElement).toBe(view);
   expect(a.keymap.label('view.focusToolOptions')).toMatch(/L/);
   view.remove();
+});
+
+it('shows the shape just drawn as applied, and goes back to the next one after an undo', () => {
+  const a = mount();
+  act(() => a.toolManager.activate('polygon'));
+  const ev = (x: number) => ({ screen: [0, 0] as [number, number], ray: { origin: [x, 0, 10] as [number, number, number], dir: [0, 0, -1] as [number, number, number] }, button: 0, buttons: 1, modifiers: { shift: false, ctrl: false, alt: false, meta: false }, inference: freeInference([x, 0, 0], GROUND_PLANE, null), camera: a.viewport.camera.getState() });
+  act(() => {
+    a.toolManager.click(ev(0));
+    a.toolManager.click(ev(1));
+  });
+  expect(bar().classList.contains('is-applied')).toBe(true);
+  expect(screen.getByRole('toolbar').textContent).toMatch(/Polygon applied/);
+  act(() => { a.commands.execute('edit.undo'); });
+  expect(bar().classList.contains('is-applied')).toBe(false);
 });

@@ -278,7 +278,14 @@ export class TwoPointArcTool implements Tool {
     return { ...this.stageStatus(), settings: [countSetting('segments', 'Segments', this.segments)] };
   }
 
-  /** Segments in the tool options bar; it changes the next arc only. */
+  /** The bar changed the segments just after a commit: redraw that arc with them, as one undo step. */
+  adjustLast(id: string): boolean {
+    if (id !== 'segments' || !this.last) return false;
+    this.reapplyLast({ segments: this.segments });
+    return true;
+  }
+
+  /** Segments in the tool options bar. */
   onSetting(id: string, value: ToolSettingValue): void {
     const n = id === 'segments' ? countFrom(value) : null;
     if (n === null) return;
@@ -419,6 +426,7 @@ export class TwoPointArcTool implements Tool {
     const payload: AddCurveInput = { points: tess.points, closed: false, curve: tess.curve };
     const res = ctx.commands.execute('sketch.addCurve', payload) as AddCurveResult;
     this.last = { params, entry: hostOfTool(ctx).undoStack.peek() };
+    ctx.committed?.();
     this.lastRadius = tess.curve.radius;
     return res;
   }

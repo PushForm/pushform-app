@@ -160,6 +160,11 @@ export interface ToolStatus {
    * fields, such as "On red axis" or "Square · Shift". Hint text never carries them.
    */
   readonly held?: readonly string[] | undefined;
+  /**
+   * The bar shows the operation the tool just committed ("✓ Tool applied"): its controls show the
+   * values that operation used, and changing one redoes it (`adjustLast`). Set by the ToolManager.
+   */
+  readonly applied?: boolean | undefined;
 }
 
 export interface ToolContext {
@@ -169,6 +174,11 @@ export interface ToolContext {
   requestRender(): void;
   /** Tell the shell that `status()` changed. */
   statusChanged(): void;
+  /**
+   * Tell the shell the tool just committed an operation it can adjust from the bar (`adjustLast`),
+   * now on top of the undo stack.
+   */
+  committed?(): void;
   /** Tell the shell that `overlay()` or the tool's preview changed outside a pointer or key event (async previews). */
   overlayChanged?(): void;
 }
@@ -225,6 +235,12 @@ export interface Tool {
   onEntryLock?(id: string, value: VcbValue | null): void;
   /** A control of `status().settings` was changed (or, for an action, clicked). */
   onSetting?(id: string, value: ToolSettingValue): void;
+  /**
+   * While the bar shows the operation just committed, setting `id` was changed (`onSetting` has
+   * already run): redo that operation with the new value as one undo step, calling
+   * `ToolContext.committed` again when done. False when the setting does not change it.
+   */
+  adjustLast?(id: string, value: ToolSettingValue): boolean;
   onCancel(): void;
   overlay(): readonly OverlayPrimitive[];
   status(): ToolStatus;

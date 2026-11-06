@@ -167,6 +167,34 @@ describe('MoveTool', () => {
     expect(host.undoStack.length).toBe(entries + 1);
   });
 
+  it('Copy in the bar, just after a move, redoes it as a copy and back, as one undo step', async () => {
+    const { host, tools, addBox, body, bodies } = setup();
+    const id = addBox();
+    host.selection.set([bodyRef(id)]);
+    const entries = host.undoStack.length;
+    tools.activate('move');
+    const tool = tools.activeTool as MoveTool;
+    tools.pointerDown(at(TOP_CAMERA, [0.5, 0.5, 1]));
+    tools.pointerUp(at(TOP_CAMERA, [0.5, 0.5, 1]));
+    tools.keyDown(key('ArrowRight'));
+    tools.pointerMove(at(TOP_CAMERA, [1.5, 0.5, 1]));
+    tools.onVcb({ kind: 'length', meters: 2, raw: 2, unit: 'm' });
+    await tool.settled;
+    expect(tools.status().applied).toBe(true);
+    expect(bodies()).toHaveLength(1);
+    tools.setting('copy', true);
+    await tool.settled;
+    expect(host.undoStack.length).toBe(entries + 1);
+    expect(bodies()).toHaveLength(2);
+    expect(near(meshBounds(body(id).mesh).min, [0, 0, 0])).toBe(true);
+    expect(tools.status().applied).toBe(true);
+    tools.setting('copy', false);
+    await tool.settled;
+    expect(host.undoStack.length).toBe(entries + 1);
+    expect(bodies()).toHaveLength(1);
+    expect(near(meshBounds(body(id).mesh).min, [2, 0, 0])).toBe(true);
+  });
+
   it('Ctrl tap copies; `3x` turns the copy into an array of 4 evenly spaced bodies (one undo entry)', async () => {
     const { host, tools, addBox, bodies } = setup();
     const id = addBox();

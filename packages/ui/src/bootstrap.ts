@@ -222,6 +222,8 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
   offs.push(toolManager.events.on('renderRequested', () => viewport.requestRender()));
   const syncUndo = () => store.getState().setUndoState(tx.canUndo(), tx.canRedo());
   offs.push(tx.onChange(syncUndo));
+  // an undo or another command ends the bar's applied state
+  offs.push(tx.onChange(() => toolManager.refreshStatus()));
   let bodies: readonly RenderBody[] = [];
   let hoverRef: EntityRef | null = null;
   const syncHighlights = () => {

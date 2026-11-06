@@ -3457,3 +3457,10 @@ h4.pf-xui-text { font-size: 12px; }
   font: 11px/16px var(--pf-font);
   white-space: nowrap;
 }
+.pf-tob.is-applied {
+  border-color: #7fbf95;
+  background: color-mix(in srgb, color-mix(in srgb, #2ea043 14%, var(--pf-surface)) 92%, transparent);
+}
+.pf-tob.is-applied .pf-tob-tool {
+  color: #1b7f3b;
+}

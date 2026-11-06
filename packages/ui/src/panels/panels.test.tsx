@@ -11,7 +11,6 @@ import { StatusBar } from '../components/StatusBar';
 import { useAppStore } from '../store';
 import { DisplayPanel } from './DisplayPanel';
 import { InstructorPanel } from './InstructorPanel';
-import { LastOperationPanel } from './LastOperationPanel';
 import { SoftenEdgesPanel } from './SoftenEdgesPanel';
 
 let app: AppInstance | null = null;
@@ -67,29 +66,6 @@ describe('InstructorPanel', () => {
     expect(screen.getByText('Push/Pull')).toBeTruthy();
     expect(screen.getByText(/Keep the starting face/)).toBeTruthy();
     expect(screen.getByText(useAppStore.getState().instructor)).toBeTruthy();
-  });
-});
-
-describe('LastOperationPanel', () => {
-  it('lists the top entry and re-executes the command when a field is edited; Repeat last repeats', () => {
-    const a = boot();
-    mount(a, <LastOperationPanel />);
-    expect(screen.getByText('Nothing to adjust yet.')).toBeTruthy();
-    act(() => void a.commands.execute('model.addBox', { min: [0, 0, 0], max: [1, 1, 1] }));
-    expect(screen.getByText('Add Box')).toBeTruthy();
-    const maxZ = screen.getByLabelText('max z') as HTMLInputElement;
-    expect(maxZ.value).toBe('1');
-    fireEvent.change(maxZ, { target: { value: '4' } });
-    fireEvent.keyDown(maxZ, { key: 'Enter' });
-    expect(a.document.undoStack.length).toBe(1);
-    expect(a.document.undoStack.peek()?.params).toEqual({ min: [0, 0, 0], max: [1, 1, 4] });
-    const body = a.document.doc.rootDefinition.entities.bodies.values().next().value!;
-    let zmax = -Infinity;
-    for (let i = 2; i < body.mesh.verts.length; i += 3) zmax = Math.max(zmax, body.mesh.verts[i]!);
-    expect(zmax).toBe(4);
-    fireEvent.click(screen.getByText('Repeat last'));
-    expect(a.document.undoStack.length).toBe(2);
-    expect(a.document.doc.rootDefinition.entities.bodies.size).toBe(2);
   });
 });
 

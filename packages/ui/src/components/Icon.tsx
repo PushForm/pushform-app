@@ -222,7 +222,6 @@ const PATHS: Record<string, string> = {
   command: 'M5 7l5 5-5 5M12 17h7',
   'panel-softenEdges': 'M4 20V9a5 5 0 0 1 5-5h11M4 20h11a5 5 0 0 0 5-5V4M9 15a2 2 0 0 1 2-2h4',
   'panel-instructor': 'M3 9l9-4 9 4-9 4-9-4zM7 11v4c0 1.5 2.5 3 5 3s5-1.5 5-3v-4M21 9v6',
-  'panel-lastOperation': 'M4 12a8 8 0 1 0 2.3-5.7M4 4v4h4M12 8v4l3 2',
 };
 
 export function Icon({

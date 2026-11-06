@@ -28,6 +28,7 @@ export function ToolOptionsBar(): JSX.Element {
   const app = useApp();
   const settings = useAppStore((s) => s.toolSettings);
   const placing = useAppStore((s) => s.toolPlacing);
+  const applied = useAppStore((s) => s.toolApplied) && settings.length > 0;
   useAppStore((s) => s.activeToolId);
   const shown = settings.length > 0;
   // keep the last controls while fading out
@@ -97,14 +98,16 @@ export function ToolOptionsBar(): JSX.Element {
 
   const visible = fold >= 3 ? view.settings.filter((c) => (c.priority ?? 1) < 2) : view.settings;
   const overflow = fold >= 3 ? view.settings.filter((c) => (c.priority ?? 1) >= 2) : [];
-  const cls = [TOOL_OPTIONS_CLASS, shown ? 'is-shown' : '', placing ? 'is-placing' : '', resting && !placing ? 'is-resting' : ''].filter(Boolean).join(' ');
+  const cls = [TOOL_OPTIONS_CLASS, shown ? 'is-shown' : '', applied ? 'is-applied' : '', placing ? 'is-placing' : '', resting && !placing ? 'is-resting' : ''].filter(Boolean).join(' ');
   return (
     <div ref={root} className={cls} role="toolbar" aria-label={`${view.title} options`} aria-hidden={!shown} onKeyDown={onKeyDown}>
       <span className="pf-tob-tool" title={view.title}>
         <Icon name={`tool-${view.id}`} size={16} />
-        {fold < 1 ? <span>{view.title}</span> : null}
+        {applied ? <span aria-hidden="true">✓</span> : null}
+        {fold < 1 ? <span>{applied ? `${view.title} applied` : view.title}</span> : null}
       </span>
       {visible.map((c) => <Control key={c.id} app={app} c={c} mac={mac} asList={fold >= 2} send={send} />)}
+      {applied && fold < 2 ? <span className="pf-tob-note">Changes redo the last operation · click the model to go on</span> : null}
       {overflow.length ? (
         <span className="pf-tob-more-wrap">
           <button

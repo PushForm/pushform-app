@@ -618,3 +618,44 @@ describe('held-key tags', () => {
     expect(tools.status().held).toEqual(['Plane square to red axis']);
   });
 });
+
+describe('applied state: the bar adjusts the shape just drawn', () => {
+  it('Polygon redraws the last polygon with new sides or mode, as one undo step, until the next click', () => {
+    const { host, tools, sketch } = setup();
+    tools.activate('polygon');
+    expect(tools.status().applied).toBe(false);
+    tools.click(at([0, 0, 0]));
+    tools.click(at([1, 0, 0]));
+    expect(tools.status().applied).toBe(true);
+    const entries = host.undoStack.length;
+    tools.setting('sides', { kind: 'segments', count: 8 });
+    expect(host.undoStack.length).toBe(entries);
+    expect(sketch().edges.size).toBe(8);
+    expect([...sketch().curves.values()][0]).toMatchObject({ kind: 'polygon', segments: 8 });
+    tools.setting('mode', 'circumscribed');
+    expect(host.undoStack.length).toBe(entries);
+    expect([...sketch().curves.values()][0]!.radius).toBeCloseTo(1 / Math.cos(Math.PI / 8), 9);
+    expect(tools.status().applied).toBe(true);
+    // a click in the view goes on: the next change is for the next polygon only
+    tools.pointerDown(at([5, 5, 0]));
+    expect(tools.status().applied).toBe(false);
+    tools.setting('sides', { kind: 'segments', count: 5 });
+    expect(sketch().edges.size).toBe(8);
+  });
+
+  it('an undo, or another tool, ends the applied state', () => {
+    const { host, tools } = setup();
+    tools.activate('circle');
+    tools.click(at([0, 0, 0]));
+    tools.click(at([1, 0, 0]));
+    expect(tools.status().applied).toBe(true);
+    host.undo();
+    expect(tools.status().applied).toBe(false);
+    tools.click(at([0, 0, 0]));
+    tools.click(at([1, 0, 0]));
+    expect(tools.status().applied).toBe(true);
+    tools.activate('polygon');
+    tools.activate('circle');
+    expect(tools.status().applied).toBe(false);
+  });
+});

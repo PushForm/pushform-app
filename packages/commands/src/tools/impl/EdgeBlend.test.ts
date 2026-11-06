@@ -233,6 +233,34 @@ describe('Fillet and Chamfer tools', () => {
     expect(body(id).props.volume).toBeCloseTo(1, 9);
   });
 
+  it('adjusts the fillet just applied from the bar, as one undo step, and keeps it when a value is too large', async () => {
+    const { host, registry, tools, body, fillet } = setup();
+    const id = addBox(registry);
+    const e1 = edgeAt(body(id), [0, 0, 1], [1, 0, 1]);
+    tools.activate('fillet');
+    tools.click(at(edgeRef(id, e1)));
+    tools.onVcb({ kind: 'length', meters: 0.1, raw: 0.1, unit: null });
+    tools.doubleClick(at(edgeRef(id, e1)));
+    await fillet.settled;
+    expect(tools.status().applied).toBe(true);
+    const entries = host.undoStack.length;
+    const volume = (): number => body(id).props.volume;
+    const after01 = volume();
+    tools.setting('size', { kind: 'length', meters: 0.25, raw: 0.25, unit: null });
+    await fillet.settled;
+    expect(host.undoStack.length).toBe(entries);
+    expect(volume()).toBeLessThan(after01);
+    const after025 = volume();
+    expect(tools.status().applied).toBe(true);
+    // too large: the 0.25 fillet stays and the tool says why
+    tools.setting('size', { kind: 'length', meters: 1.5, raw: 1.5, unit: null });
+    await fillet.settled;
+    expect(host.undoStack.length).toBe(entries);
+    expect(volume()).toBeCloseTo(after025, 9);
+    expect(fillet.message).toMatch(/too large/);
+    expect(meshTopologyProblems(body(id).mesh)).toEqual([]);
+  });
+
   it('explains a distance that is too large, changes nothing and keeps the edge set', async () => {
     const { host, registry, tools, body, chamfer } = setup();
     const id = addBox(registry);

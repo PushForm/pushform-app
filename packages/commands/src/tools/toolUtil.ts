@@ -206,3 +206,23 @@ export function entityOverlay(state: DocumentState, ref: EntityRef, color: strin
       return [];
   }
 }
+
+/**
+ * Redo an operation the tool committed, as one undo step: while its undo `entry` is still on top,
+ * undo it and run `commandId` again with `params`; on failure put the original back and rethrow.
+ * Calls `committed` when done. Resolves to the new top entry, or null when `entry` is not on top.
+ */
+export async function redoCommitted(ctx: ToolContext, entry: unknown, commandId: string, params: unknown): Promise<unknown> {
+  const host = hostOfTool(ctx);
+  if (entry === null || entry === undefined || host.undoStack.peek() !== entry || !host.undo()) return null;
+  try {
+    await ctx.commands.execute(commandId, params);
+  } catch (error) {
+    host.redo();
+    ctx.statusChanged();
+    throw error;
+  }
+  ctx.committed?.();
+  ctx.requestRender();
+  return host.undoStack.peek() ?? null;
+}

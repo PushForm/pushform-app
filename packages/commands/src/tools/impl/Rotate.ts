@@ -277,6 +277,13 @@ export class RotateTool extends TransformToolBase {
     return { ...this.baseStatus(), settings: [toggleSetting('copy', 'Copy', this.copy, 'primary')], ...(held.length ? { held } : {}) };
   }
 
+  /** The bar switched Copy just after a commit: redo it as a copy, or as a plain move, in one undo step. */
+  adjustLast(id: string): boolean {
+    const last = this.lastCommit;
+    if (id !== 'copy' || !last || !this.lastIsOnTop()) return false;
+    return this.reapplyLast(last.matrix, this.copy);
+  }
+
   onSetting(id: string, value: ToolSettingValue): void {
     if (id !== 'copy' || typeof value !== 'boolean') return;
     this.copy = value;

@@ -271,6 +271,13 @@ export class MoveTool extends TransformToolBase {
     return { ...this.baseStatus(), settings: [toggleSetting('copy', 'Copy', this.copy, 'primary'), toggleSetting('autofold', 'Autofold', this.autofold, 'secondary')], ...(held.length ? { held } : {}) };
   }
 
+  /** The bar switched Copy just after a commit: redo it as a copy, or as a plain move, in one undo step. */
+  adjustLast(id: string): boolean {
+    const last = this.lastCommit;
+    if (id !== 'copy' || !last || !this.lastIsOnTop()) return false;
+    return this.reapplyLast(last.matrix, this.copy);
+  }
+
   onSetting(id: string, value: ToolSettingValue): void {
     if (typeof value !== 'boolean') return;
     if (id === 'copy') this.copy = value;

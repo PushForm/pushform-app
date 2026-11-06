@@ -25,7 +25,7 @@ import type { OverlayPrimitive } from '../overlay';
 import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolSetting, ToolSettingValue, ToolStatus } from '../Tool';
 import { countFrom, countSetting, degreesFrom, lengthFrom } from '../settings';
 import { pointerField } from '../entry';
-import { HOVER_COLOR, hostOfTool } from '../toolUtil';
+import { HOVER_COLOR, hostOfTool, redoCommitted } from '../toolUtil';
 import { fmtLength } from './constructionUtil';
 
 /** Picked edges (the tool's edge set). */
@@ -85,6 +85,8 @@ export class EdgeBlendTool implements Tool {
   private preview: Preview | null = null;
   private previewTimer: ReturnType<typeof setTimeout> | null = null;
   private queue: Promise<void> = Promise.resolve();
+  /** The last operation committed and its undo entry, for adjusting it from the bar. */
+  private lastApplied: { params: Record<string, unknown>; entry: unknown } | null = null;
   private previewRun: Promise<void> = Promise.resolve();
 
   constructor(readonly kind: EdgeBlendMode) {
@@ -285,6 +287,35 @@ export class EdgeBlendTool implements Tool {
     return out;
   }
 
+  /** The bar changed a value just after a commit: redo that operation with it, as one undo step. */
+  adjustLast(id: string): boolean {
+    const ctx = this.ctx;
+    const last = this.lastApplied;
+    if (!ctx || !last) return false;
+    let patch: Record<string, unknown>;
+    if (id === 'size' && this.size !== null) patch = { size: this.size };
+    else if (id === 'segments' && this.kind === 'fillet') patch = { segments: this.segments };
+    else if (id === 'profile' && this.kind === 'profile') patch = { profile: this.profile, angleDeg: this.profile === 'chamfer' ? (this.angleDeg ?? undefined) : undefined };
+    else if (id === 'angle' && this.kind === 'profile' && this.angleDeg !== null) patch = { angleDeg: this.angleDeg };
+    else return false;
+    const params = { ...last.params, ...patch };
+    this.queue = this.queue
+      .then(async () => {
+        const entry = await redoCommitted(ctx, last.entry, `${this.kind}.apply`, params);
+        if (entry !== null) this.lastApplied = { params, entry };
+        this.error = null;
+      })
+      .catch((err: unknown) => {
+        // the original stays: explain why
+        this.error = err instanceof Error ? err.message : String(err);
+      })
+      .then(() => {
+        ctx.statusChanged();
+        ctx.requestRender();
+      });
+    return true;
+  }
+
   onSetting(id: string, value: ToolSettingValue): void {
     if (id === 'profile' && typeof value === 'string' && (EDGE_PROFILES as readonly string[]).includes(value)) {
       this.profile = value as EdgeProfile;
@@ -448,7 +479,9 @@ export class EdgeBlendTool implements Tool {
     this.queue = this.queue
       .then(async () => {
         await ctx.commands.execute(`${this.kind}.apply`, params);
+        this.lastApplied = { params: p, entry: hostOfTool(ctx).undoStack.peek() ?? null };
         this.clearSet();
+        ctx.committed?.();
       })
       .catch((err: unknown) => {
         // nothing changed: explain why and keep the edge set

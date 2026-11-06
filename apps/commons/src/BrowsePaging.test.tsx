@@ -13,16 +13,17 @@ function Fixture({ loader, query = '' }: { loader: CommonsBrowseLoader; query?: 
   const value = useBrowsePaging(loader, { ...filters, query }, 0);
   return <>{value.models.map(model => <p key={model.id}>{model.title}</p>)}<MoreBrowseResults count={value.models.length} more={value.more} loading={value.loadingMore} error={value.error} onMore={value.loadMore}/></>;
 }
-it('shows the first page immediately, buffers two next pages and reveals it on demand', async () => {
+it('shows the first page immediately, buffers one next page and reveals it on demand', async () => {
   const loader = vi.fn<CommonsBrowseLoader>().mockResolvedValueOnce(page('first', true)).mockResolvedValueOnce(page('second', true)).mockResolvedValueOnce(page('third', true)).mockResolvedValueOnce(page('fourth', false));
   render(<Fixture loader={loader}/>);
-  await screen.findByText('first'); await waitFor(() => expect(loader).toHaveBeenCalledTimes(3));
+  await screen.findByText('first'); await waitFor(() => expect(loader).toHaveBeenCalledTimes(2));
+  await new Promise(resolve => setTimeout(resolve, 20)); expect(loader).toHaveBeenCalledTimes(2);
   expect(screen.queryByText('second')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Load more models' }));
-  await screen.findByText('second'); await waitFor(() => expect(loader).toHaveBeenCalledTimes(4));
+  await screen.findByText('second'); await waitFor(() => expect(loader).toHaveBeenCalledTimes(3));
   expect(screen.queryByText('third')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Load more models' }));
-  await screen.findByText('third'); expect(loader).toHaveBeenCalledTimes(4);
+  await screen.findByText('third'); await waitFor(() => expect(loader).toHaveBeenCalledTimes(4));
   expect(screen.queryByText('fourth')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Load more models' }));
   await screen.findByText('fourth'); expect(screen.queryByRole('button')).toBeNull();

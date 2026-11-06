@@ -39,3 +39,10 @@ export function ModelCard({ model, filesUrl, href = modelPath(model.id), art, fo
 export function ModelGrid({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={className ? `model-grid ${className}` : 'model-grid'}>{children}</div>;
 }
+/** Stand-in cards with the same box as real ones, so the page keeps its layout while results load. */
+export function SkeletonGrid({ count, className, label }: { count: number; className?: string; label: string }) {
+  return <><p role="status" className="visually-hidden">{label}</p>
+    <ModelGrid className={className ? `${className} skeleton-grid` : 'skeleton-grid'}>{Array.from({ length: count }, (_, index) => <article key={index} className="model-card skeleton-card" aria-hidden="true">
+      <div className="model-art"/><div className="card-body"><p className="eyebrow">&nbsp;</p><h3>&nbsp;</h3><p className="creator">&nbsp;</p><p className="license-label">&nbsp;</p></div>
+    </article>)}</ModelGrid></>;
+}

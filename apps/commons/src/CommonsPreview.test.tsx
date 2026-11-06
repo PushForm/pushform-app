@@ -16,7 +16,19 @@ describe('Commons previews',()=>{
     const files=['a-notices.zip','b-source.FCStd','c-model.step','d-model.pf'].map((name,index)=>({...file,name,id:`11111111-1111-4111-8111-11111111111${index}`}));
     render(<CommonsThumbnail model={{...model,files}} filesUrl="http://localhost:8792"/>);
     expect((await screen.findByRole('img')).getAttribute('src')).toBe(`http://localhost:8792/thumbnails/${files[3]!.id}`);
-    expect(fetcher).toHaveBeenCalledWith(`http://localhost:8792/preview-status/${files[3]!.id}`,expect.anything());
+    // A rendered thumbnail loads directly, without first asking for its render status.
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it('checks a failed thumbnail once for every card showing it, then shows it when its render is ready',async()=>{
+    const shared={...file,id:'33333333-3333-4333-8333-333333333333'};
+    const fetcher=vi.fn().mockImplementation(async()=>new Response(JSON.stringify({status:'ready',error:null}),{headers:{'Content-Type':'application/json'}}));
+    vi.stubGlobal('fetch',fetcher);
+    const shown={...model,files:[shared]};
+    render(<><CommonsThumbnail model={shown} filesUrl="http://localhost:8792"/><CommonsThumbnail model={shown} filesUrl="http://localhost:8792"/></>);
+    for(const image of screen.getAllByRole('img'))fireEvent.error(image);
+    await waitFor(()=>expect(screen.getAllByRole('img')).toHaveLength(2));
+    for(const image of screen.getAllByRole('img'))expect(image.getAttribute('src')).toBe(`http://localhost:8792/thumbnails/${shared.id}`);
+    expect(fetcher.mock.calls.filter(call=>String(call[0]).endsWith(`/preview-status/${shared.id}`))).toHaveLength(1);
   });
   it('prefers an uploaded image and falls back to geometry when images fail',async()=>{
     vi.stubGlobal('fetch',vi.fn().mockImplementation(async()=>new Response(JSON.stringify({status:'ready',error:null}),{headers:{'Content-Type':'application/json'}})));

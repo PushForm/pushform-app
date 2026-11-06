@@ -7,7 +7,8 @@ import type { UndoEntry } from '@pushform/model';
 import type { CameraState } from '../../camera/CameraHost';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
-import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolSettingValue, ToolStatus } from '../Tool';
+import { toggleSetting } from '../settings';
 import { hostOfTool, inferenceOverlay, PREVIEW_COLOR, worldPerPixelAt } from '../toolUtil';
 import { AXIS_COLORS, AXIS_NORMAL } from './constructionUtil';
 
@@ -18,7 +19,7 @@ const ARROW_PX = 40;
 /** The last plane this tool placed, for a typed offset along its normal. */
 interface Placement {
   readonly point: Vec3;
-  readonly normal: Vec3;
+  normal: Vec3;
   offset: number;
   entry: UndoEntry | null;
 }
@@ -28,9 +29,9 @@ const neg = (v: Vec3): Vec3 => [-v[0] + 0, -v[1] + 0, -v[2] + 0];
 /**
  * Section Plane: the plane follows the cursor, lying in the face under it with its arrows pointing into the
  * face, or, over empty space, square to the axis the view looks along most; Shift holds the current orientation and the
- * arrow keys hold the red (Right), green (Left) or blue (Up) axis, Down releasing it; tapping Ctrl reverses the arrows.
- * A click places the plane in the open edit context as its active cut, and a typed length then moves that plane along
- * its normal, in the same undo step.
+ * arrow keys hold the red (Right), green (Left) or blue (Up) axis, Down releasing it; Reverse, in the tool options bar
+ * or by tapping Ctrl, reverses the arrows. A click places the plane in the open edit context as its active cut; a typed
+ * length then moves that plane along its normal, and switching Reverse turns it around, in the same undo step.
  */
 export class SectionPlaneTool implements Tool {
   readonly id = 'sectionPlane';
@@ -106,8 +107,32 @@ export class SectionPlaneTool implements Tool {
     if (!point) return;
     const placement: Placement = { point: [point[0], point[1], point[2]], normal: this.directed(this.locked ?? this.orientation(e)), offset: 0, entry: null };
     this.last = this.place(placement, 0) ? placement : null;
+    if (this.last) this.ctx.committed?.();
     this.ctx.statusChanged();
     this.ctx.requestRender();
+  }
+
+  /** Undo the last placement and place it again changed by `change`, as one undo step; false when it is no longer on top. */
+  private replaceLast(change: (p: Placement) => number): boolean {
+    const last = this.last, ctx = this.ctx;
+    if (!last || !ctx) return false;
+    const host = hostOfTool(ctx);
+    if (!last.entry || host.undoStack.peek() !== last.entry) {
+      this.last = null;
+      ctx.statusChanged();
+      return false;
+    }
+    const before = last.offset;
+    host.undo();
+    const placement: Placement = { ...last };
+    const offset = change(placement);
+    if (this.place(placement, offset)) this.last = placement;
+    // put the original placement back when the changed one is refused
+    else this.place(last, before);
+    ctx.committed?.();
+    ctx.statusChanged();
+    ctx.requestRender();
+    return true;
   }
 
   /** Add the plane of `p` moved `offset` along its normal; remembers the undo entry it made. */
@@ -125,21 +150,31 @@ export class SectionPlaneTool implements Tool {
 
   /** A typed length moves the plane just placed along its normal, replacing any earlier offset, in the same undo step. */
   onVcb(v: VcbValue): void {
-    const last = this.last, ctx = this.ctx;
-    if (v.kind !== 'length' || !last || !ctx) return;
-    const host = hostOfTool(ctx);
-    if (!last.entry || host.undoStack.peek() !== last.entry) {
-      this.last = null;
-      ctx.statusChanged();
-      return;
-    }
-    host.undo();
-    if (!this.place(last, v.meters)) {
-      // put the original placement back when the offset one is refused
-      this.place(last, last.offset);
-    }
-    ctx.statusChanged();
-    ctx.requestRender();
+    if (v.kind === 'length') this.replaceLast(() => v.meters);
+  }
+
+  /** Reverse, from the bar or a Ctrl tap: the arrows of the planes still to be placed point the other way. */
+  private setReversed(on: boolean): void {
+    if (on === this.reversed) return;
+    this.reversed = on;
+    this.normal = neg(this.normal);
+  }
+
+  onSetting(id: string, value: ToolSettingValue): void {
+    if (id !== 'reverse' || typeof value !== 'boolean') return;
+    this.setReversed(value);
+    this.ctx?.statusChanged();
+    this.ctx?.requestRender();
+  }
+
+  /** Reverse switched just after a placement: turn that plane around where it lies, in the same undo step. */
+  adjustLast(id: string): boolean {
+    if (id !== 'reverse') return false;
+    return this.replaceLast((p) => {
+      const offset = -p.offset;
+      p.normal = neg(p.normal);
+      return offset;
+    });
   }
 
   onKeyDown(e: ToolKeyEvent): boolean {
@@ -153,9 +188,7 @@ export class SectionPlaneTool implements Tool {
     } else if (e.key === 'Shift') {
       if (!e.repeat && !this.axis) this.locked = this.directed(this.normal);
     } else if (e.key === 'Control') {
-      if (e.repeat) return true;
-      this.reversed = !this.reversed;
-      this.normal = neg(this.normal);
+      if (!e.repeat) this.setReversed(!this.reversed);
     } else return false;
     if (this.locked) this.normal = this.directed(this.locked);
     this.ctx?.requestRender();
@@ -191,13 +224,13 @@ export class SectionPlaneTool implements Tool {
   }
 
   status(): ToolStatus {
-    const reversed = this.reversed ? ' Arrows reversed.' : '';
     const last = this.last && this.ctx ? this.last : null;
     const units = last && this.ctx ? hostOfTool(this.ctx).doc.state.meta.units : null;
     return {
-      instructor: `Click to place a section plane, then type an offset. Shift holds its orientation; Right, Left and Up hold the red, green and blue axes, Down releases them; Ctrl reverses the arrows.${reversed}`,
+      instructor: 'Click to place a section plane, then type an offset. Shift holds its orientation; Right, Left and Up hold the red, green and blue axes, Down releases them.',
       vcbLabel: last ? 'Offset' : '',
       vcbValue: last && units ? formatLength(last.offset, units) : undefined,
+      settings: [toggleSetting('reverse', 'Reverse', this.reversed, 'primary')],
     };
   }
 }

@@ -160,7 +160,7 @@ describe('section plane commands', () => {
     };
     const ctrl = { key: 'Control', code: 'ControlLeft', modifiers: NO_MODIFIERS, repeat: false };
     tool.onKeyDown(ctrl);
-    expect(tool.status().instructor).toContain('Arrows reversed');
+    expect(tool.status().settings).toEqual([{ kind: 'toggle', id: 'reverse', label: 'Reverse', on: true, key: 'primary' }]);
     tool.onPointerMove(event);
     tool.onPointerDown(event);
     expect(plane(active()!).plane.n).toEqual([0, 0, 1]);
@@ -203,6 +203,29 @@ describe('section plane commands', () => {
     tool.onVcb(length(1));
     expect(plane(id).origin).toEqual([1, 1, 1.5]);
     expect(plane(id).name).toBe('Kept');
+  });
+
+  it('switching Reverse in the bar after a placement turns that plane around where it lies, in the same undo step', () => {
+    const { registry, camera, host, plane, active, root } = setup();
+    const tool = new SectionPlaneTool();
+    let commits = 0;
+    tool.activate({ commands: registry, camera, requestRender: () => {}, statusChanged: () => {}, committed: () => { commits++; } });
+    const event: ToolPointerEvent = {
+      screen: [0, 0], ray: { origin: [0, 0, 10], dir: [0, 0, -1] }, button: 0, buttons: 0, modifiers: NO_MODIFIERS, camera: camera.getState(),
+      inference: { point: [1, 1, 1], primary: { kind: 'onFace', point: [1, 1, 1] }, lines: [], hit: { normal: [0, 0, 1] } } as never,
+    };
+    const steps = host.undoStack.length;
+    tool.onPointerDown(event);
+    tool.onVcb({ kind: 'length', meters: 0.25, raw: 0.25, unit: null });
+    expect(commits).toBe(2);
+    tool.onSetting('reverse', true);
+    expect(tool.adjustLast('reverse')).toBe(true);
+    expect(plane(active()!)).toMatchObject({ origin: [1, 1, 0.75], plane: { n: [0, 0, 1] } });
+    expect(root().sectionPlanes.size).toBe(1);
+    expect(host.undoStack.length).toBe(steps + 1);
+    // the next plane is reversed too
+    tool.onPointerDown(event);
+    expect(plane(active()!).plane.n).toEqual([0, 0, 1]);
   });
 
   it('offers Unhide when every selected plane is hidden', () => {

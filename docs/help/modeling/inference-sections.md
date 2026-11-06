@@ -14,7 +14,7 @@ Shift and arrow-key locks remain available in these modes. If expected snaps dis
 
 ## Add a section plane
 
-Choose **Section Plane** in the **Inspect** toolbar group or find it in command search. Point to a face to orient the preview, then click to place the plane. Shift holds the current orientation. Right, Left and Up constrain to the red, green and blue axes; Down releases that constraint. Tap Ctrl to reverse the arrows, so the plane keeps the other side; tap it again to turn the reversal off. Undo removes a plane you have placed.
+Choose **Section Plane** in the **Inspect** toolbar group or find it in command search. Point to a face to orient the preview, then click to place the plane. Shift holds the current orientation. Right, Left and Up constrain to the red, green and blue axes; Down releases that constraint. To make the plane keep the other side, switch on **Reverse** in the tool options bar, or tap Ctrl (Cmd on a Mac). It stays on for the next planes until you switch it off. Right after a click, switching Reverse turns the plane you just placed around where it lies. Undo removes a plane you have placed.
 
 To place a plane at an exact distance from what you clicked, type the distance right after the click and press Enter. A positive distance moves the plane the way its arrows point, a negative one the other way. Typing again replaces the distance, and Undo removes the plane and its offset together.
 

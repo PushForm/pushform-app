@@ -8,17 +8,22 @@ import { disposeKernels, setupCommands } from './transform.fixtures';
 import { contextCommands } from './context';
 import { groupCommands, type MakeResult } from './groups';
 import { contextMenu } from './contextMenu';
+import { clipboardCommands, modelClipboard } from './clipboard';
 import { nextSectionPlaneName, sectionPlaneCommands } from './sectionPlanes';
 import { SectionPlaneTool } from '../tools/impl/SectionPlane';
 import { NO_MODIFIERS, type ToolContext, type ToolPointerEvent } from '../tools/Tool';
 
-afterEach(disposeKernels);
+afterEach(() => {
+  modelClipboard.set(null);
+  disposeKernels();
+});
 
 function setup() {
   const s = setupCommands();
   s.registry.registerAll(groupCommands);
   s.registry.registerAll(contextCommands);
   s.registry.registerAll(sectionPlaneCommands);
+  s.registry.registerAll(clipboardCommands);
   const add = (point: [number, number, number], normal: [number, number, number] = [0, 0, -1]): number =>
     s.registry.execute('sectionPlane.add', { point, normal }) as number;
   const plane = (id: number, path: number[] = []) => containerAt(s.host.doc.state, path as Id[]).sectionPlanes.get(id as Id)!;
@@ -135,5 +140,112 @@ describe('section plane commands', () => {
     tool.onKeyDown({ key: 'ArrowUp', code: 'ArrowUp', modifiers: NO_MODIFIERS, repeat: false });
     tool.onPointerDown(event([1, 0, 0]));
     expect(Math.abs(plane(active()!).plane.n[2])).toBeCloseTo(1, 9);
+  });
+  it('keeps the side it cuts away under a mirror', async () => {
+    const { add, plane, apply, ref } = setup();
+    const a = add([1, 0, 0], [1, 0, 0]);
+    // keeps x >= 1; mirrored in x it keeps x <= -1
+    await apply({ refs: [ref(a)], matrix: [-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], copy: false });
+    expect(plane(a).plane.n[0]).toBeCloseTo(-1, 9);
+    expect(plane(a).plane.d).toBeCloseTo(-1, 9);
+  });
+
+  it('the tool reverses its arrows with Ctrl, until Ctrl is tapped again', () => {
+    const { registry, camera, plane, active } = setup();
+    const tool = new SectionPlaneTool();
+    tool.activate({ commands: registry, camera, requestRender: () => {}, statusChanged: () => {} });
+    const event: ToolPointerEvent = {
+      screen: [0, 0], ray: { origin: [0, 0, 10], dir: [0, 0, -1] }, button: 0, buttons: 0, modifiers: NO_MODIFIERS, camera: camera.getState(),
+      inference: { point: [1, 1, 1], primary: { kind: 'onFace', point: [1, 1, 1] }, lines: [], hit: { normal: [0, 0, 1] } } as never,
+    };
+    const ctrl = { key: 'Control', code: 'ControlLeft', modifiers: NO_MODIFIERS, repeat: false };
+    tool.onKeyDown(ctrl);
+    expect(tool.status().instructor).toContain('Arrows reversed');
+    tool.onPointerMove(event);
+    tool.onPointerDown(event);
+    expect(plane(active()!).plane.n).toEqual([0, 0, 1]);
+    // the reversal applies to a held axis too
+    tool.onKeyDown({ key: 'ArrowUp', code: 'ArrowUp', modifiers: NO_MODIFIERS, repeat: false });
+    tool.onPointerDown(event);
+    expect(plane(active()!).plane.n).toEqual([0, 0, 1]);
+    tool.onKeyDown({ key: 'ArrowDown', code: 'ArrowDown', modifiers: NO_MODIFIERS, repeat: false });
+    tool.onKeyDown(ctrl);
+    tool.onPointerDown(event);
+    expect(plane(active()!).plane.n).toEqual([0, 0, -1]);
+  });
+
+  it('a typed length moves the plane just placed along its normal, in the same undo step', () => {
+    const { registry, camera, host, plane, active, root } = setup();
+    const tool = new SectionPlaneTool();
+    tool.activate({ commands: registry, camera, requestRender: () => {}, statusChanged: () => {} });
+    const event: ToolPointerEvent = {
+      screen: [0, 0], ray: { origin: [0, 0, 10], dir: [0, 0, -1] }, button: 0, buttons: 0, modifiers: NO_MODIFIERS, camera: camera.getState(),
+      inference: { point: [1, 1, 1], primary: { kind: 'onFace', point: [1, 1, 1] }, lines: [], hit: { normal: [0, 0, 1] } } as never,
+    };
+    const steps = host.undoStack.length;
+    tool.onPointerDown(event);
+    expect(tool.status().vcbLabel).toBe('Offset');
+    const length = (meters: number) => ({ kind: 'length' as const, meters, raw: meters, unit: null });
+    // the arrows point down, into the face: a positive length moves the plane down
+    tool.onVcb(length(0.25));
+    expect(plane(active()!).origin).toEqual([1, 1, 0.75]);
+    tool.onVcb(length(-0.5));
+    expect(plane(active()!).origin).toEqual([1, 1, 1.5]);
+    expect(plane(active()!)).toMatchObject({ name: 'Section 1', symbol: '1' });
+    expect(root().sectionPlanes.size).toBe(1);
+    expect(host.undoStack.length).toBe(steps + 1);
+    host.undo();
+    expect(root().sectionPlanes.size).toBe(0);
+    host.redo();
+    // after another change a typed length does nothing
+    const id = active()!;
+    registry.execute('sectionPlane.rename', { path: [], id, name: 'Kept' });
+    tool.onVcb(length(1));
+    expect(plane(id).origin).toEqual([1, 1, 1.5]);
+    expect(plane(id).name).toBe('Kept');
+  });
+
+  it('offers Unhide when every selected plane is hidden', () => {
+    const { add, registry, host, ref } = setup();
+    const a = add([0, 0, 1]), b = add([0, 0, 2]);
+    registry.execute('sectionPlane.setHidden', { refs: [{ path: [], id: a }], hidden: true });
+    const label = (refs: EntityRef[]) => contextMenu.itemsFor(host.doc.state, refs).find((i) => i.command === 'sectionPlane.setHidden');
+    expect(label([ref(a)])).toMatchObject({ label: 'Unhide', params: { hidden: false } });
+    expect(label([ref(a), ref(b)])).toMatchObject({ label: 'Hide', params: { hidden: true } });
+  });
+
+  it('copies and pastes planes as inactive copies that keep their name, symbol and hidden state', () => {
+    const { add, registry, host, root, active, ref } = setup();
+    const a = add([0, 0, 1]);
+    registry.execute('sectionPlane.setHidden', { refs: [{ path: [], id: a }], hidden: true });
+    registry.execute('selection.set', { refs: [ref(a)] });
+    expect((registry.execute('edit.copy') as { skipped: number }).skipped).toBe(0);
+    const pasted = registry.execute('edit.pasteInPlace') as EntityRef[];
+    expect(pasted).toHaveLength(1);
+    const copy = root().sectionPlanes.get(pasted[0]!.id)!;
+    expect(copy).toMatchObject({ name: 'Section 1', symbol: '1', hidden: true, plane: { n: [0, 0, -1], d: 1 } });
+    expect(active()).toBe(a);
+    // Cut erases the plane and turns its container's cut off
+    registry.execute('selection.set', { refs: [ref(a)] });
+    registry.execute('edit.cut');
+    expect(root().sectionPlanes.has(a as Id)).toBe(false);
+    expect(active()).toBeNull();
+    expect(host.selection.refs).toEqual([]);
+  });
+
+  it('Make Group moves the selected planes and the active cut into the group', () => {
+    const { registry, addBox, bodies, add, plane, active, ref } = setup();
+    addBox();
+    const a = add([0, 0, 0.5]);
+    const b = add([0, 0, 0.25]);
+    registry.execute('sectionPlane.setActive', { path: [], id: a, active: true });
+    registry.execute('selection.set', { refs: [{ kind: 'body', path: [], id: bodies()[0]!.id }, ref(a)] });
+    const made = registry.execute('group.make', {}) as MakeResult;
+    const inst = made.instanceId as number;
+    expect(active()).toBeNull();
+    expect(active([inst])).toBe(a);
+    expect(plane(a, [inst]).name).toBe('Section 1');
+    // the plane not selected stays where it was
+    expect(plane(b).name).toBe('Section 2');
   });
 });

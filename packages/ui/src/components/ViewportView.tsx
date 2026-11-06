@@ -12,7 +12,7 @@ import { SceneTabs } from './SceneTabs';
 import { ToolOptionsBar } from './ToolOptionsBar';
 import { toolModifiers } from '../platformKeys';
 import { HeldTags } from './HeldTags';
-import type { InferenceResult } from '@pushform/inference';
+import type { InferenceOptions, InferenceResult } from '@pushform/inference';
 import { useApp } from '../AppContext';
 import { useAppStore } from '../store';
 import { viewAxesOf } from '../engine/viewAxes';
@@ -49,7 +49,7 @@ export function ViewportView(): JSX.Element {
     app.viewport.mount(el);
     el.focus();
 
-    const toEvent = (e: PointerEvent | MouseEvent, button: number, withPick: boolean): ToolPointerEvent => {
+    const toEvent = (e: PointerEvent | MouseEvent, button: number, withPick: boolean, pickOptions?: InferenceOptions): ToolPointerEvent => {
       const rect = el.getBoundingClientRect();
       const screen: [number, number] = [e.clientX - rect.left, e.clientY - rect.top];
       pointer.current = screen;
@@ -57,7 +57,7 @@ export function ViewportView(): JSX.Element {
       let inference: InferenceResult | null = null;
       if (withPick) {
         const tool = app.toolManager.activeTool;
-        const opts = tool?.inferenceOptions?.() ?? {};
+        const opts = pickOptions ?? tool?.inferenceOptions?.() ?? {};
         try {
           inference = app.inference.resolve(
             { ray, screen, pixelSizeAt: app.viewport.pixelSizeAlong(ray), project: (p) => app.viewport.project(p), view: viewAxesOf(app.viewport.camera.getState(), rect.width, rect.height) },
@@ -100,7 +100,8 @@ export function ViewportView(): JSX.Element {
     };
     const onContextMenu = (e: MouseEvent) => {
       e.preventDefault();
-      const ev = toEvent(e, 2, true);
+      // the menu is for what is under the cursor as Select picks it, whatever tool is active
+      const ev = toEvent(e, 2, true, { pickOnly: true });
       const hit = ev.inference?.hit ?? null;
       app.commands.tryExecute('ui.contextMenu.open', { x: e.clientX, y: e.clientY, refs: hit ? [hitSelectable(hit)] : [] });
     };

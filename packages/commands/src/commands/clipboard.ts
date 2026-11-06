@@ -52,6 +52,7 @@ import { DocumentHost } from '../host/DocumentHost';
 import { hostOf, SERVICE_DOCUMENT } from '../host/services';
 import { draftContainerAt, refsInContext, sketchGraphAt } from './context';
 import { cloneDefinition, copySketchInto, mapGuide, pointMapFromMatrix, uniqueDefinitionName } from './groups';
+import { mapSectionPlane } from './sectionPlanes';
 import { deleteSelection, type DeleteResult } from './sketch';
 import { copyBodyRecord, copyMeshPartRecord, definitionBounds, transformBodyAffineInPlace, transformMeshPartGeometry } from './transform';
 
@@ -77,7 +78,7 @@ export interface ModelClipboard {
   /** The camera of the view it was copied in, for a Layout view of it. */
   readonly camera: CameraState | null;
   readonly source: ModelClipboardSource | null;
-  /** Selected items that were not copied (texts, dimensions, section planes, images). */
+  /** Selected items that were not copied (texts, dimensions, images). */
   readonly skipped: number;
 }
 
@@ -255,6 +256,7 @@ export function clipboardRefs(clip: ModelClipboard): EntityRef[] {
     ...[...c.instances.keys()].map((id): EntityRef => ({ kind: 'instance', path: [], id })),
     ...[...c.sketch.edges.keys()].map((id): EntityRef => ({ kind: 'sketchEdge', path: [], id })),
     ...[...c.guides.keys()].map((id): EntityRef => ({ kind: 'guide', path: [], id })),
+    ...[...c.sectionPlanes.keys()].map((id): EntityRef => ({ kind: 'sectionPlane', path: [], id })),
   ];
 }
 
@@ -286,6 +288,7 @@ export function clipboardExtentPoints(clip: ModelClipboard): Vec3[] {
     out.push(g.origin);
     if (g.kind === 'segment') out.push(g.end);
   }
+  for (const s of c.sectionPlanes.values()) out.push(s.origin);
   return out;
 }
 
@@ -332,7 +335,7 @@ export function copyModelSelection(
   const graph = new SketchGraph(dst.sketch, <T extends number = Id>() => allocId<T>(out), out.defaultTagId);
 
   let skipped = 0;
-  const bodies = new Set<Id>(), meshParts = new Set<Id>(), instances = new Set<Id>(), guides = new Set<Id>();
+  const bodies = new Set<Id>(), meshParts = new Set<Id>(), instances = new Set<Id>(), guides = new Set<Id>(), planes = new Set<Id>();
   const edges = new Set<Id>(), faces = new Set<Id>();
   const parts = new Map<Id, BodyParts>();
   const partsOf = (id: Id): BodyParts => parts.get(id) ?? parts.set(id, { faces: new Set(), edges: new Set(), imprints: [] }).get(id)!;
@@ -358,6 +361,9 @@ export function copyModelSelection(
         break;
       case 'guide':
         if (container.guides.has(r.id)) guides.add(r.id);
+        break;
+      case 'sectionPlane':
+        if (container.sectionPlanes.has(r.id)) planes.add(r.id);
         break;
       case 'sketchEdge':
         if (container.sketch.edges.has(r.id)) edges.add(r.id);
@@ -409,6 +415,10 @@ export function copyModelSelection(
     } else if (guides.has(id)) {
       dst.guides.set(id, mapGuide(container.guides.get(id)!, id, map));
       dst.order.push(id);
+    } else if (planes.has(id)) {
+      // in world coordinates and never the clipboard's active cut
+      dst.sectionPlanes.set(id, mapSectionPlane(container.sectionPlanes.get(id)!, id, world));
+      dst.order.push(id);
     }
   }
   if (edges.size) copySketchInto(draft, container.sketch, edges, faces, graph, map);
@@ -449,7 +459,7 @@ export function copyModelSelection(
   };
   const bounds = boundsOf(clipboardExtentPoints(clip));
   if (!bounds) return null;
-  const lone = dst.instances.size === 1 && !dst.bodies.size && !dst.meshParts.size && !dst.sketch.edges.size && !dst.guides.size ? [...dst.instances.values()][0] : undefined;
+  const lone = dst.instances.size === 1 && !dst.bodies.size && !dst.meshParts.size && !dst.sketch.edges.size && !dst.guides.size && !dst.sectionPlanes.size ? [...dst.instances.values()][0] : undefined;
   const insertionPoint: Vec3 = lone ? [lone.transform[12]!, lone.transform[13]!, lone.transform[14]!] : [bounds.min[0], bounds.min[1], bounds.min[2]];
   return { ...clip, bounds, insertionPoint };
 }
@@ -623,6 +633,15 @@ export function pasteModelClipboard(draft: DocumentDraft, clip: ModelClipboard, 
       container.guides.set(copy.id, copy);
       container.order.push(copy.id);
       pasted.push({ kind: 'guide', path, id: copy.id });
+      continue;
+    }
+    const plane = srcRoot.sectionPlanes.get(sid);
+    if (plane) {
+      // a pasted plane is not active, so pasting never changes which plane cuts the container
+      const copy = mapSectionPlane(plane, allocId<Id>(draft), m);
+      container.sectionPlanes.set(copy.id, copy);
+      container.order.push(copy.id);
+      pasted.push({ kind: 'sectionPlane', path, id: copy.id });
     }
   }
   if (srcRoot.sketch.edges.size) {
@@ -660,7 +679,7 @@ function copySelection(ctx: CommandContext): CopyResult {
   if (!clip) throw new PushFormError('copy.empty', 'Nothing in the selection can be copied');
   clipboardOf(ctx).set(clip);
   const n = clip.skipped;
-  return { skipped: n, message: n ? `${n} item${n === 1 ? '' : 's'} not copied: texts, dimensions, section planes and images cannot be copied yet.` : null };
+  return { skipped: n, message: n ? `${n} item${n === 1 ? '' : 's'} not copied: texts, dimensions and images cannot be copied yet.` : null };
 }
 
 function pasteWith(ctx: CommandContext, label: string, placement: (clip: ModelClipboard) => MMat4): EntityRef[] {

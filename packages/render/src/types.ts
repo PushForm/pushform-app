@@ -528,6 +528,8 @@ export interface RenderSectionPlane {
   /** The active cut of its container. */
   readonly active: boolean;
   readonly selected: boolean;
+  /** Hidden, drawn because hidden geometry is shown: outline only, without the fill. */
+  readonly hidden?: boolean | undefined;
 }
 
 /**

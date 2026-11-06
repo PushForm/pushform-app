@@ -358,6 +358,7 @@ interface Collected {
   readonly instances: Id[];
   readonly guides: Id[];
   readonly images: Id[];
+  readonly sectionPlanes: Id[];
   readonly edges: Set<Id>;
   readonly faces: Set<Id>;
   readonly size: number;
@@ -365,11 +366,12 @@ interface Collected {
 
 /**
  * Entities of a container a group/component is made from: bodies (a face/edge ref selects its
- * solid), instances, guides, sketch faces (with their edges) and sketch edges (faces bounded
+ * solid), instances, guides, section planes, sketch faces (with their edges) and sketch edges (faces bounded
  * only by selected edges come along).
  */
 function collect(container: EntityContainer, refs: readonly EntityRef[]): Collected {
   const bodies = new Set<Id>(), meshParts = new Set<Id>(), instances = new Set<Id>(), guides = new Set<Id>(), images = new Set<Id>();
+  const planes = new Set<Id>();
   const edges = new Set<Id>(), faces = new Set<Id>();
   const sketch = container.sketch;
   for (const r of refs) {
@@ -391,6 +393,9 @@ function collect(container: EntityContainer, refs: readonly EntityRef[]): Collec
         break;
       case 'image':
         if (container.images.has(r.id)) images.add(r.id);
+        break;
+      case 'sectionPlane':
+        if (container.sectionPlanes.has(r.id)) planes.add(r.id);
         break;
       case 'sketchEdge':
         if (sketch.edges.has(r.id)) edges.add(r.id);
@@ -418,9 +423,10 @@ function collect(container: EntityContainer, refs: readonly EntityRef[]): Collec
     instances: [...instances],
     guides: [...guides],
     images: [...images],
+    sectionPlanes: [...planes],
     edges,
     faces,
-    size: bodies.size + meshParts.size + instances.size + guides.size + images.size + edges.size,
+    size: bodies.size + meshParts.size + instances.size + guides.size + images.size + planes.size + edges.size,
   };
 }
 
@@ -577,6 +583,22 @@ function makeDefinition(host: DocumentHost, refs: readonly EntityRef[], opts: Ma
         removed.add(id);
       }
       dst.images.set(copy.id, copy);
+      dst.order.push(copy.id);
+    }
+    // section planes: a moved plane that was its container's cut becomes the new definition's cut
+    for (const id of collected.sectionPlanes) {
+      const plane = src.sectionPlanes.get(id);
+      if (!plane) continue;
+      const copy = mapSectionPlane(plane, move ? plane.id : allocId<Id>(draft), toLocal);
+      if (move) {
+        src.sectionPlanes.delete(id);
+        removed.add(id);
+        if (src.activeSectionPlaneId === id) {
+          src.activeSectionPlaneId = null;
+          dst.activeSectionPlaneId = copy.id;
+        }
+      }
+      dst.sectionPlanes.set(copy.id, copy);
       dst.order.push(copy.id);
     }
     // sketch

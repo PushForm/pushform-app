@@ -48,4 +48,17 @@ describe('section planes to render', () => {
     expect(off.planes).toEqual([]);
     expect(off.cuts).toEqual([]);
   });
+
+  it('draws hidden planes, marked hidden, only while hidden geometry is shown', () => {
+    const doc = createDocument();
+    doc.transact('sections', (draft) => {
+      const root = draft.definitions.get(draft.rootDefinitionId)!.entities;
+      const p = { ...plane(51, 2), hidden: true };
+      root.sectionPlanes.set(p.id, { ...p, tagId: draft.defaultTagId } as never);
+      root.order.push(p.id);
+    });
+    expect(sectionsToRender(doc.state).planes).toEqual([]);
+    doc.transact('style', (draft) => { draft.styles.get(draft.activeStyleId)!.modeling.hiddenGeometry = true; });
+    expect(sectionsToRender(doc.state).planes.map((p) => [p.entityId, p.hidden])).toEqual([[51, true]]);
+  });
 });

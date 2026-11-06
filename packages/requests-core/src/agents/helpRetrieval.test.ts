@@ -102,7 +102,7 @@ describe('user manual retrieval over the actual corpus', () => {
     ['model', '3D Text', ['**Place**', 'click in the model', 'Escape']],
     ['model', 'Tag tool', ['pencil control', 'click an entity', 'Undo']],
     ['model', 'Paint Bucket replace material', ['Shift+click', 'Ctrl+Shift+click']],
-    ['model', 'Section Plane', ['click to place the plane', 'Undo']],
+    ['model', 'Section Plane', ['Click again to place it', 'Undo']],
     ['home', 'desktop update', ['**Restart to update**', '**Later**', '**Restart and update**']],
   ] as const)('retrieves practical %s steps for %s', (editor, query, steps) => {
     const answer = retrieveUserHelp(guides, query, editor);

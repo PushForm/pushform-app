@@ -382,6 +382,34 @@ describe('ModelObjectBrowser', () => {
     expect(item('Solid 1').getAttribute('aria-selected')).toBe('false');
   });
 
+  it('lists section planes, marks the active cut, selects, hides, unhides and renames them', () => {
+    const a = boot();
+    addSolid(a);
+    const first = a.commands.execute('sectionPlane.add', { point: [0, 0, 0.5], normal: [0, 0, -1] }) as number;
+    a.commands.execute('sectionPlane.add', { point: [0, 0, 0.25], normal: [0, 0, -1] });
+    a.document.selection.clear();
+    mount(a);
+    // the newer plane is the active cut
+    expect(names()).toEqual(['Solid 1', 'Section 1', 'Section 2 · Active cut']);
+    const planeRef: EntityRef = { kind: 'sectionPlane', path: [], id: first as Id };
+    fireEvent.click(row('Section 1'));
+    expect(a.document.selection.refs).toEqual([planeRef]);
+    expect(within(row('Section 1')).getByRole('img', { name: 'Section Plane' })).toBeTruthy();
+    // a hidden plane stays listed, and its eye shows it again
+    fireEvent.click(within(row('Section 1')).getByRole('button', { name: 'Show Section 1' }));
+    const plane = () => containerAt(a.document.doc.state, []).sectionPlanes.get(first as Id)!;
+    expect(plane().hidden).toBe(true);
+    expect(item('Section 1').classList.contains('is-hidden')).toBe(true);
+    fireEvent.click(within(row('Section 1')).getByRole('button', { name: 'Show Section 1' }));
+    expect(plane().hidden).toBe(false);
+    fireEvent.doubleClick(row('Section 1'));
+    const field = screen.getByRole('textbox', { name: 'Rename Section 1' });
+    fireEvent.change(field, { target: { value: 'Long section' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+    expect(plane().name).toBe('Long section');
+    expect(names()).toContain('Long section');
+  });
+
   it('hides and shows solids, groups and components, and locks groups and components', () => {
     const log: string[] = [];
     const a = boot(log);

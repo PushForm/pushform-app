@@ -6,6 +6,8 @@ In the editor, choose **Save version** in the header or Main menu, or press Ctrl
 
 The private cloud revision is saved first. The publishing dialog uses that fixed snapshot, including when later editor changes occur. Choose the whole model or the captured selection when available, enter public listing details, and review the license and credits. Create a public profile on your first publication. Public handles use 3–32 lowercase letters, numbers or hyphens, start with a letter and end with a letter or number. Enter the handle without an @. If a handle is already taken, choose another. Cover images are optional. Open the **Collections** dropdown to check any of your collections to add the model to, or type a name and choose **Add** to create a new private collection. Choose **Publish model** directly from the details screen. Publishing confirms that you have the necessary rights under the Terms of Use; there is no separate review step or rights checkbox. Cancelling retains the private revision and any publishing draft. Cloud revision numbers and Commons revision numbers are separate.
 
+## Publish later changes to a shared model
+
 Publishing later changes requires another explicit save and publication. Saving alone never updates a public model. Copies retain their original license versions and creator notices. Republishing a copy does not add the default original-work license, and repeated copies or draft saves do not duplicate identical license notices. Required upstream licenses and original creator notices travel with imported content; incompatible or unsupported publication terms must be resolved before publishing.
 
 ## Publish through the Commons website

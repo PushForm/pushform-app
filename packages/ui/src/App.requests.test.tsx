@@ -197,7 +197,7 @@ it('offers help.requests, keeps workspace keys out of the composer, and docks th
   fireEvent.click(screen.getByRole('button', { name: '3D model: Untitled' }));
   expect(within(rail()).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Files', 'AI Chat', 'Object browser', 'Commons']);
   expect(screen.getByRole('button', { name: 'Object browser' }).getAttribute('aria-pressed')).toBe('true');
-  expect(screen.getByText('Solids, groups, components and text you make appear here.')).toBeTruthy();
+  expect(screen.getByText('Solids, groups, components, text and section planes you make appear here.')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Object browser' }));
   expect(document.querySelector('.pf-side-dock')?.hasAttribute('hidden')).toBe(true);
   fireEvent.click(icon());

@@ -18,6 +18,14 @@ afterEach(() => {
   disposeKernels();
 });
 
+/** Two clicks at the same spot: the first sets the orientation and starting point, the second places the plane there. */
+function place(tool: SectionPlaneTool, e: ToolPointerEvent): void {
+  tool.onPointerDown(e);
+  tool.onPointerUp(e);
+  tool.onPointerDown(e);
+  tool.onPointerUp(e);
+}
+
 function setup() {
   const s = setupCommands();
   s.registry.registerAll(groupCommands);
@@ -133,12 +141,12 @@ describe('section plane commands', () => {
     });
     tool.onPointerMove(event([0, 0, 1], -1));
     expect(tool.overlay().length).toBeGreaterThan(0);
-    tool.onPointerDown(event([0, 0, 1]));
+    place(tool, event([0, 0, 1]));
     const id = active()!;
     expect(plane(id).plane.n).toEqual([0, 0, -1]);
     // Up holds the blue axis whatever lies under the cursor
     tool.onKeyDown({ key: 'ArrowUp', code: 'ArrowUp', modifiers: NO_MODIFIERS, repeat: false });
-    tool.onPointerDown(event([1, 0, 0]));
+    place(tool, event([1, 0, 0]));
     expect(Math.abs(plane(active()!).plane.n[2])).toBeCloseTo(1, 9);
   });
   it('keeps the side it cuts away under a mirror', async () => {
@@ -160,17 +168,17 @@ describe('section plane commands', () => {
     };
     const ctrl = { key: 'Control', code: 'ControlLeft', modifiers: NO_MODIFIERS, repeat: false };
     tool.onKeyDown(ctrl);
-    expect(tool.status().settings).toEqual([{ kind: 'toggle', id: 'reverse', label: 'Reverse', on: true, key: 'primary' }]);
+    expect(tool.status().settings?.[0]).toEqual({ kind: 'toggle', id: 'reverse', label: 'Reverse', on: true, key: 'primary' });
     tool.onPointerMove(event);
-    tool.onPointerDown(event);
+    place(tool, event);
     expect(plane(active()!).plane.n).toEqual([0, 0, 1]);
     // the reversal applies to a held axis too
     tool.onKeyDown({ key: 'ArrowUp', code: 'ArrowUp', modifiers: NO_MODIFIERS, repeat: false });
-    tool.onPointerDown(event);
+    place(tool, event);
     expect(plane(active()!).plane.n).toEqual([0, 0, 1]);
     tool.onKeyDown({ key: 'ArrowDown', code: 'ArrowDown', modifiers: NO_MODIFIERS, repeat: false });
     tool.onKeyDown(ctrl);
-    tool.onPointerDown(event);
+    place(tool, event);
     expect(plane(active()!).plane.n).toEqual([0, 0, -1]);
   });
 
@@ -183,7 +191,7 @@ describe('section plane commands', () => {
       inference: { point: [1, 1, 1], primary: { kind: 'onFace', point: [1, 1, 1] }, lines: [], hit: { normal: [0, 0, 1] } } as never,
     };
     const steps = host.undoStack.length;
-    tool.onPointerDown(event);
+    place(tool, event);
     expect(tool.status().vcbLabel).toBe('Offset');
     const length = (meters: number) => ({ kind: 'length' as const, meters, raw: meters, unit: null });
     // the arrows point down, into the face: a positive length moves the plane down
@@ -215,17 +223,85 @@ describe('section plane commands', () => {
       inference: { point: [1, 1, 1], primary: { kind: 'onFace', point: [1, 1, 1] }, lines: [], hit: { normal: [0, 0, 1] } } as never,
     };
     const steps = host.undoStack.length;
-    tool.onPointerDown(event);
+    place(tool, event);
     tool.onVcb({ kind: 'length', meters: 0.25, raw: 0.25, unit: null });
     expect(commits).toBe(2);
     tool.onSetting('reverse', true);
-    expect(tool.adjustLast('reverse')).toBe(true);
+    expect(tool.adjustLast('reverse', true)).toBe(true);
     expect(plane(active()!)).toMatchObject({ origin: [1, 1, 0.75], plane: { n: [0, 0, 1] } });
     expect(root().sectionPlanes.size).toBe(1);
     expect(host.undoStack.length).toBe(steps + 1);
     // the next plane is reversed too
-    tool.onPointerDown(event);
+    place(tool, event);
     expect(plane(active()!).plane.n).toEqual([0, 0, 1]);
+  });
+
+  it('the first click sets the orientation and starting point, moving sets the offset and the second click places the plane', () => {
+    const { registry, camera, host, plane, active, root } = setup();
+    const tool = new SectionPlaneTool();
+    let commits = 0;
+    tool.activate({ commands: registry, camera, requestRender: () => {}, statusChanged: () => {}, committed: () => { commits++; } });
+    const at = (point: [number, number, number], screen: [number, number], normal: [number, number, number] | null = null): ToolPointerEvent => ({
+      screen, ray: { origin: [0, 0, 10], dir: [0, 0, -1] }, button: 0, buttons: 0, modifiers: NO_MODIFIERS, camera: camera.getState(),
+      inference: { point, primary: { kind: 'onFace', point }, lines: [], hit: normal ? { normal } : null } as never,
+    });
+    const steps = host.undoStack.length;
+    // the first click on the top face of a box at z = 1: the arrows point down into it
+    tool.onPointerDown(at([1, 1, 1], [100, 100], [0, 0, 1]));
+    tool.onPointerUp(at([1, 1, 1], [100, 100], [0, 0, 1]));
+    expect(tool.hasPendingWork()).toBe(true);
+    // the cursor is held to the normal through the starting point
+    expect(tool.inferenceOptions().lockSnap).toMatchObject({ point: [1, 1, 1], dir: [0, 0, -1] });
+    expect(root().sectionPlanes.size).toBe(0);
+    // a point 0.4 below, off to the side: only the distance along the normal counts
+    tool.onPointerMove(at([3, 2, 0.6], [140, 160]));
+    // the offset shows at the pointer and in the bar
+    const status = tool.status();
+    expect(status.fields?.[0]).toMatchObject({ label: 'Offset', value: status.vcbValue });
+    expect(status.settings).toContainEqual(expect.objectContaining({ id: 'offset', value: status.vcbValue }));
+    tool.onPointerDown(at([3, 2, 0.6], [140, 160]));
+    expect(plane(active()!).origin[2]).toBeCloseTo(0.6, 9);
+    expect(plane(active()!).origin.slice(0, 2)).toEqual([1, 1]);
+    expect(commits).toBe(1);
+    expect(host.undoStack.length).toBe(steps + 1);
+    // the bar's Offset changes the plane just placed, from its starting point, in the same undo step
+    expect(tool.adjustLast('offset', { kind: 'length', meters: 0.1, raw: 0.1, unit: null })).toBe(true);
+    expect(plane(active()!).origin[2]).toBeCloseTo(0.9, 9);
+    expect(host.undoStack.length).toBe(steps + 1);
+  });
+
+  it('places on release after a drag, takes a typed offset, and Escape goes back to choosing the orientation', () => {
+    const { registry, camera, plane, active, root } = setup();
+    const tool = new SectionPlaneTool();
+    tool.activate({ commands: registry, camera, requestRender: () => {}, statusChanged: () => {} });
+    const at = (point: [number, number, number], screen: [number, number]): ToolPointerEvent => ({
+      screen, ray: { origin: [0, 0, 10], dir: [0, 0, -1] }, button: 0, buttons: 0, modifiers: NO_MODIFIERS, camera: camera.getState(),
+      inference: { point, primary: { kind: 'onFace', point }, lines: [], hit: { normal: [0, 0, 1] } } as never,
+    });
+    tool.onPointerDown(at([0, 0, 1], [100, 100]));
+    tool.onPointerMove(at([0, 0, 0.5], [100, 150]));
+    tool.onPointerUp(at([0, 0, 0.5], [100, 150]));
+    expect(plane(active()!).origin).toEqual([0, 0, 0.5]);
+    // a typed offset places the plane being offset
+    tool.onPointerDown(at([0, 0, 1], [100, 100]));
+    tool.onPointerUp(at([0, 0, 1], [100, 100]));
+    tool.onVcb({ kind: 'length', meters: 0.25, raw: 0.25, unit: null });
+    expect(plane(active()!).origin).toEqual([0, 0, 0.75]);
+    expect(tool.hasPendingWork()).toBe(false);
+    // Escape after the first click places nothing
+    tool.onPointerDown(at([0, 0, 1], [100, 100]));
+    tool.onPointerUp(at([0, 0, 1], [100, 100]));
+    tool.onCancel();
+    expect(tool.hasPendingWork()).toBe(false);
+    expect(root().sectionPlanes.size).toBe(2);
+    // Reverse while offsetting keeps the plane where it is and turns its arrows
+    tool.onPointerDown(at([0, 0, 1], [100, 100]));
+    tool.onPointerUp(at([0, 0, 1], [100, 100]));
+    tool.onPointerMove(at([0, 0, 0.8], [100, 120]));
+    tool.onKeyDown({ key: 'Control', code: 'ControlLeft', modifiers: NO_MODIFIERS, repeat: false });
+    tool.onPointerDown(at([0, 0, 0.8], [100, 120]));
+    expect(plane(active()!)).toMatchObject({ plane: { n: [0, 0, 1] } });
+    expect(plane(active()!).origin[2]).toBeCloseTo(0.8, 9);
   });
 
   it('offers Unhide when every selected plane is hidden', () => {

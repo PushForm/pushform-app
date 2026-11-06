@@ -15,7 +15,8 @@ import { toggleSetting } from '../settings';
 import { pointerField } from '../entry';
 import { EdgeLock } from '../edgeLock';
 import { DRAG_PX, entityOverlay, HOVER_COLOR, inferenceOverlay, rubberBandColor, screenDist } from '../toolUtil';
-import { AXIS_DIR, movedOutline, TransformToolBase } from './transformShared';
+import { AXIS_DIR, movedOutline, sectionPreviewFor, TransformToolBase, withoutSectionPlanes } from './transformShared';
+import type { SectionPreview, SectionPreviewTool } from '../sectionPreview';
 import { axisTag, EDGE_LOCKED, SHIFT_HELD } from '../held';
 
 type State =
@@ -49,7 +50,7 @@ const IDLE: State = { kind: 'idle' };
  * current direction, `[x,y,z]`, `<x,y,z>`, and after a copy `3x` / `/3` arrays. A body face moved
  * along its normal with perpendicular neighbours is routed to push/pull by `transform.apply`.
  */
-export class MoveTool extends TransformToolBase {
+export class MoveTool extends TransformToolBase implements SectionPreviewTool {
   readonly id = 'move';
   readonly title = 'Move';
   readonly vcbSchema: readonly VcbKind[] = ['length', 'absolute', 'relative', 'array'];
@@ -62,6 +63,8 @@ export class MoveTool extends TransformToolBase {
   private lockSnap: Snap | null = null;
   /** While only parallel section planes move: the line through the base point along their normal. */
   private planeHold: Snap | null = null;
+  /** The last section preview and what it was made for, so an unchanged one is the same object. */
+  private sectionCache: { refs: readonly EntityRef[]; key: string; preview: SectionPreview | null } | null = null;
   /** ↓ lock parallel / perpendicular to the last inferred edge. */
   private readonly edgeLock = new EdgeLock();
   private copy = false;
@@ -79,6 +82,19 @@ export class MoveTool extends TransformToolBase {
   get autofoldRequested(): boolean {
     return this.autofold;
   }
+  /** Section planes being moved, drawn and cutting where the move would put them; copies are drawn without cutting. */
+  get sectionPreview(): SectionPreview | null {
+    const s = this.state;
+    const state = this.docState();
+    if (s.kind !== 'moving' || !state || (s.face && this.glue) || v3len(s.delta) <= MERGE_TOL) return null;
+    const key = `${s.delta.join(',')}|${this.copy}`;
+    const cached = this.sectionCache;
+    if (cached && cached.refs === s.refs && cached.key === key) return cached.preview;
+    const preview = sectionPreviewFor(state, s.refs, m4translation(s.delta), this.copy);
+    this.sectionCache = { refs: s.refs, key, preview };
+    return preview;
+  }
+
   /** Current displacement while moving, or null. */
   get dragDelta(): Vec3 | null {
     return this.state.kind === 'moving' ? this.state.delta : null;
@@ -269,7 +285,8 @@ export class MoveTool extends TransformToolBase {
     if (s.kind === 'moving') {
       const end = v3add(s.base, s.delta);
       if (s.face && this.glue) out.push(...movedOutline(state, s.refs, placeOnFaceMatrix(state, this.glue.ref, s.face.point, s.face.normal)));
-      else if (v3len(s.delta) > MERGE_TOL) out.push(...movedOutline(state, s.refs, m4translation(s.delta)));
+      // section planes are drawn, with their cuts, where they would go (sectionPreview)
+      else if (v3len(s.delta) > MERGE_TOL) out.push(...movedOutline(state, withoutSectionPlanes(s.refs), m4translation(s.delta)));
       out.push({ kind: 'polyline', points: [s.base, end], color: rubberBandColor(this.cursorInference?.primary), width: 2 });
       out.push({ kind: 'point', position: s.base, color: '#111111', shape: 'square', size: 6 });
     } else if (this.hover) {

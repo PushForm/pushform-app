@@ -93,6 +93,7 @@ export { MoveTool } from './tools/impl/Move';
 export { PasteTool } from './tools/impl/Paste';
 export { PlaceComponentTool } from './tools/impl/PlaceComponent';
 export { SectionPlaneTool } from './tools/impl/SectionPlane';
+export type { SectionPreview, SectionPreviewTool, WorldSectionPlane } from './tools/sectionPreview';
 export { RotateTool, PROTRACTOR_PX } from './tools/impl/Rotate';
 export { ScaleTool, buildScaleBox, pickGrip, GRIP_PICK_PX } from './tools/impl/Scale';
 export type { ScaleBox, ScaleGrip, GripKind } from './tools/impl/Scale';

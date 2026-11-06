@@ -12,6 +12,7 @@ import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolSettingValu
 import { lengthFrom, toggleSetting } from '../settings';
 import { DRAG_PX, hostOfTool, inferenceOverlay, PREVIEW_COLOR, screenDist, worldPerPixelAt } from '../toolUtil';
 import { pointerField } from '../entry';
+import type { SectionPreview, SectionPreviewTool } from '../sectionPreview';
 import { AXIS_COLORS, AXIS_NORMAL } from './constructionUtil';
 
 /** Side of the preview square and length of its arrow, in CSS px. */
@@ -48,7 +49,7 @@ interface Offsetting {
  * options bar or by tapping Ctrl, reverses the arrows. Just after a placement, the bar's Offset and Reverse, or a typed
  * offset, change that plane in the same undo step.
  */
-export class SectionPlaneTool implements Tool {
+export class SectionPlaneTool implements Tool, SectionPreviewTool {
   readonly id = 'sectionPlane';
   readonly title = 'Section Plane';
   readonly cursor = 'crosshair';
@@ -67,6 +68,7 @@ export class SectionPlaneTool implements Tool {
   private reversed = false;
   private last: Placement | null = null;
   private offsetting: Offsetting | null = null;
+  private sectionCache: { key: string; preview: SectionPreview } | null = null;
 
   activate(ctx: ToolContext): void {
     this.ctx = ctx;
@@ -85,6 +87,19 @@ export class SectionPlaneTool implements Tool {
     this.axis = null;
     this.inference = null;
     this.offsetting = null;
+  }
+
+  /** While the plane slides, it is drawn and cuts as it will once placed, as its container's active cut. */
+  get sectionPreview(): SectionPreview | null {
+    const o = this.offsetting, ctx = this.ctx;
+    if (!o || !ctx) return null;
+    const path = hostOfTool(ctx).context.path;
+    const n = v3normalize(o.normal), p = along(o.point, n, o.offset);
+    const key = `${path.join('.')}|${n.join(',')}|${p.join(',')}`;
+    if (this.sectionCache?.key === key) return this.sectionCache.preview;
+    const preview: SectionPreview = { moved: [], copies: [], added: { path: [...path], normal: n, d: -(n[0] * p[0] + n[1] * p[1] + n[2] * p[2]) } };
+    this.sectionCache = { key, preview };
+    return preview;
   }
 
   hasPendingWork(): boolean {
@@ -317,8 +332,11 @@ export class SectionPlaneTool implements Tool {
       const half = (PREVIEW_PX / 2) * wpp, len = ARROW_PX * wpp;
       const basis = planeBasis(p, this.normal);
       const color = this.axis ? AXIS_COLORS[this.axis] : PREVIEW_COLOR;
-      out.push({ kind: 'polygon', points: [basisToWorld(basis, -half, -half), basisToWorld(basis, half, -half), basisToWorld(basis, half, half), basisToWorld(basis, -half, half)], color, opacity: 0.15 });
-      out.push({ kind: 'polyline', points: [basisToWorld(basis, -half, -half), basisToWorld(basis, half, -half), basisToWorld(basis, half, half), basisToWorld(basis, -half, half)], color, closed: true, width: 2 });
+      // while it slides, the plane itself is drawn where it will go (sectionPreview)
+      if (!o) {
+        out.push({ kind: 'polygon', points: [basisToWorld(basis, -half, -half), basisToWorld(basis, half, -half), basisToWorld(basis, half, half), basisToWorld(basis, -half, half)], color, opacity: 0.15 });
+        out.push({ kind: 'polyline', points: [basisToWorld(basis, -half, -half), basisToWorld(basis, half, -half), basisToWorld(basis, half, half), basisToWorld(basis, -half, half)], color, closed: true, width: 2 });
+      }
       out.push({ kind: 'polyline', points: [p, [p[0] + this.normal[0] * len, p[1] + this.normal[1] * len, p[2] + this.normal[2] * len]], color, width: 2 });
     }
     out.push(...inferenceOverlay(this.inference, this.screen ?? undefined));

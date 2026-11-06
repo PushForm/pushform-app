@@ -14,11 +14,18 @@ Shift and arrow-key locks remain available in these modes. If expected snaps dis
 
 ## Add a section plane
 
-Choose **Section Plane** in the **Inspect** toolbar group or find it in command search. Point to a face to orient the preview, then click to place the plane. Shift holds the current orientation. Right, Left and Up constrain to the red, green and blue axes; Down releases that constraint. To make the plane keep the other side, switch on **Reverse** in the tool options bar, or tap Ctrl (Cmd on a Mac). It stays on for the next planes until you switch it off. Right after a click, switching Reverse turns the plane you just placed around where it lies. Undo removes a plane you have placed.
+Choose **Section Plane** in the **Inspect** toolbar group or find it in command search. Placing a plane takes two clicks.
 
-To place a plane at an exact distance from what you clicked, type the distance right after the click and press Enter. A positive distance moves the plane the way its arrows point, a negative one the other way. Typing again replaces the distance, and Undo removes the plane and its offset together.
+1. Point to a face to orient the preview, then click. The plane will be parallel to that face, and the click sets its starting point. Over empty space the plane faces you along the nearest axis. Before this click, Shift holds the orientation, Right, Left and Up constrain to the red, green and blue axes, and Down releases that constraint.
+2. Move the pointer to slide the plane along its arrows' direction; it snaps to points along the way. Click again to place it, or type the distance and press Enter. You can also press, drag and release. Escape goes back to step 1.
 
-A section plane belongs to the model or to the group or component you are editing. Each such context has at most one active cut. A plane inside a component belongs to its definition, so every copy of that component is cut the same way.
+Undo removes a plane you have placed. A section plane belongs to the model or to the group or component you are editing, and each of those has at most one active cut. A plane inside a component belongs to its definition, so every copy of that component is cut the same way.
+
+## Set a section plane's offset or reverse it
+
+While you slide a plane, its distance from the starting point shows at the pointer and as **Offset** in the tool options bar. A positive offset is the way the arrows point. Right after you place a plane, changing Offset there, or typing a new distance, moves that plane from its starting point.
+
+To make the plane keep the other side, switch on **Reverse** in the tool options bar, or tap Ctrl (Cmd on a Mac). It stays on for the next planes until you switch it off. Right after you place a plane, switching Reverse turns it around where it lies. Undo removes the plane together with its offset and reversal.
 
 ## Move, flip and hide section planes
 

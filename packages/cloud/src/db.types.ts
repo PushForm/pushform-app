@@ -149,6 +149,20 @@ export type Database = {
                   Relationships: [
 
                   ]
+                },"ai_usage_daily": {
+                  Row: {
+                    "cache_read_tokens": number,"cache_write_tokens": number,"cost_usd": number,"credits": number,"day": string,"events": number,"input_tokens": number,"model": string,"org_id": string | null,"output_tokens": number,"owner_id": string | null,"path": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "cache_read_tokens": number,"cache_write_tokens": number,"cost_usd": number,"credits": number,"day": string,"events": number,"input_tokens": number,"model": string,"org_id"?: string | null,"output_tokens": number,"owner_id"?: string | null,"path": string
+                  }
+                  Update: {
+                    "cache_read_tokens"?: number,"cache_write_tokens"?: number,"cost_usd"?: number,"credits"?: number,"day"?: string,"events"?: number,"input_tokens"?: number,"model"?: string,"org_id"?: string | null,"output_tokens"?: number,"owner_id"?: string | null,"path"?: string
+                  }
+                  Relationships: [
+
+                  ]
                 },"ai_usage_events": {
                   Row: {
                     "cache_read_tokens": number,"cache_write_tokens": number,"call_id": string,"conversation_id": string | null,"cost_usd": number,"created_at": string,"credits": number,"debited_free": number,"debited_monthly": number,"estimated": boolean,"id": string,"input_tokens": number,"model": string,"org_id": string | null,"output_tokens": number,"owner_id": string | null,"path": string,"provider": string,"reason": string | null,"turn_id": string | null
@@ -1020,6 +1034,36 @@ isOneToOne: false
 "admin_accounts":
 { Args: Record<PropertyKey, never>; Returns: Json
                            },
+"admin_ai_account":
+{ Args: { "p_owner": string }; Returns: Json
+                           },
+"admin_ai_adjust":
+{ Args: { "p_credits": number,"p_owner": string,"p_reason": string }; Returns: Json
+                           },
+"admin_ai_orgs":
+{ Args: { "p_days": number }; Returns: Json
+                           },
+"admin_ai_plan_apply":
+{ Args: { "p_id": string }; Returns: Json
+                           },
+"admin_ai_plan_delete":
+{ Args: { "p_id": string }; Returns: Json
+                           },
+"admin_ai_plan_save":
+{ Args: { "p_id": string,"p_kind": string,"p_monthly_credits": number,"p_name": string,"p_note": string,"p_price_id": string,"p_product_id": string }; Returns: Json
+                           },
+"admin_ai_plans":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"admin_ai_spend_delta":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"admin_ai_usage":
+{ Args: { "p_days": number }; Returns: Json
+                           },
+"admin_ai_users":
+{ Args: { "p_days": number }; Returns: Json
+                           },
 "admin_alerts":
 { Args: Record<PropertyKey, never>; Returns: Json
                            },
@@ -1208,6 +1252,11 @@ isOneToOne: false
 "ai_credit_sync":
 { Args: { "p_owner": string }; Returns: Json
                            },
+"ai_plan_allowance":
+{ Args: { "p_owner": string }; Returns: {
+              "credits": number,"row_id": string
+            }[]
+                           },
 "ai_rate_for":
 { Args: { "p_at": string,"p_model": string }; Returns: {
               "effective_at": string,
@@ -1227,6 +1276,9 @@ isOneToOne: false
         isOneToOne: true
         isSetofReturn: false
       } },
+"ai_usage_rollup":
+{ Args: Record<PropertyKey, never>; Returns: number
+                           },
 "app_record_events":
 { Args: { "p_events": Json }; Returns: number
                            },

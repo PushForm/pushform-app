@@ -316,6 +316,41 @@ describe('MoveTool', () => {
 });
 
 describe('RotateTool', () => {
+  it('picks up a hovered section plane and rotates it, previewing the plane and its cut', async () => {
+    const { registry, host, tools } = setup();
+    registry.registerAll(sectionPlaneCommands);
+    // a vertical plane through x = 1, keeping x >= 1
+    const id = registry.execute('sectionPlane.add', { point: [1, 0, 0], normal: [1, 0, 0] }) as number;
+    host.selection.set([]);
+    tools.activate('rotate');
+    const tool = tools.activeTool as RotateTool;
+    expect(tool.inferenceOptions().annotations).toBe(true);
+    const ref: EntityRef = { kind: 'sectionPlane', path: [], id: id as Id };
+    const hit: PickHit = { ref, point: [1, 0, 0], t: 1, screenDist: 0 };
+    tools.pointerMove(at(TOP_CAMERA, [1, 0, 0], { hit }));
+    // the hovered plane is highlighted by its outline
+    expect(tools.overlay().some((o) => o.kind === 'polyline' && o.closed === true && o.points.length === 4)).toBe(true);
+    // centre at the origin, baseline along x, 90° about z
+    tools.pointerDown(at(TOP_CAMERA, [0, 0, 0], { hit }));
+    tools.pointerUp(at(TOP_CAMERA, [0, 0, 0], { hit }));
+    expect(host.selection.refs).toEqual([ref]);
+    tools.pointerDown(at(TOP_CAMERA, [1, 0, 0]));
+    tools.pointerUp(at(TOP_CAMERA, [1, 0, 0]));
+    tools.pointerMove(at(TOP_CAMERA, [0.01, 1, 0]));
+    expect(tool.dragAngleDeg).toBeCloseTo(90, 9);
+    const preview = tool.sectionPreview;
+    expect(preview?.moved).toHaveLength(1);
+    expect(preview!.moved[0]!.normal[1]).toBeCloseTo(1, 9);
+    expect(preview!.moved[0]!.d).toBeCloseTo(-1, 9);
+    expect(tool.sectionPreview).toBe(preview);
+    tools.pointerDown(at(TOP_CAMERA, [0.01, 1, 0]));
+    await tool.settled;
+    const sp = containerAt(host.doc.state, []).sectionPlanes.get(id as Id)!;
+    expect(sp.plane.n[1]).toBeCloseTo(1, 9);
+    expect(sp.plane.d).toBeCloseTo(-1, 9);
+    expect(tool.sectionPreview).toBeNull();
+  });
+
   it('centre, baseline, 90° about Z (snapped) → the body extents swap; protractor overlay present', async () => {
     const { host, tools, addBox, body } = setup();
     const id = addBox([0, 0, 0], [2, 1, 1]);

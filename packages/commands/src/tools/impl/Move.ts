@@ -15,7 +15,7 @@ import { toggleSetting } from '../settings';
 import { pointerField } from '../entry';
 import { EdgeLock } from '../edgeLock';
 import { DRAG_PX, entityOverlay, HOVER_COLOR, inferenceOverlay, rubberBandColor, screenDist } from '../toolUtil';
-import { AXIS_DIR, movedOutline, TransformToolBase } from './transformShared';
+import { AXIS_DIR, movedOutline, sectionPreviewFor, TransformToolBase, withoutSectionPlanes } from './transformShared';
 import type { SectionPreview, SectionPreviewTool } from '../sectionPreview';
 import { axisTag, EDGE_LOCKED, SHIFT_HELD } from '../held';
 
@@ -90,20 +90,7 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     const key = `${s.delta.join(',')}|${this.copy}`;
     const cached = this.sectionCache;
     if (cached && cached.refs === s.refs && cached.key === key) return cached.preview;
-    const planes: SectionPreview['moved'][number][] = [];
-    for (const r of s.refs) {
-      if (r.kind !== 'sectionPlane') continue;
-      try {
-        const sp = containerAt(state, r.path).sectionPlanes.get(r.id);
-        if (!sp) continue;
-        const { normal, d } = worldSectionPlane(sp.plane, contextMatrix(state, r.path));
-        // a translated plane keeps its normal; its distance changes by how far the move goes along it
-        planes.push({ path: r.path, id: r.id, normal, d: d - v3dot(normal, s.delta) });
-      } catch {
-        // a plane that is gone is not previewed
-      }
-    }
-    const preview: SectionPreview | null = planes.length ? { moved: this.copy ? [] : planes, copies: this.copy ? planes : [], added: null } : null;
+    const preview = sectionPreviewFor(state, s.refs, m4translation(s.delta), this.copy);
     this.sectionCache = { refs: s.refs, key, preview };
     return preview;
   }
@@ -299,7 +286,7 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
       const end = v3add(s.base, s.delta);
       if (s.face && this.glue) out.push(...movedOutline(state, s.refs, placeOnFaceMatrix(state, this.glue.ref, s.face.point, s.face.normal)));
       // section planes are drawn, with their cuts, where they would go (sectionPreview)
-      else if (v3len(s.delta) > MERGE_TOL) out.push(...movedOutline(state, s.refs.filter((r) => r.kind !== 'sectionPlane'), m4translation(s.delta)));
+      else if (v3len(s.delta) > MERGE_TOL) out.push(...movedOutline(state, withoutSectionPlanes(s.refs), m4translation(s.delta)));
       out.push({ kind: 'polyline', points: [s.base, end], color: rubberBandColor(this.cursorInference?.primary), width: 2 });
       out.push({ kind: 'point', position: s.base, color: '#111111', shape: 'square', size: 6 });
     } else if (this.hover) {

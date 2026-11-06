@@ -31,6 +31,8 @@ To make the plane keep the other side, switch on **Reverse** in the tool options
 
 To move a plane, choose **Move** and point to the plane's outline, or select the plane first. While only section planes move, the move stays square to them, so the plane slides nearer to or farther from what it cuts. The plane and its cut follow the pointer as you move; type a distance for an exact move. An arrow key locks an axis instead.
 
+To tilt or turn a plane, choose **Rotate** and point to the plane's outline, or select it first. Click the center of rotation, then a starting direction, then the end angle, or type an angle. Use the arrow keys to choose the axis to turn around. The plane and its cut follow as you rotate.
+
 Right-click a plane with any tool for **Reverse**, which flips the side it cuts away, **Hide**, **Active Cut** and **Align View**. Double-clicking a plane with Select turns its cut on or off.
 
 A hidden plane still cuts if it is the active one. To find it again, turn on **View › Hidden Geometry**: hidden planes then appear as outlines you can select, and right-clicking one offers **Unhide**.

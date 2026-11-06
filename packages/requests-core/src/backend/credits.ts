@@ -31,7 +31,7 @@ export interface CreditsPort {
   creditRecord(call: UsageCall): Promise<CreditSummary>;
 }
 
-export const usageOfRound = (stat: RoundStat) => ({ input: stat.input, output: stat.output, cacheRead: stat.cacheRead, cacheWrite: stat.cacheWrite });
+export const usageOfRound = (stat: RoundStat) => ({ input: stat.input, output: stat.output, cacheRead: stat.cacheRead, cacheWrite: stat.cacheWrite, estimated: stat.interrupted === true });
 
 const dateFormat = new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
 

@@ -889,9 +889,9 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       const turnKey = crypto.randomUUID();
       let credits = null as CreditSummary | null;
       const usagePath = usagePathOf(conversation.path === 'open' ? store.getPath() : conversation.path, editing);
-      const meter = async (callId: string, call: { path: typeof usagePath; model: string; input: number; output: number; cacheRead: number; cacheWrite: number }): Promise<void> => {
+      const meter = async (callId: string, call: { path: typeof usagePath; model: string; input: number; output: number; cacheRead: number; cacheWrite: number; estimated?: boolean }): Promise<void> => {
         try {
-          credits = await db.creditRecord({ callId, ownerId: user.id, turnId: turnKey, conversationId: id, orgId: null, provider: 'anthropic', estimated: false, ...call });
+          credits = await db.creditRecord({ callId, ownerId: user.id, turnId: turnKey, conversationId: id, orgId: null, provider: 'anthropic', ...call, estimated: call.estimated === true });
         } catch (error) { deps.log?.(`turn ${id}: usage not recorded (${callId}): ${error instanceof Error ? error.message : String(error)}`); }
       };
       let result;

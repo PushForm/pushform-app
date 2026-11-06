@@ -102,6 +102,20 @@ describe('conversations', () => {
     expect(String(recorded[0]!.params['p_call_id'])).toMatch(/:0$/);
     expect(events.at(-1)!.data).toMatchObject({ limitReached: true, limitMessage: "You've used your free AI credits. Subscribe to keep chatting.", credits: { remaining: 0 } });
   });
+  it('charges for a model round that fails partway: the usage reported so far is recorded as an estimate, and the error still reaches the client', async () => {
+    const h = harness();
+    const events: unknown[] = [
+      { type: 'message_start', message: { id: 'm', type: 'message', role: 'assistant', model: 'm', content: [], stop_reason: null, stop_sequence: null,
+        usage: { input_tokens: 900, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 3000 } } },
+    ];
+    (h.deps as { anthropic: unknown }).anthropic = { messages: { async create() { return (async function* () { for (const e of events) yield e; throw new Error('upstream closed'); })(); } } };
+    const handler = createConversationHandler(h.deps);
+    const out = parseSse(await (await call(handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'Hi' })).text());
+    expect(out.at(-1)).toMatchObject({ event: 'error' });
+    const recorded = h.service.named('ai_credit_record');
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]!.params).toMatchObject({ p_input: 900, p_cache_read: 3000, p_estimated: true, p_owner: ALICE.id });
+  });
   it('ends a turn after the round that uses the last credits, without running that round tool calls', async () => {
     const h = harness({ service: { ai_credit_record: { plan: 'free', remaining: 0, allowance: 3_000_000, refill: { kind: 'none' } } },
       turns: [{ toolUses: [{ id: 't1', name: 'search_docs', input: { query: 'inference' } }] }, { text: ['never reached'] }] });

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { cloneLayoutValue } from './nativeValues';
-import { LENGTH_TOL, v3dist, type Vec3 } from '@pushform/core';
+import { ANGLE_TOL, LENGTH_TOL, v3dist, v3dot, v3scale, v3sub, type Vec3 } from '@pushform/core';
 import { resolveDimensionAnchor, type DimensionAnchor, type DocumentState, type Draft } from '@pushform/model';
-import { entityOnPage, type LayoutDocumentState, type LayoutEntity, type LayoutViewportSource } from './LayoutDocument';
+import { entityOnPage, type LayoutDocumentState, type LayoutEntity, type LayoutLinearDimension, type LayoutViewportCamera, type LayoutViewportSource } from './LayoutDocument';
 import { layoutTextCenter, rotateLayoutPoint } from './rotation';
 import { linearMeasurement } from './dimensions';
-import { isViewport, viewportPaperPoint } from './viewports';
+import { isViewport, viewportCameraBasis, viewportPaperPoint } from './viewports';
 import { layoutModelLabelFields } from './modelLabelFields';
 import { bakeLayoutModelText } from './text';
 
@@ -125,6 +125,28 @@ export function resolveLayoutModelAttachment(
   return paperPoint ? { status: 'resolved', modelPoint, paperPoint } : { status: 'unavailable' };
 }
 
+/**
+ * The model length, in millimeters, that a connected dimension depicts, in either projection. A view looking
+ * straight along a model axis cannot show depth, so it ignores depth differences between the measured points.
+ * Any other view, such as an isometric one, measures the full model separation, so a receding edge reads its
+ * true length rather than its foreshortened paper length. Horizontal, vertical and rotated dimensions read the
+ * share of that length that lies along their dimension line on paper.
+ */
+export function modelDimensionLengthMm(a: Vec3, b: Vec3, frame: readonly [number, number][], camera: LayoutViewportCamera,
+  alignment: LayoutLinearDimension['alignment'], angleDeg?: number): number {
+  const { forward } = viewportCameraBasis(camera);
+  // Within about 0.08 degrees of a model axis counts as looking straight along it.
+  const straightOn = forward.some(component => Math.abs(component) >= 1 - ANGLE_TOL);
+  const far = straightOn ? v3sub(b, v3scale(forward, v3dot(v3sub(b, a), forward))) : b;
+  const length = v3dist(a, far) * 1000;
+  if (alignment === 'aligned') return length;
+  // Both points share a depth when straight on, where either projection keeps paper proportions exact.
+  const pa = viewportPaperPoint(frame, camera, [...a]), pb = viewportPaperPoint(frame, camera, [...far]);
+  if (!pa || !pb) return length;
+  const paper = Math.hypot(pb[0] - pa[0], pb[1] - pa[1]);
+  return paper > LENGTH_TOL * 1000 ? length * linearMeasurement(pa, pb, alignment, angleDeg) / paper : 0;
+}
+
 /** The provider must return the model revision currently selected by this drawing, never a stale load. */
 export type LayoutAnnotationModels = (state: LayoutDocumentState, source: LayoutViewportSource) => DocumentState | undefined;
 
@@ -148,11 +170,11 @@ function updateModelAnnotation(entity: LayoutEntity, lookup: (id: number) => Lay
       }
       const view = lookup(annotation.attachments[0]!.viewportId)!;
       const camera = view.image!.viewport!.camera;
-      // Parallel auto-scale measures projected length; perspective uses model distance.
-      entity.dimension.cachedValueMm = camera.projection === 'parallel'
-        ? linearMeasurement(a!.paperPoint, b!.paperPoint, entity.dimension.alignment, entity.dimension.angleDeg)
-        : v3dist(a!.modelPoint, b!.modelPoint) * 1000;
-      entity.dimension.scale = camera.projection === 'parallel' ? camera.scale : 1;
+      // Parallel views keep their drawing scale with the value; perspective views have no paper scale.
+      const scale = camera.projection === 'parallel' ? camera.scale : 1;
+      entity.dimension.cachedValueMm = modelDimensionLengthMm(a!.modelPoint, b!.modelPoint, view.points, camera,
+        entity.dimension.alignment, entity.dimension.angleDeg) * scale;
+      entity.dimension.scale = scale;
       entity.dimension.detached = false;
     } else if (entity.kind === 'label' && entity.text && resolved.length === 1) {
       const tip = rotateLayoutPoint(resolved[0]!.paperPoint, layoutTextCenter(entity), -(entity.text.rotationDeg ?? 0));

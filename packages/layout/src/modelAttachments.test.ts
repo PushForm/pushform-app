@@ -3,7 +3,7 @@
 import { expect, it } from 'vitest';
 import type { Id } from '@pushform/core';
 import { createDocument, UndoStack } from '@pushform/model';
-import type { LayoutEntity } from './LayoutDocument';
+import type { LayoutEntity, LayoutLinearDimension, LayoutViewportCamera } from './LayoutDocument';
 import { previewLayoutModelAnnotation, resolveLayoutModelAttachment, type LayoutModelAttachment } from './modelAttachments';
 import { createLinearDimension, formatLinearDimension } from './dimensions';
 
@@ -74,7 +74,53 @@ it('previews model measurements and camera changes without changing saved annota
   expect(preview().points.slice(0, 2)).toEqual([[60, 50], [80, 50]]);
   expect(formatLinearDimension(preview().dimension!)).toBe('2000.0 mm');
   view.image!.viewport!.camera.projection = 'perspective';
-  expect(preview().dimension!.cachedValueMm).toBeCloseTo(Math.sqrt(8) * 1000);
+  // A top view cannot show the 2 m height difference, so perspective reads the same model width.
+  expect(formatLinearDimension(preview().dimension!)).toBe('2000.0 mm');
   expect(entity).toEqual(before);
   expect(doc.state.definitions.get(doc.state.rootDefinitionId)!.entities.sketch.vertices.get(101 as Id)!.p).toEqual([3, 0, 2]);
+});
+
+function measured(points: [number, number, number][], camera: Partial<LayoutViewportCamera>,
+  alignment: LayoutLinearDimension['alignment'] = 'aligned', angleDeg?: number) {
+  const { doc, view, attachment } = fixture();
+  const ids = points.map((_, index) => 200 + index as Id);
+  doc.transact('Vertices', state => points.forEach((p, index) =>
+    state.definitions.get(state.rootDefinitionId)!.entities.sketch.vertices.set(ids[index]!, { id: ids[index]!, p })));
+  Object.assign(view.image!.viewport!.camera, camera);
+  const dimension = { ...createLinearDimension(), alignment, ...(angleDeg === undefined ? {} : { angleDeg }) };
+  const entity: LayoutEntity = { id: 20, kind: 'dimension', layerId: 1, closed: false, points: [[0, 0], [0, 0], [0, 0]], dimension,
+    modelAnnotation: { status: 'resolved', attachments: ids.map(id => ({ ...attachment, anchor: { kind: 'sketchVertex' as const, path: [], id } })) } };
+  return formatLinearDimension(previewLayoutModelAnnotation(entity, () => view, () => doc.state).dimension!);
+}
+
+const iso = { eye: [10, -10, 10] as [number, number, number], target: [0, 0, 0] as [number, number, number], up: [0, 0, 1] as [number, number, number] };
+const front = { eye: [0, -10, 0] as [number, number, number], target: [0, 0, 0] as [number, number, number], up: [0, 0, 1] as [number, number, number] };
+
+it('reads true model lengths for receding edges in an isometric view, in either projection', () => {
+  for (const projection of ['parallel', 'perspective'] as const) {
+    expect(measured([[0, 0, 0], [2, 0, 0]], { ...iso, projection })).toBe('2000.0 mm');
+    expect(measured([[0, 0, 0], [0, 0.5, 0]], { ...iso, projection })).toBe('500.0 mm');
+    expect(measured([[0, 0, 0], [0, 0, 0.75]], { ...iso, projection })).toBe('750.0 mm');
+  }
+});
+
+it('ignores depth a straight-on view cannot show, in either projection', () => {
+  for (const projection of ['parallel', 'perspective'] as const) {
+    // Snapped front and back corners along one top edge read the edge's width, not the diagonal.
+    expect(measured([[0, 0, 1], [2, 0.75, 1]], { ...front, projection })).toBe('2000.0 mm');
+    expect(measured([[0, 0, 0], [2, 0.75, 1]], { ...front, projection }, 'horizontal')).toBe('2000.0 mm');
+    expect(measured([[0, 0, 0], [2, 0.75, 1]], { ...front, projection }, 'vertical')).toBe('1000.0 mm');
+    expect(measured([[0, 0, 0], [2, 0.75, 1]], { ...front, projection }, 'aligned')).toBe(`${(Math.sqrt(5) * 1000).toFixed(1)} mm`);
+    // An edge running straight into the view has no visible length.
+    expect(measured([[0, 0, 0], [0, 0.75, 0]], { ...front, projection })).toBe('0.0 mm');
+  }
+});
+
+it('measures straight-on views by their model axes even when the camera is rolled', () => {
+  const rolled = { ...front, up: [1, 0, 1] as [number, number, number] };
+  for (const projection of ['parallel', 'perspective'] as const) {
+    expect(measured([[0, 0, 0], [2, 0.75, 0]], { ...rolled, projection })).toBe('2000.0 mm');
+    // The edge lies at 45 degrees on paper, so a horizontal dimension reads its horizontal share.
+    expect(measured([[0, 0, 0], [2, 0.75, 0]], { ...rolled, projection }, 'horizontal')).toBe(`${(Math.SQRT1_2 * 2000).toFixed(1)} mm`);
+  }
 });

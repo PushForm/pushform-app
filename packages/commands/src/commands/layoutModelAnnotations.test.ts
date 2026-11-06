@@ -99,7 +99,7 @@ it('rejects unresolved and cross-view attachments atomically', () => {
   expect(entity()).toEqual(before);
 });
 
-it('measures projected lengths in parallel views and true distances in perspective views', () => {
+it('reads the model length a straight-on view shows in both projections', () => {
   const { doc, model, commands, pageId, viewportId, entity, attach } = setup();
   model.transact('Raise endpoint', draft => {
     draft.definitions.get(draft.rootDefinitionId)!.entities.sketch.vertices.get(101 as Id)!.p = [2, 0, 2];
@@ -116,7 +116,8 @@ it('measures projected lengths in parallel views and true distances in perspecti
     draft.pages.get(pageId)!.entities.get(viewportId)!.image!.viewport!.camera.projection = 'perspective';
   });
   commands.execute('layout.annotation.refreshModels', {});
-  expect(formatLinearDimension(entity().dimension!)).toBe('2828.4 mm');
+  // A top view cannot show the raised endpoint, so perspective keeps the visible model width.
+  expect(formatLinearDimension(entity().dimension!)).toBe('2000.0 mm');
   expect(entity().dimension!.scale).toBe(1);
 });
 
@@ -161,8 +162,8 @@ it('makes Move-tool dimension copies independent while preserving perspective me
   expect(formatLinearDimension(copied().dimension!)).toBe(formatLinearDimension(original.dimension!));
   model.transact('Move source', state => { state.definitions.get(state.rootDefinitionId)!.entities.sketch.vertices.get(101 as Id)!.p = [3, 0, 2]; });
   commands.execute('layout.annotation.refreshModels', {});
-  expect(formatLinearDimension(copied().dimension!)).toBe('2828.4 mm');
-  expect(formatLinearDimension(entity().dimension!)).toBe('3605.6 mm');
+  expect(formatLinearDimension(copied().dimension!)).toBe('2000.0 mm');
+  expect(formatLinearDimension(entity().dimension!)).toBe('3000.0 mm');
 });
 
 it('stretches a model label leader, detaches a tip drag, and reconnects on undo', () => {

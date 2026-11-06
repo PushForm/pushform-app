@@ -38,6 +38,6 @@ After choosing the source, type a length for an exact offset. A positive value e
 
 ## Round or bevel a corner with Corner
 
-Choose **Corner** in Modify (Shift+F starts it on Round, Shift+C on Chamfer). In the tool options bar, choose **Round** or **Chamfer** and set the radius or distance, or type a positive length. Each choice remembers its own size. Click one straight segment, then an adjoining segment to preview and commit the corner.
+Choose **Corner** in Modify (Shift+F starts it on Round, Shift+C on Chamfer). In the tool options bar, choose **Round** (a fillet) or **Chamfer** and set the radius or distance, or type a positive length. Each choice remembers its own size. Click one straight segment, then an adjoining segment to preview and commit the corner.
 
 Round creates a rounded tangent arc. Chamfer creates a straight bevel with equal setbacks. Curved, parallel or unsuitable segments and sizes that consume the shape are rejected. Two separate straight lines must be on the same layer.

@@ -49,6 +49,8 @@ Choose **Profile Edges** in the Modify group of the toolbar, or search for **Fil
 - **Bead**: a half round on the edge with a small groove beside it, as on a beaded face frame. The size is the bead's radius.
 - **Step**: a square rabbet. The size is its width and depth.
 
+## Pick edges and apply Profile Edges
+
 Hover a solid in the group or component you are editing: the edge under the pointer highlights. Click edges to add them to the set; picked edges stay highlighted. Shift+click a picked edge to remove it again. Clicking any segment of a circle or arc, such as the rim of a cylinder, picks the whole curve. Edges you selected before choosing the tool start out picked.
 
 Type the size, for example `5mm` or `1/4"`, or set it in the bar. A preview of the result replaces the solid while you pick. Then press Enter, or double-click, to apply. The whole operation is one Undo step, named after the profile. Escape clears the picked edges; a second Escape returns to Select. Only hard edges are offered: soft, smooth and hidden edges cannot be shaped.

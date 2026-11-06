@@ -3670,6 +3670,17 @@ export function LayoutWorkspace({
       tab.commands.execute('layout.text.update', { pageId: page.id, entityId: editingText.id, text: patch });
     if (returnFocus) returnToText();
   };
+  /**
+   * The text the bar's style row formats: the one being edited (its selected range), or one selected
+   * text or label as a whole. The side panel keeps only the box's own properties.
+   */
+  const selectedText = !editingText?.text && tool === 'select' && selectionIds.length === 1 && selectedEntity?.text && canTransform ? selectedEntity : null;
+  const wholeText = (): { start: number; end: number } => ({ start: 0, end: selectedText?.text?.content.length ?? 0 });
+  const formatSelectedText = (patch: Partial<NonNullable<LayoutEntity['text']>>): void => {
+    if (!selectedText?.text) return;
+    if (Object.entries(patch).some(([key, value]) => JSON.stringify(selectedText.text![key as keyof typeof selectedText.text]) !== JSON.stringify(value)))
+      tab.commands.execute('layout.text.update', { pageId: page.id, entityId: selectedText.id, text: patch });
+  };
   const chooseTool = (id: LayoutTool): void => {
     if (id === 'shape-builder' && !shapeBuilder.start(selectionIds)) return;
     setBooleanIds([]);
@@ -3917,8 +3928,19 @@ export function LayoutWorkspace({
         {leading}
         <div className="pf-layout-workspace-frame">
         <div className="pf-tob-band pf-layout-tob-band">
-          <ToolOptionsBarView tool={{ id: tool, title: activeToolTitle }} settings={barSettings} placing={barPlacing} mac={MAC}
-            onSetting={onBarSetting} read={readBarQuantity} onLeave={() => canvasRef.current?.focus()} />
+          {/* Text formatting is the bar's style row: for the text being edited, or a selected text or label as a whole. */}
+          {(() => {
+            const editing = editingText?.text && canTransform ? editingText : null;
+            const styled = editing ?? selectedText;
+            return <ToolOptionsBarView tool={styled ? { id: styled.kind === 'label' ? 'label' : 'text', title: styled.kind === 'label' ? 'Label' : 'Text' } : { id: tool, title: activeToolTitle }}
+              settings={styled ? [] : barSettings} placing={barPlacing} mac={MAC}
+              onSetting={onBarSetting} read={readBarQuantity} onLeave={() => canvasRef.current?.focus()}>
+              {editing ? <LayoutTextToolbar text={editing.text!} range={textSelection} getSelection={getTextSelection} onCaptureSelection={setTextSelection}
+                onChange={formatEditingText} onReturnToText={returnToText} onFinish={() => setEditingTextId(null)} />
+                : selectedText ? <LayoutTextToolbar text={selectedText.text!} range={wholeText()} getSelection={wholeText} onCaptureSelection={() => {}}
+                  onChange={formatSelectedText} onReturnToText={() => canvasRef.current?.focus()} onFinish={() => {}} /> : null}
+            </ToolOptionsBarView>;
+          })()}
         </div>
         <canvas ref={surroundRef} className="pf-layout-surround" aria-hidden="true" />
         <main ref={workspaceRef} className="pf-layout-workspace" aria-label="Layout workspace" onContextMenu={openContextMenu}
@@ -4177,11 +4199,7 @@ export function LayoutWorkspace({
           if (file) void importImageFile(file);
         }} />
 
-          {editingText?.text && canTransform ? <section className="pf-layout-tool-panel" aria-label={`${editingText.kind === 'label' ? 'Label' : 'Text'} formatting`}>
-            <h2>{editingText.kind === 'label' ? 'Label' : 'Text'}</h2>
-            <LayoutTextToolbar text={editingText.text} range={textSelection} getSelection={getTextSelection} onCaptureSelection={setTextSelection}
-              onChange={formatEditingText} onReturnToText={returnToText} onFinish={() => setEditingTextId(null)} />
-          </section> : null}
+
 
           {viewportSources.length ? <LayoutAccordion title="Models" id={`layout-models-${tab.id}`} open={openSections.models} count={viewportSources.length}
             onToggle={() => toggleSection('models')}>
@@ -4553,20 +4571,10 @@ function LayoutTextEditor({ entity, disabled, onChange, onBounds, fields, state,
         const anchor: Point = [...entity.points[2]!]; anchor[axis] = Number(event.target.value); onBounds({ anchor });
       }} />
     </label>) : null}
-    <label>Font family<LayoutFontInput value={text.fontFamily} onChange={fontFamily => onChange({ fontFamily })} /></label>
     {fontStatus === 'loading' ? <p role="status">Loading {text.fontFamily}…</p>
       : !fontAvailable ? <p role="status">Font unavailable: {text.fontFamily}. A substitute is displayed.</p> : null}
-    <label>Font size (pt)<input type="number" min="1" value={text.fontSizePt} onChange={(event) => {
-      if (Number(event.target.value) > 0) onChange({ fontSizePt: Number(event.target.value) });
-    }} /></label>
-    <label>Text color<input type="color" value={text.color} onChange={(event) => onChange({ color: event.target.value })} /></label>
-    {(['bold', 'italic', 'underline', 'bounded'] as const).map((key) => <label key={key}>
-      <input type="checkbox" checked={text[key]} onChange={(event) => onChange({ [key]: event.target.checked })} />
-      {key === 'bounded' ? 'Wrap to box' : key[0]!.toUpperCase() + key.slice(1)}
-    </label>)}
-    <label>Alignment<select value={text.align} onChange={(event) => onChange({ align: event.target.value as typeof text.align })}>
-      {['left', 'center', 'right'].map((key) => <option key={key}>{key}</option>)}
-    </select></label>
+    {/* Font, size, color, emphasis and alignment are in the tool options bar's style row. */}
+    <label><input type="checkbox" checked={text.bounded} onChange={(event) => onChange({ bounded: event.target.checked })} />Wrap to box</label>
     <label>Vertical anchor<select value={text.vertical} onChange={(event) => onChange({ vertical: event.target.value as typeof text.vertical })}>
       {['top', 'middle', 'bottom'].map((key) => <option key={key}>{key}</option>)}
     </select></label>

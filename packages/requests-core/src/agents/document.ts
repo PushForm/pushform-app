@@ -52,10 +52,12 @@ export function documentTools(document: DocumentCapability | null): readonly Ant
   const editable = editableDocument(document);
   return [
     ...(editable === 'layout' ? layoutDocumentTools : editable === 'model' ? modelDocumentTools : []),
-    ...(editable && document?.save === 1 ? [defineTool(SAVE_TOOL, 'Save the open document as a new private cloud version, as Save version does, with optional change notes. Returns the version number.', saveSchema)] : []),
+    // Saving and publishing are loose (not strict) tools: strict tools compile into one grammar per request, and a model tab's
+    // editing, guidance and clone tools leave no room for more. Their inputs are checked in the browser instead.
+    ...(editable && document?.save === 1 ? [defineLooseTool(SAVE_TOOL, 'Save the open document as a new private cloud version, as Save version does, with optional change notes. Returns the version number.', saveSchema)] : []),
     ...(editable === 'model' && document?.publish === 1 ? [
-      defineTool(PUBLISHING_INFO_TOOL, 'Read what publishing this model to Commons needs: whether it can be published, its current publication if any, retained source licenses, the requester\'s collections, and the categories and licenses offered. Changes nothing.', publishingInfoSchema),
-      defineTool(PUBLISH_TOOL, 'Save a version and show the requester a card proposing a Commons publication of it. Only their click on the card publishes; returns what the card came to.', publishProposalSchema),
+      defineLooseTool(PUBLISHING_INFO_TOOL, 'Read what publishing this model to Commons needs: whether it can be published, its current publication if any, retained source licenses, the requester\'s collections, and the categories and licenses offered. Changes nothing.', publishingInfoSchema),
+      defineLooseTool(PUBLISH_TOOL, 'Save a version and show the requester a card proposing a Commons publication of it. Only their click on the card publishes; returns what the card came to.', publishProposalSchema),
     ] : []),
     ...(editable && document?.clone === 1 ? [defineTool(CLONE_TOOL, 'Propose a new document that copies the one open now. The requester confirms on a chat card that also offers copying inside this document; returns their choice.', cloneProposalSchema)] : []),
     ...(document?.guidance === 1 && document.apiVersion === 1 ? [

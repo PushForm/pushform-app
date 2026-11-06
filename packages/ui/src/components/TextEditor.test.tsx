@@ -34,6 +34,27 @@ function boot(): AppInstance {
 const textOf = (a: AppInstance, ref: EntityRef) => a.document.doc.rootDefinition.entities.texts.get(ref.id)?.text;
 
 describe('TextEditor', () => {
+  it('stays open while focus is in the tool options bar, and keeps the edit when focus goes elsewhere', () => {
+    const a = boot();
+    const ref = a.commands.execute('text.add', { kind: 'screen', screen: [0.1, 0.1], text: 'Enter text' }) as EntityRef;
+    act(() => void a.commands.execute('ui.editText', { ref }));
+    const box = screen.getByLabelText('Edit text') as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: 'Site plan' } });
+    const bar = document.createElement('div');
+    bar.className = 'pf-tob';
+    const size = document.createElement('input');
+    bar.appendChild(size);
+    const elsewhere = document.createElement('button');
+    document.body.append(bar, elsewhere);
+    act(() => { size.focus(); });
+    expect(screen.queryByLabelText('Edit text')).not.toBeNull();
+    act(() => { elsewhere.focus(); });
+    expect(screen.queryByLabelText('Edit text')).toBeNull();
+    expect(textOf(a, ref)).toBe('Site plan');
+    bar.remove();
+    elsewhere.remove();
+  });
+
   it('edits a text in place: Enter keeps the edit, Shift+Enter is a new line', () => {
     const a = boot();
     const ref = a.commands.execute('text.add', { kind: 'screen', screen: [0.1, 0.1], text: 'Enter text' }) as EntityRef;

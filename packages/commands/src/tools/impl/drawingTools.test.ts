@@ -117,6 +117,11 @@ const endpointAt = (p: Vec3): InferenceResult => ({
 });
 
 const key = (k: string, modifiers: Modifiers = NO_MODIFIERS) => ({ key: k, code: k, modifiers, repeat: false });
+/** Tap a modifier: press and release it with nothing between (how Ctrl and Alt reach tools). */
+const tap = (tools: ToolManager, k: string): boolean => {
+  tools.keyDown(key(k));
+  return tools.keyUp(key(k));
+};
 
 function vcb(tools: ToolManager, text: string): void {
   const v = parseVcb(text, 'in');
@@ -227,7 +232,7 @@ describe('PolygonTool', () => {
     expect(hasVertex(sketch(), [1, 0, 0])).toBe(true);
     const poly = tools.get('polygon') as PolygonTool;
     tools.click(at([5, 5, 0]));
-    expect(tools.keyDown(key('Control'))).toBe(true);
+    expect(tap(tools, 'Control')).toBe(true);
     expect(poly.circumscribed).toBe(true);
     tools.click(at([6, 5, 0]));
     const c = [...sketch().curves.values()][1]!;
@@ -585,5 +590,92 @@ describe('value fields', () => {
     tools.pointerMove(at([1, 0, 0]));
     entry(tools, { diameter: '6m' });
     expect([...sketch().curves.values()][0]).toMatchObject({ radius: 3 });
+  });
+});
+
+describe('held-key tags', () => {
+  it('Line names its axis lock and its inference mode while they are in force', () => {
+    const { tools } = setup();
+    tools.activate('line');
+    expect(tools.status().held).toBeUndefined();
+    tap(tools, 'Alt');
+    expect(tools.status().held).toEqual(['Inference off · Alt']);
+    tap(tools, 'Alt');
+    expect(tools.status().held).toEqual(['Parallel and perpendicular only · Alt']);
+    tap(tools, 'Alt');
+    expect(tools.status().held).toBeUndefined();
+    tools.click(at([0, 0, 0]));
+    tools.keyDown(key('ArrowRight'));
+    expect(tools.status().held).toEqual(['On red axis']);
+    // Line shows no tool options bar
+    expect(tools.status().settings).toBeUndefined();
+  });
+
+  it('Rectangle and Circle name an arrow-key plane lock', () => {
+    const { tools } = setup();
+    tools.activate('rectangle');
+    tools.keyDown(key('ArrowUp'));
+    expect(tools.status().held).toEqual(['Plane square to blue axis']);
+    tools.keyDown(key('ArrowDown'));
+    expect(tools.status().held).toBeUndefined();
+    tools.activate('circle');
+    tools.keyDown(key('ArrowRight'));
+    expect(tools.status().held).toEqual(['Plane square to red axis']);
+  });
+});
+
+describe('applied state: the bar adjusts the shape just drawn', () => {
+  it('Polygon redraws the last polygon with new sides or mode, as one undo step, until the next click', () => {
+    const { host, tools, sketch } = setup();
+    tools.activate('polygon');
+    expect(tools.status().applied).toBe(false);
+    tools.click(at([0, 0, 0]));
+    tools.click(at([1, 0, 0]));
+    expect(tools.status().applied).toBe(true);
+    const entries = host.undoStack.length;
+    tools.setting('sides', { kind: 'segments', count: 8 });
+    expect(host.undoStack.length).toBe(entries);
+    expect(sketch().edges.size).toBe(8);
+    expect([...sketch().curves.values()][0]).toMatchObject({ kind: 'polygon', segments: 8 });
+    tools.setting('mode', 'circumscribed');
+    expect(host.undoStack.length).toBe(entries);
+    expect([...sketch().curves.values()][0]!.radius).toBeCloseTo(1 / Math.cos(Math.PI / 8), 9);
+    expect(tools.status().applied).toBe(true);
+    // a click in the view goes on: the next change is for the next polygon only
+    tools.pointerDown(at([5, 5, 0]));
+    expect(tools.status().applied).toBe(false);
+    tools.setting('sides', { kind: 'segments', count: 5 });
+    expect(sketch().edges.size).toBe(8);
+  });
+
+  it('an undo, or another tool, ends the applied state', () => {
+    const { host, tools } = setup();
+    tools.activate('circle');
+    tools.click(at([0, 0, 0]));
+    tools.click(at([1, 0, 0]));
+    expect(tools.status().applied).toBe(true);
+    host.undo();
+    expect(tools.status().applied).toBe(false);
+    tools.click(at([0, 0, 0]));
+    tools.click(at([1, 0, 0]));
+    expect(tools.status().applied).toBe(true);
+    tools.activate('polygon');
+    tools.activate('circle');
+    expect(tools.status().applied).toBe(false);
+  });
+});
+
+describe('typed values before the first click', () => {
+  it('a bare number sets no side count; the hint says to type it with s', () => {
+    const { tools } = setup();
+    tools.activate('circle');
+    tools.onVcb({ kind: 'length', meters: 0.6096, raw: 24, unit: null });
+    expect(tools.status().settings![0]).toMatchObject({ id: 'sides', value: '24' });
+    expect(tools.status().instructor).toMatch(/Type 24s for 24 sides/);
+    tools.onVcb({ kind: 'length', meters: 0.2032, raw: 8, unit: null });
+    expect(tools.status().settings![0]).toMatchObject({ id: 'sides', value: '24' });
+    tools.onVcb({ kind: 'segments', count: 8 });
+    expect(tools.status().settings![0]).toMatchObject({ id: 'sides', value: '8' });
+    expect(tools.status().instructor).toBe('Select center point.');
   });
 });

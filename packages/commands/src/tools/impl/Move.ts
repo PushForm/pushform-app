@@ -9,11 +9,13 @@ import { glueAllows, placeOnFaceMatrix } from '../../commands/componentBehaviors
 import { contextFrame } from '../../commands/context';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
-import type { ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import type { ToolKeyEvent, ToolPointerEvent, ToolSettingValue, ToolStatus } from '../Tool';
+import { toggleSetting } from '../settings';
 import { pointerField } from '../entry';
 import { EdgeLock } from '../edgeLock';
 import { DRAG_PX, entityOverlay, HOVER_COLOR, inferenceOverlay, rubberBandColor, screenDist } from '../toolUtil';
 import { AXIS_DIR, movedOutline, TransformToolBase } from './transformShared';
+import { axisTag, EDGE_LOCKED, SHIFT_HELD } from '../held';
 
 type State =
   | { readonly kind: 'idle' }
@@ -198,7 +200,10 @@ export class MoveTool extends TransformToolBase {
         }
         return true;
       case 'Alt':
-        if (!e.repeat) this.autofold = true;
+        if (!e.repeat) {
+          this.autofold = !this.autofold;
+          this.ctx?.statusChanged();
+        }
         return true;
       default:
         return false;
@@ -265,12 +270,32 @@ export class MoveTool extends TransformToolBase {
   }
 
   status(): ToolStatus {
-    const copyHint = this.copy ? ' [Copy]' : '';
+    const held = [...axisTag(this.lockAxis), ...(this.lockSnap ? [SHIFT_HELD] : []), ...(this.edgeLock.active ? [EDGE_LOCKED] : [])];
+    return { ...this.baseStatus(), settings: [toggleSetting('copy', 'Copy', this.copy, 'primary'), toggleSetting('autofold', 'Autofold', this.autofold, 'secondary')], ...(held.length ? { held } : {}) };
+  }
+
+  /** The bar switched Copy just after a commit: redo it as a copy, or as a plain move, in one undo step. */
+  adjustLast(id: string): boolean {
+    const last = this.lastCommit;
+    if (id !== 'copy' || !last || !this.lastIsOnTop()) return false;
+    return this.reapplyLast(last.matrix, this.copy);
+  }
+
+  onSetting(id: string, value: ToolSettingValue): void {
+    if (typeof value !== 'boolean') return;
+    if (id === 'copy') this.copy = value;
+    else if (id === 'autofold') this.autofold = value;
+    else return;
+    this.ctx?.requestRender();
+    this.ctx?.statusChanged();
+  }
+
+  private baseStatus(): ToolStatus {
     if (this.state.kind === 'moving') {
       return {
         instructor: this.state.face
-          ? `Click to glue the component to this face.${copyHint}`
-          : `Pick end point or enter distance. Ctrl = copy, arrows lock an axis.${copyHint}`,
+          ? `Click to glue the component to this face.`
+          : `Pick end point or enter distance. Arrows lock an axis.`,
         vcbLabel: 'Length',
         vcbValue: this.fmtLength(v3len(this.state.delta)),
         fields: [pointerField('Length', 'length', this.fmtLength(v3len(this.state.delta)))],
@@ -280,8 +305,8 @@ export class MoveTool extends TransformToolBase {
     const instructor = this.lastError
       ? `Move failed: ${this.lastError}`
       : host && !host.selection.isEmpty
-        ? `Pick a base point to move the selection.${copyHint}`
-        : `Select objects or hover an entity, then pick a base point.${copyHint}`;
+        ? `Pick a base point to move the selection.`
+        : `Select objects or hover an entity, then pick a base point.`;
     const last = this.lastCommit;
     const lastLen = last ? v3len([last.matrix[12]!, last.matrix[13]!, last.matrix[14]!]) : null;
     return { instructor, vcbLabel: 'Length', vcbValue: lastLen === null ? undefined : this.fmtLength(lastLen) };

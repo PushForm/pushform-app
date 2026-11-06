@@ -217,6 +217,13 @@ export interface RenderText {
   /** CSS color. */
   readonly color: string;
   readonly fontSizePt: number;
+  readonly bold?: boolean | undefined;
+  readonly italic?: boolean | undefined;
+  /**
+   * URL of the font file (woff2, woff, ttf or otf) for the text's family and emphasis; absent draws the default
+   * typeface in the text's weight and style.
+   */
+  readonly fontUrl?: string | undefined;
   readonly selected: boolean;
 }
 

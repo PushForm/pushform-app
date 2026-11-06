@@ -1,17 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import type { Id, MeshData, MMat4, Vec3 } from '@pushform/core';
+import { z } from 'zod';
 import type { EdgeBlendResult } from '@pushform/kernel';
 import type { InferenceOptions } from '@pushform/inference';
 import type { Body, EdgeKey } from '@pushform/model';
 import { containerAt } from '@pushform/model';
 import { kernelOf } from '../../host/services';
+import { defineCommand, type AnyCommand } from '../../registry/Command';
 import { contextFrame, samePath } from '../../commands/context';
 import {
   blendEdgeGroup,
   checkEdgeBlendResult,
   DEFAULT_BLEND_SEGMENTS,
-  EDGE_PROFILES,
+  edgeProfileFit,
   EdgeBlendParamsSchema,
   EdgeProfileParamsSchema,
   planEdgeBlend,
@@ -22,9 +24,10 @@ import {
 } from '../../commands/edgeBlend';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
-import type { Tool, ToolChoice, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolSetting, ToolSettingValue, ToolStatus } from '../Tool';
+import { countFrom, countSetting, degreesFrom, lengthFrom } from '../settings';
 import { pointerField } from '../entry';
-import { HOVER_COLOR, hostOfTool } from '../toolUtil';
+import { HOVER_COLOR, hostOfTool, redoCommitted } from '../toolUtil';
 import { fmtLength } from './constructionUtil';
 
 /** Picked edges (the tool's edge set). */
@@ -33,7 +36,7 @@ const PICKED_COLOR = '#f9a825';
 const PREVIEW_DELAY_MS = 60;
 const IDENTITY: MMat4 = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
-/** Names of Profile Edges' router-bit profiles, as its pick list shows them. */
+/** Names of the router-bit profiles of the `profile.apply` command. */
 export const PROFILE_LABELS: Readonly<Record<EdgeProfile, string>> = {
   roundover: 'Roundover',
   cove: 'Cove',
@@ -43,35 +46,63 @@ export const PROFILE_LABELS: Readonly<Record<EdgeProfile, string>> = {
   step: 'Step',
 };
 
+/** Profile Edges' profiles, in the order its bar offers them. */
+export const EDGE_TOOL_PROFILES = ['round', 'chamfer', 'cove', 'ogee', 'bead', 'step'] as const;
+export type EdgeToolProfile = (typeof EDGE_TOOL_PROFILES)[number];
+
+export const EDGE_TOOL_PROFILE_LABELS: Readonly<Record<EdgeToolProfile, string>> = {
+  round: 'Round',
+  chamfer: 'Chamfer',
+  cove: 'Cove',
+  ogee: 'Ogee',
+  bead: 'Bead',
+  step: 'Step',
+};
+
+/** What each profile's size is called. */
+const SIZE_LABELS: Readonly<Record<EdgeToolProfile, string>> = {
+  round: 'Radius',
+  chamfer: 'Distance',
+  cove: 'Radius',
+  ogee: 'Width and depth',
+  bead: 'Radius',
+  step: 'Width and depth',
+};
+
+/** Profiles cut the way a router bit cuts: square outside edges only, inside edges left alone. */
+const ROUTER_PROFILES: ReadonlySet<EdgeToolProfile> = new Set(['cove', 'ogee', 'bead', 'step']);
+/** Profiles with curves, which take a segment count. */
+const CURVED_PROFILES: ReadonlySet<EdgeToolProfile> = new Set(['round', 'cove', 'ogee', 'bead']);
+
 interface Preview {
   readonly key: string;
   readonly result: EdgeBlendResult;
 }
 
 /**
- * Fillet, Chamfer and Profile Edges. While active, hovering a solid of the open context
- * highlights the hard edge under the cursor (a curve's edge highlights its whole curve). Click adds
- * it to the edge set, Shift-click toggles it; edges selected when the tool starts are the starting
- * set. The value field takes the radius (Fillet) or distance (Chamfer), remembered for the
- * session, and `Ns` the fillet segments. Enter or double-click commits one `fillet.apply` /
- * `chamfer.apply`; Esc clears the set, a second Esc returns to Select. A kernel preview of the
- * result replaces the solid while edges are picked. Profile Edges offers its router-bit profile as
- * a pick list (`choices`); its value field takes the profile's size, and for the Chamfer profile
- * also an angle from the reference face (`30°`).
+ * Profile Edges: rounds, bevels or shapes picked edges of a solid. While active, hovering
+ * a solid of the open context highlights the hard edge under the cursor (a curve's edge highlights
+ * its whole curve). Click adds it to the edge set, Shift-click toggles it; edges selected when the
+ * tool starts are the starting set. Its bar offers the profile, the size, Chamfer's angle and the
+ * curved profiles' segments; the value field takes the size, an angle (`30°`, which picks Chamfer)
+ * or `Ns`. Round runs `fillet.apply`, Chamfer at 45° `chamfer.apply`, the other profiles and
+ * Chamfer at another angle `profile.apply`. Enter or double-click commits; Esc clears the set, a
+ * second Esc returns to Select. A kernel preview of the result replaces the solid while edges are
+ * picked.
  */
 export class EdgeBlendTool implements Tool {
-  readonly id: EdgeBlendMode;
-  readonly title: string;
+  readonly id = 'profile';
+  readonly title = 'Profile Edges';
   readonly cursor = 'crosshair';
-  readonly vcbSchema: readonly VcbKind[];
+  readonly vcbSchema: readonly VcbKind[] = ['length', 'radius', 'angle', 'segments'];
 
-  /** Fillet radius or chamfer distance; null until one is typed (remembered for the session). */
-  size: number | null = null;
-  /** Fillet segments per full circle (session setting). */
+  /** The profile (session setting). */
+  profile: EdgeToolProfile = 'round';
+  /** Each profile's size; null until one is typed (session settings). */
+  private sizes: Partial<Record<EdgeToolProfile, number>> = {};
+  /** Segments per full circle of the curved profiles (session setting). */
   segments = DEFAULT_BLEND_SEGMENTS;
-  /** Profile Edges: the router-bit profile (session setting). */
-  profile: EdgeProfile = 'roundover';
-  /** Profile Edges, Chamfer profile: the angle from the reference face in degrees; 45 until one is typed. */
+  /** Chamfer's angle from the reference face in degrees; 45 until one is typed. */
   angleDeg: number | null = null;
 
   private ctx: ToolContext | null = null;
@@ -84,12 +115,30 @@ export class EdgeBlendTool implements Tool {
   private preview: Preview | null = null;
   private previewTimer: ReturnType<typeof setTimeout> | null = null;
   private queue: Promise<void> = Promise.resolve();
+  /** The last operation committed and its undo entry, for adjusting it from the bar. */
+  private lastApplied: { params: { path: readonly number[]; bodyId: number; edges: readonly string[] }; entry: unknown } | null = null;
   private previewRun: Promise<void> = Promise.resolve();
 
-  constructor(readonly kind: EdgeBlendMode) {
-    this.id = kind;
-    this.title = kind === 'fillet' ? 'Fillet' : kind === 'chamfer' ? 'Chamfer' : 'Profile Edges';
-    this.vcbSchema = kind === 'fillet' ? ['length', 'radius', 'segments'] : kind === 'profile' ? ['length', 'angle'] : ['length'];
+  /** Switch profile; one without a size of its own yet starts with the current profile's size. */
+  private chooseProfile(p: EdgeToolProfile): void {
+    if (this.sizes[p] === undefined && this.size !== null) this.sizes[p] = this.size;
+    this.profile = p;
+  }
+
+  /** The current profile's size, or null until one is typed. */
+  get size(): number | null {
+    return this.sizes[this.profile] ?? null;
+  }
+  set size(m: number | null) {
+    if (m === null) delete this.sizes[this.profile];
+    else this.sizes[this.profile] = m;
+  }
+
+  /** The command the current profile runs: Round fillets, Chamfer at 45° chamfers, the rest profile. */
+  get kind(): EdgeBlendMode {
+    if (this.profile === 'round') return 'fillet';
+    if (this.profile === 'chamfer' && (this.angleDeg === null || this.angleDeg === 45)) return 'chamfer';
+    return 'profile';
   }
 
   // --- test / renderer accessors --------------------------------------------------------------
@@ -208,22 +257,16 @@ export class EdgeBlendTool implements Tool {
   }
 
   onVcb(v: VcbValue): void {
-    if (v.kind === 'segments' && this.kind === 'fillet') {
-      if (v.count >= 3 && v.count <= 999) this.segments = v.count;
-    } else if (v.kind === 'angle' && this.kind === 'profile') {
+    if (v.kind === 'segments') {
+      if (v.count < 3 || v.count > 999) return;
+      this.segments = v.count;
+    } else if (v.kind === 'angle') {
       if (!(v.degrees > 0 && v.degrees < 90)) return;
       this.angleDeg = v.degrees;
-      if (this.profile !== 'chamfer') this.profile = 'chamfer';
+      this.chooseProfile('chamfer');
     } else if ((v.kind === 'length' || v.kind === 'radius') && v.meters > 0) {
       this.size = v.meters;
     } else return;
-    this.error = null;
-    this.edited();
-  }
-
-  onChoice(id: string, value: string): void {
-    if (this.kind !== 'profile' || id !== 'profile' || !(EDGE_PROFILES as readonly string[]).includes(value)) return;
-    this.profile = value as EdgeProfile;
     this.error = null;
     this.edited();
   }
@@ -251,21 +294,104 @@ export class EdgeBlendTool implements Tool {
   }
 
   status(): ToolStatus {
-    const label = this.kind === 'fillet' ? 'Radius' : this.kind === 'chamfer' ? 'Distance' : 'Size';
+    const label = SIZE_LABELS[this.profile];
     const value = this.size === null ? undefined : fmtLength(this.ctx, this.size);
     const failed = this.error ?? this.previewError;
+    const name = EDGE_TOOL_PROFILE_LABELS[this.profile].toLowerCase();
     let instructor: string;
     if (failed) instructor = `${this.title}: ${failed}`;
-    else if (!this.picked.length) instructor = `Click edges of a solid to ${this.kind === 'fillet' ? 'round' : this.kind === 'chamfer' ? 'bevel' : `shape with a ${PROFILE_LABELS[this.profile].toLowerCase()}`} (Shift-click toggles).`;
-    else if (this.size === null) instructor = `Type the ${label.toLowerCase()}${this.kind === 'profile' && this.profile === 'chamfer' ? ', or an angle such as 30°' : ''}.`;
+    else if (!this.picked.length) instructor = `Click edges of a solid to shape with ${this.profile === 'round' ? 'a round' : `a ${name}`} (Shift-click toggles).`;
+    else if (this.size === null) instructor = `Type the ${label.toLowerCase()}${this.profile === 'chamfer' ? ', or an angle such as 30°' : ''}.`;
     else instructor = `${this.picked.length} edge${this.picked.length === 1 ? '' : 's'} picked. Press Enter or double-click to apply, Esc to clear.`;
-    const choices: ToolChoice[] = this.kind !== 'profile' ? [] : [{
-      id: 'profile',
-      label: 'Profile',
-      value: this.profile,
-      options: EDGE_PROFILES.map((p) => ({ value: p, label: p === 'chamfer' && this.angleDeg !== null ? `Chamfer ${this.angleDeg}°` : PROFILE_LABELS[p] })),
-    }];
-    return { instructor, vcbLabel: label, vcbValue: value, fields: this.picked.length ? [pointerField(label, 'length', value)] : [], ...(choices.length ? { choices } : {}) };
+    return {
+      instructor,
+      vcbLabel: label,
+      vcbValue: value,
+      fields: this.picked.length ? [pointerField(label, 'length', value)] : [],
+      settings: this.barSettings(label, value),
+      // picking edges keeps the bar usable
+      placing: false,
+    };
+  }
+
+  /** The tool options bar: profile, size, Chamfer's angle, the curved profiles' segments. */
+  private barSettings(label: string, value: string | undefined): ToolSetting[] {
+    const fit = this.routerFit();
+    const reason = fit && fit.notSquare > 0 ? 'cuts square outside edges only' : undefined;
+    const out: ToolSetting[] = [
+      {
+        kind: 'choice',
+        id: 'profile',
+        label: 'Profile',
+        value: this.profile,
+        display: 'icons',
+        options: EDGE_TOOL_PROFILES.map((p) => ({
+          value: p,
+          label: EDGE_TOOL_PROFILE_LABELS[p],
+          icon: `profile-${p === 'round' ? 'roundover' : p}`,
+          ...(reason && ROUTER_PROFILES.has(p) ? { disabled: true, reason } : {}),
+        })),
+      },
+      { kind: 'quantity', id: 'size', label, value: value ?? '', quantity: 'length' },
+    ];
+    if (this.profile === 'chamfer') out.push({ kind: 'quantity', id: 'angle', label: 'Angle', value: `${this.angleDeg ?? 45}°`, quantity: 'angle', priority: 2 });
+    if (CURVED_PROFILES.has(this.profile)) out.push({ ...countSetting('segments', 'Segments', this.segments), priority: 3 });
+    if (reason) out.push({ kind: 'note', id: 'fit', text: 'Cove, Ogee, Bead and Step need square outside edges', priority: 3 });
+    else if (fit && fit.inside > 0 && ROUTER_PROFILES.has(this.profile)) {
+      out.push({ kind: 'note', id: 'fit', text: `${fit.inside} inside edge${fit.inside === 1 ? '' : 's'} left alone`, priority: 3 });
+    }
+    return out;
+  }
+
+  /** How the router profiles would treat the edge set, or null with no edges picked. */
+  private routerFit(): { cut: number; inside: number; notSquare: number } | null {
+    if (this.bodyId === null || !this.picked.length) return null;
+    const body = this.body(this.bodyId);
+    return body ? edgeProfileFit(body, this.picked) : null;
+  }
+
+  /** The bar changed a value just after a commit: redo that operation with it, as one undo step. */
+  adjustLast(id: string): boolean {
+    const ctx = this.ctx;
+    const last = this.lastApplied;
+    if (!ctx || !last || !['profile', 'size', 'angle', 'segments'].includes(id) || this.size === null) return false;
+    const params = this.paramsFor(last.params.path, last.params.bodyId, last.params.edges);
+    const command = `${this.kind}.apply`;
+    this.queue = this.queue
+      .then(async () => {
+        const entry = await redoCommitted(ctx, last.entry, command, params);
+        if (entry !== null) this.lastApplied = { params: last.params, entry };
+        this.error = null;
+      })
+      .catch((err: unknown) => {
+        // the original stays: explain why
+        this.error = err instanceof Error ? err.message : String(err);
+      })
+      .then(() => {
+        ctx.statusChanged();
+        ctx.requestRender();
+      });
+    return true;
+  }
+
+  onSetting(id: string, value: ToolSettingValue): void {
+    if (id === 'profile' && typeof value === 'string' && (EDGE_TOOL_PROFILES as readonly string[]).includes(value)) {
+      this.chooseProfile(value as EdgeToolProfile);
+    } else if (id === 'size') {
+      const m = lengthFrom(value);
+      if (m === null || !(m > 0)) return;
+      this.size = m;
+    } else if (id === 'angle') {
+      const d = degreesFrom(value);
+      if (d === null || !(d > 0 && d < 90)) return;
+      this.angleDeg = d;
+    } else if (id === 'segments') {
+      const n = countFrom(value);
+      if (n === null || n < 3 || n > 999) return;
+      this.segments = n;
+    } else return;
+    this.error = null;
+    this.edited();
   }
 
   // --- internals ------------------------------------------------------------------------------
@@ -321,28 +447,28 @@ export class EdgeBlendTool implements Tool {
     this.ctx?.requestRender();
   }
 
-  private profileParams() {
-    if (!this.ctx || this.bodyId === null || !this.picked.length || this.size === null) return null;
-    return EdgeProfileParamsSchema.parse({
-      path: [...hostOfTool(this.ctx).context.path],
-      bodyId: this.bodyId,
-      edges: [...this.picked],
-      profile: this.profile,
-      size: this.size,
-      ...(this.profile === 'chamfer' && this.angleDeg !== null ? { angleDeg: this.angleDeg } : {}),
-    });
-  }
-
   private params() {
     if (!this.ctx || this.bodyId === null || !this.picked.length || this.size === null) return null;
-    if (this.kind === 'profile') return this.profileParams();
-    return EdgeBlendParamsSchema.parse({
-      path: [...hostOfTool(this.ctx).context.path],
-      bodyId: this.bodyId,
-      edges: [...this.picked],
-      size: this.size,
-      segments: this.segments,
-    });
+    return this.paramsFor([...hostOfTool(this.ctx).context.path], this.bodyId, this.picked);
+  }
+
+  /** The current profile's command parameters for `edges` of solid `bodyId` in context `path`. */
+  private paramsFor(path: readonly number[], bodyId: number, edges: readonly string[]) {
+    const size = this.size ?? 0;
+    const base = { path: [...path], bodyId, edges: [...edges], size };
+    switch (this.kind) {
+      case 'fillet':
+        return EdgeBlendParamsSchema.parse({ ...base, segments: this.segments });
+      case 'chamfer':
+        return EdgeBlendParamsSchema.parse(base);
+      case 'profile':
+        return EdgeProfileParamsSchema.parse({
+          ...base,
+          profile: this.profile === 'round' ? 'roundover' : this.profile,
+          ...(this.profile === 'chamfer' && this.angleDeg !== null ? { angleDeg: this.angleDeg } : {}),
+          ...(CURVED_PROFILES.has(this.profile) ? { segments: this.segments } : {}),
+        });
+    }
   }
 
   /** Identity of what a preview was computed for (params + body version). */
@@ -350,7 +476,7 @@ export class EdgeBlendTool implements Tool {
     const p = this.params();
     if (!p) return null;
     const body = this.body(p.bodyId as Id);
-    return JSON.stringify([p.path, p.bodyId, body?.version, p.edges, p.size, this.kind === 'fillet' ? p.segments : 0, this.kind === 'profile' ? [this.profile, this.angleDeg] : null]);
+    return JSON.stringify([p.path, p.bodyId, body?.version, p.edges, p.size, this.kind, this.profile, this.angleDeg, CURVED_PROFILES.has(this.profile) ? this.segments : 0]);
   }
 
   private currentPreview(): Preview | null {
@@ -375,9 +501,10 @@ export class EdgeBlendTool implements Tool {
     if (!ctx || !p || key === null || this.preview?.key === key) return;
     const host = hostOfTool(ctx);
     try {
-      const plan = this.kind === 'profile' ? planEdgeProfile(host.doc.state, this.profileParams()!) : planEdgeBlend(host.doc.state, this.kind, EdgeBlendParamsSchema.parse(p));
+      const kind = this.kind;
+      const plan = kind === 'profile' ? planEdgeProfile(host.doc.state, EdgeProfileParamsSchema.parse(p)) : planEdgeBlend(host.doc.state, kind, EdgeBlendParamsSchema.parse(p));
       const kernel = kernelOf(ctx.commands.ctx);
-      const r = await kernel.coalesced(`${this.kind}-preview`, () => runEdgeBlendKernel(kernel, plan, true));
+      const r = await kernel.coalesced('edge-profile-preview', () => runEdgeBlendKernel(kernel, plan, true));
       if (r.status !== 'current' || this.previewKey() !== key) return;
       checkEdgeBlendResult(plan, r.value);
       this.preview = { key, result: r.value };
@@ -402,16 +529,19 @@ export class EdgeBlendTool implements Tool {
     }
     const p = this.params();
     if (!p) {
-      this.error = `Type the ${this.kind === 'fillet' ? 'radius' : this.kind === 'chamfer' ? 'distance' : 'size'} first.`;
+      this.error = `Type the ${SIZE_LABELS[this.profile].toLowerCase()} first.`;
       ctx.statusChanged();
       return;
     }
     const pre = this.currentPreview();
     const params = pre ? { ...p, precomputed: pre.result } : p;
+    const command = `${this.kind}.apply`;
     this.queue = this.queue
       .then(async () => {
-        await ctx.commands.execute(`${this.kind}.apply`, params);
+        await ctx.commands.execute(command, params);
+        this.lastApplied = { params: { path: p.path, bodyId: p.bodyId, edges: p.edges }, entry: hostOfTool(ctx).undoStack.peek() ?? null };
         this.clearSet();
+        ctx.committed?.();
       })
       .catch((err: unknown) => {
         // nothing changed: explain why and keep the edge set
@@ -425,7 +555,30 @@ export class EdgeBlendTool implements Tool {
   }
 }
 
-/** Fillet, Chamfer and Profile Edges, for the bootstrap's `ToolManager.register` loop. */
+/** Profile Edges, for the bootstrap's `ToolManager.register` loop. */
 export function edgeBlendTools(): EdgeBlendTool[] {
-  return [new EdgeBlendTool('fillet'), new EdgeBlendTool('chamfer'), new EdgeBlendTool('profile')];
+  return [new EdgeBlendTool()];
 }
+
+/** Command search names that start Profile Edges with a profile chosen. */
+const ALIASES: readonly { id: string; title: string; profile: EdgeToolProfile }[] = [
+  { id: 'profileEdges.fillet', title: 'Fillet', profile: 'round' },
+  { id: 'profileEdges.roundover', title: 'Roundover', profile: 'round' },
+  { id: 'profileEdges.round', title: 'Round Edges', profile: 'round' },
+  { id: 'profileEdges.chamfer', title: 'Chamfer', profile: 'chamfer' },
+];
+
+export const edgeToolAliasCommands: readonly AnyCommand[] = ALIASES.map((a) =>
+  defineCommand({
+    id: a.id,
+    title: a.title,
+    category: 'tool',
+    icon: 'tool-profile',
+    params: z.object({}),
+    undoable: false,
+    run: (ctx) => {
+      ctx.tools?.activate('profile');
+      ctx.tools?.setting?.('profile', a.profile);
+    },
+  }),
+);

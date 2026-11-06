@@ -129,6 +129,11 @@ const edgeHit = (id: Id, p: Vec3): PickHit => ({ ref: { kind: 'sketchEdge', path
 const sketchFaceHit = (id: Id, p: Vec3): PickHit => ({ ref: { kind: 'sketchFace', path: [], id }, point: p, t: 10, normal: [0, 0, 1], screenDist: 0 });
 
 const key = (k: string, modifiers: Modifiers = NO_MODIFIERS) => ({ key: k, code: k, modifiers, repeat: false });
+/** Tap a modifier: press and release it with nothing between (how Ctrl and Alt reach tools). */
+const tap = (tools: ToolManager, k: string): boolean => {
+  tools.keyDown(key(k));
+  return tools.keyUp(key(k));
+};
 const vcb = (s: string) => {
   const v = parseVcb(s, 'm');
   if (!v.ok) throw new Error(JSON.stringify(v.error));
@@ -175,7 +180,7 @@ describe('TapeTool', () => {
     const { tools, guides } = setup();
     tools.activate('tape');
     const tape = tools.activeTool as TapeTool;
-    expect(tools.keyDown(key('Control'))).toBe(true);
+    expect(tap(tools, 'Control')).toBe(true);
     expect(tape.mode).toBe('guidePoint');
     tools.click(at([0, 0, 0]));
     tools.pointerMove(at([1, 1, 0]));
@@ -196,7 +201,7 @@ describe('TapeTool', () => {
   it('Down arrow locks the tape parallel to the last inferred edge, and a typed distance places the guide point along it', () => {
     const { tools, guides } = setup();
     tools.activate('tape');
-    tools.keyDown(key('Control')); // guide point mode
+    tap(tools, 'Control'); // guide point mode
     tools.click(at([0, 0, 0]));
     const onEdge: InferenceResult = { ...freeInference([3, 1, 0], GROUND_PLANE),
       primary: { kind: 'onEdge', point: [3, 1, 0], dir: [0, 1, 0], color: SNAP_COLORS.onEdge, label: 'On Edge' } };
@@ -217,8 +222,8 @@ describe('TapeTool', () => {
     square();
     tools.activate('tape');
     const tape = tools.activeTool as TapeTool;
-    tools.keyDown(key('Control'));
-    tools.keyDown(key('Control'));
+    tap(tools, 'Control');
+    tap(tools, 'Control');
     expect(tape.mode).toBe('measure');
     // hovering an edge reads its length
     const bottom = [...sketch().edges.values()][0]!;
@@ -278,7 +283,7 @@ describe('ProtractorTool', () => {
     tools.onVcb(vcb('1:1'));
     expect(guides()).toHaveLength(2);
     // Ctrl turns guide creation off
-    tools.keyDown(key('Control'));
+    tap(tools, 'Control');
     expect(pro.guidesEnabled).toBe(false);
     tools.click(at([0, 0, 0]));
     tools.click(at([1, 0, 0]));
@@ -304,9 +309,13 @@ describe('AxesTool', () => {
     tools.doubleClick(at([3, 3, 0]));
     expect(host.doc.rootDefinition.axes.origin).toEqual([3, 3, 0]);
     expect(host.doc.rootDefinition.axes.x).toEqual([1, 0, 0]);
-    // Alt: place green first, then blue; red follows right-handedly
+    // a Ctrl tap: place green first, then blue; red follows right-handedly (Alt no longer cycles)
     const tool = tools.activeTool as AxesTool;
     tools.keyDown(key('Alt', ALT));
+    tools.keyUp(key('Alt', ALT));
+    expect(tool.firstAxis).toBe('x');
+    tools.keyDown(key('Control'));
+    tools.keyUp(key('Control'));
     expect(tool.firstAxis).toBe('y');
     tools.click(at([0, 0, 0]));
     tools.click(at([-1, 0, 0]));

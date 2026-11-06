@@ -95,7 +95,9 @@ it('creates, edits, saves, duplicates, and undoes text and paper labels', async 
   fireEvent.input(pageText, { target: { textContent: 'Draft' } });
   expect(tab.doc.state.pages.get(tab.activePageId)!.entities.values().next().value?.text?.content).toBe('Draft');
   fireEvent.change(screen.getByLabelText('Text content'), { target: { value: 'Sheet <PageNumber>' } });
-  fireEvent.click(screen.getByLabelText('Bold', { exact: true }));
+  // emphasis is in the tool options bar's style row; with the text selected, not edited, it formats the whole text
+  fireEvent.keyDown(screen.getByRole('textbox', { name: 'Edit text on page' }), { key: 'Escape' });
+  fireEvent.click(screen.getByRole('button', { name: 'Text toolbar bold' }));
   const page = () => tab.doc.state.pages.get(tab.activePageId)!;
   const first = page().entities.get(page().entityOrder[0]!)!;
   expect(first).toMatchObject({ kind: 'text', points: [[10, 10], [70, 30]], text: { content: 'Sheet <PageNumber>', bold: true, bounded: true } });

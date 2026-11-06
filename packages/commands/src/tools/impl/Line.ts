@@ -11,12 +11,13 @@ import { angleDimension, DIMENSION_COLOR, DIMENSION_OFFSET_PX, entryDegrees, ent
 import { formatDeg } from './drawingUtil';
 import { EdgeLock } from '../edgeLock';
 import { DRAG_PX, hostOfTool, inferenceOverlay, rubberBandColor, screenDist } from '../toolUtil';
+import { axisTag, EDGE_LOCKED, SHIFT_HELD } from '../held';
 
 /** Alt cycles these inference modes, with the status text naming each but the first. */
-const MODES: readonly { mode: InferenceMode; status: string }[] = [
+const MODES: readonly { mode: InferenceMode; status: string; tag?: string }[] = [
   { mode: 'all', status: '' },
-  { mode: 'none', status: 'Inference off (Alt).' },
-  { mode: 'directional', status: 'Parallel and perpendicular inference only (Alt).' },
+  { mode: 'none', status: 'Inference off (Alt).', tag: 'Inference off · Alt' },
+  { mode: 'directional', status: 'Parallel and perpendicular inference only (Alt).', tag: 'Parallel and perpendicular only · Alt' },
 ];
 
 interface LastSegment {
@@ -242,6 +243,11 @@ export class LineTool implements Tool {
   }
 
   status(): ToolStatus {
+    const held = [...axisTag(this.lockAxis), ...(this.lockSnap ? [SHIFT_HELD] : []), ...(this.edgeLock.active ? [EDGE_LOCKED] : []), ...(MODES[this.modeIndex]!.tag ? [MODES[this.modeIndex]!.tag!] : [])];
+    return held.length ? { ...this.baseStatus(), held } : this.baseStatus();
+  }
+
+  private baseStatus(): ToolStatus {
     const mode = MODES[this.modeIndex]!.status;
     if (!this.from) return { instructor: mode ? `Select start point. ${mode}` : 'Select start point.', vcbLabel: 'Length' };
     const units = this.ctx ? hostOfTool(this.ctx).doc.state.meta.units : null;

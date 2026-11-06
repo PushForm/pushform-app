@@ -25,7 +25,8 @@ import type { ToolKeyEvent, ToolPointerEvent, ToolSettingValue, ToolStatus } fro
 import { toggleSetting } from '../settings';
 import { pointerField } from '../entry';
 import { DRAG_PX, entityOverlay, HOVER_COLOR, inferenceOverlay, screenDist, worldPerPixelAt } from '../toolUtil';
-import { AXIS_COLOR, AXIS_DIR, movedOutline, TransformToolBase, worldToScreen } from './transformShared';
+import { AXIS_COLOR, AXIS_DIR, movedOutline, sectionPreviewFor, TransformToolBase, withoutSectionPlanes, worldToScreen } from './transformShared';
+import type { SectionPreview, SectionPreviewTool } from '../sectionPreview';
 import { planeTag } from '../held';
 
 /** Screen radius of the protractor in CSS px. */
@@ -61,7 +62,7 @@ const IDLE: State = { kind: 'idle' };
  * click (or release after a drag) to commit. Ctrl toggles copy; VCB takes degrees or `rise:run`,
  * and after a copy `Nx` / `N/` radial arrays.
  */
-export class RotateTool extends TransformToolBase {
+export class RotateTool extends TransformToolBase implements SectionPreviewTool {
   readonly id = 'rotate';
   readonly title = 'Rotate';
   readonly cursor = 'crosshair';
@@ -75,6 +76,8 @@ export class RotateTool extends TransformToolBase {
   private lockedNormal: Vec3 | null = null;
   private hoverNormal: Vec3 | null = null;
   private copy = false;
+  /** The last section preview and what it was made for, so an unchanged one is the same object. */
+  private sectionCache: { refs: readonly EntityRef[]; key: string; preview: SectionPreview | null } | null = null;
   private camera: ToolPointerEvent['camera'] | null = null;
 
   get copyMode(): boolean {
@@ -107,9 +110,22 @@ export class RotateTool extends TransformToolBase {
     this.lockedNormal = null;
   }
 
+  /** Section planes being rotated, drawn and cutting where the rotation would put them; copies are drawn without cutting. */
+  get sectionPreview(): SectionPreview | null {
+    const s = this.state, state = this.docState();
+    if (s.kind !== 'rotating' || !state || Math.abs(s.angle) <= 1e-9) return null;
+    const key = `${s.center.join(',')}|${s.axis.join(',')}|${s.angle}|${this.copy}`;
+    const cached = this.sectionCache;
+    if (cached && cached.refs === s.refs && cached.key === key) return cached.preview;
+    const preview = sectionPreviewFor(state, s.refs, m4rotationAbout(s.center, s.axis, s.angle), this.copy);
+    this.sectionCache = { refs: s.refs, key, preview };
+    return preview;
+  }
+
   inferenceOptions(): InferenceOptions {
     const s = this.state;
-    if (s.kind === 'idle') return {};
+    // section planes and dimensions under the cursor can be picked up
+    if (s.kind === 'idle') return { annotations: true };
     const plane = planeFromPointNormal(s.center, s.axis);
     return { anchor: s.center, plane, ignore: s.refs };
   }
@@ -261,7 +277,8 @@ export class RotateTool extends TransformToolBase {
       const cur = this.rotatedDir(s.baseDir, s.axis, s.angle);
       out.push({ kind: 'polyline', points: [s.center, v3addScaled(s.center, s.baseDir, radius)], color: '#111111', width: 1, dashed: true });
       out.push({ kind: 'polyline', points: [s.center, v3addScaled(s.center, cur, radius)], color: '#111111', width: 2 });
-      if (Math.abs(s.angle) > 1e-9) out.push(...movedOutline(state, s.refs, m4rotationAbout(s.center, s.axis, s.angle)));
+      // section planes are drawn, with their cuts, where they would go (sectionPreview)
+      if (Math.abs(s.angle) > 1e-9) out.push(...movedOutline(state, withoutSectionPlanes(s.refs), m4rotationAbout(s.center, s.axis, s.angle)));
       out.push({ kind: 'label', position: v3addScaled(s.center, cur, radius), text: this.fmtAngle(s.angle), offset: [12, -12] });
     } else if (s.kind === 'center' && this.cursorInference) {
       out.push({ kind: 'polyline', points: [s.center, this.cursorInference.point], color: '#111111', width: 1, dashed: true });

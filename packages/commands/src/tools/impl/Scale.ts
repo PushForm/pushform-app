@@ -12,7 +12,8 @@ import { NO_MODIFIERS } from '../Tool';
 import type { Modifiers, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
 import { pointerField } from '../entry';
 import { DRAG_PX, entityOverlay, HOVER_COLOR, inferenceOverlay, screenDist } from '../toolUtil';
-import { AXIS_COLOR, AXIS_DIR, movedOutline, refsKey, TransformToolBase, worldToScreen } from './transformShared';
+import { AXIS_COLOR, AXIS_DIR, movedOutline, refsKey, sectionPreviewFor, TransformToolBase, withoutSectionPlanes, worldToScreen } from './transformShared';
+import type { SectionPreview, SectionPreviewTool } from '../sectionPreview';
 
 /** Grip pick radius in CSS px. */
 export const GRIP_PICK_PX = 8;
@@ -128,7 +129,10 @@ function boxEdges(box: ScaleBox): Vec3[][] {
  * (Ctrl or Alt = about the centre, Shift toggles uniform); commit on release or click. VCB: a factor,
  * `x,y,z` factors, a length with a unit (absolute size along the grip's axis); negative mirrors.
  */
-export class ScaleTool extends TransformToolBase {
+export class ScaleTool extends TransformToolBase implements SectionPreviewTool {
+  /** The last section preview and what it was made for, so an unchanged one is the same object. */
+  private sectionCache: { refs: readonly EntityRef[]; key: string; preview: SectionPreview | null } | null = null;
+
   /** Modifiers of the last pointer event, for the held-key tags. */
   private mods: Modifiers = NO_MODIFIERS;
   readonly id = 'scale';
@@ -174,6 +178,18 @@ export class ScaleTool extends TransformToolBase {
     this.box = null;
     this.hoverGrip = null;
     this.hover = null;
+  }
+
+  /** Section planes being scaled, drawn and cutting where the scale would put them. */
+  get sectionPreview(): SectionPreview | null {
+    const s = this.state, state = this.docState();
+    if (s.kind !== 'scaling' || !state) return null;
+    const key = `${s.anchor.join(',')}|${s.factors.join(',')}`;
+    const cached = this.sectionCache;
+    if (cached && cached.refs === s.refs && cached.key === key) return cached.preview;
+    const preview = sectionPreviewFor(state, s.refs, m4scaleAbout(s.anchor, s.factors), false);
+    this.sectionCache = { refs: s.refs, key, preview };
+    return preview;
   }
 
   inferenceOptions(): InferenceOptions {
@@ -323,7 +339,8 @@ export class ScaleTool extends TransformToolBase {
     if (s.kind === 'scaling') {
       const m = m4scaleAbout(s.anchor, s.factors);
       for (const e of boxEdges(s.box)) out.push({ kind: 'polyline', points: e.map((p) => m4transformPoint(m, p)), color: BOX_COLOR, width: 1.5 });
-      out.push(...movedOutline(state, s.refs, m));
+      // section planes are drawn, with their cuts, where they would go (sectionPreview)
+      out.push(...movedOutline(state, withoutSectionPlanes(s.refs), m));
       out.push({ kind: 'point', position: m4transformPoint(m, s.grip.pos), color: GRIP_HOVER_COLOR, shape: 'square', size: 10 });
       out.push({ kind: 'point', position: s.anchor, color: '#111111', shape: 'square', size: 6 });
       out.push({ kind: 'label', position: m4transformPoint(m, s.grip.pos), text: this.fmtFactors(s.factors, s.box.dims), offset: [12, -12] });

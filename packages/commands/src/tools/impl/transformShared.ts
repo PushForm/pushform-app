@@ -5,7 +5,9 @@ import { formatLength, m4mul, m4transformPoint, MERGE_TOL, v3cross, v3dist, v3do
 import type { Axis } from '@pushform/inference';
 import { SNAP_COLORS } from '@pushform/inference';
 import type { DocumentState, EntityContainer, EntityRef, MeshPartGeometry, UndoEntry } from '@pushform/model';
-import { containerAt, contentWorldBounds, entityRefKey, imageEntityCorners, sectionPlaneCorners, worldSectionPlane } from '@pushform/model';
+import { containerAt, contentWorldBounds, contextMatrix, entityRefKey, imageEntityCorners, sectionPlaneCorners, worldSectionPlane } from '@pushform/model';
+import { mapNormal } from '../../commands/sectionPlanes';
+import type { SectionPreview } from '../sectionPreview';
 import { contextFrame, pathKeyOf } from '../../commands/context';
 import { surfaceRefs } from '../../commands/sketchQueries';
 import type { CameraState } from '../../camera/CameraHost';
@@ -64,6 +66,34 @@ function* meshPartEdgePolylines(g: MeshPartGeometry): Generator<Vec3[]> {
     for (let i = g.edgeOffsets[e]! * 3; i < g.edgeOffsets[e + 1]! * 3; i += 3) line.push([p[i]!, p[i + 1]!, p[i + 2]!]);
     yield line;
   }
+}
+
+/**
+ * The section planes among `refs` transformed by `m` (world coordinates), for a tool's live preview: moved planes, or
+ * copies when `copy`; null when no section plane is transformed.
+ */
+export function sectionPreviewFor(state: DocumentState, refs: readonly EntityRef[], m: Mat4 | MMat4, copy: boolean): SectionPreview | null {
+  const planes: SectionPreview['moved'][number][] = [];
+  for (const r of refs) {
+    if (r.kind !== 'sectionPlane') continue;
+    try {
+      const sp = containerAt(state, r.path).sectionPlanes.get(r.id);
+      if (!sp) continue;
+      const { normal, d } = worldSectionPlane(sp.plane, contextMatrix(state, r.path));
+      // a point of the plane and its normal, both mapped, keep the side it cuts away
+      const point = m4transformPoint(m, [-normal[0] * d, -normal[1] * d, -normal[2] * d]);
+      const n = mapNormal(m, normal);
+      planes.push({ path: r.path, id: r.id, normal: [n[0], n[1], n[2]], d: -v3dot(n, point) });
+    } catch {
+      // a plane that is gone is not previewed
+    }
+  }
+  return planes.length ? { moved: copy ? [] : planes, copies: copy ? planes : [], added: null } : null;
+}
+
+/** `refs` without their section planes, which a live section preview draws instead of an outline. */
+export function withoutSectionPlanes(refs: readonly EntityRef[]): EntityRef[] {
+  return refs.filter((r) => r.kind !== 'sectionPlane');
 }
 
 function movedOutlineInContext(state: DocumentState, refs: readonly EntityRef[], m: Mat4 | MMat4, color: string): OverlayPrimitive[] {

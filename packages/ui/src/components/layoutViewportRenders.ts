@@ -3,7 +3,7 @@
 import type { Box3, Vec3, Guid } from '@pushform/core';
 import { applySketchUpImport, openModelFile, readPreservedSketchUpModel, readSketchUpInWorker, type ImportedScene } from '@pushform/io';
 import {
-  isCloudReference, isCloudSource, isViewport, layoutFrameSize, viewportCacheCurrent, viewportCloudReference, viewportOrthoHeight, viewportSourceKey, viewportSourceSheet,
+  isCloudReference, isCloudSource, isViewport, layoutFrameSize, viewportCacheCurrent, viewportCloudReference, viewportOrthoHeight, viewportSourceKey, viewportSourceSectionViews, viewportSourceSheetsKey,
   type CloudModelReference, type LayoutDocumentState, type LayoutEntity, type LayoutViewport, type LayoutViewportCamera, type LayoutViewportDisplay,
   type LayoutViewportSections,
 } from '@pushform/layout';
@@ -102,8 +102,8 @@ let previewSerial = 0;
 interface Job {
   key: string; entityId: number; preview: boolean; state: LayoutDocumentState; source: Source; camera: CameraState; shift: readonly [number, number] | undefined;
   width: number; height: number; background: string | null; scene: string | null; display: LayoutViewportDisplay | undefined;
-  /** The sheet the model's sections are drawn on, for the section markers. */
-  sheet: string;
+  /** The sheet each section plane is drawn on, by plane, for the section markers. */
+  sheets: Readonly<Record<string, string>>;
 }
 const queue: Job[] = [];
 let running = false;
@@ -346,8 +346,8 @@ export function layoutViewportPicture(state: LayoutDocumentState, entity: Layout
     ? Math.min(pxPerMm ?? PREVIEW_PX_PER_MM, PREVIEW_MAX_PX / Math.max(width, height))
     : exportResolution ? Math.min(pxPerMm ?? PRINT_PX_PER_MM, 16384 / Math.max(width, height)) : Math.min(committedPxPerMm(pxPerMm), RENDER_MAX_PX / Math.max(width, height));
   const pixels = [Math.max(1, Math.round(width * scale)), Math.max(1, Math.round(height * scale))] as const;
-  const sheet = viewSheet(state, viewport.source);
-  const key = JSON.stringify([sourceKey(state, viewport.source), view, pixels, viewport.background, viewport.scene, viewport.display ?? null, sheet]);
+  const sheets = viewSheets(state, viewport);
+  const key = JSON.stringify([sourceKey(state, viewport.source), view, pixels, viewport.background, viewport.scene, viewport.display ?? null, sheets]);
   const preview = previews.get(entity.id);
   if (camera && preview?.key === key) return preview.src;
   const done = camera ? undefined : renders.get(key);
@@ -363,7 +363,7 @@ export function layoutViewportPicture(state: LayoutDocumentState, entity: Layout
     return fallback && layoutImageReady(fallback) ? fallback : done;
   }
   enqueue({ key, entityId: entity.id, preview: !!camera, state, source: viewport.source, camera: viewportCameraState(view, height),
-    shift: view.shift, width: pixels[0], height: pixels[1], background: viewport.background, scene: viewport.scene, display: viewport.display, sheet });
+    shift: view.shift, width: pixels[0], height: pixels[1], background: viewport.background, scene: viewport.scene, display: viewport.display, sheets });
   return fallback;
 }
 
@@ -380,38 +380,53 @@ export function layoutViewportRender(state: LayoutDocumentState, entity: LayoutE
   if (width <= 0 || height <= 0) return null;
   const scale = Math.min(PRINT_PX_PER_MM, RENDER_MAX_PX / Math.max(width, height));
   const pixels = [Math.max(1, Math.round(width * scale)), Math.max(1, Math.round(height * scale))] as const;
-  const sheet = viewSheet(state, viewport.source);
-  const key = JSON.stringify([sourceKey(state, viewport.source), viewport.camera, pixels, viewport.background, viewport.scene, viewport.display ?? null, sheet]);
+  const sheets = viewSheets(state, viewport);
+  const key = JSON.stringify([sourceKey(state, viewport.source), viewport.camera, pixels, viewport.background, viewport.scene, viewport.display ?? null, sheets]);
+  // A picture whose markers show sheets goes stale when they change.
+  const sheet = Object.keys(sheets).length ? viewportSourceSheetsKey(state, viewport.source) : '';
   const found = renders.get(key);
   // An empty view stores a transparent picture, so the drawing reopens showing nothing there without the model.
   const done = found === LAYOUT_VIEW_EMPTY ? TRANSPARENT_PNG : found;
   if (done) return { src: done, cache: { camera: viewport.camera, widthMm: width, heightMm: height, sha256: reference.target.sha256, ...(sheet ? { sheet } : {}) } };
   if (done === undefined) enqueue({ key, entityId: entity.id, preview: false, state, source: viewport.source, camera: viewportCameraState(viewport.camera, height),
-    shift: viewport.camera.shift, width: pixels[0], height: pixels[1], background: viewport.background, scene: viewport.scene, display: viewport.display, sheet });
+    shift: viewport.camera.shift, width: pixels[0], height: pixels[1], background: viewport.background, scene: viewport.scene, display: viewport.display, sheets });
   return null;
 }
 
 /**
- * Section markers in a model view name the sheet their section is drawn on: a plane that cuts the model is drawn on
- * the first page showing the model (every view of it cuts with the same planes). Other planes cut nowhere and keep
- * that half of the bubble blank.
+ * Section markers name the sheet their section is drawn on, in every view of the model, so a plan's markers point
+ * to the page that draws the section. Planes without one keep that half of the bubble blank.
  */
-export function withSectionSheet(sections: RenderSections, sheet: string): RenderSections {
-  if (!sheet || !sections.planes.length) return sections;
-  const cutting = new Set(sections.cuts.map((cut) => cut.key));
-  return { ...sections, planes: sections.planes.map((plane) => cutting.has(plane.id) ? { ...plane, sheet } : plane) };
+export function withSectionSheets(sections: RenderSections, sheets: Readonly<Record<string, string>>): RenderSections {
+  if (!sections.planes.some((plane) => sheets[plane.id])) return sections;
+  return { ...sections, planes: sections.planes.map((plane) => sheets[plane.id] ? { ...plane, sheet: sheets[plane.id] } : plane) };
+}
+
+const drawnSections = new WeakMap<DocumentState, RenderSections>();
+/** The section planes and cuts a view of `scene` with `sections` draws. */
+function viewSections(model: LayoutViewportModel, scene: string | null, sections: LayoutViewportSections | undefined): RenderSections {
+  const state = viewSectionState(model, scene, sections);
+  let drawn = drawnSections.get(state);
+  if (!drawn) drawnSections.set(state, drawn = sectionsToRender(state));
+  return drawn;
 }
 
 /**
- * The sheet number a view's section markers show, or '' while its model is not loaded or none of its section planes
- * cuts, so views without section markers are not drawn again when pages move.
+ * The sheets a view's section markers show, by plane: each plane is drawn on the first page with a view of the model
+ * that cuts with it, each view cut as its scene and section settings decide. Empty while the model is not loaded, so
+ * views without section markers are not drawn again when pages move.
  */
-function viewSheet(state: LayoutDocumentState, source: Source): string {
-  const model = loadedModels.get(sourceKey(state, source));
-  if (!model) return '';
-  const sections = sectionsToRender(model.state);
-  const cutting = new Set(sections.cuts.map((cut) => cut.key));
-  return sections.planes.some((plane) => cutting.has(plane.id)) ? viewportSourceSheet(state, source) : '';
+function viewSheets(state: LayoutDocumentState, viewport: LayoutViewport): Record<string, string> {
+  const model = loadedModels.get(sourceKey(state, viewport.source));
+  const sheets: Record<string, string> = {};
+  if (!model) return sheets;
+  const drawn = new Set(viewSections(model, viewport.scene, viewport.display?.sections).planes.map((plane) => plane.id));
+  if (!drawn.size) return sheets;
+  // In the order their first pages come, so the first page cutting with a plane names it.
+  for (const views of viewportSourceSectionViews(state, viewport.source)) {
+    for (const cut of viewSections(model, views.scene, views.sections).cuts) if (drawn.has(cut.key) && !(cut.key in sheets)) sheets[cut.key] = views.sheet;
+  }
+  return sheets;
 }
 
 /** Print resolution, or the next doubling of it that keeps up with the screen (few distinct renders while zooming). */
@@ -499,7 +514,7 @@ async function drain(): Promise<void> {
           const geometry = viewGeometry(model, job.scene);
           withRenderImageStore(model.images, () => { view.setBodies(geometry.bodies); view.setSketches(geometry.sketches); });
           view.setImages(geometry.pictures);
-          view.setSections(withSectionSheet(sectionsToRender(viewSectionState(model, job.scene, job.display?.sections)), job.sheet));
+          view.setSections(withSectionSheets(viewSections(model, job.scene, job.display?.sections), job.sheets));
           const { shadows, sections: _sections, ...display }: Partial<LayoutViewportDisplay> = job.display ?? {};
           view.setDisplay({ ...model.display, ...display });
           // The view's own sun and shadows, else the model's.

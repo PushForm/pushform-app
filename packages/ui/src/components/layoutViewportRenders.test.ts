@@ -17,9 +17,15 @@ vi.mock('@pushform/io', () => ({
   readPreservedSketchUpModel: (_state: unknown, _archive: string, model: string) => model === 'linked' ? null : new Uint8Array(1),
   readSketchUpInWorker: rendered.read,
   applySketchUpImport: () => undefined,
-  openModelFile: vi.fn(async (bytes: Uint8Array) => ({ images: new Map(), state: { images: new Map(), styles: new Map(), sceneOrder: [1], tags: new Map(),
+  openModelFile: vi.fn(async (bytes: Uint8Array) => bytes.length === 7 ? { images: new Map(), state: {
+    // A model cut by plane 1, with a plan scene that keeps that cut and a section scene that cuts with plane 2.
+    images: new Map(), styles: new Map([[1, { modeling: { sectionCutsVisible: true } }]]), activeStyleId: 1, tags: new Map(), rootDefinitionId: 1, sceneOrder: [1, 2],
+    definitions: new Map([[1, { id: 1, entities: { sectionPlanes: new Map([[1, {}], [2, {}]]), activeSectionPlaneId: 1 } }]]),
+    scenes: new Map([[1, { name: 'Plan', flags: { useCamera: true, useTags: false, useSectionPlanes: false }, hiddenTags: [], activeSectionPlanes: [], camera: {} }],
+      [2, { name: 'Section B', flags: { useCamera: true, useTags: false, useSectionPlanes: true }, hiddenTags: [], activeSectionPlanes: [2], camera: {} }]]) } }
+    : { images: new Map(), state: { images: new Map(), styles: new Map(), sceneOrder: [1], tags: new Map(),
     scenes: new Map([[1, { name: `Scene ${bytes.length}`, flags: { useCamera: true, useTags: false }, hiddenTags: [],
-      camera: { eye: [1, 2, 3], target: [0, 0, 0], up: [0, 0, 1], perspective: false, fov: 35, height: 4 } }]]) } })),
+      camera: { eye: [1, 2, 3], target: [0, 0, 0], up: [0, 0, 1], perspective: false, fov: 35, height: 4 } }]]) } }),
 }));
 vi.mock('../engine/renderAdapter', () => ({
   bodiesToRender: () => [], sketchesToRender: () => rendered.empty ? [] : [{}], imagesToRender: () => [], displayToRender: () => ({}),
@@ -27,7 +33,15 @@ vi.mock('../engine/renderAdapter', () => ({
   fogToRender: () => ({ enabled: true, near: 1, far: 20, color: '#eeece6' }),
   withRenderImageStore: (_images: unknown, run: () => unknown) => run(),
 }));
-vi.mock('../engine/sectionAdapter', () => ({ sectionsToRender: () => rendered.sections }));
+vi.mock('../engine/sectionAdapter', () => ({
+  // A model with definitions draws both its planes and cuts with its root's active plane.
+  sectionsToRender: (state: { definitions?: Map<number, { entities: { activeSectionPlaneId: number | null } }>; activeStyleId?: number;
+    styles: Map<number, { modeling: { sectionCutsVisible: boolean } }> }) => {
+    if (!state.definitions) return rendered.sections;
+    const active = state.styles.get(state.activeStyleId!)!.modeling.sectionCutsVisible ? state.definitions.get(1)!.entities.activeSectionPlaneId : null;
+    return { planes: [{ id: '/1' }, { id: '/2' }], cuts: active === null ? [] : [{ key: `/${active}` }] };
+  },
+}));
 vi.mock('@pushform/render', () => ({
   Viewport: class {
     sceneSync = { textures: { whenReady: rendered.texturesReady }, sections: { ready: Promise.resolve() } };
@@ -327,11 +341,54 @@ describe('Cloud model views', () => {
       await settle();
       // only the plane that cuts is drawn on the sheet
       expect(rendered.drawnSections.at(-1)).toEqual({ planes: [{ id: '/1', sheet: '1' }, { id: '/2' }], cuts: [{ key: '/1' }] });
-      expect(layoutViewportRender(state, entity)).toMatchObject({ cache: { sha256: '6'.repeat(64), sheet: '1' } });
-      // without a cutting plane, the picture records no sheet
-      rendered.sections = { planes: [{ id: '/2' }], cuts: [] };
+      expect(layoutViewportRender(state, entity)).toMatchObject({ cache: { sha256: '6'.repeat(64), sheet: '[[null,null,"1"]]' } });
+    } finally { rendered.sections = { planes: [], cuts: [] }; }
+  });
+
+  it('records no sheet for a picture of a model whose planes cut no view', async () => {
+    setLayoutCloudModelLoader(async () => new Uint8Array(8));
+    const state = cloudState(), entity = cloudView();
+    state.references.get(5)!.target = { kind: 'cloud', documentId: 'uncut', revisionId: 'rev-8', revisionNumber: 8, sha256: '8'.repeat(64), pinned: false };
+    const page = state.pages.get(state.pageOrder[0]!)!;
+    page.entities.set(entity.id, entity); page.entityOrder.push(entity.id);
+    rendered.sections = { planes: [{ id: '/2' }], cuts: [] };
+    try {
+      layoutViewportRender(state, entity);
+      await settle();
+      expect(rendered.drawnSections.at(-1)).toEqual({ planes: [{ id: '/2' }], cuts: [] });
       expect(layoutViewportRender(state, entity)!.cache).not.toHaveProperty('sheet');
     } finally { rendered.sections = { planes: [], cuts: [] }; }
+  });
+
+  it("numbers every plane's markers with the first page whose view cuts with it", async () => {
+    setLayoutCloudModelLoader(async () => new Uint8Array(7));
+    const state = cloudState();
+    state.references.get(5)!.target = { kind: 'cloud', documentId: 'scenes', revisionId: 'rev-7', revisionNumber: 7, sha256: '7'.repeat(64), pinned: false };
+    const plan = cloudView(), section = cloudView();
+    plan.image!.viewport!.scene = 'Plan';
+    section.image!.viewport!.scene = 'Section B';
+    const second = 9;
+    state.pages.set(second, { ...state.pages.get(state.pageOrder[0]!)!, id: second, name: 'Sections', entities: new Map(), entityOrder: [] });
+    state.pageOrder.push(second);
+    for (const [pageId, entity] of [[state.pageOrder[0]!, plan], [second, section]] as const) {
+      const page = state.pages.get(pageId)!;
+      page.entities.set(entity.id, entity); page.entityOrder.push(entity.id);
+    }
+    const drawn = async (entity: LayoutEntity) => {
+      layoutViewportRender(state, entity);
+      await settle();
+      layoutViewportRender(state, entity);
+      await settle();
+      return rendered.drawnSections.at(-1);
+    };
+    // The plan keeps the model's cut, plane 1; its markers name page 1 for plane 1 and page 2, where the section view
+    // cuts with it, for plane 2. The section view's markers name the same pages.
+    expect(await drawn(plan)).toEqual({ planes: [{ id: '/1', sheet: '1' }, { id: '/2', sheet: '2' }], cuts: [{ key: '/1' }] });
+    expect(await drawn(section)).toEqual({ planes: [{ id: '/1', sheet: '1' }, { id: '/2', sheet: '2' }], cuts: [{ key: '/2' }] });
+    expect(layoutViewportRender(state, plan)!.cache.sheet).toBe('[["Plan",null,"1"],["Section B",null,"2"]]');
+    // turning cuts off in the section view leaves plane 2 drawn on no sheet
+    section.image!.viewport!.display = { faceStyle: 'shaded', edges: true, profiles: true, backEdges: false, xray: false, hiddenGeometry: false, sections: { planes: true, cuts: false } };
+    expect(await drawn(plan)).toEqual({ planes: [{ id: '/1', sheet: '1' }, { id: '/2' }], cuts: [{ key: '/1' }] });
   });
 
   it('stores a transparent picture for a view of a cloud model that shows nothing', async () => {

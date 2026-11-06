@@ -58,3 +58,11 @@ export function openInApp(event: { button: number; metaKey: boolean; ctrlKey: bo
   event.preventDefault();
   navigateCommons(path);
 }
+
+/** Upload and edit routes open the contributor dialog. */
+export type PublishRoute = { kind: 'upload' } | { kind: 'edit'; model: string };
+export function publishRoute(hash: string): PublishRoute | null {
+  if (hash === '#upload' || hash === '#publish') return { kind: 'upload' };
+  const edit = /^#edit\/([a-z0-9][a-z0-9-]{0,95})$/.exec(hash);
+  return edit ? { kind: 'edit', model: edit[1]! } : null;
+}

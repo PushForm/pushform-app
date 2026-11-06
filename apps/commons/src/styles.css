@@ -9,6 +9,10 @@ button, select, input { accent-color: var(--accent); }
 button { background: var(--ink); color: white; border: 0; border-radius: 6px; padding: 12px 20px; cursor: pointer; }
 :focus-visible { outline: 3px solid #247ae0; outline-offset: 4px; }
 main:focus { outline: none; }
+/* Short loading states keep the footer below the fold, even once a route scrolls past the header, so it does not
+ * jump when content arrives. */
+main { min-height: 100vh; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .skip-link { position: absolute; top: -70px; left: 20px; padding: 14px; background: white; z-index: 3; }
 .skip-link:focus { top: 12px; }
 .commons { max-width: 1500px; margin: auto; padding: 0 6%; }
@@ -47,6 +51,10 @@ h2 { font-size: 29px; letter-spacing: -.8px; font-weight: 500; margin: 0; }
 .missing-image span:first-child { font-size: 52px; color: #8c9e80; }
 .card-body { padding: 22px; overflow-wrap: anywhere; }
 .card-body .eyebrow { font-size: 9px; letter-spacing: 1.1px; margin: 0 0 10px; }
+.skeleton-card .model-art { animation: skeleton-pulse 1.4s ease-in-out infinite; }
+.skeleton-card .card-body > * { background: #edf0e8; border-radius: 4px; color: transparent; }
+@keyframes skeleton-pulse { 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .skeleton-card .model-art { animation: none; } }
 .model-card h3 { margin: 0; font-weight: 600; font-size: 19px; }
 .model-card h3 a { text-decoration: none; }
 .model-card h3 a:hover { text-decoration: underline; }

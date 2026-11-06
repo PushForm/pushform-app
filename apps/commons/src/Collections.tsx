@@ -2,12 +2,13 @@
 // Copyright 2026 PushForm contributors
 import { createContext, useCallback, useContext, useEffect, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
 import { commonsProfileImageUrl, commonsSearchMatcher } from '@pushform/cloud';
-import type { CommonsModelsLoader, CommonsCreditedCreator, CommonsPublicProfile, CollectionFields, CommonsCollection, CommonsCollections, CommonsDiscovery } from '@pushform/cloud';
+import type { CommonsCreditedCreator, CommonsPublicProfile, CollectionFields, CommonsCollection, CommonsCollections, CommonsDiscovery } from '@pushform/cloud';
 import type { CommonsAccount } from './account';
 import { CommonsAccessGate } from './CommonsAccess';
 import { CommonsThumbnail } from './CommonsPreview';
-import { ModelCard, ModelGrid, ProfileLink } from './ModelCard';
+import { ModelCard, ModelGrid, ProfileLink, SkeletonGrid } from './ModelCard';
 import { filterModels, type CatalogFilters, type CatalogModel } from './catalog';
+import { newestFirst, useCatalogModels } from './catalogModels';
 import { navigateCommons, profilePath } from './route';
 
 const noSubscribe = () => () => {};
@@ -72,19 +73,28 @@ export function CollectionsProvider({ service, account, children }: { service: C
 export function CollectionCurator({ collection }: { collection: CommonsCollection }) {
   return <span>Curated by {collection.curator ? <ProfileLink handle={collection.curator.handle}>{collection.curator.displayName}</ProfileLink> : 'a Commons member'}</span>;
 }
-export function CollectionMosaic({ collection, models, filesUrl }: { collection: CommonsCollection; models: CatalogModel[]; filesUrl: string | undefined }) {
-  const visible = collection.modelIds.map(id => models.find(model => model.id === id)).filter((model): model is CatalogModel => Boolean(model));
-  return <div className="collection-mosaic" role="img" aria-label={`${collection.title}, ${visible.length} available models`}>
+/** The cover needs four models; reading a few more covers models that are no longer published. */
+const COVER_LOOKAHEAD = 8;
+/** Models in a collection that are still published, judged from the ones loaded for its cover. */
+function useCollectionCover(collection: CommonsCollection) {
+  const ids = collection.modelIds.slice(0, COVER_LOOKAHEAD);
+  const { models, missing } = useCatalogModels(ids);
+  return { visible: models, available: collection.modelIds.length - missing };
+}
+export function CollectionMosaic({ collection, filesUrl }: { collection: CommonsCollection; filesUrl: string | undefined }) {
+  const { visible, available } = useCollectionCover(collection);
+  return <div className="collection-mosaic" role="img" aria-label={`${collection.title}, ${available} available models`}>
     {Array.from({ length: 4 }, (_, index) => {
       const model = visible[index];
-      return <div key={index} className="mosaic-tile" aria-hidden="true">{model ? <CommonsThumbnail model={model} filesUrl={filesUrl} /> : index === 3 ? <span>{visible.length} {visible.length === 1 ? 'model' : 'models'}</span> : null}</div>;
+      return <div key={index} className="mosaic-tile" aria-hidden="true">{model ? <CommonsThumbnail model={model} filesUrl={filesUrl} /> : index === 3 ? <span>{available} {available === 1 ? 'model' : 'models'}</span> : null}</div>;
     })}
   </div>;
 }
-export function CollectionCard({ collection, models, filesUrl, privateLabel = false }: { collection: CommonsCollection; models: CatalogModel[]; filesUrl: string | undefined; privateLabel?: boolean }) {
-  const count = privateLabel ? collection.modelIds.filter(id => models.some(model => model.id === id)).length : collection.modelIds.length;
+export function CollectionCard({ collection, filesUrl, privateLabel = false }: { collection: CommonsCollection; filesUrl: string | undefined; privateLabel?: boolean }) {
+  const { available } = useCollectionCover(collection);
+  const count = privateLabel ? available : collection.modelIds.length;
   return <article className="model-card collection-card">
-    <a href={`#collections/${collection.id}`} aria-label={`View collection ${collection.title}`}><CollectionMosaic collection={collection} models={models} filesUrl={filesUrl} /></a>
+    <a href={`#collections/${collection.id}`} aria-label={`View collection ${collection.title}`}><CollectionMosaic collection={collection} filesUrl={filesUrl} /></a>
     <div className="card-body"><p className="eyebrow">Collection · {count} {count === 1 ? 'model' : 'models'}{privateLabel ? ` · ${collection.visibility}` : ''}</p>
       <h3><a href={`#collections/${collection.id}`}>{collection.title}</a></h3><p className="creator"><CollectionCurator collection={collection} /></p>
     </div>
@@ -103,8 +113,8 @@ export function CreatorCard({ creator, filesUrl }: { creator: CommonsPublicProfi
     <div className="card-body"><p className="eyebrow">Creator</p><h3><ProfileLink handle={creator.handle}>{creator.displayName}</ProfileLink></h3><p className="creator">@{creator.handle}</p></div>
   </article>;
 }
-function CreditedCreatorCard({ creator, models, filesUrl }: { creator: CommonsCreditedCreator; models: CatalogModel[]; filesUrl: string | undefined }) {
-  const firstModel = models.find(model => creator.modelIds.includes(model.id));
+function CreditedCreatorCard({ creator, filesUrl }: { creator: CommonsCreditedCreator; filesUrl: string | undefined }) {
+  const firstModel = useCatalogModels(creator.modelIds.slice(0, 1)).models[0];
   return <article className="model-card creator-card">
     <a className="model-art" href={`#creators/${creator.id}`} aria-label={`View creator ${creator.displayName}`}>
       {firstModel && <CommonsThumbnail model={firstModel} filesUrl={filesUrl} />}
@@ -112,9 +122,10 @@ function CreditedCreatorCard({ creator, models, filesUrl }: { creator: CommonsCr
     <div className="card-body"><p className="eyebrow">Credited creator</p><h3><a href={`#creators/${creator.id}`}>{creator.displayName}</a></h3><p className="creator">{creator.sourceName} · {creator.modelIds.length} {creator.modelIds.length === 1 ? 'model' : 'models'}</p></div>
   </article>;
 }
-export function CreditedCreatorPage({ id, models, filesUrl }: { id: string; models: CatalogModel[]; filesUrl: string | undefined }) {
+export function CreditedCreatorPage({ id, filesUrl }: { id: string; filesUrl: string | undefined }) {
   const { service, revision } = useCollections();
   const [creator, setCreator] = useState<CommonsCreditedCreator | null | undefined>();
+  const credited = useCatalogModels(creator?.modelIds ?? []);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
@@ -133,36 +144,31 @@ export function CreditedCreatorPage({ id, models, filesUrl }: { id: string; mode
     <p className="eyebrow">Credited creator · {creator.sourceName}</p><h1>{creator.displayName}</h1>
     <p>Models from {creator.sourceName} credit {creator.displayName} as their creator. This listing is based on the models’ source credits and is not a Commons account profile.</p>
     <FeatureAction key={creator.id} type="credited_creator" targetId={creator.id} />
-    <h2>Published models</h2><ModelGrid>{models.filter(model => creator.modelIds.includes(model.id)).map(model => <ModelCard key={model.id} model={model} filesUrl={filesUrl} />)}</ModelGrid>
+    <h2>Published models</h2><ModelGrid>{newestFirst(credited.models).map(model => <ModelCard key={model.id} model={model} filesUrl={filesUrl} />)}</ModelGrid>
+    {credited.loading && <p role="status">Loading models…</p>}
+    {credited.error && <p role="alert">{credited.error} <button onClick={credited.retry}>Retry models</button></p>}
   </article>;
 }
-export function FeaturedSection({ models, filesUrl, loadModels }: { models: CatalogModel[]; filesUrl: string | undefined; loadModels?: CommonsModelsLoader | undefined }) {
+/** `onSettled` reports when the section has its final height, so the page can scroll past it without a jump. */
+export function FeaturedSection({ filesUrl, onSettled }: { filesUrl: string | undefined; onSettled?: () => void }) {
   const { service, discovery, error, refresh } = useCollections();
   const [page, setPage] = useState(0);
-  const items = discovery?.featured.filter(item => item.type === 'model' ? Boolean(loadModels) || models.some(model => model.id === item.targetId) : item.type === 'credited_creator' ? discovery.creditedCreators.some(creator => creator.id === item.targetId) : item.type === 'creator' ? discovery.creators.some(creator => creator.id === item.targetId) : discovery.collections.some(collection => collection.id === item.targetId)) ?? [];
+  const items = discovery?.featured.filter(item => item.type === 'model' ? true : item.type === 'credited_creator' ? discovery.creditedCreators.some(creator => creator.id === item.targetId) : item.type === 'creator' ? discovery.creators.some(creator => creator.id === item.targetId) : discovery.collections.some(collection => collection.id === item.targetId)) ?? [];
   const pages = Math.ceil(items.length / 3);
   const currentPage = Math.min(page, Math.max(0, pages - 1));
-  const ids = items.slice(currentPage * 3, currentPage * 3 + 3).flatMap(item => item.type === 'model' ? [item.targetId]
-    : item.type === 'collection' ? discovery?.collections.find(value => value.id === item.targetId)?.modelIds.slice(0, 4) ?? []
-    : item.type === 'credited_creator' ? discovery?.creditedCreators.find(value => value.id === item.targetId)?.modelIds.slice(0, 1) ?? [] : []).join(',');
-  const [extra, setExtra] = useState<CatalogModel[]>([]);
-  const [modelError, setModelError] = useState<string | null>(null);
-  useEffect(() => {
-    setExtra([]); setModelError(null);
-    if (!loadModels || !ids) return;
-    const controller = new AbortController();
-    void loadModels(ids.split(','), controller.signal).then(value => { if (!controller.signal.aborted) setExtra(value); }, error => { if (!controller.signal.aborted) setModelError(message(error)); });
-    return () => controller.abort();
-  }, [loadModels, ids, discovery]);
-  const featuredModels = [...extra, ...models.filter(model => !extra.some(value => value.id === model.id))];
+  // Collection and creator cards load their own cover models.
+  const featured = useCatalogModels(items.slice(currentPage * 3, currentPage * 3 + 3).flatMap(item => item.type === 'model' ? [item.targetId] : []));
+  const featuredModels = featured.models, modelError = featured.error;
+  const settled = !service || Boolean(error) || Boolean(discovery) && !featured.loading;
+  useEffect(() => { if (settled) onSettled?.(); }, [settled, onSettled]);
   if (!service) return null;
   return <section className="featured-section" aria-labelledby="featured-title">
     <div className="section-heading"><div><h2 id="featured-title">Featured</h2><p className="section-description">Models, collections and creators, picked for makers.</p></div></div>
-    {error ? <div role="alert"><p>{error}</p><button onClick={refresh}>Retry featured</button></div> : !discovery ? <p role="status">Loading featured models, collections and creators…</p> : <>
+    {error ? <div role="alert"><p>{error}</p><button onClick={refresh}>Retry featured</button></div> : !discovery ? <SkeletonGrid count={3} className="featured-grid" label="Loading featured models, collections and creators…"/> : <>
       <ModelGrid className="featured-grid">{items.slice(currentPage * 3, currentPage * 3 + 3).map(item => {
         if (item.type === 'credited_creator') {
           const creator = discovery.creditedCreators.find(value => value.id === item.targetId);
-          return creator ? <CreditedCreatorCard key={item.id} creator={creator} models={featuredModels} filesUrl={filesUrl} /> : null;
+          return creator ? <CreditedCreatorCard key={item.id} creator={creator} filesUrl={filesUrl} /> : null;
         }
         if (item.type === 'creator') {
           const creator = discovery.creators.find(value => value.id === item.targetId);
@@ -170,13 +176,13 @@ export function FeaturedSection({ models, filesUrl, loadModels }: { models: Cata
         }
         if (item.type === 'collection') {
           const collection = discovery.collections.find(value => value.id === item.targetId);
-          return collection ? <CollectionCard key={item.id} collection={collection} models={featuredModels} filesUrl={filesUrl} /> : null;
+          return collection ? <CollectionCard key={item.id} collection={collection} filesUrl={filesUrl} /> : null;
         }
         const model = featuredModels.find(value => value.id === item.targetId);
         return model ? <ModelCard key={item.id} model={model} filesUrl={filesUrl} typeLabel="Model" /> : null;
       })}</ModelGrid>
       {pages > 1 && <div className="featured-pagination" aria-label="Featured pages"><button className="secondary-button" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>Previous featured</button><span role="status">{currentPage * 3 + 1}–{Math.min(items.length, currentPage * 3 + 3)} of {items.length}</span><button className="secondary-button" disabled={currentPage === pages - 1} onClick={() => setPage(currentPage + 1)}>Next featured</button></div>}
-      {modelError && <p role="alert">{modelError} <button onClick={refresh}>Retry featured models</button></p>}
+      {modelError && <p role="alert">{modelError} <button onClick={featured.retry}>Retry featured models</button></p>}
       {items.length === 0 && <p className="section-description">Featured projects will appear here.</p>}
     </>}
   </section>;
@@ -196,11 +202,14 @@ export function FeatureAction({ type, targetId, eligible = true }: { type: 'mode
     {error && <p role="alert">{error}</p>}
   </div>;
 }
-export function PublicCollectionResults({ models, filesUrl, filters }: { models: CatalogModel[]; filesUrl: string | undefined; filters: CatalogFilters }) {
+export function PublicCollectionResults({ filesUrl, filters }: { filesUrl: string | undefined; filters: CatalogFilters }) {
   const { discovery, error, refresh, service } = useCollections();
+  // Searching and filtering look inside collections, so only then are all their models needed.
+  const filtering = Boolean(filters.query.trim() || filters.category || filters.license || filters.commercial);
+  const { models, loading } = useCatalogModels(filtering ? [...new Set(discovery?.collections.flatMap(collection => collection.modelIds) ?? [])] : []);
   if (!service) return <p>Collections are unavailable in this build.</p>;
   if (error) return <div role="alert"><p>{error}</p><button onClick={refresh}>Retry collections</button></div>;
-  if (!discovery) return <p role="status">Loading collections…</p>;
+  if (!discovery || filtering && loading) return <p role="status">Loading collections…</p>;
   const matches = commonsSearchMatcher(filters.query);
   const shown = discovery.collections.filter(collection => {
     const members = models.filter(model => collection.modelIds.includes(model.id));
@@ -209,10 +218,10 @@ export function PublicCollectionResults({ models, filesUrl, filters }: { models:
     return matches(searchable) && (!(filters.category || filters.license) || filterModels(members, { ...filters, query: '', commercial: false }).length > 0);
   });
   return <><p className="result-count" role="status">{shown.length} {shown.length === 1 ? 'collection' : 'collections'}</p>
-    {shown.length ? <ModelGrid>{shown.map(collection => <CollectionCard key={collection.id} collection={collection} models={models} filesUrl={filesUrl} />)}</ModelGrid> : <p>No public collections match those filters.</p>}
+    {shown.length ? <ModelGrid>{shown.map(collection => <CollectionCard key={collection.id} collection={collection} filesUrl={filesUrl} />)}</ModelGrid> : <p>No public collections match those filters.</p>}
   </>;
 }
-export function ProfileCollections({ handle, owner = false, profileId, models, filesUrl }: { handle: string; owner?: boolean; profileId?: string; models: CatalogModel[]; filesUrl: string | undefined }) {
+export function ProfileCollections({ handle, owner = false, profileId, filesUrl }: { handle: string; owner?: boolean; profileId?: string; filesUrl: string | undefined }) {
   const { discovery, error, refresh, service, userId } = useCollections();
   if (!service) return null;
   const isOwner = owner && userId !== null && userId === profileId;
@@ -221,8 +230,8 @@ export function ProfileCollections({ handle, owner = false, profileId, models, f
     <div className="section-heading"><h2 id="profile-collections-title">{isOwner ? 'My Collections' : 'Public collections'}</h2>
       {isOwner && <a className="primary-button" href="#collections/new">New Collection</a>}
     </div>
-    {isOwner ? <OwnedCollections models={models} filesUrl={filesUrl} /> : error ? <div role="alert"><p>{error}</p><button onClick={refresh}>Retry collections</button></div> : !collections ? <p role="status">Loading collections…</p> : collections.length ?
-      <ModelGrid>{collections.map(collection => <CollectionCard key={collection.id} collection={collection} models={models} filesUrl={filesUrl} />)}</ModelGrid> : <p>No public collections to show.</p>}
+    {isOwner ? <OwnedCollections filesUrl={filesUrl} /> : error ? <div role="alert"><p>{error}</p><button onClick={refresh}>Retry collections</button></div> : !collections ? <p role="status">Loading collections…</p> : collections.length ?
+      <ModelGrid>{collections.map(collection => <CollectionCard key={collection.id} collection={collection} filesUrl={filesUrl} />)}</ModelGrid> : <p>No public collections to show.</p>}
   </section>;
 }
 async function returnToOwnerProfile(account: CommonsAccount | null): Promise<void> {
@@ -233,28 +242,29 @@ async function returnToOwnerProfile(account: CommonsAccount | null): Promise<voi
     navigateCommons('/#account');
   }
 }
-function OwnedCollections({ models, filesUrl }: { models: CatalogModel[]; filesUrl: string | undefined }) {
+function OwnedCollections({ filesUrl }: { filesUrl: string | undefined }) {
   const { own, ownError, refresh } = useCollectionsAfterSetup();
   if (ownError) return <div role="alert"><p>{ownError}</p><button onClick={refresh}>Reload my collections</button></div>;
   if (!own) return <p role="status">Loading your collections…</p>;
-  return <>{own.length ? <ModelGrid>{own.map(collection => <CollectionCard key={collection.id} collection={collection} models={models} filesUrl={filesUrl} privateLabel />)}</ModelGrid> : <p>You haven’t made a collection yet. Gather models for a project or share useful finds.</p>}</>;
+  return <>{own.length ? <ModelGrid>{own.map(collection => <CollectionCard key={collection.id} collection={collection} filesUrl={filesUrl} privateLabel />)}</ModelGrid> : <p>You haven’t made a collection yet. Gather models for a project or share useful finds.</p>}</>;
 }
-export function CollectionsRoute({ route, models, filesUrl }: { route: string; models: CatalogModel[]; filesUrl: string | undefined }) {
+export function CollectionsRoute({ route, filesUrl }: { route: string; filesUrl: string | undefined }) {
   const { service, account, userId } = useCollections();
   useEffect(() => { if (route === '#collections/new') document.title = 'New collection — PushForm Commons'; }, [route]);
   if (!service) return <section className="status-panel"><h1>Collections are unavailable in this build.</h1></section>;
   if (route === '#collections/new') {
     if (!account) return <p>Sign-in is unavailable in this build.</p>;
     return <CommonsAccessGate account={account}><section className="collection-page" key={userId}>
-      <h1>New collection</h1><CollectionEditor models={models} filesUrl={filesUrl} collection={null} onCancel={() => { void returnToOwnerProfile(account); }} />
+      <h1>New collection</h1><CollectionEditor filesUrl={filesUrl} collection={null} onCancel={() => { void returnToOwnerProfile(account); }} />
     </section></CommonsAccessGate>;
   }
   const id = /^#collections\/([a-f0-9-]{36})$/.exec(route)?.[1];
-  return id ? <CollectionDetail key={id + ':' + userId} id={id} models={models} filesUrl={filesUrl} /> : null;
+  return id ? <CollectionDetail key={id + ':' + userId} id={id} filesUrl={filesUrl} /> : null;
 }
-function CollectionDetail({ id, models, filesUrl }: { id: string; models: CatalogModel[]; filesUrl: string | undefined }) {
+function CollectionDetail({ id, filesUrl }: { id: string; filesUrl: string | undefined }) {
   const { service, own, revision, refresh } = useCollections();
   const [data, setData] = useState<CommonsCollection | null | undefined>(undefined); const [error, setError] = useState<string | null>(null);
+  const loaded = useCatalogModels(data?.modelIds ?? []);
   const [editing, setEditing] = useState(false);
   useEffect(() => {
     const controller = new AbortController(); setError(null);
@@ -266,28 +276,30 @@ function CollectionDetail({ id, models, filesUrl }: { id: string; models: Catalo
   if (data === undefined) return <p className="status-panel" role="status">Loading collection…</p>;
   if (!data) return <section className="status-panel"><h1>This collection isn’t available.</h1><p>It may be private or have been removed.</p><a href="#collections">Browse public collections</a></section>;
   const editable = own?.some(value => value.id === id);
-  const members = data.modelIds.map(memberId => models.find(model => model.id === memberId)).filter((model): model is CatalogModel => Boolean(model));
+  const members = loaded.models;
   return <section className="collection-page"><a className="back-link" href="#collections">← All collections</a>
-    {editing && editable ? <CollectionEditor collection={data} models={models} filesUrl={filesUrl} onCancel={() => setEditing(false)} onSaved={value => { setData(value); setEditing(false); }} /> : <>
-      <div className="collection-hero"><CollectionMosaic collection={data} models={models} filesUrl={filesUrl} />
+    {editing && editable ? <CollectionEditor collection={data} filesUrl={filesUrl} onCancel={() => setEditing(false)} onSaved={value => { setData(value); setEditing(false); }} /> : <>
+      <div className="collection-hero"><CollectionMosaic collection={data} filesUrl={filesUrl} />
         <div><p className="eyebrow">{data.visibility} collection · {members.length} {members.length === 1 ? 'model' : 'models'}</p><h1>{data.title}</h1>
           <p className="creator"><CollectionCurator collection={data} /></p><p className="description">{data.description}</p>
-          <div className="collection-actions">{editable && <button className="secondary-button" onClick={() => setEditing(true)}>Edit collection</button>}<FeatureAction key={data.id + data.version} type="collection" targetId={id} eligible={data.visibility === 'public' && members.length > 0} /></div>
+          <div className="collection-actions">{editable && <button className="secondary-button" onClick={() => setEditing(true)}>Edit collection</button>}<FeatureAction key={data.id + data.version} type="collection" targetId={id} eligible={data.visibility === 'public' && members.length > 0 && !loaded.loading} /></div>
         </div>
       </div>
       <section className="collection-members" aria-labelledby="collection-members-title"><div className="section-heading"><h2 id="collection-members-title">Models in this collection</h2><p className="section-description">Each model retains its own license and credits.</p></div>
         <ModelGrid>{members.map(model => <ModelCard key={model.id} model={model} filesUrl={filesUrl} />)}</ModelGrid>
-        {!members.length && <p>No published models are available in this collection.</p>}
+        {loaded.loading ? <p role="status">Loading models…</p> : !members.length && <p>No published models are available in this collection.</p>}
+        {loaded.error && <p role="alert">{loaded.error} <button onClick={loaded.retry}>Retry models</button></p>}
       </section>
     </>}
   </section>;
 }
-function CollectionEditor({ collection, models, filesUrl, onCancel, onSaved }: { collection: CommonsCollection | null; models: CatalogModel[]; filesUrl: string | undefined; onCancel: () => void; onSaved?: (value: CommonsCollection) => void }) {
+function CollectionEditor({ collection, filesUrl, onCancel, onSaved }: { collection: CommonsCollection | null; filesUrl: string | undefined; onCancel: () => void; onSaved?: (value: CommonsCollection) => void }) {
   const { service, refresh, account } = useCollections();
   const [fields, setFields] = useState<CollectionFields>(() => collection ? { title: collection.title, description: collection.description, visibility: collection.visibility, modelIds: [...collection.modelIds] } : { title: '', description: '', visibility: 'public', modelIds: [] });
   // Keep the version the editor opened with. A refresh must never silently rebase a stale draft.
   const [expectedVersion] = useState(collection?.version ?? null);
   const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null); const [confirmDelete, setConfirmDelete] = useState(false);
+  const { models, loading } = useCatalogModels(fields.modelIds);
   const patch = (value: Partial<CollectionFields>) => setFields(current => ({ ...current, ...value }));
   const move = (index: number, offset: number) => { const ids = [...fields.modelIds]; [ids[index], ids[index + offset]] = [ids[index + offset]!, ids[index]!]; patch({ modelIds: ids }); };
   const submit = (event: FormEvent) => {
@@ -304,7 +316,7 @@ function CollectionEditor({ collection, models, filesUrl, onCancel, onSaved }: {
     <h2>Models in this collection</h2><p className="section-description">{fields.modelIds.length} of 100 models. The first four available models form the collection cover.</p>
     <ol className="collection-edit-members">{fields.modelIds.map((id, index) => {
       const model = models.find(value => value.id === id);
-      return <li key={id}><div className="collection-edit-thumb">{model && <CommonsThumbnail model={model} filesUrl={filesUrl} />}</div><span>{model?.title ?? 'Unavailable model'}</span><div className="member-actions">
+      return <li key={id}><div className="collection-edit-thumb">{model && <CommonsThumbnail model={model} filesUrl={filesUrl} />}</div><span>{model?.title ?? (loading ? 'Loading model…' : 'Unavailable model')}</span><div className="member-actions">
         <button type="button" className="secondary-button" disabled={busy || index === 0} aria-label={`Move ${model?.title ?? 'unavailable model'} up`} onClick={() => move(index, -1)}>Move up</button>
         <button type="button" className="secondary-button" disabled={busy || index === fields.modelIds.length - 1} aria-label={`Move ${model?.title ?? 'unavailable model'} down`} onClick={() => move(index, 1)}>Move down</button>
         <button type="button" className="secondary-button" disabled={busy} aria-label={`Remove ${model?.title ?? 'unavailable model'} from collection`} onClick={() => patch({ modelIds: fields.modelIds.filter(value => value !== id) })}>Remove</button>

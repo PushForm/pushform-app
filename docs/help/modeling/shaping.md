@@ -48,13 +48,13 @@ Edges you selected before choosing the tool start out picked. Escape clears the 
 
 ## Fillet and Chamfer settings and limits
 
-The radius or distance you type is remembered until the app is closed, also when you switch tools. For a fillet, type a number followed by `s` (for example `12s`) to set how many segments a full circle of fillet faces would have; the default is 24, so a right-angle edge gets 6 faces. Fillet faces form one smooth surface.
+The radius or distance you type is remembered until the app is closed, also when you switch tools. For a fillet, set **Segments** in the tool options bar, or type a number followed by `s` (for example `12s`), to choose how many segments a full circle of fillet faces would have; the default is 24, so a right-angle edge gets 6 faces. Fillet faces form one smooth surface.
 
 Outside edges are cut away and inside corners are filled. Picked edges that meet end to end are joined with a mitre, as in a picture frame. Where picked edges turn from an outside edge to an inside corner, each part is rounded or beveled on its own and ends flat on the face across its end. Chamfer can also bevel three picked edges that meet at one corner, such as all twelve edges of a box: the three bevels cut into each other and meet in a point. Fillet cannot round such a corner. When the value is too large for the faces beside an edge, when the fillets of two edges would run into each other, or when three picked edges meet at one corner for a fillet, nothing changes: the status bar explains why and the picked edges stay so you can type a smaller value.
 
 ## Shape edges like a router bit with Profile Edges
 
-Choose **Profile Edges** from the Edge dropdown in the toolbar, next to Fillet and Chamfer, or search for it by name. Pick a profile from the **Profile** list at the right of the status bar:
+Choose **Profile Edges** from the Edge dropdown in the toolbar, next to Fillet and Chamfer, or search for it by name. Pick a profile from the row of profile buttons in the tool options bar at the top of the view:
 
 - **Roundover**: a quarter round. The size is its radius.
 - **Cove**: a hollow quarter round. The size is its radius.

@@ -65,16 +65,78 @@ export interface EntryField {
   readonly locked?: boolean | undefined;
 }
 
-/** A setting the tool offers as a pick list beside its status, such as Profile Edges' router-bit profile. */
-export interface ToolChoice {
-  /** Stable id within the tool; keys `onChoice`. */
-  readonly id: string;
-  /** Accessible name, e.g. "Profile". */
-  readonly label: string;
-  /** The option picked now (its `value`). */
+/** Display priority of a bar control: lower numbers stay visible longest as the bar narrows. */
+export type ToolSettingPriority = 1 | 2 | 3;
+
+/** One option of a `choice` setting. */
+export interface ToolSettingOption {
   readonly value: string;
-  readonly options: readonly { readonly value: string; readonly label: string }[];
+  readonly label: string;
+  /** Icon name, shown instead of the label where the bar has room (`display: 'icons'`). */
+  readonly icon?: string | undefined;
+  /** Disabled options stay visible; `reason` says why. */
+  readonly disabled?: boolean | undefined;
+  readonly reason?: string | undefined;
 }
+
+/**
+ * A control in the tool options bar: a tool setting (shapes every operation until changed) or a
+ * mode toggle (changes what the next operation produces). Operation values are `EntryField`s and
+ * never appear here; held keys are `ToolStatus.held`.
+ */
+export type ToolSetting =
+  | {
+      readonly kind: 'choice';
+      readonly id: string;
+      readonly label: string;
+      readonly value: string;
+      readonly options: readonly ToolSettingOption[];
+      /** Icon row (collapses to a list when the bar is narrow), buttons, or a list. Buttons by default. */
+      readonly display?: 'icons' | 'buttons' | 'menu' | undefined;
+      /** Modifier tap that cycles or toggles this choice, printed on it. */
+      readonly key?: ToolSettingKey | undefined;
+      readonly priority?: ToolSettingPriority | undefined;
+    }
+  | {
+      readonly kind: 'quantity';
+      readonly id: string;
+      readonly label: string;
+      /** Current value, formatted in the document's units (empty when unset). */
+      readonly value: string;
+      /** How typed text is read: a length or angle in the field's units, or a whole count. */
+      readonly quantity: 'length' | 'angle' | 'count';
+      readonly disabled?: boolean | undefined;
+      readonly priority?: ToolSettingPriority | undefined;
+    }
+  | {
+      readonly kind: 'toggle';
+      readonly id: string;
+      readonly label: string;
+      readonly on: boolean;
+      readonly key?: ToolSettingKey | undefined;
+      readonly priority?: ToolSettingPriority | undefined;
+    }
+  | {
+      readonly kind: 'action';
+      readonly id: string;
+      readonly label: string;
+      readonly primary?: boolean | undefined;
+      readonly disabled?: boolean | undefined;
+      readonly priority?: ToolSettingPriority | undefined;
+    }
+  | {
+      /** A short read-only note at the bar's end, such as why some options are disabled. */
+      readonly kind: 'note';
+      readonly id: string;
+      readonly text: string;
+      readonly priority?: ToolSettingPriority | undefined;
+    };
+
+/** The tapped modifier that toggles a setting: primary is the Ctrl tap, secondary the Alt tap. */
+export type ToolSettingKey = 'primary' | 'secondary';
+
+/** What a bar control sends the tool: a choice's value, a toggle's new state, a parsed quantity, or nothing for an action. */
+export type ToolSettingValue = string | boolean | VcbValue | undefined;
 
 export interface ToolStatus {
   /** Instructor / status bar text. */
@@ -85,8 +147,14 @@ export interface ToolStatus {
   readonly vcbValue?: string | undefined;
   /** Value fields to draw in the viewport, in Tab order. None: typing opens one beside the pointer. */
   readonly fields?: readonly EntryField[] | undefined;
-  /** Settings the tool offers as pick lists (`onChoice`). */
-  readonly choices?: readonly ToolChoice[] | undefined;
+  /** Tool settings and mode toggles for the tool options bar (`onSetting`). None: no bar. */
+  readonly settings?: readonly ToolSetting[] | undefined;
+  /**
+   * Whether the tool is placing a point (between the clicks of a click-move-click operation), so the
+   * bar lets the pointer through. Defaults to `hasPendingWork()`; tools that gather picks while
+   * their bar stays usable (edge picking) report false.
+   */
+  readonly placing?: boolean | undefined;
 }
 
 export interface ToolContext {
@@ -150,8 +218,8 @@ export interface Tool {
   onEntry?(values: Readonly<Record<string, VcbValue>>): void;
   /** Hold (or with null, release) a typed field value in the preview while the others are set. */
   onEntryLock?(id: string, value: VcbValue | null): void;
-  /** A pick list of `status().choices` was set to `value`. */
-  onChoice?(id: string, value: string): void;
+  /** A control of `status().settings` was changed (or, for an action, clicked). */
+  onSetting?(id: string, value: ToolSettingValue): void;
   onCancel(): void;
   overlay(): readonly OverlayPrimitive[];
   status(): ToolStatus;

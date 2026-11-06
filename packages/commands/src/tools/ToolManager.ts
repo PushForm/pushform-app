@@ -7,7 +7,7 @@ import type { CommandRegistry } from '../registry/CommandRegistry';
 import type { ToolHost } from '../registry/Command';
 import type { VcbValue } from '../vcb/parse';
 import type { OverlayPrimitive } from './overlay';
-import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus, ToolWheelEvent } from './Tool';
+import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolSettingValue, ToolStatus, ToolWheelEvent } from './Tool';
 import { OrbitTool } from './impl/Orbit';
 import { PanTool } from './impl/Pan';
 
@@ -290,11 +290,11 @@ export class ToolManager implements ToolHost {
     this.afterInteraction();
   }
 
-  /** Set a pick list the active tool offers (`ToolStatus.choices`). */
-  choose(id: string, value: string): void {
-    const tool = this.temp ?? this.active;
-    if (!tool?.onChoice) return;
-    this.call(() => tool.onChoice?.(id, value));
+  /** A control of the tool options bar was changed: goes to the tool whose settings the bar shows. */
+  setting(id: string, value: ToolSettingValue): void {
+    const tool = this.visualTool;
+    if (!tool?.onSetting) return;
+    this.call(() => tool.onSetting?.(id, value));
     this.afterInteraction();
   }
 
@@ -314,8 +314,19 @@ export class ToolManager implements ToolHost {
     return p.length || t.length ? [...p, ...a, ...t] : a;
   }
 
+  /**
+   * The status the shell shows. Settings and `placing` come from the tool whose visuals show
+   * (`visualTool`), so during a temporary orbit, pan or zoom the bar keeps the set-aside tool's
+   * settings; the rest comes from the tool handling input.
+   */
   status(): ToolStatus {
-    return (this.temp ?? this.active)?.status() ?? EMPTY_STATUS;
+    const input = this.temp ?? this.active;
+    const s = input?.status() ?? EMPTY_STATUS;
+    const owner = this.visualTool;
+    const own = owner === input ? s : owner?.status();
+    const settings = own?.settings?.length ? own.settings : undefined;
+    const placing = own?.placing ?? owner?.hasPendingWork?.() ?? false;
+    return { ...s, settings, placing };
   }
 
   // --- internals ------------------------------------------------------------------------------
@@ -367,7 +378,7 @@ export class ToolManager implements ToolHost {
   private emitStatus(): void {
     const s = this.status();
     const prev = this.lastStatus;
-    if (s.instructor === prev.instructor && s.vcbLabel === prev.vcbLabel && s.vcbValue === prev.vcbValue && sameFields(s.fields, prev.fields) && JSON.stringify(s.choices ?? []) === JSON.stringify(prev.choices ?? [])) return;
+    if (s.instructor === prev.instructor && s.vcbLabel === prev.vcbLabel && s.vcbValue === prev.vcbValue && s.placing === prev.placing && sameFields(s.fields, prev.fields) && JSON.stringify(s.settings ?? []) === JSON.stringify(prev.settings ?? [])) return;
     this.lastStatus = s;
     this.events.emit('statusChanged', s);
   }

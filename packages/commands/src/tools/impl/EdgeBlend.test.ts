@@ -283,21 +283,24 @@ describe('Fillet and Chamfer tools', () => {
 });
 
 describe('Profile Edges tool', () => {
-  it('offers its profiles as a pick list, takes a size and a chamfer angle, previews and commits one undo step', async () => {
+  it('offers its profiles in the tool options bar, takes a size and a chamfer angle, previews and commits one undo step', async () => {
     const { host, registry, tools, body } = setup();
     const profile = tools.get('profile') as EdgeBlendTool;
     expect(profile.title).toBe('Profile Edges');
     const id = addBox(registry);
     const top = [edgeAt(body(id), [0, 0, 1], [1, 0, 1]), edgeAt(body(id), [1, 0, 1], [1, 1, 1]), edgeAt(body(id), [1, 1, 1], [0, 1, 1]), edgeAt(body(id), [0, 1, 1], [0, 0, 1])];
     tools.activate('profile');
-    const choice = tools.status().choices![0]!;
-    expect(choice).toMatchObject({ id: 'profile', label: 'Profile', value: 'roundover' });
-    expect(choice.options.map((o) => o.label)).toEqual(['Roundover', 'Cove', 'Ogee', 'Bead', 'Chamfer', 'Step']);
+    const choice = tools.status().settings![0]!;
+    expect(choice).toMatchObject({ kind: 'choice', id: 'profile', label: 'Profile', value: 'roundover', display: 'icons' });
+    expect(choice.kind === 'choice' && choice.options.map((o) => o.label)).toEqual(['Roundover', 'Cove', 'Ogee', 'Bead', 'Chamfer', 'Step']);
+    expect(tools.status().settings!.map((c) => c.id)).toEqual(['profile', 'size']);
+    // edge picking keeps the bar usable
+    expect(tools.status().placing).toBe(false);
     expect(tools.status().vcbLabel).toBe('Size');
-    tools.choose('profile', 'ogee');
+    tools.setting('profile', 'ogee');
     expect(profile.profile).toBe('ogee');
     expect(tools.status().instructor).toMatch(/ogee/);
-    tools.choose('profile', 'spiral');
+    tools.setting('profile', 'spiral');
     expect(profile.profile).toBe('ogee');
     for (const e of top) tools.click(at(edgeRef(id, e)));
     tools.onVcb({ kind: 'length', meters: 0.1, raw: 0.1, unit: null });
@@ -305,7 +308,7 @@ describe('Profile Edges tool', () => {
     expect(profile.message).toBeNull();
     expect(profile.previewMeshes).toHaveLength(1);
     // another profile is previewed afresh
-    tools.choose('profile', 'bead');
+    tools.setting('profile', 'bead');
     await profile.previewSettled();
     expect(profile.previewMeshes).toHaveLength(1);
     const entries = host.undoStack.length;
@@ -319,10 +322,17 @@ describe('Profile Edges tool', () => {
     tools.onVcb({ kind: 'angle', degrees: 30 });
     expect(profile.profile).toBe('chamfer');
     expect(profile.angleDeg).toBe(30);
-    expect(tools.status().choices![0]!.options.find((o) => o.value === 'chamfer')!.label).toBe('Chamfer 30°');
-    // Fillet and Chamfer offer no pick list
+    expect(tools.status().settings!.find((c) => c.id === 'angle')).toMatchObject({ kind: 'quantity', value: '30°', quantity: 'angle' });
+    // the bar's size and angle fields set the tool too
+    tools.setting('size', { kind: 'length', meters: 0.05, raw: 0.05, unit: null });
+    expect(profile.size).toBe(0.05);
+    tools.setting('angle', { kind: 'angle', degrees: 20 });
+    expect(profile.angleDeg).toBe(20);
+    // Fillet offers no profile, but its segments
     tools.activate('fillet');
-    expect(tools.status().choices).toBeUndefined();
+    expect(tools.status().settings!.map((c) => c.id)).toEqual(['size', 'segments']);
+    tools.setting('segments', { kind: 'segments', count: 12 });
+    expect((tools.get('fillet') as EdgeBlendTool).segments).toBe(12);
   });
 
   it('explains a size too large for the picked edges and keeps them', async () => {
@@ -331,7 +341,7 @@ describe('Profile Edges tool', () => {
     const id = addBox(registry);
     const e1 = edgeAt(body(id), [0, 0, 1], [1, 0, 1]);
     tools.activate('profile');
-    tools.choose('profile', 'bead');
+    tools.setting('profile', 'bead');
     tools.click(at(edgeRef(id, e1)));
     tools.onVcb({ kind: 'length', meters: 0.6, raw: 0.6, unit: null });
     await profile.previewSettled();

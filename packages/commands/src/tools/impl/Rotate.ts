@@ -21,7 +21,8 @@ import type { EntityRef } from '@pushform/model';
 import { m4rotationAbout } from '../../commands/transform';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
-import type { ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import type { ToolKeyEvent, ToolPointerEvent, ToolSettingValue, ToolStatus } from '../Tool';
+import { toggleSetting } from '../settings';
 import { pointerField } from '../entry';
 import { DRAG_PX, entityOverlay, HOVER_COLOR, inferenceOverlay, screenDist, worldPerPixelAt } from '../toolUtil';
 import { AXIS_COLOR, AXIS_DIR, movedOutline, TransformToolBase, worldToScreen } from './transformShared';
@@ -271,6 +272,17 @@ export class RotateTool extends TransformToolBase {
   }
 
   status(): ToolStatus {
+    return { ...this.baseStatus(), settings: [toggleSetting('copy', 'Copy', this.copy, 'primary')] };
+  }
+
+  onSetting(id: string, value: ToolSettingValue): void {
+    if (id !== 'copy' || typeof value !== 'boolean') return;
+    this.copy = value;
+    this.ctx?.requestRender();
+    this.ctx?.statusChanged();
+  }
+
+  private baseStatus(): ToolStatus {
     const copyHint = this.copy ? ' [Copy]' : '';
     const s = this.state;
     if (s.kind === 'rotating') {

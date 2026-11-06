@@ -22,7 +22,8 @@ import {
 } from '../../commands/edgeBlend';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
-import type { Tool, ToolChoice, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolSetting, ToolSettingValue, ToolStatus } from '../Tool';
+import { countFrom, countSetting, degreesFrom, lengthFrom } from '../settings';
 import { pointerField } from '../entry';
 import { HOVER_COLOR, hostOfTool } from '../toolUtil';
 import { fmtLength } from './constructionUtil';
@@ -221,13 +222,6 @@ export class EdgeBlendTool implements Tool {
     this.edited();
   }
 
-  onChoice(id: string, value: string): void {
-    if (this.kind !== 'profile' || id !== 'profile' || !(EDGE_PROFILES as readonly string[]).includes(value)) return;
-    this.profile = value as EdgeProfile;
-    this.error = null;
-    this.edited();
-  }
-
   onCancel(): void {
     if (this.picked.length || this.error || this.previewError) {
       this.clearSet();
@@ -259,13 +253,56 @@ export class EdgeBlendTool implements Tool {
     else if (!this.picked.length) instructor = `Click edges of a solid to ${this.kind === 'fillet' ? 'round' : this.kind === 'chamfer' ? 'bevel' : `shape with a ${PROFILE_LABELS[this.profile].toLowerCase()}`} (Shift-click toggles).`;
     else if (this.size === null) instructor = `Type the ${label.toLowerCase()}${this.kind === 'profile' && this.profile === 'chamfer' ? ', or an angle such as 30°' : ''}.`;
     else instructor = `${this.picked.length} edge${this.picked.length === 1 ? '' : 's'} picked. Press Enter or double-click to apply, Esc to clear.`;
-    const choices: ToolChoice[] = this.kind !== 'profile' ? [] : [{
-      id: 'profile',
-      label: 'Profile',
-      value: this.profile,
-      options: EDGE_PROFILES.map((p) => ({ value: p, label: p === 'chamfer' && this.angleDeg !== null ? `Chamfer ${this.angleDeg}°` : PROFILE_LABELS[p] })),
-    }];
-    return { instructor, vcbLabel: label, vcbValue: value, fields: this.picked.length ? [pointerField(label, 'length', value)] : [], ...(choices.length ? { choices } : {}) };
+    return {
+      instructor,
+      vcbLabel: label,
+      vcbValue: value,
+      fields: this.picked.length ? [pointerField(label, 'length', value)] : [],
+      settings: this.barSettings(label, value),
+      // picking edges keeps the bar usable
+      placing: false,
+    };
+  }
+
+  /** The tool options bar: profile (Profile Edges), size, the chamfer profile's angle, fillet segments. */
+  private barSettings(label: string, value: string | undefined): ToolSetting[] {
+    const out: ToolSetting[] = [];
+    if (this.kind === 'profile') {
+      out.push({
+        kind: 'choice',
+        id: 'profile',
+        label: 'Profile',
+        value: this.profile,
+        display: 'icons',
+        options: EDGE_PROFILES.map((p) => ({ value: p, label: PROFILE_LABELS[p], icon: `profile-${p}` })),
+      });
+    }
+    out.push({ kind: 'quantity', id: 'size', label, value: value ?? '', quantity: 'length' });
+    if (this.kind === 'profile' && this.profile === 'chamfer') {
+      out.push({ kind: 'quantity', id: 'angle', label: 'Angle', value: `${this.angleDeg ?? 45}°`, quantity: 'angle', priority: 2 });
+    }
+    if (this.kind === 'fillet') out.push({ ...countSetting('segments', 'Segments', this.segments), priority: 3 });
+    return out;
+  }
+
+  onSetting(id: string, value: ToolSettingValue): void {
+    if (id === 'profile' && typeof value === 'string' && (EDGE_PROFILES as readonly string[]).includes(value)) {
+      this.profile = value as EdgeProfile;
+    } else if (id === 'size') {
+      const m = lengthFrom(value);
+      if (m === null || !(m > 0)) return;
+      this.size = m;
+    } else if (id === 'angle') {
+      const d = degreesFrom(value);
+      if (d === null || !(d > 0 && d < 90)) return;
+      this.angleDeg = d;
+    } else if (id === 'segments') {
+      const n = countFrom(value);
+      if (n === null || n < 3 || n > 999) return;
+      this.segments = n;
+    } else return;
+    this.error = null;
+    this.edited();
   }
 
   // --- internals ------------------------------------------------------------------------------

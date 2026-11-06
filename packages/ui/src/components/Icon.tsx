@@ -200,6 +200,13 @@ const PATHS: Record<string, string> = {
   'tool-lozenge': 'M9 5h6a7 7 0 0 1 0 14H9A7 7 0 0 1 9 5Z',
   'tool-axes': 'M12 20V4M12 20l-8 -4M12 20l8 -4M12 4l-2 2M12 4l2 2',
   'tool-chamfer': 'M4 20V12l8-8h8M4 4v3M8 4H4',
+  // Profile Edges profiles: the end of a board, its top-right edge shaped by the profile.
+  'profile-roundover': 'M4 20V5h8a8 8 0 0 1 8 8v7z',
+  'profile-cove': 'M4 20V5h8a8 8 0 0 0 8 8v7z',
+  'profile-ogee': 'M4 20V5h7q4 0 4.5 4t4.5 4v7z',
+  'profile-bead': 'M4 20V5h11v2a3 3 0 0 1 0 6h5v7z',
+  'profile-chamfer': 'M4 20V5h8l8 8v7z',
+  'profile-step': 'M4 20V5h8v8h8v7z',
   'tool-profile': 'M4 20V14a2 2 0 0 1 2-2 2 2 0 0 0 2-2 4 4 0 0 1 4-4h8M4 4v3M8 4H4',
   'tool-offset': 'M4 4h16v16H4zM8 8h8v8H8z',
   'tool-zoomWindow': 'M4 4h5M4 4v5M20 4h-5M20 4v5M4 20h5M4 20v-5M20 20h-5M20 20v-5M10 10h4v4h-4z',

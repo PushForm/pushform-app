@@ -9,7 +9,8 @@ import { glueAllows, placeOnFaceMatrix } from '../../commands/componentBehaviors
 import { contextFrame } from '../../commands/context';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
-import type { ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import type { ToolKeyEvent, ToolPointerEvent, ToolSettingValue, ToolStatus } from '../Tool';
+import { toggleSetting } from '../settings';
 import { pointerField } from '../entry';
 import { EdgeLock } from '../edgeLock';
 import { DRAG_PX, entityOverlay, HOVER_COLOR, inferenceOverlay, rubberBandColor, screenDist } from '../toolUtil';
@@ -265,6 +266,19 @@ export class MoveTool extends TransformToolBase {
   }
 
   status(): ToolStatus {
+    return { ...this.baseStatus(), settings: [toggleSetting('copy', 'Copy', this.copy, 'primary'), toggleSetting('autofold', 'Autofold', this.autofold, 'secondary')] };
+  }
+
+  onSetting(id: string, value: ToolSettingValue): void {
+    if (typeof value !== 'boolean') return;
+    if (id === 'copy') this.copy = value;
+    else if (id === 'autofold') this.autofold = value;
+    else return;
+    this.ctx?.requestRender();
+    this.ctx?.statusChanged();
+  }
+
+  private baseStatus(): ToolStatus {
     const copyHint = this.copy ? ' [Copy]' : '';
     if (this.state.kind === 'moving') {
       return {

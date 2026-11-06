@@ -8,7 +8,8 @@ import type { PolygonsWithHoles } from '@pushform/geom';
 import type { UndoEntry } from '@pushform/model';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
-import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolSettingValue, ToolStatus } from '../Tool';
+import { toggleSetting } from '../settings';
 import { pointerField } from '../entry';
 import { HOVER_COLOR, hostOfTool, PREVIEW_COLOR } from '../toolUtil';
 import {
@@ -210,6 +211,17 @@ export class OffsetTool implements Tool {
   }
 
   status(): ToolStatus {
+    return { ...this.baseStatus(), settings: [toggleSetting('overlaps', 'Allow overlaps', this.overlaps, 'secondary')] };
+  }
+
+  onSetting(id: string, value: ToolSettingValue): void {
+    if (id !== 'overlaps' || typeof value !== 'boolean') return;
+    this.overlaps = value;
+    this.ctx?.requestRender();
+    this.ctx?.statusChanged();
+  }
+
+  private baseStatus(): ToolStatus {
     const s = this.state;
     const hint = this.overlaps ? ' [Overlaps allowed]' : '';
     if (s.kind === 'dragging') {

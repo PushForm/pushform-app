@@ -6,7 +6,7 @@ import type { CameraHost, CameraState } from '../camera/CameraHost';
 import { DocumentHost } from '../host/DocumentHost';
 import { CommandRegistry } from '../registry/CommandRegistry';
 import type { VcbValue } from '../vcb/parse';
-import { NO_MODIFIERS, type Tool, type ToolKeyEvent } from './Tool';
+import { NO_MODIFIERS, type Tool, type ToolKeyEvent, type ToolSettingValue, type ToolStatus } from './Tool';
 import { ToolManager } from './ToolManager';
 import { OrbitTool } from './impl/Orbit';
 import { PanTool } from './impl/Pan';
@@ -262,5 +262,46 @@ describe('ToolManager: camera tools and Select set the active tool aside', () =>
     tools.activate('orbit');
     tools.keyDown(key('Escape'));
     expect(tools.activeToolId).toBe('orbit');
+  });
+});
+
+describe('ToolManager: tool options bar', () => {
+  class BarTool extends WorkTool {
+    copy = false;
+    override status(): ToolStatus {
+      return { ...super.status(), settings: [{ kind: 'toggle', id: 'copy', label: 'Copy', on: this.copy, key: 'primary' }] };
+    }
+    onSetting(id: string, value: ToolSettingValue): void {
+      if (id === 'copy' && typeof value === 'boolean') this.copy = value;
+    }
+  }
+
+  it('reports placing while the tool has an operation in progress, unless the tool says otherwise', () => {
+    const { tools } = setup();
+    const bar = new BarTool('bar');
+    tools.register(bar);
+    tools.activate('bar');
+    expect(tools.status().settings).toHaveLength(1);
+    expect(tools.status().placing).toBe(false);
+    bar.pending = true;
+    expect(tools.status().placing).toBe(true);
+    tools.setting('copy', true);
+    expect(bar.copy).toBe(true);
+    expect(tools.status().settings![0]).toMatchObject({ kind: 'toggle', on: true });
+  });
+
+  it('keeps showing the set-aside tool\'s settings during a camera tool, and sends bar changes to it', () => {
+    const { tools } = setup();
+    const bar = new BarTool('bar');
+    tools.register(bar);
+    tools.activate('bar');
+    tools.activate('orbit');
+    expect(tools.activeToolId).toBe('orbit');
+    expect(tools.status().settings?.map((s) => s.id)).toEqual(['copy']);
+    tools.setting('copy', true);
+    expect(bar.copy).toBe(true);
+    // a tool with no settings shows no bar
+    tools.activate('line');
+    expect(tools.status().settings).toBeUndefined();
   });
 });

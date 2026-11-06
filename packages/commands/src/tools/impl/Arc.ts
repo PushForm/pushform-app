@@ -8,7 +8,8 @@ import { SNAP_COLORS } from '@pushform/inference';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { AddCurveInput, AddCurveResult } from '../../commands/curves';
 import type { OverlayPrimitive } from '../overlay';
-import type { EntryField, Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import type { EntryField, Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolSettingValue, ToolStatus } from '../Tool';
+import { countFrom, countSetting } from '../settings';
 import { angleDimension, DIMENSION_COLOR, field, pxAt } from '../entry';
 import { hostOfTool, inferenceOverlay, PREVIEW_COLOR } from '../toolUtil';
 import {
@@ -236,6 +237,19 @@ export class ArcTool implements Tool {
   }
 
   status(): ToolStatus {
+    return { ...this.stageStatus(), settings: [countSetting('segments', 'Segments', this.segments)] };
+  }
+
+  /** Segments in the tool options bar; it changes the next arc only. */
+  onSetting(id: string, value: ToolSettingValue): void {
+    const n = id === 'segments' ? countFrom(value) : null;
+    if (n === null) return;
+    this.segments = Math.max(1, Math.round(n));
+    this.ctx?.requestRender();
+    this.ctx?.statusChanged();
+  }
+
+  private stageStatus(): ToolStatus {
     switch (this.stage) {
       case 'center':
         return { instructor: 'Select center point.', vcbLabel: 'Sides', vcbValue: String(this.segments) };

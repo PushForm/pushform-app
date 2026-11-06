@@ -122,6 +122,23 @@ export const uiCommands: readonly AnyCommand[] = [
     run: () => store().closeDialog(),
   }),
   defineCommand({
+    // Ctrl+L (Cmd+L on macOS) moves focus into the tool options bar; again, back to the view.
+    id: 'view.focusToolOptions',
+    title: 'Focus Tool Options',
+    category: 'view',
+    params: z.object({}),
+    undoable: false,
+    run: () => {
+      const bar = document.querySelector<HTMLElement>('.pf-tob.is-shown');
+      if (!bar) return;
+      if (bar.contains(document.activeElement)) {
+        document.querySelector<HTMLElement>('.pf-viewport')?.focus();
+        return;
+      }
+      bar.querySelector<HTMLElement>('[data-tob-control]:not(:disabled)')?.focus();
+    },
+  }),
+  defineCommand({
     id: 'view.search',
     title: 'Search',
     category: 'view',

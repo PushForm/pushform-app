@@ -9,6 +9,7 @@ import { DialogHost } from './MakeComponentDialog';
 import { EntryFields } from './EntryFields';
 import { NavigationCube } from './NavigationCube';
 import { SceneTabs } from './SceneTabs';
+import { ToolOptionsBar } from './ToolOptionsBar';
 import type { InferenceResult } from '@pushform/inference';
 import { useApp } from '../AppContext';
 import { useAppStore } from '../store';
@@ -116,9 +117,17 @@ export function ViewportView(): JSX.Element {
   const hintPos = hint?.screen ?? pointer.current;
   return (
     <div className="pf-viewport-wrap">
-      <SceneTabs />
       <div ref={ref} className="pf-viewport" tabIndex={0} style={{ cursor }} aria-label="3D viewport" />
-      <NavigationCube />
+      {/* Over the canvas: scene tabs, the tool options bar's band, then the navigation cube below the band. */}
+      <div className="pf-viewport-top">
+        <SceneTabs />
+        <div className="pf-tob-band">
+          <ToolOptionsBar />
+        </div>
+        <div className="pf-viewport-under-band">
+          <NavigationCube />
+        </div>
+      </div>
       <DialogHost />
       <ContextMenuHost />
       <EntryFields pointer={pointer} />

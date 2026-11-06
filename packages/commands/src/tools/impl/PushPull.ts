@@ -14,7 +14,8 @@ import { contextFrame, samePath } from '../../commands/context';
 import { planPushPull, runPushPullKernel, type PushPullApplyParams, type PushPullTarget } from '../../commands/pushpull';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
-import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolSettingValue, ToolStatus } from '../Tool';
+import { toggleSetting } from '../settings';
 import { pointerField } from '../entry';
 
 /** Pointer travel (CSS px) that turns a press into a drag-release gesture. */
@@ -314,6 +315,17 @@ export class PushPullTool implements Tool {
   }
 
   status(): ToolStatus {
+    return { ...this.baseStatus(), settings: [toggleSetting('newBody', 'New body', this.mode === 'newBody', 'primary')] };
+  }
+
+  onSetting(id: string, value: ToolSettingValue): void {
+    if (id !== 'newBody' || typeof value !== 'boolean') return;
+    this.mode = value ? 'newBody' : 'merge';
+    this.ctx?.requestRender();
+    this.ctx?.statusChanged();
+  }
+
+  private baseStatus(): ToolStatus {
     const s = this.state;
     const doc = this.ctx?.commands.ctx.services.get(SERVICE_DOCUMENT);
     const units = doc instanceof DocumentHost ? doc.doc.state.meta.units : null;

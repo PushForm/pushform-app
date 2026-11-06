@@ -9,7 +9,8 @@ import { SNAP_COLORS } from '@pushform/inference';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { AddCurveInput, AddCurveResult } from '../../commands/curves';
 import type { OverlayPrimitive } from '../overlay';
-import type { EntryField, Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import type { EntryField, Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolSetting, ToolSettingValue, ToolStatus } from '../Tool';
+import { countFrom, countSetting } from '../settings';
 import { DIMENSION_COLOR, field, pxAt } from '../entry';
 import { hostOfTool, inferenceOverlay, PREVIEW_COLOR } from '../toolUtil';
 import {
@@ -191,14 +192,36 @@ export class CircleTool implements Tool {
   }
 
   status(): ToolStatus {
-    if (!this.center) return { instructor: 'Select center point.', vcbLabel: 'Sides', vcbValue: String(this.segments) };
+    const settings = this.barSettings();
+    if (!this.center) return { instructor: 'Select center point.', vcbLabel: 'Sides', vcbValue: String(this.segments), settings };
     const r = this.currentRadius();
     return {
       instructor: `Select point on ${this.shapeName} or enter value.`,
       vcbLabel: 'Diameter',
       vcbValue: formatLen(this.ctx, 2 * r),
       fields: this.diameterDimension(r).fields,
+      settings,
     };
+  }
+
+  /** The tool options bar: the side count. */
+  protected barSettings(): ToolSetting[] {
+    return [countSetting('sides', 'Sides', this.segments)];
+  }
+
+  onSetting(id: string, value: ToolSettingValue): void {
+    if (!this.applySetting(id, value)) return;
+    this.ctx?.requestRender();
+    this.ctx?.statusChanged();
+  }
+
+  /** Apply a bar control; false when it is not one of this tool's. */
+  protected applySetting(id: string, value: ToolSettingValue): boolean {
+    if (id !== 'sides') return false;
+    const n = countFrom(value);
+    if (n === null) return false;
+    this.setSegments(n);
+    return true;
   }
 
   // --- hooks for Polygon ----------------------------------------------------------------------

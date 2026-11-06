@@ -2,6 +2,12 @@
 
 The modeling ribbon groups tools into **Transform**, **Draw**, **Modify**, **Inspect**, **Organize**, and **Navigate**, with names below the buttons. Open a button’s arrow for related tools. Scroll horizontally if the ribbon does not fit your window. Additional tools appear in **More** when available.
 
+## Tool options bar
+
+When the tool you choose has settings, such as Polygon's number of sides or Move's Copy mode, a bar with those settings floats over the top of the 3D view. Tools with nothing to set, such as Select, Rectangle and Orbit, show no bar. Change a setting by clicking it, or type in its box and press Enter; lengths use the model's units. A toggle shows the key that switches it while you work, for example Ctrl for Copy.
+
+While you are placing a point, the bar fades and lets the pointer through, so you can click geometry underneath it. Empty parts of the bar always let clicks through; rest the pointer there briefly and the bar fades so you can see what is underneath. Press Ctrl+L (Cmd+L on a Mac) to move the keyboard into the bar, Tab between its controls, and Escape to return to the model.
+
 ## Select, Eraser and drawing tools
 
 **Select** chooses existing model entities. **Lasso**, in Select's stack, chooses with a drawn outline. **Eraser** removes eligible sketch entities and dividing edges; a solid's actual boundary cannot simply be erased away.

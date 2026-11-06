@@ -29,7 +29,7 @@ const f = (id: number, kind: NativeFieldKind, required = true): NativeField => (
 const camera = new NativeRecordCodec({ eye: f(1, 'bytes'), target: f(2, 'bytes'), up: f(3, 'bytes'), projection: f(4, 'uint32'), fov: f(5, 'double'), scale: f(6, 'double'), shift: f(7, 'bytes', false) } satisfies Record<Exclude<keyof LayoutViewportCamera, 'nativeUnknownFields'>, NativeField>);
 const source = new NativeRecordCodec({ kind: f(1, 'uint32'), archiveId: f(2, 'string', false), modelReferenceId: f(3, 'string', false), referenceId: f(4, 'uint32', false) });
 const display = new NativeRecordCodec({ faceStyle: f(1, 'uint32'), edges: f(2, 'bool'), profiles: f(3, 'bool'), backEdges: f(4, 'bool'), xray: f(5, 'bool'), hiddenGeometry: f(6, 'bool'), shadows: f(7, 'bytes', false) } satisfies Record<Exclude<keyof LayoutViewportDisplay, 'nativeUnknownFields'>, NativeField>);
-const cache = new NativeRecordCodec({ camera: f(1, 'bytes'), widthMm: f(2, 'double'), heightMm: f(3, 'double'), sha256: f(4, 'bytes', false) } satisfies Record<Exclude<keyof NonNullable<LayoutViewport['cache']>, 'nativeUnknownFields'>, NativeField>);
+const cache = new NativeRecordCodec({ camera: f(1, 'bytes'), widthMm: f(2, 'double'), heightMm: f(3, 'double'), sha256: f(4, 'bytes', false), sheet: f(5, 'bytes', false) } satisfies Record<Exclude<keyof NonNullable<LayoutViewport['cache']>, 'nativeUnknownFields'>, NativeField>);
 const viewport = new NativeRecordCodec({ source: f(1, 'bytes'), templateId: f(2, 'string', false), originalId: f(3, 'string', false), camera: f(4, 'bytes'), preserveScaleOnResize: f(5, 'uint32', false),
   scene: f(6, 'string', false), background: f(7, 'string', false), cache: f(8, 'bytes', false), display: f(9, 'bytes', false) } satisfies Record<Exclude<keyof LayoutViewport, 'nativeUnknownFields'>, NativeField>);
 const optional = new NativeRecordCodec({ state: f(1, 'uint32'), value: f(2, 'bytes', false) });
@@ -94,6 +94,7 @@ export function encodeNativeLayoutViewport(value: LayoutViewport, ext: LayoutVie
   if (value.cache !== null) {
     const c = value.cache, cf: Record<string, NativeScalar> = { camera: writeCamera(c.camera, 'cache.camera', ext), widthMm: finite(c.widthMm), heightMm: finite(c.heightMm) };
     if (Object.hasOwn(c, 'sha256')) cf.sha256 = wrap(optionalString, c.sha256, 'cache.sha256', ext);
+    if (Object.hasOwn(c, 'sheet')) cf.sheet = wrap(optionalString, c.sheet, 'cache.sheet', ext);
     fields.cache = write(cache, cf, 'cache', ext);
   }
   if (Object.hasOwn(value, 'display')) {
@@ -121,6 +122,7 @@ export function decodeNativeLayoutViewport(bytes: Uint8Array): { value: LayoutVi
     const c = read(cache, v.cache as Uint8Array, 'cache', ext);
     value.cache = { camera: readCamera(c.camera as Uint8Array, 'cache.camera', ext), widthMm: finite(c.widthMm), heightMm: finite(c.heightMm) };
     if (Object.hasOwn(c, 'sha256')) value.cache.sha256 = unwrap(optionalString, c.sha256 as Uint8Array, 'cache.sha256', ext) as string | undefined;
+    if (Object.hasOwn(c, 'sheet')) value.cache.sheet = unwrap(optionalString, c.sheet as Uint8Array, 'cache.sheet', ext) as string | undefined;
   }
   if (Object.hasOwn(v, 'display')) {
     const bytes = unwrap(optional, v.display as Uint8Array, 'display', ext);

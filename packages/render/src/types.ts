@@ -525,6 +525,8 @@ export interface RenderSectionPlane {
   /** Unit normal pointing to the side the cut keeps. */
   readonly normal: Vec3;
   readonly symbol: string;
+  /** The sheet the section is drawn on, shown under the symbol; absent or empty leaves that half of the bubble blank. */
+  readonly sheet?: string | undefined;
   /** The active cut of its container. */
   readonly active: boolean;
   readonly selected: boolean;

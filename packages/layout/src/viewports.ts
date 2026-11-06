@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { current, isDraft } from 'immer';
+import { entitiesForLayer } from './LayoutDocument';
 import type { LayoutDocumentState, LayoutEntity, LayoutImage, LayoutViewport, LayoutViewportCamera, LayoutViewportSource, ModelReference } from './LayoutDocument';
+import { DEFAULT_LAYOUT_PAGE_NUMBERING, layoutPageNumberText, layoutPageNumbering } from './text';
 
 type V3 = [number, number, number];
 type P2 = [number, number];
@@ -38,6 +40,25 @@ export function viewportSourceKey(state: LayoutDocumentState, source: LayoutView
   if (!isCloudSource(source)) return `${source.archiveId}\u0000${source.modelReferenceId}`;
   const reference = viewportCloudReference(state, source);
   return reference ? `cloud\u0000${reference.target.documentId}\u0000${reference.target.sha256}` : `cloud\u0000missing\u0000${source.referenceId}`;
+}
+
+/**
+ * The sheet a section of the model is drawn on: the page number, as `<PageNumber>` shows it, of the first page that
+ * draws a model view of `source`, or '' when no page does. Every view of a model cuts it with the model's active
+ * section planes, so the first such page is where those sections are drawn. Hidden views and views on layers hidden
+ * on a page do not count.
+ */
+export function viewportSourceSheet(state: LayoutDocumentState, source: LayoutViewportSource): string {
+  const key = viewportSourceKey(state, source);
+  const numbering = layoutPageNumbering('PageNumber', state) ?? DEFAULT_LAYOUT_PAGE_NUMBERING;
+  for (const pageId of state.pageOrder) {
+    const page = state.pages.get(pageId);
+    if (!page) continue;
+    const draws = state.layerOrder.some((layerId) => entitiesForLayer(page, state, layerId)
+      .some((entity) => isViewport(entity) && viewportSourceKey(state, entity.image.viewport.source) === key));
+    if (draws) return layoutPageNumberText(numbering, page, state);
+  }
+  return '';
 }
 
 /** An independent copy of a picture. A copied viewport keeps its source and settings but is no longer the imported original. */
@@ -123,7 +144,7 @@ export function viewportCamerasEqual(a: LayoutViewportCamera, b: LayoutViewportC
 
 /**
  * Whether the viewport's picture was rendered for its current camera and frame size and,
- * for a cloud model, from the revision its reference now names.
+ * for a cloud model, from the revision its reference now names, with the sheet number its section markers show.
  */
 export function viewportCacheCurrent(viewport: LayoutViewport, points: readonly P2[], state?: LayoutDocumentState): boolean {
   const cache = viewport.cache;
@@ -132,6 +153,7 @@ export function viewportCacheCurrent(viewport: LayoutViewport, points: readonly 
     const reference = state ? viewportCloudReference(state, viewport.source) : undefined;
     if (!reference || cache.sha256 !== reference.target.sha256) return false;
   }
+  if (cache.sheet !== undefined && (!state || cache.sheet !== viewportSourceSheet(state, viewport.source))) return false;
   const { width, height } = layoutFrameSize(points);
   // Paper coordinates round-trip through inches; a micrometer is far below a rendered pixel.
   const sameSize = Math.abs(cache.widthMm - width) < 1e-3 && Math.abs(cache.heightMm - height) < 1e-3;

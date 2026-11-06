@@ -12,6 +12,10 @@ Select the model view. In its **Model view** settings, choose a saved scene with
 
 A scene applies its camera. A standard view frames the model and makes the view custom. Scene styles and tag overrides are not followed by this scene selection workflow.
 
+## Section markers and sheet numbers
+
+When a model has section planes and its style shows them, each marker in a model view has the plane's symbol in the top half of its bubble. The bottom half shows a sheet number when the plane cuts the model. That number is the page number of the first page with a view of the same model, because every view of a model is cut by the same planes. It is numbered as the **<PageNumber>** field numbers pages, so changing that field's start page or style changes it too. Hidden views, and views on a layer hidden on their page, do not count. A plane that does not cut the model leaves the bottom half empty. Moving pages updates the numbers. A view that still shows the picture saved with an imported .layout file keeps that picture's markers until the view is drawn again.
+
 ## Navigate inside a model view
 
 Double-click the view with Select, or enable **Navigate view** in its settings. Inside the frame, drag to orbit, Shift+drag or middle-button drag to pan, and scroll to zoom. Release a drag to save that camera change as one undo step. Scrolling saves when it pauses.

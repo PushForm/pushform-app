@@ -208,9 +208,10 @@ export interface LayoutViewport {
   background: string | null;
   /**
    * The camera and frame size `src` was rendered for, and for a cloud source the model revision it
-   * shows (its sha256); a picture that no longer matches is stale.
+   * shows (its sha256); a picture that no longer matches is stale. `sheet` is the sheet number the picture's section
+   * markers show, recorded only when they show one, so the picture goes stale when that number changes.
    */
-  cache: { nativeUnknownFields?: Map<string, Uint8Array[]>; camera: LayoutViewportCamera; widthMm: number; heightMm: number; sha256?: string | undefined } | null;
+  cache: { nativeUnknownFields?: Map<string, Uint8Array[]>; camera: LayoutViewportCamera; widthMm: number; heightMm: number; sha256?: string | undefined; sheet?: string | undefined } | null;
   /** The view's own display settings; absent draws the model with its own style. */
   display?: LayoutViewportDisplay;
 }

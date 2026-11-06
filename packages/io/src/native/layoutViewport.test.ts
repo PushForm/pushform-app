@@ -12,7 +12,7 @@ function fixture(): LayoutViewport {
   const camera = { eye: [-0, 2, 3] as [number, number, number], target: [4, 5, 6] as [number, number, number], up: [0, 0, 1] as [number, number, number],
     projection: 'parallel' as const, fov: 45.125, scale: 0.02, shift: [-0, 0.25] as [number, number] };
   return { source: { archiveId: 'archive', modelReferenceId: 'model' }, templateId: 'template', originalId: 'original', camera, scene: '', background: null,
-    preserveScaleOnResize: false, cache: { camera: { ...camera, projection: 'perspective' }, widthMm: 123.125, heightMm: 99.5, sha256: 'a'.repeat(64) },
+    preserveScaleOnResize: false, cache: { camera: { ...camera, projection: 'perspective' }, widthMm: 123.125, heightMm: 99.5, sha256: 'a'.repeat(64), sheet: 'A-3' },
     display: { faceStyle: 'shadedTextured', edges: true, profiles: false, backEdges: true, xray: false, hiddenGeometry: true, shadows: { ...DEFAULT_SHADOWS } } };
 }
 it('round trips embedded/cloud sources, exact cameras, cache and all display styles', () => {
@@ -27,21 +27,21 @@ it('round trips embedded/cloud sources, exact cameras, cache and all display sty
 it('distinguishes absent, undefined, false and empty metadata without inventing defaults', () => {
   for (const state of ['absent', 'undefined', 'present']) {
     const value = fixture();
-    for (const [target, key] of [[value, 'display'], [value, 'preserveScaleOnResize'], [value.camera, 'shift'], [value.cache!, 'sha256']] as const) {
+    for (const [target, key] of [[value, 'display'], [value, 'preserveScaleOnResize'], [value.camera, 'shift'], [value.cache!, 'sha256'], [value.cache!, 'sheet']] as const) {
       Reflect.deleteProperty(target, key);
       if (state === 'undefined') Object.defineProperty(target, key, { value: undefined, enumerable: true });
     }
-    if (state === 'present') { value.display = fixture().display!; value.preserveScaleOnResize = true; value.camera.shift = [0, 0]; value.cache!.sha256 = ''; }
+    if (state === 'present') { value.display = fixture().display!; value.preserveScaleOnResize = true; value.camera.shift = [0, 0]; value.cache!.sha256 = ''; value.cache!.sheet = ''; }
     const next = decodeNativeLayoutViewport(encodeNativeLayoutViewport(value)).value;
     expect(next).toEqual(value); expect(Object.hasOwn(next.camera, 'shift')).toBe(state !== 'absent');
-    expect(Object.hasOwn(next, 'display')).toBe(state !== 'absent'); expect(Object.hasOwn(next.cache!, 'sha256')).toBe(state !== 'absent');
+    expect(Object.hasOwn(next, 'display')).toBe(state !== 'absent'); expect(Object.hasOwn(next.cache!, 'sha256')).toBe(state !== 'absent'); expect(Object.hasOwn(next.cache!, 'sheet')).toBe(state !== 'absent');
   }
   const value = fixture(); value.cache = null; value.scene = null; value.background = '';
   expect(decodeNativeLayoutViewport(encodeNativeLayoutViewport(value)).value).toEqual(value);
 });
 it('owns and preserves extension bytes through camera edits at every nested scope', () => {
   const fields = [new Uint8Array([0x98, 6, 7])];
-  const extensions = { records: new Map(['', 'source', 'camera', 'cache', 'cache.camera', 'cache.sha256', 'display', 'display.value', 'display.shadows'].map(key => [key, fields])), shadows: new Map([['', fields]]) };
+  const extensions = { records: new Map(['', 'source', 'camera', 'cache', 'cache.camera', 'cache.sha256', 'cache.sheet', 'display', 'display.value', 'display.shadows'].map(key => [key, fields])), shadows: new Map([['', fields]]) };
   const bytes = encodeNativeLayoutViewport(fixture(), extensions), decoded = decodeNativeLayoutViewport(bytes); bytes.fill(0);
   decoded.value.camera.eye[1] = 123;
   const next = decodeNativeLayoutViewport(encodeNativeLayoutViewport(decoded.value, decoded.extensions));

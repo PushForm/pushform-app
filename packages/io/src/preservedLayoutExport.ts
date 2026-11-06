@@ -158,7 +158,8 @@ export class PreservedLayoutExport {
           this.homes.get(view.id) !== null && this.homes.get(view.id) !== this.homes.get(entity.id) ||
           view.image.viewport.source.archiveId !== saved.archiveId || view.image.viewport.originalId !== originalId ||
           view.image.viewport.source.modelReferenceId !== this.state?.modelArchives?.get(saved.archiveId)?.viewports.get(originalId!)?.modelReferenceId ||
-          view.image.viewport.scene !== (template.attrs.cameraModified === '1' ? null : template.attrs.defaultPageName ?? null) ||
+          view.image.viewport.scene !== (template.attrs.defaultPageName ?? null) ||
+          !!view.image.viewport.cameraModified !== (template.attrs.cameraModified === '1' && template.attrs.defaultPageName !== undefined) ||
           !this.untouched(view, view.image.viewport, template)) throw new Error('Changed model view');
       }
       this.checkDependencies(original, archive, new Set());
@@ -194,6 +195,8 @@ export class PreservedLayoutExport {
     const base = child(child(template, 'placedFileReference') ?? template, 'rectangleBase');
     const camera = child(template, 'camera') ?? { name: 'camera', attrs: {}, children: [], text: '' };
     if (viewport.originalId !== viewport.templateId || !base) return false;
+    if (viewport.scene !== (template.attrs.defaultPageName ?? null) ||
+      !!viewport.cameraModified !== (template.attrs.cameraModified === '1' && template.attrs.defaultPageName !== undefined)) return false;
     const n = (key: string, fallback: number, element = base) => Number(element.attrs[key] ?? fallback);
     const x = n('x', 0), y = n('y', 0), width = n('width', 0), height = n('height', 0);
     const matrix = child(base, 'affineTransform');
@@ -220,7 +223,9 @@ export class PreservedLayoutExport {
       placed.xml.trim().replace(/<(\/?)e:/g, `<$1${prefix}`));
     result = setAttributes(result, 'skpModelRef', {
       ...(viewport.scene !== null ? { defaultPageName: viewport.scene } : {}),
-      ...(changedCamera || viewport.scene === null ? { cameraModified: '1' } : {}),
+      // A view of no scene, or whose camera was changed after its scene was chosen, is modified; one whose scene was
+      // chosen again shows that scene's camera.
+      ...(viewport.scene === null || viewport.cameraModified ? { cameraModified: '1' } : changedCamera ? { cameraModified: '0' } : {}),
     });
     result = setAttributes(result, 'camera', {
       projection: camera.perspective ? '0' : '1', fov: numberText(camera.fov),

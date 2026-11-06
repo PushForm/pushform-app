@@ -636,6 +636,33 @@ describe('SketchUp LayOut import', () => {
     expect(p.entityOrder.map(id => reopened.entities.get(id)!.image!.viewport!.display)).toEqual(displays);
   });
 
+  it("keeps each model view's section display from LayOut's rendering options", () => {
+    const entry = (key: string, value: string) => `<e:entry key="${key}" type="3" value="${value}" />`;
+    const model = (id: string, options: string) => `<e:skpModelRef id="${id}">
+      <e:placedFileReference><e:rectangleBase x="1" y="1" width="4" height="4" /></e:placedFileReference>
+      <e:renderingOptions>${entry('RenderMode', '1')}${options}</e:renderingOptions><r:skpFileReference r:id="idModel" /><r:imageFileReference r:id="id2" />
+    </e:skpModelRef>`;
+    // Colors are int32s whose little-endian bytes are red, green, blue and alpha: -16742401 is orange (255, 135, 0).
+    const full = entry('DisplaySectionPlanes', '1') + entry('DisplaySectionCuts', '0') + entry('SectionCutFilled', '1') + entry('SectionCutWidth', '3') +
+      entry('SectionActiveColor', '-16742401') + entry('SectionInactiveColor', '-10393232') + entry('SectionDefaultFillColor', '-16777216') +
+      entry('SectionDefaultCutColor', '-16776961');
+    const files = unzipSync(layoutFile(page(model('id40', full) + model('id41', entry('DisplaySectionCuts', '1')) + model('id42', ''),
+      onLayer('id10', ['id40', 'id41', 'id42']))));
+    files['references.xml'] = strToU8(strFromU8(files['references.xml']!).replace('</references>',
+      '<r:skpFileReference r:id="idModel" internalTarget="ref/model.skp" /></references>'));
+    const { doc } = importSketchUpLayout(zipSync(files));
+    const p = doc.state.pages.get(doc.state.pageOrder[0]!)!;
+    const sections = p.entityOrder.map(id => p.entities.get(id)!.image!.viewport!.display!.sections);
+    expect(sections).toEqual([
+      { planes: true, cuts: false, fill: true, lineWidth: 3, activeColor: [1, 135 / 255, 0], inactiveColor: [112 / 255, 105 / 255, 97 / 255],
+        fillColor: [0, 0, 0], lineColor: [1, 0, 0] },
+      { planes: false, cuts: true },
+      undefined,
+    ]);
+    const reopened = decodeLayoutDocument(encodeLayoutDocument(doc)).state.pages.get(p.id)!;
+    expect(p.entityOrder.map(id => reopened.entities.get(id)!.image!.viewport!.display!.sections)).toEqual(sections);
+  });
+
   it('keeps each model view\'s sun and shadows from LayOut\'s shadow options, reading the local time as SketchUp stores it', () => {
     const entry = (key: string, value: string) => `<e:entry key="${key}" type="3" value="${value}" />`;
     // ShadowTime shows the saving computer's zone; ShadowTime_time_t's UTC reading (10:42) is the local time in TZOffset.
@@ -729,6 +756,34 @@ describe('SketchUp LayOut import', () => {
     });
     const legacy = await exportSketchUpLayout(decodeLayoutDocument(encodeLayoutDocument(doc)).state);
     expect(legacy.warnings).toContain('This drawing was imported before model connections were preserved; original model annotation connections may be missing');
+  });
+
+  it('keeps the scene of a view whose camera was changed after its scene was chosen, through import and export', async () => {
+    const model = (id: string, modified: string) => `<e:skpModelRef id="${id}" defaultPageName="Plan" cameraModified="${modified}">
+      <e:placedFileReference><e:rectangleBase x="1" y="1" width="2" height="1" /></e:placedFileReference>
+      <e:camera projection="1" height="48" fov="35" twoDCamera="0" twoDScale="1" twoDxCenter="0" twoDyCenter="0" aspectRatio="0">
+        <e:eye x="10" y="20" z="500" /><e:target x="10" y="20" z="0" /><e:up x="0" y="1" z="0" /><e:offset x="0" y="0" />
+      </e:camera>
+      <r:skpFileReference r:id="idModel" /><e:imageRect x="1" y="1" width="2" height="1" />
+    </e:skpModelRef>`;
+    const files = unzipSync(layoutFile(page(model('id40', '1') + model('id41', '0'), onLayer('id10', ['id40', 'id41']))));
+    files['references.xml'] = strToU8(strFromU8(files['references.xml']!).replace('</references>',
+      '<r:skpFileReference r:id="idModel" internalTarget="ref/model.skp" /></references>'));
+    const { doc } = importSketchUpLayout(zipSync(files));
+    const page0 = () => doc.state.pages.get(doc.state.pageOrder[0]!)!;
+    const [modified, plain] = page0().entityOrder.map(id => page0().entities.get(id)!);
+    expect(modified!.image!.viewport).toMatchObject({ scene: 'Plan', cameraModified: true });
+    expect(plain!.image!.viewport!.scene).toBe('Plan');
+    expect(Object.hasOwn(plain!.image!.viewport!, 'cameraModified')).toBe(false);
+    const tags = async () => [...strFromU8(unzipSync((await exportSketchUpLayout(doc.state)).bytes)['pages/page1.xml']!)
+      .matchAll(/<e:skpModelRef\b[^>]*>/g)].map(([tag]) => [/defaultPageName="([^"]*)"/.exec(tag)?.[1], /cameraModified="(\d)"/.exec(tag)?.[1]]);
+    expect(await tags()).toEqual([['Plan', '1'], ['Plan', '0']]);
+    // Choosing the scene again shows its camera, and the view is exported as unmodified.
+    doc.undoStack.transact('Choose the scene', draft => {
+      const viewport = draft.pages.get(draft.pageOrder[0]!)!.entities.get(modified!.id)!.image!.viewport!;
+      delete viewport.cameraModified; viewport.camera = { ...viewport.camera, scale: viewport.camera.scale / 2 };
+    });
+    expect(await tags()).toEqual([['Plan', '0'], ['Plan', '0']]);
   });
 
   it('exports moved, copied, re-aimed and grouped viewports as LayOut viewports', async () => {

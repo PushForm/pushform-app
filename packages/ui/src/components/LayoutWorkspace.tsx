@@ -2207,7 +2207,9 @@ export function LayoutWorkspace({
   };
   const commitViewportCamera = (entityId: number, camera: LayoutViewportCamera): void => {
     try {
-      tab.commands.execute('layout.viewport.setCamera', { pageId: page.id, entityId, camera, scene: null });
+      // Navigating keeps the view's scene for its tags and section cuts; only the camera becomes the view's own.
+      const viewed = entityOnPage(page, tab.doc.state, entityId), scene = isViewport(viewed) ? viewed.image.viewport.scene : null;
+      tab.commands.execute('layout.viewport.setCamera', { pageId: page.id, entityId, camera, scene, cameraModified: scene !== null });
     } catch (error) { setVcbError(error instanceof Error ? error.message : 'Cannot change this view.'); }
   };
   /** Leaves navigation; a zoom still waiting to commit is kept, a drag in progress is cancelled. */
@@ -4255,7 +4257,7 @@ export function LayoutWorkspace({
           ) : null}
           {isViewport(selectedEntity) ? <LayoutViewportPanel key={selectedEntity.id} entity={selectedEntity} state={state} disabled={!canTransform}
             navigating={navigatingViewportId === selectedEntity.id}
-            onCamera={(camera, scene) => runPageCommand('layout.viewport.setCamera', { pageId: page.id, entityId: selectedEntity.id, camera, scene })}
+            onCamera={(camera, scene, cameraModified) => runPageCommand('layout.viewport.setCamera', { pageId: page.id, entityId: selectedEntity.id, camera, scene, cameraModified })}
             onResizeMode={preserveScale => runPageCommand('layout.viewport.setResizeMode', { pageId: page.id, entityId: selectedEntity.id, preserveScale })}
             onNavigate={on => { if (on) setNavigatingViewportId(selectedEntity.id); else endViewportNavigation(); }} /> : null}
           {/* A model view's layer changes through Move to Layer or the object browser, not the panel. */}

@@ -339,6 +339,29 @@ function pictureBlocks(pictures: readonly MessagePicture[] | undefined, images: 
       : { type: 'text' as const, text: `(The requester removed the picture "${p.name.replace(/["<>]/g, '')}".)` };
   });
 }
+/**
+ * How much of a conversation the model reads each turn, in characters of text and tool traffic (about 30,000 tokens). A document's chat is kept
+ * until it is cleared, so it can grow without bound; everything stays stored and shown, and the model is sent the recent part.
+ */
+export const MODEL_HISTORY_MAX_CHARS = 120_000;
+const sizeOf = (m: ConversationMessage): number => (m.role === 'tool' ? m.name.length + m.output.length + JSON.stringify(m.input ?? null).length : m.text.length);
+/**
+ * The most recent messages that fit `maxChars`, beginning at a requester message so no reply or tool result is left without its question,
+ * and always including the latest requester message and what followed it. `omitted` says older messages were left out.
+ */
+export function recentHistory(messages: readonly ConversationMessage[], maxChars = MODEL_HISTORY_MAX_CHARS): { messages: readonly ConversationMessage[]; omitted: boolean } {
+  let lastUser = -1;
+  for (let i = messages.length - 1; i >= 0; i--) if (messages[i]!.role === 'user') { lastUser = i; break; }
+  let total = 0, start = messages.length;
+  for (let i = messages.length - 1; i >= 0; i--) { total += sizeOf(messages[i]!); if (total > maxChars) break; start = i; }
+  if (lastUser >= 0) start = Math.min(start, lastUser);
+  while (start < messages.length && messages[start]!.role !== 'user') start++;
+  return start === 0 ? { messages, omitted: false } : { messages: messages.slice(start), omitted: start > 0 };
+}
+/** The per-turn context, told when earlier messages were left out so the agent asks instead of guessing. */
+export const withOmittedNote = (context: string, omitted: boolean): string =>
+  omitted ? `${context}\n(Earlier messages in this chat are not shown to you. Ask the requester if you need something from them.)` : context;
+
 export function historyOf(messages: readonly ConversationMessage[], contextBlock: string, latestText: string,
   latestPictures: readonly MessagePicture[] = [], images: ReadonlyMap<string, PictureData> = new Map()): Anthropic.MessageParam[] {
   const out: Anthropic.MessageParam[] = [];
@@ -520,9 +543,12 @@ const agentFor = agentForPath;
 const kindOf = (path: ConversationPath): ConversationKind => (path === 'help' ? 'help' : 'intake');
 const clientOf = (screen: PanelScreen | null): Record<string, unknown> | null => (screen ? { version: screen.build.version, build: screen.build.commit, editor: screen.editor, browser: screen.browser, os: screen.os } : null);
 
-/** An account keeps at most this many open conversations (one per document, resumed from the panel); the database enforces it. */
-export const OPEN_CONVERSATIONS_LIMIT = 20;
-const OPEN_CONVERSATIONS_MESSAGE = `You have ${OPEN_CONVERSATIONS_LIMIT} open chats. Use Clear Chat in one you no longer need, then try again.`;
+/**
+ * A backstop against runaway clients, not a product limit: a chat is kept for each document until it is cleared, and starting one is
+ * already rate limited, so using the product never reaches this. The database enforces the same number.
+ */
+export const OPEN_CONVERSATIONS_LIMIT = 1000;
+const OPEN_CONVERSATIONS_MESSAGE = `You have ${OPEN_CONVERSATIONS_LIMIT.toLocaleString('en-US')} open chats. Use Clear Chat in one you no longer need, then try again.`;
 
 export function createConversationHandler(deps: ConversationDeps): (req: Request) => Promise<Response> {
   const { config, db } = deps;
@@ -1048,7 +1074,8 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       ? `\n\n<retrieved_help>\n${retrieveUserHelp(deps.digest, body.text.slice(0, 300), ctx.screen.editor)}\n</retrieved_help>` : '';
     const context = agent.context(ctx) + help;
     const pictures = body.attachments?.length ? await timed(timing, 'pictures', messagePictures(conversation, user.id, body.attachments)) : [];
-    const images = await timed(timing, 'images', pictureData([...prior, { role: 'user', text: body.text, at: base.now, attachments: pictures }]));
+    const seen = recentHistory(prior);
+    const images = await timed(timing, 'images', pictureData([...seen.messages, { role: 'user', text: body.text, at: base.now, attachments: pictures }]));
     return streamTurn({
       timing,
       user, conversation, store, handlers: agent.handlers(ctx, store), pathChanged: path !== conversation.path,
@@ -1056,7 +1083,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       status: messageStatus(),
       ...(config.models.acknowledge ? { acknowledge: acknowledgeContent({ text: body.text, pictures: pictures.length, previousReply: previousReplyOf(prior) }) } : {}),
       setup: {
-        ...turnPrompt(config.models, ctx, document), context, historyLength: prior.length, messages: historyOf(prior, context, body.text, pictures, images), document, resume: undefined,
+        ...turnPrompt(config.models, ctx, document), context, historyLength: prior.length, messages: historyOf(seen.messages, withOmittedNote(context, seen.omitted), body.text, pictures, images), document, resume: undefined,
       },
     });
   };
@@ -1110,7 +1137,8 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       const saved = conversationFromRow(await db.conversationAppend(id, user.id, messages, store.getBrief(), store.getTitle(), store.getPath(), null));
       emit({ event: 'done', data: { messageCount: saved.messageCount, limitReached: false, ended: false } });
     });
-    const history = conversation.messages.slice(0, turn.historyLength);
+    const seen = recentHistory(conversation.messages.slice(0, turn.historyLength));
+    const history = seen.messages;
     const images = await pictureData([...history, opening]);
     // The render pictures of this turn's earlier suspensions, put back into the rounds the agent saw.
     const renders = turnRenders(conversation.messages.slice(turn.historyLength));
@@ -1128,7 +1156,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       }),
       setup: {
         model: turn.model, system: turn.system, tools: turn.tools as Anthropic.Tool[], context: turn.context, historyLength: turn.historyLength,
-        messages: historyOf(history, turn.context, opening.text, opening.attachments ?? [], images), document: turn.document,
+        messages: historyOf(history, withOmittedNote(turn.context, seen.omitted), opening.text, opening.attachments ?? [], images), document: turn.document,
         resume: { appended: [...restoreRenders(turn.appended as Anthropic.MessageParam[], renders), answerPending(pending, answers)], rounds: turn.rounds,
           reviews: turn.reviews ?? 0, renders: new Set(renders.keys()) },
       },

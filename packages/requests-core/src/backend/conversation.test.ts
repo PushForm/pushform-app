@@ -91,7 +91,30 @@ describe('conversations', () => {
     const h = harness({ service: { fr_conversation_start: () => sqlError('fr_limit') } });
     const res = await call(h.handler, 'POST', '/conversations', { kind: 'help', path: 'help', screen: { editor: 'model', build: { version: '0.3.0', commit: 'abc' }, browser: 'Chrome', os: 'macOS' } });
     expect(res.status).toBe(409);
-    expect(await res.json()).toMatchObject({ error: { code: 'limit', kind: 'open_conversations', message: 'You have 20 open chats. Use Clear Chat in one you no longer need, then try again.' } });
+    expect(await res.json()).toMatchObject({ error: { code: 'limit', kind: 'open_conversations', message: 'You have 1,000 open chats. Use Clear Chat in one you no longer need, then try again.' } });
+  });
+  it('sends the model a recent window of a long stored chat and says earlier messages are left out, while the whole chat stays stored', async () => {
+    const stored = Array.from({ length: 600 }, (_, i) => i % 2 === 0
+      ? { role: 'user', text: `question ${i} ${'x'.repeat(1500)}`, at: 't' } : { role: 'assistant', text: `answer ${i} ${'y'.repeat(1500)}`, at: 't' });
+    const h = harness({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help', messages: stored, message_count: 300 }) } });
+    const events = parseSse(await (await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'And now?' })).text());
+    expect(events.at(-1)).toMatchObject({ event: 'done' });
+    const sent = (h.deps.anthropic as ReturnType<typeof fakeAnthropic>).calls[0]!.messages as { role: string; content: unknown }[];
+    expect(sent.length).toBeLessThan(120);
+    expect(sent[0]!.role).toBe('user');
+    expect(JSON.stringify(sent.at(-1))).toContain('Earlier messages in this chat are not shown to you');
+    expect(JSON.stringify(sent)).toContain('question 598');
+    expect(JSON.stringify(sent)).not.toContain('question 0 ');
+    // Nothing stored was dropped: the turn is appended to the same row.
+    expect(h.service.named('fr_conversation_append')).toHaveLength(1);
+  });
+  it('sends a short chat whole, with no note about omitted messages', async () => {
+    const h = harness({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help', messages: [{ role: 'user', text: 'first', at: 't' }, { role: 'assistant', text: 'reply', at: 't' }], message_count: 1 }) } });
+    await (await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'second' })).text();
+    const sent = (h.deps.anthropic as ReturnType<typeof fakeAnthropic>).calls[0]!.messages as { role: string; content: unknown }[];
+    expect(sent).toHaveLength(3);
+    expect(JSON.stringify(sent)).toContain('first');
+    expect(JSON.stringify(sent)).not.toContain('Earlier messages in this chat');
   });
   it('does not limit a conversation by its message count', async () => {
     const h = harness({ service: { fr_conversation_get: conversationRow({ message_count: 300 }), fr_conversation_append: conversationRow({ message_count: 301 }) } });

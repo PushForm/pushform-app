@@ -141,4 +141,8 @@ Chat uses AI credits, which are counted from the text and pictures it reads and 
 - When about a tenth of your credits are left, chat says so in a short note under the conversation.
 - When they run out, chat explains it. A free account can subscribe to continue. A subscriber sees the date the credits refill. Everything outside chat keeps working: your files, editing, saving, importing and exporting.
 
-If you are sending messages too quickly, chat asks you to wait a moment. A conversation also takes at most 5 pictures, an account can have at most 5 open requests, and an account can keep at most 20 open chats (one for each document you have used chat in). If you reach 20, chat tells you; use **Clear Chat** in one you no longer need.
+If you are sending messages too quickly, chat asks you to wait a moment. A conversation also takes at most 5 pictures, and an account can have at most 5 open requests.
+
+## Chat history
+
+Chat keeps the conversation for each document until you clear it, however long it has been since you opened it. Open a document later and its chat is still there, and you can keep going. In a very long chat, the assistant works from the most recent part of the conversation; if it needs something from much earlier, it asks. **Clear Chat** (or `/clear`) removes a document's chat for good.

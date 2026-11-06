@@ -6,7 +6,7 @@ import { commonsFileUrl, CommonsUnavailableError, type CommonsProfile, type Comm
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { CommonsProfileEditor, CommonsProfilePageView, CreatorCredit, ProfileLink, type ProfileLookup } from './CommonsProfile';
 import { ModelCard, ModelGrid } from './ModelCard';
-import { currentCommonsLocation, modelIdFromPath, navigateCommons, openInApp, profileHandleFromPath, profilePath } from './route';
+import { browseSearchFromUrl, clearBrowseSearch, currentCommonsLocation, modelIdFromPath, navigateCommons, openInApp, profileHandleFromPath, profilePath } from './route';
 import { applySeo, homeSeo, modelSeo, normalizeSiteUrl, utilitySeo } from './seo';
 import { OwnModelsProvider, OwnModelGrid, OwnedDraftDetail, OwnerModelActions, useOwnModels } from './OwnModels';
 import { publishRoute, type PublishRoute } from './PublishPage';
@@ -18,7 +18,7 @@ import { CommonsOpenAction } from './CommonsOpenAction';
 import { BrowseFilters } from './BrowseFilters';
 import { SiteFooter } from './SiteFooter';
 import { filterModels, type CatalogFilters, type CatalogLoader, type CatalogModel } from './catalog';
-import { ProfileCollections, CreditedCreatorPage, CollectionsProvider, CollectionsRoute, FeaturedSection, FeatureAction, ModelCollectionAction, PublicCollectionResults, CommonsAdminLink } from './Collections';
+import { ProfileCollections, CreditedCreatorPage, CollectionsProvider, CollectionsRoute, FeaturedSection, FeatureAction, ModelCollectionAction, PublicCollectionResults } from './Collections';
 
 type CatalogState = { kind: 'unconfigured' | 'loading' | 'error' } | { kind: 'ready'; models: CatalogModel[] };
 const emptyFilters: CatalogFilters = { query: '', category: '', license: '', commercial: false };
@@ -85,7 +85,7 @@ function CommonsApp({ loadCatalog, filesUrl, account=null, publishPage, editorUr
   const [fullState, setState] = useState<CatalogState>({ kind: loadCatalog ? 'loading' : 'unconfigured' });
   const [attempt, setAttempt] = useState(0);
   useEffect(()=>{const refresh=()=>setAttempt(value=>value+1);window.addEventListener('commons:catalog-changed',refresh);return()=>window.removeEventListener('commons:catalog-changed',refresh);},[]);
-  const [filters, setFilters] = useState<CatalogFilters>(emptyFilters);
+  const [filters, setFilters] = useState<CatalogFilters>(() => { const query = browseSearchFromUrl(); return query === null ? emptyFilters : { ...emptyFilters, query }; });
   const [footerDocked, setFooterDocked] = useState(false);
   const [location,setLocation]=useState(currentCommonsLocation);
   const hash=location.hash;
@@ -111,7 +111,11 @@ function CommonsApp({ loadCatalog, filesUrl, account=null, publishPage, editorUr
     else window.location.hash = '#account';
   }, [legacyOwnRoute, own]);
   useEffect(() => {
-    const update = () => {const next=currentCommonsLocation();setLocation(current=>next.path===current.path&&next.hash===current.hash?current:next);};
+    clearBrowseSearch();
+    const update = () => {
+      const query=browseSearchFromUrl();
+      if(query!==null){clearBrowseSearch();setFilters({...emptyFilters,query});}
+      const next=currentCommonsLocation();setLocation(current=>next.path===current.path&&next.hash===current.hash?current:next);};
     window.addEventListener('hashchange', update);window.addEventListener('popstate', update);
     return () => {window.removeEventListener('hashchange', update);window.removeEventListener('popstate', update);};
   }, []);
@@ -160,7 +164,7 @@ function CommonsApp({ loadCatalog, filesUrl, account=null, publishPage, editorUr
     <a className="skip-link" href="#main">Skip to content</a>
     <header className="site-header"><a className="brand" href="/" onClick={event=>openInApp(event,'/')} aria-label="PushForm Commons home">
       <img src="/pf-logo-mark.svg" alt="" width="30" height="30" /><span>PushForm <strong>Commons</strong></span>
-    </a><nav aria-label="Commons">{account&&<a className="nav-upload" href="#upload">Upload model</a>}<a href="#collections">Collections</a>{account&&<><MyProfileLink own={own}/></>}<a className="editor-link" href="https://app.pushform.io">Open PushForm <span aria-hidden="true">↗</span></a><CommonsAdminLink/></nav></header>
+    </a><nav aria-label="Commons">{account&&<a className="nav-upload" href="#upload">Upload model</a>}<a href="#collections">Collections</a>{account&&<><MyProfileLink own={own}/></>}<a className="editor-link" href="https://app.pushform.io">Open PushForm <span aria-hidden="true">↗</span></a></nav></header>
     <main id="main" ref={heading} tabIndex={-1}>
       {creditedCreatorId?<CreditedCreatorPage key={creditedCreatorId} id={creditedCreatorId} models={models} filesUrl={filesUrl}/>:legacyOwnRoute?<p className="status-panel" role="status">Opening your profile...</p>:collectionRoute?<CollectionsRoute route={hash} models={models} filesUrl={filesUrl}/>:profileLookup?<CommonsProfilePageView lookup={profileLookup} profiles={account?.profiles??null} filesUrl={filesUrl} ownProfileId={own?.id??null} renderCollections={(handle,owner,profileId)=><ProfileCollections handle={handle} owner={owner} profileId={profileId} models={models} filesUrl={filesUrl}/>} renderOwnModels={()=><OwnModelGrid filesUrl={filesUrl}/>}/>:hash==='#account'?account?<AccountPage account={account} filesUrl={filesUrl}/>:<section className="status-panel"><h1>Accounts are unavailable in this build.</h1></section>:publishRoute(hash)?publishPage?.(publishRoute(hash)!,state.kind==='ready')??<section className="status-panel"><h1>Publishing is unavailable in this build.</h1></section>:selectedId && (state.kind === 'ready' || ownedModels.models?.some(model=>model.id===selectedId)) ? selected ? <ModelDetail model={selected} filesUrl={filesUrl} account={account} editorUrl={editorUrl} /> :
         ownedModels.models?.find(model=>model.id===selectedId) ? <OwnedDraftDetail key={selectedId} model={ownedModels.models.find(model=>model.id===selectedId)!} filesUrl={filesUrl}/> : account && ownedModels.userId && !ownedModels.models && !ownedModels.error ? <p role="status">Loading your model...</p> : <section className="status-panel"><p className="eyebrow">Model unavailable</p><h1>This model isn’t in the catalog.</h1>
@@ -185,7 +189,7 @@ function CommonsApp({ loadCatalog, filesUrl, account=null, publishPage, editorUr
           {state.kind === 'loading' && <p className="status-panel" role="status">Loading models…</p>}
           {state.kind === 'error' && <section className="status-panel" role="alert"><h3>We couldn’t load the catalog.</h3><p>Please try again in a moment.</p><button onClick={() => setAttempt((value) => value + 1)}>Try again</button></section>}
           <div id="catalog-results" role="tabpanel" aria-labelledby={onCollections?'browse-collections-tab':'browse-models-tab'}>{onCollections?<PublicCollectionResults models={models} filesUrl={filesUrl} filters={filters}/>:state.kind === 'ready' && <>
-            <p className="result-count" role="status">{paged && paging.more ? `${shown.length} of ${paging.total}` : shown.length} {(paged ? paging.total : shown.length) === 1 ? 'model' : 'models'}{filters.query && ` matching “${filters.query}”`}</p>
+            <p className="result-count" role="status">{paged && paging.more ? `${shown.length} of ${paging.total}` : shown.length} {(paged ? paging.total : shown.length) === 1 ? 'model' : 'models'}{filters.query.trim() && (/["“”„]/.test(filters.query) ? ` matching ${filters.query.trim()}` : ` matching “${filters.query.trim()}”`)}</p>
             {shown.length ? <ModelGrid>{shown.map((model) => <ModelCard key={model.id} model={model} filesUrl={filesUrl} />)}</ModelGrid> : <section className="status-panel"><h3>{(models.length || paged && (filters.query || filters.category || filters.license || filters.commercial)) ? 'No models match those filters.' : 'The library is ready for its first models.'}</h3>
               <p>{(models.length || paged && (filters.query || filters.category || filters.license || filters.commercial)) ? 'Try a different search or broaden your filters.' : 'Published models will appear here.'}</p>
               {(models.length > 0 || paged && (filters.query || filters.category || filters.license || filters.commercial)) && <button onClick={() => setFilters(emptyFilters)}>Clear filters</button>}</section>}

@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { catalogModelSchema, commonsProfileImageUrl, commonsPublicProfileSchema, parseCommonsCatalog, type CatalogModel } from '@pushform/cloud/catalog';
 import {
-  escapeHtml, headTags, homeSeo, modelImageUrl, modelPath, modelSeo, normalizeSiteUrl, profilePathFor, profileSeo, utilitySeo,
+  browseSearchPath, escapeHtml, headTags, homeSeo, modelImageUrl, modelPath, modelSeo, normalizeSiteUrl, profilePathFor, profileSeo, utilitySeo,
   type SeoContext, type SeoMeta,
 } from '../seo';
 
@@ -103,7 +103,7 @@ export function modelBody(model: CatalogModel, ctx: SeoContext): string {
   const image = modelImageUrl(model, ctx);
   return `<main><nav aria-label="Breadcrumb"><a href="/">All models</a></nav><article>
 <h1>${escapeHtml(model.title)}</h1>
-<p>By ${model.creatorProfile ? `<a href="${profilePathFor(model.creatorProfile.handle)}">${escapeHtml(model.creator)}</a>` : escapeHtml(model.creator)}</p>
+<p>By ${model.creatorProfile ? `<a href="${profilePathFor(model.creatorProfile.handle)}">${escapeHtml(model.creator)}</a>` : model.creator.trim() ? `<a href="${escapeHtml(browseSearchPath(model.creator))}" rel="nofollow">${escapeHtml(model.creator)}</a>` : escapeHtml(model.creator)}</p>
 ${image ? `<img src="${escapeHtml(image)}" alt="${escapeHtml(model.title)}" width="640" />` : ''}
 ${paragraphs(model.description)}
 <ul><li>Category: ${escapeHtml(model.category)}</li><li>Formats: ${escapeHtml(model.formats.join(', '))}</li>${model.tags.length ? `<li>Tags: ${escapeHtml(model.tags.join(', '))}</li>` : ''}<li>Published: ${escapeHtml(model.publishedAt.slice(0, 10))}</li></ul>

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { createContext, useCallback, useContext, useEffect, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
-import { commonsProfileImageUrl } from '@pushform/cloud';
+import { commonsProfileImageUrl, commonsSearchMatcher } from '@pushform/cloud';
 import type { CommonsModelsLoader, CommonsCreditedCreator, CommonsPublicProfile, CollectionFields, CommonsCollection, CommonsCollections, CommonsDiscovery } from '@pushform/cloud';
 import type { CommonsAccount } from './account';
 import { CommonsAccessGate } from './CommonsAccess';
@@ -12,7 +12,6 @@ import { navigateCommons, profilePath } from './route';
 
 const noSubscribe = () => () => {};
 const message = (error: unknown) => error instanceof Error ? error.message : 'This request failed. Try again.';
-const adminUrl = (import.meta.env.VITE_PUSHFORM_ADMIN_URL || 'https://pushform-oregon.pages.dev').replace(/\/$/, '') + '/#/commons/featured';
 interface CollectionContext {
   service: CommonsCollections | null; account: CommonsAccount | null; userId: string | null;
   discovery: CommonsDiscovery | null; error: string | null; own: CommonsCollection[] | null; ownError: string | null;
@@ -72,9 +71,6 @@ export function CollectionsProvider({ service, account, children }: { service: C
 
 export function CollectionCurator({ collection }: { collection: CommonsCollection }) {
   return <span>Curated by {collection.curator ? <ProfileLink handle={collection.curator.handle}>{collection.curator.displayName}</ProfileLink> : 'a Commons member'}</span>;
-}
-export function CommonsAdminLink() {
-  return useCollections().canFeature ? <a href={adminUrl}>Admin</a> : null;
 }
 export function CollectionMosaic({ collection, models, filesUrl }: { collection: CommonsCollection; models: CatalogModel[]; filesUrl: string | undefined }) {
   const visible = collection.modelIds.map(id => models.find(model => model.id === id)).filter((model): model is CatalogModel => Boolean(model));
@@ -141,7 +137,7 @@ export function CreditedCreatorPage({ id, models, filesUrl }: { id: string; mode
   </article>;
 }
 export function FeaturedSection({ models, filesUrl, loadModels }: { models: CatalogModel[]; filesUrl: string | undefined; loadModels?: CommonsModelsLoader | undefined }) {
-  const { service, discovery, error, refresh, canFeature } = useCollections();
+  const { service, discovery, error, refresh } = useCollections();
   const [page, setPage] = useState(0);
   const items = discovery?.featured.filter(item => item.type === 'model' ? Boolean(loadModels) || models.some(model => model.id === item.targetId) : item.type === 'credited_creator' ? discovery.creditedCreators.some(creator => creator.id === item.targetId) : item.type === 'creator' ? discovery.creators.some(creator => creator.id === item.targetId) : discovery.collections.some(collection => collection.id === item.targetId)) ?? [];
   const pages = Math.ceil(items.length / 3);
@@ -161,7 +157,7 @@ export function FeaturedSection({ models, filesUrl, loadModels }: { models: Cata
   const featuredModels = [...extra, ...models.filter(model => !extra.some(value => value.id === model.id))];
   if (!service) return null;
   return <section className="featured-section" aria-labelledby="featured-title">
-    <div className="section-heading"><div><h2 id="featured-title">Featured</h2><p className="section-description">Models, collections and creators, picked for makers.</p></div>{canFeature && <a href={adminUrl}>Manage featured</a>}</div>
+    <div className="section-heading"><div><h2 id="featured-title">Featured</h2><p className="section-description">Models, collections and creators, picked for makers.</p></div></div>
     {error ? <div role="alert"><p>{error}</p><button onClick={refresh}>Retry featured</button></div> : !discovery ? <p role="status">Loading featured models, collections and creators…</p> : <>
       <ModelGrid className="featured-grid">{items.slice(currentPage * 3, currentPage * 3 + 3).map(item => {
         if (item.type === 'credited_creator') {
@@ -190,13 +186,13 @@ export function FeatureAction({ type, targetId, eligible = true }: { type: 'mode
   const { service, discovery, canFeature, refresh } = context ?? {};
   const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null); const [added, setAdded] = useState(false);
   if (!canFeature || !service) return null;
-  const featured = added || discovery?.featured.some(item => item.type === type && item.targetId === targetId);
+  if (added || discovery?.featured.some(item => item.type === type && item.targetId === targetId)) return null;
   return <div className="feature-action">
-    {featured ? <a className="secondary-button" href={adminUrl}>Featured · Manage</a> : <button type="button" className="secondary-button" disabled={busy || !eligible} onClick={() => {
+    <button type="button" className="secondary-button" disabled={busy || !eligible} onClick={() => {
       setBusy(true); setError(null);
       void service.feature(type, targetId).then(() => { setAdded(true); refresh?.(); }, error => setError(message(error))).finally(() => setBusy(false));
-    }}>{busy ? 'Featuring…' : 'Feature'}</button>}
-    {!eligible && !featured && <p className="section-description">Only nonempty public collections can be featured.</p>}
+    }}>{busy ? 'Featuring…' : 'Feature'}</button>
+    {!eligible && <p className="section-description">Only nonempty public collections can be featured.</p>}
     {error && <p role="alert">{error}</p>}
   </div>;
 }
@@ -205,12 +201,12 @@ export function PublicCollectionResults({ models, filesUrl, filters }: { models:
   if (!service) return <p>Collections are unavailable in this build.</p>;
   if (error) return <div role="alert"><p>{error}</p><button onClick={refresh}>Retry collections</button></div>;
   if (!discovery) return <p role="status">Loading collections…</p>;
-  const words = filters.query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  const matches = commonsSearchMatcher(filters.query);
   const shown = discovery.collections.filter(collection => {
     const members = models.filter(model => collection.modelIds.includes(model.id));
-    const searchable = [collection.title, collection.description, collection.curator?.displayName ?? '', ...members.map(model => model.title + ' ' + model.creator)].join(' ').toLocaleLowerCase();
+    const searchable = [collection.title, collection.description, collection.curator?.displayName ?? '', ...members.flatMap(model => [model.title, model.creator])].join(' · ');
     if (filters.commercial && (!members.length || !members.every(model => model.licenses.every(license => license.commercialUse === 'allowed')))) return false;
-    return words.every(word => searchable.includes(word)) && (!(filters.category || filters.license) || filterModels(members, { ...filters, query: '', commercial: false }).length > 0);
+    return matches(searchable) && (!(filters.category || filters.license) || filterModels(members, { ...filters, query: '', commercial: false }).length > 0);
   });
   return <><p className="result-count" role="status">{shown.length} {shown.length === 1 ? 'collection' : 'collections'}</p>
     {shown.length ? <ModelGrid>{shown.map(collection => <CollectionCard key={collection.id} collection={collection} models={models} filesUrl={filesUrl} />)}</ModelGrid> : <p>No public collections match those filters.</p>}

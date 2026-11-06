@@ -144,7 +144,8 @@ jobs:
           node -e 'const jobs = JSON.parse(process.env.RESULTS); if (Object.values(jobs).some(j => !["success", "skipped"].includes(j.result))) process.exit(1)'
 
   deploy-commons:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.plan.outputs.commons == 'true'
+    # Without always(), a skipped upstream job (step-reader, when only Commons changed) skips this deploy too.
+    if: ${{ always() && needs.test.result == 'success' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.plan.outputs.commons == 'true' }}
     needs: [test, plan]
     runs-on: ubuntu-24.04
     environment: Production
@@ -154,7 +155,6 @@ jobs:
       VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
       VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
       VITE_COMMONS_ASSETS_URL: ${{ vars.VITE_COMMONS_ASSETS_URL }}
-      VITE_PUSHFORM_ADMIN_URL: ${{ vars.VITE_PUSHFORM_ADMIN_URL }}
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6

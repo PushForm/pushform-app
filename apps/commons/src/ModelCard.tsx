@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import type { MouseEvent, ReactNode } from 'react';
-import { modelPath, navigateCommons, openInApp, profilePath } from './route';
+import { browseSearchPath, modelPath, navigateCommons, openInApp, profilePath } from './route';
 import { CommonsThumbnail } from './CommonsPreview';
 import type { CatalogModel } from './catalog';
 
@@ -13,8 +13,12 @@ export function ProfileLink({handle,children}:{handle:string;children:ReactNode}
   };
   return <a href={profilePath(handle)} onClick={open}>{children}</a>;
 }
+/** Links a creator with a Commons profile to it; any other credited name searches the library for that name. */
 export function CreatorCredit({model}:{model:{creator:string;creatorProfile?:{handle:string}|null}}){
-  return <>By {model.creatorProfile?<ProfileLink handle={model.creatorProfile.handle}>{model.creator}</ProfileLink>:model.creator}</>;
+  if(model.creatorProfile)return <>By <ProfileLink handle={model.creatorProfile.handle}>{model.creator}</ProfileLink></>;
+  if(!model.creator.trim())return <>By {model.creator}</>;
+  const search=browseSearchPath(model.creator);
+  return <>By <a href={search} title={`Find models by ${model.creator}`} onClick={event=>openInApp(event,search)}>{model.creator}</a></>;
 }
 /** The one card used for every grid of models: the library, profile pages and My models. `art` replaces the
  * public thumbnail (My models shows owner-only previews of drafts) and `footer` adds status and actions. */

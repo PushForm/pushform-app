@@ -73,7 +73,7 @@ it('offers owner actions for an authenticated owned import despite unrelated cre
   render(<App account={f.account} loadCatalog={async () => [model]} />);
   expect(await screen.findByRole('link', { name: 'Edit model' })).toHaveProperty('hash', '#edit/' + model.id);
   expect(screen.getByRole('button', { name: 'Delete model' })).toBeTruthy();
-  expect(screen.getByText('By Independent source author')).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Independent source author' }).getAttribute('href')).toBe('/?q=%22Independent+source+author%22#browse');
   expect(f.rpc).toHaveBeenCalledWith('commons_my_models', {});
 });
 

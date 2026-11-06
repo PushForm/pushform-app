@@ -32,7 +32,7 @@ The inputs and the result must be valid solids in the current editing context. W
 
 The **Inspect** group contains the **Measure** dropdown and a **Section Plane** button. Section Plane creates a cutaway view to inspect the model’s interior.
 
-**Tape Measure** and **Protractor** help measure distances and angles. **Dimension** adds measured annotations. **Axes** works with the coordinate reference rather than placing ordinary text or geometry.
+**Tape Measure** and **Protractor** help measure distances and angles. **Dimension** adds measured annotations. **Axes**, which moves the drawing axes, is not on the toolbar; find it in command search.
 
 The **Text** dropdown in **Draw** contains **Text** for model annotations and **3D Text** for letter geometry.
 

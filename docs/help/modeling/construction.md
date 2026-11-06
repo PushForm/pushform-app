@@ -20,6 +20,8 @@ By default, finishing creates a guide line at that angle. Turn off **Create guid
 
 ## Place the drawing Axes
 
-Choose **Axes** from the Measure dropdown. Click the new origin, click a point in the red-axis direction, then click toward the green-axis direction to finish. The third direction is set automatically. Use points that give distinct directions. Escape cancels unfinished placement.
+The drawing axes set the directions that drawing tools, the arrow-key locks and typed coordinates follow. Move them when part of a model is not square to them, such as a wing of a building set at an angle, or to put the origin on a useful corner of an imported model.
 
-Double-click a new origin instead to retain the current orientation. Tap Ctrl to cycle which axis is placed first; check the named axis in the status before clicking. This changes the drawing axes in the current editing context; it does not move the geometry. Undo restores the previous axes.
+Search for **Axes** in command search (Ctrl/Cmd+K); it is not on the toolbar. Click the new origin, click a point in the red-axis direction, then click toward the green-axis direction to finish. The third direction is set automatically. Use points that give distinct directions. Escape cancels unfinished placement.
+
+Double-click a new origin instead to retain the current orientation. Tap Ctrl to cycle which axis is placed first; check the named axis in the status before clicking. This changes the drawing axes in the current editing context; it does not move the geometry. Undo restores the previous axes. To go back to the standard axes, run **Reset Axes** from command search.

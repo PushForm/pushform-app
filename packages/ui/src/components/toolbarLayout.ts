@@ -66,7 +66,6 @@ export const TOOLBAR_GROUPS: readonly { title: string; slots: readonly Slot[] }[
         'tape',
         'dimension',
         'protractor',
-        'axes',
       ),
       tool('sectionPlane'),
     ],
@@ -85,8 +84,8 @@ export const TOOLBAR_LAYOUT: readonly Slot[] = TOOLBAR_GROUPS.flatMap((group, in
   index === 0 ? [...group.slots] : [SEP, ...group.slots],
 );
 
-/** Tools reachable only from elsewhere (context menus, panels); never shown as toolbar buttons. */
-const NOT_IN_TOOLBAR: ReadonlySet<string> = new Set(['texturePosition', 'placeLight']);
+/** Tools reachable only from elsewhere (context menus, panels, command search); never shown as toolbar buttons. */
+const NOT_IN_TOOLBAR: ReadonlySet<string> = new Set(['texturePosition', 'placeLight', 'axes']);
 
 /** A toolbar item: what the stack shows (`StackedTool`) plus the command that runs on click. */
 export interface ToolbarItem extends StackedTool {

@@ -89,7 +89,8 @@ it('features a public collection in one action for admins and adds it to the hom
   const auth = await setup('admin'); window.location.hash = '#collections/' + collection.id;
   render(<App {...auth} loadCatalog={async () => [model]} />);
   fireEvent.click(await screen.findByRole('button', { name: 'Feature' }));
-  await screen.findByRole('link', { name: 'Featured · Manage' });
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Feature' })).toBeNull());
+  expect(screen.queryByText(/Manage/)).toBeNull();
   expect(auth.rpc).toHaveBeenCalledWith('admin_commons_feature', { p_type: 'collection', p_target_id: collection.id });
   window.location.hash = '#browse'; fireEvent(window, new HashChangeEvent('hashchange'));
   expect(await screen.findByRole('link', { name: 'View collection Workshop essentials' })).toBeTruthy();
@@ -126,7 +127,8 @@ it('features a creator from their profile and shows their public card on the hom
   window.history.replaceState(null, '', '/u/test-maker');
   render(<App {...auth} loadCatalog={async () => [model]} />);
   fireEvent.click(await screen.findByRole('button', { name: 'Feature' }));
-  await screen.findByRole('link', { name: 'Featured · Manage' });
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Feature' })).toBeNull());
+  expect(screen.queryByText(/Manage/)).toBeNull();
   expect(feature).toHaveBeenCalledWith('creator', creator.id);
   window.history.replaceState(null, '', '/'); fireEvent(window, new PopStateEvent('popstate'));
   const featured = within(await screen.findByRole('region', { name: 'Featured' }));

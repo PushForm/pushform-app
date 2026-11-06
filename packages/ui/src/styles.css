@@ -3530,3 +3530,48 @@ h4.pf-xui-text { font-size: 12px; }
   margin: 0 3px;
   background: var(--pf-border);
 }
+/* A model text's style row in the tool options bar. */
+.pf-model-text-style {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.pf-model-text-style select,
+.pf-model-text-style input:not([type='color']) {
+  height: 22px;
+  box-sizing: border-box;
+  font: inherit;
+}
+.pf-model-text-style > select {
+  width: 140px;
+}
+.pf-model-text-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--pf-text-muted);
+}
+.pf-model-text-size input {
+  width: 46px;
+}
+.pf-model-text-style button {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  background: var(--pf-surface);
+  color: inherit;
+}
+.pf-model-text-style button[aria-pressed='true'] {
+  border-color: var(--pf-accent);
+  background: var(--pf-accent-bg);
+  color: var(--pf-accent);
+}
+.pf-model-text-color {
+  width: 28px;
+  height: 22px;
+  padding: 0 2px;
+}

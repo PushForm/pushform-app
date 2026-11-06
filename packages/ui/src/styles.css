@@ -3476,3 +3476,57 @@ h4.pf-xui-text { font-size: 12px; }
 .pf-layout-workspace {
   padding-top: calc(24px + 42px);
 }
+
+/* Controls a workspace hosts in the tool options bar, such as Layout's text style row. */
+.pf-tob.is-shown .pf-tob-custom,
+.pf-tob.is-shown .pf-tob-custom * {
+  pointer-events: auto;
+}
+.pf-tob .pf-tob-custom {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+.pf-tob .pf-layout-text-toolbar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.pf-tob .pf-layout-text-toolbar select,
+.pf-tob .pf-layout-text-toolbar input:not([type='color']) {
+  height: 22px;
+  box-sizing: border-box;
+  font: inherit;
+}
+.pf-tob .pf-layout-text-toolbar > select:first-child {
+  width: 140px;
+}
+.pf-tob .pf-layout-text-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--pf-text-muted);
+}
+.pf-tob .pf-layout-text-size input {
+  width: 46px;
+}
+.pf-tob .pf-layout-text-toolbar button {
+  width: 24px;
+  height: 22px;
+}
+.pf-tob .pf-layout-text-toolbar .pf-layout-text-color {
+  width: 28px;
+  height: 22px;
+  padding: 0 2px;
+}
+.pf-tob .pf-layout-text-toolbar-divider {
+  display: inline-block;
+  width: 1px;
+  height: 16px;
+  margin: 0 3px;
+  background: var(--pf-border);
+}

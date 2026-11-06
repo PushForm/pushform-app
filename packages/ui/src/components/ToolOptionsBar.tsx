@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { JSX, KeyboardEvent as ReactKeyboardEvent } from 'react';
+import type { JSX, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
 import { parseVcb } from '@pushform/commands';
 import type { ToolSetting, ToolSettingKey, ToolSettingValue, VcbValue } from '@pushform/commands';
 import { typedLengthUnit } from '@pushform/core';
@@ -35,6 +35,11 @@ export interface ToolOptionsBarProps {
   read(quantity: 'length' | 'angle' | 'count', text: string): VcbValue | null;
   /** Give keyboard focus back to the view. */
   onLeave(): void;
+  /**
+   * Controls a workspace renders itself, after the tool's name, such as Layout's text formatting
+   * while text is edited. The bar shows while there are any.
+   */
+  readonly children?: ReactNode;
 }
 
 /**
@@ -67,12 +72,13 @@ export function ToolOptionsBar(): JSX.Element {
  * the view. Hidden when there are none. Only its controls take the pointer; while the tool
  * is placing a point the whole bar lets it through.
  */
-export function ToolOptionsBarView({ tool, settings, placing = false, applied: appliedIn = false, mac, onSetting, read, onLeave }: ToolOptionsBarProps): JSX.Element {
-  const shown = settings.length > 0;
+export function ToolOptionsBarView({ tool, settings, placing = false, applied: appliedIn = false, mac, onSetting, read, onLeave, children }: ToolOptionsBarProps): JSX.Element {
+  const shown = settings.length > 0 || Boolean(children);
   const applied = appliedIn && shown;
   // keep the last controls while fading out
   const last = useRef<{ settings: readonly ToolSetting[]; title: string; id: string }>({ settings: [], title: '', id: '' });
   if (shown && tool) last.current = { settings, title: tool.title, id: tool.id };
+  const content = shown ? children : null;
   const view = last.current;
   const root = useRef<HTMLDivElement>(null);
   const [fold, setFold] = useState<Fold>(0);
@@ -145,6 +151,7 @@ export function ToolOptionsBarView({ tool, settings, placing = false, applied: a
         {applied ? <span aria-hidden="true">✓</span> : null}
         {fold < 1 ? <span>{applied ? `${view.title} applied` : view.title}</span> : null}
       </span>
+      {content ? <span className="pf-tob-custom" data-tob-control>{content}</span> : null}
       {visible.map((c) => <Control key={c.id} read={read} c={c} mac={mac} asList={fold >= 2} send={send} />)}
       {applied && fold < 2 ? <span className="pf-tob-note">Changes redo the last operation · click to go on</span> : null}
       {overflow.length ? (

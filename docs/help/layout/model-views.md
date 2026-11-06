@@ -10,13 +10,13 @@ A drawing imported from LayOut may already contain embedded models. Without clou
 
 Select the model view. In its **Model view** settings, choose a saved scene with a camera, or choose **Top**, **Front**, **Right**, **Back**, **Left**, **Bottom**, or **Iso**.
 
-A scene applies its camera, and the view follows the tags the scene hides. A standard view frames the model and makes the view custom.
+A scene applies its camera, and the view follows the tags the scene hides. A standard view frames the model with a new camera. The view keeps its scene, and the Scene setting shows it as modified, for example **Floor Plan (modified)**: the scene's tags and section cuts still apply. Choose the scene again to return to its camera.
 
 ## Show section cuts in a model view
 
 A view of a scene shows the section cuts the scene saved: a scene saved with a section plane active shows that cut, and one saved with none shows the model uncut. Two views of the same model can show different cuts this way, for example a floor plan and a section. A view with no scene, such as a standard view, or of a scene that does not save its section planes, shows the model's current cuts.
 
-When the scene saved its style, the view also takes that style's section display settings: whether section planes and cuts are shown, the section fill, and the section colors and line width. The scene's other style settings do not change the view. Snapping to model points in a view uses the cuts that view shows, so points cut away are not offered.
+When the scene saved its style, the view also takes that style's section display settings: whether section planes and cuts are shown, the section fill, and the section colors and line width. The scene's other style settings do not change the view. A view imported from a LayOut document keeps the section display settings saved with it there instead. Snapping to model points in a view uses the cuts that view shows, so points cut away are not offered.
 
 ## Section markers and sheet numbers
 
@@ -26,7 +26,7 @@ When a model has section planes and its style shows them, each marker in a model
 
 Double-click the view with Select, or enable **Navigate view** in its settings. Inside the frame, drag to orbit, Shift+drag or middle-button drag to pan, and scroll to zoom. Release a drag to save that camera change as one undo step. Scrolling saves when it pauses.
 
-Press **Escape** or click outside the view to leave navigation. Escape during a drag cancels that drag. To move the frame on the page, leave navigation and select the whole view. Copies keep the same model source but have their own view settings.
+Navigating keeps the view's scene in the same way, marked as modified. Press **Escape** or click outside the view to leave navigation. Escape during a drag cancels that drag. To move the frame on the page, leave navigation and select the whole view. Copies keep the same model source but have their own view settings.
 
 ## Keep a cloud model up to date
 

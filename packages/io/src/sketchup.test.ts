@@ -405,7 +405,9 @@ describe('SketchUp import', () => {
       const modeling = draft.styles.get(draft.activeStyleId)!.modeling;
       modeling.sectionPlanesVisible = false; modeling.sectionCutsVisible = false;
     });
-    doc.transact('Open fixture', draft => applySketchUpImport(draft, { ...scene, sectionDisplay: null }));
+    // A file that records no section display has the switches neither apart nor among its rendering options.
+    const { sectionPlanesVisible: _planes, sectionCutsVisible: _cuts, ...modeling } = scene.display!.modeling;
+    doc.transact('Open fixture', draft => applySketchUpImport(draft, { ...scene, sectionDisplay: null, display: { ...scene.display!, modeling } }));
     expect(activeStyle(doc).modeling).toMatchObject({ sectionPlanesVisible: true, sectionCutsVisible: true });
   });
 
@@ -797,6 +799,12 @@ describe('SketchUp import', () => {
     expect(root.activeSectionPlaneId).not.toBeNull();
     expect(doc.state.sceneOrder.map(id => doc.state.scenes.get(id)!.activeSectionPlanes)).toEqual([[root.activeSectionPlaneId], [root.activeSectionPlaneId],
       [root.activeSectionPlaneId]]);
+    // Each scene's style keeps the Display Section Planes and Display Section Cuts it saved; the model's are both off.
+    const shown = (style: { modeling: { sectionPlanesVisible: boolean; sectionCutsVisible: boolean } }) =>
+      [style.modeling.sectionPlanesVisible, style.modeling.sectionCutsVisible];
+    expect(shown(doc.state.styles.get(doc.state.activeStyleId)!)).toEqual([false, false]);
+    expect(doc.state.sceneOrder.map(id => { const scene = doc.state.scenes.get(id)!; return [scene.name, ...shown(doc.state.styles.get(scene.styleId!)!)]; }))
+      .toEqual([['Wire', true, false], ['Hidden', false, true], ['Xray', true, true]]);
   });
 
   it.each([2017, 2027])('opens a SketchUp %s scene without a name or camera', async year => {

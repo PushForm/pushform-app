@@ -92,4 +92,16 @@ describe('Section cuts of Layout model views', () => {
     expect(modeling.guidesVisible).toBe(before.guidesVisible);
     expect(sectionsToRender(viewSectionState(model, 'Open')).planes.map(plane => plane.symbol)).toEqual(['P']);
   });
+
+  it("lets a view's own section display settings replace its scene's", () => {
+    const { model, plan } = fixture();
+    const sections = { planes: true, cuts: false, fill: false, lineWidth: 2, lineColor: [0, 0, 1] as [number, number, number] };
+    const state = viewSectionState(model, 'Cut', sections);
+    // The scene still chooses the cut; the view decides how it is drawn.
+    expect(active(state, state.rootDefinitionId)).toBe(plan);
+    expect(sectionsToRender(state)).toMatchObject({ cuts: [], fill: false, lineWidth: 2, lineColor: '#0000ff', fillColor: '#ff0000' });
+    expect(sectionsToRender(state).planes.map(plane => plane.symbol)).toEqual(['P']);
+    expect(viewSectionState(model, 'Cut', { ...sections })).toBe(state);
+    expect(sectionsToRender(viewSectionState(model, null, { planes: false, cuts: true })).planes).toEqual([]);
+  });
 });

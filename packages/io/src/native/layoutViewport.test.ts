@@ -38,6 +38,12 @@ it('distinguishes absent, undefined, false and empty metadata without inventing 
   }
   const value = fixture(); value.cache = null; value.scene = null; value.background = '';
   expect(decodeNativeLayoutViewport(encodeNativeLayoutViewport(value)).value).toEqual(value);
+  // A view whose camera changed after its scene was chosen keeps the scene; the flag is stored only when set.
+  const modified = { ...fixture(), scene: 'Plan', cameraModified: true };
+  const bytes = encodeNativeLayoutViewport(modified);
+  expect(decodeNativeLayoutViewport(bytes).value).toEqual(modified);
+  expect(Array.from(schema.encode(schema.decode(bytes)).finish())).toEqual(Array.from(bytes));
+  expect(Object.hasOwn(decodeNativeLayoutViewport(encodeNativeLayoutViewport({ ...fixture(), cameraModified: false })).value, 'cameraModified')).toBe(false);
 });
 it('owns and preserves extension bytes through camera edits at every nested scope', () => {
   const fields = [new Uint8Array([0x98, 6, 7])];

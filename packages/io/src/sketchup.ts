@@ -255,7 +255,8 @@ type RenderingOption = number | boolean | [number, number, number, number];
  * SketchUp's rendering options → PushForm's style settings. `RenderMode` 0 is Wireframe, 1 Hidden Line
  * and 5 Monochrome; the other values are Shaded, with textures while `Texture` is on. `ModelTransparency` (X-ray)
  * makes the shaded, textured and monochrome styles X-ray. `EdgeDisplayMode` 0 hides edges. `EdgeColorMode` 0 colors
- * edges by material, 1 all the same, 2 by axis. `GroundTransparency` is a percentage. Watermarks, sketchy edges, fog
+ * edges by material, 1 all the same, 2 by axis. `GroundTransparency` is a percentage. `DisplaySectionPlanes` and
+ * `DisplaySectionCuts` show section planes and cuts. Watermarks, sketchy edges, fog
  * and the saved style list are not read.
  */
 export function sketchUpDisplay(options: Record<string, RenderingOption> | null | undefined): ImportedDisplay | null {
@@ -290,6 +291,7 @@ export function sketchUpDisplay(options: Record<string, RenderingOption> | null 
       ['selected', rgb('HighlightColor')], ['locked', rgb('LockedColor')], ['guides', rgb('ConstructionColor')],
       ['inactiveSection', rgb('SectionInactiveColor')], ['activeSection', rgb('SectionActiveColor')], ['sectionFill', rgb('SectionDefaultFillColor')],
       ['sectionLine', rgb('SectionDefaultCutColor')], ['sectionLineWidth', count('SectionCutWidth')], ['sectionFillEnabled', flag('SectionCutFilled')],
+      ['sectionPlanesVisible', flag('DisplaySectionPlanes')], ['sectionCutsVisible', flag('DisplaySectionCuts')],
       ['hiddenGeometry', flag('DrawHidden')], ['guidesVisible', hideGuides === undefined ? undefined : !hideGuides],
       ['modelAxesVisible', flag('DisplaySketchAxes')], ['colorByTag', flag('DisplayColorByLayer')],
     ]),
@@ -513,7 +515,10 @@ export function prepareSketchUp(model: SkpModel, onProgress?: (p: ImportProgress
     }),
     tagFolders: ((model as ReaderModel).tagFolders ?? []).map(f => ({ name: f.name, visible: !f.hidden, parent: f.parent })), scenes,
     units: sketchUpUnits(model.unitsOptions), sectionDisplay: model.sectionDisplay ?? null,
-    display: sketchUpDisplay(model.renderingOptions), warnings: [...warnings], format };
+    // Display Section Planes and Cuts are read apart from the model's other options in newer files; a scene's saved style
+    // carries them with the rest, so the model's settings compare equal to a scene's that saved the same ones.
+    display: sketchUpDisplay(model.renderingOptions && model.sectionDisplay ? { DisplaySectionPlanes: model.sectionDisplay.planes,
+      DisplaySectionCuts: model.sectionDisplay.cuts, ...model.renderingOptions } : model.renderingOptions), warnings: [...warnings], format };
 }
 
 // SketchUp's Length constants, indexed by their stored codes.

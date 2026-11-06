@@ -32,7 +32,7 @@ import {
   type LayoutDocumentState,
   type LayoutTable,
   type LayoutTableEdge,
-  type LayoutViewportDisplay,
+  type LayoutViewportDisplay, type LayoutViewportSections,
   type LayoutModelArchive,
   type LayoutEntity,
   type LayoutImage,
@@ -1136,7 +1136,9 @@ class Importer {
       entity.image!.viewport = {
         source: { archiveId: this.archiveId, modelReferenceId }, templateId: originalId, originalId,
         camera: viewportCamera, preserveScaleOnResize: element.attrs.constantSize === '1',
-        scene: element.attrs.cameraModified === '1' ? null : element.attrs.defaultPageName ?? null,
+        // A view whose camera was changed after its scene was chosen still shows the scene's tags and section cuts.
+        scene: element.attrs.defaultPageName ?? null,
+        ...(element.attrs.cameraModified === '1' && element.attrs.defaultPageName !== undefined ? { cameraModified: true } : {}),
         background: backgroundColor,
         cache: picture ? { camera: viewportCamera, widthMm: width * MM_PER_INCH, heightMm: height * MM_PER_INCH } : null,
         ...viewportDisplay(element),
@@ -1417,10 +1419,33 @@ function viewportDisplay(element: XmlElement): { display?: LayoutViewportDisplay
   const mode = entries.get('RenderMode'), textured = on('Texture', true);
   const faceStyle: LayoutViewportDisplay['faceStyle'] = mode === '0' ? 'wireframe' : mode === '1' ? 'hiddenLine' : mode === '5' ? 'monochrome'
     : textured ? 'shadedTextured' : 'shaded';
-  const shadows = viewportShadows(element);
+  const shadows = viewportShadows(element), sections = viewportSections(entries);
   return { display: { faceStyle, edges: entries.get('EdgeDisplayMode') !== '0', profiles: on('DrawSilhouettes', true),
     backEdges: on('DrawBackEdges', false), xray: on('ModelTransparency', false), hiddenGeometry: on('DrawHidden', false),
-    ...(shadows ? { shadows } : {}) } };
+    ...(shadows ? { shadows } : {}), ...(sections ? { sections } : {}) } };
+}
+
+/**
+ * A view's own section display from its rendering options: Display Section Planes and Cuts, the fill, the cut line width,
+ * and the colors, each an int32 whose little-endian bytes are red, green, blue and alpha. Null without either switch.
+ */
+function viewportSections(entries: Map<string | undefined, string | undefined>): LayoutViewportSections | null {
+  if (!entries.has('DisplaySectionPlanes') && !entries.has('DisplaySectionCuts')) return null;
+  const color = (key: string): [number, number, number] | undefined => {
+    const value = Number(entries.get(key));
+    if (!entries.has(key) || !Number.isInteger(value)) return undefined;
+    return [value & 255, (value >>> 8) & 255, (value >>> 16) & 255].map(c => c / 255) as [number, number, number];
+  };
+  const width = Number(entries.get('SectionCutWidth'));
+  const sections: LayoutViewportSections = { planes: entries.get('DisplaySectionPlanes') === '1', cuts: entries.get('DisplaySectionCuts') === '1' };
+  if (entries.has('SectionCutFilled')) sections.fill = entries.get('SectionCutFilled') === '1';
+  if (entries.has('SectionCutWidth') && Number.isFinite(width) && width > 0) sections.lineWidth = width;
+  for (const [key, field] of [['SectionActiveColor', 'activeColor'], ['SectionInactiveColor', 'inactiveColor'],
+    ['SectionDefaultFillColor', 'fillColor'], ['SectionDefaultCutColor', 'lineColor']] as const) {
+    const value = color(key);
+    if (value) sections[field] = value;
+  }
+  return sections;
 }
 
 /**

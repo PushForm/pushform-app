@@ -5,6 +5,7 @@ import { applySketchUpImport, openModelFile, readPreservedSketchUpModel, readSke
 import {
   isCloudReference, isCloudSource, isViewport, layoutFrameSize, viewportCacheCurrent, viewportCloudReference, viewportOrthoHeight, viewportSourceKey, viewportSourceSheet,
   type CloudModelReference, type LayoutDocumentState, type LayoutEntity, type LayoutViewport, type LayoutViewportCamera, type LayoutViewportDisplay,
+  type LayoutViewportSections,
 } from '@pushform/layout';
 import { createDocument, ImageStore, type DocumentState, type ModelingColors, type Scene } from '@pushform/model';
 import { Viewport, type CameraState, type RenderBody, type RenderDisplay, type RenderImage, type RenderSections, type RenderSketch } from '@pushform/render';
@@ -194,13 +195,14 @@ const sceneSections = new WeakMap<LayoutViewportModel, Map<string, DocumentState
  * The model as a view of `scene` shows its section planes and cuts, and picks through them: with the scene's tag
  * visibility when it saves tags, the active section plane it saved for each container when it saves section planes,
  * and its style's section display settings when it saves its style. Otherwise, and for a view without a scene, the
- * model's own.
+ * model's own. The view's own section display settings (`sections`), when it has them, replace the scene's or model's.
  */
-export function viewSectionState(model: LayoutViewportModel, scene: string | null): DocumentState {
-  if (scene === null) return model.state;
+export function viewSectionState(model: LayoutViewportModel, scene: string | null, sections?: LayoutViewportSections): DocumentState {
+  if (scene === null && !sections) return model.state;
   let byScene = sceneSections.get(model);
   if (!byScene) sceneSections.set(model, byScene = new Map());
-  const cached = byScene.get(scene);
+  const key = JSON.stringify([scene, sections ?? null]);
+  const cached = byScene.get(key);
   if (cached) return cached;
   const imported = model.scenes.find(candidate => candidate.name === scene);
   let saved: Scene | undefined;
@@ -220,12 +222,21 @@ export function viewSectionState(model: LayoutViewportModel, scene: string | nul
   }
   const style = saved?.flags.useStyle && saved.styleId !== null ? state.styles.get(saved.styleId) : undefined;
   const current = state.styles.get(state.activeStyleId);
-  if (style && current && style !== current) {
+  if (current && ((style && style !== current) || sections)) {
     const modeling = { ...current.modeling };
-    for (const key of SECTION_SETTINGS) (modeling as Record<string, unknown>)[key] = style.modeling[key];
+    if (style) for (const setting of SECTION_SETTINGS) (modeling as Record<string, unknown>)[setting] = style.modeling[setting];
+    if (sections) {
+      modeling.sectionPlanesVisible = sections.planes; modeling.sectionCutsVisible = sections.cuts;
+      if (sections.fill !== undefined) modeling.sectionFillEnabled = sections.fill;
+      if (sections.lineWidth !== undefined) modeling.sectionLineWidth = sections.lineWidth;
+      if (sections.activeColor) modeling.activeSection = sections.activeColor;
+      if (sections.inactiveColor) modeling.inactiveSection = sections.inactiveColor;
+      if (sections.fillColor) modeling.sectionFill = sections.fillColor;
+      if (sections.lineColor) modeling.sectionLine = sections.lineColor;
+    }
     state = { ...state, styles: new Map(state.styles).set(state.activeStyleId, { ...current, modeling }) };
   }
-  byScene.set(scene, state);
+  byScene.set(key, state);
   return state;
 }
 
@@ -488,8 +499,8 @@ async function drain(): Promise<void> {
           const geometry = viewGeometry(model, job.scene);
           withRenderImageStore(model.images, () => { view.setBodies(geometry.bodies); view.setSketches(geometry.sketches); });
           view.setImages(geometry.pictures);
-          view.setSections(withSectionSheet(sectionsToRender(viewSectionState(model, job.scene)), job.sheet));
-          const { shadows, ...display }: Partial<LayoutViewportDisplay> = job.display ?? {};
+          view.setSections(withSectionSheet(sectionsToRender(viewSectionState(model, job.scene, job.display?.sections)), job.sheet));
+          const { shadows, sections: _sections, ...display }: Partial<LayoutViewportDisplay> = job.display ?? {};
           view.setDisplay({ ...model.display, ...display });
           // The view's own sun and shadows, else the model's.
           view.setShadows(shadowsToRender(shadows ? { ...model.state, shadows } : model.state));

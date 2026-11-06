@@ -12,6 +12,12 @@ With Linear Dimension active, Ctrl-click a straight path segment, or Cmd-click o
 
 Where measurement points are attached to editable path vertices, later geometry edits update the measurement. Moving the dimension line adjusts its annotation position without moving those vertices.
 
+## Dimension a model view
+
+With Linear Dimension, snap both measurement points to model corners or points in the same model view. The dimension stays connected to the model and updates when the model, the view's camera or its scale changes.
+
+A connected dimension shows the model length it depicts, in parallel and perspective views alike. In an isometric or other angled view, an edge that recedes from you reads its full length, not its shorter length on paper. In a straight-on view such as Top or Front, depth cannot be seen, so the measurement ignores any difference in depth between the two points. A horizontal, vertical or rotated dimension shows the part of that length along its dimension line.
+
 ## Dimension an angle between edges
 
 Choose **Angular Dimension**. Click a straight edge, a different straight edge, then a point to position the arc. The edges need not physically meet; their extended directions establish the vertex.

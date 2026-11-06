@@ -2,6 +2,31 @@
 
 Notable changes in each PushForm desktop release. Versions are `<year>.<week>.<build>`.
 
+## 26.45.143
+
+- **AI Chat limits use token credits** instead of a message count. You can queue follow-ups while it works, each request is a single Undo step, and a status line shows progress on 3D models.
+- **Faster cabinet building.** AI Chat builds cabinet runs one cabinet per batch, and each door, drawer and face frame is its own named assembly.
+- **Union combines multiple solids at once**, including solids that share a face, whatever order you pick them.
+- **Style environments and scene lighting** are new, and nested assemblies take paint in one step.
+- **Text tools moved to the Draw toolbar**, and text annotations now appear in the Object browser.
+- **LayOut files:** import, draw and export pattern fills, and PDF pictures now show in imported documents.
+- **Commons uploads are simpler,** with one upload dialog, live previews, one license choice, and original authors credited.
+- **Commons profiles and collections:** profile pictures and banners with cropping, handle addresses, public collections on profiles, and featured creators.
+- **Commons browsing is faster,** with results that load as you scroll, shaded previews, and models that open directly.
+- **Saving is more reliable,** and you can keep local working copies and save manual cloud versions.
+- **Account:** sign-out is easier to find, Pro accounts show a badge, and analytics requires your consent.
+- **Links in the desktop app open in your default browser.**
+
+## 26.45.59
+
+- AI Chat can build and shape models, combine solids, add dimensions and notes, apply wood finishes with grain direction, and inspect renders to check its work.
+- Add reference pictures to AI Chat, dictate messages, and follow progress with a redesigned composer and Stop control.
+- New Profile Edges tool: roundover, cove, ogee, bead, chamfer and step profiles, plus more flexible bevels and improved edge blending.
+- Fix curved solid results and face outlines when saving and reopening models.
+- Improve transparent textures, Color by Tag textures, lighting and guide point display.
+- Improve .skp and .layout imports, text spacing, labels and lists.
+- Add monthly and annual Individual subscription controls and billing management when available.
+
 ## 26.45.20
 
 ### Materials

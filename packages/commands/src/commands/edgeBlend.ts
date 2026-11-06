@@ -132,6 +132,9 @@ export interface EdgeBlendApplyResult {
 }
 
 /** A hard edge: neither soft, smooth nor hidden. Only these are offered to Fillet, Chamfer and Profile Edges. */
+/** Undo-step names of the router-bit profiles. */
+const PROFILE_TITLES: Readonly<Record<EdgeProfile, string>> = { roundover: 'Roundover', cove: 'Cove', ogee: 'Ogee', bead: 'Bead', chamfer: 'Chamfer', step: 'Step' };
+
 export const isHardEdge = (e: EdgeRecord): boolean => !e.soft && !e.smooth && !e.hidden;
 
 /**
@@ -229,6 +232,27 @@ function faceSide(body: Body, faceId: FaceLocalId, p0: Vec3, p1: Vec3): FaceSide
     }
   }
   return undefined;
+}
+
+/**
+ * How a router-bit profile treats picked edges: square outside edges are cut,
+ * inside edges are left out, and any other edge is refused.
+ */
+export function edgeProfileFit(body: Body, keys: readonly EdgeKey[]): { cut: number; inside: number; notSquare: number } {
+  const out = { cut: 0, inside: 0, notSquare: 0 };
+  for (const key of new Set(keys)) {
+    const rec = body.edges.get(key);
+    if (!rec) continue;
+    const v0 = rec.polyline[0], v1 = rec.polyline[rec.polyline.length - 1];
+    if (!v0 || !v1) continue;
+    const a = faceSide(body, rec.faceA, v0, v1), b = faceSide(body, rec.faceB, v0, v1);
+    if (!a || !b) continue;
+    const alpha = Math.acos(Math.max(-1, Math.min(1, v3dot(a.inward, b.inward))));
+    if (v3dot(a.inward, b.n) >= 0) out.inside++;
+    else if (Math.abs(alpha - Math.PI / 2) > EDGE_PROFILE_SQUARE_TOL) out.notSquare++;
+    else out.cut++;
+  }
+  return out;
 }
 
 /** Whether a body edge is convex (the solid lies inside both face planes there). */
@@ -534,7 +558,8 @@ export function planEdgeProfile(state: DocumentState, params: z.output<typeof Ed
 }
 
 function planPrisms(state: DocumentState, mode: EdgeBlendMode, params: PlanInput): EdgeBlendPlan {
-  const title = mode === 'fillet' ? 'Fillet' : mode === 'chamfer' ? 'Chamfer' : 'Profile Edges';
+  // the undo step is named after the profile used
+  const title = mode === 'fillet' ? 'Round' : mode === 'chamfer' ? 'Chamfer' : PROFILE_TITLES[params.profile ?? 'roundover'];
   const what = mode === 'fillet' ? 'radius' : mode === 'chamfer' ? 'distance' : 'size';
   const noun = mode === 'profile' ? `${params.profile ?? 'roundover'} profile` : mode;
   const path = params.path as unknown as readonly Id[];
@@ -600,7 +625,7 @@ function planPrisms(state: DocumentState, mode: EdgeBlendMode, params: PlanInput
         continue;
       }
       if (Math.abs(alpha - Math.PI / 2) > squareTol) {
-        fail('geometry', `${title} shapes square edges, where the faces meet at a right angle; use Chamfer or Fillet for an edge whose faces meet at another angle.`);
+        fail('geometry', `${title} shapes square edges, where the faces meet at a right angle; use Round or Chamfer for an edge whose faces meet at another angle.`);
       }
     }
     let ref: 'a' | 'b' | null = null;

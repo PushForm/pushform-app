@@ -58,7 +58,8 @@ it('zooms to the selected objects including curve extents', () => {
     points: [[10, 10], [40, 10]], handles: [{ out: [10, 110] }, { in: [40, 110] }], closed: false }); });
   open(25, 85); choose('Zoom Selection');
   // This curve's visible height is 75 mm, much larger than its anchor-point height.
-  expect(tab.workspace.zoom).toBeCloseTo((400 - 48) / (75 * 3));
+  // the tool options bar's band (42 px) stays clear above it
+  expect(tab.workspace.zoom).toBeCloseTo((400 - 48 - 42) / (75 * 3));
   dispose();
 });
 

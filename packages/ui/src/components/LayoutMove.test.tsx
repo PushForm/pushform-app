@@ -253,11 +253,14 @@ describe('Layout Move tool', () => {
     dispose();
   });
 
-  it('toggles copying with Ctrl or Alt and places selected copies directly above their originals', () => {
+  it('toggles copying with a Ctrl tap, not Alt, and places selected copies directly above their originals', () => {
     const { tab, a, b, canvas, click, move, measure, page, points, readout, status, selected, useMove, tap, dispose } = setup();
     useMove();
     click(40, 30);
-    for (const key of ['Control', 'Alt']) {
+    // Alt no longer toggles copying: Ctrl does (Cmd on macOS)
+    tap('Alt');
+    expect(status()).toMatch(/^Move:/);
+    for (const key of ['Control']) {
       const event = createEvent.keyDown(window, { key });
       fireEvent(window, event);
       expect(event.defaultPrevented).toBe(true);
@@ -279,7 +282,7 @@ describe('Layout Move tool', () => {
     fireEvent.keyDown(window, { key: '5', code: 'Digit5' });
     const input = layoutEntryField('Distance');
     expect(document.activeElement).toBe(input);
-    tap('Alt', input);
+    tap('Control', input);
     expect(status()).toMatch(/^Copy:/);
     measure('50');
     const copy = page().entityOrder[1]!;
@@ -323,7 +326,9 @@ describe('Layout Move tool', () => {
     let second = 0;
     act(() => { second = tab.commands.execute('layout.page.add') as number; session.setActivePage(pageId); });
     view.rerender(<LayoutWorkspace tab={tab} session={session} />);
-    const copyAcross = () => { click(20.5, 20.5); tap('Control'); click(50, 20); };
+    // Copy stays on for later moves until the tool is chosen again, so only the first move taps Ctrl
+    let copying = false;
+    const copyAcross = () => { click(20.5, 20.5); if (!copying) { tap('Control'); copying = true; } click(50, 20); };
     const copiesX = () => page().entityOrder.filter((id) => id !== a && id !== b).map((id) => points(id)[0]![0]);
     useMove();
     copyAcross();
@@ -352,6 +357,7 @@ describe('Layout Move tool', () => {
     act(() => { tab.commands.execute('edit.undo'); });
     copyAcross();
     fireEvent.keyDown(window, { key: 'q', code: 'KeyQ' }); fireEvent.keyDown(window, { key: 'm', code: 'KeyM' });
+    copying = false; // choosing Move again turns Copy off
     measure('2x');
     expect(alert()).toContain('array'); expect(copiesX()).toEqual([50]);
     act(() => { tab.commands.execute('edit.undo'); });

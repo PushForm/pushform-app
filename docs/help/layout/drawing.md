@@ -22,7 +22,7 @@ Escape, switching tools, or changing pages cancels an unfinished stroke.
 
 Open the Rectangle button's arrow and choose **Rectangle**, **Rounded**, **Bulged**, or **Lozenge**. Drag between opposite corners, or click each corner. Hold Shift for square bounds. Hold Ctrl, or Cmd on macOS, to draw outward from the center. The modifiers can be combined.
 
-After the first point, type the width and height. Rounded and Bulged show their radius or bulge controls in the temporary tool pane on the right. Lozenge makes a capsule with fully rounded ends.
+After the first point, type the width and height. Rounded and Bulged show their corner radius or bulge in the tool options bar over the page view. Lozenge makes a capsule with fully rounded ends.
 
 ## Draw circles and ellipses
 

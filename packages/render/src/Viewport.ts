@@ -537,7 +537,8 @@ export class Viewport {
   /** Texts of the model. */
   setTexts(texts: RenderTexts | null): void {
     if (!this.sceneSync.setTexts(texts)) return;
-    if (this.renderer) void this.sceneSync.texts.prepare();
+    // draw again once troika has laid the labels out, which waits for any font file they need
+    if (this.renderer) void this.sceneSync.texts.prepare().then(() => this.requestRender());
     this.requestRender();
   }
 

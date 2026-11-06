@@ -110,10 +110,11 @@ describe('Layout tool commands', () => {
       expect((input as HTMLInputElement).value).toBe('');
     };
     const version = tab.doc.version;
+    // the fit leaves the tool options bar's 42 px band clear above the page
     run('zoom to page', 'Zoom to Page');
-    expect(tab.workspace.zoom).toBeCloseTo(600 / 630);
+    expect(tab.workspace.zoom).toBeCloseTo(558 / 630);
     run('fit content', 'Fit Content'); // Empty content falls back to the page.
-    expect(tab.workspace.zoom).toBeCloseTo(600 / 630);
+    expect(tab.workspace.zoom).toBeCloseTo(558 / 630);
     expect(tab.doc.version).toBe(version); expect(tab.doc.undoStack.canUndo).toBe(false);
     act(() => {
       tab.commands.execute('layout.shape.add', { pageId: tab.activePageId, points: [[10, 10], [110, 60]] });
@@ -129,7 +130,7 @@ describe('Layout tool commands', () => {
     expect(tab.doc.version).toBe(contentVersion);
     act(() => { tab.commands.execute('layout.page.setup', { pageId: tab.activePageId, widthMm: 400, heightMm: 300 }); });
     run('zoom to page', 'Zoom to Page');
-    expect(tab.workspace.zoom).toBeCloseTo(2 / 3);
+    expect(tab.workspace.zoom).toBeCloseTo(558 / 900);
     view.unmount();
     expect(tab.commands.isEnabled('layout.zoom.page')).toBe(false);
     expect(tab.commands.isEnabled('layout.zoom.content')).toBe(false);

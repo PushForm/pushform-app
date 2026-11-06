@@ -4,10 +4,11 @@ import { Emitter, PushFormError } from '@pushform/core';
 import { z } from 'zod';
 import type { CameraHost } from '../camera/CameraHost';
 import type { CommandRegistry } from '../registry/CommandRegistry';
+import { hostOf } from '../host/services';
 import type { ToolHost } from '../registry/Command';
 import type { VcbValue } from '../vcb/parse';
 import type { OverlayPrimitive } from './overlay';
-import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus, ToolWheelEvent } from './Tool';
+import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolSettingValue, ToolStatus, ToolWheelEvent } from './Tool';
 import { OrbitTool } from './impl/Orbit';
 import { PanTool } from './impl/Pan';
 
@@ -56,6 +57,10 @@ export class ToolManager implements ToolHost {
   private readonly registerCommands: boolean;
   private readonly ctx: ToolContext;
   private lastStatus: ToolStatus = EMPTY_STATUS;
+  /** The operation the bar shows as applied: the tool that committed it and its undo entry. */
+  private applied: { tool: Tool; entry: unknown } | null = null;
+  /** Ctrl or Alt pressed with nothing else since: a tap if released next. */
+  private pendingTap: string | null = null;
 
   constructor(
     readonly commands: CommandRegistry,
@@ -70,6 +75,12 @@ export class ToolManager implements ToolHost {
       camera,
       requestRender: () => this.events.emit('renderRequested', undefined),
       statusChanged: () => this.emitStatus(),
+      committed: () => {
+        const tool = this.visualTool;
+        const entry = this.undoTop();
+        this.applied = tool && entry ? { tool, entry } : null;
+        this.emitStatus();
+      },
       overlayChanged: () => this.overlayChanged(),
     };
     commands.register({
@@ -143,6 +154,7 @@ export class ToolManager implements ToolHost {
     if (!tool) throw new PushFormError('tool.unknown', `Unknown tool: ${id}`);
     if (this.active === tool) return;
     this.endTemp();
+    if (!tool.role) this.applied = null;
     const previous = this.active?.id ?? null;
     const current = this.active;
     const finishing = this.inTool > 0;
@@ -206,6 +218,9 @@ export class ToolManager implements ToolHost {
       this.overlayChanged();
       return;
     }
+    // A click in the view ends the applied state: the bar goes back to the next operation's settings.
+    this.applied = null;
+    this.pendingTap = null;
     this.call(() => (this.temp ?? this.active)?.onPointerDown?.(e));
     this.afterInteraction();
   }
@@ -239,6 +254,7 @@ export class ToolManager implements ToolHost {
   }
 
   wheel(e: ToolWheelEvent): void {
+    this.pendingTap = null;
     const consumed = this.call(() => (this.temp ?? this.active)?.onWheel?.(e));
     if (consumed) {
       this.afterInteraction();
@@ -252,6 +268,12 @@ export class ToolManager implements ToolHost {
 
   /** Returns true when the key was consumed by the manager or the active tool. */
   keyDown(e: ToolKeyEvent): boolean {
+    // Ctrl and Alt reach tools only as taps: pressed and released with nothing between.
+    if (e.key === 'Control' || e.key === 'Alt') {
+      if (!e.repeat) this.pendingTap = e.key;
+      return true;
+    }
+    this.pendingTap = null;
     if (e.key === 'Escape') {
       this.cancel();
       return true;
@@ -270,6 +292,17 @@ export class ToolManager implements ToolHost {
   }
 
   keyUp(e: ToolKeyEvent): boolean {
+    if (e.key === 'Control' || e.key === 'Alt') {
+      const tap = this.pendingTap === e.key;
+      this.pendingTap = null;
+      if (tap) {
+        const press: ToolKeyEvent = { ...e, repeat: false };
+        if (this.call(() => this.active?.onKeyDown?.(press) || (this.camerasParked() && this.parked!.onKeyDown?.(press)))) {
+          this.afterInteraction();
+          return true;
+        }
+      }
+    }
     const consumed = this.call(() => !!this.active?.onKeyUp?.(e) || (this.camerasParked() && !!this.parked!.onKeyUp?.(e)));
     if (consumed) this.afterInteraction();
     return consumed;
@@ -290,11 +323,21 @@ export class ToolManager implements ToolHost {
     this.afterInteraction();
   }
 
-  /** Set a pick list the active tool offers (`ToolStatus.choices`). */
-  choose(id: string, value: string): void {
-    const tool = this.temp ?? this.active;
-    if (!tool?.onChoice) return;
-    this.call(() => tool.onChoice?.(id, value));
+  /** Re-read the status (after the document changed outside a tool, such as an undo ending the applied state). */
+  refreshStatus(): void {
+    this.emitStatus();
+  }
+
+  /** A control of the tool options bar was changed: goes to the tool whose settings the bar shows. */
+  setting(id: string, value: ToolSettingValue): void {
+    const tool = this.visualTool;
+    if (!tool?.onSetting) return;
+    const adjusting = this.isApplied();
+    this.call(() => {
+      tool.onSetting?.(id, value);
+      // While the bar shows the last operation, the change redoes it; otherwise it is for the next one.
+      if (adjusting && !tool.adjustLast?.(id, value)) this.applied = null;
+    });
     this.afterInteraction();
   }
 
@@ -314,8 +357,39 @@ export class ToolManager implements ToolHost {
     return p.length || t.length ? [...p, ...a, ...t] : a;
   }
 
+  /**
+   * The status the shell shows. Settings and `placing` come from the tool whose visuals show
+   * (`visualTool`), so during a temporary orbit, pan or zoom the bar keeps the set-aside tool's
+   * settings; the rest comes from the tool handling input.
+   */
   status(): ToolStatus {
-    return (this.temp ?? this.active)?.status() ?? EMPTY_STATUS;
+    const input = this.temp ?? this.active;
+    const s = input?.status() ?? EMPTY_STATUS;
+    const owner = this.visualTool;
+    const own = owner === input ? s : owner?.status();
+    const settings = own?.settings?.length ? own.settings : undefined;
+    const placing = own?.placing ?? owner?.hasPendingWork?.() ?? false;
+    const applied = settings ? this.isApplied() : false;
+    return { ...s, settings, placing, applied };
+  }
+
+  /** Whether the bar shows the operation just committed: still on top of the undo stack, by the tool shown. */
+  private isApplied(): boolean {
+    const a = this.applied;
+    if (!a) return false;
+    if (a.tool !== this.visualTool || a.entry !== this.undoTop()) {
+      this.applied = null;
+      return false;
+    }
+    return true;
+  }
+
+  private undoTop(): unknown {
+    try {
+      return hostOf(this.commands.ctx).undoStack.peek() ?? null;
+    } catch {
+      return null;
+    }
   }
 
   // --- internals ------------------------------------------------------------------------------
@@ -367,7 +441,7 @@ export class ToolManager implements ToolHost {
   private emitStatus(): void {
     const s = this.status();
     const prev = this.lastStatus;
-    if (s.instructor === prev.instructor && s.vcbLabel === prev.vcbLabel && s.vcbValue === prev.vcbValue && sameFields(s.fields, prev.fields) && JSON.stringify(s.choices ?? []) === JSON.stringify(prev.choices ?? [])) return;
+    if (s.instructor === prev.instructor && s.vcbLabel === prev.vcbLabel && s.vcbValue === prev.vcbValue && s.placing === prev.placing && s.applied === prev.applied && (s.held ?? []).join('|') === (prev.held ?? []).join('|') && sameFields(s.fields, prev.fields) && JSON.stringify(s.settings ?? []) === JSON.stringify(prev.settings ?? [])) return;
     this.lastStatus = s;
     this.events.emit('statusChanged', s);
   }

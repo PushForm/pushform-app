@@ -408,9 +408,9 @@ describe('Layout object browser', () => {
     act(() => { t.tab.commands.execute('layout.layer.setVisible', { pageId: t.pageId, layerId: t.notes, visible: false }); });
     fireEvent.click(t.row(t.object(t.pageId, t.note)!));
     expect(t.tab.activePageId).toBe(t.pageId);
-    expect(t.selectionTitle()).toBe('Default Style');
+    expect(t.selectionTitle()).toBe('New Shapes');
     fireEvent.click(t.row(t.object(t.pageId, t.note)!));
-    expect(t.selectionTitle()).toBe('Default Style');
+    expect(t.selectionTitle()).toBe('New Shapes');
     t.dispose();
   });
 

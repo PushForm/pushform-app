@@ -26,7 +26,7 @@ import {
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { SERVICE_LAYOUT_WORKSPACE, LAYOUT_TOOLS, parseVcb, type LayoutWorkspaceHost } from '@pushform/commands';
+import { SERVICE_LAYOUT_WORKSPACE, LAYOUT_TOOLS, detectPlatform, parseVcb, type LayoutWorkspaceHost, type ToolSetting, type ToolSettingValue, type VcbValue } from '@pushform/commands';
 import { removeLayoutPathVertex, nextLayoutPathIndex, layoutPathContours, layoutPathSegmentIndices,isLayoutLayerVisible, labelAnchorAt, layoutLabelDragPart, layoutLabelWholeMovePart, moveLayoutLabel, previewLayoutLabel, type LayoutLabelDragPart, formatLayoutTextRange, layoutTextStyleAt, layoutLabelLeader, createLayoutLabelGeometry, inferLinearDimensionAlignment, layoutRotationAngle, snapLayoutRotationAngle, rotateLayoutEntity, rotateLayoutPoint, layoutTextCenter, resizeLayoutTextPoints, createLayoutCornerBetween, isLayoutCornerTool, createLayoutOffset, layoutOffsetDistance, createLayoutArc, isLayoutArcTool, layoutArcSweep, createLayoutRectangle, isLayoutRectangleTool, type LayoutRectanglePath, pointInsideLayoutPath, angularRaysFromPoints, angularEdgesFromPicks, type LayoutAngularEdgeAnchor, angularDimensionError, angularPlacementReflex, angularMeasurement, autoDimensionExtent, entitiesInSelectionBox, entitiesInLasso, lassoIsCrossing, layoutEntityBounds, angularDimensionGeometry, formatAngularDimension, createAngularDimension, type LayoutAngularDimension, createLinearDimension, dimensionAnchorAt, linearMeasurement, linearDimensionGeometry, formatLinearDimension, formatLayoutLength, layoutLengthPrecisionLabel, layoutDimensionScaleLabel, LAYOUT_DIMENSION_SCALES, previewLayoutDimension, type LayoutDimensionAnchor, type LayoutLinearDimension, editLayoutTextContent, importLayoutText, entitiesForLayer, entityOnPage, flattenLayoutPath, pathSegment, pointOnPathSegment, splitLayoutPathSegment, snapPaperPoint, alignToPaperReference, addLayoutBezierAnchor, pullLayoutBezierHandle, previewLayoutBezier, finishLayoutBezier, type LayoutBezierDraft, type PaperAlignment, type LayoutEntity, type LayoutPathHandle, type LayoutPage, type LayoutDocumentState, type PaperSnapKind } from '@pushform/layout';
 import { FREEHAND_SMOOTHING_PX, LENGTH_TOL } from '@pushform/core';
 import { createLayoutFreehand } from '@pushform/layout';
@@ -71,6 +71,7 @@ import { LayoutCloudModelPicker } from './LayoutCloudModelPicker';
 import { LayoutEntryFields } from './LayoutEntryFields';
 import { entryDeg, entryMm, LAYOUT_POINTER_FIELD, layoutEntryFields, layoutEntryKind, lockedPoint, type LayoutEntryField, type LayoutEntryLocks } from './layoutEntry';
 import { LayoutReferencesPanel } from './LayoutReferencesPanel';
+import { ToolOptionsBarView } from './ToolOptionsBar';
 import { LayoutObjectBrowser, layoutBrowserPassesKey, type LayoutBrowserDrop, type LayoutBrowserSelectMode, type LayoutBrowserTarget } from './LayoutObjectBrowser';
 
 type Point = [number, number];
@@ -217,7 +218,7 @@ const TOOLS: { id: LayoutTool; title: string; key: string }[] = [
   { id: 'circle', title: 'Circle', key: 'C' },
   { id: 'polygon', title: 'Polygon', key: '' },
   { id: 'offset', title: 'Offset', key: '' },
-  { id: 'fillet', title: 'Fillet', key: 'Shift+F' },
+  { id: 'fillet', title: 'Corner', key: 'Shift+F' },
   { id: 'move', title: 'Move', key: 'M' },
   { id: 'rotate', title: 'Rotate', key: 'Q' },
   { id: 'scale', title: 'Scale', key: '' },
@@ -246,10 +247,6 @@ const BOOLEAN_TOOLS = [
 const booleanOperation = (tool: LayoutTool): LayoutPathOperation | null =>
   tool.startsWith('boolean-') ? tool.slice('boolean-'.length) as LayoutPathOperation : null;
 
-const CORNER_TOOLS = [
-  { id: 'fillet', title: 'Fillet', icon: 'tool-fillet', key: 'Shift+F' },
-  { id: 'chamfer', title: 'Chamfer', icon: 'tool-chamfer', key: 'Shift+C' },
-] as const;
 const LINE_TOOLS = [
   { id: 'line', title: 'Line', icon: 'tool-line', key: 'L' },
   { id: 'bezier', title: 'Bézier Curve', icon: 'tool-bezier' },
@@ -269,6 +266,9 @@ const POLYGON_TOOLS = [
   { id: 'polygon', title: 'Polygon', icon: 'tool-polygon' },
   { id: 'circumscribed-polygon', title: 'Circumscribed Polygon', icon: 'tool-circumscribed-polygon' },
 ] as const;
+/** Tools that draw shapes: choosing one clears the selection, so the style panel edits new shapes. */
+const SHAPE_DRAWING_TOOLS: ReadonlySet<string> = new Set(['line', 'bezier', 'freehand', 'arc', 'arc2', 'arc3', 'pie',
+  'rectangle', 'rounded-rectangle', 'bulged-rectangle', 'lozenge', 'ellipse', 'circle', 'polygon', 'circumscribed-polygon']);
 /** Tools that draw open lines, the only shapes that take arrows. */
 const LINE_DRAWING_TOOLS: ReadonlySet<string> = new Set(['line', 'bezier', 'freehand', 'arc', 'arc2', 'arc3']);
 const isPolygonTool = (id: string): boolean => id === 'polygon' || id === 'circumscribed-polygon';
@@ -284,7 +284,29 @@ const DIMENSION_TOOLS = [
   { id: 'dimension', title: 'Linear Dimension', icon: 'tool-dimension', key: 'D' },
   { id: 'angular-dimension', title: 'Angular Dimension', icon: 'tool-angular-dimension', key: 'Shift+D' },
 ] as const;
+/** Tools take Cmd on macOS wherever Windows uses Ctrl. */
+const MAC = detectPlatform() === 'mac';
 const PX_PER_MM = 3;
+/** Height of the tool options bar's band over the page view, kept clear by framing. */
+const TOOL_BAND_PX = 42;
+
+/**
+ * Tool settings remembered while the app is open, across tool changes and document tabs:
+ * kept outside the workspace, which remounts with its tab.
+ */
+const rememberedToolSettings = {
+  filletRadiusMm: 5, chamferDistanceMm: 5, cornerRadiusMm: 5, bulgeMm: 5, polygonSides: 6, tableRows: 3, tableColumns: 3,
+};
+type RememberedToolSetting = keyof typeof rememberedToolSettings;
+const REMEMBERED_DEFAULTS = { ...rememberedToolSettings };
+/** Back to the defaults, as when the app starts (tests). */
+export function resetRememberedLayoutToolSettings(): void {
+  Object.assign(rememberedToolSettings, REMEMBERED_DEFAULTS);
+}
+function useRememberedToolSetting(key: RememberedToolSetting): readonly [number, (value: number) => void] {
+  const [value, setValue] = useState(rememberedToolSettings[key]);
+  return [value, (next: number) => { rememberedToolSettings[key] = next; setValue(next); }] as const;
+}
 const THUMBNAIL_MAX_PX = 88;
 const ZOOM_PRESETS = [25, 50, 75, 100, 150, 200, 400] as const;
 
@@ -940,7 +962,7 @@ const TABLE_COUNT_STEP_PX = [36, 18] as const;
 /** Title of the context-sensitive top panel: what is selected, or the default style when nothing is. */
 function layoutSelectionTitle(entity: LayoutEntity | null, count: number): string {
   if (count > 1) return `${count} Objects`;
-  if (!entity) return 'Default Style';
+  if (!entity) return 'New Shapes';
   if (entity.table) return 'Table';
   if (entity.image) return isViewport(entity) ? 'Model View' : 'Image';
   if (entity.dimension || entity.angularDimension) return 'Dimension';
@@ -1038,7 +1060,8 @@ export function LayoutWorkspace({
   const [tableResizePreview, setTableResizePreview] = useState<LayoutEntity | null>(null);
   const [tableEditRequest, setTableEditRequest] = useState(0);
   const tableDrag = useRef<TableGridSelection | null>(null);
-  const [tableRows, setTableRows] = useState(3), [tableColumns, setTableColumns] = useState(3);
+  const [tableRows, setTableRows] = useRememberedToolSetting('tableRows');
+  const [tableColumns, setTableColumns] = useRememberedToolSetting('tableColumns');
   // True while the button is held after the first table corner, so dragging picks rows and columns.
   const [tableCounting, setTableCounting] = useState(false);
   const [tableSelection, setTableSelection] = useState<TableGridSelection>({ anchor: { row: 0, column: 0 }, focus: { row: 0, column: 0 } });
@@ -1104,7 +1127,7 @@ export function LayoutWorkspace({
   }, []);
   const polygonTool: LayoutTool = polygonAlt && isPolygonTool(tool) ? tool === 'polygon' ? 'circumscribed-polygon' : 'polygon' : tool;
   /** Sides of the next polygon, shared by both Polygon tools. */
-  const [polygonSides, setPolygonSides] = useState(6);
+  const [polygonSides, setPolygonSides] = useRememberedToolSetting('polygonSides');
   const [anchor, setAnchor] = useState<Point | null>(tab.workspace.anchor);
   const [cursor, setCursor] = useState<Point | null>(null);
   const [placementModifiers, setPlacementModifiers] = useState(NO_PLACEMENT_MODIFIERS);
@@ -1139,12 +1162,25 @@ export function LayoutWorkspace({
   const [gripRotation, setGripRotation] = useState<RotationDraft | null>(null);
   const gripDrag = useRef<'center' | 'rotate' | null>(null);
   const [moveDraft, setMoveDraft] = useState<MoveDraft | null>(null);
+  /** Copy for the next move: the bar's toggle, or a Ctrl tap before the first click. A move in progress keeps its own. */
+  const [moveCopyNext, setMoveCopyNext] = useState(false);
+  /** Corner's last choice, which its ribbon button returns to. */
+  const [lastCornerTool, setLastCornerTool] = useState<LayoutTool>('fillet');
+  useEffect(() => { if (isLayoutCornerTool(tool)) setLastCornerTool(tool); }, [tool]);
+  const toggleMoveCopy = (): void => {
+    if (moveDraft) {
+      const copy = !moveDraft.copy;
+      setMoveDraft({ ...moveDraft, copy });
+      setMovePreview((preview) => preview && { ...preview, copy });
+      setMoveCopyNext(copy);
+    } else setMoveCopyNext((copy) => !copy);
+  };
   // The latest Move copy while an array may still replace it: its undo entry must still be the newest.
   const lastMoveCopy = useRef<{ pageId: number; entityIds: number[]; delta: Point; entry: object | undefined } | null>(null);
   const [cornerFirst, setCornerFirst] = useState<CornerPick | null>(null);
   const [cornerHover, setCornerHover] = useState<CornerPick | null>(null);
-  const [filletRadiusMm, setFilletRadiusMm] = useState(5);
-  const [chamferDistanceMm, setChamferDistanceMm] = useState(5);
+  const [filletRadiusMm, setFilletRadiusMm] = useRememberedToolSetting('filletRadiusMm');
+  const [chamferDistanceMm, setChamferDistanceMm] = useRememberedToolSetting('chamferDistanceMm');
   const cornerAmountMm = tool === 'chamfer' ? chamferDistanceMm : filletRadiusMm;
   const [offsetDraft, setOffsetDraft] = useState<{ entityId: number; distanceMm: number } | null>(null);
   useEffect(() => { setOffsetDraft(null); setCornerFirst(null); setCornerHover(null); setRotationDraft(null); setLabelDraft(null); }, [tool]);
@@ -1211,8 +1247,8 @@ export function LayoutWorkspace({
   const [vcbError, setVcbError] = useState<string | null>(null);
   /** What the last DXF import did: its scale and anything it left out. */
   const [importNote, setImportNote] = useState<string | null>(null);
-  const [cornerRadiusMm, setCornerRadiusMm] = useState(5);
-  const [bulgeMm, setBulgeMm] = useState(5);
+  const [cornerRadiusMm, setCornerRadiusMm] = useRememberedToolSetting('cornerRadiusMm');
+  const [bulgeMm, setBulgeMm] = useRememberedToolSetting('bulgeMm');
   const rectangleAmountMm = tool === 'bulged-rectangle' ? bulgeMm : cornerRadiusMm;
   const [rotationDeg, setRotationDeg] = useState('90');
   const [scalePercent, setScalePercent] = useState('100');
@@ -1858,6 +1894,9 @@ export function LayoutWorkspace({
         if (shortcut === 'shape-builder') { event.preventDefault(); chooseTool('shape-builder'); return; }
         setDimensionDraft(null); setAngularEdgeFirst(null); setDimensionError(null); setArcDraft(null); setArcError(null); setOffsetDraft(null); setCornerFirst(null); setCornerHover(null); setRotationDraft(null); setLabelDraft(null);
         setTool(shortcut as LayoutTool);
+        // as chooseTool: drawing starts with no selection, and mode toggles start off
+        if (SHAPE_DRAWING_TOOLS.has(shortcut)) setSelectionIds([]);
+        if (shortcut !== toolRef.current) setMoveCopyNext(false);
         setAnchor(null);
         setVcbError(null);
         if (shortcut !== 'select') {
@@ -1922,31 +1961,30 @@ export function LayoutWorkspace({
     return () => { window.removeEventListener('keydown', onModifier); window.removeEventListener('keyup', onModifier); };
   }, []);
 
-  // A tap of Ctrl or Alt (Option) toggles copying, also while a value field has focus. A chord such as Ctrl+Z
-  // or Ctrl+wheel zoom is not a tap: any other key, wheel or pointer press while the modifier is down cancels it.
+  // A tap of Ctrl (Cmd on macOS) toggles copying, also while a value field has focus. A chord such
+  // as Ctrl+Z or Ctrl+wheel zoom is not a tap: any other key, wheel or pointer press while it is down cancels it.
   const copyTap = useRef<string | null>(null);
+  const copyKey = MAC ? 'Meta' : 'Control';
   useEffect(() => {
-    if (tool !== 'move' || !moveDraft) { copyTap.current = null; return; }
+    if (tool !== 'move') { copyTap.current = null; return; }
     const tapTarget = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       return !(target instanceof Element && (target.closest('.pf-layout-context-menu, .pf-layout-object-browser') ||
         (target.closest('input, textarea, select, [contenteditable="true"]') && !target.classList.contains('pf-entry'))));
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Control' && event.key !== 'Alt') { copyTap.current = null; return; }
+      if (event.key !== copyKey) { copyTap.current = null; return; }
       if (!tapTarget(event)) return;
-      event.preventDefault(); // Alt must not move focus to the browser menu.
+      event.preventDefault();
       if (!event.repeat) copyTap.current = event.key;
     };
     const onKeyUp = (event: KeyboardEvent) => {
-      if (event.key !== 'Control' && event.key !== 'Alt') return;
+      if (event.key !== copyKey) return;
       const tapped = copyTap.current === event.key;
       copyTap.current = null;
       if (!tapped || !tapTarget(event)) return;
       event.preventDefault();
-      const copy = !moveDraft.copy;
-      setMoveDraft({ ...moveDraft, copy });
-      setMovePreview((preview) => preview && { ...preview, copy });
+      toggleMoveCopy();
     };
     const cancel = () => { copyTap.current = null; };
     window.addEventListener('keydown', onKeyDown, true);
@@ -2417,7 +2455,7 @@ export function LayoutWorkspace({
       }
       lastMoveCopy.current = null;
       if (chosen !== selectionIds) setSelectionIds(chosen);
-      setMoveDraft({ entityIds, base: p, copy: false }); setCursor(p);
+      setMoveDraft({ entityIds, base: p, copy: moveCopyNext }); setCursor(p);
       return;
     }
     if (tool === 'rotate') {
@@ -3281,7 +3319,7 @@ export function LayoutWorkspace({
     setPanOffset(0, 0);
     const next = Math.min(
       (workspace.clientWidth - 48) / (page.size[0] * PX_PER_MM),
-      (workspace.clientHeight - 48) / (page.size[1] * PX_PER_MM),
+      (workspace.clientHeight - 48 - TOOL_BAND_PX) / (page.size[1] * PX_PER_MM),
     );
     setZoom(Math.max(0.1, Math.min(8, next)));
     workspace.scrollTo(0, 0);
@@ -3304,7 +3342,7 @@ export function LayoutWorkspace({
     }
     const next = Math.min(
       (workspace.clientWidth - 48) / (Math.max(10, maxX - minX) * PX_PER_MM),
-      (workspace.clientHeight - 48) / (Math.max(10, maxY - minY) * PX_PER_MM),
+      (workspace.clientHeight - 48 - TOOL_BAND_PX) / (Math.max(10, maxY - minY) * PX_PER_MM),
     );
     zoomCenter.current = [(minX + maxX) / 2, (minY + maxY) / 2];
     setZoom(Math.max(0.1, Math.min(8, next)));
@@ -3632,9 +3670,24 @@ export function LayoutWorkspace({
       tab.commands.execute('layout.text.update', { pageId: page.id, entityId: editingText.id, text: patch });
     if (returnFocus) returnToText();
   };
+  /**
+   * The text the bar's style row formats: the one being edited (its selected range), or one selected
+   * text or label as a whole. The side panel keeps only the box's own properties.
+   */
+  const selectedText = !editingText?.text && tool === 'select' && selectionIds.length === 1 && selectedEntity?.text && canTransform ? selectedEntity : null;
+  const wholeText = (): { start: number; end: number } => ({ start: 0, end: selectedText?.text?.content.length ?? 0 });
+  const formatSelectedText = (patch: Partial<NonNullable<LayoutEntity['text']>>): void => {
+    if (!selectedText?.text) return;
+    if (Object.entries(patch).some(([key, value]) => JSON.stringify(selectedText.text![key as keyof typeof selectedText.text]) !== JSON.stringify(value)))
+      tab.commands.execute('layout.text.update', { pageId: page.id, entityId: selectedText.id, text: patch });
+  };
   const chooseTool = (id: LayoutTool): void => {
     if (id === 'shape-builder' && !shapeBuilder.start(selectionIds)) return;
     setBooleanIds([]);
+    // Style edits with nothing selected are for new shapes, so drawing never starts with a leftover selection.
+    if (SHAPE_DRAWING_TOOLS.has(id)) setSelectionIds([]);
+    // mode toggles start off each time the tool is chosen
+    if (id !== tool) setMoveCopyNext(false);
     if (booleanOperation(id) || booleanOperation(tool)) setSelectionIds([]);
     if (navigatingViewportRef.current !== null) endViewportNavigation();
     setTableCellsActive(false); setTableResizePreview(null); setImportNote(null);
@@ -3704,12 +3757,75 @@ export function LayoutWorkspace({
       ctx.services.delete(SERVICE_LAYOUT_WORKSPACE);
     };
   }, [tab]);
-  const activeToolTitle = editingText?.text && canTransform
-    ? editingText.kind === 'label' ? 'Label' : 'Text'
-    : LAYOUT_TOOLS.find(item => item.id === polygonTool)?.title ?? 'Tool';
-  const showToolPane = Boolean(booleanOperation(tool) || tool === 'shape-builder' || tool === 'table' ||
-    tool === 'viewport' && (viewportSources.length > 0 || cloudApi) || isLayoutCornerTool(tool) || isPolygonTool(tool) ||
-    tool === 'rounded-rectangle' || tool === 'bulged-rectangle' || editingText?.text && canTransform);
+  const activeToolTitle = isLayoutCornerTool(tool) ? 'Corner' : LAYOUT_TOOLS.find(item => item.id === polygonTool)?.title ?? 'Tool';
+
+  // --- Tool options bar -------------------------------------------------------------
+  const lengthSetting = (id: string, label: string, mm: number): ToolSetting => ({ kind: 'quantity', id, label, value: formatEntryLength(mm), quantity: 'length' });
+  const countSetting = (id: string, label: string, n: number): ToolSetting => ({ kind: 'quantity', id, label, value: String(n), quantity: 'count' });
+  const barSettings: ToolSetting[] = (() => {
+    if (tool === 'shape-builder') return [
+      { kind: 'choice', id: 'mode', label: 'Shape Builder', value: shapeBuilder.mode, options: [{ value: 'add', label: 'Add' }, { value: 'remove', label: 'Remove' }] },
+      { kind: 'toggle', id: 'keepOriginals', label: 'Keep originals', on: shapeBuilder.keepOriginals },
+      { kind: 'note', id: 'status', text: shapeBuilder.session?.busy ? 'Finding regions…' : `${shapeBuilder.result?.groups.length ?? 0} result objects`, priority: 3 },
+      { kind: 'action', id: 'cancel', label: 'Cancel' },
+      { kind: 'action', id: 'apply', label: shapeBuilder.canApply && shapeBuilder.result?.groups.length === 0 ? 'Apply: delete selected shapes' : 'Apply', primary: true, disabled: !shapeBuilder.canApply },
+    ];
+    if (booleanOperation(tool)) return [
+      { kind: 'note', id: 'status', text: booleanPreview?.error ?? (booleanPreview && !booleanPreview.shapes.length ? 'Empty result: applying removes the picked shapes.' : booleanIds.length ? `${booleanIds.length} shapes picked` : 'Pick the target first, then other shapes'), priority: 3 },
+      { kind: 'action', id: 'apply', label: 'Apply', primary: true, disabled: booleanIds.length < 2 || Boolean(booleanPreview?.error) },
+    ];
+    if (tool === 'table') return [countSetting('rows', 'Rows', tableRows), countSetting('columns', 'Columns', tableColumns)];
+    if (tool === 'viewport' && (viewportSources.length > 0 || cloudApi)) return [{
+      kind: 'choice', id: 'model', label: 'Model', display: 'menu', value: viewportSource?.key ?? '',
+      options: [...viewportSources.map(source => ({ value: source.key, label: source.name })), ...(cloudApi ? [{ value: 'cloud:choose', label: 'Choose cloud model…' }] : [])],
+    }];
+    if (isLayoutCornerTool(tool)) return [
+      { kind: 'choice', id: 'corner', label: 'Corner', value: tool, options: [{ value: 'fillet', label: 'Round' }, { value: 'chamfer', label: 'Chamfer' }] },
+      lengthSetting('size', tool === 'fillet' ? 'Radius' : 'Distance', cornerAmountMm),
+    ];
+    if (isPolygonTool(tool)) return [countSetting('sides', 'Sides', polygonSides)];
+    if (tool === 'rounded-rectangle') return [lengthSetting('size', 'Corner radius', cornerRadiusMm)];
+    if (tool === 'bulged-rectangle') return [lengthSetting('size', 'Bulge', bulgeMm)];
+    if (tool === 'move') return [{ kind: 'toggle', id: 'copy', label: 'Copy', on: moveDraft?.copy ?? moveCopyNext, key: 'primary' }];
+    return [];
+  })();
+  const onBarSetting = (id: string, value: ToolSettingValue): void => {
+    const count = typeof value === 'object' && value?.kind === 'segments' ? value.count : null;
+    const mm = typeof value === 'object' && (value?.kind === 'length' || value?.kind === 'radius') ? value.meters * 1000 : null;
+    if (tool === 'shape-builder') {
+      if (id === 'mode' && (value === 'add' || value === 'remove')) shapeBuilder.setMode(value);
+      else if (id === 'keepOriginals' && typeof value === 'boolean') shapeBuilder.setKeepOriginals(value);
+      else if (id === 'apply') shapeBuilder.apply();
+      else if (id === 'cancel') shapeBuilder.cancel();
+    } else if (booleanOperation(tool)) {
+      if (id === 'apply') commitBoolean();
+    } else if (tool === 'table') {
+      if (count !== null && count > 0 && count <= 100) (id === 'rows' ? setTableRows : setTableColumns)(count);
+    } else if (tool === 'viewport') {
+      if (value === 'cloud:choose') setChoosingModel(true); else if (typeof value === 'string') setViewportSourceKey(value);
+    } else if (isLayoutCornerTool(tool)) {
+      if (id === 'corner' && (value === 'fillet' || value === 'chamfer')) chooseTool(value);
+      else if (id === 'size' && mm !== null && mm > 0) { if (tool === 'fillet') setFilletRadiusMm(mm); else setChamferDistanceMm(mm); }
+    } else if (isPolygonTool(tool)) {
+      if (count !== null && count >= LAYOUT_POLYGON_MIN_SIDES && count <= LAYOUT_POLYGON_MAX_SIDES) setPolygonSides(count);
+    } else if (tool === 'rounded-rectangle' || tool === 'bulged-rectangle') {
+      if (mm !== null && mm >= 0) { if (tool === 'bulged-rectangle') setBulgeMm(mm); else setCornerRadiusMm(mm); }
+    } else if (tool === 'move' && id === 'copy') toggleMoveCopy();
+  };
+  /** A bar field's text, read in the grid's units. */
+  const readBarQuantity = (quantity: 'length' | 'angle' | 'count', text: string): VcbValue | null => {
+    const t = text.trim();
+    if (quantity === 'count') {
+      const m = /^(\d+)\s*s?$/i.exec(t);
+      return m ? { kind: 'segments', count: Number(m[1]) } : null;
+    }
+    const parsed = parseVcb(t, entryUnit);
+    if (!parsed.ok) return null;
+    if (quantity === 'angle') return parsed.value.kind === 'angle' ? parsed.value : null;
+    return parsed.value.kind === 'length' || parsed.value.kind === 'radius' ? parsed.value : null;
+  };
+  // picking Corner's segments keeps the bar usable, as edge picking does in 3D
+  const barPlacing = Boolean(moveDraft || rotationDraft || offsetDraft || arcDraft);
   return (
     <>
       {contextMenu ? <LayoutContextMenu x={contextMenu.x} y={contextMenu.y} items={contextItems} onClose={() => { setContextMenu(null); canvasRef.current?.focus(); }} /> : null}
@@ -3746,8 +3862,19 @@ export function LayoutWorkspace({
             <ToolStack key={item.id} title="Dimension" tools={DIMENSION_TOOLS} activeId={tool}
               onSelect={(id) => chooseTool(id as LayoutTool)} />
           ) : item.id === 'fillet' ? (
-            <ToolStack key={item.id} title="Fillet / Chamfer" tools={CORNER_TOOLS} activeId={tool}
-              onSelect={(id) => chooseTool(id as LayoutTool)} />
+            // Corner: one tool whose bar chooses Round (fillet) or Chamfer
+            <ToolButton
+              key={item.id}
+              data-guidance-id="toolbar:corner"
+              type="button"
+              className={`pf-toolbtn${isLayoutCornerTool(tool) ? ' is-active' : ''}`}
+              title="Corner (Shift+F round, Shift+C chamfer)"
+              aria-label="Corner"
+              aria-pressed={isLayoutCornerTool(tool)}
+              onClick={() => chooseTool(lastCornerTool)}
+            >
+              <Icon name="tool-fillet" />
+            </ToolButton>
           ) : item.id === 'line' ? (
             <ToolStack key={item.id} title="Line" tools={LINE_TOOLS} activeId={tool}
               onSelect={(id) => chooseTool(id as LayoutTool)} />
@@ -3800,6 +3927,21 @@ export function LayoutWorkspace({
       <div className="pf-layout-main">
         {leading}
         <div className="pf-layout-workspace-frame">
+        <div className="pf-tob-band pf-layout-tob-band">
+          {/* Text formatting is the bar's style row: for the text being edited, or a selected text or label as a whole. */}
+          {(() => {
+            const editing = editingText?.text && canTransform ? editingText : null;
+            const styled = editing ?? selectedText;
+            return <ToolOptionsBarView tool={styled ? { id: styled.kind === 'label' ? 'label' : 'text', title: styled.kind === 'label' ? 'Label' : 'Text' } : { id: tool, title: activeToolTitle }}
+              settings={styled ? [] : barSettings} placing={barPlacing} mac={MAC}
+              onSetting={onBarSetting} read={readBarQuantity} onLeave={() => canvasRef.current?.focus()}>
+              {editing ? <LayoutTextToolbar text={editing.text!} range={textSelection} getSelection={getTextSelection} onCaptureSelection={setTextSelection}
+                onChange={formatEditingText} onReturnToText={returnToText} onFinish={() => setEditingTextId(null)} />
+                : selectedText ? <LayoutTextToolbar text={selectedText.text!} range={wholeText()} getSelection={wholeText} onCaptureSelection={() => {}}
+                  onChange={formatSelectedText} onReturnToText={() => canvasRef.current?.focus()} onFinish={() => {}} /> : null}
+            </ToolOptionsBarView>;
+          })()}
+        </div>
         <canvas ref={surroundRef} className="pf-layout-surround" aria-hidden="true" />
         <main ref={workspaceRef} className="pf-layout-workspace" aria-label="Layout workspace" onContextMenu={openContextMenu}
           data-tool={polygonTool} style={pageCursor}
@@ -4057,63 +4199,7 @@ export function LayoutWorkspace({
           if (file) void importImageFile(file);
         }} />
 
-          {showToolPane ? <section className="pf-layout-tool-panel" aria-label={`${activeToolTitle} tool options`}>
-            <h2>{activeToolTitle}</h2>
-          {tool === 'shape-builder' ? <div className="pf-layout-tool-option pf-layout-boolean-options pf-layout-shape-builder-controls" role="group" aria-label="Shape Builder controls">
-            <div className="pf-layout-tool-actions">
-            <button type="button" disabled={!shapeBuilder.canApply} onClick={shapeBuilder.apply}>{shapeBuilder.canApply && shapeBuilder.result?.groups.length === 0 ? 'Apply: delete selected shapes' : 'Apply'}</button>
-            <button type="button" onClick={shapeBuilder.cancel}>Cancel</button>
-            </div>
-            <button type="button" aria-pressed={shapeBuilder.mode === 'add'} onClick={() => shapeBuilder.setMode('add')}>Add</button>
-            <button type="button" aria-pressed={shapeBuilder.mode === 'remove'} onClick={() => shapeBuilder.setMode('remove')}>Remove</button>
-            <label><input type="checkbox" checked={shapeBuilder.keepOriginals} onChange={event => shapeBuilder.setKeepOriginals(event.target.checked)} />Keep originals</label>
-            <span role="status">{shapeBuilder.session?.busy ? 'Finding regions…' : `${shapeBuilder.result?.groups.length ?? 0} result objects. ${shapeBuilder.result?.sourceIndex !== null ? 'Only added sections will be kept.' : 'Delete sections to keep everything else, or add sections to choose what to keep.'}`}</span>
-          </div> : null}
-          {booleanOperation(tool) ? <div className="pf-layout-tool-option pf-layout-boolean-options" role="group" aria-label="Boolean operation">
-            <div className="pf-layout-tool-actions"><button type="button" disabled={booleanIds.length < 2 || Boolean(booleanPreview?.error)} onClick={commitBoolean}>Apply boolean</button></div>
-            <span>{booleanPreview?.error ?? (booleanPreview && !booleanPreview.shapes.length ? 'Empty result: applying removes the picked shapes.' : booleanIds.length ? `${booleanIds.length} shapes picked. Enter to apply; Escape to cancel.` : 'Pick the target first, then other shapes.')}
-              {tool === 'boolean-cut-path' ? ' Cuts the outline and removes fill.' : tool === 'boolean-division' ? ' Produces separate filled pieces.' : ''}</span>
 
-          </div> : null}
-
-          {tool === 'table' ? <>
-            <label className="pf-layout-tool-option">Rows<input aria-label="Table rows" type="number" min="1" max="100" value={tableRows} onChange={event => { const n = Number(event.target.value); if (Number.isInteger(n) && n > 0 && n <= 100) setTableRows(n); }} /></label>
-            <label className="pf-layout-tool-option">Columns<input aria-label="Table columns" type="number" min="1" max="100" value={tableColumns} onChange={event => { const n = Number(event.target.value); if (Number.isInteger(n) && n > 0 && n <= 100) setTableColumns(n); }} /></label>
-          </> : null}
-          {tool === 'viewport' && (viewportSources.length > 0 || cloudApi) ? <label className="pf-layout-tool-option">Model
-            <select aria-label="Model" value={viewportSource?.key ?? ''} onChange={event => {
-              if (event.target.value === 'cloud:choose') setChoosingModel(true); else setViewportSourceKey(event.target.value);
-            }}>
-              {viewportSources.map(source => <option key={source.key} value={source.key}>{source.name}</option>)}
-              {cloudApi ? <option value="cloud:choose">Choose cloud model…</option> : null}
-            </select>
-          </label> : null}
-          {isLayoutCornerTool(tool) ? <label className="pf-layout-tool-option">
-            {tool === 'fillet' ? 'Fillet radius (mm)' : 'Chamfer distance (mm)'}
-            <input type="number" min="0.001" step="0.5" value={cornerAmountMm} onChange={event => {
-              const value = Number(event.target.value);
-              if (Number.isFinite(value) && value > 0) { if (tool === 'fillet') setFilletRadiusMm(value); else setChamferDistanceMm(value); }
-            }} />
-          </label> : null}
-          {isPolygonTool(tool) ? <label className="pf-layout-tool-option">
-            Sides
-            <input type="number" min={LAYOUT_POLYGON_MIN_SIDES} max={LAYOUT_POLYGON_MAX_SIDES} step="1" value={polygonSides} onChange={event => {
-              const sides = Number(event.target.value);
-              if (Number.isInteger(sides) && sides >= LAYOUT_POLYGON_MIN_SIDES && sides <= LAYOUT_POLYGON_MAX_SIDES) setPolygonSides(sides);
-            }} />
-          </label> : null}
-          {tool === 'rounded-rectangle' || tool === 'bulged-rectangle' ? <label className="pf-layout-tool-option">
-            {tool === 'rounded-rectangle' ? 'Corner radius (mm)' : 'Bulge (mm)'}
-            <input type="number" min="0" step="0.5" value={rectangleAmountMm} onChange={(event) => {
-              const amount = Number(event.target.value);
-              if (event.target.value.trim() && Number.isFinite(amount) && amount >= 0) {
-                if (tool === 'bulged-rectangle') setBulgeMm(amount); else setCornerRadiusMm(amount);
-              }
-            }} />
-          </label> : null}
-          {editingText?.text && canTransform ? <LayoutTextToolbar text={editingText.text} range={textSelection} getSelection={getTextSelection} onCaptureSelection={setTextSelection}
-            onChange={formatEditingText} onReturnToText={returnToText} onFinish={() => setEditingTextId(null)} /> : null}
-          </section> : null}
 
           {viewportSources.length ? <LayoutAccordion title="Models" id={`layout-models-${tab.id}`} open={openSections.models} count={viewportSources.length}
             onToggle={() => toggleSection('models')}>
@@ -4128,7 +4214,7 @@ export function LayoutWorkspace({
           <div className="pf-form-note">
             {selectedEntity
               ? `${selectedEntity.kind === 'table' ? 'Table' : selectedEntity.kind === 'path' ? 'Path' : selectedEntity.kind === 'image' ? 'Image' : selectedEntity.kind === 'text' ? 'Text' : selectedEntity.kind === 'dimension' || selectedEntity.kind === 'angular-dimension' ? 'Dimension' : 'Label'} #${selectedEntity.id} · ${selectedEntity.points.length} points`
-              : selectionIds.length > 1 ? `${selectionIds.length} objects selected` : 'No selection · editing default style'}
+              : selectionIds.length > 1 ? `${selectionIds.length} objects selected` : 'Nothing selected · the style new shapes start with'}
           </div>
           {selectedEntity?.table && isLayoutLayerVisible(page, state, selectedEntity.layerId) ? <LayoutTablePanel key={`${page.id}:${selectedEntity.id}`} entity={selectedEntity} selected={tableCell} selection={tableSelection} onSelect={setTableCell} disabled={!canTransform}
             onChange={(table, size) => { tab.commands.execute('layout.table.update', { pageId: page.id, entityId: selectedEntity.id, table, ...size }); }} /> : null}
@@ -4322,8 +4408,8 @@ export function LayoutWorkspace({
               ? `Rotation: ${rotationDraft.angleDeg.toFixed(1)}°. Click to finish, or type an angle. Esc cancels.`
               : rotationDraft ? 'Click a second point to establish the reference line.' : 'Click within a shape or on a line to choose the rotation point.'
             : isLayoutCornerTool(tool) ? cornerResult.error ?? (cornerFirst
-              ? `Click the second adjoining segment to ${tool === 'fillet' ? 'round' : 'bevel'} the corner. Size: ${cornerAmountMm} mm. Esc cancels.`
-              : `Click the first straight segment. Set the ${tool === 'fillet' ? 'radius' : 'setback'} in the toolbar, or type it.`)
+              ? `Click the second adjoining segment to ${tool === 'fillet' ? 'round' : 'bevel'} the corner. Size: ${formatEntryLength(cornerAmountMm)}. Esc cancels.`
+              : `Click the first straight segment. Set the ${tool === 'fillet' ? 'radius' : 'setback'} in the tool options bar, or type it.`)
             : tool === 'offset' ? offsetResult.error ?? (offsetDraft
               ? `Click to place the offset (${offsetDraft.distanceMm.toFixed(2)} mm), or type a distance. Negative values inset closed shapes. Esc cancels.`
               : 'Click a path to offset, then move and click to place its copy.')
@@ -4341,7 +4427,7 @@ export function LayoutWorkspace({
             : tool === 'circle' ? 'Click the center, then a point on the circle. Enter a radius for an exact size.'
             : isLayoutRectangleTool(tool) ? `Drag or click two points. Hold Shift for a square; ${PRIMARY_MODIFIER} draws from the center. Enter width, height for an exact size.`
             : tool === 'viewport' ? vcbError ?? `Drag or click two corners to place a view of ${viewportSource?.name ?? 'the model'}.`
-            : tool === 'table' ? !anchor ? 'Press and drag to choose rows and columns, or set them in the toolbar and click the first corner.'
+            : tool === 'table' ? !anchor ? 'Press and drag to choose rows and columns, or set them in the tool options bar and click the first corner.'
               : tableCounting ? `Drag right or left for columns, up or down for rows: ${tableRows} ${tableRows === 1 ? 'row' : 'rows'} × ${tableColumns} ${tableColumns === 1 ? 'column' : 'columns'}. Release to keep them.`
               : `Move to size the table (${tableRows} × ${tableColumns}), then click to place it. Type the width and height for an exact size. Esc cancels.`
             : tool === 'line' ? 'Click or drag to draw. Hold Shift for horizontal or vertical. Esc or double-click ends the chain.'
@@ -4427,7 +4513,6 @@ function LayoutTextEditor({ entity, disabled, onChange, onBounds, fields, state,
   onChange: (values: Partial<NonNullable<LayoutEntity['text']>>) => void;
 }): JSX.Element {
   const text = entity.text!;
-  const contentRef = useRef<HTMLTextAreaElement>(null);
   const [token, setToken] = useState('PageNumber');
   const modelFields = layoutModelFields(entity);
   const modelField = !!modelFields && Object.hasOwn(modelFields, token);
@@ -4436,17 +4521,8 @@ function LayoutTextEditor({ entity, disabled, onChange, onBounds, fields, state,
   const fontAvailable = fontStatus === 'ready' || layoutFontAvailable(text.fontFamily);
   return <fieldset disabled={disabled}>
     <legend>{entity.kind === 'label' ? 'Label' : 'Text'}</legend>
-    <label>Text content<textarea ref={contentRef} aria-label="Text content" value={text.content}
+    <label>Text content<textarea aria-label="Text content" value={text.content}
       onChange={(event) => onChange(editLayoutTextContent(text, event.target.value))} /></label>
-    <div className="pf-layout-inline-formatting" aria-label="Inline formatting">
-      {(['bold', 'italic', 'underline'] as const).map((key) => <button type="button" key={key}
-        onClick={() => {
-          const input = contentRef.current;
-          if (!input || input.selectionStart === input.selectionEnd) return;
-          onChange({ spans: [...(text.spans ?? []), { start: input.selectionStart, end: input.selectionEnd,
-            bold: text.bold, italic: text.italic, underline: text.underline, [key]: true }] });
-        }}>Apply {key} to selection</button>)}
-    </div>
     <label>List<select value={text.list ?? 'none'} onChange={(event) => onChange({ list: event.target.value as 'none' | 'bullet' | 'number' })}>
       {['none', 'bullet', 'number'].map((key) => <option key={key}>{key}</option>)}
     </select></label>
@@ -4485,20 +4561,10 @@ function LayoutTextEditor({ entity, disabled, onChange, onBounds, fields, state,
         const anchor: Point = [...entity.points[2]!]; anchor[axis] = Number(event.target.value); onBounds({ anchor });
       }} />
     </label>) : null}
-    <label>Font family<LayoutFontInput value={text.fontFamily} onChange={fontFamily => onChange({ fontFamily })} /></label>
     {fontStatus === 'loading' ? <p role="status">Loading {text.fontFamily}…</p>
       : !fontAvailable ? <p role="status">Font unavailable: {text.fontFamily}. A substitute is displayed.</p> : null}
-    <label>Font size (pt)<input type="number" min="1" value={text.fontSizePt} onChange={(event) => {
-      if (Number(event.target.value) > 0) onChange({ fontSizePt: Number(event.target.value) });
-    }} /></label>
-    <label>Text color<input type="color" value={text.color} onChange={(event) => onChange({ color: event.target.value })} /></label>
-    {(['bold', 'italic', 'underline', 'bounded'] as const).map((key) => <label key={key}>
-      <input type="checkbox" checked={text[key]} onChange={(event) => onChange({ [key]: event.target.checked })} />
-      {key === 'bounded' ? 'Wrap to box' : key[0]!.toUpperCase() + key.slice(1)}
-    </label>)}
-    <label>Alignment<select value={text.align} onChange={(event) => onChange({ align: event.target.value as typeof text.align })}>
-      {['left', 'center', 'right'].map((key) => <option key={key}>{key}</option>)}
-    </select></label>
+    {/* Font, size, color, emphasis and alignment are in the tool options bar's style row. */}
+    <label><input type="checkbox" checked={text.bounded} onChange={(event) => onChange({ bounded: event.target.checked })} />Wrap to box</label>
     <label>Vertical anchor<select value={text.vertical} onChange={(event) => onChange({ vertical: event.target.value as typeof text.vertical })}>
       {['top', 'middle', 'bottom'].map((key) => <option key={key}>{key}</option>)}
     </select></label>

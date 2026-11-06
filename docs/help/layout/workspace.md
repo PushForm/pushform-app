@@ -4,11 +4,11 @@
 
 Layout is the page-based drawing editor. Its toolbar is organized into **Transform**, **Draw**, **Modify**, **Annotate**, **Insert**, and **Present** groups. Buttons with small arrows offer related tools.
 
-Tool settings appear in a temporary pane at the top of the right-side panel. For example, Polygon shows **Sides**, and Table shows row and column counts. Look there for the active tool's options.
+When the tool you choose has settings, a tool options bar floats over the top of the page view, between the side panels. For example, Polygon shows **Sides**, Table shows row and column counts, and Move shows **Copy**. Tools with nothing to set show no bar. Change a value and press Enter; lengths use the document's grid units. Press Ctrl+L (Cmd+L on a Mac) to move the keyboard into the bar and Escape to return to the page.
 
 ## Edit properties in the side panel
 
-The right-side panel uses the same aligned fields and control styling as the 3D workspace. With nothing selected, **Default Style** sets the stroke and fill for new shapes. Select one object to see its properties and **Arrange** controls for rotation, scaling, flipping, and stacking order. Flip and stacking-order actions appear in paired columns.
+The right-side panel uses the same aligned fields and control styling as the 3D workspace. With nothing selected, the panel is titled **New Shapes** and sets the stroke, fill and arrows new shapes start with. Choosing a drawing tool clears the selection, so these changes always go to the next shape. Select one object to see its properties and **Arrange** controls for rotation, scaling, flipping, and stacking order. Flip and stacking-order actions appear in paired columns.
 
 ## Use the Object browser
 

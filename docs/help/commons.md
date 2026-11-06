@@ -18,6 +18,8 @@ Any signed-in PushForm user can create collections. Choose **New Collection** be
 
 On a model page, **Save to collection** adds or removes that model using your collection checkboxes. **New private collection** creates a collection and saves the model into it in one action.
 
+You can also choose collections while publishing. Open the **Collections** dropdown in the publishing dialog to see your collections; check the ones the model belongs in, or type a name and choose **Add** to create a new private collection. The model is added when you choose **Publish model**, because collections only hold published models; saving a draft does not keep these choices. When you edit a model that is already published, its current collections are checked. Unchecking one removes the model, and if nothing else changed, **Save collections** applies the change without publishing a new version. If a collection can't be updated, the model stays published and the dialog names the collection so you can fix it from the model page.
+
 On your collection's page, choose **Edit collection** to change its details or visibility, remove models, and use **Move up** or **Move down** to set their order. To add models, open a model's page and choose **Save to collection**. The first four available models form its cover. Choose **Save collection** to apply your edits. You can keep up to 100 collections with up to 100 models each. If someone edits the same collection in another tab, reload before saving again; a failed save keeps your draft available for correction.
 
 ## Collection visibility and credits

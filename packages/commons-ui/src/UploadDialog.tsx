@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { useCallback, useId, useEffect, useMemo, useRef, useState, type DragEvent, type JSX, type ReactNode } from 'react';
-import { COMMONS_FILE_LIMIT, COMMONS_IMAGE_LIMIT, COMMONS_MODEL_EXTENSIONS, CommonsPublishing, commonsHandleSchema, commonsFileKind, fetchCommonsImage, fetchCommonsThumbnail,
+import { COMMONS_FILE_LIMIT, COMMONS_IMAGE_LIMIT, COMMONS_MODEL_EXTENSIONS, CommonsCollections, CommonsPublishing, commonsHandleSchema, commonsFileKind, fetchCommonsImage, fetchCommonsThumbnail,
   removeCommonsFile, streamCommonsRender, uploadCommonsFile, type CommonsOwnModels, type CommonsOwnRevision, type CommonsProfile,
-  type CommonsSubmission, type CommonsRenderEvent, type CommonsUpload, type CommonsUploadProgress } from '@pushform/cloud';
+  type CommonsSubmission, type CommonsRenderEvent, type CommonsUpload, type CommonsUploadProgress, type CollectionFields, type CommonsCollection } from '@pushform/cloud';
 import type { CommonsAccount } from './account';
 import { CATEGORIES, DESCRIPTION_LIMIT, RIGHTS_BASIS, TITLE_LIMIT, detailsFromMetadata, detailsProblem, formatBytes, metadataFor, publishLicenses,
   titleFromFileName, uniqueLicenses, type LicenseChoice, type LicenseKey, type ModelDetails } from './modelDetails';
@@ -36,6 +36,29 @@ const FORMAT_LIST = 'SKP, SKB, DAE, KMZ, OBJ, 3DS, STL, DXF, glTF, GLB, STEP, PF
 const SAVE_DELAY_MS = 800;
 const POLL_MS = 3000;
 const emptyDetails: ModelDetails = { title: '', description: '', category: 'Other', license: 'CC BY 4.0', terms: '' };
+const COLLECTION_MODEL_LIMIT = 100;
+const COLLECTION_LIMIT = 100;
+const COLLECTION_TITLE_LIMIT = 100;
+const failureText = (failure: unknown, fallback: string) => failure instanceof Error ? failure.message : fallback;
+
+/** Whether the model is in a collection once the publisher's choices are applied. */
+export function collectionChosen(collection: CommonsCollection, modelId: string | null, choices: Readonly<Record<string, boolean>>): boolean {
+  return choices[collection.id] ?? (modelId !== null && collection.modelIds.includes(modelId));
+}
+
+/**
+ * The collection saves that apply the publisher's choices to freshly loaded collections. Only collections the
+ * publisher changed are touched, and each keeps its other members, their order and its own details.
+ */
+export function collectionChanges(collections: readonly CommonsCollection[], modelId: string, choices: Readonly<Record<string, boolean>>): { collection: CommonsCollection; fields: CollectionFields }[] {
+  return collections.flatMap((collection) => {
+    const wanted = choices[collection.id];
+    const member = collection.modelIds.includes(modelId);
+    if (wanted === undefined || wanted === member) return [];
+    const modelIds = wanted ? [...collection.modelIds, modelId] : collection.modelIds.filter((id) => id !== modelId);
+    return [{ collection, fields: { title: collection.title, description: collection.description, visibility: collection.visibility, modelIds } }];
+  });
+}
 
 /** Upload verification and preview progress. */
 export function fileStatus(file: FileState): { label: string; detail: string | null; tone: 'busy' | 'good' | 'bad'; progress: number | null } {
@@ -59,6 +82,7 @@ export function fileStatus(file: FileState): { label: string; detail: string | n
 
 export function UploadDialog({ account, filesUrl, modelId, initialFile, initialImage, newModelId, snapshotLabel, scopeControl, inherited, onClose, onPublished }: UploadDialogProps): JSX.Element {
   const api = useMemo(() => new CommonsPublishing(account.client), [account.client]);
+  const collectionsApi = useMemo(() => new CommonsCollections(account.client), [account.client]);
   const [profile, setProfile] = useState<CommonsProfile | null | undefined>();
   const [loadError, setLoadError] = useState('');
   const [model, setModel] = useState<ModelState | null>(null);
@@ -72,6 +96,16 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, initialI
   const [publishing, setPublishing] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(modelId !== null);
+  /** The publisher's collections, and the choices applied to them when the model is published. */
+  const [collections, setCollections] = useState<CommonsCollection[] | null>(null);
+  const [collectionsError, setCollectionsError] = useState('');
+  const [collectionsAttempt, setCollectionsAttempt] = useState(0);
+  const [collectionChoices, setCollectionChoices] = useState<Record<string, boolean>>({});
+  const [newCollections, setNewCollections] = useState<string[]>([]);
+  const [newCollection, setNewCollection] = useState('');
+  /** Set when the model was published but a collection could not be updated. */
+  const [publishedId, setPublishedId] = useState<string | null>(null);
+  const memberId = modelId ?? newModelId ?? null;
   const modelRef = useRef<ModelState | null>(null); modelRef.current = model;
   const detailsRef = useRef(details); detailsRef.current = details;
   const filesRef = useRef<string[]>([]);
@@ -111,6 +145,15 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, initialI
     void account.profiles.mine(abort.signal).then(setProfile, () => { if (!abort.signal.aborted) setLoadError('Your public profile could not be loaded. Try again.'); });
     return () => abort.abort();
   }, [account.profiles]);
+
+  useEffect(() => {
+    if (!profile?.active) return;
+    const abort = new AbortController();
+    setCollectionsError('');
+    void collectionsApi.mine(abort.signal).then((value) => { if (!abort.signal.aborted) setCollections(value); },
+      (failure) => { if (!abort.signal.aborted) setCollectionsError(failureText(failure, 'Your collections could not be loaded.')); });
+    return () => abort.abort();
+  }, [collectionsApi, profile?.active, collectionsAttempt]);
 
   /** The model's current state from My models: its draft, its published revision and their files. */
   const refresh = useCallback(async (id: string): Promise<{ state: CommonsOwnModels; model: ModelState }> => {
@@ -297,23 +340,64 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, initialI
   const fileReady = !!modelFile?.asset && !modelFile.upload && !modelFile.error;
   const coverBusy = !!cover && (!!cover.upload || (!cover.asset && !cover.error));
   const hasChanges = !!model?.draft || dirty.current || !model?.published;
+  const collectionsChanged = newCollections.length > 0 || (collections ?? []).some((collection) =>
+    collectionChoices[collection.id] !== undefined && collectionChoices[collection.id] !== collectionChosen(collection, memberId, {}));
+  /** A published model whose only change is its collections is not republished. */
+  const collectionsOnly = !hasChanges && collectionsChanged && !!model?.published;
   const previewReady = !initialImage || (!!cover?.asset && !cover.error);
-  const canPublish = previewReady && fileReady && !coverBusy && !problem && !publishing && hasChanges;
+  const canPublish = previewReady && fileReady && !coverBusy && !problem && !publishing && (hasChanges || collectionsOnly) && !publishedId;
+
+  /** Collections accept only published models, so the choices are applied after publishing. Returns what failed. */
+  const applyCollections = async (id: string): Promise<string[]> => {
+    const failures: string[] = [];
+    if (Object.keys(collectionChoices).length) {
+      try {
+        // Fresh versions and members: another tab may have changed a collection since the dialog opened.
+        for (const { collection, fields } of collectionChanges(await collectionsApi.mine(control.current.signal), id, collectionChoices)) {
+          try { await collectionsApi.save(collection.id, fields, collection.version, control.current.signal); }
+          catch (failure) { failures.push(`“${collection.title}”: ${failureText(failure, 'It could not be updated.')}`); }
+        }
+      } catch (failure) { failures.push(failureText(failure, 'Your collections could not be loaded.')); }
+    }
+    for (const title of newCollections) {
+      try { await collectionsApi.save(null, { title, description: '', visibility: 'private', modelIds: [id] }, null, control.current.signal); }
+      catch (failure) { failures.push(`“${title}”: ${failureText(failure, 'It could not be created.')}`); }
+    }
+    return failures;
+  };
   const publish = async () => {
     if (!canPublish) return;
     setPublishing(true); setMessage('');
+    let published: string | null = null;
     try {
-      dirty.current = true; await queueSave();
-      const draft = await ensureDraft();
-      const { model: fresh, state } = await refresh(modelRef.current!.id);
-      const revision = state.revisions.find((item) => item.id === draft.id)!;
-      await api.publish(revision.id, fresh.published, revision.asset_version, true, control.current.signal);
+      if (collectionsOnly) published = model!.id;
+      else {
+        dirty.current = true; await queueSave();
+        const draft = await ensureDraft();
+        const { model: fresh, state } = await refresh(modelRef.current!.id);
+        const revision = state.revisions.find((item) => item.id === draft.id)!;
+        await api.publish(revision.id, fresh.published, revision.asset_version, true, control.current.signal);
+        published = fresh.id;
+      }
+      const failures = await applyCollections(published);
       window.dispatchEvent(new Event('commons:catalog-changed'));
-      onPublished(fresh.id);
+      if (!failures.length) { onPublished(published); return; }
+      setPublishedId(published);
+      setMessage(`${collectionsOnly ? 'Some collections were not updated' : 'Published, but some collections were not updated'}. ${failures.join(' ')} You can change them from the model page.`);
     } catch (failure) {
-      setMessage(failure instanceof Error ? failure.message : 'The model could not be published.');
+      setMessage(failure instanceof Error ? failure.message : published ? 'Your collections could not be updated.' : 'The model could not be published.');
     } finally { setPublishing(false); }
   };
+
+  const addCollection = () => {
+    const title = newCollection.trim();
+    if (!title) return;
+    const taken = [...(collections ?? []).map((collection) => collection.title), ...newCollections].some((value) => value.toLocaleLowerCase() === title.toLocaleLowerCase());
+    if (taken) { setMessage(`You already have a collection called “${title}”. Select it instead.`); return; }
+    setNewCollections((value) => [...value, title]); setNewCollection(''); setMessage('');
+  };
+  const collectionCount = (collections?.length ?? 0) + newCollections.length;
+  const chosenCollections = [...(collections ?? []).filter((collection) => collectionChosen(collection, memberId, collectionChoices)).map((collection) => collection.title), ...newCollections];
 
   const onDrop = (event: DragEvent) => { event.preventDefault(); setDragging(false); chooseModel(event.dataTransfer.files[0]); };
   const status = modelFile ? fileStatus(modelFile) : null;
@@ -375,12 +459,33 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, initialI
         <p className="field-note">{details.license === 'other' ? 'Describe how others may use, share and credit this model.' : publishLicenses[details.license].summary}</p>
         {details.license === 'other' && <label><span className="field-head"><span>License terms *</span></span>
           <textarea value={details.terms} rows={4} onChange={(event) => update({ terms: event.target.value })}/></label>}</>}
+        <CollectionPicker summary={chosenCollections.length ? chosenCollections.join(', ') : 'None'} collections={collections} error={collectionsError} disabled={publishing || !!publishedId} onRetry={() => setCollectionsAttempt((value) => value + 1)}>
+          {collections && <>
+            {collectionCount > 0 && <div className="collection-choices">
+              {collections.map((collection) => {
+                const checked = collectionChosen(collection, memberId, collectionChoices);
+                const full = !checked && collection.modelIds.length >= COLLECTION_MODEL_LIMIT;
+                return <label key={collection.id} className="collection-check"><input type="checkbox" checked={checked} disabled={full}
+                  onChange={(event) => { const wanted = event.target.checked; setCollectionChoices((value) => ({ ...value, [collection.id]: wanted })); }}/>
+                  <span>{collection.title} <small>· {full ? 'full' : collection.visibility}</small></span></label>;
+              })}
+              {newCollections.map((title) => <label key={'new:' + title} className="collection-check"><input type="checkbox" checked
+                onChange={() => setNewCollections((value) => value.filter((item) => item !== title))}/><span>{title} <small>· new, private</small></span></label>)}
+            </div>}
+            <div className="collection-create-inline">
+              <input aria-label="New collection name" placeholder="New collection" value={newCollection} maxLength={COLLECTION_TITLE_LIMIT} disabled={collectionCount >= COLLECTION_LIMIT}
+                onChange={(event) => setNewCollection(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addCollection(); } }}/>
+              <button type="button" className="secondary" aria-label="Add new collection" disabled={!newCollection.trim() || collectionCount >= COLLECTION_LIMIT} onClick={addCollection}>Add</button>
+            </div>
+            <p className="field-note">The model is added when you publish. New collections start private.</p>
+          </>}
+        </CollectionPicker>
       </section>
     </div>;
   })();
 
   const saveLabel = save === 'saving' ? 'Saving…' : save === 'saved' ? 'Draft saved' : save === 'error' ? 'Not saved' : model?.draft ? 'Draft saved' : '';
-  const blocked = step === 'details' && profile?.active ? (!modelFile ? 'Add a model file.' : !fileReady ? (modelFile.error ? 'Upload the model file again.' : 'Waiting for the file check.') : !previewReady ? (cover?.error ?? 'Uploading your current-view preview.') : problem ?? (!hasChanges ? 'No changes to publish.' : null)) : null;
+  const blocked = step === 'details' && profile?.active ? (!modelFile ? 'Add a model file.' : !fileReady ? (modelFile.error ? 'Upload the model file again.' : 'Waiting for the file check.') : !previewReady ? (cover?.error ?? 'Uploading your current-view preview.') : problem ?? (!hasChanges && !collectionsOnly ? 'No changes to publish.' : null)) : null;
   return <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <div ref={dialog} className={`upload-dialog${!profile?.active ? ' upload-dialog-profile' : ''}`} role="dialog" aria-modal="true" aria-labelledby="upload-dialog-title">
       <header className="dialog-head">
@@ -391,12 +496,49 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, initialI
       <div className="dialog-body">{scopeControl}{snapshotLabel && <p className="snapshot-note">{snapshotLabel}. This exact snapshot is used; later edits stay private.</p>}{inherited && <section aria-label="Retained source licenses"><h3>Original licenses and credits</h3>{uniqueLicenses(inherited.licenses).map((license, index) => <p key={index}>{license.name}: {license.conditions.join('; ')}</p>)}{inherited.credits.map((credit, index) => <p key={index}>{credit.name}: {credit.text}</p>)}</section>}{body}</div>
       {step === 'details' && profile?.active && !loading && filesUrl && <footer className="dialog-foot">
         <span className="save-state" role="status">{message ? <span role="alert">{message}</span> : blocked ?? saveLabel}</span>
-        <button type="button" className="secondary" onClick={async () => { dirty.current = dirty.current || !model; if (model || modelFile?.asset) await queueSave(); onClose(); }}>Save draft</button>
-        <button type="button" disabled={!canPublish} onClick={() => void publish()}>{publishing ? 'Publishing…' : model?.published ? 'Publish changes' : 'Publish model'}</button>
+        {publishedId ? <button type="button" onClick={() => onPublished(publishedId)}>Done</button> : <>
+          <button type="button" className="secondary" onClick={async () => { dirty.current = dirty.current || !model; if (model || modelFile?.asset) await queueSave(); onClose(); }}>Save draft</button>
+          <button type="button" disabled={!canPublish} onClick={() => void publish()}>{publishing ? (collectionsOnly ? 'Saving…' : 'Publishing…') : collectionsOnly ? 'Save collections' : model?.published ? 'Publish changes' : 'Publish model'}</button>
+        </>}
       </footer>}
       <input ref={fileInput} type="file" hidden accept={ACCEPT} aria-label="Choose a model file" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; chooseModel(file); }}/>
       <input ref={coverInput} type="file" hidden accept="image/png,image/jpeg,.png,.jpg,.jpeg" aria-label="Choose a cover photo" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; chooseCover(file); }}/>
     </div>
+  </div>;
+}
+
+/**
+ * A compact dropdown for choosing collections: one row when closed, so the publishing form stays short. The panel
+ * opens below the trigger, or above it when the dialog has no room below.
+ */
+function CollectionPicker({ summary, collections, error, disabled, onRetry, children }: { summary: string; collections: CommonsCollection[] | null; error: string; disabled: boolean; onRetry(): void; children: ReactNode }): JSX.Element {
+  const id = useId();
+  const [open, setOpen] = useState<'down' | 'up' | null>(null);
+  const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const outside = (event: MouseEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(null); };
+    document.addEventListener('mousedown', outside); return () => document.removeEventListener('mousedown', outside);
+  }, [open]);
+  useEffect(() => { if (disabled) setOpen(null); }, [disabled]);
+  const toggle = () => {
+    if (open) { setOpen(null); return; }
+    const box = trigger.current?.getBoundingClientRect();
+    const bounds = trigger.current?.closest('.dialog-body')?.getBoundingClientRect();
+    // Prefer opening down; flip up when the panel (about 320px) would run past the dialog's scroll area.
+    setOpen(box && bounds && bounds.bottom - box.bottom < 320 && box.top - bounds.top > bounds.bottom - box.bottom ? 'up' : 'down');
+  };
+  return <div ref={root} className="publish-collections" role="group" aria-labelledby={`${id}-label`}
+    onKeyDown={(event) => { if (event.key === 'Escape' && open) { event.stopPropagation(); setOpen(null); trigger.current?.focus(); } }}>
+    <span className="field-head"><span id={`${id}-label`}>Collections</span><span>Optional</span></span>
+    {error ? <div className="collections-error" role="alert"><p>{error}</p><button type="button" className="secondary" onClick={onRetry}>Try again</button></div>
+      : <div className="collection-anchor"><button ref={trigger} type="button" className="collection-trigger" disabled={disabled || !collections} aria-expanded={!!open} aria-controls={`${id}-panel`}
+        aria-labelledby={`${id}-label ${id}-summary`} onClick={toggle}>
+        <span id={`${id}-summary`}>{collections ? summary : 'Loading your collections…'}</span>
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><path d="m3 6 5 5 5-5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+      </button>
+      {open && <div id={`${id}-panel`} className={`collection-panel collection-panel-${open}`}>{children}</div>}</div>}
   </div>;
 }
 

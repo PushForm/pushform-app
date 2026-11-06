@@ -1217,7 +1217,7 @@
 .pf-layout-controls [role='alert'] { color: var(--pf-danger); }
 .pf-layout-controls .pf-form-note { margin: 0 0 6px; }
 .pf-layout-arrange-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
-.pf-layout-controls :is(.pf-layout-table-line, .pf-layout-inline-formatting) { display: flex; flex-direction: column; gap: 6px; }
+.pf-layout-controls .pf-layout-table-line { display: flex; flex-direction: column; gap: 6px; }
 
 /* List panels (Tags, Scenes): filter head, details menu, bordered list, rename field and eye buttons */
 .pf-outliner {

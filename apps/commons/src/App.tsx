@@ -6,7 +6,7 @@ import { commonsFileUrl, CommonsUnavailableError, type CommonsProfile, type Comm
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { CommonsProfileEditor, CommonsProfilePageView, CreatorCredit, ProfileLink, type ProfileLookup } from './CommonsProfile';
 import { ModelCard, ModelGrid, SkeletonGrid } from './ModelCard';
-import { browseSearchFromUrl, clearBrowseSearch, currentCommonsLocation, modelIdFromPath, navigateCommons, openInApp, profileHandleFromPath, profilePath, publishRoute, type PublishRoute } from './route';
+import { browseSearchFromUrl, clearBrowseSearch, collectionIdFromPath, currentCommonsLocation, modelIdFromPath, navigateCommons, openInApp, profileHandleFromPath, profilePath, publishRoute, type PublishRoute } from './route';
 import { applySeo, homeSeo, modelSeo, normalizeSiteUrl, utilitySeo } from './seo';
 import { OwnModelsProvider, OwnModelGrid, OwnedDraftDetail, OwnerModelActions, useOwnModels } from './OwnModels';
 import { CommonsAccessGate, CommonsDownloadButton, CommonsMailingPreference } from './CommonsAccess';
@@ -90,7 +90,8 @@ function CommonsApp({ loadCatalog, filesUrl, account=null, publishPage, editorUr
   const [location,setLocation]=useState(currentCommonsLocation);
   const hash=location.hash;
   const onCollections=hash==='#collections';
-  const collectionRoute=hash.startsWith('#collections/');
+  const collectionId=collectionIdFromPath(location.path);
+  const collectionRoute=collectionId!==null||hash==='#collections/new';
   const legacyOwnRoute=hash==='#my-models'||hash==='#my-collections';
   const ownedModels=useOwnModels();
   const selectedId=modelIdFromPath(location.path);
@@ -146,7 +147,8 @@ function CommonsApp({ loadCatalog, filesUrl, account=null, publishPage, editorUr
   const seoContext = useMemo(() => ({ siteUrl: normalizeSiteUrl(import.meta.env.VITE_COMMONS_SITE_URL), filesUrl }), [filesUrl]);
   // Search and social tags follow the route. Until the catalog is ready the tags the edge worker wrote stay in place.
   useEffect(() => {
-    if (onProfile) return;
+    // Profile and collection pages write their own tags once their content arrives.
+    if (onProfile || collectionId) return;
     if (collectionRoute || legacyOwnRoute || hash === '#account' || publishRoute(hash)) { applySeo({ ...utilitySeo('Commons', seoContext), title: document.title }); return; }
     if (selectedId) {
       if (selected) applySeo(modelSeo(selected, seoContext));
@@ -155,7 +157,7 @@ function CommonsApp({ loadCatalog, filesUrl, account=null, publishPage, editorUr
     }
     if (state.kind === 'ready') applySeo(homeSeo(state.models, seoContext));
     else if (state.kind === 'unconfigured') applySeo(utilitySeo('Models', seoContext));
-  }, [onProfile, collectionRoute, legacyOwnRoute, hash, selectedId, selected, state, seoContext, ownedModels.models]);
+  }, [onProfile, collectionId, collectionRoute, legacyOwnRoute, hash, selectedId, selected, state, seoContext, ownedModels.models]);
   useEffect(() => {
     const key = location.path + hash;
     if (focusedRoute.current.key !== key) focusedRoute.current = { key, done: false };
@@ -178,7 +180,7 @@ function CommonsApp({ loadCatalog, filesUrl, account=null, publishPage, editorUr
       <img src="/pf-logo-mark.svg" alt="" width="30" height="30" /><span>PushForm <strong>Commons</strong></span>
     </a><nav aria-label="Commons">{account&&<a className="nav-upload" href="#upload">Upload model</a>}<a href="#collections">Collections</a>{account&&<><MyProfileLink own={own}/></>}<a className="editor-link" href="https://app.pushform.io">Open PushForm <span aria-hidden="true">↗</span></a></nav></header>
     <main id="main" ref={heading} tabIndex={-1}>
-      {creditedCreatorId?<CreditedCreatorPage key={creditedCreatorId} id={creditedCreatorId} filesUrl={filesUrl}/>:legacyOwnRoute?<p className="status-panel" role="status">Opening your profile...</p>:collectionRoute?<CollectionsRoute route={hash} filesUrl={filesUrl}/>:profileLookup?<CommonsProfilePageView lookup={profileLookup} profiles={account?.profiles??null} filesUrl={filesUrl} ownProfileId={own?.id??null} renderCollections={(handle,owner,profileId)=><ProfileCollections handle={handle} owner={owner} profileId={profileId} filesUrl={filesUrl}/>} renderOwnModels={()=><OwnModelGrid filesUrl={filesUrl}/>}/>:hash==='#account'?account?<AccountPage account={account} filesUrl={filesUrl}/>:<section className="status-panel"><h1>Accounts are unavailable in this build.</h1></section>:publishRoute(hash)?publishPage?.(publishRoute(hash)!,state.kind==='ready')??<section className="status-panel"><h1>Publishing is unavailable in this build.</h1></section>:selectedId && (state.kind === 'ready' || ownedModels.models?.some(model=>model.id===selectedId)) ? selected ? <ModelDetail model={selected} filesUrl={filesUrl} account={account} editorUrl={editorUrl} /> :
+      {creditedCreatorId?<CreditedCreatorPage key={creditedCreatorId} id={creditedCreatorId} filesUrl={filesUrl}/>:legacyOwnRoute?<p className="status-panel" role="status">Opening your profile...</p>:collectionRoute?<CollectionsRoute id={collectionId ?? 'new'} filesUrl={filesUrl}/>:profileLookup?<CommonsProfilePageView lookup={profileLookup} profiles={account?.profiles??null} filesUrl={filesUrl} ownProfileId={own?.id??null} renderCollections={(handle,owner,profileId)=><ProfileCollections handle={handle} owner={owner} profileId={profileId} filesUrl={filesUrl}/>} renderOwnModels={()=><OwnModelGrid filesUrl={filesUrl}/>}/>:hash==='#account'?account?<AccountPage account={account} filesUrl={filesUrl}/>:<section className="status-panel"><h1>Accounts are unavailable in this build.</h1></section>:publishRoute(hash)?publishPage?.(publishRoute(hash)!,state.kind==='ready')??<section className="status-panel"><h1>Publishing is unavailable in this build.</h1></section>:selectedId && (state.kind === 'ready' || ownedModels.models?.some(model=>model.id===selectedId)) ? selected ? <ModelDetail model={selected} filesUrl={filesUrl} account={account} editorUrl={editorUrl} /> :
         ownedModels.models?.find(model=>model.id===selectedId) ? <OwnedDraftDetail key={selectedId} model={ownedModels.models.find(model=>model.id===selectedId)!} filesUrl={filesUrl}/> : account && ownedModels.userId && !ownedModels.models && !ownedModels.error ? <p role="status">Loading your model...</p> : <section className="status-panel"><p className="eyebrow">Model unavailable</p><h1>This model isn’t in the catalog.</h1>
           <p>It may have been removed or the link may be out of date.</p><a href="/#browse" onClick={event=>openInApp(event,'/#browse')}>Browse models</a></section> : <>
         <section className="hero"><p className="eyebrow">A shared place to start</p>

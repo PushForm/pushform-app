@@ -180,14 +180,19 @@ it('hydrates featured models independently from the first browse page and its fi
 it('opens collections and a collection page by reading only their models, never the whole catalog', async () => {
   const auth = await setup();
   const browse = vi.fn().mockResolvedValue({ models: [], total: 0, categories: ['Hardware'], licenses: [], next: null });
-  const byIds = vi.fn().mockResolvedValue([model]);
-  const loadCatalog = Object.assign(vi.fn().mockResolvedValue([model]), { browse, byIds });
+  const pictured = { ...model, imageUrl: 'https://img.example/hinge.png' };
+  const byIds = vi.fn().mockResolvedValue([pictured]);
+  const loadCatalog = Object.assign(vi.fn().mockResolvedValue([pictured]), { browse, byIds });
   window.history.replaceState(null, '', '/#collections/' + collection.id);
   render(<App {...auth} loadCatalog={loadCatalog}/>);
   const members = within(await screen.findByRole('region', { name: 'Models in this collection' }));
   expect(await members.findByRole('link', { name: model.title })).toBeTruthy();
+  // An old hash link moves to the collection's own path, which carries its search and share tags.
+  expect(window.location.pathname + window.location.hash).toBe('/collections/' + collection.id);
+  await waitFor(() => expect(document.querySelector('meta[property="og:image"]')?.getAttribute('content')).toBe(pictured.imageUrl));
+  expect(document.title).toBe('Workshop essentials — collection by Example Maker | PushForm Commons');
   window.location.hash = '#collections'; fireEvent(window, new HashChangeEvent('hashchange'));
-  expect(await screen.findByRole('link', { name: 'View collection Workshop essentials' })).toBeTruthy();
+  expect((await screen.findByRole('link', { name: 'View collection Workshop essentials' })).getAttribute('href')).toBe('/collections/' + collection.id);
   expect(loadCatalog).not.toHaveBeenCalled();
   // The collection's one model was read once and then reused for every card that shows it.
   expect(byIds.mock.calls.flatMap(call => call[0])).toEqual([model.id]);
@@ -209,10 +214,9 @@ it('shows only the viewed profile’s public collections and opens their detail 
   expect(region.queryByText('Another maker collection')).toBeNull();
   expect(region.queryByText('Unattributed collection')).toBeNull();
   expect(region.getByRole('img', { name: 'Workshop essentials, 1 available models' })).toBeTruthy();
-  window.location.href = (link as HTMLAnchorElement).href;
-  fireEvent(window, new HashChangeEvent('hashchange'));
+  fireEvent.click(link);
   expect(await screen.findByRole('heading', { name: 'Workshop essentials', level: 1 })).toBeTruthy();
-  expect(window.location.pathname).toBe('/');
+  expect(window.location.pathname).toBe('/collections/' + collection.id);
 });
 it('updates public collections when navigating to a profile without collections', async () => {
   const auth = await setup('none', false);
@@ -260,7 +264,7 @@ it('shows all owner collections with creation controls and never leaks them to a
 });
 it('defaults new collections to public and cancels back to the active owner profile',async()=>{
   const auth=await setup();auth.account.profiles={mine:async()=>({...publicProfile,active:true,version:1})} as unknown as CommonsProfiles;
-  render(<CatalogModelsProvider store={new CatalogModelStore(catalog)}><CollectionsProvider service={auth.collections} account={auth.account}><CollectionsRoute route="#collections/new" filesUrl={undefined}/></CollectionsProvider></CatalogModelsProvider>);
+  render(<CatalogModelsProvider store={new CatalogModelStore(catalog)}><CollectionsProvider service={auth.collections} account={auth.account}><CollectionsRoute id="new" filesUrl={undefined}/></CollectionsProvider></CatalogModelsProvider>);
   const select=await screen.findByLabelText('Visibility') as HTMLSelectElement;expect(select.value).toBe('public');
   fireEvent.change(select,{target:{value:'private'}});expect(select.value).toBe('private');
   fireEvent.click(screen.getByRole('button',{name:'Cancel'}));
@@ -268,14 +272,14 @@ it('defaults new collections to public and cancels back to the active owner prof
 });
 it('returns creation cancellation to account setup when no active profile is available',async()=>{
   const auth=await setup();
-  render(<CatalogModelsProvider store={new CatalogModelStore(catalog)}><CollectionsProvider service={auth.collections} account={auth.account}><CollectionsRoute route="#collections/new" filesUrl={undefined}/></CollectionsProvider></CatalogModelsProvider>);
+  render(<CatalogModelsProvider store={new CatalogModelStore(catalog)}><CollectionsProvider service={auth.collections} account={auth.account}><CollectionsRoute id="new" filesUrl={undefined}/></CollectionsProvider></CatalogModelsProvider>);
   fireEvent.click(await screen.findByRole('button',{name:'Cancel'}));
   await waitFor(()=>expect(window.location.hash).toBe('#account'));expect(window.location.pathname).toBe('/');
 });
 it('deletes an owned collection from its editor and returns to the owner profile',async()=>{
   const auth=await setup();auth.account.profiles={mine:async()=>({...publicProfile,active:true,version:1})} as unknown as CommonsProfiles;
   vi.spyOn(auth.collections,'delete').mockResolvedValue(undefined);
-  render(<CatalogModelsProvider store={new CatalogModelStore(catalog)}><CollectionsProvider service={auth.collections} account={auth.account}><CollectionsRoute route={'#collections/'+collection.id} filesUrl={undefined}/></CollectionsProvider></CatalogModelsProvider>);
+  render(<CatalogModelsProvider store={new CatalogModelStore(catalog)}><CollectionsProvider service={auth.collections} account={auth.account}><CollectionsRoute id={collection.id} filesUrl={undefined}/></CollectionsProvider></CatalogModelsProvider>);
   fireEvent.click(await screen.findByRole('button',{name:'Edit collection'}));fireEvent.click(screen.getByRole('button',{name:'Delete collection'}));
   fireEvent.click(screen.getByRole('button',{name:'Delete this collection'}));
   await waitFor(()=>expect(auth.collections.delete).toHaveBeenCalledWith(collection.id,1));

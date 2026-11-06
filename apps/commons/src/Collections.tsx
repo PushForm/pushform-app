@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { createContext, useCallback, useContext, useEffect, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, useSyncExternalStore, type FormEvent, type MouseEvent, type ReactNode } from 'react';
 import { commonsProfileImageUrl, commonsSearchMatcher } from '@pushform/cloud';
 import type { CommonsCreditedCreator, CommonsPublicProfile, CollectionFields, CommonsCollection, CommonsCollections, CommonsDiscovery } from '@pushform/cloud';
 import type { CommonsAccount } from './account';
@@ -9,7 +9,8 @@ import { CommonsThumbnail } from './CommonsPreview';
 import { ModelCard, ModelGrid, ProfileLink, SkeletonGrid } from './ModelCard';
 import { filterModels, type CatalogFilters, type CatalogModel } from './catalog';
 import { newestFirst, useCatalogModels } from './catalogModels';
-import { navigateCommons, profilePath } from './route';
+import { collectionPath, navigateCommons, openInApp, profilePath } from './route';
+import { applySeo, collectionSeo, normalizeSiteUrl } from './seo';
 
 const noSubscribe = () => () => {};
 const message = (error: unknown) => error instanceof Error ? error.message : 'This request failed. Try again.';
@@ -93,10 +94,11 @@ export function CollectionMosaic({ collection, filesUrl }: { collection: Commons
 export function CollectionCard({ collection, filesUrl, privateLabel = false }: { collection: CommonsCollection; filesUrl: string | undefined; privateLabel?: boolean }) {
   const { available } = useCollectionCover(collection);
   const count = privateLabel ? available : collection.modelIds.length;
+  const href = collectionPath(collection.id), open = (event: MouseEvent<HTMLAnchorElement>) => openInApp(event, href);
   return <article className="model-card collection-card">
-    <a href={`#collections/${collection.id}`} aria-label={`View collection ${collection.title}`}><CollectionMosaic collection={collection} filesUrl={filesUrl} /></a>
+    <a href={href} onClick={open} aria-label={`View collection ${collection.title}`}><CollectionMosaic collection={collection} filesUrl={filesUrl} /></a>
     <div className="card-body"><p className="eyebrow">Collection · {count} {count === 1 ? 'model' : 'models'}{privateLabel ? ` · ${collection.visibility}` : ''}</p>
-      <h3><a href={`#collections/${collection.id}`}>{collection.title}</a></h3><p className="creator"><CollectionCurator collection={collection} /></p>
+      <h3><a href={href} onClick={open}>{collection.title}</a></h3><p className="creator"><CollectionCurator collection={collection} /></p>
     </div>
   </article>;
 }
@@ -248,18 +250,18 @@ function OwnedCollections({ filesUrl }: { filesUrl: string | undefined }) {
   if (!own) return <p role="status">Loading your collections…</p>;
   return <>{own.length ? <ModelGrid>{own.map(collection => <CollectionCard key={collection.id} collection={collection} filesUrl={filesUrl} privateLabel />)}</ModelGrid> : <p>You haven’t made a collection yet. Gather models for a project or share useful finds.</p>}</>;
 }
-export function CollectionsRoute({ route, filesUrl }: { route: string; filesUrl: string | undefined }) {
+/** `id` is a collection page's ID, or `new` for the new-collection form. */
+export function CollectionsRoute({ id, filesUrl }: { id: string; filesUrl: string | undefined }) {
   const { service, account, userId } = useCollections();
-  useEffect(() => { if (route === '#collections/new') document.title = 'New collection — PushForm Commons'; }, [route]);
+  useEffect(() => { if (id === 'new') document.title = 'New collection — PushForm Commons'; }, [id]);
   if (!service) return <section className="status-panel"><h1>Collections are unavailable in this build.</h1></section>;
-  if (route === '#collections/new') {
+  if (id === 'new') {
     if (!account) return <p>Sign-in is unavailable in this build.</p>;
     return <CommonsAccessGate account={account}><section className="collection-page" key={userId}>
       <h1>New collection</h1><CollectionEditor filesUrl={filesUrl} collection={null} onCancel={() => { void returnToOwnerProfile(account); }} />
     </section></CommonsAccessGate>;
   }
-  const id = /^#collections\/([a-f0-9-]{36})$/.exec(route)?.[1];
-  return id ? <CollectionDetail key={id + ':' + userId} id={id} filesUrl={filesUrl} /> : null;
+  return <CollectionDetail key={id + ':' + userId} id={id} filesUrl={filesUrl} />;
 }
 function CollectionDetail({ id, filesUrl }: { id: string; filesUrl: string | undefined }) {
   const { service, own, revision, refresh } = useCollections();
@@ -271,13 +273,15 @@ function CollectionDetail({ id, filesUrl }: { id: string; filesUrl: string | und
     void service!.get(id, controller.signal).then(value => { if (!controller.signal.aborted) setData(value); }, error => { if (!controller.signal.aborted) setError(message(error)); });
     return () => controller.abort();
   }, [service, id, revision]);
-  useEffect(() => { if (data) document.title = `${data.title} — PushForm Commons`; }, [data]);
+  // The tags match the ones the edge worker wrote for this path, now with the collection's current models.
+  const seoMembers = loaded.models, seoReady = Boolean(data) && !loaded.loading;
+  useEffect(() => { if (data && seoReady) applySeo(collectionSeo(data, seoMembers, { siteUrl: normalizeSiteUrl(import.meta.env.VITE_COMMONS_SITE_URL), filesUrl })); }, [data, seoReady, seoMembers, filesUrl]);
   if (error) return <section className="status-panel" role="alert"><p>{error}</p><button onClick={refresh}>Reload collection</button></section>;
   if (data === undefined) return <p className="status-panel" role="status">Loading collection…</p>;
-  if (!data) return <section className="status-panel"><h1>This collection isn’t available.</h1><p>It may be private or have been removed.</p><a href="#collections">Browse public collections</a></section>;
+  if (!data) return <section className="status-panel"><h1>This collection isn’t available.</h1><p>It may be private or have been removed.</p><a href="/#collections" onClick={event => openInApp(event, '/#collections')}>Browse public collections</a></section>;
   const editable = own?.some(value => value.id === id);
   const members = loaded.models;
-  return <section className="collection-page"><a className="back-link" href="#collections">← All collections</a>
+  return <section className="collection-page"><a className="back-link" href="/#collections" onClick={event => openInApp(event, '/#collections')}>← All collections</a>
     {editing && editable ? <CollectionEditor collection={data} filesUrl={filesUrl} onCancel={() => setEditing(false)} onSaved={value => { setData(value); setEditing(false); }} /> : <>
       <div className="collection-hero"><CollectionMosaic collection={data} filesUrl={filesUrl} />
         <div><p className="eyebrow">{data.visibility} collection · {members.length} {members.length === 1 ? 'model' : 'models'}</p><h1>{data.title}</h1>
@@ -305,7 +309,7 @@ function CollectionEditor({ collection, filesUrl, onCancel, onSaved }: { collect
   const submit = (event: FormEvent) => {
     event.preventDefault(); if (busy) return; setBusy(true); setError(null);
     void service!.save(collection?.id ?? null, fields, expectedVersion).then(value => {
-      refresh(); if (onSaved) onSaved(value); else window.location.hash = `#collections/${value.id}`;
+      refresh(); if (onSaved) onSaved(value); else navigateCommons(collectionPath(value.id));
     }, error => setError(message(error))).finally(() => setBusy(false));
   };
   return <form className="collection-editor" aria-label={collection ? 'Edit collection' : 'Create collection'} onSubmit={submit}>

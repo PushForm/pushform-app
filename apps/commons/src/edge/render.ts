@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { z } from 'zod';
-import { catalogModelSchema, commonsProfileImageUrl, commonsPublicProfileSchema, parseCommonsCatalog, type CatalogModel } from '@pushform/cloud/catalog';
+import { catalogModelSchema, commonsCollectionSchema, commonsProfileImageUrl, commonsPublicProfileSchema, parseCommonsCatalog, type CatalogModel, type CommonsCollection } from '@pushform/cloud/catalog';
 import {
-  browseSearchPath, escapeHtml, headTags, homeSeo, modelImageUrl, modelPath, modelSeo, normalizeSiteUrl, profilePathFor, profileSeo, utilitySeo,
+  browseSearchPath, collectionPath, collectionSeo, escapeHtml, headTags, homeSeo, modelImageUrl, modelPath, modelSeo, normalizeSiteUrl, profilePathFor, profileSeo, utilitySeo,
   type SeoContext, type SeoMeta,
 } from '../seo';
 
@@ -13,11 +13,12 @@ export interface EdgeEnv { ASSETS: { fetch(request: Request): Promise<Response> 
 export interface SeoConfig { siteUrl: string; supabaseUrl: string; publishableKey: string; catalogUrl: string; filesUrl: string }
 export interface EdgeCache { match(key: string): Promise<Response | undefined>; put(key: string, response: Response): Promise<void> }
 export interface EdgeDeps { fetcher?: typeof fetch; cache?: EdgeCache | null; now?: () => number }
-export type PageRoute = { kind: 'home' } | { kind: 'model'; id: string } | { kind: 'profile'; handle: string };
+export type PageRoute = { kind: 'home' } | { kind: 'model'; id: string } | { kind: 'profile'; handle: string } | { kind: 'collection'; id: string };
 
 const CACHE_SECONDS = 300;
 const MODEL_ID = /^[a-z0-9][a-z0-9-]{0,95}$/;
 const HANDLE = /^[a-z][a-z0-9-]{1,30}[a-z0-9]$/;
+const COLLECTION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const configSchema = z.object({ siteUrl: z.string().optional(), supabaseUrl: z.string().optional(), publishableKey: z.string().optional(),
   catalogUrl: z.string().optional(), filesUrl: z.string().optional() });
 
@@ -93,6 +94,42 @@ export function loadProfile(config: SeoConfig, handle: string, deps: EdgeDeps = 
   });
 }
 
+export interface CollectionPage { collection: CommonsCollection; members: CatalogModel[] }
+/** A public collection and its published models in collection order. `value: null` is a private, removed or missing
+ * collection: anonymous reads see only public ones. */
+export function loadCollection(config: SeoConfig, id: string, deps: EdgeDeps = {}): Promise<Loaded<CollectionPage | null>> {
+  return cached(`collection:${id}`, deps, async () => {
+    try {
+      if (!config.supabaseUrl || !config.publishableKey) return { kind: 'unavailable' };
+      const found = await rpc(config, 'commons_collection', { p_id: id }, deps);
+      if (isUnavailable(found.body)) return { kind: 'unavailable' };
+      if (found.status !== 200) return { kind: 'error' };
+      if (found.body === null) return { kind: 'ok', value: null };
+      const collection = commonsCollectionSchema.parse(found.body);
+      if (collection.visibility !== 'public') return { kind: 'ok', value: null };
+      if (!collection.modelIds.length) return { kind: 'ok', value: { collection, members: [] } };
+      const models = await rpc(config, 'commons_catalog_models', { p_ids: collection.modelIds }, deps);
+      if (models.status !== 200) return { kind: 'error' };
+      const byId = new Map(z.array(catalogModelSchema).max(100).parse(models.body).map(model => [model.id, model]));
+      return { kind: 'ok', value: { collection, members: collection.modelIds.flatMap(member => byId.get(member) ?? []) } };
+    } catch { return { kind: 'error' }; }
+  });
+}
+
+/** Public collections, for the sitemap. An unreadable list leaves them out rather than failing the sitemap. */
+async function loadPublicCollections(config: SeoConfig, deps: EdgeDeps): Promise<CommonsCollection[]> {
+  const result = await cached<CommonsCollection[]>('collections', deps, async () => {
+    try {
+      if (!config.supabaseUrl || !config.publishableKey) return { kind: 'unavailable' };
+      const { status, body } = await rpc(config, 'commons_discovery', {}, deps);
+      if (status !== 200) return { kind: 'error' };
+      const collections = z.object({ collections: z.array(commonsCollectionSchema).max(1000) }).parse(body).collections;
+      return { kind: 'ok', value: collections.filter(collection => collection.visibility === 'public' && collection.modelIds.length > 0) };
+    } catch { return { kind: 'error' }; }
+  });
+  return result.kind === 'ok' ? result.value : [];
+}
+
 const paragraphs = (text: string): string => text.split(/\n{2,}/).map(part => part.trim()).filter(Boolean).map(part => `<p>${escapeHtml(part).replace(/\n/g, '<br />')}</p>`).join('');
 const safeHref = (url: string | null | undefined): string | null => { try { const parsed = new URL(url ?? ''); return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.href : null; } catch { return null; } };
 const link = (url: string | null | undefined, label: string): string => { const href = safeHref(url); return href ? `<a href="${escapeHtml(href)}" rel="noopener">${escapeHtml(label)}</a>` : escapeHtml(label); };
@@ -117,6 +154,12 @@ export function profileBody(page: ProfilePage): string {
   return `<main><nav aria-label="Breadcrumb"><a href="/">All models</a></nav><article><h1>${escapeHtml(page.profile.displayName)}</h1><p>@${escapeHtml(page.profile.handle)}</p>${paragraphs(page.profile.bio)}
 ${page.profile.links.length ? `<ul>${page.profile.links.map(item => `<li>${link(item.url, item.label)}</li>`).join('')}</ul>` : ''}
 <h2>Published models</h2>${page.models.length ? `<ul>${page.models.map(modelLink).join('')}</ul>` : '<p>No published models to show.</p>'}</article></main>`;
+}
+export function collectionBody(page: CollectionPage): string {
+  const { collection, members } = page;
+  const curator = collection.curator ? `<a href="${profilePathFor(collection.curator.handle)}">${escapeHtml(collection.curator.displayName)}</a>` : 'a Commons member';
+  return `<main><nav aria-label="Breadcrumb"><a href="/">All models</a></nav><article><h1>${escapeHtml(collection.title)}</h1><p>Curated by ${curator}</p>${paragraphs(collection.description)}
+<h2>Models in this collection</h2>${members.length ? `<ul>${members.map(modelLink).join('')}</ul>` : '<p>No published models are available in this collection.</p>'}</article></main>`;
 }
 export function homeBody(models: CatalogModel[]): string {
   const recent = [...models].sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt)).slice(0, 100);
@@ -160,6 +203,15 @@ export async function renderPage(request: Request, env: EdgeEnv, route: PageRout
       if (!model) return respond(renderShell(shell, utilitySeo('Model not found', ctx), ''), catalog.kind === 'ok' ? 404 : 200, indexable);
       return respond(renderShell(shell, modelSeo(model, ctx), modelBody(model, ctx)), 200, indexable);
     }
+    if (route.kind === 'collection') {
+      if (!COLLECTION_ID.test(route.id)) return respond(renderShell(shell, utilitySeo('Collection not found', ctx), ''), 404, indexable);
+      const loaded = await loadCollection(config, route.id, deps);
+      if (loaded.kind === 'error') return respond(shell, 503, indexable, { 'Retry-After': '120' });
+      if (loaded.kind === 'unavailable') return respond(renderShell(shell, utilitySeo('Collection', ctx), ''), 200, indexable);
+      // A private collection is still served to its signed-in curator by the app, so it is not a 404, but crawlers see nothing.
+      if (!loaded.value) return respond(renderShell(shell, utilitySeo('Collection', ctx), ''), 200, indexable);
+      return respond(renderShell(shell, collectionSeo(loaded.value.collection, loaded.value.members, ctx), collectionBody(loaded.value)), 200, indexable);
+    }
     if (!HANDLE.test(route.handle)) return respond(renderShell(shell, utilitySeo('Profile not found', ctx), ''), 404, indexable);
     const profile = await loadProfile(config, route.handle, deps);
     if (profile.kind === 'error') return respond(shell, 503, indexable, { 'Retry-After': '120' });
@@ -181,11 +233,11 @@ export async function renderRobots(request: Request, env: EdgeEnv): Promise<Resp
 }
 
 const xml = escapeHtml;
-/** Every public model and creator profile. `lastmod` is the publication date; the catalog does not expose later edit times. */
+/** Every public model, creator profile and nonempty public collection. `lastmod` is the publication date; the catalog does not expose later edit times. */
 export async function renderSitemap(request: Request, env: EdgeEnv, deps: EdgeDeps = {}): Promise<Response> {
   const config = await loadSeoConfig(env, new URL(request.url).origin);
   if (!isIndexableHost(request, config)) return new Response('Not found', { status: 404, headers: { 'X-Robots-Tag': 'noindex, nofollow' } });
-  const catalog = await loadCatalog(config, deps);
+  const [catalog, collections] = await Promise.all([loadCatalog(config, deps), loadPublicCollections(config, deps)]);
   if (catalog.kind === 'error') return new Response('Catalog temporarily unavailable', { status: 503, headers: { 'Retry-After': '300' } });
   const ctx = contextOf(config);
   const models = catalog.kind === 'ok' ? catalog.value : [];
@@ -198,7 +250,8 @@ export async function renderSitemap(request: Request, env: EdgeEnv, deps: EdgeDe
   const entry = (path: string, lastmod: string | undefined, extra = '') => `  <url><loc>${xml(config.siteUrl + path)}</loc>${lastmod ? `<lastmod>${xml(lastmod)}</lastmod>` : ''}${extra}</url>`;
   const image = (model: CatalogModel) => { const url = modelImageUrl(model, ctx); return url ? `<image:image><image:loc>${xml(url)}</image:loc><image:title>${xml(model.title)}</image:title></image:image>` : ''; };
   const lines = [entry('/', newest), ...[...models].sort((a, b) => a.id.localeCompare(b.id)).map(model => entry(modelPath(model.id), model.publishedAt, image(model))),
-    ...[...profiles].sort(([a], [b]) => a.localeCompare(b)).map(([handle, modified]) => entry(profilePathFor(handle), modified))];
+    ...[...profiles].sort(([a], [b]) => a.localeCompare(b)).map(([handle, modified]) => entry(profilePathFor(handle), modified)),
+    ...[...collections].sort((a, b) => a.id.localeCompare(b.id)).map(collection => entry(collectionPath(collection.id), collection.updatedAt))];
   return new Response(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">\n${lines.join('\n')}\n</urlset>\n`,
     { headers: { 'Content-Type': 'application/xml; charset=utf-8', 'Cache-Control': 'public, max-age=300' } });
 }

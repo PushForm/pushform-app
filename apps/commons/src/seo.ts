@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { commonsExactSearch, commonsFileUrl, type CatalogModel, type CommonsCollection } from '@pushform/cloud/catalog';
+import { isPreviewModelFile } from '@pushform/cloud/preview';
 
 /** Search and social metadata, shared by the browser (which updates the head as the route changes) and the edge
  * worker (which writes the same tags into the HTML that crawlers and link-preview bots fetch without running scripts). */
@@ -16,7 +17,7 @@ export interface SeoMeta {
   title: string; description: string; canonical: string;
   /** `index` for public content; utility and missing pages are kept out of results. */
   robots: string;
-  image: { url: string; alt: string } | null;
+  image: { url: string; alt: string; width?: number; height?: number } | null;
   type: 'website' | 'profile';
   published?: string | undefined;
   jsonLd: object[];
@@ -108,19 +109,22 @@ export function profileSeo(profile: SeoProfile, models: CatalogModel[], ctx: Seo
   };
 }
 
-/** A collection's tags. `members` are its published models in collection order; the first with a picture provides the
- * share image. Private collections are only ever seen by their curator and stay out of search results. */
+/** A collection's tags. `members` are its published models in collection order. The share image is the cover the file
+ * service draws from their generated thumbnails, or, when no member has a model it can preview, the first member's own
+ * picture. Private collections are only ever seen by their curator and stay out of search results. */
 export function collectionSeo(collection: CommonsCollection, members: CatalogModel[], ctx: SeoContext): SeoMeta {
   const url = absolute(ctx, collectionPath(collection.id));
   const curator = collection.curator?.displayName ?? 'a Commons member';
   const count = members.length;
   const titles = members.slice(0, 4).map(model => model.title).join(', ');
   const description = clip(collection.description.trim() || `${count === 1 ? 'One model' : `${count} models`} collected by ${curator}${titles ? `: ${titles}` : ''}.`, 158);
+  const drawn = members.some(model => model.files.some(file => isPreviewModelFile(file.name))) ? commonsFileUrl(ctx.filesUrl, 'collection-covers', collection.id) : null;
   const cover = members.map(model => ({ model, url: modelImageUrl(model, ctx) })).find(item => item.url);
   return {
     title: `${clip(collection.title, 50)} — collection by ${clip(curator, 30)} | ${SITE_NAME}`, description, canonical: url,
     robots: collection.visibility === 'public' ? INDEX : NOINDEX, type: 'website',
-    image: cover?.url ? { url: cover.url, alt: `${cover.model.title}, from the ${collection.title} collection` } : null,
+    image: drawn ? { url: drawn, alt: `Models from the ${collection.title} collection`, width: 1200, height: 630 }
+      : cover?.url ? { url: cover.url, alt: `${cover.model.title}, from the ${collection.title} collection` } : null,
     jsonLd: [{
       '@context': 'https://schema.org', '@type': 'CollectionPage', '@id': `${url}#collection`, url, name: collection.title, description,
       ...(collection.curator ? { author: { '@type': 'Person', name: collection.curator.displayName, url: absolute(ctx, profilePathFor(collection.curator.handle)) } } : {}),
@@ -167,7 +171,7 @@ export function headTags(meta: SeoMeta): string {
     `<link rel="canonical" href="${escapeHtml(meta.canonical)}" />`,
     tag('og:site_name', SITE_NAME), tag('og:type', meta.type), tag('og:title', meta.title), tag('og:description', meta.description),
     tag('og:url', meta.canonical), tag('og:locale', 'en_US'),
-    ...(meta.image ? [tag('og:image', meta.image.url), tag('og:image:alt', meta.image.alt)] : []),
+    ...(meta.image ? [tag('og:image', meta.image.url), ...(meta.image.width && meta.image.height ? [tag('og:image:width', String(meta.image.width)), tag('og:image:height', String(meta.image.height))] : []), tag('og:image:alt', meta.image.alt)] : []),
     ...(meta.published ? [tag('article:published_time', meta.published)] : []),
     tag('twitter:card', meta.image ? 'summary_large_image' : 'summary', 'name'), tag('twitter:title', meta.title, 'name'),
     tag('twitter:description', meta.description, 'name'), ...(meta.image ? [tag('twitter:image', meta.image.url, 'name'), tag('twitter:image:alt', meta.image.alt, 'name')] : []),

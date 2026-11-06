@@ -42,7 +42,7 @@ Commons is a client-rendered app, so crawlers and link-preview bots would otherw
 - Only the host in `VITE_COMMONS_SITE_URL` (default `https://commons.pushform.io`) is indexable. Every other host, such as a preview deployment, gets `X-Robots-Tag: noindex`, `Disallow: /` and no sitemap. Canonical URLs always name the production site.
 - The functions read the catalog with the same public settings as the app. The build writes them to `seo-config.json` (public values only), and the catalog is cached at the edge for five minutes, so a newly published model is indexable within minutes without a redeploy.
 - Utility screens (account, upload, drafts, new collection) are marked `noindex` in the browser.
-- A collection's share image is its first member with a picture, in collection order.
+- A collection's share image is a 1200 × 630 cover the file service draws from its first four published members' generated thumbnails (`/collection-covers/<id>` on the file host). A collection whose members have no previewable model shares its first member's own picture instead.
 - Models without a picture use a product capture from the main site as their share image; a model's own cover image or thumbnail is used when present.
 
 Deploy Pages from this directory (`wrangler pages deploy dist`) so `functions/` and `dist/_routes.json` are included. `pnpm --filter @pushform/app-commons preview` serves the static build only; use `wrangler pages dev dist` to try the functions.

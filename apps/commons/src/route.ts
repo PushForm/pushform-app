@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { modelPath } from './seo';
+import { browseSearchPath, modelPath } from './seo';
 
-export { modelPath };
+export { browseSearchPath, modelPath };
 /** Models live at `/models/<id>` and public profiles at `/u/<handle>`, so search engines can index each page. Account,
  * collection and publishing screens remain hash routes on `/`. Older `#models/<id>` links still work and move to the path. */
 const handlePattern = /^[a-z][a-z0-9-]{1,30}[a-z0-9]$/;
@@ -31,6 +31,20 @@ export function currentCommonsLocation(): CommonsLocation {
     return { path: '/', hash };
   }
   return { path: pathname, hash };
+}
+/** The search a `browseSearchPath` link carries, or null when the address has none. */
+export function browseSearchFromUrl(): string | null {
+  if (window.location.pathname !== '/') return null;
+  const query = new URLSearchParams(window.location.search).get('q');
+  return query === null ? null : query.trim().slice(0, 200);
+}
+/** Removes a carried search from the address once the search box holds it, so later edits and Back behave as usual. */
+export function clearBrowseSearch(): void {
+  const params = new URLSearchParams(window.location.search);
+  if (!params.has('q')) return;
+  params.delete('q');
+  const rest = params.toString();
+  window.history.replaceState(window.history.state, '', window.location.pathname + (rest ? `?${rest}` : '') + window.location.hash);
 }
 /** Changes the path without reloading; the app listens for `popstate`. */
 export function navigateCommons(path: string, replace = false): void {

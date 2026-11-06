@@ -5,3 +5,4 @@ export { catalogModelSchema, catalogSchema, catalogUrlSchema, parseCommonsCatalo
 export { commonsFileUrl } from './CommonsFiles';
 export { commonsProfileImageUrl } from './CommonsProfileImages';
 export { commonsPublicProfileSchema } from './CommonsProfiles';
+export { commonsExactSearch, commonsSearchMatcher } from './CommonsSearch';

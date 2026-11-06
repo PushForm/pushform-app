@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { createContext, useCallback, useContext, useEffect, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
-import { commonsProfileImageUrl } from '@pushform/cloud';
+import { commonsProfileImageUrl, commonsSearchMatcher } from '@pushform/cloud';
 import type { CommonsModelsLoader, CommonsCreditedCreator, CommonsPublicProfile, CollectionFields, CommonsCollection, CommonsCollections, CommonsDiscovery } from '@pushform/cloud';
 import type { CommonsAccount } from './account';
 import { CommonsAccessGate } from './CommonsAccess';
@@ -201,12 +201,12 @@ export function PublicCollectionResults({ models, filesUrl, filters }: { models:
   if (!service) return <p>Collections are unavailable in this build.</p>;
   if (error) return <div role="alert"><p>{error}</p><button onClick={refresh}>Retry collections</button></div>;
   if (!discovery) return <p role="status">Loading collections…</p>;
-  const words = filters.query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  const matches = commonsSearchMatcher(filters.query);
   const shown = discovery.collections.filter(collection => {
     const members = models.filter(model => collection.modelIds.includes(model.id));
-    const searchable = [collection.title, collection.description, collection.curator?.displayName ?? '', ...members.map(model => model.title + ' ' + model.creator)].join(' ').toLocaleLowerCase();
+    const searchable = [collection.title, collection.description, collection.curator?.displayName ?? '', ...members.flatMap(model => [model.title, model.creator])].join(' · ');
     if (filters.commercial && (!members.length || !members.every(model => model.licenses.every(license => license.commercialUse === 'allowed')))) return false;
-    return words.every(word => searchable.includes(word)) && (!(filters.category || filters.license) || filterModels(members, { ...filters, query: '', commercial: false }).length > 0);
+    return matches(searchable) && (!(filters.category || filters.license) || filterModels(members, { ...filters, query: '', commercial: false }).length > 0);
   });
   return <><p className="result-count" role="status">{shown.length} {shown.length === 1 ? 'collection' : 'collections'}</p>
     {shown.length ? <ModelGrid>{shown.map(collection => <CollectionCard key={collection.id} collection={collection} models={models} filesUrl={filesUrl} />)}</ModelGrid> : <p>No public collections match those filters.</p>}

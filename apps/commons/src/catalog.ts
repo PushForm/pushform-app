@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { catalogSchema, catalogUrlSchema as link, createCommonsClient, createCommonsBrowseLoader, createCommonsModelsLoader, readCommonsCatalog, type CommonsBrowseLoader, type CommonsModelsLoader, type BrowserCloudConfig, type CatalogModel } from '@pushform/cloud';
+import { catalogSchema, catalogUrlSchema as link, createCommonsClient, createCommonsBrowseLoader, createCommonsModelsLoader, commonsSearchMatcher, readCommonsCatalog, type CommonsBrowseLoader, type CommonsModelsLoader, type BrowserCloudConfig, type CatalogModel } from '@pushform/cloud';
 export { catalogSchema, type CatalogModel } from '@pushform/cloud';
 
 export interface CatalogFilters { query: string; category: string; license: string; commercial: boolean }
 export type CatalogLoader = ((signal: AbortSignal) => Promise<CatalogModel[]>) & { browse?: CommonsBrowseLoader; byIds?: CommonsModelsLoader };
 
 export function filterModels(models: CatalogModel[], filters: CatalogFilters): CatalogModel[] {
-  const words = filters.query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  const matches = commonsSearchMatcher(filters.query);
   return models.filter((model) => {
     if (filters.category && model.category !== filters.category) return false;
     if (filters.license && !model.licenses.some((license) => license.name === filters.license)) return false;
     if (filters.commercial && !model.licenses.every((license) => license.commercialUse === 'allowed')) return false;
     const searchable = [model.title, model.description, model.creator, model.category, ...model.tags,
       model.source?.name ?? '', ...model.credits.map((credit) => credit.name), ...model.licenses.map((license) => license.name)]
-      .join(' ').toLocaleLowerCase();
-    return words.every((word) => searchable.includes(word));
+      .join(' · ');
+    return matches(searchable);
   }).sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt) || a.id.localeCompare(b.id));
 }
 

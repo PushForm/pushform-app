@@ -26,18 +26,26 @@ function setup() {
     fireEvent.pointerUp(canvas, { pointerId: 1, clientX: x * 3, clientY: y * 3 });
   };
   const move = (x: number, y: number) => fireEvent.pointerMove(canvas, { pointerId: 1, clientX: x * 3, clientY: y * 3 });
+  // Corner is one tool; its bar chooses Round (fillet) or Chamfer
   const choose = (name: string) => {
-    fireEvent.click(screen.getByRole('button', { name: 'Fillet / Chamfer tools' }));
-    fireEvent.click(screen.getByRole('menuitemradio', { name }));
+    fireEvent.click(screen.getByRole('button', { name: 'Corner' }));
+    fireEvent.click(within(screen.getByRole('toolbar', { name: 'Corner options' })).getByRole('radio', { name: name === 'Fillet' ? 'Round' : name }));
   };
   return { app, session, tab, canvas, click, move, choose, sourceId, page: () => tab.doc.state.pages.get(tab.activePageId)! };
 }
 
-it('stacks Fillet and Chamfer after Offset and edits native corners using toolbar and Measurements sizes', async () => {
+/** Type `text` into the tool options bar's field `label` and press Enter. */
+function setBar(label: string, text: string): void {
+  const input = screen.getByLabelText(label);
+  fireEvent.change(input, { target: { value: text } });
+  fireEvent.keyDown(input, { key: 'Enter' });
+}
+
+it('puts one Corner tool after Offset and edits native corners using its bar and typed sizes', async () => {
   const { app, session, tab, click, move, choose, sourceId, page } = setup();
   const buttons = within(screen.getByRole('navigation', { name: 'Layout tools' })).getAllByRole('button');
   const offsetIndex = buttons.findIndex(b => b.getAttribute('aria-label') === 'Offset');
-  expect(buttons[offsetIndex + 1]!.getAttribute('aria-label')).toBe('Fillet');
+  expect(buttons[offsetIndex + 1]!.getAttribute('aria-label')).toBe('Corner');
   const source = page().entities.get(sourceId)!;
   choose('Fillet'); click(50, 20); move(80, 40);
   expect(page().entities.get(sourceId)).toEqual(source);
@@ -46,7 +54,7 @@ it('stacks Fillet and Chamfer after Offset and edits native corners using toolba
   expect(page().entities.get(sourceId)!.handles![1]!.out).toBeDefined();
   choose('Chamfer');
   enterLayoutValue('4mm');
-  expect((screen.getByLabelText('Chamfer distance (mm)') as HTMLInputElement).value).toBe('4');
+  expect((screen.getByLabelText('Distance') as HTMLInputElement).value).toMatch(/^4(\.0+)? ?mm$/);
   click(80, 45); click(50, 60);
   expect(page().entities.get(sourceId)!.points).toContainEqual([80, 56]);
   expect(page().entities.get(sourceId)).toMatchObject({ closed: true, style: source.style });
@@ -54,12 +62,15 @@ it('stacks Fillet and Chamfer after Offset and edits native corners using toolba
   act(() => { tab.commands.execute('edit.redo'); });
   const reopened = (await openLayoutFile((await session.saveLayoutBytes(tab.id))));
   expect(reopened.state.pages.get(page().id)!.entities.get(sourceId)).toEqual(page().entities.get(sourceId));
+  // the Corner button goes back to the last choice; Shift+F and Shift+C choose Round and Chamfer
   fireEvent.click(screen.getByRole('button', { name: 'Select' }));
-  expect(screen.getByRole('button', { name: 'Chamfer' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Corner' }));
+  expect(screen.getByRole('radio', { name: 'Chamfer' }).getAttribute('aria-checked')).toBe('true');
   fireEvent.keyDown(window, { key: 'F', code: 'KeyF', shiftKey: true });
-  expect(screen.getByRole('button', { name: 'Fillet' }).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByRole('button', { name: 'Corner' }).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByRole('radio', { name: 'Round' }).getAttribute('aria-checked')).toBe('true');
   fireEvent.keyDown(window, { key: 'C', code: 'KeyC', shiftKey: true });
-  expect(screen.getByRole('button', { name: 'Chamfer' }).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByRole('radio', { name: 'Chamfer' }).getAttribute('aria-checked')).toBe('true');
   session.dispose(); app.dispose();
 });
 
@@ -67,11 +78,11 @@ it('keeps invalid edits atomic, allows correcting the size, and cancels a pendin
   const { app, session, canvas, click, choose, sourceId, page } = setup();
   const source = page().entities.get(sourceId)!;
   choose('Fillet');
-  fireEvent.change(screen.getByLabelText('Fillet radius (mm)'), { target: { value: '100' } });
+  setBar('Radius', '100mm');
   click(50, 20); click(80, 40);
   expect(screen.getByRole('alert').textContent).toContain('smaller');
   expect(page().entities.get(sourceId)).toEqual(source);
-  fireEvent.change(screen.getByLabelText('Fillet radius (mm)'), { target: { value: '3' } });
+  setBar('Radius', '3mm');
   click(80, 40); expect(page().entities.get(sourceId)!.points).toHaveLength(5);
   const edited = page().entities.get(sourceId)!;
   click(50, 20); fireEvent.keyDown(window, { key: 'Escape' });

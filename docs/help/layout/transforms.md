@@ -8,7 +8,7 @@ Move the pointer to preview the destination, then click again to finish. Hold Sh
 
 ## Copy and repeat objects with Move
 
-Choose **Move**, click the object to set its base point, then tap Ctrl or Alt/Option to toggle **Copy**. Check that the status says Copy. Click the destination, or type a distance, to place a copy while leaving the original.
+Choose **Move**, click the object to set its base point, then tap Ctrl (Cmd on a Mac) or click **Copy** in the tool options bar to toggle copying. Check that the status says Copy. Copy stays on for later moves until you choose Move again. Click the destination, or type a distance, to place a copy while leaving the original.
 
 Immediately after that copy, type **3x** and press Enter to make three copies in total at the same spacing. Type **/3** instead for three copies spaced between the original and the first copy's position. Do this before picking another base point or changing tools. One Undo removes the copy array.
 
@@ -36,8 +36,8 @@ Choose **Offset** in Modify. Click a visible, unlocked path, move the pointer to
 
 After choosing the source, type a length for an exact offset. A positive value expands a closed shape; a negative value insets it. For an open path, the pointer sets the positive side and a negative value uses the other side. A collapsed or invalid offset creates nothing; correct the distance or press Escape.
 
-## Round or bevel a corner
+## Round or bevel a corner with Corner
 
-Choose **Fillet** or **Chamfer** from the shared button in Modify. Set the radius or distance in its temporary right-side pane, or type a positive length. Click one straight segment, then an adjoining segment to preview and commit the corner.
+Choose **Corner** in Modify (Shift+F starts it on Round, Shift+C on Chamfer). In the tool options bar, choose **Round** or **Chamfer** and set the radius or distance, or type a positive length. Each choice remembers its own size. Click one straight segment, then an adjoining segment to preview and commit the corner.
 
-Fillet creates a rounded tangent arc. Chamfer creates a straight bevel with equal setbacks. Curved, parallel or unsuitable segments and sizes that consume the shape are rejected. Two separate straight lines must be on the same layer.
+Round creates a rounded tangent arc. Chamfer creates a straight bevel with equal setbacks. Curved, parallel or unsuitable segments and sizes that consume the shape are rejected. Two separate straight lines must be on the same layer.

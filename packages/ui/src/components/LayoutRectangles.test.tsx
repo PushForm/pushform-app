@@ -9,6 +9,14 @@ import { DocumentSession } from '../session';
 import { LayoutWorkspace } from './LayoutWorkspace';
 import { enterLayoutValue } from './layoutEntryTesting';
 
+/** Type `text` into the tool options bar's field `label` and press Enter. */
+function setBar(label: string, text: string): void {
+  const input = screen.getByLabelText(label);
+  fireEvent.change(input, { target: { value: text } });
+  fireEvent.keyDown(input, { key: 'Enter' });
+}
+
+
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 it('updates the rectangle outline on modifier changes without moving the pointer', () => {
@@ -114,14 +122,14 @@ it('chooses rectangle variants from one stack, draws them, accepts measurements,
   const up = (x: number, y: number): void => { fireEvent.pointerUp(canvas, { pointerId: 1, clientX: x * 3, clientY: y * 3 }); };
   const page = () => tab.doc.state.pages.get(tab.activePageId)!;
   choose('Rounded');
-  fireEvent.change(screen.getByLabelText('Corner radius (mm)'), { target: { value: '4' } });
+  setBar('Corner radius', '4mm');
   down(10, 10); up(70, 40);
   const roundedId = page().entityOrder[0]!;
   expect(page().entities.get(roundedId)!.points[0]).toEqual([14, 10]);
   expect(page().entities.get(roundedId)!.handles).toHaveLength(8);
   choose('Bulged');
   expect(screen.queryByRole('button', { name: 'Rounded' })).toBeNull();
-  fireEvent.change(screen.getByLabelText('Bulge (mm)'), { target: { value: '3' } });
+  setBar('Bulge', '3mm');
   down(90, 10); up(130, 40);
   expect(page().entities.get(page().entityOrder[1]!)!.handles![1]!.out![0]).toBe(134);
   choose('Lozenge');

@@ -3464,3 +3464,15 @@ h4.pf-xui-text { font-size: 12px; }
 .pf-tob.is-applied .pf-tob-tool {
   color: #1b7f3b;
 }
+
+/* Layout: the tool options bar floats over the top of the page view; the page starts below its band. */
+.pf-layout-tob-band {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 5;
+}
+.pf-layout-workspace {
+  padding-top: calc(24px + 42px);
+}

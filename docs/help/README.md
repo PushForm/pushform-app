@@ -20,7 +20,7 @@ PushForm has two editors: **Modeling** for 3D work and **Layout** for drawings o
 - [Polygons, side counts and exact radii](layout/polygons.md)
 - [Delete objects, use Eraser and restore with Undo](layout/deleting.md)
 - [Selection, lasso and vertex editing](layout/selection.md)
-- [Move, Rotate, Scale, Offset, Fillet and Chamfer](layout/transforms.md)
+- [Move, Rotate, Scale, Offset and Corner (fillet and chamfer)](layout/transforms.md)
 - [Boolean operations and Shape Builder](layout/booleans.md)
 
 ## Layout documents and output

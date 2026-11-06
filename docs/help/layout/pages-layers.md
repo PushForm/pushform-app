@@ -26,7 +26,7 @@ A selection made on the page expands its ancestors and reveals it in the browser
 
 ## Set paper, units and grid
 
-Open **Document Settings** in the Object browser. Configure the paper size, orientation, margin, units and grid there. Tool-specific settings live separately in the temporary pane at the top of the right-side panel.
+Open **Document Settings** in the Object browser. Configure the paper size, orientation, margin, units and grid there. Tool-specific settings live separately in the tool options bar over the page view.
 
 Choosing a paper size sets it in landscape. Use **Orientation** to turn the page to portrait. A US size such as Letter also switches the page size, the grid and drawing values to inches; an international size such as A4 switches them to millimeters.
 

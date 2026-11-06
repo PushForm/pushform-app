@@ -8,6 +8,14 @@ import { DocumentSession } from '../session';
 import { LayoutWorkspace } from './LayoutWorkspace';
 import { enterLayoutValue, openLayoutEntry } from './layoutEntryTesting';
 
+/** Type `text` into the tool options bar's field `label` and press Enter. */
+function setBar(label: string, text: string): void {
+  const input = screen.getByLabelText(label);
+  fireEvent.change(input, { target: { value: text } });
+  fireEvent.keyDown(input, { key: 'Enter' });
+}
+
+
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 it.each(['polygon', 'circumscribed-polygon'])('previews a reference circle for %s and removes it on cancellation', tool => {
@@ -154,16 +162,16 @@ it('sets the side count from Measurements or the toolbar and keeps it for later 
   draw(50);
   expect(latest().points).toHaveLength(8);
   for (const p of latest().points) expect(Math.hypot(p[0] - 50, p[1] - 50)).toBeCloseTo(20);
-  // Both variants share the count, and the toolbar field sets it too.
+  // Both variants share the count, and the tool options bar sets it too.
   act(() => { tab.commands.execute('tool.circumscribed-polygon'); });
-  fireEvent.change(screen.getByLabelText('Sides'), { target: { value: '5' } });
+  setBar('Sides', '5');
   draw(120);
   expect(latest().points).toHaveLength(5);
   // Out of range counts are reported and change nothing.
   const version = tab.doc.version;
   enterLayoutValue('2s');
   expect(screen.getByRole('alert').textContent).toContain('3 to 100 sides');
-  fireEvent.change(screen.getByLabelText('Sides'), { target: { value: '101' } });
+  setBar('Sides', '101');
   expect((screen.getByLabelText('Sides') as HTMLInputElement).value).toBe('5');
   expect(tab.doc.version).toBe(version);
   cleanup(); session.dispose(); app.dispose();

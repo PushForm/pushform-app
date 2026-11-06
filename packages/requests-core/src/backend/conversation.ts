@@ -12,6 +12,7 @@ import { GUIDANCE_RULES } from '../guidance.ts';
 import { PICTURE_RULES } from '../agents/pictures.ts';
 import { DOCUMENT_RULES, MODEL_DOCUMENT_RULES, RENDER_TOOL, documentTools, editableDocument, type DocumentCapability } from '../agents/document.ts';
 import { CLONE_RULES, CLONE_TOOL, cloneAnswerOf, handoffBlock, handoffSchema, quietCloneAnswer } from '../clone.ts';
+import { PUBLISH_RULES, PUBLISH_TOOL, SAVE_RULES, SAVE_TOOL, publishAnswerOf, quietPublishAnswer } from '../publish.ts';
 import { MODEL_TOOLS, modelRenderSchema, modelRenderViewName, modelRenderViews } from '@pushform/extension-protocol';
 import type { DigestSection } from '../agents/digest.ts';
 import { helpAgent } from '../agents/help.ts';
@@ -111,7 +112,8 @@ export function turnPrompt(models: Config['models'], ctx: AgentContext, document
   const editable = editableDocument(document);
   return {
     model: tools.length ? models.document : models.conversation,
-    system: [agent.system(ctx), USER_HELP_RULES, PICTURE_RULES, ...(editable === 'layout' ? [DOCUMENT_RULES(ctx)] : editable === 'model' ? [MODEL_DOCUMENT_RULES(ctx)] : []), ...(document?.guidance ? [GUIDANCE_RULES] : []), ...(tools.some(tool => tool.name === CLONE_TOOL) ? [CLONE_RULES] : [])].join('\n\n'),
+    system: [agent.system(ctx), USER_HELP_RULES, PICTURE_RULES, ...(editable === 'layout' ? [DOCUMENT_RULES(ctx)] : editable === 'model' ? [MODEL_DOCUMENT_RULES(ctx)] : []), ...(document?.guidance ? [GUIDANCE_RULES] : []), ...(tools.some(tool => tool.name === SAVE_TOOL) ? [SAVE_RULES] : []), ...(tools.some(tool => tool.name === PUBLISH_TOOL) ? [PUBLISH_RULES] : []),
+      ...(tools.some(tool => tool.name === CLONE_TOOL) ? [CLONE_RULES] : [])].join('\n\n'),
     tools: [...agent.tools(ctx), ...tools],
   };
 }
@@ -121,8 +123,8 @@ export function turnPrompt(models: Config['models'], ctx: AgentContext, document
  */
 export const WARM_DOCUMENTS: readonly (DocumentCapability | null)[] = [
   null,
-  { type: 'model', apiVersion: 1, edit: 1, guidance: 1, clone: 1 },
-  { type: 'layout', apiVersion: 1, guidance: 1, clone: 1 },
+  { type: 'model', apiVersion: 1, edit: 1, guidance: 1, clone: 1, save: 1, publish: 1 },
+  { type: 'layout', apiVersion: 1, guidance: 1, clone: 1, save: 1 },
 ];
 /** A first-message context with no account in it: the prompt does not depend on the account (see `turnPrompt`). */
 function warmContext(config: Config, document: DocumentCapability | null): AgentContext {
@@ -178,7 +180,7 @@ const startSchema = z.object({ kind: z.enum(['help', 'intake']), path: z.enum(['
   .refine(b => (b.kind === 'help') === (b.path === 'help'), { message: 'kind help pairs with path help; kind intake with open, problem or feature', path: ['path'] });
 /** `intent` is the card the requester clicked; it settles an open conversation's path before the agent runs and is ignored once a path is set. */
 /** `document` is what the sending tab can edit this turn; absent or null offers no document tools. */
-const documentSchema = z.object({ type: z.enum(['layout', 'model']), apiVersion: z.int().min(1), guidance: z.literal(1).optional(), edit: z.literal(1).optional(), clone: z.literal(1).optional() });
+const documentSchema = z.object({ type: z.enum(['layout', 'model']), apiVersion: z.int().min(1), guidance: z.literal(1).optional(), edit: z.literal(1).optional(), clone: z.literal(1).optional(), save: z.literal(1).optional(), publish: z.literal(1).optional() });
 /** `attachments` are the ids of uploaded pictures of this conversation sent with the message; a message may be pictures alone. */
 const messageSchema = z.object({ text: z.string().max(MESSAGE_MAX_CHARS), intent: z.enum(['help', 'problem', 'feature']).optional(), document: documentSchema.nullable().optional(),
   attachments: z.array(z.uuid()).max(PICTURES_PER_MESSAGE).optional(), handoff: handoffSchema.optional() })
@@ -1147,10 +1149,12 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     const pending = turn.pending as PendingClientTools;
     // A missed cue is not a conversational event. Persist the result without spending another model round
     // or emitting a follow-up that blames the user for not clicking; current instructions remain in chat.
-    // Likewise a clone made or a clone card cancelled: the work goes on in the clone's own chat, or nothing was asked for.
+    // Likewise a clone made or a clone card cancelled: the work goes on in the clone's own chat, or nothing was asked for;
+    // and a publication made or its card cancelled, which the card already reports.
     const quietCue = pending.calls.length > 0 && pending.calls.every(call => {
       const answer = answers.get(call.id);
       if (call.name === CLONE_TOOL) return !!answer && !answer.isError && quietCloneAnswer(cloneAnswerOf(answer.content));
+      if (call.name === PUBLISH_TOOL) return !!answer && !answer.isError && quietPublishAnswer(publishAnswerOf(answer.content));
       if (call.name !== 'ui_highlight' || !answer || answer.isError) return false;
       try { return ['expired', 'cancelled', 'dismissed'].includes((JSON.parse(answer.content) as { status?: string }).status ?? ''); }
       catch { return false; }

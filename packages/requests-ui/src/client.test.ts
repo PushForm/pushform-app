@@ -176,3 +176,14 @@ describe('clone records in a stored conversation', () => {
     expect(conversation.messages[3]!.cloned).toBeUndefined();
   });
 });
+
+describe('publication records in a stored conversation', () => {
+  it('reads what each publication card came to', () => {
+    const conversation = normalizeConversation({ id: 'c', messages: [
+      { role: 'tool', name: 'commons_publish_propose', toolUseId: 'a', input: {}, output: '{"ok":true,"outcome":"published","title":"Shaker base","url":"https://commons.pushform.io/#models/d"}', at: 't1' },
+      { role: 'tool', name: 'commons_publish_propose', toolUseId: 'b', input: {}, output: '{"ok":true,"outcome":"cancel"}', at: 't2' },
+    ] });
+    expect(conversation.messages[0]!.published).toEqual({ title: 'Shaker base', url: 'https://commons.pushform.io/#models/d' });
+    expect(conversation.messages[1]!.published).toBeNull();
+  });
+});

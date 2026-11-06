@@ -12,7 +12,7 @@ export type {
 export { readDrafts, rememberDraft, forgetDraft, draftScope, DRAFT_TTL_MS, HOME_SCOPE } from './drafts';
 export type { DraftRecord } from './drafts';
 export { Chat } from './Chat';
-export type { ChatProps, ClonedDocument, CloneRequest, DocumentCopy, DocumentToolSession, DocumentToolOutcome } from './Chat';
+export type { ChatProps, ClonedDocument, CloneRequest, DocumentCopy, DocumentToolSession, DocumentToolOutcome, PreparedPublication, PublishedModel } from './Chat';
 export { Popover } from './Popover';
 export type { PopoverProps } from './Popover';
 export { DockedPanel } from './DockedPanel';

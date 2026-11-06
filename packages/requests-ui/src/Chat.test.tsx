@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { RequestsClient, type Brief, type ScreenInfo } from './client';
 import { readDrafts, rememberDraft } from './drafts';
 import { BASE, FAKE_OPENER, fakeBackend, filedTurn, makeFiledRequest, type FakeBackendOptions, type FakeTurn } from './fakeBackend';
-import { Chat, GREETING, type ClonedDocument, type CloneRequest, type DocumentToolSession } from './Chat';
+import { Chat, GREETING, type ClonedDocument, type CloneRequest, type DocumentToolSession, type PreparedPublication, type PublishedModel } from './Chat';
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); localStorage.clear(); document.body.innerHTML = ''; });
 const account = { id: 'alice', email: 'artist@example.com' };
@@ -1114,5 +1114,65 @@ describe('cloning the document', () => {
       handoff: { from: 'Bookcase', summary: 'A 30 in bookcase; make it 36 in wide.' }, document: MODEL });
     expect(onHandoffStarted).toHaveBeenCalledTimes(1);
     expect(onMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe('saving and publishing', () => {
+  const MODEL = { type: 'model', apiVersion: 1, edit: 1, save: 1, publish: 1 } as const;
+  const awaiting: FakeTurn = { event: 'done', data: { messageCount: 1, limitReached: false, ended: false, awaitingTools: true } };
+  const proposal = { id: 'p1', name: 'commons_publish_propose', input: { title: 'Shaker base', collections: ['Shaker cabinets'] } };
+  const prepared: PreparedPublication = { revision: 4, savedLine: 'Saved version 4.', update: false, title: 'Shaker base', description: 'A 30 in base cabinet.', category: 'Cabinets and built-ins',
+    license: { name: 'CC BY 4.0', summary: 'Others may share and adapt it, even commercially, with credit.', url: 'https://creativecommons.org/licenses/by/4.0/' }, retained: null,
+    collections: [{ name: 'Shaker cabinets', isNew: false }, { name: 'Kitchens', isNew: true }], host: null };
+  type Publish = (prepared: PreparedPublication, auto: boolean) => Promise<PublishedModel | null>;
+  const session = (publish: Publish, prepare = vi.fn(async () => prepared)) => (): DocumentToolSession =>
+    ({ document: MODEL, name: 'Shaker base', run: () => ({ content: '{}', isError: false }), preparePublication: prepare, publish });
+  const card = async (): Promise<HTMLElement> => screen.findByRole('region', { name: 'Publish to Commons' });
+
+  it('shows a save\'s own line beside the change line', async () => {
+    const run = vi.fn(() => ({ content: '{"ok":true,"version":5,"saved":true}', isError: false, line: 'Saved version 5.' }));
+    setup({ turns: [[{ event: 'tool_request', data: { calls: [{ id: 's1', name: 'document_save', input: {} }] } }, awaiting], [text('Saved.'), done(1)]] },
+      { documentTools: () => ({ document: MODEL, run }) });
+    await say('save it');
+    await waitFor(() => expect(log().textContent).toContain('Saved version 5.'));
+  });
+
+  it('proposes on a card after saving, and publishes only when Publish is chosen', async () => {
+    const publish = vi.fn<Publish>(async () => ({ title: 'Shaker base', url: 'https://commons.pushform.io/#models/design-1', failedCollections: [] }));
+    const { backend } = setup({ turns: [[text('Here it is.'), { event: 'tool_request', data: { calls: [proposal] } }, awaiting], [done(1)]] }, { documentTools: session(publish) });
+    await say('publish this to commons in my shaker cabinet collection');
+    const shown = await card();
+    expect(log().textContent).toContain('Saved version 4.');
+    expect(shown.textContent).toContain('Private cloud revision 4');
+    expect(shown.textContent).toContain('Shaker cabinets, Kitchens (new, private)');
+    expect(shown.textContent).toContain('Publishing makes this model public under CC BY 4.0');
+    expect(publish).not.toHaveBeenCalled();
+    fireEvent.click(within(shown).getByRole('button', { name: 'Publish model' }));
+    await waitFor(() => expect(log().textContent).toContain('Published Shaker base.'));
+    expect(publish).toHaveBeenCalledWith(prepared, true);
+    expect(screen.getByRole('link', { name: 'Shaker base' }).getAttribute('href')).toBe('https://commons.pushform.io/#models/design-1');
+    await waitFor(() => expect(backend.calls.find(c => c.path.endsWith('/tool-results'))?.body).toEqual({ results: [{ toolUseId: 'p1',
+      content: JSON.stringify({ ok: true, outcome: 'published', title: 'Shaker base', url: 'https://commons.pushform.io/#models/design-1' }), isError: false }] }));
+  });
+
+  it('keeps the card when the dialog closes without publishing, and reports Cancel', async () => {
+    const publish = vi.fn<Publish>(async () => null);
+    const { backend } = setup({ turns: [[{ event: 'tool_request', data: { calls: [proposal] } }, awaiting], [done(1)]] }, { documentTools: session(publish) });
+    await say('publish this');
+    fireEvent.click(within(await card()).getByRole('button', { name: 'Edit details' }));
+    await waitFor(() => expect(publish).toHaveBeenCalledWith(prepared, false));
+    await waitFor(() => expect((within(screen.getByRole('region', { name: 'Publish to Commons' })).getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(within(await card()).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(log().textContent).toContain('Not published.'));
+    await waitFor(() => expect(backend.calls.find(c => c.path.endsWith('/tool-results'))?.body).toEqual({ results: [{ toolUseId: 'p1', content: JSON.stringify({ ok: true, outcome: 'cancel' }), isError: false }] }));
+  });
+
+  it('reports a publication that could not be prepared to the agent, without a card', async () => {
+    const prepare = vi.fn(async (): Promise<PreparedPublication> => { throw new Error('This model includes a source with a no-derivatives condition.'); });
+    const { backend } = setup({ turns: [[{ event: 'tool_request', data: { calls: [proposal] } }, awaiting], [text('It cannot be published.'), done(1)]] }, { documentTools: session(vi.fn<Publish>(), prepare) });
+    await say('publish this');
+    await waitFor(() => expect(log().textContent).toContain('It cannot be published.'));
+    expect(screen.queryByRole('region', { name: 'Publish to Commons' })).toBeNull();
+    expect(backend.calls.find(c => c.path.endsWith('/tool-results'))?.body).toMatchObject({ results: [{ toolUseId: 'p1', isError: true }] });
   });
 });

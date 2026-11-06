@@ -6,6 +6,8 @@ import { LayoutDocumentApi, ModelDocumentApi, runLayoutTool, runModelTool, type 
 import type { Viewport } from '@pushform/render';
 import { TOOL_IMAGE_MAX_CHARS, type ClonedDocument, type CloneRequest, type DocumentToolOutcome, type DocumentToolSession } from '@pushform/requests-ui';
 import type { DocumentSession, DocumentTab } from './session';
+import { PUBLISHING_INFO_TOOL, SAVE_TOOL, saveSchema, type PublishProposal } from '@pushform/requests-core';
+import type { ChatPublishing } from './chatPublishing';
 
 /** Names the chat's undo entries. */
 const CLIENT = 'AI Chat';
@@ -77,7 +79,7 @@ function withNotice(result: DocumentToolOutcome, api: { readonly changes: { labe
  * `clone` makes a confirmed clone of the tab's document; without it the chat offers no cloning.
  */
 export function documentToolsFor(session: DocumentSession, tab: DocumentTab, openPanel?: (panel: 'objects' | 'requests') => void,
-  clone?: (tab: DocumentTab, request: CloneRequest) => Promise<ClonedDocument>): DocumentToolSession | null {
+  clone?: (tab: DocumentTab, request: CloneRequest) => Promise<ClonedDocument>, publishing?: ChatPublishing): DocumentToolSession | null {
   const guidance = openPanel ? guidanceFor(session, tab, openPanel) : null;
   const cloning = clone ? {
     name: tab.name.replace(/\.(pfl?)$/i, ''),
@@ -86,16 +88,48 @@ export function documentToolsFor(session: DocumentSession, tab: DocumentTab, ope
       return clone(tab, request);
     },
   } : {};
+  const publishable = tab.type === 'model' && !!publishing?.prepare && !!publishing.publish;
+  const publishingTools = publishable ? {
+    preparePublication: async (proposal: PublishProposal) => {
+      if (!session.tabs.includes(tab)) throw new Error(`The document "${tab.name}" was closed.`);
+      if (session.active !== tab) throw new Error(`The requester switched away from "${tab.name}". Ask them to return to it and try again.`);
+      return publishing.prepare!(tab, proposal);
+    },
+    publish: publishing.publish!,
+  } : {};
+  const capabilities = { ...(clone ? { clone: 1 as const } : {}), ...(publishing ? { save: 1 as const } : {}), ...(publishable ? { publish: 1 as const } : {}) };
+  /** Saving and reading what publishing needs: changes no document, so it runs before the document APIs see the call. */
+  const hosted = async (call: { name: string; input: unknown }, revision: number): Promise<DocumentToolOutcome | null> => {
+    if (!publishing || (call.name !== SAVE_TOOL && call.name !== PUBLISHING_INFO_TOOL)) return null;
+    const refused = gone(session, tab, revision);
+    if (refused) return refused;
+    try {
+      if (call.name === PUBLISHING_INFO_TOOL) {
+        if (!publishing.info) return unavailable('Publishing to Commons is not available in this editor.', revision);
+        return { content: JSON.stringify(await publishing.info(tab)), isError: false };
+      }
+      const parsed = saveSchema.safeParse(call.input ?? {});
+      const notes = parsed.success ? parsed.data.notes : undefined;
+      const saved = await publishing.save(tab, notes);
+      return saved.saved
+        ? { content: JSON.stringify({ ok: true, version: saved.revision, saved: true, notesSaved: !!notes?.trim() }), isError: false, line: `Saved version ${saved.revision}.` }
+        : { content: JSON.stringify({ ok: true, version: saved.revision, saved: false, notesSaved: false }), isError: false, line: `No changes since version ${saved.revision}. Nothing new was saved.` };
+    } catch (cause) {
+      return { content: JSON.stringify({ ok: false, error: cause instanceof Error ? cause.message : 'The document could not be saved.' }), isError: true };
+    }
+  };
   if (tab.type === 'model') {
     const api = new ModelDocumentApi(tab.app.commands, CLIENT);
     const renderer = viewportRenderer(tab.app.viewport);
     return {
-      document: { type: 'model', apiVersion: MODEL_API_VERSION, edit: 1, ...(guidance ? { guidance: 1 as const } : {}), ...(clone ? { clone: 1 as const } : {}) },
-      ...cloning,
+      document: { type: 'model', apiVersion: MODEL_API_VERSION, edit: 1, ...(guidance ? { guidance: 1 as const } : {}), ...capabilities },
+      ...cloning, ...publishingTools,
       progress: call => (call.name === MODEL_TOOLS.applyOperations.name ? 'Applying the change…' : call.name === MODEL_TOOLS.view.name ? 'Changing the view…'
         : call.name === MODEL_TOOLS.render.name ? 'Checking the result…' : undefined),
       run: async (call, signal) => {
         if (guidance && call.name.startsWith('ui_')) return guidance(call.name, call.input, signal, call.id);
+        const own = await hosted(call, api.revision);
+        if (own) return own;
         const refused = gone(session, tab, api.revision);
         if (refused) return refused;
         const result = await runModelTool(api, call.name, call.input, signal, { renderer });
@@ -113,10 +147,12 @@ export function documentToolsFor(session: DocumentSession, tab: DocumentTab, ope
     selectedEntityIds: () => (tab.workspace.selectedEntityId === null ? [] : [tab.workspace.selectedEntityId]),
   }, CLIENT);
   return {
-    document: { type: 'layout', apiVersion: LAYOUT_API_VERSION, ...(guidance ? { guidance: 1 as const } : {}), ...(clone ? { clone: 1 as const } : {}) },
+    document: { type: 'layout', apiVersion: LAYOUT_API_VERSION, ...(guidance ? { guidance: 1 as const } : {}), ...capabilities },
     ...cloning,
-    run: (call, signal) => {
+    run: async (call, signal) => {
       if (guidance && call.name.startsWith('ui_')) return guidance(call.name, call.input, signal, call.id);
+      const own = await hosted(call, api.revision);
+      if (own) return own;
       const refused = gone(session, tab, api.revision);
       if (refused) return refused;
       const result = runLayoutTool(api, call.name, call.input);

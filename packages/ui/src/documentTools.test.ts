@@ -156,3 +156,23 @@ it('keeps guidance outside the extension protocol and command registry', () => {
   }
   expect(documentToolsFor(s, tab, () => {})?.document.guidance).toBe(1);
 });
+
+describe('saving and publishing from the chat', () => {
+  it('declares saving on both kinds of document, publishing on models, and reports a save as its own line', async () => {
+    const s = open();
+    const publishing = { save: vi.fn(async () => ({ revision: 7, saved: true })), info: vi.fn(), prepare: vi.fn(), publish: vi.fn() };
+    const model = documentToolsFor(s, s.active, undefined, undefined, publishing)!;
+    expect(model.document).toMatchObject({ type: 'model', save: 1, publish: 1 });
+    const result = await model.run({ id: 's1', name: 'document_save', input: { notes: 'Added runners' } });
+    expect(publishing.save).toHaveBeenCalledWith(s.active, 'Added runners');
+    expect(result).toMatchObject({ isError: false, line: 'Saved version 7.' });
+    publishing.save.mockResolvedValueOnce({ revision: 7, saved: false });
+    expect(await model.run({ id: 's2', name: 'document_save', input: {} })).toMatchObject({ line: 'No changes since version 7. Nothing new was saved.' });
+    publishing.save.mockRejectedValueOnce(new Error('The cloud revision changed elsewhere.'));
+    expect(await model.run({ id: 's3', name: 'document_save', input: {} })).toMatchObject({ isError: true, content: expect.stringContaining('changed elsewhere') });
+    const layout = documentToolsFor(s, s.newLayout(), undefined, undefined, publishing)!;
+    expect(layout.document).toMatchObject({ type: 'layout', save: 1 });
+    expect(layout.document).not.toHaveProperty('publish');
+    expect(documentToolsFor(s, s.active)!.document).not.toHaveProperty('save');
+  });
+});

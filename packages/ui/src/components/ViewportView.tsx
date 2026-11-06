@@ -10,6 +10,7 @@ import { EntryFields } from './EntryFields';
 import { NavigationCube } from './NavigationCube';
 import { SceneTabs } from './SceneTabs';
 import { ToolOptionsBar } from './ToolOptionsBar';
+import { HeldTags } from './HeldTags';
 import type { InferenceResult } from '@pushform/inference';
 import { useApp } from '../AppContext';
 import { useAppStore } from '../store';
@@ -29,6 +30,23 @@ export function ViewportView(): JSX.Element {
   const activeToolId = useAppStore((s) => s.activeToolId);
   const hint = useAppStore((s) => s.cursorHint);
   const pointer = useRef<[number, number]>([0, 0]);
+  const underBand = useRef<HTMLDivElement>(null);
+  const bandBottom = useRef(0);
+  // Framing keeps the scene tabs and the tool options bar's band clear.
+  useEffect(() => {
+    const el = underBand.current;
+    if (!el) return;
+    const update = () => {
+      bandBottom.current = el.offsetTop;
+      app.viewport.camera.setFrameInsetTop(el.offsetTop);
+    };
+    update();
+    const top = el.parentElement;
+    if (!top || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(update);
+    ro.observe(top);
+    return () => ro.disconnect();
+  }, [app]);
   const cursor = (activeToolId && app.toolManager.get(activeToolId)?.cursor) || 'default';
 
   useEffect(() => {
@@ -124,13 +142,14 @@ export function ViewportView(): JSX.Element {
         <div className="pf-tob-band">
           <ToolOptionsBar />
         </div>
-        <div className="pf-viewport-under-band">
+        <div ref={underBand} className="pf-viewport-under-band">
           <NavigationCube />
         </div>
       </div>
       <DialogHost />
       <ContextMenuHost />
       <EntryFields pointer={pointer} />
+      <HeldTags pointer={pointer} minTop={bandBottom} />
       {hint ? (
         <div className="pf-cursor-hint" style={{ left: hintPos[0] + 14, top: hintPos[1] + 18 }}>
           {hint.text}

@@ -51,6 +51,8 @@ export interface AppState {
   toolSettings: readonly ToolSetting[];
   /** The tool is placing a point, so the bar lets the pointer through (`ToolStatus.placing`). */
   toolPlacing: boolean;
+  /** Held-key tags shown beside the value fields (`ToolStatus.held`). */
+  toolHeld: readonly string[];
   /** Text typed into value fields, by field id; a field without a draft shows its live value. */
   entryDrafts: Readonly<Record<string, string>>;
   /** Field being typed in, or null. `value` is the field typing opens beside the pointer. */
@@ -81,7 +83,7 @@ export interface AppState {
   setActiveTool(id: string | null): void;
   togglePanel(id: PanelId): void;
   closePanel(): void;
-  setStatus(s: { instructor: string; vcbLabel: string; vcbValue?: string | undefined; fields?: readonly EntryField[] | undefined; settings?: readonly ToolSetting[] | undefined; placing?: boolean | undefined }): void;
+  setStatus(s: { instructor: string; vcbLabel: string; vcbValue?: string | undefined; fields?: readonly EntryField[] | undefined; settings?: readonly ToolSetting[] | undefined; placing?: boolean | undefined; held?: readonly string[] | undefined }): void;
   /** Start or continue typing in field `id` with `text`. */
   setEntryDraft(id: string, text: string): void;
   /** Drop a field's typed text. */
@@ -122,6 +124,7 @@ export const useAppStore = create<AppState>()((set) => ({
   entryFields: [],
   toolSettings: [],
   toolPlacing: false,
+  toolHeld: [],
   entryDrafts: {},
   entryFocus: null,
   entryError: null,
@@ -142,7 +145,7 @@ export const useAppStore = create<AppState>()((set) => ({
   setActiveTool: (activeToolId) => set({ activeToolId }),
   togglePanel: (id) => set((s) => ({ openPanel: s.openPanel === id ? null : id })),
   closePanel: () => set({ openPanel: null }),
-  setStatus: (st) => set({ instructor: st.instructor, vcbLabel: st.vcbLabel, vcbValue: st.vcbValue ?? '', entryFields: st.fields ?? [], toolSettings: st.settings ?? [], toolPlacing: st.placing ?? false }),
+  setStatus: (st) => set({ instructor: st.instructor, vcbLabel: st.vcbLabel, vcbValue: st.vcbValue ?? '', entryFields: st.fields ?? [], toolSettings: st.settings ?? [], toolPlacing: st.placing ?? false, toolHeld: st.held ?? [] }),
   setEntryDraft: (id, text) => set((s) => ({ entryDrafts: { ...s.entryDrafts, [id]: text }, entryFocus: id, entryError: s.entryError === id ? null : s.entryError })),
   clearEntryDraft: (id) =>
     set((s) => {

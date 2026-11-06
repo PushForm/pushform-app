@@ -14,6 +14,7 @@ import { countFrom, countSetting } from '../settings';
 import { pointerField } from '../entry';
 import { hostOfTool, inferenceOverlay, PREVIEW_COLOR } from '../toolUtil';
 import { ARC_SEGMENTS } from './Arc';
+import { planeTag, SHIFT_HELD } from '../held';
 import {
   contextCurveTangentAt,
   AXIS_NORMAL,
@@ -268,6 +269,12 @@ export class TwoPointArcTool implements Tool {
   }
 
   status(): ToolStatus {
+    const held = [...planeTag(this.lockNormal), ...(this.heldPlane ? [SHIFT_HELD] : [])];
+    const s = this.statusWithoutHeld();
+    return held.length ? { ...s, held } : s;
+  }
+
+  private statusWithoutHeld(): ToolStatus {
     return { ...this.stageStatus(), settings: [countSetting('segments', 'Segments', this.segments)] };
   }
 

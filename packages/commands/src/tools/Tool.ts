@@ -155,6 +155,11 @@ export interface ToolStatus {
    * their bar stays usable (edge picking) report false.
    */
   readonly placing?: boolean | undefined;
+  /**
+   * Held-key constraints and keyed modes in force now, each named for a tag beside the value
+   * fields, such as "On red axis" or "Square · Shift". Hint text never carries them.
+   */
+  readonly held?: readonly string[] | undefined;
 }
 
 export interface ToolContext {

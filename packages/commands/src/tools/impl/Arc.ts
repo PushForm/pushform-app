@@ -12,6 +12,7 @@ import type { EntryField, Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, Too
 import { countFrom, countSetting } from '../settings';
 import { angleDimension, DIMENSION_COLOR, field, pxAt } from '../entry';
 import { hostOfTool, inferenceOverlay, PREVIEW_COLOR } from '../toolUtil';
+import { planeTag, SHIFT_HELD } from '../held';
 import {
   AXIS_NORMAL,
   ClickGesture,
@@ -237,6 +238,12 @@ export class ArcTool implements Tool {
   }
 
   status(): ToolStatus {
+    const held = [...planeTag(this.lockNormal), ...(this.heldPlane ? [SHIFT_HELD] : [])];
+    const s = this.statusWithoutHeld();
+    return held.length ? { ...s, held } : s;
+  }
+
+  private statusWithoutHeld(): ToolStatus {
     return { ...this.stageStatus(), settings: [countSetting('segments', 'Segments', this.segments)] };
   }
 

@@ -378,7 +378,7 @@ export class ToolManager implements ToolHost {
   private emitStatus(): void {
     const s = this.status();
     const prev = this.lastStatus;
-    if (s.instructor === prev.instructor && s.vcbLabel === prev.vcbLabel && s.vcbValue === prev.vcbValue && s.placing === prev.placing && sameFields(s.fields, prev.fields) && JSON.stringify(s.settings ?? []) === JSON.stringify(prev.settings ?? [])) return;
+    if (s.instructor === prev.instructor && s.vcbLabel === prev.vcbLabel && s.vcbValue === prev.vcbValue && s.placing === prev.placing && (s.held ?? []).join('|') === (prev.held ?? []).join('|') && sameFields(s.fields, prev.fields) && JSON.stringify(s.settings ?? []) === JSON.stringify(prev.settings ?? [])) return;
     this.lastStatus = s;
     this.events.emit('statusChanged', s);
   }

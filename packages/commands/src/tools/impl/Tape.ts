@@ -11,6 +11,7 @@ import { pointerField } from '../entry';
 import { EdgeLock } from '../edgeLock';
 import { inferenceOverlay, PREVIEW_COLOR } from '../toolUtil';
 import { AXIS_NORMAL, closestOnLine, edgeSegment, fmtLength, GUIDE_COLOR, stateOf } from './constructionUtil';
+import { axisTag, EDGE_LOCKED, SHIFT_HELD } from '../held';
 
 export type TapeMode = 'guideLine' | 'guidePoint' | 'measure';
 const MODE_CYCLE: readonly TapeMode[] = ['guideLine', 'guidePoint', 'measure'];
@@ -258,8 +259,10 @@ export class TapeTool implements Tool {
   }
 
   status(): ToolStatus {
+    const held = [...axisTag(this.lockAxis), ...(this.lockSnap ? [SHIFT_HELD] : []), ...(this.edgeLock.active ? [EDGE_LOCKED] : [])];
     return {
       ...this.baseStatus(),
+      ...(held.length ? { held } : {}),
       settings: [
         {
           kind: 'choice',

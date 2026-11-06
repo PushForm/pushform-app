@@ -67,6 +67,8 @@ export class CameraController implements CameraHost {
     return this.state.projection === 'parallel' ? this.orthographic : this.perspective;
   }
 
+  private frameInsetTop = 0;
+
   get aspect(): number {
     return this.width / Math.max(this.height, 1);
   }
@@ -169,17 +171,31 @@ export class CameraController implements CameraHost {
   zoomExtents(): void {
     const box = this.sceneBounds();
     this.pushHistory();
-    if (!box) {
-      this.commit(cameraFrameBox(this.state, { min: [-5, -5, 0], max: [5, 5, 2] }, this.aspect));
-      return;
-    }
-    this.commit(cameraFrameBox(this.state, box, this.aspect));
+    this.commit(this.frame(box ?? { min: [-5, -5, 0], max: [5, 5, 2] }));
   }
 
   /** Frame `box`; `history: false` keeps the change out of Previous View (an import keeping its model in view). */
   zoomBox(box: Box3, opts: { history?: boolean } = {}): void {
     if (opts.history !== false) this.pushHistory();
-    this.commit(cameraFrameBox(this.state, box, this.aspect));
+    this.commit(this.frame(box));
+  }
+
+  /**
+   * CSS pixels at the top of the view that framing keeps clear: the band of the tool options bar
+   * and the scene tabs above it, whether or not the bar is showing.
+   */
+  setFrameInsetTop(px: number): void {
+    this.frameInsetTop = Math.max(0, px);
+  }
+
+  /** The camera framing `box` in the part of the view below the top inset. */
+  frame(box: Box3): CameraState {
+    const top = Math.min(this.frameInsetTop, this.height / 2);
+    if (top <= 0) return cameraFrameBox(this.state, box, this.aspect);
+    const usable = this.height - top;
+    // fit the box to a view as tall as the clear area, then move it down into that area
+    const fitted = cameraZoom(cameraFrameBox(this.state, box, this.width / usable), this.height / usable, null);
+    return cameraPan(fitted, 0, top / 2, this.height);
   }
 
   zoomWindow(a: Vec2, b: Vec2): void {

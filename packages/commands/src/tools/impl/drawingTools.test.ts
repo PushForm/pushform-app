@@ -587,3 +587,34 @@ describe('value fields', () => {
     expect([...sketch().curves.values()][0]).toMatchObject({ radius: 3 });
   });
 });
+
+describe('held-key tags', () => {
+  it('Line names its axis lock and its inference mode while they are in force', () => {
+    const { tools } = setup();
+    tools.activate('line');
+    expect(tools.status().held).toBeUndefined();
+    tools.keyDown(key('Alt'));
+    expect(tools.status().held).toEqual(['Inference off · Alt']);
+    tools.keyDown(key('Alt'));
+    expect(tools.status().held).toEqual(['Parallel and perpendicular only · Alt']);
+    tools.keyDown(key('Alt'));
+    expect(tools.status().held).toBeUndefined();
+    tools.click(at([0, 0, 0]));
+    tools.keyDown(key('ArrowRight'));
+    expect(tools.status().held).toEqual(['On red axis']);
+    // Line shows no tool options bar
+    expect(tools.status().settings).toBeUndefined();
+  });
+
+  it('Rectangle and Circle name an arrow-key plane lock', () => {
+    const { tools } = setup();
+    tools.activate('rectangle');
+    tools.keyDown(key('ArrowUp'));
+    expect(tools.status().held).toEqual(['Plane square to blue axis']);
+    tools.keyDown(key('ArrowDown'));
+    expect(tools.status().held).toBeUndefined();
+    tools.activate('circle');
+    tools.keyDown(key('ArrowRight'));
+    expect(tools.status().held).toEqual(['Plane square to red axis']);
+  });
+});

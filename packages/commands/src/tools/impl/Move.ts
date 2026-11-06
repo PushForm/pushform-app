@@ -15,6 +15,7 @@ import { pointerField } from '../entry';
 import { EdgeLock } from '../edgeLock';
 import { DRAG_PX, entityOverlay, HOVER_COLOR, inferenceOverlay, rubberBandColor, screenDist } from '../toolUtil';
 import { AXIS_DIR, movedOutline, TransformToolBase } from './transformShared';
+import { axisTag, EDGE_LOCKED, SHIFT_HELD } from '../held';
 
 type State =
   | { readonly kind: 'idle' }
@@ -266,7 +267,8 @@ export class MoveTool extends TransformToolBase {
   }
 
   status(): ToolStatus {
-    return { ...this.baseStatus(), settings: [toggleSetting('copy', 'Copy', this.copy, 'primary'), toggleSetting('autofold', 'Autofold', this.autofold, 'secondary')] };
+    const held = [...axisTag(this.lockAxis), ...(this.lockSnap ? [SHIFT_HELD] : []), ...(this.edgeLock.active ? [EDGE_LOCKED] : [])];
+    return { ...this.baseStatus(), settings: [toggleSetting('copy', 'Copy', this.copy, 'primary'), toggleSetting('autofold', 'Autofold', this.autofold, 'secondary')], ...(held.length ? { held } : {}) };
   }
 
   onSetting(id: string, value: ToolSettingValue): void {

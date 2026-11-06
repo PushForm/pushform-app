@@ -26,6 +26,7 @@ import { toggleSetting } from '../settings';
 import { pointerField } from '../entry';
 import { DRAG_PX, entityOverlay, HOVER_COLOR, inferenceOverlay, screenDist, worldPerPixelAt } from '../toolUtil';
 import { AXIS_COLOR, AXIS_DIR, movedOutline, TransformToolBase, worldToScreen } from './transformShared';
+import { planeTag } from '../held';
 
 /** Screen radius of the protractor in CSS px. */
 export const PROTRACTOR_PX = 60;
@@ -272,7 +273,8 @@ export class RotateTool extends TransformToolBase {
   }
 
   status(): ToolStatus {
-    return { ...this.baseStatus(), settings: [toggleSetting('copy', 'Copy', this.copy, 'primary')] };
+    const held = planeTag(this.lockAxis);
+    return { ...this.baseStatus(), settings: [toggleSetting('copy', 'Copy', this.copy, 'primary')], ...(held.length ? { held } : {}) };
   }
 
   onSetting(id: string, value: ToolSettingValue): void {

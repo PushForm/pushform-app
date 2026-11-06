@@ -11,7 +11,8 @@
 :is(.pf-fr-popover, .pf-fr-docked) p { margin: 0; }
 :is(.pf-fr-popover, .pf-fr-docked) button { font: inherit; color: inherit; cursor: pointer; }
 :is(.pf-fr-popover, .pf-fr-docked) button:disabled { cursor: default; opacity: .55; }
-:is(.pf-fr-popover, .pf-fr-docked) button:not(.pf-fr-choice):not(.pf-fr-primary):not(.pf-fr-link) { padding: 6px 12px; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); background: var(--pf-surface-2); }
+/* The plain button look. Keep its specificity at (0,3,1): the composer's icon and Stop buttons override it by coming later. */
+:is(.pf-fr-popover, .pf-fr-docked) button:not(.pf-fr-choice):not(.pf-fr-primary, .pf-fr-link) { padding: 6px 12px; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); background: var(--pf-surface-2); }
 /* Same blue and text color as Home's Create button (.pf-home-primary). */
 :is(.pf-fr-popover, .pf-fr-docked) button.pf-fr-primary { padding: 6px 12px; border: 1px solid var(--pf-accent); border-radius: var(--pf-radius); background: var(--pf-accent); color: #fff; }
 @media (prefers-color-scheme: dark) { :is(.pf-fr-popover, .pf-fr-docked) button.pf-fr-primary { color: #14213a; } }

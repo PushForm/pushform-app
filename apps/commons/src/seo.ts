@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { commonsExactSearch, commonsFileUrl, type CatalogModel } from '@pushform/cloud/catalog';
+import { commonsExactSearch, commonsFileUrl, type CatalogModel, type CommonsCollection } from '@pushform/cloud/catalog';
 
 /** Search and social metadata, shared by the browser (which updates the head as the route changes) and the edge
  * worker (which writes the same tags into the HTML that crawlers and link-preview bots fetch without running scripts). */
@@ -24,6 +24,7 @@ export interface SeoMeta {
 
 export const modelPath = (id: string): string => `/models/${id}`;
 export const profilePathFor = (handle: string): string => `/u/${handle}`;
+export const collectionPath = (id: string): string => `/collections/${id}`;
 /** The library filtered to an exact-name search, used to find every model credited to a creator without a Commons profile. */
 export const browseSearchPath = (name: string): string => `/?${new URLSearchParams({ q: commonsExactSearch(name) })}#browse`;
 const INDEX = 'index, follow, max-image-preview:large, max-snippet:-1';
@@ -104,6 +105,28 @@ export function profileSeo(profile: SeoProfile, models: CatalogModel[], ctx: Seo
         ...(image ? { image } : {}), ...(profile.links.length ? { sameAs: profile.links.map(link => link.url) } : {}) },
     }, ...(count ? [{ '@context': 'https://schema.org', '@type': 'ItemList', itemListElement: models.slice(0, 24).map((model, index) => ({ '@type': 'ListItem', position: index + 1, url: absolute(ctx, modelPath(model.id)), name: model.title })) }] : []),
     breadcrumbs(ctx, [['Models', ctx.siteUrl + '/'], [profile.displayName, url]])],
+  };
+}
+
+/** A collection's tags. `members` are its published models in collection order; the first with a picture provides the
+ * share image. Private collections are only ever seen by their curator and stay out of search results. */
+export function collectionSeo(collection: CommonsCollection, members: CatalogModel[], ctx: SeoContext): SeoMeta {
+  const url = absolute(ctx, collectionPath(collection.id));
+  const curator = collection.curator?.displayName ?? 'a Commons member';
+  const count = members.length;
+  const titles = members.slice(0, 4).map(model => model.title).join(', ');
+  const description = clip(collection.description.trim() || `${count === 1 ? 'One model' : `${count} models`} collected by ${curator}${titles ? `: ${titles}` : ''}.`, 158);
+  const cover = members.map(model => ({ model, url: modelImageUrl(model, ctx) })).find(item => item.url);
+  return {
+    title: `${clip(collection.title, 50)} — collection by ${clip(curator, 30)} | ${SITE_NAME}`, description, canonical: url,
+    robots: collection.visibility === 'public' ? INDEX : NOINDEX, type: 'website',
+    image: cover?.url ? { url: cover.url, alt: `${cover.model.title}, from the ${collection.title} collection` } : null,
+    jsonLd: [{
+      '@context': 'https://schema.org', '@type': 'CollectionPage', '@id': `${url}#collection`, url, name: collection.title, description,
+      ...(collection.curator ? { author: { '@type': 'Person', name: collection.curator.displayName, url: absolute(ctx, profilePathFor(collection.curator.handle)) } } : {}),
+      dateModified: collection.updatedAt, isPartOf: { '@type': 'WebSite', name: SITE_NAME, url: ctx.siteUrl }, inLanguage: 'en',
+      ...(count ? { mainEntity: { '@type': 'ItemList', numberOfItems: count, itemListElement: members.map((model, index) => ({ '@type': 'ListItem', position: index + 1, url: absolute(ctx, modelPath(model.id)), name: model.title })) } } : {}),
+    }, breadcrumbs(ctx, [['Collections', `${ctx.siteUrl}/#collections`], [collection.title, url]])],
   };
 }
 

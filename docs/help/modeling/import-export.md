@@ -4,7 +4,7 @@
 
 Open a supported **.skp** or **.skb** file to make it the model you work on, or use Import to bring content into the current model. Review the conversion report for unsupported data or changes.
 
-Imported models can retain hierarchy, materials, textures, curves, annotations, images and section information where supported. A successful import is not a guarantee that every SketchUp feature is editable in PushForm. Keep the source file for comparison.
+Imported models can retain hierarchy, materials, textures, curves, annotations, images and section information where supported. Opened scenes keep the section planes they saved as active, so showing a scene turns its own cuts on and the other cuts off; a scene saved without section planes leaves the cuts as they are. A successful import is not a guarantee that every SketchUp feature is editable in PushForm. Keep the source file for comparison.
 
 ## Import other model formats
 

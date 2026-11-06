@@ -143,6 +143,8 @@ export function applySketchUpImport(
   // Mesh parts of every definition count against the document's limit together.
   let meshPartTriangles = 0;
   for (const def of draft.definitions.values()) for (const part of def.entities.meshParts.values()) meshPartTriangles += part.geometry.triangles.length / 3;
+  // Imported section planes by their key in the source file, for the scenes that name them.
+  const planeIds = new Map<string, Id>();
   const populate = (source: ImportedDefinition, id: DefId): void => {
     const container = destination.get(id)!.entities;
     for (const part of source.meshParts ?? []) {
@@ -278,6 +280,7 @@ export function applySketchUpImport(
       container.sectionPlanes.set(planeId, { ...annotation(plane.hidden, plane.tag), id: planeId, name: plane.name, symbol: plane.symbol,
         plane: { n: [...plane.plane.n], d: plane.plane.d }, origin: [...plane.origin] });
       if (plane.active) container.activeSectionPlaneId = planeId;
+      if (plane.key !== undefined) planeIds.set(plane.key, planeId);
       container.order.push(planeId); report.sectionPlanes++;
     }
     for (const guide of source.guides) {
@@ -386,11 +389,13 @@ export function applySketchUpImport(
       const styleId = styleOf(saved);
       draft.scenes.set(id, { id, name: saved.name, description: '',
         camera: ((camera: CameraState) => ({ ...camera, eye: [...camera.eye], target: [...camera.target], up: [...camera.up] }))(saved.camera ?? DEFAULT_SCENE_CAMERA),
-        // The reader recovers each scene's camera, hidden tags and saved style; the scene leaves everything else as it is.
+        // The reader recovers each scene's camera, hidden tags, saved style and active section planes; the scene leaves
+        // everything else as it is.
         flags: { ...DEFAULT_SCENE_FLAGS, useCamera: saved.camera !== null, useTags: saved.usesTags, useHiddenGeometry: false, useHiddenObjects: false,
-          useStyle: styleId !== null, useShadows: false, useSectionPlanes: false, useAxes: false },
+          useStyle: styleId !== null, useShadows: false, useSectionPlanes: !!saved.sectionPlanes, useAxes: false },
         hiddenEntities: [], hiddenTags: saved.usesTags ? [...new Set(saved.hiddenTags.flatMap(sceneTag))] : [],
-        hiddenTagFolders: [], styleId, shadows: null, activeSectionPlanes: [], axesVisible: true, includeInAnimation: true });
+        hiddenTagFolders: [], styleId, shadows: null, activeSectionPlanes: [...new Set((saved.sectionPlanes ?? []).flatMap(key => planeIds.get(key) ?? []))],
+        axesVisible: true, includeInAnimation: true });
       draft.sceneOrder.push(id); report.scenes++;
     }
   }

@@ -768,6 +768,35 @@ describe('SketchUp import', () => {
     expect(keepsTags!.hiddenTags).toEqual([]);
     close(keepsTags!.camera.eye, [-4, -4, 3]);
     expect(keepsTags!.camera.fov).toBeCloseTo(50, 9);
+    // Every scene saves its active section planes: Plan was saved with the model's section plane active, the others
+    // with none, so showing them turns the cut off. The model itself opens without a cut.
+    const root = doc.state.definitions.get(doc.state.rootDefinitionId)!.entities;
+    const [plane] = [...root.sectionPlanes.keys()];
+    expect(root.sectionPlanes.size).toBe(1);
+    expect(root.activeSectionPlaneId).toBeNull();
+    expect(scenes.map(s => [s.flags.useSectionPlanes, s.activeSectionPlanes])).toEqual([[true, []], [true, [plane]], [true, []], [true, []]]);
+  });
+
+  it.each([2017, 2027])('keeps the cuts as they are for a SketchUp %s scene that does not save its section planes', year => {
+    const model = parseSkp(new Uint8Array(readFileSync(new URL(`../../testing/assets/sketchup/text-scenes-${year}.skp`, import.meta.url))).buffer);
+    expect(model.pages.map(p => (p.activeSectionPlanes ?? []).length)).toEqual([0, 1, 0, 0]);
+    model.pages[1]!.flags! &= ~64;
+    const scene = prepareSketchUp(model), doc = createDocument();
+    expect(scene.scenes.map(s => s.sectionPlanes?.length ?? null)).toEqual([0, null, 0, 0]);
+    doc.transact('Open fixture', draft => applySketchUpImport(draft, scene));
+    const plan = doc.state.scenes.get(doc.state.sceneOrder[1]!)!;
+    expect(plan.flags.useSectionPlanes).toBe(false);
+    expect(plan.activeSectionPlanes).toEqual([]);
+  });
+
+  it.each(['styles-current-2017', 'styles-current-2020', 'styles-current-2027'])('gives every scene of %s the section plane it keeps active', async name => {
+    const scene = await readSketchUp(readFileSync(new URL(`../../testing/assets/sketchup/${name}.skp`, import.meta.url)));
+    const doc = createDocument();
+    doc.transact('Open fixture', draft => applySketchUpImport(draft, scene));
+    const root = doc.state.definitions.get(doc.state.rootDefinitionId)!.entities;
+    expect(root.activeSectionPlaneId).not.toBeNull();
+    expect(doc.state.sceneOrder.map(id => doc.state.scenes.get(id)!.activeSectionPlanes)).toEqual([[root.activeSectionPlaneId], [root.activeSectionPlaneId],
+      [root.activeSectionPlaneId]]);
   });
 
   it.each([2017, 2027])('opens a SketchUp %s scene without a name or camera', async year => {

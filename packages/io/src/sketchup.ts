@@ -17,7 +17,7 @@ import type {
 
 // Fields PushForm's reader patch adds (patches/openskp@1.3.0.patch): tags, hidden guides, the active
 // section plane, and what a dimension measures (0 its points' distance, 1 along planeX, 2 across it).
-type ReaderSectionPlane = SectionPlane & { layer?: string; active?: boolean };
+type ReaderSectionPlane = SectionPlane & { layer?: string; active?: boolean; key?: string | null };
 type ReaderGuideLine = ConstructionLine & { hidden?: boolean; layer?: string };
 type ReaderGuidePoint = ConstructionPoint & { hidden?: boolean; layer?: string };
 type ReaderDimension = Dimension & { layer?: string; alignment?: number | null };
@@ -186,6 +186,8 @@ export const MESH_PART_THRESHOLD = 250_000;
 /** Section planes, guides and dimensions keep the coordinates of the definition that holds them. */
 export interface ImportedSectionPlane {
   name: string; symbol: string; plane: Plane; origin: Vec3; hidden: boolean; tag: string; active: boolean;
+  /** The plane's identity in the source file, which scenes use to name the planes they keep active. */
+  key?: string;
 }
 export type ImportedGuide = { hidden: boolean; tag: string } & (
   | { kind: 'line'; origin: Vec3; dir: Vec3 }
@@ -204,6 +206,11 @@ export interface ImportedScene {
   usesTags: boolean;
   /** The style the scene saved, as PushForm style settings, when it saves its style; otherwise null. */
   display?: ImportedDisplay | null;
+  /**
+   * The section planes the scene keeps active, by `ImportedSectionPlane.key`, at most one per definition, when the scene
+   * saves its active section planes; an empty list turns every cut off. Null or absent when it does not save them.
+   */
+  sectionPlanes?: string[] | null;
 }
 export interface SketchUpImport {
   version: string;
@@ -483,7 +490,8 @@ export function prepareSketchUp(model: SkpModel, onProgress?: (p: ImportProgress
     d.sectionPlanes.length || d.guides.length || d.dimensions.length))
     throw new Error(`No supported geometry was found in this ${format.name} file. It may be empty or contain records the reader cannot recover.`);
   const point = (p: [number, number, number]): Vec3 => [p[0] * INCH, p[1] * INCH, p[2] * INCH];
-  // SketchUp's scene flags: 1 saves the camera, 32 saves tag visibility. Files without flags save both.
+  // SketchUp's scene flags: 1 saves the camera, 32 saves tag visibility, 64 saves the active section planes. Files without
+  // flags save the camera and tag visibility.
   const saves = (flags: number | null, bit: number): boolean => flags === null || (flags & bit) !== 0;
   const scenes: ImportedScene[] = model.pages.map(page => {
     const valid = page.eye && page.target && page.up && [...page.eye, ...page.target, ...page.up].every(Number.isFinite) &&
@@ -494,7 +502,8 @@ export function prepareSketchUp(model: SkpModel, onProgress?: (p: ImportProgress
     return { name: page.name, hiddenTags: [...page.hiddenLayers], usesTags: saves(page.flags, 32), camera: valid ? {
       eye: point(page.eye!), target: point(page.target!), up: v3normalize(page.up!), perspective: !page.parallel,
       fov: Number.isFinite(page.fov) && page.fov > 0 ? page.fov : 35, height: page.orthoHeight * INCH,
-    } : null, display };
+    } : null, display,
+      sectionPlanes: page.flags !== null && (page.flags & 64) !== 0 ? [...(page.activeSectionPlanes ?? [])] : null };
   });
   if (model.scenesUnread > 0) warn(`${model.scenesUnread} saved scene(s) could not be read and are not imported.`);
   return { version: model.version, root, definitions, materials, images,
@@ -1102,7 +1111,7 @@ function convertAnnotations(source: Definition, result: ImportedDefinition, tall
     const number = tally.numberPlanes && !sp.name && !sp.label ? ++tally.unnamedPlanes : null;
     result.sectionPlanes.push({ name: number ? `Section ${number}` : sp.name, symbol: number ? String(number) : sp.label,
       plane, hidden: sp.hidden, tag: sp.layer ?? '', active: !!sp.active && !active,
-      origin: v3sub(center, v3scale(plane.n, v3dot(plane.n, center) + plane.d)) });
+      origin: v3sub(center, v3scale(plane.n, v3dot(plane.n, center) + plane.d)), ...(sp.key ? { key: sp.key } : {}) });
     active ||= !!sp.active;
   }
   for (const line of source.constructionLines as ReaderGuideLine[]) {

@@ -10,7 +10,13 @@ A drawing imported from LayOut may already contain embedded models. Without clou
 
 Select the model view. In its **Model view** settings, choose a saved scene with a camera, or choose **Top**, **Front**, **Right**, **Back**, **Left**, **Bottom**, or **Iso**.
 
-A scene applies its camera. A standard view frames the model and makes the view custom. Scene styles and tag overrides are not followed by this scene selection workflow.
+A scene applies its camera, and the view follows the tags the scene hides. A standard view frames the model and makes the view custom.
+
+## Show section cuts in a model view
+
+A view of a scene shows the section cuts the scene saved: a scene saved with a section plane active shows that cut, and one saved with none shows the model uncut. Two views of the same model can show different cuts this way, for example a floor plan and a section. A view with no scene, such as a standard view, or of a scene that does not save its section planes, shows the model's current cuts.
+
+When the scene saved its style, the view also takes that style's section display settings: whether section planes and cuts are shown, the section fill, and the section colors and line width. The scene's other style settings do not change the view. Snapping to model points in a view uses the cuts that view shows, so points cut away are not offered.
 
 ## Section markers and sheet numbers
 

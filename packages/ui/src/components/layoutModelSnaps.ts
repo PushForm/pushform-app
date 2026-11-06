@@ -5,25 +5,20 @@ import { bodyVertexAt, bodyVertexFaces, containerAt, pathWithin } from '@pushfor
 import { PickService, SpatialIndex } from '@pushform/inference';
 import { entitiesForLayer, flattenLayoutPath, isLayoutLayerVisible, isViewport, pointInsideLayoutPath, viewportCameraBasis, viewportPaperPoint,
   type LayoutDocumentState, type LayoutEntity, type LayoutModelAttachment, type LayoutPage } from '@pushform/layout';
-import { peekLayoutViewportModel, viewGeometry, type LayoutViewportModel } from './layoutViewportRenders';
+import { peekLayoutViewportModel, viewGeometry, viewSectionState, type LayoutViewportModel } from './layoutViewportRenders';
 
 type Candidate = { point: Vec3; hidden: boolean; anchor: LayoutModelAttachment['anchor'] };
 const candidates = new WeakMap<LayoutViewportModel, Map<string | null, Candidate[]>>();
 const pickers = new WeakMap<LayoutViewportModel, Map<string | null, PickService>>();
 
-/** Reuse Modeling's surface and section-cut picking with the viewport's scene tag visibility. */
+/** Reuse Modeling's surface and section-cut picking with the viewport's scene tag visibility and section cuts. */
 function picker(model: LayoutViewportModel, scene: string | null): PickService {
   let scenes = pickers.get(model);
   if (!scenes) pickers.set(model, scenes = new Map());
   const cached = scenes.get(scene);
   if (cached) return cached;
-  const saved = model.scenes.find(candidate => candidate.name === scene);
-  const hidden = new Set(saved?.hiddenTags);
-  const state = saved?.usesTags ? { ...model.state,
-    tags: new Map([...model.state.tags].map(([id, tag]) => [id, { ...tag, visible: !hidden.has(tag.name) }])),
-  } : model.state;
   const index = new SpatialIndex();
-  index.setState(state);
+  index.setState(viewSectionState(model, scene));
   const result = new PickService(index);
   scenes.set(scene, result);
   return result;

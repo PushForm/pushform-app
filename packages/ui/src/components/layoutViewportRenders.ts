@@ -6,7 +6,7 @@ import {
   isCloudReference, isCloudSource, isViewport, layoutFrameSize, viewportCacheCurrent, viewportCloudReference, viewportOrthoHeight, viewportSourceKey, viewportSourceSheet,
   type CloudModelReference, type LayoutDocumentState, type LayoutEntity, type LayoutViewport, type LayoutViewportCamera, type LayoutViewportDisplay,
 } from '@pushform/layout';
-import { createDocument, ImageStore, type DocumentState } from '@pushform/model';
+import { createDocument, ImageStore, type DocumentState, type ModelingColors, type Scene } from '@pushform/model';
 import { Viewport, type CameraState, type RenderBody, type RenderDisplay, type RenderImage, type RenderSections, type RenderSketch } from '@pushform/render';
 import { bodiesToRender, displayToRender, fogToRender, imagesToRender, shadowsToRender, sketchesToRender, withRenderImageStore } from '../engine/renderAdapter';
 import { sectionsToRender } from '../engine/sectionAdapter';
@@ -172,13 +172,61 @@ export function viewGeometry(model: LayoutViewportModel, scene: string | null): 
   if (!byScene) sceneGeometry.set(model, byScene = new Map());
   const cached = byScene.get(saved.name);
   if (cached) return cached;
-  const hidden = new Set(saved.hiddenTags);
-  const tags = new Map([...model.state.tags].map(([id, tag]) => [id, { ...tag, visible: !hidden.has(tag.name) }]));
-  const state = { ...model.state, tags };
+  const state = withSceneTags(model.state, saved);
   const geometry = { ...withRenderImageStore(model.images, () => ({ bodies: bodiesToRender(state), sketches: sketchesToRender(state) })),
     pictures: imagesToRender(state, model.images) };
   byScene.set(saved.name, geometry);
   return geometry;
+}
+
+/** The model with a scene's hidden tags hidden and every other tag shown. */
+function withSceneTags(state: DocumentState, saved: ImportedScene): DocumentState {
+  const hidden = new Set(saved.hiddenTags);
+  return { ...state, tags: new Map([...state.tags].map(([id, tag]) => [id, { ...tag, visible: !hidden.has(tag.name) }])) };
+}
+
+/** The style settings that decide how section planes and cuts are drawn. */
+const SECTION_SETTINGS = ['sectionPlanesVisible', 'sectionCutsVisible', 'sectionFillEnabled', 'activeSection', 'inactiveSection', 'sectionFill',
+  'sectionLine', 'sectionLineWidth'] as const satisfies readonly (keyof ModelingColors)[];
+
+const sceneSections = new WeakMap<LayoutViewportModel, Map<string, DocumentState>>();
+/**
+ * The model as a view of `scene` shows its section planes and cuts, and picks through them: with the scene's tag
+ * visibility when it saves tags, the active section plane it saved for each container when it saves section planes,
+ * and its style's section display settings when it saves its style. Otherwise, and for a view without a scene, the
+ * model's own.
+ */
+export function viewSectionState(model: LayoutViewportModel, scene: string | null): DocumentState {
+  if (scene === null) return model.state;
+  let byScene = sceneSections.get(model);
+  if (!byScene) sceneSections.set(model, byScene = new Map());
+  const cached = byScene.get(scene);
+  if (cached) return cached;
+  const imported = model.scenes.find(candidate => candidate.name === scene);
+  let saved: Scene | undefined;
+  for (const id of model.state.sceneOrder) {
+    const candidate = model.state.scenes.get(id);
+    if (candidate?.name === scene) { saved = candidate; break; }
+  }
+  let state = imported?.usesTags ? withSceneTags(model.state, imported) : model.state;
+  if (saved?.flags.useSectionPlanes) {
+    // Each container cuts with the scene's plane among its own, or not at all.
+    const active = new Set<number>(saved.activeSectionPlanes);
+    state = { ...state, definitions: new Map([...state.definitions].map(([id, definition]) => {
+      const entities = definition.entities;
+      const plane = [...entities.sectionPlanes.keys()].find(planeId => active.has(planeId)) ?? null;
+      return [id, plane === entities.activeSectionPlaneId ? definition : { ...definition, entities: { ...entities, activeSectionPlaneId: plane } }];
+    })) };
+  }
+  const style = saved?.flags.useStyle && saved.styleId !== null ? state.styles.get(saved.styleId) : undefined;
+  const current = state.styles.get(state.activeStyleId);
+  if (style && current && style !== current) {
+    const modeling = { ...current.modeling };
+    for (const key of SECTION_SETTINGS) (modeling as Record<string, unknown>)[key] = style.modeling[key];
+    state = { ...state, styles: new Map(state.styles).set(state.activeStyleId, { ...current, modeling }) };
+  }
+  byScene.set(scene, state);
+  return state;
 }
 
 /** Whether a view of `scene` draws nothing at all: no bodies, edges or pictures are shown in it. */
@@ -440,7 +488,7 @@ async function drain(): Promise<void> {
           const geometry = viewGeometry(model, job.scene);
           withRenderImageStore(model.images, () => { view.setBodies(geometry.bodies); view.setSketches(geometry.sketches); });
           view.setImages(geometry.pictures);
-          view.setSections(withSectionSheet(sectionsToRender(model.state), job.sheet));
+          view.setSections(withSectionSheet(sectionsToRender(viewSectionState(model, job.scene)), job.sheet));
           const { shadows, ...display }: Partial<LayoutViewportDisplay> = job.display ?? {};
           view.setDisplay({ ...model.display, ...display });
           // The view's own sun and shadows, else the model's.

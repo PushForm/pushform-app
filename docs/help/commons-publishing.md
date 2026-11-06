@@ -12,17 +12,19 @@ Publishing later changes requires another explicit save and publication. Saving 
 
 ## Publish through the Commons website
 
-Sign in and complete the initial PushForm account setup. Create a public Commons profile if you want to publish original work under your name. This public profile is separate from the private name and account details used for signup.
+Sign in and complete the initial PushForm account setup. The first time you publish, create a public Commons profile; your models are published under it. This public profile is separate from the private name and account details used for signup.
 
-Choose **Publish model**, enter the model details and choose **My original work** or **Redistributed with permission**. Original work offers CC BY 4.0, CC BY-NC 4.0 or CC0 1.0. For redistribution, enter the original creator, source and exact upstream license. Add every applicable asset license and attribution notice; the uploader does not automatically become the original creator.
+Choose **Upload model** and drop or choose one model file. While it uploads and its preview is prepared, enter a title, a category and an optional description, then choose a license: one of the Creative Commons 4.0 licenses, CC0 1.0 (public domain), or **Other** to describe your own terms. CC BY 4.0 is selected to start, and each choice shows a short summary of what others may do. A copy of a Commons model keeps its original licenses and credits instead of offering a license choice; keep the original creator in **Creator credit** when you redistribute someone else's work.
 
-Choose **Save private draft**, then attach the model files. Each file can be up to 128 MiB; a revision can hold 20 files and 512 MiB total. Pending uploads must finish or be removed before publication. Choose **Publish model**; this confirms your redistribution rights under the Terms of Use. Automatic checks determine whether the files and metadata are complete; ordinary publication does not wait for admin approval. Saving or uploading alone keeps the draft private.
+A model file can be up to 128 MiB. Your details are kept in a private draft; **Save draft** saves them without publishing. The upload must finish before you can publish. Choose **Publish model**; this confirms under the Terms of Use that you have the right to share the model under the license you chose. Automatic checks determine whether the files and metadata are complete; ordinary publication does not wait for admin approval. Saving or uploading alone keeps the draft private.
 
-Use **Your models** to reopen a draft, create a correction or withdraw your publication. Corrections create new immutable revisions; the previous published revision stays visible until the correction is published. Attach the files for the new revision again and preserve all required license and credit notices. Withdrawing stops new downloads, while existing copies keep the rights granted by their licenses.
+## Manage your published models
+
+Use **My models** to edit or publish a draft, view a published model, withdraw it or delete a draft. Editing a published model keeps its files; **Publish changes** creates a new revision, and the previous published revision stays visible until then. Keep all required license and credit notices. Withdrawing stops new downloads, while existing copies keep the rights granted by their licenses.
 
 ## Add an optional preview image
 
-After saving a private draft, use **Preview image** to attach one PNG or JPEG. The image must be no larger than 8 MiB, 8,192 pixels on either side, or 20 megapixels. Remove the current image before replacing it. Include the image’s required licenses and creator credits in the model details. An image alone cannot be published as a model.
+In the upload dialog, use **Add a cover photo** to attach one PNG or JPEG. The image must be no larger than 8 MiB, 8,192 pixels on either side, or 20 megapixels. Use **Replace cover photo** to change it. Include the image’s required licenses and creator credits in the model details. An image alone cannot be published as a model.
 
 Commons generates its own thumbnail from supported geometry when no image is supplied, using the same front-right-top isometric orientation as the editor. An uploaded image becomes the listing image; the interactive geometry preview remains available. The image stays private until you publish and becomes unavailable when the model is withdrawn.
 

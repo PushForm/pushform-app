@@ -128,7 +128,7 @@ it('docks the chat beside the editor from the left menu bar icon, sends the sess
   fireEvent.click(within(await cards()).getByRole('button', { name: /^Request a feature or change/ }));
   await waitFor(() => expect(calls.find(call => call.path === '/conversations/conv-1/messages')).toBeTruthy());
   expect(calls.find(call => call.path === '/conversations')?.body).toMatchObject({ kind: 'intake', path: 'open', screen: { editor: 'model', documentType: 'model', build: { version: '1.2.3', commit: 'abc1234' } } });
-  expect(calls.find(call => call.path === '/conversations/conv-1/messages')?.body).toEqual({ text: 'Request a feature or change', intent: 'feature', document: { type: 'model', apiVersion: 1, edit: 1, guidance: 1 } });
+  expect(calls.find(call => call.path === '/conversations/conv-1/messages')?.body).toEqual({ text: 'Request a feature or change', intent: 'feature', document: { type: 'model', apiVersion: 1, edit: 1, guidance: 1, clone: 1 } });
   await waitFor(() => expect(screen.getByRole('log', { name: 'Conversation' }).textContent).toContain('What are you trying to do?'));
   expect(screen.queryByRole('button', { name: 'File request' })).toBeNull();
   expect(screen.queryByText(/preview/i)).toBeNull();
@@ -281,7 +281,7 @@ it('keeps a separate conversation for each document tab, offering guidance and d
   fireEvent.change(await screen.findByLabelText('Your message'), { target: { value: 'hello from the model' } });
   fireEvent.click(screen.getByRole('button', { name: 'Send' }));
   await screen.findByText('What are you trying to do?');
-  expect(calls.find(call => call.path === '/conversations/conv-1/messages')?.body).toEqual({ text: 'hello from the model', document: { type: 'model', apiVersion: 1, edit: 1, guidance: 1 } });
+  expect(calls.find(call => call.path === '/conversations/conv-1/messages')?.body).toEqual({ text: 'hello from the model', document: { type: 'model', apiVersion: 1, edit: 1, guidance: 1, clone: 1 } });
   fireEvent.click(icon());
   fireEvent.click(screen.getByRole('button', { name: 'New document' }));
   fireEvent.click(screen.getByRole('menuitem', { name: 'Layout' }));
@@ -293,7 +293,7 @@ it('keeps a separate conversation for each document tab, offering guidance and d
   fireEvent.change(within(panel).getByLabelText('Your message'), { target: { value: 'add a box' } });
   fireEvent.click(within(panel).getByRole('button', { name: 'Send' }));
   await waitFor(() => expect(calls.filter(call => call.path === '/conversations/conv-1/messages')).toHaveLength(2));
-  expect(calls.filter(call => call.path === '/conversations/conv-1/messages')[1]!.body).toEqual({ text: 'add a box', document: { type: 'layout', apiVersion: 1, guidance: 1 } });
+  expect(calls.filter(call => call.path === '/conversations/conv-1/messages')[1]!.body).toEqual({ text: 'add a box', document: { type: 'layout', apiVersion: 1, guidance: 1, clone: 1 } });
   fireEvent.click(icon());
   fireEvent.click(screen.getByRole('button', { name: /^3D model:/ }));
   fireEvent.click(icon());
@@ -423,4 +423,38 @@ it('opens Save As from the menu and command in both editors without redundant Ho
   fireEvent.change(search, { target: { value: 'Save as Template' } });
   fireEvent.keyDown(search, { key: 'Enter' });
   await screen.findByRole('dialog', { name: 'Save as Template' });
+});
+
+it('clones the model from a chat card into a new tab, whose own chat carries on from the handoff', async () => {
+  const base = globalThis.fetch;
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+    const path = url.pathname.replace('/functions/v1/fr-conversation', '');
+    const body = init?.body ? JSON.parse(init.body as string) as { text?: string; handoff?: unknown } : undefined;
+    if (path === '/conversations/conv-1/messages' && body?.text === 'clone this model, but make it 36 wide') {
+      calls.push({ path, headers: {}, body });
+      if (body.handoff) return sse([{ event: 'text', data: { delta: 'Widening the copy to 36 in.' } }, { event: 'done', data: { messageCount: 1, limitReached: false } }]);
+      return sse([{ event: 'text', data: { delta: 'I can make a copy.' } },
+        { event: 'tool_request', data: { calls: [{ id: 'c1', name: 'document_clone', input: { name: 'Model 36 wide', summary: 'An empty model; make it 36 in wide.' } }] } },
+        { event: 'done', data: { messageCount: 1, limitReached: false, ended: false, awaitingTools: true } }]);
+    }
+    if (path === '/conversations/conv-1/tool-results') { calls.push({ path, headers: {}, body }); return sse([{ event: 'done', data: { messageCount: 1, limitReached: false, ended: false } }]); }
+    return base(input, init);
+  }));
+  render(<App initialScreen="workspace" app={app} cloud={cloud} buildInfo={build} requests={requests} />);
+  fireEvent.click(icon());
+  fireEvent.change(await screen.findByLabelText('Your message'), { target: { value: 'clone this model, but make it 36 wide' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+  const card = await screen.findByRole('region', { name: 'Clone this document?' });
+  expect(screen.getAllByRole('button', { name: /^3D model:/ })).toHaveLength(1);
+  fireEvent.click(within(card).getByRole('button', { name: 'Clone document' }));
+  await waitFor(() => expect(screen.getAllByRole('button', { name: /^3D model:/ })).toHaveLength(2));
+  await waitFor(() => expect(calls.filter(call => call.path === '/conversations/conv-1/messages' && (call.body as { handoff?: unknown }).handoff)).toHaveLength(1));
+  const handedOff = calls.find(call => (call.body as { handoff?: unknown })?.handoff)!.body;
+  expect(handedOff).toMatchObject({ text: 'clone this model, but make it 36 wide', handoff: { summary: 'An empty model; make it 36 in wide.' }, document: { type: 'model', clone: 1 } });
+  expect(calls.find(call => call.path === '/conversations/conv-1/tool-results')?.body).toEqual({ results: [{ toolUseId: 'c1', content: JSON.stringify({ ok: true, choice: 'clone', name: 'Model 36 wide' }), isError: false }] });
+  const panel = await screen.findByRole('region', { name: 'AI Chat' });
+  await waitFor(() => expect(panel.textContent).toContain('Widening the copy to 36 in.'));
+  expect(panel.textContent).toContain('Continued from');
+  expect(screen.getByRole('button', { name: /^3D model: Model 36 wide/ })).toBeTruthy();
 });

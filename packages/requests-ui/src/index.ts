@@ -7,12 +7,12 @@ export { RequestsClient, RequestsError, parseEventStream, normalizeConversation,
 export type {
   RequestsClientOptions, ErrorCode, ConversationKind, ConversationPath, IntentPath, ConversationStatus, EffectiveRole, ChangeClass, Area,
   FeatureBrief, ProblemReport, Brief, ScreenInfo, Me, ConversationSummary, Message, Conversation, FiledRequest, StreamEvent,
-  DocumentDescriptor, ToolCall, ToolCallResult, ToolImage, Attachment, AttachmentKind, AttachmentFile,
+  DocumentDescriptor, Handoff, ToolCall, ToolCallResult, ToolImage, Attachment, AttachmentKind, AttachmentFile,
 } from './client';
 export { readDrafts, rememberDraft, forgetDraft, draftScope, DRAFT_TTL_MS, HOME_SCOPE } from './drafts';
 export type { DraftRecord } from './drafts';
 export { Chat } from './Chat';
-export type { ChatProps, DocumentCopy, DocumentToolSession, DocumentToolOutcome } from './Chat';
+export type { ChatProps, ClonedDocument, CloneRequest, DocumentCopy, DocumentToolSession, DocumentToolOutcome } from './Chat';
 export { Popover } from './Popover';
 export type { PopoverProps } from './Popover';
 export { DockedPanel } from './DockedPanel';

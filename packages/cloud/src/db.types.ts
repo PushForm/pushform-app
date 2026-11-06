@@ -93,6 +93,76 @@ export type Database = {
                   Relationships: [
 
                   ]
+                },"ai_credit_buckets": {
+                  Row: {
+                    "anchor_at": string,"balance": number,"created_at": string,"id": string,"next_refill_at": string | null,"owner_id": string,"size": number,"source": string,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "anchor_at"?: string,"balance": number,"created_at"?: string,"id"?: string,"next_refill_at"?: string | null,"owner_id": string,"size": number,"source": string,"updated_at"?: string
+                  }
+                  Update: {
+                    "anchor_at"?: string,"balance"?: number,"created_at"?: string,"id"?: string,"next_refill_at"?: string | null,"owner_id"?: string,"size"?: number,"source"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+
+                  ]
+                },"ai_credit_settings": {
+                  Row: {
+                    "free_grant_credits": number,"id": boolean,"updated_at": string,"updated_by": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "free_grant_credits": number,"id"?: boolean,"updated_at"?: string,"updated_by"?: string
+                  }
+                  Update: {
+                    "free_grant_credits"?: number,"id"?: boolean,"updated_at"?: string,"updated_by"?: string
+                  }
+                  Relationships: [
+
+                  ]
+                },"ai_model_rates": {
+                  Row: {
+                    "effective_at": string,"model": string,"usd_cache_read": number,"usd_cache_write": number,"usd_in": number,"usd_out": number,"w_cache_read": number,"w_cache_write": number,"w_in": number,"w_out": number
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "effective_at"?: string,"model": string,"usd_cache_read": number,"usd_cache_write": number,"usd_in": number,"usd_out": number,"w_cache_read": number,"w_cache_write": number,"w_in": number,"w_out": number
+                  }
+                  Update: {
+                    "effective_at"?: string,"model"?: string,"usd_cache_read"?: number,"usd_cache_write"?: number,"usd_in"?: number,"usd_out"?: number,"w_cache_read"?: number,"w_cache_write"?: number,"w_in"?: number,"w_out"?: number
+                  }
+                  Relationships: [
+
+                  ]
+                },"ai_plan_mappings": {
+                  Row: {
+                    "effective_at": string,"id": string,"kind": string,"monthly_credits": number,"name": string,"note": string,"price_id": string | null,"product_id": string | null,"updated_by": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "effective_at"?: string,"id"?: string,"kind": string,"monthly_credits": number,"name": string,"note"?: string,"price_id"?: string | null,"product_id"?: string | null,"updated_by"?: string
+                  }
+                  Update: {
+                    "effective_at"?: string,"id"?: string,"kind"?: string,"monthly_credits"?: number,"name"?: string,"note"?: string,"price_id"?: string | null,"product_id"?: string | null,"updated_by"?: string
+                  }
+                  Relationships: [
+
+                  ]
+                },"ai_usage_events": {
+                  Row: {
+                    "cache_read_tokens": number,"cache_write_tokens": number,"call_id": string,"conversation_id": string | null,"cost_usd": number,"created_at": string,"credits": number,"debited_free": number,"debited_monthly": number,"estimated": boolean,"id": string,"input_tokens": number,"model": string,"org_id": string | null,"output_tokens": number,"owner_id": string | null,"path": string,"provider": string,"reason": string | null,"turn_id": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "cache_read_tokens"?: number,"cache_write_tokens"?: number,"call_id": string,"conversation_id"?: string | null,"cost_usd"?: number,"created_at"?: string,"credits": number,"debited_free"?: number,"debited_monthly"?: number,"estimated"?: boolean,"id"?: string,"input_tokens"?: number,"model": string,"org_id"?: string | null,"output_tokens"?: number,"owner_id"?: string | null,"path": string,"provider"?: string,"reason"?: string | null,"turn_id"?: string | null
+                  }
+                  Update: {
+                    "cache_read_tokens"?: number,"cache_write_tokens"?: number,"call_id"?: string,"conversation_id"?: string | null,"cost_usd"?: number,"created_at"?: string,"credits"?: number,"debited_free"?: number,"debited_monthly"?: number,"estimated"?: boolean,"id"?: string,"input_tokens"?: number,"model"?: string,"org_id"?: string | null,"output_tokens"?: number,"owner_id"?: string | null,"path"?: string,"provider"?: string,"reason"?: string | null,"turn_id"?: string | null
+                  }
+                  Relationships: [
+
+                  ]
                 },"app_events": {
                   Row: {
                     "app_build": string | null,"app_version": string | null,"category": string | null,"client_at": string | null,"count": number,"created_at": string,"document_type": string | null,"duration_seconds": number | null,"id": number,"kind": string,"owner_id": string,"tool": string | null
@@ -1126,6 +1196,37 @@ isOneToOne: false
 "admin_webhooks":
 { Args: { "p_source": string }; Returns: Json
                            },
+"ai_add_months":
+{ Args: { "p_from": string,"p_months": number }; Returns: string
+                           },
+"ai_credit_record":
+{ Args: { "p_cache_read": number,"p_cache_write": number,"p_call_id": string,"p_conversation": string,"p_estimated": boolean,"p_input": number,"p_model": string,"p_org": string,"p_output": number,"p_owner": string,"p_path": string,"p_provider": string,"p_turn": string }; Returns: Json
+                           },
+"ai_credit_refill_due":
+{ Args: Record<PropertyKey, never>; Returns: number
+                           },
+"ai_credit_sync":
+{ Args: { "p_owner": string }; Returns: Json
+                           },
+"ai_rate_for":
+{ Args: { "p_at": string,"p_model": string }; Returns: {
+              "effective_at": string,
+"model": string,
+"usd_cache_read": number,
+"usd_cache_write": number,
+"usd_in": number,
+"usd_out": number,
+"w_cache_read": number,
+"w_cache_write": number,
+"w_in": number,
+"w_out": number
+            }
+                          SetofOptions: {
+        from: "*"
+        to: "ai_model_rates"
+        isOneToOne: true
+        isSetofReturn: false
+      } },
 "app_record_events":
 { Args: { "p_events": Json }; Returns: number
                            },

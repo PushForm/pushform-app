@@ -14,7 +14,7 @@ const STATUS: Record<HttpErrorCode, number> = {
   unavailable: 503, not_implemented: 501,
 };
 /** Why a `limit` or `rate_limited` answer was given, so a client shows the server's message instead of guessing the cause. */
-export type LimitKind = 'credits_exhausted' | 'open_requests' | 'images' | 'rate_limited';
+export type LimitKind = 'credits_exhausted' | 'open_requests' | 'open_conversations' | 'images' | 'rate_limited';
 export class HttpError extends Error {
   readonly status: number;
   constructor(readonly code: HttpErrorCode, message: string, readonly details?: unknown, readonly kind?: LimitKind) { super(message); this.name = 'HttpError'; this.status = STATUS[code]; }

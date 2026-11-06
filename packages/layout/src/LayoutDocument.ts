@@ -188,6 +188,20 @@ export interface LayoutViewportDisplay {
   hiddenGeometry: boolean;
   /** The view's own sun and shadow settings; absent uses the model's. */
   shadows?: ShadowSettings & { nativeUnknownFields?: Map<string, Uint8Array[]> };
+  /** The view's own section display settings; absent uses its scene's or the model's. */
+  sections?: LayoutViewportSections;
+}
+
+/** How a view draws section planes and cuts. Settings left out follow the view's scene or model. Colors are 0-1 RGB. */
+export interface LayoutViewportSections {
+  planes: boolean;
+  cuts: boolean;
+  fill?: boolean;
+  lineWidth?: number;
+  activeColor?: [number, number, number];
+  inactiveColor?: [number, number, number];
+  fillColor?: [number, number, number];
+  lineColor?: [number, number, number];
 }
 
 export const LAYOUT_VIEWPORT_FACE_STYLES: readonly LayoutViewportDisplay['faceStyle'][] = ['wireframe', 'hiddenLine', 'shaded', 'shadedTextured', 'monochrome'];
@@ -202,8 +216,13 @@ export interface LayoutViewport {
   camera: LayoutViewportCamera;
   /** Keep the model's paper position and size when resizing its frame; absent means true. */
   preserveScaleOnResize?: boolean;
-  /** The model scene the camera came from, or null for a custom view. */
+  /**
+   * The model scene the view shows: its camera, unless `cameraModified`, and its tag visibility and section cuts. Null
+   * for a view of no scene.
+   */
   scene: string | null;
+  /** The camera was changed after the scene was chosen (navigation, a standard view or the projection); absent is false. */
+  cameraModified?: boolean;
   /** Painted behind the model within the frame or crop; null leaves the paper visible. */
   background: string | null;
   /**

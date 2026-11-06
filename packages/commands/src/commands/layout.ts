@@ -637,12 +637,15 @@ export const layoutCommands: readonly AnyCommand[] = [
   }),
   defineCommand({
     id: 'layout.viewport.setCamera', title: 'Change View', category: 'layout', menu: 'Tools', undoable: true,
-    params: z.object({ pageId: id, entityId: id, camera: viewportCamera, scene: z.string().nullable() }),
+    // `cameraModified`: the camera is no longer the scene's own, while the scene's other settings still apply.
+    params: z.object({ pageId: id, entityId: id, camera: viewportCamera, scene: z.string().nullable(), cameraModified: z.boolean().default(false) }),
     run: (ctx, params) => host(ctx).edit('Change View', draft => {
       const entity = editablePath(draft, params.pageId, params.entityId);
       if (!isViewport(entity)) throw new Error('Object is not a model view');
       entity.image.viewport.camera = params.camera;
       entity.image.viewport.scene = params.scene;
+      if (params.scene !== null && params.cameraModified) entity.image.viewport.cameraModified = true;
+      else delete entity.image.viewport.cameraModified;
     }),
   }),
   defineCommand({

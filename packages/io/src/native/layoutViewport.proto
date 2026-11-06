@@ -32,6 +32,17 @@ message LayoutViewportDisplay {
   required bool xray = 5;
   required bool hidden_geometry = 6;
   optional LayoutViewportOptionalRecord shadows = 7; // value is existing Shadows record
+  optional LayoutViewportSections sections = 8;
+}
+message LayoutViewportSections {
+  required bool planes = 1;
+  required bool cuts = 2;
+  optional bool fill = 3;
+  optional double line_width = 4;
+  optional bytes active_color = 5; // three little-endian doubles, 0-1 RGB
+  optional bytes inactive_color = 6;
+  optional bytes fill_color = 7;
+  optional bytes line_color = 8;
 }
 message LayoutViewportCache {
   required LayoutViewportCamera camera = 1;
@@ -51,4 +62,5 @@ message LayoutViewport {
   optional string background = 7;
   optional LayoutViewportCache cache = 8; // absent means null
   optional LayoutViewportOptionalRecord display = 9; // value is LayoutViewportDisplay
+  optional bool camera_modified = 10; // absent means false
 }

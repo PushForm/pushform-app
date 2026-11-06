@@ -32,7 +32,8 @@ export function LayoutViewportPanel({ entity, state, disabled, navigating, onCam
   state: LayoutDocumentState;
   disabled: boolean;
   navigating: boolean;
-  onCamera: (camera: LayoutViewportCamera, scene: string | null) => void;
+  /** `cameraModified`: the camera is no longer the scene's own; the scene's other settings still apply. */
+  onCamera: (camera: LayoutViewportCamera, scene: string | null, cameraModified: boolean) => void;
   onNavigate: (navigating: boolean) => void;
   onResizeMode: (preserve: boolean) => void;
 }): JSX.Element | null {
@@ -50,7 +51,8 @@ export function LayoutViewportPanel({ entity, state, disabled, navigating, onCam
   if (!viewport) return null;
   const failure = layoutViewportFailure(state, viewport.source) ?? layoutViewportProblem(state, entity);
   const scenes = model?.scenes.filter(scene => scene.camera) ?? [];
-  const sceneValue = viewport.scene !== null && scenes.some(scene => scene.name === viewport.scene) ? viewport.scene : '';
+  // A view whose camera changed after its scene was chosen offers that scene again, to restore its camera.
+  const sceneValue = viewport.scene !== null && !viewport.cameraModified && scenes.some(scene => scene.name === viewport.scene) ? viewport.scene : '';
   const unavailable = disabled || !model;
   const parallel = viewport.camera.projection === 'parallel', scale = viewport.camera.scale;
   const preset = LAYOUT_DIMENSION_SCALES.findIndex(item => item.label === layoutDimensionScaleLabel(scale));
@@ -60,20 +62,20 @@ export function LayoutViewportPanel({ entity, state, disabled, navigating, onCam
       <h3>Model view</h3>
       <p className="pf-layout-panel-note" role="status">{failure ? `${STATUS.unavailable} ${failure}` : model ? statusText(state, entity) : 'Loading the model…'}</p>
       <label>Projection<select value={viewport.camera.projection} disabled={disabled}
-        onChange={event => onCamera(projectionViewportCamera(viewport.camera, event.target.value as LayoutViewportCamera['projection'], entity.points), viewport.scene)}>
+        onChange={event => onCamera(projectionViewportCamera(viewport.camera, event.target.value as LayoutViewportCamera['projection'], entity.points), viewport.scene, true)}>
         <option value="parallel">Parallel</option><option value="perspective">Perspective</option>
       </select></label>
       <label>Drawing scale<select value={parallel ? preset < 0 ? 'custom' : String(preset) : 'perspective'} disabled={disabled || !parallel}
         onChange={event => {
           const choice = LAYOUT_DIMENSION_SCALES[Number(event.target.value)];
-          if (choice) onCamera({ ...viewport.camera, scale: choice.scale }, viewport.scene);
+          if (choice) onCamera({ ...viewport.camera, scale: choice.scale }, viewport.scene, !!viewport.cameraModified);
         }}>
         {!parallel ? <option value="perspective">Not to scale</option> : null}
         {preset < 0 ? <option value="custom">{layoutDimensionScaleLabel(scale)}</option> : null}
         {LAYOUT_DIMENSION_SCALES.map((item, index) => <option key={index} value={index}>{item.label}</option>)}
       </select></label>
       {parallel ? <ViewportScaleInput key={`${entity.id}:${scale}`} scale={scale} disabled={disabled}
-        onCommit={next => onCamera({ ...viewport.camera, scale: next }, viewport.scene)} />
+        onCommit={next => onCamera({ ...viewport.camera, scale: next }, viewport.scene, !!viewport.cameraModified)} />
         : <p className="pf-layout-panel-note">Perspective views have no uniform drawing scale.</p>}
       <label><input type="checkbox" checked={preserve} disabled={disabled}
         onChange={event => onResizeMode(event.target.checked)} /> Preserve scale on resize</label>
@@ -86,15 +88,15 @@ export function LayoutViewportPanel({ entity, state, disabled, navigating, onCam
           onChange={(event) => {
             const scene = scenes.find(candidate => candidate.name === event.target.value);
             const camera = scene && sceneViewportCamera(scene, entity.points);
-            if (scene && camera) onCamera(camera, scene.name);
+            if (scene && camera) onCamera(camera, scene.name, false);
           }}>
-          <option value="" disabled>{viewport.scene !== null && !sceneValue ? viewport.scene : 'Custom view'}</option>
+          <option value="" disabled>{viewport.scene === null ? 'Custom view' : viewport.cameraModified ? `${viewport.scene} (modified)` : viewport.scene}</option>
           {scenes.map(scene => <option key={scene.name} value={scene.name}>{scene.name}</option>)}
         </select>
       </label>
       <div className="pf-layout-view-buttons" role="group" aria-label="Standard views">
         {VIEWS.map(view => <button key={view.id} type="button" disabled={unavailable}
-          onClick={() => onCamera(standardViewportCamera(viewport.camera, view.id, entity.points, model?.bounds ?? null), null)}>{view.label}</button>)}
+          onClick={() => onCamera(standardViewportCamera(viewport.camera, view.id, entity.points, model?.bounds ?? null), viewport.scene, true)}>{view.label}</button>)}
       </div>
       <button type="button" aria-pressed={navigating} disabled={unavailable} onClick={() => onNavigate(!navigating)}>
         {navigating ? 'Done navigating' : 'Navigate view'}

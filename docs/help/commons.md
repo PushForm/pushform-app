@@ -28,7 +28,7 @@ Your own profile shows **My Collections** above **My Models**, including your pr
 
 ## Feature a model or collection
 
-Commons admins see **Feature** on published model pages and nonempty public collection pages. It adds the item to the end of Featured immediately; **Featured · Manage** opens the admin manager. Other accounts do not see this action.
+Commons admins see **Feature** on published model pages and nonempty public collection pages. It adds the item to the end of Featured immediately, and the button disappears once the item is featured. Other accounts do not see this action.
 
 In **Admin → Commons → Featured**, choose **Add featured item**, search for a model or collection, then feature it. **Move up** and **Move down** change the homepage order. **Remove** takes an entry out of Featured without deleting its model or collection. Entries that become private, empty or withdrawn stay in the manager as unavailable and are hidden from the homepage. If the list changed in another session, use **Reload list** before changing it again.
 

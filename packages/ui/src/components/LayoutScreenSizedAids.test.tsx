@@ -64,3 +64,51 @@ it('keeps the placement marker, grid lines and margin guide the same size on scr
   expect(far.marker).toBe(near.marker);
   expect(near.marker).toContain('<circle r="2.4"');
 });
+
+/** Paints a rectangle in vertex editing at a zoom, recording the circles drawn on its corners. */
+function vertexCirclesAt(zoom: number): { radius: number; width: number }[] {
+  let circles: { x: number; y: number; radius: number; width: number }[] = [];
+  let pending: { x: number; y: number; radius: number } | null = null;
+  const methods = new Map<string | symbol, unknown>();
+  const ctx = new Proxy({}, {
+    get: (_, key) => {
+      if (!methods.has(key)) methods.set(key, vi.fn());
+      return methods.get(key);
+    },
+    set: (_, key, value) => { methods.set(key, value); return true; },
+  }) as CanvasRenderingContext2D;
+  methods.set('setTransform', () => { circles = []; });
+  methods.set('beginPath', () => { pending = null; });
+  methods.set('arc', (x: number, y: number, radius: number) => { pending = { x, y, radius }; });
+  methods.set('stroke', () => { if (pending) circles.push({ ...pending, width: ctx.lineWidth }); });
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(function (this: HTMLCanvasElement) {
+    return this.getAttribute('aria-label') === 'Page 1 canvas' ? ctx : null;
+  } as typeof HTMLCanvasElement.prototype.getContext);
+  vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockReturnValue({
+    left: 0, top: 0, width: 891, height: 630, right: 891, bottom: 630, x: 0, y: 0, toJSON: () => ({}),
+  });
+  const app = createApp({ demo: false, expose: false });
+  const session = new DocumentSession(app, () => createApp({ demo: false, expose: false }), false, null);
+  const tab = session.newLayout();
+  tab.commands.execute('layout.shape.add', { pageId: tab.activePageId, points: [[10, 10], [50, 10], [50, 40], [10, 40]], closed: true });
+  tab.workspace.zoomToPageOnOpen = false;
+  tab.workspace.zoom = zoom;
+  render(<LayoutWorkspace tab={tab} session={session} />);
+  const canvas = screen.getByLabelText('Page 1 canvas');
+  fireEvent.pointerDown(canvas, { button: 0, pointerId: 1, clientX: 90, clientY: 75 });
+  fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 90, clientY: 75 });
+  fireEvent.doubleClick(canvas, { clientX: 90, clientY: 75 });
+  const corners = circles.filter(circle => circle.x === 10 && circle.y === 10);
+  cleanup(); session.dispose(); app.dispose(); vi.restoreAllMocks();
+  return corners;
+}
+
+it('keeps the vertex-editing circles the same size on screen at any zoom', () => {
+  const near = vertexCirclesAt(1).at(-1), far = vertexCirclesAt(4).at(-1);
+  if (!near || !far) throw new Error('The vertex circle was not painted.');
+  // 3 CSS pixels per page millimetre at zoom 1: a 4 px radius and a 1 px outline, like the 9 px resize handles.
+  expect(near.radius * 3).toBeCloseTo(4);
+  expect(near.width * 3).toBeCloseTo(1);
+  expect(far.radius * 4).toBeCloseTo(near.radius);
+  expect(far.width * 4).toBeCloseTo(near.width);
+});

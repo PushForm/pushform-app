@@ -4513,7 +4513,6 @@ function LayoutTextEditor({ entity, disabled, onChange, onBounds, fields, state,
   onChange: (values: Partial<NonNullable<LayoutEntity['text']>>) => void;
 }): JSX.Element {
   const text = entity.text!;
-  const contentRef = useRef<HTMLTextAreaElement>(null);
   const [token, setToken] = useState('PageNumber');
   const modelFields = layoutModelFields(entity);
   const modelField = !!modelFields && Object.hasOwn(modelFields, token);
@@ -4522,17 +4521,8 @@ function LayoutTextEditor({ entity, disabled, onChange, onBounds, fields, state,
   const fontAvailable = fontStatus === 'ready' || layoutFontAvailable(text.fontFamily);
   return <fieldset disabled={disabled}>
     <legend>{entity.kind === 'label' ? 'Label' : 'Text'}</legend>
-    <label>Text content<textarea ref={contentRef} aria-label="Text content" value={text.content}
+    <label>Text content<textarea aria-label="Text content" value={text.content}
       onChange={(event) => onChange(editLayoutTextContent(text, event.target.value))} /></label>
-    <div className="pf-layout-inline-formatting" aria-label="Inline formatting">
-      {(['bold', 'italic', 'underline'] as const).map((key) => <button type="button" key={key}
-        onClick={() => {
-          const input = contentRef.current;
-          if (!input || input.selectionStart === input.selectionEnd) return;
-          onChange({ spans: [...(text.spans ?? []), { start: input.selectionStart, end: input.selectionEnd,
-            bold: text.bold, italic: text.italic, underline: text.underline, [key]: true }] });
-        }}>Apply {key} to selection</button>)}
-    </div>
     <label>List<select value={text.list ?? 'none'} onChange={(event) => onChange({ list: event.target.value as 'none' | 'bullet' | 'number' })}>
       {['none', 'bullet', 'number'].map((key) => <option key={key}>{key}</option>)}
     </select></label>

@@ -59,6 +59,8 @@ export class ToolManager implements ToolHost {
   private lastStatus: ToolStatus = EMPTY_STATUS;
   /** The operation the bar shows as applied: the tool that committed it and its undo entry. */
   private applied: { tool: Tool; entry: unknown } | null = null;
+  /** Ctrl or Alt pressed with nothing else since: a tap if released next. */
+  private pendingTap: string | null = null;
 
   constructor(
     readonly commands: CommandRegistry,
@@ -218,6 +220,7 @@ export class ToolManager implements ToolHost {
     }
     // A click in the view ends the applied state: the bar goes back to the next operation's settings.
     this.applied = null;
+    this.pendingTap = null;
     this.call(() => (this.temp ?? this.active)?.onPointerDown?.(e));
     this.afterInteraction();
   }
@@ -251,6 +254,7 @@ export class ToolManager implements ToolHost {
   }
 
   wheel(e: ToolWheelEvent): void {
+    this.pendingTap = null;
     const consumed = this.call(() => (this.temp ?? this.active)?.onWheel?.(e));
     if (consumed) {
       this.afterInteraction();
@@ -264,6 +268,12 @@ export class ToolManager implements ToolHost {
 
   /** Returns true when the key was consumed by the manager or the active tool. */
   keyDown(e: ToolKeyEvent): boolean {
+    // Ctrl and Alt reach tools only as taps: pressed and released with nothing between.
+    if (e.key === 'Control' || e.key === 'Alt') {
+      if (!e.repeat) this.pendingTap = e.key;
+      return true;
+    }
+    this.pendingTap = null;
     if (e.key === 'Escape') {
       this.cancel();
       return true;
@@ -282,6 +292,17 @@ export class ToolManager implements ToolHost {
   }
 
   keyUp(e: ToolKeyEvent): boolean {
+    if (e.key === 'Control' || e.key === 'Alt') {
+      const tap = this.pendingTap === e.key;
+      this.pendingTap = null;
+      if (tap) {
+        const press: ToolKeyEvent = { ...e, repeat: false };
+        if (this.call(() => this.active?.onKeyDown?.(press) || (this.camerasParked() && this.parked!.onKeyDown?.(press)))) {
+          this.afterInteraction();
+          return true;
+        }
+      }
+    }
     const consumed = this.call(() => !!this.active?.onKeyUp?.(e) || (this.camerasParked() && !!this.parked!.onKeyUp?.(e)));
     if (consumed) this.afterInteraction();
     return consumed;

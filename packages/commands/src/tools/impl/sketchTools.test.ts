@@ -127,6 +127,11 @@ const faceHit = (id: number, faceId: number, p: Vec3): PickHit => ({
 });
 
 const key = (k: string, modifiers: Modifiers = NO_MODIFIERS) => ({ key: k, code: k, modifiers, repeat: false });
+/** Tap a modifier: press and release it with nothing between (how Ctrl and Alt reach tools). */
+const tap = (tools: ToolManager, k: string): boolean => {
+  tools.keyDown(key(k));
+  return tools.keyUp(key(k));
+};
 const CTRL: Modifiers = { ...NO_MODIFIERS, ctrl: true };
 const SHIFT: Modifiers = { ...NO_MODIFIERS, shift: true };
 
@@ -251,21 +256,21 @@ describe('LineTool', () => {
     const { tools } = setup();
     tools.activate('line');
     expect(tools.activeTool?.inferenceOptions?.().snapping).toBe('all');
-    tools.keyDown(key('Alt'));
+    tap(tools, 'Alt');
     expect(tools.activeTool?.inferenceOptions?.().snapping).toBe('none');
     expect(tools.status().instructor).toBe('Select start point. Inference off (Alt).');
     tools.click(at([0, 0, 0]));
-    tools.keyDown(key('Alt'));
+    tap(tools, 'Alt');
     expect(tools.activeTool?.inferenceOptions?.().snapping).toBe('directional');
     expect(tools.status().instructor).toBe('Select end point or enter value. Parallel and perpendicular inference only (Alt).');
     tools.keyDown({ ...key('Alt'), repeat: true });
     expect(tools.activeTool?.inferenceOptions?.().snapping).toBe('directional');
-    tools.keyDown(key('Alt'));
+    tap(tools, 'Alt');
     expect(tools.activeTool?.inferenceOptions?.().snapping).toBe('all');
     expect(tools.status().instructor).toBe('Select end point or enter value.');
     // Choosing the tool again starts with all inferences once no line is in progress; a line in
     // progress continues as it was.
-    tools.keyDown(key('Alt'));
+    tap(tools, 'Alt');
     tools.activate('select');
     tools.activate('line');
     expect(tools.activeTool?.inferenceOptions?.().snapping).toBe('none');

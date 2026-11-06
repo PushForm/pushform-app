@@ -292,13 +292,12 @@ export class RotateTool extends TransformToolBase {
   }
 
   private baseStatus(): ToolStatus {
-    const copyHint = this.copy ? ' [Copy]' : '';
     const s = this.state;
     if (s.kind === 'rotating') {
-      return { instructor: `Pick second point or enter angle. Ctrl = copy.${copyHint}`, vcbLabel: 'Angle', vcbValue: this.fmtAngle(s.angle), fields: [pointerField('Angle', 'angle', this.fmtAngle(s.angle))] };
+      return { instructor: `Pick second point or enter angle.`, vcbLabel: 'Angle', vcbValue: this.fmtAngle(s.angle), fields: [pointerField('Angle', 'angle', this.fmtAngle(s.angle))] };
     }
-    if (s.kind === 'center') return { instructor: `Pick first point of the baseline.${copyHint}`, vcbLabel: 'Angle' };
-    const instructor = this.lastError ? `Rotate failed: ${this.lastError}` : `Pick the centre of rotation. Hover a face to align the protractor, arrows lock an axis.${copyHint}`;
+    if (s.kind === 'center') return { instructor: `Pick first point of the baseline.`, vcbLabel: 'Angle' };
+    const instructor = this.lastError ? `Rotate failed: ${this.lastError}` : `Pick the centre of rotation. Hover a face to align the protractor, arrows lock an axis.`;
     const last = this.lastRotation;
     return { instructor, vcbLabel: 'Angle', vcbValue: last ? this.fmtAngle(last.angle) : undefined };
   }

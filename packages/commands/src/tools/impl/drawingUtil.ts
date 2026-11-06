@@ -53,13 +53,6 @@ export function drawingPlaneAt(inf: InferenceResult, at: Vec3, lock: Axis | null
   return hoverPlane(inf, at);
 }
 
-/** Sides typed before the first click: `24s`, or a bare integer (`24`) that carries no unit. */
-export function sidesFromVcb(v: VcbValue): number | null {
-  if (v.kind === 'segments') return v.count;
-  if (v.kind === 'length' && v.unit === null && Number.isInteger(v.raw) && v.raw >= 1) return v.raw;
-  return null;
-}
-
 /** Degrees typed in an angle stage: `45deg`, a `rise:run` slope, or a bare number (`45`). */
 export function degreesFromVcb(v: VcbValue): number | null {
   if (v.kind === 'angle' || v.kind === 'slope') return v.degrees;

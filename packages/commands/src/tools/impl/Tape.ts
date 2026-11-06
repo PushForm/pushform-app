@@ -161,7 +161,6 @@ export class TapeTool implements Tool {
   onKeyDown(e: ToolKeyEvent): boolean {
     switch (e.key) {
       case 'Control':
-      case 'Alt':
         if (!e.repeat) {
           this.modeIndex = (this.modeIndex + 1) % MODE_CYCLE.length;
           this.ctx?.statusChanged();
@@ -291,8 +290,6 @@ export class TapeTool implements Tool {
 
   private baseStatus(): ToolStatus {
     const s = this.state;
-    const modeName = this.mode === 'guideLine' ? 'Guide Lines' : this.mode === 'guidePoint' ? 'Guide Points' : 'Measure';
-    const tail = ` [${modeName}: Ctrl cycles]`;
     if (this.resize) {
       return {
         instructor: `Resize model by ${this.resize.factor.toFixed(4)}? Choose Resize Model in the tool bar to resize, or Esc to cancel.`,
@@ -303,10 +300,10 @@ export class TapeTool implements Tool {
     if (s.kind === 'idle') {
       const instructor =
         this.mode === 'measure'
-          ? `Select start point to measure, or hover an edge.${tail}`
+          ? `Select start point to measure, or hover an edge.`
           : this.mode === 'guidePoint'
-            ? `Select start point for the guide point.${tail}`
-            : `Select an edge for a parallel guide line, or a point for a guide point.${tail}`;
+            ? `Select start point for the guide point.`
+            : `Select an edge for a parallel guide line, or a point for a guide point.`;
       const value = this.hoverEdgeLength ?? this.lastMeasurement?.length ?? null;
       return { instructor, vcbLabel: 'Length', vcbValue: value === null ? undefined : fmtLength(this.ctx, value) };
     }
@@ -317,10 +314,10 @@ export class TapeTool implements Tool {
     }
     const instructor =
       this.mode === 'measure'
-        ? `Select end point or enter value.${tail}`
+        ? `Select end point or enter value.`
         : s.kind === 'fromEdge' && this.mode === 'guideLine'
-          ? `Select offset for the guide line or enter value.${tail}`
-          : `Select the guide point position or enter value.${tail}`;
+          ? `Select offset for the guide line or enter value.`
+          : `Select the guide point position or enter value.`;
     return { instructor, vcbLabel: 'Length', vcbValue: fmtLength(this.ctx, live), fields: [pointerField('Length', 'length', fmtLength(this.ctx, live))] };
   }
 

@@ -64,7 +64,10 @@ describe('InstructorPanel', () => {
     expect(screen.getByText('Ctrl+Shift')).toBeTruthy();
     act(() => a.toolManager.activate('pushpull'));
     expect(screen.getByText('Push/Pull')).toBeTruthy();
-    expect(screen.getByText(/Keep the starting face/)).toBeTruthy();
+    // the Ctrl row comes from the bar's New body toggle; no keys the tool does not handle
+    const keys = screen.getByLabelText('Modifier keys');
+    expect([...keys.querySelectorAll('dt')].map((d) => d.textContent)).toEqual(['Ctrl']);
+    expect(keys.textContent).toMatch(/Tap to turn New body on or off/);
     expect(screen.getByText(useAppStore.getState().instructor)).toBeTruthy();
   });
 });

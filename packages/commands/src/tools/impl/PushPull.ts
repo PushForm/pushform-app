@@ -254,7 +254,7 @@ export class PushPullTool implements Tool {
 
   onKeyDown(e: ToolKeyEvent): boolean {
     if (e.repeat) return false;
-    if (e.key === 'Control' || e.key === 'Alt') {
+    if (e.key === 'Control') {
       this.mode = this.mode === 'merge' ? 'newBody' : 'merge';
       this.clearPreview();
       this.schedulePreview();
@@ -352,13 +352,12 @@ export class PushPullTool implements Tool {
     const doc = this.ctx?.commands.ctx.services.get(SERVICE_DOCUMENT);
     const units = doc instanceof DocumentHost ? doc.doc.state.meta.units : null;
     const fmt = (d: number): string => (units ? formatLength(d, units) : d.toString());
-    const modeHint = this.mode === 'newBody' ? ' [New body]' : '';
     if (s.kind === 'dragging') {
       // A loose face has no inside: its distance is how far it is pulled, whichever way. A solid's face is signed along its front.
       const shown = isLoose(s.target.ref) ? Math.abs(s.distance) : s.distance;
-      return { instructor: `Click or type distance.${modeHint}`, vcbLabel: 'Distance', vcbValue: fmt(shown), fields: [pointerField('Distance', 'length', fmt(shown))] };
+      return { instructor: `Click or type distance.`, vcbLabel: 'Distance', vcbValue: fmt(shown), fields: [pointerField('Distance', 'length', fmt(shown))] };
     }
-    const instructor = this.lastError ? `Push/Pull failed: ${this.lastError}` : `Select face to push or pull.${modeHint}`;
+    const instructor = this.lastError ? `Push/Pull failed: ${this.lastError}` : `Select face to push or pull.`;
     const last = this.lastCommit ? (isLoose(this.lastCommit.params.target) ? Math.abs(this.lastCommit.params.distance) : this.lastCommit.params.distance) : this.lastDistance;
     return { instructor, vcbLabel: 'Distance', vcbValue: last === null ? undefined : fmt(last) };
   }

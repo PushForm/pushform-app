@@ -202,7 +202,8 @@ describe('MoveTool', () => {
     const entries = host.undoStack.length;
     tools.activate('move');
     const tool = tools.activeTool as MoveTool;
-    expect(tools.keyDown(key('Control', CTRL))).toBe(true);
+    tools.keyDown(key('Control', CTRL));
+    expect(tools.keyUp(key('Control', CTRL))).toBe(true);
     expect(tool.copyMode).toBe(true);
     expect(tool.cursor).toBe('copy');
     tools.pointerDown(at(TOP_CAMERA, [0, 0, 0]));
@@ -313,6 +314,7 @@ describe('RotateTool', () => {
     tools.keyDown(key('ArrowRight')); // toggle off
     expect(tool.protractorNormal).toEqual([0, 0, 1]);
     tools.keyDown(key('Control', CTRL));
+    tools.keyUp(key('Control', CTRL));
     expect(tool.copyMode).toBe(true);
 
     tools.pointerDown(at(TOP_CAMERA, [0, 0, 0]));

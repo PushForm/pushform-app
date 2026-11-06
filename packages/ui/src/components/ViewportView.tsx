@@ -2,7 +2,7 @@
 // Copyright 2026 PushForm contributors
 import { useEffect, useRef } from 'react';
 import type { JSX } from 'react';
-import type { Modifiers, ToolPointerEvent } from '@pushform/commands';
+import type { ToolPointerEvent } from '@pushform/commands';
 import { GROUND_PLANE, freeInference, hitSelectable } from '@pushform/inference';
 import { ContextMenuHost } from './ContextMenu';
 import { DialogHost } from './MakeComponentDialog';
@@ -10,18 +10,12 @@ import { EntryFields } from './EntryFields';
 import { NavigationCube } from './NavigationCube';
 import { SceneTabs } from './SceneTabs';
 import { ToolOptionsBar } from './ToolOptionsBar';
+import { toolModifiers } from '../platformKeys';
 import { HeldTags } from './HeldTags';
 import type { InferenceResult } from '@pushform/inference';
 import { useApp } from '../AppContext';
 import { useAppStore } from '../store';
 import { viewAxesOf } from '../engine/viewAxes';
-
-const modifiersOf = (e: { shiftKey: boolean; ctrlKey: boolean; altKey: boolean; metaKey: boolean }): Modifiers => ({
-  shift: e.shiftKey,
-  ctrl: e.ctrlKey,
-  alt: e.altKey,
-  meta: e.metaKey,
-});
 
 /** Mounts the render Viewport and forwards pointer/wheel events to the ToolManager. */
 export function ViewportView(): JSX.Element {
@@ -79,7 +73,7 @@ export function ViewportView(): JSX.Element {
         ray,
         button,
         buttons: e.buttons,
-        modifiers: modifiersOf(e),
+        modifiers: toolModifiers(e, app.keymap.platform === 'mac'),
         inference,
         camera: app.viewport.camera.getState(),
       };
@@ -102,7 +96,7 @@ export function ViewportView(): JSX.Element {
       e.preventDefault();
       const rect = el.getBoundingClientRect();
       const deltaY = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
-      app.toolManager.wheel({ screen: [e.clientX - rect.left, e.clientY - rect.top], deltaY, modifiers: modifiersOf(e) });
+      app.toolManager.wheel({ screen: [e.clientX - rect.left, e.clientY - rect.top], deltaY, modifiers: toolModifiers(e, app.keymap.platform === 'mac') });
     };
     const onContextMenu = (e: MouseEvent) => {
       e.preventDefault();

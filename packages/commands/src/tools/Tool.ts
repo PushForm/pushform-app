@@ -221,7 +221,11 @@ export interface Tool {
   onPointerUp?(e: ToolPointerEvent): void;
   onClick?(e: ToolPointerEvent): void;
   onDoubleClick?(e: ToolPointerEvent): void;
-  /** Return true when the key was consumed (prevents keymap/VCB handling). */
+  /**
+   * Return true when the key was consumed (prevents keymap/VCB handling). Ctrl and Alt arrive only
+   * as taps: once, when released with no other key, click or wheel since they were
+   * pressed. Held Ctrl and Alt are read from `modifiers` instead.
+   */
   onKeyDown?(e: ToolKeyEvent): boolean | void;
   onKeyUp?(e: ToolKeyEvent): boolean | void;
   onWheel?(e: ToolWheelEvent): boolean | void;

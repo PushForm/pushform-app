@@ -80,7 +80,10 @@ class WorkTool implements Tool {
   hasPendingWork(): boolean {
     return this.pending;
   }
+  /** Keys delivered to the tool, in order. */
+  readonly keys: string[] = [];
   onKeyDown(e: ToolKeyEvent): boolean {
+    this.keys.push(e.key);
     if (e.key !== 'Enter') return false;
     this.log.push('enter');
     return true;
@@ -303,5 +306,30 @@ describe('ToolManager: tool options bar', () => {
     // a tool with no settings shows no bar
     tools.activate('line');
     expect(tools.status().settings).toBeUndefined();
+  });
+});
+
+describe('ToolManager: Ctrl and Alt reach tools only as taps', () => {
+  it('delivers a tap on release, and not when another key, click or wheel came between', () => {
+    const { tools, line } = setup();
+    tools.activate('line');
+    const seen = (): string[] => line.keys.filter((k) => k === 'Control' || k === 'Alt');
+    expect(tools.keyDown(key('Control'))).toBe(true);
+    expect(seen()).toEqual([]);
+    tools.keyUp(key('Control'));
+    expect(seen()).toEqual(['Control']);
+    // Ctrl+Z: not a tap
+    tools.keyDown(key('Control'));
+    tools.keyDown(key('z', 'KeyZ'));
+    tools.keyUp(key('Control'));
+    expect(seen()).toEqual(['Control']);
+    // Alt held while clicking: not a tap
+    tools.keyDown(key('Alt'));
+    tools.pointerDown({ screen: [0, 0], ray: { origin: [0, 0, 1], dir: [0, 0, -1] }, button: 0, buttons: 1, modifiers: { ...NO_MODIFIERS, alt: true }, inference: null, camera: new FakeCamera().getState() });
+    tools.keyUp(key('Alt'));
+    expect(seen()).toEqual(['Control']);
+    tools.keyDown(key('Alt'));
+    tools.keyUp(key('Alt'));
+    expect(seen()).toEqual(['Control', 'Alt']);
   });
 });

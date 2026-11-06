@@ -200,7 +200,10 @@ export class MoveTool extends TransformToolBase {
         }
         return true;
       case 'Alt':
-        if (!e.repeat) this.autofold = true;
+        if (!e.repeat) {
+          this.autofold = !this.autofold;
+          this.ctx?.statusChanged();
+        }
         return true;
       default:
         return false;
@@ -288,12 +291,11 @@ export class MoveTool extends TransformToolBase {
   }
 
   private baseStatus(): ToolStatus {
-    const copyHint = this.copy ? ' [Copy]' : '';
     if (this.state.kind === 'moving') {
       return {
         instructor: this.state.face
-          ? `Click to glue the component to this face.${copyHint}`
-          : `Pick end point or enter distance. Ctrl = copy, arrows lock an axis.${copyHint}`,
+          ? `Click to glue the component to this face.`
+          : `Pick end point or enter distance. Arrows lock an axis.`,
         vcbLabel: 'Length',
         vcbValue: this.fmtLength(v3len(this.state.delta)),
         fields: [pointerField('Length', 'length', this.fmtLength(v3len(this.state.delta)))],
@@ -303,8 +305,8 @@ export class MoveTool extends TransformToolBase {
     const instructor = this.lastError
       ? `Move failed: ${this.lastError}`
       : host && !host.selection.isEmpty
-        ? `Pick a base point to move the selection.${copyHint}`
-        : `Select objects or hover an entity, then pick a base point.${copyHint}`;
+        ? `Pick a base point to move the selection.`
+        : `Select objects or hover an entity, then pick a base point.`;
     const last = this.lastCommit;
     const lastLen = last ? v3len([last.matrix[12]!, last.matrix[13]!, last.matrix[14]!]) : null;
     return { instructor, vcbLabel: 'Length', vcbValue: lastLen === null ? undefined : this.fmtLength(lastLen) };

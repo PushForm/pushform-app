@@ -117,6 +117,11 @@ const endpointAt = (p: Vec3): InferenceResult => ({
 });
 
 const key = (k: string, modifiers: Modifiers = NO_MODIFIERS) => ({ key: k, code: k, modifiers, repeat: false });
+/** Tap a modifier: press and release it with nothing between (how Ctrl and Alt reach tools). */
+const tap = (tools: ToolManager, k: string): boolean => {
+  tools.keyDown(key(k));
+  return tools.keyUp(key(k));
+};
 
 function vcb(tools: ToolManager, text: string): void {
   const v = parseVcb(text, 'in');
@@ -227,7 +232,7 @@ describe('PolygonTool', () => {
     expect(hasVertex(sketch(), [1, 0, 0])).toBe(true);
     const poly = tools.get('polygon') as PolygonTool;
     tools.click(at([5, 5, 0]));
-    expect(tools.keyDown(key('Control'))).toBe(true);
+    expect(tap(tools, 'Control')).toBe(true);
     expect(poly.circumscribed).toBe(true);
     tools.click(at([6, 5, 0]));
     const c = [...sketch().curves.values()][1]!;
@@ -593,11 +598,11 @@ describe('held-key tags', () => {
     const { tools } = setup();
     tools.activate('line');
     expect(tools.status().held).toBeUndefined();
-    tools.keyDown(key('Alt'));
+    tap(tools, 'Alt');
     expect(tools.status().held).toEqual(['Inference off · Alt']);
-    tools.keyDown(key('Alt'));
+    tap(tools, 'Alt');
     expect(tools.status().held).toEqual(['Parallel and perpendicular only · Alt']);
-    tools.keyDown(key('Alt'));
+    tap(tools, 'Alt');
     expect(tools.status().held).toBeUndefined();
     tools.click(at([0, 0, 0]));
     tools.keyDown(key('ArrowRight'));
@@ -657,5 +662,20 @@ describe('applied state: the bar adjusts the shape just drawn', () => {
     tools.activate('polygon');
     tools.activate('circle');
     expect(tools.status().applied).toBe(false);
+  });
+});
+
+describe('typed values before the first click', () => {
+  it('a bare number sets no side count; the hint says to type it with s', () => {
+    const { tools } = setup();
+    tools.activate('circle');
+    tools.onVcb({ kind: 'length', meters: 0.6096, raw: 24, unit: null });
+    expect(tools.status().settings![0]).toMatchObject({ id: 'sides', value: '24' });
+    expect(tools.status().instructor).toMatch(/Type 24s for 24 sides/);
+    tools.onVcb({ kind: 'length', meters: 0.2032, raw: 8, unit: null });
+    expect(tools.status().settings![0]).toMatchObject({ id: 'sides', value: '24' });
+    tools.onVcb({ kind: 'segments', count: 8 });
+    expect(tools.status().settings![0]).toMatchObject({ id: 'sides', value: '8' });
+    expect(tools.status().instructor).toBe('Select center point.');
   });
 });

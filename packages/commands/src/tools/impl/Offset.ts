@@ -238,15 +238,14 @@ export class OffsetTool implements Tool {
 
   private baseStatus(): ToolStatus {
     const s = this.state;
-    const hint = this.overlaps ? ' [Overlaps allowed]' : '';
     if (s.kind === 'dragging') {
-      return { instructor: `Click or type the offset distance (negative = inward).${hint}`, vcbLabel: 'Distance', vcbValue: fmtLength(this.ctx, s.distance), fields: [pointerField('Distance', 'length', fmtLength(this.ctx, s.distance))] };
+      return { instructor: `Click or type the offset distance (negative = inward).`, vcbLabel: 'Distance', vcbValue: fmtLength(this.ctx, s.distance), fields: [pointerField('Distance', 'length', fmtLength(this.ctx, s.distance))] };
     }
     const instructor = this.lastError
       ? `Offset failed: ${this.lastError}`
       : s.kind === 'hover' && s.target.kind === 'edges'
-        ? `Click to start offsetting the selected edges.${hint}`
-        : `Select a face to offset (or preselect connected edges). Double-click repeats the last distance.${hint}`;
+        ? `Click to start offsetting the selected edges.`
+        : `Select a face to offset (or preselect connected edges). Double-click repeats the last distance.`;
     const last = this.lastCommit?.params.distance ?? this.lastDistance;
     return { instructor, vcbLabel: 'Distance', vcbValue: last === null ? undefined : fmtLength(this.ctx, last) };
   }

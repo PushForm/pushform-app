@@ -4,6 +4,7 @@ import { useEffect, useReducer } from 'react';
 import type { JSX, RefObject } from 'react';
 import { useApp } from '../AppContext';
 import { useAppStore } from '../store';
+import { platformKeyText } from '../platformKeys';
 
 /** Offset of the tags from the pointer: below the cursor hint and the pointer's value field. */
 const OFFSET: readonly [number, number] = [14, 46];
@@ -22,7 +23,7 @@ export function HeldTags({ pointer, minTop }: { pointer: RefObject<readonly [num
   const top = Math.max(p[1] + OFFSET[1], minTop.current ?? 0);
   return (
     <div className="pf-held-tags" aria-live="polite" aria-label="Held keys" style={{ left: p[0] + OFFSET[0], top }}>
-      {held.map((t) => <span key={t} className="pf-held-tag">{t}</span>)}
+      {held.map((t) => <span key={t} className="pf-held-tag">{platformKeyText(t, app.keymap.platform === 'mac')}</span>)}
     </div>
   );
 }

@@ -41,7 +41,7 @@ export class PolygonTool extends CircleTool {
   }
 
   protected override onExtraKey(e: ToolKeyEvent): boolean {
-    if ((e.key === 'Control' || e.key === 'Alt') && !e.repeat) {
+    if (e.key === 'Control' && !e.repeat) {
       this.circumscribed = !this.circumscribed;
       this.ctx?.requestRender();
       this.ctx?.statusChanged();

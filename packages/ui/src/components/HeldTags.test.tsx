@@ -22,7 +22,11 @@ it('shows the tags the tool reports below the pointer, never above the band', ()
   render(<AppContext.Provider value={a}><HeldTags pointer={pointer} minTop={band} /></AppContext.Provider>);
   expect(screen.queryByLabelText('Held keys')).toBeNull();
   act(() => a.toolManager.activate('line'));
-  act(() => { a.toolManager.keyDown({ key: 'Alt', code: 'AltLeft', modifiers: { shift: false, ctrl: false, alt: true, meta: false }, repeat: false }); });
+  const alt = { key: 'Alt', code: 'AltLeft', modifiers: { shift: false, ctrl: false, alt: true, meta: false }, repeat: false };
+  act(() => {
+    a.toolManager.keyDown(alt);
+    a.toolManager.keyUp(alt);
+  });
   const tags = screen.getByLabelText('Held keys');
   expect(tags.textContent).toBe('Inference off · Alt');
   expect(tags.style.left).toBe('214px');

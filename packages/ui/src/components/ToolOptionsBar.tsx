@@ -133,12 +133,9 @@ export function ToolOptionsBar(): JSX.Element {
   );
 }
 
-/**
- * The label printed on a toggle for its modifier tap: the primary tap is Ctrl and the secondary
- * Alt (Option on macOS).
- */
+/** The label printed on a toggle for its modifier tap: Ctrl and Alt, or Cmd and Option on macOS. */
 export function keyLabel(key: ToolSettingKey, mac: boolean): string {
-  return key === 'primary' ? 'Ctrl' : mac ? '⌥' : 'Alt';
+  return key === 'primary' ? (mac ? '⌘' : 'Ctrl') : mac ? '⌥' : 'Alt';
 }
 
 function Control({ app, c, mac, asList, send }: { app: AppInstance; c: ToolSetting; mac: boolean; asList: boolean; send: (id: string, value: ToolSettingValue, refocus?: boolean) => void }): JSX.Element {

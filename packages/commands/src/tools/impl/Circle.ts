@@ -24,7 +24,6 @@ import {
   onPlane,
   planeLockFromKey,
   shapePreview,
-  sidesFromVcb,
   toggleLock,
   undoLast,
   type LastCommit,
@@ -63,6 +62,8 @@ export class CircleTool implements Tool {
   protected basis: PlaneBasis | null = null;
   protected lockNormal: Axis | null = null;
   protected heldPlane: Plane | null = null;
+  /** A bare number typed before the first click, which sets nothing; the hint says how to set the sides. */
+  private bareNumber: number | null = null;
   protected lockSnap: Snap | null = null;
   protected cursorInference: InferenceResult | null = null;
   protected cursorScreen: Vec2 | null = null;
@@ -157,8 +158,10 @@ export class CircleTool implements Tool {
       if (this.last && this.ctx && (v.kind === 'length' || v.kind === 'radius' || v.kind === 'circumscribed' || v.kind === 'segments')) {
         if (this.reapplyLast(v)) return;
       }
-      const sides = sidesFromVcb(v);
-      if (sides !== null) this.setSegments(sides);
+      // A side count takes its suffix (`24s`); a bare number before the first click sets nothing.
+      if (v.kind === 'segments') this.setSegments(v.count);
+      else this.bareNumber = v.kind === 'length' && v.unit === null ? v.raw : null;
+      this.ctx?.statusChanged();
       return;
     }
     if (v.kind === 'segments') {
@@ -200,7 +203,13 @@ export class CircleTool implements Tool {
 
   private statusWithoutHeld(): ToolStatus {
     const settings = this.barSettings();
-    if (!this.center) return { instructor: 'Select center point.', vcbLabel: 'Sides', vcbValue: String(this.segments), settings };
+    if (!this.center) {
+      const n = this.bareNumber;
+      const instructor = n !== null && Number.isInteger(n) && n >= 3
+        ? `Type ${n}s for ${n} sides, or set Sides in the tool options bar. Then select the center point.`
+        : 'Select center point.';
+      return { instructor, vcbLabel: 'Sides', vcbValue: String(this.segments), settings };
+    }
     const r = this.currentRadius();
     return {
       instructor: `Select point on ${this.shapeName} or enter value.`,
@@ -290,6 +299,7 @@ export class CircleTool implements Tool {
   }
 
   protected setSegments(n: number): void {
+    this.bareNumber = null;
     this.segments = Math.max(this.minSides, Math.round(n));
     this.ctx?.statusChanged();
   }
@@ -299,6 +309,7 @@ export class CircleTool implements Tool {
     this.plane = drawingPlaneAt(inf, p, this.lockNormal, this.heldPlane);
     this.basis = planeBasis(p, this.plane.n);
     this.center = p;
+    this.bareNumber = null;
     this.ctx?.statusChanged();
   }
 

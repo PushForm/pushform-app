@@ -116,7 +116,6 @@ export class ProtractorTool implements Tool {
   onKeyDown(e: ToolKeyEvent): boolean {
     switch (e.key) {
       case 'Control':
-      case 'Alt':
         if (!e.repeat) {
           this.createGuides = !this.createGuides;
           this.ctx?.statusChanged();
@@ -221,11 +220,10 @@ export class ProtractorTool implements Tool {
 
   private baseStatus(): ToolStatus {
     const s = this.state;
-    const guide = this.createGuides ? '' : ' [Guide creation off: Ctrl toggles]';
-    if (s.kind === 'idle') return { instructor: `Click to place the protractor (hover a face to align it).${guide}`, vcbLabel: 'Angle' };
-    if (s.kind === 'center') return { instructor: `Click to set the baseline.${guide}`, vcbLabel: 'Angle' };
+    if (s.kind === 'idle') return { instructor: `Click to place the protractor (hover a face to align it).`, vcbLabel: 'Angle' };
+    if (s.kind === 'center') return { instructor: `Click to set the baseline.`, vcbLabel: 'Angle' };
     const deg = this.cursorInference ? this.angleFor(this.cursorInference.point, this.cursorCamera) : (this.lastAngle ?? 0);
-    return { instructor: `Click to set the angle or enter value (degrees or rise:run).${guide}`, vcbLabel: 'Angle', vcbValue: fmtAngle(deg), fields: [pointerField('Angle', 'angle', fmtAngle(deg))] };
+    return { instructor: `Click to set the angle or enter value (degrees or rise:run).`, vcbLabel: 'Angle', vcbValue: fmtAngle(deg), fields: [pointerField('Angle', 'angle', fmtAngle(deg))] };
   }
 
   // --- internals ------------------------------------------------------------------------------

@@ -4,7 +4,7 @@ The modeling ribbon groups tools into **Transform**, **Draw**, **Modify**, **Ins
 
 ## Tool options bar
 
-When the tool you choose has settings, such as Polygon's number of sides or Move's Copy mode, a bar with those settings floats over the top of the 3D view. Tools with nothing to set, such as Select, Rectangle and Orbit, show no bar. Change a setting by clicking it, or type in its box and press Enter; lengths use the model's units. A toggle shows the key that switches it while you work, for example Ctrl for Copy.
+When the tool you choose has settings, such as Polygon's number of sides or Move's Copy mode, a bar with those settings floats over the top of the 3D view. Tools with nothing to set, such as Select, Rectangle and Orbit, show no bar. Change a setting by clicking it, or type in its box and press Enter; lengths use the model's units. A toggle shows the key that switches it while you work, for example Ctrl for Copy: tap the key, pressing and releasing it on its own. On a Mac, Cmd takes the place of Ctrl in every tool, and Option is Alt.
 
 Right after you finish a shape or an operation, the bar turns green and reads, for example, **Polygon applied**. Changing a setting then changes what you just made, as one Undo step: a polygon's sides, a fillet's radius, or whether a move made a copy. Clicking in the model, choosing another tool or undoing goes back to settings for the next operation.
 

@@ -380,6 +380,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     // A saved document resumes its conversation after a reload; an unsaved one keeps it for the session.
     const scope = !tab ? HOME_SCOPE : tab.identity ? `document:${tab.identity}` : `tab:${tab.id}`;
     return <Chat key={key} placement={tab ? 'docked' : 'popover'} client={client} account={{ id: ownerId, email: accountEmail }} screen={screenOf(tab)} scope={scope}
+      documentId={tab ? cloudLocation(tab.identity)?.fileId : undefined}
       anchor={tab ? requestsIcon : requestsPanel?.anchor ?? null} onClose={tab ? closeSidePanel : closeRequests}
       open={key === chatKey && (tab ? sidePanel === 'requests' : !!requestsPanel?.open)}
       documentTools={tab ? () => documentToolsFor(session, tab, panel => { if (panel === 'objects' && sidePanel === 'requests') setGuidanceBrowserTab(tab.id); else showSidePanel(panel, 'open'); }) : undefined} captureScreenshot={tab ? () => captureRequestScreenshot(session, tab) : undefined} onMessage={() => usage?.record('help_message')} clearSignal={clearSignals[key] ?? 0} />;

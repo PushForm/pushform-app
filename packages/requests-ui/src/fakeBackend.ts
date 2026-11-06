@@ -134,6 +134,7 @@ export function fakeBackend(options: FakeBackendOptions = {}) {
       }
     }
     if (conversation && segments[2] === 'discard' && method === 'POST') { conversation.status = 'discarded'; return json({ ok: true }); }
+    if (conversation && segments[2] === 'document' && method === 'POST') return json({ ok: true });
     // The editor's answers resume the turn with the next scripted events.
     if (conversation && segments[2] === 'tool-results' && method === 'POST') {
       const turn = turns.shift();

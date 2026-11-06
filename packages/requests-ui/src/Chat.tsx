@@ -28,6 +28,11 @@ export interface ChatProps {
    * identity) re-files the remembered conversation without restarting the chat. Defaults to Home's scope.
    */
   readonly scope?: string | undefined;
+  /**
+   * The saved cloud document this panel's conversation is held in, once the document has one. The conversation is linked to it, so deleting
+   * the document deletes the chat; an unsaved document has none.
+   */
+  readonly documentId?: string | undefined;
   /** Each increase clears this panel's conversation, as `/clear` does; the host's Clear Chat command raises it. */
   readonly clearSignal?: number | undefined;
   /**
@@ -130,7 +135,7 @@ function fromConversation(conversation: Conversation): ChatState {
  * the conversation; reopening resumes it; asking the agent to start over, Clear Chat or `/clear` discards it. There is no header row:
  * Escape or the icon hide it, and on Home also a click outside (user decisions 2026-10-24, 2026-10-25).
  */
-export function Chat({ client, account, screen, anchor, placement = 'popover', onClose, open = true, storage, documentTools, captureScreenshot, onMessage, scope = HOME_SCOPE, clearSignal = 0 }: ChatProps): JSX.Element {
+export function Chat({ client, account, screen, anchor, placement = 'popover', onClose, open = true, storage, documentTools, captureScreenshot, onMessage, scope = HOME_SCOPE, documentId, clearSignal = 0 }: ChatProps): JSX.Element {
   // The greeting, cards and composer draw at once; the profile and any resumable conversation load behind them.
   const [view, setView] = useState<View>({ kind: 'chat' });
   const [me, setMe] = useState<Me | null>(null);
@@ -158,6 +163,8 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
   const draftStorage = storage === undefined ? undefined : storage;
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
+  const documentIdRef = useRef(documentId);
+  documentIdRef.current = documentId;
   /** Bumped by Clear Chat: work started before it never touches the cleared chat. */
   const generation = useRef(0);
   useEffect(() => {
@@ -218,6 +225,16 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
     if (conversationId && chat.conversation) rememberDraft(account.id, { conversationId, path: chat.path, title: chat.conversation.title, scope }, draftStorage);
     // Only a scope change re-files; every turn already remembers the conversation itself.
   }, [scope]);
+  // Link the conversation to its saved document: a chat started before the document was saved, or before chats were linked, gets its link as
+  // soon as both are known. A failed link is tried again the next time this runs.
+  const linked = useRef(new Set<string>());
+  useEffect(() => {
+    if (!documentId || !conversationId) return;
+    const key = `${conversationId}:${documentId}`;
+    if (linked.current.has(key)) return;
+    linked.current.add(key);
+    void client.linkConversationDocument(conversationId, documentId).catch(() => { linked.current.delete(key); });
+  }, [client, conversationId, documentId]);
 
   /**
    * Clear Chat and `/clear`: stop any turn, discard this document's conversation on the server, forget it
@@ -286,7 +303,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
       try {
         if (!conversation) {
           try {
-            conversation = await client.startConversation({ kind: 'intake', path: 'open', screen });
+            conversation = await client.startConversation({ kind: 'intake', path: 'open', screen, ...(documentIdRef.current ? { documentId: documentIdRef.current } : {}) });
             if (!live()) return;
             const started = conversation;
             setChat(current => ({ ...current, conversation: started, path: started.path, messageCount: 0, limitReached: false, limitMessage: null }));

@@ -711,14 +711,14 @@ isOneToOne: false
                   ]
                 },"fr_conversations": {
                   Row: {
-                    "account_email": string,"brief": Json | null,"closed_at": string | null,"host_id": string,"id": string,"kind": string,"message_count": number,"messages": NonNullable<Json>,"org_id": string | null,"owner_id": string,"path": string,"request_id": string | null,"screen": Json | null,"started_at": string,"status": string,"title": string | null,"updated_at": string
+                    "account_email": string,"brief": Json | null,"closed_at": string | null,"document_id": string | null,"host_id": string,"id": string,"kind": string,"message_count": number,"messages": NonNullable<Json>,"org_id": string | null,"owner_id": string,"path": string,"request_id": string | null,"screen": Json | null,"started_at": string,"status": string,"title": string | null,"updated_at": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "account_email": string,"brief"?: Json | null,"closed_at"?: string | null,"host_id": string,"id"?: string,"kind": string,"message_count"?: number,"messages"?: NonNullable<Json>,"org_id"?: string | null,"owner_id": string,"path": string,"request_id"?: string | null,"screen"?: Json | null,"started_at"?: string,"status"?: string,"title"?: string | null,"updated_at"?: string
+                    "account_email": string,"brief"?: Json | null,"closed_at"?: string | null,"document_id"?: string | null,"host_id": string,"id"?: string,"kind": string,"message_count"?: number,"messages"?: NonNullable<Json>,"org_id"?: string | null,"owner_id": string,"path": string,"request_id"?: string | null,"screen"?: Json | null,"started_at"?: string,"status"?: string,"title"?: string | null,"updated_at"?: string
                   }
                   Update: {
-                    "account_email"?: string,"brief"?: Json | null,"closed_at"?: string | null,"host_id"?: string,"id"?: string,"kind"?: string,"message_count"?: number,"messages"?: NonNullable<Json>,"org_id"?: string | null,"owner_id"?: string,"path"?: string,"request_id"?: string | null,"screen"?: Json | null,"started_at"?: string,"status"?: string,"title"?: string | null,"updated_at"?: string
+                    "account_email"?: string,"brief"?: Json | null,"closed_at"?: string | null,"document_id"?: string | null,"host_id"?: string,"id"?: string,"kind"?: string,"message_count"?: number,"messages"?: NonNullable<Json>,"org_id"?: string | null,"owner_id"?: string,"path"?: string,"request_id"?: string | null,"screen"?: Json | null,"started_at"?: string,"status"?: string,"title"?: string | null,"updated_at"?: string
                   }
                   Relationships: [
                     {
@@ -1730,6 +1730,9 @@ isOneToOne: false
                            },
 "fr_conversation_list_open":
 { Args: { "p_host": string,"p_owner": string }; Returns: Json
+                           },
+"fr_conversation_set_document":
+{ Args: { "p_document": string,"p_id": string,"p_owner": string }; Returns: boolean
                            },
 "fr_conversation_start":
 { Args: { "p_email": string,"p_host": string,"p_kind": string,"p_owner": string,"p_path": string,"p_screen": Json }; Returns: Json

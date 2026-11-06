@@ -171,7 +171,9 @@ const screenSchema = z.object({
   os: z.string().max(200),
 });
 /** `path: 'open'` (kind intake) starts a conversation before the requester chose a card; the first message settles it. */
-const startSchema = z.object({ kind: z.enum(['help', 'intake']), path: z.enum(['open', 'help', 'problem', 'feature']), screen: screenSchema })
+const startSchema = z.object({ kind: z.enum(['help', 'intake']), path: z.enum(['open', 'help', 'problem', 'feature']), screen: screenSchema,
+  /** The saved cloud document the chat is held in, when it has one: deleting the document deletes the chat. */
+  documentId: z.uuid().optional() })
   .refine(b => (b.kind === 'help') === (b.path === 'help'), { message: 'kind help pairs with path help; kind intake with open, problem or feature', path: ['path'] });
 /** `intent` is the card the requester clicked; it settles an open conversation's path before the agent runs and is ignored once a path is set. */
 /** `document` is what the sending tab can edit this turn; absent or null offers no document tools. */
@@ -185,6 +187,7 @@ const messageSchema = z.object({ text: z.string().max(MESSAGE_MAX_CHARS), intent
 const toolImageSchema = z.object({ mime: z.enum(['image/jpeg', 'image/png']), data: z.string().min(1).max(TOOL_IMAGE_MAX_CHARS).regex(/^[A-Za-z0-9+/]+={0,2}$/, 'base64') });
 const toolResultsSchema = z.object({ results: z.array(z.object({ toolUseId: z.string().min(1).max(200), content: z.string().max(TOOL_RESULT_MAX_CHARS), isError: z.boolean().default(false),
   images: z.array(toolImageSchema).max(TOOL_IMAGES_PER_RESULT).optional() })).max(20) });
+const linkDocumentSchema = z.object({ documentId: z.uuid().nullable() });
 const briefBodySchema = z.object({ brief: briefSchema.nullable(), title: z.string().trim().max(300).nullable().optional() });
 const addMeSchema = z.object({ requestId: z.uuid(), notes: z.string().max(4000).default('') });
 const replySchema = z.object({ text: z.string().trim().min(1).max(4000) });
@@ -339,6 +342,29 @@ function pictureBlocks(pictures: readonly MessagePicture[] | undefined, images: 
       : { type: 'text' as const, text: `(The requester removed the picture "${p.name.replace(/["<>]/g, '')}".)` };
   });
 }
+/**
+ * How much of a conversation the model reads each turn, in characters of text and tool traffic (about 30,000 tokens). A document's chat is kept
+ * until it is cleared, so it can grow without bound; everything stays stored and shown, and the model is sent the recent part.
+ */
+export const MODEL_HISTORY_MAX_CHARS = 120_000;
+const sizeOf = (m: ConversationMessage): number => (m.role === 'tool' ? m.name.length + m.output.length + JSON.stringify(m.input ?? null).length : m.text.length);
+/**
+ * The most recent messages that fit `maxChars`, beginning at a requester message so no reply or tool result is left without its question,
+ * and always including the latest requester message and what followed it. `omitted` says older messages were left out.
+ */
+export function recentHistory(messages: readonly ConversationMessage[], maxChars = MODEL_HISTORY_MAX_CHARS): { messages: readonly ConversationMessage[]; omitted: boolean } {
+  let lastUser = -1;
+  for (let i = messages.length - 1; i >= 0; i--) if (messages[i]!.role === 'user') { lastUser = i; break; }
+  let total = 0, start = messages.length;
+  for (let i = messages.length - 1; i >= 0; i--) { total += sizeOf(messages[i]!); if (total > maxChars) break; start = i; }
+  if (lastUser >= 0) start = Math.min(start, lastUser);
+  while (start < messages.length && messages[start]!.role !== 'user') start++;
+  return start === 0 ? { messages, omitted: false } : { messages: messages.slice(start), omitted: start > 0 };
+}
+/** The per-turn context, told when earlier messages were left out so the agent asks instead of guessing. */
+export const withOmittedNote = (context: string, omitted: boolean): string =>
+  omitted ? `${context}\n(Earlier messages in this chat are not shown to you. Ask the requester if you need something from them.)` : context;
+
 export function historyOf(messages: readonly ConversationMessage[], contextBlock: string, latestText: string,
   latestPictures: readonly MessagePicture[] = [], images: ReadonlyMap<string, PictureData> = new Map()): Anthropic.MessageParam[] {
   const out: Anthropic.MessageParam[] = [];
@@ -520,9 +546,12 @@ const agentFor = agentForPath;
 const kindOf = (path: ConversationPath): ConversationKind => (path === 'help' ? 'help' : 'intake');
 const clientOf = (screen: PanelScreen | null): Record<string, unknown> | null => (screen ? { version: screen.build.version, build: screen.build.commit, editor: screen.editor, browser: screen.browser, os: screen.os } : null);
 
-/** An account keeps at most this many open conversations (one per document, resumed from the panel); the database enforces it. */
-export const OPEN_CONVERSATIONS_LIMIT = 20;
-const OPEN_CONVERSATIONS_MESSAGE = `You have ${OPEN_CONVERSATIONS_LIMIT} open chats. Use Clear Chat in one you no longer need, then try again.`;
+/**
+ * A backstop against runaway clients, not a product limit: a chat is kept for each document until it is cleared, and starting one is
+ * already rate limited, so using the product never reaches this. The database enforces the same number.
+ */
+export const OPEN_CONVERSATIONS_LIMIT = 1000;
+const OPEN_CONVERSATIONS_MESSAGE = `You have ${OPEN_CONVERSATIONS_LIMIT.toLocaleString('en-US')} open chats. Use Clear Chat in one you no longer need, then try again.`;
 
 export function createConversationHandler(deps: ConversationDeps): (req: Request) => Promise<Response> {
   const { config, db } = deps;
@@ -611,6 +640,11 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       // The database refuses a twenty-first open conversation; say so, since "a limit was reached" tells nobody what to do.
       throw e.code === 'limit' ? new HttpError('limit', OPEN_CONVERSATIONS_MESSAGE, undefined, 'open_conversations') : e;
     }
+    if (body.documentId) {
+      // Best effort: the chat works unlinked, and the panel links it again the next time it opens with the document.
+      try { await db.conversationSetDocument(row.id, user.id, body.documentId); }
+      catch (error) { deps.log?.(`conversation ${row.id}: not linked to its document: ${error instanceof Error ? error.message : String(error)}`); }
+    }
     return json({ conversation: conversationView(conversationFromRow(row)) }, 201);
   };
   const get = async (req: Request, id: string): Promise<Response> => {
@@ -630,6 +664,14 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       const row = await db.conversationAppend(id, user.id, [], brief, body.title ?? null, path);
       return json({ conversation: conversationView(conversationFromRow(row)) });
     } catch (error) { throw httpErrorOf(error); }
+  };
+  /** Links the conversation to a saved document its account owns, or unlinks it with null. */
+  const linkDocument = async (req: Request, id: string): Promise<Response> => {
+    const user = await session(req);
+    const body = await parseBody(req, linkDocumentSchema);
+    await loadConversation(id, user);
+    try { await db.conversationSetDocument(id, user.id, body.documentId); } catch (error) { throw httpErrorOf(error, 'not_found'); }
+    return json({ ok: true });
   };
   const discard = async (req: Request, id: string): Promise<Response> => {
     const user = await session(req);
@@ -1048,7 +1090,8 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       ? `\n\n<retrieved_help>\n${retrieveUserHelp(deps.digest, body.text.slice(0, 300), ctx.screen.editor)}\n</retrieved_help>` : '';
     const context = agent.context(ctx) + help;
     const pictures = body.attachments?.length ? await timed(timing, 'pictures', messagePictures(conversation, user.id, body.attachments)) : [];
-    const images = await timed(timing, 'images', pictureData([...prior, { role: 'user', text: body.text, at: base.now, attachments: pictures }]));
+    const seen = recentHistory(prior);
+    const images = await timed(timing, 'images', pictureData([...seen.messages, { role: 'user', text: body.text, at: base.now, attachments: pictures }]));
     return streamTurn({
       timing,
       user, conversation, store, handlers: agent.handlers(ctx, store), pathChanged: path !== conversation.path,
@@ -1056,7 +1099,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       status: messageStatus(),
       ...(config.models.acknowledge ? { acknowledge: acknowledgeContent({ text: body.text, pictures: pictures.length, previousReply: previousReplyOf(prior) }) } : {}),
       setup: {
-        ...turnPrompt(config.models, ctx, document), context, historyLength: prior.length, messages: historyOf(prior, context, body.text, pictures, images), document, resume: undefined,
+        ...turnPrompt(config.models, ctx, document), context, historyLength: prior.length, messages: historyOf(seen.messages, withOmittedNote(context, seen.omitted), body.text, pictures, images), document, resume: undefined,
       },
     });
   };
@@ -1110,7 +1153,8 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       const saved = conversationFromRow(await db.conversationAppend(id, user.id, messages, store.getBrief(), store.getTitle(), store.getPath(), null));
       emit({ event: 'done', data: { messageCount: saved.messageCount, limitReached: false, ended: false } });
     });
-    const history = conversation.messages.slice(0, turn.historyLength);
+    const seen = recentHistory(conversation.messages.slice(0, turn.historyLength));
+    const history = seen.messages;
     const images = await pictureData([...history, opening]);
     // The render pictures of this turn's earlier suspensions, put back into the rounds the agent saw.
     const renders = turnRenders(conversation.messages.slice(turn.historyLength));
@@ -1128,7 +1172,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       }),
       setup: {
         model: turn.model, system: turn.system, tools: turn.tools as Anthropic.Tool[], context: turn.context, historyLength: turn.historyLength,
-        messages: historyOf(history, turn.context, opening.text, opening.attachments ?? [], images), document: turn.document,
+        messages: historyOf(history, withOmittedNote(turn.context, seen.omitted), opening.text, opening.attachments ?? [], images), document: turn.document,
         resume: { appended: [...restoreRenders(turn.appended as Anthropic.MessageParam[], renders), answerPending(pending, answers)], rounds: turn.rounds,
           reviews: turn.reviews ?? 0, renders: new Set(renders.keys()) },
       },
@@ -1192,7 +1236,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
       if (path === '/me' && m === 'GET') return await me(req);
       if (path === '/conversations/open' && m === 'GET') return await listOpen(req);
       if (path === '/conversations' && m === 'POST') return await start(req);
-      let r = /^\/conversations\/([^/]+)(?:\/(messages|tool-results|brief|file|add-me|discard))?$/.exec(path);
+      let r = /^\/conversations\/([^/]+)(?:\/(messages|tool-results|brief|file|add-me|discard|document))?$/.exec(path);
       if (r) {
         const [, id, action] = r as unknown as [string, string, string | undefined];
         if (!action && m === 'GET') return await get(req, id);
@@ -1202,6 +1246,7 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
         if (action === 'file' && m === 'POST') return await file(req, id);
         if (action === 'add-me' && m === 'POST') return await addMe(req, id);
         if (action === 'discard' && m === 'POST') return await discard(req, id);
+        if (action === 'document' && m === 'POST') return await linkDocument(req, id);
       }
       r = /^\/conversations\/([^/]+)\/attachments(?:\/([^/]+)(\/complete)?)?$/.exec(path);
       if (r) {

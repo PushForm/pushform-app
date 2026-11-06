@@ -116,6 +116,26 @@ describe('conversations', () => {
     expect(JSON.stringify(sent)).toContain('first');
     expect(JSON.stringify(sent)).not.toContain('Earlier messages in this chat');
   });
+  it('links a new chat to its saved document, and still starts the chat when the link cannot be made', async () => {
+    const h = harness({ service: { fr_conversation_set_document: true } });
+    const res = await call(h.handler, 'POST', '/conversations', { kind: 'help', path: 'help', screen: { editor: 'model', build: { version: '0.3.0', commit: 'abc' }, browser: 'Chrome', os: 'macOS' }, documentId: '3d6f1c1e-5b7a-4d8e-9c1a-2f4b6a8c0d1e' });
+    expect(res.status).toBe(201);
+    expect(h.service.named('fr_conversation_set_document')[0]!.params).toEqual({ p_id: CONVERSATION_ID, p_owner: ALICE.id, p_document: '3d6f1c1e-5b7a-4d8e-9c1a-2f4b6a8c0d1e' });
+    const unlinked = harness({ service: { fr_conversation_set_document: () => sqlError('fr_forbidden') } });
+    expect((await call(unlinked.handler, 'POST', '/conversations', { kind: 'help', path: 'help', screen: { editor: 'model', build: { version: '0.3.0', commit: 'abc' }, browser: 'Chrome', os: 'macOS' }, documentId: '3d6f1c1e-5b7a-4d8e-9c1a-2f4b6a8c0d1e' })).status).toBe(201);
+    const none = harness();
+    expect((await call(none.handler, 'POST', '/conversations', { kind: 'help', path: 'help', screen: { editor: 'model', build: { version: '0.3.0', commit: 'abc' }, browser: 'Chrome', os: 'macOS' } })).status).toBe(201);
+    expect(none.service.named('fr_conversation_set_document')).toHaveLength(0);
+  });
+  it('links an existing chat to a document by route, unlinks it with null, and refuses a document that is not the account\'s', async () => {
+    const h = harness({ service: { fr_conversation_set_document: true } });
+    await status(await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/document`, { documentId: '3d6f1c1e-5b7a-4d8e-9c1a-2f4b6a8c0d1e' }), 200);
+    await status(await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/document`, { documentId: null }), 200);
+    expect(h.service.named('fr_conversation_set_document').map(c => c.params['p_document'])).toEqual(['3d6f1c1e-5b7a-4d8e-9c1a-2f4b6a8c0d1e', null]);
+    await status(await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/document`, { documentId: 'not-a-uuid' }), 400, 'invalid');
+    const other = harness({ service: { fr_conversation_set_document: () => sqlError('fr_forbidden') } });
+    await status(await call(other.handler, 'POST', `/conversations/${CONVERSATION_ID}/document`, { documentId: '3d6f1c1e-5b7a-4d8e-9c1a-2f4b6a8c0d1e' }), 404, 'not_found');
+  });
   it('does not limit a conversation by its message count', async () => {
     const h = harness({ service: { fr_conversation_get: conversationRow({ message_count: 300 }), fr_conversation_append: conversationRow({ message_count: 301 }) } });
     const events = parseSse(await (await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'Keep going' })).text());

@@ -298,8 +298,12 @@ export class RequestsClient {
     return (Array.isArray(row['conversations']) ? row['conversations'] : []).map(normalizeSummary);
   }
   /** `path: 'open'` starts a conversation whose path the agent sets from the first message or intent. */
-  async startConversation(input: { kind: 'help' | 'intake'; path: ConversationPath; screen: ScreenInfo }): Promise<Conversation> {
+  async startConversation(input: { kind: 'help' | 'intake'; path: ConversationPath; screen: ScreenInfo; documentId?: string }): Promise<Conversation> {
     return normalizeConversation((await this.json<Json>('POST', '/conversations', input))['conversation']);
+  }
+  /** Links the conversation to the saved document it is held in, so deleting that document deletes the chat. */
+  async linkConversationDocument(id: string, documentId: string | null): Promise<void> {
+    await this.request('POST', `/conversations/${encodeURIComponent(id)}/document`, { documentId });
   }
   /** Clear Chat discards the conversation; it is not offered again. */
   async discardConversation(id: string): Promise<void> {

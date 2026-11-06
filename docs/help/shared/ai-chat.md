@@ -145,4 +145,4 @@ If you are sending messages too quickly, chat asks you to wait a moment. A conve
 
 ## Chat history
 
-Chat keeps the conversation for each document until you clear it, however long it has been since you opened it. Open a document later and its chat is still there, and you can keep going. In a very long chat, the assistant works from the most recent part of the conversation; if it needs something from much earlier, it asks. **Clear Chat** (or `/clear`) removes a document's chat for good.
+Chat keeps the conversation for each document until you clear it, however long it has been since you opened it. Open a document later and its chat is still there, and you can keep going. In a very long chat, the assistant works from the most recent part of the conversation; if it needs something from much earlier, it asks. **Clear Chat** (or `/clear`) removes a document's chat for good, and so does deleting the document permanently. A document in Trash keeps its chat, so restoring it brings the chat back.

@@ -373,6 +373,26 @@ describe('Chat', () => {
     expect(log().textContent).toContain('Still continuing');
     expect(document.querySelector('.pf-fr-limit')).toBeNull();
   });
+  it('starts a conversation linked to its saved document, and links one that was started before the document was saved', async () => {
+    const { backend, view, client, anchor: button, onClose } = setup({}, { documentId: 'aaaaaaaa-0000-4000-8000-000000000001' });
+    await say('hello');
+    expect(backend.calls.find(c => c.method === 'POST' && c.path === '/conversations')!.body).toMatchObject({ documentId: 'aaaaaaaa-0000-4000-8000-000000000001' });
+    const first = backend.calls.filter(c => c.path.endsWith('/document'));
+    expect(first).toHaveLength(1);
+    expect(first[0]!.body).toEqual({ documentId: 'aaaaaaaa-0000-4000-8000-000000000001' });
+    // The same conversation and document are linked once, not on every render.
+    view.rerender(<Chat client={client} account={account} screen={screenInfo} anchor={button} onClose={onClose} documentId="aaaaaaaa-0000-4000-8000-000000000001" />);
+    expect(backend.calls.filter(c => c.path.endsWith('/document'))).toHaveLength(1);
+  });
+  it('links a chat started on an unsaved document once the document is saved', async () => {
+    const { backend, view, client, anchor: button, onClose } = setup();
+    await say('hello');
+    expect(backend.calls.find(c => c.method === 'POST' && c.path === '/conversations')!.body).not.toHaveProperty('documentId');
+    expect(backend.calls.filter(c => c.path.endsWith('/document'))).toHaveLength(0);
+    view.rerender(<Chat client={client} account={account} screen={screenInfo} anchor={button} onClose={onClose} documentId="bbbbbbbb-0000-4000-8000-000000000002" />);
+    await waitFor(() => expect(backend.calls.filter(c => c.path.endsWith('/document'))).toHaveLength(1));
+    expect(backend.calls.find(c => c.path.endsWith('/document'))!.body).toEqual({ documentId: 'bbbbbbbb-0000-4000-8000-000000000002' });
+  });
   it('shows the server sentence as a short muted notice when credits run out, never a counter or an empty number', async () => {
     const sentence = "You've used your free AI credits. Subscribe to keep chatting.";
     setup({ turns: [[text('That is all for now.'), briefEvent({ ...featureBrief, desired: 'x' }, 'T'), { event: 'done', data: { messageCount: 3, limitReached: true, limitMessage: sentence } }]] });

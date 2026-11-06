@@ -285,6 +285,10 @@ export class ServiceDb implements CreditsPort {
       p_provider: call.provider, p_model: call.model, p_input: call.input, p_output: call.output, p_cache_read: call.cacheRead, p_cache_write: call.cacheWrite, p_estimated: call.estimated,
     });
   }
+  /** Links an open conversation to the cloud document it was held in (or unlinks it with null); deleting that document deletes the conversation. */
+  conversationSetDocument(id: string, ownerId: string, documentId: string | null): Promise<boolean> {
+    return this.call('fr_conversation_set_document', { p_id: id, p_owner: ownerId, p_document: documentId });
+  }
   requestCountOpen(ownerId: string): Promise<number> { return this.call('fr_request_count_open', { p_owner: ownerId }); }
   requestFile(input: FileRequestInput): Promise<SqlRequestRow> {
     return this.call('fr_request_file', {

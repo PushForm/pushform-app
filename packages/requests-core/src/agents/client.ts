@@ -152,6 +152,8 @@ export interface RoundStat {
   /** Until the first content arrived (thinking, text or a tool call), or null when none did. */
   firstMs: number | null;
   ms: number; input: number; output: number; cacheRead: number; cacheWrite: number;
+  /** The stream failed or was cancelled before the message completed: the counts are what had been reported, plus an estimate of text already written. */
+  interrupted?: boolean;
 }
 export interface RunTurnResult { appended: Anthropic.MessageParam[]; text: string; usage: TurnUsage; stop: TurnStop; rounds: number; pending: PendingClientTools | null; roundStats: RoundStat[] }
 
@@ -227,13 +229,18 @@ export async function runTurn(options: RunTurnOptions): Promise<RunTurnResult> {
     let startMs: number | null = null, firstMs: number | null = null;
     // Each visible block (a progress note or reply text) starts a new paragraph after text already shown.
     let blockStarted = false;
+    let roundChars = 0;
     const visible = (delta: string) => {
       if (!delta) return;
+      roundChars += delta.length;
       if (!blockStarted) { blockStarted = true; if (text && !text.endsWith('\n\n')) emit(text.endsWith('\n') ? '\n' : '\n\n'); }
       emit(delta);
     };
+    const live: { usage: Anthropic.Usage | null } = { usage: null };
+    let read: Awaited<ReturnType<typeof readMessage>>;
+    try {
     const events = await client.messages.create({ ...params, stream: true } as Anthropic.MessageCreateParamsStreaming, headers ? { headers } : undefined);
-    const { message, invalid } = await readMessage(events, (event) => {
+    read = await readMessage(events, (event) => {
       if (event.type === 'message_start') startMs ??= Math.round(performance.now() - roundStarted);
       else if (event.type === 'content_block_delta' || event.type === 'content_block_start') firstMs ??= Math.round(performance.now() - roundStarted);
       if (event.type === 'content_block_start') {
@@ -245,7 +252,21 @@ export async function runTurn(options: RunTurnOptions): Promise<RunTurnResult> {
       }
       else if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') visible(event.delta.text);
       else if (progress && event.type === 'content_block_delta' && event.delta.type === 'thinking_delta') visible(event.delta.thinking);
-    });
+    }, live);
+    } catch (error) {
+      // A stream that failed or was cancelled after it started still cost its prompt, so the round is metered from what it had
+      // reported; text already written is counted at about four characters a token when that is more than was reported.
+      const partial = live.usage;
+      if (partial && options.afterRound) {
+        const output = Math.max(partial.output_tokens ?? 0, Math.ceil(roundChars / 4));
+        try {
+          await options.afterRound({ startMs: startMs ?? 0, firstMs, ms: Math.round(performance.now() - roundStarted), input: partial.input_tokens ?? 0, output,
+            cacheRead: partial.cache_read_input_tokens ?? 0, cacheWrite: partial.cache_creation_input_tokens ?? 0, interrupted: true }, roundStats.length);
+        } catch { /* The original failure is the one to report. */ }
+      }
+      throw error;
+    }
+    const { message, invalid } = read;
     usage.inputTokens += message.usage.input_tokens; usage.outputTokens += message.usage.output_tokens;
     usage.cacheReadTokens += message.usage.cache_read_input_tokens ?? 0; usage.cacheWriteTokens += message.usage.cache_creation_input_tokens ?? 0;
     roundStats.push({ startMs: startMs ?? 0, firstMs, ms: Math.round(performance.now() - roundStarted), input: message.usage.input_tokens, output: message.usage.output_tokens,
@@ -330,7 +351,9 @@ function parseToolInput(raw: string): { input: Record<string, unknown> } | { err
  * block ends; an invalid one is kept in the message with an empty input and reported in `invalid` by tool_use id, so
  * the rest of the message (other calls, the stop reason, usage) is still read.
  */
-export async function readMessage(events: AsyncIterable<Anthropic.RawMessageStreamEvent>, onEvent?: (event: Anthropic.RawMessageStreamEvent) => void): Promise<{ message: Anthropic.Message; invalid: Map<string, InvalidToolInput> }> {
+export async function readMessage(events: AsyncIterable<Anthropic.RawMessageStreamEvent>, onEvent?: (event: Anthropic.RawMessageStreamEvent) => void,
+  /** Kept up to date with the usage reported so far, so a caller can still charge for a stream that fails partway. */
+  live?: { usage: Anthropic.Usage | null }): Promise<{ message: Anthropic.Message; invalid: Map<string, InvalidToolInput> }> {
   let message: Anthropic.Message | null = null;
   let stopped = false;
   const buffers = new Map<number, string>();
@@ -348,6 +371,7 @@ export async function readMessage(events: AsyncIterable<Anthropic.RawMessageStre
     switch (event.type) {
       case 'message_start':
         message = { ...event.message, content: [], usage: { ...event.message.usage } };
+        if (live) live.usage = message.usage;
         break;
       case 'content_block_start':
         if (!message) break;

@@ -124,6 +124,36 @@ describe('runTurn', () => {
     const r = await runTurn({ client, model: 'm', system: 's', tools: [echoTool], messages: [user('hi')], handlers: {} });
     expect(r.stop).toBe('refusal'); expect(r.text).toBe(REFUSAL_TEXT); expect(r.appended).toHaveLength(1);
   });
+  describe('metering a round that does not complete', () => {
+    const start = (usage: Partial<Anthropic.Usage>): Anthropic.RawMessageStreamEvent => ({ type: 'message_start', message: { id: 'm', type: 'message', role: 'assistant', model: 'm', content: [], stop_reason: null,
+      stop_sequence: null, usage: { input_tokens: 0, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, ...usage } } } as unknown as Anthropic.RawMessageStreamEvent);
+    const textStart = { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } } as unknown as Anthropic.RawMessageStreamEvent;
+    const textDelta = (text: string) => ({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } }) as unknown as Anthropic.RawMessageStreamEvent;
+    /** A client whose stream yields `events` and then fails, as a dropped connection or a cancelled request does. */
+    const failing = (events: Anthropic.RawMessageStreamEvent[]): AnthropicLike => ({ messages: { async create() {
+      return (async function* () { for (const e of events) yield e; throw new Error('connection dropped'); })();
+    } } } as unknown as AnthropicLike);
+    it('meters what a stream had reported when it fails partway, flagged as interrupted, and still reports the failure', async () => {
+      const rounds: { input: number; output: number; cacheRead: number; cacheWrite: number; interrupted?: boolean; index: number }[] = [];
+      await expect(runTurn({ client: failing([start({ input_tokens: 700, cache_read_input_tokens: 2000, cache_creation_input_tokens: 40 }), textStart, textDelta('x'.repeat(400))]),
+        model: 'm', system: 's', tools: [], handlers: {}, messages: [user('hi')],
+        afterRound: async (stat, index) => { rounds.push({ ...stat, index }); return true; } })).rejects.toThrow('connection dropped');
+      // 400 characters written is about 100 tokens, more than the single output token reported so far.
+      expect(rounds).toEqual([expect.objectContaining({ input: 700, output: 100, cacheRead: 2000, cacheWrite: 40, interrupted: true, index: 0 })]);
+    });
+    it('meters nothing when the request fails before the model reports any usage', async () => {
+      const rounds: unknown[] = [];
+      await expect(runTurn({ client: failing([]), model: 'm', system: 's', tools: [], handlers: {}, messages: [user('hi')],
+        afterRound: async stat => { rounds.push(stat); return true; } })).rejects.toThrow('connection dropped');
+      expect(rounds).toEqual([]);
+    });
+    it('meters a completed round once, not interrupted', async () => {
+      const rounds: { interrupted?: boolean }[] = [];
+      await runTurn({ client: fakeAnthropic([{ text: ['done'] }]), model: 'm', system: 's', tools: [], handlers: {}, messages: [user('hi')],
+        afterRound: async stat => { rounds.push(stat); return true; } });
+      expect(rounds).toHaveLength(1); expect(rounds[0]!.interrupted).toBeUndefined();
+    });
+  });
   it('stops after maxToolRounds and answers the pending tool calls', async () => {
     const client = fakeAnthropic([
       { toolUses: [{ id: '1', name: 'echo', input: { value: 'a' } }] },

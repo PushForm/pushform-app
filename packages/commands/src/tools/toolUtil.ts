@@ -2,7 +2,7 @@
 // Copyright 2026 PushForm contributors
 import { m4mul, m4transformPoint, v3dot, v3normalize, v3sub } from '@pushform/core';
 import type { Id, Vec2, Vec3 } from '@pushform/core';
-import { containerAt, meshPartBounds, surfaceFaceIds } from '@pushform/model';
+import { containerAt, contentWorldBounds, contextMatrix, meshPartBounds, sectionPlaneCorners, surfaceFaceIds, worldSectionPlane } from '@pushform/model';
 import type { EntityRef, DocumentState, EntityContainer } from '@pushform/model';
 import type { InferenceResult, Snap, SnapKind } from '@pushform/inference';
 import type { CameraState } from '../camera/CameraHost';
@@ -94,6 +94,13 @@ export function entityOverlay(state: DocumentState, ref: EntityRef, color: strin
   const w = (p: Vec3): Vec3 => frame.toWorld(p);
   const sketch = root.sketch;
   switch (ref.kind) {
+    case 'sectionPlane': {
+      // its rectangle as drawn, framing what its container holds
+      const sp = root.sectionPlanes.get(ref.id);
+      if (!sp) return [];
+      const { normal, d } = worldSectionPlane(sp.plane, contextMatrix(state, ref.path));
+      return [{ kind: 'polyline', points: sectionPlaneCorners(normal, d, contentWorldBounds(state, ref.path)), color, width: 3, closed: true }];
+    }
     case 'sketchEdge': {
       const e = sketch.edges.get(ref.id);
       const a = e && sketch.vertices.get(e.a), b = e && sketch.vertices.get(e.b);

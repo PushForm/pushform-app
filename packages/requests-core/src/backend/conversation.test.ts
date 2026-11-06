@@ -87,6 +87,12 @@ describe('conversations', () => {
     const paidRes = await call(paid.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'Keep going' });
     expect(await paidRes.json()).toMatchObject({ error: { kind: 'credits_exhausted', message: "You've used this month's AI credits. They refill on December 5, 2026." } });
   });
+  it('says what to do when an account already has the most open conversations, instead of a bare limit', async () => {
+    const h = harness({ service: { fr_conversation_start: () => sqlError('fr_limit') } });
+    const res = await call(h.handler, 'POST', '/conversations', { kind: 'help', path: 'help', screen: { editor: 'model', build: { version: '0.3.0', commit: 'abc' }, browser: 'Chrome', os: 'macOS' } });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: { code: 'limit', kind: 'open_conversations', message: 'You have 20 open chats. Use Clear Chat in one you no longer need, then try again.' } });
+  });
   it('does not limit a conversation by its message count', async () => {
     const h = harness({ service: { fr_conversation_get: conversationRow({ message_count: 300 }), fr_conversation_append: conversationRow({ message_count: 301 }) } });
     const events = parseSse(await (await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'Keep going' })).text());

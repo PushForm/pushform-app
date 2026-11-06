@@ -7,7 +7,7 @@
  */
 
 /** Why the server refused or ended a turn: its message says which, and this lets the chat treat the cause properly. */
-export type LimitKind = 'credits_exhausted' | 'open_requests' | 'images' | 'rate_limited';
+export type LimitKind = 'credits_exhausted' | 'open_requests' | 'open_conversations' | 'images' | 'rate_limited';
 /** An account's AI allowance. Every field is concrete: there is no unlimited plan, and a free account has no refill. */
 export interface Credits {
   readonly plan: 'free' | 'paid';

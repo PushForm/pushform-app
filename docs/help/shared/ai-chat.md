@@ -141,4 +141,4 @@ Chat uses AI credits, which are counted from the text and pictures it reads and 
 - When about a tenth of your credits are left, chat says so in a short note under the conversation.
 - When they run out, chat explains it. A free account can subscribe to continue. A subscriber sees the date the credits refill. Everything outside chat keeps working: your files, editing, saving, importing and exporting.
 
-If you are sending messages too quickly, chat asks you to wait a moment. A conversation also takes at most 5 pictures, and an account can have at most 5 open requests.
+If you are sending messages too quickly, chat asks you to wait a moment. A conversation also takes at most 5 pictures, an account can have at most 5 open requests, and an account can keep at most 20 open chats (one for each document you have used chat in). If you reach 20, chat tells you; use **Clear Chat** in one you no longer need.

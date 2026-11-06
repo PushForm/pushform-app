@@ -520,6 +520,10 @@ const agentFor = agentForPath;
 const kindOf = (path: ConversationPath): ConversationKind => (path === 'help' ? 'help' : 'intake');
 const clientOf = (screen: PanelScreen | null): Record<string, unknown> | null => (screen ? { version: screen.build.version, build: screen.build.commit, editor: screen.editor, browser: screen.browser, os: screen.os } : null);
 
+/** An account keeps at most this many open conversations (one per document, resumed from the panel); the database enforces it. */
+export const OPEN_CONVERSATIONS_LIMIT = 20;
+const OPEN_CONVERSATIONS_MESSAGE = `You have ${OPEN_CONVERSATIONS_LIMIT} open chats. Use Clear Chat in one you no longer need, then try again.`;
+
 export function createConversationHandler(deps: ConversationDeps): (req: Request) => Promise<Response> {
   const { config, db } = deps;
   const now = () => deps.now?.() ?? new Date();
@@ -600,7 +604,13 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     await enforceRate(db, user.id, config.limits.messagesPerMinute);
     const screen: PanelScreen = { editor: body.screen.editor, build: body.screen.build, browser: body.screen.browser, os: body.screen.os };
     if (body.screen.documentType !== undefined) screen.documentType = body.screen.documentType;
-    let row; try { row = await db.conversationStart(config.host, user.id, user.email, body.kind, body.path, screen); } catch (error) { throw httpErrorOf(error); }
+    let row;
+    try { row = await db.conversationStart(config.host, user.id, user.email, body.kind, body.path, screen); }
+    catch (error) {
+      const e = httpErrorOf(error);
+      // The database refuses a twenty-first open conversation; say so, since "a limit was reached" tells nobody what to do.
+      throw e.code === 'limit' ? new HttpError('limit', OPEN_CONVERSATIONS_MESSAGE, undefined, 'open_conversations') : e;
+    }
     return json({ conversation: conversationView(conversationFromRow(row)) }, 201);
   };
   const get = async (req: Request, id: string): Promise<Response> => {

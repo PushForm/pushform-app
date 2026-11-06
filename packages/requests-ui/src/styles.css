@@ -131,3 +131,13 @@
 .pf-fr-clone input { font: inherit; padding: 4px 6px; }
 .pf-fr-clone-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .pf-fr-link { padding: 0; background: none; border: none; color: inherit; text-decoration: underline; cursor: pointer; font: inherit; }
+
+/* The card that proposes a Commons publication. */
+.pf-fr-publish { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--pf-border, #bbb); border-radius: 8px; }
+.pf-fr-publish h3 { margin: 0; font-size: 13px; }
+.pf-fr-publish p { margin: 0; }
+.pf-fr-publish dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 10px; margin: 0; }
+.pf-fr-publish dt { color: var(--pf-text-muted); }
+.pf-fr-publish dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.pf-fr-publish-description { max-height: 8em; overflow-y: auto; white-space: pre-wrap; }
+.pf-fr-publish-picture { width: 100%; max-height: 160px; object-fit: contain; border-radius: 4px; border: 1px solid var(--pf-border, #bbb); }

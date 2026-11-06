@@ -8,6 +8,7 @@ import { SAMPLE_CONFIG_INPUT } from '../config/sample.ts';
 import type { ConversationMessage } from '../domain/types.ts';
 import { SAYINGS } from './status.ts';
 import { CLONE_TOOL } from '../clone.ts';
+import { PUBLISH_TOOL } from '../publish.ts';
 import { documentTools } from '../agents/document.ts';
 import { attachmentSection, closeSuspended, createConversationHandler, WARM_DOCUMENTS, warmChatPrompts, formatBytes, historyOf, issueSummaryOf, parseSse, requestIdOfIssue, routePath, type ConversationDeps } from './conversation.ts';
 import { conversationFromRow, ServiceDb, UserDb } from './db.ts';
@@ -1500,5 +1501,31 @@ describe('cloning the document from AI Chat', () => {
 
   it('keeps the warmed first-message prompts in step with tabs that can clone', () => {
     expect(WARM_DOCUMENTS.filter(document => document?.clone === 1)).toHaveLength(2);
+  });
+});
+
+describe('saving and publishing from AI Chat (backend)', () => {
+  const anthropicOf = (h: Harness) => h.deps.anthropic as ReturnType<typeof fakeAnthropic>;
+  const model = { type: 'model', apiVersion: 1, edit: 1, guidance: 1, clone: 1, save: 1, publish: 1 };
+  const proposal = { id: 'p1', name: PUBLISH_TOOL, input: { title: 'Shaker base cabinet', description: 'A 30 in base cabinet.', category: 'Cabinets and built-ins', license: 'CC BY 4.0', collections: ['Shaker cabinets'] } };
+
+  it('adds the save and publishing rules when those tools are offered', async () => {
+    const h = harness({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help' }) }, turns: [{ text: ['Sure.'] }] });
+    await (await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'publish this', document: model })).text();
+    const system = (anthropicOf(h).calls[0]!.system as { text: string }[])[0]!.text;
+    expect(system).toContain('Saving the document:');
+    expect(system).toContain('Publishing to Commons:');
+    expect(WARM_DOCUMENTS).toContainEqual(model);
+  });
+
+  it.each([['published', { ok: true, outcome: 'published', title: 'Shaker base cabinet', url: 'https://commons.pushform.io/#models/design-1' }, 0], ['cancel', { ok: true, outcome: 'cancel' }, 0],
+    ['failed', { ok: false, outcome: 'failed', error: 'The upload failed.' }, 1]])('after a card that was %s, calls the model %i more times', async (_label, answer, calls) => {
+    const first = harness({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help' }) }, turns: [{ text: ['Here is the publication.'], toolUses: [proposal] }] });
+    await (await call(first.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'publish this to commons in my shaker cabinet collection', document: model })).text();
+    const stored = first.service.named('fr_conversation_append')[0]!.params['p_messages'] as ConversationMessage[];
+    const next = harness({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help', messages: stored, message_count: 1 }) }, turns: [{ text: ['It could not be published.'] }] });
+    const response = await call(next.handler, 'POST', `/conversations/${CONVERSATION_ID}/tool-results`, { results: [{ toolUseId: 'p1', content: JSON.stringify(answer), isError: !answer.ok }] });
+    await response.text();
+    expect(anthropicOf(next).calls).toHaveLength(calls);
   });
 });

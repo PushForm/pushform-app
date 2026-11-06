@@ -416,3 +416,21 @@ it('computes collection saves only for collections whose membership the publishe
   const changes = collectionChanges([a, { ...b, modelIds: ['m'] }, c], 'm', { [a.id]: false, [b.id]: true });
   expect(changes).toEqual([{ collection: a, fields: { title: a.title, description: a.description, visibility: a.visibility, modelIds: ['x'] } }]);
 });
+
+it('starts from AI Chat\'s preset and publishes on its own once the upload is ready, applying the preset collections', async () => {
+  const jigs = collection();
+  const f = setup({ collections: [jigs] }); const published = vi.fn(), publication = vi.fn();
+  const file = new File(['saved snapshot bytes'], 'Garden bench.pf');
+  cloud.upload.mockResolvedValue(asset({ filename: file.name, format: 'pf', size_bytes: file.size }));
+  cloud.stream.mockResolvedValue({ state: 'pending' });
+  render(<UploadDialog account={f.account} filesUrl="https://files.example.com" modelId={null} newModelId="design-snapshot" initialFile={file} snapshotLabel="Private cloud revision 12"
+    preset={{ details: { title: 'Cedar garden bench', description: 'A two-seat bench.', category: 'Outdoor and garden', license: 'CC BY-NC 4.0' }, collections: { ids: [jigs.id], names: ['Garden projects'] } }}
+    autoPublish onClose={vi.fn()} onPublished={published} onPublication={publication}/>);
+  await waitFor(() => expect(published).toHaveBeenCalledWith('design-snapshot'));
+  expect(publication).toHaveBeenCalledWith('design-snapshot', []);
+  const submitted = f.rpc.mock.calls.filter(([name]) => name === 'commons_submit_model' || name === 'commons_update_draft').at(-1)![1] as { p_metadata: { title: string; description: string; licenses: { name: string }[] } };
+  expect(submitted.p_metadata).toMatchObject({ title: 'Cedar garden bench', description: 'A two-seat bench.' });
+  expect(submitted.p_metadata.licenses[0]!.name).toBe('CC BY-NC 4.0');
+  expect(f.rpc).toHaveBeenCalledWith('commons_save_collection', expect.objectContaining({ p_id: jigs.id, p_model_ids: ['model-other', 'design-snapshot'] }));
+  expect(f.rpc).toHaveBeenCalledWith('commons_save_collection', expect.objectContaining({ p_id: null, p_title: 'Garden projects', p_public: false, p_model_ids: ['design-snapshot'] }));
+});

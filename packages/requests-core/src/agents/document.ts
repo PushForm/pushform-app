@@ -2,6 +2,7 @@
 // Copyright 2026 PushForm contributors
 import { guidanceHighlightSchema, guidanceListSchema, guidanceSidebarSchema } from '../guidance.ts';
 import { CLONE_TOOL, cloneProposalSchema } from '../clone.ts';
+import { PUBLISH_TOOL, PUBLISHING_INFO_TOOL, SAVE_TOOL, publishingInfoSchema, publishProposalSchema, saveSchema } from '../publish.ts';
 import type Anthropic from '@anthropic-ai/sdk';
 import {
   LAYOUT_API_VERSION, LAYOUT_TOOLS, MODEL_API_VERSION, MODEL_TOOLS, layoutBatchSchema, layoutGetDocumentSchema, layoutListSchema,
@@ -16,9 +17,10 @@ import type { AgentContext } from './store.ts';
  */
 /**
  * What the sending tab can run. Model tabs sent `apiVersion: 1` for guidance alone before models could be edited, so
- * a model is editable only when the tab also sends `edit: 1`. `clone: 1` says the tab can clone its document from the chat.
+ * a model is editable only when the tab also sends `edit: 1`. `clone: 1` says the tab can clone its document from the chat,
+ * `save: 1` that it can save a version, and `publish: 1` (a model tab) that it can publish to Commons.
  */
-export interface DocumentCapability { type: 'layout' | 'model'; apiVersion: number; guidance?: 1 | undefined; edit?: 1 | undefined; clone?: 1 | undefined }
+export interface DocumentCapability { type: 'layout' | 'model'; apiVersion: number; guidance?: 1 | undefined; edit?: 1 | undefined; clone?: 1 | undefined; save?: 1 | undefined; publish?: 1 | undefined }
 
 export const layoutDocumentTools: readonly Anthropic.Tool[] = [
   defineTool(LAYOUT_TOOLS.getDocument.name, LAYOUT_TOOLS.getDocument.description, layoutGetDocumentSchema),
@@ -50,6 +52,11 @@ export function documentTools(document: DocumentCapability | null): readonly Ant
   const editable = editableDocument(document);
   return [
     ...(editable === 'layout' ? layoutDocumentTools : editable === 'model' ? modelDocumentTools : []),
+    ...(editable && document?.save === 1 ? [defineTool(SAVE_TOOL, 'Save the open document as a new private cloud version, as Save version does, with optional change notes. Returns the version number.', saveSchema)] : []),
+    ...(editable === 'model' && document?.publish === 1 ? [
+      defineTool(PUBLISHING_INFO_TOOL, 'Read what publishing this model to Commons needs: whether it can be published, its current publication if any, retained source licenses, the requester\'s collections, and the categories and licenses offered. Changes nothing.', publishingInfoSchema),
+      defineTool(PUBLISH_TOOL, 'Save a version and show the requester a card proposing a Commons publication of it. Only their click on the card publishes; returns what the card came to.', publishProposalSchema),
+    ] : []),
     ...(editable && document?.clone === 1 ? [defineTool(CLONE_TOOL, 'Propose a new document that copies the one open now. The requester confirms on a chat card that also offers copying inside this document; returns their choice.', cloneProposalSchema)] : []),
     ...(document?.guidance === 1 && document.apiVersion === 1 ? [
       defineTool('ui_list_targets', 'Read the current editor and active tool, and list available toolbar/menu routes, action IDs, enabled states, tabs and visible object-browser items. Does not change any UI.', guidanceListSchema),

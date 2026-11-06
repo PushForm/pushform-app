@@ -28,7 +28,16 @@ export interface UploadDialogProps {
   scopeControl?: ReactNode;
   inherited?: (Pick<CommonsSubmission, 'licenses' | 'credits' | 'source'> & { creator?: string }) | undefined;
   newModelId?: string | undefined;
+  /**
+   * Values to start from, as AI Chat proposes them: details override what a published model has, and the collections
+   * are checked (by id) or created (by name) when the publisher's collections load.
+   */
+  preset?: { details?: Partial<ModelDetails> | undefined; collections?: { ids: readonly string[]; names: readonly string[] } | undefined } | undefined;
+  /** Publish once everything is ready, as if Publish were chosen; anything that needs the publisher waits for them. */
+  autoPublish?: boolean | undefined;
   onClose(): void; onPublished(modelId: string): void;
+  /** Called once the model is published, before collection failures are shown, with each failed collection's message. */
+  onPublication?: ((modelId: string, failures: readonly string[]) => void) | undefined;
 }
 
 const ACCEPT = [...COMMONS_MODEL_EXTENSIONS].map((extension) => '.' + extension).join(',');
@@ -80,14 +89,14 @@ export function fileStatus(file: FileState): { label: string; detail: string | n
   return { label: 'File checked', detail: null, tone: 'good', progress: null };
 }
 
-export function UploadDialog({ account, filesUrl, modelId, initialFile, initialImage, newModelId, snapshotLabel, scopeControl, inherited, onClose, onPublished }: UploadDialogProps): JSX.Element {
+export function UploadDialog({ account, filesUrl, modelId, initialFile, initialImage, newModelId, snapshotLabel, scopeControl, inherited, preset, autoPublish, onClose, onPublished, onPublication }: UploadDialogProps): JSX.Element {
   const api = useMemo(() => new CommonsPublishing(account.client), [account.client]);
   const collectionsApi = useMemo(() => new CommonsCollections(account.client), [account.client]);
   const [profile, setProfile] = useState<CommonsProfile | null | undefined>();
   const [loadError, setLoadError] = useState('');
   const [model, setModel] = useState<ModelState | null>(null);
   const [step, setStep] = useState<'upload' | 'details'>(modelId ? 'details' : 'upload');
-  const [details, setDetails] = useState<ModelDetails>(emptyDetails);
+  const [details, setDetails] = useState<ModelDetails>(() => ({ ...emptyDetails, ...preset?.details }));
   const [modelFile, setModelFile] = useState<FileState | null>(null);
   const [cover, setCover] = useState<FileState | null>(null);
   const [save, setSave] = useState<SaveState>('idle');
@@ -197,7 +206,8 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, initialI
       try {
         const { state, model: loaded } = await refresh(modelId);
         if (!live) return;
-        setDetails(detailsFromMetadata(loaded.current?.metadata));
+        setDetails({ ...detailsFromMetadata(loaded.current?.metadata), ...preset?.details });
+        if (preset?.details && Object.keys(preset.details).length) dirty.current = true;
         const files = state.assets.filter((asset) => asset.revision_id === loaded.current?.id);
         // An upload interrupted by closing the dialog is discarded; the owner chooses the file again.
         for (const pending of files.filter((asset) => asset.status === 'pending')) await removeCommonsFile(filesUrl, await token(), pending.id, control.current.signal).catch(() => {});
@@ -381,6 +391,7 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, initialI
       }
       const failures = await applyCollections(published);
       window.dispatchEvent(new Event('commons:catalog-changed'));
+      onPublication?.(published, failures);
       if (!failures.length) { onPublished(published); return; }
       setPublishedId(published);
       setMessage(`${collectionsOnly ? 'Some collections were not updated' : 'Published, but some collections were not updated'}. ${failures.join(' ')} You can change them from the model page.`);
@@ -388,6 +399,25 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, initialI
       setMessage(failure instanceof Error ? failure.message : published ? 'Your collections could not be updated.' : 'The model could not be published.');
     } finally { setPublishing(false); }
   };
+
+  // Preset collections are chosen once the publisher's collections load: existing ones by id, the rest created by name.
+  const presetApplied = useRef(false);
+  useEffect(() => {
+    if (presetApplied.current || !collections || !preset?.collections) return;
+    presetApplied.current = true;
+    const known = new Set(collections.map((collection) => collection.id));
+    const titles = new Set(collections.map((collection) => collection.title.toLocaleLowerCase()));
+    setCollectionChoices((value) => ({ ...value, ...Object.fromEntries(preset.collections!.ids.filter((id) => known.has(id)).map((id) => [id, true])) }));
+    setNewCollections((value) => [...value, ...preset.collections!.names.filter((name) => name.trim() && !titles.has(name.trim().toLocaleLowerCase())).map((name) => name.trim())]);
+  }, [collections, preset]);
+  // Auto-publish waits for the preset collections too, so they are applied with the publication.
+  const autoTried = useRef(false);
+  const presetReady = !preset?.collections || presetApplied.current || !!collectionsError;
+  useEffect(() => {
+    if (!autoPublish || autoTried.current || !canPublish || !presetReady) return;
+    autoTried.current = true;
+    void publish();
+  });
 
   const addCollection = () => {
     const title = newCollection.trim();

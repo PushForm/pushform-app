@@ -46,6 +46,16 @@ AI Chat can change the document open in the tab you send from: a Layout document
 
 Each change applies all at once, without a confirmation step. The chat then shows a line such as “Changed the document: Group the shelves. Undo reverts it.” One request is one undo step, so **Undo** reverts the whole change, even when the agent made it in several parts; the chat keeps one such line for the request and updates it as the parts apply. If you edit the document while the agent is still working, its later parts become a separate undo step, and the line says how many steps **Undo** takes. If any part of a change fails, nothing changes and the agent says what could not be done.
 
+## Save a version from AI Chat
+
+Ask AI Chat to save, such as “Save this” or “Save it with the note: added the drawer runners.” It saves a private cloud version, exactly as **Save version** does, and the chat shows “Saved version” with the number. If nothing changed since the last version, the chat says so and no new version is made. Add notes in your own words, or ask the agent to describe the changes it made in this conversation. Saving never publishes or shares the document.
+
+## Publish a 3D model to Commons from AI Chat
+
+In a 3D model, ask AI Chat to publish, such as “Publish this to Commons in my Shaker cabinets collection.” The agent saves a version first, then shows a **Publish to Commons** card with the title, a description it drafted, the category, the license and the collections. If you don't name a license, it suggests CC BY 4.0 and says so. Collections you name are matched to yours; a name that matches none becomes a new private collection.
+
+Nothing is public until you choose **Publish model** on the card (**Publish changes** for a model you already published). That opens the publishing dialog with the card's values, and it publishes as soon as the upload finishes. The first time, it asks you to create your public profile. Choose **Edit details** to review or change everything in the dialog before you choose **Publish model** yourself, or **Cancel** to publish nothing. When it's done, the card shows “Published” with a link to the model in Commons.
+
 ## Clone a document and change the copy
 
 Ask for a new document based on the one you have open, such as “Clone this model, but make it 36″ wide” or “Start a new drawing from this one.” Before anything is copied, the chat shows a **Clone this document?** card with a name for the copy, which you can change. Choose:

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { CLONE_TOOL, cloneAnswerOf } from '@pushform/requests-core';
+import { CLONE_TOOL, PUBLISH_TOOL, cloneAnswerOf, publishAnswerOf } from '@pushform/requests-core';
 /**
  * Browser client for the `fr-conversation` Edge Function. The UI depends only on this HTTP contract:
  * bearer session token plus publishable key on every call, JSON bodies, and a `text/event-stream`
@@ -80,10 +80,12 @@ export interface MessagePicture { readonly id: string; readonly name: string; re
 /** `reviewed`: a tool message recording a render review, with the names of the views pictured (the pictures are not kept). */
 /**
  * `handoff`: the opening message of a clone's chat, shown after a "Continued from" line and the agent's summary.
- * `cloned`: what a clone card came to, for the transcript line a reloaded chat shows in its place.
+ * `cloned`: what a clone card came to, for the transcript line a reloaded chat shows in its place; `published` likewise
+ * for a Commons publication card.
  */
 export interface Message { readonly role: 'user' | 'assistant' | 'tool'; readonly text: string; readonly at: string; readonly pictures?: readonly MessagePicture[] | undefined; readonly reviewed?: readonly string[] | undefined;
-  readonly handoff?: Handoff | undefined; readonly cloned?: { readonly name: string | null } | undefined }
+  readonly handoff?: Handoff | undefined; readonly cloned?: { readonly name: string | null } | undefined;
+  readonly published?: { readonly title: string; readonly url: string | null } | null | undefined }
 export interface Handoff { readonly from: string; readonly summary: string }
 export interface Conversation {
   readonly id: string; readonly kind: ConversationKind; readonly path: ConversationPath; readonly status: ConversationStatus;
@@ -134,7 +136,7 @@ export const TOOL_IMAGE_MAX_CHARS = 1_572_864;
 export interface ToolCallResult { readonly toolUseId: string; readonly content: string; readonly isError: boolean; readonly images?: readonly ToolImage[] | undefined }
 /** What the sending tab can edit this turn; the backend offers matching document tools. */
 /** `edit: 1` marks a model tab whose model the agent may edit; a model tab without it offers guidance alone. */
-export interface DocumentDescriptor { readonly type: 'layout' | 'model'; readonly apiVersion: number; readonly guidance?: 1 | undefined; readonly edit?: 1 | undefined; readonly clone?: 1 | undefined }
+export interface DocumentDescriptor { readonly type: 'layout' | 'model'; readonly apiVersion: number; readonly guidance?: 1 | undefined; readonly edit?: 1 | undefined; readonly clone?: 1 | undefined; readonly save?: 1 | undefined; readonly publish?: 1 | undefined }
 
 /** A problem report's attachment as the panel shows it. */
 export type AttachmentKind = 'screenshot' | 'document';
@@ -178,6 +180,11 @@ function clonedName(output: string): string | null {
   const answer = cloneAnswerOf(output);
   return answer?.ok && answer.choice === 'clone' ? answer.name ?? '' : null;
 }
+/** The publication a card made, from its stored result; null when it published nothing. */
+function publishedOf(output: string): { title: string; url: string | null } | null {
+  const answer = publishAnswerOf(output);
+  return answer?.ok && answer.outcome === 'published' ? { title: answer.title ?? '', url: answer.url ?? null } : null;
+}
 export function normalizeConversation(raw: unknown): Conversation {
   const row = (raw ?? {}) as Json;
   const messages = Array.isArray(row['messages']) ? row['messages'] as Json[] : [];
@@ -192,8 +199,9 @@ export function normalizeConversation(raw: unknown): Conversation {
       const raw = m['handoff'] as Json | undefined;
       const handoff = m['role'] === 'user' && raw && typeof raw['from'] === 'string' && typeof raw['summary'] === 'string' ? { from: str(raw['from']), summary: str(raw['summary']) } : undefined;
       const cloned = m['role'] === 'tool' && m['name'] === CLONE_TOOL ? { name: clonedName(str(m['output'])) } : undefined;
+      const published = m['role'] === 'tool' && m['name'] === PUBLISH_TOOL ? publishedOf(str(m['output'])) : undefined;
       return { role: str(m['role'], 'assistant') as Message['role'], text: str(m['text'] ?? m['content']), at: str(m['at']), ...(pictures.length ? { pictures } : {}), ...(reviewed.length ? { reviewed } : {}),
-        ...(handoff ? { handoff } : {}), ...(cloned ? { cloned } : {}) };
+        ...(handoff ? { handoff } : {}), ...(cloned ? { cloned } : {}), ...(published !== undefined ? { published } : {}) };
     }),
     messageCount: num(pick(row, 'message_count', 'messageCount')), requestId: nullable(pick(row, 'request_id', 'requestId')),
   };

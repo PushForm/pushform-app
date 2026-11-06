@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import type { ProjectActivitySink } from '@pushform/cloud';
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { JSX } from 'react';
 import { createPortal } from 'react-dom';
 import { CommonsBrowser } from './components/CommonsBrowser';
@@ -11,6 +11,9 @@ import { createApp } from './bootstrap';
 import type { AppInstance } from './bootstrap';
 import { MainToolbar } from './components/MainToolbar';
 import { documentToolsFor } from './documentTools';
+import { chatPublishing, type PublicationPreset } from './chatPublishing';
+import { PublishSnapshot } from './components/PublishSnapshot';
+import type { PublishingSnapshot } from './components/SaveVersionDialog';
 import { captureRequestScreenshot } from './requestScreenshot';
 import { PanelHost } from './components/PanelHost';
 import { RightStrip } from './components/RightStrip';
@@ -344,6 +347,15 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     };
     return () => { if (target.pushform?.session === session) delete target.pushform; };
   }, [given, session, active.id, modelApp, locked, home]);
+  /**
+   * AI Chat's publishing dialog: opened from a publication card with the card's values. `made` records the publication
+   * (even one whose collections failed) so closing the dialog reports it.
+   */
+  const [chatPublication, setChatPublication] = useState<{ snapshot: PublishingSnapshot; preset: PublicationPreset; auto: boolean;
+    made: { modelId: string; failures: readonly string[] } | null; resolve(made: { modelId: string; failures: readonly string[] } | null): void } | null>(null);
+  const publishingForChat = useMemo(() => (autosave && cloudFiles ? chatPublishing({ files: cloudFiles, saves: autosave, commons,
+    openPublishing: (snapshot, preset, auto) => new Promise(resolve => setChatPublication({ snapshot, preset, auto, made: null, resolve })) }) : undefined),
+  [autosave, cloudFiles, commons?.account]);
   if (locked) return null;
   const accountEmail = cloud?.getSnapshot().user?.email ?? '';
   const screenOf = (tab: DocumentTab | null): ScreenInfo => ({ editor: tab ? tab.type : 'home', ...(tab ? { documentType: tab.type } : {}),
@@ -404,7 +416,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
       documentId={tab ? cloudLocation(tab.identity)?.fileId : undefined}
       anchor={tab ? requestsIcon : requestsPanel?.anchor ?? null} onClose={tab ? closeSidePanel : closeRequests}
       open={key === chatKey && (tab ? sidePanel === 'requests' : !!requestsPanel?.open)}
-      documentTools={tab ? () => documentToolsFor(session, tab, panel => { if (panel === 'objects' && sidePanel === 'requests') setGuidanceBrowserTab(tab.id); else showSidePanel(panel, 'open'); }, cloneFromChat) : undefined}
+      documentTools={tab ? () => documentToolsFor(session, tab, panel => { if (panel === 'objects' && sidePanel === 'requests') setGuidanceBrowserTab(tab.id); else showSidePanel(panel, 'open'); }, cloneFromChat, publishingForChat) : undefined}
       handoff={handoffs[key]} onHandoffStarted={() => setHandoffs(({ [key]: _used, ...rest }) => rest)} captureScreenshot={tab ? () => captureRequestScreenshot(session, tab) : undefined} onMessage={() => usage?.record('help_message')} clearSignal={clearSignals[key] ?? 0} />;
   };
   const panel = requestsPanel ? (requestsClient
@@ -497,6 +509,9 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
           onRequests={() => toggleSidePanel('requests')} onObjects={() => toggleSidePanel('objects')} onClearChat={requestsClient ? clearChat : undefined}
           onExtensions={openExtensions} />
         {commonsVisited && <div className="pf-commons-tab" hidden={!commonsShown}><CommonsBrowser account={commons?.account} filesUrl={commons?.filesUrl} session={session} onClose={() => setCommonsShown(false)} onOpened={() => setCommonsShown(false)} /></div>}
+        {chatPublication && commons?.account ? <PublishSnapshot account={commons.account} filesUrl={commons.filesUrl} snapshot={chatPublication.snapshot}
+          preset={chatPublication.preset} autoPublish={chatPublication.auto} onPublication={(modelId, failures) => { chatPublication.made = { modelId, failures }; }}
+          onClose={() => { setChatPublication(null); chatPublication.resolve(chatPublication.made); }} /> : null}
         {commonsPicker && createPortal(<div className="pf-modal-backdrop"><section className="pf-modal pf-commons-picker" role="dialog" aria-modal="true" aria-label="Import from Commons"><CommonsBrowser account={commons?.account} filesUrl={commons?.filesUrl} session={session} target={commonsPicker} onClose={() => setCommonsPicker(null)} onOpened={() => setCommonsPicker(null)} /></section></div>, document.body)}
         {extensionManager}
         {extensionPrint}

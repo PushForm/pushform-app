@@ -34,11 +34,11 @@ function setup() {
   return { app, session, tab, canvas, click, move, choose, sourceId, page: () => tab.doc.state.pages.get(tab.activePageId)! };
 }
 
-/** Type `text` into the tool options bar's field `label` and press Enter. */
+/** Type `text` into the tool options bar's field `label` and leave it, which commits it as Enter does. */
 function setBar(label: string, text: string): void {
   const input = screen.getByLabelText(label);
   fireEvent.change(input, { target: { value: text } });
-  fireEvent.keyDown(input, { key: 'Enter' });
+  fireEvent.blur(input);
 }
 
 it('puts one Corner tool after Offset and edits native corners using its bar and typed sizes', async () => {

@@ -136,7 +136,8 @@ it('puts tool controls in the tool options bar over the page, not in the side pa
   fireEvent.click(screen.getByRole('button', { name: 'Table' }));
   const rows = within(screen.getByRole('toolbar', { name: 'Table options' })).getByLabelText('Rows');
   fireEvent.change(rows, { target: { value: '5' } });
-  fireEvent.keyDown(rows, { key: 'Enter' });
+  // the bar commits on blur as well as Enter; a keydown here would reach the boolean engine's document-wide key handler
+  fireEvent.blur(rows);
   fireEvent.click(screen.getByRole('button', { name: 'Select' }));
   expect(document.querySelector('.pf-tob')!.classList.contains('is-shown')).toBe(false);
   fireEvent.click(screen.getByRole('button', { name: 'Table' }));

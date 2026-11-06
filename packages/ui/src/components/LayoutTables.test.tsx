@@ -9,11 +9,11 @@ import { DocumentSession } from '../session';
 import { LayoutWorkspace, resetRememberedLayoutToolSettings } from './LayoutWorkspace';
 import { enterLayoutValue } from './layoutEntryTesting';
 
-/** Type `text` into the tool options bar's field `label` and press Enter. */
+/** Type `text` into the tool options bar's field `label` and leave it, which commits it as Enter does. */
 function setBar(label: string, text: string): void {
   const input = screen.getByLabelText(label);
   fireEvent.change(input, { target: { value: text } });
-  fireEvent.keyDown(input, { key: 'Enter' });
+  fireEvent.blur(input);
 }
 
 

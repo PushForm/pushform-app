@@ -1653,6 +1653,9 @@ isOneToOne: false
 "commons_save_profile":
 { Args: { "p_avatar_url": string,"p_bio": string,"p_display_name": string,"p_expected_version": number,"p_handle": string,"p_links": Json,"p_public_consent": boolean }; Returns: Json
                            },
+"commons_search_matches":
+{ Args: { "p_query": string,"p_text": string }; Returns: boolean
+                           },
 "commons_self_service_details_valid":
 { Args: { "p_metadata": Json }; Returns: boolean
                            },

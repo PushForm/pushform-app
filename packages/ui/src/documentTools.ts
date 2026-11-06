@@ -4,7 +4,7 @@ import { guidanceFor } from './guidance';
 import { LAYOUT_API_VERSION, LAYOUT_TOOLS, MODEL_API_VERSION, MODEL_TOOLS, type LayoutApiError } from '@pushform/extension-protocol';
 import { LayoutDocumentApi, ModelDocumentApi, runLayoutTool, runModelTool, type ModelRenderer } from '@pushform/extensions';
 import type { Viewport } from '@pushform/render';
-import { TOOL_IMAGE_MAX_CHARS, type DocumentToolOutcome, type DocumentToolSession } from '@pushform/requests-ui';
+import { TOOL_IMAGE_MAX_CHARS, type ClonedDocument, type CloneRequest, type DocumentToolOutcome, type DocumentToolSession } from '@pushform/requests-ui';
 import type { DocumentSession, DocumentTab } from './session';
 
 /** Names the chat's undo entries. */
@@ -74,14 +74,24 @@ function withNotice(result: DocumentToolOutcome, api: { readonly changes: { labe
  * AI Chat's view of one tab's document: the Layout document API for a Layout tab, the model document API for a
  * model tab. Each document's conversation edits only its own tab, and only while that tab is active.
  * A call that arrives after the tab was closed or another tab was brought forward changes nothing and reports why.
+ * `clone` makes a confirmed clone of the tab's document; without it the chat offers no cloning.
  */
-export function documentToolsFor(session: DocumentSession, tab: DocumentTab, openPanel?: (panel: 'objects' | 'requests') => void): DocumentToolSession | null {
+export function documentToolsFor(session: DocumentSession, tab: DocumentTab, openPanel?: (panel: 'objects' | 'requests') => void,
+  clone?: (tab: DocumentTab, request: CloneRequest) => Promise<ClonedDocument>): DocumentToolSession | null {
   const guidance = openPanel ? guidanceFor(session, tab, openPanel) : null;
+  const cloning = clone ? {
+    name: tab.name.replace(/\.(pfl?)$/i, ''),
+    clone: async (request: CloneRequest): Promise<ClonedDocument> => {
+      if (!session.tabs.includes(tab)) throw new Error(`The document "${tab.name}" was closed.`);
+      return clone(tab, request);
+    },
+  } : {};
   if (tab.type === 'model') {
     const api = new ModelDocumentApi(tab.app.commands, CLIENT);
     const renderer = viewportRenderer(tab.app.viewport);
     return {
-      document: { type: 'model', apiVersion: MODEL_API_VERSION, edit: 1, ...(guidance ? { guidance: 1 as const } : {}) },
+      document: { type: 'model', apiVersion: MODEL_API_VERSION, edit: 1, ...(guidance ? { guidance: 1 as const } : {}), ...(clone ? { clone: 1 as const } : {}) },
+      ...cloning,
       progress: call => (call.name === MODEL_TOOLS.applyOperations.name ? 'Applying the change…' : call.name === MODEL_TOOLS.view.name ? 'Changing the view…'
         : call.name === MODEL_TOOLS.render.name ? 'Checking the result…' : undefined),
       run: async (call, signal) => {
@@ -103,7 +113,8 @@ export function documentToolsFor(session: DocumentSession, tab: DocumentTab, ope
     selectedEntityIds: () => (tab.workspace.selectedEntityId === null ? [] : [tab.workspace.selectedEntityId]),
   }, CLIENT);
   return {
-    document: { type: 'layout', apiVersion: LAYOUT_API_VERSION, ...(guidance ? { guidance: 1 as const } : {}) },
+    document: { type: 'layout', apiVersion: LAYOUT_API_VERSION, ...(guidance ? { guidance: 1 as const } : {}), ...(clone ? { clone: 1 as const } : {}) },
+    ...cloning,
     run: (call, signal) => {
       if (guidance && call.name.startsWith('ui_')) return guidance(call.name, call.input, signal, call.id);
       const refused = gone(session, tab, api.revision);

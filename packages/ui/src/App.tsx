@@ -62,7 +62,7 @@ import { ThumbnailContext } from './useThumbnails';
 import { DocumentLoading } from './components/DocumentLoading';
 import { cloudLocation, openCloudDocument } from './cloudDocuments';
 import { forgetCloudRecents, readCloudRecents, recordCloudRecent, updateCloudRecent } from './cloudRecents';
-import { Chat, DockedPanel, HOME_SCOPE, Popover, RequestsClient, type ScreenInfo } from '@pushform/requests-ui';
+import { Chat, DockedPanel, HOME_SCOPE, Popover, RequestsClient, type ClonedDocument, type CloneRequest, type Handoff, type ScreenInfo } from '@pushform/requests-ui';
 import { PiTreeView } from 'react-icons/pi';
 import { RiChatAiLine } from 'react-icons/ri';
 
@@ -207,6 +207,8 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
   const chats = useRef(new Set<string>());
   /** Clear Chat raises the counter of the conversation it clears. */
   const [clearSignals, setClearSignals] = useState<Record<string, number>>({});
+  /** A clone made from AI Chat, by its tab: its chat opens with the handoff and sends the request that made it. */
+  const [handoffs, setHandoffs] = useState<Record<string, Handoff & { request: string }>>({});
   /** The editors' one docked side panel at a time; a document's chat mounts on first open and then only hides. */
   const [sidePanel, setSidePanel] = useState<SidePanel | null>(null);
   const [guidanceBrowserTab, setGuidanceBrowserTab] = useState<string | null>(null);
@@ -375,6 +377,25 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     setClearSignals(current => ({ ...current, [chatKey]: (current[chatKey] ?? 0) + 1 }));
     showSidePanel('requests', 'open');
   };
+  /**
+   * Clone a document the requester confirmed on a chat card: the copy opens in a new, active tab, unsaved, headed for the
+   * original's project and folder, and its own chat takes over from the handoff.
+   */
+  const cloneFromChat = async (source: DocumentTab, request: CloneRequest): Promise<ClonedDocument> => {
+    if (!allowOpeningDocument()) throw new Error('A downloaded update must be installed before another document opens.');
+    const location = cloudLocation(source.identity);
+    let draft = source.cloudDraft?.projectId ? { projectId: source.cloudDraft.projectId, folderId: source.cloudDraft.folderId ?? null } : undefined;
+    if (location) {
+      const head = cloudFiles ? await cloudFiles.head(location.fileId).catch(() => null) : null;
+      draft = { projectId: head?.file.project_id ?? location.projectId, folderId: head?.file.folder_id ?? null };
+    }
+    const tab = await session.cloneDocument(source.id, request.name, draft);
+    const plain = (name: string): string => name.replace(/\.(pfl?)$/i, '');
+    setHandoffs(current => ({ ...current, [tab.id]: { from: plain(source.name), summary: request.summary, request: request.request } }));
+    chats.current.add(tab.id);
+    showSidePanel('requests', 'open');
+    return { name: plain(tab.name), show: () => { if (session.tabs.includes(tab)) session.activate(tab.id); } };
+  };
   const chatPanel = (key: string, client: RequestsClient): JSX.Element => {
     const tab = key === HOME_SCOPE ? null : session.tabs.find(item => item.id === key) ?? null;
     // A saved document resumes its conversation after a reload; an unsaved one keeps it for the session.
@@ -383,7 +404,8 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
       documentId={tab ? cloudLocation(tab.identity)?.fileId : undefined}
       anchor={tab ? requestsIcon : requestsPanel?.anchor ?? null} onClose={tab ? closeSidePanel : closeRequests}
       open={key === chatKey && (tab ? sidePanel === 'requests' : !!requestsPanel?.open)}
-      documentTools={tab ? () => documentToolsFor(session, tab, panel => { if (panel === 'objects' && sidePanel === 'requests') setGuidanceBrowserTab(tab.id); else showSidePanel(panel, 'open'); }) : undefined} captureScreenshot={tab ? () => captureRequestScreenshot(session, tab) : undefined} onMessage={() => usage?.record('help_message')} clearSignal={clearSignals[key] ?? 0} />;
+      documentTools={tab ? () => documentToolsFor(session, tab, panel => { if (panel === 'objects' && sidePanel === 'requests') setGuidanceBrowserTab(tab.id); else showSidePanel(panel, 'open'); }, cloneFromChat) : undefined}
+      handoff={handoffs[key]} onHandoffStarted={() => setHandoffs(({ [key]: _used, ...rest }) => rest)} captureScreenshot={tab ? () => captureRequestScreenshot(session, tab) : undefined} onMessage={() => usage?.record('help_message')} clearSignal={clearSignals[key] ?? 0} />;
   };
   const panel = requestsPanel ? (requestsClient
     ? chats.current.has(HOME_SCOPE) ? chatPanel(HOME_SCOPE, requestsClient) : null

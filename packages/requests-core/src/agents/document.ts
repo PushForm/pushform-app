@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { guidanceHighlightSchema, guidanceListSchema, guidanceSidebarSchema } from '../guidance.ts';
+import { CLONE_TOOL, cloneProposalSchema } from '../clone.ts';
 import type Anthropic from '@anthropic-ai/sdk';
 import {
   LAYOUT_API_VERSION, LAYOUT_TOOLS, MODEL_API_VERSION, MODEL_TOOLS, layoutBatchSchema, layoutGetDocumentSchema, layoutListSchema,
@@ -15,9 +16,9 @@ import type { AgentContext } from './store.ts';
  */
 /**
  * What the sending tab can run. Model tabs sent `apiVersion: 1` for guidance alone before models could be edited, so
- * a model is editable only when the tab also sends `edit: 1`.
+ * a model is editable only when the tab also sends `edit: 1`. `clone: 1` says the tab can clone its document from the chat.
  */
-export interface DocumentCapability { type: 'layout' | 'model'; apiVersion: number; guidance?: 1 | undefined; edit?: 1 | undefined }
+export interface DocumentCapability { type: 'layout' | 'model'; apiVersion: number; guidance?: 1 | undefined; edit?: 1 | undefined; clone?: 1 | undefined }
 
 export const layoutDocumentTools: readonly Anthropic.Tool[] = [
   defineTool(LAYOUT_TOOLS.getDocument.name, LAYOUT_TOOLS.getDocument.description, layoutGetDocumentSchema),
@@ -49,6 +50,7 @@ export function documentTools(document: DocumentCapability | null): readonly Ant
   const editable = editableDocument(document);
   return [
     ...(editable === 'layout' ? layoutDocumentTools : editable === 'model' ? modelDocumentTools : []),
+    ...(editable && document?.clone === 1 ? [defineTool(CLONE_TOOL, 'Propose a new document that copies the one open now. The requester confirms on a chat card that also offers copying inside this document; returns their choice.', cloneProposalSchema)] : []),
     ...(document?.guidance === 1 && document.apiVersion === 1 ? [
       defineTool('ui_list_targets', 'Read the current editor and active tool, and list available toolbar/menu routes, action IDs, enabled states, tabs and visible object-browser items. Does not change any UI.', guidanceListSchema),
       defineTool('ui_open_sidebar', 'Reveal a needed left sidebar panel while keeping the conversation visible. Unnecessary for toolbar/menu guidance.', guidanceSidebarSchema),

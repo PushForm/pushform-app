@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { RequestsClient, type Brief, type ScreenInfo } from './client';
 import { readDrafts, rememberDraft } from './drafts';
 import { BASE, FAKE_OPENER, fakeBackend, filedTurn, makeFiledRequest, type FakeBackendOptions, type FakeTurn } from './fakeBackend';
-import { Chat, GREETING } from './Chat';
+import { Chat, GREETING, type ClonedDocument, type CloneRequest, type DocumentToolSession } from './Chat';
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); localStorage.clear(); document.body.innerHTML = ''; });
 const account = { id: 'alice', email: 'artist@example.com' };
@@ -1038,5 +1038,81 @@ describe('render review and progress', () => {
     expect(log().textContent).toContain('A 24 in base cabinet. Starting on it now.');
     // The greeting, the requester, then one label over the acknowledgment and the reply that follows it.
     expect([...log().querySelectorAll('.pf-fr-role')].map(el => el.textContent)).toEqual(['Agent', 'You', 'Agent']);
+  });
+});
+
+describe('cloning the document', () => {
+  const MODEL = { type: 'model', apiVersion: 1, edit: 1, clone: 1 } as const;
+  const proposal = { id: 'c1', name: 'document_clone', input: { name: 'Bookcase 36 in wide', summary: 'A 30 in bookcase; make it 36 in wide.' } };
+  const proposed: FakeTurn[] = [text('I can make a copy.'), { event: 'tool_request', data: { calls: [proposal] } },
+    { event: 'done', data: { messageCount: 1, limitReached: false, ended: false, awaitingTools: true } }];
+  type Clone = (request: CloneRequest) => Promise<ClonedDocument>;
+  const tools = (clone: Clone) => (): DocumentToolSession => ({ document: MODEL, name: 'Bookcase', run: () => ({ content: '{}', isError: false }), clone });
+  const card = async (): Promise<HTMLElement> => screen.findByRole('region', { name: 'Clone this document?' });
+
+  it('asks first, then clones under the name on the card and ends the turn with the clone made', async () => {
+    const show = vi.fn();
+    const clone = vi.fn<Clone>(async request => ({ name: request.name, show }));
+    const { backend } = setup({ turns: [proposed, [done(1)]] }, { documentTools: tools(clone) });
+    await say('clone this model, but make it 36 wide');
+    const asked = await card();
+    expect(asked.textContent).toContain('A copy of Bookcase opens in a new tab as an unsaved document');
+    expect(within(asked).getByRole('button', { name: 'Copy within this model' })).toBeTruthy();
+    expect(clone).not.toHaveBeenCalled();
+    fireEvent.change(within(asked).getByLabelText('Name of the copy'), { target: { value: 'Wide bookcase' } });
+    fireEvent.click(within(asked).getByRole('button', { name: 'Clone document' }));
+    await waitFor(() => expect(log().textContent).toContain('Cloned to Wide bookcase.'));
+    expect(clone).toHaveBeenCalledWith({ name: 'Wide bookcase', summary: 'A 30 in bookcase; make it 36 in wide.', request: 'clone this model, but make it 36 wide' });
+    await waitFor(() => expect(backend.calls.find(c => c.path.endsWith('/tool-results'))?.body).toEqual({ results: [{ toolUseId: 'c1', content: JSON.stringify({ ok: true, choice: 'clone', name: 'Wide bookcase' }), isError: false }] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show it' }));
+    expect(show).toHaveBeenCalled();
+  });
+
+  it('reports Copy within and Cancel to the agent without cloning', async () => {
+    for (const [choice, button, line] of [['copy', 'Copy within this model', 'Copying within this document instead.'], ['cancel', 'Cancel', 'Not cloned.']] as const) {
+      const clone = vi.fn<Clone>();
+      const { backend } = setup({ turns: [proposed, [done(1)]] }, { documentTools: tools(clone) });
+      await say('make a copy of this');
+      fireEvent.click(within(await card()).getByRole('button', { name: button }));
+      await waitFor(() => expect(log().textContent).toContain(line));
+      await waitFor(() => expect(backend.calls.find(c => c.path.endsWith('/tool-results'))?.body).toEqual({ results: [{ toolUseId: 'c1', content: JSON.stringify({ ok: true, choice }), isError: false }] }));
+      expect(clone).not.toHaveBeenCalled();
+      cleanup();
+    }
+  });
+
+  it('reports a clone that could not be made as an error result', async () => {
+    const clone = vi.fn<Clone>(async () => { throw new Error('A downloaded update must be installed before another document opens.'); });
+    const { backend } = setup({ turns: [proposed, [text('The copy could not be made.'), done(1)]] }, { documentTools: tools(clone) });
+    await say('clone this');
+    fireEvent.click(within(await card()).getByRole('button', { name: 'Clone document' }));
+    await waitFor(() => expect(log().textContent).toContain('Not cloned. A downloaded update must be installed'));
+    await waitFor(() => expect(backend.calls.find(c => c.path.endsWith('/tool-results'))?.body).toMatchObject({ results: [{ toolUseId: 'c1', isError: true }] }));
+  });
+
+  it('leaves an unanswered card not cloned when the requester sends another message', async () => {
+    const clone = vi.fn<Clone>();
+    const { backend } = setup({ turns: [proposed, [text('Okay.'), done(2)]] }, { documentTools: tools(clone) });
+    await say('clone this');
+    await card();
+    await say('never mind');
+    await waitFor(() => expect(log().textContent).toContain('Not cloned.'));
+    expect(screen.queryByRole('region', { name: 'Clone this document?' })).toBeNull();
+    expect(backend.calls.some(c => c.path.endsWith('/tool-results'))).toBe(false);
+    expect(clone).not.toHaveBeenCalled();
+  });
+
+  it('opens a clone\'s chat from the handoff and sends the request that made it, without the greeting', async () => {
+    const onHandoffStarted = vi.fn(), onMessage = vi.fn();
+    const { backend } = setup({ turns: [[text('Widening it to 36 in.'), done(1)]] }, { documentTools: tools(vi.fn<Clone>()), onMessage, onHandoffStarted,
+      handoff: { from: 'Bookcase', summary: 'A 30 in bookcase; make it 36 in wide.', request: 'clone this model, but make it 36 wide' } });
+    await waitFor(() => expect(log().textContent).toContain('Widening it to 36 in.'));
+    const lines = [...log().querySelectorAll('.pf-fr-message')].map(el => el.textContent ?? '');
+    expect(lines.slice(0, 3)).toEqual(['Continued from Bookcase', 'AgentA 30 in bookcase; make it 36 in wide.', 'Youclone this model, but make it 36 wide']);
+    expect(log().textContent).not.toContain(GREETING);
+    expect(backend.calls.find(c => c.path.endsWith('/messages'))?.body).toMatchObject({ text: 'clone this model, but make it 36 wide',
+      handoff: { from: 'Bookcase', summary: 'A 30 in bookcase; make it 36 in wide.' }, document: MODEL });
+    expect(onHandoffStarted).toHaveBeenCalledTimes(1);
+    expect(onMessage).not.toHaveBeenCalled();
   });
 });

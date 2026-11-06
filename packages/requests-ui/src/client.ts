@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import { CLONE_TOOL, cloneAnswerOf } from '@pushform/requests-core';
 /**
  * Browser client for the `fr-conversation` Edge Function. The UI depends only on this HTTP contract:
  * bearer session token plus publishable key on every call, JSON bodies, and a `text/event-stream`
@@ -77,7 +78,13 @@ export interface ConversationSummary {
 /** A picture posted with a message, by attachment id. */
 export interface MessagePicture { readonly id: string; readonly name: string; readonly mime: string }
 /** `reviewed`: a tool message recording a render review, with the names of the views pictured (the pictures are not kept). */
-export interface Message { readonly role: 'user' | 'assistant' | 'tool'; readonly text: string; readonly at: string; readonly pictures?: readonly MessagePicture[] | undefined; readonly reviewed?: readonly string[] | undefined }
+/**
+ * `handoff`: the opening message of a clone's chat, shown after a "Continued from" line and the agent's summary.
+ * `cloned`: what a clone card came to, for the transcript line a reloaded chat shows in its place.
+ */
+export interface Message { readonly role: 'user' | 'assistant' | 'tool'; readonly text: string; readonly at: string; readonly pictures?: readonly MessagePicture[] | undefined; readonly reviewed?: readonly string[] | undefined;
+  readonly handoff?: Handoff | undefined; readonly cloned?: { readonly name: string | null } | undefined }
+export interface Handoff { readonly from: string; readonly summary: string }
 export interface Conversation {
   readonly id: string; readonly kind: ConversationKind; readonly path: ConversationPath; readonly status: ConversationStatus;
   readonly title: string | null; readonly brief: Brief | null; readonly messages: readonly Message[];
@@ -127,7 +134,7 @@ export const TOOL_IMAGE_MAX_CHARS = 1_572_864;
 export interface ToolCallResult { readonly toolUseId: string; readonly content: string; readonly isError: boolean; readonly images?: readonly ToolImage[] | undefined }
 /** What the sending tab can edit this turn; the backend offers matching document tools. */
 /** `edit: 1` marks a model tab whose model the agent may edit; a model tab without it offers guidance alone. */
-export interface DocumentDescriptor { readonly type: 'layout' | 'model'; readonly apiVersion: number; readonly guidance?: 1 | undefined; readonly edit?: 1 | undefined }
+export interface DocumentDescriptor { readonly type: 'layout' | 'model'; readonly apiVersion: number; readonly guidance?: 1 | undefined; readonly edit?: 1 | undefined; readonly clone?: 1 | undefined }
 
 /** A problem report's attachment as the panel shows it. */
 export type AttachmentKind = 'screenshot' | 'document';
@@ -166,6 +173,11 @@ const nullable = (value: unknown): string | null => typeof value === 'string' &&
 const num = (value: unknown, fallback = 0): number => typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 const pick = (row: Json, snake: string, camel: string): unknown => row[camel] ?? row[snake];
 
+/** The clone a card made, from its stored result; null when the card did not clone (cancelled, copied within, failed or unanswered). */
+function clonedName(output: string): string | null {
+  const answer = cloneAnswerOf(output);
+  return answer?.ok && answer.choice === 'clone' ? answer.name ?? '' : null;
+}
 export function normalizeConversation(raw: unknown): Conversation {
   const row = (raw ?? {}) as Json;
   const messages = Array.isArray(row['messages']) ? row['messages'] as Json[] : [];
@@ -177,7 +189,11 @@ export function normalizeConversation(raw: unknown): Conversation {
       const pictures = (Array.isArray(m['attachments']) ? m['attachments'] as Json[] : []).filter(p => typeof p?.['id'] === 'string')
         .map(p => ({ id: str(p['id']), name: str(p['name']), mime: str(p['mime']) }));
       const reviewed = m['role'] === 'tool' && Array.isArray(m['views']) ? (m['views'] as unknown[]).map(v => str(v)) : [];
-      return { role: str(m['role'], 'assistant') as Message['role'], text: str(m['text'] ?? m['content']), at: str(m['at']), ...(pictures.length ? { pictures } : {}), ...(reviewed.length ? { reviewed } : {}) };
+      const raw = m['handoff'] as Json | undefined;
+      const handoff = m['role'] === 'user' && raw && typeof raw['from'] === 'string' && typeof raw['summary'] === 'string' ? { from: str(raw['from']), summary: str(raw['summary']) } : undefined;
+      const cloned = m['role'] === 'tool' && m['name'] === CLONE_TOOL ? { name: clonedName(str(m['output'])) } : undefined;
+      return { role: str(m['role'], 'assistant') as Message['role'], text: str(m['text'] ?? m['content']), at: str(m['at']), ...(pictures.length ? { pictures } : {}), ...(reviewed.length ? { reviewed } : {}),
+        ...(handoff ? { handoff } : {}), ...(cloned ? { cloned } : {}) };
     }),
     messageCount: num(pick(row, 'message_count', 'messageCount')), requestId: nullable(pick(row, 'request_id', 'requestId')),
   };
@@ -318,9 +334,9 @@ export class RequestsClient {
    * the conversation path from it and answers on that path.
    */
   /** `attachments` are uploaded pictures of this conversation (see `attach`) that the agent sees with the message. */
-  async *sendMessage(id: string, text: string, options: { readonly intent?: IntentPath | undefined; readonly document?: DocumentDescriptor | null | undefined; readonly signal?: AbortSignal | undefined; readonly attachments?: readonly string[] | undefined } = {}): AsyncGenerator<StreamEvent> {
+  async *sendMessage(id: string, text: string, options: { readonly intent?: IntentPath | undefined; readonly document?: DocumentDescriptor | null | undefined; readonly signal?: AbortSignal | undefined; readonly attachments?: readonly string[] | undefined; readonly handoff?: Handoff | undefined } = {}): AsyncGenerator<StreamEvent> {
     const body: Json = { text, ...(options.intent ? { intent: options.intent } : {}), ...(options.document ? { document: options.document } : {}),
-      ...(options.attachments?.length ? { attachments: [...options.attachments] } : {}) };
+      ...(options.attachments?.length ? { attachments: [...options.attachments] } : {}), ...(options.handoff ? { handoff: { from: options.handoff.from, summary: options.handoff.summary } } : {}) };
     yield* this.stream(`/conversations/${encodeURIComponent(id)}/messages`, body, options.signal);
   }
   /**

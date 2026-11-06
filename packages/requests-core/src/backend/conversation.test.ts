@@ -7,6 +7,8 @@ import { loadConfig } from '../config/load.ts';
 import { SAMPLE_CONFIG_INPUT } from '../config/sample.ts';
 import type { ConversationMessage } from '../domain/types.ts';
 import { SAYINGS } from './status.ts';
+import { CLONE_TOOL } from '../clone.ts';
+import { documentTools } from '../agents/document.ts';
 import { attachmentSection, closeSuspended, createConversationHandler, WARM_DOCUMENTS, warmChatPrompts, formatBytes, historyOf, issueSummaryOf, parseSse, requestIdOfIssue, routePath, type ConversationDeps } from './conversation.ts';
 import { conversationFromRow, ServiceDb, UserDb } from './db.ts';
 import { ALICE, ATTACHMENT_ID, attachmentRow, CONVERSATION_ID, CREDITS, conversationRow, FakeRpc, FakeSessions, FakeStorage, FakeTracker, myRoles, REQUEST_ID, requestRow, sqlError, TOKEN, type RpcScript } from './fakes.ts';
@@ -1426,5 +1428,77 @@ describe('acknowledgments on turns that edit a 3D model', () => {
     expect(resumedClient.acknowledgments).toEqual([]);
     // The resumed request continues from the suspended turn, after the acknowledgment.
     expect(JSON.stringify(resumedClient.calls[0]!.messages)).not.toContain('Starting on it now');
+  });
+});
+
+describe('cloning the document from AI Chat', () => {
+  const anthropicOf = (h: Harness) => h.deps.anthropic as ReturnType<typeof fakeAnthropic>;
+  const toolNames = (h: Harness) => (anthropicOf(h).calls[0]!.tools ?? []).map(t => (t as { name: string }).name);
+  const systemOf = (h: Harness) => (anthropicOf(h).calls[0]!.system as { text: string }[])[0]!.text;
+  const proposal = { id: 'c1', name: CLONE_TOOL, input: { name: 'Bookcase 36 in wide', summary: 'A 30 in bookcase with three shelves; the requester wants it 36 in wide.' } };
+  const model = { type: 'model', apiVersion: 1, edit: 1, guidance: 1, clone: 1 };
+
+  it('offers document_clone and its rules only to a tab that can clone an editable document', async () => {
+    const h = harness({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help' }) }, turns: [{ text: ['Sure.'] }] });
+    await (await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'clone this, but 36 wide', document: model })).text();
+    expect(toolNames(h)).toContain(CLONE_TOOL);
+    expect(systemOf(h)).toContain('Cloning the document:');
+    const without = harness({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help' }) }, turns: [{ text: ['Sure.'] }] });
+    await (await call(without.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'clone this', document: { type: 'model', apiVersion: 1, edit: 1 } })).text();
+    expect(toolNames(without)).not.toContain(CLONE_TOOL);
+    expect(systemOf(without)).not.toContain('Cloning the document:');
+    expect(documentTools({ type: 'model', apiVersion: 1, guidance: 1, clone: 1 }).map(tool => tool.name)).not.toContain(CLONE_TOOL);
+  });
+
+  const proposed = async () => {
+    const first = harness({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help' }) }, turns: [{ text: ['I can make a copy.'], toolUses: [proposal] }] });
+    const events = parseSse(await (await call(first.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'clone this model, but make it 36 wide', document: model })).text());
+    expect(events.at(-1)!.data).toMatchObject({ awaitingTools: true });
+    return first.service.named('fr_conversation_append')[0]!.params['p_messages'] as ConversationMessage[];
+  };
+
+  it.each([['clone', { ok: true, choice: 'clone', name: 'Bookcase 36 in wide' }], ['cancel', { ok: true, choice: 'cancel' }]])('ends the turn without another model call after %s', async (_choice, answer) => {
+    const stored = await proposed();
+    const next = harness({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help', messages: stored, message_count: 1 }) } });
+    const response = await call(next.handler, 'POST', `/conversations/${CONVERSATION_ID}/tool-results`, { results: [{ toolUseId: 'c1', content: JSON.stringify(answer), isError: false }] });
+    expect(parseSse(await response.text()).map(event => event.event)).toEqual(['done']);
+    expect(anthropicOf(next).calls).toHaveLength(0);
+    const saved = next.service.named('fr_conversation_append')[0]!.params['p_messages'] as ConversationMessage[];
+    expect(saved).toEqual([expect.objectContaining({ role: 'tool', name: CLONE_TOOL })]);
+  });
+
+  it('goes back to the agent to copy within the document, or when the clone failed', async () => {
+    const stored = await proposed();
+    for (const [answer, isError] of [[{ ok: true, choice: 'copy' }, false], [{ ok: false, choice: 'clone', error: 'No room.' }, true]] as const) {
+      const next = harness({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help', messages: stored, message_count: 1 }) }, turns: [{ text: ['Done.'] }] });
+      const response = await call(next.handler, 'POST', `/conversations/${CONVERSATION_ID}/tool-results`, { results: [{ toolUseId: 'c1', content: JSON.stringify(answer), isError }] });
+      expect(parseSse(await response.text()).map(event => event.event)).toContain('text');
+      expect(anthropicOf(next).calls).toHaveLength(1);
+    }
+  });
+
+  it('opens a clone\'s chat with the handoff: stored with the first message and read before it, now and in later turns', async () => {
+    const handoff = { from: 'Bookcase', summary: 'A 30 in bookcase with three shelves; make it 36 in wide.' };
+    const h = harness({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help' }) }, turns: [{ text: ['Widening it.'] }] });
+    await (await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'clone this model, but make it 36 wide', document: model, handoff })).text();
+    const stored = h.service.named('fr_conversation_append')[0]!.params['p_messages'] as ConversationMessage[];
+    expect(stored[0]).toMatchObject({ role: 'user', text: 'clone this model, but make it 36 wide', handoff });
+    const latest = anthropicOf(h).calls[0]!.messages.at(-1)!.content as string;
+    expect(latest).toContain('This document is a copy, just made, of the requester\'s document "Bookcase"');
+    expect(latest).toContain('<handoff_summary>');
+    const history = historyOf(stored, '<context/>', 'and paint it white');
+    expect(JSON.stringify(history[0])).toContain('never clone it again');
+  });
+
+  it('accepts a handoff only as the first message of a conversation', async () => {
+    const started = [{ role: 'user' as const, text: 'hi', at: '2026-11-06T00:00:00Z' }, { role: 'assistant' as const, text: 'Hello.', at: '2026-11-06T00:00:01Z' }];
+    const h = harness({ service: { fr_conversation_get: conversationRow({ kind: 'help', path: 'help', messages: started, message_count: 1 }) }, turns: [{ text: ['x'] }] });
+    const response = await call(h.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'go', document: model, handoff: { from: 'A', summary: 'B' } });
+    expect(response.status).toBe(400);
+    expect(anthropicOf(h).calls).toHaveLength(0);
+  });
+
+  it('keeps the warmed first-message prompts in step with tabs that can clone', () => {
+    expect(WARM_DOCUMENTS.filter(document => document?.clone === 1)).toHaveLength(2);
   });
 });

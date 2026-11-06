@@ -46,6 +46,16 @@ AI Chat can change the document open in the tab you send from: a Layout document
 
 Each change applies all at once, without a confirmation step. The chat then shows a line such as “Changed the document: Group the shelves. Undo reverts it.” One request is one undo step, so **Undo** reverts the whole change, even when the agent made it in several parts; the chat keeps one such line for the request and updates it as the parts apply. If you edit the document while the agent is still working, its later parts become a separate undo step, and the line says how many steps **Undo** takes. If any part of a change fails, nothing changes and the agent says what could not be done.
 
+## Clone a document and change the copy
+
+Ask for a new document based on the one you have open, such as “Clone this model, but make it 36″ wide” or “Start a new drawing from this one.” Before anything is copied, the chat shows a **Clone this document?** card with a name for the copy, which you can change. Choose:
+
+- **Clone document** to open a copy in a new tab. The copy includes edits you haven't saved yet, and the original doesn't change. The copy isn't saved until you choose **Save version**, and its first save goes into the original's project and folder.
+- **Copy within this model** (or **Copy within this drawing**) if you meant to copy something inside the document you have open.
+- **Cancel** to leave everything as it is.
+
+After cloning, the copy's chat starts with “Continued from” and the original's name, followed by the agent's short summary of the earlier conversation and your request. The agent then makes the change in the copy. The original's chat shows “Cloned to” and the copy's name, with **Show it** to switch to the copy. Sending another message before you choose leaves the card unanswered, and nothing is copied.
+
 ## Ask for a change to a 3D model
 
 In a 3D model the agent can:

@@ -68,4 +68,15 @@ describe('SectionLayer', () => {
     expect(names(layer.group.children[0] as never)).toEqual(['LineSegments2']);
     layer.dispose();
   });
+
+  it('draws a hidden plane shown with hidden geometry as an outline without its fill', () => {
+    const layer = new SectionLayer();
+    const hidden = sections().planes.map((p) => ({ ...p, hidden: true }));
+    layer.set(sections({ planes: hidden, cuts: [] }), [], [0, 0, 0], { min: [0, 0, 0], max: [2, 2, 2] });
+    const planes = layer.group.children[1] as unknown as { children: { type: string }[] };
+    // outline and two symbols with arrows, no fill quad
+    expect(planes.children.length).toBe(5);
+    expect(planes.children[0]!.type).toBe('LineSegments2');
+    layer.dispose();
+  });
 });

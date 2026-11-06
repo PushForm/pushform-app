@@ -5,7 +5,7 @@ import { formatLength, m4mul, m4transformPoint, MERGE_TOL, v3cross, v3dist, v3do
 import type { Axis } from '@pushform/inference';
 import { SNAP_COLORS } from '@pushform/inference';
 import type { DocumentState, EntityContainer, EntityRef, MeshPartGeometry, UndoEntry } from '@pushform/model';
-import { containerAt, entityRefKey, imageEntityCorners } from '@pushform/model';
+import { containerAt, contentWorldBounds, entityRefKey, imageEntityCorners, sectionPlaneCorners, worldSectionPlane } from '@pushform/model';
 import { contextFrame, pathKeyOf } from '../../commands/context';
 import { surfaceRefs } from '../../commands/sketchQueries';
 import type { CameraState } from '../../camera/CameraHost';
@@ -89,6 +89,15 @@ function movedOutlineInContext(state: DocumentState, refs: readonly EntityRef[],
   const sketch = root.sketch;
   for (const ref of refs) {
     switch (ref.kind) {
+      case 'sectionPlane': {
+        // the plane's rectangle as drawn, framing its container's contents, then moved
+        const sp = root.sectionPlanes.get(ref.id);
+        if (!sp) break;
+        const { normal, d } = worldSectionPlane(sp.plane, frame.matrix);
+        const corners = sectionPlaneCorners(normal, d, contentWorldBounds(state, path));
+        push([...corners, corners[0]].map((p) => m4transformPoint(m, p)));
+        break;
+      }
       case 'body': {
         const b = root.bodies.get(ref.id);
         if (!b) break;

@@ -149,12 +149,6 @@ export class SectionLayer {
     for (const p of sections.planes) {
       const color = new Color(p.selected ? palette.select.getHex() : p.active ? sections.activeColor : sections.inactiveColor);
       const c = p.corners.map(rel) as [Vec3, Vec3, Vec3, Vec3];
-      const fill = new BufferGeometry();
-      fill.setAttribute('position', new BufferAttribute(new Float32Array([...c[0], ...c[1], ...c[2], ...c[0], ...c[2], ...c[3]]), 3));
-      // The fill is neutral grey; the outline carries the active or inactive color.
-      const quad = new Mesh(fill, new MeshBasicMaterial({ color: new Color(sections.inactiveColor), transparent: true, opacity: SECTION_PLANE_OPACITY, side: DoubleSide, depthWrite: false }));
-      quad.renderOrder = 5;
-      quad.userData['sectionPlane'] = p.id;
       const outline = new LineSegmentsGeometry();
       outline.setPositions([...c[0], ...c[1], ...c[1], ...c[2], ...c[2], ...c[3], ...c[3], ...c[0]]);
       const material = new LineMaterial({ color: color.getHex(), linewidth: p.active || p.selected ? 2 : 1, worldUnits: false });
@@ -163,7 +157,17 @@ export class SectionLayer {
       const line = new LineSegments2(outline, material);
       line.renderOrder = 5;
       line.frustumCulled = false;
-      this.planeGroup.add(quad, line);
+      // a hidden plane, shown with hidden geometry, has no fill
+      if (!p.hidden) {
+        const fill = new BufferGeometry();
+        fill.setAttribute('position', new BufferAttribute(new Float32Array([...c[0], ...c[1], ...c[2], ...c[0], ...c[2], ...c[3]]), 3));
+        // The fill is neutral grey; the outline carries the active or inactive color.
+        const quad = new Mesh(fill, new MeshBasicMaterial({ color: new Color(sections.inactiveColor), transparent: true, opacity: SECTION_PLANE_OPACITY, side: DoubleSide, depthWrite: false }));
+        quad.renderOrder = 5;
+        quad.userData['sectionPlane'] = p.id;
+        this.planeGroup.add(quad);
+      }
+      this.planeGroup.add(line);
       // Symbol and arrow at the middles of two opposite sides, pointing to the side the cut keeps.
       for (const [a, b] of [[p.corners[0], p.corners[1]], [p.corners[2], p.corners[3]]] as const) {
         const at: Vec3 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];

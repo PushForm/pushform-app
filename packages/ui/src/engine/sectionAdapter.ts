@@ -32,9 +32,10 @@ export function sectionsToRender(state: DocumentState, selection: readonly Entit
       const key = renderKey(path, sp.id);
       const active = container.activeSectionPlaneId === sp.id;
       if (active && style.sectionCutsVisible) cuts.push({ key, path, normal, d });
-      if (!style.sectionPlanesVisible || sp.hidden || !tagVisible(state, sp.tagId)) continue;
+      // hidden planes are drawn, as an outline, only while hidden geometry is shown
+      if (!style.sectionPlanesVisible || (sp.hidden && !style.hiddenGeometry) || !tagVisible(state, sp.tagId)) continue;
       planes.push({ id: key, path, entityId: sp.id, corners: sectionPlaneCorners(normal, d, bounds), normal, symbol: sp.symbol, active,
-        selected: selected.has(`${pathKey(path)}/${sp.id}`) });
+        selected: selected.has(`${pathKey(path)}/${sp.id}`), ...(sp.hidden ? { hidden: true } : {}) });
     }
   }
   const out: RenderSections = {

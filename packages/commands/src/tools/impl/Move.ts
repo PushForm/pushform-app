@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import type { MMat4, Plane, Vec2, Vec3 } from '@pushform/core';
-import { m4translation, MERGE_TOL, planeFromPointNormal, v3add, v3dot, v3len, v3normalize, v3scale, v3sub } from '@pushform/core';
+import { ANGLE_TOL, m4translation, MERGE_TOL, planeFromPointNormal, v3add, v3cross, v3dot, v3len, v3normalize, v3scale, v3sub } from '@pushform/core';
 import type { Axis, InferenceOptions, InferenceResult, Snap } from '@pushform/inference';
-import { instanceAt } from '@pushform/model';
+import { SNAP_COLORS } from '@pushform/inference';
+import { containerAt, contextMatrix, instanceAt, worldSectionPlane } from '@pushform/model';
 import type { ComponentBehaviors, EntityRef } from '@pushform/model';
 import { glueAllows, placeOnFaceMatrix } from '../../commands/componentBehaviors';
 import { contextFrame } from '../../commands/context';
@@ -59,6 +60,8 @@ export class MoveTool extends TransformToolBase {
   private cursorScreen: Vec2 | null = null;
   private lockAxis: Axis | null = null;
   private lockSnap: Snap | null = null;
+  /** While only parallel section planes move: the line through the base point along their normal. */
+  private planeHold: Snap | null = null;
   /** ↓ lock parallel / perpendicular to the last inferred edge. */
   private readonly edgeLock = new EdgeLock();
   private copy = false;
@@ -86,6 +89,7 @@ export class MoveTool extends TransformToolBase {
 
   protected override onActivate(): void {
     this.state = IDLE;
+    this.planeHold = null;
     this.hover = null;
     this.copy = false;
     this.autofold = false;
@@ -96,6 +100,7 @@ export class MoveTool extends TransformToolBase {
 
   protected override onDeactivate(): void {
     this.state = IDLE;
+    this.planeHold = null;
     this.hover = null;
     this.lockAxis = null;
     this.lockSnap = null;
@@ -104,9 +109,11 @@ export class MoveTool extends TransformToolBase {
 
   inferenceOptions(): InferenceOptions {
     if (this.state.kind === 'moving') {
-      return { anchor: this.state.base, lockAxis: this.lockAxis, lockSnap: this.lockSnap ?? this.edgeLock.snapAt(this.state.base), ignore: this.state.refs };
+      const hold = this.lockAxis ? null : this.planeHold;
+      return { anchor: this.state.base, lockAxis: this.lockAxis, lockSnap: this.lockSnap ?? this.edgeLock.snapAt(this.state.base) ?? hold, ignore: this.state.refs };
     }
-    return { lockAxis: this.lockAxis, lockSnap: this.lockSnap };
+    // section planes and dimensions under the cursor can be picked up
+    return { lockAxis: this.lockAxis, lockSnap: this.lockSnap, annotations: true };
   }
 
   // --- pointer --------------------------------------------------------------------------------
@@ -150,7 +157,10 @@ export class MoveTool extends TransformToolBase {
     this.hover = null;
     this.lastError = null;
     this.glue = this.glueFor(refs);
-    this.state = { kind: 'moving', refs, base: inf.point, downScreen: e.screen, pressed: true, moved: false, delta: [0, 0, 0], face: null };
+    // a section plane picked up by its outline moves from the point on the outline under the cursor
+    const base = inf.hit?.ref.kind === 'sectionPlane' ? inf.hit.point : inf.point;
+    this.planeHold = this.normalHold(refs, base);
+    this.state = { kind: 'moving', refs, base, downScreen: e.screen, pressed: true, moved: false, delta: [0, 0, 0], face: null };
     this.ctx?.statusChanged();
     this.ctx?.requestRender();
   }
@@ -369,7 +379,27 @@ export class MoveTool extends TransformToolBase {
 
   private lockDirection(): Vec3 | null {
     if (this.lockAxis) return AXIS_DIR[this.lockAxis];
-    return this.lockSnap?.dir ? v3normalize(this.lockSnap.dir) : this.edgeLock.direction;
+    return this.lockSnap?.dir ? v3normalize(this.lockSnap.dir) : (this.edgeLock.direction ?? this.planeHold?.dir ?? null);
+  }
+
+  /** When every moved entity is a section plane and their planes are parallel: a hold along their normal through `base`. */
+  private normalHold(refs: readonly EntityRef[], base: Vec3): Snap | null {
+    const state = this.docState();
+    if (!state || !refs.length || refs.some((r) => r.kind !== 'sectionPlane')) return null;
+    let normal: Vec3 | null = null;
+    for (const r of refs) {
+      let n: Vec3;
+      try {
+        const sp = containerAt(state, r.path).sectionPlanes.get(r.id);
+        if (!sp) return null;
+        n = worldSectionPlane(sp.plane, contextMatrix(state, r.path)).normal;
+      } catch {
+        return null;
+      }
+      if (!normal) normal = v3normalize(n);
+      else if (v3len(v3cross(normal, v3normalize(n))) > ANGLE_TOL) return null;
+    }
+    return normal ? { kind: 'perpendicular', point: base, dir: normal, color: SNAP_COLORS.perpendicular, label: 'Along Section Plane Normal' } : null;
   }
 
   private setLock(axis: Axis | null): void {
@@ -390,6 +420,7 @@ export class MoveTool extends TransformToolBase {
 
   private endMove(): void {
     this.state = IDLE;
+    this.planeHold = null;
     this.edgeLock.release();
     this.glue = null;
     this.ctx?.statusChanged();
@@ -403,6 +434,7 @@ export class MoveTool extends TransformToolBase {
     const copy = this.copy;
     const glue = this.glue;
     this.state = IDLE;
+    this.planeHold = null;
     this.glue = null;
     this.lockAxis = null;
     this.lockSnap = null;

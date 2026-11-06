@@ -15,6 +15,8 @@ import type { MoveTool } from './Move';
 import type { RotateTool } from './Rotate';
 import type { ScaleTool } from './Scale';
 import { groupCommands, type MakeResult } from '../../commands/groups';
+import { sectionPlaneCommands } from '../../commands/sectionPlanes';
+import { containerAt } from '@pushform/model';
 import { worldToScreen } from './transformShared';
 
 beforeAll(installPolyMeshStub);
@@ -63,6 +65,40 @@ const bodyHit = (body: Body, p: Vec3): PickHit => {
 // ---------------------------------------------------------------------------------------------
 
 describe('MoveTool', () => {
+  it('picks up a hovered section plane and moves it along its normal, drawing its outline', async () => {
+    const { registry, host, tools } = setup();
+    registry.registerAll(sectionPlaneCommands);
+    const id = registry.execute('sectionPlane.add', { point: [0, 0, 1], normal: [0, 0, -1] }) as number;
+    host.selection.set([]);
+    tools.activate('move');
+    const tool = tools.activeTool as MoveTool;
+    // section planes are picked while hovering
+    expect(tool.inferenceOptions().annotations).toBe(true);
+    const ref: EntityRef = { kind: 'sectionPlane', path: [], id: id as Id };
+    const hit: PickHit = { ref, point: [2, 0, 1], t: 1, screenDist: 0 };
+    // the snapped point lies elsewhere; the move starts from the point on the outline
+    const onOutline = at(TOP_CAMERA, [2, 0, 1], { inference: { ...freeInference([2, 0.5, 0], GROUND_PLANE, hit) } });
+    tools.pointerMove(onOutline);
+    tools.pointerDown(onOutline);
+    tools.pointerUp(onOutline);
+    expect(host.selection.refs).toEqual([ref]);
+    expect(tool.inferenceOptions().lockSnap?.dir).toEqual([0, 0, -1]);
+    // off the normal: only the part along it counts
+    tools.pointerMove(at(TOP_CAMERA, [3, 1, 3]));
+    expect(tool.overlay().some((o) => o.kind === 'polyline' && o.points.length === 5 && Math.abs(o.points[0]![2] - 3) < 1e-9)).toBe(true);
+    tools.pointerDown(at(TOP_CAMERA, [3, 1, 3]));
+    tools.pointerUp(at(TOP_CAMERA, [3, 1, 3]));
+    await tool.settled;
+    const sp = containerAt(host.doc.state, []).sectionPlanes.get(id as Id)!;
+    expect(sp.plane.n).toEqual([0, 0, -1]);
+    expect(sp.plane.d).toBeCloseTo(3, 9);
+    expect(sp.origin[0]).toBeCloseTo(0, 9);
+    // an arrow-key lock replaces the hold
+    tools.pointerDown(at(TOP_CAMERA, [2, 0, 3], { hit: { ...hit, point: [2, 0, 3] } }));
+    tools.keyDown(key('ArrowRight'));
+    expect(tool.inferenceOptions().lockSnap ?? null).toBeNull();
+  });
+
   it('drags a selected body 1 m in x: moved outline while dragging, one undo entry, undo restores', async () => {
     const { host, tools, addBox, body } = setup();
     const id = addBox();

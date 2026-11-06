@@ -10,7 +10,8 @@ import { allocId, createDocument, ImageStore, DEFAULT_SHADOWS } from '@pushform/
 const rendered = vi.hoisted(() => ({ snapshots: [] as [number, number][], previews: [] as [number, number][], ready: new Set<string>(),
   displays: [] as unknown[], shadows: [] as unknown[], fog: [] as unknown[], texturesReady: vi.fn(async () => {}), failure: null as string | null,
   /** Models loaded while this is set have nothing in them. */
-  empty: false, read: vi.fn(async (_bytes: Uint8Array, _options?: unknown): Promise<unknown> => ({ scenes: [] })) }));
+  empty: false, sections: { planes: [], cuts: [] } as { planes: { id: string; sheet?: string }[]; cuts: { key: string }[] }, drawnSections: [] as unknown[],
+  read: vi.fn(async (_bytes: Uint8Array, _options?: unknown): Promise<unknown> => ({ scenes: [] })) }));
 
 vi.mock('@pushform/io', () => ({
   readPreservedSketchUpModel: (_state: unknown, _archive: string, model: string) => model === 'linked' ? null : new Uint8Array(1),
@@ -26,15 +27,15 @@ vi.mock('../engine/renderAdapter', () => ({
   fogToRender: () => ({ enabled: true, near: 1, far: 20, color: '#eeece6' }),
   withRenderImageStore: (_images: unknown, run: () => unknown) => run(),
 }));
-vi.mock('../engine/sectionAdapter', () => ({ sectionsToRender: () => null }));
+vi.mock('../engine/sectionAdapter', () => ({ sectionsToRender: () => rendered.sections }));
 vi.mock('@pushform/render', () => ({
   Viewport: class {
-    sceneSync = { textures: { whenReady: rendered.texturesReady } };
+    sceneSync = { textures: { whenReady: rendered.texturesReady }, sections: { ready: Promise.resolve() } };
     mountOffscreen(): boolean { return true; }
     setBodies(): void {}
     setSketches(): void {}
     setImages(): void {}
-    setSections(): void {}
+    setSections(sections: unknown): void { rendered.drawnSections.push(sections); }
     setDisplay(display: unknown): void { rendered.displays.push(display); }
     setShadows(shadows: unknown): void { rendered.shadows.push(shadows); }
     setFog(fog: unknown): void { rendered.fog.push(fog); }
@@ -309,6 +310,28 @@ describe('Cloud model views', () => {
     const render = layoutViewportRender(state, entity);
     expect(render).toMatchObject({ src: expect.stringMatching(/^data:image\/png/), cache: { camera, widthMm: 100, heightMm: 50, sha256: sha } });
     expect(rendered.snapshots.at(-1)).toEqual([591, 295]);
+  });
+
+  it('numbers section markers with the first page showing the model, and stamps the picture with that sheet', async () => {
+    setLayoutCloudModelLoader(async () => new Uint8Array(6));
+    const state = cloudState(), entity = cloudView();
+    state.references.get(5)!.target = { kind: 'cloud', documentId: 'sections', revisionId: 'rev-6', revisionNumber: 6, sha256: '6'.repeat(64), pinned: false };
+    const page = state.pages.get(state.pageOrder[0]!)!;
+    page.entities.set(entity.id, entity); page.entityOrder.push(entity.id);
+    rendered.sections = { planes: [{ id: '/1' }, { id: '/2' }], cuts: [{ key: '/1' }] };
+    try {
+      // The model is loaded by the first render; the next one knows its section planes and draws the sheet.
+      expect(layoutViewportRender(state, entity)).toBeNull();
+      await settle();
+      expect(layoutViewportRender(state, entity)).toBeNull();
+      await settle();
+      // only the plane that cuts is drawn on the sheet
+      expect(rendered.drawnSections.at(-1)).toEqual({ planes: [{ id: '/1', sheet: '1' }, { id: '/2' }], cuts: [{ key: '/1' }] });
+      expect(layoutViewportRender(state, entity)).toMatchObject({ cache: { sha256: '6'.repeat(64), sheet: '1' } });
+      // without a cutting plane, the picture records no sheet
+      rendered.sections = { planes: [{ id: '/2' }], cuts: [] };
+      expect(layoutViewportRender(state, entity)!.cache).not.toHaveProperty('sheet');
+    } finally { rendered.sections = { planes: [], cuts: [] }; }
   });
 
   it('stores a transparent picture for a view of a cloud model that shows nothing', async () => {

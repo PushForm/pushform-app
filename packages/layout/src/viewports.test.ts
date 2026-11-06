@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { describe, expect, it } from 'vitest';
-import { createLayoutDocumentState, type LayoutViewport, type LayoutViewportCamera, type ModelReference } from './LayoutDocument';
-import { layoutFrameSize, viewportCacheCurrent, viewportPaperPoint, viewportSourceKey } from './viewports';
+import { createLayoutDocumentState, type LayoutEntity, type LayoutViewport, type LayoutViewportCamera, type ModelReference } from './LayoutDocument';
+import { layoutFrameSize, viewportCacheCurrent, viewportPaperPoint, viewportSourceKey, viewportSourceSheet } from './viewports';
 
 const IN = 0.0254, MM = 25.4;
 const m = (v: number[]) => v.map(x => x * IN) as [number, number, number];
@@ -99,5 +99,62 @@ describe('cloud model sources', () => {
     expect(viewportCacheCurrent(cloudView(cache), points)).toBe(false);
     state.references.get(7)!.target = { ...state.references.get(7)!.target as Extract<ModelReference['target'], { kind: 'cloud' }>, sha256: newer };
     expect(viewportCacheCurrent(cloudView(cache), points, state)).toBe(false);
+  });
+});
+
+describe('section sheets', () => {
+  const house = { archiveId: 'a', modelReferenceId: 'house' }, shed = { archiveId: 'a', modelReferenceId: 'shed' };
+  const view = (id: number, source: LayoutViewport['source'], hidden = false): LayoutEntity => ({
+    id, kind: 'image', layerId: 1, closed: true, points: frame(0, 0, 4, 2),
+    image: { src: '', viewport: { source, templateId: null, originalId: null, camera: perspective, scene: null, background: null, cache: null } }, ...(hidden ? { hidden } : {}),
+  });
+  const document = () => {
+    const state = createLayoutDocumentState();
+    for (const [id, name] of [[3, 'Plan'], [4, 'Sections']] as const) { state.pages.set(id, { ...state.pages.get(2)!, id, name, entities: new Map(), entityOrder: [] }); state.pageOrder.push(id); }
+    return state;
+  };
+  const place = (state: ReturnType<typeof document>, pageId: number, entity: LayoutEntity) => {
+    const page = state.pages.get(pageId)!;
+    page.entities.set(entity.id, entity);
+    page.entityOrder.push(entity.id);
+  };
+
+  it('numbers the first page that draws a view of the model, or none', () => {
+    const state = document();
+    expect(viewportSourceSheet(state, house)).toBe('');
+    place(state, 4, view(10, house));
+    place(state, 3, view(11, shed));
+    expect(viewportSourceSheet(state, house)).toBe('3');
+    expect(viewportSourceSheet(state, shed)).toBe('2');
+    place(state, 3, view(12, house));
+    expect(viewportSourceSheet(state, house)).toBe('2');
+    // the page moves, and its number with it
+    state.pageOrder = [4, 2, 3];
+    expect(viewportSourceSheet(state, house)).toBe('1');
+  });
+
+  it('skips hidden views and layers hidden on a page, and follows the page-number field', () => {
+    const state = document();
+    place(state, 3, view(10, house, true));
+    place(state, 4, view(11, house));
+    expect(viewportSourceSheet(state, house)).toBe('3');
+    state.pages.get(4)!.layerVisibility = new Map([[1, false]]);
+    expect(viewportSourceSheet(state, house)).toBe('');
+    delete state.pages.get(4)!.layerVisibility;
+    state.pageNumberFields = new Map([['PageNumber', { startPageId: 3, startNumber: 1, style: 'upper-letter' }]]);
+    expect(viewportSourceSheet(state, house)).toBe('B');
+  });
+
+  it('makes a picture stale when the sheet its section markers show changes', () => {
+    const state = document(), points = frame(0, 0, 4, 2);
+    const entity = view(10, house);
+    entity.image!.viewport!.cache = { camera: perspective, widthMm: 4 * MM, heightMm: 2 * MM, sheet: '2' };
+    place(state, 3, entity);
+    expect(viewportCacheCurrent(entity.image!.viewport!, points, state)).toBe(true);
+    state.pageOrder = [3, 2, 4];
+    expect(viewportCacheCurrent(entity.image!.viewport!, points, state)).toBe(false);
+    // a picture that shows no sheet does not depend on page order
+    delete entity.image!.viewport!.cache!.sheet;
+    expect(viewportCacheCurrent(entity.image!.viewport!, points, state)).toBe(true);
   });
 });

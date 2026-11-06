@@ -38,6 +38,8 @@ message LayoutViewportCache {
   required double width_mm = 2;
   required double height_mm = 3;
   optional LayoutViewportOptionalString sha256 = 4;
+  // The sheet number the picture's section markers show.
+  optional LayoutViewportOptionalString sheet = 5;
 }
 message LayoutViewport {
   required LayoutViewportSource source = 1;

@@ -44,3 +44,7 @@ Copy and paste section planes like other entities; a pasted plane is not active.
 In Styles, **Display Section Planes** controls the plane markers and **Display Section Cuts** controls cutting the view. A hidden plane can still be the active cut. Section Fill and the section line settings control how a cut through a solid looks.
 
 The cut changes what is shown, not the underlying solid. Geometry removed from view by an active cut is not available for picking or snapping. Check nested editing contexts if several cuts combine.
+
+## Section markers: symbol, sheet number and arrow
+
+Each corner of the plane's outline has a marker, so one is readable from any side. The marker is a circle (a bubble) split by a line, with a triangle on its edge. The top half shows the plane's symbol, which you can change in Entity Info. The bottom half is for the number of the sheet the section is drawn on. It stays empty in the modeler and is filled in when the model is shown in a Layout model view. The triangle on the bubble points to the side the cut keeps, which is the direction you look when you view the section. Reverse the plane and the triangles turn around. When you look straight along the plane's direction, the triangles are not drawn.

@@ -2,7 +2,7 @@
 
 Notable changes in each PushForm desktop release. Versions are `<year>.<week>.<build>`.
 
-## 26.45.143
+## 26.45.144
 
 - **AI Chat limits use token credits** instead of a message count. You can queue follow-ups while it works, each request is a single Undo step, and a status line shows progress on 3D models.
 - **Faster cabinet building.** AI Chat builds cabinet runs one cabinet per batch, and each door, drawer and face frame is its own named assembly.

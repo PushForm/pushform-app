@@ -30,7 +30,7 @@ The first time you sign in, PushForm asks for your name, whether you're an indiv
 PushForm has two editors:
 
 - **Modeling** for 3D work.
-- **Layout** for drawings on pages, with dimensions, text and tables.
+- **Layout** for drawings made from your models: plans, elevations, sections and assembly views, with dimensions, text and tables.
 
 Choose the **+** button and pick **Model** or **Layout**. Each document gets its own tab and its own Undo history.
 

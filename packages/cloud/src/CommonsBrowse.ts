@@ -5,6 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from './db.types';
 import { catalogModelSchema, type CatalogModel } from './CommonsCatalog';
 import { CommonsUnavailableError, readCommonsCatalog } from './CommonsClient';
+import { commonsSearchMatcher } from './CommonsSearch';
 
 export interface CommonsBrowseFilters { query: string; category: string; license: string; commercial: boolean }
 export interface CommonsBrowseCursor { id: string; publishedAt: string; asOf: string }
@@ -16,11 +17,11 @@ const pageSchema = z.object({ version: z.literal(1), models: z.array(catalogMode
   asOf: z.iso.datetime({ offset: true }), total: z.number().int().nonnegative(), categories: z.array(z.string()), licenses: z.array(z.string()),
 });
 export function filterCommonsModels(models: CatalogModel[], filters: CommonsBrowseFilters): CatalogModel[] {
-  const words = filters.query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const matches = commonsSearchMatcher(filters.query);
   return models.filter(model => (!filters.category || model.category === filters.category)
     && (!filters.license || model.licenses.some(license => license.name === filters.license))
     && (!filters.commercial || model.licenses.every(license => license.commercialUse === 'allowed'))
-    && words.every(word => [model.title, model.description, model.creator, model.category, ...model.tags, model.source?.name ?? '', ...model.credits.map(credit => credit.name), ...model.licenses.map(license => license.name)].join(' ').toLowerCase().includes(word)))
+    && matches([model.title, model.description, model.creator, model.category, ...model.tags, model.source?.name ?? '', ...model.credits.map(credit => credit.name), ...model.licenses.map(license => license.name)].join(' · ')))
     .sort((a,b) => b.publishedAt.localeCompare(a.publishedAt) || a.id.localeCompare(b.id));
 }
 export function createCommonsBrowseLoader(client: Pick<SupabaseClient<Database>, 'rpc'>): CommonsBrowseLoader {

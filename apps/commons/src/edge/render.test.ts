@@ -38,6 +38,7 @@ describe('model pages', () => {
     expect(html.match(/rel="canonical"/g)).toHaveLength(1);
     expect(html).toContain('<link rel="canonical" href="https://commons.pushform.io/models/workshop-hinge" />');
     expect(html).toContain('"@type":"3DModel"');
+    expect(html).toContain('<p>By <a href="/?q=%22Example+Maker%22#browse" rel="nofollow">Example Maker</a></p>');
     expect(html).toContain('<h1>Workshop hinge</h1>');
     expect(html).toContain('Credit Example Maker.');
     expect(html).not.toContain('<!--seo:body-->');

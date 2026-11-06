@@ -15,6 +15,14 @@ describe('saving and publishing from AI Chat', () => {
     expect(names({ type: 'model', apiVersion: 1, guidance: 1, save: 1, publish: 1 })).not.toContain(SAVE_TOOL);
   });
 
+  it('keeps saving and publishing out of the strict tool grammar, which a model tab\'s other tools already fill', () => {
+    // The API refuses a request whose strict tools compile into too large a grammar ("The compiled grammar is too large").
+    const tools = documentTools({ type: 'model', apiVersion: 1, edit: 1, guidance: 1, clone: 1, save: 1, publish: 1 });
+    for (const name of [SAVE_TOOL, PUBLISHING_INFO_TOOL, PUBLISH_TOOL]) expect(tools.find(tool => tool.name === name)).not.toHaveProperty('strict');
+    const strict = tools.filter(tool => 'strict' in tool && tool.strict).map(tool => tool.name);
+    expect(strict).toEqual(documentTools({ type: 'model', apiVersion: 1, edit: 1, guidance: 1, clone: 1 }).filter(tool => 'strict' in tool && tool.strict).map(tool => tool.name));
+  });
+
   it('ends quietly only after a publication made or a card cancelled', () => {
     expect(quietPublishAnswer(publishAnswerOf('{"ok":true,"outcome":"published","title":"Shaker base","url":"https://commons.pushform.io/#models/design-1"}'))).toBe(true);
     expect(quietPublishAnswer(publishAnswerOf('{"ok":true,"outcome":"cancel"}'))).toBe(true);

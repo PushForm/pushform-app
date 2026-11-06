@@ -73,9 +73,6 @@ export function CollectionsProvider({ service, account, children }: { service: C
 export function CollectionCurator({ collection }: { collection: CommonsCollection }) {
   return <span>Curated by {collection.curator ? <ProfileLink handle={collection.curator.handle}>{collection.curator.displayName}</ProfileLink> : 'a Commons member'}</span>;
 }
-export function CommonsAdminLink() {
-  return useCollections().canFeature ? <a href={adminUrl}>Admin</a> : null;
-}
 export function CollectionMosaic({ collection, models, filesUrl }: { collection: CommonsCollection; models: CatalogModel[]; filesUrl: string | undefined }) {
   const visible = collection.modelIds.map(id => models.find(model => model.id === id)).filter((model): model is CatalogModel => Boolean(model));
   return <div className="collection-mosaic" role="img" aria-label={`${collection.title}, ${visible.length} available models`}>
@@ -141,7 +138,7 @@ export function CreditedCreatorPage({ id, models, filesUrl }: { id: string; mode
   </article>;
 }
 export function FeaturedSection({ models, filesUrl, loadModels }: { models: CatalogModel[]; filesUrl: string | undefined; loadModels?: CommonsModelsLoader | undefined }) {
-  const { service, discovery, error, refresh, canFeature } = useCollections();
+  const { service, discovery, error, refresh } = useCollections();
   const [page, setPage] = useState(0);
   const items = discovery?.featured.filter(item => item.type === 'model' ? Boolean(loadModels) || models.some(model => model.id === item.targetId) : item.type === 'credited_creator' ? discovery.creditedCreators.some(creator => creator.id === item.targetId) : item.type === 'creator' ? discovery.creators.some(creator => creator.id === item.targetId) : discovery.collections.some(collection => collection.id === item.targetId)) ?? [];
   const pages = Math.ceil(items.length / 3);
@@ -161,7 +158,7 @@ export function FeaturedSection({ models, filesUrl, loadModels }: { models: Cata
   const featuredModels = [...extra, ...models.filter(model => !extra.some(value => value.id === model.id))];
   if (!service) return null;
   return <section className="featured-section" aria-labelledby="featured-title">
-    <div className="section-heading"><div><h2 id="featured-title">Featured</h2><p className="section-description">Models, collections and creators, picked for makers.</p></div>{canFeature && <a href={adminUrl}>Manage featured</a>}</div>
+    <div className="section-heading"><div><h2 id="featured-title">Featured</h2><p className="section-description">Models, collections and creators, picked for makers.</p></div></div>
     {error ? <div role="alert"><p>{error}</p><button onClick={refresh}>Retry featured</button></div> : !discovery ? <p role="status">Loading featured models, collections and creators…</p> : <>
       <ModelGrid className="featured-grid">{items.slice(currentPage * 3, currentPage * 3 + 3).map(item => {
         if (item.type === 'credited_creator') {

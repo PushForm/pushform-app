@@ -16,7 +16,8 @@ describe('configSchema', () => {
     expect(result.data?.roles.maintainers).toEqual(['testers@pushform.io']);
     expect(result.data?.models).toEqual({ conversation: 'claude-haiku-5-5', document: 'claude-sonnet-5-5', build: 'claude-opus-5-5', acknowledge: 'claude-haiku-5-5' });
     expect(result.data?.mail).toEqual({ kind: 'resend', from: 'requests@pushform.io', replyTo: 'support@pushform.io' });
-    expect(result.data?.limits.messagesPerConversation).toBe(30);
+    // The retired per-conversation message limit is neither defaulted nor operational.
+    expect(result.data?.limits.messagesPerConversation).toBeUndefined();
     expect(result.data?.limits.messagesPerMinute).toBe(20);
     // Render review bounds come from the defaults when the file leaves them out.
     expect(result.data?.limits.renderReviewsPerTurn).toBe(3);
@@ -31,7 +32,7 @@ describe('configSchema', () => {
     const { models: _m, roles: _r, boundaries: _b, limits: _l, ...minimal } = SAMPLE_CONFIG_INPUT;
     const config = configSchema.parse(minimal);
     expect(config.limits).toEqual({
-      openRequestsPerAccount: 5, messagesPerConversation: 30, messagesPerMinute: 20, concurrentRuns: 2, runWallClockMinutes: 120,
+      openRequestsPerAccount: 5, messagesPerMinute: 20, concurrentRuns: 2, runWallClockMinutes: 120,
       runBudgetUsd: 20, trialDays: 3, verdictGraceHours: 24, rounds: 2, dailyRuns: 6, liveDataBranches: 3,
       renderReviewsPerTurn: 3, documentToolRoundsWithReview: 20,
     });

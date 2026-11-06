@@ -14,8 +14,22 @@ describe('RequestsClient', () => {
     const backend = fakeBackend();
     const me = await client(backend).me();
     expect(me.email).toBe('artist@example.com');
-    expect(me.limits).toEqual({ openRequestsPerAccount: 5, messagesPerConversation: 30 });
+    expect(me.limits).toEqual({ openRequestsPerAccount: 5 });
+    expect(me.credits).toEqual({ plan: 'free', remaining: 3_000_000, allowance: 3_000_000, refill: { kind: 'none' } });
     expect(backend.calls[0]).toMatchObject({ method: 'GET', path: '/me', headers: { authorization: 'Bearer jwt-token', apikey: 'sb_publishable_test' } });
+  });
+  it('reads the monthly refill of a paid account, and treats a malformed or missing credits summary as unknown, never as unlimited', async () => {
+    const paid = fakeBackend({ me: { credits: { plan: 'paid', remaining: 10, allowance: 20, refill: { kind: 'monthly', at: '2026-12-05T10:00:00Z' } } } });
+    expect((await client(paid).me()).credits).toEqual({ plan: 'paid', remaining: 10, allowance: 20, refill: { kind: 'monthly', at: '2026-12-05T10:00:00Z' } });
+    const older = fakeBackend({ me: { credits: null } });
+    expect((await client(older).me()).credits).toBeNull();
+  });
+  it('carries the limit kind and the server sentence of a refused turn', async () => {
+    const stream = sseResponse([{ event: 'error', data: { code: 'limit', kind: 'credits_exhausted', message: 'You have used this month\'s AI credits.' } },
+      { event: 'done', data: { messageCount: 4, limitReached: true, limitMessage: 'Out of credits.', credits: { plan: 'free', remaining: 0, allowance: 5, refill: { kind: 'none' } } } }]);
+    const events = await collect(parseEventStream(stream.body!));
+    expect(events[0]).toEqual({ type: 'error', code: 'limit', message: 'You have used this month\'s AI credits.', kind: 'credits_exhausted' });
+    expect(events[1]).toMatchObject({ type: 'done', limitReached: true, limitMessage: 'Out of credits.', credits: { plan: 'free', remaining: 0, allowance: 5, refill: { kind: 'none' } } });
   });
   it('fails with unauthorized before any network call when there is no session token', async () => {
     const backend = fakeBackend();
@@ -50,13 +64,13 @@ describe('RequestsClient', () => {
     expect(events[2]).toMatchObject({ type: 'brief', title: 'T', path: 'feature' });
     expect(events[3]).toEqual({ type: 'added', request: { id: 'req-7', issueKey: 'CUS-7', issueUrl: null, title: 'Existing', requesterState: 'Under review', eligibility: null } });
     expect(events[4]).toEqual({ type: 'filed', request: { id: 'req-1', issueKey: 'CUS-12', issueUrl: 'https://linear.app/pushform/issue/CUS-12', title: 'Mirror tool', requesterState: 'Submitted', eligibility: 'gated' } });
-    expect(events[6]).toEqual({ type: 'done', messageCount: 2, limitReached: false, ended: true, reason: null, awaitingTools: false });
+    expect(events[6]).toEqual({ type: 'done', messageCount: 2, limitReached: false, limitMessage: null, credits: null, ended: true, reason: null, awaitingTools: false });
     expect(backend.calls.at(-1)).toMatchObject({ method: 'POST', path: `/conversations/${conversation.id}/messages`, body: { text: 'hi' } });
     expect(backend.conversations.get(conversation.id)).toMatchObject({ status: 'filed', requestId: 'req-1' });
   });
   it('reads the start_over reason of a done event', async () => {
     const events = await collect(parseEventStream(sseResponse([{ event: 'done', data: { messageCount: 4, limitReached: false, ended: true, reason: 'start_over' } }]).body!));
-    expect(events).toEqual([{ type: 'done', messageCount: 4, limitReached: false, ended: true, reason: 'start_over', awaitingTools: false }]);
+    expect(events).toEqual([{ type: 'done', messageCount: 4, limitReached: false, limitMessage: null, credits: null, ended: true, reason: 'start_over', awaitingTools: false }]);
   });
   it('passes an abort signal to the stream request so a closed panel can cancel the turn', async () => {
     let seen: AbortSignal | null | undefined;
@@ -100,14 +114,14 @@ describe('parseEventStream', () => {
     const chunks = ['event: te', 'xt\r\ndata: {"del', 'ta":"a"}\r\n\r\nevent: done\ndata: {"messageCount":\ndata: 3,"limitReached":true}'];
     const stream = new ReadableStream<Uint8Array>({ start(controller) { for (const chunk of chunks) controller.enqueue(encoder.encode(chunk)); controller.close(); } });
     const events = await collect(parseEventStream(stream));
-    expect(events).toEqual([{ type: 'text', delta: 'a' }, { type: 'done', messageCount: 3, limitReached: true, ended: false, reason: null, awaitingTools: false }]);
+    expect(events).toEqual([{ type: 'text', delta: 'a' }, { type: 'done', messageCount: 3, limitReached: true, limitMessage: null, credits: null, ended: false, reason: null, awaitingTools: false }]);
   });
   it('parses a document tool request and a done that waits for the editor', async () => {
     const turn = sseResponse([{ event: 'tool_request', data: { calls: [{ id: 'c1', name: 'layout_get_document', input: {} }] } },
       { event: 'done', data: { messageCount: 1, limitReached: false, ended: false, awaitingTools: true } }], 'whole');
     expect(await collect(parseEventStream(turn.body!))).toEqual([
       { type: 'tool_request', calls: [{ id: 'c1', name: 'layout_get_document', input: {} }] },
-      { type: 'done', messageCount: 1, limitReached: false, ended: false, reason: null, awaitingTools: true },
+      { type: 'done', messageCount: 1, limitReached: false, limitMessage: null, credits: null, ended: false, reason: null, awaitingTools: true },
     ]);
   });
   it('parses a status line and skips one without text', async () => {
@@ -120,7 +134,7 @@ describe('parseEventStream', () => {
       controller.enqueue(encoder.encode('data: {"type":"text","delta":"x"}\n\nevent: ping\ndata: {}\n\ndata: not json\n\n')); controller.close();
     } });
     const events = await collect(parseEventStream(stream));
-    expect(events).toEqual([{ type: 'text', delta: 'x' }, { type: 'error', code: 'unknown', message: 'The server sent an unreadable event.' }]);
+    expect(events).toEqual([{ type: 'text', delta: 'x' }, { type: 'error', code: 'unknown', message: 'The server sent an unreadable event.', kind: null }]);
     expect((await collect(parseEventStream(sseResponse([{ event: 'done', data: { messageCount: 1, limitReached: false } }], 'whole').body!)))).toHaveLength(1);
   });
 });

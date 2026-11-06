@@ -36,7 +36,6 @@
   },
   "limits": {
     "openRequestsPerAccount": 5,
-    "messagesPerConversation": 30,
     "messagesPerMinute": 20
   }
 }

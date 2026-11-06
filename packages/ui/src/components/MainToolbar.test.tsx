@@ -155,8 +155,10 @@ describe('MainToolbar', () => {
     fireEvent.click(screen.getByRole('menuitemradio', { name: 'Text' }));
     fireEvent.click(within(screen.getByRole('group', { name: 'Inspect' })).getByRole('button', { name: 'Measure tools' }));
     expect(screen.getAllByRole('menuitemradio').map(item => item.getAttribute('aria-label'))).toEqual([
-      'Tape Measure', 'Dimension', 'Protractor', 'Axes',
+      'Tape Measure', 'Dimension', 'Protractor',
     ]);
+    // Axes is reached through command search only, so it is neither in the stack nor in a "More" group
+    expect(screen.queryByRole('button', { name: /^Axes/ })).toBeNull();
     fireEvent.keyDown(screen.getByRole('menuitemradio', { name: 'Dimension' }), { key: 'Escape' });
     // picking from the flyout activates the tool and the face follows
     fireEvent.click(screen.getByRole('button', { name: 'Line tools' }));

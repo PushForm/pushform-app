@@ -12,7 +12,6 @@ import { navigateCommons, profilePath } from './route';
 
 const noSubscribe = () => () => {};
 const message = (error: unknown) => error instanceof Error ? error.message : 'This request failed. Try again.';
-const adminUrl = (import.meta.env.VITE_PUSHFORM_ADMIN_URL || 'https://pushform-oregon.pages.dev').replace(/\/$/, '') + '/#/commons/featured';
 interface CollectionContext {
   service: CommonsCollections | null; account: CommonsAccount | null; userId: string | null;
   discovery: CommonsDiscovery | null; error: string | null; own: CommonsCollection[] | null; ownError: string | null;
@@ -187,13 +186,13 @@ export function FeatureAction({ type, targetId, eligible = true }: { type: 'mode
   const { service, discovery, canFeature, refresh } = context ?? {};
   const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null); const [added, setAdded] = useState(false);
   if (!canFeature || !service) return null;
-  const featured = added || discovery?.featured.some(item => item.type === type && item.targetId === targetId);
+  if (added || discovery?.featured.some(item => item.type === type && item.targetId === targetId)) return null;
   return <div className="feature-action">
-    {featured ? <a className="secondary-button" href={adminUrl}>Featured · Manage</a> : <button type="button" className="secondary-button" disabled={busy || !eligible} onClick={() => {
+    <button type="button" className="secondary-button" disabled={busy || !eligible} onClick={() => {
       setBusy(true); setError(null);
       void service.feature(type, targetId).then(() => { setAdded(true); refresh?.(); }, error => setError(message(error))).finally(() => setBusy(false));
-    }}>{busy ? 'Featuring…' : 'Feature'}</button>}
-    {!eligible && !featured && <p className="section-description">Only nonempty public collections can be featured.</p>}
+    }}>{busy ? 'Featuring…' : 'Feature'}</button>
+    {!eligible && <p className="section-description">Only nonempty public collections can be featured.</p>}
     {error && <p role="alert">{error}</p>}
   </div>;
 }

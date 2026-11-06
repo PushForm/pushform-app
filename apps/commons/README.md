@@ -49,7 +49,7 @@ Deploy Pages from this directory (`wrangler pages deploy dist`) so `functions/` 
 
 With account configuration present, public discovery loads collections and the ordered mixed featured list. Collection routes are `#collections`, `#collections/<uuid>` and `#collections/new`. On `/u/<handle>`, owners see My Collections above My Models, including their private collections and drafts, with a New Collection action beside the collections heading. Visitors see public content only. Model detail pages expose Edit model and confirmed Delete model actions to their authenticated owner. Legacy `#my-models` and `#my-collections` links redirect to the owner's profile. Collection ownership, public visibility and admin featuring are enforced by authenticated database operations. New collections default to public, support up to 100 ordered model references, and preserve each member's existing rights. The initial limits are 100 collections per account, 1,000 public collections and 24 featured items. A collection follows the model's current publication; withdrawn models are omitted from its public view.
 
-Commons restores its account session at startup so authorized accounts can see Feature actions directly on details. Set optional `VITE_PUSHFORM_ADMIN_URL` to override the public admin-console origin used by Manage links (for example, a separate staging console). Only existing Admin/Owner roles can feature; public-profile settings and an account's email spelling do not grant this permission.
+Commons restores its account session at startup so authorized accounts can see Feature actions directly on details. Only existing Admin/Owner roles can feature; public-profile settings and an account's email spelling do not grant this permission.
 
 ## Production deployment
 

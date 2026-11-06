@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { commonsFileUrl, type CatalogModel } from '@pushform/cloud/catalog';
+import { commonsExactSearch, commonsFileUrl, type CatalogModel } from '@pushform/cloud/catalog';
 
 /** Search and social metadata, shared by the browser (which updates the head as the route changes) and the edge
  * worker (which writes the same tags into the HTML that crawlers and link-preview bots fetch without running scripts). */
@@ -24,8 +24,8 @@ export interface SeoMeta {
 
 export const modelPath = (id: string): string => `/models/${id}`;
 export const profilePathFor = (handle: string): string => `/u/${handle}`;
-/** The library filtered by a search, used to find every model credited to a creator without a Commons profile. */
-export const browseSearchPath = (query: string): string => `/?${new URLSearchParams({ q: query.trim().slice(0, 200) })}#browse`;
+/** The library filtered to an exact-name search, used to find every model credited to a creator without a Commons profile. */
+export const browseSearchPath = (name: string): string => `/?${new URLSearchParams({ q: commonsExactSearch(name) })}#browse`;
 const INDEX = 'index, follow, max-image-preview:large, max-snippet:-1';
 export const NOINDEX = 'noindex, follow';
 

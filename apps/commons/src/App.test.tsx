@@ -137,10 +137,11 @@ it('searches the library for a credited creator who has no Commons profile',asyn
   const other=exampleModel({id:'garden-bench',title:'Garden bench',creator:'Someone Else',credits:[]});
   render(<App loadCatalog={Object.assign(async()=>[exampleModel(),other],{byIds:async()=>[exampleModel()]})}/>);
   const credit=await screen.findByRole('link',{name:'Example Maker'});
-  expect(credit.getAttribute('href')).toBe('/?q=Example+Maker#browse');
+  expect(credit.getAttribute('href')).toBe('/?q=%22Example+Maker%22#browse');
   fireEvent.click(credit);
   expect(await screen.findByRole('link',{name:'View Workshop hinge'})).toBeTruthy();
-  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('Example Maker');
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('"Example Maker"');
+  expect(screen.getByText('1 model matching "Example Maker"')).toBeTruthy();
   expect(screen.queryByRole('link',{name:'View Garden bench'})).toBeNull();
   expect(window.location.pathname+window.location.search+window.location.hash).toBe('/#browse');
 });

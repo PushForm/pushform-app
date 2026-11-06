@@ -42,7 +42,7 @@ it('keeps handles immutable, links the saved profile by handle and offers no hid
   await waitFor(()=>expect(save).toHaveBeenCalledWith({...fields,displayName:'Renamed Maker'},1,true));await waitFor(()=>expect(window.location.pathname).toBe('/u/example-maker'));
 });
 it('links original author credit to a profile only when an account association is established',()=>{
-  const view=render(<CreatorCredit model={{creator:'Original Author',creatorProfile:null}}/>);expect(screen.getByRole('link',{name:'Original Author'}).getAttribute('href')).toBe('/?q=Original+Author#browse');view.rerender(<CreatorCredit model={{creator:'Original Author',creatorProfile:{handle:'original-author'}}}/>);const link=screen.getByRole('link',{name:'Original Author'});expect(link.getAttribute('href')).toBe('/u/original-author');
+  const view=render(<CreatorCredit model={{creator:'Original Author',creatorProfile:null}}/>);expect(screen.getByRole('link',{name:'Original Author'}).getAttribute('href')).toBe('/?q=%22Original+Author%22#browse');view.rerender(<CreatorCredit model={{creator:'Original Author',creatorProfile:{handle:'original-author'}}}/>);const link=screen.getByRole('link',{name:'Original Author'});expect(link.getAttribute('href')).toBe('/u/original-author');
   fireEvent.click(link);expect(window.location.pathname).toBe('/u/original-author');
 });
 

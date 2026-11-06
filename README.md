@@ -28,10 +28,12 @@ The app requires sign-in and stores documents in Supabase. Point `apps/web/.env.
 ```
 packages/   core geom kernel model inference commands render io ui mcp cloud testing
 apps/       web desktop commons
-docs/help/  user-facing help guides
+docs/       documentation site published at docs.pushform.io
+docs/help/  in-app help guides that AI Chat searches (not part of the site)
 ```
 
 The standalone Commons frontend has its own build and catalog configuration; see [apps/commons](apps/commons/README.md).
+The documentation site has its own build; see [docs](docs/README.md).
 
 ## License
 

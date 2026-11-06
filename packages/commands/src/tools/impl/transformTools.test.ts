@@ -85,10 +85,15 @@ describe('MoveTool', () => {
     expect(tool.inferenceOptions().lockSnap?.dir).toEqual([0, 0, -1]);
     // off the normal: only the part along it counts
     tools.pointerMove(at(TOP_CAMERA, [3, 1, 3]));
-    expect(tool.overlay().some((o) => o.kind === 'polyline' && o.points.length === 5 && Math.abs(o.points[0]![2] - 3) < 1e-9)).toBe(true);
+    // the plane is previewed, with its cut, where the move would put it; the document is unchanged
+    const preview = tool.sectionPreview;
+    expect(preview?.moved).toEqual([{ path: [], id, normal: [0, 0, -1], d: 3 }]);
+    expect(tool.sectionPreview).toBe(preview);
+    expect(containerAt(host.doc.state, []).sectionPlanes.get(id as Id)!.plane.d).toBe(1);
     tools.pointerDown(at(TOP_CAMERA, [3, 1, 3]));
     tools.pointerUp(at(TOP_CAMERA, [3, 1, 3]));
     await tool.settled;
+    expect(tool.sectionPreview).toBeNull();
     const sp = containerAt(host.doc.state, []).sectionPlanes.get(id as Id)!;
     expect(sp.plane.n).toEqual([0, 0, -1]);
     expect(sp.plane.d).toBeCloseTo(3, 9);

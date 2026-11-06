@@ -259,7 +259,11 @@ describe('section plane commands', () => {
     const status = tool.status();
     expect(status.fields?.[0]).toMatchObject({ label: 'Offset', value: status.vcbValue });
     expect(status.settings).toContainEqual(expect.objectContaining({ id: 'offset', value: status.vcbValue }));
+    // while it slides the plane is previewed, as the context's cut, before anything is placed
+    expect(tool.sectionPreview?.added).toEqual({ path: [], normal: [0, 0, -1], d: expect.closeTo(0.6, 9) });
+    expect(tool.sectionPreview).toBe(tool.sectionPreview);
     tool.onPointerDown(at([3, 2, 0.6], [140, 160]));
+    expect(tool.sectionPreview).toBeNull();
     expect(plane(active()!).origin[2]).toBeCloseTo(0.6, 9);
     expect(plane(active()!).origin.slice(0, 2)).toEqual([1, 1]);
     expect(commits).toBe(1);

@@ -24,7 +24,7 @@ import {
   editCommands,
   placeholderTool,
 } from '@pushform/commands';
-import type { DisplayState, Platform, Tool } from '@pushform/commands';
+import type { DisplayState, Platform, SectionPreviewTool, Tool } from '@pushform/commands';
 import type { Mat4, MeshData } from '@pushform/core';
 import { InlineBackend, KernelClient, WorkerBackend } from '@pushform/kernel';
 import { bodyFromMesh } from '@pushform/model';
@@ -228,11 +228,16 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
   offs.push(tx.onChange(() => toolManager.refreshStatus()));
   let bodies: readonly RenderBody[] = [];
   let hoverRef: EntityRef | null = null;
+  // section planes a tool is dragging are drawn, and cut, where they would go
+  const syncSections = () => {
+    const tool = toolManager.visualTool as (Tool & Partial<SectionPreviewTool>) | null;
+    viewport.setSections(sectionsToRender(tx.doc.state, tx.selection.refs, tool?.sectionPreview ?? null));
+  };
   const syncHighlights = () => {
     viewport.setHighlight(highlightsFor(tx.doc.state, hoverRef, tx.selection.refs));
     viewport.setDimensions(dimensionsToRender(tx.doc.state, tx.selection.refs));
     viewport.setTexts(textsToRender(tx.doc.state, tx.selection.refs));
-    viewport.setSections(sectionsToRender(tx.doc.state, tx.selection.refs));
+    syncSections();
   };
   setRenderImageStore(tx.images);
   // The inference index catches up with the document in short slices between frames, so that opening a large model
@@ -284,6 +289,7 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
     const tool = toolManager.visualTool as
       | (Tool & { hoverRef?: EntityRef | null; previewMeshes?: readonly MeshData[]; previewReplacesBodyId?: number | null; previewMatrix?: Mat4 })
       | null;
+    syncSections();
     const nextHover = tool?.hoverRef ?? null;
     if (nextHover !== hoverRef) {
       hoverRef = nextHover;

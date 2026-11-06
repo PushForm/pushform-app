@@ -17,7 +17,7 @@ Shift and arrow-key locks remain available in these modes. If expected snaps dis
 Choose **Section Plane** in the **Inspect** toolbar group or find it in command search. Placing a plane takes two clicks.
 
 1. Point to a face to orient the preview, then click. The plane will be parallel to that face, and the click sets its starting point. Over empty space the plane faces you along the nearest axis. Before this click, Shift holds the orientation, Right, Left and Up constrain to the red, green and blue axes, and Down releases that constraint.
-2. Move the pointer to slide the plane along its arrows' direction; it snaps to points along the way. Click again to place it, or type the distance and press Enter. You can also press, drag and release. Escape goes back to step 1.
+2. Move the pointer to slide the plane along its arrows' direction; it snaps to points along the way, and the view is cut where the plane is as you move. Click again to place it, or type the distance and press Enter. You can also press, drag and release. Escape goes back to step 1.
 
 Undo removes a plane you have placed. A section plane belongs to the model or to the group or component you are editing, and each of those has at most one active cut. A plane inside a component belongs to its definition, so every copy of that component is cut the same way.
 
@@ -29,7 +29,7 @@ To make the plane keep the other side, switch on **Reverse** in the tool options
 
 ## Move, flip and hide section planes
 
-To move a plane, choose **Move** and point to the plane's outline, or select the plane first. While only section planes move, the move stays square to them, so the plane slides nearer to or farther from what it cuts; type a distance for an exact move. An arrow key locks an axis instead.
+To move a plane, choose **Move** and point to the plane's outline, or select the plane first. While only section planes move, the move stays square to them, so the plane slides nearer to or farther from what it cuts. The plane and its cut follow the pointer as you move; type a distance for an exact move. An arrow key locks an axis instead.
 
 Right-click a plane with any tool for **Reverse**, which flips the side it cuts away, **Hide**, **Active Cut** and **Align View**. Double-clicking a plane with Select turns its cut on or off.
 

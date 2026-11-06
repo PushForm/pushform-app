@@ -18,7 +18,7 @@ Use **Line** for straight edges or **Freehand** for a drawn stroke. The Shape st
 
 ## Push/Pull, Offset, Move, Rotate and Scale
 
-**Push/Pull** gives a planar face depth or moves a region of an existing solid. **Offset** derives a parallel boundary from an existing outline. Use them to build from a face or outline instead of manually redrawing every edge.
+**Push/Pull** gives a planar face depth or moves a region of an existing solid. **Offset** derives a parallel boundary from an existing outline. **Profile Edges** rounds, bevels or shapes the edges of a solid: choose Round, Chamfer or a router profile in its tool options bar. Use them to build from a face or outline instead of manually redrawing every edge.
 
 **Move** changes position, **Rotate** changes orientation, and **Scale** changes size. Work in the intended group or component and check the selection before changing geometry. For **Follow Me**, click the profile face, hover along connected sketch path edges, then click to finish. With path edges preselected, clicking the profile applies the sweep immediately.
 

@@ -42,11 +42,11 @@ it("shows Profile Edges' profiles, size and the chamfer angle, and sets the tool
   const tool = a.toolManager.get('profile') as EdgeBlendTool;
   const toolbar = screen.getByRole('toolbar', { name: 'Profile Edges options' });
   const profiles = within(toolbar).getByRole('radiogroup', { name: 'Profile' });
-  expect(within(profiles).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['Roundover', 'Cove', 'Ogee', 'Bead', 'Chamfer', 'Step']);
-  expect(within(profiles).getByRole('radio', { name: 'Roundover' }).getAttribute('aria-checked')).toBe('true');
+  expect(within(profiles).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['Round', 'Chamfer', 'Cove', 'Ogee', 'Bead', 'Step']);
+  expect(within(profiles).getByRole('radio', { name: 'Round' }).getAttribute('aria-checked')).toBe('true');
   act(() => { fireEvent.click(within(profiles).getByRole('radio', { name: 'Chamfer' })); });
   expect(tool.profile).toBe('chamfer');
-  const size = within(toolbar).getByLabelText('Size');
+  const size = within(toolbar).getByLabelText('Distance');
   act(() => { fireEvent.change(size, { target: { value: '0.25' } }); });
   act(() => { fireEvent.keyDown(size, { key: 'Enter' }); });
   expect(tool.size).toBeCloseTo(0.25 * 0.0254);

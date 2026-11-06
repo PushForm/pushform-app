@@ -40,6 +40,8 @@ export interface TransactionHost {
 export interface ToolHost {
   activate(id: string): void;
   readonly activeToolId: string | null;
+  /** Change a control of the active tool's options bar (`Tool.onSetting`). */
+  setting?(id: string, value: string | boolean): void;
 }
 
 /** Services commands may use. Fields are filled in by the app bootstrap; absent until then. */

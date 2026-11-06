@@ -16,10 +16,10 @@ import { modelCommands } from '../../commands/model';
 import { pushPullCommands } from '../../commands/pushpull';
 import { sketchCommands } from '../../commands/sketch';
 import { curveCommands, type AddCurveInput } from '../../commands/curves';
-import { edgeBlendCommands } from '../../commands/edgeBlend';
+import { edgeBlendCommands, edgeProfileFit } from '../../commands/edgeBlend';
 import { ToolManager } from '../ToolManager';
 import { NO_MODIFIERS, type Modifiers, type Tool, type ToolPointerEvent } from '../Tool';
-import { edgeBlendTools, type EdgeBlendTool } from './EdgeBlend';
+import { edgeBlendTools, edgeToolAliasCommands, type EdgeBlendTool } from './EdgeBlend';
 import { OrbitTool } from './Orbit';
 
 class FakeCamera implements CameraHost {
@@ -89,9 +89,16 @@ function setup() {
   tools.register(new OrbitTool());
   const root = (): EntityContainer => host.doc.rootDefinition.entities;
   const body = (id: number): Body => root().bodies.get(id as never)!;
-  const fillet = tools.get('fillet') as EdgeBlendTool;
-  const chamfer = tools.get('chamfer') as EdgeBlendTool;
+  // Fillet and Chamfer are Profile Edges' Round and Chamfer profiles
+  const fillet = tools.get('profile') as EdgeBlendTool;
+  const chamfer = fillet;
   return { host, registry, tools, root, body, fillet, chamfer };
+}
+
+/** Start Profile Edges with `profile` chosen, as command search's Fillet and Chamfer do. */
+function useProfile(tools: ToolManager, profile: string): void {
+  tools.activate('profile');
+  tools.setting('profile', profile);
 }
 
 const addBox = (registry: CommandRegistry): number => registry.execute('model.addBox', { min: [0, 0, 0], max: [1, 1, 1] }) as number;
@@ -127,7 +134,7 @@ describe('Fillet and Chamfer tools', () => {
     const id = addBox(registry);
     const e1 = edgeAt(body(id), [0, 0, 1], [1, 0, 1]);
     const e2 = edgeAt(body(id), [1, 0, 1], [1, 1, 1]);
-    tools.activate('chamfer');
+    useProfile(tools, 'chamfer');
     tools.pointerMove(at(edgeRef(id, e1)));
     expect(chamfer.hoverEdges).toEqual([e1.key]);
     expect(tools.overlay().length).toBeGreaterThan(0);
@@ -145,7 +152,7 @@ describe('Fillet and Chamfer tools', () => {
     expect(chamfer.edgeSet).toHaveLength(2);
     tools.cancel();
     expect(chamfer.edgeSet).toEqual([]);
-    expect(tools.activeToolId).toBe('chamfer');
+    expect(tools.activeToolId).toBe('profile');
     tools.cancel();
     expect(tools.activeToolId).toBe('select');
   });
@@ -158,7 +165,7 @@ describe('Fillet and Chamfer tools', () => {
       const e = draft.definitions.get(draft.rootDefinitionId)!.entities.bodies.get(id as never)!.edges.get(e1.key)!;
       e.smooth = true;
     });
-    tools.activate('fillet');
+    useProfile(tools, 'round');
     tools.pointerMove(at(edgeRef(id, e1)));
     expect(fillet.hoverEdges).toEqual([]);
     tools.click(at(edgeRef(id, e1)));
@@ -175,7 +182,7 @@ describe('Fillet and Chamfer tools', () => {
     const cyl = body(id);
     const top = [...cyl.faces.values()].find((f) => f.plane.n[2] > 0.99)!;
     const capEdge = [...cyl.edges.values()].find((e) => (e.faceA === top.id || e.faceB === top.id) && e.curveId !== null)!;
-    tools.activate('fillet');
+    useProfile(tools, 'round');
     tools.click(at(edgeRef(id, capEdge)));
     expect(fillet.edgeSet).toHaveLength(24);
     tools.click(at(edgeRef(id, capEdge), { shift: true }));
@@ -188,7 +195,7 @@ describe('Fillet and Chamfer tools', () => {
     const e1 = edgeAt(body(id), [0, 0, 1], [1, 0, 1]);
     const e2 = edgeAt(body(id), [0, 0, 0], [1, 0, 0]);
     host.selection.set([edgeRef(id, e1), edgeRef(id, e2), { kind: 'body', path: [], id: id as never }]);
-    tools.activate('fillet');
+    useProfile(tools, 'round');
     expect(fillet.edgeSetBodyId).toBe(id);
     expect([...fillet.edgeSet].sort()).toEqual([e1.key, e2.key].sort());
   });
@@ -197,7 +204,7 @@ describe('Fillet and Chamfer tools', () => {
     const { host, registry, tools, body, fillet } = setup();
     const id = addBox(registry);
     const e1 = edgeAt(body(id), [0, 0, 1], [1, 0, 1]);
-    tools.activate('fillet');
+    useProfile(tools, 'round');
     expect(tools.status().vcbLabel).toBe('Radius');
     tools.click(at(edgeRef(id, e1)));
     // Enter without a radius explains what is missing
@@ -218,7 +225,7 @@ describe('Fillet and Chamfer tools', () => {
     expect(fillet.message).toBeNull();
     expect(fillet.edgeSet).toEqual([]);
     expect(host.undoStack.length).toBe(entries + 1);
-    expect(host.undoStack.peek()?.label).toBe('Fillet');
+    expect(host.undoStack.peek()?.label).toBe('Round');
     const b = body(id);
     expect(meshTopologyProblems(b.mesh)).toEqual([]);
     expect(b.props.volume).toBeLessThan(1);
@@ -226,7 +233,7 @@ describe('Fillet and Chamfer tools', () => {
     expect([...b.faces.values()].filter((f) => f.surfaceId !== null)).toHaveLength(3);
     // the value is remembered for the session, also across tool switches
     tools.activate('select');
-    tools.activate('fillet');
+    useProfile(tools, 'round');
     expect(fillet.size).toBe(0.25);
     expect(tools.status().vcbValue).toBeDefined();
     expect(host.undo()).toBe(true);
@@ -237,7 +244,7 @@ describe('Fillet and Chamfer tools', () => {
     const { host, registry, tools, body, fillet } = setup();
     const id = addBox(registry);
     const e1 = edgeAt(body(id), [0, 0, 1], [1, 0, 1]);
-    tools.activate('fillet');
+    useProfile(tools, 'round');
     tools.click(at(edgeRef(id, e1)));
     tools.onVcb({ kind: 'length', meters: 0.1, raw: 0.1, unit: null });
     tools.doubleClick(at(edgeRef(id, e1)));
@@ -265,7 +272,7 @@ describe('Fillet and Chamfer tools', () => {
     const { host, registry, tools, body, chamfer } = setup();
     const id = addBox(registry);
     const e1 = edgeAt(body(id), [0, 0, 1], [1, 0, 1]);
-    tools.activate('chamfer');
+    useProfile(tools, 'chamfer');
     tools.click(at(edgeRef(id, e1)));
     tools.onVcb({ kind: 'length', meters: 2, raw: 2, unit: null });
     await chamfer.previewSettled();
@@ -287,7 +294,7 @@ describe('Fillet and Chamfer tools', () => {
     const id = addBox(registry);
     const e1 = edgeAt(body(id), [0, 0, 1], [1, 0, 1]);
     const e2 = edgeAt(body(id), [1, 0, 1], [1, 1, 1]);
-    tools.activate('chamfer');
+    useProfile(tools, 'chamfer');
     tools.click(at(edgeRef(id, e1)));
     tools.click(at(edgeRef(id, e2)));
     tools.onVcb({ kind: 'length', meters: 0.1, raw: 0.1, unit: null });
@@ -299,7 +306,7 @@ describe('Fillet and Chamfer tools', () => {
     expect(chamfer.edgeSet).toEqual([e1.key, e2.key]);
     expect(chamfer.previewMeshes.length).toBeGreaterThan(0);
     tools.keyDown({ key: 'Escape', code: 'Escape', modifiers: NO_MODIFIERS, repeat: false });
-    expect(tools.activeToolId).toBe('chamfer');
+    expect(tools.activeToolId).toBe('profile');
     expect(chamfer.edgeSet).toEqual([e1.key, e2.key]);
     tools.activate('orbit');
     expect(tools.keyDown({ key: 'Enter', code: 'Enter', modifiers: NO_MODIFIERS, repeat: false })).toBe(true);
@@ -311,7 +318,7 @@ describe('Fillet and Chamfer tools', () => {
 });
 
 describe('Profile Edges tool', () => {
-  it('offers its profiles in the tool options bar, takes a size and a chamfer angle, previews and commits one undo step', async () => {
+  it('offers Round, Chamfer and the router profiles in the tool options bar, takes sizes per profile and a chamfer angle, previews and commits one undo step', async () => {
     const { host, registry, tools, body } = setup();
     const profile = tools.get('profile') as EdgeBlendTool;
     expect(profile.title).toBe('Profile Edges');
@@ -319,12 +326,12 @@ describe('Profile Edges tool', () => {
     const top = [edgeAt(body(id), [0, 0, 1], [1, 0, 1]), edgeAt(body(id), [1, 0, 1], [1, 1, 1]), edgeAt(body(id), [1, 1, 1], [0, 1, 1]), edgeAt(body(id), [0, 1, 1], [0, 0, 1])];
     tools.activate('profile');
     const choice = tools.status().settings![0]!;
-    expect(choice).toMatchObject({ kind: 'choice', id: 'profile', label: 'Profile', value: 'roundover', display: 'icons' });
-    expect(choice.kind === 'choice' && choice.options.map((o) => o.label)).toEqual(['Roundover', 'Cove', 'Ogee', 'Bead', 'Chamfer', 'Step']);
-    expect(tools.status().settings!.map((c) => c.id)).toEqual(['profile', 'size']);
+    expect(choice).toMatchObject({ kind: 'choice', id: 'profile', label: 'Profile', value: 'round', display: 'icons' });
+    expect(choice.kind === 'choice' && choice.options.map((o) => o.label)).toEqual(['Round', 'Chamfer', 'Cove', 'Ogee', 'Bead', 'Step']);
+    expect(tools.status().settings!.map((c) => c.id)).toEqual(['profile', 'size', 'segments']);
     // edge picking keeps the bar usable
     expect(tools.status().placing).toBe(false);
-    expect(tools.status().vcbLabel).toBe('Size');
+    expect(tools.status().vcbLabel).toBe('Radius');
     tools.setting('profile', 'ogee');
     expect(profile.profile).toBe('ogee');
     expect(tools.status().instructor).toMatch(/ogee/);
@@ -335,8 +342,9 @@ describe('Profile Edges tool', () => {
     await profile.previewSettled();
     expect(profile.message).toBeNull();
     expect(profile.previewMeshes).toHaveLength(1);
-    // another profile is previewed afresh
+    // another profile starts with the size in use, and is previewed afresh
     tools.setting('profile', 'bead');
+    expect(profile.size).toBe(0.1);
     await profile.previewSettled();
     expect(profile.previewMeshes).toHaveLength(1);
     const entries = host.undoStack.length;
@@ -344,7 +352,8 @@ describe('Profile Edges tool', () => {
     await profile.settled;
     expect(profile.message).toBeNull();
     expect(host.undoStack.length).toBe(entries + 1);
-    expect(host.undoStack.peek()?.label).toBe('Profile Edges');
+    // the undo step is named after the profile
+    expect(host.undoStack.peek()?.label).toBe('Bead');
     expect(meshTopologyProblems(body(id).mesh)).toEqual([]);
     // an angle picks the Chamfer profile at that angle
     tools.onVcb({ kind: 'angle', degrees: 30 });
@@ -356,11 +365,19 @@ describe('Profile Edges tool', () => {
     expect(profile.size).toBe(0.05);
     tools.setting('angle', { kind: 'angle', degrees: 20 });
     expect(profile.angleDeg).toBe(20);
-    // Fillet offers no profile, but its segments
-    tools.activate('fillet');
-    expect(tools.status().settings!.map((c) => c.id)).toEqual(['size', 'segments']);
+    // each profile keeps its own size; Round and the curved profiles share the segments
+    tools.setting('profile', 'bead');
+    expect(profile.size).toBe(0.1);
+    tools.setting('profile', 'chamfer');
+    expect(profile.size).toBe(0.05);
+    tools.setting('profile', 'round');
+    expect(profile.size).toBe(0.05);
+    expect(tools.status().settings!.map((c) => c.id)).toEqual(['profile', 'size', 'segments']);
     tools.setting('segments', { kind: 'segments', count: 12 });
-    expect((tools.get('fillet') as EdgeBlendTool).segments).toBe(12);
+    expect(profile.segments).toBe(12);
+    // Chamfer takes no segments
+    tools.setting('profile', 'chamfer');
+    expect(tools.status().settings!.map((c) => c.id)).toEqual(['profile', 'size', 'angle']);
   });
 
   it('explains a size too large for the picked edges and keeps them', async () => {
@@ -380,3 +397,42 @@ describe('Profile Edges tool', () => {
     expect(body(id).props.volume).toBeCloseTo(1, 9);
   });
 });
+
+describe('Profile Edges in place of Fillet and Chamfer', () => {
+  it('Fillet, Roundover and Chamfer in command search start it with Round or Chamfer chosen', () => {
+    const { registry, tools, fillet } = setup();
+    registry.registerAll(edgeToolAliasCommands);
+    registry.execute('profileEdges.chamfer');
+    expect(tools.activeToolId).toBe('profile');
+    expect(fillet.profile).toBe('chamfer');
+    registry.execute('profileEdges.fillet');
+    expect(fillet.profile).toBe('round');
+    expect(registry.list().filter((c) => c.id.startsWith('profileEdges.')).map((c) => c.title)).toEqual(['Fillet', 'Roundover', 'Round Edges', 'Chamfer']);
+  });
+
+  it('switching the profile just after applying redoes the edges with the new one, as one undo step', async () => {
+    const { host, registry, tools, body, fillet } = setup();
+    const id = addBox(registry);
+    const e1 = edgeAt(body(id), [0, 0, 1], [1, 0, 1]);
+    useProfile(tools, 'round');
+    tools.click(at(edgeRef(id, e1)));
+    tools.onVcb({ kind: 'length', meters: 0.1, raw: 0.1, unit: null });
+    tools.doubleClick(at(edgeRef(id, e1)));
+    await fillet.settled;
+    expect(host.undoStack.peek()?.label).toBe('Round');
+    const entries = host.undoStack.length;
+    tools.setting('profile', 'cove');
+    await fillet.settled;
+    expect(host.undoStack.length).toBe(entries);
+    expect(host.undoStack.peek()?.label).toBe('Cove');
+    expect(meshTopologyProblems(body(id).mesh)).toEqual([]);
+  });
+
+  it('classifies the edges a router profile would cut', () => {
+    const { registry, body } = setup();
+    const id = addBox(registry);
+    const keys = [...body(id).edges.keys()];
+    expect(edgeProfileFit(body(id), keys)).toEqual({ cut: 12, inside: 0, notSquare: 0 });
+  });
+});
+

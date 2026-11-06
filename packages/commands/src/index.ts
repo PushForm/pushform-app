@@ -123,7 +123,7 @@ export { AxesTool, type PickedAxes } from './tools/impl/AxesTool';
 export { ComponentAxesTool, componentAxesPick, type ComponentAxesRequest } from './tools/impl/ComponentAxesTool';
 export { OffsetTool } from './tools/impl/Offset';
 export { FollowMeTool } from './tools/impl/FollowMe';
-export { EdgeBlendTool, edgeBlendTools, PROFILE_LABELS } from './tools/impl/EdgeBlend';
+export { EdgeBlendTool, edgeBlendTools, edgeToolAliasCommands, EDGE_TOOL_PROFILES, EDGE_TOOL_PROFILE_LABELS, PROFILE_LABELS, type EdgeToolProfile } from './tools/impl/EdgeBlend';
 export { SolidTool, solidTools } from './tools/impl/SolidTool';
 export { constructionTools } from './tools/constructionTools';
 export * from './commands/contextMenu';

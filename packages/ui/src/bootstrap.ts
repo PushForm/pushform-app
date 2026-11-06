@@ -55,6 +55,7 @@ import {
   offsetCommands,
   followMeCommands,
   edgeBlendCommands,
+  edgeToolAliasCommands,
   solidCommands,
   intersectCommands,
   contextCommands,
@@ -166,6 +167,7 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
   commands.registerAll(offsetCommands);
   commands.registerAll(followMeCommands);
   commands.registerAll(edgeBlendCommands);
+  commands.registerAll(edgeToolAliasCommands);
   commands.registerAll(solidCommands);
   commands.registerAll(intersectCommands);
   commands.registerAll(contextCommands);

@@ -38,34 +38,33 @@ With no solids preselected, choose **Intersect** or **Split** from the Solid dro
 
 **Intersect** replaces the inputs with their shared volume, so nonoverlapping solids can leave no result. **Split** replaces both inputs with separate solid pieces for their overlap and their remaining portions. **Undo** restores the originals.
 
-## Round or bevel edges of a solid with Fillet or Chamfer
+## Round, bevel or shape edges with Profile Edges
 
-Choose **Fillet** (rounded edge) or **Chamfer** (flat bevel) from the Edge dropdown in the toolbar, or search for it by name. Hover a solid in the group or component you are editing: the edge under the pointer highlights. Click edges to add them to the set; picked edges stay highlighted. Shift+click a picked edge to remove it again. Clicking any segment of a circle or arc, such as the rim of a cylinder, picks the whole curve.
+Choose **Profile Edges** in the Modify group of the toolbar, or search for **Fillet**, **Round**, **Chamfer** or **Profile Edges** by name. Pick a profile from the row of profile buttons in the tool options bar at the top of the view:
 
-Type the fillet radius or the chamfer distance, for example `5mm`, and press Enter. A preview of the result replaces the solid while you pick. Then press Enter, or double-click, to apply. The whole operation is one Undo step.
-
-Edges you selected before choosing the tool start out picked. Escape clears the picked edges; a second Escape returns to Select. Only hard edges are offered: soft, smooth and hidden edges cannot be rounded.
-
-## Fillet and Chamfer settings and limits
-
-The radius or distance you type is remembered until the app is closed, also when you switch tools. For a fillet, set **Segments** in the tool options bar, or type a number followed by `s` (for example `12s`), to choose how many segments a full circle of fillet faces would have; the default is 24, so a right-angle edge gets 6 faces. Fillet faces form one smooth surface.
-
-Outside edges are cut away and inside corners are filled. Picked edges that meet end to end are joined with a mitre, as in a picture frame. Where picked edges turn from an outside edge to an inside corner, each part is rounded or beveled on its own and ends flat on the face across its end. Chamfer can also bevel three picked edges that meet at one corner, such as all twelve edges of a box: the three bevels cut into each other and meet in a point. Fillet cannot round such a corner. When the value is too large for the faces beside an edge, when the fillets of two edges would run into each other, or when three picked edges meet at one corner for a fillet, nothing changes: the status bar explains why and the picked edges stay so you can type a smaller value.
-
-## Shape edges like a router bit with Profile Edges
-
-Choose **Profile Edges** from the Edge dropdown in the toolbar, next to Fillet and Chamfer, or search for it by name. Pick a profile from the row of profile buttons in the tool options bar at the top of the view:
-
-- **Roundover**: a quarter round. The size is its radius.
+- **Round**: a rounded edge, also called a fillet or roundover. The size is its radius.
+- **Chamfer**: a flat bevel. The size is how far it reaches back from the edge; set **Angle** in the bar, or type an angle such as `20°`, for a wide, shallow bevel, as on a raised panel.
 - **Cove**: a hollow quarter round. The size is its radius.
 - **Ogee**: an S curve, rounded near the edge and hollow near the face. The size is its width and depth.
 - **Bead**: a half round on the edge with a small groove beside it, as on a beaded face frame. The size is the bead's radius.
-- **Chamfer**: a bevel. The size is its width on the face; type an angle such as `20°` for a wide, shallow bevel, as on a raised panel.
 - **Step**: a square rabbet. The size is its width and depth.
 
-Pick edges as with Fillet, type the size, for example `1/4"`, and press Enter or double-click to apply. A preview shows the result first, and the whole operation is one Undo step.
+Hover a solid in the group or component you are editing: the edge under the pointer highlights. Click edges to add them to the set; picked edges stay highlighted. Shift+click a picked edge to remove it again. Clicking any segment of a circle or arc, such as the rim of a cylinder, picks the whole curve. Edges you selected before choosing the tool start out picked.
 
-## Profile Edges corners and limits
+Type the size, for example `5mm` or `1/4"`, or set it in the bar. A preview of the result replaces the solid while you pick. Then press Enter, or double-click, to apply. The whole operation is one Undo step, named after the profile. Escape clears the picked edges; a second Escape returns to Select. Only hard edges are offered: soft, smooth and hidden edges cannot be shaped.
 
-A profile is measured from one face beside each edge, as a router rides on it: for edges round a face, that face; for a single edge, its larger face. Profiles shape square outside edges, where two faces meet at a right angle. Picked edges that meet end to end are mitred, also round the inside of an opening, as on a beaded face frame. Inside corners in your pick are left alone: the profile stops flat against the face it runs into there, as a router's bearing stops. When the size is too large, nothing changes and the status bar explains why.
+## Profile Edges settings
+
+Each profile remembers its own size until the app is closed; a profile you have not used yet starts with the size of the one you switch from. **Round**, **Cove**, **Ogee** and **Bead** share **Segments** in the bar, or type a number followed by `s` (for example `12s`): the number of segments a full circle of their curved faces would have. The default is 24, so a right-angle edge gets 6 faces. Curved faces form one smooth surface.
+
+Right after you apply, you can still change the profile, size, angle or segments in the bar: the edges you just shaped are redone with the new values.
+
+## Round and Chamfer on any edge
+
+**Round**, and **Chamfer** at its usual 45°, work on any hard edge, whatever the angle between its faces. Outside edges are cut away and inside corners are filled. Picked edges that meet end to end are joined with a mitre, as in a picture frame. Where picked edges turn from an outside edge to an inside corner, each part is rounded or beveled on its own and ends flat on the face across its end. Chamfer can also bevel three picked edges that meet at one corner, such as all twelve edges of a box: the three bevels cut into each other and meet in a point. Round cannot round such a corner. When the value is too large for the faces beside an edge, when the curves of two edges would run into each other, or when three picked edges meet at one corner for Round, nothing changes: the status bar explains why and the picked edges stay so you can try a smaller value.
+
+## Cove, Ogee, Bead, Step and angled Chamfer like a router bit
+
+
+A profile is measured from one face beside each edge, as a router rides on it: for edges round a face, that face; for a single edge, its larger face. These profiles, and Chamfer at an angle other than 45°, shape square outside edges, where two faces meet at a right angle; when your pick includes another kind of edge, their buttons are disabled and the bar says why. Use Round or Chamfer at 45° for those edges. Picked edges that meet end to end are mitred, also round the inside of an opening, as on a beaded face frame. Inside corners in your pick are left alone, and the bar says how many: the profile stops flat against the face it runs into there, as a router's bearing stops. When the size is too large, nothing changes and the status bar explains why.
 

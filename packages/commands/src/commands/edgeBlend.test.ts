@@ -436,7 +436,8 @@ describe('profile.apply', () => {
     expect(meshTopologyProblems(b.mesh)).toEqual([]);
     expect(b.props.volume).toBeCloseTo(1 - removed(p, 0.1).area, 6);
     expect(res.faceIds.length).toBeGreaterThan(0);
-    expect(host.undoStack.peek()?.label).toBe('Profile Edges');
+    // the undo step is named after the profile
+    expect(host.undoStack.peek()?.label).toBe({ roundover: 'Roundover', cove: 'Cove', ogee: 'Ogee', bead: 'Bead', chamfer: 'Chamfer', step: 'Step' }[p]);
   });
 
   it.each(EDGE_PROFILES)('mitres a %s round the four top edges of a box', async (p) => {

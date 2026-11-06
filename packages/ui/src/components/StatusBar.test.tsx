@@ -21,5 +21,5 @@ it('shows no tool settings: they are in the tool options bar', () => {
   act(() => a.toolManager.activate('profile'));
   expect(screen.queryByLabelText('Profile')).toBeNull();
   expect(screen.queryByRole('combobox')).toBeNull();
-  expect(screen.getByRole('status').textContent).toMatch(/roundover/);
+  expect(screen.getByRole('status').textContent).toMatch(/round/);
 });

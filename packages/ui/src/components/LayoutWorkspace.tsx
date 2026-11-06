@@ -287,6 +287,8 @@ const DIMENSION_TOOLS = [
 /** Tools take Cmd on macOS wherever Windows uses Ctrl. */
 const MAC = detectPlatform() === 'mac';
 const PX_PER_MM = 3;
+/** On-screen radii of the vertex-editing circles; the square resize handles are 9 px across. */
+const VERTEX_HANDLE_RADIUS_PX = { vertex: 4, active: 5, curve: 3.5 };
 /** Height of the tool options bar's band over the page view, kept clear by framing. */
 const TOOL_BAND_PX = 42;
 
@@ -709,22 +711,25 @@ function paintPage(
     if (entity?.kind === 'path' && isLayoutLayerVisible(page, state, entity.layerId)) {
       const points = pathEdit.points ?? entity.points;
       const handles = pathEdit.handles ?? entity.handles;
+      // Vertices and curve handles are editing aids sized in screen pixels, like the resize handles.
+      const mmPerPx = 1 / (PX_PER_MM * zoom);
       for (const [index, point] of points.entries()) {
         for (const side of ['in', 'out'] as const) {
           const handle = handles?.[index]?.[side];
           if (!handle) continue;
           ctx.beginPath(); ctx.moveTo(...point); ctx.lineTo(...handle);
-          ctx.strokeStyle = '#7b8eaa'; ctx.lineWidth = 0.3; ctx.stroke();
-          ctx.beginPath(); ctx.arc(handle[0], handle[1], 1.1, 0, 2 * Math.PI);
+          ctx.strokeStyle = '#7b8eaa'; ctx.lineWidth = mmPerPx; ctx.stroke();
+          ctx.beginPath(); ctx.arc(handle[0], handle[1], VERTEX_HANDLE_RADIUS_PX.curve * mmPerPx, 0, 2 * Math.PI);
           ctx.fillStyle = '#ffffff'; ctx.fill();
           ctx.strokeStyle = '#1e63d1'; ctx.stroke();
         }
+        const active = index === pathEdit.activeIndex;
         ctx.beginPath();
-        ctx.arc(point[0], point[1], index === pathEdit.activeIndex ? 1.8 : 1.3, 0, 2 * Math.PI);
-        ctx.fillStyle = index === pathEdit.activeIndex ? '#1e63d1' : '#ffffff';
+        ctx.arc(point[0], point[1], (active ? VERTEX_HANDLE_RADIUS_PX.active : VERTEX_HANDLE_RADIUS_PX.vertex) * mmPerPx, 0, 2 * Math.PI);
+        ctx.fillStyle = active ? '#1e63d1' : '#ffffff';
         ctx.fill();
         ctx.strokeStyle = '#1e63d1';
-        ctx.lineWidth = 0.4;
+        ctx.lineWidth = mmPerPx;
         ctx.stroke();
       }
     }

@@ -157,3 +157,15 @@ describe('mesh parts behave like bodies', () => {
     expect(mixed.map((i) => i.label)).toEqual(['Entity Info', 'Erase', 'Make Group', 'Make Component…', 'Zoom Selection']);
   });
 });
+
+
+it('recursive painting replaces explicit mesh face materials without mutating the geometry snapshot', () => {
+  const { registry, host, ref, part } = setup();
+  const red = registry.execute('material.create', { name: 'Red', color: [1, 0, 0] }) as number;
+  const geometry = part().geometry;
+  registry.execute('paint.apply', { refs: [ref], materialId: red, recursive: true });
+  expect([...part().geometry.faceMaterials]).toEqual([red, red]);
+  expect([...geometry.faceMaterials]).toEqual([0, 42]);
+  host.undo();
+  expect([...part().geometry.faceMaterials]).toEqual([0, 42]);
+});

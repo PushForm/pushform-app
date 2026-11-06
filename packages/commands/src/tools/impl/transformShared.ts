@@ -199,7 +199,7 @@ function movedOutlineInContext(state: DocumentState, refs: readonly EntityRef[],
 export interface TransformCommit {
   readonly refs: EntityRef[];
   matrix: MMat4;
-  readonly copy: boolean;
+  copy: boolean;
   readonly label: string;
   /** Undo entry the commit produced (re-edits only while it is still on top). */
   entry: UndoEntry | null;
@@ -290,6 +290,7 @@ export abstract class TransformToolBase implements Tool {
       await ctx.commands.execute('transform.apply', { refs, matrix, copy, label });
       commit.entry = hostOfTool(ctx).undoStack.peek();
       commit.applied = true;
+      ctx.committed?.();
       ctx.statusChanged();
       ctx.requestRender();
     });
@@ -305,19 +306,26 @@ export abstract class TransformToolBase implements Tool {
   }
 
   /** VCB re-edit: undo the last commit and re-apply it with a new matrix (still one undo entry). */
-  protected reapplyLast(matrix: MMat4): boolean {
+  protected reapplyLast(matrix: MMat4, copy?: boolean): boolean {
     const ctx = this.ctx;
     const last = this.lastCommit;
     if (!ctx || !last) return false;
     last.matrix = matrix;
+    if (copy !== undefined) last.copy = copy;
     this.enqueue(async () => {
       if (this.lastCommit !== last || !this.lastIsOnTop()) return;
       const host = hostOfTool(ctx);
       host.undo();
       last.applied = false;
-      await ctx.commands.execute('transform.apply', { refs: last.refs, matrix, copy: last.copy, label: last.label });
+      try {
+        await ctx.commands.execute('transform.apply', { refs: last.refs, matrix, copy: last.copy, label: last.label });
+      } catch (err) {
+        host.redo();
+        throw err;
+      }
       last.entry = host.undoStack.peek();
       last.applied = true;
+      ctx.committed?.();
       ctx.statusChanged();
       ctx.requestRender();
     });

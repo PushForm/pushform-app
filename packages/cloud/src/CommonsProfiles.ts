@@ -6,7 +6,7 @@ import { catalogModelSchema, catalogUrlSchema } from './CommonsCatalog';
 import type { Database } from './db.types';
 import { commonsProfileImageSchema } from './CommonsProfileImages';
 
-export const commonsHandleSchema = z.string().trim().toLowerCase().regex(/^[a-z][a-z0-9-]{1,30}[a-z0-9]$/);
+export const commonsHandleSchema = z.string().trim().toLowerCase().regex(/^[a-z][a-z0-9-]{1,30}[a-z0-9]$/, 'Use 3–32 lowercase letters, numbers or hyphens. Start with a letter and end with a letter or number; leave out the @.');
 export const commonsProfileFieldsSchema = z.object({
   handle: commonsHandleSchema,
   displayName: z.string().trim().min(1).max(100).refine(value => !/\p{Cc}/u.test(value)),
@@ -21,7 +21,7 @@ export type CommonsProfileFields = z.infer<typeof commonsProfileFieldsSchema>;
 export type CommonsPublicProfile = z.infer<typeof commonsPublicProfileSchema>;
 export type CommonsProfile = z.infer<typeof commonsProfileSchema>;
 export interface CommonsProfilePage { profile: CommonsPublicProfile; models: z.infer<typeof catalogModelSchema>[] }
-const pageSchema = z.object({profile:commonsPublicProfileSchema,models:z.array(catalogModelSchema).max(1000)}).strict();
+const pageSchema = z.object({profile:commonsPublicProfileSchema,models:z.array(catalogModelSchema)}).strict();
 
 export function commonsProfileError(error: {message?:string}):Error {
   const message=error.message??'';
@@ -55,7 +55,10 @@ export class CommonsProfiles {
     const data=await this.rpc('commons_my_profile',{},signal);return data===null?null:commonsProfileSchema.parse(data);
   }
   async save(fields:CommonsProfileFields,expectedVersion:number|null,publicConsent:boolean,signal?:AbortSignal):Promise<CommonsProfile>{
-    const value=commonsProfileFieldsSchema.parse(fields);
+    const parsed=commonsProfileFieldsSchema.safeParse(fields);
+    if(!parsed.success)throw new Error(parsed.error.issues[0]?.path[0]==='handle'
+      ? parsed.error.issues[0].message : 'Check the profile fields and links before saving.');
+    const value=parsed.data;
     const data=await this.rpc('commons_save_profile',{p_handle:value.handle,p_display_name:value.displayName,p_bio:value.bio,p_avatar_url:value.avatarUrl,p_links:value.links,p_expected_version:expectedVersion,p_public_consent:publicConsent},signal);
     return commonsProfileSchema.parse(data);
   }

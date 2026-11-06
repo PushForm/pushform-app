@@ -70,6 +70,7 @@ export const PaintApplyParamsSchema = z.object({
   materialId: materialIdSchema,
   mode: z.enum(PAINT_MODES).default('single'),
   side: sideSchema.default('front'),
+  recursive: z.boolean().default(false),
 });
 export type PaintApplyParams = z.infer<typeof PaintApplyParamsSchema>;
 
@@ -319,7 +320,7 @@ export function sampleRef(host: DocumentHost, ref: EntityRef, side: PaintSide = 
   return sampleTarget(containerAt(host.doc.state, host.context.path), t, side === 'back' ? 'back' : 'front');
 }
 
-function applyTargets(draft: DocumentDraft, path: readonly number[], targets: readonly Target[], materialId: MaterialId | null): number {
+function applyTargets(draft: DocumentDraft, path: readonly number[], targets: readonly Target[], materialId: MaterialId | null, recursive = false): number {
   const c = draftContainerAt(draft, path);
   let n = 0;
   for (const t of targets) {
@@ -351,6 +352,7 @@ function applyTargets(draft: DocumentDraft, path: readonly number[], targets: re
         const part = c.meshParts.get(t.id);
         if (!part) break;
         part.materialId = materialId;
+        if (recursive) part.geometry = { ...part.geometry, faceMaterials: part.geometry.faceMaterials.map(() => materialId ?? 0) };
         n++;
         break;
       }
@@ -364,6 +366,32 @@ function applyTargets(draft: DocumentDraft, path: readonly number[], targets: re
     }
   }
   return n;
+}
+
+/** Collect each nested definition once; editing a component definition affects all its placements. */
+function recursivePaintTargets(state: DocumentState, path: readonly Id[], targets: readonly Target[], side: PaintSide): { path: Id[]; targets: Target[] }[] {
+  const batches: { path: Id[]; targets: Target[] }[] = [];
+  const visited = new Set<number>();
+  const visit = (path: Id[], targets: Target[]): void => {
+    batches.push({ path, targets });
+    const container = containerAt(state, path);
+    for (const target of targets) {
+      if (target.kind !== 'instance') continue;
+      const instance = container.instances.get(target.id)!;
+      if (visited.has(instance.definitionId)) continue;
+      visited.add(instance.definitionId);
+      const nested = state.definitions.get(instance.definitionId)!.entities;
+      visit([...path, instance.id], [
+        ...[...nested.bodies.keys()].map((id): Target => ({ kind: 'body', id, sides: sidesOf(side) })),
+        ...[...nested.meshParts.keys()].map((id): Target => ({ kind: 'meshPart', id })),
+        ...[...nested.sketch.faces.keys()].map((id): Target => ({ kind: 'sketchFace', id, sides: sidesOf(side) })),
+        ...[...nested.instances.keys()].map((id): Target => ({ kind: 'instance', id })),
+      ]);
+    }
+  };
+  const unique = new Map(targets.map(target => [targetKey(target), target]));
+  visit([...path], [...unique.values()]);
+  return batches;
 }
 
 /** Expand the clicked targets per paint mode (pure; reads the current state). */
@@ -722,6 +750,7 @@ export const paintApply = defineCommand({
   run(ctx, p): PaintResult {
     const host = hostOf(ctx);
     const state = host.doc.state;
+    if (p.recursive && p.mode !== 'single') throw new PushFormError('paint.mode', 'Recursive painting requires single mode.');
     const materialId = normalizeMaterialId(state, p.materialId);
     const refs = p.refs ? paramRefs(p.refs) : host.selection.refs.filter((r) => samePath(r.path, host.context.path));
     const clicked = targetsOf(host, refs, p.side);
@@ -741,7 +770,8 @@ export const paintApply = defineCommand({
     });
     const targets = expandPaintTargets(host, targetsOf(host, whole, p.side), p.mode, p.side);
     if (targets.length === 0) return { painted: 0, materialId, sampled };
-    const painted = host.edit('Paint', (draft) => applyTargets(draft, host.context.path, targets, materialId));
+    const batches = p.recursive ? recursivePaintTargets(state, host.context.path, targets, p.side) : [{ path: host.context.path, targets }];
+    const painted = host.edit('Paint', (draft) => batches.reduce((count, batch) => count + applyTargets(draft, batch.path, batch.targets, materialId, p.recursive), 0));
     return { painted, materialId, sampled };
   },
 });

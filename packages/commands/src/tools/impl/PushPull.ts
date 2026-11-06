@@ -14,7 +14,8 @@ import { contextFrame, samePath } from '../../commands/context';
 import { planPushPull, runPushPullKernel, type PushPullApplyParams, type PushPullTarget } from '../../commands/pushpull';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
-import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolSettingValue, ToolStatus } from '../Tool';
+import { toggleSetting } from '../settings';
 import { pointerField } from '../entry';
 
 /** Pointer travel (CSS px) that turns a press into a drag-release gesture. */
@@ -253,7 +254,7 @@ export class PushPullTool implements Tool {
 
   onKeyDown(e: ToolKeyEvent): boolean {
     if (e.repeat) return false;
-    if (e.key === 'Control' || e.key === 'Alt') {
+    if (e.key === 'Control') {
       this.mode = this.mode === 'merge' ? 'newBody' : 'merge';
       this.clearPreview();
       this.schedulePreview();
@@ -276,9 +277,24 @@ export class PushPullTool implements Tool {
     if (!last) return;
     // Re-editing a loose face's pull keeps its direction.
     const distance = isLoose(last.params.target) ? (Math.sign(last.params.distance) || 1) * v.meters : v.meters;
-    const params: PushPullApplyParams = { target: last.params.target, distance, mode: last.params.mode };
-    last.params = params;
     this.lastDistance = distance;
+    this.redoLast(last, { target: last.params.target, distance, mode: last.params.mode });
+    this.ctx?.statusChanged();
+  }
+
+  /** The bar switched New body just after a pull: redo that pull in the new mode, as one undo step. */
+  adjustLast(id: string): boolean {
+    const last = this.lastCommit;
+    if (id !== 'newBody' || !last) return false;
+    this.redoLast(last, { ...last.params, mode: this.mode });
+    this.ctx?.statusChanged();
+    return true;
+  }
+
+  /** Undo the last pull and apply it again with `params` (one undo entry); the original stays if that fails. */
+  private redoLast(last: LastCommit, params: PushPullApplyParams): void {
+    const previous = last.params;
+    last.params = params;
     this.enqueue(async () => {
       if (!last.applied || this.lastCommit !== last) return;
       const ctx = this.ctx;
@@ -287,10 +303,17 @@ export class PushPullTool implements Tool {
       // Only re-edit when our commit is still the last thing that happened to the document.
       if (host.undoStack.peek()?.label !== 'Push/Pull' || !host.undo()) return;
       last.applied = false;
-      await ctx.commands.execute('pushpull.apply', params);
+      try {
+        await ctx.commands.execute('pushpull.apply', params);
+      } catch (err) {
+        host.redo();
+        last.params = previous;
+        last.applied = true;
+        throw err;
+      }
       last.applied = true;
+      ctx.committed?.();
     });
-    this.ctx?.statusChanged();
   }
 
   onCancel(): void {
@@ -314,17 +337,27 @@ export class PushPullTool implements Tool {
   }
 
   status(): ToolStatus {
+    return { ...this.baseStatus(), settings: [toggleSetting('newBody', 'New body', this.mode === 'newBody', 'primary')] };
+  }
+
+  onSetting(id: string, value: ToolSettingValue): void {
+    if (id !== 'newBody' || typeof value !== 'boolean') return;
+    this.mode = value ? 'newBody' : 'merge';
+    this.ctx?.requestRender();
+    this.ctx?.statusChanged();
+  }
+
+  private baseStatus(): ToolStatus {
     const s = this.state;
     const doc = this.ctx?.commands.ctx.services.get(SERVICE_DOCUMENT);
     const units = doc instanceof DocumentHost ? doc.doc.state.meta.units : null;
     const fmt = (d: number): string => (units ? formatLength(d, units) : d.toString());
-    const modeHint = this.mode === 'newBody' ? ' [New body]' : '';
     if (s.kind === 'dragging') {
       // A loose face has no inside: its distance is how far it is pulled, whichever way. A solid's face is signed along its front.
       const shown = isLoose(s.target.ref) ? Math.abs(s.distance) : s.distance;
-      return { instructor: `Click or type distance.${modeHint}`, vcbLabel: 'Distance', vcbValue: fmt(shown), fields: [pointerField('Distance', 'length', fmt(shown))] };
+      return { instructor: `Click or type distance.`, vcbLabel: 'Distance', vcbValue: fmt(shown), fields: [pointerField('Distance', 'length', fmt(shown))] };
     }
-    const instructor = this.lastError ? `Push/Pull failed: ${this.lastError}` : `Select face to push or pull.${modeHint}`;
+    const instructor = this.lastError ? `Push/Pull failed: ${this.lastError}` : `Select face to push or pull.`;
     const last = this.lastCommit ? (isLoose(this.lastCommit.params.target) ? Math.abs(this.lastCommit.params.distance) : this.lastCommit.params.distance) : this.lastDistance;
     return { instructor, vcbLabel: 'Distance', vcbValue: last === null ? undefined : fmt(last) };
   }
@@ -447,6 +480,7 @@ export class PushPullTool implements Tool {
     this.enqueue(async () => {
       await ctx.commands.execute('pushpull.apply', precomputed ? { ...params, precomputed } : params);
       last.applied = true;
+      ctx.committed?.();
     });
     ctx.statusChanged();
     ctx.requestRender();

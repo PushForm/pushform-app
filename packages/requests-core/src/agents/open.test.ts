@@ -13,7 +13,7 @@ function ctx(over: Partial<AgentContext> = {}): AgentContext {
     host: 'pushform', accountEmail: 'a@b.io', roles: ['user'], filingAllowed: true,
     screen: { editor: 'model', documentType: 'model', browser: 'Chrome 141', os: 'macOS 15' }, build: { version: '0.3.0', commit: 'abc123' },
     now: '2026-10-24T10:00:00Z', path: 'open', brief: null, title: null, messageCount: 1, openRequests: [], openRequestCount: 0,
-    limits: { openRequestsPerAccount: 5, messagesPerConversation: 30 }, openIssues: [],
+    limits: { openRequestsPerAccount: 5 }, openIssues: [],
     digest: [{ path: 'docs/help/modeling.md', heading: 'Inference locking', anchor: 'inference-locking', text: 'Holding Shift locks the current inference direction.' }],
     ...over,
   };
@@ -33,8 +33,6 @@ describe('open agent (a typed first message settles the path)', () => {
     expect(tools).toContain('switch_path'); expect(tools).toContain('search_docs'); expect(tools).toContain('update_brief'); expect(tools).toContain('start_over'); expect(tools).not.toContain('request_file');
     const schema = openTools(c).find((t) => t.name === 'switch_path')!.input_schema as { properties: { to: { enum: string[] } } };
     expect(schema.properties.to.enum).toEqual(['help', 'problem', 'feature']);
-    // At the message limit the brief tools shrink to decline; the first choice stays available.
-    expect(names(openTools(ctx({ messageCount: 31 })))).toEqual(['switch_path', 'decline', 'start_over']);
     const system = openAgent.system(c);
     expect(system).toContain('has not chosen a path yet'); expect(system).toContain('without asking'); expect(system).toContain('afterwards this rule applies');
     expect(system).not.toContain('a@b.io'); expect(openAgent.context(c)).toContain('path: open');

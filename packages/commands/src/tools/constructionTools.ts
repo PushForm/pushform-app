@@ -11,6 +11,7 @@ import { ProtractorTool } from './impl/Protractor';
 import { solidTools } from './impl/SolidTool';
 import { edgeBlendTools } from './impl/EdgeBlend';
 import { TapeTool } from './impl/Tape';
+import { PlaceLightTool } from './impl/PlaceLight';
 
 /**
  * Fresh instances of the construction / solid tools for `ToolManager.register`: Tape Measure (T),
@@ -20,5 +21,5 @@ import { TapeTool } from './impl/Tape';
  * `edgeBlendCommands` and `solidCommands` arrays registered on the same registry.
  */
 export function constructionTools(): Tool[] {
-  return [new TapeTool(), new DimensionTool(), new TextTool(), new ProtractorTool(), new SectionPlaneTool(), new AxesTool(), new OffsetTool(), new FollowMeTool(), ...edgeBlendTools(), ...solidTools()];
+  return [new TapeTool(), new DimensionTool(), new TextTool(), new ProtractorTool(), new SectionPlaneTool(), new PlaceLightTool(), new AxesTool(), new OffsetTool(), new FollowMeTool(), ...edgeBlendTools(), ...solidTools()];
 }

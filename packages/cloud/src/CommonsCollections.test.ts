@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { expect, it } from 'vitest';
-import { commonsDiscoverySchema, commonsCollectionError } from './CommonsCollections';
+import { commonsDiscoverySchema, commonsCollectionError, commonsFeaturedStateSchema } from './CommonsCollections';
 import { commonsFileUrl } from './CommonsFiles';
 const collection = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', title: 'Fixtures', description: '', visibility: 'public', version: 1, updatedAt: '2026-11-04T00:00:00Z', curator: null, modelIds: ['example-model'] };
 it('rejects private collection data, duplicate entries and malformed typed targets in public discovery', () => {
@@ -20,4 +20,27 @@ it('explains conflict and permission failures without exposing server diagnostic
 it('treats an empty or malformed optional file origin as unconfigured', () => {
   expect(commonsFileUrl('', 'thumbnails')).toBeNull();
   expect(commonsFileUrl('not a URL', 'thumbnails')).toBeNull();
+});
+
+it('validates public featured creators without accepting private profile fields', () => {
+  const creator = { id: collection.id, handle: 'test-maker', displayName: 'Test Maker', bio: '', avatarUrl: null, links: [] };
+  const good = { version: 1, collections: [], creators: [creator], featured: [{ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', type: 'creator', targetId: creator.id }] };
+  expect(commonsDiscoverySchema.safeParse(good).success).toBe(true);
+  expect(commonsDiscoverySchema.safeParse({ ...good, creators: [creator, creator] }).success).toBe(false);
+  expect(commonsDiscoverySchema.safeParse({ ...good, creators: [{ ...creator, user_id: 'private-account' }] }).success).toBe(false);
+  expect(commonsDiscoverySchema.safeParse({ ...good, featured: [{ ...good.featured[0], targetId: 'test-maker' }] }).success).toBe(false);
+});
+
+it('retains more than a thousand available models when editing featured collections',()=>{
+  const models=Array.from({length:1001},(_,index)=>({id:`model-${index}`,revision:'revision',title:'Part',description:'',creator:'Maker',category:'Other',tags:[],formats:['PF'],imageUrl:null,source:null,publishedAt:'2026-11-05T00:00:00Z',licenses:[{name:'CC0',url:null,commercialUse:'allowed',conditions:[]}],credits:[{name:'Maker',url:null,text:'Original model'}]}));
+  expect(commonsFeaturedStateSchema.parse({version:1,enabled:true,items:[],collections:[],models}).models).toHaveLength(1001);
+});
+
+it('validates credited-creator targets and source-scoped public data', () => {
+  const creator = { id: 'credited-' + 'a'.repeat(32), displayName: 'Maker', sourceName: 'Parts Library', modelIds: ['imported-model'] };
+  const good = { version: 1, collections: [], creditedCreators: [creator], featured: [{ id: collection.id, type: 'credited_creator', targetId: creator.id }] };
+  expect(commonsDiscoverySchema.safeParse(good).success).toBe(true);
+  expect(commonsDiscoverySchema.safeParse({ ...good, creditedCreators: [creator, creator] }).success).toBe(false);
+  expect(commonsDiscoverySchema.safeParse({ ...good, creditedCreators: [{ ...creator, email: 'private@example.com' }] }).success).toBe(false);
+  expect(commonsDiscoverySchema.safeParse({ ...good, featured: [{ ...good.featured[0], targetId: 'arbitrary-name' }] }).success).toBe(false);
 });

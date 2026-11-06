@@ -10,6 +10,8 @@ import { encodeNativeShadows, decodeNativeShadows, encodeNativeFog, decodeNative
 import type { ViewSettingsExtensions } from './viewSettings';
 import { encodeNativeIds, decodeNativeIds } from './idList';
 import { validateNativeTagHierarchy } from './tags';
+import { encodeNativeSceneLight, decodeNativeSceneLight } from './environment';
+import { MAX_SCENE_LIGHTS, MAX_SCENE_SHADOW_SAMPLES, sceneShadowSamples } from '@pushform/model';
 export type NativeModelSettings = Omit<DocumentState, 'nativeStyleUnknownFields' | 'nativeSceneUnknownFields' | 'nativeImageUnknownFields' | 'nativeMaterialUnknownFields' | 'nativeTagUnknownFields' | 'nativeSettingsUnknownFields' | 'nativeRootUnknownFields' | 'definitions' | 'materials' | 'tags' | 'tagFolders' | 'styles' | 'scenes' | 'images'>;
 export interface ModelSettingsExtensions {
   records: Map<string, Uint8Array[]>;
@@ -19,13 +21,14 @@ export interface ModelSettingsExtensions {
 }
 const f = (id: number, kind: NativeFieldKind, required = true): NativeField => ({ id, kind, required });
 const codec = new NativeRecordCodec({ meta: f(1, 'bytes'), rootDefinitionId: f(2, 'uint32'), defaultTagId: f(3, 'uint32'), defaultMaterialId: f(4, 'uint32'),
-  activeStyleId: f(5, 'uint32'), sceneOrder: f(6, 'bytes', false), shadows: f(7, 'bytes'), fog: f(8, 'bytes', false) } satisfies Record<keyof NativeModelSettings, NativeField>);
+  activeStyleId: f(5, 'uint32'), sceneOrder: f(6, 'bytes', false), shadows: f(7, 'bytes'), fog: f(8, 'bytes', false), sceneLights: { ...f(9, 'bytes', false), repeated: true } } satisfies Record<keyof NativeModelSettings, NativeField>);
 const optionalFog = new NativeRecordCodec({ undefinedValue: f(1, 'bytes', false), value: f(3, 'bytes', false) }), empty = new NativeRecordCodec({});
 const fresh = (): ModelSettingsExtensions => ({ records: new Map(), meta: new Map(), shadows: new Map() });
 export function encodeNativeModelSettings(value: NativeModelSettings, ext: ModelSettingsExtensions = fresh()): Uint8Array {
   const fields: Record<string, NativeScalar> = { meta: encodeNativeModelMeta(value.meta, ext.meta), rootDefinitionId: value.rootDefinitionId,
     defaultTagId: value.defaultTagId, defaultMaterialId: value.defaultMaterialId, activeStyleId: value.activeStyleId, shadows: encodeNativeShadows(value.shadows, ext.shadows) };
   if (value.sceneOrder.length) fields.sceneOrder = encodeNativeIds(value.sceneOrder);
+  if (value.sceneLights?.length) fields.sceneLights = value.sceneLights.map(encodeNativeSceneLight);
   if (Object.hasOwn(value, 'fog')) fields.fog = optionalFog.encode({ fields: value.fog === undefined
     ? { undefinedValue: empty.encode({ fields: {}, unknownFields: ext.records.get('fog.undefined') ?? [] }) }
     : { value: encodeNativeFog(value.fog, ext.fog) }, unknownFields: ext.records.get('fog') ?? [] });
@@ -39,6 +42,10 @@ export function decodeNativeModelSettings(bytes: Uint8Array): { value: NativeMod
   const value: NativeModelSettings = { meta: meta.value, rootDefinitionId: f.rootDefinitionId as DocumentState['rootDefinitionId'],
     defaultTagId: f.defaultTagId as DocumentState['defaultTagId'], defaultMaterialId: f.defaultMaterialId as DocumentState['defaultMaterialId'],
     activeStyleId: f.activeStyleId as DocumentState['activeStyleId'], sceneOrder: decodeNativeIds(f.sceneOrder as Uint8Array | undefined) as DocumentState['sceneOrder'], shadows: shadows.value };
+  if (f.sceneLights) {
+    if ((f.sceneLights as Uint8Array[]).length > MAX_SCENE_LIGHTS) throw new NativeChunkError('Too many native scene lights');
+    value.sceneLights = (f.sceneLights as Uint8Array[]).map(decodeNativeSceneLight);
+  }
   if (Object.hasOwn(f, 'fog')) {
     const fog = optionalFog.decode(f.fog as Uint8Array); if (fog.unknownFields.length) ext.records.set('fog', fog.unknownFields);
     if (Object.keys(fog.fields).length !== 1) throw new NativeChunkError('Invalid native document fog');
@@ -62,7 +69,9 @@ export function validateNativeModelCatalogs(settings: NativeModelSettings, state
   for (const [id, image] of state.images) if (image.id !== id) fail();
   for (const [id, style] of state.styles) {
     if (style.id !== id) fail(); for (const watermark of style.watermarks) if (!state.images.has(watermark.imageId)) fail();
+    if (style.environment?.skyboxImageId && !state.images.has(style.environment.skyboxImageId)) fail();
   }
+  if ((settings.sceneLights?.length ?? 0) > MAX_SCENE_LIGHTS || sceneShadowSamples(settings.sceneLights ?? []) > MAX_SCENE_SHADOW_SAMPLES) fail();
   for (const [id, scene] of state.scenes) {
     if (scene.id !== id || (scene.styleId !== null && !state.styles.has(scene.styleId))) fail();
     for (const tag of scene.hiddenTags) if (!state.tags.has(tag)) fail();

@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import { studioColor, type StudioLightingPreset } from '@pushform/core';
 /** Small display derivatives only: no editor, kernel, textures, scripts or external resources. */
 export const PREVIEW_BYTE_LIMIT = 8 * 1024 * 1024;
 export const PREVIEW_TRIANGLE_LIMIT = 12000;
 export interface PreviewMesh { version: 1; positions: number[]; colors?: number[] }
-export const COMMONS_RENDER_VERSION = 'display-2';
+export const COMMONS_RENDER_VERSION = 'viewport-1';
 export const isPreviewModelFile = (name: string): boolean => /\.(pf|step|stp|fcstd|stl|obj|glb|gltf|dae|3ds|skp|zip)$/i.test(name);
-export const DEFAULT_PREVIEW_VIEW = { yaw: -.65, pitch: .45, zoom: 1 };
+// Front-right-top isometric view: eye along +X, -Y, +Z with world Z up.
+export const DEFAULT_PREVIEW_VIEW = { yaw: -Math.PI / 4, pitch: Math.asin(1 / Math.sqrt(3)), zoom: 1 };
 export interface PreviewView { yaw: number; pitch: number; zoom: number }
 
 export function stlPreview(bytes: Uint8Array): PreviewMesh {
@@ -75,13 +77,13 @@ export function parsePreviewMesh(value: unknown): PreviewMesh {
 export interface PreviewFace { points: string; fill: string; depth: number }
 
 const LIGHT = (() => { const l = [-.42, .82, .38]; const n = Math.hypot(...l); return l.map(v => v / n); })();
-export function projectPreview(mesh: PreviewMesh, view: PreviewView = DEFAULT_PREVIEW_VIEW): PreviewFace[] {
+export function projectPreview(mesh: PreviewMesh, view: PreviewView = DEFAULT_PREVIEW_VIEW, lighting: StudioLightingPreset | 'legacy' = 'bright'): PreviewFace[] {
   const cy = Math.cos(view.yaw), sy = Math.sin(view.yaw), cp = Math.cos(view.pitch), sp = Math.sin(view.pitch);
   const projected: PreviewFace[] = [];
   for (let i = 0; i < mesh.positions.length; i += 9) {
     const points = [0, 3, 6].map(k => {
       const x = mesh.positions[i + k]!, y = mesh.positions[i + k + 1]!, z = mesh.positions[i + k + 2]!;
-      const rx = cy * x - sy * y, ry = sy * x + cy * y;
+      const rx = cy * x - sy * y, ry = -(sy * x + cy * y);
       return [rx, cp * z - sp * ry, cp * ry + sp * z];
     });
     const [a, b, c] = points as [number[], number[], number[]];
@@ -94,9 +96,11 @@ export function projectPreview(mesh: PreviewMesh, view: PreviewView = DEFAULT_PR
     const diffuse = Math.max(0, nx * LIGHT[0]! + ny * LIGHT[1]! + nz * LIGHT[2]!);
     const light = Math.min(1.08, .38 + .52 * diffuse + .14 * nz);
     const color = mesh.colors?.slice(i / 3, i / 3 + 3).map(n => n * 255) ?? [158, 184, 172];
+    const shade = lighting === 'legacy' ? color.map(c => Math.min(255, Math.round(c * light)))
+      : studioColor([color[0]! / 255, color[1]! / 255, color[2]! / 255], [nx, ny, nz], lighting).map(c => Math.round(c * 255));
     const xy = points.map(p => [(240 + p[0]! * 265 * view.zoom).toFixed(2), (200 - p[1]! * 265 * view.zoom).toFixed(2)]);
     projected.push({ points: xy.map(p => p.join(',')).join(' '),
-      fill: `rgb(${Math.min(255, Math.round(color[0]! * light))},${Math.min(255, Math.round(color[1]! * light))},${Math.min(255, Math.round(color[2]! * light))})`,
+      fill: `rgb(${shade[0]},${shade[1]},${shade[2]})`,
       depth: points.reduce((n, p) => n + p[2]!, 0) });
   }
   return projected.sort((a, b) => a.depth - b.depth);
@@ -111,6 +115,7 @@ export function previewSvg(mesh: PreviewMesh): string {
 
 export interface RasterOptions {
   width?: number; height?: number; supersample?: number;
+  lighting?: StudioLightingPreset | 'legacy';
   /** Frame the model to fill the image (thumbnails) instead of using the view's fixed scale (interactive view). */
   fit?: boolean;
   /** Outline width in output pixels. */
@@ -139,7 +144,7 @@ export function rasterPreview(mesh: PreviewMesh, view: PreviewView = DEFAULT_PRE
     // Fit the projected model into the frame with a margin, centred.
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     for (let i = 0; i < p.length; i += 3) {
-      const x = p[i]!, y = p[i + 1]!, z = p[i + 2]!, rx = cy * x - sy * y, ry = sy * x + cy * y, vy = cp * z - sp * ry;
+      const x = p[i]!, y = p[i + 1]!, z = p[i + 2]!, rx = cy * x - sy * y, ry = -(sy * x + cy * y), vy = cp * z - sp * ry;
       if (rx < minX) minX = rx; if (rx > maxX) maxX = rx; if (vy < minY) minY = vy; if (vy > maxY) maxY = vy;
     }
     const margin = .1, spanX = Math.max(1e-6, maxX - minX), spanY = Math.max(1e-6, maxY - minY);
@@ -153,7 +158,7 @@ export function rasterPreview(mesh: PreviewMesh, view: PreviewView = DEFAULT_PRE
     const i = t * 9;
     for (let k = 0; k < 3; k++) {
       const x = p[i + k * 3]!, y = p[i + k * 3 + 1]!, z = p[i + k * 3 + 2]!;
-      const rx = cy * x - sy * y, ry = sy * x + cy * y;
+      const rx = cy * x - sy * y, ry = -(sy * x + cy * y);
       vx3[k] = rx; vy3[k] = cp * z - sp * ry; sz[k] = cp * ry + sp * z;
       sx[k] = ox + rx * unit; syy[k] = oy - vy3[k]! * unit;
     }
@@ -167,7 +172,9 @@ export function rasterPreview(mesh: PreviewMesh, view: PreviewView = DEFAULT_PRE
     // Ambient plus a key light from the upper left and a little facing light, so top, front and side faces separate.
     const light = Math.min(1.15, .46 + .56 * diffuse + .1 * nz);
     const color = mesh.colors ? [mesh.colors[i / 3]! * 255, mesh.colors[i / 3 + 1]! * 255, mesh.colors[i / 3 + 2]! * 255] : [158, 184, 172];
-    shades[t * 3] = color[0]! * light; shades[t * 3 + 1] = color[1]! * light; shades[t * 3 + 2] = color[2]! * light;
+    const shaded = options.lighting === 'legacy' ? color.map(c => c * light)
+      : studioColor([color[0]! / 255, color[1]! / 255, color[2]! / 255], [nx, ny, nz], options.lighting ?? 'bright').map(c => c * 255);
+    shades[t * 3] = shaded[0]!; shades[t * 3 + 1] = shaded[1]!; shades[t * 3 + 2] = shaded[2]!;
     const area = (sx[1]! - sx[0]!) * (syy[2]! - syy[0]!) - (syy[1]! - syy[0]!) * (sx[2]! - sx[0]!);
     if (Math.abs(area) < 1e-9) continue;
     const x0 = Math.max(0, Math.floor(Math.min(sx[0]!, sx[1]!, sx[2]!))), x1 = Math.min(W - 1, Math.ceil(Math.max(sx[0]!, sx[1]!, sx[2]!)));

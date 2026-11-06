@@ -24,7 +24,7 @@ function ctx(over: Partial<AgentContext> = {}): AgentContext {
     host: 'pushform', accountEmail: 'a@b.io', roles: ['user'], filingAllowed: true,
     screen: { editor: 'model', documentType: 'model', browser: 'Chrome 141', os: 'macOS 15' }, build: { version: '0.3.0', commit: 'abc123' },
     now: '2026-10-23T10:00:00Z', path: 'feature', brief: emptyFeatureBrief(), title: null, messageCount: 3, openRequests: [], openRequestCount: 0,
-    limits: { openRequestsPerAccount: 5, messagesPerConversation: 30 }, openIssues: issues,
+    limits: { openRequestsPerAccount: 5 }, openIssues: issues,
     digest: [{ path: 'docs/help/modeling.md', heading: 'Inference locking', anchor: 'inference-locking', text: 'Holding Shift locks the current inference direction.' }],
     ...over,
   };
@@ -89,13 +89,14 @@ describe('intake tools', () => {
       expect(system).not.toMatch(/File request button|Add me button/);
     }
   });
-  it('records the 30th message and restricts the conversation only after it', () => {
-    expect(names(briefTools(ctx({ messageCount: 30 })))).toContain('update_brief');
-    expect(intakeAgent.context(ctx({ messageCount: 30 }))).toContain('last message');
-    expect(problemAgent.context(ctx({ path: 'problem', messageCount: 30 }))).toContain('send the report as it stands');
-    expect(names(briefTools(ctx({ messageCount: 31 })))).toEqual(['request_file', 'decline', 'start_over']);
-    expect(intakeAgent.context(ctx({ messageCount: 31 }))).toContain('30-message limit');
-    expect(intakeAgent.context(ctx({ messageCount: 29 }))).not.toContain('-message limit');
+  it('keeps every brief tool and adds no message-count instruction, however long the conversation is', () => {
+    for (const messageCount of [1, 30, 31, 100]) {
+      const c = ctx({ messageCount });
+      expect(names(briefTools(c))).toContain('update_brief');
+      expect(intakeAgent.context(c)).not.toContain('-message limit');
+      expect(intakeAgent.context(c)).not.toContain('last message');
+      expect(intakeAgent.context(c)).toContain('requester_messages_so_far: ' + messageCount);
+    }
   });
   it('updates the brief through the tool loop and proposes a title', async () => {
     const store = new MemoryConversationStore(emptyFeatureBrief(), null, 'feature', issues);

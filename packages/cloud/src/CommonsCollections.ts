@@ -5,6 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from './db.types';
 import type { RpcArgs, RpcName } from './rpc';
 import { catalogModelSchema } from './CommonsCatalog';
+import { commonsPublicProfileSchema } from './CommonsProfiles';
 
 const modelId = z.string().regex(/^[a-z0-9][a-z0-9-]{0,95}$/);
 const unique = <T>(items: T[]) => new Set(items).size === items.length;
@@ -17,21 +18,28 @@ export const commonsCollectionSchema = z.object({
 }).strict();
 export type CommonsCollection = z.infer<typeof commonsCollectionSchema>;
 export type CollectionFields = Pick<CommonsCollection, 'title' | 'description' | 'visibility' | 'modelIds'>;
-export const commonsFeaturedItemSchema = z.object({ id: z.uuid(), type: z.enum(['model', 'collection']), targetId: z.string().min(1).max(96) }).strict()
-  .refine(item => (item.type === 'model' ? modelId : z.uuid()).safeParse(item.targetId).success, 'Invalid featured target.');
+export const commonsCreditedCreatorSchema = z.object({
+  id: z.string().regex(/^credited-[a-f0-9]{32}$/), displayName: z.string().min(1).max(200),
+  sourceName: z.string().min(1).max(200), modelIds: z.array(modelId).min(1).refine(unique, 'Duplicate credited model.'),
+}).strict();
+export type CommonsCreditedCreator = z.infer<typeof commonsCreditedCreatorSchema>;
+export const commonsFeaturedItemSchema = z.object({ id: z.uuid(), type: z.enum(['model', 'collection', 'creator', 'credited_creator']), targetId: z.string().min(1).max(96) }).strict()
+  .refine(item => (item.type === 'model' ? modelId : item.type === 'credited_creator' ? commonsCreditedCreatorSchema.shape.id : z.uuid()).safeParse(item.targetId).success, 'Invalid featured target.');
 export const commonsDiscoverySchema = z.object({
-  version: z.literal(1), collections: z.array(commonsCollectionSchema).max(1000), featured: z.array(commonsFeaturedItemSchema).max(24),
+  version: z.literal(1), creditedCreators: z.array(commonsCreditedCreatorSchema).max(24).default([]), creators: z.array(commonsPublicProfileSchema).max(24).default([]), collections: z.array(commonsCollectionSchema).max(1000), featured: z.array(commonsFeaturedItemSchema).max(24),
 }).strict().superRefine((value, ctx) => {
+  if (!unique(value.creditedCreators.map(item => item.id))) ctx.addIssue({ code: 'custom', message: 'Duplicate credited creator.' });
+  if (!unique(value.creators.map(item => item.id))) ctx.addIssue({ code: 'custom', message: 'Duplicate creator.' });
   if (!unique(value.collections.map(item => item.id)) || !unique(value.featured.map(item => item.id)) || !unique(value.featured.map(item => item.type + ':' + item.targetId))) {
     ctx.addIssue({ code: 'custom', message: 'Duplicate discovery entry.' });
   }
   if (value.collections.some(item => item.visibility !== 'public')) ctx.addIssue({ code: 'custom', message: 'Private collection in public discovery.' });
 });
 export type CommonsDiscovery = z.infer<typeof commonsDiscoverySchema>;
-const adminFeaturedItemSchema = z.object({ id: z.uuid(), type: z.enum(['model', 'collection']), targetId: z.string(), title: z.string(), available: z.boolean() }).strict();
+const adminFeaturedItemSchema = z.object({ id: z.uuid(), type: z.enum(['model', 'collection', 'creator', 'credited_creator']), targetId: z.string(), title: z.string(), available: z.boolean() }).strict();
 export const commonsFeaturedStateSchema = z.object({
   version: z.number().int().positive(), enabled: z.boolean(), items: z.array(adminFeaturedItemSchema).max(24),
-  models: z.array(catalogModelSchema).max(1000), collections: z.array(commonsCollectionSchema).max(1000),
+  creditedCreators: z.array(commonsCreditedCreatorSchema).default([]), creators: z.array(commonsPublicProfileSchema).default([]), models: z.array(catalogModelSchema), collections: z.array(commonsCollectionSchema).max(1000),
 }).strict();
 export type CommonsFeaturedState = z.infer<typeof commonsFeaturedStateSchema>;
 
@@ -45,7 +53,7 @@ export function commonsCollectionError(error: { message?: string }): Error {
     commons_collection_conflict: 'This collection changed in another tab. Reload the collection before saving your changes.',
     commons_collection_limit: 'The collection limit has been reached. Remove an unused collection or try again later.',
     commons_model_unavailable: 'A selected model is no longer published. Reload and choose an available model.',
-    commons_feature_unavailable: 'Only published models and nonempty public collections can be featured.',
+    commons_feature_unavailable: 'Only published models, nonempty public collections and active public profiles and creators credited on imported models can be featured.',
     commons_feature_limit: 'Up to 24 items can be featured. Remove an item before adding another.',
     commons_feature_conflict: 'The featured list changed. Reload it before changing the order.',
     commons_feature_invalid: 'The featured selection is invalid. Reload and try again.',
@@ -64,6 +72,10 @@ export class CommonsCollections {
   }
   async discovery(signal?: AbortSignal): Promise<CommonsDiscovery> {
     return commonsDiscoverySchema.parse(await this.request('commons_discovery', {}, signal));
+  }
+  async creditedCreator(id: string, signal?: AbortSignal): Promise<CommonsCreditedCreator | null> {
+    const value = await this.request('commons_credited_creator', { p_id: commonsCreditedCreatorSchema.shape.id.parse(id) }, signal);
+    return value === null ? null : commonsCreditedCreatorSchema.parse(value);
   }
   async get(id: string, signal?: AbortSignal): Promise<CommonsCollection | null> {
     const value = await this.request('commons_collection', { p_id: z.uuid().parse(id) }, signal);
@@ -91,7 +103,7 @@ export class CommonsCollections {
   async featured(signal?: AbortSignal): Promise<CommonsFeaturedState> {
     return commonsFeaturedStateSchema.parse(await this.request('admin_commons_featured', {}, signal));
   }
-  async feature(type: 'model' | 'collection', targetId: string): Promise<CommonsFeaturedState> {
+  async feature(type: 'model' | 'collection' | 'creator' | 'credited_creator', targetId: string): Promise<CommonsFeaturedState> {
     return commonsFeaturedStateSchema.parse(await this.request('admin_commons_feature', { p_type: type, p_target_id: targetId }));
   }
   async updateFeatured(ids: string[], expectedVersion: number): Promise<CommonsFeaturedState> {

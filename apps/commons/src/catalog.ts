@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { catalogSchema, catalogUrlSchema as link, createCommonsClient, readCommonsCatalog, type BrowserCloudConfig, type CatalogModel } from '@pushform/cloud';
+import { catalogSchema, catalogUrlSchema as link, createCommonsClient, createCommonsBrowseLoader, createCommonsModelsLoader, readCommonsCatalog, type CommonsBrowseLoader, type CommonsModelsLoader, type BrowserCloudConfig, type CatalogModel } from '@pushform/cloud';
 export { catalogSchema, type CatalogModel } from '@pushform/cloud';
 
 export interface CatalogFilters { query: string; category: string; license: string; commercial: boolean }
-export type CatalogLoader = (signal: AbortSignal) => Promise<CatalogModel[]>;
+export type CatalogLoader = ((signal: AbortSignal) => Promise<CatalogModel[]>) & { browse?: CommonsBrowseLoader; byIds?: CommonsModelsLoader };
 
 export function filterModels(models: CatalogModel[], filters: CatalogFilters): CatalogModel[] {
   const words = filters.query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
@@ -37,7 +37,6 @@ export function createCatalogLoader(endpoint: string | undefined, fetcher: typeo
       });
       if (!response.ok) throw new Error('Catalog request failed.');
       const body = await response.text();
-      if (new TextEncoder().encode(body).byteLength > 2 * 1024 * 1024) throw new Error('Catalog response is too large.');
       const parsed = catalogSchema.safeParse(JSON.parse(body));
       if (!parsed.success) throw new Error('Catalog metadata is invalid.');
       return parsed.data.models;
@@ -56,15 +55,7 @@ export function configuredCatalogLoader(env: Record<string, string | undefined>)
   if (!config.url && !config.publishableKey) return null;
   try {
     const client = createCommonsClient(config);
-    return async (signal) => {
-      const controller = new AbortController();
-      const abort = () => controller.abort();
-      signal.addEventListener('abort', abort, { once: true });
-      if (signal.aborted) controller.abort();
-      const timeout = setTimeout(abort, 15000);
-      try { return await readCommonsCatalog(client, controller.signal); }
-      finally { clearTimeout(timeout); signal.removeEventListener('abort', abort); }
-    };
+    return Object.assign(async (signal: AbortSignal) => readCommonsCatalog(client, signal), { browse: createCommonsBrowseLoader(client), byIds: createCommonsModelsLoader(client) });
   } catch {
     return async () => { throw new Error('Invalid catalog configuration.'); };
   }

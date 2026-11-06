@@ -24,8 +24,9 @@ it('opens account details, traps focus, shields shortcuts, and restores focus on
   const shortcut = vi.fn(); window.addEventListener('keydown', shortcut);
   try {
     fireEvent.keyDown(window, { key: 'l' }); expect(shortcut).not.toHaveBeenCalled();
+    fireEvent.keyDown(window, { key: 'Tab' }); expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Sign out' }));
     fireEvent.keyDown(window, { key: 'Tab' }); expect(document.activeElement).toBe(screen.getByText('Danger Zone'));
-    expect(screen.getByRole('button', { name: 'Sign out' }).closest('details')?.open).toBe(false);
+    expect(screen.getByRole('button', { name: 'Sign out' }).closest('details')).toBeNull();
     fireEvent.keyDown(window, { key: 'Tab' }); expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close account dialog' }));
     fireEvent.keyDown(window, { key: 'Escape' }); expect(screen.queryByRole('dialog')).toBeNull();
     expect(document.activeElement).toBe(account); expect(document.querySelector<HTMLElement>('.pf-app')?.inert).toBe(false);
@@ -96,7 +97,9 @@ it('keeps Danger Zone collapsed after Extensions and includes only revealed acti
   const details = summary.closest('details')!;
   expect(details.open).toBe(false);
   expect(extensions.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(screen.getByRole('button', { name: 'Sign out' }).closest('details')).toBe(details);
+  const signOut = screen.getByRole('button', { name: 'Sign out' });
+  expect(signOut.closest('details')).toBeNull();
+  expect(signOut.parentElement?.textContent).toContain('Signed in as artist@example.com');
   close.focus();
   fireEvent.keyDown(window, { key: 'Tab', shiftKey: true }); expect(document.activeElement).toBe(summary);
   fireEvent.keyDown(window, { key: 'Tab' }); expect(document.activeElement).toBe(close);
@@ -105,7 +108,6 @@ it('keeps Danger Zone collapsed after Extensions and includes only revealed acti
   fireEvent.click(summary);
   expect(details.open).toBe(true);
   summary.focus();
-  fireEvent.keyDown(window, { key: 'Tab' }); expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Sign out' }));
   fireEvent.keyDown(window, { key: 'Tab' }); expect(document.activeElement).toBe(close);
   fireEvent.click(summary); summary.focus();
   expect(details.open).toBe(false);

@@ -8,7 +8,8 @@ import type { PolygonsWithHoles } from '@pushform/geom';
 import type { UndoEntry } from '@pushform/model';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
-import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolSettingValue, ToolStatus } from '../Tool';
+import { toggleSetting } from '../settings';
 import { pointerField } from '../entry';
 import { HOVER_COLOR, hostOfTool, PREVIEW_COLOR } from '../toolUtil';
 import {
@@ -180,6 +181,21 @@ export class OffsetTool implements Tool {
     this.execute({ ...last.params, distance });
   }
 
+  /** The bar switched Allow overlaps just after an offset: redo it that way, as one undo step. */
+  adjustLast(id: string): boolean {
+    const last = this.lastCommit;
+    if (id !== 'overlaps' || !this.ctx || !last?.entry) return false;
+    const host = hostOfTool(this.ctx);
+    if (host.undoStack.peek() !== last.entry || !host.undo()) return false;
+    this.execute({ ...last.params, allowOverlap: this.overlaps });
+    if (this.lastCommit === null) {
+      // the original stays; lastError says why
+      host.redo();
+      this.lastCommit = last;
+    }
+    return true;
+  }
+
   onCancel(): void {
     this.state = IDLE;
     this.lastCommit = null;
@@ -210,16 +226,26 @@ export class OffsetTool implements Tool {
   }
 
   status(): ToolStatus {
+    return { ...this.baseStatus(), settings: [toggleSetting('overlaps', 'Allow overlaps', this.overlaps, 'secondary')] };
+  }
+
+  onSetting(id: string, value: ToolSettingValue): void {
+    if (id !== 'overlaps' || typeof value !== 'boolean') return;
+    this.overlaps = value;
+    this.ctx?.requestRender();
+    this.ctx?.statusChanged();
+  }
+
+  private baseStatus(): ToolStatus {
     const s = this.state;
-    const hint = this.overlaps ? ' [Overlaps allowed]' : '';
     if (s.kind === 'dragging') {
-      return { instructor: `Click or type the offset distance (negative = inward).${hint}`, vcbLabel: 'Distance', vcbValue: fmtLength(this.ctx, s.distance), fields: [pointerField('Distance', 'length', fmtLength(this.ctx, s.distance))] };
+      return { instructor: `Click or type the offset distance (negative = inward).`, vcbLabel: 'Distance', vcbValue: fmtLength(this.ctx, s.distance), fields: [pointerField('Distance', 'length', fmtLength(this.ctx, s.distance))] };
     }
     const instructor = this.lastError
       ? `Offset failed: ${this.lastError}`
       : s.kind === 'hover' && s.target.kind === 'edges'
-        ? `Click to start offsetting the selected edges.${hint}`
-        : `Select a face to offset (or preselect connected edges). Double-click repeats the last distance.${hint}`;
+        ? `Click to start offsetting the selected edges.`
+        : `Select a face to offset (or preselect connected edges). Double-click repeats the last distance.`;
     const last = this.lastCommit?.params.distance ?? this.lastDistance;
     return { instructor, vcbLabel: 'Distance', vcbValue: last === null ? undefined : fmtLength(this.ctx, last) };
   }
@@ -341,6 +367,7 @@ export class OffsetTool implements Tool {
       this.ctx.commands.execute('sketch.offset', params);
       this.lastDistance = params.distance;
       this.lastCommit = { params, entry: host.undoStack.peek() };
+      this.ctx.committed?.();
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       this.lastCommit = null;

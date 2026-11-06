@@ -16,7 +16,7 @@
 // warns, so local builds work without it. Release builds always run in CI.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { formatGroups, normalizeText, npmNoticesSection } from './license-check.mjs';
@@ -104,9 +104,13 @@ export function cargoAboutReports(root, version) {
     for (const file of [config, path, join(dirname(path), 'Cargo.lock')]) hash.update(readFileSync(file));
     const cached = join(cache, `${hash.digest('hex').slice(0, 24)}.json`);
     if (existsSync(cached)) return { ships, report: JSON.parse(readFileSync(cached, 'utf8')) };
-    const output = run('cargo', ['about', 'generate', '--format', 'json', '--fail', '--locked', '-c', config, '-m', path,
-      ...targets.flatMap((target) => ['--target', target])]);
-    const full = JSON.parse(output);
+    // cargo-about refuses redirected output in PowerShell, so it writes to a file that is read back.
+    mkdirSync(cache, { recursive: true });
+    const raw = `${cached}.raw`;
+    run('cargo', ['about', 'generate', '--format', 'json', '--fail', '--locked', '-c', config, '-m', path,
+      ...targets.flatMap((target) => ['--target', target]), '-o', raw]);
+    const full = JSON.parse(readFileSync(raw, 'utf8'));
+    rmSync(raw, { force: true });
     const report = {
       crates: full.crates.map(({ package: pkg }) => ({ package: { id: pkg.id, name: pkg.name, version: pkg.version,
         license: pkg.license, authors: pkg.authors, repository: pkg.repository } })),

@@ -6,7 +6,7 @@ import type { CameraHost, CameraState } from '../camera/CameraHost';
 import { DocumentHost } from '../host/DocumentHost';
 import { CommandRegistry } from '../registry/CommandRegistry';
 import type { VcbValue } from '../vcb/parse';
-import { NO_MODIFIERS, type Tool, type ToolKeyEvent } from './Tool';
+import { NO_MODIFIERS, type Tool, type ToolKeyEvent, type ToolSettingValue, type ToolStatus } from './Tool';
 import { ToolManager } from './ToolManager';
 import { OrbitTool } from './impl/Orbit';
 import { PanTool } from './impl/Pan';
@@ -80,7 +80,10 @@ class WorkTool implements Tool {
   hasPendingWork(): boolean {
     return this.pending;
   }
+  /** Keys delivered to the tool, in order. */
+  readonly keys: string[] = [];
   onKeyDown(e: ToolKeyEvent): boolean {
+    this.keys.push(e.key);
     if (e.key !== 'Enter') return false;
     this.log.push('enter');
     return true;
@@ -262,5 +265,71 @@ describe('ToolManager: camera tools and Select set the active tool aside', () =>
     tools.activate('orbit');
     tools.keyDown(key('Escape'));
     expect(tools.activeToolId).toBe('orbit');
+  });
+});
+
+describe('ToolManager: tool options bar', () => {
+  class BarTool extends WorkTool {
+    copy = false;
+    override status(): ToolStatus {
+      return { ...super.status(), settings: [{ kind: 'toggle', id: 'copy', label: 'Copy', on: this.copy, key: 'primary' }] };
+    }
+    onSetting(id: string, value: ToolSettingValue): void {
+      if (id === 'copy' && typeof value === 'boolean') this.copy = value;
+    }
+  }
+
+  it('reports placing while the tool has an operation in progress, unless the tool says otherwise', () => {
+    const { tools } = setup();
+    const bar = new BarTool('bar');
+    tools.register(bar);
+    tools.activate('bar');
+    expect(tools.status().settings).toHaveLength(1);
+    expect(tools.status().placing).toBe(false);
+    bar.pending = true;
+    expect(tools.status().placing).toBe(true);
+    tools.setting('copy', true);
+    expect(bar.copy).toBe(true);
+    expect(tools.status().settings![0]).toMatchObject({ kind: 'toggle', on: true });
+  });
+
+  it('keeps showing the set-aside tool\'s settings during a camera tool, and sends bar changes to it', () => {
+    const { tools } = setup();
+    const bar = new BarTool('bar');
+    tools.register(bar);
+    tools.activate('bar');
+    tools.activate('orbit');
+    expect(tools.activeToolId).toBe('orbit');
+    expect(tools.status().settings?.map((s) => s.id)).toEqual(['copy']);
+    tools.setting('copy', true);
+    expect(bar.copy).toBe(true);
+    // a tool with no settings shows no bar
+    tools.activate('line');
+    expect(tools.status().settings).toBeUndefined();
+  });
+});
+
+describe('ToolManager: Ctrl and Alt reach tools only as taps', () => {
+  it('delivers a tap on release, and not when another key, click or wheel came between', () => {
+    const { tools, line } = setup();
+    tools.activate('line');
+    const seen = (): string[] => line.keys.filter((k) => k === 'Control' || k === 'Alt');
+    expect(tools.keyDown(key('Control'))).toBe(true);
+    expect(seen()).toEqual([]);
+    tools.keyUp(key('Control'));
+    expect(seen()).toEqual(['Control']);
+    // Ctrl+Z: not a tap
+    tools.keyDown(key('Control'));
+    tools.keyDown(key('z', 'KeyZ'));
+    tools.keyUp(key('Control'));
+    expect(seen()).toEqual(['Control']);
+    // Alt held while clicking: not a tap
+    tools.keyDown(key('Alt'));
+    tools.pointerDown({ screen: [0, 0], ray: { origin: [0, 0, 1], dir: [0, 0, -1] }, button: 0, buttons: 1, modifiers: { ...NO_MODIFIERS, alt: true }, inference: null, camera: new FakeCamera().getState() });
+    tools.keyUp(key('Alt'));
+    expect(seen()).toEqual(['Control']);
+    tools.keyDown(key('Alt'));
+    tools.keyUp(key('Alt'));
+    expect(seen()).toEqual(['Control', 'Alt']);
   });
 });

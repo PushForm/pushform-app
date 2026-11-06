@@ -13,6 +13,10 @@ it('reads a strict public profile page and never accepts private account fields'
   const {profiles,rpc}=client({profile:{...fields,id},models:[]});expect(await profiles.get(id)).toMatchObject({profile:{id,handle:fields.handle},models:[]});expect(rpc).toHaveBeenCalledWith('commons_profile',{p_id:id});
   const bad=client({profile:{...fields,id,email:'private@example.com'},models:[]});await expect(bad.profiles.get(id)).rejects.toThrow();
 });
+it('retains more than a thousand published models on a creator profile',async()=>{
+  const models=Array.from({length:1001},(_,index)=>({id:`model-${index}`,revision:'revision',title:'Part',description:'',creator:'Maker',category:'Other',tags:[],formats:['PF'],imageUrl:null,source:null,publishedAt:'2026-11-05T00:00:00Z',licenses:[{name:'CC0',url:null,commercialUse:'allowed',conditions:[]}],credits:[{name:'Maker',url:null,text:'Original model'}]}));
+  const page=await client({profile:{...fields,id},models}).profiles.get(id);expect(page?.models).toHaveLength(1001);
+});
 it('reads a public profile page by its handle and rejects malformed handles before networking',async()=>{
   const {profiles,rpc}=client({profile:{...fields,id},models:[]});expect(await profiles.getByHandle('example-maker')).toMatchObject({profile:{id,handle:fields.handle}});expect(rpc).toHaveBeenCalledWith('commons_profile_by_handle',{p_handle:'example-maker'});
   await expect(profiles.getByHandle('../escape')).rejects.toThrow('invalid');await expect(profiles.getByHandle('Example-Maker')).rejects.toThrow('invalid');expect(rpc).toHaveBeenCalledTimes(1);
@@ -31,4 +35,10 @@ it('reports actionable conflicts and hides raw provider errors',async()=>{
   await expect(client(null,{message:'commons_handle_taken'}).profiles.save(fields,null,true)).rejects.toThrow('already in use');
   await expect(client(null,{message:'commons_profile_conflict'}).profiles.hide(1)).rejects.toThrow('another tab');
   await expect(client(null,{message:'private credentials or diagnostics'}).profiles.mine()).rejects.toThrow('could not be loaded or saved');
+});
+it('rejects invalid profile fields with readable messages before networking', async () => {
+  const { profiles, rpc } = client(mine);
+  await expect(profiles.save({ ...fields, handle: '@example' }, null, true)).rejects.toThrow('leave out the @');
+  await expect(profiles.save({ ...fields, displayName: ' ' }, null, true)).rejects.toThrow('Check the profile fields');
+  expect(rpc).not.toHaveBeenCalled();
 });

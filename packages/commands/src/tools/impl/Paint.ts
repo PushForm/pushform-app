@@ -6,34 +6,22 @@ import type { InferenceOptions, PickHit } from '@pushform/inference';
 import type { EntityRef } from '@pushform/model';
 import { activeMaterialOf } from '../../host/services';
 import type { ActiveMaterialHost } from '../../host/services';
-import { detectPlatform } from '../../keymap/Keymap';
-import type { Platform } from '../../keymap/Keymap';
 import type { PaintMode, PaintResult, PaintSide } from '../../commands/materials';
 import type { OverlayPrimitive } from '../overlay';
 import type { Modifiers, Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
 import { entityOverlay, HOVER_COLOR, hostOfTool } from '../toolUtil';
 
 /**
- * Paint mode for a modifier set. `sampling` = the panel's Sample button.
- *
- * On a Mac, Ctrl+click is the context menu and never reaches the tool, so Option stands in for
- * Ctrl (adjacent fill, and with Shift replace on the object) and Cmd samples. Elsewhere Ctrl is
- * Ctrl and Alt samples.
+ * Paint's mode from the modifiers held at the click: Ctrl fills adjacent faces (with Shift, replaces
+ * on the object), Shift replaces everywhere, Alt samples. On macOS the shell passes Cmd as Ctrl and
+ * Option as Alt, so these hold there too.
  */
-export function paintModeOf(m: Modifiers, sampling = false, platform: Platform = detectPlatform()): PaintMode {
-  const mac = platform === 'mac';
-  const ctrl = mac ? m.ctrl || m.alt : m.ctrl;
-  const sample = mac ? m.meta : m.alt || m.meta;
-  if (sampling || sample) return 'sample';
-  if (ctrl && m.shift) return 'replaceOnObject';
+export function paintModeOf(m: Modifiers, sampling = false): PaintMode {
+  if (sampling || m.alt) return 'sample';
+  if (m.ctrl && m.shift) return 'replaceOnObject';
   if (m.shift) return 'replaceAll';
-  if (ctrl) return 'adjacent';
+  if (m.ctrl) return 'adjacent';
   return 'single';
-}
-
-/** The modifier keys of each mode, named for the platform (status text and help). */
-export function paintModifierKeys(platform: Platform = detectPlatform()): { ctrl: string; sample: string } {
-  return platform === 'mac' ? { ctrl: 'Option', sample: 'Cmd' } : { ctrl: 'Ctrl', sample: 'Alt' };
 }
 
 /** Side of the hit face the pointer sees: front when the face normal points toward the camera. */
@@ -63,7 +51,6 @@ export class PaintTool implements Tool {
   readonly title = 'Paint Bucket';
   readonly cursor = 'copy';
 
-  private readonly platform: Platform = detectPlatform();
   private ctx: ToolContext | null = null;
   private hover: EntityRef | null = null;
   private hoverSide: PaintSide = 'front';
@@ -132,7 +119,7 @@ export class PaintTool implements Tool {
     this.hover = ref;
     this.message = null;
     if (!ref) return;
-    const mode = paintModeOf(e.modifiers, this._sampling, this.platform);
+    const mode = paintModeOf(e.modifiers, this._sampling);
     const side = hitSide(hit, e.ray.dir);
     if (!this.inContext(ref)) {
       this.message = 'Open the group or component to paint inside it.';
@@ -167,7 +154,7 @@ export class PaintTool implements Tool {
   overlay(): readonly OverlayPrimitive[] {
     if (!this.ctx || !this.hover) return [];
     const state = hostOfTool(this.ctx).doc.state;
-    const mode = paintModeOf(this.modifiers, this._sampling, this.platform);
+    const mode = paintModeOf(this.modifiers, this._sampling);
     // hovering a selected entity previews the whole selection getting painted
     const refs = mode === 'single' && this.isSelected(this.hover) ? this.paintableSelection().slice(0, MAX_SELECTION_OVERLAY) : [this.hover];
     const out: OverlayPrimitive[] = [];
@@ -177,7 +164,7 @@ export class PaintTool implements Tool {
   }
 
   status(): ToolStatus {
-    const mode = paintModeOf(this.modifiers, this._sampling, this.platform);
+    const mode = paintModeOf(this.modifiers, this._sampling);
     const name = this.activeName();
     const verb =
       mode === 'sample' ? 'Click to sample a material.'
@@ -185,8 +172,7 @@ export class PaintTool implements Tool {
       : mode === 'replaceAll' ? `Click to replace that material with ${name} everywhere in the context.`
       : mode === 'replaceOnObject' ? `Click to replace that material with ${name} on the same object.`
       : `Click a face or object to paint it with ${name}.`;
-    const k = paintModifierKeys(this.platform);
-    const keys = `${k.ctrl} = adjacent, Shift = replace all, ${k.ctrl}+Shift = replace on object, ${k.sample} = sample.`;
+    const keys = 'Ctrl = adjacent, Shift = replace all, Ctrl+Shift = replace on object, Alt = sample.';
     const side = this.hover && (this.hover.kind === 'face' || this.hover.kind === 'sketchFace') && this.hoverSide === 'back' ? ' (back side)' : '';
     const text = `${verb}${side} ${keys}`;
     return { instructor: this.message ? `${this.message} ${text}` : text, vcbLabel: '' };

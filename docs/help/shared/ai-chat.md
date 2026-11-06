@@ -72,6 +72,8 @@ When a change would not leave a valid solid, for example pushing a face all the 
 
 ## Ask for finishes and notes in a 3D model
 
+Ask to paint an entire group or component to replace the materials on all its nested parts in one change. This includes faces that already have their own materials. Painting a component recursively changes all placements that share its definition; make it unique first if you want to change just one copy. The agent checks the finish after applying it.
+
 The agent can add materials from the built-in library, such as oak, walnut or maple veneer, paint parts with them and turn the grain to run along each part. Unless you ask for something else, a cabinet gets a maple plywood interior, your paint or stain on the doors, drawer fronts and face frame, vertical grain on stiles, sides and doors, and horizontal grain on rails and drawer fronts. Patterned woods such as herringbone parquet have no single grain direction, so the agent leaves them as they are. It can also add guides, linear dimensions, text labels, 3D lettering and section planes that cut the model open, for example “Show a cutaway through the middle of the cabinet.” It adds notes like these only when you ask.
 
 ## Ask for scenes and camera views
@@ -129,3 +131,18 @@ When a tool is inside a toolbar dropdown, AI Chat opens that dropdown and highli
 Choose **Report a problem** or **Request a feature or change** and briefly describe it. Chat uses the current workspace and what you have already said; it may ask one essential follow-up, then shows a short summary for you to confirm. Frequency and impact are optional. You can correct the summary before sending.
 
 Keep or remove the automatic screenshot, or use **Upload images** to add PNG, JPEG or WebP files. Previews stay available while you chat. If a preview cannot load, choose **Retry preview**. After sending, chat gives a plain ticket reference such as CUS-3; follow up with support using that reference.
+
+## AI credits
+
+Chat uses AI credits, which are counted from the text and pictures it reads and writes, so a long conversation or a large document uses more. There is no limit on how many messages a conversation can hold.
+
+- A free account has a one-time set of AI credits. They do not refill.
+- A subscription includes a set of AI credits that refills every month, including for yearly subscriptions. Credits left over at the end of a month do not carry over.
+- When about a tenth of your credits are left, chat says so in a short note under the conversation.
+- When they run out, chat explains it. A free account can subscribe to continue. A subscriber sees the date the credits refill. Everything outside chat keeps working: your files, editing, saving, importing and exporting.
+
+If you are sending messages too quickly, chat asks you to wait a moment. A conversation also takes at most 5 pictures, and an account can have at most 5 open requests.
+
+## Chat history
+
+Chat keeps the conversation for each document until you clear it, however long it has been since you opened it. Open a document later and its chat is still there, and you can keep going. In a very long chat, the assistant works from the most recent part of the conversation; if it needs something from much earlier, it asks. **Clear Chat** (or `/clear`) removes a document's chat for good, and so does deleting the document permanently. A document in Trash keeps its chat, so restoring it brings the chat back.

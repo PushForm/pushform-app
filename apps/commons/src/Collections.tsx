@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { createContext, useCallback, useContext, useEffect, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
-import type { CollectionFields, CommonsCollection, CommonsCollections, CommonsDiscovery } from '@pushform/cloud';
+import { commonsProfileImageUrl } from '@pushform/cloud';
+import type { CommonsModelsLoader, CommonsCreditedCreator, CommonsPublicProfile, CollectionFields, CommonsCollection, CommonsCollections, CommonsDiscovery } from '@pushform/cloud';
 import type { CommonsAccount } from './account';
 import { CommonsAccessGate } from './CommonsAccess';
 import { CommonsThumbnail } from './CommonsPreview';
 import { ModelCard, ModelGrid, ProfileLink } from './ModelCard';
 import { filterModels, type CatalogFilters, type CatalogModel } from './catalog';
+import { navigateCommons, profilePath } from './route';
 
 const noSubscribe = () => () => {};
 const message = (error: unknown) => error instanceof Error ? error.message : 'This request failed. Try again.';
@@ -84,7 +86,7 @@ export function CollectionMosaic({ collection, models, filesUrl }: { collection:
   </div>;
 }
 export function CollectionCard({ collection, models, filesUrl, privateLabel = false }: { collection: CommonsCollection; models: CatalogModel[]; filesUrl: string | undefined; privateLabel?: boolean }) {
-  const count = collection.modelIds.filter(id => models.some(model => model.id === id)).length;
+  const count = privateLabel ? collection.modelIds.filter(id => models.some(model => model.id === id)).length : collection.modelIds.length;
   return <article className="model-card collection-card">
     <a href={`#collections/${collection.id}`} aria-label={`View collection ${collection.title}`}><CollectionMosaic collection={collection} models={models} filesUrl={filesUrl} /></a>
     <div className="card-body"><p className="eyebrow">Collection · {count} {count === 1 ? 'model' : 'models'}{privateLabel ? ` · ${collection.visibility}` : ''}</p>
@@ -92,38 +94,107 @@ export function CollectionCard({ collection, models, filesUrl, privateLabel = fa
     </div>
   </article>;
 }
-export function FeaturedSection({ models, filesUrl }: { models: CatalogModel[]; filesUrl: string | undefined }) {
+export function CreatorCard({ creator, filesUrl }: { creator: CommonsPublicProfile; filesUrl: string | undefined }) {
+  const uploaded = creator.avatarImage ? commonsProfileImageUrl(filesUrl, creator.avatarImage.id) : null;
+  const urls = [uploaded, creator.avatarUrl].filter((url): url is string => Boolean(url));
+  const [failed, setFailed] = useState(0);
+  const imageKey = urls.join(' ');
+  useEffect(() => setFailed(0), [imageKey]);
+  return <article className="model-card creator-card">
+    <a className="creator-art" href={profilePath(creator.handle)} aria-label={`View creator ${creator.displayName}`}>
+      {urls[failed] ? <img src={urls[failed]} alt="" referrerPolicy="no-referrer" onError={() => setFailed(value => value + 1)} /> : <span aria-hidden="true">{creator.displayName.slice(0, 1).toUpperCase()}</span>}
+    </a>
+    <div className="card-body"><p className="eyebrow">Creator</p><h3><ProfileLink handle={creator.handle}>{creator.displayName}</ProfileLink></h3><p className="creator">@{creator.handle}</p></div>
+  </article>;
+}
+function CreditedCreatorCard({ creator, models, filesUrl }: { creator: CommonsCreditedCreator; models: CatalogModel[]; filesUrl: string | undefined }) {
+  const firstModel = models.find(model => creator.modelIds.includes(model.id));
+  return <article className="model-card creator-card">
+    <a className="model-art" href={`#creators/${creator.id}`} aria-label={`View creator ${creator.displayName}`}>
+      {firstModel && <CommonsThumbnail model={firstModel} filesUrl={filesUrl} />}
+    </a>
+    <div className="card-body"><p className="eyebrow">Credited creator</p><h3><a href={`#creators/${creator.id}`}>{creator.displayName}</a></h3><p className="creator">{creator.sourceName} · {creator.modelIds.length} {creator.modelIds.length === 1 ? 'model' : 'models'}</p></div>
+  </article>;
+}
+export function CreditedCreatorPage({ id, models, filesUrl }: { id: string; models: CatalogModel[]; filesUrl: string | undefined }) {
+  const { service, revision } = useCollections();
+  const [creator, setCreator] = useState<CommonsCreditedCreator | null | undefined>();
+  const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    setCreator(undefined); setError(null);
+    if (!service) return;
+    const controller = new AbortController();
+    void service.creditedCreator(id, controller.signal).then(value => { if (!controller.signal.aborted) setCreator(value); }, error => { if (!controller.signal.aborted) setError(message(error)); });
+    return () => controller.abort();
+  }, [id, service, revision, attempt]);
+  useEffect(() => { document.title = creator ? `${creator.displayName} — PushForm Commons` : 'Credited creator — PushForm Commons'; }, [creator]);
+  if (!service) return <section className="status-panel"><h1>Creator listings are unavailable in this build.</h1></section>;
+  if (error) return <section className="status-panel" role="alert"><p>{error}</p><button onClick={() => setAttempt(value => value + 1)}>Retry creator</button></section>;
+  if (creator === undefined) return <p role="status">Loading creator…</p>;
+  if (creator === null) return <section className="status-panel"><h1>This creator listing is unavailable.</h1><a href="#browse">Browse models</a></section>;
+  return <article className="profile-page"><a className="back-link" href="#browse">← All models</a>
+    <p className="eyebrow">Credited creator · {creator.sourceName}</p><h1>{creator.displayName}</h1>
+    <p>Models from {creator.sourceName} credit {creator.displayName} as their creator. This listing is based on the models’ source credits and is not a Commons account profile.</p>
+    <FeatureAction key={creator.id} type="credited_creator" targetId={creator.id} />
+    <h2>Published models</h2><ModelGrid>{models.filter(model => creator.modelIds.includes(model.id)).map(model => <ModelCard key={model.id} model={model} filesUrl={filesUrl} />)}</ModelGrid>
+  </article>;
+}
+export function FeaturedSection({ models, filesUrl, loadModels }: { models: CatalogModel[]; filesUrl: string | undefined; loadModels?: CommonsModelsLoader | undefined }) {
   const { service, discovery, error, refresh, canFeature } = useCollections();
   const [page, setPage] = useState(0);
-  const items = discovery?.featured.filter(item => item.type === 'model' ? models.some(model => model.id === item.targetId) : discovery.collections.some(collection => collection.id === item.targetId)) ?? [];
+  const items = discovery?.featured.filter(item => item.type === 'model' ? Boolean(loadModels) || models.some(model => model.id === item.targetId) : item.type === 'credited_creator' ? discovery.creditedCreators.some(creator => creator.id === item.targetId) : item.type === 'creator' ? discovery.creators.some(creator => creator.id === item.targetId) : discovery.collections.some(collection => collection.id === item.targetId)) ?? [];
   const pages = Math.ceil(items.length / 3);
   const currentPage = Math.min(page, Math.max(0, pages - 1));
+  const ids = items.slice(currentPage * 3, currentPage * 3 + 3).flatMap(item => item.type === 'model' ? [item.targetId]
+    : item.type === 'collection' ? discovery?.collections.find(value => value.id === item.targetId)?.modelIds.slice(0, 4) ?? []
+    : item.type === 'credited_creator' ? discovery?.creditedCreators.find(value => value.id === item.targetId)?.modelIds.slice(0, 1) ?? [] : []).join(',');
+  const [extra, setExtra] = useState<CatalogModel[]>([]);
+  const [modelError, setModelError] = useState<string | null>(null);
+  useEffect(() => {
+    setExtra([]); setModelError(null);
+    if (!loadModels || !ids) return;
+    const controller = new AbortController();
+    void loadModels(ids.split(','), controller.signal).then(value => { if (!controller.signal.aborted) setExtra(value); }, error => { if (!controller.signal.aborted) setModelError(message(error)); });
+    return () => controller.abort();
+  }, [loadModels, ids, discovery]);
+  const featuredModels = [...extra, ...models.filter(model => !extra.some(value => value.id === model.id))];
   if (!service) return null;
   return <section className="featured-section" aria-labelledby="featured-title">
-    <div className="section-heading"><div><h2 id="featured-title">Featured</h2><p className="section-description">Useful models and collections, picked for makers.</p></div>{canFeature && <a href={adminUrl}>Manage featured</a>}</div>
-    {error ? <div role="alert"><p>{error}</p><button onClick={refresh}>Retry featured</button></div> : !discovery ? <p role="status">Loading featured models and collections…</p> : <>
+    <div className="section-heading"><div><h2 id="featured-title">Featured</h2><p className="section-description">Models, collections and creators, picked for makers.</p></div>{canFeature && <a href={adminUrl}>Manage featured</a>}</div>
+    {error ? <div role="alert"><p>{error}</p><button onClick={refresh}>Retry featured</button></div> : !discovery ? <p role="status">Loading featured models, collections and creators…</p> : <>
       <ModelGrid className="featured-grid">{items.slice(currentPage * 3, currentPage * 3 + 3).map(item => {
+        if (item.type === 'credited_creator') {
+          const creator = discovery.creditedCreators.find(value => value.id === item.targetId);
+          return creator ? <CreditedCreatorCard key={item.id} creator={creator} models={featuredModels} filesUrl={filesUrl} /> : null;
+        }
+        if (item.type === 'creator') {
+          const creator = discovery.creators.find(value => value.id === item.targetId);
+          return creator ? <CreatorCard key={item.id} creator={creator} filesUrl={filesUrl} /> : null;
+        }
         if (item.type === 'collection') {
           const collection = discovery.collections.find(value => value.id === item.targetId);
-          return collection ? <CollectionCard key={item.id} collection={collection} models={models} filesUrl={filesUrl} /> : null;
+          return collection ? <CollectionCard key={item.id} collection={collection} models={featuredModels} filesUrl={filesUrl} /> : null;
         }
-        const model = models.find(value => value.id === item.targetId);
+        const model = featuredModels.find(value => value.id === item.targetId);
         return model ? <ModelCard key={item.id} model={model} filesUrl={filesUrl} typeLabel="Model" /> : null;
       })}</ModelGrid>
       {pages > 1 && <div className="featured-pagination" aria-label="Featured pages"><button className="secondary-button" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>Previous featured</button><span role="status">{currentPage * 3 + 1}–{Math.min(items.length, currentPage * 3 + 3)} of {items.length}</span><button className="secondary-button" disabled={currentPage === pages - 1} onClick={() => setPage(currentPage + 1)}>Next featured</button></div>}
+      {modelError && <p role="alert">{modelError} <button onClick={refresh}>Retry featured models</button></p>}
       {items.length === 0 && <p className="section-description">Featured projects will appear here.</p>}
     </>}
   </section>;
 }
-export function FeatureAction({ type, targetId, eligible = true }: { type: 'model' | 'collection'; targetId: string; eligible?: boolean }) {
-  const { service, discovery, canFeature, refresh } = useCollections();
+export function FeatureAction({ type, targetId, eligible = true }: { type: 'model' | 'collection' | 'creator' | 'credited_creator'; targetId: string; eligible?: boolean }) {
+  const context = useContext(Context);
+  const { service, discovery, canFeature, refresh } = context ?? {};
   const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null); const [added, setAdded] = useState(false);
   if (!canFeature || !service) return null;
   const featured = added || discovery?.featured.some(item => item.type === type && item.targetId === targetId);
   return <div className="feature-action">
     {featured ? <a className="secondary-button" href={adminUrl}>Featured · Manage</a> : <button type="button" className="secondary-button" disabled={busy || !eligible} onClick={() => {
       setBusy(true); setError(null);
-      void service.feature(type, targetId).then(() => { setAdded(true); refresh(); }, error => setError(message(error))).finally(() => setBusy(false));
+      void service.feature(type, targetId).then(() => { setAdded(true); refresh?.(); }, error => setError(message(error))).finally(() => setBusy(false));
     }}>{busy ? 'Featuring…' : 'Feature'}</button>}
     {!eligible && !featured && <p className="section-description">Only nonempty public collections can be featured.</p>}
     {error && <p role="alert">{error}</p>}
@@ -145,6 +216,27 @@ export function PublicCollectionResults({ models, filesUrl, filters }: { models:
     {shown.length ? <ModelGrid>{shown.map(collection => <CollectionCard key={collection.id} collection={collection} models={models} filesUrl={filesUrl} />)}</ModelGrid> : <p>No public collections match those filters.</p>}
   </>;
 }
+export function ProfileCollections({ handle, owner = false, profileId, models, filesUrl }: { handle: string; owner?: boolean; profileId?: string; models: CatalogModel[]; filesUrl: string | undefined }) {
+  const { discovery, error, refresh, service, userId } = useCollections();
+  if (!service) return null;
+  const isOwner = owner && userId !== null && userId === profileId;
+  const collections = discovery?.collections.filter(collection => collection.visibility === 'public' && collection.curator?.handle === handle);
+  return <section className="profile-collections" aria-labelledby="profile-collections-title">
+    <div className="section-heading"><h2 id="profile-collections-title">{isOwner ? 'My Collections' : 'Public collections'}</h2>
+      {isOwner && <a className="primary-button" href="#collections/new">New Collection</a>}
+    </div>
+    {isOwner ? <OwnedCollections models={models} filesUrl={filesUrl} /> : error ? <div role="alert"><p>{error}</p><button onClick={refresh}>Retry collections</button></div> : !collections ? <p role="status">Loading collections…</p> : collections.length ?
+      <ModelGrid>{collections.map(collection => <CollectionCard key={collection.id} collection={collection} models={models} filesUrl={filesUrl} />)}</ModelGrid> : <p>No public collections to show.</p>}
+  </section>;
+}
+async function returnToOwnerProfile(account: CommonsAccount | null): Promise<void> {
+  try {
+    const profile = await account?.profiles.mine();
+    navigateCommons(profile?.active ? profilePath(profile.handle) : '/#account');
+  } catch {
+    navigateCommons('/#account');
+  }
+}
 function OwnedCollections({ models, filesUrl }: { models: CatalogModel[]; filesUrl: string | undefined }) {
   const { own, ownError, refresh } = useCollectionsAfterSetup();
   if (ownError) return <div role="alert"><p>{ownError}</p><button onClick={refresh}>Reload my collections</button></div>;
@@ -153,16 +245,12 @@ function OwnedCollections({ models, filesUrl }: { models: CatalogModel[]; filesU
 }
 export function CollectionsRoute({ route, models, filesUrl }: { route: string; models: CatalogModel[]; filesUrl: string | undefined }) {
   const { service, account, userId } = useCollections();
-  useEffect(() => { if (route === '#my-collections' || route === '#collections/new') document.title = `${route === '#my-collections' ? 'My collections' : 'New collection'} — PushForm Commons`; }, [route]);
+  useEffect(() => { if (route === '#collections/new') document.title = 'New collection — PushForm Commons'; }, [route]);
   if (!service) return <section className="status-panel"><h1>Collections are unavailable in this build.</h1></section>;
-  if (route === '#my-collections' || route === '#collections/new') {
+  if (route === '#collections/new') {
     if (!account) return <p>Sign-in is unavailable in this build.</p>;
     return <CommonsAccessGate account={account}><section className="collection-page" key={userId}>
-      <a className="back-link" href="#collections">← All collections</a>
-      {route === '#collections/new' ? <><h1>New collection</h1><CollectionEditor models={models} filesUrl={filesUrl} collection={null} onCancel={() => { window.location.hash = '#my-collections'; }} /></> : <>
-        <div className="section-heading"><h1>My collections</h1><a className="primary-button" href="#collections/new">New collection</a></div>
-        <OwnedCollections models={models} filesUrl={filesUrl} />
-      </>}
+      <h1>New collection</h1><CollectionEditor models={models} filesUrl={filesUrl} collection={null} onCancel={() => { void returnToOwnerProfile(account); }} />
     </section></CommonsAccessGate>;
   }
   const id = /^#collections\/([a-f0-9-]{36})$/.exec(route)?.[1];
@@ -199,11 +287,11 @@ function CollectionDetail({ id, models, filesUrl }: { id: string; models: Catalo
   </section>;
 }
 function CollectionEditor({ collection, models, filesUrl, onCancel, onSaved }: { collection: CommonsCollection | null; models: CatalogModel[]; filesUrl: string | undefined; onCancel: () => void; onSaved?: (value: CommonsCollection) => void }) {
-  const { service, refresh } = useCollections();
-  const [fields, setFields] = useState<CollectionFields>(() => collection ? { title: collection.title, description: collection.description, visibility: collection.visibility, modelIds: [...collection.modelIds] } : { title: '', description: '', visibility: 'private', modelIds: [] });
+  const { service, refresh, account } = useCollections();
+  const [fields, setFields] = useState<CollectionFields>(() => collection ? { title: collection.title, description: collection.description, visibility: collection.visibility, modelIds: [...collection.modelIds] } : { title: '', description: '', visibility: 'public', modelIds: [] });
   // Keep the version the editor opened with. A refresh must never silently rebase a stale draft.
   const [expectedVersion] = useState(collection?.version ?? null);
-  const [query, setQuery] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null); const [confirmDelete, setConfirmDelete] = useState(false);
+  const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null); const [confirmDelete, setConfirmDelete] = useState(false);
   const patch = (value: Partial<CollectionFields>) => setFields(current => ({ ...current, ...value }));
   const move = (index: number, offset: number) => { const ids = [...fields.modelIds]; [ids[index], ids[index + offset]] = [ids[index + offset]!, ids[index]!]; patch({ modelIds: ids }); };
   const submit = (event: FormEvent) => {
@@ -212,7 +300,6 @@ function CollectionEditor({ collection, models, filesUrl, onCancel, onSaved }: {
       refresh(); if (onSaved) onSaved(value); else window.location.hash = `#collections/${value.id}`;
     }, error => setError(message(error))).finally(() => setBusy(false));
   };
-  const available = filterModels(models, { query, category: '', license: '', commercial: false }).filter(model => !fields.modelIds.includes(model.id));
   return <form className="collection-editor" aria-label={collection ? 'Edit collection' : 'Create collection'} onSubmit={submit}>
     <div className="collection-form-fields"><label>Collection title<input required maxLength={100} value={fields.title} onChange={event => patch({ title: event.target.value })} disabled={busy} /></label>
       <label>Visibility<select value={fields.visibility} onChange={event => patch({ visibility: event.target.value as CollectionFields['visibility'] })} disabled={busy}><option value="private">Private — only you</option><option value="public">Public — visible in Commons</option></select></label>
@@ -227,13 +314,11 @@ function CollectionEditor({ collection, models, filesUrl, onCancel, onSaved }: {
         <button type="button" className="secondary-button" disabled={busy} aria-label={`Remove ${model?.title ?? 'unavailable model'} from collection`} onClick={() => patch({ modelIds: fields.modelIds.filter(value => value !== id) })}>Remove</button>
       </div></li>;
     })}</ol>
-    <label className="collection-search">Find models to add<input type="search" placeholder="Search published models" value={query} onChange={event => setQuery(event.target.value)} /></label>
-    <div className="collection-add-results">{available.slice(0, 12).map(model => <button key={model.id} className="secondary-button" type="button" disabled={busy || fields.modelIds.length >= 100} onClick={() => patch({ modelIds: [...fields.modelIds, model.id] })}>Add {model.title}</button>)}{available.length === 0 && <p>No more published models match.</p>}</div>
     {error && <div role="alert"><p>{error}</p><button type="button" className="secondary-button" onClick={() => { refresh(); onCancel(); }}>Close editor and reload</button></div>}
     <div className="collection-actions"><button type="submit" disabled={busy || !fields.title.trim()}>{busy ? 'Saving…' : 'Save collection'}</button><button type="button" className="secondary-button" disabled={busy} onClick={onCancel}>Cancel</button>
       {collection && <button type="button" className="text-button" disabled={busy} onClick={() => setConfirmDelete(true)}>Delete collection</button>}</div>
     {confirmDelete && collection && <div className="collection-delete" role="group" aria-label="Delete collection confirmation"><p>Delete “{collection.title}”? Its models stay in Commons.</p><button type="button" disabled={busy} onClick={() => {
-      setBusy(true); setError(null); void service!.delete(collection.id, expectedVersion!).then(() => { refresh(); window.location.hash = '#my-collections'; }, error => setError(message(error))).finally(() => setBusy(false));
+      setBusy(true); setError(null); void service!.delete(collection.id, expectedVersion!).then(async () => { refresh(); await returnToOwnerProfile(account); }, error => setError(message(error))).finally(() => setBusy(false));
     }}>Delete this collection</button> <button type="button" className="secondary-button" disabled={busy} onClick={() => setConfirmDelete(false)}>Keep collection</button></div>}
   </form>;
 }

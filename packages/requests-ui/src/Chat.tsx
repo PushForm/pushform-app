@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type JSX } from 'react';
-import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_REPORT, formatBytes, RequestsError, SCREENSHOT_TYPES, type Attachment, type AttachmentFile, type Conversation, type ConversationPath, type ConversationSummary, type DocumentDescriptor, type IntentPath, type Me, type Message, type RequestsClient, type ScreenInfo, type ToolCall, type ToolCallResult, type ToolImage } from './client';
+import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_REPORT, formatBytes, RequestsError, SCREENSHOT_TYPES, type Attachment, type AttachmentFile, type Conversation, type ConversationPath, type Credits, type ConversationSummary, type DocumentDescriptor, type IntentPath, type Me, type Message, type RequestsClient, type ScreenInfo, type ToolCall, type ToolCallResult, type ToolImage } from './client';
 import { draftScope, forgetDraft, HOME_SCOPE, readDrafts, rememberDraft } from './drafts';
 import { DockedPanel } from './DockedPanel';
 import { Popover } from './Popover';
@@ -28,6 +28,11 @@ export interface ChatProps {
    * identity) re-files the remembered conversation without restarting the chat. Defaults to Home's scope.
    */
   readonly scope?: string | undefined;
+  /**
+   * The saved cloud document this panel's conversation is held in, once the document has one. The conversation is linked to it, so deleting
+   * the document deletes the chat; an unsaved document has none.
+   */
+  readonly documentId?: string | undefined;
   /** Each increase clears this panel's conversation, as `/clear` does; the host's Clear Chat command raises it. */
   readonly clearSignal?: number | undefined;
   /**
@@ -86,6 +91,8 @@ interface ChatState {
   readonly path: ConversationPath;
   readonly messageCount: number;
   readonly limitReached: boolean;
+  /** The server's sentence for why the conversation cannot continue; shown as the muted notice. */
+  readonly limitMessage: string | null;
 }
 
 interface QueuedMessage { readonly id: number; readonly text: string; readonly pictures: readonly AttachmentFile[]; readonly tools: DocumentToolSession | null }
@@ -113,7 +120,9 @@ export const ELAPSED_AFTER_SECONDS = 10;
 const ANNOUNCE_EVERY_SECONDS = 30;
 const reviewProgress = (call: ToolCall): string | undefined => (call.review ? `Checking the result (review ${call.review.index} of ${call.review.limit})…` : undefined);
 const errorText = (cause: unknown): string => cause instanceof Error ? cause.message : 'Something went wrong.';
-const EMPTY: ChatState = { conversation: null, transcript: [], streaming: null, path: 'open', messageCount: 0, limitReached: false };
+/** Shown only when a server that predates the message field reports a limit without saying why. */
+const LIMIT_FALLBACK = 'This conversation cannot take more messages right now.';
+const EMPTY: ChatState = { conversation: null, transcript: [], streaming: null, path: 'open', messageCount: 0, limitReached: false, limitMessage: null };
 function fromConversation(conversation: Conversation): ChatState {
   return { ...EMPTY, conversation, transcript: visible(conversation.messages), path: conversation.path, messageCount: conversation.messageCount };
 }
@@ -126,10 +135,12 @@ function fromConversation(conversation: Conversation): ChatState {
  * the conversation; reopening resumes it; asking the agent to start over, Clear Chat or `/clear` discards it. There is no header row:
  * Escape or the icon hide it, and on Home also a click outside (user decisions 2026-10-24, 2026-10-25).
  */
-export function Chat({ client, account, screen, anchor, placement = 'popover', onClose, open = true, storage, documentTools, captureScreenshot, onMessage, scope = HOME_SCOPE, clearSignal = 0 }: ChatProps): JSX.Element {
+export function Chat({ client, account, screen, anchor, placement = 'popover', onClose, open = true, storage, documentTools, captureScreenshot, onMessage, scope = HOME_SCOPE, documentId, clearSignal = 0 }: ChatProps): JSX.Element {
   // The greeting, cards and composer draw at once; the profile and any resumable conversation load behind them.
   const [view, setView] = useState<View>({ kind: 'chat' });
   const [me, setMe] = useState<Me | null>(null);
+  /** The account's AI allowance: from the profile, then refreshed by each turn. */
+  const [credits, setCredits] = useState<Credits | null>(null);
   const [chat, setChat] = useState<ChatState>(EMPTY);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -152,6 +163,8 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
   const draftStorage = storage === undefined ? undefined : storage;
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
+  const documentIdRef = useRef(documentId);
+  documentIdRef.current = documentId;
   /** Bumped by Clear Chat: work started before it never touches the cleared chat. */
   const generation = useRef(0);
   useEffect(() => {
@@ -180,6 +193,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
           client.listOpenConversations().then(items => ({ ok: true, items })).catch(() => ({ ok: false, items: [] as ConversationSummary[] })), resuming]);
         if (!current) return;
         setMe(profile);
+        if (profile.credits) setCredits(profile.credits);
         const open = listed.items;
         if (listed.ok) for (const draft of drafts) if (!open.some(item => item.id === draft.conversationId)) forgetDraft(account.id, draft.conversationId, draftStorage);
         const stillOpen = resumed && (!listed.ok || open.some(item => item.id === resumed.conversation?.id));
@@ -197,7 +211,6 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
 
   // Optimistic until the profile arrives; the backend enforces roles on every call.
   const filingAllowed = !me || (me.effective !== 'none' && !me.filingDisabled);
-  const messageLimit = me?.limits.messagesPerConversation ?? 30;
   const run = async (action: () => Promise<void>): Promise<void> => {
     const gen = generation.current;
     const live = (): boolean => alive.current && generation.current === gen;
@@ -212,6 +225,16 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
     if (conversationId && chat.conversation) rememberDraft(account.id, { conversationId, path: chat.path, title: chat.conversation.title, scope }, draftStorage);
     // Only a scope change re-files; every turn already remembers the conversation itself.
   }, [scope]);
+  // Link the conversation to its saved document: a chat started before the document was saved, or before chats were linked, gets its link as
+  // soon as both are known. A failed link is tried again the next time this runs.
+  const linked = useRef(new Set<string>());
+  useEffect(() => {
+    if (!documentId || !conversationId) return;
+    const key = `${conversationId}:${documentId}`;
+    if (linked.current.has(key)) return;
+    linked.current.add(key);
+    void client.linkConversationDocument(conversationId, documentId).catch(() => { linked.current.delete(key); });
+  }, [client, conversationId, documentId]);
 
   /**
    * Clear Chat and `/clear`: stop any turn, discard this document's conversation on the server, forget it
@@ -280,10 +303,10 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
       try {
         if (!conversation) {
           try {
-            conversation = await client.startConversation({ kind: 'intake', path: 'open', screen });
+            conversation = await client.startConversation({ kind: 'intake', path: 'open', screen, ...(documentIdRef.current ? { documentId: documentIdRef.current } : {}) });
             if (!live()) return;
             const started = conversation;
-            setChat(current => ({ ...current, conversation: started, path: started.path, messageCount: 0, limitReached: false }));
+            setChat(current => ({ ...current, conversation: started, path: started.path, messageCount: 0, limitReached: false, limitMessage: null }));
             remember(started.id, started.path, started.title);
           } catch (cause) { failed = true; throw cause; }
         }
@@ -331,14 +354,15 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
               case 'error':
                 failed = true;
                 if (event.code === 'rate_limited') rateLimited = true;
-                else if (event.code === 'limit') setChat(current => ({ ...current, limitReached: true }));
+                else if (event.code === 'limit') setChat(current => ({ ...current, limitReached: true, limitMessage: event.message }));
                 else if (event.code === 'tracker_unavailable') setError({ code: event.code, message: event.message, retry: intent ? undefined : pending ? () => setQueuePaused(false) : () => send(body) });
                 else setError({ code: event.code, message: event.message });
                 break;
               case 'done':
                 completed = !event.awaitingTools;
                 ended = event.ended; startOver = ended && event.reason === 'start_over';
-                setChat(current => ({ ...current, messageCount: event.messageCount, limitReached: !ended && (event.limitReached || event.messageCount >= messageLimit) }));
+                setChat(current => ({ ...current, messageCount: event.messageCount, limitReached: !ended && event.limitReached, limitMessage: !ended && event.limitReached ? event.limitMessage : null }));
+                if (event.credits) setCredits(event.credits);
                 break;
             }
           }
@@ -388,7 +412,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
         if (controller.signal.aborted) return;
         failed = true;
         if (cause instanceof RequestsError && cause.code === 'rate_limited') rateLimited = true;
-        else if (cause instanceof RequestsError && cause.code === 'limit') setChat(current => ({ ...current, limitReached: true }));
+        else if (cause instanceof RequestsError && cause.code === 'limit') setChat(current => ({ ...current, limitReached: true, limitMessage: cause.message }));
         else throw cause;
       } finally {
         if (turn.current === controller) turn.current = null;
@@ -405,7 +429,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
           setAttachments(current => current.filter(item => !released.includes(item.id)));
         }
         if (live()) setChat(current => startOver ? EMPTY : ({ ...current, streaming: null,
-          ...(ended ? { conversation: null, path: 'open' as const, messageCount: 0, limitReached: false } : {}),
+          ...(ended ? { conversation: null, path: 'open' as const, messageCount: 0, limitReached: false, limitMessage: null } : {}),
           transcript: streamed.trim() ? [...current.transcript, { role: 'assistant', text: streamed, at: new Date().toISOString() }]
             : failed && !resumed ? current.transcript.filter(item => !(item.role === 'user' && item.at === at && item.text === body)) : current.transcript }));
       }
@@ -578,7 +602,8 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
         </div>}</div> : null}
         <div ref={transcriptEnd} />
       </div>
-      {current.limitReached ? <p className="pf-fr-muted pf-fr-limit" role="status">This conversation reached its {messageLimit}-message limit.</p> : null}
+      {current.limitReached ? <p className="pf-fr-muted pf-fr-limit" role="status">{current.limitMessage ?? LIMIT_FALLBACK}</p>
+        : credits && credits.remaining > 0 && credits.remaining * 10 <= credits.allowance ? <p className="pf-fr-muted pf-fr-limit" role="status">{credits.plan === 'free' ? 'You are running low on your free AI credits.' : 'You are running low on this month\'s AI credits.'}</p> : null}
       {notice ? <p className="pf-fr-notice" role="status">{notice}</p> : null}
       {slashMatches.length ? <div className="pf-fr-slash" role="group" aria-label="Chat commands">
         {slashMatches.map(command => <button key={command.name} type="button" onClick={() => runSlash(`/${command.name}`)}>

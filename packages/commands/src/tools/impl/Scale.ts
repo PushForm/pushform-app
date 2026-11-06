@@ -8,7 +8,8 @@ import type { EntityRef } from '@pushform/model';
 import { m4scaleAbout, refsBounds } from '../../commands/transform';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
-import type { ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import { NO_MODIFIERS } from '../Tool';
+import type { Modifiers, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
 import { pointerField } from '../entry';
 import { DRAG_PX, entityOverlay, HOVER_COLOR, inferenceOverlay, screenDist } from '../toolUtil';
 import { AXIS_COLOR, AXIS_DIR, movedOutline, refsKey, TransformToolBase, worldToScreen } from './transformShared';
@@ -128,6 +129,8 @@ function boxEdges(box: ScaleBox): Vec3[][] {
  * `x,y,z` factors, a length with a unit (absolute size along the grip's axis); negative mirrors.
  */
 export class ScaleTool extends TransformToolBase {
+  /** Modifiers of the last pointer event, for the held-key tags. */
+  private mods: Modifiers = NO_MODIFIERS;
   readonly id = 'scale';
   readonly title = 'Scale';
   readonly cursor = 'default';
@@ -201,6 +204,7 @@ export class ScaleTool extends TransformToolBase {
   // --- pointer --------------------------------------------------------------------------------
 
   onPointerMove(e: ToolPointerEvent): void {
+    this.mods = e.modifiers;
     this.cursorInference = e.inference;
     this.cursorScreen = e.screen;
     const s = this.state;
@@ -220,6 +224,7 @@ export class ScaleTool extends TransformToolBase {
   }
 
   onPointerDown(e: ToolPointerEvent): void {
+    this.mods = e.modifiers;
     if (e.button !== 0) return;
     const s = this.state;
     if (s.kind === 'scaling') {
@@ -349,6 +354,7 @@ export class ScaleTool extends TransformToolBase {
         vcbLabel: 'Scale',
         vcbValue: this.fmtFactors(s.factors, s.box.dims),
         fields: [pointerField('Scale', 'number', this.fmtFactors(s.factors, s.box.dims))],
+        ...this.heldTags(s.grip.kind === 'corner'),
       };
     }
     const instructor = this.lastError
@@ -358,6 +364,14 @@ export class ScaleTool extends TransformToolBase {
         : 'Select the entities to scale.';
     const last = this.lastScale;
     return { instructor, vcbLabel: 'Scale', vcbValue: last ? this.fmtFactors(last.factors, last.dims) : undefined };
+  }
+
+  /** Tags for the held keys while a grip is dragged: Shift's aspect ratio and Ctrl or Alt's centre. */
+  private heldTags(corner: boolean): { held?: string[] } {
+    const held: string[] = [];
+    if (this.mods.shift) held.push(corner ? 'Free aspect ratio · Shift' : 'Uniform · Shift');
+    if (this.mods.ctrl || this.mods.alt) held.push('About the centre · Ctrl');
+    return held.length ? { held } : {};
   }
 
   // --- internals ------------------------------------------------------------------------------

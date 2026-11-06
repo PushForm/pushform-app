@@ -16,7 +16,7 @@ vi.mock('@pushform/io', () => ({
   readPreservedSketchUpModel: (_state: unknown, _archive: string, model: string) => model === 'linked' ? null : new Uint8Array(1),
   readSketchUpInWorker: rendered.read,
   applySketchUpImport: () => undefined,
-  openModelFile: vi.fn(async (bytes: Uint8Array) => ({ images: new Map(), state: { images: new Map(), sceneOrder: [1], tags: new Map(),
+  openModelFile: vi.fn(async (bytes: Uint8Array) => ({ images: new Map(), state: { images: new Map(), styles: new Map(), sceneOrder: [1], tags: new Map(),
     scenes: new Map([[1, { name: `Scene ${bytes.length}`, flags: { useCamera: true, useTags: false }, hiddenTags: [],
       camera: { eye: [1, 2, 3], target: [0, 0, 0], up: [0, 0, 1], perspective: false, fov: 35, height: 4 } }]]) } })),
 }));
@@ -38,6 +38,8 @@ vi.mock('@pushform/render', () => ({
     setDisplay(display: unknown): void { rendered.displays.push(display); }
     setShadows(shadows: unknown): void { rendered.shadows.push(shadows); }
     setFog(fog: unknown): void { rendered.fog.push(fog); }
+    setEnvironment(): void {}
+    environmentReady = Promise.resolve();
     snapshot(width: number, height: number): string {
       if (rendered.failure) throw new Error(rendered.failure);
       rendered.snapshots.push([width, height]);

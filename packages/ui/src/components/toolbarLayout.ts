@@ -47,7 +47,7 @@ export const TOOLBAR_GROUPS: readonly { title: string; slots: readonly Slot[] }[
       tool('pushpull'),
       tool('offset'),
       tool('followme'),
-      stack('Edge', 'fillet', 'chamfer', 'profile'),
+      tool('profile'),
       stack(
         'Solid',
         'solid.union',
@@ -86,7 +86,7 @@ export const TOOLBAR_LAYOUT: readonly Slot[] = TOOLBAR_GROUPS.flatMap((group, in
 );
 
 /** Tools reachable only from elsewhere (context menus, panels); never shown as toolbar buttons. */
-const NOT_IN_TOOLBAR: ReadonlySet<string> = new Set(['texturePosition']);
+const NOT_IN_TOOLBAR: ReadonlySet<string> = new Set(['texturePosition', 'placeLight']);
 
 /** A toolbar item: what the stack shows (`StackedTool`) plus the command that runs on click. */
 export interface ToolbarItem extends StackedTool {

@@ -8,7 +8,10 @@
     ".": "./src/UploadDialog.tsx",
     "./UploadDialog": "./src/UploadDialog.tsx",
     "./modelDetails": "./src/modelDetails.ts",
-    "./account": "./src/account.ts"
+    "./account": "./src/account.ts",
+    "./BrowsePaging": "./src/BrowsePaging.tsx",
+    "./BrowseImages": "./src/BrowseImages.tsx",
+    "./modelImages": "./src/modelImages.ts"
   },
   "dependencies": {
     "@pushform/cloud": "workspace:*",

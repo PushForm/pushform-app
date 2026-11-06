@@ -10,7 +10,7 @@ On a face, the side facing the camera is painted. Painting a group or component 
 
 Use **Sample** in Materials or hold Alt with Paint Bucket and click to sample a material. Choose the replacement material, then hold Ctrl and click to fill edge-connected faces with the same material. Shift+click replaces the clicked material throughout the current editing context; Ctrl+Shift+click replaces it on the clicked object.
 
-On a Mac, Ctrl+click opens the context menu, so the keys differ: Option+click fills edge-connected faces, Option+Shift+click replaces on the clicked object, and Cmd+click samples. The status bar names the keys for your platform.
+On a Mac, use Cmd wherever these steps say Ctrl, and Option for Alt: Cmd+click fills edge-connected faces, Cmd+Shift+click replaces on the clicked object, and Option+click samples. The status bar names the keys for your platform.
 
 Check the tool's status and active mode before clicking when you want only one face painted. A broad replacement is different from ordinary painting; Undo reverses the applied change.
 
@@ -31,6 +31,8 @@ Check the tag named in the status before clicking. Each click applies immediatel
 Use Styles for the background, face display and supported edge settings. Front and back face colors affect faces using the default material. X-ray opacity affects the translucent view. Selection and guide colors control their overlays.
 
 Settings that are not rendered yet are disabled with an explanation. Changing display colors does not paint the underlying faces.
+
+**Styles → Edit → Environment** contains studio lighting, sun and sky settings, skyboxes and placed scene lights. See [Lighting and environments](lighting.md) for previewing, saving and reusing a look.
 
 ## Soften, smooth or hide an edge
 

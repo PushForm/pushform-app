@@ -4,11 +4,12 @@ import type { JSX } from 'react';
 import { useAppStore } from '../store';
 import { PANELS } from '../panels';
 import { Icon } from './Icon';
+import { StylesPanel } from '../panels/StylesPanel';
 
 export function PanelHost(): JSX.Element | null {
   const openPanel = useAppStore((s) => s.openPanel);
   const closePanel = useAppStore((s) => s.closePanel);
-  const panel = PANELS.find((p) => p.id === openPanel);
+  const panel = PANELS.find((p) => p.id === (openPanel === 'shadows' ? 'styles' : openPanel));
   if (!panel) return null;
   const Body = panel.component;
   return (
@@ -20,7 +21,7 @@ export function PanelHost(): JSX.Element | null {
         </button>
       </div>
       <div className="pf-panel-body">
-        <Body />
+        {openPanel === 'shadows' ? <StylesPanel environment/> : <Body />}
       </div>
     </aside>
   );

@@ -4,12 +4,10 @@ import type { CloudFile, CloudFilesApi } from '@pushform/cloud';
 import { openLayoutFile, openModelFile } from '@pushform/io';
 import { ImageStore, type DocumentState } from '@pushform/model';
 import type { LayoutDocumentState } from '@pushform/layout';
-import { Viewport, type CameraState } from '@pushform/render';
+import type { CameraState } from '@pushform/render';
+import { modelPicture } from './modelPicture';
 import type { DocumentSession } from './session';
 import { cloudLocation } from './cloudDocuments';
-import { withRenderImageStore, bodiesToRender, sketchesToRender, imagesToRender, dimensionsToRender, textsToRender, guidesToRender } from './engine/renderAdapter';
-import { sectionsToRender } from './engine/sectionAdapter';
-import { applyDocumentView } from './engine/viewSync';
 import { paintPrintPage } from './components/LayoutWorkspace';
 import { prepareLayoutPages } from './components/layoutPrint';
 
@@ -51,29 +49,8 @@ function modelTriangles(state: DocumentState): number {
 
 /** An independent viewport: never changes the editor's camera, selection, tools, or document. */
 async function modelThumbnail(state: DocumentState, images: ImageStore, camera?: CameraState): Promise<Uint8Array | null> {
-  await document.fonts?.ready;
-  const viewport = new Viewport();
-  try {
-    if (!viewport.mountOffscreen()) return null;
-    withRenderImageStore(images, () => {
-      viewport.setBodies(bodiesToRender(state));
-      viewport.setSketches(sketchesToRender(state));
-    });
-    viewport.setImages(imagesToRender(state, images));
-    viewport.setSections(sectionsToRender(state));
-    viewport.setDimensions(dimensionsToRender(state));
-    viewport.setTexts(textsToRender(state));
-    viewport.setGuides(guidesToRender(state));
-    applyDocumentView(viewport, state);
-    viewport.camera.setSize(THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT);
-    if (camera) viewport.camera.setState(camera); else viewport.camera.zoomExtents();
-    await viewport.sceneSync.textures.whenReady();
-    const picture = document.createElement('canvas');
-    return viewport.snapshotInto(picture, THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT, viewport.camera.getState(), { background: '#ffffff' }) ? await jpeg(picture) : null;
-  } finally {
-    const renderer = viewport.renderer;
-    viewport.dispose(); renderer?.forceContextLoss();
-  }
+  const picture = await modelPicture(state, images, { width: THUMBNAIL_WIDTH, height: THUMBNAIL_HEIGHT, ...(camera ? { camera } : {}) });
+  return picture ? jpeg(picture) : null;
 }
 
 /** Saved documents larger than this are not fetched and rebuilt for a thumbnail; the previous one stays. */

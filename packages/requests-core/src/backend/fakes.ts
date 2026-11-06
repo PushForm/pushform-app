@@ -3,6 +3,7 @@
 import type { Tracker, TrackerEvent, TrackerIssue, TrackerIssueInput, WebhookInput } from '../adapters/tracker.ts';
 import { TrackerError } from '../adapters/tracker.ts';
 import type { SessionUser, SessionValidator } from './auth.ts';
+import type { CreditSummary } from './credits.ts';
 import type { AttachmentStorage } from './conversation.ts';
 import { DbError, type Rpc, type SqlAttachmentRow, type SqlConversationRow, type SqlMyRoles, type SqlRequestRow, type SqlTrialRow } from './db.ts';
 
@@ -41,6 +42,8 @@ export class FakeSessions implements SessionValidator {
   async getUser(token: string): Promise<SessionUser | null> { return this.users[token] ?? null; }
 }
 
+/** A free account with credits left; the backend meters and gates turns against `ai_credit_sync` and `ai_credit_record`. */
+export const CREDITS: CreditSummary = { plan: 'free', remaining: 1_000_000, allowance: 3_000_000, refill: { kind: 'none' } };
 export const CONVERSATION_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 export const REQUEST_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 export function conversationRow(over: Partial<SqlConversationRow> = {}): SqlConversationRow {
@@ -83,7 +86,7 @@ export function requestRow(over: Partial<SqlRequestRow> = {}): SqlRequestRow {
   };
 }
 export function myRoles(over: Partial<SqlMyRoles> = {}): SqlMyRoles {
-  return { email: ALICE.email, roles: [], effective: 'user', filing_disabled: false, builds_disabled: false, trials_disabled: false, open_requests: 0, limits: { openRequestsPerAccount: 5, messagesPerConversation: 30 }, ...over };
+  return { email: ALICE.email, roles: [], effective: 'user', filing_disabled: false, builds_disabled: false, trials_disabled: false, open_requests: 0, limits: { openRequestsPerAccount: 5 }, ...over };
 }
 
 export const TRIAL_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';

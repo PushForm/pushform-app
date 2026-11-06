@@ -8,7 +8,7 @@ Hold Ctrl or Cmd while dragging to place a centered text box with centered text.
 
 ## Format text
 
-While editing, use the temporary formatting pane at the top of the right-side panel for font, size and supported text styling. Select a text range to format just that range. A text box's font size is independent of its frame size.
+While editing, use the **Text** formatting section at the top of the right-side panel for font, size and supported text styling. Select a text range to format just that range. A text box's font size is independent of its frame size.
 
 If part of the text disappears, increase the box's height or width, reduce the font size, or shorten the text. A fixed text box clips content that does not fit.
 

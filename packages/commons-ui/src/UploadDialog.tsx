@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type JSX, type ReactNode } from 'react';
-import { COMMONS_FILE_LIMIT, COMMONS_IMAGE_LIMIT, COMMONS_MODEL_EXTENSIONS, CommonsPublishing, commonsFileKind, fetchCommonsImage, fetchCommonsThumbnail,
+import { useCallback, useId, useEffect, useMemo, useRef, useState, type DragEvent, type JSX, type ReactNode } from 'react';
+import { COMMONS_FILE_LIMIT, COMMONS_IMAGE_LIMIT, COMMONS_MODEL_EXTENSIONS, CommonsPublishing, commonsHandleSchema, commonsFileKind, fetchCommonsImage, fetchCommonsThumbnail,
   removeCommonsFile, streamCommonsRender, uploadCommonsFile, type CommonsOwnModels, type CommonsOwnRevision, type CommonsProfile,
   type CommonsSubmission, type CommonsRenderEvent, type CommonsUpload, type CommonsUploadProgress } from '@pushform/cloud';
 import type { CommonsAccount } from './account';
 import { CATEGORIES, DESCRIPTION_LIMIT, RIGHTS_BASIS, TITLE_LIMIT, detailsFromMetadata, detailsProblem, formatBytes, metadataFor, publishLicenses,
-  titleFromFileName, type LicenseChoice, type LicenseKey, type ModelDetails } from './modelDetails';
+  titleFromFileName, uniqueLicenses, type LicenseChoice, type LicenseKey, type ModelDetails } from './modelDetails';
 
 /** One file in the dialog: its upload, then (for the model file) its conversion. */
 interface FileState {
@@ -22,6 +22,8 @@ export interface UploadDialogProps {
   /** The model to edit, or null to upload a new one. */
   modelId: string | null;
   initialFile?: File | undefined;
+  /** A preview rendered by the editor from its captured camera and saved revision. */
+  initialImage?: File | undefined;
   snapshotLabel?: string | undefined;
   scopeControl?: ReactNode;
   inherited?: (Pick<CommonsSubmission, 'licenses' | 'credits' | 'source'> & { creator?: string }) | undefined;
@@ -55,7 +57,7 @@ export function fileStatus(file: FileState): { label: string; detail: string | n
   return { label: 'File checked', detail: null, tone: 'good', progress: null };
 }
 
-export function UploadDialog({ account, filesUrl, modelId, initialFile, newModelId, snapshotLabel, scopeControl, inherited, onClose, onPublished }: UploadDialogProps): JSX.Element {
+export function UploadDialog({ account, filesUrl, modelId, initialFile, initialImage, newModelId, snapshotLabel, scopeControl, inherited, onClose, onPublished }: UploadDialogProps): JSX.Element {
   const api = useMemo(() => new CommonsPublishing(account.client), [account.client]);
   const [profile, setProfile] = useState<CommonsProfile | null | undefined>();
   const [loadError, setLoadError] = useState('');
@@ -67,8 +69,6 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
   const [save, setSave] = useState<SaveState>('idle');
   const [message, setMessage] = useState('');
   const [creditCreator, setCreditCreator] = useState(inherited?.creator ?? '');
-  const [rights, setRights] = useState(false);
-  const [reviewing, setReviewing] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(modelId !== null);
@@ -179,7 +179,7 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
     if (!inherited) return args[3]?.source ? { ...metadata, creator: args[3].creator } : metadata;
     const publisher = args[1];
     const credits = [...metadata.credits.filter(credit => credit.text !== `Original model by ${publisher}.`), ...inherited.credits, { name: publisher, url: null, text: `Published by ${publisher}.` }];
-    return { ...metadata, creator: creditCreator.trim(), source: inherited.source, licenses: [...metadata.licenses, ...inherited.licenses], credits: [...new Map(credits.map(credit => [JSON.stringify(credit), credit])).values()] };
+    return { ...metadata, creator: creditCreator.trim(), source: inherited.source, licenses: uniqueLicenses(inherited.licenses), credits: [...new Map(credits.map(credit => [JSON.stringify(credit), credit])).values()] };
   }, [inherited, creditCreator]);
   const creator = profile?.displayName ?? '';
   /** The pending revision changes go into, created on first need: a new model, or the next revision of a published one. */
@@ -219,7 +219,7 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
       dirty.current = true; setSave('error');
       setMessage(failure instanceof Error ? failure.message : 'Your changes could not be saved.');
     }
-  }, [api, creator, ensureDraft]);
+  }, [api, creator, ensureDraft, publicationMetadata]);
   const queueSave = useCallback(() => { saving.current = saving.current.then(saveNow); return saving.current; }, [saveNow]);
 
   const update = (patch: Partial<ModelDetails>) => { setDetails((value) => ({ ...value, ...patch })); dirty.current = true; setSave('idle'); setMessage(''); };
@@ -244,7 +244,7 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
         { onProgress: (progress) => set((value) => value && value.name === file.name ? { ...value, upload: progress } : value) });
       filesRef.current = [...filesRef.current.filter((name) => name !== previous?.name), file.name];
       set((value) => value && value.name === file.name ? { ...value, asset, upload: null } : value);
-      if (kind === 'model') { dirty.current = true; void queueSave(); void startRender(asset); }
+      if (kind === 'model') { dirty.current = true; void queueSave(); if (initialImage) setModelFile(value => value ? { ...value, image: blobUrl(initialImage), render: { state: 'ready', triangles: null, durationMs: null } } : value); else void startRender(asset); }
       else set((value) => value && value.name === file.name ? { ...value, image: blobUrl(file) } : value);
     } catch (failure) {
       if (control.current.signal.aborted) return;
@@ -267,6 +267,13 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
     chooseModel(initialFile);
   }, [initialFile, profile, loading, loadError]);
 
+  const seededImage = useRef(false);
+  useEffect(() => {
+    if (!initialImage || seededImage.current || !modelFile?.asset) return;
+    seededImage.current = true;
+    void uploadInto(initialImage, 'image');
+  }, [initialImage, modelFile?.asset, cover]);
+
   const chooseCover = (file: File | undefined) => {
     if (!file) return;
     if (commonsFileKind(file.name) !== 'image' || !/^image\/(png|jpeg)$/.test(file.type)) { setMessage('Choose a PNG or JPEG cover photo.'); return; }
@@ -274,6 +281,7 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
     void uploadInto(file, 'image');
   };
   const removeCover = async () => {
+    if (initialImage) { await uploadInto(initialImage, 'image'); return; }
     if (!filesUrl || !cover?.asset) { setCover(null); return; }
     try {
       const draft = await ensureDraft();
@@ -284,12 +292,13 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
     } catch (failure) { setMessage(failure instanceof Error ? failure.message : 'The cover photo could not be removed.'); }
   };
 
-  const shareAlike = inherited?.licenses.find(license => /ShareAlike|(?:^|-)SA(?:-| |$)/i.test(license.name));
-  const problem = (inherited && !creditCreator.trim() ? 'Enter the creator credit.' : null) ?? detailsProblem(details) ?? (shareAlike && details.license !== shareAlike.name ? 'This source requires its ShareAlike license. Choose the same license before publishing.' : null);
+  const retainedLicenses = inherited ? uniqueLicenses(inherited.licenses) : model?.current?.metadata.source ? uniqueLicenses(model.current.metadata.licenses) : null;
+  const problem = (inherited && !creditCreator.trim() ? 'Enter the creator credit.' : null) ?? detailsProblem(details);
   const fileReady = !!modelFile?.asset && !modelFile.upload && !modelFile.error;
   const coverBusy = !!cover && (!!cover.upload || (!cover.asset && !cover.error));
   const hasChanges = !!model?.draft || dirty.current || !model?.published;
-  const canPublish = fileReady && !coverBusy && !problem && rights && !publishing && hasChanges;
+  const previewReady = !initialImage || (!!cover?.asset && !cover.error);
+  const canPublish = previewReady && fileReady && !coverBusy && !problem && !publishing && hasChanges;
   const publish = async () => {
     if (!canPublish) return;
     setPublishing(true); setMessage('');
@@ -334,16 +343,17 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
           <div className="file-actions">
             {modelFile.error && !modelFile.asset && <button type="button" className="secondary" onClick={() => fileInput.current?.click()}>Try again</button>}
             {modelFile.render.state === 'failed' && modelFile.render.retry && modelFile.asset && <button type="button" className="secondary" onClick={() => void startRender(modelFile.asset!, true)}>Try again</button>}
-            <button type="button" className="secondary" disabled={!!modelFile.upload} onClick={() => fileInput.current?.click()}>Replace file</button>
+            {!snapshotLabel && <button type="button" className="secondary" disabled={!!modelFile.upload} onClick={() => fileInput.current?.click()}>Replace file</button>}
           </div>
         </div>}
         {!modelFile && <button type="button" onClick={() => fileInput.current?.click()}>Choose a model file</button>}
         <div className="cover-field">
-          {cover?.image ? <img src={cover.image} alt="Cover photo"/> : null}
+          {cover?.image && cover.name !== initialImage?.name ? <img src={cover.image} alt="Cover photo"/> : null}
           {cover ? <p className="file-detail">{cover.error ?? (cover.upload ? fileStatus(cover).label : cover.name)}</p> : null}
           <div className="file-actions">
-            <button type="button" className="secondary" disabled={coverBusy} onClick={() => coverInput.current?.click()}>{cover ? 'Replace cover photo' : 'Add a cover photo'}</button>
-            {cover && !coverBusy && <button type="button" className="secondary" onClick={() => void removeCover()}>Remove</button>}
+            {initialImage && cover?.error && cover.name === initialImage.name && <button type="button" className="secondary" onClick={() => void uploadInto(initialImage, 'image')}>Retry preview upload</button>}
+            <button type="button" className="secondary" disabled={coverBusy} onClick={() => coverInput.current?.click()}>{cover && cover.name !== initialImage?.name ? 'Replace cover photo' : 'Add a cover photo'}</button>
+            {cover && cover.name !== initialImage?.name && !coverBusy && <button type="button" className="secondary" onClick={() => void removeCover()}>Remove</button>}
           </div>
           <p className="file-detail">Optional. PNG or JPEG, up to 8 MiB. Without one, the preview is used.</p>
         </div>
@@ -356,6 +366,7 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
           <textarea value={details.description} maxLength={DESCRIPTION_LIMIT} rows={5} placeholder="What it is, how it is built, sizes and materials" onChange={(event) => update({ description: event.target.value })}/></label>
         <label><span className="field-head"><span>Category *</span></span>
           <select value={details.category} onChange={(event) => update({ category: event.target.value })}>{CATEGORIES.map((category) => <option key={category}>{category}</option>)}</select></label>
+        {retainedLicenses ? <div className="retained-license"><strong>Source licenses retained</strong><p>{[...new Set(retainedLicenses.map(license => license.name))].join(' · ')}</p><p className="field-note">This copy keeps the original licenses and credits. Publishing it does not add a new license.</p></div> : <>
         <label><span className="field-head"><span>License *</span></span>
           <select value={details.license} onChange={(event) => update({ license: event.target.value as LicenseChoice })}>
             {(Object.keys(publishLicenses) as LicenseKey[]).map((key) => <option key={key} value={key}>{publishLicenses[key].label}</option>)}
@@ -363,27 +374,25 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
           </select></label>
         <p className="field-note">{details.license === 'other' ? 'Describe how others may use, share and credit this model.' : publishLicenses[details.license].summary}</p>
         {details.license === 'other' && <label><span className="field-head"><span>License terms *</span></span>
-          <textarea value={details.terms} rows={4} onChange={(event) => update({ terms: event.target.value })}/></label>}
-        {!snapshotLabel && <label className="rights"><input type="checkbox" checked={rights} onChange={(event) => setRights(event.target.checked)}/>
-          <span>I created this model, or have the right to share it and everything it includes under this license.</span></label>}
+          <textarea value={details.terms} rows={4} onChange={(event) => update({ terms: event.target.value })}/></label>}</>}
       </section>
     </div>;
   })();
 
   const saveLabel = save === 'saving' ? 'Saving…' : save === 'saved' ? 'Draft saved' : save === 'error' ? 'Not saved' : model?.draft ? 'Draft saved' : '';
-  const blocked = step === 'details' && profile?.active ? (!modelFile ? 'Add a model file.' : !fileReady ? (modelFile.error ? 'Upload the model file again.' : 'Waiting for the file check.') : problem ?? (!rights && (!snapshotLabel || reviewing) ? 'Confirm your right to share it.' : !hasChanges ? 'No changes to publish.' : null)) : null;
+  const blocked = step === 'details' && profile?.active ? (!modelFile ? 'Add a model file.' : !fileReady ? (modelFile.error ? 'Upload the model file again.' : 'Waiting for the file check.') : !previewReady ? (cover?.error ?? 'Uploading your current-view preview.') : problem ?? (!hasChanges ? 'No changes to publish.' : null)) : null;
   return <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    <div ref={dialog} className="upload-dialog" role="dialog" aria-modal="true" aria-labelledby="upload-dialog-title">
+    <div ref={dialog} className={`upload-dialog${!profile?.active ? ' upload-dialog-profile' : ''}`} role="dialog" aria-modal="true" aria-labelledby="upload-dialog-title">
       <header className="dialog-head">
         <div><h2 id="upload-dialog-title" ref={heading} tabIndex={-1}>{snapshotLabel ? 'Share with the community' : editing ? 'Edit model' : 'Upload model'}</h2>
-          {profile?.active && snapshotLabel ? <ol className="dialog-steps"><li aria-current={!reviewing ? 'step' : undefined}>1 Details</li><li aria-current={reviewing ? 'step' : undefined}>2 Review</li></ol> : profile?.active && <ol className="dialog-steps"><li aria-current={step === 'upload' ? 'step' : undefined}>1 Upload</li><li aria-current={step === 'details' ? 'step' : undefined}>2 Details</li></ol>}</div>
+          {profile?.active && !snapshotLabel && <ol className="dialog-steps"><li aria-current={step === 'upload' ? 'step' : undefined}>1 Upload</li><li aria-current={step === 'details' ? 'step' : undefined}>2 Details</li></ol>}</div>
         <button type="button" className="dialog-close" aria-label="Close" onClick={onClose}>×</button>
       </header>
-      <div className="dialog-body">{scopeControl}{snapshotLabel && <p>{snapshotLabel}. This exact snapshot is used; later edits stay private.</p>}{inherited && <section aria-label="Retained source licenses"><h3>Original licenses and credits</h3>{inherited.licenses.map((license, index) => <p key={index}>{license.name}: {license.conditions.join('; ')}</p>)}{inherited.credits.map((credit, index) => <p key={index}>{credit.name}: {credit.text}</p>)}</section>}{reviewing ? <section><h3>Review your public snapshot</h3><p>{details.title} by {inherited ? creditCreator : model?.current?.metadata.source ? model.current.metadata.creator : creator}</p><p>{details.description}</p><p>Commons revision {model?.draft?.number ?? (model?.current?.number ?? 0) + 1}. License: {details.license}</p><p>Private change notes and cloud history are not published. Future edits stay private.</p><label><input type="checkbox" checked={rights} onChange={event => setRights(event.target.checked)} />I have the right to publish this model and its included assets under the listed terms.</label><button type="button" onClick={() => setReviewing(false)}>Back to details</button></section> : body}</div>
+      <div className="dialog-body">{scopeControl}{snapshotLabel && <p className="snapshot-note">{snapshotLabel}. This exact snapshot is used; later edits stay private.</p>}{inherited && <section aria-label="Retained source licenses"><h3>Original licenses and credits</h3>{uniqueLicenses(inherited.licenses).map((license, index) => <p key={index}>{license.name}: {license.conditions.join('; ')}</p>)}{inherited.credits.map((credit, index) => <p key={index}>{credit.name}: {credit.text}</p>)}</section>}{body}</div>
       {step === 'details' && profile?.active && !loading && filesUrl && <footer className="dialog-foot">
         <span className="save-state" role="status">{message ? <span role="alert">{message}</span> : blocked ?? saveLabel}</span>
         <button type="button" className="secondary" onClick={async () => { dirty.current = dirty.current || !model; if (model || modelFile?.asset) await queueSave(); onClose(); }}>Save draft</button>
-        <button type="button" disabled={snapshotLabel && !reviewing ? !fileReady || coverBusy || !!problem || publishing || !hasChanges : !canPublish} onClick={() => { if (!snapshotLabel || reviewing) void publish(); else { setRights(false); setReviewing(true); } }}>{publishing ? 'Publishing…' : snapshotLabel && !reviewing ? 'Review publication' : model?.published ? 'Publish changes' : 'Publish model'}</button>
+        <button type="button" disabled={!canPublish} onClick={() => void publish()}>{publishing ? 'Publishing…' : model?.published ? 'Publish changes' : 'Publish model'}</button>
       </footer>}
       <input ref={fileInput} type="file" hidden accept={ACCEPT} aria-label="Choose a model file" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; chooseModel(file); }}/>
       <input ref={coverInput} type="file" hidden accept="image/png,image/jpeg,.png,.jpg,.jpeg" aria-label="Choose a cover photo" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; chooseCover(file); }}/>
@@ -393,21 +402,31 @@ export function UploadDialog({ account, filesUrl, modelId, initialFile, newModel
 
 /** A first-time contributor creates a public profile before publishing. */
 function ProfileStep({ account, profile, onReady }: { account: CommonsAccount; profile: CommonsProfile | null; onReady(profile: CommonsProfile): void }): JSX.Element {
+  const fieldId = useId();
   const [handle, setHandle] = useState(profile?.handle ?? '');
   const [name, setName] = useState(profile?.displayName ?? '');
   const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
+  const [handleError, setHandleError] = useState('');
   const submit = async () => {
+    const parsed = commonsHandleSchema.safeParse(handle);
+    if (!parsed.success) { setHandleError(parsed.error.issues[0]?.message ?? 'Check your public handle.'); return; }
+    setHandleError('');
+    if (!name.trim()) { setError('Enter a display name.'); return; }
     setBusy(true); setError('');
     try {
       onReady(await account.profiles.save({ handle, displayName: name, bio: profile?.bio ?? '', avatarUrl: profile?.avatarUrl ?? null, links: profile?.links ?? [] }, profile?.version ?? null, true));
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'Your public profile could not be saved.'); }
     finally { setBusy(false); }
   };
-  return <form className="profile-step" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
+  return <form className="profile-step" noValidate onSubmit={(event) => { event.preventDefault(); void submit(); }}>
     <p>Models are published under your public profile. Choose how you appear; your account details stay private.</p>
-    <label>Public handle<input value={handle} onChange={(event) => setHandle(event.target.value.toLowerCase())} disabled={busy || !!profile} required pattern="[a-z][a-z0-9-]{1,30}[a-z0-9]" minLength={3} maxLength={32}/></label>
-    <label>Display name<input value={name} onChange={(event) => setName(event.target.value)} disabled={busy} required maxLength={100}/></label>
-    {error && <p role="alert">{error}</p>}
+    <label htmlFor={`${fieldId}-handle`}>Public handle</label>
+    <input id={`${fieldId}-handle`} value={handle} onChange={(event) => { setHandle(event.target.value.toLowerCase()); setHandleError(''); setError(''); }} disabled={busy || !!profile} required minLength={3} maxLength={32} autoCapitalize="none" spellCheck={false} aria-describedby={`${fieldId}-hint${handleError ? ` ${fieldId}-error` : ''}`} aria-invalid={!!handleError}/>
+    <p id={`${fieldId}-hint`} className="profile-hint">3–32 lowercase letters, numbers or hyphens. Start with a letter, end with a letter or number. No @ needed.</p>
+    {handleError && <p id={`${fieldId}-error`} className="profile-error" role="alert">{handleError}</p>}
+    <label htmlFor={`${fieldId}-name`}>Display name</label>
+    <input id={`${fieldId}-name`} value={name} onChange={(event) => { setName(event.target.value); setError(''); }} disabled={busy} required maxLength={100}/>
+    {error && <p className="profile-error" role="alert">{error}</p>}
     <button type="submit" disabled={busy}>{busy ? 'Saving…' : 'Continue'}</button>
   </form>;
 }

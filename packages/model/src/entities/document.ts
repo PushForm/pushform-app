@@ -12,6 +12,7 @@ import type {
   UnitSettings,
 } from '@pushform/core';
 import type { ModelAttribution } from '../attribution';
+import type { SceneLight } from '../environment';
 import type { ComponentDefinition } from './definition';
 import type { FogSettings, ImageAsset, Material, Scene, ShadowSettings, Style, Tag, TagFolder } from './attrs';
 import type { DimensionStyle } from './misc';
@@ -74,6 +75,8 @@ export interface DocumentState {
   scenes: Map<SceneId, Scene>;
   sceneOrder: SceneId[];
   shadows: ShadowSettings;
+  /** Model-space light placements; style environments choose whether they illuminate a view. */
+  sceneLights?: SceneLight[];
   /** Fog settings; absent in documents saved before fog existed (treated as `DEFAULT_FOG`). */
   fog?: FogSettings | undefined;
 }

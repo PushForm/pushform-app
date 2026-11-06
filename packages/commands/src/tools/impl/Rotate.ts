@@ -21,10 +21,12 @@ import type { EntityRef } from '@pushform/model';
 import { m4rotationAbout } from '../../commands/transform';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
-import type { ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import type { ToolKeyEvent, ToolPointerEvent, ToolSettingValue, ToolStatus } from '../Tool';
+import { toggleSetting } from '../settings';
 import { pointerField } from '../entry';
 import { DRAG_PX, entityOverlay, HOVER_COLOR, inferenceOverlay, screenDist, worldPerPixelAt } from '../toolUtil';
 import { AXIS_COLOR, AXIS_DIR, movedOutline, TransformToolBase, worldToScreen } from './transformShared';
+import { planeTag } from '../held';
 
 /** Screen radius of the protractor in CSS px. */
 export const PROTRACTOR_PX = 60;
@@ -271,13 +273,31 @@ export class RotateTool extends TransformToolBase {
   }
 
   status(): ToolStatus {
-    const copyHint = this.copy ? ' [Copy]' : '';
+    const held = planeTag(this.lockAxis);
+    return { ...this.baseStatus(), settings: [toggleSetting('copy', 'Copy', this.copy, 'primary')], ...(held.length ? { held } : {}) };
+  }
+
+  /** The bar switched Copy just after a commit: redo it as a copy, or as a plain move, in one undo step. */
+  adjustLast(id: string): boolean {
+    const last = this.lastCommit;
+    if (id !== 'copy' || !last || !this.lastIsOnTop()) return false;
+    return this.reapplyLast(last.matrix, this.copy);
+  }
+
+  onSetting(id: string, value: ToolSettingValue): void {
+    if (id !== 'copy' || typeof value !== 'boolean') return;
+    this.copy = value;
+    this.ctx?.requestRender();
+    this.ctx?.statusChanged();
+  }
+
+  private baseStatus(): ToolStatus {
     const s = this.state;
     if (s.kind === 'rotating') {
-      return { instructor: `Pick second point or enter angle. Ctrl = copy.${copyHint}`, vcbLabel: 'Angle', vcbValue: this.fmtAngle(s.angle), fields: [pointerField('Angle', 'angle', this.fmtAngle(s.angle))] };
+      return { instructor: `Pick second point or enter angle.`, vcbLabel: 'Angle', vcbValue: this.fmtAngle(s.angle), fields: [pointerField('Angle', 'angle', this.fmtAngle(s.angle))] };
     }
-    if (s.kind === 'center') return { instructor: `Pick first point of the baseline.${copyHint}`, vcbLabel: 'Angle' };
-    const instructor = this.lastError ? `Rotate failed: ${this.lastError}` : `Pick the centre of rotation. Hover a face to align the protractor, arrows lock an axis.${copyHint}`;
+    if (s.kind === 'center') return { instructor: `Pick first point of the baseline.`, vcbLabel: 'Angle' };
+    const instructor = this.lastError ? `Rotate failed: ${this.lastError}` : `Pick the centre of rotation. Hover a face to align the protractor, arrows lock an axis.`;
     const last = this.lastRotation;
     return { instructor, vcbLabel: 'Angle', vcbValue: last ? this.fmtAngle(last.angle) : undefined };
   }

@@ -2,24 +2,25 @@
 // Copyright 2026 PushForm contributors
 import { useEffect, useRef, useState } from 'react';
 import { commonsFileUrl, type CatalogModel } from '@pushform/cloud';
-import { DEFAULT_PREVIEW_VIEW, isPreviewModelFile, parsePreviewMesh, rasterPreview, type PreviewMesh, type PreviewView } from '@pushform/cloud/preview';
+import { DEFAULT_PREVIEW_VIEW, parsePreviewMesh, rasterPreview, type PreviewMesh, type PreviewView } from '@pushform/cloud/preview';
+import { commonsImageSources, commonsPreviewFile as geometryFile } from '@pushform/commons-ui/modelImages';
+import { usePrefetchedImage } from '@pushform/commons-ui/BrowseImages';
 
-const geometryFile = (model: CatalogModel) => model.files.find(file => isPreviewModelFile(file.name));
 export function CommonsThumbnail({ model, filesUrl }: { model: CatalogModel; filesUrl: string | undefined }) {
   const generated = geometryFile(model);
   const target = useRef<HTMLElement|null>(null);
   const [visible,setVisible] = useState(typeof IntersectionObserver === 'undefined');
-  useEffect(()=>{if(typeof IntersectionObserver === 'undefined')return;const observer=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting)){setVisible(true);observer.disconnect();}},{rootMargin:'300px'});if(target.current)observer.observe(target.current);return()=>observer.disconnect();},[]);
+  useEffect(()=>{if(typeof IntersectionObserver === 'undefined')return;const observer=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting)){setVisible(true);observer.disconnect();}},{rootMargin:'1200px'});if(target.current)observer.observe(target.current);return()=>observer.disconnect();},[]);
   const observe=(node:HTMLElement|null)=>{target.current=node;};
-  const sources = [...new Set([model.previewImage ? commonsFileUrl(filesUrl, 'images', model.previewImage.id) : null,
-    model.imageUrl, generated ? commonsFileUrl(filesUrl, 'thumbnails', generated.id) : null].filter((url): url is string => !!url))];
+  const sources = commonsImageSources(model, filesUrl);
   const [failed, setFailed] = useState<string[]>([]);
   const candidate = sources.find(url => !failed.includes(url));
+  const prefetched = usePrefetchedImage(candidate);
   const generatedUrl = generated ? commonsFileUrl(filesUrl, 'thumbnails', generated.id) : null;
-  const status = usePreviewStatus(generated ? commonsFileUrl(filesUrl, 'preview-status', generated.id) : null, candidate === generatedUrl && visible);
-  const src = candidate === generatedUrl && status.status !== 'ready' ? null : candidate;
-  return src ? <img ref={observe} src={src} alt={model.title} loading="lazy" referrerPolicy="no-referrer" onError={() => { if (src === generatedUrl && failed.filter(value => value === src + ':retry').length < 2) { setFailed(values => [...values, src + ':retry']); status.refresh(); } else setFailed(values => [...values, src]); }}/>
-    : <div ref={observe} className="missing-image"><span aria-hidden="true">◇</span><span>{candidate === generatedUrl && ['queued','rendering','loading'].includes(status.status) ? 'Rendering preview…' : 'Preview unavailable'}</span></div>;
+  const status = usePreviewStatus(generated ? commonsFileUrl(filesUrl, 'preview-status', generated.id) : null, candidate === generatedUrl && visible && (!prefetched || prefetched.status === 'error'));
+  const src = prefetched?.status === 'ready' ? prefetched.src : prefetched?.status === 'loading' ? null : candidate === generatedUrl && status.status !== 'ready' ? null : candidate;
+  return src ? <img ref={observe} src={src} alt={model.title} loading="lazy" referrerPolicy="no-referrer" onError={() => { if (src === generatedUrl && failed.filter(value => value === candidate + ':retry').length < 2) { setFailed(values => [...values, candidate + ':retry']); status.refresh(); } else if (candidate) setFailed(values => [...values, candidate]); }}/>
+    : <div ref={observe} className="missing-image"><span aria-hidden="true">◇</span><span>{prefetched?.status === 'loading' ? 'Loading preview…' : candidate === generatedUrl && ['queued','rendering','loading'].includes(status.status) ? 'Rendering preview…' : 'Preview unavailable'}</span></div>;
 }
 
 export function CommonsModelPreview({ model, filesUrl }: { model: CatalogModel; filesUrl: string | undefined }) {

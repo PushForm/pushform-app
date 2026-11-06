@@ -4,7 +4,7 @@ import type { Config } from '../config/schema.ts';
 import { DbError, meFromRow, type MeView, type ServiceDb, type UserDb } from './db.ts';
 
 /** The verified session: Supabase `auth.getUser(token)` reduced to what the backend uses. */
-export interface SessionUser { id: string; email: string }
+export interface SessionUser { id: string; email: string; emailVerified?: boolean }
 export interface SessionValidator { getUser(token: string): Promise<SessionUser | null> }
 
 /** HTTP error codes of the fr-conversation contract plus `unavailable` for a database that cannot be reached. */
@@ -13,9 +13,11 @@ const STATUS: Record<HttpErrorCode, number> = {
   unauthorized: 401, forbidden: 403, not_found: 404, invalid: 400, rate_limited: 429, limit: 409, tracker_unavailable: 502, config_invalid: 500,
   unavailable: 503, not_implemented: 501,
 };
+/** Why a `limit` or `rate_limited` answer was given, so a client shows the server's message instead of guessing the cause. */
+export type LimitKind = 'credits_exhausted' | 'open_requests' | 'open_conversations' | 'images' | 'rate_limited';
 export class HttpError extends Error {
   readonly status: number;
-  constructor(readonly code: HttpErrorCode, message: string, readonly details?: unknown) { super(message); this.name = 'HttpError'; this.status = STATUS[code]; }
+  constructor(readonly code: HttpErrorCode, message: string, readonly details?: unknown, readonly kind?: LimitKind) { super(message); this.name = 'HttpError'; this.status = STATUS[code]; }
 }
 /** A `DbError` becomes the matching HTTP error; `forbidden` on lookups of own rows reads as not found so ids are not probed. */
 export function httpErrorOf(error: unknown, forbiddenAs: 'forbidden' | 'not_found' = 'forbidden'): HttpError {
@@ -45,7 +47,7 @@ export function json(body: unknown, status = 200, headers: Record<string, string
 export const RATE_LIMITED_HEADERS: Record<string, string> = { 'Retry-After': '60' };
 export function errorResponse(error: unknown): Response {
   const e = httpErrorOf(error);
-  return json({ error: { code: e.code, message: e.message, ...(e.details !== undefined ? { details: e.details } : {}) } }, e.status, e.code === 'rate_limited' ? RATE_LIMITED_HEADERS : {});
+  return json({ error: { code: e.code, message: e.message, ...(e.kind ? { kind: e.kind } : {}), ...(e.details !== undefined ? { details: e.details } : {}) } }, e.status, e.code === 'rate_limited' ? RATE_LIMITED_HEADERS : {});
 }
 
 /** `Authorization: Bearer <token>`; null when absent or malformed. */
@@ -60,7 +62,7 @@ export async function validateSession(req: Request, validator: SessionValidator)
   let user: SessionUser | null;
   try { user = await validator.getUser(token); } catch { throw new HttpError('unauthorized', 'The session could not be verified.'); }
   if (!user?.id || !user.email) throw new HttpError('unauthorized', 'The session is invalid or expired.');
-  return { id: user.id, email: user.email.trim().toLowerCase() };
+  return { id: user.id, email: user.email.trim().toLowerCase(), ...(user.emailVerified === true ? { emailVerified: true } : {}) };
 }
 /** Roles and switches of the account through the user-scoped RPC; limits come from the config. */
 export async function lookupRoles(userDb: UserDb, config: Config): Promise<MeView> {
@@ -79,5 +81,5 @@ export function hasJobsSecret(req: Request, secret: string): boolean {
 export async function enforceRate(db: ServiceDb, ownerId: string, limit: number): Promise<void> {
   let ok: boolean;
   try { ok = await db.rateCheck(ownerId, limit); } catch (error) { throw httpErrorOf(error); }
-  if (!ok) throw new HttpError('rate_limited', `You are sending messages too quickly; the limit is ${limit} per minute. Wait a moment and try again.`);
+  if (!ok) throw new HttpError('rate_limited', `You are sending messages too quickly; the limit is ${limit} per minute. Wait a moment and try again.`, undefined, 'rate_limited');
 }

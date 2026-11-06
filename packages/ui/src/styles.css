@@ -751,7 +751,7 @@
 }
 .pf-nav-cube {
   position: absolute;
-  top: 34px;
+  top: 0;
   right: 12px;
   width: 144px;
   height: 144px;
@@ -1712,6 +1712,17 @@
 }
 
 /* Styles panel */
+.pf-styles .pf-tabs-sub { flex-wrap: wrap; }
+.pf-environment { display: grid; gap: 10px; min-width: 0; }
+.pf-env-field { display: grid; gap: 5px; min-width: 0; }
+.pf-env-field > input[type='range'] { width: 100%; margin: 0; accent-color: var(--pf-accent); }
+.pf-env-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.pf-env-between { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.pf-env-editor { display: grid; gap: 9px; border-top: 1px solid var(--pf-border); padding-top: 12px; }
+.pf-env-light-list { display: grid; gap: 5px; }
+.pf-env-light-list > button { text-align: left; overflow-wrap: anywhere; }
+.pf-environment .pf-form-actions { flex-wrap: wrap; gap: 6px; }
+.pf-environment details > summary { margin: 5px 0; cursor: pointer; }
 .pf-tabs {
   display: flex;
   gap: 2px;
@@ -2287,6 +2298,9 @@
 .pf-account-button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pf-account-button:disabled { opacity: .65; cursor: wait; }
 .pf-modal.pf-account-dialog { box-sizing: border-box; width: min(440px, calc(100vw - 36px)); min-width: 0; max-height: calc(100dvh - 36px); padding: 24px; overflow: auto; color: var(--pf-text); font: 14px/1.5 var(--pf-font); overflow-wrap: anywhere; }
+.pf-account-session-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.pf-account-session-row p { min-width: 0; overflow-wrap: anywhere; }
+.pf-account-session-row button { flex-shrink: 0; margin-left: auto; }
 .pf-account-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .pf-account-heading h2 { margin: 0; font-size: 20px; }
 .pf-account-title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -3130,8 +3144,6 @@ h4.pf-xui-text { font-size: 12px; }
 .field-head { display: flex; justify-content: space-between; gap: 12px; }
 .field-head span + span { font-weight: 400; color: var(--muted); }
 .upload-form .field-note { margin: -8px 0 0; font-size: 13px; color: var(--muted); }
-.upload-form .rights { display: flex; align-items: flex-start; gap: 10px; font-weight: 400; font-size: 14px; }
-.upload-form .rights input { width: 18px; height: 18px; margin: 1px 0 0; flex: none; }
 .dialog-foot { display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 16px 28px; border-top: 1px solid var(--line); }
 .save-state { margin-right: auto; font-size: 13px; color: var(--muted); }
 .save-state [role='alert'] { color: #a42d24; }
@@ -3139,6 +3151,20 @@ h4.pf-xui-text { font-size: 12px; }
 .profile-step { display: grid; gap: 16px; max-width: 460px; }
 .profile-step label { display: grid; gap: 6px; font-weight: 600; font-size: 14px; }
 .profile-step input { border: 1px solid #b8c1b5; border-radius: 6px; padding: 10px 12px; font: inherit; font-weight: 400; }
+
+.upload-dialog-profile { width: min(560px, 100%); }
+.dialog-head h2 { margin: 0; }
+.snapshot-note { margin: 0 0 22px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.profile-step { max-width: none; gap: 8px; font-size: 14px; line-height: 1.5; }
+.profile-step > p:first-child { margin: 0 0 12px; color: var(--muted); }
+.profile-step label { margin-top: 8px; }
+.profile-step input { width: 100%; min-width: 0; }
+.profile-step .profile-hint { margin: 0; color: var(--muted); font-size: 12px; }
+.profile-step .profile-error { margin: 4px 0; color: #b43c32; font-size: 13px; }
+.profile-step input[aria-invalid='true'] { border-color: #b43c32; }
+.profile-step button { justify-self: end; margin-top: 16px; min-width: 112px; }
+.profile-step input:focus-visible, .upload-dialog button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 @media (max-width: 720px) {
   .upload-details { grid-template-columns: 1fr; }
   .dialog-backdrop { padding: 0; }
@@ -3151,7 +3177,7 @@ h4.pf-xui-text { font-size: 12px; }
 }
 
 .pf-publishing-host .dialog-backdrop { z-index: 1100; }
-.pf-publishing-host .upload-dialog { color: var(--pf-text); background: var(--pf-surface); }
+.pf-publishing-host .upload-dialog { font: 13px/1.5 var(--pf-font); color: var(--pf-text); background: var(--pf-surface); }
 .pf-publishing-host input, .pf-publishing-host textarea, .pf-publishing-host select { background: var(--pf-surface); color: var(--pf-text); }
 
 .pf-save-version { width: min(620px, calc(100vw - 32px)); font: 13px/1.45 var(--pf-font); color: var(--pf-text); background: var(--pf-surface); }
@@ -3176,3 +3202,277 @@ h4.pf-xui-text { font-size: 12px; }
 
 .pf-save-version, .pf-save-version *, .pf-commons-browser, .pf-commons-browser *, .pf-publishing-host, .pf-publishing-host * { box-sizing: border-box; }
 .pf-save-version h2 { overflow-wrap: anywhere; }
+
+/* The sharing dialog is portalled outside .pf-app, so its controls need explicit shell styling. */
+.pf-publishing-host .dialog-backdrop { padding: 4vh 16px; background: #0006; }
+.pf-publishing-host .upload-dialog { max-height: 92dvh; border: 1px solid var(--pf-border); border-radius: 8px; box-shadow: 0 16px 48px #0004; overflow: hidden; }
+.pf-publishing-host .dialog-head, .pf-publishing-host .dialog-foot { flex-shrink: 0; background: var(--pf-surface); }
+.pf-publishing-host .dialog-head { padding: 20px 24px 16px; gap: 16px; }
+.pf-publishing-host .dialog-head h2 { font-size: 20px; line-height: 1.3; letter-spacing: normal; }
+.pf-publishing-host .dialog-body { padding: 24px; overflow-y: auto; min-height: 0; }
+.pf-publishing-host .dialog-foot { padding: 16px 24px; flex-wrap: wrap; }
+.pf-publishing-host .upload-details { gap: 24px; }
+.pf-publishing-host .upload-files, .pf-publishing-host .upload-form { min-width: 0; }
+.pf-publishing-host .snapshot-note { background: var(--pf-surface-2); }
+.pf-publishing-host .upload-form input:not([type=checkbox]), .pf-publishing-host .upload-form textarea,
+.pf-publishing-host .upload-form select, .pf-publishing-host .profile-step input,
+.pf-publishing-host .dialog-body > label select { width: 100%; min-width: 0; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); padding: 8px 10px; font: inherit; color: var(--pf-text); background: var(--pf-surface); }
+.pf-publishing-host textarea { resize: vertical; }
+.pf-publishing-host input[type=checkbox] { accent-color: var(--pf-accent); }
+.pf-publishing-host .dialog-body > label { display: grid; gap: 6px; margin-bottom: 16px; }
+.pf-publishing-host .upload-dialog button { min-height: 34px; border: 1px solid var(--pf-accent); border-radius: var(--pf-radius); padding: 7px 12px; font: inherit; font-weight: 600; color: #fff; background: var(--pf-accent); cursor: pointer; }
+.pf-publishing-host .upload-dialog button.secondary { border-color: var(--pf-border); color: var(--pf-text); background: var(--pf-surface); }
+.pf-publishing-host .upload-dialog button.link-button { border: 0; color: var(--pf-accent); background: transparent; text-decoration: underline; }
+.pf-publishing-host .upload-dialog button.dialog-close { display: grid; place-items: center; flex: none; width: 32px; height: 32px; min-height: 32px; padding: 0; border-color: transparent; color: var(--pf-text-muted); background: transparent; font-size: 22px; }
+.pf-publishing-host .upload-dialog button:hover:not(:disabled) { filter: brightness(.94); }
+.pf-publishing-host .upload-dialog button.secondary:hover:not(:disabled), .pf-publishing-host .upload-dialog button.dialog-close:hover { background: var(--pf-surface-2); filter: none; }
+.pf-publishing-host .upload-dialog button:disabled { opacity: .5; cursor: default; }
+.pf-publishing-host .upload-dialog :is(button, input, select, textarea):focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 2px; }
+.pf-publishing-host .drop-zone { background: var(--pf-surface-2); border-color: var(--pf-border); }
+.pf-publishing-host .drop-zone.dragging { background: var(--pf-accent-bg); border-color: var(--pf-accent); }
+@media (max-width: 720px) {
+  .pf-publishing-host .dialog-backdrop { padding: 0; }
+  .pf-publishing-host .upload-dialog { max-height: 100dvh; border-radius: 0; }
+  .pf-publishing-host .dialog-head, .pf-publishing-host .dialog-body, .pf-publishing-host .dialog-foot { padding-left: 18px; padding-right: 18px; }
+}
+.pf-commons-browser .commons-load-more { display:flex; flex-direction:column; align-items:center; gap:12px; padding:24px 0; }
+
+/* Over the 3D canvas: scene tabs, the tool options bar's band and, below it, the navigation cube. */
+.pf-viewport-top {
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+}
+.pf-viewport-top > .pf-scene-tabs {
+  pointer-events: auto;
+}
+.pf-viewport-under-band {
+  position: relative;
+}
+.pf-viewport-under-band .pf-nav-cube {
+  pointer-events: auto;
+}
+
+/* Tool options bar: floats over the top of the view; only its controls take the pointer. */
+.pf-tob-band {
+  flex: none;
+  height: 42px;
+  box-sizing: border-box;
+  padding: 6px;
+  pointer-events: none;
+}
+.pf-tob {
+  box-sizing: border-box;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  overflow: hidden;
+  white-space: nowrap;
+  border: 1px solid var(--pf-border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--pf-surface) 92%, transparent);
+  box-shadow: 0 2px 8px #0002;
+  color: var(--pf-text);
+  font: 12px/1.3 var(--pf-font);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 100ms ease;
+}
+.pf-tob.is-shown {
+  opacity: 1;
+}
+.pf-tob.is-shown [data-tob-control] {
+  pointer-events: auto;
+}
+.pf-tob.is-placing {
+  opacity: 0.2;
+}
+.pf-tob.is-placing [data-tob-control] {
+  pointer-events: none;
+}
+.pf-tob.is-shown.is-resting {
+  opacity: 0.35;
+}
+.pf-tob-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 10px;
+  border-right: 1px solid var(--pf-border);
+  font-weight: 600;
+}
+.pf-tob-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pf-tob-label {
+  color: var(--pf-text-muted);
+}
+.pf-tob-seg {
+  display: inline-flex;
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  overflow: hidden;
+}
+.pf-tob-seg > button,
+.pf-tob-toggle,
+.pf-tob-action,
+.pf-tob-more {
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  background: var(--pf-surface);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.pf-tob-seg > button + button {
+  border-left: 1px solid var(--pf-border);
+}
+.pf-tob-seg.is-icons > button {
+  padding: 0 3px;
+  display: inline-grid;
+  place-items: center;
+}
+.pf-tob-seg > button[aria-checked='true'] {
+  background: var(--pf-accent-bg);
+  color: var(--pf-accent);
+  font-weight: 600;
+}
+.pf-tob-seg > button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.pf-tob-toggle,
+.pf-tob-action,
+.pf-tob-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+}
+.pf-tob-check {
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--pf-text-muted);
+  border-radius: 2px;
+}
+.pf-tob-toggle[aria-pressed='true'] {
+  border-color: var(--pf-accent);
+  background: var(--pf-accent-bg);
+  color: var(--pf-accent);
+  font-weight: 600;
+}
+.pf-tob-toggle[aria-pressed='true'] .pf-tob-check {
+  border-color: var(--pf-accent);
+  background: var(--pf-accent);
+}
+.pf-tob-action.is-primary {
+  border-color: var(--pf-accent);
+  background: var(--pf-accent);
+  color: #fff;
+}
+.pf-tob-action:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.pf-tob-key {
+  padding: 0 4px;
+  border: 1px solid var(--pf-border);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  background: var(--pf-surface);
+  color: var(--pf-text-muted);
+  font: 10px/14px var(--pf-font);
+}
+.pf-tob-input {
+  height: 20px;
+  box-sizing: border-box;
+  padding: 0 5px;
+  border: 1px solid var(--pf-border);
+  border-radius: 3px;
+  background: var(--pf-surface);
+  color: inherit;
+  font: inherit;
+}
+.pf-tob-input.is-error {
+  border-color: var(--pf-danger);
+}
+.pf-tob select {
+  height: 22px;
+  font: inherit;
+}
+.pf-tob-note {
+  margin-left: auto;
+  color: var(--pf-text-muted);
+}
+.pf-tob-more-wrap {
+  position: relative;
+  margin-left: auto;
+}
+.pf-tob-more-pop {
+  position: fixed;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 8px;
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  background: var(--pf-surface);
+  box-shadow: 0 4px 14px #0003;
+  pointer-events: auto;
+}
+.pf-tob-more-pop [data-tob-control] {
+  pointer-events: auto;
+}
+.pf-tob [data-tob-control]:focus-visible {
+  outline: 2px solid var(--pf-accent);
+  outline-offset: -2px;
+}
+
+/* Held-key tags beside the pointer. */
+.pf-held-tags {
+  position: absolute;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  pointer-events: none;
+}
+.pf-held-tag {
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--pf-accent);
+  color: #fff;
+  font: 11px/16px var(--pf-font);
+  white-space: nowrap;
+}
+.pf-tob.is-applied {
+  border-color: #7fbf95;
+  background: color-mix(in srgb, color-mix(in srgb, #2ea043 14%, var(--pf-surface)) 92%, transparent);
+}
+.pf-tob.is-applied .pf-tob-tool {
+  color: #1b7f3b;
+}
+
+/* Layout: the tool options bar floats over the top of the page view; the page starts below its band. */
+.pf-layout-tob-band {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 5;
+}
+.pf-layout-workspace {
+  padding-top: calc(24px + 42px);
+}

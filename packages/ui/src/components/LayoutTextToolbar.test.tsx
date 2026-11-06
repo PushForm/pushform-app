@@ -34,7 +34,7 @@ it('places formatting in the temporary right-side pane, preserves editing focus,
   const { tab, session, editor, entity, dispose } = setup();
   const group = screen.getByRole('group', { name: 'Text formatting' });
   expect(group.closest('aside')?.getAttribute('aria-label')).toBe('Layout settings');
-  expect(screen.getByRole('region', { name: 'Text tool options' }).contains(group)).toBe(true);
+  expect(screen.getByRole('region', { name: 'Text formatting' }).contains(group)).toBe(true);
   expect(within(screen.getByRole('navigation', { name: 'Layout tools' })).queryByRole('group', { name: 'Text formatting' })).toBeNull();
   const families = within(within(group).getByRole('combobox', { name: 'Text toolbar font' })).getAllByRole('option').map(option => option.textContent);
   expect(families).toHaveLength(167);
@@ -155,7 +155,7 @@ it('keeps the editor and selection when clicking toolbar blank areas, buttons, a
   setLayoutTextSelection(editor, 1, 4); fireEvent.select(editor);
   const toolbar = screen.getByRole('navigation', { name: 'Layout tools' });
   const formatting = screen.getByRole('group', { name: 'Text formatting' });
-  for (const target of [toolbar, screen.getByRole('region', { name: 'Text tool options' }), formatting, formatting.querySelector('.pf-layout-text-toolbar-divider')!]) {
+  for (const target of [toolbar, screen.getByRole('region', { name: 'Text formatting' }), formatting, formatting.querySelector('.pf-layout-text-toolbar-divider')!]) {
     expect(fireEvent.pointerDown(target, { button: 0 })).toBe(false);
     expect(fireEvent.mouseDown(target, { button: 0 })).toBe(false);
     fireEvent.click(target);

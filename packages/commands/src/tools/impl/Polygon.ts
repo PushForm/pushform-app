@@ -4,7 +4,7 @@ import type { Vec3 } from '@pushform/core';
 import { tessellatePolygon } from '@pushform/geom';
 import type { Tessellation } from '@pushform/geom';
 import type { VcbValue } from '../../vcb/parse';
-import type { ToolKeyEvent, ToolStatus } from '../Tool';
+import type { ToolKeyEvent, ToolSetting, ToolSettingValue, ToolStatus } from '../Tool';
 import { CircleTool } from './Circle';
 
 /**
@@ -41,13 +41,41 @@ export class PolygonTool extends CircleTool {
   }
 
   protected override onExtraKey(e: ToolKeyEvent): boolean {
-    if ((e.key === 'Control' || e.key === 'Alt') && !e.repeat) {
+    if (e.key === 'Control' && !e.repeat) {
       this.circumscribed = !this.circumscribed;
       this.ctx?.requestRender();
       this.ctx?.statusChanged();
       return true;
     }
     return false;
+  }
+
+  protected override barSettings(): ToolSetting[] {
+    return [
+      ...super.barSettings(),
+      {
+        kind: 'choice',
+        id: 'mode',
+        label: 'Polygon',
+        value: this.circumscribed ? 'circumscribed' : 'inscribed',
+        options: [
+          { value: 'inscribed', label: 'Inscribed' },
+          { value: 'circumscribed', label: 'Circumscribed' },
+        ],
+        key: 'primary',
+      },
+    ];
+  }
+
+  protected override adjustable(id: string): boolean {
+    return id === 'mode' || super.adjustable(id);
+  }
+
+  protected override applySetting(id: string, value: ToolSettingValue): boolean {
+    if (id !== 'mode') return super.applySetting(id, value);
+    if (value !== 'inscribed' && value !== 'circumscribed') return false;
+    this.circumscribed = value === 'circumscribed';
+    return true;
   }
 
   override status(): ToolStatus {

@@ -18,6 +18,7 @@ import type { OverlayPrimitive } from '../overlay';
 import type { EntryField, Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
 import { DIMENSION_OFFSET_PX, entryLength, field, lengthDimension, pxAt } from '../entry';
 import { DRAG_PX, hostOfTool, inferenceOverlay, PREVIEW_COLOR, screenDist, worldPerPixelAt } from '../toolUtil';
+import { planeTag } from '../held';
 
 const GOLDEN = (1 + Math.sqrt(5)) / 2;
 /** Screen tolerance for the Square / Golden Section shape inferences. */
@@ -222,6 +223,12 @@ export class RectangleTool implements Tool {
   }
 
   status(): ToolStatus {
+    const held = [...planeTag(this.lockNormal)];
+    const s = this.statusWithoutHeld();
+    return held.length ? { ...s, held } : s;
+  }
+
+  private statusWithoutHeld(): ToolStatus {
     if (!this.corner) return { instructor: 'Select first corner.', vcbLabel: 'Dimensions' };
     const units = this.ctx ? hostOfTool(this.ctx).doc.state.meta.units : null;
     const dims = this.dims();

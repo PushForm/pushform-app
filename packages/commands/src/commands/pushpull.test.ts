@@ -394,7 +394,9 @@ describe('PushPullTool', () => {
     const bodyId = addBox(registry);
     tools.activate('pushpull');
     const tool = tools.activeTool as PushPullTool;
-    expect(tools.keyDown({ key: 'Control', code: 'ControlLeft', modifiers: { ...NO_MODIFIERS, ctrl: true }, repeat: false })).toBe(true);
+    tools.keyDown({ key: 'Control', code: 'ControlLeft', modifiers: { ...NO_MODIFIERS, ctrl: true }, repeat: false });
+    // a tap toggles: pressed and released with nothing between
+    expect(tools.keyUp({ key: 'Control', code: 'ControlLeft', modifiers: { ...NO_MODIFIERS, ctrl: true }, repeat: false })).toBe(true);
     expect(tool.pushPullMode).toBe('newBody');
     const top = topFace(root().bodies.get(bodyId as never)!);
     tools.pointerDown(pe([100, 100], 0, freeInference([0.5, 0.5, 1], GROUND_PLANE, faceHit(bodyId, top, [0.5, 0.5, 1]))));

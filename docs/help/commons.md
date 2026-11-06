@@ -2,7 +2,9 @@
 
 PushForm Commons is a community model catalog with its own website. Browse models, search by name or description, and filter by category or license. The commercial-use filter includes models only when every listed license explicitly permits commercial use; read all listed conditions before reuse.
 
-Open a model to see its original creator, source, licenses and attribution notices. When files are available, choose **Download ZIP** next to a filename. The package contains the unchanged original in `files/`, an `ATTRIBUTION.json` record and a README. Keep required credits and license notices with reused files. A free download does not remove license conditions.
+The unfiltered browse view omits models marked low interest by Commons admins. Search or apply any category, license, or commercial-use filter to find matching models from the full library. These models remain available through direct links, creator pages, and collections.
+
+Open a model to see its original creator next to the title. Source information, licenses and required credits are grouped under **Licenses & attribution**. When files are available, choose **Download ZIP** next to a filename. The package contains the unchanged original in `files/`, an `ATTRIBUTION.json` record and a README. Keep required credits and license notices with reused files. A free download does not remove license conditions.
 
 ## Browse featured projects and collections
 
@@ -12,13 +14,17 @@ Use the **Models** and **Collections** tabs below Featured to search the library
 
 ## Create and manage collections
 
-Any signed-in PushForm user can create collections. Choose **New collection** or **My collections**, complete account setup if needed, then enter a title and optional description. Collections start **Private — only you**. Choose **Public — visible in Commons** when you want to share one. A public creator profile is optional; if you have an active public profile it appears as the collection's curator.
+Any signed-in PushForm user can create collections. Choose **New Collection** beside **My Collections** on your profile. Complete account setup if needed, then enter a title and optional description. Collections start **Public — visible in Commons**; choose **Private — only you** to keep one private. A public creator profile is optional; if you have an active public profile it appears as the collection's curator.
 
 On a model page, **Save to collection** adds or removes that model using your collection checkboxes. **New private collection** creates a collection and saves the model into it in one action.
 
-On your collection's page, choose **Edit collection** to change its details or visibility, add or remove models, and use **Move up** or **Move down** to set their order. The first four available models form its cover. Choose **Save collection** to apply your edits. You can keep up to 100 collections with up to 100 models each. If someone edits the same collection in another tab, reload before saving again; a failed save keeps your draft available for correction.
+On your collection's page, choose **Edit collection** to change its details or visibility, remove models, and use **Move up** or **Move down** to set their order. To add models, open a model's page and choose **Save to collection**. The first four available models form its cover. Choose **Save collection** to apply your edits. You can keep up to 100 collections with up to 100 models each. If someone edits the same collection in another tab, reload before saving again; a failed save keeps your draft available for correction.
+
+## Collection visibility and credits
 
 Collections follow each model's current published version. Withdrawn models disappear from public collection views, and making a collection private removes it from public browsing and Featured. A collection does not transfer ownership or replace its models' licenses and credits. **Delete collection** removes only the collection; its models stay in Commons.
+
+Your own profile shows **My Collections** above **My Models**, including your private and empty collections, saved drafts and published models. Other visitors see only **Public collections** and published models; public collections appear once they contain an available model. Open a collection card to browse its models.
 
 ## Feature a model or collection
 
@@ -74,7 +80,7 @@ Choose **Upload model** in the Commons header. If you don't have a public profil
 4. Tick the box confirming that you created the model, or have the right to share it and everything it includes under the license you chose. The Terms of Use require this.
 5. Choose **Publish model**. You don't have to wait for the preview to finish.
 
-Your changes save automatically as you type. **Save draft** or **Close** keeps the draft, file and preview under **My models**. If the upload fails, choose **Try again**. If a preview fails because of a converter problem, **Try again** starts a fresh conversion; a model that is too large or complex to preview can still be published.
+Your changes save automatically as you type. **Save draft** or **Close** keeps the draft, file and preview under **My Models** on your profile. If the upload fails, choose **Try again**. If a preview fails because of a converter problem, **Try again** starts a fresh conversion; a model that is too large or complex to preview can still be published.
 
 ### Licenses
 
@@ -84,11 +90,10 @@ Your changes save automatically as you type. **Save draft** or **Close** keeps t
 
 ## Manage your models
 
-**My models** shows each of your models as a card with its preview, status and last change.
+Choose **My profile**, then open a card under **My Models**. Your model's detail page offers **Edit model** and **Delete model**. These controls appear only for the signed-in owner.
 
-- **Edit** reopens the dialog. Changes to a draft save into that draft. Changes to a published model become a new draft that keeps its files, so nothing has to be uploaded again; the published version stays as it is until you choose **Publish changes**. **Replace file** uploads a new model file and converts it.
-- **Delete draft** removes a model you never published. On a published model, **Discard changes** throws away its unpublished draft and keeps the published version.
-- **View** opens a published model's page, and **Withdraw** takes it out of the library. Copies people already downloaded keep their licenses.
+- **Edit model** reopens the dialog. Changes to a draft save into that draft. Changes to a published model become a new draft that keeps its files, so nothing has to be uploaded again; the published version stays as it is until you choose **Publish changes**. **Replace file** uploads a new model file and converts it.
+- **Delete model** asks you to confirm. It removes a private draft or takes a published model and its unpublished changes out of the library. Copies people already downloaded keep their licenses. After deletion, you return to your profile.
 
 ## Preview a model
 
@@ -101,3 +106,24 @@ Commons converts every format it accepts as soon as the upload is checked: nativ
 A new publication may show **Rendering preview…** while its server job waits or runs. Commons updates the image when rendering finishes. Identical files reuse cached geometry and thumbnails. An uploaded PNG/JPEG still takes precedence as the listing image. If a render fails, the model page explains the failure and retains its original-file and license information. Try **Open in PushForm** or download the original where supported.
 
 FreeCAD previews use visible saved BREP shapes, without running document scripts or recomputing the model. Assembly links/group placements and files without stored shape geometry are not supported by this preview converter.
+
+When several files are available, downloads put the native PushForm model first, then STEP and common exchange formats, with FreeCAD sources last. The preview also prefers the native model over source and notice archives. Downloads include attribution in a ZIP package; an archive download keeps a single `.zip` filename suffix.
+
+Commons has no fixed limit on the total number of published models. Individual models still need supported files, complete attribution and redistribution rights, and must meet the file size limits.
+
+## Featured creators
+
+The Featured section highlights models, collections and creators. Choose a creator card to visit their public profile. Commons admins can choose **Feature** on a public profile, or use **Admin → Featured → Add featured item** and filter by **Creators**. Search by name or handle, then add the creator. Move and remove creators using the same controls as other featured items. Hidden or deleted profiles do not appear on the homepage.
+
+Creators credited on imported models can also be featured without a Commons account. In the picker, **Credited creator** entries show their source library. Their pages list currently published models carrying those credits; they are not account profiles. The same creator name from different source libraries appears separately. Models linked to an account profile remain associated with that profile.
+
+## Browse a large library
+
+Commons and the editor’s Commons browser load a small first set of models, then add more as you scroll. The next two sets and their thumbnail images are prepared in advance for smoother scrolling. On the Commons website, search and filters stay at the top as you browse. Once you scroll past their original position, the footer slides up with the PushForm, Terms, and Privacy links, so you can reach them without scrolling through the whole library. Scroll back to the original filter position and the footer slides away. **Load more models** also works with a keyboard. If a later set fails, your current results stay visible and **Retry loading more** tries again. Search and filters cover the entire library, including models that have not appeared on screen yet.
+
+
+## Manage default browse visibility
+
+In **Admin → Commons → Browse visibility**, admins can search published models and filter by **All models**, **Default browse**, or **Low interest**. Choose **Mark low interest** on a model to omit it from unfiltered browsing, or **Restore to default browse** to bring it back. For a group, select the relevant models or **Select this page**, then use the bulk action. Selection applies only to the displayed page.
+
+Changes apply immediately to new browse requests and persist when a model is updated. Search and filters still find matching low-interest models. If another admin changed a selected model, reload the list and review the current flags before trying again.

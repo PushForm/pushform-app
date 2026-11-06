@@ -2,14 +2,16 @@
 // Copyright 2026 PushForm contributors
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { CloudSession, CommonsCollections, type AuthApi, type CommonsCollection, type CommonsFeaturedState } from '@pushform/cloud';
+import { CloudSession, CommonsCollections, type AuthApi, type CommonsCollection, type CommonsFeaturedState, type CommonsProfiles } from '@pushform/cloud';
 import type { CommonsAccount } from './account';
 import { App } from './App';
+import { CollectionsProvider, CollectionsRoute, ProfileCollections } from './Collections';
 import { exampleModel } from './catalog.fixture';
 
 const collection: CommonsCollection = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', title: 'Workshop essentials', description: 'Useful fittings for the workshop.', visibility: 'public', version: 1, modelIds: ['workshop-hinge'], curator: { handle: 'example-maker', displayName: 'Example Maker' }, updatedAt: '2026-11-04T00:00:00Z' };
 const model = exampleModel();
 const disposals: (() => void)[] = [];
+const publicProfile = { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', handle: 'example-maker', displayName: 'Example Maker', bio: '', avatarUrl: null, links: [] };
 beforeEach(() => window.history.replaceState(null, '', '/'));
 afterEach(() => { cleanup(); disposals.splice(0).forEach(dispose => dispose()); });
 async function setup(role = 'none', own = true) {
@@ -24,7 +26,7 @@ async function setup(role = 'none', own = true) {
     if (name === 'admin_session') data = { role };
     if (name === 'commons_my_collections') data = collections;
     if (name === 'commons_collection') data = collection;
-    if (name === 'commons_discovery') data = { version: 1, collections: [collection], featured: featured.map(({ id, type, targetId }) => ({ id, type, targetId })) };
+    if (name === 'commons_discovery') data = { version: 1, creditedCreators: [], creators: [], collections: [collection], featured: featured.map(({ id, type, targetId }) => ({ id, type, targetId })) };
     if (name === 'commons_save_collection') {
       const saved = { ...collection, title: args!.p_title, description: args!.p_description, visibility: args!.p_public ? 'public' : 'private', modelIds: args!.p_model_ids, version: 2 };
       collections = [saved as CommonsCollection]; data = saved;
@@ -55,7 +57,7 @@ it('places mixed featured content above filters and keeps it unchanged when brow
 it('keeps longer featured lists in one three-card page and makes later entries reachable', async () => {
   const auth = await setup();
   const models = Array.from({ length: 4 }, (_, index) => exampleModel({ id: `featured-${index}`, title: `Featured project ${index}` }));
-  vi.spyOn(auth.collections, 'discovery').mockResolvedValue({ version: 1, collections: [], featured: models.map((value, index) => ({ id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`, type: 'model', targetId: value.id })) });
+  vi.spyOn(auth.collections, 'discovery').mockResolvedValue({ version: 1, creditedCreators: [], creators: [], collections: [], featured: models.map((value, index) => ({ id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`, type: 'model', targetId: value.id })) });
   render(<App {...auth} loadCatalog={async () => models} />);
   const featured = within(await screen.findByRole('region', { name: 'Featured' }));
   await featured.findByRole('link', { name: 'Featured project 0' });
@@ -69,7 +71,7 @@ it('keeps longer featured lists in one three-card page and makes later entries r
 it('preserves keyboard focus between browse tabs and excludes mixed-rights collections from commercial results', async () => {
   const auth = await setup();
   const restricted = exampleModel({ id: 'restricted-model', title: 'Restricted model', licenses: [{ ...model.licenses[0]!, commercialUse: 'restricted' }] });
-  vi.spyOn(auth.collections, 'discovery').mockResolvedValue({ version: 1, collections: [{ ...collection, modelIds: [model.id, restricted.id] }], featured: [] });
+  vi.spyOn(auth.collections, 'discovery').mockResolvedValue({ version: 1, creditedCreators: [], creators: [], collections: [{ ...collection, modelIds: [model.id, restricted.id] }], featured: [] });
   render(<App {...auth} loadCatalog={async () => [model, restricted]} />);
   const modelsTab = screen.getByRole('tab', { name: 'Models' }); modelsTab.focus();
   fireEvent.keyDown(modelsTab, { key: 'ArrowRight' });
@@ -109,4 +111,153 @@ it('creates a private collection directly from a model and preserves the selecte
   fireEvent.change(await screen.findByLabelText('New private collection'), { target: { value: 'Next project' } });
   fireEvent.click(screen.getByRole('button', { name: 'Create and save' }));
   await waitFor(() => expect(auth.rpc).toHaveBeenCalledWith('commons_save_collection', { p_id: null, p_title: 'Next project', p_description: '', p_public: false, p_model_ids: [model.id], p_expected_version: null }));
+});
+
+it('features a creator from their profile and shows their public card on the homepage', async () => {
+  const auth = await setup('admin');
+  const creator = { id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', handle: 'test-maker', displayName: 'Test Maker', bio: '', avatarUrl: 'https://example.com/avatar.jpg', links: [] };
+  auth.account.profiles.getByHandle = vi.fn().mockResolvedValue({ profile: creator, models: [] });
+  let items: CommonsFeaturedState['items'] = [];
+  vi.spyOn(auth.collections, 'discovery').mockImplementation(async () => ({ version: 1, creditedCreators: [], collections: [], creators: items.length ? [creator] : [], featured: items.map(({ id, type, targetId }) => ({ id, type, targetId })) }));
+  const feature = vi.spyOn(auth.collections, 'feature').mockImplementation(async () => {
+    items = [{ id: collection.id, type: 'creator', targetId: creator.id, title: creator.displayName, available: true }];
+    return { version: 2, enabled: true, items, creditedCreators: [], creators: [creator], collections: [], models: [] };
+  });
+  window.history.replaceState(null, '', '/u/test-maker');
+  render(<App {...auth} loadCatalog={async () => [model]} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Feature' }));
+  await screen.findByRole('link', { name: 'Featured · Manage' });
+  expect(feature).toHaveBeenCalledWith('creator', creator.id);
+  window.history.replaceState(null, '', '/'); fireEvent(window, new PopStateEvent('popstate'));
+  const featured = within(await screen.findByRole('region', { name: 'Featured' }));
+  const link = await featured.findByRole('link', { name: 'View creator Test Maker' });
+  expect(link.getAttribute('href')).toBe('/u/test-maker');
+  fireEvent.error(link.querySelector('img')!);
+  expect(link.querySelector('img')).toBeNull();
+  expect(featured.getByText('@test-maker')).toBeTruthy();
+});
+
+it('shows imported creator cards and opens their credited models without implying an account', async () => {
+  const auth = await setup();
+  const creator = { id: 'credited-' + 'a'.repeat(32), displayName: 'Example Creator', sourceName: 'Example Library', modelIds: [model.id] };
+  vi.spyOn(auth.collections, 'discovery').mockResolvedValue({ version: 1, creators: [], creditedCreators: [creator], collections: [], featured: [{ id: collection.id, type: 'credited_creator', targetId: creator.id }] });
+  vi.spyOn(auth.collections, 'creditedCreator').mockResolvedValue(creator);
+  render(<App {...auth} loadCatalog={async () => [model]} />);
+  const link = await screen.findByRole('link', { name: 'View creator Example Creator' });
+  expect(link.getAttribute('href')).toBe('#creators/' + creator.id);
+  window.location.hash = '#creators/' + creator.id; fireEvent(window, new HashChangeEvent('hashchange'));
+  await screen.findByRole('heading', { name: 'Example Creator' });
+  expect(screen.getByText(/not a Commons account profile/)).toBeTruthy();
+  expect(screen.getByRole('link', { name: model.title })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Feature' })).toBeNull();
+  vi.mocked(auth.collections.creditedCreator).mockResolvedValue(null);
+  window.location.hash = '#creators/credited-' + 'b'.repeat(32); fireEvent(window, new HashChangeEvent('hashchange'));
+  expect(await screen.findByRole('heading', { name: 'This creator listing is unavailable.' })).toBeTruthy();
+});
+
+it('hydrates featured models independently from the first browse page and its filters', async () => {
+  const auth = await setup();
+  const other = exampleModel({ id: 'later-model', title: 'Browse result' });
+  const browse = vi.fn().mockResolvedValue({ models: [other], total: 1, categories: [], licenses: [], next: null });
+  const byIds = vi.fn().mockResolvedValue([model]);
+  const loadCatalog = Object.assign(vi.fn().mockResolvedValue([]), { browse, byIds });
+  render(<App {...auth} loadCatalog={loadCatalog}/>);
+  const featured = within(await screen.findByRole('region', { name: 'Featured' }));
+  await featured.findByRole('link', { name: model.title });
+  expect(byIds).toHaveBeenCalledWith([model.id], expect.any(AbortSignal));
+  expect(loadCatalog).not.toHaveBeenCalled();
+  const calls = byIds.mock.calls.length;
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'no matching featured model' } });
+  await waitFor(() => expect(browse).toHaveBeenLastCalledWith(expect.objectContaining({ query: 'no matching featured model' }), null, expect.any(AbortSignal)));
+  expect(byIds.mock.calls.length).toBe(calls);
+  expect(featured.getByRole('link', { name: model.title })).toBeTruthy();
+});
+it('shows only the viewed profile’s public collections and opens their detail page', async () => {
+  const auth = await setup();
+  auth.account.profiles = { mine: async () => ({ ...publicProfile, active: true, version: 1 }), getByHandle: async () => ({ profile: { ...publicProfile, id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' }, models: [] }) } as unknown as CommonsProfiles;
+  vi.spyOn(auth.collections, 'mine').mockResolvedValue([{ ...collection, title: 'Private workshop', visibility: 'private' }]);
+  const publicDiscovery = await auth.collections.discovery();
+  vi.spyOn(auth.collections, 'discovery').mockResolvedValue({ ...publicDiscovery, featured: [], collections: [collection,
+    { ...collection, id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', title: 'Another maker collection', curator: { handle: 'another-maker', displayName: 'Example Maker' } },
+    { ...collection, id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', title: 'Unattributed collection', curator: null },
+  ] });
+  window.history.replaceState(null, '', '/u/example-maker');
+  render(<App {...auth} loadCatalog={async () => [model]} />);
+  const region = within(await screen.findByRole('region', { name: 'Public collections' }));
+  const link = await region.findByRole('link', { name: 'View collection Workshop essentials' });
+  expect(region.queryByText('Private workshop')).toBeNull();
+  expect(region.queryByText('Another maker collection')).toBeNull();
+  expect(region.queryByText('Unattributed collection')).toBeNull();
+  expect(region.getByRole('img', { name: 'Workshop essentials, 1 available models' })).toBeTruthy();
+  window.location.href = (link as HTMLAnchorElement).href;
+  fireEvent(window, new HashChangeEvent('hashchange'));
+  expect(await screen.findByRole('heading', { name: 'Workshop essentials', level: 1 })).toBeTruthy();
+  expect(window.location.pathname).toBe('/');
+});
+it('updates public collections when navigating to a profile without collections', async () => {
+  const auth = await setup('none', false);
+  auth.account.profiles = { mine: async () => null, getByHandle: async (handle: string) => ({ profile: { ...publicProfile, handle }, models: [] }) } as unknown as CommonsProfiles;
+  window.history.replaceState(null, '', '/u/example-maker');
+  render(<App {...auth} loadCatalog={async () => [model]} />);
+  await screen.findByRole('link', { name: 'View collection Workshop essentials' });
+  window.history.pushState(null, '', '/u/another-maker');
+  fireEvent(window, new PopStateEvent('popstate'));
+  expect(await screen.findByText('No public collections to show.')).toBeTruthy();
+  expect(screen.queryByRole('link', { name: 'View collection Workshop essentials' })).toBeNull();
+});
+it('distinguishes collection loading and failure from an empty profile and retries', async () => {
+  const auth = await setup('none', false);
+  auth.account.profiles = { mine: async () => null, getByHandle: async () => ({ profile: publicProfile, models: [] }) } as unknown as CommonsProfiles;
+  let reject!: (reason: Error) => void;
+  const discovery = vi.spyOn(auth.collections, 'discovery').mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; }));
+  window.history.replaceState(null, '', '/u/example-maker');
+  render(<App {...auth} loadCatalog={async () => [model]} />);
+  expect(await screen.findByText('Loading collections…')).toBeTruthy();
+  reject(new Error('Collections are temporarily unavailable.'));
+  expect(await screen.findByRole('alert')).toBeTruthy();
+  expect(screen.queryByText('No public collections to show.')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry collections' }));
+  expect(await screen.findByRole('link', { name: 'View collection Workshop essentials' })).toBeTruthy();
+  expect(discovery).toHaveBeenCalledTimes(2);
+});
+
+it('shows all owner collections with creation controls and never leaks them to a visitor or stale session',async()=>{
+  const auth=await setup();
+  const privateCollection={...collection,id:'dddddddd-dddd-4ddd-8ddd-dddddddddddd',title:'Private workshop',visibility:'private' as const};
+  vi.spyOn(auth.collections,'mine').mockResolvedValue([collection,privateCollection]);
+  const content=(owner:boolean,profileId:string)=><CollectionsProvider service={auth.collections} account={auth.account}><ProfileCollections handle={publicProfile.handle} owner={owner} profileId={profileId} models={[model]} filesUrl={undefined}/></CollectionsProvider>;
+  const view=render(content(true,publicProfile.id));
+  const region=within(await screen.findByRole('region',{name:'My Collections'}));
+  expect(await region.findByRole('link',{name:'View collection Private workshop'})).toBeTruthy();
+  expect(region.getByRole('link',{name:'New Collection'}).getAttribute('href')).toBe('#collections/new');
+  view.rerender(content(false,publicProfile.id));
+  const visitor=within(await screen.findByRole('region',{name:'Public collections'}));
+  expect(await visitor.findByRole('link',{name:'View collection Workshop essentials'})).toBeTruthy();
+  expect(visitor.queryByText('Private workshop')).toBeNull();expect(visitor.queryByRole('link',{name:'New Collection'})).toBeNull();
+  view.rerender(content(true,'another-account'));
+  expect(await screen.findByRole('region',{name:'Public collections'})).toBeTruthy();
+  expect(screen.queryByText('Private workshop')).toBeNull();expect(screen.queryByRole('link',{name:'New Collection'})).toBeNull();
+});
+it('defaults new collections to public and cancels back to the active owner profile',async()=>{
+  const auth=await setup();auth.account.profiles={mine:async()=>({...publicProfile,active:true,version:1})} as unknown as CommonsProfiles;
+  render(<CollectionsProvider service={auth.collections} account={auth.account}><CollectionsRoute route="#collections/new" models={[model]} filesUrl={undefined}/></CollectionsProvider>);
+  const select=await screen.findByLabelText('Visibility') as HTMLSelectElement;expect(select.value).toBe('public');
+  fireEvent.change(select,{target:{value:'private'}});expect(select.value).toBe('private');
+  fireEvent.click(screen.getByRole('button',{name:'Cancel'}));
+  await waitFor(()=>expect(window.location.pathname).toBe('/u/example-maker'));expect(window.location.hash).toBe('');
+});
+it('returns creation cancellation to account setup when no active profile is available',async()=>{
+  const auth=await setup();
+  render(<CollectionsProvider service={auth.collections} account={auth.account}><CollectionsRoute route="#collections/new" models={[model]} filesUrl={undefined}/></CollectionsProvider>);
+  fireEvent.click(await screen.findByRole('button',{name:'Cancel'}));
+  await waitFor(()=>expect(window.location.hash).toBe('#account'));expect(window.location.pathname).toBe('/');
+});
+it('deletes an owned collection from its editor and returns to the owner profile',async()=>{
+  const auth=await setup();auth.account.profiles={mine:async()=>({...publicProfile,active:true,version:1})} as unknown as CommonsProfiles;
+  vi.spyOn(auth.collections,'delete').mockResolvedValue(undefined);
+  render(<CollectionsProvider service={auth.collections} account={auth.account}><CollectionsRoute route={'#collections/'+collection.id} models={[model]} filesUrl={undefined}/></CollectionsProvider>);
+  fireEvent.click(await screen.findByRole('button',{name:'Edit collection'}));fireEvent.click(screen.getByRole('button',{name:'Delete collection'}));
+  fireEvent.click(screen.getByRole('button',{name:'Delete this collection'}));
+  await waitFor(()=>expect(auth.collections.delete).toHaveBeenCalledWith(collection.id,1));
+  await waitFor(()=>expect(window.location.pathname).toBe('/u/example-maker'));expect(window.location.hash).toBe('');
 });

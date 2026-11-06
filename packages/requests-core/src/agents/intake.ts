@@ -146,11 +146,9 @@ export function briefHandlers(ctx: AgentContext, store: ConversationStore): Reco
  * The tool list for a brief-gathering path. It is the same for every account and every state of the brief, so the
  * tools and system prompt stay one shared prompt-cache prefix: `request_file` is always offered and refuses when the
  * brief is not fileable, filing is not allowed or the account is at its open-request limit (the prompt still requires
- * the shown brief and an explicit yes). Past the message limit (restricts the conversation after 30) only sending or
- * stopping remains.
+ * the shown brief and an explicit yes).
  */
-export function briefTools(ctx: AgentContext): Anthropic.Tool[] {
-  if (ctx.messageCount > ctx.limits.messagesPerConversation) return [requestFileTool, declineTool, startOverTool];
+export function briefTools(_ctx: AgentContext): Anthropic.Tool[] {
   return [searchDocsTool, searchOpenIssuesTool, updateBriefTool, setBriefChoiceTool, proposeTitleTool, switchPathTool, addMeTool, declineTool, startOverTool, requestFileTool];
 }
 
@@ -171,7 +169,7 @@ export function contextBlock(ctx: AgentContext): string {
     '<context>', `host: ${ctx.host}`, `account_email: ${ctx.accountEmail}`, `roles: ${ctx.roles.join(', ') || 'user'}`, `filing_allowed: ${ctx.filingAllowed}`,
     `screen: ${screen}`, ...(ctx.document ? [`open_document: ${ctx.document.type}${editableDocument(ctx.document) ? ` (the ${editableDocument(ctx.document)}_* tools read and edit it)` : ' (UI guidance only)'}`] : []),
     `build: ${ctx.build.version} (${ctx.build.commit})`, `time: ${ctx.now}`, `path: ${ctx.path}`,
-    `requester_messages_so_far: ${ctx.messageCount} of ${ctx.limits.messagesPerConversation}`,
+    `requester_messages_so_far: ${ctx.messageCount}`,
     `open_requests_filed_by_this_account: ${ctx.openRequestCount} of ${ctx.limits.openRequestsPerAccount}`,
     'requests_listed_under_this_account (own and joined with Add me):', frameRequesterText(own, 'issue'),
     'open_issues_in_tracker (titles; use search_open_issues for details):', frameRequesterText(issues, 'issue'),
@@ -203,12 +201,10 @@ ${FEEDBACK_RULES}
 
 /**
  * What the account's limits allow on this turn. Part of the per-turn <context>, not the system prompt, so the system
- * prompt is the same for every account and stays cached across conversations. `noun` names what is being sent.
+ * prompt is the same for every account and stays cached across conversations.
  */
-export function limitNotes(ctx: AgentContext, noun: 'brief' | 'report' = ctx.path === 'problem' ? 'report' : 'brief'): string[] {
+export function limitNotes(ctx: AgentContext): string[] {
   const parts: string[] = [];
-  if (ctx.messageCount > ctx.limits.messagesPerConversation) parts.push(`This conversation has reached its ${ctx.limits.messagesPerConversation}-message limit. Do not ask further questions; only offer to send the ${noun} as it stands (show it and ask for a yes, then request_file) or to stop (start_over).`);
-  else if (ctx.messageCount === ctx.limits.messagesPerConversation) parts.push(`This is the requester's last message in this conversation (${ctx.limits.messagesPerConversation}-message limit). Record what they said, then say the limit is reached and that they can send the ${noun} as it stands or stop; ask nothing further.`);
   if (ctx.openRequestCount >= ctx.limits.openRequestsPerAccount) parts.push(`The account has ${ctx.openRequestCount} open requests, the limit. Explain this, list the open requests from <context>, and offer Add me to a matching open request; do not offer a new filing.`);
   if (!ctx.filingAllowed) parts.push('Filing is not available for this account in this product. You can still help; say that filing is not available when asked.');
   return parts;

@@ -8,9 +8,11 @@ import { SNAP_COLORS } from '@pushform/inference';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { AddCurveInput, AddCurveResult } from '../../commands/curves';
 import type { OverlayPrimitive } from '../overlay';
-import type { EntryField, Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import type { EntryField, Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolSettingValue, ToolStatus } from '../Tool';
+import { countFrom, countSetting } from '../settings';
 import { angleDimension, DIMENSION_COLOR, field, pxAt } from '../entry';
 import { hostOfTool, inferenceOverlay, PREVIEW_COLOR } from '../toolUtil';
+import { planeTag, SHIFT_HELD } from '../held';
 import {
   AXIS_NORMAL,
   ClickGesture,
@@ -236,6 +238,32 @@ export class ArcTool implements Tool {
   }
 
   status(): ToolStatus {
+    const held = [...planeTag(this.lockNormal), ...(this.heldPlane ? [SHIFT_HELD] : [])];
+    const s = this.statusWithoutHeld();
+    return held.length ? { ...s, held } : s;
+  }
+
+  private statusWithoutHeld(): ToolStatus {
+    return { ...this.stageStatus(), settings: [countSetting('segments', 'Segments', this.segments)] };
+  }
+
+  /** The bar changed the segments just after a commit: redraw that arc with them, as one undo step. */
+  adjustLast(id: string): boolean {
+    if (id !== 'segments' || !this.last) return false;
+    this.reapplyLast({ segments: this.segments });
+    return true;
+  }
+
+  /** Segments in the tool options bar. */
+  onSetting(id: string, value: ToolSettingValue): void {
+    const n = id === 'segments' ? countFrom(value) : null;
+    if (n === null) return;
+    this.segments = Math.max(1, Math.round(n));
+    this.ctx?.requestRender();
+    this.ctx?.statusChanged();
+  }
+
+  private stageStatus(): ToolStatus {
     switch (this.stage) {
       case 'center':
         return { instructor: 'Select center point.', vcbLabel: 'Sides', vcbValue: String(this.segments) };
@@ -358,6 +386,7 @@ export class ArcTool implements Tool {
       : { points: tess.points, closed: false, curve: tess.curve };
     const res = ctx.commands.execute('sketch.addCurve', payload) as AddCurveResult;
     this.last = { params, entry: hostOfTool(ctx).undoStack.peek() };
+    ctx.committed?.();
     return res;
   }
 

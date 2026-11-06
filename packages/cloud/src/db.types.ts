@@ -93,6 +93,90 @@ export type Database = {
                   Relationships: [
 
                   ]
+                },"ai_credit_buckets": {
+                  Row: {
+                    "anchor_at": string,"balance": number,"created_at": string,"id": string,"next_refill_at": string | null,"owner_id": string,"size": number,"source": string,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "anchor_at"?: string,"balance": number,"created_at"?: string,"id"?: string,"next_refill_at"?: string | null,"owner_id": string,"size": number,"source": string,"updated_at"?: string
+                  }
+                  Update: {
+                    "anchor_at"?: string,"balance"?: number,"created_at"?: string,"id"?: string,"next_refill_at"?: string | null,"owner_id"?: string,"size"?: number,"source"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+
+                  ]
+                },"ai_credit_settings": {
+                  Row: {
+                    "free_grant_credits": number,"id": boolean,"updated_at": string,"updated_by": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "free_grant_credits": number,"id"?: boolean,"updated_at"?: string,"updated_by"?: string
+                  }
+                  Update: {
+                    "free_grant_credits"?: number,"id"?: boolean,"updated_at"?: string,"updated_by"?: string
+                  }
+                  Relationships: [
+
+                  ]
+                },"ai_model_rates": {
+                  Row: {
+                    "effective_at": string,"model": string,"usd_cache_read": number,"usd_cache_write": number,"usd_in": number,"usd_out": number,"w_cache_read": number,"w_cache_write": number,"w_in": number,"w_out": number
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "effective_at"?: string,"model": string,"usd_cache_read": number,"usd_cache_write": number,"usd_in": number,"usd_out": number,"w_cache_read": number,"w_cache_write": number,"w_in": number,"w_out": number
+                  }
+                  Update: {
+                    "effective_at"?: string,"model"?: string,"usd_cache_read"?: number,"usd_cache_write"?: number,"usd_in"?: number,"usd_out"?: number,"w_cache_read"?: number,"w_cache_write"?: number,"w_in"?: number,"w_out"?: number
+                  }
+                  Relationships: [
+
+                  ]
+                },"ai_plan_mappings": {
+                  Row: {
+                    "effective_at": string,"id": string,"kind": string,"monthly_credits": number,"name": string,"note": string,"price_id": string | null,"product_id": string | null,"updated_by": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "effective_at"?: string,"id"?: string,"kind": string,"monthly_credits": number,"name": string,"note"?: string,"price_id"?: string | null,"product_id"?: string | null,"updated_by"?: string
+                  }
+                  Update: {
+                    "effective_at"?: string,"id"?: string,"kind"?: string,"monthly_credits"?: number,"name"?: string,"note"?: string,"price_id"?: string | null,"product_id"?: string | null,"updated_by"?: string
+                  }
+                  Relationships: [
+
+                  ]
+                },"ai_usage_daily": {
+                  Row: {
+                    "cache_read_tokens": number,"cache_write_tokens": number,"cost_usd": number,"credits": number,"day": string,"events": number,"input_tokens": number,"model": string,"org_id": string | null,"output_tokens": number,"owner_id": string | null,"path": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "cache_read_tokens": number,"cache_write_tokens": number,"cost_usd": number,"credits": number,"day": string,"events": number,"input_tokens": number,"model": string,"org_id"?: string | null,"output_tokens": number,"owner_id"?: string | null,"path": string
+                  }
+                  Update: {
+                    "cache_read_tokens"?: number,"cache_write_tokens"?: number,"cost_usd"?: number,"credits"?: number,"day"?: string,"events"?: number,"input_tokens"?: number,"model"?: string,"org_id"?: string | null,"output_tokens"?: number,"owner_id"?: string | null,"path"?: string
+                  }
+                  Relationships: [
+
+                  ]
+                },"ai_usage_events": {
+                  Row: {
+                    "cache_read_tokens": number,"cache_write_tokens": number,"call_id": string,"conversation_id": string | null,"cost_usd": number,"created_at": string,"credits": number,"debited_free": number,"debited_monthly": number,"estimated": boolean,"id": string,"input_tokens": number,"model": string,"org_id": string | null,"output_tokens": number,"owner_id": string | null,"path": string,"provider": string,"reason": string | null,"turn_id": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "cache_read_tokens"?: number,"cache_write_tokens"?: number,"call_id": string,"conversation_id"?: string | null,"cost_usd"?: number,"created_at"?: string,"credits": number,"debited_free"?: number,"debited_monthly"?: number,"estimated"?: boolean,"id"?: string,"input_tokens"?: number,"model": string,"org_id"?: string | null,"output_tokens"?: number,"owner_id"?: string | null,"path": string,"provider"?: string,"reason"?: string | null,"turn_id"?: string | null
+                  }
+                  Update: {
+                    "cache_read_tokens"?: number,"cache_write_tokens"?: number,"call_id"?: string,"conversation_id"?: string | null,"cost_usd"?: number,"created_at"?: string,"credits"?: number,"debited_free"?: number,"debited_monthly"?: number,"estimated"?: boolean,"id"?: string,"input_tokens"?: number,"model"?: string,"org_id"?: string | null,"output_tokens"?: number,"owner_id"?: string | null,"path"?: string,"provider"?: string,"reason"?: string | null,"turn_id"?: string | null
+                  }
+                  Relationships: [
+
+                  ]
                 },"app_events": {
                   Row: {
                     "app_build": string | null,"app_version": string | null,"category": string | null,"client_at": string | null,"count": number,"created_at": string,"document_type": string | null,"duration_seconds": number | null,"id": number,"kind": string,"owner_id": string,"tool": string | null
@@ -413,14 +497,14 @@ isOneToOne: false
                   ]
                 },"commons_featured": {
                   Row: {
-                    "collection_id": string | null,"id": string,"model_id": string | null,"position": number
+                    "collection_id": string | null,"creator_id": string | null,"credited_creator_id": string | null,"id": string,"model_id": string | null,"position": number
                   }
                   ComputedFields: never
                   Insert: {
-                    "collection_id"?: string | null,"id"?: string,"model_id"?: string | null,"position": number
+                    "collection_id"?: string | null,"creator_id"?: string | null,"credited_creator_id"?: string | null,"id"?: string,"model_id"?: string | null,"position": number
                   }
                   Update: {
-                    "collection_id"?: string | null,"id"?: string,"model_id"?: string | null,"position"?: number
+                    "collection_id"?: string | null,"creator_id"?: string | null,"credited_creator_id"?: string | null,"id"?: string,"model_id"?: string | null,"position"?: number
                   }
                   Relationships: [
                     {
@@ -428,6 +512,12 @@ isOneToOne: false
       columns: ["collection_id"]
 isOneToOne: true
       referencedRelation: "commons_collections"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "commons_featured_creator_id_fkey"
+      columns: ["creator_id"]
+isOneToOne: true
+      referencedRelation: "commons_profiles"
       referencedColumns: ["id"]
     },{
       foreignKeyName: "commons_featured_model_id_fkey"
@@ -453,14 +543,14 @@ isOneToOne: true
                   ]
                 },"commons_models": {
                   Row: {
-                    "created_at": string,"id": string,"last_number": number,"latest_submission": string | null,"owner_id": string | null,"published_revision": string | null
+                    "created_at": string,"curation_version": number,"id": string,"last_number": number,"latest_submission": string | null,"low_interest": boolean,"owner_id": string | null,"published_revision": string | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "created_at"?: string,"id": string,"last_number"?: number,"latest_submission"?: string | null,"owner_id"?: string | null,"published_revision"?: string | null
+                    "created_at"?: string,"curation_version"?: number,"id": string,"last_number"?: number,"latest_submission"?: string | null,"low_interest"?: boolean,"owner_id"?: string | null,"published_revision"?: string | null
                   }
                   Update: {
-                    "created_at"?: string,"id"?: string,"last_number"?: number,"latest_submission"?: string | null,"owner_id"?: string | null,"published_revision"?: string | null
+                    "created_at"?: string,"curation_version"?: number,"id"?: string,"last_number"?: number,"latest_submission"?: string | null,"low_interest"?: boolean,"owner_id"?: string | null,"published_revision"?: string | null
                   }
                   Relationships: [
                     {
@@ -621,14 +711,14 @@ isOneToOne: false
                   ]
                 },"fr_conversations": {
                   Row: {
-                    "account_email": string,"brief": Json | null,"closed_at": string | null,"host_id": string,"id": string,"kind": string,"message_count": number,"messages": NonNullable<Json>,"org_id": string | null,"owner_id": string,"path": string,"request_id": string | null,"screen": Json | null,"started_at": string,"status": string,"title": string | null,"updated_at": string
+                    "account_email": string,"brief": Json | null,"closed_at": string | null,"document_id": string | null,"host_id": string,"id": string,"kind": string,"message_count": number,"messages": NonNullable<Json>,"org_id": string | null,"owner_id": string,"path": string,"request_id": string | null,"screen": Json | null,"started_at": string,"status": string,"title": string | null,"updated_at": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "account_email": string,"brief"?: Json | null,"closed_at"?: string | null,"host_id": string,"id"?: string,"kind": string,"message_count"?: number,"messages"?: NonNullable<Json>,"org_id"?: string | null,"owner_id": string,"path": string,"request_id"?: string | null,"screen"?: Json | null,"started_at"?: string,"status"?: string,"title"?: string | null,"updated_at"?: string
+                    "account_email": string,"brief"?: Json | null,"closed_at"?: string | null,"document_id"?: string | null,"host_id": string,"id"?: string,"kind": string,"message_count"?: number,"messages"?: NonNullable<Json>,"org_id"?: string | null,"owner_id": string,"path": string,"request_id"?: string | null,"screen"?: Json | null,"started_at"?: string,"status"?: string,"title"?: string | null,"updated_at"?: string
                   }
                   Update: {
-                    "account_email"?: string,"brief"?: Json | null,"closed_at"?: string | null,"host_id"?: string,"id"?: string,"kind"?: string,"message_count"?: number,"messages"?: NonNullable<Json>,"org_id"?: string | null,"owner_id"?: string,"path"?: string,"request_id"?: string | null,"screen"?: Json | null,"started_at"?: string,"status"?: string,"title"?: string | null,"updated_at"?: string
+                    "account_email"?: string,"brief"?: Json | null,"closed_at"?: string | null,"document_id"?: string | null,"host_id"?: string,"id"?: string,"kind"?: string,"message_count"?: number,"messages"?: NonNullable<Json>,"org_id"?: string | null,"owner_id"?: string,"path"?: string,"request_id"?: string | null,"screen"?: Json | null,"started_at"?: string,"status"?: string,"title"?: string | null,"updated_at"?: string
                   }
                   Relationships: [
                     {
@@ -915,6 +1005,20 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"project_activity_events": {
+                  Row: {
+                    "document_key": string,"document_type": string,"event_id": string,"evidence": string,"file_id": string | null,"fingerprint": string,"kind": string,"occurred_at": string,"owner_id": string,"recorded_at": string,"revision_id": string | null,"storage": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "document_key": string,"document_type": string,"event_id": string,"evidence"?: string,"file_id"?: string | null,"fingerprint": string,"kind": string,"occurred_at": string,"owner_id": string,"recorded_at"?: string,"revision_id"?: string | null,"storage": string
+                  }
+                  Update: {
+                    "document_key"?: string,"document_type"?: string,"event_id"?: string,"evidence"?: string,"file_id"?: string | null,"fingerprint"?: string,"kind"?: string,"occurred_at"?: string,"owner_id"?: string,"recorded_at"?: string,"revision_id"?: string | null,"storage"?: string
+                  }
+                  Relationships: [
+
+                  ]
                 }
           }
           Views: {
@@ -929,6 +1033,36 @@ isOneToOne: false
                            },
 "admin_accounts":
 { Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"admin_ai_account":
+{ Args: { "p_owner": string }; Returns: Json
+                           },
+"admin_ai_adjust":
+{ Args: { "p_credits": number,"p_owner": string,"p_reason": string }; Returns: Json
+                           },
+"admin_ai_orgs":
+{ Args: { "p_days": number }; Returns: Json
+                           },
+"admin_ai_plan_apply":
+{ Args: { "p_id": string }; Returns: Json
+                           },
+"admin_ai_plan_delete":
+{ Args: { "p_id": string }; Returns: Json
+                           },
+"admin_ai_plan_save":
+{ Args: { "p_id": string,"p_kind": string,"p_monthly_credits": number,"p_name": string,"p_note": string,"p_price_id": string,"p_product_id": string }; Returns: Json
+                           },
+"admin_ai_plans":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"admin_ai_spend_delta":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"admin_ai_usage":
+{ Args: { "p_days": number }; Returns: Json
+                           },
+"admin_ai_users":
+{ Args: { "p_days": number }; Returns: Json
                            },
 "admin_alerts":
 { Args: Record<PropertyKey, never>; Returns: Json
@@ -954,6 +1088,9 @@ isOneToOne: false
 "admin_commons_begin_asset":
 { Args: { "p_filename": string,"p_revision": string,"p_sha256": string,"p_size_bytes": number }; Returns: Json
                            },
+"admin_commons_browse_visibility":
+{ Args: { "p_after_id"?: string,"p_limit"?: number,"p_query"?: string,"p_visibility"?: string }; Returns: Json
+                           },
 "admin_commons_feature":
 { Args: { "p_target_id": string,"p_type": string }; Returns: Json
                            },
@@ -974,6 +1111,9 @@ isOneToOne: false
                            },
 "admin_commons_rollout":
 { Args: { "p_enabled": boolean,"p_policy_version": string }; Returns: undefined
+                           },
+"admin_commons_set_low_interest":
+{ Args: { "p_low_interest": boolean,"p_models": Json }; Returns: undefined
                            },
 "admin_commons_submit":
 { Args: { "p_expected_revision"?: string,"p_id": string,"p_metadata": Json,"p_rights_basis": string }; Returns: Json
@@ -1100,8 +1240,50 @@ isOneToOne: false
 "admin_webhooks":
 { Args: { "p_source": string }; Returns: Json
                            },
+"ai_add_months":
+{ Args: { "p_from": string,"p_months": number }; Returns: string
+                           },
+"ai_credit_record":
+{ Args: { "p_cache_read": number,"p_cache_write": number,"p_call_id": string,"p_conversation": string,"p_estimated": boolean,"p_input": number,"p_model": string,"p_org": string,"p_output": number,"p_owner": string,"p_path": string,"p_provider": string,"p_turn": string }; Returns: Json
+                           },
+"ai_credit_refill_due":
+{ Args: Record<PropertyKey, never>; Returns: number
+                           },
+"ai_credit_sync":
+{ Args: { "p_owner": string }; Returns: Json
+                           },
+"ai_plan_allowance":
+{ Args: { "p_owner": string }; Returns: {
+              "credits": number,"row_id": string
+            }[]
+                           },
+"ai_rate_for":
+{ Args: { "p_at": string,"p_model": string }; Returns: {
+              "effective_at": string,
+"model": string,
+"usd_cache_read": number,
+"usd_cache_write": number,
+"usd_in": number,
+"usd_out": number,
+"w_cache_read": number,
+"w_cache_write": number,
+"w_in": number,
+"w_out": number
+            }
+                          SetofOptions: {
+        from: "*"
+        to: "ai_model_rates"
+        isOneToOne: true
+        isSetofReturn: false
+      } },
+"ai_usage_rollup":
+{ Args: Record<PropertyKey, never>; Returns: number
+                           },
 "app_record_events":
 { Args: { "p_events": Json }; Returns: number
+                           },
+"app_record_project_events":
+{ Args: { "p_events": Json,"p_expected_owner": string }; Returns: number
                            },
 "campaign_create_handoff":
 { Args: { "p_touches": Json }; Returns: string
@@ -1233,6 +1415,9 @@ isOneToOne: false
 "cloud_pending_blob":
 { Args: { "p_path": string }; Returns: boolean
                            },
+"cloud_project_progress":
+{ Args: { "p_expected_owner": string }; Returns: Json
+                           },
 "cloud_purge_account":
 { Args: { "p_owner": string }; Returns: Json
                            },
@@ -1313,8 +1498,20 @@ isOneToOne: false
 "commons_begin_profile_image":
 { Args: { "p_format": string,"p_height": number,"p_kind": string,"p_sha256": string,"p_size_bytes": number,"p_width": number }; Returns: Json
                            },
+"commons_browse":
+{ Args: { "p_after_id"?: string,"p_after_published_at"?: string,"p_as_of"?: string,"p_category"?: string,"p_commercial"?: boolean,"p_license"?: string,"p_limit"?: number,"p_query"?: string }; Returns: Json
+                           },
 "commons_catalog":
 { Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"commons_catalog_items":
+{ Args: { "p_ids": (string)[] }; Returns: Json
+                           },
+"commons_catalog_models":
+{ Args: { "p_ids": (string)[] }; Returns: Json
+                           },
+"commons_catalog_page":
+{ Args: { "p_after"?: string,"p_as_of"?: string,"p_limit"?: number }; Returns: Json
                            },
 "commons_catalog_snapshot":
 { Args: Record<PropertyKey, never>; Returns: Json
@@ -1333,6 +1530,12 @@ isOneToOne: false
                            },
 "commons_collection_json":
 { Args: { "p": Omit<Database["public"]['Tables']["commons_collections"]['Row'], Database["public"]['Tables']["commons_collections"]['ComputedFields']>,"p_owner"?: boolean }; Returns: Json
+                           },
+"commons_credited_creator":
+{ Args: { "p_id": string }; Returns: Json
+                           },
+"commons_credited_creators":
+{ Args: Record<PropertyKey, never>; Returns: Json
                            },
 "commons_delete_collection":
 { Args: { "p_expected_version": number,"p_id": string }; Returns: undefined
@@ -1369,6 +1572,9 @@ isOneToOne: false
                            },
 "commons_my_collections":
 { Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"commons_my_model":
+{ Args: { "p_id": string }; Returns: Json
                            },
 "commons_my_models":
 { Args: Record<PropertyKey, never>; Returns: Json
@@ -1524,6 +1730,9 @@ isOneToOne: false
                            },
 "fr_conversation_list_open":
 { Args: { "p_host": string,"p_owner": string }; Returns: Json
+                           },
+"fr_conversation_set_document":
+{ Args: { "p_document": string,"p_id": string,"p_owner": string }; Returns: boolean
                            },
 "fr_conversation_start":
 { Args: { "p_email": string,"p_host": string,"p_kind": string,"p_owner": string,"p_path": string,"p_screen": Json }; Returns: Json

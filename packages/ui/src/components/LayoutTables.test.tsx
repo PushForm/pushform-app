@@ -6,11 +6,21 @@ import { layoutDashMm, layoutTextStyleAt, tableFrame } from '@pushform/layout';
 import { openLayoutFile } from '@pushform/io';
 import { createApp } from '../bootstrap';
 import { DocumentSession } from '../session';
-import { LayoutWorkspace } from './LayoutWorkspace';
+import { LayoutWorkspace, resetRememberedLayoutToolSettings } from './LayoutWorkspace';
 import { enterLayoutValue } from './layoutEntryTesting';
+
+/** Type `text` into the tool options bar's field `label` and leave it, which commits it as Enter does. */
+function setBar(label: string, text: string): void {
+  const input = screen.getByLabelText(label);
+  fireEvent.change(input, { target: { value: text } });
+  fireEvent.blur(input);
+}
+
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 function mount() {
+  // tool settings are remembered app-wide; each test starts as the app does
+  resetRememberedLayoutToolSettings();
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
   vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 891, height: 630, right: 891, bottom: 630, x: 0, y: 0, toJSON: () => ({}) });
   const app = createApp({ demo: false, expose: false });
@@ -25,8 +35,8 @@ function mount() {
 it('draws tables through the toolbar, previews without mutation, and edits cells on the page', async () => {
   const { tab, session, canvas, page, down, up, dispose } = mount();
   fireEvent.click(screen.getByRole('button', { name: 'Table' }));
-  fireEvent.change(screen.getByLabelText('Table rows'), { target: { value: '2' } });
-  fireEvent.change(screen.getByLabelText('Table columns'), { target: { value: '2' } });
+  setBar('Rows', '2');
+  setBar('Columns', '2');
   // A click without dragging keeps the toolbar counts; the next click sets the size.
   down(10, 10); up(10, 10);
   fireEvent.pointerMove(canvas, { clientX: 210, clientY: 150 });
@@ -135,7 +145,7 @@ it('resizes a rotated table along its frame with Shift while keeping previews ou
 it('drags to choose rows and columns, locks them on release, then sizes and places the table on the next click', () => {
   const { canvas, page, down, up, dispose } = mount();
   fireEvent.click(screen.getByRole('button', { name: 'Table' }));
-  const rows = screen.getByLabelText('Table rows') as HTMLInputElement, columns = screen.getByLabelText('Table columns') as HTMLInputElement;
+  const rows = screen.getByLabelText('Rows') as HTMLInputElement, columns = screen.getByLabelText('Columns') as HTMLInputElement;
   down(100, 100);
   expect(screen.queryByLabelText('Table size preview')).toBeNull();
   // 36 px per column, 18 px per row of screen drag.

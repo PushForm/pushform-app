@@ -16,12 +16,12 @@ it('makes unavailable configuration and an empty published catalog distinct', as
   view.rerender(<App loadCatalog={async () => []} />);
   expect(await screen.findByText('The library is ready for its first models.')).toBeTruthy();
 });
-it('searches and combines filters, clears them and shows source attribution on cards', async () => {
+it('searches and combines filters, clears them and keeps creator credits on cards', async () => {
   const first = exampleModel();
   const second = exampleModel({ id: 'garden-bench', title: 'Garden bench', category: 'Furniture', licenses: [{ ...first.licenses[0]!, name: 'Personal use', commercialUse: 'restricted' }] });
   render(<App loadCatalog={async () => [first, second]} />);
   await screen.findByRole('link', { name: 'View Workshop hinge' });
-  expect(screen.getAllByText('From Example Library')).toHaveLength(2);
+  expect(screen.getAllByText('By Example Maker')).toHaveLength(2);
   fireEvent.click(screen.getByRole('checkbox', { name: 'Commercial use permitted' }));
   expect(screen.queryByRole('link', { name: 'View Garden bench' })).toBeNull();
   fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'Furniture' } });
@@ -94,12 +94,12 @@ it('opens public profile routes independently of catalog availability',async()=>
 });
 
 const profilePage={profile:{id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',handle:'example-maker',displayName:'Example Maker',bio:'',avatarUrl:null,links:[]},models:[exampleModel()]};
-it('opens a public profile at its handle path and returns hash links from it to the catalog root',async()=>{
+it('opens a public profile at its handle path and moves older model hash links from it to the model path',async()=>{
   window.history.replaceState(null,'','/u/example-maker');const getByHandle=vi.fn().mockResolvedValue(profilePage);
   render(<App loadCatalog={async()=>[exampleModel()]} account={{profiles:{getByHandle}} as unknown as CommonsAccount}/>);
   expect(await screen.findByRole('heading',{name:'Example Maker'})).toBeTruthy();expect(getByHandle).toHaveBeenCalledWith('example-maker',expect.anything());
   window.history.pushState(null,'','/u/example-maker#models/workshop-hinge');fireEvent(window,new HashChangeEvent('hashchange'));
-  expect(await screen.findByRole('heading',{name:'Workshop hinge',level:1})).toBeTruthy();expect(window.location.pathname).toBe('/');expect(window.location.hash).toBe('#models/workshop-hinge');
+  expect(await screen.findByRole('heading',{name:'Workshop hinge',level:1})).toBeTruthy();expect(window.location.pathname).toBe('/models/workshop-hinge');expect(window.location.hash).toBe('');
   window.history.pushState(null,'','/u/example-maker');fireEvent(window,new PopStateEvent('popstate'));expect(await screen.findByRole('heading',{name:'Example Maker'})).toBeTruthy();
 });
 it('moves older account-ID profile links to the handle path',async()=>{
@@ -149,4 +149,38 @@ it('refreshes discovery after a contributor publishes without requiring a full p
   render(<App loadCatalog={loader}/>);await screen.findByText('The library is ready for its first models.');
   fireEvent(window,new Event('commons:catalog-changed'));
   expect(await screen.findByRole('link',{name:'View Workshop hinge'})).toBeTruthy();expect(loader).toHaveBeenCalledTimes(2);
+});
+
+it('lists each license name once on a model card while retaining its metadata records', async () => {
+  const model = exampleModel();
+  model.licenses = [model.licenses[0]!, { ...model.licenses[0]! }];
+  render(<App loadCatalog={async () => [model]} />);
+  await screen.findByText('Workshop hinge');
+  expect(screen.getAllByText(model.licenses[0]!.name, { selector: '.license-label' })).toHaveLength(1);
+  expect(model.licenses).toHaveLength(2);
+});
+
+it('serves a model at its own path with search tags, and keeps a missing model out of results', async () => {
+  window.history.replaceState(null, '', '/models/workshop-hinge');
+  const view = render(<App loadCatalog={async () => [exampleModel()]} />);
+  expect(await screen.findByRole('heading', { name: 'Workshop hinge', level: 1 })).toBeTruthy();
+  expect(document.title).toBe('Workshop hinge — Hardware 3D model | PushForm Commons');
+  expect(document.head.querySelector('link[rel="canonical"]')?.getAttribute('href')).toBe('https://commons.pushform.io/models/workshop-hinge');
+  expect(document.head.querySelector('meta[name="robots"]')?.getAttribute('content')).not.toContain('noindex');
+  expect(document.head.querySelector('script[type="application/ld+json"]')?.textContent).toContain('"@type":"3DModel"');
+  view.unmount();
+  window.history.replaceState(null, '', '/models/removed-model');
+  render(<App loadCatalog={async () => [exampleModel()]} />);
+  await screen.findByText(/may have been removed/);
+  expect(document.head.querySelector('meta[name="robots"]')?.getAttribute('content')).toContain('noindex');
+});
+
+it('opens a model from the library without leaving the page and links to it by path', async () => {
+  window.history.replaceState(null, '', '/');
+  render(<App loadCatalog={async () => [exampleModel()]} />);
+  const link = (await screen.findAllByRole('link', { name: 'Workshop hinge' }))[0]!;
+  expect(link.getAttribute('href')).toBe('/models/workshop-hinge');
+  fireEvent.click(link);
+  expect(await screen.findByRole('heading', { name: 'Workshop hinge', level: 1 })).toBeTruthy();
+  expect(window.location.pathname).toBe('/models/workshop-hinge');
 });

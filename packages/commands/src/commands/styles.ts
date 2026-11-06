@@ -10,6 +10,8 @@ import type { AnyCommand } from '../registry/Command';
 import type { DocumentHost } from '../host/DocumentHost';
 import { hostOf } from '../host/services';
 import type { DisplayKey, DisplayState } from '../host/DisplayHost';
+import { EnvironmentPatchSchema, patchedEnvironment } from './environment';
+import { ensureDocumentImage } from './materials';
 
 /**
  * Styles v1: the active style is the single source for edge, face,
@@ -25,6 +27,7 @@ const rgb = z.tuple([z.number(), z.number(), z.number()]);
 const idSchema = z.number().int().nonnegative();
 
 export const StylePatchSchema = z.object({
+  environment: EnvironmentPatchSchema.optional(),
   name: z.string().optional(),
   description: z.string().optional(),
   edges: z
@@ -97,6 +100,7 @@ export function styleOf(state: DocumentState, id: number): Style {
 
 /** Copy the defined fields of `patch` onto `style` (nested one level: edges/faces/background/modeling). */
 export function applyStylePatch(style: Style, patch: StylePatch): void {
+  if (patch.environment) style.environment = patchedEnvironment(style, patch.environment);
   if (patch.name !== undefined) style.name = patch.name;
   if (patch.description !== undefined) style.description = patch.description;
   for (const section of ['edges', 'faces', 'background', 'modeling'] as const) {
@@ -320,9 +324,12 @@ export const styleUpdate = defineCommand({
   params: z.object({ id: idSchema.optional(), patch: StylePatchSchema }),
   undoable: true,
   run(ctx, p): void {
-    hostOf(ctx).edit('Edit Style', (draft) => {
+    const host = hostOf(ctx);
+    host.edit('Edit Style', (draft) => {
       const state = draftState(draft);
-      applyStylePatch(styleOf(state, p.id ?? state.activeStyleId), p.patch);
+      const style = styleOf(state, p.id ?? state.activeStyleId);
+      applyStylePatch(style, p.patch);
+      if (p.patch.environment && style.environment?.skyboxImageId) style.environment.skyboxImageId = ensureDocumentImage(host, draft, style.environment.skyboxImageId);
     });
   },
 });

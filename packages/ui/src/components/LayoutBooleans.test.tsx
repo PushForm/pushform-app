@@ -41,7 +41,7 @@ it.each(['Union', 'Difference', 'Intersection', 'Exclusion', 'Division', 'Cut Pa
       [...preview.querySelectorAll('path')].every((p) => p.getAttribute('d')?.includes('C')),
     ).toBe(true);
     expect(tab.doc.state).toBe(before);
-    fireEvent.click(screen.getByRole('button', { name: 'Apply boolean' }));
+    fireEvent.click(within(screen.getByRole('toolbar')).getByRole('button', { name: 'Apply' }));
     const pieces = [...page().entities.values()].filter((e) => !untouched.has(e.id));
     expect(pieces).toHaveLength(name === 'Division' || name === 'Cut Path' ? 2 : 1);
     expect(
@@ -123,23 +123,25 @@ function setup() {
   };
 }
 
-it('puts contextual controls in a tool-titled right pane with Apply first and leaves the toolbar free of inputs', () => {
+it('puts tool controls in the tool options bar over the page, not in the side panel or the toolbar', () => {
   const { choose, dispose } = setup();
   choose('Difference');
-  const pane = screen.getByRole('region', { name: 'Difference tool options' });
-  expect(pane.closest('aside')?.getAttribute('aria-label')).toBe('Layout settings');
-  expect(within(pane).getByRole('heading', { name: 'Difference' })).toBeTruthy();
-  expect(within(pane).getAllByRole('button')[0]!.textContent).toBe('Apply boolean');
+  const bar = screen.getByRole('toolbar', { name: 'Difference options' });
+  expect(bar.closest('aside')).toBeNull();
+  expect(bar.classList.contains('is-shown')).toBe(true);
+  expect(within(bar).getByRole('button', { name: 'Apply' })).toBeTruthy();
   const toolbar = screen.getByRole('navigation', { name: 'Layout tools' });
   expect(toolbar.querySelector('input, select, .pf-layout-tool-option')).toBeNull();
+  expect(document.querySelector('.pf-layout-tool-panel')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Table' }));
-  expect(screen.queryByRole('region', { name: 'Difference tool options' })).toBeNull();
-  const tablePane = screen.getByRole('region', { name: 'Table tool options' });
-  fireEvent.change(within(tablePane).getByLabelText('Table rows'), { target: { value: '5' } });
+  const rows = within(screen.getByRole('toolbar', { name: 'Table options' })).getByLabelText('Rows');
+  fireEvent.change(rows, { target: { value: '5' } });
+  // the bar commits on blur as well as Enter; a keydown here would reach the boolean engine's document-wide key handler
+  fireEvent.blur(rows);
   fireEvent.click(screen.getByRole('button', { name: 'Select' }));
-  expect(screen.queryByRole('region', { name: 'Table tool options' })).toBeNull();
+  expect(document.querySelector('.pf-tob')!.classList.contains('is-shown')).toBe(false);
   fireEvent.click(screen.getByRole('button', { name: 'Table' }));
-  expect((screen.getByLabelText('Table rows') as HTMLInputElement).value).toBe('5');
+  expect((screen.getByLabelText('Rows') as HTMLInputElement).value).toBe('5');
   dispose();
 });
 
@@ -184,11 +186,11 @@ it('can pick behind an already-picked target and explains an empty result before
   // The small, frontmost shape is the target. The next click reaches the larger shape behind it.
   click(50, 50);
   click(50, 50);
-  expect(screen.getByRole('group', { name: 'Boolean operation' }).textContent).toContain(
+  expect(screen.getByRole('toolbar').textContent).toContain(
     'Empty result',
   );
   expect(tab.doc.state).toBe(original);
-  fireEvent.click(screen.getByRole('button', { name: 'Apply boolean' }));
+  fireEvent.click(within(screen.getByRole('toolbar')).getByRole('button', { name: 'Apply' }));
   expect(page().entities.size).toBe(0);
   expect(canvas.getAttribute('data-tool')).toBe('boolean-subtract');
   act(() => {
@@ -226,7 +228,7 @@ it.each(['Escape', 'pointer cancel', 'tool change', 'keyboard tool change', 'pag
     expect(tab.doc.state).toBe(original);
     choose('Union');
     expect(
-      (screen.getByRole('button', { name: 'Apply boolean' }) as HTMLButtonElement).disabled,
+      (within(screen.getByRole('toolbar')).getByRole('button', { name: 'Apply' }) as HTMLButtonElement).disabled,
     ).toBe(true);
     dispose();
   },
@@ -354,7 +356,7 @@ it('Cut Path accepts an open target and a closed cutter without inventing closin
   choose('Cut Path');
   click(15, 50);
   click(50, 50);
-  fireEvent.click(screen.getByRole('button', { name: 'Apply boolean' }));
+  fireEvent.click(within(screen.getByRole('toolbar')).getByRole('button', { name: 'Apply' }));
   expect(page().entities.has(target)).toBe(false);
   const pieces = [...page().entities.values()].filter((entity) => !entity.closed);
   expect(pieces.map((entity) => entity.points)).toEqual([

@@ -20,8 +20,8 @@ function setup() {
   const files = [{ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: 'bench.pf', format: 'PF', sizeBytes: 100, sha256: 'a'.repeat(64) }];
   const models = [{ ...metadata, files, id: 'bench', revision, publishedAt: '2026-11-04T00:00:00Z' }, { ...metadata, id: 'unknown', title: 'Unknown permission', revision, publishedAt: '2026-11-03T00:00:00Z', licenses: [{ ...metadata.licenses[0], commercialUse: 'unknown' }] }];
   let published: string | null = revision;
-  const rpc = vi.fn((name: string) => {
-    const data = name === 'commons_catalog' ? { version: 1, models } : name === 'commons_my_models' ? { models: [{ id: 'bench', latest_submission: revision, published_revision: published }], revisions: [{ id: revision, model_id: 'bench', number: 2, metadata, status: 'published', asset_version: 1, rights_basis: 'Original work created by me', creator_profile_id: null, self_service: true }], assets: [] } : null;
+  const rpc = vi.fn((name: string, args?: Record<string, unknown>) => {
+    const data = name === 'commons_browse' ? { version: 1, models: models.filter(model => (!args?.p_query || model.title.toLowerCase().includes(String(args.p_query).toLowerCase())) && (!args?.p_commercial || model.licenses.every(license => license.commercialUse === 'allowed'))), total: models.length, categories: ['Furniture'], licenses: ['CC BY 4.0'], nextCursor: null, asOf: '2026-11-05T00:00:00Z' } : name === 'commons_catalog_page' ? { version: 1, models, nextCursor: null, asOf: '2026-11-05T00:00:00Z' } : name === 'commons_catalog' ? { version: 1, models } : name === 'commons_my_models' ? { models: [{ id: 'bench', latest_submission: revision, published_revision: published }], revisions: [{ id: revision, model_id: 'bench', number: 2, metadata, status: 'published', asset_version: 1, rights_basis: 'Original work created by me', creator_profile_id: null, self_service: true }], assets: [] } : null;
     if (name === 'commons_withdraw_model') published = null;
     const promise = Promise.resolve({ data, error: null }); return Object.assign(promise, { abortSignal: () => promise });
   });
@@ -135,6 +135,7 @@ it('keeps the catalog and current documents when direct opening fails', async ()
   expect(screen.getByRole('button', { name: 'Open in new tab' })).toBeTruthy();
 });
 it('requests catalog and detail thumbnails with anonymous CORS for the isolated editor', async () => {
+  vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Prefetch unavailable'));
   const f = setup(); const view = render(<CommonsBrowser {...f.props} filesUrl="https://files.example.com"/>);
   await screen.findByText('Garden bench');
   const assertImage = (image: HTMLImageElement) => {
@@ -142,6 +143,7 @@ it('requests catalog and detail thumbnails with anonymous CORS for the isolated 
     expect(image.crossOrigin).toBe('anonymous');
     expect(image.getAttribute('referrerpolicy')).toBe('no-referrer');
   };
+  await waitFor(() => expect(view.container.querySelector('img')).not.toBeNull());
   assertImage(view.container.querySelector('img')!);
   fireEvent.click(screen.getByText('Garden bench'));
   expect(screen.getByRole('img', { name: 'Loading preview for Garden bench' })).toBeTruthy();

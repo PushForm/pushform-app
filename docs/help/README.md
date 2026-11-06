@@ -20,7 +20,7 @@ PushForm has two editors: **Modeling** for 3D work and **Layout** for drawings o
 - [Polygons, side counts and exact radii](layout/polygons.md)
 - [Delete objects, use Eraser and restore with Undo](layout/deleting.md)
 - [Selection, lasso and vertex editing](layout/selection.md)
-- [Move, Rotate, Scale, Offset, Fillet and Chamfer](layout/transforms.md)
+- [Move, Rotate, Scale, Offset and Corner (fillet and chamfer)](layout/transforms.md)
 - [Boolean operations and Shape Builder](layout/booleans.md)
 
 ## Layout documents and output
@@ -39,12 +39,13 @@ PushForm has two editors: **Modeling** for 3D work and **Layout** for drawings o
 - [Modeling toolbar controls and their purpose](modeling/controls.md)
 - [Drawing faces, circles, polygons and Push/Pull](modeling/drawing.md)
 - [Navigation, Move, Rotate and Scale](modeling/transforms-navigation.md)
-- [Follow Me, Offset and solid combinations and cuts](modeling/shaping.md)
+- [Follow Me, Offset, Profile Edges (fillet, chamfer, router profiles) and solid combinations and cuts](modeling/shaping.md)
 - [Tape Measure, guide lines, Protractor and Axes](modeling/construction.md)
 - [Typing exact values](modeling/measurements.md)
 - [Delete objects and erase sketch geometry](modeling/deleting.md)
 - [Selection, Object browser and Entity Info](modeling/selection.md)
 - [Materials, tags, hidden geometry and styles](modeling/materials-styles.md)
+- [Lighting, environments, skyboxes and scene lights](modeling/lighting.md)
 - [Groups and components](modeling/components.md)
 - [Dimensions, 3D text and pictures](modeling/annotations.md)
 - [Inference locks and section views](modeling/inference-sections.md)

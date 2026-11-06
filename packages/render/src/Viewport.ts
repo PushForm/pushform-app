@@ -22,6 +22,8 @@ import { DEFAULT_RENDER_FOG, DEFAULT_RENDER_SHADOWS } from './types';
 import type { RenderFog, RenderShadows } from './types';
 import { SunLight } from './shadows/SunLight';
 import { cameraLight, shadowDisplay } from './renderables/BodyRenderable';
+import { EnvironmentLighting } from './lighting/EnvironmentLighting';
+import type { EnvironmentSettings, SceneLight } from '@pushform/model';
 
 // three-mesh-bvh acceleration for CPU picking.
 (ThreeBufferGeometry.prototype as unknown as { computeBoundsTree: typeof computeBoundsTree }).computeBoundsTree = computeBoundsTree;
@@ -39,6 +41,7 @@ export interface ViewportEvents extends Record<string, unknown> {
 export interface SnapshotOptions {
   shift?: readonly [number, number] | undefined;
   background: string | null;
+  environmentBackground?: boolean;
 }
 
 /** 2D graphic export settings (`Viewport.renderImage`). */
@@ -70,6 +73,7 @@ export class Viewport {
   private readonly sky: SkyBackground;
   /** Sun light + shadow map + ground shadow plane (wraps the key and hemisphere lights). */
   readonly sunLight: SunLight;
+  readonly environmentLighting: EnvironmentLighting;
   private fogSettings: RenderFog = DEFAULT_RENDER_FOG;
   private shadowSettings: RenderShadows = DEFAULT_RENDER_SHADOWS;
   renderer: WebGLRenderer | null = null;
@@ -109,6 +113,7 @@ export class Viewport {
     this.scene.background = null;
     this.sunLight = new SunLight(sun, hemi);
     this.scene.add(this.sunLight.ground, sun.target);
+    this.environmentLighting = new EnvironmentLighting(this.scene);
   }
 
   /** Current sun/shadow settings. */
@@ -121,9 +126,24 @@ export class Viewport {
    * and sky lights otherwise. The camera light is shared by every viewport's materials, so each viewport sets it from
    * its own settings right before it draws.
    */
-  private applyLighting(): void {
-    cameraLight.value = this.shadowSettings.enabled || this.shadowSettings.useSunForShading ? 0 : 1;
+  private applyLighting(renderer: WebGLRenderer | null = this.renderer): void {
+    cameraLight.value = this.environmentLighting.settings || this.shadowSettings.enabled || this.shadowSettings.useSunForShading ? 0 : 1;
+    this.environmentLighting.apply(this.camera.three, this.sceneSync.sceneBounds(), this.sunLight, this.shadowSettings, renderer);
   }
+
+  setEnvironment(settings: EnvironmentSettings | null, lights: readonly SceneLight[] = [], skyboxUrl?: string): void {
+    this.environmentLighting.set(settings, lights);
+    this.sky.setEnvironment(settings?.sky ?? null, skyboxUrl, settings?.skyRotation ?? 0);
+    void this.sky.ready.then(() => this.requestRender(), () => this.requestRender());
+    if (!settings) {
+      this.sunLight.ambient.color.set(0xffffff); this.sunLight.ambient.groundColor.set(0x9aa5b1);
+      this.sunLight.set(this.shadowSettings, this.renderer);
+    }
+    this.sceneSync.setSunShade(settings ? null : this.shadowSettings.enabled && this.shadowSettings.onFaces ? Math.min(1, .2 + this.shadowSettings.dark / 100) : null);
+    this.requestRender();
+  }
+  setLightSelection(id: number | null): void { this.environmentLighting.setSelection(id); this.requestRender(); }
+  get environmentReady(): Promise<void> { return this.sky.ready; }
 
   /**
    * Sun and shadows: direction (NOAA solar position computed by the adapter), Light/Dark
@@ -278,7 +298,7 @@ export class Viewport {
       if (this.shadowSettings.enabled) this.sunLight.fit(this.sceneSync.sceneBounds());
       if (this.sky.visible) this.sky.update(cam, w / h);
       this.sceneSync.prepareFrame();
-      this.applyLighting();
+      this.applyLighting(renderer);
       renderer.render(this.scene, cam);
       const out = document.createElement('canvas');
       out.width = w;
@@ -325,11 +345,11 @@ export class Viewport {
     const visible = { grid: this.grid.visible, axes: this.axes.visible, sky: this.sky.visible, background: this.scene.background };
     this.grid.visible = false;
     this.axes.visible = false;
-    this.sky.visible = false;
-    this.scene.background = opts.background === null ? null : new Color(opts.background);
+    this.sky.visible = opts.environmentBackground === true && visible.sky;
+    this.scene.background = opts.environmentBackground ? visible.background : opts.background === null ? null : new Color(opts.background);
     // Hidden-line faces take the picture's background, or white paper where it has none.
     const faceBackground = this.sceneSync.backgroundColor();
-    this.sceneSync.setBackgroundColor(opts.background === null ? 0xffffff : new Color(opts.background).getHex());
+    if (!opts.environmentBackground) this.sceneSync.setBackgroundColor(opts.background === null ? 0xffffff : new Color(opts.background).getHex());
     renderer.setClearColor(0xffffff, 0);
     try {
       const fwd = cameraForward(camera);
@@ -341,6 +361,7 @@ export class Viewport {
       // face-camera placements face the picture's camera; the next frame turns them back
       this.sceneSync.updateFaceCamera({ eye: camera.eye, forward: fwd, parallel: camera.projection === 'parallel' }, this.shadowSettings.enabled ? this.sunLight.current.sunDirection : null);
       this.sceneSync.prepareFrame();
+      if (this.sky.visible) this.sky.update(this.camera.three, w / h);
       this.applyLighting();
       renderer.render(this.scene, this.camera.three);
       return read(renderer.domElement);
@@ -416,6 +437,7 @@ export class Viewport {
     this.grid.material.dispose();
     this.axes.dispose();
     this.sunLight.dispose();
+    this.environmentLighting.dispose();
   }
 
   resize(): void {
@@ -606,6 +628,7 @@ export class Viewport {
     this.grid.setOrigin(origin[0], origin[1], origin[2]);
     this.axes.setOrigin(origin[0], origin[1], origin[2]);
     this.sunLight.setOrigin(origin);
+    this.environmentLighting.setOrigin(origin);
     this.requestRender();
   }
 
@@ -672,7 +695,7 @@ export class Viewport {
       const depth = (p[0] - state.eye[0]) * fwd[0] + (p[1] - state.eye[1]) * fwd[1] + (p[2] - state.eye[2]) * fwd[2];
       return worldPerPixelAtDepth(state, depth, this.height);
     };
-    this.overlay.set(this.overlayPrims, cam, wppAt);
+    this.overlay.set([...this.overlayPrims, ...this.environmentLighting.helpers()], cam, wppAt);
     this.sceneSync.dimensions.update(cam, wppAt);
     this.sceneSync.texts.update(cam, wppAt);
     this.sceneSync.sections.update(cam, wppAt);

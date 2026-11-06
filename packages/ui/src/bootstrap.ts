@@ -55,6 +55,7 @@ import {
   offsetCommands,
   followMeCommands,
   edgeBlendCommands,
+  edgeToolAliasCommands,
   solidCommands,
   intersectCommands,
   contextCommands,
@@ -66,6 +67,7 @@ import {
   tagCommands,
   sceneCommands,
   styleCommands,
+  environmentCommands,
   shadowCommands,
   fogCommands,
   modelInfoCommands,
@@ -165,6 +167,7 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
   commands.registerAll(offsetCommands);
   commands.registerAll(followMeCommands);
   commands.registerAll(edgeBlendCommands);
+  commands.registerAll(edgeToolAliasCommands);
   commands.registerAll(solidCommands);
   commands.registerAll(intersectCommands);
   commands.registerAll(contextCommands);
@@ -173,6 +176,7 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
   commands.registerAll(tagCommands);
   commands.registerAll(sceneCommands);
   commands.registerAll(styleCommands);
+  commands.registerAll(environmentCommands);
   commands.registerAll(shadowCommands);
   commands.registerAll(fogCommands);
   commands.registerAll(materialCommands);
@@ -220,6 +224,8 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
   offs.push(toolManager.events.on('renderRequested', () => viewport.requestRender()));
   const syncUndo = () => store.getState().setUndoState(tx.canUndo(), tx.canRedo());
   offs.push(tx.onChange(syncUndo));
+  // an undo or another command ends the bar's applied state
+  offs.push(tx.onChange(() => toolManager.refreshStatus()));
   let bodies: readonly RenderBody[] = [];
   let hoverRef: EntityRef | null = null;
   const syncHighlights = () => {
@@ -252,7 +258,7 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
     viewport.setImages(imagesToRender(state));
     viewport.setAxes(axesToRender(state));
     viewport.setSky(backgroundToRender(state));
-    applyDocumentView(viewport, state);
+    applyDocumentView(viewport, state, tx.images);
     syncDisplayStoreFromStyle(state);
     viewport.setEditContext(editContextToRender(state, tx.context.path));
     syncHighlights();

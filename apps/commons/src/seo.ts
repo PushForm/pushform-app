@@ -24,6 +24,8 @@ export interface SeoMeta {
 
 export const modelPath = (id: string): string => `/models/${id}`;
 export const profilePathFor = (handle: string): string => `/u/${handle}`;
+/** The library filtered by a search, used to find every model credited to a creator without a Commons profile. */
+export const browseSearchPath = (query: string): string => `/?${new URLSearchParams({ q: query.trim().slice(0, 200) })}#browse`;
 const INDEX = 'index, follow, max-image-preview:large, max-snippet:-1';
 export const NOINDEX = 'noindex, follow';
 

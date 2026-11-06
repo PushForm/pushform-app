@@ -6,7 +6,7 @@ import { commonsFileUrl, CommonsUnavailableError, type CommonsProfile, type Comm
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { CommonsProfileEditor, CommonsProfilePageView, CreatorCredit, ProfileLink, type ProfileLookup } from './CommonsProfile';
 import { ModelCard, ModelGrid } from './ModelCard';
-import { currentCommonsLocation, modelIdFromPath, navigateCommons, openInApp, profileHandleFromPath, profilePath } from './route';
+import { browseSearchFromUrl, clearBrowseSearch, currentCommonsLocation, modelIdFromPath, navigateCommons, openInApp, profileHandleFromPath, profilePath } from './route';
 import { applySeo, homeSeo, modelSeo, normalizeSiteUrl, utilitySeo } from './seo';
 import { OwnModelsProvider, OwnModelGrid, OwnedDraftDetail, OwnerModelActions, useOwnModels } from './OwnModels';
 import { publishRoute, type PublishRoute } from './PublishPage';
@@ -85,7 +85,7 @@ function CommonsApp({ loadCatalog, filesUrl, account=null, publishPage, editorUr
   const [fullState, setState] = useState<CatalogState>({ kind: loadCatalog ? 'loading' : 'unconfigured' });
   const [attempt, setAttempt] = useState(0);
   useEffect(()=>{const refresh=()=>setAttempt(value=>value+1);window.addEventListener('commons:catalog-changed',refresh);return()=>window.removeEventListener('commons:catalog-changed',refresh);},[]);
-  const [filters, setFilters] = useState<CatalogFilters>(emptyFilters);
+  const [filters, setFilters] = useState<CatalogFilters>(() => { const query = browseSearchFromUrl(); return query === null ? emptyFilters : { ...emptyFilters, query }; });
   const [footerDocked, setFooterDocked] = useState(false);
   const [location,setLocation]=useState(currentCommonsLocation);
   const hash=location.hash;
@@ -111,7 +111,11 @@ function CommonsApp({ loadCatalog, filesUrl, account=null, publishPage, editorUr
     else window.location.hash = '#account';
   }, [legacyOwnRoute, own]);
   useEffect(() => {
-    const update = () => {const next=currentCommonsLocation();setLocation(current=>next.path===current.path&&next.hash===current.hash?current:next);};
+    clearBrowseSearch();
+    const update = () => {
+      const query=browseSearchFromUrl();
+      if(query!==null){clearBrowseSearch();setFilters({...emptyFilters,query});}
+      const next=currentCommonsLocation();setLocation(current=>next.path===current.path&&next.hash===current.hash?current:next);};
     window.addEventListener('hashchange', update);window.addEventListener('popstate', update);
     return () => {window.removeEventListener('hashchange', update);window.removeEventListener('popstate', update);};
   }, []);

@@ -4,7 +4,7 @@ PushForm Commons is a community model catalog with its own website. Browse model
 
 The unfiltered browse view omits models marked low interest by Commons admins. Search or apply any category, license, or commercial-use filter to find matching models from the full library. These models remain available through direct links, creator pages, and collections.
 
-Open a model to see its original creator next to the title. Source information, licenses and required credits are grouped under **Licenses & attribution**. When files are available, choose **Download ZIP** next to a filename. The package contains the unchanged original in `files/`, an `ATTRIBUTION.json` record and a README. Keep required credits and license notices with reused files. A free download does not remove license conditions.
+Open a model to see its original creator next to the title. Select a creator's name, on a model page or a model card, to see more of their work. A creator with a Commons profile opens that profile; any other creator name searches the library for that name. Source information, licenses and required credits are grouped under **Licenses & attribution**. When files are available, choose **Download ZIP** next to a filename. The package contains the unchanged original in `files/`, an `ATTRIBUTION.json` record and a README. Keep required credits and license notices with reused files. A free download does not remove license conditions.
 
 ## Browse featured projects and collections
 

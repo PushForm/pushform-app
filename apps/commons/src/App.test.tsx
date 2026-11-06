@@ -21,7 +21,7 @@ it('searches and combines filters, clears them and keeps creator credits on card
   const second = exampleModel({ id: 'garden-bench', title: 'Garden bench', category: 'Furniture', licenses: [{ ...first.licenses[0]!, name: 'Personal use', commercialUse: 'restricted' }] });
   render(<App loadCatalog={async () => [first, second]} />);
   await screen.findByRole('link', { name: 'View Workshop hinge' });
-  expect(screen.getAllByText('By Example Maker')).toHaveLength(2);
+  expect(screen.getAllByRole('link', { name: 'Example Maker' })).toHaveLength(2);
   fireEvent.click(screen.getByRole('checkbox', { name: 'Commercial use permitted' }));
   expect(screen.queryByRole('link', { name: 'View Garden bench' })).toBeNull();
   fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'Furniture' } });
@@ -131,6 +131,26 @@ it('links model creator credits to the creator handle path',async()=>{
   window.history.replaceState(null,'','/#models/workshop-hinge');
   render(<App loadCatalog={async()=>[exampleModel({creatorProfile:{id:profilePage.profile.id,handle:'example-maker',displayName:'Example Maker'}})]}/>);
   expect((await screen.findByRole('link',{name:'Example Maker'})).getAttribute('href')).toBe('/u/example-maker');
+});
+it('searches the library for a credited creator who has no Commons profile',async()=>{
+  window.history.replaceState(null,'','/models/workshop-hinge');
+  const other=exampleModel({id:'garden-bench',title:'Garden bench',creator:'Someone Else',credits:[]});
+  render(<App loadCatalog={Object.assign(async()=>[exampleModel(),other],{byIds:async()=>[exampleModel()]})}/>);
+  const credit=await screen.findByRole('link',{name:'Example Maker'});
+  expect(credit.getAttribute('href')).toBe('/?q=Example+Maker#browse');
+  fireEvent.click(credit);
+  expect(await screen.findByRole('link',{name:'View Workshop hinge'})).toBeTruthy();
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('Example Maker');
+  expect(screen.queryByRole('link',{name:'View Garden bench'})).toBeNull();
+  expect(window.location.pathname+window.location.search+window.location.hash).toBe('/#browse');
+});
+it('opens a shared creator search link with the search already applied',async()=>{
+  window.history.replaceState(null,'','/?q=Someone+Else#browse');
+  render(<App loadCatalog={async()=>[exampleModel(),exampleModel({id:'garden-bench',title:'Garden bench',creator:'Someone Else'})]}/>);
+  expect(await screen.findByRole('link',{name:'View Garden bench'})).toBeTruthy();
+  expect(screen.queryByRole('link',{name:'View Workshop hinge'})).toBeNull();
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('Someone Else');
+  expect(window.location.search).toBe('');
 });
 
 it('offers a real model-specific Open in PushForm action and explains unsupported original downloads', async () => {

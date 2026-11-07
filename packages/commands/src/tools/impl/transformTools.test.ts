@@ -18,6 +18,7 @@ import { groupCommands, type MakeResult } from '../../commands/groups';
 import { sectionPlaneCommands } from '../../commands/sectionPlanes';
 import { guideCommands } from '../../commands/guides';
 import { textCommands } from '../../commands/texts';
+import { modelInfoCommands } from '../../commands/modelInfo';
 import { containerAt } from '@pushform/model';
 import { worldToScreen } from './transformShared';
 
@@ -404,7 +405,7 @@ describe('RotateTool', () => {
     expect(tool.protractorNormal).toEqual([0, 0, 1]);
     tools.pointerDown(at(TOP_CAMERA, [1, 0.5, 1]));
     tools.pointerUp(at(TOP_CAMERA, [1, 0.5, 1]));
-    expect(tools.status().instructor).toContain('baseline');
+    expect(tools.status().instructor).toContain('starting direction');
     tools.pointerDown(at(TOP_CAMERA, [2, 0.5, 1]));
     tools.pointerUp(at(TOP_CAMERA, [2, 0.5, 1]));
     tools.pointerMove(at(TOP_CAMERA, [1.01, 1.5, 1])); // ~89.4°, within the 15° tick tolerance near the ring
@@ -452,6 +453,224 @@ describe('RotateTool', () => {
     expect(mins.some((m) => near(m, [-2, -1, 0]))).toBe(true); // 180°
     expect(mins.some((m) => near(m, [0, -2, 0]))).toBe(true); // 270°
     expect(host.undoStack.peek()?.label).toBe('Rotate');
+  });
+});
+
+describe('RotateTool: typed angles, snapping, locks and arrays', () => {
+  /** Rotate tool with a 2×1×1 box selected at x 1..2 and the center at the origin, starting along x. */
+  function started(opts: { angleSnap?: number | null } = {}) {
+    const s = setup();
+    if (opts.angleSnap !== undefined) {
+      s.registry.registerAll(modelInfoCommands);
+      s.registry.execute('model.setUnits', { patch: { angleSnap: opts.angleSnap } });
+    }
+    const id = s.addBox([1, 0, 0], [2, 1, 1]);
+    s.host.selection.set([bodyRef(id)]);
+    s.tools.activate('rotate');
+    const tool = s.tools.activeTool as RotateTool;
+    const click = (p: Vec3): void => {
+      s.tools.pointerDown(at(TOP_CAMERA, p));
+      s.tools.pointerUp(at(TOP_CAMERA, p));
+    };
+    return { ...s, id, tool, click };
+  }
+  const min = (b: Body): Vec3 => meshBounds(b.mesh).min.map((x) => +x.toFixed(6) + 0) as unknown as Vec3;
+
+  it('a bare number is degrees, counterclockwise about the normal before the pointer has turned', async () => {
+    const { tools, tool, click, body, id, host } = started();
+    click([0, 0, 0]);
+    click([1, 0, 0]);
+    tools.onVcb({ kind: 'length', meters: 90 * 0.0254, raw: 90, unit: null });
+    await tool.settled;
+    expect(near(min(body(id)), [-1, 1, 0])).toBe(true);
+    expect(host.undoStack.peek()?.label).toBe('Rotate');
+  });
+
+  it('a typed angle turns the way the preview turns, and a negative one the other way', async () => {
+    const { tools, tool, click, body, id, host } = started();
+    click([0, 0, 0]);
+    click([1, 0, 0]);
+    tools.pointerMove(at(TOP_CAMERA, [1, -0.3, 0])); // turning clockwise
+    expect(tool.dragAngleDeg!).toBeLessThan(0);
+    tools.onVcb({ kind: 'length', meters: 0, raw: 90, unit: null });
+    await tool.settled;
+    expect(near(min(body(id)), [0, -2, 0])).toBe(true); // 90° clockwise
+    host.undo();
+    click([0, 0, 0]);
+    click([1, 0, 0]);
+    tools.pointerMove(at(TOP_CAMERA, [1, -0.3, 0]));
+    tools.onVcb({ kind: 'angle', degrees: -90 });
+    await tool.settled;
+    expect(near(min(body(id)), [-1, 1, 0])).toBe(true); // the other way: counterclockwise
+  });
+
+  it('an angle typed before the starting direction changes nothing and asks for it, even after a rotation', async () => {
+    const { tools, tool, click, body, id, host } = started();
+    click([0, 0, 0]);
+    click([1, 0, 0]);
+    tools.onVcb({ kind: 'angle', degrees: 90 });
+    await tool.settled;
+    const entries = host.undoStack.length;
+    expect(near(min(body(id)), [-1, 1, 0])).toBe(true);
+    click([0, 0, 0]);
+    tools.onVcb({ kind: 'angle', degrees: 45 });
+    await tool.settled;
+    expect(tools.status().instructor).toContain('starting direction first');
+    expect(near(min(body(id)), [-1, 1, 0])).toBe(true);
+    expect(host.undoStack.length).toBe(entries);
+    // the next step clears the message
+    click([1, 0, 0]);
+    expect(tools.status().instructor).not.toContain('starting direction first');
+  });
+
+  it('an angle typed just after a rotation redoes it the way it turned, as one step', async () => {
+    const { tools, tool, click, body, id, host } = started();
+    click([0, 0, 0]);
+    click([1, 0, 0]);
+    tools.pointerMove(at(TOP_CAMERA, [1, -0.3, 0]));
+    tools.onVcb({ kind: 'angle', degrees: 45 });
+    await tool.settled;
+    const entries = host.undoStack.length;
+    tools.onVcb({ kind: 'length', meters: 0, raw: 90, unit: null });
+    await tool.settled;
+    expect(near(min(body(id)), [0, -2, 0])).toBe(true); // still clockwise
+    expect(host.undoStack.length).toBe(entries);
+    expect(tools.status().vcbValue).toContain('-90');
+  });
+
+  it('the last rotation does not survive a tool switch or another change', async () => {
+    const { tools, tool, click, body, id, host, addBox } = started();
+    click([0, 0, 0]);
+    click([1, 0, 0]);
+    tools.onVcb({ kind: 'angle', degrees: 90 });
+    await tool.settled;
+    expect(tools.status().vcbValue).toContain('90');
+    tools.activate('move');
+    tools.activate('rotate');
+    expect(tools.status().vcbValue).toBeUndefined();
+    tools.onVcb({ kind: 'angle', degrees: 45 });
+    await tool.settled;
+    expect(near(min(body(id)), [-1, 1, 0])).toBe(true);
+
+    // another change on top: the redo is skipped and the old angle is not kept
+    host.selection.set([bodyRef(id)]);
+    click([0, 0, 0]);
+    click([1, 0, 0]);
+    tools.onVcb({ kind: 'angle', degrees: 90 });
+    await tool.settled;
+    expect(near(min(body(id)), [-2, -1, 0])).toBe(true);
+    addBox([5, 5, 0], [6, 6, 1]);
+    expect(tools.status().vcbValue).toBeUndefined();
+    tools.onVcb({ kind: 'angle', degrees: 45 });
+    await tool.settled;
+    expect(near(min(body(id)), [-2, -1, 0])).toBe(true);
+  });
+
+  it('snaps to the snap angle within 2 px at any distance, draws ticks at it, and not at all when snapping is off', async () => {
+    const ticks = (snap: number | null): number => {
+      const { tools } = started({ angleSnap: snap });
+      tools.pointerMove(at(TOP_CAMERA, [0, 0, 0]));
+      return tools.overlay().filter((o) => o.kind === 'polyline' && o.points.length === 2 && o.width === 1).length;
+    };
+    const off = ticks(null);
+    expect(ticks(30) - off).toBe(12 - 4);
+    expect(ticks(15) - off).toBe(24 - 4);
+    expect(ticks(1) - off).toBe(72 - 4); // finer snaps are drawn every 5°
+
+    const far = started({ angleSnap: 15 });
+    far.click([0, 0, 0]);
+    far.click([1, 0, 0]);
+    far.tools.pointerMove(at(TOP_CAMERA, [0.01, 5, 0])); // 1 px off 90°, 500 px out
+    expect(far.tool.dragAngleDeg).toBeCloseTo(90, 9);
+    far.tools.pointerMove(at(TOP_CAMERA, [0.05, 5, 0])); // 5 px off
+    expect(far.tool.dragAngleDeg).not.toBeCloseTo(90, 3);
+
+    const free = started({ angleSnap: null });
+    free.click([0, 0, 0]);
+    free.click([1, 0, 0]);
+    free.tools.pointerMove(at(TOP_CAMERA, [0.01, 1, 0])); // near the ring
+    expect(free.tool.dragAngleDeg).not.toBeCloseTo(90, 3);
+  });
+
+  it('once the center is set the arrow keys do nothing and no lock tag is shown', () => {
+    const { tools, tool, click } = started();
+    tools.keyDown(key('ArrowRight'));
+    expect(tools.status().held?.length).toBe(1);
+    tools.keyDown(key('ArrowRight'));
+    click([0, 0, 0]);
+    expect(tool.protractorNormal).toEqual([0, 0, 1]);
+    expect(tools.keyDown(key('ArrowUp'))).toBe(true);
+    expect(tools.keyDown(key('ArrowRight'))).toBe(true);
+    expect(tool.protractorNormal).toEqual([0, 0, 1]);
+    expect(tools.status().held ?? []).toEqual([]);
+    tools.keyDown(key('Escape'));
+    // a lock set before the center stays on its axis but its tag goes once the center is set
+    tools.keyDown(key('ArrowRight'));
+    click([0, 0, 0]);
+    expect(tool.protractorNormal).toEqual([1, 0, 0]);
+    expect(tools.status().held ?? []).toEqual([]);
+    tools.keyDown(key('ArrowLeft'));
+    expect(tool.protractorNormal).toEqual([1, 0, 0]);
+  });
+
+  it('/N spreads the copies over a turn past 180°, the way it turned', async () => {
+    const { tools, tool, click, bodies, host } = started();
+    tools.keyDown(key('Control', CTRL));
+    tools.keyUp(key('Control', CTRL));
+    click([0, 0, 0]);
+    click([1, 0, 0]);
+    tools.onVcb({ kind: 'angle', degrees: 270 });
+    await tool.settled;
+    expect(bodies().map(min)).toContainEqual([0, -2, 0]);
+    const entries = host.undoStack.length;
+    tools.onVcb({ kind: 'array', mode: 'internal', count: 3 });
+    await tool.settled;
+    const mins = bodies().map(min);
+    expect(mins).toHaveLength(4);
+    expect(mins).toContainEqual([-1, 1, 0]); // 90°
+    expect(mins).toContainEqual([-2, -1, 0]); // 180°
+    expect(mins).toContainEqual([0, -2, 0]); // 270°
+    expect(host.undoStack.length).toBe(entries);
+    expect(host.undoStack.peek()?.label).toBe('Rotate');
+  });
+
+  it('a copy turned all the way round, then /N, spreads N copies evenly round the circle', async () => {
+    const { tools, tool, click, bodies } = started();
+    tools.keyDown(key('Control', CTRL));
+    tools.keyUp(key('Control', CTRL));
+    click([0, 0, 0]);
+    click([1, 0, 0]);
+    tools.pointerMove(at(TOP_CAMERA, [1, -0.3, 0])); // clockwise
+    tools.onVcb({ kind: 'angle', degrees: 360 });
+    await tool.settled;
+    expect(bodies()).toHaveLength(2);
+    tools.onVcb({ kind: 'array', mode: 'internal', count: 4 });
+    await tool.settled;
+    const mins = bodies().map(min);
+    expect(mins).toHaveLength(5);
+    expect(mins).toContainEqual([0, -2, 0]); // 90° clockwise first
+    expect(mins).toContainEqual([-2, -1, 0]);
+    expect(mins).toContainEqual([-1, 1, 0]);
+    expect(mins.filter((m) => near(m, [1, 0, 0]))).toHaveLength(2); // the last copy is back at the start
+  });
+
+  it('switching Copy in the bar just after a rotation redoes it as a copy and back, as one step', async () => {
+    const { tools, tool, click, bodies, host, id, body } = started();
+    click([0, 0, 0]);
+    click([1, 0, 0]);
+    tools.onVcb({ kind: 'angle', degrees: 90 });
+    await tool.settled;
+    const entries = host.undoStack.length;
+    tools.setting('copy', true);
+    await tool.settled;
+    expect(bodies()).toHaveLength(2);
+    expect(near(min(body(id)), [1, 0, 0])).toBe(true);
+    expect(host.undoStack.length).toBe(entries);
+    expect(tool.adjustLast('copy', false)).toBe(true);
+    await tool.settled;
+    expect(bodies()).toHaveLength(1);
+    expect(near(min(body(id)), [-1, 1, 0])).toBe(true);
+    expect(tool.copyMode).toBe(false);
   });
 });
 

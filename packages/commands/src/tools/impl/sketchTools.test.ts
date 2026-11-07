@@ -8,6 +8,7 @@ import type { EntityRef } from '@pushform/model';
 import { CommandRegistry } from '../../registry/CommandRegistry';
 import { editCommands } from '../../registry/editCommands';
 import { sketchCommands } from '../../commands/sketch';
+import { guideCommands } from '../../commands/guides';
 import { DocumentHost } from '../../host/DocumentHost';
 import { SERVICE_DOCUMENT, SERVICE_INFERENCE } from '../../host/services';
 import type { CameraHost, CameraState } from '../../camera/CameraHost';
@@ -644,6 +645,44 @@ describe('EraserTool', () => {
     host.undo();
     expect(sketch().edges.size).toBe(4);
     expect(sketch().faces.size).toBe(1);
+  });
+
+  it('erases a guide together with the edges of the same stroke in one undo step; modifiers leave guides alone', () => {
+    const { tools, host, registry, sketch } = setup();
+    registry.registerAll(guideCommands);
+    rectangle(registry);
+    registry.execute('guides.addLine', { point: [0, 0.5, 0], dir: [1, 0, 0] });
+    const guides = () => host.doc.rootDefinition.entities.guides;
+    const guideId = [...guides().keys()][0]!;
+    const guideHit: PickHit = { ref: { kind: 'guide', path: [], id: guideId }, point: [0.5, 0.5, 0], t: 9, screenDist: 0 };
+    const e1 = [...sketch().edges.keys()][0]!;
+    tools.activate('eraser');
+    tools.click(at([0.5, 0.5, 0], { hit: guideHit, modifiers: SHIFT }));
+    tools.click(at([0.5, 0.5, 0], { hit: guideHit, modifiers: CTRL }));
+    expect(guides().has(guideId)).toBe(true);
+    const undoDepth = host.undoStack.length;
+    tools.pointerDown(at([0.5, 0.5, 0], { hit: guideHit }));
+    expect((tools.activeTool as EraserTool).markedRefs).toEqual([guideHit.ref]);
+    tools.pointerMove(at([0.5, 0, 0], { button: -1, buttons: 1, hit: edgeHit(e1, [0.5, 0, 0]) }));
+    tools.pointerUp(at([0.5, 0, 0], { hit: edgeHit(e1, [0.5, 0, 0]) }));
+    tools.click(at([0.5, 0, 0], { hit: edgeHit(e1, [0.5, 0, 0]) }));
+    expect(guides().size).toBe(0);
+    expect(sketch().edges.size).toBe(3);
+    expect(host.undoStack.length).toBe(undoDepth + 1);
+    host.undo();
+    expect(guides().has(guideId)).toBe(true);
+    expect(sketch().edges.size).toBe(4);
+  });
+
+  it('leaves a guide outside the open context alone', () => {
+    const { tools, host, registry } = setup();
+    registry.registerAll(guideCommands);
+    registry.execute('guides.addLine', { point: [0, 0.5, 0], dir: [1, 0, 0] });
+    const guideId = [...host.doc.rootDefinition.entities.guides.keys()][0]!;
+    const elsewhere: PickHit = { ref: { kind: 'guide', path: [123 as Id], id: guideId }, point: [0.5, 0.5, 0], t: 9, screenDist: 0 };
+    tools.activate('eraser');
+    tools.click(at([0.5, 0.5, 0], { hit: elsewhere }));
+    expect(host.doc.rootDefinition.entities.guides.has(guideId)).toBe(true);
   });
 
   it('Esc during a drag erases nothing, on release or on the trailing click', () => {

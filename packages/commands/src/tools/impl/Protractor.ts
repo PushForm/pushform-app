@@ -27,7 +27,8 @@ const IDLE: State = { kind: 'idle' };
  * Protractor. The plane comes from the hovered face, an arrow-key axis lock, or Shift (holds the
  * current plane). Click the vertex (center), click the baseline direction, rotate to the angle
  * (15° ticks while the cursor is inside the protractor) and click → a guide line at that angle
- * (`guides.addLine`). VCB takes degrees or `rise:run`; Ctrl toggles guide creation.
+ * (`guides.addLine`). VCB takes degrees or `rise:run`; Ctrl toggles guide creation, which is on
+ * again each time the tool is chosen.
  */
 export class ProtractorTool implements Tool {
   readonly id = 'protractor';
@@ -69,6 +70,8 @@ export class ProtractorTool implements Tool {
   activate(ctx: ToolContext): void {
     this.ctx = ctx;
     this.state = IDLE;
+    // every time the tool is chosen it starts creating guides again
+    this.createGuides = true;
   }
   deactivate(): void {
     this.reset();

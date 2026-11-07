@@ -45,10 +45,10 @@ const IDLE: State = { kind: 'idle' };
 /**
  * Move (M). Idle → pick a base point (hovering picks the entity under the cursor when nothing is
  * selected) → Moving: Δ = inference point − base with arrow-key axis locks and Shift lock;
- * commit on click (click-move-click) or on release after a drag. Ctrl tap toggles copy; Alt
- * requests autofold (the model autofolds sub-entity moves anyway). VCB: distance along the
- * current direction, `[x,y,z]`, `<x,y,z>`, and after a copy `3x` / `/3` arrays. A body face moved
- * along its normal with perpendicular neighbours is routed to push/pull by `transform.apply`.
+ * commit on click (click-move-click) or on release after a drag. Ctrl tap toggles copy. Moved
+ * faces and edges of a solid always fold into a valid solid. VCB: distance along the current
+ * direction, `[x,y,z]`, `<x,y,z>`, and after a copy `3x` / `/3` arrays. A body face moved along
+ * its normal with perpendicular neighbours is routed to push/pull by `transform.apply`.
  */
 export class MoveTool extends TransformToolBase implements SectionPreviewTool {
   readonly id = 'move';
@@ -68,7 +68,6 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
   /** ↓ lock parallel / perpendicular to the last inferred edge. */
   private readonly edgeLock = new EdgeLock();
   private copy = false;
-  private autofold = false;
   private glue: GlueMove | null = null;
 
   get cursor(): string {
@@ -77,10 +76,6 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
   /** Copy mode (Ctrl tap). */
   get copyMode(): boolean {
     return this.copy;
-  }
-  /** Alt pressed: autofold explicitly requested. */
-  get autofoldRequested(): boolean {
-    return this.autofold;
   }
   /** Section planes being moved, drawn and cutting where the move would put them; copies are drawn without cutting. */
   get sectionPreview(): SectionPreview | null {
@@ -108,7 +103,6 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     this.planeHold = null;
     this.hover = null;
     this.copy = false;
-    this.autofold = false;
   }
   hasPendingWork(): boolean {
     return this.state.kind !== 'idle';
@@ -225,12 +219,6 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
           this.ctx?.requestRender();
         }
         return true;
-      case 'Alt':
-        if (!e.repeat) {
-          this.autofold = !this.autofold;
-          this.ctx?.statusChanged();
-        }
-        return true;
       default:
         return false;
     }
@@ -298,7 +286,7 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
 
   status(): ToolStatus {
     const held = [...axisTag(this.lockAxis), ...(this.lockSnap ? [SHIFT_HELD] : []), ...(this.edgeLock.active ? [EDGE_LOCKED] : [])];
-    return { ...this.baseStatus(), settings: [toggleSetting('copy', 'Copy', this.copy, 'primary'), toggleSetting('autofold', 'Autofold', this.autofold, 'secondary')], ...(held.length ? { held } : {}) };
+    return { ...this.baseStatus(), settings: [toggleSetting('copy', 'Copy', this.copy, 'primary')], ...(held.length ? { held } : {}) };
   }
 
   /** The bar switched Copy just after a commit: redo it as a copy, or as a plain move, in one undo step. */
@@ -309,10 +297,8 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
   }
 
   onSetting(id: string, value: ToolSettingValue): void {
-    if (typeof value !== 'boolean') return;
-    if (id === 'copy') this.copy = value;
-    else if (id === 'autofold') this.autofold = value;
-    else return;
+    if (typeof value !== 'boolean' || id !== 'copy') return;
+    this.copy = value;
     this.ctx?.requestRender();
     this.ctx?.statusChanged();
   }

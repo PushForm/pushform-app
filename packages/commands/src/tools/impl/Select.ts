@@ -10,7 +10,7 @@ import { connectedSketchRefs, faceBoundingEdgeRefs, facesUsingEdge, surfaceRefs 
 import type { DeleteResult } from '../../commands/sketch';
 import type { OverlayPrimitive } from '../overlay';
 import type { Modifiers, Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
-import { ctrlLike, DRAG_PX, entityOverlay, HOVER_COLOR, hostOfTool, screenDist } from '../toolUtil';
+import { DRAG_PX, entityOverlay, HOVER_COLOR, hostOfTool, screenDist } from '../toolUtil';
 
 export type BoxSelectMode = 'window' | 'crossing';
 
@@ -118,8 +118,15 @@ export class SelectTool implements Tool {
 
   onPointerDown(e: ToolPointerEvent): void {
     if (e.button !== 0) return;
+    // A new press means any click owed to the last release has come or never will.
+    this.suppressNextClick = false;
     this.downScreen = e.screen;
     this.dragTo = null;
+  }
+
+  /** A press is in progress: Esc ends it here rather than returning to a set-aside tool. */
+  hasPendingWork(): boolean {
+    return this.downScreen !== null;
   }
 
   onPointerUp(e: ToolPointerEvent): void {
@@ -202,10 +209,14 @@ export class SelectTool implements Tool {
     return true;
   }
 
-  /** Esc: cancel a drag / message; with nothing selected inside a context, close one level. */
+  /**
+   * Esc: cancel a drag / message; with nothing selected inside a context, close one level. A drag
+   * cancelled with the button still held also swallows the click that follows its release.
+   */
   onCancel(): void {
     const wasDragging = this.downScreen !== null;
     this.reset();
+    this.suppressNextClick = wasDragging;
     const host = this.host();
     if (!wasDragging && host && host.selection.isEmpty) this.exitContext();
     this.ctx?.requestRender();
@@ -335,11 +346,13 @@ export class SelectTool implements Tool {
   }
 }
 
-/** Selection operation for click modifiers: Ctrl add, Shift toggle, Ctrl+Shift remove, none replace. */
+/**
+ * Selection operation for click modifiers: Ctrl add, Shift toggle, Ctrl+Shift remove, none replace.
+ * Only Ctrl counts (Cmd on macOS, mapped before tools see it); Alt plays no part in selecting.
+ */
 export function opOf(m: Modifiers): SelectOp {
-  const ctrl = ctrlLike(m);
-  if (ctrl && m.shift) return 'remove';
-  if (ctrl) return 'add';
+  if (m.ctrl && m.shift) return 'remove';
+  if (m.ctrl) return 'add';
   if (m.shift) return 'toggle';
   return 'set';
 }

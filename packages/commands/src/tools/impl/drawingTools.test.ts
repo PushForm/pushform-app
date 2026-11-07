@@ -11,6 +11,7 @@ import { editCommands } from '../../registry/editCommands';
 import { sketchCommands } from '../../commands/sketch';
 import { curveCommands } from '../../commands/curves';
 import { modelCommands } from '../../commands/model';
+import { tagCommands } from '../../commands/tags';
 import { DocumentHost } from '../../host/DocumentHost';
 import { SERVICE_DOCUMENT } from '../../host/services';
 import type { CameraHost, CameraState } from '../../camera/CameraHost';
@@ -24,6 +25,7 @@ import { RectangleTool } from './Rectangle';
 import type { CircleTool } from './Circle';
 import type { PolygonTool } from './Polygon';
 import type { TwoPointArcTool } from './TwoPointArc';
+import type { ThreePointArcTool } from './ThreePointArc';
 import type { FreehandTool } from './Freehand';
 import type { RotatedRectangleTool } from './RotatedRectangle';
 
@@ -239,6 +241,67 @@ describe('PolygonTool', () => {
     expect(c.radius).toBeCloseTo(1 / Math.cos(Math.PI / 6), 9);
     expect(hasVertex(sketch(), [5 + c.radius, 5, 0])).toBe(true);
   });
+
+  it('Circumscribed goes back to its default each time the tool is chosen', () => {
+    const { tools } = setup();
+    tools.activate('polygon');
+    const poly = tools.get('polygon') as PolygonTool;
+    tools.setting('mode', 'circumscribed');
+    expect(poly.circumscribed).toBe(true);
+    tools.activate('circle');
+    tools.activate('polygon');
+    expect(poly.circumscribed).toBe(false);
+    expect(tools.status().settings!.find((x) => x.id === 'mode')).toMatchObject({ value: 'inscribed' });
+    expect(tap(tools, 'Control')).toBe(true);
+    tools.activate('line');
+    tools.activate('polygon');
+    expect(poly.circumscribed).toBe(false);
+  });
+
+  it('a Ctrl tap while the polygon is applied redraws it in the other mode, as one undo step; Sides then keeps that mode', () => {
+    const { host, tools, sketch } = setup();
+    tools.activate('polygon');
+    tools.click(at([0, 0, 0]));
+    tools.click(at([1, 0, 0]));
+    expect(tools.status().applied).toBe(true);
+    const entries = host.undoStack.length;
+    const curve = () => [...sketch().curves.values()][0]!;
+    expect(tap(tools, 'Control')).toBe(true);
+    expect(host.undoStack.length).toBe(entries);
+    expect(sketch().curves.size).toBe(1);
+    expect(curve().radius).toBeCloseTo(1 / Math.cos(Math.PI / 6), 9);
+    expect(tools.status().applied).toBe(true);
+    expect(tools.status().settings!.find((x) => x.id === 'mode')).toMatchObject({ value: 'circumscribed' });
+    // a second tap goes back to inscribed, still one step
+    tap(tools, 'Control');
+    expect(host.undoStack.length).toBe(entries);
+    expect(curve().radius).toBeCloseTo(1, 9);
+    // the bar's toggle does the same; a later Sides change keeps the polygon's mode
+    tools.setting('mode', 'circumscribed');
+    expect(curve().radius).toBeCloseTo(1 / Math.cos(Math.PI / 6), 9);
+    tools.setting('sides', { kind: 'segments', count: 8 });
+    expect(host.undoStack.length).toBe(entries);
+    expect(curve()).toMatchObject({ segments: 8 });
+    expect(curve().radius).toBeCloseTo(1 / Math.cos(Math.PI / 8), 9);
+    host.undo();
+    expect(sketch().curves.size).toBe(0);
+  });
+
+  it('after a press in the view, a Ctrl tap is for the next polygon only', () => {
+    const { host, tools, sketch } = setup();
+    tools.activate('polygon');
+    tools.click(at([0, 0, 0]));
+    tools.click(at([1, 0, 0]));
+    tools.pointerDown(at([5, 5, 0], { button: 2 })); // a press that starts nothing
+    expect(tools.status().applied).toBe(false);
+    const entries = host.undoStack.length;
+    tap(tools, 'Control');
+    expect(host.undoStack.length).toBe(entries);
+    expect([...sketch().curves.values()][0]!.radius).toBeCloseTo(1, 9);
+    // the toggle changed but the last polygon did not: a later Sides change leaves it alone
+    tools.setting('sides', { kind: 'segments', count: 5 });
+    expect([...sketch().curves.values()][0]).toMatchObject({ segments: 6, radius: 1 });
+  });
 });
 
 describe('ArcTool / PieTool', () => {
@@ -377,7 +440,9 @@ describe('ThreePointArcTool', () => {
     tools.click(at([-1, 0, 0]));
     tools.click(at([0, 1, 0]));
     tools.pointerMove(at([1, 0, 0]));
-    expect(tools.status()).toMatchObject({ vcbLabel: 'Radius', vcbValue: `3' 3 3/8"` });
+    // the end stage's value is the distance from the second point to the end (√2 m here)
+    expect(tools.status()).toMatchObject({ vcbLabel: 'Length', vcbValue: `4' 7 11/16"` });
+    expect(tools.status().fields).toEqual([expect.objectContaining({ label: 'Length', value: `4' 7 11/16"` })]);
     tools.click(at([1, 0, 0]));
     expect(sketch().edges.size).toBe(12);
     expect(sketch().faces.size).toBe(0);
@@ -385,6 +450,21 @@ describe('ThreePointArcTool', () => {
     expect(c.radius).toBeCloseTo(1, 9);
     expect(hasVertex(sketch(), [0, 1, 0])).toBe(true);
     expect(hasVertex(sketch(), [1, 0, 0])).toBe(true);
+  });
+});
+
+describe('ThreePointArcTool end stage', () => {
+  it('a typed length places the end that far from the second point, toward the pointer', () => {
+    const { tools, sketch } = setup();
+    tools.activate('arc3');
+    tools.click(at([-1, 0, 0]));
+    tools.click(at([0, 1, 0]));
+    tools.pointerMove(at([0.5, 0.5, 0])); // pointer down-right of the second point
+    vcb(tools, '1m');
+    const end: Vec3 = [Math.SQRT1_2, 1 - Math.SQRT1_2, 0];
+    expect(sketch().curves.size).toBe(1);
+    expect(hasVertex(sketch(), end)).toBe(true);
+    expect((tools.get('arc3') as ThreePointArcTool).lastParams?.end[0]).toBeCloseTo(end[0], 9);
   });
 });
 
@@ -677,5 +757,96 @@ describe('typed values before the first click', () => {
     tools.onVcb({ kind: 'segments', count: 8 });
     expect(tools.status().settings![0]).toMatchObject({ id: 'sides', value: '8' });
     expect(tools.status().instructor).toBe('Select center point.');
+  });
+
+  it.each([
+    ['arc', 'Select center point.'],
+    ['pie', 'Select center point.'],
+    ['arc2', 'Select start point of arc, or double-click a corner to fillet it.'],
+    ['arc3', 'Select start point of arc.'],
+  ])('%s: a bare number sets no segment count; the hint says to type it with s', (id, instructor) => {
+    const { tools, sketch } = setup();
+    tools.activate(id);
+    expect(tools.status()).toMatchObject({ instructor, vcbLabel: 'Segments', vcbValue: '12' });
+    tools.onVcb({ kind: 'length', meters: 0.3048, raw: 16, unit: null });
+    expect(tools.status().settings![0]).toMatchObject({ id: 'segments', value: '12' });
+    expect(tools.status().instructor).toMatch(/^Type 16s for 16 segments, or set Segments in the tool options bar\. Then select /);
+    expect(sketch().edges.size).toBe(0);
+    tools.onVcb({ kind: 'segments', count: 16 });
+    expect(tools.status().settings![0]).toMatchObject({ id: 'segments', value: '16' });
+    expect(tools.status()).toMatchObject({ instructor, vcbLabel: 'Segments', vcbValue: '16' });
+  });
+
+  it('right after an arc, a bare number still re-edits it', () => {
+    const { tools, sketch, host } = setup();
+    tools.activate('arc');
+    tools.click(at([0, 0, 0]));
+    tools.click(at([1, 0, 0]));
+    tools.click(at([0, 1, 0]));
+    const entries = host.undoStack.length;
+    vcb(tools, '4m');
+    expect(host.undoStack.length).toBe(entries);
+    expect([...sketch().curves.values()][0]).toMatchObject({ radius: 2 });
+    expect(tools.status().instructor).toBe('Select center point.');
+  });
+});
+
+describe('active tag', () => {
+  function tagged() {
+    const s = setup();
+    s.registry.registerAll(tagCommands);
+    const tag = s.registry.execute('tag.create', { name: 'Trim' }) as number;
+    s.registry.execute('tag.setActive', { id: tag });
+    const allOnTag = (): boolean => {
+      const sk = s.sketch();
+      return [...sk.edges.values()].every((e) => e.tagId === tag) && [...sk.faces.values()].every((f) => f.tagId === tag);
+    };
+    return { ...s, tag, allOnTag };
+  }
+
+  const shapes: [string, (tools: ToolManager) => void, { faces: number }][] = [
+    ['circle', (t) => { t.click(at([0, 0, 0])); t.click(at([1, 0, 0])); }, { faces: 1 }],
+    ['polygon', (t) => { t.click(at([0, 0, 0])); t.click(at([1, 0, 0])); }, { faces: 1 }],
+    ['arc', (t) => { t.click(at([0, 0, 0])); t.click(at([1, 0, 0])); t.click(at([0, 1, 0])); }, { faces: 0 }],
+    ['pie', (t) => { t.click(at([0, 0, 0])); t.click(at([1, 0, 0])); t.click(at([0, 1, 0])); }, { faces: 1 }],
+    ['arc2', (t) => { t.click(at([0, 0, 0])); t.click(at([2, 0, 0])); t.click(at([1, 0.5, 0])); }, { faces: 0 }],
+    ['arc3', (t) => { t.click(at([-1, 0, 0])); t.click(at([0, 1, 0])); t.click(at([1, 0, 0])); }, { faces: 0 }],
+    ['freehand', (t) => {
+      t.pointerDown(at([5, 5, 0]));
+      t.pointerMove(at([6, 5, 0], { button: -1, buttons: 1 }));
+      t.pointerMove(at([6, 6, 0], { button: -1, buttons: 1 }));
+      t.pointerMove(at([5, 6, 0], { button: -1, buttons: 1 }));
+      t.pointerUp(at([5, 5.02, 0]));
+    }, { faces: 1 }],
+    ['rectangle', (t) => { t.click(at([0, 0, 0])); t.click(at([2, 1, 0])); }, { faces: 1 }],
+    ['line', (t) => {
+      t.click(at([0, 0, 0])); t.click(at([1, 0, 0])); t.click(at([1, 1, 0]));
+      t.click(at([0, 0, 0], { inference: endpointAt([0, 0, 0]) }));
+    }, { faces: 1 }],
+  ];
+
+  it.each(shapes)('%s puts its edges and faces on the active tag', (id, draw, { faces }) => {
+    const { tools, sketch, allOnTag } = tagged();
+    tools.activate(id);
+    draw(tools);
+    expect(sketch().edges.size).toBeGreaterThan(0);
+    expect(sketch().faces.size).toBe(faces);
+    expect(allOnTag()).toBe(true);
+  });
+
+  it('re-edits keep the active tag (typed sides, bar segments)', () => {
+    const { tools, sketch, allOnTag } = tagged();
+    tools.activate('circle');
+    tools.click(at([0, 0, 0]));
+    tools.click(at([1, 0, 0]));
+    vcb(tools, '12s');
+    expect(sketch().edges.size).toBe(12);
+    expect(allOnTag()).toBe(true);
+    tools.activate('arc');
+    tools.click(at([5, 0, 0]));
+    tools.click(at([6, 0, 0]));
+    tools.click(at([5, 1, 0]));
+    tools.setting('segments', { kind: 'segments', count: 6 });
+    expect(allOnTag()).toBe(true);
   });
 });

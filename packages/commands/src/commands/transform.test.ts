@@ -6,6 +6,8 @@ import { m4rotationAxis, m4transformPoint, m4translation, meshBounds, planeDista
 import { meshTopologyProblems } from '@pushform/kernel';
 import { loopPoints, SketchGraph, type Body, type EntityRef, type FaceRecord } from '@pushform/model';
 import { arrayMatrices, m4rotationAbout, m4scaleAbout, rigidMatrixRoot } from './transform';
+import { guideCommands } from './guides';
+import { textCommands } from './texts';
 import { disposeKernels, installBrokenPolyMeshStub, installPolyMeshStub, restorePolyMesh, setupCommands, usingRealPolyMesh } from './transform.fixtures';
 
 beforeAll(installPolyMeshStub);
@@ -297,6 +299,87 @@ describe('transform.apply on body sub-entities', () => {
     await expect(apply({ refs: [{ kind: 'face', path: [], id, faceId: top.id, region: null }], matrix: m4translation([0, 0, 0.5]), copy: true })).rejects.toBeInstanceOf(
       PushFormError,
     );
+  });
+});
+
+describe('transform.apply on guides and text', () => {
+  const setup = () => {
+    const s = setupCommands();
+    s.registry.registerAll(guideCommands);
+    s.registry.registerAll(textCommands);
+    return s;
+  };
+  const turn = m4rotationAbout([0, 0, 0], [0, 0, 1], Math.PI / 2);
+
+  it('turns guide points, lines and segments with the rest of the selection; undo restores them', async () => {
+    const { registry, apply, root, host, addBox } = setup();
+    const box = addBox([2, 2, 0], [3, 3, 1]);
+    const point = (registry.execute('guides.addPoint', { point: [1, 0, 0] }) as { id: number }).id;
+    const line = registry.execute('guides.addLine', { point: [1, 0, 0], dir: [1, 0, 0] }) as number;
+    const segment = registry.execute('guides.addSegment', { a: [0, 0, 0], b: [1, 0, 0] }) as number;
+    const refs: EntityRef[] = [bodyRef(box), ...[point, line, segment].map((id): EntityRef => ({ kind: 'guide', path: [], id: id as never }))];
+    const res = await apply({ refs, matrix: turn, label: 'Rotate' });
+    expect(res.refs.filter((r) => r.kind === 'guide')).toHaveLength(3);
+    const guide = (id: number) => root().guides.get(id as never)!;
+    expect(near(guide(point).origin, [0, 1, 0])).toBe(true);
+    const l = guide(line);
+    expect(l.kind === 'line' && near(l.origin, [0, 1, 0]) && near(l.dir, [0, 1, 0])).toBe(true);
+    const sg = guide(segment);
+    expect(sg.kind === 'segment' && near(sg.origin, [0, 0, 0]) && near(sg.end, [0, 1, 0])).toBe(true);
+    expect(host.undo()).toBe(true);
+    expect(near(guide(point).origin, [1, 0, 0])).toBe(true);
+  });
+
+  it('moves leader text by its anchor and label point and leaves screen text where it is on screen', async () => {
+    const { registry, apply, root } = setup();
+    const leader = registry.execute('text.add', { kind: 'leader', anchor: [1, 0, 0], label: [2, 1, 0], text: 'Shelf' }) as EntityRef;
+    const screen = registry.execute('text.add', { kind: 'screen', screen: [0.25, 0.75], text: 'Notes' }) as EntityRef;
+    const res = await apply({ refs: [leader, screen], matrix: m4translation([0, 0, 2]) });
+    expect(res.refs).toEqual([leader]);
+    const text = (r: EntityRef) => root().texts.get(r.id)!;
+    expect(near(text(leader).position, [1, 0, 2])).toBe(true);
+    expect(near(text(leader).offset!, [1, 1, 0])).toBe(true);
+    expect(text(screen).position).toEqual([0.25, 0.75, 0]);
+    await apply({ refs: [leader], matrix: turn, label: 'Rotate' });
+    expect(near(text(leader).position, [0, 1, 2])).toBe(true);
+    expect(near(text(leader).offset!, [-1, 1, 0])).toBe(true);
+    // screen text on its own is left alone without an error
+    await expect(apply({ refs: [screen], matrix: m4translation([1, 0, 0]) })).resolves.toMatchObject({ refs: [] });
+  });
+
+  it('copy makes new guides and texts, selects them and keeps the originals', async () => {
+    const { registry, apply, root, host } = setup();
+    const line = registry.execute('guides.addLine', { point: [0, 0, 0], dir: [0, 1, 0] }) as number;
+    const leader = registry.execute('text.add', { kind: 'leader', anchor: [0, 0, 0], label: [1, 1, 0], text: 'Leg' }) as EntityRef;
+    const res = await apply({ refs: [{ kind: 'guide', path: [], id: line as never }, leader], matrix: m4translation([3, 0, 0]), copy: true });
+    expect(root().guides.size).toBe(2);
+    expect(root().texts.size).toBe(2);
+    const guideCopy = res.refs.find((r) => r.kind === 'guide')!, textCopy = res.refs.find((r) => r.kind === 'text')!;
+    expect(guideCopy.id).not.toBe(line);
+    expect(textCopy.id).not.toBe(leader.id);
+    expect(near(root().guides.get(guideCopy.id)!.origin, [3, 0, 0])).toBe(true);
+    expect(near(root().guides.get(line as never)!.origin, [0, 0, 0])).toBe(true);
+    expect(root().texts.get(textCopy.id)).toMatchObject({ text: 'Leg', position: [3, 0, 0], offset: [1, 1, 0] });
+    expect(near(root().texts.get(leader.id)!.position, [0, 0, 0])).toBe(true);
+    expect(host.selection.refs).toEqual(res.refs);
+  });
+
+  it("leaves edges drawn on a solid's face in place when other entities move, and refuses them alone with a plain message", async () => {
+    const { registry, apply, root, addBox, body } = setup();
+    const id = addBox();
+    registry.execute('sketch.addEdge', { a: [0.2, 0.5, 1], b: [0.8, 0.5, 1] });
+    const [faceId, graph] = [...body(id).imprints][0]!;
+    const imprint: EntityRef = { kind: 'imprintEdge', path: [], id: id as never, faceId, edgeId: [...graph.edges.keys()][0]! };
+    const version = body(id).version;
+    const point = (registry.execute('guides.addPoint', { point: [2, 0, 0] }) as { id: number }).id;
+    await apply({ refs: [imprint, { kind: 'guide', path: [], id: point as never }], matrix: m4translation([0, 1, 0]) });
+    expect(near(root().guides.get(point as never)!.origin, [2, 1, 0])).toBe(true);
+    expect(body(id).version).toBe(version);
+    const refusal = apply({ refs: [imprint], matrix: m4translation([0, 1, 0]) });
+    await expect(refusal).rejects.toMatchObject({ code: 'transform.imprintEdge' });
+    const message = await refusal.catch((e: Error) => e.message);
+    expect(message).toMatch(/solid's face/);
+    expect(message).not.toMatch(/\d/);
   });
 });
 

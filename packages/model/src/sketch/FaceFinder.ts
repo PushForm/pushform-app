@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import type { Id, Plane, PlaneBasis, Vec3 } from '@pushform/core';
+import type { Id, Plane, PlaneBasis, TagId, Vec3 } from '@pushform/core';
 import {
   AREA_TOL,
   basisToLocal,
@@ -44,12 +44,13 @@ const MAX_BFS_EDGES = 64;
  * - `onEdgesAdded`: for every plane the new edges could close a loop in, arrange all coplanar
  *   edges and create faces for new bounded cells touching a new edge. A cell whose outer loop
  *   matches an existing face only updates that face's holes (a loop drawn inside a face); a new
- *   cell lying inside an existing face replaces it (a line splitting a face).
+ *   cell lying inside an existing face replaces it (a line splitting a face). A face with no
+ *   existing face to take its attributes from goes on `tagId` (default: the document's default tag).
  * - `heal`: after an edge removal, recreate the merged cell bounded only by the removed faces'
  *   remaining edges.
  */
 export const FaceFinder = {
-  onEdgesAdded(g: SketchGraph, edgeIds: readonly Id[]): Id[] {
+  onEdgesAdded(g: SketchGraph, edgeIds: readonly Id[], tagId?: TagId): Id[] {
     const newIds = edgeIds.filter((id) => g.sketch.edges.has(id));
     if (!newIds.length) return [];
     const result: Id[] = [];
@@ -85,7 +86,7 @@ export const FaceFinder = {
             }
           }
         }
-        const id = createFace(g, plane, basis, loops, template);
+        const id = createFace(g, plane, basis, loops, template, tagId);
         created.add(id);
         result.push(id);
       }
@@ -194,7 +195,7 @@ function cellLoops(arr: Arrangement, cell: ArrangementCell): LoopRef[][] {
   return [toRefs(ringSegmentRefs(arr, cell.outerEdges)), ...cell.holeEdges.map((h) => toRefs(ringSegmentRefs(arr, h)))];
 }
 
-function createFace(g: SketchGraph, plane: Plane, basis: PlaneBasis, loops: LoopRef[][], template?: SketchFace): Id {
+function createFace(g: SketchGraph, plane: Plane, basis: PlaneBasis, loops: LoopRef[][], template?: SketchFace, tagId?: TagId): Id {
   const id = g.alloc<Id>();
   const face: SketchFace = {
     id,
@@ -209,7 +210,7 @@ function createFace(g: SketchGraph, plane: Plane, basis: PlaneBasis, loops: Loop
     frontMaterialId: template?.frontMaterialId ?? null,
     backMaterialId: template?.backMaterialId ?? null,
     uv: template?.uv ?? UV_AUTO,
-    tagId: template?.tagId ?? g.defaultTagId,
+    tagId: template?.tagId ?? tagId ?? g.defaultTagId,
     hidden: template?.hidden ?? false,
     locked: template?.locked ?? false,
     castShadows: template?.castShadows ?? true,

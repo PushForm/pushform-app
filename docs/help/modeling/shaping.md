@@ -10,7 +10,7 @@ A disconnected edge cannot extend the path. If the sweep cannot form a valid sol
 
 ## Offset a face or connected edges in Modeling
 
-Choose **Offset** and click the face whose boundary you want to offset. Move inside or outside the face to preview the inset or outset, then click again to commit. While positioning, type a positive length and press Enter to use that distance on the previewed side. Escape cancels the pending offset.
+Choose **Offset** and click the face whose boundary you want to offset. Move inside or outside the face to preview the inset or outset, then click again to commit. While positioning, type a length and press Enter to use that distance on the previewed side; a negative length uses the other side. Typing a new length right after the offset redoes it on the same side; if that distance can't be offset, the original offset stays. Escape cancels the pending offset.
 
 To offset an open chain, preselect at least two connected coplanar sketch edges before activating Offset, click to start, then set the distance. Double-click another face with Offset to repeat the last distance.
 
@@ -20,7 +20,7 @@ This creates offset sketch geometry; it does not by itself give the face depth. 
 
 Work in the context containing two valid solids. Clear the selection first if you want to choose the picking order. Choose **Subtract** or **Trim** from the Solid dropdown. Click the cutter first, then click the target solid to cut. The second click applies the operation; there is no separate Apply step. Escape before that click cancels the pending pick.
 
-**Subtract** removes the cutter after cutting the target. **Trim** keeps the cutter. **Undo** restores the completed operation. If two solids are already selected, choosing the tool applies it immediately using the selection order.
+**Subtract** removes the cutter after cutting the target. **Trim** keeps the cutter. **Undo** restores the completed operation. If two solids are already selected, choosing the tool applies it immediately using the selection order. When the cutter covers the whole target, nothing would be left, so Subtract and Trim refuse, say why in the status bar and change nothing.
 
 To bore a round hole, draw a circle outside the target, use **Push/Pull** to make a cylinder that passes through it, then subtract the cylinder. Save the resulting model as a `.pf` file to reopen and continue editing it later.
 
@@ -36,7 +36,7 @@ You can also select two or more solids and choose **Union** to combine all of th
 
 With no solids preselected, choose **Intersect** or **Split** from the Solid dropdown. Click the first solid, then the second; the second click applies. Both must be valid solids in the current editing context. Escape cancels before the second pick. With two solids preselected, activation applies immediately.
 
-**Intersect** replaces the inputs with their shared volume, so nonoverlapping solids can leave no result. **Split** replaces both inputs with separate solid pieces for their overlap and their remaining portions. **Undo** restores the originals.
+**Intersect** replaces the inputs with their shared volume. Solids that do not overlap share nothing, so Intersect refuses them, says why in the status bar and changes nothing. **Split** replaces both inputs with separate solid pieces for their overlap and their remaining portions. **Undo** restores the originals.
 
 ## Round, bevel or shape edges with Profile Edges
 

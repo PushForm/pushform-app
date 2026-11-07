@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { InlineBackend, KernelClient } from '@pushform/kernel';
 import { AppContext } from '../AppContext';
@@ -98,5 +98,18 @@ describe('ContextMenu', () => {
     const sub = screen.getByRole('menu', { name: 'Select' });
     fireEvent.click(within(sub).getByRole('menuitem', { name: 'All Connected' }));
     expect(a.document.selection.size).toBe(5);
+  });
+
+  it('shows why a Solid Tools operation from the menu was refused', async () => {
+    const a = boot();
+    const box = (min: [number, number, number], max: [number, number, number]) => a.commands.execute('model.addBox', { min, max }) as number;
+    const refs = [box([0, 0, 0], [1, 1, 1]), box([5, 0, 0], [6, 1, 1])].map((id) => ({ kind: 'body', path: [], id }) as const);
+    mount(a);
+    act(() => useAppStore.getState().setNotice(null));
+    act(() => void a.commands.execute('ui.contextMenu.open', { x: 0, y: 0, refs }));
+    const sub = screen.getByRole('menu', { name: 'Solid Tools' });
+    fireEvent.click(within(sub).getByRole('menuitem', { name: 'Intersect' }));
+    await vi.waitFor(() => expect(useAppStore.getState().notice).toMatch(/do not overlap/));
+    expect(a.document.doc.rootDefinition.entities.bodies.size).toBe(2);
   });
 });

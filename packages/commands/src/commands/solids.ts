@@ -10,7 +10,7 @@ import { defineCommand } from '../registry/Command';
 import type { AnyCommand } from '../registry/Command';
 import { hostOf, kernelOf } from '../host/services';
 import type { DocumentHost } from '../host/DocumentHost';
-import { draftContainerAt, requireContextPath } from './context';
+import { draftContainerAt, samePath } from './context';
 import { rootContainerOf } from './offset';
 
 /**
@@ -42,13 +42,18 @@ export interface SolidsApplyResult {
 const TEMP_BODY_BASE = 0x7f000000;
 let tempCounter = 0;
 
-function solidOf(host: DocumentHost, ref: BodyRefParam, role: string): Body {
+/**
+ * Refusal messages reach the user (the Solid Tools prefix them with "<operation> failed:"), so they read as plain
+ * sentences and never show an internal id.
+ */
+function solidOf(host: DocumentHost, ref: BodyRefParam): Body {
   const state: DocumentState = host.doc.state;
-  requireContextPath(host, ref.path, `${role}: body ${ref.id}`);
+  if (!samePath(ref.path, host.context.path))
+    throw new PushFormError('context.mismatch', 'One of the solids is outside the group or component being edited.');
   const root = rootContainerOf(state, ref.path);
   const body = root.bodies.get(ref.id as Id);
-  if (!body) throw new PushFormError('solids.target', `${role}: body ${ref.id} not found`);
-  if (!body.valid) throw new PushFormError('solids.notSolid', `${role}: body ${ref.id} is not a solid`);
+  if (!body) throw new PushFormError('solids.target', 'One of the solids could not be found; it may have been deleted.');
+  if (!body.valid) throw new PushFormError('solids.notSolid', 'One of the objects is not a closed solid, so it cannot be used.');
   return body;
 }
 
@@ -108,13 +113,28 @@ function draftRoot(draft: DocumentDraft, host: DocumentHost): EntityContainer {
 
 function assertUnchanged(root: EntityContainer, body: Body, label: string): Body {
   const cur = root.bodies.get(body.id);
-  if (!cur || cur.version !== body.version) throw new PushFormError('solids.stale', `A body changed before ${label} could be applied`);
+  if (!cur || cur.version !== body.version) throw new PushFormError('solids.stale', `A solid changed before ${label} could finish. Nothing was changed; try again.`);
   return cur;
 }
 
+/** Why a boolean that would leave no solid is refused, per mode. */
+const EMPTY_RESULT: Record<SolidsPairMode, string> = {
+  union: 'The result would have no solid. Nothing was changed.',
+  subtract: 'The solid you subtract with covers all of the other solid, so nothing would be left. Nothing was changed.',
+  trim: 'The solid you trim with covers all of the other solid, so nothing would be left. Nothing was changed.',
+  intersect: 'The solids do not overlap, so there is no shared volume to keep. Nothing was changed.',
+  split: 'The result would have no solid. Nothing was changed.',
+};
+
+/** True when committing `work` would leave no solid where its inputs were. */
+export function solidsResultIsEmpty(work: SolidsKernelWork): boolean {
+  if (work.mode === 'split') return work.split.components.length + work.split.secondary.length + work.bMinusA.components.length === 0;
+  return work.result.components.length === 0;
+}
+
 /**
- * Replace `survivor` with the first component (or delete it when nothing is left) and create a
- * body for every extra component. Returns the ids that exist afterwards.
+ * Replace `survivor` with the first component and create a body for every extra component.
+ * Returns the ids that exist afterwards. Callers refuse an empty result before they get here.
  */
 function applyComponents(
   draft: DocumentDraft,
@@ -127,10 +147,7 @@ function applyComponents(
 ): number[] {
   const [first, ...extras] = components;
   const ids: number[] = [];
-  if (!first) {
-    removeBody(root, survivor.id);
-    return ids;
-  }
+  if (!first) throw new PushFormError('solids.empty', 'The operation would leave no solid. Nothing was changed.');
   const updated = applyKernelResult(draft, survivor.id, toKernelResult(first, selfRunId, foreign));
   updated.nextFaceId = Math.max(updated.nextFaceId, nextFaceId);
   ids.push(updated.id);
@@ -168,9 +185,9 @@ const isSolidsWork = (v: unknown): v is SolidsKernelWork =>
  */
 export async function runSolidsKernel(host: DocumentHost, kernel: KernelClient, mode: SolidsPairMode, p: { a: BodyRefParam; b: BodyRefParam }): Promise<SolidsKernelWork> {
   const title = TITLE[mode];
-  const a = solidOf(host, p.a, title);
-  const b = solidOf(host, p.b, title);
-  if (a.id === b.id) throw new PushFormError('solids.target', `${title}: the same body was given twice`);
+  const a = solidOf(host, p.a);
+  const b = solidOf(host, p.b);
+  if (a.id === b.id) throw new PushFormError('solids.target', `${title} needs two different solids.`);
   if (mode === 'split') {
     const split = await runBoolean(kernel, 'split', a, b); // components = a ∩ b, secondary = a − b
     const bMinusA = await runBoolean(kernel, 'subtract', b, a);
@@ -184,6 +201,8 @@ export async function runSolidsKernel(host: DocumentHost, kernel: KernelClient, 
 /** Commit a kernel step in one transaction; throws `solids.stale` when a body changed since it ran. */
 export function commitSolids(host: DocumentHost, work: SolidsKernelWork): SolidsApplyResult {
   const label = TITLE[work.mode];
+  // An empty result would delete the inputs and leave nothing: refuse it before the document changes.
+  if (solidsResultIsEmpty(work)) throw new PushFormError('solids.empty', EMPTY_RESULT[work.mode]);
   if (work.mode === 'split') {
     const { a, b, split, bMinusA } = work;
     return host.transact(label, () =>
@@ -236,7 +255,7 @@ function pairCommand(mode: SolidsPairMode) {
     undoable: false,
     async run(ctx, p): Promise<SolidsApplyResult> {
       const host = hostOf(ctx);
-      if (p.precomputed && p.precomputed.mode !== mode) throw new PushFormError('solids.target', `${TITLE[mode]}: the precomputed result is for ${p.precomputed.mode}`);
+      if (p.precomputed && p.precomputed.mode !== mode) throw new PushFormError('solids.target', `${TITLE[mode]} was given a result computed for ${TITLE[p.precomputed.mode]}.`);
       const work = p.precomputed ?? (await runSolidsKernel(host, kernelOf(ctx), mode, p));
       return commitSolids(host, work);
     },
@@ -282,8 +301,8 @@ export const solidsUnion = defineCommand({
     if (p.bodies.length === 2) return solidsUnionPair.run(ctx, { a: p.bodies[0]!, b: p.bodies[1]! }) as Promise<SolidsApplyResult>;
     const host = hostOf(ctx);
     const kernel = kernelOf(ctx);
-    const bodies = p.bodies.map((r) => solidOf(host, r, 'Union'));
-    if (new Set(bodies.map((b) => b.id)).size !== bodies.length) throw new PushFormError('solids.target', 'Union: the same body was given twice');
+    const bodies = p.bodies.map((r) => solidOf(host, r));
+    if (new Set(bodies.map((b) => b.id)).size !== bodies.length) throw new PushFormError('solids.target', 'Union needs different solids; one was chosen twice.');
     const first = bodies[0]!;
     for (const b of bodies) await kernel.ensureBody(b.id, b.version, b.mesh);
     let cur = { bodyId: first.id as number, version: first.version };
@@ -310,6 +329,7 @@ export const solidsUnion = defineCommand({
     } finally {
       for (const t of temps) void kernel.release(t.bodyId, t.version).catch(() => undefined);
     }
+    if (components.length === 0) throw new PushFormError('solids.empty', EMPTY_RESULT.union);
     return host.transact('Union', () =>
       host.edit('Union', (draft) => {
         const root = draftRoot(draft, host);

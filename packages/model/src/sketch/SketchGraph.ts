@@ -31,6 +31,8 @@ export interface AddEdgeOptions {
   smooth?: boolean;
   hidden?: boolean;
   tagId?: TagId;
+  /** Tag of faces the new edges form that take no attributes from an existing face (default: the document's default tag). */
+  faceTagId?: TagId;
   curveId?: CurveId | null;
   /** Run the face finder after adding (default true). */
   findFaces?: boolean;
@@ -293,7 +295,7 @@ export class SketchGraph {
       const existing = this.findEdge(u, v);
       ids.push(existing ? existing.id : this.createEdge(u, v, opts).id);
     }
-    if (opts.findFaces !== false && ids.length) FaceFinder.onEdgesAdded(this, ids);
+    if (opts.findFaces !== false && ids.length) FaceFinder.onEdgesAdded(this, ids, opts.faceTagId);
     return ids;
   }
 

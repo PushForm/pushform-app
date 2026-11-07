@@ -48,6 +48,7 @@ import type {
   EntityContainer,
   EntityRef,
   FaceRecord,
+  Guide,
   KernelFaceOrigin,
   KernelResult,
   LoopRef,
@@ -59,6 +60,7 @@ import type {
 } from '@pushform/model';
 import { allocId, applyKernelResult, bodyFromMesh, containerAt, entityRefKey, imageEntityCorners, loopPoints, loopVertexIds, meshPartBounds, planeOrigin, reconcileBody } from '@pushform/model';
 import { mapNormal, mapSectionPlane } from './sectionPlanes';
+import { mapGuide, pointMapFromMatrix } from './groups';
 import { defineCommand } from '../registry/Command';
 import type { AnyCommand } from '../registry/Command';
 import { hostOf, kernelOf } from '../host/services';
@@ -342,6 +344,13 @@ function* refPoints(state: DocumentState, container: EntityContainer, ref: Entit
       if (image) yield* imageEntityCorners(image);
       break;
     }
+    case 'text': {
+      const text = container.texts.get(ref.id);
+      if (!text || text.kind === 'screen') break;
+      yield text.position;
+      if (text.offset) yield v3add(text.position, text.offset);
+      break;
+    }
     default:
       break;
   }
@@ -436,6 +445,10 @@ export interface TransformPlan {
   imageIds: Id[];
   /** Dimensions. */
   dimensionIds: Id[];
+  /** Guide points, lines and segments. */
+  guideIds: Id[];
+  /** Leader and model text (screen text is fixed to the screen and stays put). */
+  textIds: Id[];
   /** A single body face moved along its normal with perpendicular neighbours: push/pull instead. */
   pushPull: { target: PushPullTarget; distance: number } | null;
 }
@@ -502,6 +515,8 @@ export function planTransform(state: DocumentState, refs: readonly EntityRef[], 
     sectionPlaneIds: [],
     imageIds: [],
     dimensionIds: [],
+    guideIds: [],
+    textIds: [],
     pushPull: null,
   };
   const seen = new Set<string>();
@@ -511,6 +526,10 @@ export function planTransform(state: DocumentState, refs: readonly EntityRef[], 
     seen.add(k);
     return true;
   });
+  // Edges drawn on a solid's face stay where they are drawn; on their own there is nothing to move.
+  if (unique.length > 0 && unique.every((r) => r.kind === 'imprintEdge')) {
+    throw new PushFormError('transform.imprintEdge', "Edges drawn on a solid's face cannot be moved on their own. Move the solid instead.");
+  }
   const vertexIds = new Set<Id>(), edgeIds = new Set<Id>();
   const container = containerFor(state, path);
   for (const ref of unique) {
@@ -538,6 +557,17 @@ export function planTransform(state: DocumentState, refs: readonly EntityRef[], 
         break;
       case 'dimension':
         if (container.dimensions.has(ref.id)) plan.dimensionIds.push(ref.id);
+        break;
+      case 'guide':
+        if (container.guides.has(ref.id)) plan.guideIds.push(ref.id);
+        break;
+      case 'text': {
+        const text = container.texts.get(ref.id);
+        if (text && text.kind !== 'screen') plan.textIds.push(ref.id);
+        break;
+      }
+      case 'imprintEdge':
+        // left where it is drawn while the rest of the selection moves
         break;
       case 'sketchEdge': {
         const e = sketch.edges.get(ref.id);
@@ -568,7 +598,7 @@ export function planTransform(state: DocumentState, refs: readonly EntityRef[], 
         break;
       }
       default:
-        throw new PushFormError('transform.unsupported', `Cannot transform entities of kind "${ref.kind}" yet`);
+        throw new PushFormError('transform.unsupported', `Cannot transform entities of kind "${(ref as EntityRef).kind}" yet`);
     }
   }
   plan.sketchVertexIds = [...vertexIds];
@@ -1226,7 +1256,7 @@ export function applyTransformPlan(draft: DocumentDraft, plan: TransformPlan, wo
   // new dimension attached to nothing.
   const onlyDimensions = plan.dimensionIds.length > 0 && plan.bodies.size === 0 && plan.meshPartIds.length === 0 && plan.instances.length === 0 &&
     plan.sketchVertexIds.length === 0 && plan.sketchEdgeIds.length === 0 && plan.subEntities.size === 0 &&
-    plan.sectionPlaneIds.length === 0 && plan.imageIds.length === 0;
+    plan.sectionPlaneIds.length === 0 && plan.imageIds.length === 0 && plan.guideIds.length === 0 && plan.textIds.length === 0;
   for (const id of plan.dimensionIds) {
     const dim = container.dimensions.get(id);
     if (!dim) continue;
@@ -1243,6 +1273,39 @@ export function applyTransformPlan(draft: DocumentDraft, plan: TransformPlan, wo
     if (onlyDimensions && isTranslation(m)) dim.offset = v3add(dim.offset, dimensionDrag(draft as unknown as DocumentState, container, dim, [m[12]!, m[13]!, m[14]!]));
     else container.dimensions.set(id, whole());
     refs.push({ kind: 'dimension', path, id });
+  }
+
+  // guides: points, lines and segments follow the transform; a copy is a new guide
+  if (plan.guideIds.length) {
+    const map = pointMapFromMatrix(m);
+    for (const id of plan.guideIds) {
+      const source = container.guides.get(id);
+      if (!source) continue;
+      if (source.locked && !plan.copy) throw new PushFormError('guide.locked', 'A locked guide cannot be moved');
+      const targetId = plan.copy ? allocId<Id>(draft) : id;
+      const moved: Guide = { ...source, ...mapGuide(source, targetId, map), ...(plan.copy ? { locked: false } : {}) };
+      container.guides.set(targetId, moved);
+      if (plan.copy) container.order.push(targetId);
+      refs.push({ kind: 'guide', path, id: targetId });
+    }
+  }
+
+  // leader and model text: the anchor and the label point follow the transform; a copy is a new text
+  for (const id of plan.textIds) {
+    const source = container.texts.get(id);
+    if (!source) continue;
+    if (source.locked && !plan.copy) throw new PushFormError('text.locked', 'A locked text cannot be moved');
+    const placed = { position: m4transformPoint(m, source.position), offset: source.offset ? m4transformDir(m, source.offset) : null };
+    if (plan.copy) {
+      const copyId = allocId<Id>(draft);
+      container.texts.set(copyId, { ...source, ...placed, id: copyId, locked: false, attributes: cloneJson(source.attributes) });
+      container.order.push(copyId);
+      refs.push({ kind: 'text', path, id: copyId });
+    } else {
+      source.position = placed.position;
+      source.offset = placed.offset;
+      refs.push({ kind: 'text', path, id });
+    }
   }
 
   // section planes: a copy is a new, inactive plane
@@ -1309,7 +1372,8 @@ async function executeTransform(host: DocumentHost, kernel: KernelClient, plans:
  * Move / rotate / scale / mirror entities of the current edit context by a world matrix. Rigid
  * whole-body transforms stay in the model; scale and mirror go through the kernel; sketch
  * geometry moves its vertices (merging and re-planing); body faces/edges autofold; a single face
- * moved along its normal is a push/pull; instances multiply their transform. Async; one undo
+ * moved along its normal is a push/pull; instances multiply their transform; guides and leader or model text
+ * follow it (screen text, fixed to the screen, and edges drawn on a solid's face stay put). Async; one undo
  * entry labelled `label`. `copy` duplicates first and selects the copies.
  */
 export const transformApply = defineCommand({

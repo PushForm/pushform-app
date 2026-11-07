@@ -3,7 +3,7 @@
 import {
   DEFAULT_BLEND_SEGMENTS, SERVICE_FONTS, checkEdgeBlendResult, Text3DParamsSchema, isHardEdge, libraryMaterial, loadLibraryMaterial, planEdgeBlend, planEdgeProfile, runEdgeBlendKernel, runIntersectKernel,
   runText3DKernel, BUILTIN_LIBRARY, LIBRARY_CATEGORIES, activeTagOpt, applyTransformPlan, arrayMatrices, contextFrame, curvePoints, definitionBounds, hostOf, instanceCount, kernelOf, localPushPullDistance,
-  m4rotationAbout, m4scaleAbout, planPushPull, planTransform, runFollowMeKernel, runPushPullKernel, runSolidsKernel, runTransformKernel, sceneRuntimeOf,
+  m4rotationAbout, m4scaleAbout, planPushPull, planTransform, runFollowMeKernel, runPushPullKernel, runSolidsKernel, runTransformKernel, sceneRuntimeOf, solidsResultIsEmpty,
   type CameraHost, type CameraState, type CommandRegistry, type DocumentHost, type ExplodeResult, type FollowMeApplyResult, type FollowMeParams,
   type EdgeBlendMode, type EdgeBlendPlan, type MakeResult, type StandardView, type PushPullApplyResult, type PushPullTarget, type SolidsApplyResult, type SolidsKernelWork, type SolidsPairMode, type TransformKernelWork, type TransformPlan,
 } from '@pushform/commands';
@@ -892,7 +892,10 @@ export class ModelDocumentApi {
           const after: number[] = [];
           for (const [j, piece] of touched.entries()) {
             // The last cut deletes the cutter unless it is kept; earlier pieces are trimmed so it survives them.
-            const result = await boolean(!op.keepCutters && j === touched.length - 1 ? 'subtract' : 'trim', cutter, { kind: 'body', path, id: piece });
+            // The command refuses a cut that leaves nothing; say which cutter covers which solid instead.
+            const result = await boolean(!op.keepCutters && j === touched.length - 1 ? 'subtract' : 'trim', cutter, { kind: 'body', path, id: piece }, work => {
+              if (solidsResultIsEmpty(work)) throw this.failure('invalid_geometry', `Cutter ${i} (solid ${cutter.id}) covers all of solid ${piece}, so nothing would be left; delete the solid instead.`);
+            });
             after.push(...result.bodyIds);
             deleted.push(...result.deleted);
           }
@@ -910,8 +913,9 @@ export class ModelDocumentApi {
         let pieces = [first!.id];
         for (const other of rest) {
           if (pieces.length > 1) throw this.failure('invalid_geometry', `The shared volume of the first solids is in ${pieces.length} pieces; intersect them with solid ${other.id} one at a time.`);
-          const result = await boolean('intersect', first!, other);
-          if (result.bodyIds.length === 0) throw this.failure('invalid_geometry', `Solids ${first!.id} and ${other.id} do not overlap, so they share no volume.`);
+          const result = await boolean('intersect', first!, other, work => {
+            if (solidsResultIsEmpty(work)) throw this.failure('invalid_geometry', `Solids ${first!.id} and ${other.id} do not overlap, so they share no volume.`);
+          });
           pieces = result.bodyIds;
           deleted.push(...result.deleted);
         }
@@ -1646,7 +1650,7 @@ function errorCode(cause: unknown): ModelApiErrorCode {
   if (cause instanceof Error && cause.name === 'KernelError') return 'invalid_geometry';
   const code = cause instanceof PushFormError ? cause.code : '';
   if (code === 'service.missing') return 'unavailable';
-  if (/invalidSolid|invalid_geometry|kernel|notSolid|degenerate|^path\.|^followme\.(path|empty)|^edgeblend\.(?!target|stale)|^fillet\.|^offset\.|^dimension\.|^text3d\./i.test(code)) return 'invalid_geometry';
+  if (/invalidSolid|invalid_geometry|kernel|notSolid|^solids\.empty|degenerate|^path\.|^followme\.(path|empty)|^edgeblend\.(?!target|stale)|^fillet\.|^offset\.|^dimension\.|^text3d\./i.test(code)) return 'invalid_geometry';
   if (/missing|notFound|target/i.test(code)) return 'invalid_reference';
   return 'operation_failed';
 }

@@ -72,6 +72,10 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
   private readonly edgeLock = new EdgeLock();
   private copy = false;
   private glue: GlueMove | null = null;
+  /** The base point of the last move, for an `[x,y,z]` typed after it. */
+  private lastBase: Vec3 | null = null;
+  /** Why the value just typed during the move changed nothing. */
+  private hint: string | null = null;
 
   get cursor(): string {
     return this.copy ? 'copy' : 'move';
@@ -138,6 +142,7 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     if (this.state.kind === 'moving') {
       const s = this.state;
       if (!s.moved && screenDist(e.screen, s.downScreen) > DRAG_PX) s.moved = true;
+      this.hint = null;
       s.face = this.glueFace(e);
       s.delta = this.deltaFor(e, s.base);
       this.ctx?.requestRender();
@@ -241,12 +246,18 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     if (this.state.kind === 'moving') {
       const delta = this.deltaFromVcb(v, this.state.base, this.state.delta);
       if (delta) this.commit(delta);
+      else if (v.kind === 'length') {
+        // before the pointer has moved, a length has no direction to go without an axis lock
+        this.hint = 'Move the pointer or lock an axis with an arrow key, then type the length.';
+        this.ctx?.statusChanged();
+      }
       return;
     }
     const last = this.lastCommit;
     if (!last) return;
     const prev: Vec3 = [last.matrix[12]!, last.matrix[13]!, last.matrix[14]!];
-    const delta = this.deltaFromVcb(v, [0, 0, 0], prev, prev);
+    // [x,y,z] puts the last move's base point there
+    const delta = this.deltaFromVcb(v, this.lastBase ?? [0, 0, 0], prev, prev);
     if (!delta || v3len(delta) < MERGE_TOL) return;
     this.reapplyLast(m4translation(delta));
     this.ctx?.statusChanged();
@@ -259,6 +270,7 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
       return;
     }
     this.lastCommit = null;
+    this.lastBase = null;
     this.lastError = null;
     this.hover = null;
     this.lockAxis = null;
@@ -314,7 +326,9 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
       return {
         instructor: this.lastError
           ? sentence(this.lastError)
-          : this.state.face
+          : this.hint
+            ? this.hint
+            : this.state.face
             ? `Click to glue the component to this face.`
             : `Pick end point or enter distance. Arrows lock an axis.`,
         vcbLabel: 'Length',
@@ -442,6 +456,9 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
   private endMove(): void {
     this.state = IDLE;
     this.planeHold = null;
+    this.lockAxis = null;
+    this.lockSnap = null;
+    this.hint = null;
     this.edgeLock.release();
     this.glue = null;
     this.ctx?.statusChanged();
@@ -459,6 +476,7 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     this.glue = null;
     this.lockAxis = null;
     this.lockSnap = null;
+    this.hint = null;
     this.edgeLock.release();
     const ctx = this.ctx;
     if (s.face && glue && ctx) {
@@ -472,11 +490,15 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
       return;
     }
     if (v3len(delta) < MERGE_TOL) {
+      // nothing moved: there is no move to redo, and none from before either
+      this.lastCommit = null;
+      this.lastBase = null;
       this.ctx?.statusChanged();
       this.ctx?.requestRender();
       return;
     }
     const matrix: MMat4 = m4translation(delta);
+    this.lastBase = s.base;
     this.commitTransform(refs, matrix, copy, 'Move');
   }
 }

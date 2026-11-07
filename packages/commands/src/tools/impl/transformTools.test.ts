@@ -414,6 +414,84 @@ describe('MoveTool', () => {
   });
 });
 
+describe('MoveTool: typed values and locks', () => {
+  const len = (m: number) => ({ kind: 'length' as const, meters: m, raw: m, unit: 'm' });
+
+  it('a length typed before the pointer moves applies only with an axis lock; otherwise the status says what to do', async () => {
+    const { host, tools, addBox, body } = setup();
+    const id = addBox();
+    host.selection.set([bodyRef(id)]);
+    tools.activate('move');
+    const tool = tools.activeTool as MoveTool;
+    tools.pointerDown(at(TOP_CAMERA, [0, 0, 0]));
+    tools.pointerUp(at(TOP_CAMERA, [0, 0, 0]));
+    tools.onVcb(len(2));
+    await tool.settled;
+    expect(tool.dragDelta).toEqual([0, 0, 0]);
+    expect(tools.status().instructor).toContain('lock an axis');
+    tools.keyDown(key('ArrowUp'));
+    tools.onVcb(len(2));
+    await tool.settled;
+    expect(near(meshBounds(body(id).mesh).min, [0, 0, 2])).toBe(true);
+  });
+
+  it('[x,y,z] typed just after a move puts its base point there', async () => {
+    const { host, tools, addBox, body } = setup();
+    const id = addBox();
+    host.selection.set([bodyRef(id)]);
+    const entries = host.undoStack.length;
+    tools.activate('move');
+    const tool = tools.activeTool as MoveTool;
+    tools.pointerDown(at(TOP_CAMERA, [1, 1, 0]));
+    tools.pointerMove(at(TOP_CAMERA, [2, 1, 0]));
+    tools.pointerUp(at(TOP_CAMERA, [2, 1, 0]));
+    await tool.settled;
+    tools.onVcb({ kind: 'absolute', coords: [4, null, 3] });
+    await tool.settled;
+    // the base point (1,1,0) goes to (4,1,3): the box moves by (3,0,3)
+    expect(near(meshBounds(body(id).mesh).min, [3, 0, 3])).toBe(true);
+    expect(host.undoStack.length).toBe(entries + 1);
+  });
+
+  it('Esc during a move clears the arrow and Shift locks, as a commit does', () => {
+    const { host, tools, addBox } = setup();
+    host.selection.set([bodyRef(addBox())]);
+    tools.activate('move');
+    const tool = tools.activeTool as MoveTool;
+    tools.pointerDown(at(TOP_CAMERA, [0, 0, 0]));
+    tools.keyDown(key('ArrowRight'));
+    tools.pointerMove(at(TOP_CAMERA, [1, 1, 0]));
+    tools.keyDown(key('Shift', SHIFT));
+    expect(tool.axisLock).toBe('x');
+    tools.keyDown(key('Escape'));
+    expect(tool.axisLock).toBeNull();
+    expect(tools.status().held ?? []).toEqual([]);
+    tools.pointerDown(at(TOP_CAMERA, [0, 0, 0]));
+    tools.pointerMove(at(TOP_CAMERA, [1, 1, 0]));
+    expect(tool.dragDelta).toEqual([1, 1, 0]);
+  });
+
+  it('a move of zero length leaves no earlier move to redo', async () => {
+    const { host, tools, addBox, body } = setup();
+    const id = addBox();
+    host.selection.set([bodyRef(id)]);
+    tools.activate('move');
+    const tool = tools.activeTool as MoveTool;
+    tools.pointerDown(at(TOP_CAMERA, [0, 0, 0]));
+    tools.pointerMove(at(TOP_CAMERA, [1, 0, 0]));
+    tools.pointerUp(at(TOP_CAMERA, [1, 0, 0]));
+    await tool.settled;
+    // a drag that ends where it started
+    tools.pointerDown(at(TOP_CAMERA, [0, 0, 0]));
+    tools.pointerMove(at(TOP_CAMERA, [0.5, 0, 0]));
+    tools.pointerUp(at(TOP_CAMERA, [0, 0, 0], { screen: [430, 300] }));
+    await tool.settled;
+    tools.onVcb(len(3));
+    await tool.settled;
+    expect(near(meshBounds(body(id).mesh).min, [1, 0, 0])).toBe(true);
+  });
+});
+
 describe('transform tools: what a press picks up', () => {
   /** A box made into a group, and a hit on its top face as seen from the model: the group is what Select would select. */
   const groupedBox = (s: ReturnType<typeof setup>) => {

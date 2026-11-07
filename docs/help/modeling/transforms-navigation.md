@@ -32,7 +32,7 @@ Tap Ctrl (Cmd on a Mac), or click **Copy** in the tool options bar, to copy inst
 
 After a copy, type 3x and press Enter for three copies at the same spacing, or /3 for three copies spread evenly up to where the copy went. Then type a length to change their spacing; the number of copies stays. If an array cannot be made, the copies stay as they were.
 
-Move, Rotate and Scale also take guides and text, and copy them too. Screen text stays where it is on the screen, and edges drawn on a solid's face stay on the face: move the solid to move them.
+Move, Rotate and Scale also take guides and text, and Move and Rotate copy them too. Screen text stays where it is on the screen, and edges drawn on a solid's face stay on the face: move the solid to move them.
 
 ## Move sketch geometry and glued components
 
@@ -42,15 +42,23 @@ A component that glues to faces slides onto the face under the pointer, keeping 
 
 ## Rotate geometry around a pivot
 
-Select the geometry and choose **Rotate**. Hover a face to align the protractor, then click the center of rotation. Click a point away from the center to set the baseline. Move to preview the angle, then click again to commit, or type an angle and press Enter. Escape cancels the pending rotation.
+Select the geometry and choose **Rotate**. Hover a face to align the protractor, then click the center of rotation. Click a point away from the center to set the starting direction. Move to preview the angle, then click again to commit, or press, drag and release. Escape cancels the pending rotation.
 
-Before setting the center, arrow keys can lock the rotation axis. Tap Ctrl to toggle copying if you want the original to stay in place. Work in the intended editing context and check the preview before the final click.
+Before setting the center, the Right, Left and Up arrow keys lock the protractor square to the red, green or blue axis, and Shift holds its plane while held. Once the center is set the arrow keys do nothing.
+
+With angle snapping on in **Model Info**, the angle snaps to multiples of the snap angle when the pointer is close to one, and the protractor's ticks show that angle. With snapping off, the angle follows the pointer freely.
+
+After setting the starting direction, type an angle in degrees, such as `45` or `45°`, or a rise:run slope, and press Enter. It turns the way the preview turns, and a negative value turns the other way; before you move the pointer it turns counterclockwise. Typing just after a rotation redoes it.
+
+Tap Ctrl, or click **Copy**, to keep the original in place. After a rotated copy, type `3x` for three more copies at the same step, or `/3` to spread three copies over the angle turned. A copy turned 360° and then `/6` spreads six copies evenly round the whole circle, the last one where the original is.
 
 ## Scale with grips
 
-Choose **Scale** for the selection. Drag a grip to resize it, then release to commit; Escape cancels the preview. Corner grips normally keep proportions; Shift lets a corner scale freely. With an edge or face grip, Shift keeps proportions. Hold Alt to scale around the selection's center.
+Choose **Scale** for the selection. Its box and grips line up with the model's red, green and blue axes. Drag a grip to resize, then release to commit; Escape cancels the preview. Corner grips keep proportions, and Shift lets a corner scale each axis freely. With an edge or face grip, Shift keeps proportions. Hold Alt or Ctrl to scale about the selection's center instead of the opposite grip. Where grips overlap on screen, the one nearest you is used.
 
-Read the status text for the current grip's modifier behavior. Changing the model's display units does not resize geometry and is not a substitute for Scale.
+Type a number for a scale factor, or a length with a unit, such as `600mm`, for a size: along a face grip's axis, or for the longest side a corner or edge grip scales, with the other sides following. Type `x,y,z` for a factor per axis; a negative value mirrors. Typing just after a scale redoes it, keeping proportions if the drag did. Scale does not make copies.
+
+Changing the model's display units does not resize geometry and is not a substitute for Scale.
 
 ## Use scenes and inspect the view
 

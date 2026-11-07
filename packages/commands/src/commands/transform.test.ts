@@ -473,6 +473,42 @@ describe('matrix helpers', () => {
     expect(near(m4transformPoint(r, [1, 0, 0]), [0, 1, 1])).toBe(true);
   });
 
+  it('an internal array of a turn steps the way it turned, past 180° and round a whole turn', () => {
+    const center: Vec3 = [1, 0, 0], axis: Vec3 = [0, 0, 1], p: Vec3 = [2, 0, 0];
+    // 270° counterclockwise: the matrix alone is 90° clockwise
+    const m = m4rotationAbout(center, axis, 1.5 * Math.PI);
+    const ccw = arrayMatrices(m, 3, 'internal', { center, axis, angle: 1.5 * Math.PI });
+    expect(near(m4transformPoint(ccw[0]!, p), [1, 1, 0])).toBe(true); // 90°
+    expect(near(m4transformPoint(ccw[1]!, p), [0, 0, 0])).toBe(true); // 180°
+    expect(near(m4transformPoint(ccw[2]!, p), m4transformPoint(m, p))).toBe(true);
+    // 200° clockwise
+    const cw = arrayMatrices(m4rotationAbout(center, axis, (-200 * Math.PI) / 180), 2, 'internal', { center, axis, angle: (-200 * Math.PI) / 180 });
+    expect(near(m4transformPoint(cw[0]!, p), [1 + Math.cos((-100 * Math.PI) / 180), Math.sin((-100 * Math.PI) / 180), 0])).toBe(true);
+    // a whole turn: the matrix is the identity, the copies spread evenly round the circle
+    const round = arrayMatrices(m4rotationAbout(center, axis, 2 * Math.PI), 4, 'internal', { center, axis, angle: 2 * Math.PI });
+    expect(round.map((s) => m4transformPoint(s, p).map((x) => +x.toFixed(9) + 0))).toEqual([
+      [1, 1, 0],
+      [0, 0, 0],
+      [1, -1, 0],
+      [2, 0, 0],
+    ]);
+    // external arrays repeat the matrix
+    const ext = arrayMatrices(m, 2, 'external', { center, axis, angle: 1.5 * Math.PI });
+    expect(near(m4transformPoint(ext[1]!, p), [0, 0, 0])).toBe(true);
+  });
+
+  it('transform.array takes the turn for an internal array of a rotation', async () => {
+    const { registry, addBox, bodies } = setupCommands();
+    const id = addBox([1, 0, 0], [2, 1, 1]);
+    const angle = 1.5 * Math.PI;
+    await registry.execute('transform.array', { refs: [bodyRef(id)], matrix: m4rotationAbout([0, 0, 0], [0, 0, 1], angle), count: 3, mode: 'internal', label: 'Rotate', rotation: { center: [0, 0, 0], axis: [0, 0, 1], angle } });
+    const mins = bodies().map((b) => meshBounds(b.mesh).min.map((x) => +x.toFixed(6) + 0));
+    expect(mins).toHaveLength(4);
+    expect(mins).toContainEqual([-1, 1, 0]); // 90°
+    expect(mins).toContainEqual([-2, -1, 0]); // 180°
+    expect(mins).toContainEqual([0, -2, 0]); // 270°
+  });
+
   it('rejects face ids that do not exist', async () => {
     const { apply, addBox } = setupCommands();
     const id = addBox();

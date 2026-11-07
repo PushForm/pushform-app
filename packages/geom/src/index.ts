@@ -10,5 +10,5 @@ export * from './triangulate';
 export * from './coplanar';
 export * from './curves';
 export * from './bvh';
-export { offsetPolygonFull, offsetPolyline } from './offset';
+export { offsetPolygonFull, offsetPolyline, offsetPolylineFull } from './offset';
 export type { OffsetArc, OffsetOptions, OffsetResult } from './offset';

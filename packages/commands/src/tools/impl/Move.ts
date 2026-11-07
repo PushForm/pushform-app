@@ -15,7 +15,7 @@ import { toggleSetting } from '../settings';
 import { pointerField } from '../entry';
 import { EdgeLock } from '../edgeLock';
 import { DRAG_PX, entityOverlay, HOVER_COLOR, inferenceOverlay, rubberBandColor, screenDist } from '../toolUtil';
-import { AXIS_DIR, movedOutline, sectionPreviewFor, TransformToolBase, withoutSectionPlanes } from './transformShared';
+import { AXIS_DIR, movedOutline, pickRef, sectionPreviewFor, TransformToolBase, withoutSectionPlanes } from './transformShared';
 import type { SectionPreview, SectionPreviewTool } from '../sectionPreview';
 import { axisTag, EDGE_LOCKED, SHIFT_HELD } from '../held';
 
@@ -41,6 +41,9 @@ interface GlueMove {
 }
 
 const IDLE: State = { kind: 'idle' };
+
+/** A message as a sentence, ending with a full stop. */
+const sentence = (text: string): string => (/[.!?]$/.test(text) ? text : `${text}.`);
 
 /**
  * Move (M). Idle → pick a base point (hovering picks the entity under the cursor when nothing is
@@ -69,6 +72,10 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
   private readonly edgeLock = new EdgeLock();
   private copy = false;
   private glue: GlueMove | null = null;
+  /** The base point of the last move, for an `[x,y,z]` typed after it. */
+  private lastBase: Vec3 | null = null;
+  /** Why the value just typed during the move changed nothing. */
+  private hint: string | null = null;
 
   get cursor(): string {
     return this.copy ? 'copy' : 'move';
@@ -135,6 +142,7 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     if (this.state.kind === 'moving') {
       const s = this.state;
       if (!s.moved && screenDist(e.screen, s.downScreen) > DRAG_PX) s.moved = true;
+      this.hint = null;
       s.face = this.glueFace(e);
       s.delta = this.deltaFor(e, s.base);
       this.ctx?.requestRender();
@@ -142,8 +150,8 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
       return;
     }
     const host = this.host();
-    const hit = e.inference?.hit?.ref ?? null;
-    this.hover = host && host.selection.isEmpty ? hit : null;
+    // with nothing selected, a press picks up what a Select click would select
+    this.hover = host && host.selection.isEmpty ? pickRef(e.inference?.hit) : null;
     this.ctx?.requestRender();
   }
 
@@ -154,6 +162,7 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
       if (s.pressed) return;
       if (!s.moved && screenDist(e.screen, s.downScreen) <= DRAG_PX) {
         this.endMove();
+        this.dropPickup();
         return;
       }
       s.face = this.glueFace(e);
@@ -162,7 +171,9 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     }
     const inf = e.inference;
     if (!inf) return;
-    const refs = this.targetRefs(this.hover ?? inf.hit?.ref ?? null);
+    this.lastError = null;
+    this.lastNotice = null;
+    const refs = this.targetRefs(this.hover ?? pickRef(inf.hit), this.copy);
     if (!refs.length) return;
     this.hover = null;
     this.lastError = null;
@@ -210,14 +221,11 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
         if (!e.repeat) {
           const p = this.cursorInference?.primary ?? null;
           this.lockSnap = p && (p.dir || p.plane) ? p : null;
+          if (this.lockSnap && this.state.kind === 'moving') this.state.face = null;
         }
         return true;
       case 'Control':
-        if (!e.repeat) {
-          this.copy = !this.copy;
-          this.ctx?.statusChanged();
-          this.ctx?.requestRender();
-        }
+        if (!e.repeat) this.toggleCopy();
         return true;
       default:
         return false;
@@ -239,13 +247,25 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     }
     if (this.state.kind === 'moving') {
       const delta = this.deltaFromVcb(v, this.state.base, this.state.delta);
-      if (delta) this.commit(delta);
+      if (delta) {
+        // a typed value is the move, even with the pointer over a face the component would glue to
+        this.state.face = null;
+        this.commit(delta);
+      }
+      else if (v.kind === 'length') {
+        // before the pointer has moved, a length has no direction to go without an axis lock
+        this.hint = 'Move the pointer or lock an axis with an arrow key, then type the length.';
+        this.ctx?.statusChanged();
+      }
       return;
     }
     const last = this.lastCommit;
     if (!last) return;
     const prev: Vec3 = [last.matrix[12]!, last.matrix[13]!, last.matrix[14]!];
-    const delta = this.deltaFromVcb(v, [0, 0, 0], prev, prev);
+    // [x,y,z] puts the last move's base point there; a glued placement stays in its glue plane
+    this.glue = this.glueFor(last.refs);
+    const delta = this.deltaFromVcb(v, this.lastBase ?? [0, 0, 0], prev, prev);
+    this.glue = null;
     if (!delta || v3len(delta) < MERGE_TOL) return;
     this.reapplyLast(m4translation(delta));
     this.ctx?.statusChanged();
@@ -254,10 +274,13 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
   onCancel(): void {
     if (this.state.kind === 'moving') {
       this.endMove();
+      this.dropPickup();
       return;
     }
     this.lastCommit = null;
+    this.lastBase = null;
     this.lastError = null;
+    this.lastNotice = null;
     this.hover = null;
     this.lockAxis = null;
     this.ctx?.requestRender();
@@ -272,9 +295,9 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     const s = this.state;
     if (s.kind === 'moving') {
       const end = v3add(s.base, s.delta);
-      if (s.face && this.glue) out.push(...movedOutline(state, s.refs, placeOnFaceMatrix(state, this.glue.ref, s.face.point, s.face.normal)));
+      if (s.face && this.glue) out.push(...movedOutline(state, s.refs, placeOnFaceMatrix(state, this.glue.ref, s.face.point, s.face.normal, s.base), undefined, this.copy));
       // section planes are drawn, with their cuts, where they would go (sectionPreview)
-      else if (v3len(s.delta) > MERGE_TOL) out.push(...movedOutline(state, withoutSectionPlanes(s.refs), m4translation(s.delta)));
+      else if (v3len(s.delta) > MERGE_TOL) out.push(...movedOutline(state, withoutSectionPlanes(s.refs), m4translation(s.delta), undefined, this.copy));
       out.push({ kind: 'polyline', points: [s.base, end], color: rubberBandColor(this.cursorInference?.primary), width: 2 });
       out.push({ kind: 'point', position: s.base, color: '#111111', shape: 'square', size: 6 });
     } else if (this.hover) {
@@ -296,6 +319,10 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     return this.reapplyLast(last.matrix, this.copy);
   }
 
+  protected override restoreCopy(copy: boolean): void {
+    this.copy = copy;
+  }
+
   onSetting(id: string, value: ToolSettingValue): void {
     if (typeof value !== 'boolean' || id !== 'copy') return;
     this.copy = value;
@@ -306,9 +333,13 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
   private baseStatus(): ToolStatus {
     if (this.state.kind === 'moving') {
       return {
-        instructor: this.state.face
-          ? `Click to glue the component to this face.`
-          : `Pick end point or enter distance. Arrows lock an axis.`,
+        instructor: this.lastError
+          ? sentence(this.lastError)
+          : this.hint
+            ? this.hint
+            : this.state.face
+            ? `Click to glue the component to this face.`
+            : `Pick end point or enter distance. Arrows lock an axis.`,
         vcbLabel: 'Length',
         vcbValue: this.fmtLength(v3len(this.state.delta)),
         fields: [pointerField('Length', 'length', this.fmtLength(v3len(this.state.delta)))],
@@ -317,7 +348,9 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     const host = this.host();
     const instructor = this.lastError
       ? `Move failed: ${this.lastError}`
-      : host && !host.selection.isEmpty
+      : this.lastNotice
+        ? this.lastNotice
+        : host && !host.selection.isEmpty
         ? `Pick a base point to move the selection.`
         : `Select objects or hover an entity, then pick a base point.`;
     const last = this.lastCommit;
@@ -366,17 +399,22 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     return { point: e.inference.point, normal: v3dot(n, e.ray.dir) > 0 ? v3scale(n, -1) : n };
   }
 
-  /** Displacement from a typed value: a length along the current direction, `[x,y,z]` or `<x,y,z>`. */
+  /**
+   * Displacement from a typed value: a length along the current direction, `[x,y,z]` or `<x,y,z>`. A glued
+   * placement stays in its glue plane: a length goes along the direction laid in the plane, and
+   * coordinates are projected onto it.
+   */
   private deltaFromVcb(v: VcbValue, base: Vec3, current: Vec3, fallbackDir: Vec3 | null = null): Vec3 | null {
     if (v.kind === 'length') {
-      const dir = this.lockDirection() ?? (v3len(current) >= MERGE_TOL ? v3normalize(current) : fallbackDir && v3len(fallbackDir) >= MERGE_TOL ? v3normalize(fallbackDir) : null);
-      return dir ? v3scale(dir, v.meters) : null;
+      const raw = this.lockDirection() ?? (v3len(current) >= MERGE_TOL ? current : fallbackDir && v3len(fallbackDir) >= MERGE_TOL ? fallbackDir : null);
+      const dir = raw ? this.inGluePlane(raw) : null;
+      return dir && v3len(dir) >= MERGE_TOL ? v3scale(v3normalize(dir), v.meters) : null;
     }
     if (v.kind === 'absolute') {
       const cur: Vec3 = [base[0] + current[0], base[1] + current[1], base[2] + current[2]];
-      return [(v.coords[0] ?? cur[0]) - base[0], (v.coords[1] ?? cur[1]) - base[1], (v.coords[2] ?? cur[2]) - base[2]];
+      return this.inGluePlane([(v.coords[0] ?? cur[0]) - base[0], (v.coords[1] ?? cur[1]) - base[1], (v.coords[2] ?? cur[2]) - base[2]]);
     }
-    if (v.kind === 'relative') return [v.coords[0] ?? 0, v.coords[1] ?? 0, v.coords[2] ?? 0];
+    if (v.kind === 'relative') return this.inGluePlane([v.coords[0] ?? 0, v.coords[1] ?? 0, v.coords[2] ?? 0]);
     return null;
   }
 
@@ -405,6 +443,16 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     return normal ? { kind: 'perpendicular', point: base, dir: normal, color: SNAP_COLORS.perpendicular, label: 'Along Section Plane Normal' } : null;
   }
 
+  /** Ctrl tap: switch Copy; during a move, a switch that would make the move one that is refused is not made. */
+  private toggleCopy(): void {
+    const s = this.state;
+    if (s.kind === 'moving' && this.refuse(s.refs, !this.copy)) return;
+    if (s.kind === 'moving') this.lastError = null;
+    this.copy = !this.copy;
+    this.ctx?.statusChanged();
+    this.ctx?.requestRender();
+  }
+
   private setLock(axis: Axis | null): void {
     this.lockAxis = axis !== null && this.lockAxis === axis ? null : axis;
     this.edgeLock.release();
@@ -413,6 +461,8 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
 
   /** Re-project the current displacement onto the locked direction, if any. */
   private applyLock(): void {
+    // a locked move does not glue: the face found before the lock is no longer the target
+    if (this.state.kind === 'moving' && (this.lockAxis || this.lockSnap || this.edgeLock.active)) this.state.face = null;
     if (this.state.kind === 'moving' && this.cursorInference) {
       const d = v3sub(this.cursorInference.point, this.state.base);
       const dir = this.lockDirection();
@@ -424,6 +474,9 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
   private endMove(): void {
     this.state = IDLE;
     this.planeHold = null;
+    this.lockAxis = null;
+    this.lockSnap = null;
+    this.hint = null;
     this.edgeLock.release();
     this.glue = null;
     this.ctx?.statusChanged();
@@ -441,24 +494,30 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     this.glue = null;
     this.lockAxis = null;
     this.lockSnap = null;
+    this.hint = null;
     this.edgeLock.release();
     const ctx = this.ctx;
     if (s.face && glue && ctx) {
       const { point, normal } = s.face;
       this.lastCommit = null;
       this.enqueue(async () => {
-        await ctx.commands.execute('component.placeOnFace', { ref: glue.ref, point: [point[0], point[1], point[2]], normal: [normal[0], normal[1], normal[2]], copy });
+        // the pointer keeps its place on the component: the base point is where it was picked up
+        await ctx.commands.execute('component.placeOnFace', { ref: glue.ref, point: [point[0], point[1], point[2]], normal: [normal[0], normal[1], normal[2]], copy, grab: [s.base[0], s.base[1], s.base[2]] });
         ctx.statusChanged();
         ctx.requestRender();
       });
       return;
     }
     if (v3len(delta) < MERGE_TOL) {
+      // nothing moved: there is no move to redo, and none from before either
+      this.lastCommit = null;
+      this.lastBase = null;
       this.ctx?.statusChanged();
       this.ctx?.requestRender();
       return;
     }
     const matrix: MMat4 = m4translation(delta);
+    this.lastBase = s.base;
     this.commitTransform(refs, matrix, copy, 'Move');
   }
 }

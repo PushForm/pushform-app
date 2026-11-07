@@ -96,6 +96,14 @@ export const TransformArrayParamsSchema = z.object({
   /** `external`: copies at matrix^k, k = 1..count. `internal`: count copies dividing the matrix. */
   mode: z.enum(['external', 'internal']),
   label: z.string().default('Move'),
+  /**
+   * The turn the matrix makes when it is a rotation: its center, axis and signed angle in radians, which
+   * may pass 180° or be a whole turn. An internal array then divides this angle, the way it turned, rather
+   * than the matrix's shortest equivalent rotation.
+   */
+  rotation: z
+    .object({ center: z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]), axis: z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]), angle: z.number().finite() })
+    .optional(),
 });
 export type TransformArrayParams = z.infer<typeof TransformArrayParamsSchema>;
 
@@ -112,7 +120,13 @@ export interface TransformApplyResult {
   bodyIds: number[];
   /** Mesh parts created or modified by the operation. */
   meshPartIds: number[];
+  /** Something the operation changed besides what was asked, for the status (a face replaced by its edges). */
+  notice?: string;
+  /** Moved sketch edges split where they crossed others, by ref key: the pieces that replace them in the selection. */
+  edgePieces?: Map<string, EntityRef[]>;
 }
+
+const FACES_REPLACED = 'A face with holes could no longer be flat and was replaced by its edges.';
 
 type RefParam = z.infer<typeof EntityRefSchema>;
 
@@ -262,11 +276,29 @@ export function rigidMatrixRoot(m: Mat4 | MMat4, n: number): MMat4 {
   return m4mul(m4translation(v3scale(tPar, 1 / n)), m4rotationAbout(center, axis, angle / n));
 }
 
-/** Transforms of the copies of an array: external `m^k`, internal `root(m, count)^k`, k = 1..count. */
-export function arrayMatrices(m: Mat4 | MMat4, count: number, mode: 'external' | 'internal'): MMat4[] {
-  const step = mode === 'internal' ? rigidMatrixRoot(m, count) : [...m];
+/** A turn about a line: center, axis and signed angle in radians (any size, a whole turn included). */
+export interface ArrayRotation {
+  readonly center: Vec3;
+  readonly axis: Vec3;
+  readonly angle: number;
+}
+
+/**
+ * Transforms of the copies of an array: external `m^k`, internal `root(m, count)^k`, k = 1..count. With
+ * `rotation`, the turn `m` makes, an internal array steps by its angle / count about its axis, so copies
+ * follow the way it turned past 180° and round a whole turn, where `m` alone is the identity.
+ */
+export function arrayMatrices(m: Mat4 | MMat4, count: number, mode: 'external' | 'internal', rotation?: ArrayRotation): MMat4[] {
+  const step =
+    mode !== 'internal' ? [...m]
+    : rotation && v3len(rotation.axis) > 0 ? m4rotationAbout(rotation.center, v3normalize(rotation.axis), rotation.angle / count)
+    : rigidMatrixRoot(m, count);
+  // A whole turn ends where it started: the last copy would sit on the original, so the original counts as one
+  // of the N, spread evenly round the circle.
+  const wholeTurn = mode === 'internal' && !!rotation && Math.abs(Math.abs(rotation.angle) - 2 * Math.PI) <= ANGLE_TOL;
+  const last = wholeTurn ? count - 1 : count;
   const out: MMat4[] = [];
-  for (let k = 1; k <= count; k++) out.push(m4power(step, k));
+  for (let k = 1; k <= last; k++) out.push(m4power(step, k));
   return out;
 }
 
@@ -405,14 +437,81 @@ export function refsBounds(state: DocumentState, refs: readonly EntityRef[]): Bo
   return box3IsEmpty(b) ? null : b;
 }
 
+/** The past participle an undo label stands for in messages: Move → moved, Rotate → rotated, Scale → scaled. */
+export function transformVerb(label: string): string {
+  switch (label) {
+    case 'Move':
+      return 'moved';
+    case 'Copy':
+      return 'copied';
+    case 'Rotate':
+      return 'rotated';
+    case 'Scale':
+      return 'scaled';
+    case 'Flip Along':
+      return 'flipped';
+    default:
+      return 'transformed';
+  }
+}
+
 /** Common instance path of a set of refs (`context.mismatch` when they span several contexts). */
-export function commonPath(refs: readonly EntityRef[], fallback: readonly Id[] = []): readonly Id[] {
+export function commonPath(refs: readonly EntityRef[], fallback: readonly Id[] = [], label = ''): readonly Id[] {
   const first = refs[0];
   if (!first) return fallback;
   for (const r of refs) {
-    if (!samePath(r.path, first.path)) throw new PushFormError('context.mismatch', 'Entities of different groups/components cannot be transformed together');
+    if (!samePath(r.path, first.path)) throw new PushFormError('context.mismatch', `Entities of different groups or components cannot be ${transformVerb(label)} together`);
   }
   return first.path;
+}
+
+/** What a locked entity of each kind is called in messages. */
+const LOCKED_NAME: Partial<Record<EntityRef['kind'], string>> = {
+  body: 'solid',
+  face: 'solid',
+  edge: 'solid',
+  meshPart: 'part',
+  instance: 'group or component',
+  image: 'image',
+  dimension: 'dimension',
+  guide: 'guide',
+  text: 'text',
+  sectionPlane: 'section plane',
+  sketchEdge: 'edge',
+  sketchFace: 'face',
+};
+
+const lockedError = (kind: EntityRef['kind'], label: string): PushFormError =>
+  new PushFormError(`${kind === 'face' || kind === 'edge' ? 'body' : kind}.locked`, `A locked ${LOCKED_NAME[kind] ?? 'entity'} cannot be ${transformVerb(label)}`);
+
+/** Whether the entity `ref` names in `container` is locked (a face or edge of a solid: the solid). */
+function refLocked(container: EntityContainer, ref: EntityRef): boolean {
+  switch (ref.kind) {
+    case 'body':
+    case 'face':
+    case 'edge':
+      return container.bodies.get(ref.id)?.locked ?? false;
+    case 'meshPart':
+      return container.meshParts.get(ref.id)?.locked ?? false;
+    case 'instance':
+      return container.instances.get(ref.id)?.locked ?? false;
+    case 'image':
+      return container.images.get(ref.id)?.locked ?? false;
+    case 'dimension':
+      return container.dimensions.get(ref.id)?.locked ?? false;
+    case 'guide':
+      return container.guides.get(ref.id)?.locked ?? false;
+    case 'text':
+      return container.texts.get(ref.id)?.locked ?? false;
+    case 'sectionPlane':
+      return container.sectionPlanes.get(ref.id)?.locked ?? false;
+    case 'sketchEdge':
+      return container.sketch.edges.get(ref.id)?.locked ?? false;
+    case 'sketchFace':
+      return container.sketch.faces.get(ref.id)?.locked ?? false;
+    default:
+      return false;
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -496,7 +595,7 @@ function pushPullRoute(container: EntityContainer, path: readonly Id[], refs: re
 export function planTransform(state: DocumentState, refs: readonly EntityRef[], matrix: ArrayLike<number>, copy: boolean, label: string): TransformPlan {
   const world: MMat4 = Array.from(matrix);
   if (world.length !== 16) throw new PushFormError('transform.matrix', 'matrix must have 16 numbers');
-  const path = commonPath(refs);
+  const path = commonPath(refs, [], label);
   const frame = contextFrame(state, path);
   const m: MMat4 = frame.identity ? world : m4mul(frame.inverse, m4mul(world, frame.matrix));
   const plan: TransformPlan = {
@@ -533,6 +632,8 @@ export function planTransform(state: DocumentState, refs: readonly EntityRef[], 
   const vertexIds = new Set<Id>(), edgeIds = new Set<Id>();
   const container = containerFor(state, path);
   for (const ref of unique) {
+    // a copy leaves the original where it is, so only a move or other change of a locked entity is refused
+    if (!copy && refLocked(container, ref)) throw lockedError(ref.kind, label);
     const sketch = container.sketch;
     switch (ref.kind) {
       case 'body': {
@@ -606,12 +707,42 @@ export function planTransform(state: DocumentState, refs: readonly EntityRef[], 
   // Sub-entities of a body that is itself moved go with the body.
   for (const id of plan.bodies.keys()) plan.subEntities.delete(id);
   if (copy && plan.subEntities.size) {
-    throw new PushFormError('transform.copySubEntity', 'Copying faces or edges of a solid is not supported');
+    throw new PushFormError('transform.copySubEntity', 'Faces or edges of a solid cannot be copied on their own. Copy the solid instead.');
+  }
+  // a copy draws copied edges; sketch vertices on no copied edge have nothing to draw
+  if (copy && vertexIds.size > 0 && edgeIds.size === 0 && planCopiesNothingElse(plan)) {
+    throw new PushFormError('transform.copyVertices', 'Sketch vertices on their own cannot be copied. Select the edges to copy instead.');
   }
   if (!copy && plan.subEntities.size === 1 && plan.bodies.size === 0 && plan.meshPartIds.length === 0 && plan.instances.length === 0 && vertexIds.size === 0) {
     plan.pushPull = pushPullRoute(container, path, unique, m);
   }
   return plan;
+}
+
+/** True when the plan has nothing but sketch geometry in it. */
+function planCopiesNothingElse(plan: TransformPlan): boolean {
+  return plan.bodies.size === 0 && plan.meshPartIds.length === 0 && plan.instances.length === 0 && plan.subEntities.size === 0 &&
+    plan.sectionPlaneIds.length === 0 && plan.imageIds.length === 0 && plan.dimensionIds.length === 0 && plan.guideIds.length === 0 &&
+    plan.textIds.length === 0;
+}
+
+const IDENTITY: MMat4 = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+
+/**
+ * Why a transform of `refs` (labelled `label`, a copy when `copy`) cannot be made, checked before any pointer
+ * moves so a tool can refuse it as it starts: anything locked (unless copied), entities of different
+ * groups or components, entities outside the open edit context, copies of a solid's faces or edges, and
+ * copies of sketch vertices alone. Null when it can be made (the kernel may still refuse the result).
+ */
+export function transformRefusal(host: DocumentHost, refs: readonly EntityRef[], copy: boolean, label: string): string | null {
+  if (!refs.length) return null;
+  try {
+    const plan = planTransform(host.doc.state, refs, IDENTITY, copy, label);
+    if (!samePath(plan.path, host.context.path)) return `Only what is in the open group or component can be ${transformVerb(label)}.`;
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -740,6 +871,7 @@ const cloneJson = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 export function cloneBody(draft: DocumentDraft, container: EntityContainer, src: Body): Body {
   const body = copyBodyRecord(src, allocId<Id>(draft));
   body.version = 0;
+  body.locked = false;
   container.bodies.set(body.id, body);
   container.order.push(body.id);
   return body;
@@ -1012,6 +1144,18 @@ function mergeSketchVertex(sketch: Sketch, from: Id, into: Id, tol: number): voi
     if (e.b === from) e.b = into;
     if (e.a === e.b) degenerate.add(e.id);
   }
+  dropCollapsedEdges(sketch, degenerate);
+  const v = sketch.vertices.get(from);
+  if (v) unhashVertex(sketch, from, v.p, tol);
+  sketch.vertices.delete(from);
+}
+
+/**
+ * Remove the `degenerate` edges (both ends on one vertex) and every edge that duplicates another between
+ * the same two vertices, keeping one; face loops and curves are mapped to the kept edges and a loop that
+ * collapses to fewer than 3 edges goes (with its face, for an outer loop).
+ */
+function dropCollapsedEdges(sketch: Sketch, degenerate: ReadonlySet<Id>): void {
   const seen = new Map<string, Id>();
   const dup = new Map<Id, Id>();
   for (const e of sketch.edges.values()) {
@@ -1053,9 +1197,6 @@ function mergeSketchVertex(sketch: Sketch, from: Id, into: Id, tol: number): voi
   }
   for (const id of degenerate) sketch.edges.delete(id);
   for (const id of dup.keys()) sketch.edges.delete(id);
-  const v = sketch.vertices.get(from);
-  if (v) unhashVertex(sketch, from, v.p, tol);
-  sketch.vertices.delete(from);
 }
 
 function newellNormal(pts: readonly Vec3[]): Vec3 {
@@ -1072,9 +1213,11 @@ function newellNormal(pts: readonly Vec3[]): Vec3 {
 /**
  * Re-plane the faces touching moved vertices. A face that is still planar gets a new plane/basis;
  * a non-planar one is removed and, when it has no holes, fan-split from a moved vertex into
- * planar pieces (fold edges, as autofold does for sheet geometry).
+ * planar pieces (fold edges, as autofold does for sheet geometry). Returns how many faces with holes
+ * could not stay flat and were replaced by their edges.
  */
-function replaneSketchFaces(g: SketchGraphType, moved: ReadonlySet<Id>): void {
+function replaneSketchFaces(g: SketchGraphType, moved: ReadonlySet<Id>): number {
+  let replaced = 0;
   const sketch = g.sketch;
   for (const f of [...sketch.faces.values()]) {
     const touches = f.loops.some((loop) =>
@@ -1105,7 +1248,10 @@ function replaneSketchFaces(g: SketchGraphType, moved: ReadonlySet<Id>): void {
       continue;
     }
     sketch.faces.delete(f.id);
-    if (f.loops.length > 1) continue;
+    if (f.loops.length > 1) {
+      replaced++;
+      continue;
+    }
     const vids = loopVertexIds(sketch, outer);
     const mi = vids.findIndex((id) => moved.has(id));
     if (mi < 0) continue;
@@ -1113,13 +1259,26 @@ function replaneSketchFaces(g: SketchGraphType, moved: ReadonlySet<Id>): void {
     const count = vids.length;
     for (let k = 2; k <= count - 2; k++) g.addEdge(apex, vids[(mi + k) % count]!);
   }
+  return replaced;
 }
 
-/** Move sketch vertices by `m`, merging within MERGE_TOL and re-planing the faces they bound. */
-export function moveSketchVertices(g: SketchGraphType, ids: readonly Id[], m: Mat4 | MMat4): void {
+export interface SketchMoveResult {
+  /** Faces with holes that could no longer be flat and were replaced by their edges. */
+  readonly facesReplacedByEdges: number;
+  /** Edges split where they now cross or touch others: each edge's pieces. */
+  readonly pieces: ReadonlyMap<Id, readonly Id[]>;
+}
+
+/**
+ * Move sketch vertices by `m` as drawing would: a vertex landing on another merges with it (edges that
+ * collapse go), the faces they bound are re-planed, edges touching them are split where they cross or
+ * touch other edges, and faces form where edges now close.
+ */
+export function moveSketchVertices(g: SketchGraphType, ids: readonly Id[], m: Mat4 | MMat4): SketchMoveResult {
   const sketch = g.sketch;
   const tol = g.tol;
   const moved = new Set<Id>();
+  let merged = false;
   for (const id of ids) {
     const v = sketch.vertices.get(id);
     if (!v) continue;
@@ -1139,8 +1298,16 @@ export function moveSketchVertices(g: SketchGraphType, ids: readonly Id[], m: Ma
     mergeSketchVertex(sketch, drop, keep, tol);
     moved.delete(drop);
     moved.add(keep);
+    merged = true;
   }
-  replaneSketchFaces(g, moved);
+  const facesReplacedByEdges = replaneSketchFaces(g, moved);
+  const movedEdges = [...sketch.edges.values()].filter((e) => moved.has(e.a) || moved.has(e.b)).map((e) => e.id);
+  const { along, split, pieces } = g.splitAtCrossings(movedEdges);
+  const wasSplit = split.length > 0 || pieces.size > 0;
+  // edges laid over others now run between the same vertices: keep one of each
+  if (wasSplit) dropCollapsedEdges(sketch, new Set());
+  if (merged || wasSplit) model.FaceFinder.onEdgesAdded(g, [...along, ...split].filter((id) => sketch.edges.has(id)));
+  return { facesReplacedByEdges, pieces };
 }
 
 // --- apply ------------------------------------------------------------------------------------
@@ -1152,6 +1319,8 @@ export function applyTransformPlan(draft: DocumentDraft, plan: TransformPlan, wo
   const refs: EntityRef[] = [];
   const bodyIds: number[] = [], meshPartIds: number[] = [];
   const m = plan.matrix;
+  let notice: string | undefined;
+  const edgePieces = new Map<string, EntityRef[]>();
 
   if (plan.pushPull && work.pushPull) {
     const r = applyPushPullResult(draft, work.pushPull.plan, work.pushPull.result);
@@ -1195,7 +1364,7 @@ export function applyTransformPlan(draft: DocumentDraft, plan: TransformPlan, wo
   for (const id of plan.meshPartIds) {
     const source = container.meshParts.get(id);
     if (!source) continue;
-    if (source.locked && !plan.copy) throw new PushFormError('meshPart.locked', 'A locked part cannot be moved');
+    if (source.locked && !plan.copy) throw lockedError('meshPart', plan.label);
     const target = plan.copy ? cloneMeshPart(draft, container, source) : source;
     target.geometry = transformMeshPartGeometry(source.geometry, m);
     refs.push({ kind: 'meshPart', path, id: target.id });
@@ -1206,7 +1375,7 @@ export function applyTransformPlan(draft: DocumentDraft, plan: TransformPlan, wo
   for (const id of plan.instances) {
     const source = container.instances.get(id);
     if (!source) continue;
-    if (source.locked && !plan.copy) throw new PushFormError('instance.locked', 'A locked group/component cannot be moved');
+    if (source.locked && !plan.copy) throw lockedError('instance', plan.label);
     const target = plan.copy ? cloneInstance(draft, container, source) : source;
     target.transform = m4mul(m, target.transform) as unknown as Mat4;
     // a glued placement's plane moves with it
@@ -1229,16 +1398,21 @@ export function applyTransformPlan(draft: DocumentDraft, plan: TransformPlan, wo
     for (const id of g.sketch.faces.keys()) if (!facesBefore.has(id)) refs.push({ kind: 'sketchFace', path, id });
   } else if (!plan.copy && plan.sketchVertexIds.length) {
     const g = sketchGraphAt(draft, path);
-    moveSketchVertices(g, plan.sketchVertexIds, m);
+    const moved = moveSketchVertices(g, plan.sketchVertexIds, m);
+    if (moved.facesReplacedByEdges > 0) notice = FACES_REPLACED;
     for (const id of plan.sketchVertexIds) if (g.sketch.vertices.has(id)) refs.push({ kind: 'sketchVertex', path, id });
-    for (const id of plan.sketchEdgeIds) if (g.sketch.edges.has(id)) refs.push({ kind: 'sketchEdge', path, id });
+    for (const id of plan.sketchEdgeIds) {
+      if (g.sketch.edges.has(id)) refs.push({ kind: 'sketchEdge', path, id });
+      else for (const piece of moved.pieces.get(id) ?? []) refs.push({ kind: 'sketchEdge', path, id: piece });
+    }
+    for (const [id, list] of moved.pieces) edgePieces.set(entityRefKey({ kind: 'sketchEdge', path, id }), list.map((piece): EntityRef => ({ kind: 'sketchEdge', path, id: piece })));
   }
 
   // placed pictures: the whole picture follows the transform; a copy is a new picture of the same image
   for (const id of plan.imageIds) {
     const source = container.images.get(id);
     if (!source) continue;
-    if (source.locked && !plan.copy) throw new PushFormError('image.locked', 'A locked image cannot be moved');
+    if (source.locked && !plan.copy) throw lockedError('image', plan.label);
     const transform = m4mul(m, source.transform) as unknown as Mat4;
     if (plan.copy) {
       const copyId = allocId<Id>(draft);
@@ -1260,7 +1434,7 @@ export function applyTransformPlan(draft: DocumentDraft, plan: TransformPlan, wo
   for (const id of plan.dimensionIds) {
     const dim = container.dimensions.get(id);
     if (!dim) continue;
-    if (dim.locked && !plan.copy) throw new PushFormError('dimension.locked', 'A locked dimension cannot be moved');
+    if (dim.locked && !plan.copy) throw lockedError('dimension', plan.label);
     const whole = (): model.Dimension => ({ ...dim, start: m4transformPoint(m, dim.start), end: m4transformPoint(m, dim.end),
       offset: m4transformDir(m, dim.offset), normal: mapNormal(m, dim.normal) });
     if (plan.copy) {
@@ -1281,7 +1455,7 @@ export function applyTransformPlan(draft: DocumentDraft, plan: TransformPlan, wo
     for (const id of plan.guideIds) {
       const source = container.guides.get(id);
       if (!source) continue;
-      if (source.locked && !plan.copy) throw new PushFormError('guide.locked', 'A locked guide cannot be moved');
+      if (source.locked && !plan.copy) throw lockedError('guide', plan.label);
       const targetId = plan.copy ? allocId<Id>(draft) : id;
       const moved: Guide = { ...source, ...mapGuide(source, targetId, map), ...(plan.copy ? { locked: false } : {}) };
       container.guides.set(targetId, moved);
@@ -1294,7 +1468,7 @@ export function applyTransformPlan(draft: DocumentDraft, plan: TransformPlan, wo
   for (const id of plan.textIds) {
     const source = container.texts.get(id);
     if (!source) continue;
-    if (source.locked && !plan.copy) throw new PushFormError('text.locked', 'A locked text cannot be moved');
+    if (source.locked && !plan.copy) throw lockedError('text', plan.label);
     const placed = { position: m4transformPoint(m, source.position), offset: source.offset ? m4transformDir(m, source.offset) : null };
     if (plan.copy) {
       const copyId = allocId<Id>(draft);
@@ -1313,6 +1487,7 @@ export function applyTransformPlan(draft: DocumentDraft, plan: TransformPlan, wo
     const sp = container.sectionPlanes.get(id);
     if (!sp) continue;
     const moved = mapSectionPlane(sp, plan.copy ? allocId<Id>(draft) : id, m);
+    if (plan.copy) moved.locked = false;
     container.sectionPlanes.set(moved.id, moved);
     if (plan.copy) container.order.push(moved.id);
     refs.push({ kind: 'sectionPlane', path, id: moved.id });
@@ -1342,7 +1517,7 @@ export function applyTransformPlan(draft: DocumentDraft, plan: TransformPlan, wo
     }
   }
 
-  return { refs, bodyIds, meshPartIds };
+  return { refs, bodyIds, meshPartIds, ...(notice ? { notice } : {}), ...(edgePieces.size ? { edgePieces } : {}) };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1361,10 +1536,17 @@ async function executeTransform(host: DocumentHost, kernel: KernelClient, plans:
         out.refs.push(...r.refs);
         out.bodyIds.push(...r.bodyIds);
         out.meshPartIds.push(...r.meshPartIds);
+        if (r.notice) out.notice = r.notice;
+        if (r.edgePieces) out.edgePieces = new Map([...(out.edgePieces ?? []), ...r.edgePieces]);
       });
     }),
   );
   if (plans.some((p) => p.copy)) host.selection.set(out.refs);
+  else if (out.edgePieces) {
+    const pieces = out.edgePieces;
+    // a selected edge that was split stays selected as its pieces
+    host.selection.set(host.selection.refs.flatMap((r) => pieces.get(entityRefKey(r)) ?? [r]));
+  }
   return out;
 }
 
@@ -1399,7 +1581,7 @@ export const transformArray = defineCommand({
   async run(ctx, p): Promise<TransformApplyResult> {
     const host = hostOf(ctx);
     const refs = refsOrSelection(host, p.refs);
-    const plans = arrayMatrices(p.matrix, p.count, p.mode).map((mk) => planTransform(host.doc.state, refs, mk, true, p.label));
+    const plans = arrayMatrices(p.matrix, p.count, p.mode, p.rotation).map((mk) => planTransform(host.doc.state, refs, mk, true, p.label));
     return executeTransform(host, kernelOf(ctx), plans, p.label);
   },
 });

@@ -46,3 +46,6 @@ export const EDGE_BLEND_MIN_FACE_ANGLE = (1 * Math.PI) / 180;
 export const EDGE_BLEND_MIN_END_ANGLE = (10 * Math.PI) / 180;
 /** Largest difference (radians) from a right angle between the faces beside an edge that Profile Edges shapes. */
 export const EDGE_PROFILE_SQUARE_TOL = (1 * Math.PI) / 180;
+
+/** Largest angle (radians) between a hovered face and the face being pushed or pulled for the pull to match the hovered face's height. */
+export const PUSH_PULL_MATCH_HEIGHT_ANGLE = (30 * Math.PI) / 180;

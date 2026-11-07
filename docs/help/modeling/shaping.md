@@ -1,5 +1,23 @@
 # Shaping and cutting solids in Modeling
 
+## Push or pull a face with Push/Pull
+
+Choose **Push/Pull** and hover a flat face of a solid, or a face that isn't part of a solid yet, in the group or component you are editing. The face highlights; on a face divided by drawn edges, only the region under the pointer is highlighted and pulled. Then click the face, move to preview the result, and click again to commit. You can also press, drag and release. Escape cancels the preview. If exactly one face is selected when you choose Push/Pull, your next click anywhere in the view pulls that face.
+
+While pulling, hover another face within 30° of parallel to match its height: the pull ends where that face's plane crosses the pull line. A snap to a point on the way, such as an endpoint, wins over a matched height. With the pointer over the face you are pushing, the push follows how far the pointer moves.
+
+Pulling a solid's face outward extends the solid. Pushing a region in makes a pocket, or a hole when it reaches the other side; a push that cuts a solid apart leaves separate solids, each keeping its materials. Pulling a loose face makes a new solid in its place. Pulled circles and arcs get smooth sides. Each pull is one Undo step.
+
+## Exact Push/Pull lengths, double-click and New body
+
+While pulling, type a distance and press Enter to end the pull there: positive pulls out of the solid, negative pushes in. For a loose face, it goes the way you are pulling. A typed 0 changes nothing. Typing a distance right after a pull, before anything else changes, redoes it at that distance in the same direction. With nothing in progress, a typed distance pulls the face under the pointer; with no face there, the status bar asks you to point to one.
+
+Double-click a face to repeat the last distance: out if the last pull went out, in if it went in, whichever way the face points.
+
+Turn on **New body** in the tool options bar, or tap Ctrl (Cmd on macOS), to make the pulled region a separate solid and leave the original as it was; a loose face stays too. It is off each time you choose the tool. Switching it right after a pull redoes that pull the other way.
+
+Push/Pull refuses, says why and changes nothing when pushing a whole face to or past the opposite side would leave nothing, and on a face of a smooth surface, such as a cylinder's side: it works on flat faces. In a group or component, distances are in the model, as the preview shows, even when it is scaled.
+
 ## Sweep a profile with Follow Me
 
 Prepare a profile face and a connected chain of sketch edges for its path in the editing context you intend to change. Choose **Follow Me**, click the profile face, then move the pointer along the connected path edges. The collected edges highlight red. Click to finish the sweep. Escape cancels the pending path.
@@ -10,11 +28,13 @@ A disconnected edge cannot extend the path. If the sweep cannot form a valid sol
 
 ## Offset a face or connected edges in Modeling
 
-Choose **Offset** and click the face whose boundary you want to offset. Move inside or outside the face to preview the inset or outset, then click again to commit. While positioning, type a length and press Enter to use that distance on the previewed side; a negative length uses the other side. Typing a new length right after the offset redoes it on the same side; if that distance can't be offset, the original offset stays. Escape cancels the pending offset.
+Choose **Offset**, click the face to offset in the context you're editing, move to where the offset should reach and click again to commit, or press on the face, drag and release. The distance runs from the pointer to the face's nearest edge and snaps to vertices and edges on the face's plane: inside the face insets, outside outsets. The distance box shows the length and the status bar says which way it goes. Type a length and press Enter to use it on the pointer's side (inward before you move); a negative length goes the other way. Typing a new length or switching **Allow overlaps** right after an offset redoes it; a click in the view ends that. Escape cancels. Double-click a face to repeat the last face offset.
 
-To offset an open chain, preselect at least two connected coplanar sketch edges before activating Offset, click to start, then set the distance. Double-click another face with Offset to repeat the last distance.
+Every loop of the face is offset, so holes grow as the face shrinks, and arcs and circles stay arcs. Overlapping loops are merged unless **Allow overlaps** (Alt, Option on macOS) is on; it is off each time you choose Offset. An offset that would leave nothing, or run past the edges of a solid's face, is refused with a message.
 
-This creates offset sketch geometry; it does not by itself give the face depth. Use Push/Pull when you want an extrusion.
+On a loose face an inset adds a face inside with the original's material and tag; an outset adds a ring around it. On a solid's face the offset divides the face. New edges go on the active tag.
+
+To offset a chain, select two or more connected coplanar edges before choosing Offset, click, then move to a side; type the length if you like. Offset adds outlines only; use Push/Pull to give a face depth.
 
 ## Subtract or Trim one solid with another
 

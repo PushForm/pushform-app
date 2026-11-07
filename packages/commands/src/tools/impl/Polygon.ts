@@ -52,9 +52,8 @@ export class PolygonTool extends CircleTool {
 
   protected override onExtraKey(e: ToolKeyEvent): boolean {
     if (e.key === 'Control' && !e.repeat) {
+      // while the bar shows the polygon just drawn, the tool manager takes the tap and redoes it in the other mode
       this.circumscribed = !this.circumscribed;
-      // while the bar shows the polygon just drawn, the tap redoes it in the new mode
-      if (!this.center && this.lastShown) this.adjustLast('mode');
       this.ctx?.requestRender();
       this.ctx?.statusChanged();
       return true;

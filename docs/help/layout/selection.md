@@ -8,7 +8,7 @@ Drag a selection box left to right to select objects completely inside it. Drag 
 
 ## Select with a lasso
 
-Choose **Lasso** from the Select button's arrow, or press Shift+Space. Drag a freehand outline and release, or click successive points and finish with Enter or a double-click.
+Choose **Lasso** from the Select button's arrow, or press Shift+Space. Drag a freehand outline and release, or click successive points and finish with Enter or a double-click. Delete or Backspace removes the last clicked point.
 
 A clockwise outline selects objects it touches or encloses. A counterclockwise outline selects only objects entirely inside. Shift toggles, Ctrl or Cmd adds, and Ctrl+Shift or Cmd+Shift removes. Escape cancels the outline without changing the selection.
 

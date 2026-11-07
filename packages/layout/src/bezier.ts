@@ -24,6 +24,15 @@ export function pullLayoutBezierHandle(draft: LayoutBezierDraft, handle: Point):
   return { points: draft.points, handles };
 }
 
+/**
+ * The draft without its newest anchor, as Delete or Backspace leaves it, or null when that was the only one.
+ * The anchor before it keeps its handles.
+ */
+export function removeLastLayoutBezierAnchor(draft: LayoutBezierDraft): LayoutBezierDraft | null {
+  if (draft.points.length <= 1) return null;
+  return { points: draft.points.slice(0, -1), handles: draft.handles.slice(0, -1) };
+}
+
 /** The draft with a pending straight-in segment to `cursor`, for preview. */
 export function previewLayoutBezier(draft: LayoutBezierDraft, cursor: Point | null): LayoutRectanglePath {
   return cursor ? { points: [...draft.points, cursor], handles: [...draft.handles, {}], closed: false }

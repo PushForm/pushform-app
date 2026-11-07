@@ -628,12 +628,12 @@ describe('Layout object browser', () => {
     key('Home'); expect(focused()).toBe('settings');
     key('End'); key('Enter');
     expect(t.tab.activePageId).toBe(t.page2);
-    // Tool letters, digits, arrows and Delete pressed in the tree do nothing in the workspace.
+    // Tool letters, digits and arrows pressed in the tree do nothing in the workspace.
     act(() => { t.session.setActivePage(t.pageId); });
     fireEvent.click(t.row(t.object(t.pageId, t.rect)!));
     t.object(t.pageId, t.rect)!.focus();
     const points = structuredClone(t.entity(t.rect)!.points), version = t.tab.doc.version;
-    for (const [value, code] of [['l', 'KeyL'], ['r', 'KeyR'], [' ', 'Space'], ['Delete', 'Delete'], ['5', 'Digit5']] as const) key(value, { code });
+    for (const [value, code] of [['l', 'KeyL'], ['r', 'KeyR'], [' ', 'Space'], ['5', 'Digit5']] as const) key(value, { code });
     key('ArrowUp', { code: 'ArrowUp' });
     t.object(t.pageId, t.rect)!.focus();
     key('ArrowRight');
@@ -927,6 +927,40 @@ describe('Layout object browser', () => {
     expect([t.entity(t.line), t.entity(t.rect)]).toEqual([undefined, undefined]);
     act(() => { t.tab.commands.execute('edit.undo'); });
     expect([t.entity(t.line), t.entity(t.rect)].every(Boolean)).toBe(true);
+    t.dispose();
+  });
+
+  it('erases a focused object or group with Delete or Backspace, moving focus on, and leaves pages, layers and locked objects', () => {
+    const t = setup();
+    const focused = (): string => document.activeElement?.getAttribute('data-key') ?? '';
+    const below = (item: HTMLElement): string => {
+      const all = within(t.tree()).getAllByRole('treeitem');
+      return all[all.indexOf(item) + 1]!.getAttribute('data-key')!;
+    };
+    const rect = t.object(t.pageId, t.rect)!, next = below(rect);
+    rect.focus();
+    fireEvent.keyDown(rect, { key: 'Delete' });
+    expect(t.entity(t.rect)).toBeUndefined();
+    expect(focused()).toBe(next);
+    act(() => { t.tab.commands.execute('edit.undo'); });
+    expect(t.entity(t.rect)).toBeDefined();
+    // Backspace on a group item erases its members in one step.
+    act(() => { t.tab.commands.execute('layout.shape.group', { pageId: t.pageId, entityIds: [t.line, t.rect] }); });
+    const group = within(t.tree()).getByRole('treeitem', { name: 'Group 1' });
+    group.focus();
+    fireEvent.keyDown(group, { key: 'Backspace' });
+    expect([t.entity(t.line), t.entity(t.rect)]).toEqual([undefined, undefined]);
+    act(() => { t.tab.commands.execute('edit.undo'); });
+    // Pages, layers and locked objects are left alone.
+    act(() => { t.tab.commands.execute('layout.shape.setLocked', { pageId: t.pageId, entityIds: [t.dimension], locked: true }); });
+    const version = t.tab.doc.version;
+    for (const item of [t.page(t.pageId), t.layer(t.pageId, t.base)!, t.object(t.pageId, t.dimension)!]) {
+      item.focus();
+      fireEvent.keyDown(item, { key: 'Delete' });
+      fireEvent.keyDown(item, { key: 'Backspace' });
+    }
+    expect(t.tab.doc.version).toBe(version);
+    expect(t.entity(t.dimension)).toBeDefined();
     t.dispose();
   });
 

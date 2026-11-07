@@ -8,7 +8,7 @@ While placing a segment, hold Shift to constrain it horizontally or vertically. 
 
 ## Draw a Bézier curve
 
-Open the Line button's arrow and choose **Bézier Curve**. Click to place a sharp corner, or press and drag to pull out smooth curve handles. Continue placing anchors. Click the first anchor to close and fill the path. Press Enter or Escape to finish an open path. Switching tools or pages discards an unfinished Bézier curve.
+Open the Line button's arrow and choose **Bézier Curve**. Click to place a sharp corner, or press and drag to pull out smooth curve handles. Continue placing anchors. Click the first anchor to close and fill the path. Press Enter or Escape to finish an open path, or Delete or Backspace to remove the last anchor placed. Switching tools or pages discards an unfinished Bézier curve.
 
 The finished curve remains editable: select it and enter vertex editing to move its anchors and handles.
 

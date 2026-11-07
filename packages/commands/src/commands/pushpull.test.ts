@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Box3, ImageId, MaterialId, PlaneBasis, Ray, Vec2, Vec3 } from '@pushform/core';
 import { basisToLocal, v3eq } from '@pushform/core';
-import { InlineBackend, KernelClient, meshTopologyProblems } from '@pushform/kernel';
+import { InlineBackend, KernelClient, KernelError, meshTopologyProblems } from '@pushform/kernel';
 import { freeInference, GROUND_PLANE, type InferenceResult, type PickHit } from '@pushform/inference';
 import { allocId, computeRegions, createImprintGraph, sketchFaceLoops, SketchGraph, uvApply, uvToAffine, type Body, type Draft, type EntityContainer, type FaceRecord, type ImprintGraph, type UvMapping } from '@pushform/model';
 import { CommandRegistry } from '../registry/CommandRegistry';
@@ -15,7 +15,7 @@ import { ToolManager } from '../tools/ToolManager';
 import { NO_MODIFIERS, type ToolPointerEvent } from '../tools/Tool';
 import { pushPullTools, type PushPullTool } from '../tools/impl/PushPull';
 import { modelCommands } from './model';
-import { pushPullCommands, type PushPullApplyResult } from './pushpull';
+import { planPushPull, PUSH_PULL_MESSAGES, pushPullCommands, runPushPullKernel, type PushPullApplyResult } from './pushpull';
 
 class FakeCamera implements CameraHost {
   state: CameraState = { eye: [10, -10, 10], target: [0, 0, 0], up: [0, 0, 1], fov: 35, projection: 'perspective', orthoHeight: 10 };
@@ -407,5 +407,55 @@ describe('PushPullTool', () => {
     const volumes = bodies().map((b) => b.props.volume).sort((a, b) => a - b);
     expect(volumes[0]).toBeCloseTo(0.5, 6);
     expect(volumes[1]).toBeCloseTo(1, 6);
+  });
+});
+
+describe('pushpull.apply refusals and New body', () => {
+  const addSheet = (host: DocumentHost): void => {
+    host.edit('Rectangle', (draft) => {
+      const g = SketchGraph.for(draft);
+      g.addEdge([0, 0, 0], [2, 0, 0]);
+      g.addEdge([2, 0, 0], [2, 1, 0]);
+      g.addEdge([2, 1, 0], [0, 1, 0]);
+      g.addEdge([0, 1, 0], [0, 0, 0]);
+    });
+  };
+
+  it('New body on a sheet face makes a solid and keeps the sheet face', async () => {
+    const { host, registry, root, bodies } = setup();
+    addSheet(host);
+    const face = [...root().sketch.faces.values()][0]!;
+    const res = await apply(registry, { target: { kind: 'sketchFace', path: [], id: face.id }, distance: -1, mode: 'newBody' });
+    expect(res.bodyIds).toHaveLength(1);
+    expect(bodies()[0]!.props.volume).toBeCloseTo(2, 6);
+    expect(root().sketch.faces.get(face.id)).toBeDefined();
+    expect(root().sketch.edges.size).toBe(4);
+  });
+
+  it('says why in words, without internal ids, when the face is gone or the kernel fails', async () => {
+    const { host, registry, root } = setup();
+    const bodyId = addBox(registry);
+    await expect(apply(registry, { target: { kind: 'face', path: [], id: bodyId, faceId: 999, region: null }, distance: 1, mode: 'merge' })).rejects.toThrow(PUSH_PULL_MESSAGES.gone);
+    await expect(apply(registry, { target: { kind: 'face', path: [], id: 999, faceId: 1, region: null }, distance: 1, mode: 'merge' })).rejects.toThrow(PUSH_PULL_MESSAGES.gone);
+    addSheet(host);
+    const face = [...root().sketch.faces.values()][0]!;
+    const plan = planPushPull(host.doc.state, { kind: 'sketchFace', path: [], id: face.id }, 1, 'merge');
+    const failing = { extrudeSketch: () => Promise.reject(new KernelError('InvalidInput', 'pushPull region polygon has no area')) } as unknown as KernelClient;
+    await expect(runPushPullKernel(failing, plan)).rejects.toThrow(PUSH_PULL_MESSAGES.noArea);
+    const broken = { extrudeSketch: () => Promise.reject(new KernelError('ManifoldError', 'Face 3 not found on body 7')) } as unknown as KernelClient;
+    await expect(runPushPullKernel(broken, plan)).rejects.toThrow(PUSH_PULL_MESSAGES.failed);
+    for (const m of Object.values(PUSH_PULL_MESSAGES)) expect(m).not.toMatch(/\d/);
+  });
+
+  it('recomputes a precomputed result made for another version of the solid', async () => {
+    const { registry, kernel, root, host } = setup();
+    const bodyId = addBox(registry);
+    const top = topFace(root().bodies.get(bodyId as never)!);
+    const target = { kind: 'face' as const, path: [], id: bodyId, faceId: top.id, region: null };
+    const stale = await runPushPullKernel(kernel, planPushPull(host.doc.state, target, 0.25, 'merge'), true);
+    const bottom = [...root().bodies.get(bodyId as never)!.faces.values()].find((f) => v3eq(f.plane.n, [0, 0, -1]))!;
+    await apply(registry, { target: { ...target, faceId: bottom.id }, distance: 0.5, mode: 'merge' });
+    await apply(registry, { target, distance: 0.25, mode: 'merge', precomputed: stale, precomputedVersion: root().bodies.get(bodyId as never)!.version - 1 });
+    expect(root().bodies.get(bodyId as never)!.props.volume).toBeCloseTo(1.75, 6);
   });
 });

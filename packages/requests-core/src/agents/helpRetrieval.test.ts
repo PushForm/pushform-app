@@ -70,7 +70,7 @@ describe('user manual retrieval over the actual corpus', () => {
     ['layout', 'Move', ['base point', 'click again to finish', '10mm, 5mm']],
     ['layout', 'copy array with Move', ['**Copy**', '**3x**', '**/3**']],
     ['layout', 'Rotate', ['reference direction', 'click a third time', '**30**']],
-    ['layout', 'Scale', ['Drag a handle', 'release to commit', 'Escape']],
+    ['layout', 'Scale', ['reference point', 'Click a third time', 'Escape']],
     ['layout', 'navigate model view', ['drag to orbit', 'Shift+drag', 'scroll to zoom', '**Escape**']],
     ['layout', 'Presentation mode', ['Page Down', '**Escape**']],
     ['model', 'Follow Me', ['click the profile face', 'connected path edges', 'Click to finish']],

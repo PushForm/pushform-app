@@ -44,7 +44,7 @@ export function layoutEntryKind(tool: string, boxTool: boolean, radiusTool: bool
   if (arcTool) return 'arc';
   if (boxTool) return 'box';
   if (radiusTool) return 'radius';
-  if (tool === 'move' || tool === 'rotate' || tool === 'offset' || tool === 'fillet' || tool === 'chamfer') return 'single';
+  if (tool === 'move' || tool === 'rotate' || tool === 'scale' || tool === 'offset' || tool === 'fillet' || tool === 'chamfer') return 'single';
   return 'none';
 }
 

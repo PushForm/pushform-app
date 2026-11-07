@@ -109,6 +109,8 @@ type LayoutTool = LayoutToolId;
 interface LabelDraft { tip: Point; bend: Point | null; attachment: LayoutDimensionAnchor | null; modelAttachment?: LayoutModelAttachment }
 /** A rotation in progress: the objects it turns, about `pivot`, by `angleDeg` from the `reference` direction. */
 interface RotationDraft { entityIds: number[]; pivot: Point; reference: Point | null; angleDeg: number }
+/** A Scale tool scale in progress: the objects it scales about `base`, by `factor`, once a `reference` point is chosen. */
+interface ScaleDraft { entityIds: number[]; base: Point; reference: Point | null; factor: number }
 /** A resize of a group or multi-selection: its objects scale along the page's axes about `pivot`. */
 interface SelectionScale { entityIds: number[]; pivot: Point; scaleX: number; scaleY: number }
 /** A group or multi-selection handle drag, in page millimeters: the box, the dragged handle and where the pointer went down. */
@@ -118,6 +120,10 @@ interface SelectionScaleDrag {
 }
 interface CornerPick { entityId: number; segmentIndex: number; point: Point }
 interface ArcDraft { points: Point[]; sweep: number }
+/** A percentage typed for Scale, such as "50%"; the field reads it as a factor. */
+const SCALE_PERCENT = /^\s*([0-9]*\.?[0-9]+)\s*%\s*$/;
+/** A scale factor as a percentage with at most two decimals: 1.5 is "150%". */
+function formatScalePercent(factor: number): string { return `${Number((factor * 100).toFixed(2))}%`; }
 /** The platform's primary modifier, named the way its keyboard labels it. */
 const PRIMARY_MODIFIER = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? 'Cmd' : 'Ctrl';
 /** `whole` is the Move tool's preview: labels move whole and copied dimensions become fixed paper points. */
@@ -558,6 +564,7 @@ function paintPage(
   tableResizePreview: LayoutEntity | null = null,
   surround: LayoutSurround | null = null,
   transformed: ReadonlyMap<number, LayoutEntity> | null = null,
+  scaleGuide: { base: Point; reference: Point | null; target: Point | null } | null = null,
 ): void {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
@@ -915,6 +922,16 @@ function paintPage(
     }
     ctx.beginPath(); ctx.arc(...pivot, 1.2 / zoom, 0, Math.PI * 2); ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.stroke(); ctx.restore();
   }
+  if (scaleGuide) {
+    // Dashed guides from the base point to the reference point and to the pointer, with both points marked.
+    const { base, reference, target } = scaleGuide;
+    ctx.save(); ctx.lineWidth = 0.5 / zoom; ctx.strokeStyle = '#1e63d1';
+    ctx.setLineDash([2 / zoom, 1 / zoom]);
+    for (const end of [reference, target]) if (end) { ctx.beginPath(); ctx.moveTo(...base); ctx.lineTo(...end); ctx.stroke(); }
+    ctx.setLineDash([]);
+    if (reference) { ctx.beginPath(); ctx.arc(...reference, 0.9 / zoom, 0, Math.PI * 2); ctx.fillStyle = '#1e63d1'; ctx.fill(); }
+    ctx.beginPath(); ctx.arc(...base, 1.2 / zoom, 0, Math.PI * 2); ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.stroke(); ctx.restore();
+  }
   if (moveGuide) {
     // A dashed guide from the base point to the destination, with the base point marked.
     const { base, target } = moveGuide;
@@ -1209,6 +1226,7 @@ export function LayoutWorkspace({
   const [arcDraft, setArcDraft] = useState<ArcDraft | null>(null);
   const [labelDraft, setLabelDraft] = useState<LabelDraft | null>(null);
   const [rotationDraft, setRotationDraft] = useState<RotationDraft | null>(null);
+  const [scaleDraft, setScaleDraft] = useState<ScaleDraft | null>(null);
   // The Select tool's rotation grip. Its center is kept as fractions of the selection box.
   const [gripCenter, setGripCenter] = useState<{ entityId: number; u: number; v: number } | null>(null);
   const [gripRotation, setGripRotation] = useState<RotationDraft | null>(null);
@@ -1235,7 +1253,7 @@ export function LayoutWorkspace({
   const [chamferDistanceMm, setChamferDistanceMm] = useRememberedToolSetting('chamferDistanceMm');
   const cornerAmountMm = tool === 'chamfer' ? chamferDistanceMm : filletRadiusMm;
   const [offsetDraft, setOffsetDraft] = useState<{ entityId: number; distanceMm: number } | null>(null);
-  useEffect(() => { setOffsetDraft(null); setCornerFirst(null); setCornerHover(null); setRotationDraft(null); setLabelDraft(null); }, [tool]);
+  useEffect(() => { setOffsetDraft(null); setCornerFirst(null); setCornerHover(null); setRotationDraft(null); setScaleDraft(null); setLabelDraft(null); }, [tool]);
   const [arcError, setArcError] = useState<string | null>(null);
   useEffect(() => { setArcDraft(null); setArcError(null); }, [tool]);
   const [dimensionError, setDimensionError] = useState<string | null>(null);
@@ -1407,14 +1425,19 @@ export function LayoutWorkspace({
   const transformPreview = useMemo((): ReadonlyMap<number, LayoutEntity> | null => {
     try {
       const turned = activeRotation?.reference ? rotateLayoutEntities(transformable(activeRotation.entityIds), activeRotation.pivot, activeRotation.angleDeg)
-        : selectionScale ? scaleLayoutEntities(transformable(selectionScale.entityIds), selectionScale.pivot, selectionScale.scaleX, selectionScale.scaleY) : null;
+        : selectionScale ? scaleLayoutEntities(transformable(selectionScale.entityIds), selectionScale.pivot, selectionScale.scaleX, selectionScale.scaleY)
+        : tool === 'scale' && scaleDraft?.reference ? scaleLayoutEntities(transformable(scaleDraft.entityIds), scaleDraft.base, scaleDraft.factor, scaleDraft.factor) : null;
       return turned ? new Map(turned.map((entity) => [entity.id, entity])) : null;
     } catch { return null; }
-  }, [activeRotation, selectionScale, transformable]);
+  }, [activeRotation, selectionScale, tool, scaleDraft, transformable]);
   useEffect(() => {
     // A pending rotation ends when any of its objects is removed, hidden or locked.
     if (rotationDraft && transformable(rotationDraft.entityIds).length < rotationDraft.entityIds.length) { setRotationDraft(null); setCursor(null); }
   }, [rotationDraft, transformable]);
+  useEffect(() => {
+    // So does a pending scale.
+    if (scaleDraft && transformable(scaleDraft.entityIds).length < scaleDraft.entityIds.length) { setScaleDraft(null); setCursor(null); }
+  }, [scaleDraft, transformable]);
   useEffect(() => {
     // A pending move ends when any moving object is removed, hidden, or locked.
     if (moveDraft?.entityIds.some((id) => {
@@ -1454,7 +1477,7 @@ export function LayoutWorkspace({
     }
     tab.commands.execute('layout.table.update', { pageId: page.id, entityId: current.id, table });
   };
-  const selectionBounds = (tool === 'select' || tool === 'scale') && selectedEntity && (selectedEntity.kind === 'path' || selectedEntity.text || selectedEntity.image || selectedEntity.table) && editingTextId === null &&
+  const selectionBounds = tool === 'select' && selectedEntity && (selectedEntity.kind === 'path' || selectedEntity.text || selectedEntity.image || selectedEntity.table) && editingTextId === null &&
     selectedEntity.points.length >= 2 && canTransform && editingPathId === null
     ? (() => {
       const bounds = selectionBox(selectedEntity, tableResizePreview?.id === selectedEntity.id ? tableResizePreview.points : scalePreview?.points ?? undefined, scalePreview?.handles ?? undefined);
@@ -1515,7 +1538,8 @@ export function LayoutWorkspace({
       tool === 'bezier' && bezierDraft ? previewLayoutBezier(bezierDraft, bezierPress.current ? null : cursor) : offsetResult.shape ?? cornerResult.shape, activeRotation, labelDraft,
       false, undefined, initialLabelEdit ? editingTextId : null, tool === 'offset' ? offsetSource ?? null : null,
       tool === 'move' && moveDraft ? { base: moveDraft.base, target: cursor ?? moveDraft.base } : null, { rows: tableRows, columns: tableColumns }, placementModifiers,
-      navigatingViewportId !== null && viewportCameraPreview ? { entityId: navigatingViewportId, camera: viewportCameraPreview } : null, polygonSides, tableResizePreview, surround, transformPreview);
+      navigatingViewportId !== null && viewportCameraPreview ? { entityId: navigatingViewportId, camera: viewportCameraPreview } : null, polygonSides, tableResizePreview, surround, transformPreview,
+      tool === 'scale' && scaleDraft ? { base: scaleDraft.base, reference: scaleDraft.reference, target: cursor } : null);
     if (canvasRef.current) paint(canvasRef.current);
     paintSurround.current = () => {
       const canvas = canvasRef.current, surround = surroundRef.current;
@@ -1528,7 +1552,7 @@ export function LayoutWorkspace({
     };
     paintSurround.current();
   }, [version, imageLoads, page, state, anchor, cursor, tool, highlightedSet, movePreview, moveDraft,
-    editingPathId, editPoints, editHandles, activePointIndex, freehand, zoom, dimensionDraft, scalePreview, rectangleAmountMm, arcDraft, offsetResult.shape, offsetSource, cornerResult.shape, activeRotation, transformPreview, labelDraft, initialLabelEdit, editingTextId, tableRows, tableColumns, placementModifiers, polygonTool, polygonSides, navigatingViewportId, viewportCameraPreview, bezierDraft, tableResizePreview]);
+    editingPathId, editPoints, editHandles, activePointIndex, freehand, zoom, dimensionDraft, scalePreview, rectangleAmountMm, arcDraft, offsetResult.shape, offsetSource, cornerResult.shape, activeRotation, transformPreview, scaleDraft, labelDraft, initialLabelEdit, editingTextId, tableRows, tableColumns, placementModifiers, polygonTool, polygonSides, navigatingViewportId, viewportCameraPreview, bezierDraft, tableResizePreview]);
   // Objects past the paper edge follow scrolling and workspace resizing.
   useEffect(() => {
     const workspace = workspaceRef.current, surround = surroundRef.current;
@@ -1798,7 +1822,7 @@ export function LayoutWorkspace({
               const entityIds = tab.commands.execute('layout.clipboard.paste', { pageId: page.id, entities }) as number[];
               setSelectionIds(entityIds); setTool('select'); setEditingPathId(null); setEditPoints(null); setEditHandles(null);
               setActivePointIndex(null); setAnchor(null); setDimensionDraft(null); setAngularEdgeFirst(null);
-              setArcDraft(null); setOffsetDraft(null); setCornerFirst(null); setRotationDraft(null); setLabelDraft(null);
+              setArcDraft(null); setOffsetDraft(null); setCornerFirst(null); setRotationDraft(null); setScaleDraft(null); setLabelDraft(null);
               setCursor(null); setSnapKind(null); setFreehand([]);
             } catch { setVcbError('Could not paste this Layout object.'); }
           };
@@ -1912,7 +1936,7 @@ export function LayoutWorkspace({
         setLasso(null); lassoPress.current = null; lassoLast.current = null;
         eraserStroke.current = null; setEraserMarks({ ids: [], dragging: false });
         setAnchor(null);
-        setDimensionDraft(null); setAngularEdgeFirst(null); setDimensionError(null); setArcDraft(null); setArcError(null); setOffsetDraft(null); setCornerFirst(null); setCornerHover(null); setRotationDraft(null); setLabelDraft(null);
+        setDimensionDraft(null); setAngularEdgeFirst(null); setDimensionError(null); setArcDraft(null); setArcError(null); setOffsetDraft(null); setCornerFirst(null); setCornerHover(null); setRotationDraft(null); setScaleDraft(null); setLabelDraft(null);
         pointerDown.current = null;
         setFreehand([]);
         setVcbError(null);
@@ -1954,7 +1978,7 @@ export function LayoutWorkspace({
         // During a drag, or while a tool waits for its next step, nothing is erased; Esc ends the step first.
         if (pointerDown.current || moveStart.current || scaleStart.current || selectionScaleStart.current || boxStart.current || gripDrag.current || pointEditStart.current ||
             tableDrag.current || viewportDrag.current || lassoPress.current || bezierPress.current || eraserStroke.current ||
-            navigatingViewportRef.current !== null || anchor || moveDraft || rotationDraft || offsetDraft || cornerFirst || booleanIds.length ||
+            navigatingViewportRef.current !== null || anchor || moveDraft || rotationDraft || scaleDraft || offsetDraft || cornerFirst || booleanIds.length ||
             dimensionDraft || labelDraft || arcDraft || freehand.length || lasso || reattachModel || tableCounting) {
           event.preventDefault();
           return;
@@ -2001,7 +2025,7 @@ export function LayoutWorkspace({
             )[event.code];
       if (shortcut && !event.metaKey && !event.ctrlKey && !event.altKey) {
         if (shortcut === 'shape-builder') { event.preventDefault(); chooseTool('shape-builder'); return; }
-        setDimensionDraft(null); setAngularEdgeFirst(null); setDimensionError(null); setArcDraft(null); setArcError(null); setOffsetDraft(null); setCornerFirst(null); setCornerHover(null); setRotationDraft(null); setLabelDraft(null);
+        setDimensionDraft(null); setAngularEdgeFirst(null); setDimensionError(null); setArcDraft(null); setArcError(null); setOffsetDraft(null); setCornerFirst(null); setCornerHover(null); setRotationDraft(null); setScaleDraft(null); setLabelDraft(null);
         setTool(shortcut as LayoutTool);
         // as chooseTool: drawing starts with no selection, and mode toggles start off
         if (SHAPE_DRAWING_TOOLS.has(shortcut) || shortcut === 'eraser') setSelectionIds([]);
@@ -2028,7 +2052,7 @@ export function LayoutWorkspace({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [tab, selectionIds, selectedEntity, editingPathId, editingTextId, activePointIndex, canTransform, tool, page, state, presenting, printing, catalogActive, moveDraft, lasso, bezierDraft, booleanIds, shapeBuilder,
-    anchor, rotationDraft, offsetDraft, cornerFirst, dimensionDraft, labelDraft, arcDraft, freehand, reattachModel, tableCounting]);
+    anchor, rotationDraft, scaleDraft, offsetDraft, cornerFirst, dimensionDraft, labelDraft, arcDraft, freehand, reattachModel, tableCounting]);
 
   useEffect(() => {
     updatePolygonAlt(false);
@@ -2126,7 +2150,7 @@ export function LayoutWorkspace({
     setActivePointIndex(null);
     setFreehand([]);
     setVcbError(null);
-    setDimensionDraft(null); setAngularEdgeFirst(null); setDimensionError(null); setArcDraft(null); setArcError(null); setOffsetDraft(null); setCornerFirst(null); setCornerHover(null); setRotationDraft(null); setLabelDraft(null);
+    setDimensionDraft(null); setAngularEdgeFirst(null); setDimensionError(null); setArcDraft(null); setArcError(null); setOffsetDraft(null); setCornerFirst(null); setCornerHover(null); setRotationDraft(null); setScaleDraft(null); setLabelDraft(null);
   }, [tab.activePageId]);
 
   const rawPointFromEvent = (event: {
@@ -2163,7 +2187,9 @@ export function LayoutWorkspace({
     const snap = snapPaperPoint(raw, page, tab.doc.state, 8 * page.size[0] / bounds.width,
       tool === 'offset' && offsetDraft ? new Set([offsetDraft.entityId])
         // A move's destination snaps only to objects that stay put.
-        : tool === 'move' && moveDraft && !moveDraft.copy ? movingWithFollowers(moveDraft.entityIds, page, tab.doc.state) : undefined,
+        : tool === 'move' && moveDraft && !moveDraft.copy ? movingWithFollowers(moveDraft.entityIds, page, tab.doc.state)
+        // So does a scale's target point; its base and reference points snap to the objects being scaled too.
+        : tool === 'scale' && scaleDraft?.reference ? movingWithFollowers(scaleDraft.entityIds, page, tab.doc.state) : undefined,
       tool === 'offset' && offsetSource ? point => {
         try { return Math.abs(layoutOffsetDistance(offsetSource, point)) >= 1e-6; } catch { return true; }
       } : undefined);
@@ -2223,6 +2249,20 @@ export function LayoutWorkspace({
       });
       setRotationDraft(null); setCursor(null); setSnapKind(null); clearEntry(); setVcbError(null);
     } catch (error) { setVcbError(error instanceof Error ? error.message : 'Cannot rotate this object.'); }
+  };
+  /** The Scale tool's factor for a target point: its distance from the base point over the reference point's. */
+  const scaleFactorTo = (draft: ScaleDraft, reference: Point, p: Point): number =>
+    Math.hypot(p[0] - draft.base[0], p[1] - draft.base[1]) / Math.hypot(reference[0] - draft.base[0], reference[1] - draft.base[1]);
+  /** Scales the pending objects about the base point as one undoable step; a factor of 1 changes nothing. */
+  const commitScale = (factor: number): void => {
+    if (!scaleDraft) return;
+    if (!(factor > 0) || !Number.isFinite(factor)) { setVcbError('Enter a scale greater than zero.'); return; }
+    try {
+      if (Math.abs(factor - 1) > 1e-9) tab.commands.execute('layout.shape.scale', {
+        pageId: page.id, entityIds: scaleDraft.entityIds, pivot: scaleDraft.base, scaleX: factor, scaleY: factor,
+      });
+      setScaleDraft(null); setCursor(null); setSnapKind(null); clearEntry(); setVcbError(null);
+    } catch (error) { setVcbError(error instanceof Error ? error.message : 'Cannot scale the selection.'); }
   };
   /** The page point under a pointer event on a grip (the grips sit over the page canvas). */
   const gripPoint = (event: { clientX: number; clientY: number }): Point => rawPointFromEvent({ currentTarget: canvasRef.current!, clientX: event.clientX, clientY: event.clientY });
@@ -2370,7 +2410,7 @@ export function LayoutWorkspace({
     if (!offsetDraft) return;
     try {
       const id = tab.commands.execute('layout.path.offset', { pageId: page.id, entityId: offsetDraft.entityId, distanceMm }) as number;
-      setSelectionId(id); setOffsetDraft(null); setCornerFirst(null); setCornerHover(null); setRotationDraft(null); setLabelDraft(null); setCursor(null); clearEntry(); setVcbError(null);
+      setSelectionId(id); setOffsetDraft(null); setCornerFirst(null); setCornerHover(null); setRotationDraft(null); setScaleDraft(null); setLabelDraft(null); setCursor(null); clearEntry(); setVcbError(null);
     } catch (error) { setVcbError(error instanceof Error ? error.message : 'Cannot offset this path.'); }
   };
   const previewViewportCamera = (camera: LayoutViewportCamera | null): void => {
@@ -2661,11 +2701,25 @@ export function LayoutWorkspace({
       return;
     }
     if (tool === 'scale') {
-      // As Move does: an unselected object is picked up with its group, and any other click keeps the selection,
-      // whose box then shows the resize handles.
-      const entity = pickEntity(rawPointFromEvent(event), page, state, true);
-      if (entity && !selectionIds.includes(entity.id)) setSelectionIds(expandLayoutGroups([entity.id], page, state));
-      setCursor(null); setSnapKind(null); setVcbError(null);
+      const p = pointFromEvent(event); setCursor(p); setVcbError(null);
+      if (!scaleDraft) {
+        // As Rotate does: an unselected object is picked up with its group; otherwise the click scales the selection.
+        // Objects are picked where the pointer is, and the base point is the snapped point.
+        const raw = rawPointFromEvent(event);
+        const entity = pickEntity(raw, page, state, true) ?? pickEntity(p, page, state, true);
+        const chosen = entity && !selectionIds.includes(entity.id) ? expandLayoutGroups([entity.id], page, state) : selectionIds;
+        const entityIds = transformable(chosen).map((member) => member.id);
+        if (!entityIds.length) {
+          setVcbError(chosen.length ? 'Locked or hidden objects cannot be scaled.' : 'Click an object, or anywhere while objects are selected, to choose the base point.');
+          return;
+        }
+        if (chosen !== selectionIds) setSelectionIds(chosen);
+        setScaleDraft({ entityIds, base: p, reference: null, factor: 1 });
+        return;
+      }
+      if (Math.hypot(p[0] - scaleDraft.base[0], p[1] - scaleDraft.base[1]) <= LENGTH_TOL * 1000) { setVcbError('Choose a point away from the base point.'); return; }
+      if (!scaleDraft.reference) setScaleDraft({ ...scaleDraft, reference: p, factor: 1 });
+      else commitScale(scaleFactorTo(scaleDraft, scaleDraft.reference, p));
       return;
     }
     if (tool === 'move') {
@@ -3033,7 +3087,14 @@ export function LayoutWorkspace({
       }
       return;
     }
-    if (tool === 'select' || tool === 'scale' || booleanOperation(tool)) { setCursor(null); setSnapKind(null); return; }
+    if (tool === 'scale') {
+      const p = pointFromEvent(event); setCursor(p);
+      if (scaleDraft?.reference && Math.hypot(p[0] - scaleDraft.base[0], p[1] - scaleDraft.base[1]) > LENGTH_TOL * 1000) {
+        setScaleDraft({ ...scaleDraft, factor: scaleFactorTo(scaleDraft, scaleDraft.reference, p) }); setVcbError(null);
+      }
+      return;
+    }
+    if (tool === 'select' || booleanOperation(tool)) { setCursor(null); setSnapKind(null); return; }
     const counting = pointerDown.current;
     if (tool === 'table' && counting && !counting.fromAnchor) {
       // Each step right or left adds a column, each step up or down a row; the preview grows by whole cells.
@@ -3268,6 +3329,7 @@ export function LayoutWorkspace({
   const entrySingle = ((): { label: string; value?: string | undefined } => {
     if (tool === 'move') return { label: 'Distance', value: moveDraft ? formatEntryLength(Math.hypot(...(movePreview?.delta ?? [0, 0]))) : undefined };
     if (tool === 'rotate') return { label: 'Angle', value: rotationDraft?.reference ? `${rotationDraft.angleDeg.toFixed(1)}°` : undefined };
+    if (tool === 'scale') return { label: 'Scale', value: scaleDraft?.reference ? formatScalePercent(scaleDraft.factor) : undefined };
     if (tool === 'offset') return { label: 'Distance', value: offsetDraft ? formatEntryLength(offsetDraft.distanceMm) : undefined };
     if (tool === 'fillet') return { label: 'Radius' };
     if (tool === 'chamfer') return { label: 'Distance' };
@@ -3412,8 +3474,9 @@ export function LayoutWorkspace({
     if (passThrough) {
       const f = typed.find(g => !lockable(g.id) || readEntry(g.id, entryDrafts[g.id]!) === null) ?? typed[0];
       if (!f) return;
-      const parsed = parseVcb(entryDrafts[f.id]!, entryUnit);
-      if (!parsed.ok) { setEntryError(f.id); setVcbError(parsed.error.error); return; }
+      // Scale reads its percentages itself.
+      const parsed = tool === 'scale' && SCALE_PERCENT.test(entryDrafts[f.id]!) ? null : parseVcb(entryDrafts[f.id]!, entryUnit);
+      if (parsed && !parsed.ok) { setEntryError(f.id); setVcbError(parsed.error.error); return; }
       // The tool clears the fields when the value applies; an error keeps them for correction.
       setEntryError(null);
       applyVcbText(entryDrafts[f.id]!);
@@ -3485,6 +3548,21 @@ export function LayoutWorkspace({
         : parsed.value.kind === 'length' && parsed.value.unit === null ? parsed.value.raw : NaN;
       if (!Number.isFinite(angle)) { setVcbError('Enter a rotation angle in degrees.'); return; }
       commitRotation(angle); return;
+    }
+    if (tool === 'scale') {
+      if (!scaleDraft) { setVcbError('Click an object, or anywhere while objects are selected, to choose the base point first.'); return; }
+      // A percentage or a number without a unit is a factor; a length with its unit is the reference's new length.
+      const percent = SCALE_PERCENT.exec(text);
+      if (percent) { commitScale(Number(percent[1]) / 100); return; }
+      const parsed = parseVcb(text, drawingUnits === 'mm' ? 'mm' : 'in');
+      if (!parsed.ok) { setVcbError(parsed.error.error); return; }
+      const value = parsed.value;
+      if (value.kind !== 'length') { setVcbError('Enter a scale factor, a percentage, or a length with its unit.'); return; }
+      if (value.unit === null) { commitScale(value.raw); return; }
+      const reference = scaleDraft.reference;
+      if (!reference) { setVcbError('Click a reference point before entering its new length.'); return; }
+      if (!(value.meters > 0)) { setVcbError('Enter a length greater than zero.'); return; }
+      commitScale(value.meters * 1000 / Math.hypot(reference[0] - scaleDraft.base[0], reference[1] - scaleDraft.base[1])); return;
     }
     if (isLayoutCornerTool(tool)) {
       const parsed = parseVcb(text, drawingUnits === 'mm' ? 'mm' : 'in');
@@ -3985,7 +4063,7 @@ export function LayoutWorkspace({
     if (booleanOperation(id) || booleanOperation(tool)) setSelectionIds([]);
     if (navigatingViewportRef.current !== null) endViewportNavigation();
     setTableCellsActive(false); setTableResizePreview(null); setImportNote(null);
-    setDimensionDraft(null); setAngularEdgeFirst(null); setDimensionError(null); setArcDraft(null); setArcError(null); setOffsetDraft(null); setCornerFirst(null); setCornerHover(null); setRotationDraft(null); setLabelDraft(null); setTool(id); setAnchor(null); setVcbError(null);
+    setDimensionDraft(null); setAngularEdgeFirst(null); setDimensionError(null); setArcDraft(null); setArcError(null); setOffsetDraft(null); setCornerFirst(null); setCornerHover(null); setRotationDraft(null); setScaleDraft(null); setLabelDraft(null); setTool(id); setAnchor(null); setVcbError(null);
     setEditingTextId(null);
     scaleStart.current = null; setScalePreview(null);
     selectionScaleStart.current = null; setSelectionScale(null);
@@ -4128,7 +4206,7 @@ export function LayoutWorkspace({
     return parsed.value.kind === 'length' || parsed.value.kind === 'radius' ? parsed.value : null;
   };
   // picking Corner's segments keeps the bar usable, as edge picking does in 3D
-  const barPlacing = Boolean(moveDraft || rotationDraft || offsetDraft || arcDraft);
+  const barPlacing = Boolean(moveDraft || rotationDraft || scaleDraft || offsetDraft || arcDraft);
   return (
     <>
       {contextMenu ? <LayoutContextMenu x={contextMenu.x} y={contextMenu.y} items={contextItems} onClose={() => { setContextMenu(null); canvasRef.current?.focus(); }} /> : null}
@@ -4276,9 +4354,9 @@ export function LayoutWorkspace({
           {tool === 'line' && lineGuide && cursor ? <LayoutAlignmentGuide axis={lineGuide.axis}
             from={[lineGuide.reference[0] * PX_PER_MM * zoom, lineGuide.reference[1] * PX_PER_MM * zoom]}
             to={[cursor[0] * PX_PER_MM * zoom, cursor[1] * PX_PER_MM * zoom]} /> : null}
-          {cursor && (tool !== 'select' && tool !== 'scale' && !booleanOperation(tool) || (scalePreview !== null || selectionScale !== null) && snapKind !== null)
+          {cursor && (tool !== 'select' && !booleanOperation(tool) || (scalePreview !== null || selectionScale !== null) && snapKind !== null)
             ? <LayoutPlacementMarker snapKind={snapKind} x={cursor[0] * PX_PER_MM * zoom} y={cursor[1] * PX_PER_MM * zoom} /> : null}
-          {snapKind && snapKind !== 'grid' && cursor && (tool !== 'select' && tool !== 'scale' || scalePreview !== null || selectionScale !== null) && !presenting && !printing && !contextMenu && editingTextId === null &&
+          {snapKind && snapKind !== 'grid' && cursor && (tool !== 'select' || scalePreview !== null || selectionScale !== null) && !presenting && !printing && !contextMenu && editingTextId === null &&
               state.settings.objectSnap !== false ? <LayoutSnapTooltip
             key={`${page.id}:${tool}:${snapHoverEpoch}:${snapType}:${cursor[0]}:${cursor[1]}`}
             type={snapType ?? snapKind} x={cursor[0] * PX_PER_MM * zoom} y={cursor[1] * PX_PER_MM * zoom}
@@ -4323,7 +4401,7 @@ export function LayoutWorkspace({
               if (tableDrag.current) setTableSelection(tableDrag.current);
               tableDrag.current = null;
               if (booleanOperation(tool)) { setBooleanIds([]); setSelectionIds([]); }
-              setDimensionDraft(null); setAngularEdgeFirst(null); setDimensionError(null); setArcDraft(null); setArcError(null); setOffsetDraft(null); setCornerFirst(null); setCornerHover(null); setRotationDraft(null); setLabelDraft(null);
+              setDimensionDraft(null); setAngularEdgeFirst(null); setDimensionError(null); setArcDraft(null); setArcError(null); setOffsetDraft(null); setCornerFirst(null); setCornerHover(null); setRotationDraft(null); setScaleDraft(null); setLabelDraft(null);
               pointerDown.current = null;
               moveStart.current = null;
               boxStart.current = null; setBoxSelect(null);
@@ -4395,17 +4473,15 @@ export function LayoutWorkspace({
                 onPointerCancel={() => { scaleStart.current = null; setScalePreview(null); setSnapKind(null); setCursor(null); }}
                 onDoubleClick={(event) => {
                   event.stopPropagation(); scaleStart.current = null; setScalePreview(null);
-                  // Text and vertex editing belong to Select, so Scale hands over to it.
-                  if (tool === 'scale' && (selectedEntity.text || selectedEntity.kind === 'path')) chooseTool('select');
                   if (selectedEntity.text) setEditingTextId(selectedEntity.id); else if (selectedEntity.kind === 'path') setEditingPathId(selectedEntity.id);
                 }}
               />)}
-            {tool !== 'scale' && selectedEntity.kind !== 'label' && !(selectedEntity.table && tableCellsActive) && !scalePreview && !movePreview
+            {selectedEntity.kind !== 'label' && !(selectedEntity.table && tableCellsActive) && !scalePreview && !movePreview
               ? renderRotationGrip(singleGrip(selectedEntity, selectionBounds)) : null}
           </div> : null}
-          {(tool === 'select' || tool === 'scale') && selectionIds.length > 1 && editingTextId === null ? (() => {
+          {tool === 'select' && selectionIds.length > 1 && editingTextId === null ? (() => {
             // One box around the drawn extent of every selected object, following a resize as it is previewed. While any of
-            // them can be changed it has resize handles, and with Select a rotation grip.
+            // them can be changed it has resize handles and a rotation grip.
             const box = extentOf(selectionIds, selectionScale ? transformPreview : null);
             if (!box) return null;
             const entityIds = transformable(selectionIds).map((entity) => entity.id);
@@ -4432,7 +4508,7 @@ export function LayoutWorkspace({
                 onPointerUp={finishSelectionScale}
                 onPointerCancel={endSelectionScale}
               />) : null}
-              {editable && tool === 'select' && !selectionScale ? renderRotationGrip(subject) : null}
+              {editable && !selectionScale ? renderRotationGrip(subject) : null}
             </div>;
           })() : null}
           {boxSelect ? <div className="pf-layout-marquee" aria-label="Selection box" data-mode={boxSelect.to[0] < boxSelect.from[0] ? 'crossing' : 'window'}
@@ -4701,8 +4777,12 @@ export function LayoutWorkspace({
               : 'Click an object to erase it, or drag across objects to erase them all.'
             : tool === 'shape-builder' ? `${shapeBuilder.effectiveMode === 'add' ? 'Add' : 'Remove'}: click regions or drag across them. Shift reverses the mode. ${shapeBuilder.result?.sourceIndex !== null ? 'Only added sections are kept.' : 'Deleting alone keeps everything else.'} Enter applies; Escape cancels.`
             : booleanOperation(tool) ? booleanIds.length ? 'Pick more shapes. Enter to apply; Escape to cancel.' : 'Click the target first, then the other shapes.'
-            : tool === 'scale' ? scalePreview || selectionScale ? 'Resizing: hold Shift to maintain aspect ratio, Alt to keep the center. Release to finish.'
-              : 'Click an object, or keep the selection, then drag a resize handle. Hold Shift to maintain aspect ratio and Alt to keep the center.'
+            : tool === 'scale' ? scaleDraft?.reference ? (() => {
+                const before = Math.hypot(scaleDraft.reference[0] - scaleDraft.base[0], scaleDraft.reference[1] - scaleDraft.base[1]);
+                return `Scale: ${formatScalePercent(scaleDraft.factor)} (${formatEntryLength(before)} to ${formatEntryLength(before * scaleDraft.factor)}). Click to finish, or type a factor, a percentage or a new length. Esc cancels.`;
+              })()
+              : scaleDraft ? 'Click a reference point, or type a scale factor or percentage. Esc cancels.'
+              : 'Click an object, or anywhere to scale the selection, to choose the base point.'
             : tool === 'move' ? moveDraft
               ? `${moveDraft.copy ? 'Copy' : 'Move'}: click the destination, or type a distance or x, y offsets. Tap ${COPY_TOGGLE_KEYS} to toggle copying; hold Shift to move only horizontally or vertically. Esc cancels.`
               : 'Click an object, or anywhere to move the selection, to choose the base point. After a copy, type Nx or /N for an array.'

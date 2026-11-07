@@ -50,14 +50,14 @@ function setup() {
   return { tab, pageId, a, b, t, canvas, press, drag, release, click, pull, entity, points, selectAll, selectSquares, box, undo, dispose };
 }
 
-it('shows resize handles and a rotation grip around a multi-selection, and Scale shows the handles alone', () => {
+it('shows resize handles and a rotation grip around a multi-selection with Select, and neither with Scale', () => {
   const { tab, selectAll, box, dispose } = setup();
   selectAll();
   expect(within(box()).getAllByRole('button', { name: /^Scale selection / })).toHaveLength(8);
   expect(within(box()).getByRole('button', { name: 'Rotation handle' })).toBeTruthy();
   act(() => { tab.commands.execute('tool.scale'); });
-  expect(within(box()).getAllByRole('button', { name: /^Scale selection / })).toHaveLength(8);
-  expect(within(box()).queryByRole('button', { name: 'Rotation handle' })).toBeNull();
+  expect(screen.queryByLabelText('Selected objects bounds')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Rotation handle' })).toBeNull();
   dispose();
 });
 
@@ -99,24 +99,6 @@ it('keeps proportions with Shift and the center with Alt, leaves locked objects 
   fireEvent.keyDown(window, { key: 'Escape' });
   fireEvent.pointerUp(handle, { pointerId: 1, clientX: 360, clientY: 60 });
   expect(tab.doc.version).toBe(version);
-  dispose();
-});
-
-it('Scale picks up a whole group from a click on a member, and a double-click on a handle hands over to Select', () => {
-  const { tab, pageId, a, b, click, canvas, box, dispose } = setup();
-  act(() => { tab.commands.execute('layout.shape.group', { pageId, entityIds: [a, b] }); });
-  act(() => { tab.commands.execute('tool.scale'); });
-  click(20, 20);
-  expect(within(box()).getAllByRole('button', { name: /^Scale selection / })).toHaveLength(8);
-  expect(screen.getByText('2 objects selected')).toBeTruthy();
-  // A lone object's handle: a double-click there edits its vertices with Select.
-  act(() => { tab.commands.execute('layout.shape.ungroup', { pageId, entityIds: [a, b] }); });
-  act(() => { tab.commands.execute('tool.select'); });
-  click(150, 150); click(20, 20);
-  act(() => { tab.commands.execute('tool.scale'); });
-  fireEvent.doubleClick(screen.getByRole('button', { name: 'Scale bottom right' }));
-  expect(canvas.getAttribute('data-tool')).toBe('select');
-  expect(document.querySelector('.pf-layout-footer-spacer')?.textContent).toContain('Drag vertices to edit');
   dispose();
 });
 

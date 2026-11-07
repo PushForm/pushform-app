@@ -20,17 +20,25 @@ After fixing the reference direction, you can instead type an angle such as **30
 
 Labels stay readable as they turn: the arrow and the bend move around the pivot, while the text stays upright at the end of a level leader. A horizontal or vertical dimension becomes a rotated dimension at its new angle.
 
-## Resize with the Scale tool
+## Scale to a factor or a known length with the Scale tool
 
-Choose **Scale** in Transform, then click an object to show its resize handles; clicking a member of a group picks up the whole group, and a selection you already have stays selected. Drag a handle to preview the new size and release to commit. Hold Shift to preserve proportions, or Alt to keep the center fixed. Escape discards an active resize. Double-click a handle to edit the object's text or vertices with Select.
+Choose **Scale** in Transform. Click the object at the point that should stay put, such as a corner; clicking a member of a group picks up the whole group. To scale several objects together, select them first, then click a selected object or empty paper to set that base point. Click a second point, the reference point, to measure from. Move the pointer to preview the new size: everything scales by the pointer's distance from the base point compared with the reference point's, the same amount across and down. Click a third time to finish. The Scale field beside the pointer shows the factor, and the status bar shows the reference length before and after.
+
+You can type instead of clicking. After the base point, type a factor such as **2** or **0.5**, or a percentage such as **50%**, and press Enter. After the reference point, type a length with its unit, such as **600mm** or **24"**, to make the distance from the base point to the reference point exactly that long. To bring an imported picture or drawing to its true size, click one end of a part whose size you know, click its other end, and type the real length.
+
+The points snap to the corners and edges of objects and to the grid. The base and reference points can snap to the objects you are scaling; the final point snaps only to other objects. Escape cancels a pending scale. Type scales with the drawing, so a text box scaled to 200% has twice its font size. Hidden or locked objects stay as they are.
+
+## Resize with the handles
+
+With Select, a selected object shows resize handles on its box. Drag a handle to preview the new size and release to commit. Hold Shift to preserve proportions, or Alt to keep the center fixed. Escape discards an active resize.
 
 While you drag, the handle snaps to the corners and edges of other objects and to the grid, as drawing does, and shows the snap marker. A handle can't be dragged past the opposite side; use Flip to mirror.
 
-A text box resized on its own keeps its font size and rewraps. Hidden or locked objects must be made editable before resizing.
+A text box resized on its own with its handles keeps its font size and rewraps. Hidden or locked objects must be made editable before resizing.
 
 ## Resize or rotate a group or several objects
 
-Select a group, or several objects, with Select or Scale. One box surrounds them all, with resize handles on its corners and sides, and with Select a rotation handle in its middle. Drag a corner or side handle to scale everything together; Shift keeps proportions and Alt scales about the center. Drag the rotation handle to turn everything together.
+Select a group, or several objects, with Select. One box surrounds them all, with resize handles on its corners and sides and a rotation handle in its middle. Drag a corner or side handle to scale everything together; Shift keeps proportions and Alt scales about the center. Drag the rotation handle to turn everything together.
 
 When several objects are scaled together, the type scales with them by the smaller of the two factors, so shrinking a title block shrinks its text instead of cutting it off. Rotated text boxes and pictures keep their angle. Locked objects stay as they are.
 

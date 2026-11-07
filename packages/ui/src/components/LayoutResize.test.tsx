@@ -22,7 +22,7 @@ function frame(entity: LayoutEntity) {
     : entity.text ? layoutTextCenter(entity) : [(bounds.minX + bounds.maxX) / 2, (bounds.minY + bounds.maxY) / 2];
   return { width, height, center, angle };
 }
-function setup(kind: Kind, angle = 0, scaleTool = false) {
+function setup(kind: Kind, angle = 0) {
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
   vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 891, height: 630, right: 891, bottom: 630, x: 0, y: 0, toJSON: () => ({}) });
   const app = createApp({ demo: false, expose: false }), session = new DocumentSession(app, () => createApp({ demo: false, expose: false }), false, null);
@@ -48,7 +48,6 @@ function setup(kind: Kind, angle = 0, scaleTool = false) {
   else if (angle) tab.commands.execute('layout.shape.rotate', { pageId, entityId: id, angleDeg: angle });
   const entity = () => tab.doc.state.pages.get(pageId)!.entities.get(id)!;
   render(<LayoutWorkspace tab={tab} session={session} />);
-  if (scaleTool) fireEvent.click(screen.getByRole('button', { name: 'Scale' }));
   const canvas = screen.getByLabelText('Page 1 canvas'), center = frame(entity()).center;
   fireEvent.pointerDown(canvas, { button: 0, pointerId: 1, clientX: center[0] * 3, clientY: center[1] * 3 });
   fireEvent.pointerUp(canvas, { pointerId: 1, clientX: center[0] * 3, clientY: center[1] * 3 });
@@ -159,19 +158,3 @@ for (const kind of ['path', 'image', 'text', 'label'] as const) {
     dispose();
   });
 }
-it('selects an object after activating Scale and resizes it without leaving the tool', () => {
-  const { tab, entity, handle, pointer, dispose } = setup('path', 0, true);
-  const original = entity();
-  expect(screen.getByLabelText('Page 1 canvas').getAttribute('data-tool')).toBe('scale');
-  const button = handle('bottom right');
-  const version = tab.doc.version;
-  fireEvent.pointerDown(button, pointer(120, 70));
-  fireEvent.pointerMove(button, pointer(140, 80));
-  expect(tab.doc.version).toBe(version);
-  fireEvent.pointerUp(button, pointer(140, 80));
-  expect(frame(entity()).width).toBeGreaterThan(frame(original).width);
-  expect(screen.getByLabelText('Page 1 canvas').getAttribute('data-tool')).toBe('scale');
-  act(() => { tab.commands.execute('edit.undo'); });
-  expect(entity()).toEqual(original);
-  dispose();
-});

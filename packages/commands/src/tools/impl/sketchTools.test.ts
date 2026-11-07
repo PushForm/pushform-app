@@ -345,6 +345,32 @@ describe('RectangleTool', () => {
     expect(sketch().faces.size).toBe(2);
   });
 
+  it('typed dimensions and a re-edit after the commit keep the side the pointer is on', () => {
+    const { tools, sketch, host } = setup();
+    const vcb = (text: string) => {
+      const v = parseVcb(text, 'in');
+      if (v.ok) tools.onVcb(v.value);
+    };
+    tools.activate('rectangle');
+    tools.click(at([0, 0, 0]));
+    tools.pointerMove(at([-0.5, -0.5, 0])); // toward −x/−y
+    vcb('2m,3m');
+    expect(host.undoStack.length).toBe(1);
+    expect(vertexPositions(sketch()).sort()).toEqual([[-2, -3, 0], [-2, 0, 0], [0, -3, 0], [0, 0, 0]].sort());
+    // re-edit after the commit: the rectangle stays on that side
+    vcb('4m,5m');
+    expect(host.undoStack.length).toBe(1);
+    expect(vertexPositions(sketch()).sort()).toEqual([[-4, -5, 0], [-4, 0, 0], [0, -5, 0], [0, 0, 0]].sort());
+    // the Width and Height fields after the commit re-edit the same way
+    const one = parseVcb('1m', 'in');
+    if (one.ok) tools.onEntry({ width: one.value });
+    expect(host.undoStack.length).toBe(1);
+    expect(vertexPositions(sketch()).sort()).toEqual([[-1, -5, 0], [-1, 0, 0], [0, -5, 0], [0, 0, 0]].sort());
+    // a negative value takes the other side of the first corner
+    vcb(',-2m');
+    expect(vertexPositions(sketch()).sort()).toEqual([[-1, 0, 0], [-1, 2, 0], [0, 0, 0], [0, 2, 0]].sort());
+  });
+
   it('shows Square / Golden Section hints within 2 px and snaps to them', () => {
     const { tools, sketch } = setup();
     tools.activate('rectangle');

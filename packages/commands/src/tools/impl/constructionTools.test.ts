@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Box3, Id, Ray, Vec2, Vec3 } from '@pushform/core';
 import { formatLength, v3eq } from '@pushform/core';
 import { freeInference, GROUND_PLANE, SNAP_COLORS } from '@pushform/inference';
@@ -368,6 +368,39 @@ describe('OffsetTool', () => {
     expect(tool.dragDistance).toBeCloseTo(0.3);
     tools.click(at([0.5, -0.3, 0]));
     expect(sketch().faces.size).toBe(3);
+  });
+
+  it('a typed re-edit that fails keeps the original offset; the hint says a typed value takes the pointer side', () => {
+    const { tools, sketch, square, host, registry } = setup();
+    square();
+    const face = [...sketch().faces.values()][0]!;
+    tools.activate('offset');
+    tools.click(at([0.5, 0.5, 0], { hit: sketchFaceHit(face.id, [0.5, 0.5, 0]) }));
+    tools.pointerMove(at([0.5, 0.1, 0]));
+    expect(tools.status().instructor).toBe("Click or type the offset distance. A typed value offsets toward the pointer's side; a negative one, the other side.");
+    tools.click(at([0.5, 0.1, 0]));
+    const entries = host.undoStack.length;
+    const top = host.undoStack.peek();
+    const before = { faces: sketch().faces.size, edges: sketch().edges.size };
+    // the next offset fails
+    const execute = registry.execute.bind(registry);
+    const spy = vi.spyOn(registry, 'execute').mockImplementation(((id: string, params?: unknown) => {
+      if (id === 'sketch.offset' && (params as { distance: number }).distance !== -0.1) throw new Error('Offset collapsed');
+      return execute(id, params as never);
+    }) as typeof registry.execute);
+    tools.onVcb(vcb('0.3'));
+    expect(host.undoStack.length).toBe(entries);
+    expect(host.undoStack.peek()).toBe(top);
+    expect({ faces: sketch().faces.size, edges: sketch().edges.size }).toEqual(before);
+    expect(tools.status().instructor).toBe('Offset failed: Offset collapsed');
+    expect(tools.status().applied).toBe(true);
+    // the original can still be re-edited
+    spy.mockRestore();
+    tools.onVcb(vcb('0.2'));
+    expect(host.undoStack.length).toBe(entries);
+    const inner = [...sketch().faces.values()].find((f) => f.id !== face.id)!;
+    const xs = inner.loops[0]!.map((r) => sketch().vertices.get(sketch().edges.get(r.edgeId)!.a)!.p[0]);
+    expect(Math.min(...xs)).toBeCloseTo(0.2);
   });
 
   it('offsets preselected connected edges as a parallel polyline', () => {

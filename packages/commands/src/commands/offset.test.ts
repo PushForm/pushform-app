@@ -182,4 +182,17 @@ describe('sketch.offset', () => {
     expect(edgeChainProblem(sk, right)).toBe('The selected edges do not lie in one plane');
     expect(edgeChainProblem(sk, left.slice(0, 2))).toBeNull();
   });
+
+  it('offsets a chain along one line in the level plane through it', () => {
+    const s = setup();
+    const a = s.registry.execute('sketch.addEdge', { a: [0, 0, 0], b: [1, 0, 0] }) as number[];
+    const b = s.registry.execute('sketch.addEdge', { a: [1, 0, 0], b: [2, 0, 0] }) as number[];
+    s.offset({ edgeIds: [...a, ...b], distance: 0.5 });
+    const added = [...s.sketch().vertices.values()].filter((v) => Math.abs(v.p[1]) > 1e-9);
+    expect(added).toHaveLength(3);
+    for (const v of added) {
+      expect(Math.abs(v.p[1])).toBeCloseTo(0.5);
+      expect(v.p[2]).toBeCloseTo(0);
+    }
+  });
 });

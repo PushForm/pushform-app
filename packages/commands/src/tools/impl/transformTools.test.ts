@@ -315,6 +315,18 @@ describe('MoveTool', () => {
   });
 });
 
+describe('MoveTool: tool options bar', () => {
+  it('offers only Copy in the tool options bar; an Alt tap changes nothing', () => {
+    const { tools } = setup();
+    tools.activate('move');
+    expect(tools.status().settings?.map((s) => s.id)).toEqual(['copy']);
+    tools.keyDown(key('Alt', ALT));
+    tools.keyUp(key('Alt', ALT));
+    expect(tools.status().settings).toEqual([expect.objectContaining({ id: 'copy', on: false })]);
+    expect((tools.activeTool as MoveTool).copyMode).toBe(false);
+  });
+});
+
 describe('RotateTool', () => {
   it('picks up a hovered section plane and rotates it, previewing the plane and its cut', async () => {
     const { registry, host, tools } = setup();

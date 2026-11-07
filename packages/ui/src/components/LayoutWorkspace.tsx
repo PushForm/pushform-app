@@ -27,7 +27,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { SERVICE_LAYOUT_WORKSPACE, LAYOUT_TOOLS, detectPlatform, parseVcb, type LayoutWorkspaceHost, type ToolSetting, type ToolSettingValue, type VcbValue } from '@pushform/commands';
-import { removeLayoutPathVertex, nextLayoutPathIndex, layoutPathContours, layoutPathSegmentIndices,isLayoutLayerVisible, labelAnchorAt, layoutLabelDragPart, layoutLabelWholeMovePart, moveLayoutLabel, previewLayoutLabel, type LayoutLabelDragPart, formatLayoutTextRange, layoutTextStyleAt, layoutLabelLeader, createLayoutLabelGeometry, inferLinearDimensionAlignment, layoutRotationAngle, snapLayoutRotationAngle, rotateLayoutEntity, rotateLayoutPoint, layoutTextCenter, resizeLayoutTextPoints, createLayoutCornerBetween, isLayoutCornerTool, createLayoutOffset, layoutOffsetDistance, createLayoutArc, isLayoutArcTool, layoutArcSweep, createLayoutRectangle, isLayoutRectangleTool, type LayoutRectanglePath, pointInsideLayoutPath, angularRaysFromPoints, angularEdgesFromPicks, type LayoutAngularEdgeAnchor, angularDimensionError, angularPlacementReflex, angularMeasurement, autoDimensionExtent, entitiesInSelectionBox, entitiesInLasso, lassoIsCrossing, layoutEntityBounds, angularDimensionGeometry, formatAngularDimension, createAngularDimension, type LayoutAngularDimension, createLinearDimension, dimensionAnchorAt, linearMeasurement, linearDimensionGeometry, formatLinearDimension, formatLayoutLength, layoutLengthPrecisionLabel, layoutDimensionScaleLabel, LAYOUT_DIMENSION_SCALES, previewLayoutDimension, type LayoutDimensionAnchor, type LayoutLinearDimension, editLayoutTextContent, importLayoutText, entitiesForLayer, entityOnPage, flattenLayoutPath, pathSegment, pointOnPathSegment, splitLayoutPathSegment, snapPaperPoint, alignToPaperReference, addLayoutBezierAnchor, pullLayoutBezierHandle, previewLayoutBezier, finishLayoutBezier, type LayoutBezierDraft, type PaperAlignment, type LayoutEntity, type LayoutPathHandle, type LayoutPage, type LayoutDocumentState, type PaperSnapKind } from '@pushform/layout';
+import { removeLayoutPathVertex, nextLayoutPathIndex, layoutPathContours, layoutPathSegmentIndices,isLayoutLayerVisible, labelAnchorAt, layoutLabelDragPart, layoutLabelWholeMovePart, moveLayoutLabel, previewLayoutLabel, type LayoutLabelDragPart, formatLayoutTextRange, layoutTextStyleAt, layoutLabelLeader, createLayoutLabelGeometry, inferLinearDimensionAlignment, layoutRotationAngle, snapLayoutRotationAngle, rotateLayoutEntity, rotateLayoutPoint, layoutTextCenter, resizeLayoutTextPoints, createLayoutCornerBetween, isLayoutCornerTool, createLayoutOffset, layoutOffsetDistance, createLayoutArc, isLayoutArcTool, layoutArcSweep, createLayoutRectangle, isLayoutRectangleTool, type LayoutRectanglePath, pointInsideLayoutPath, angularRaysFromPoints, angularEdgesFromPicks, type LayoutAngularEdgeAnchor, angularDimensionError, angularPlacementReflex, angularMeasurement, autoDimensionExtent, entitiesInSelectionBox, entitiesInLasso, lassoIsCrossing, layoutEntityBounds, angularDimensionGeometry, formatAngularDimension, createAngularDimension, type LayoutAngularDimension, createLinearDimension, dimensionAnchorAt, linearMeasurement, linearDimensionGeometry, formatLinearDimension, formatLayoutLength, layoutLengthPrecisionLabel, layoutDimensionScaleLabel, LAYOUT_DIMENSION_SCALES, previewLayoutDimension, type LayoutDimensionAnchor, type LayoutLinearDimension, editLayoutTextContent, importLayoutText, entitiesForLayer, entityOnPage, flattenLayoutPath, pathSegment, pointOnPathSegment, splitLayoutPathSegment, snapPaperPoint, alignToPaperReference, addLayoutBezierAnchor, pullLayoutBezierHandle, removeLastLayoutBezierAnchor, previewLayoutBezier, finishLayoutBezier, type LayoutBezierDraft, type PaperAlignment, type LayoutEntity, type LayoutPathHandle, type LayoutPage, type LayoutDocumentState, type PaperSnapKind } from '@pushform/layout';
 import { FREEHAND_SMOOTHING_PX, LENGTH_TOL } from '@pushform/core';
 import { createLayoutFreehand } from '@pushform/layout';
 import { dxfLayoutEntities, isDxfFile } from '@pushform/io';
@@ -267,6 +267,8 @@ const POLYGON_TOOLS = [
   { id: 'circumscribed-polygon', title: 'Circumscribed Polygon', icon: 'tool-circumscribed-polygon' },
 ] as const;
 /** Tools that draw shapes: choosing one clears the selection, so the style panel edits new shapes. */
+/** How far apart, in paper millimeters, the Eraser tests points along a drag: under twice the 2 mm pick distance, so it misses no line it crosses. */
+const ERASER_STEP_MM = 1.5;
 const SHAPE_DRAWING_TOOLS: ReadonlySet<string> = new Set(['line', 'bezier', 'freehand', 'arc', 'arc2', 'arc3', 'pie',
   'rectangle', 'rounded-rectangle', 'bulged-rectangle', 'lozenge', 'ellipse', 'circle', 'polygon', 'circumscribed-polygon']);
 /** Tools that draw open lines, the only shapes that take arrows. */
@@ -435,6 +437,23 @@ function movingWithFollowers(entityIds: readonly number[], page: LayoutPage, sta
   return moving;
 }
 
+/** A path's flattened contours and their bounds, kept per entity (entities are immutable) so repeated picks stay cheap. */
+const pathPickOutlines = new WeakMap<LayoutEntity, { contours: Point[][]; min: Point; max: Point }>();
+function pathPickOutline(entity: LayoutEntity): { contours: Point[][]; min: Point; max: Point } {
+  const cached = pathPickOutlines.get(entity);
+  if (cached) return cached;
+  // Fill tests close every contour (pointInsideLayoutPath wraps around); edge tests skip undrawn closing segments.
+  const contours = layoutPathContours(entity.points, entity.handles, entity.closed, entity.contourStarts, entity.openContours)
+    .map(contour => flattenLayoutPath(contour.points, contour.handles, contour.closed));
+  const min: Point = [Infinity, Infinity], max: Point = [-Infinity, -Infinity];
+  for (const samples of contours) for (const [x, y] of samples) {
+    min[0] = Math.min(min[0], x); min[1] = Math.min(min[1], y); max[0] = Math.max(max[0], x); max[1] = Math.max(max[1], y);
+  }
+  const outline = { contours, min, max };
+  pathPickOutlines.set(entity, outline);
+  return outline;
+}
+
 function pickEntity(p: Point, page: LayoutPage, state: LayoutDocumentState, includeUnfilledInterior = false, excludedIds: readonly number[] = []): LayoutEntity | null {
   for (const layerId of [...state.layerOrder].reverse()) {
     if (!isLayoutLayerVisible(page, state, layerId)) continue;
@@ -467,9 +486,8 @@ function pickEntity(p: Point, page: LayoutPage, state: LayoutDocumentState, incl
         if (leader && (distanceToSegment(local, leader.tip, leader.bend) < 2 || distanceToSegment(local, leader.bend, leader.start) < 2)) return entity;
         continue;
       }
-      // Fill tests close every contour (pointInsideLayoutPath wraps around); edge tests skip undrawn closing segments.
-      const contours = layoutPathContours(entity.points, entity.handles, entity.closed, entity.contourStarts, entity.openContours)
-        .map(contour => flattenLayoutPath(contour.points, contour.handles, contour.closed));
+      const { contours, min, max } = pathPickOutline(entity);
+      if (p[0] < min[0] - 2 || p[0] > max[0] + 2 || p[1] < min[1] - 2 || p[1] > max[1] + 2) continue;
       if (entity.closed && (entity.style?.fillColor || entity.style?.fillPattern || includeUnfilledInterior) &&
         contours.filter(samples => pointInsideLayoutPath(p, samples)).length % 2 === 1) return entity;
       for (const samples of contours) for (let i = 1; i < samples.length; i++) {
@@ -1229,6 +1247,16 @@ export function LayoutWorkspace({
   const [bezierDraft, setBezierDraft] = useState<LayoutBezierDraft | null>(null);
   const bezierPress = useRef<{ x: number; y: number } | null>(null);
   useEffect(() => { setBezierDraft(null); bezierPress.current = null; }, [tool, tab.activePageId]);
+  /** The Eraser's drag: what releasing erases, the locked objects it passed over, and its last page point. */
+  const eraserStroke = useRef<{ ids: Set<number>; locked: Set<number>; last: Point } | null>(null);
+  /** What the Eraser highlights: the objects a click would erase, or those its drag has passed over. */
+  const [eraserMarks, setEraserMarks] = useState<{ ids: readonly number[]; dragging: boolean }>({ ids: [], dragging: false });
+  useEffect(() => { eraserStroke.current = null; setEraserMarks({ ids: [], dragging: false }); }, [tool, tab.activePageId]);
+  // The Eraser starts with nothing selected, so its marks are drawn as a selection is.
+  const highlightedSet = useMemo(() => tool === 'eraser' ? new Set(eraserMarks.ids) : selectedSet, [tool, eraserMarks, selectedSet]);
+  /** A note shown in place of the status hint until the next click, key press, tool change or page change. */
+  const [statusNote, setStatusNote] = useState<string | null>(null);
+  useEffect(() => { setStatusNote(null); }, [tool, tab.activePageId]);
   const [editingPathId, setEditingPathId] = useState<number | null>(null);
   const [editingTextId, setEditingTextId] = useState<number | null>(null);
   const initialLabelEditId = useRef<number | null>(null);
@@ -1448,7 +1476,7 @@ export function LayoutWorkspace({
   }, [tab]);
 
   useEffect(() => {
-    const paint = (canvas: HTMLCanvasElement, surround: LayoutSurround | null = null) => paintPage(canvas, page, state, anchor, cursor, polygonTool, selectedSet,
+    const paint = (canvas: HTMLCanvasElement, surround: LayoutSurround | null = null) => paintPage(canvas, page, state, anchor, cursor, polygonTool, highlightedSet,
       movePreview, rotationPreview ?? scalePreview ?? (editingPathId === null ? null : {
         entityId: editingPathId, points: editPoints, handles: editHandles, activeIndex: activePointIndex,
       }), freehand, zoom, false, dimensionDraft, rectangleAmountMm, arcDraft,
@@ -1467,7 +1495,7 @@ export function LayoutWorkspace({
         width: frame.width / pxPerMm, height: frame.height / pxPerMm, pxPerMm });
     };
     paintSurround.current();
-  }, [version, imageLoads, page, state, anchor, cursor, tool, selectedSet, movePreview, moveDraft,
+  }, [version, imageLoads, page, state, anchor, cursor, tool, highlightedSet, movePreview, moveDraft,
     editingPathId, editPoints, editHandles, activePointIndex, freehand, zoom, dimensionDraft, scalePreview, rectangleAmountMm, arcDraft, offsetResult.shape, offsetSource, cornerResult.shape, activeRotation, rotationPreview, labelDraft, initialLabelEdit, editingTextId, tableRows, tableColumns, placementModifiers, polygonTool, polygonSides, navigatingViewportId, viewportCameraPreview, bezierDraft, tableResizePreview]);
   // Objects past the paper edge follow scrolling and workspace resizing.
   useEffect(() => {
@@ -1774,6 +1802,7 @@ export function LayoutWorkspace({
       const target = event.target as HTMLElement | null;
       // From the object browser only Print, undo and redo reach Layout shortcuts.
       if (target instanceof Element && target.closest('.pf-layout-object-browser') && !layoutBrowserPassesKey(event)) return;
+      setStatusNote(null);
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'p') {
         event.preventDefault(); setPrinting(true); return;
       }
@@ -1830,6 +1859,7 @@ export function LayoutWorkspace({
         moveStart.current = null; setMovePreview(null); setMoveDraft(null);
         boxStart.current = null; setBoxSelect(null);
         setLasso(null); lassoPress.current = null; lassoLast.current = null;
+        eraserStroke.current = null; setEraserMarks({ ids: [], dragging: false });
         setAnchor(null);
         setDimensionDraft(null); setAngularEdgeFirst(null); setDimensionError(null); setArcDraft(null); setArcError(null); setOffsetDraft(null); setCornerFirst(null); setCornerHover(null); setRotationDraft(null); setLabelDraft(null);
         pointerDown.current = null;
@@ -1843,6 +1873,9 @@ export function LayoutWorkspace({
         return;
       }
       if (event.key === 'Delete' || event.key === 'Backspace') {
+        // Nothing on the page is erased from a dialog or menu, or while one is open.
+        if (presenting || printing || (target instanceof Element && target.closest('[role="dialog"], [role="menu"]')) ||
+            document.querySelector('[role="dialog"][aria-modal="true"]')) return;
         if (editingPathId !== null) {
           if (selectedEntity?.id === editingPathId && activePointIndex !== null && canTransform &&
               selectedEntity.points.length > 2) {
@@ -1855,16 +1888,36 @@ export function LayoutWorkspace({
           event.preventDefault();
           return;
         }
-        // Every selected object on an unlocked, visible layer erases in one undoable step.
-        const erasable = selectionIds.filter((id) => {
-          const layer = state.layers.get(entityOnPage(page, state, id)?.layerId ?? -1);
-          return Boolean(layer && isLayoutLayerVisible(page, state, layer.id) && !layer.locked && !entityOnPage(page, state, id)?.locked);
-        });
-        if (erasable.length > 0) {
-          tab.commands.execute('layout.shape.delete', { pageId: tab.activePageId, entityIds: erasable });
-          setSelectionIds(selectionIds.filter((id) => !erasable.includes(id)));
+        // An unfinished Bézier path or clicked Lasso outline loses its newest point and carries on.
+        if (tool === 'bezier' && bezierDraft && !bezierPress.current) {
           event.preventDefault();
+          setBezierDraft(removeLastLayoutBezierAnchor(bezierDraft));
+          return;
         }
+        if (tool === 'lasso' && lasso && !lasso.freehand && !lassoPress.current) {
+          event.preventDefault();
+          lassoLast.current = null;
+          setLasso(lasso.points.length > 1 ? { ...lasso, points: lasso.points.slice(0, -1) } : null);
+          return;
+        }
+        // During a drag, or while a tool waits for its next step, nothing is erased; Esc ends the step first.
+        if (pointerDown.current || moveStart.current || scaleStart.current || boxStart.current || gripDrag.current || pointEditStart.current ||
+            tableDrag.current || viewportDrag.current || lassoPress.current || bezierPress.current || eraserStroke.current ||
+            navigatingViewportRef.current !== null || anchor || moveDraft || rotationDraft || offsetDraft || cornerFirst || booleanIds.length ||
+            dimensionDraft || labelDraft || arcDraft || freehand.length || lasso || reattachModel || tableCounting) {
+          event.preventDefault();
+          return;
+        }
+        // The selected objects erase in one undoable step; locked ones stay selected.
+        const current = tab.doc.state;
+        const selected = selectionIds.flatMap((id) => {
+          const entity = entityOnPage(page, current, id);
+          return entity && isLayoutLayerVisible(page, current, entity.layerId) ? [entity] : [];
+        });
+        if (!selected.length) return;
+        event.preventDefault();
+        const erasable = selected.filter((entity) => !objectLocked(entity, current)).map((entity) => entity.id);
+        eraseObjects(erasable, selected.length - erasable.length);
         return;
       }
       // Shift+= brings the selection forward and Shift+- sends it backward, like the Arrange menu.
@@ -1900,7 +1953,7 @@ export function LayoutWorkspace({
         setDimensionDraft(null); setAngularEdgeFirst(null); setDimensionError(null); setArcDraft(null); setArcError(null); setOffsetDraft(null); setCornerFirst(null); setCornerHover(null); setRotationDraft(null); setLabelDraft(null);
         setTool(shortcut as LayoutTool);
         // as chooseTool: drawing starts with no selection, and mode toggles start off
-        if (SHAPE_DRAWING_TOOLS.has(shortcut)) setSelectionIds([]);
+        if (SHAPE_DRAWING_TOOLS.has(shortcut) || shortcut === 'eraser') setSelectionIds([]);
         if (shortcut !== toolRef.current) setMoveCopyNext(false);
         setAnchor(null);
         setVcbError(null);
@@ -1923,7 +1976,8 @@ export function LayoutWorkspace({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [tab, selectionIds, selectedEntity, editingPathId, editingTextId, activePointIndex, canTransform, tool, page, state, presenting, printing, moveDraft, lasso, bezierDraft, booleanIds, shapeBuilder]);
+  }, [tab, selectionIds, selectedEntity, editingPathId, editingTextId, activePointIndex, canTransform, tool, page, state, presenting, printing, moveDraft, lasso, bezierDraft, booleanIds, shapeBuilder,
+    anchor, rotationDraft, offsetDraft, cornerFirst, dimensionDraft, labelDraft, arcDraft, freehand, reattachModel, tableCounting]);
 
   useEffect(() => {
     updatePolygonAlt(false);
@@ -2328,7 +2382,45 @@ export function LayoutWorkspace({
     else if (modifiers.shiftKey) setSelectionIds([...selectionIds.filter((id) => !covered.includes(id)), ...covered.filter((id) => !selectionIds.includes(id))]);
     else setSelectionIds(covered);
   };
+  /**
+   * Erase objects in one undoable step, as the Eraser, Delete and Backspace do. The caller has set aside the locked
+   * objects; the status bar says how many there were.
+   */
+  const eraseObjects = (ids: readonly number[], lockedCount: number): void => {
+    if (ids.length) {
+      try { tab.commands.execute('layout.shape.delete', { pageId: page.id, entityIds: [...ids] }); }
+      catch (error) { setStatusNote(error instanceof Error ? error.message : 'Could not erase the objects.'); return; }
+      setSelectionIds(previous => previous.filter(id => !ids.includes(id)));
+    }
+    setStatusNote(lockedCount ? `${lockedCount} locked ${lockedCount === 1 ? 'object was' : 'objects were'} not erased.` : null);
+  };
+  /** The objects the Eraser takes for the frontmost object at `p`: its whole group, split into erasable and locked. */
+  const eraserTargetsAt = (p: Point): { ids: number[]; locked: number[] } => {
+    const current = tab.doc.state, entity = pickEntity(p, page, current);
+    const targets = { ids: [] as number[], locked: [] as number[] };
+    if (!entity) return targets;
+    for (const id of expandLayoutGroups([entity.id], page, current)) {
+      const member = entityOnPage(page, current, id);
+      if (member) (objectLocked(member, current) ? targets.locked : targets.ids).push(id);
+    }
+    return targets;
+  };
+  /** Add what the Eraser's drag passes over from its last point to `to`, stepping finely enough to catch every crossed line. */
+  const eraseAlong = (to: Point): void => {
+    const stroke = eraserStroke.current;
+    if (!stroke) return;
+    const from = stroke.last, steps = Math.max(1, Math.ceil(Math.hypot(to[0] - from[0], to[1] - from[1]) / ERASER_STEP_MM));
+    let added = false;
+    for (let i = 0; i <= steps; i++) {
+      const targets = eraserTargetsAt([from[0] + (to[0] - from[0]) * i / steps, from[1] + (to[1] - from[1]) * i / steps]);
+      for (const id of targets.ids) if (!stroke.ids.has(id)) { stroke.ids.add(id); added = true; }
+      for (const id of targets.locked) stroke.locked.add(id);
+    }
+    stroke.last = to;
+    if (added) setEraserMarks({ ids: [...stroke.ids], dragging: true });
+  };
   const onPointerDown = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
+    setStatusNote(null);
     if (tool === 'shape-builder' && event.button === 0) {
       shapeBuilder.down(rawPointFromEvent(event), event.shiftKey);
       event.currentTarget.setPointerCapture?.(event.pointerId); event.preventDefault(); return;
@@ -2354,6 +2446,16 @@ export function LayoutWorkspace({
       endViewportNavigation();
     }
     if (event.button !== 0) return;
+    if (tool === 'eraser') {
+      // Nothing is erased until release; a click is a drag that has not moved.
+      setEditingTextId(null); setCursor(null); setSnapKind(null);
+      const p = rawPointFromEvent(event);
+      eraserStroke.current = { ids: new Set(), locked: new Set(), last: p };
+      setEraserMarks({ ids: [], dragging: true });
+      eraseAlong(p);
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      return;
+    }
     if (editingPathId !== null && tool === 'select') {
       const entity = entityOnPage(page, tab.doc.state, editingPathId);
       if (!entity || entity.kind !== 'path' || !isLayoutLayerVisible(page, tab.doc.state, entity.layerId)) return;
@@ -2635,11 +2737,11 @@ export function LayoutWorkspace({
       }
       return;
     }
-    if (tool === 'select' || tool === 'eraser') {
-      if (tool === 'select') { setCursor(null); setSnapKind(null); }
+    if (tool === 'select') {
+      setCursor(null); setSnapKind(null);
       setEditingTextId(null);
       const entity = pickEntity(p, page, tab.doc.state);
-      if (tool === 'select' && tableCellsActive && selectionId === entity?.id && entity?.table && entity.groupId === undefined && !objectLocked(entity, tab.doc.state) && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      if (tableCellsActive && selectionId === entity?.id && entity?.table && entity.groupId === undefined && !objectLocked(entity, tab.doc.state) && !event.ctrlKey && !event.metaKey && !event.altKey) {
         const cell = tableCellAt(entity, p);
         if (cell) {
           event.preventDefault();
@@ -2650,35 +2752,31 @@ export function LayoutWorkspace({
         }
       }
       setTableCellsActive(false);
-      if (tool === 'select') {
-        if (!entity) {
-          // A drag from empty paper draws a selection box; a plain click clears the selection on release.
-          boxStart.current = { point: p, x: event.clientX, y: event.clientY, additive: event.shiftKey };
-          event.currentTarget.setPointerCapture?.(event.pointerId);
-          return;
-        }
-        const primary = event.metaKey || event.ctrlKey;
-        if (event.shiftKey || primary) {
-          // Shift toggles membership;: Ctrl (Cmd) adds and Ctrl+Shift subtracts. None starts a move.
-          const members = expandLayoutGroups([entity.id], page, tab.doc.state);
-          const remove = primary ? event.shiftKey : selectionIds.includes(entity.id);
-          setSelectionIds(remove ? selectionIds.filter(id => !members.includes(id)) : [...new Set([...selectionIds, ...members])]);
-          return;
-        }
-        const group = selectionIds.includes(entity.id) ? selectionIds : expandLayoutGroups([entity.id], page, tab.doc.state);
-        setSelectionIds(group);
-        // Alt (Option) selects without moving.
-        if (event.altKey) return;
-        const unlocked = group.filter((id) => { const member = entityOnPage(page, tab.doc.state, id); return member && !objectLocked(member, tab.doc.state); });
-        if (unlocked.includes(entity.id)) {
-          moveStart.current = { entityIds: unlocked, point: rawPointFromEvent(event), x: event.clientX, y: event.clientY,
-            ...(entity.kind === 'label' && group.length === 1 ? { labelPart: layoutLabelDragPart(entity, rawPointFromEvent(event),
-              8 * page.size[0] / event.currentTarget.getBoundingClientRect().width) } : {}) };
-          event.currentTarget.setPointerCapture?.(event.pointerId);
-        }
+      if (!entity) {
+        // A drag from empty paper draws a selection box; a plain click clears the selection on release.
+        boxStart.current = { point: p, x: event.clientX, y: event.clientY, additive: event.shiftKey };
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        return;
       }
-      else if (entity && !objectLocked(entity, tab.doc.state))
-        tab.commands.execute('layout.shape.delete', { pageId: page.id, entityId: entity.id });
+      const primary = event.metaKey || event.ctrlKey;
+      if (event.shiftKey || primary) {
+        // Shift toggles membership;: Ctrl (Cmd) adds and Ctrl+Shift subtracts. None starts a move.
+        const members = expandLayoutGroups([entity.id], page, tab.doc.state);
+        const remove = primary ? event.shiftKey : selectionIds.includes(entity.id);
+        setSelectionIds(remove ? selectionIds.filter(id => !members.includes(id)) : [...new Set([...selectionIds, ...members])]);
+        return;
+      }
+      const group = selectionIds.includes(entity.id) ? selectionIds : expandLayoutGroups([entity.id], page, tab.doc.state);
+      setSelectionIds(group);
+      // Alt (Option) selects without moving.
+      if (event.altKey) return;
+      const unlocked = group.filter((id) => { const member = entityOnPage(page, tab.doc.state, id); return member && !objectLocked(member, tab.doc.state); });
+      if (unlocked.includes(entity.id)) {
+        moveStart.current = { entityIds: unlocked, point: rawPointFromEvent(event), x: event.clientX, y: event.clientY,
+          ...(entity.kind === 'label' && group.length === 1 ? { labelPart: layoutLabelDragPart(entity, rawPointFromEvent(event),
+            8 * page.size[0] / event.currentTarget.getBoundingClientRect().width) } : {}) };
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+      }
       return;
     }
     if (anchor && tool === 'line') {
@@ -2701,6 +2799,14 @@ export function LayoutWorkspace({
   };
   const onPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
     if (tool === 'shape-builder') { shapeBuilder.pointer(rawPointFromEvent(event), true, event.shiftKey); return; }
+    if (tool === 'eraser') {
+      const p = rawPointFromEvent(event);
+      if (eraserStroke.current) { eraseAlong(p); return; }
+      // Hovering highlights what a click would erase; locked objects are left alone, so they are not highlighted.
+      const ids = eraserTargetsAt(p).ids;
+      if (eraserMarks.dragging || ids.length !== eraserMarks.ids.length || ids.some((id, i) => id !== eraserMarks.ids[i])) setEraserMarks({ ids, dragging: false });
+      return;
+    }
     if (tableDrag.current && selectedEntity?.table) {
       const focus = tableCellAt(selectedEntity, rawPointFromEvent(event));
       if (focus) setTableSelection({ anchor: tableDrag.current.anchor, focus });
@@ -2832,6 +2938,14 @@ export function LayoutWorkspace({
   };
   const onPointerUp = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
     if (tool === 'shape-builder') { shapeBuilder.up(rawPointFromEvent(event), event.shiftKey); return; }
+    if (tool === 'eraser') {
+      // After Esc or a cancelled pointer there is no drag left, and the release erases nothing.
+      const stroke = eraserStroke.current;
+      eraserStroke.current = null;
+      setEraserMarks({ ids: [], dragging: false });
+      if (stroke && event.button === 0) eraseObjects([...stroke.ids], stroke.locked.size);
+      return;
+    }
     if (tableDrag.current) { tableDrag.current = null; return; }
     if (tool === 'scale' || booleanOperation(tool)) return;
     if (tool === 'lasso') {
@@ -3358,6 +3472,9 @@ export function LayoutWorkspace({
   };
   const contextEntities = selectionIds.map(id => entityOnPage(page, state, id)).filter((entity): entity is LayoutEntity => Boolean(entity));
   const editableSelection = contextEntities.length > 0 && contextEntities.every(entity => isLayoutLayerVisible(page, state, entity.layerId) && !objectLocked(entity, state));
+  // Delete erases what it can and leaves locked objects selected, as the Delete key does.
+  const visibleContextEntities = contextEntities.filter(entity => isLayoutLayerVisible(page, state, entity.layerId));
+  const erasableContextIds = visibleContextEntities.filter(entity => !objectLocked(entity, state)).map(entity => entity.id);
   const layerEditableSelection = contextEntities.length > 0 && contextEntities.every(entity => isLayoutLayerVisible(page, state, entity.layerId) && !state.layers.get(entity.layerId)?.locked);
   const allLocked = contextEntities.length > 0 && contextEntities.every(entity => entity.locked);
   const sameGroup = contextEntities.length > 0 && contextEntities[0]!.groupId !== undefined && contextEntities.every(entity => entity.groupId === contextEntities[0]!.groupId);
@@ -3399,8 +3516,8 @@ export function LayoutWorkspace({
   const contextItems: LayoutMenuItem[] = [
     { label: 'Cut', disabled: !editableSelection, action: contextAction('Cut', () => copyFromMenu(true)) },
     { label: 'Copy', disabled: !contextEntities.length, action: contextAction('Copy', () => copyFromMenu(false)) },
-    { label: 'Delete', disabled: !editableSelection, action: contextAction('Delete', () => {
-      tab.commands.execute('layout.shape.delete', { pageId: page.id, entityIds: selectionIds }); setSelectionIds([]);
+    { label: 'Delete', disabled: !erasableContextIds.length, action: contextAction('Delete', () => {
+      eraseObjects(erasableContextIds, visibleContextEntities.length - erasableContextIds.length);
     }) },
     { label: allLocked ? 'Unlock' : 'Lock', disabled: !layerEditableSelection, action: contextAction(allLocked ? 'Unlock' : 'Lock', () => {
       tab.commands.execute('layout.shape.setLocked', { pageId: page.id, entityIds: selectionIds, locked: !allLocked });
@@ -3534,10 +3651,13 @@ export function LayoutWorkspace({
     // Delete erases the item's unlocked objects together and drops them from the selection.
     deleteObjects: (pageId: number, entityIds: readonly number[]): void => {
       const current = tab.doc.state, target = current.pages.get(pageId);
-      const erasable = target ? entityIds.filter(id => { const entity = entityOnPage(target, current, id); return entity && !objectLocked(entity, current); }) : [];
+      const entities = target ? entityIds.flatMap(id => { const entity = entityOnPage(target, current, id); return entity ? [entity] : []; }) : [];
+      const erasable = entities.filter(entity => !objectLocked(entity, current)).map(entity => entity.id);
+      const locked = entities.length - erasable.length;
+      setStatusNote(locked ? `${locked} locked ${locked === 1 ? 'object was' : 'objects were'} not erased.` : null);
       if (!erasable.length) return;
       browserCommand('layout.shape.delete', { pageId, entityIds: erasable });
-      setSelectionIds(selectionIds.filter(id => !erasable.includes(id)));
+      setSelectionIds(previous => previous.filter(id => !erasable.includes(id)));
     },
     movePage: (pageId: number, toIndex: number): void => { browserCommand('layout.page.move', { pageId, toIndex }); },
     // The page context menu; a new page becomes the active page, as the Pages panel's Add Page does.
@@ -3692,7 +3812,8 @@ export function LayoutWorkspace({
     if (id === 'shape-builder' && !shapeBuilder.start(selectionIds)) return;
     setBooleanIds([]);
     // Style edits with nothing selected are for new shapes, so drawing never starts with a leftover selection.
-    if (SHAPE_DRAWING_TOOLS.has(id)) setSelectionIds([]);
+    // The Eraser starts with nothing selected too, so its highlights are unambiguous.
+    if (SHAPE_DRAWING_TOOLS.has(id) || id === 'eraser') setSelectionIds([]);
     // mode toggles start off each time the tool is chosen
     if (id !== tool) setMoveCopyNext(false);
     if (booleanOperation(id) || booleanOperation(tool)) setSelectionIds([]);
@@ -4022,6 +4143,7 @@ export function LayoutWorkspace({
             onDoubleClick={onDoubleClick}
             onPointerCancel={() => {
               if (tool === 'shape-builder') { shapeBuilder.cancelPointer(); return; }
+              eraserStroke.current = null; setEraserMarks({ ids: [], dragging: false });
               if (tableDrag.current) setTableSelection(tableDrag.current);
               tableDrag.current = null;
               if (booleanOperation(tool)) { setBooleanIds([]); setSelectionIds([]); }
@@ -4039,7 +4161,10 @@ export function LayoutWorkspace({
               setFreehand([]);
             }}
             onLostPointerCapture={() => { if (tool === 'shape-builder') shapeBuilder.cancelPointer(); }}
-            onPointerLeave={() => { setSnapKind(null); if (tool === 'shape-builder') shapeBuilder.leave(); }}
+            onPointerLeave={() => {
+              setSnapKind(null); if (tool === 'shape-builder') shapeBuilder.leave();
+              if (tool === 'eraser' && !eraserStroke.current) setEraserMarks({ ids: [], dragging: false });
+            }}
           />
           {tableCellsActive && tool === 'select' && selectedEntity?.table && selectedEntity.groupId === undefined && canTransform && !presenting && !printing && !scalePreview && !movePreview ? <LayoutTableGrid key={`${page.id}:${selectedEntity.id}`} entity={tableResizePreview?.id === selectedEntity.id ? tableResizePreview : selectedEntity} selection={tableSelection} pixelsPerMm={PX_PER_MM * zoom}
             onCommitRich={(cell, text) => {
@@ -4401,10 +4526,13 @@ export function LayoutWorkspace({
       </div>
       <footer className="pf-layout-footer pf-statusbar" aria-label="Document status">
         <StatusHint className="pf-layout-footer-spacer">
-          {catalogActive ? 'Browse community models. Open a document tab to keep working.' : tool === 'select' && importNote !== null ? importNote : tool === 'select' ? navigatingViewportId !== null ? vcbError ?? 'Drag to orbit, Shift+drag or middle-drag to pan, and scroll to zoom the view. Click outside it or press Esc when done.'
+          {catalogActive ? 'Browse community models. Open a document tab to keep working.' : statusNote !== null ? statusNote : tool === 'select' && importNote !== null ? importNote : tool === 'select' ? navigatingViewportId !== null ? vcbError ?? 'Drag to orbit, Shift+drag or middle-drag to pan, and scroll to zoom the view. Click outside it or press Esc when done.'
             : editingPathId !== null ? 'Drag vertices to edit. Delete removes the selected vertex. Esc returns to object selection.'
             : scalePreview ? 'Resizing: hold Shift to maintain aspect ratio, Alt to keep the center. Release to finish.'
             : 'Click to select, drag to move, or use the handles to resize (hold Shift to maintain aspect ratio, Alt to keep the center). Double-click to edit vertices.'
+            : tool === 'eraser' ? eraserMarks.dragging
+              ? eraserMarks.ids.length ? `Release to erase ${eraserMarks.ids.length} ${eraserMarks.ids.length === 1 ? 'object' : 'objects'}. Esc cancels.` : 'Drag across objects to erase them. Esc cancels.'
+              : 'Click an object to erase it, or drag across objects to erase them all.'
             : tool === 'shape-builder' ? `${shapeBuilder.effectiveMode === 'add' ? 'Add' : 'Remove'}: click regions or drag across them. Shift reverses the mode. ${shapeBuilder.result?.sourceIndex !== null ? 'Only added sections are kept.' : 'Deleting alone keeps everything else.'} Enter applies; Escape cancels.`
             : booleanOperation(tool) ? booleanIds.length ? 'Pick more shapes. Enter to apply; Escape to cancel.' : 'Click the target first, then the other shapes.'
             : tool === 'scale' ? 'Click an object, then drag a resize handle. Hold Shift to maintain aspect ratio and Alt to keep the center.'

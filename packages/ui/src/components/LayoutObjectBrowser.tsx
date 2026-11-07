@@ -532,6 +532,20 @@ export const LayoutObjectBrowser = memo(function LayoutObjectBrowser({
         break;
       case 'Enter': activate(node, 'replace'); break;
       case 'F2': startRename(node); break;
+      case 'Delete': case 'Backspace': {
+        // An object or group erases as its context menu's Delete does; pages and layers are deleted from their menus.
+        const target = node.target;
+        if ((target?.kind !== 'object' && target?.kind !== 'group') || node.lock?.disabled || node.lock?.locked) break;
+        // Focus moves on to the next item outside the erased one, or back to the previous item.
+        const inside = (item: BrowserNode): boolean => {
+          for (let key: string | null = item.key; key !== null; key = allByKey.get(key)?.parent ?? null) if (key === node.key) return true;
+          return false;
+        };
+        const next = visible.slice(index + 1).find(item => !inside(item)) ?? visible[index - 1];
+        onDeleteObjects(target.pageId, target.kind === 'group' ? target.entityIds : [target.entityId]);
+        go(next?.key);
+        break;
+      }
       case 'Escape': onClose?.(); break;
       default: handled = false;
     }

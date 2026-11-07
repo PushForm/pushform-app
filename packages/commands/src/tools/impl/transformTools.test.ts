@@ -13,7 +13,7 @@ import type { CameraState } from '../../camera/CameraHost';
 import { disposeKernels, installPolyMeshStub, ISO_CAMERA, setupCommands, TOP_CAMERA } from '../../commands/transform.fixtures';
 import type { MoveTool } from './Move';
 import type { RotateTool } from './Rotate';
-import type { ScaleTool } from './Scale';
+import { pickGrip, type ScaleTool } from './Scale';
 import { groupCommands, type MakeResult } from '../../commands/groups';
 import { sectionPlaneCommands } from '../../commands/sectionPlanes';
 import { guideCommands } from '../../commands/guides';
@@ -829,6 +829,145 @@ describe('ScaleTool', () => {
     tools.pointerDown(at(ISO_CAMERA, [0.5, 0.5, 1], { hit: bodyHit(body(id), [0.5, 0.5, 1]) }));
     expect(host.selection.size).toBe(1);
     expect(tool.scaleBox?.grips.length).toBeGreaterThan(0);
+  });
+});
+
+describe('ScaleTool: Shift, typed sizes, overlapping grips and redos', () => {
+  /** Scale tool with a box selected; `grab` presses the grip at `pos`. */
+  function scaling(max: Vec3 = [1, 1, 1], cam: CameraState = ISO_CAMERA) {
+    const s = setup(cam);
+    const id = s.addBox([0, 0, 0], max);
+    s.host.selection.set([bodyRef(id)]);
+    s.tools.activate('scale');
+    const tool = s.tools.activeTool as ScaleTool;
+    const grab = (pos: Vec3, modifiers: Modifiers = NO_MODIFIERS) => {
+      const grip = tool.scaleBox!.grips.find((g) => near(g.pos, pos))!;
+      s.tools.pointerDown(at(cam, grip.pos, { screen: worldToScreen(cam, VIEWPORT, grip.pos)!, modifiers }));
+      return grip;
+    };
+    const drag = (to: Vec3, modifiers: Modifiers = NO_MODIFIERS): void => {
+      s.tools.pointerMove(at(cam, to, { modifiers }));
+      s.tools.pointerUp(at(cam, to, { modifiers }));
+    };
+    const size = (): number[] => {
+      const b = meshBounds(s.body(id).mesh);
+      return [0, 1, 2].map((a) => +(b.max[a]! - b.min[a]!).toFixed(6));
+    };
+    return { ...s, id, tool, grab, drag, size };
+  }
+  const m = (meters: number) => ({ kind: 'length' as const, meters, raw: meters, unit: 'm' as const });
+  const factor = (k: number) => ({ kind: 'length' as const, meters: k * 0.0254, raw: k, unit: null });
+
+  it('Shift lets a corner grip scale each axis freely, without the diagonal lock', async () => {
+    const { tools, tool, grab, drag, size } = scaling();
+    grab([1, 1, 1]);
+    expect(tool.inferenceOptions().lockSnap?.kind).toBe('fromPoint');
+    tools.keyDown(key('Shift', SHIFT));
+    expect(tool.inferenceOptions().lockSnap).toBeUndefined();
+    tools.pointerMove(at(ISO_CAMERA, [2, 1.5, 1], { modifiers: SHIFT }));
+    expect(tool.dragFactors?.map((f) => +f.toFixed(9))).toEqual([2, 1.5, 1]);
+    tools.keyUp(key('Shift'));
+    expect(tool.inferenceOptions().lockSnap?.kind).toBe('fromPoint');
+    tools.keyDown(key('Shift', SHIFT));
+    drag([2, 1.5, 1], SHIFT);
+    await tool.settled;
+    expect(size()).toEqual([2, 1.5, 1]);
+  });
+
+  it('Shift on a flat corner keeps it in its plane', () => {
+    const { tools, root, host, addRectangle } = setup(ISO_CAMERA);
+    addRectangle(2, 1);
+    host.selection.set([{ kind: 'sketchFace', path: [], id: [...root().sketch.faces.values()][0]!.id }]);
+    tools.activate('scale');
+    const t = tools.activeTool as ScaleTool;
+    const c = t.scaleBox!.grips.find((g) => near(g.pos, [2, 1, 0]))!;
+    tools.pointerDown(at(ISO_CAMERA, c.pos, { screen: worldToScreen(ISO_CAMERA, VIEWPORT, c.pos)!, modifiers: SHIFT }));
+    expect(t.inferenceOptions().lockSnap?.kind).toBe('onPlane');
+  });
+
+  it('a length on a corner or edge grip sets the longest side it scales, the rest following; on a face grip its axis', async () => {
+    const corner = scaling([2, 1, 0.5]);
+    corner.grab([2, 1, 0.5]);
+    corner.tools.onVcb(m(4));
+    await corner.tool.settled;
+    expect(corner.size()).toEqual([4, 2, 1]);
+
+    const edge = scaling([2, 1, 0.5]);
+    edge.grab([2, 1, 0.25]);
+    edge.tools.onVcb(m(3));
+    await edge.tool.settled;
+    expect(edge.size()).toEqual([3, 1.5, 0.5]);
+
+    const face = scaling([2, 1, 0.5]);
+    face.grab([1, 0.5, 0.5]);
+    face.tools.onVcb(m(2));
+    await face.tool.settled;
+    expect(face.size()).toEqual([2, 1, 2]);
+  });
+
+  it('of overlapping grips, the one nearest the viewer is picked', () => {
+    const { tool } = scaling([1, 1, 1], TOP_CAMERA);
+    const box = tool.scaleBox!;
+    const screen = worldToScreen(TOP_CAMERA, VIEWPORT, [1, 1, 0])!;
+    const picked = pickGrip(box, screen, TOP_CAMERA, VIEWPORT)!;
+    expect(picked.pos).toEqual([1, 1, 1]);
+    expect(picked.kind).toBe('corner');
+    // seen from below, the bottom one
+    const below: CameraState = { ...TOP_CAMERA, eye: [0, 0, -10] };
+    expect(pickGrip(box, worldToScreen(below, VIEWPORT, [1, 1, 0])!, below, VIEWPORT)!.pos).toEqual([1, 1, 0]);
+    // grips apart on screen are picked by distance
+    const side = worldToScreen(TOP_CAMERA, VIEWPORT, [1, 0.5, 0])!;
+    expect(pickGrip(box, [side[0], side[1] + 2], TOP_CAMERA, VIEWPORT)!.pos).toEqual([1, 0.5, 1]);
+  });
+
+  it('a value typed after a Shift-uniform drag keeps it uniform', async () => {
+    const { tools, tool, grab, drag, size, host } = scaling();
+    grab([1, 1, 0.5]);
+    drag([2, 2, 0.5], SHIFT);
+    await tool.settled;
+    expect(size()).toEqual([2, 2, 2]);
+    const entries = host.undoStack.length;
+    tools.onVcb(factor(3));
+    await tool.settled;
+    expect(size()).toEqual([3, 3, 3]);
+    tools.onVcb(m(1.5));
+    await tool.settled;
+    expect(size()).toEqual([1.5, 1.5, 1.5]);
+    expect(host.undoStack.length).toBe(entries);
+  });
+
+  it('the last scale does not survive a tool switch or another change', async () => {
+    const { tools, tool, grab, drag, size, addBox } = scaling();
+    grab([1, 0.5, 0.5]);
+    drag([2, 0.5, 0.5]);
+    await tool.settled;
+    expect(size()).toEqual([2, 1, 1]);
+    expect(tools.status().vcbValue).toContain('2.00');
+    tools.activate('move');
+    tools.activate('scale');
+    expect(tools.status().vcbValue).toBeUndefined();
+    tools.onVcb(factor(3));
+    await tool.settled;
+    expect(size()).toEqual([2, 1, 1]);
+
+    grab([2, 0.5, 0.5]);
+    drag([3, 0.5, 0.5]);
+    await tool.settled;
+    expect(size()).toEqual([3, 1, 1]);
+    addBox([5, 5, 0], [6, 6, 1]);
+    expect(tools.status().vcbValue).toBeUndefined();
+    tools.onVcb(factor(2));
+    await tool.settled;
+    expect(size()).toEqual([3, 1, 1]);
+  });
+
+  it('the held-key tag reads the same for Ctrl and Alt', () => {
+    for (const mods of [CTRL, ALT]) {
+      const { tools, grab } = scaling();
+      grab([1, 0.5, 0.5], mods);
+      tools.pointerMove(at(ISO_CAMERA, [1.5, 0.5, 0.5], { modifiers: mods }));
+      expect(tools.status().held).toEqual(['About the center · Ctrl/Alt']);
+    }
   });
 });
 

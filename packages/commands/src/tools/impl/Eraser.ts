@@ -54,6 +54,8 @@ export class EraserTool implements Tool {
 
   onPointerDown(e: ToolPointerEvent): void {
     if (e.button !== 0) return;
+    // A new press means any click owed to the last release has come or never will.
+    this.suppressNextClick = false;
     this.dragging = true;
     this.marked.clear();
     this.message = null;
@@ -80,8 +82,11 @@ export class EraserTool implements Tool {
     this.applyMarked(e.modifiers);
   }
 
+  /** Esc drops the marked edges; pressed mid-drag, the click that follows the release is swallowed too. */
   onCancel(): void {
+    const wasDragging = this.dragging;
     this.reset();
+    this.suppressNextClick = wasDragging;
     this.ctx?.requestRender();
     this.ctx?.statusChanged();
   }

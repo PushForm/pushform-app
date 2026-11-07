@@ -226,6 +226,34 @@ describe('SelectTool edit contexts', () => {
     expect(log).toEqual(['exit', 'exit']);
   });
 
+  it('Esc during a box drag inside a group keeps the selection and the group open after release', () => {
+    const { host, tools, log, registry } = setup();
+    const { outer } = addNestedGroups(host);
+    registry.execute('context.enter', { path: [outer] });
+    log.length = 0;
+    const body: EntityRef = { kind: 'body', path: [outer], id: 7 as Id };
+    const face: PickHit = { ref: { kind: 'face', path: [outer], id: 8 as Id, faceId: 0 as never, region: null }, point: [1, 0, 0], t: 10, screenDist: 0 };
+    host.selection.set([body]);
+    for (const hit of [null, face]) {
+      tools.pointerDown(at([0, 0, 0]));
+      tools.pointerMove(at([1, -1, 0]));
+      tools.keyDown({ key: 'Escape', code: 'Escape', modifiers: NO_MODIFIERS, repeat: false });
+      tools.pointerUp(at([1, -1, 0], hit));
+      tools.click(at([1, -1, 0], hit));
+      expect(host.selection.refs).toEqual([body]);
+      expect(host.context.path).toEqual([outer]);
+    }
+    // with nothing selected, Esc mid-drag still only ends the drag
+    host.selection.clear();
+    tools.pointerDown(at([0, 0, 0]));
+    tools.pointerMove(at([1, -1, 0]));
+    tools.keyDown({ key: 'Escape', code: 'Escape', modifiers: NO_MODIFIERS, repeat: false });
+    tools.pointerUp(at([1, -1, 0]));
+    tools.click(at([1, -1, 0]));
+    expect(host.context.path).toEqual([outer]);
+    expect(log).toEqual([]);
+  });
+
   it('works without the context commands registered (double-click falls back to expansion)', () => {
     const host = new DocumentHost();
     const camera = new StubCamera();

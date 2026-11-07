@@ -7,7 +7,7 @@ import type { DocumentDraft, DocumentState, EdgeKey, EntityRef } from '@pushform
 import { defineCommand } from '../registry/Command';
 import type { AnyCommand, CommandContext } from '../registry/Command';
 import { DocumentHost } from '../host/DocumentHost';
-import { activeTagOpt, hostOf, SERVICE_DOCUMENT } from '../host/services';
+import { activeDrawTagOpts, hostOf, SERVICE_DOCUMENT } from '../host/services';
 import { currentFrame, draftBodyAt, draftContainerAt, refsInContext, requireContextPath, sketchGraphAt, type ContextFrame } from './context';
 
 const vec3 = z.tuple([z.number(), z.number(), z.number()]);
@@ -96,8 +96,9 @@ export function allContextRefs(host: DocumentHost): EntityRef[] {
 
 const edgeFlags = { soft: z.boolean().optional(), smooth: z.boolean().optional(), hidden: z.boolean().optional() };
 type EdgeFlags = { soft?: boolean | undefined; smooth?: boolean | undefined; hidden?: boolean | undefined };
-function flagOpts(f: EdgeFlags): { soft?: boolean; smooth?: boolean; hidden?: boolean; tagId?: TagId } {
-  const o: { soft?: boolean; smooth?: boolean; hidden?: boolean; tagId?: TagId } = {};
+type EdgeOpts = { soft?: boolean; smooth?: boolean; hidden?: boolean; tagId?: TagId; faceTagId?: TagId };
+function flagOpts(f: EdgeFlags): EdgeOpts {
+  const o: EdgeOpts = {};
   if (f.soft !== undefined) o.soft = f.soft;
   if (f.smooth !== undefined) o.smooth = f.smooth;
   if (f.hidden !== undefined) o.hidden = f.hidden;
@@ -150,7 +151,7 @@ export const addEdge = defineCommand({
   run(ctx, p) {
     const host = hostOf(ctx);
     const frame = currentFrame(host);
-    return host.edit('Line', (draft) => addRoutedEdge(draft, frame.path, localPoint(frame, p.a), localPoint(frame, p.b), { ...flagOpts(p), ...activeTagOpt(ctx) }));
+    return host.edit('Line', (draft) => addRoutedEdge(draft, frame.path, localPoint(frame, p.a), localPoint(frame, p.b), { ...flagOpts(p), ...activeDrawTagOpts(ctx) }));
   },
 });
 
@@ -170,7 +171,7 @@ export const addPolyline = defineCommand({
       const count = p.closed && n > 2 ? n : n - 1;
       for (let i = 0; i < count; i++) {
         const a = pts[i]!, b = pts[(i + 1) % n]!;
-        ids.push(...addRoutedEdge(draft, frame.path, a, b, { ...flagOpts(p), ...activeTagOpt(ctx) }, !p.closed));
+        ids.push(...addRoutedEdge(draft, frame.path, a, b, { ...flagOpts(p), ...activeDrawTagOpts(ctx) }, !p.closed));
       }
       return ids;
     });
@@ -189,7 +190,7 @@ export const rectangle = defineCommand({
     return host.edit('Rectangle', (draft) => {
       const corners = [p.a, p.b, p.c, p.d].map((q) => localPoint(frame, q));
       const ids: number[] = [];
-      for (let i = 0; i < 4; i++) ids.push(...addRoutedEdge(draft, frame.path, corners[i]!, corners[(i + 1) % 4]!, { ...activeTagOpt(ctx) }, false));
+      for (let i = 0; i < 4; i++) ids.push(...addRoutedEdge(draft, frame.path, corners[i]!, corners[(i + 1) % 4]!, { ...activeDrawTagOpts(ctx) }, false));
       return ids;
     });
   },

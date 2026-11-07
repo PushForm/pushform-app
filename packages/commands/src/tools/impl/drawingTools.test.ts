@@ -11,6 +11,7 @@ import { editCommands } from '../../registry/editCommands';
 import { sketchCommands } from '../../commands/sketch';
 import { curveCommands } from '../../commands/curves';
 import { modelCommands } from '../../commands/model';
+import { tagCommands } from '../../commands/tags';
 import { DocumentHost } from '../../host/DocumentHost';
 import { SERVICE_DOCUMENT } from '../../host/services';
 import type { CameraHost, CameraState } from '../../camera/CameraHost';
@@ -677,5 +678,65 @@ describe('typed values before the first click', () => {
     tools.onVcb({ kind: 'segments', count: 8 });
     expect(tools.status().settings![0]).toMatchObject({ id: 'sides', value: '8' });
     expect(tools.status().instructor).toBe('Select center point.');
+  });
+});
+
+describe('active tag', () => {
+  function tagged() {
+    const s = setup();
+    s.registry.registerAll(tagCommands);
+    const tag = s.registry.execute('tag.create', { name: 'Trim' }) as number;
+    s.registry.execute('tag.setActive', { id: tag });
+    const allOnTag = (): boolean => {
+      const sk = s.sketch();
+      return [...sk.edges.values()].every((e) => e.tagId === tag) && [...sk.faces.values()].every((f) => f.tagId === tag);
+    };
+    return { ...s, tag, allOnTag };
+  }
+
+  const shapes: [string, (tools: ToolManager) => void, { faces: number }][] = [
+    ['circle', (t) => { t.click(at([0, 0, 0])); t.click(at([1, 0, 0])); }, { faces: 1 }],
+    ['polygon', (t) => { t.click(at([0, 0, 0])); t.click(at([1, 0, 0])); }, { faces: 1 }],
+    ['arc', (t) => { t.click(at([0, 0, 0])); t.click(at([1, 0, 0])); t.click(at([0, 1, 0])); }, { faces: 0 }],
+    ['pie', (t) => { t.click(at([0, 0, 0])); t.click(at([1, 0, 0])); t.click(at([0, 1, 0])); }, { faces: 1 }],
+    ['arc2', (t) => { t.click(at([0, 0, 0])); t.click(at([2, 0, 0])); t.click(at([1, 0.5, 0])); }, { faces: 0 }],
+    ['arc3', (t) => { t.click(at([-1, 0, 0])); t.click(at([0, 1, 0])); t.click(at([1, 0, 0])); }, { faces: 0 }],
+    ['freehand', (t) => {
+      t.pointerDown(at([5, 5, 0]));
+      t.pointerMove(at([6, 5, 0], { button: -1, buttons: 1 }));
+      t.pointerMove(at([6, 6, 0], { button: -1, buttons: 1 }));
+      t.pointerMove(at([5, 6, 0], { button: -1, buttons: 1 }));
+      t.pointerUp(at([5, 5.02, 0]));
+    }, { faces: 1 }],
+    ['rectangle', (t) => { t.click(at([0, 0, 0])); t.click(at([2, 1, 0])); }, { faces: 1 }],
+    ['line', (t) => {
+      t.click(at([0, 0, 0])); t.click(at([1, 0, 0])); t.click(at([1, 1, 0]));
+      t.click(at([0, 0, 0], { inference: endpointAt([0, 0, 0]) }));
+    }, { faces: 1 }],
+  ];
+
+  it.each(shapes)('%s puts its edges and faces on the active tag', (id, draw, { faces }) => {
+    const { tools, sketch, allOnTag } = tagged();
+    tools.activate(id);
+    draw(tools);
+    expect(sketch().edges.size).toBeGreaterThan(0);
+    expect(sketch().faces.size).toBe(faces);
+    expect(allOnTag()).toBe(true);
+  });
+
+  it('re-edits keep the active tag (typed sides, bar segments)', () => {
+    const { tools, sketch, allOnTag } = tagged();
+    tools.activate('circle');
+    tools.click(at([0, 0, 0]));
+    tools.click(at([1, 0, 0]));
+    vcb(tools, '12s');
+    expect(sketch().edges.size).toBe(12);
+    expect(allOnTag()).toBe(true);
+    tools.activate('arc');
+    tools.click(at([5, 0, 0]));
+    tools.click(at([6, 0, 0]));
+    tools.click(at([5, 1, 0]));
+    tools.setting('segments', { kind: 'segments', count: 6 });
+    expect(allOnTag()).toBe(true);
   });
 });

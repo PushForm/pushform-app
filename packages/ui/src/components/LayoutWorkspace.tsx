@@ -27,7 +27,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { SERVICE_LAYOUT_WORKSPACE, LAYOUT_TOOLS, detectPlatform, parseVcb, type LayoutWorkspaceHost, type ToolSetting, type ToolSettingValue, type VcbValue } from '@pushform/commands';
-import { removeLayoutPathVertex, nextLayoutPathIndex, layoutPathContours, layoutPathSegmentIndices,isLayoutLayerVisible, labelAnchorAt, layoutLabelDragPart, layoutLabelWholeMovePart, moveLayoutLabel, previewLayoutLabel, type LayoutLabelDragPart, formatLayoutTextRange, layoutTextStyleAt, layoutLabelLeader, createLayoutLabelGeometry, inferLinearDimensionAlignment, layoutRotationAngle, snapLayoutRotationAngle, rotateLayoutEntity, rotateLayoutPoint, layoutTextCenter, resizeLayoutTextPoints, createLayoutCornerBetween, isLayoutCornerTool, createLayoutOffset, layoutOffsetDistance, createLayoutArc, isLayoutArcTool, layoutArcSweep, createLayoutRectangle, isLayoutRectangleTool, type LayoutRectanglePath, pointInsideLayoutPath, angularRaysFromPoints, angularEdgesFromPicks, type LayoutAngularEdgeAnchor, angularDimensionError, angularPlacementReflex, angularMeasurement, autoDimensionExtent, entitiesInSelectionBox, entitiesInLasso, lassoIsCrossing, layoutEntityBounds, angularDimensionGeometry, formatAngularDimension, createAngularDimension, type LayoutAngularDimension, createLinearDimension, dimensionAnchorAt, linearMeasurement, linearDimensionGeometry, formatLinearDimension, formatLayoutLength, layoutLengthPrecisionLabel, layoutDimensionScaleLabel, LAYOUT_DIMENSION_SCALES, previewLayoutDimension, type LayoutDimensionAnchor, type LayoutLinearDimension, editLayoutTextContent, importLayoutText, entitiesForLayer, entityOnPage, flattenLayoutPath, pathSegment, pointOnPathSegment, splitLayoutPathSegment, snapPaperPoint, alignToPaperReference, addLayoutBezierAnchor, pullLayoutBezierHandle, removeLastLayoutBezierAnchor, previewLayoutBezier, finishLayoutBezier, type LayoutBezierDraft, type PaperAlignment, type LayoutEntity, type LayoutPathHandle, type LayoutPage, type LayoutDocumentState, type PaperSnapKind } from '@pushform/layout';
+import { removeLayoutPathVertex, nextLayoutPathIndex, layoutPathContours, layoutPathSegmentIndices,isLayoutLayerVisible, labelAnchorAt, layoutLabelDragPart, layoutLabelWholeMovePart, moveLayoutLabel, previewLayoutLabel, type LayoutLabelDragPart, formatLayoutTextRange, layoutTextStyleAt, layoutLabelLeader, createLayoutLabelGeometry, inferLinearDimensionAlignment, layoutRotationAngle, snapLayoutRotationAngle, rotateLayoutEntities, scaleLayoutEntities, rotateLayoutPoint, layoutTextCenter, resizeLayoutTextPoints, createLayoutCornerBetween, isLayoutCornerTool, createLayoutOffset, layoutOffsetDistance, createLayoutArc, isLayoutArcTool, layoutArcSweep, createLayoutRectangle, isLayoutRectangleTool, type LayoutRectanglePath, pointInsideLayoutPath, angularRaysFromPoints, angularEdgesFromPicks, type LayoutAngularEdgeAnchor, angularDimensionError, angularPlacementReflex, angularMeasurement, autoDimensionExtent, entitiesInSelectionBox, entitiesInLasso, lassoIsCrossing, layoutEntityBounds, angularDimensionGeometry, formatAngularDimension, createAngularDimension, type LayoutAngularDimension, createLinearDimension, dimensionAnchorAt, linearMeasurement, linearDimensionGeometry, formatLinearDimension, formatLayoutLength, layoutLengthPrecisionLabel, layoutDimensionScaleLabel, LAYOUT_DIMENSION_SCALES, previewLayoutDimension, type LayoutDimensionAnchor, type LayoutLinearDimension, editLayoutTextContent, importLayoutText, entitiesForLayer, entityOnPage, flattenLayoutPath, pathSegment, pointOnPathSegment, splitLayoutPathSegment, snapPaperPoint, alignToPaperReference, addLayoutBezierAnchor, pullLayoutBezierHandle, removeLastLayoutBezierAnchor, previewLayoutBezier, finishLayoutBezier, type LayoutBezierDraft, type PaperAlignment, type LayoutEntity, type LayoutPathHandle, type LayoutPage, type LayoutDocumentState, type PaperSnapKind } from '@pushform/layout';
 import { FREEHAND_SMOOTHING_PX, LENGTH_TOL } from '@pushform/core';
 import { createLayoutFreehand } from '@pushform/layout';
 import { dxfLayoutEntities, isDxfFile } from '@pushform/io';
@@ -103,7 +103,15 @@ function angularDraftGeometry(draft: DimensionDraft, cursor: Point): { points: P
 }
 type LayoutTool = LayoutToolId;
 interface LabelDraft { tip: Point; bend: Point | null; attachment: LayoutDimensionAnchor | null; modelAttachment?: LayoutModelAttachment }
-interface RotationDraft { entityId: number; pivot: Point; reference: Point | null; angleDeg: number }
+/** A rotation in progress: the objects it turns, about `pivot`, by `angleDeg` from the `reference` direction. */
+interface RotationDraft { entityIds: number[]; pivot: Point; reference: Point | null; angleDeg: number }
+/** A resize of a group or multi-selection: its objects scale along the page's axes about `pivot`. */
+interface SelectionScale { entityIds: number[]; pivot: Point; scaleX: number; scaleY: number }
+/** A group or multi-selection handle drag, in page millimeters: the box, the dragged handle and where the pointer went down. */
+interface SelectionScaleDrag {
+  entityIds: number[]; pivot: Point; center: Point; start: Point; down: Point; scaleX: boolean; scaleY: boolean;
+  x: number; y: number; pointer: { clientX: number; clientY: number; shiftKey: boolean; altKey: boolean };
+}
 interface CornerPick { entityId: number; segmentIndex: number; point: Point }
 interface ArcDraft { points: Point[]; sweep: number }
 /** The platform's primary modifier, named the way its keyboard labels it. */
@@ -177,6 +185,9 @@ function boxAngle(entity: LayoutEntity): number {
   return (entity.image || entity.table) ? imageFrame(entity.points).angle : entity.text?.rotationDeg ?? 0;
 }
 type Box = { minX: number; minY: number; width: number; height: number };
+/** What the rotation grip turns: one object in its own box, or a group or multi-selection (`key` 0) in a box along the page. */
+type GripSubject = { key: number; entityIds: number[]; box: Box; angle: number };
+const SELECTION_GRIP = 0;
 /** The page point at fractions (u, v) of a box turned `angle` degrees about its center. */
 function boxPoint(box: Box, angle: number, u: number, v: number): Point {
   return rotateLayoutPoint([box.minX + u * box.width, box.minY + v * box.height], [box.minX + box.width / 2, box.minY + box.height / 2], angle);
@@ -454,6 +465,17 @@ function pathPickOutline(entity: LayoutEntity): { contours: Point[][]; min: Poin
   return outline;
 }
 
+/** The page and document with some of the page's objects replaced by previews of them. */
+function withPreviewEntities(page: LayoutPage, state: LayoutDocumentState, preview: ReadonlyMap<number, LayoutEntity>): { page: LayoutPage; state: LayoutDocumentState } {
+  const entities = new Map(page.entities), shared = new Map(state.sharedEntities);
+  for (const [id, entity] of preview) {
+    if (entities.has(id)) entities.set(id, entity);
+    else if (shared.has(id)) shared.set(id, entity);
+  }
+  const previewPage: LayoutPage = { ...page, entities };
+  return { page: previewPage, state: { ...state, pages: new Map(state.pages).set(page.id, previewPage), sharedEntities: shared } };
+}
+
 function pickEntity(p: Point, page: LayoutPage, state: LayoutDocumentState, includeUnfilledInterior = false, excludedIds: readonly number[] = []): LayoutEntity | null {
   for (const layerId of [...state.layerOrder].reverse()) {
     if (!isLayoutLayerVisible(page, state, layerId)) continue;
@@ -531,9 +553,12 @@ function paintPage(
   polygonSides = 6,
   tableResizePreview: LayoutEntity | null = null,
   surround: LayoutSurround | null = null,
+  transformed: ReadonlyMap<number, LayoutEntity> | null = null,
 ): void {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
+  // A rotation or group resize draws its objects transformed, and what is attached to them follows.
+  if (transformed?.size) ({ page, state } = withPreviewEntities(page, state, transformed));
   const visibleEntities = state.layerOrder.filter(id => isLayoutLayerVisible(page, state, id)).flatMap(id => entitiesForLayer(page, state, id));
   void prepareLayoutFonts(visibleEntities).catch(() => { /* Keep the readable fallback when offline. */ });
   const renderScale = outputDpi ? outputDpi / 25.4 : thumbnail
@@ -599,14 +624,14 @@ function paintPage(
   }
   // Associated dimensions follow a source path while it is dragged: resolve them against the previewed geometry.
   const draggedSourceIds: ReadonlySet<number> = pathEdit?.points ? new Set([pathEdit.entityId])
-    : movePreview && !movePreview.copy ? movePreview.entityIds : new Set();
+    : movePreview && !movePreview.copy ? movePreview.entityIds : transformed?.size ? new Set(transformed.keys()) : new Set();
   const previewedSource = (id: number): LayoutEntity | undefined => {
     const source = entityOnPage(page, state, id);
     if (!source) return source;
     if (viewportPreview?.entityId === id && isViewport(source)) return { ...source,
       image: { ...source.image, viewport: { ...source.image.viewport, camera: viewportPreview.camera } } };
     const live = source.dimension || source.angularDimension ? previewLayoutDimension(source, previewedSource) : source;
-    if (!draggedSourceIds.has(id)) return live;
+    if (!draggedSourceIds.has(id) || transformed?.has(id)) return live;
     if (pathEdit?.points) return { ...source, points: pathEdit.points, ...(pathEdit.resizeViewport && isViewport(source) ? { image: { ...source.image,
       viewport: { ...source.image.viewport, camera: resizedViewportCamera(source.image.viewport.camera, source.points, pathEdit.points, source.image.viewport.preserveScaleOnResize) } } } : {}),
       ...(pathEdit.handles ? { handles: pathEdit.handles } : {}),
@@ -1337,7 +1362,7 @@ export function LayoutWorkspace({
   };
 
   // An object selected again starts with its rotation center in the middle.
-  useEffect(() => { setGripCenter(null); setGripRotation(null); gripDrag.current = null; }, [selectedEntity?.id]);
+  useEffect(() => { setGripCenter(null); setGripRotation(null); gripDrag.current = null; }, [selectedEntity?.id, selectionIds.join()]);
   // Hiding an object, including through undo or redo, drops it from the selection.
   useEffect(() => {
     const shown = selectionIds.filter(id => !entityOnPage(page, state, id)?.hidden);
@@ -1366,23 +1391,26 @@ export function LayoutWorkspace({
   }, [tool, cornerFirst, cornerHover, page, state, cornerAmountMm]);
   // The Rotate tool's draft, or the Select tool's while its rotation handle is dragged.
   const activeRotation = tool === 'rotate' ? rotationDraft : tool === 'select' ? gripRotation : null;
-  const rotationSource = rotationDraft ? entityOnPage(page, state, rotationDraft.entityId) : undefined;
-  const activeRotationSource = activeRotation ? entityOnPage(page, state, activeRotation.entityId) : undefined;
-  const rotationPreview = useMemo((): PathEditPreview | null => {
-    const rotationDraft = activeRotation, rotationSource = activeRotationSource;
-    if (!rotationDraft?.reference || !rotationSource) return null;
-    const layer = state.layers.get(rotationSource.layerId);
-    if (!layer || !isLayoutLayerVisible(page, state, rotationSource.layerId) || layer.locked || rotationSource.locked) return null;
+  /** The objects on this page that can be turned or scaled: visible, on visible layers, and unlocked. */
+  const transformable = useCallback((ids: readonly number[]): LayoutEntity[] => ids.flatMap((id) => {
+    const entity = entityOnPage(page, state, id);
+    return entity && isLayoutLayerVisible(page, state, entity.layerId) && !objectLocked(entity, state) ? [entity] : [];
+  }), [page, state]);
+  // A group or multi-selection resize in progress, as a handle on its box is dragged.
+  const [selectionScale, setSelectionScale] = useState<SelectionScale | null>(null);
+  const selectionScaleStart = useRef<SelectionScaleDrag | null>(null);
+  /** Rotations and group resizes are previewed by drawing the transformed objects in place of the originals. */
+  const transformPreview = useMemo((): ReadonlyMap<number, LayoutEntity> | null => {
     try {
-      const geometry = rotateLayoutEntity(rotationSource, rotationDraft.pivot, rotationDraft.angleDeg);
-      return { ...(geometry.text ? { rotationDeg: geometry.text.rotationDeg ?? 0 } : {}), entityId: rotationSource.id, points: geometry.points, handles: geometry.handles ?? [], activeIndex: null, showVertices: false };
+      const turned = activeRotation?.reference ? rotateLayoutEntities(transformable(activeRotation.entityIds), activeRotation.pivot, activeRotation.angleDeg)
+        : selectionScale ? scaleLayoutEntities(transformable(selectionScale.entityIds), selectionScale.pivot, selectionScale.scaleX, selectionScale.scaleY) : null;
+      return turned ? new Map(turned.map((entity) => [entity.id, entity])) : null;
     } catch { return null; }
-  }, [activeRotation, activeRotationSource, state]);
+  }, [activeRotation, selectionScale, transformable]);
   useEffect(() => {
-    if (!rotationDraft) return;
-    const layer = rotationSource ? state.layers.get(rotationSource.layerId) : null;
-    if (!rotationSource || !layer || !isLayoutLayerVisible(page, state, rotationSource.layerId) || layer.locked || rotationSource.locked) { setRotationDraft(null); setCursor(null); }
-  }, [rotationDraft, rotationSource, state]);
+    // A pending rotation ends when any of its objects is removed, hidden or locked.
+    if (rotationDraft && transformable(rotationDraft.entityIds).length < rotationDraft.entityIds.length) { setRotationDraft(null); setCursor(null); }
+  }, [rotationDraft, transformable]);
   useEffect(() => {
     // A pending move ends when any moving object is removed, hidden, or locked.
     if (moveDraft?.entityIds.some((id) => {
@@ -1435,10 +1463,10 @@ export function LayoutWorkspace({
    * The selection box's CSS transform: turned with its object, and while the rotation handle is dragged also turned
    * with the preview about the center of rotation, so the box and grip follow the object.
    */
-  const gripBoxTransform = (box: Box): { transform: string; transformOrigin?: string } => {
-    const angle = selectedEntity ? boxAngle(selectedEntity) : 0;
-    if (!gripRotation || !selectedEntity || gripRotation.entityId !== selectedEntity.id) return { transform: `rotate(${angle}deg)` };
-    const { u, v } = gripFraction(selectedEntity), local: Point = [box.minX + u * box.width, box.minY + v * box.height];
+  const gripBoxTransform = (subject: GripSubject): { transform: string; transformOrigin?: string } => {
+    const { box, angle } = subject;
+    if (!gripRotation || gripRotation.entityIds.join() !== subject.entityIds.join()) return { transform: `rotate(${angle}deg)` };
+    const { u, v } = gripFraction(subject.key), local: Point = [box.minX + u * box.width, box.minY + v * box.height];
     // About the pivot's own place in the box, then moved to where the pivot is on the page.
     const pivot = boxPoint(box, angle, u, v), px = PX_PER_MM * zoom;
     return { transform: `translate(${(pivot[0] - local[0]) * px}px, ${(pivot[1] - local[1]) * px}px) rotate(${angle + gripRotation.angleDeg}deg)`,
@@ -1477,13 +1505,13 @@ export function LayoutWorkspace({
 
   useEffect(() => {
     const paint = (canvas: HTMLCanvasElement, surround: LayoutSurround | null = null) => paintPage(canvas, page, state, anchor, cursor, polygonTool, highlightedSet,
-      movePreview, rotationPreview ?? scalePreview ?? (editingPathId === null ? null : {
+      movePreview, scalePreview ?? (editingPathId === null ? null : {
         entityId: editingPathId, points: editPoints, handles: editHandles, activeIndex: activePointIndex,
       }), freehand, zoom, false, dimensionDraft, rectangleAmountMm, arcDraft,
       tool === 'bezier' && bezierDraft ? previewLayoutBezier(bezierDraft, bezierPress.current ? null : cursor) : offsetResult.shape ?? cornerResult.shape, activeRotation, labelDraft,
       false, undefined, initialLabelEdit ? editingTextId : null, tool === 'offset' ? offsetSource ?? null : null,
       tool === 'move' && moveDraft ? { base: moveDraft.base, target: cursor ?? moveDraft.base } : null, { rows: tableRows, columns: tableColumns }, placementModifiers,
-      navigatingViewportId !== null && viewportCameraPreview ? { entityId: navigatingViewportId, camera: viewportCameraPreview } : null, polygonSides, tableResizePreview, surround);
+      navigatingViewportId !== null && viewportCameraPreview ? { entityId: navigatingViewportId, camera: viewportCameraPreview } : null, polygonSides, tableResizePreview, surround, transformPreview);
     if (canvasRef.current) paint(canvasRef.current);
     paintSurround.current = () => {
       const canvas = canvasRef.current, surround = surroundRef.current;
@@ -1496,7 +1524,7 @@ export function LayoutWorkspace({
     };
     paintSurround.current();
   }, [version, imageLoads, page, state, anchor, cursor, tool, highlightedSet, movePreview, moveDraft,
-    editingPathId, editPoints, editHandles, activePointIndex, freehand, zoom, dimensionDraft, scalePreview, rectangleAmountMm, arcDraft, offsetResult.shape, offsetSource, cornerResult.shape, activeRotation, rotationPreview, labelDraft, initialLabelEdit, editingTextId, tableRows, tableColumns, placementModifiers, polygonTool, polygonSides, navigatingViewportId, viewportCameraPreview, bezierDraft, tableResizePreview]);
+    editingPathId, editPoints, editHandles, activePointIndex, freehand, zoom, dimensionDraft, scalePreview, rectangleAmountMm, arcDraft, offsetResult.shape, offsetSource, cornerResult.shape, activeRotation, transformPreview, labelDraft, initialLabelEdit, editingTextId, tableRows, tableColumns, placementModifiers, polygonTool, polygonSides, navigatingViewportId, viewportCameraPreview, bezierDraft, tableResizePreview]);
   // Objects past the paper edge follow scrolling and workspace resizing.
   useEffect(() => {
     const workspace = workspaceRef.current, surround = surroundRef.current;
@@ -1855,6 +1883,7 @@ export function LayoutWorkspace({
         setReattachModel(null);
         setSnapKind(null); setCursor(null);
         scaleStart.current = null; setScalePreview(null);
+        selectionScaleStart.current = null; setSelectionScale(null);
         gripDrag.current = null; setGripRotation(null);
         moveStart.current = null; setMovePreview(null); setMoveDraft(null);
         boxStart.current = null; setBoxSelect(null);
@@ -1901,7 +1930,7 @@ export function LayoutWorkspace({
           return;
         }
         // During a drag, or while a tool waits for its next step, nothing is erased; Esc ends the step first.
-        if (pointerDown.current || moveStart.current || scaleStart.current || boxStart.current || gripDrag.current || pointEditStart.current ||
+        if (pointerDown.current || moveStart.current || scaleStart.current || selectionScaleStart.current || boxStart.current || gripDrag.current || pointEditStart.current ||
             tableDrag.current || viewportDrag.current || lassoPress.current || bezierPress.current || eraserStroke.current ||
             navigatingViewportRef.current !== null || anchor || moveDraft || rotationDraft || offsetDraft || cornerFirst || booleanIds.length ||
             dimensionDraft || labelDraft || arcDraft || freehand.length || lasso || reattachModel || tableCounting) {
@@ -2168,7 +2197,7 @@ export function LayoutWorkspace({
     if (!rotationDraft?.reference) return;
     try {
       if (Math.abs(angleDeg % 360) > 1e-10) tab.commands.execute('layout.shape.rotate', {
-        pageId: page.id, entityId: rotationDraft.entityId, pivot: rotationDraft.pivot, angleDeg,
+        pageId: page.id, entityIds: rotationDraft.entityIds, pivot: rotationDraft.pivot, angleDeg,
       });
       setRotationDraft(null); setCursor(null); setSnapKind(null); clearEntry(); setVcbError(null);
     } catch (error) { setVcbError(error instanceof Error ? error.message : 'Cannot rotate this object.'); }
@@ -2177,33 +2206,100 @@ export function LayoutWorkspace({
   const gripPoint = (event: { clientX: number; clientY: number }): Point => rawPointFromEvent({ currentTarget: canvasRef.current!, clientX: event.clientX, clientY: event.clientY });
   /** Screen pixels per page millimeter, as the canvas is shown. */
   const screenPxPerMm = (): number => canvasRef.current!.getBoundingClientRect().width / page.size[0];
-  const gripFraction = (entity: LayoutEntity) => gripCenter && gripCenter.entityId === entity.id ? gripCenter : { u: 0.5, v: 0.5 };
+  const gripFraction = (key: number) => gripCenter && gripCenter.entityId === key ? gripCenter : { u: 0.5, v: 0.5 };
   // The center moves within the box and snaps back to its middle within 8 screen pixels.
-  const moveGripCenter = (entity: LayoutEntity, box: Box, p: Point): void => {
-    const angle = boxAngle(entity), middle = boxPoint(box, angle, 0.5, 0.5);
+  const moveGripCenter = (subject: GripSubject, p: Point): void => {
+    const { box, angle } = subject, middle = boxPoint(box, angle, 0.5, 0.5);
     const snap = Math.hypot(p[0] - middle[0], p[1] - middle[1]) <= 8 / screenPxPerMm();
-    setGripCenter({ entityId: entity.id, ...(snap ? { u: 0.5, v: 0.5 } : boxFraction(box, angle, p)) });
+    setGripCenter({ entityId: subject.key, ...(snap ? { u: 0.5, v: 0.5 } : boxFraction(box, angle, p)) });
   };
   // The handle starts where the arm ends; the angle follows the pointer about the center.
-  const startGripRotation = (entity: LayoutEntity, box: Box): void => {
-    const { u, v } = gripFraction(entity), angle = boxAngle(entity), pivot = boxPoint(box, angle, u, v);
+  const startGripRotation = (subject: GripSubject): void => {
+    const { u, v } = gripFraction(subject.key), { box, angle } = subject, pivot = boxPoint(box, angle, u, v);
     const arm = rotateLayoutPoint([ROTATION_ARM_PX / (PX_PER_MM * zoom), 0], [0, 0], angle);
     const reference: Point = [pivot[0] + arm[0], pivot[1] + arm[1]];
-    setGripRotation({ entityId: entity.id, pivot, reference, angleDeg: 0 }); setCursor(reference);
+    setGripRotation({ entityIds: subject.entityIds, pivot, reference, angleDeg: 0 }); setCursor(reference);
   };
   const updateGripRotation = (p: Point): void => {
     if (!gripRotation?.reference || Math.hypot(p[0] - gripRotation.pivot[0], p[1] - gripRotation.pivot[1]) < 1e-6) return;
     setGripRotation({ ...gripRotation, angleDeg: pointerRotation(gripRotation, gripRotation.reference, p, { currentTarget: canvasRef.current! }) });
     setCursor(p);
   };
-  const finishGripRotation = (): void => {
+  const finishGripRotation = (subject: GripSubject): void => {
     const draft = gripRotation;
     setGripRotation(null); setCursor(null);
     if (!draft || Math.abs(draft.angleDeg % 360) <= 1e-10) return;
-    tab.commands.execute('layout.shape.rotate', { pageId: page.id, entityId: draft.entityId, pivot: draft.pivot, angleDeg: draft.angleDeg });
-    // The center stays where it was on the page, within the rotated object's new box.
-    const rotated = entityOnPage(page, tab.doc.state, draft.entityId);
-    if (rotated) setGripCenter({ entityId: rotated.id, ...boxFraction(selectionBox(rotated), boxAngle(rotated), draft.pivot) });
+    try { tab.commands.execute('layout.shape.rotate', { pageId: page.id, entityIds: draft.entityIds, pivot: draft.pivot, angleDeg: draft.angleDeg }); }
+    catch (error) { setVcbError(error instanceof Error ? error.message : 'Cannot rotate the selection.'); return; }
+    // The center stays where it was on the page, within the new box of the rotated object or selection.
+    const rotated = subject.key === SELECTION_GRIP ? null : entityOnPage(page, tab.doc.state, subject.key);
+    const box = rotated ? selectionBox(rotated) : extentOf(subject.entityIds, null, tab.doc.state);
+    if (box) setGripCenter({ entityId: subject.key, ...boxFraction(box, rotated ? boxAngle(rotated) : 0, draft.pivot) });
+  };
+  /**
+   * The selection panel's Arrange actions: one object as before, or a group or multi-selection as a whole, about the
+   * center of its box, as one undoable step. Locked objects in it stay as they are.
+   */
+  const arrangeIds = selectedEntity ? (canTransform ? [selectedEntity.id] : []) : transformable(selectionIds).map((entity) => entity.id);
+  const arrange = (label: string, single: (entityId: number) => void, together: (entityIds: number[], center: Point) => void): void => {
+    if (!arrangeIds.length) return;
+    if (selectedEntity) { single(selectedEntity.id); return; }
+    const box = extentOf(arrangeIds, null);
+    if (box) contextAction(label, () => together(arrangeIds, [box.minX + box.width / 2, box.minY + box.height / 2]))();
+  };
+  /** One object's grip subject: its own box, turned with it. */
+  const singleGrip = (entity: LayoutEntity, box: Box): GripSubject => ({ key: entity.id, entityIds: [entity.id], box, angle: boxAngle(entity) });
+  /** The center of rotation, its arm and the rotation handle, inside the box of `subject`. */
+  const renderRotationGrip = (subject: GripSubject): JSX.Element => {
+    const { u, v } = gripFraction(subject.key);
+    return <div className="pf-layout-rotation-grip" style={{ left: `${u * 100}%`, top: `${v * 100}%` }}>
+      <span className="pf-layout-rotation-arm" style={{ width: ROTATION_ARM_PX }} />
+      <button type="button" className="pf-layout-rotation-center" aria-label="Center of rotation" title="Center of rotation"
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          event.preventDefault(); event.stopPropagation();
+          gripDrag.current = 'center'; event.currentTarget.setPointerCapture?.(event.pointerId);
+        }}
+        onPointerMove={(event) => { if (gripDrag.current === 'center') moveGripCenter(subject, gripPoint(event)); }}
+        onPointerUp={() => { gripDrag.current = null; }}
+        onPointerCancel={() => { gripDrag.current = null; }} />
+      <button type="button" className="pf-layout-rotation-handle" aria-label="Rotation handle" title="Drag to rotate"
+        style={{ left: ROTATION_ARM_PX }}
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          event.preventDefault(); event.stopPropagation();
+          gripDrag.current = 'rotate'; event.currentTarget.setPointerCapture?.(event.pointerId);
+          startGripRotation(subject);
+        }}
+        onPointerMove={(event) => { if (gripDrag.current === 'rotate') updateGripRotation(gripPoint(event)); }}
+        onPointerUp={() => { if (gripDrag.current !== 'rotate') return; gripDrag.current = null; finishGripRotation(subject); }}
+        onPointerCancel={() => { gripDrag.current = null; setGripRotation(null); setCursor(null); }} />
+    </div>;
+  };
+  /**
+   * The page-aligned box around the drawn extent of objects, as previewed while they are being scaled and moved,
+   * or null when none of them is drawn.
+   */
+  const extentOf = (ids: readonly number[], preview: ReadonlyMap<number, LayoutEntity> | null, current = state): Box | null => {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const id of ids) {
+      const entity = entityOnPage(page, current, id);
+      const bounds = entity && isLayoutLayerVisible(page, current, entity.layerId) ? layoutEntityBounds(preview?.get(id) ?? entity) : null;
+      if (!bounds) continue;
+      const delta: Point = movePreview?.entityIds.has(id) && !movePreview.copy ? movePreview.delta : [0, 0];
+      minX = Math.min(minX, bounds.minX + delta[0]); minY = Math.min(minY, bounds.minY + delta[1]);
+      maxX = Math.max(maxX, bounds.maxX + delta[0]); maxY = Math.max(maxY, bounds.maxY + delta[1]);
+    }
+    return minX <= maxX ? { minX, minY, width: maxX - minX, height: maxY - minY } : null;
+  };
+  /** A dragged resize handle's page point, snapped as placement snaps, to objects other than those being resized. */
+  const snapHandle = (target: Point, resizing: readonly number[]): Point => {
+    const canvas = canvasRef.current;
+    if (!canvas) return target;
+    const snap = snapPaperPoint(target, page, tab.doc.state, 8 * page.size[0] / canvas.getBoundingClientRect().width,
+      movingWithFollowers(resizing, page, tab.doc.state));
+    setSnapKind(snap.kind); setSnapType(snap.type ?? snap.kind); setCursor(snap.point);
+    return snap.point;
   };
   /** Offset from the base point to `target`, kept horizontal or vertical when constrained. */
   const moveDelta = (draft: MoveDraft, target: Point, constrain: boolean): Point => {
@@ -2543,8 +2639,10 @@ export function LayoutWorkspace({
       return;
     }
     if (tool === 'scale') {
+      // As Move does: an unselected object is picked up with its group, and any other click keeps the selection,
+      // whose box then shows the resize handles.
       const entity = pickEntity(rawPointFromEvent(event), page, state, true);
-      setSelectionId(entity && !objectLocked(entity, state) ? entity.id : null);
+      if (entity && !selectionIds.includes(entity.id)) setSelectionIds(expandLayoutGroups([entity.id], page, state));
       setCursor(null); setSnapKind(null); setVcbError(null);
       return;
     }
@@ -2570,11 +2668,18 @@ export function LayoutWorkspace({
     if (tool === 'rotate') {
       const p = pointFromEvent(event); setCursor(p); setVcbError(null);
       if (!rotationDraft) {
-        const entity = pickEntity(p, page, state, true);
-        if (!entity || (entity.kind !== 'path' && !entity.text && !entity.image && !entity.table)) { setVcbError('Click within a shape, image, or text box, or on a line to choose the rotation point.'); return; }
-        if (objectLocked(entity, state)) { setVcbError('Source layer is locked.'); return; }
-        const pivot = p;
-        setSelectionId(entity.id); setRotationDraft({ entityId: entity.id, pivot, reference: null, angleDeg: 0 }); setCursor(pivot);
+        // As Move does: an unselected object is picked up with its group; otherwise the click rotates the selection.
+        // Objects are picked where the pointer is, and the rotation point is the snapped point.
+        const raw = rawPointFromEvent(event);
+        const entity = pickEntity(raw, page, state, true) ?? pickEntity(p, page, state, true);
+        const chosen = entity && !selectionIds.includes(entity.id) ? expandLayoutGroups([entity.id], page, state) : selectionIds;
+        const entityIds = transformable(chosen).map((member) => member.id);
+        if (!entityIds.length) {
+          setVcbError(chosen.length ? 'Locked or hidden objects cannot be rotated.' : 'Click an object, or anywhere while objects are selected, to choose the rotation point.');
+          return;
+        }
+        if (chosen !== selectionIds) setSelectionIds(chosen);
+        setRotationDraft({ entityIds, pivot: p, reference: null, angleDeg: 0 }); setCursor(p);
       } else {
         setCursor(p);
         if (Math.hypot(p[0] - rotationDraft.pivot[0], p[1] - rotationDraft.pivot[1]) < 1e-6) { setVcbError('Choose a direction away from the rotation point.'); return; }
@@ -3733,12 +3838,50 @@ export function LayoutWorkspace({
     const raw = rawPointFromEvent({ ...event, currentTarget: canvasRef.current! });
     const down = rawPointFromEvent({ currentTarget: canvasRef.current!, clientX: drag.x, clientY: drag.y });
     const entity = entityOnPage(page, tab.doc.state, drag.entityId);
-    const delta = rotateLayoutPoint([raw[0] - down[0], raw[1] - down[1]], [0, 0], -((entity?.image || entity?.table) ? imageFrame(entity.points).angle : entity?.text?.rotationDeg ?? 0));
+    const angle = (entity?.image || entity?.table) ? imageFrame(entity.points).angle : entity?.text?.rotationDeg ?? 0;
+    // The handle's place on the page follows the pointer and snaps, then is read back in the box's own axes.
+    const handle = rotateLayoutPoint(drag.start, drag.center, angle);
+    const snapped = snapHandle([handle[0] + raw[0] - down[0], handle[1] + raw[1] - down[1]], [drag.entityId]);
+    const delta = rotateLayoutPoint([snapped[0] - handle[0], snapped[1] - handle[1]], [0, 0], -angle);
     const point: Point = [drag.start[0] + delta[0], drag.start[1] + delta[1]];
     let sx = drag.scaleX ? Math.max(0.01, (point[0] - pivot[0]) / (drag.start[0] - pivot[0])) : 1;
     let sy = drag.scaleY ? Math.max(0.01, (point[1] - pivot[1]) / (drag.start[1] - pivot[1])) : 1;
-    if (event.shiftKey) sx = sy = Math.abs(sx - 1) > Math.abs(sy - 1) ? sx : sy;
+    if (event.shiftKey) sx = sy = keepProportions(sx, sy);
     return [sx, sy];
+  };
+  /** Shift's proportional factor, the one that changes more; the snap marker goes when it moves the handle off the snap. */
+  const keepProportions = (sx: number, sy: number): number => {
+    const factor = Math.abs(sx - 1) > Math.abs(sy - 1) ? sx : sy;
+    if (factor !== sx || factor !== sy) setSnapKind(null);
+    return factor;
+  };
+  /** A group or multi-selection resize at the pointer: about the opposite handle, or the box's center with Alt. */
+  const selectionScaleFactors = (drag: SelectionScaleDrag, event: ScaleModifiers): SelectionScale => {
+    const pivot = event.altKey ? drag.center : drag.pivot, raw = gripPoint(event);
+    const target = snapHandle([drag.start[0] + raw[0] - drag.down[0], drag.start[1] + raw[1] - drag.down[1]], drag.entityIds);
+    let scaleX = drag.scaleX ? Math.max(0.01, (target[0] - pivot[0]) / (drag.start[0] - pivot[0])) : 1;
+    let scaleY = drag.scaleY ? Math.max(0.01, (target[1] - pivot[1]) / (drag.start[1] - pivot[1])) : 1;
+    if (event.shiftKey) scaleX = scaleY = keepProportions(scaleX, scaleY);
+    return { entityIds: drag.entityIds, pivot, scaleX, scaleY };
+  };
+  const updateSelectionScaleRef = useRef<(event: ScaleModifiers) => void>(() => {});
+  const updateSelectionScale = (event: ScaleModifiers): void => {
+    const drag = selectionScaleStart.current;
+    if (!drag) return;
+    drag.pointer = { clientX: event.clientX, clientY: event.clientY, shiftKey: event.shiftKey, altKey: event.altKey };
+    setSelectionScale(selectionScaleFactors(drag, event));
+  };
+  updateSelectionScaleRef.current = updateSelectionScale;
+  const endSelectionScale = (): void => { selectionScaleStart.current = null; setSelectionScale(null); setSnapKind(null); setCursor(null); };
+  /** Release commits the resize as one undoable step; a click without a drag, or no change, does nothing. */
+  const finishSelectionScale = (event: ScaleModifiers): void => {
+    const drag = selectionScaleStart.current;
+    if (!drag) return;
+    const moved = Math.hypot(event.clientX - drag.x, event.clientY - drag.y) >= 2, scale = selectionScaleFactors(drag, event);
+    endSelectionScale();
+    if (!moved || Math.abs(scale.scaleX - 1) < 1e-9 && Math.abs(scale.scaleY - 1) < 1e-9) return;
+    try { tab.commands.execute('layout.shape.scale', { pageId: page.id, entityIds: scale.entityIds, pivot: scale.pivot, scaleX: scale.scaleX, scaleY: scale.scaleY }); }
+    catch (error) { setVcbError(error instanceof Error ? error.message : 'Cannot scale the selection.'); }
   };
   const scaledPoints = (drag: ScaleDrag, sx: number, sy: number, pivot: Point): Point[] => {
     const transform = ([x, y]: Point): Point => [pivot[0] + (x - pivot[0]) * sx, pivot[1] + (y - pivot[1]) * sy];
@@ -3768,12 +3911,13 @@ export function LayoutWorkspace({
   };
   useEffect(() => {
     const onShift = (event: KeyboardEvent) => {
-      const drag = scaleStart.current;
-      if ((event.key !== 'Shift' && event.key !== 'Alt') || !drag) return;
+      const drag = scaleStart.current, group = selectionScaleStart.current;
+      if ((event.key !== 'Shift' && event.key !== 'Alt') || (!drag && !group)) return;
       // Keep Alt from focusing the browser menu bar mid-drag.
       if (event.key === 'Alt') event.preventDefault();
       // Apply the constraint immediately even when the pointer is stationary.
-      updateScalePreview({ ...drag.pointer, shiftKey: event.shiftKey, altKey: event.altKey });
+      if (drag) updateScalePreview({ ...drag.pointer, shiftKey: event.shiftKey, altKey: event.altKey });
+      if (group) updateSelectionScaleRef.current({ ...group.pointer, shiftKey: event.shiftKey, altKey: event.altKey });
     };
     window.addEventListener('keydown', onShift);
     window.addEventListener('keyup', onShift);
@@ -3822,6 +3966,7 @@ export function LayoutWorkspace({
     setDimensionDraft(null); setAngularEdgeFirst(null); setDimensionError(null); setArcDraft(null); setArcError(null); setOffsetDraft(null); setCornerFirst(null); setCornerHover(null); setRotationDraft(null); setLabelDraft(null); setTool(id); setAnchor(null); setVcbError(null);
     setEditingTextId(null);
     scaleStart.current = null; setScalePreview(null);
+    selectionScaleStart.current = null; setSelectionScale(null);
     setMoveDraft(null); setMovePreview(null);
     setEditingPathId(null); setEditPoints(null); setEditHandles(null); setActivePointIndex(null);
   };
@@ -4101,8 +4246,9 @@ export function LayoutWorkspace({
           {tool === 'line' && lineGuide && cursor ? <LayoutAlignmentGuide axis={lineGuide.axis}
             from={[lineGuide.reference[0] * PX_PER_MM * zoom, lineGuide.reference[1] * PX_PER_MM * zoom]}
             to={[cursor[0] * PX_PER_MM * zoom, cursor[1] * PX_PER_MM * zoom]} /> : null}
-          {cursor && tool !== 'select' && tool !== 'scale' && !booleanOperation(tool) ? <LayoutPlacementMarker snapKind={snapKind} x={cursor[0] * PX_PER_MM * zoom} y={cursor[1] * PX_PER_MM * zoom} /> : null}
-          {snapKind && snapKind !== 'grid' && cursor && tool !== 'select' && tool !== 'scale' && !presenting && !printing && !contextMenu && editingTextId === null &&
+          {cursor && (tool !== 'select' && tool !== 'scale' && !booleanOperation(tool) || (scalePreview !== null || selectionScale !== null) && snapKind !== null)
+            ? <LayoutPlacementMarker snapKind={snapKind} x={cursor[0] * PX_PER_MM * zoom} y={cursor[1] * PX_PER_MM * zoom} /> : null}
+          {snapKind && snapKind !== 'grid' && cursor && (tool !== 'select' && tool !== 'scale' || scalePreview !== null || selectionScale !== null) && !presenting && !printing && !contextMenu && editingTextId === null &&
               state.settings.objectSnap !== false ? <LayoutSnapTooltip
             key={`${page.id}:${tool}:${snapHoverEpoch}:${snapType}:${cursor[0]}:${cursor[1]}`}
             type={snapType ?? snapKind} x={cursor[0] * PX_PER_MM * zoom} y={cursor[1] * PX_PER_MM * zoom}
@@ -4186,7 +4332,7 @@ export function LayoutWorkspace({
             onCommit={(cell, value) => updateTableCellText([cell], value)} onClear={cells => updateTableCellText(cells, '')} /> : null}
           {selectionBounds && selectedEntity ? <div className="pf-layout-selection-box" aria-label="Selected object bounds"
             style={{ left: `${selectionBounds.minX / page.size[0] * 100}%`, top: `${selectionBounds.minY / page.size[1] * 100}%`,
-              width: `${selectionBounds.width / page.size[0] * 100}%`, height: `${selectionBounds.height / page.size[1] * 100}%`, ...gripBoxTransform(selectionBounds) }}>
+              width: `${selectionBounds.width / page.size[0] * 100}%`, height: `${selectionBounds.height / page.size[1] * 100}%`, ...gripBoxTransform(singleGrip(selectedEntity, selectionBounds)) }}>
             {SCALE_HANDLES.filter((handle) => selectionBounds.width < 1e-6 ? handle.x === 0.5
               : selectionBounds.height < 1e-6 ? handle.y === 0.5 : true).map((handle) => <button
                 key={handle.name} type="button" className="pf-layout-scale-handle" aria-label={`${selectedEntity.text ? 'Resize text' : selectedEntity.image ? 'Resize image' : 'Scale'} ${handle.name}`} title={`${selectedEntity.text ? 'Resize text' : selectedEntity.image ? 'Resize image' : 'Scale'} ${handle.name}`}
@@ -4207,60 +4353,57 @@ export function LayoutWorkspace({
                 onPointerMove={updateScalePreview}
                 onPointerUp={(event) => {
                   const drag = scaleStart.current; scaleStart.current = null; setScalePreview(null);
-                  if (!drag || Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 2) return;
+                  if (!drag || Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 2) { setSnapKind(null); setCursor(null); return; }
                   const [scaleX, scaleY] = scaleFactors(drag, event), pivot = scalePivot(drag, event.altKey);
+                  setSnapKind(null); setCursor(null);
                   if (selectedEntity.text) tab.commands.execute('layout.text.setBounds', {
                     pageId: page.id, entityId: drag.entityId, bounds: scaledPoints(drag, scaleX, scaleY, pivot).slice(0, 2),
                   });
                   else tab.commands.execute('layout.shape.scale', { pageId: page.id, entityId: drag.entityId,
                     pivot: (selectedEntity.image || selectedEntity.table) ? rotateLayoutPoint(pivot, imageFrame(drag.points).center, imageFrame(drag.points).angle) : pivot, scaleX, scaleY });
                 }}
-                onPointerCancel={() => { scaleStart.current = null; setScalePreview(null); }}
-                onDoubleClick={(event) => { event.stopPropagation(); scaleStart.current = null; setScalePreview(null); if (selectedEntity.text) setEditingTextId(selectedEntity.id); else if (selectedEntity.kind === 'path') setEditingPathId(selectedEntity.id); }}
+                onPointerCancel={() => { scaleStart.current = null; setScalePreview(null); setSnapKind(null); setCursor(null); }}
+                onDoubleClick={(event) => {
+                  event.stopPropagation(); scaleStart.current = null; setScalePreview(null);
+                  // Text and vertex editing belong to Select, so Scale hands over to it.
+                  if (tool === 'scale' && (selectedEntity.text || selectedEntity.kind === 'path')) chooseTool('select');
+                  if (selectedEntity.text) setEditingTextId(selectedEntity.id); else if (selectedEntity.kind === 'path') setEditingPathId(selectedEntity.id);
+                }}
               />)}
-            {tool !== 'scale' && selectedEntity.kind !== 'label' && !(selectedEntity.table && tableCellsActive) && !scalePreview && !movePreview ? (() => {
-              // The center of rotation, its arm and the rotation handle.
-              const { u, v } = gripFraction(selectedEntity), box = selectionBounds;
-              return <div className="pf-layout-rotation-grip" style={{ left: `${u * 100}%`, top: `${v * 100}%` }}>
-                <span className="pf-layout-rotation-arm" style={{ width: ROTATION_ARM_PX }} />
-                <button type="button" className="pf-layout-rotation-center" aria-label="Center of rotation" title="Center of rotation"
-                  onPointerDown={(event) => {
-                    if (event.button !== 0) return;
-                    event.preventDefault(); event.stopPropagation();
-                    gripDrag.current = 'center'; event.currentTarget.setPointerCapture?.(event.pointerId);
-                  }}
-                  onPointerMove={(event) => { if (gripDrag.current === 'center') moveGripCenter(selectedEntity, box, gripPoint(event)); }}
-                  onPointerUp={() => { gripDrag.current = null; }}
-                  onPointerCancel={() => { gripDrag.current = null; }} />
-                <button type="button" className="pf-layout-rotation-handle" aria-label="Rotation handle" title="Drag to rotate"
-                  style={{ left: ROTATION_ARM_PX }}
-                  onPointerDown={(event) => {
-                    if (event.button !== 0) return;
-                    event.preventDefault(); event.stopPropagation();
-                    gripDrag.current = 'rotate'; event.currentTarget.setPointerCapture?.(event.pointerId);
-                    startGripRotation(selectedEntity, box);
-                  }}
-                  onPointerMove={(event) => { if (gripDrag.current === 'rotate') updateGripRotation(gripPoint(event)); }}
-                  onPointerUp={() => { if (gripDrag.current !== 'rotate') return; gripDrag.current = null; finishGripRotation(); }}
-                  onPointerCancel={() => { gripDrag.current = null; setGripRotation(null); setCursor(null); }} />
-              </div>;
-            })() : null}
+            {tool !== 'scale' && selectedEntity.kind !== 'label' && !(selectedEntity.table && tableCellsActive) && !scalePreview && !movePreview
+              ? renderRotationGrip(singleGrip(selectedEntity, selectionBounds)) : null}
           </div> : null}
-          {tool === 'select' && selectionIds.length > 1 && editingTextId === null ? (() => {
-            // One dashed outline, without handles, around the drawn extent of every selected object.
-            const boxes = selectionIds.map((id) => {
-              const entity = entityOnPage(page, state, id);
-              const bounds = entity && isLayoutLayerVisible(page, state, entity.layerId) ? layoutEntityBounds(entity) : null;
-              if (!bounds || !movePreview?.entityIds.has(id) || movePreview.copy) return bounds;
-              return { minX: bounds.minX + movePreview.delta[0], minY: bounds.minY + movePreview.delta[1],
-                maxX: bounds.maxX + movePreview.delta[0], maxY: bounds.maxY + movePreview.delta[1] };
-            }).filter((bounds): bounds is NonNullable<typeof bounds> => bounds !== null);
-            if (boxes.length === 0) return null;
-            const minX = Math.min(...boxes.map((b) => b.minX)), minY = Math.min(...boxes.map((b) => b.minY));
-            const maxX = Math.max(...boxes.map((b) => b.maxX)), maxY = Math.max(...boxes.map((b) => b.maxY));
+          {(tool === 'select' || tool === 'scale') && selectionIds.length > 1 && editingTextId === null ? (() => {
+            // One box around the drawn extent of every selected object, following a resize as it is previewed. While any of
+            // them can be changed it has resize handles, and with Select a rotation grip.
+            const box = extentOf(selectionIds, selectionScale ? transformPreview : null);
+            if (!box) return null;
+            const entityIds = transformable(selectionIds).map((entity) => entity.id);
+            const subject: GripSubject = { key: SELECTION_GRIP, entityIds, box, angle: 0 };
+            const editable = entityIds.length > 0 && !movePreview && !presenting && !printing;
             return <div className="pf-layout-selection-box" aria-label="Selected objects bounds"
-              style={{ left: `${minX / page.size[0] * 100}%`, top: `${minY / page.size[1] * 100}%`,
-                width: `${(maxX - minX) / page.size[0] * 100}%`, height: `${(maxY - minY) / page.size[1] * 100}%` }} />;
+              style={{ left: `${box.minX / page.size[0] * 100}%`, top: `${box.minY / page.size[1] * 100}%`,
+                width: `${box.width / page.size[0] * 100}%`, height: `${box.height / page.size[1] * 100}%`, ...gripBoxTransform(subject) }}>
+              {editable && !gripRotation ? SCALE_HANDLES.filter((handle) => box.width < 1e-6 ? handle.x === 0.5 : box.height < 1e-6 ? handle.y === 0.5 : true).map((handle) => <button
+                key={handle.name} type="button" className="pf-layout-scale-handle" aria-label={`Scale selection ${handle.name}`} title={`Scale selection ${handle.name}`}
+                style={{ left: `${handle.x * 100}%`, top: `${handle.y * 100}%`, cursor: handle.cursor }}
+                onPointerDown={(event) => {
+                  if (event.button !== 0) return;
+                  event.preventDefault(); event.stopPropagation();
+                  selectionScaleStart.current = { entityIds,
+                    pivot: [box.minX + (1 - handle.x) * box.width, box.minY + (1 - handle.y) * box.height],
+                    center: [box.minX + box.width / 2, box.minY + box.height / 2],
+                    start: [box.minX + handle.x * box.width, box.minY + handle.y * box.height], down: gripPoint(event),
+                    scaleX: handle.x !== 0.5 && box.width > 1e-6, scaleY: handle.y !== 0.5 && box.height > 1e-6,
+                    x: event.clientX, y: event.clientY, pointer: { clientX: event.clientX, clientY: event.clientY, shiftKey: event.shiftKey, altKey: event.altKey } };
+                  event.currentTarget.setPointerCapture?.(event.pointerId);
+                }}
+                onPointerMove={updateSelectionScale}
+                onPointerUp={finishSelectionScale}
+                onPointerCancel={endSelectionScale}
+              />) : null}
+              {editable && tool === 'select' && !selectionScale ? renderRotationGrip(subject) : null}
+            </div>;
           })() : null}
           {boxSelect ? <div className="pf-layout-marquee" aria-label="Selection box" data-mode={boxSelect.to[0] < boxSelect.from[0] ? 'crossing' : 'window'}
             style={{ left: `${Math.min(boxSelect.from[0], boxSelect.to[0]) / page.size[0] * 100}%`, top: `${Math.min(boxSelect.from[1], boxSelect.to[1]) / page.size[1] * 100}%`,
@@ -4473,52 +4616,45 @@ export function LayoutWorkspace({
             </label>
           ) : null}
           </> : null}
-          {selectedEntity ? <section className="pf-layout-panel-section" aria-label="Arrange">
+          {selectedEntity || selectionIds.length > 1 ? <section className="pf-layout-panel-section" aria-label="Arrange">
             <h3>Arrange</h3>
             <label>
               Rotate (°)
               <input type="number" aria-label="Rotation angle" value={rotationDeg}
                 onChange={(event) => setRotationDeg(event.target.value)} />
             </label>
-            <button type="button" disabled={!canTransform || !Number.isFinite(Number(rotationDeg)) || !rotationDeg.trim()}
-              onClick={() => tab.commands.execute('layout.shape.rotate', {
-                pageId: page.id, entityId: selectedEntity!.id, angleDeg: Number(rotationDeg),
-              })}>Rotate clockwise</button>
+            <button type="button" disabled={!arrangeIds.length || !Number.isFinite(Number(rotationDeg)) || !rotationDeg.trim()}
+              onClick={() => arrange('Rotate',
+                (entityId) => tab.commands.execute('layout.shape.rotate', { pageId: page.id, entityId, angleDeg: Number(rotationDeg) }),
+                (entityIds, pivot) => tab.commands.execute('layout.shape.rotate', { pageId: page.id, entityIds, pivot, angleDeg: Number(rotationDeg) }))}>Rotate clockwise</button>
             <label>
               Scale (%)
               <input ref={scalePercentInput} type="number" aria-label="Scale percent" min="0.01" value={scalePercent}
                 onChange={(event) => setScalePercent(event.target.value)} />
             </label>
-            <button type="button" disabled={!canTransform || !(Number(scalePercent) > 0)}
-              onClick={() => tab.commands.execute('layout.shape.scale', {
-                pageId: page.id, entityId: selectedEntity!.id,
-                scaleX: Number(scalePercent) / 100, scaleY: Number(scalePercent) / 100,
-              })}>Apply scale</button>
+            <button type="button" disabled={!arrangeIds.length || !(Number(scalePercent) > 0)}
+              onClick={() => {
+                const factor = Number(scalePercent) / 100;
+                arrange('Scale',
+                  (entityId) => tab.commands.execute('layout.shape.scale', { pageId: page.id, entityId, scaleX: factor, scaleY: factor }),
+                  (entityIds, pivot) => tab.commands.execute('layout.shape.scale', { pageId: page.id, entityIds, pivot, scaleX: factor, scaleY: factor }));
+              }}>Apply scale</button>
             <div className="pf-layout-arrange-actions">
-              <button type="button" disabled={!canTransform}
-                onClick={() => tab.commands.execute('layout.shape.flip', {
-                  pageId: page.id, entityId: selectedEntity!.id, axis: 'horizontal',
-                })}>Flip horizontally</button>
-              <button type="button" disabled={!canTransform}
-                onClick={() => tab.commands.execute('layout.shape.flip', {
-                  pageId: page.id, entityId: selectedEntity!.id, axis: 'vertical',
-                })}>Flip vertically</button>
-              <button type="button" disabled={!canTransform}
-                onClick={() => tab.commands.execute('layout.shape.order', {
-                  pageId: page.id, entityId: selectedEntity!.id, direction: 'front',
-                })}>Bring to front</button>
-              <button type="button" disabled={!canTransform}
-                onClick={() => tab.commands.execute('layout.shape.order', {
-                  pageId: page.id, entityId: selectedEntity!.id, direction: 'forward',
-                })}>Bring forward</button>
-              <button type="button" disabled={!canTransform}
-                onClick={() => tab.commands.execute('layout.shape.order', {
-                  pageId: page.id, entityId: selectedEntity!.id, direction: 'backward',
-                })}>Send backward</button>
-              <button type="button" disabled={!canTransform}
-                onClick={() => tab.commands.execute('layout.shape.order', {
-                  pageId: page.id, entityId: selectedEntity!.id, direction: 'back',
-                })}>Send to back</button>
+              {(['horizontal', 'vertical'] as const).map((axis) => <button key={axis} type="button" disabled={!arrangeIds.length}
+                onClick={() => arrange('Flip',
+                  (entityId) => tab.commands.execute('layout.shape.flip', { pageId: page.id, entityId, axis }),
+                  (entityIds, pivot) => { for (const entityId of entityIds) tab.commands.execute('layout.shape.flip', { pageId: page.id, entityId, axis, pivot }); })}>
+                {axis === 'horizontal' ? 'Flip horizontally' : 'Flip vertically'}</button>)}
+              {([['front', 'Bring to front'], ['forward', 'Bring forward'], ['backward', 'Send backward'], ['back', 'Send to back']] as const).map(([direction, label]) =>
+                <button key={direction} type="button" disabled={!arrangeIds.length}
+                  onClick={() => arrange(label,
+                    (entityId) => tab.commands.execute('layout.shape.order', { pageId: page.id, entityId, direction }),
+                    (entityIds) => {
+                      // In drawing order, so the selected objects keep their order among themselves.
+                      const ordered = state.layerOrder.flatMap(layerId => entitiesForLayer(page, state, layerId)).filter(entity => entityIds.includes(entity.id));
+                      if (direction === 'back' || direction === 'forward') ordered.reverse();
+                      for (const entity of ordered) tab.commands.execute('layout.shape.order', { pageId: page.id, entityId: entity.id, direction });
+                    })}>{label}</button>)}
             </div>
           </section> : null}
           </LayoutAccordion>
@@ -4528,20 +4664,21 @@ export function LayoutWorkspace({
         <StatusHint className="pf-layout-footer-spacer">
           {catalogActive ? 'Browse community models. Open a document tab to keep working.' : statusNote !== null ? statusNote : tool === 'select' && importNote !== null ? importNote : tool === 'select' ? navigatingViewportId !== null ? vcbError ?? 'Drag to orbit, Shift+drag or middle-drag to pan, and scroll to zoom the view. Click outside it or press Esc when done.'
             : editingPathId !== null ? 'Drag vertices to edit. Delete removes the selected vertex. Esc returns to object selection.'
-            : scalePreview ? 'Resizing: hold Shift to maintain aspect ratio, Alt to keep the center. Release to finish.'
+            : scalePreview || selectionScale ? 'Resizing: hold Shift to maintain aspect ratio, Alt to keep the center. Release to finish.'
             : 'Click to select, drag to move, or use the handles to resize (hold Shift to maintain aspect ratio, Alt to keep the center). Double-click to edit vertices.'
             : tool === 'eraser' ? eraserMarks.dragging
               ? eraserMarks.ids.length ? `Release to erase ${eraserMarks.ids.length} ${eraserMarks.ids.length === 1 ? 'object' : 'objects'}. Esc cancels.` : 'Drag across objects to erase them. Esc cancels.'
               : 'Click an object to erase it, or drag across objects to erase them all.'
             : tool === 'shape-builder' ? `${shapeBuilder.effectiveMode === 'add' ? 'Add' : 'Remove'}: click regions or drag across them. Shift reverses the mode. ${shapeBuilder.result?.sourceIndex !== null ? 'Only added sections are kept.' : 'Deleting alone keeps everything else.'} Enter applies; Escape cancels.`
             : booleanOperation(tool) ? booleanIds.length ? 'Pick more shapes. Enter to apply; Escape to cancel.' : 'Click the target first, then the other shapes.'
-            : tool === 'scale' ? 'Click an object, then drag a resize handle. Hold Shift to maintain aspect ratio and Alt to keep the center.'
+            : tool === 'scale' ? scalePreview || selectionScale ? 'Resizing: hold Shift to maintain aspect ratio, Alt to keep the center. Release to finish.'
+              : 'Click an object, or keep the selection, then drag a resize handle. Hold Shift to maintain aspect ratio and Alt to keep the center.'
             : tool === 'move' ? moveDraft
               ? `${moveDraft.copy ? 'Copy' : 'Move'}: click the destination, or type a distance or x, y offsets. Tap ${COPY_TOGGLE_KEYS} to toggle copying; hold Shift to move only horizontally or vertically. Esc cancels.`
               : 'Click an object, or anywhere to move the selection, to choose the base point. After a copy, type Nx or /N for an array.'
             : tool === 'rotate' ? rotationDraft?.reference
               ? `Rotation: ${rotationDraft.angleDeg.toFixed(1)}°. Click to finish, or type an angle. Esc cancels.`
-              : rotationDraft ? 'Click a second point to establish the reference line.' : 'Click within a shape or on a line to choose the rotation point.'
+              : rotationDraft ? 'Click a second point to establish the reference line.' : 'Click an object, or anywhere to rotate the selection, to choose the rotation point.'
             : isLayoutCornerTool(tool) ? cornerResult.error ?? (cornerFirst
               ? `Click the second adjoining segment to ${tool === 'fillet' ? 'round' : 'bevel'} the corner. Size: ${formatEntryLength(cornerAmountMm)}. Esc cancels.`
               : `Click the first straight segment. Set the ${tool === 'fillet' ? 'radius' : 'setback'} in the tool options bar, or type it.`)

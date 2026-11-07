@@ -14,7 +14,7 @@ A clockwise outline selects objects it touches or encloses. A counterclockwise o
 
 ## Move and resize a selected object
 
-Drag a selected object to move the whole object. Its bounding box has handles for resizing. Hold Shift while resizing to preserve its proportions. Hold Alt to keep its center in place.
+Drag a selected object to move the whole object. Its bounding box has handles for resizing; a group or several selected objects share one box, so they resize and rotate together. Hold Shift while resizing to preserve its proportions. Hold Alt to keep its center in place.
 
 Resizing a text box changes the box, not its font size. Escape during a resize discards that preview. Hidden or locked objects cannot be transformed until made editable.
 

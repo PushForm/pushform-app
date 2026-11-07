@@ -132,7 +132,13 @@ export const TOOL_HELP: Readonly<Record<string, ToolHelp>> = {
       ['Alt', 'Sample a material'],
     ],
   },
-  orbit: { summary: 'Drag to orbit the camera around the model. The middle mouse button orbits from any tool.', keys: [['Shift', 'Pan instead of orbit']] },
+  orbit: {
+    summary: 'Drag to orbit the camera around the model. The middle mouse button orbits from any tool.',
+    keys: [
+      ['Shift', 'Pan instead of orbit (hold before you drag)'],
+      ['Ctrl', 'Free orbit: the view can roll, with no up direction kept'],
+    ],
+  },
   pan: { summary: 'Drag to slide the view. Shift + middle button pans from any tool.', keys: [] },
   zoom: { summary: 'Drag up to zoom in, down to zoom out; the wheel zooms toward the cursor. Type 35deg or 50mm to set the field of view or focal length.', keys: [] },
   zoomWindow: { summary: 'Drag a rectangle to fill the view with it.', keys: [] },

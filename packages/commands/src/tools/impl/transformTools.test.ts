@@ -19,7 +19,8 @@ import { sectionPlaneCommands } from '../../commands/sectionPlanes';
 import { guideCommands } from '../../commands/guides';
 import { textCommands } from '../../commands/texts';
 import { containerAt } from '@pushform/model';
-import { worldToScreen } from './transformShared';
+import { TransformToolBase, worldToScreen, type TransformRotation } from './transformShared';
+import { m4rotationAbout } from '../../commands/transform';
 
 beforeAll(installPolyMeshStub);
 afterEach(disposeKernels);
@@ -817,3 +818,52 @@ describe('worldToScreen', () => {
   });
 });
 
+
+describe('TransformToolBase: arrays of a turn', () => {
+  /** The shared machinery alone, as a rotation tool drives it. */
+  class TurnTool extends TransformToolBase {
+    readonly id = 'turn';
+    readonly title = 'Rotate';
+    onCancel(): void {}
+    overlay() {
+      return [];
+    }
+    status() {
+      return { instructor: '', vcbLabel: '' };
+    }
+    turn(refs: EntityRef[], rotation: TransformRotation, copy: boolean): void {
+      this.commitTransform(refs, m4rotationAbout(rotation.center, rotation.axis, rotation.angle), copy, 'Rotate', rotation);
+    }
+    array(count: number, mode: 'external' | 'internal'): boolean {
+      return this.arrayLast(count, mode);
+    }
+    retype(rotation: TransformRotation): boolean {
+      return this.reapplyLast(m4rotationAbout(rotation.center, rotation.axis, rotation.angle), undefined, rotation);
+    }
+  }
+
+  it('passes the turn the last rotation made to transform.array, and keeps it for a re-edit of the array', async () => {
+    const { registry, tools, addBox } = setup();
+    const turn = new TurnTool();
+    tools.register(turn);
+    tools.activate('turn');
+    const ref = bodyRef(addBox([1, 0, 0], [2, 1, 1]));
+    const sent: unknown[] = [];
+    const execute = registry.execute.bind(registry);
+    vi.spyOn(registry, 'execute').mockImplementation((id: string, params?: unknown) => {
+      if (id === 'transform.array') sent.push(params);
+      return execute(id, params);
+    });
+    const half: TransformRotation = { center: [0, 0, 0], axis: [0, 0, 1], angle: (3 * Math.PI) / 2 };
+    turn.turn([ref], half, true);
+    await turn.settled;
+    expect(turn.array(3, 'internal')).toBe(true);
+    await turn.settled;
+    expect(sent[0]).toMatchObject({ count: 3, mode: 'internal', rotation: { center: [0, 0, 0], axis: [0, 0, 1], angle: half.angle } });
+    const whole: TransformRotation = { ...half, angle: 2 * Math.PI };
+    turn.retype(whole);
+    await turn.settled;
+    expect(sent[1]).toMatchObject({ count: 3, mode: 'internal', rotation: { angle: 2 * Math.PI } });
+    expect(tools.status().applied).toBe(false); // no settings: the bar is not shown
+  });
+});

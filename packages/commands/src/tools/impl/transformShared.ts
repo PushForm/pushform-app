@@ -268,6 +268,16 @@ function movedOutlineInContext(state: DocumentState, refs: readonly EntityRef[],
   return out;
 }
 
+/**
+ * The turn a rotation's matrix makes: center, axis and signed angle in radians, which may pass 180° or be a
+ * whole turn. `transform.array` takes it as `rotation` so a `/N` array divides that angle the way it turned.
+ */
+export interface TransformRotation {
+  readonly center: Vec3;
+  readonly axis: Vec3;
+  readonly angle: number;
+}
+
 /** An `Nx` (external) or `/N` (internal) array of copies. */
 export interface TransformArray {
   readonly count: number;
@@ -279,6 +289,8 @@ export interface TransformCommit {
   readonly refs: EntityRef[];
   /** The transform applied (for an array, of its first copy, or of the whole run for `/N`). */
   matrix: MMat4;
+  /** The turn `matrix` makes, for a rotation (passed to an array). */
+  rotation: TransformRotation | null;
   copy: boolean;
   /** The array that replaced the copy, if any: a re-edit keeps its count. */
   array: TransformArray | null;
@@ -291,6 +303,7 @@ export interface TransformCommit {
 /** What a re-edit of the last commit applies instead. */
 interface TransformRedo {
   readonly matrix: MMat4;
+  readonly rotation: TransformRotation | null;
   readonly copy: boolean;
   readonly array: TransformArray | null;
 }
@@ -402,10 +415,10 @@ export abstract class TransformToolBase implements Tool {
   }
 
   /** Queue a `transform.apply` and remember it as the last commit. */
-  protected commitTransform(refs: EntityRef[], matrix: MMat4, copy: boolean, label: string): void {
+  protected commitTransform(refs: EntityRef[], matrix: MMat4, copy: boolean, label: string, rotation?: TransformRotation): void {
     const ctx = this.ctx;
     if (!ctx) return;
-    const commit: TransformCommit = { refs, matrix, copy, array: null, label, entry: null, applied: false };
+    const commit: TransformCommit = { refs, matrix, rotation: rotation ?? null, copy, array: null, label, entry: null, applied: false };
     this.lastCommit = commit;
     this.lastError = null;
     this.keepPickup();
@@ -434,24 +447,29 @@ export abstract class TransformToolBase implements Tool {
    * commit records the new values only once they are applied: if the redo fails, the commit stays as it
    * was, the status says why, and `restoreCopy` puts the tool's Copy back.
    */
-  protected reapplyLast(matrix: MMat4, copy?: boolean): boolean {
+  protected reapplyLast(matrix: MMat4, copy?: boolean, rotation?: TransformRotation): boolean {
     const last = this.lastCommit;
     if (!this.ctx || !last) return false;
     const nextCopy = copy ?? last.copy;
+    // a new matrix comes with its own turn (none for a move); the same matrix keeps the one it had
+    const nextRotation = rotation ?? (matrix === last.matrix ? last.rotation : null);
     this.enqueue(async () => {
       if (this.lastCommit !== last || !this.lastIsOnTop()) return;
-      await this.redoLast(last, { matrix, copy: nextCopy, array: nextCopy ? last.array : null });
+      await this.redoLast(last, { matrix, rotation: nextRotation, copy: nextCopy, array: nextCopy ? last.array : null });
     });
     return true;
   }
 
-  /** `3x` / `/3` after a copy (or an array): replace it by an array of that many copies (one undo entry). */
-  protected arrayLast(count: number, mode: 'external' | 'internal'): boolean {
+  /**
+   * `3x` / `/3` after a copy (or an array): replace it by an array of that many copies (one undo entry).
+   * `rotation`, the turn the last commit made, overrides the one it recorded.
+   */
+  protected arrayLast(count: number, mode: 'external' | 'internal', rotation?: TransformRotation): boolean {
     const last = this.lastCommit;
     if (!this.ctx || !last || !last.copy) return false;
     this.enqueue(async () => {
       if (this.lastCommit !== last || !this.lastIsOnTop()) return;
-      await this.redoLast(last, { matrix: last.matrix, copy: true, array: { count, mode } });
+      await this.redoLast(last, { matrix: last.matrix, rotation: rotation ?? last.rotation, copy: true, array: { count, mode } });
     });
     return true;
   }
@@ -468,7 +486,10 @@ export abstract class TransformToolBase implements Tool {
     last.applied = false;
     try {
       const { refs, label } = last;
-      if (next.array) await ctx.commands.execute('transform.array', { refs, matrix: next.matrix, count: next.array.count, mode: next.array.mode, label });
+      if (next.array) {
+        const turn = next.rotation ? { rotation: { center: [...next.rotation.center], axis: [...next.rotation.axis], angle: next.rotation.angle } } : {};
+        await ctx.commands.execute('transform.array', { refs, matrix: next.matrix, count: next.array.count, mode: next.array.mode, label, ...turn });
+      }
       else await ctx.commands.execute('transform.apply', { refs, matrix: next.matrix, copy: next.copy, label });
     } catch (err) {
       host.redo();
@@ -480,6 +501,7 @@ export abstract class TransformToolBase implements Tool {
       return;
     }
     last.matrix = next.matrix;
+    last.rotation = next.rotation;
     last.copy = next.copy;
     last.array = next.array;
     last.entry = host.undoStack.peek();

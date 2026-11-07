@@ -2,7 +2,7 @@
 // Copyright 2026 PushForm contributors
 import { z } from 'zod';
 import type { FaceLocalId, Id, TagId, Vec3 } from '@pushform/core';
-import { addImprintEdge, containerAt, entityRefKey, findFaceContainingPoints, segmentFaceSpans, removeImprintEdge } from '@pushform/model';
+import { addImprintEdge, containerAt, entityRefKey, findFaceContainingPoints, segmentFaceSpans, removeImprintEdge, tagVisible } from '@pushform/model';
 import type { DocumentDraft, DocumentState, EdgeKey, EntityRef } from '@pushform/model';
 import { defineCommand } from '../registry/Command';
 import type { AnyCommand, CommandContext } from '../registry/Command';
@@ -91,7 +91,39 @@ export function allContextRefs(host: DocumentHost): EntityRef[] {
   for (const id of c.meshParts.keys()) refs.push({ kind: 'meshPart', path, id });
   for (const id of c.instances.keys()) refs.push({ kind: 'instance', path, id });
   for (const id of c.guides.keys()) refs.push({ kind: 'guide', path, id });
+  for (const id of c.images.keys()) refs.push({ kind: 'image', path, id });
+  for (const id of c.dimensions.keys()) refs.push({ kind: 'dimension', path, id });
+  for (const id of c.texts.keys()) refs.push({ kind: 'text', path, id });
+  for (const id of c.sectionPlanes.keys()) refs.push({ kind: 'sectionPlane', path, id });
   return refs;
+}
+
+/**
+ * Everything in the open edit context that is drawn now: what Select All takes. Hidden entities count only while
+ * hidden geometry is shown; entities on hidden tags never do, nor guides or section planes while their display is off.
+ */
+export function visibleContextRefs(host: DocumentHost): EntityRef[] {
+  const state = host.doc.state;
+  const c = containerAt(state, host.context.path);
+  const style = state.styles.get(state.activeStyleId)?.modeling;
+  const showHidden = style?.hiddenGeometry === true;
+  const shown = (e: { readonly hidden?: boolean; readonly tagId?: TagId } | undefined): boolean =>
+    !!e && (showHidden || !e.hidden) && (e.tagId === undefined || tagVisible(state, e.tagId));
+  return allContextRefs(host).filter((r) => {
+    switch (r.kind) {
+      case 'sketchEdge': return shown(c.sketch.edges.get(r.id));
+      case 'sketchFace': return shown(c.sketch.faces.get(r.id));
+      case 'body': return shown(c.bodies.get(r.id));
+      case 'meshPart': return shown(c.meshParts.get(r.id));
+      case 'instance': return shown(c.instances.get(r.id));
+      case 'guide': return style?.guidesVisible !== false && shown(c.guides.get(r.id));
+      case 'image': return shown(c.images.get(r.id));
+      case 'dimension': return shown(c.dimensions.get(r.id));
+      case 'text': return shown(c.texts.get(r.id));
+      case 'sectionPlane': return style?.sectionPlanesVisible !== false && shown(c.sectionPlanes.get(r.id));
+      default: return true;
+    }
+  });
 }
 
 const edgeFlags = { soft: z.boolean().optional(), smooth: z.boolean().optional(), hidden: z.boolean().optional() };
@@ -526,7 +558,7 @@ export const selectAll = defineCommand({
   undoable: false,
   run(ctx) {
     const host = hostOf(ctx);
-    host.selection.set(allContextRefs(host));
+    host.selection.set(visibleContextRefs(host));
     return host.selection.size;
   },
 });
@@ -555,7 +587,7 @@ export const invertSelection = defineCommand({
   run(ctx) {
     const host = hostOf(ctx);
     const sel = host.selection;
-    sel.set(allContextRefs(host).filter((r) => !sel.has(r)));
+    sel.set(visibleContextRefs(host).filter((r) => !sel.has(r)));
     return sel.size;
   },
 });

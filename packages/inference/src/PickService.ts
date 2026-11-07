@@ -490,6 +490,56 @@ export class PickService {
         if (acc.keep()) out.push(image.ref);
       }
     }
+    const addMeshPart = (acc: Acc, mesh: { readonly verts: Float64Array | Float32Array; readonly tris: Uint32Array }): void => {
+      const v = mesh.verts;
+      for (let i = 0; i < v.length && !acc.done(); i += 3) acc.point([v[i]!, v[i + 1]!, v[i + 2]!]);
+      if (mode !== 'crossing') return;
+      const t = mesh.tris;
+      const at = (k: number): Vec3 => [v[k * 3]!, v[k * 3 + 1]!, v[k * 3 + 2]!];
+      for (let i = 0; i < t.length && !acc.done(); i += 3) {
+        const a = at(t[i]!), b = at(t[i + 1]!), c = at(t[i + 2]!);
+        acc.segment(a, b); acc.segment(b, c); acc.segment(c, a); acc.ring([a, b, c]);
+      }
+    };
+    const addSegments = (acc: Acc, segments: ReadonlyArray<readonly [Vec3, Vec3]>): void => {
+      for (const [a, b] of segments) { acc.point(a); acc.point(b); acc.segment(a, b); }
+    };
+    const keepIn = (ref: EntityRef, fill: (acc: Acc) => void): void => {
+      if (!samePath(ref.path, context) || filter.ignored(ref)) return;
+      const acc = new Acc();
+      fill(acc);
+      if (acc.keep()) out.push(ref);
+    };
+    if (filter.wants('meshPart')) {
+      for (const part of this.index.meshParts()) keepIn({ kind: 'meshPart', path: part.path, id: part.id }, (acc) => addMeshPart(acc, part.mesh));
+    }
+    if (filter.wants('guide')) {
+      for (const { guide: g, ref } of this.index.guides()) {
+        if (g.kind === 'line') {
+          // an endless line is never entirely inside; a crossing box takes it when the line on screen passes through it
+          if (mode !== 'crossing' || !samePath(ref.path, context) || filter.ignored(ref)) continue;
+          const a = project(g.origin), b = project([g.origin[0] + g.dir[0], g.origin[1] + g.dir[1], g.origin[2] + g.dir[2]]);
+          const d: Vec2 = [b[0] - a[0], b[1] - a[1]], len = Math.hypot(d[0], d[1]);
+          if (!(len > 0)) continue;
+          const far = 1e6 / len;
+          if (region.touches([a[0] - d[0] * far, a[1] - d[1] * far], [a[0] + d[0] * far, a[1] + d[1] * far])) out.push(ref);
+          continue;
+        }
+        keepIn(ref, (acc) => (g.kind === 'point' ? acc.point(g.origin) : addSegments(acc, [[g.origin, g.end]])));
+      }
+    }
+    if (filter.wants('dimension')) for (const { segments, ref } of this.index.dimensions()) keepIn(ref, (acc) => addSegments(acc, segments));
+    if (filter.wants('sectionPlane')) for (const { segments, ref } of this.index.sectionPlanes()) keepIn(ref, (acc) => addSegments(acc, segments));
+    if (filter.wants('text')) {
+      // leader and model text by its anchor and, when it has one, its label point; screen text is drawn over the view, not in the model
+      for (const tx of this.index.texts()) {
+        if (tx.kind === 'screen') continue;
+        keepIn(tx.ref, (acc) => {
+          acc.point(tx.position);
+          if (tx.offset) acc.point([tx.position[0] + tx.offset[0], tx.position[1] + tx.offset[1], tx.position[2] + tx.offset[2]]);
+        });
+      }
+    }
     if (filter.wants('instance')) {
       // instances directly in the context: gather the world geometry of every container below them
       const accs = new Map<Id, Acc>();
@@ -508,6 +558,7 @@ export class PickService {
           for (const f of esk.faces) if (f.visible && f.loops[0]) acc.ring(f.loops[0]);
         }
         for (const image of images) if (samePath(image.ref.path, entry.path)) addImage(acc, image.corners);
+        for (const part of this.index.meshParts()) if (samePath(part.path, entry.path)) addMeshPart(acc, part.mesh);
       }
       for (const [id, acc] of accs) if (acc.keep()) out.push({ kind: 'instance', path: context, id });
     }

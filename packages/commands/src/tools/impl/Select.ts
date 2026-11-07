@@ -155,6 +155,8 @@ export class SelectTool implements Tool {
       return;
     }
     if (ref) {
+      // Something outside the open group or component: close out to the one holding it, then select it.
+      this.closeOutTo(ref);
       // A face of a smooth surface selects the whole surface.
       const host = this.host();
       this.apply(host ? surfaceRefs(host.doc.state, ref) : [ref], e.modifiers);
@@ -185,6 +187,11 @@ export class SelectTool implements Tool {
       return;
     }
     const enter = host ? enterPathOf(hit, host.context.path) : null;
+    if (enter && host && this.ctx && lockedOnPath(host, enter)) {
+      // A locked group or component is selected, not opened, and says why.
+      this.refuseLocked(ref);
+      return;
+    }
     if (enter && this.ctx?.commands.isEnabled(CONTEXT_ENTER)) {
       // Entering clears the selection (DocumentHost.setContext); the click that preceded the
       // double-click already selected the instance.
@@ -198,6 +205,7 @@ export class SelectTool implements Tool {
   }
 
   onKeyDown(e: ToolKeyEvent): boolean {
+    if (e.key === 'Enter') return this.openSelected();
     if (e.key !== 'Delete' && e.key !== 'Backspace') return false;
     if (!this.ctx) return true;
     if (this.ctx.commands.isEnabled('edit.delete')) {
@@ -210,15 +218,19 @@ export class SelectTool implements Tool {
   }
 
   /**
-   * Esc: cancel a drag / message; with nothing selected inside a context, close one level. A drag
-   * cancelled with the button still held also swallows the click that follows its release.
+   * Esc: cancel a drag; otherwise clear the selection, and with nothing selected close one level of the open
+   * group or component. A drag cancelled with the button still held also swallows the click that follows its release.
    */
   onCancel(): void {
     const wasDragging = this.downScreen !== null;
     this.reset();
     this.suppressNextClick = wasDragging;
     const host = this.host();
-    if (!wasDragging && host && host.selection.isEmpty) this.exitContext();
+    if (!wasDragging && host) {
+      if (!host.selection.isEmpty) this.apply([], 'set');
+      else this.exitContext();
+    }
+    this.ctx?.statusChanged();
     this.ctx?.requestRender();
   }
 
@@ -234,7 +246,7 @@ export class SelectTool implements Tool {
   }
 
   status(): ToolStatus {
-    const base = 'Select objects. Ctrl = add, Shift = add/remove, Ctrl+Shift = remove. Drag for a selection box.';
+    const base = 'Select objects. Ctrl = add, Shift = add/remove, Ctrl+Shift = remove. Drag for a selection box. Double-click or Enter opens a group; Esc clears the selection, then closes the group.';
     const editing = this.editingLabel();
     const text = this.message ? `${this.message} ${base}` : base;
     return { instructor: editing ? `${editing} ${text}` : text, vcbLabel: '' };
@@ -274,6 +286,44 @@ export class SelectTool implements Tool {
     this.ctx.commands.execute(CONTEXT_EXIT);
     this.hover = null;
     return true;
+  }
+
+  /** A click on `ref` outside the open context closes contexts out to the one that holds it. */
+  private closeOutTo(ref: EntityRef): void {
+    const host = this.host();
+    if (!host || !this.ctx) return;
+    const ctxPath = host.context.path;
+    if (ref.path.length >= ctxPath.length || !pathWithin(ctxPath, ref.path)) return;
+    while (host.context.path.length > ref.path.length && this.exitContext()) { /* one level at a time */ }
+  }
+
+  /** Enter: open the one selected group or component; a locked one is refused with a message. */
+  private openSelected(): boolean {
+    const host = this.host();
+    if (!host || !this.ctx) return false;
+    const refs = host.selection.refs;
+    const only = refs.length === 1 ? refs[0]! : null;
+    if (!only || only.kind !== 'instance') return false;
+    const path = [...only.path, only.id];
+    if (lockedOnPath(host, path)) {
+      this.refuseLocked(only);
+      return true;
+    }
+    if (!this.ctx.commands.isEnabled(CONTEXT_ENTER)) return false;
+    this.ctx.commands.execute(CONTEXT_ENTER, { path });
+    this.hover = null;
+    this.ctx.requestRender();
+    return true;
+  }
+
+  /** Select a locked group or component instead of opening it, and say why. */
+  private refuseLocked(ref: EntityRef): void {
+    this.apply([ref], 'set');
+    const host = this.host();
+    const inst = host && ref.kind === 'instance' ? instanceAt(host.doc.state, [...ref.path, ref.id]) : undefined;
+    const def = inst && host ? host.doc.state.definitions.get(inst.definitionId) : undefined;
+    this.message = `This ${def && !def.isGroup ? 'component' : 'group'} is locked. Unlock it to edit it.`;
+    this.ctx?.statusChanged();
   }
 
   private apply(refs: readonly EntityRef[], mods: Modifiers | SelectOp): void {
@@ -355,6 +405,18 @@ export function opOf(m: Modifiers): SelectOp {
   if (m.ctrl) return 'add';
   if (m.shift) return 'toggle';
   return 'set';
+}
+
+/** Whether a placement on the instance path `path` is locked, so that it cannot be opened. */
+function lockedOnPath(host: DocumentHost, path: readonly Id[]): boolean {
+  for (let i = 1; i <= path.length; i++) {
+    try {
+      if (instanceAt(host.doc.state, path.slice(0, i))?.locked) return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
 }
 
 function boxOf(start: Vec2, end: Vec2): BoxPickRect {

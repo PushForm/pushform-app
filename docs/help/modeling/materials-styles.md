@@ -4,7 +4,7 @@
 
 Choose **Paint Bucket** to open Materials. Choose a material and click the intended target. If the clicked object belongs to the selection, paint applies to the selected paintable entities; clicking outside the selection affects the clicked entity instead.
 
-On a face, the side facing the camera is painted. Painting a group or component supplies its default material, but explicitly painted faces inside it keep their own materials.
+On a face, the side facing the camera is painted. Painting a group or component supplies its default material, but explicitly painted faces inside it keep their own materials. Exploding a painted group or component keeps every color as it was: faces, parts and nested groups that showed its material are painted with it, and anything with a material of its own keeps that one.
 
 ## Sample or replace materials
 

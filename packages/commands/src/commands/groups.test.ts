@@ -148,6 +148,167 @@ describe('group.make / group.explode', () => {
   });
 });
 
+describe('a painted group or component through Explode', () => {
+  /** Materials created in one step (untextured unless `tile` is given). */
+  const addMaterials = (s: ReturnType<typeof setup>, names: readonly string[], tile?: { widthM: number; heightM: number }): MaterialId[] => {
+    const ids: MaterialId[] = [];
+    s.host.doc.transact('Materials', (draft) => {
+      for (const name of names) {
+        const id = allocId<MaterialId>(draft);
+        draft.materials.set(id, { id, name, color: [0.5, 0.4, 0.3], alpha: 1, texture: tile ? { imageId: 1 as ImageId, ...tile, colorize: false } : null });
+        ids.push(id);
+      }
+    });
+    return ids;
+  };
+  const paintInstance = (s: ReturnType<typeof setup>, path: readonly number[], id: number, materialId: MaterialId | null): void => {
+    s.host.doc.transact('Paint', (draft) => {
+      containerAt(draft as never, path as Id[]).instances.get(id as Id)!.materialId = materialId;
+    });
+  };
+  const addMeshPart = (s: ReturnType<typeof setup>): Id => {
+    let id = 0 as Id;
+    s.host.doc.transact('Mesh part', (draft) => {
+      const entities = draft.definitions.get(draft.rootDefinitionId)!.entities;
+      id = allocId<Id>(draft);
+      entities.meshParts.set(id, {
+        id, name: 'Bracket', source: { format: 'STEP', system: '' }, tagId: draft.defaultTagId, hidden: false, locked: false, castShadows: true,
+        receiveShadows: true, attributes: {}, materialId: null,
+        geometry: {
+          positions: new Float64Array([0, 0, 3, 1, 0, 3, 1, 1, 3]), triangles: new Uint32Array([0, 1, 2]), triangleFace: new Uint32Array([0]), faceCount: 1,
+          faceMaterials: new Uint32Array([0]), edgeOffsets: new Uint32Array([0]), edgePositions: new Float64Array(0), edgeFlags: new Uint8Array(0),
+        },
+      } as never);
+      entities.order.push(id);
+    });
+    return id;
+  };
+  const sides = (f: { frontMaterialId: MaterialId | null; backMaterialId: MaterialId | null }) => [f.frontMaterialId, f.backMaterialId];
+
+  it('gives what showed the group\'s material that material, and leaves what had its own', () => {
+    const s = setup();
+    const { host, registry, root, bodyRef, instanceRef, makeGroup } = s;
+    const [oak, walnut, maple, red] = addMaterials(s, ['Oak', 'Walnut', 'Maple', 'Red']);
+    const plain = registry.execute('model.addBox', { min: [0, 0, 0], max: [1, 1, 1] }) as number;
+    const topPainted = registry.execute('model.addBox', { min: [2, 0, 0], max: [3, 1, 1] }) as number;
+    const ownBody = registry.execute('model.addBox', { min: [4, 0, 0], max: [5, 1, 1] }) as number;
+    const plainGroup = registry.execute('model.addBox', { min: [6, 0, 0], max: [7, 1, 1] }) as number;
+    const redGroup = registry.execute('model.addBox', { min: [8, 0, 0], max: [9, 1, 1] }) as number;
+    registry.execute('sketch.rectangle', { a: [0, 2, 0], b: [1, 2, 0], c: [1, 3, 0], d: [0, 3, 0] });
+    const part = addMeshPart(s);
+    host.doc.transact('Paint', (draft) => {
+      const c = containerAt(draft as never, []);
+      topFace(c.bodies.get(topPainted as Id)!).frontMaterialId = walnut!;
+      c.bodies.get(ownBody as Id)!.materialId = maple!;
+    });
+    registry.execute('selection.set', { refs: [bodyRef(plainGroup)] });
+    const nestedPlain = makeGroup().instanceId!;
+    registry.execute('selection.set', { refs: [bodyRef(redGroup)] });
+    const nestedRed = makeGroup().instanceId!;
+    paintInstance(s, [], nestedRed, red!);
+    const sheet = [...root().sketch.faces.keys()][0]!;
+    registry.execute('selection.set', { refs: [bodyRef(plain), bodyRef(topPainted), bodyRef(ownBody), instanceRef(nestedPlain), instanceRef(nestedRed),
+      { kind: 'sketchFace', path: [], id: sheet }, { kind: 'meshPart', path: [], id: part as number }] });
+    const made = makeGroup();
+    paintInstance(s, [], made.instanceId!, oak!);
+
+    registry.execute('group.explode', { refs: [instanceRef(made.instanceId!)] });
+    const c = root();
+    for (const f of c.bodies.get(plain as Id)!.faces.values()) expect(sides(f)).toEqual([oak, oak]);
+    const painted = c.bodies.get(topPainted as Id)!;
+    for (const f of painted.faces.values()) expect(sides(f)).toEqual(f.id === topFace(painted).id ? [walnut, oak] : [oak, oak]);
+    const own = c.bodies.get(ownBody as Id)!;
+    expect(own.materialId).toBe(maple);
+    for (const f of own.faces.values()) expect(sides(f)).toEqual([null, null]);
+    expect(c.instances.get(nestedPlain as Id)!.materialId).toBe(oak);
+    expect(c.instances.get(nestedRed as Id)!.materialId).toBe(red);
+    expect([...c.sketch.faces.values()].map(sides)).toEqual([[oak, oak]]);
+    expect(c.meshParts.get(part)!.materialId).toBe(oak);
+
+    host.undo();
+    expect(root().instances.get(made.instanceId as Id)!.materialId).toBe(oak);
+    const def = host.doc.state.definitions.get(made.definitionId as never)!.entities;
+    for (const f of def.bodies.get(plain as Id)!.faces.values()) expect(sides(f)).toEqual([null, null]);
+    expect(def.instances.get(nestedPlain as Id)!.materialId).toBeNull();
+    expect([...def.sketch.faces.values()].map(sides)).toEqual([[null, null]]);
+    expect(def.meshParts.get(part)!.materialId).toBeNull();
+  });
+
+  it('gives one exploded placement of a component its own material and leaves the definition and other placements alone', () => {
+    const s = setup();
+    const { host, registry, root, bodyRef, instanceRef } = s;
+    const [oak, walnut] = addMaterials(s, ['Oak', 'Walnut']);
+    const boxId = registry.execute('model.addBox', { min: [0, 0, 0], max: [1, 1, 1] }) as number;
+    registry.execute('selection.set', { refs: [bodyRef(boxId)] });
+    const made = registry.execute('component.make', {}) as MakeResult;
+    let second = 0 as Id;
+    host.doc.transact('Place again', (draft) => {
+      const c = draft.definitions.get(draft.rootDefinitionId)!.entities;
+      const first = c.instances.get(made.instanceId as Id)!;
+      second = allocId<Id>(draft);
+      c.instances.set(second, { ...first, id: second, transform: m4translation([3, 0, 0]) as unknown as Mat4, attributes: {} });
+      c.order.push(second);
+    });
+    paintInstance(s, [], made.instanceId!, oak!);
+    paintInstance(s, [], second, walnut!);
+
+    const res = registry.execute('group.explode', { refs: [instanceRef(made.instanceId!)] }) as ExplodeResult;
+    expect(res.deletedDefinitionIds).toEqual([]);
+    const loose = [...root().bodies.values()];
+    expect(loose).toHaveLength(1);
+    for (const f of loose[0]!.faces.values()) expect(sides(f)).toEqual([oak, oak]);
+    for (const f of host.doc.state.definitions.get(made.definitionId as never)!.entities.bodies.values().next().value!.faces.values()) {
+      expect(sides(f)).toEqual([null, null]);
+    }
+    expect(root().instances.get(second)!.materialId).toBe(walnut);
+  });
+
+  it('keeps a textured group material where it showed on faces of a turned and scaled group', () => {
+    const s = setup();
+    const { host, registry, root, bodyRef, makeGroup, setInstanceTransform } = s;
+    const tile = { widthM: 0.5, heightM: 0.25 };
+    const [tex] = addMaterials(s, ['Tex'], tile);
+    const boxId = registry.execute('model.addBox', { min: [0, 0, 0], max: [1, 1, 1] }) as number;
+    registry.execute('sketch.rectangle', { a: [2, 0, 0], b: [4, 0, 0], c: [4, 0, 2], d: [2, 0, 2] });
+    const sheet = [...root().sketch.faces.keys()][0]!;
+    registry.execute('selection.set', { refs: [bodyRef(boxId), { kind: 'sketchFace', path: [], id: sheet }] });
+    const made = makeGroup();
+    const m = m4mul(m4translation([1, 2, 3]), m4mul(m4scaling([1.5, 2, 1]), m4rotationAxis([1, 0, 0], Math.PI / 3)));
+    setInstanceTransform([], made.instanceId!, m);
+    paintInstance(s, [], made.instanceId!, tex!);
+    // Each face point's texture coordinates as the group showed them: the face's own placement, read with the group's texture.
+    const coords = (bases: Iterable<{ basis: PlaneBasis; uv: UvMapping; uvBack?: UvMapping | undefined; pts: readonly Vec3[] }>, toWorld: (p: Vec3) => Vec3) => {
+      const out = new Map<string, number[]>();
+      for (const f of bases) {
+        for (const [side, uv] of [['front', f.uv], ['back', f.uvBack ?? f.uv]] as const) {
+          const a = uvToAffine(uv, tile.widthM, tile.heightM);
+          for (const p of f.pts) {
+            const l = basisToLocal(f.basis, p);
+            out.set(`${side}:${toWorld(p).map((x) => x.toFixed(6)).join(',')}`, [...uvApply(a, l[0], l[1])]);
+          }
+        }
+      }
+      return out;
+    };
+    const facesOf = (c: EntityContainer) => [
+      ...[...c.bodies.values()].flatMap((b) => [...b.faces.values()].map((f) => ({ basis: f.basis, uv: f.uv, uvBack: f.uvBack, pts: f.loops.flat() }))),
+      ...[...c.sketch.faces.values()].map((f) => ({ basis: f.basis, uv: f.uv, uvBack: f.uvBack, pts: sketchFaceLoops(c.sketch, f).flat() })),
+    ];
+    const shown = coords(facesOf(host.doc.state.definitions.get(made.definitionId as never)!.entities), (p) => m4transformPoint(m, p));
+
+    registry.execute('selection.set', { refs: [{ kind: 'instance', path: [], id: made.instanceId }] });
+    registry.execute('group.explode', {});
+    for (const f of facesOf(root())) expect(f.uv.kind).not.toBe('auto');
+    const exploded = coords(facesOf(root()), (p) => p);
+    expect(exploded.size).toBe(shown.size);
+    for (const [k, st] of shown) {
+      expect(exploded.get(k), k).toBeDefined();
+      expect(exploded.get(k)![0]).toBeCloseTo(st[0]!, 9);
+      expect(exploded.get(k)![1]).toBeCloseTo(st[1]!, 9);
+    }
+  });
+});
+
 /** Put an active section plane (cutting away local x < 0.5) and a dimension into a definition, as importing a .skp file does. */
 function addAnnotations(s: ReturnType<typeof setup>, definitionId: number): { planeId: Id; dimensionId: Id } {
   const ids = { planeId: 0 as Id, dimensionId: 0 as Id };

@@ -5,7 +5,8 @@ import type { FaceLocalId, Mat4, Vec3 } from '@pushform/core';
 import { m4rotationAxis, m4transformPoint, m4translation, meshBounds, planeDistance, PushFormError, v3dist, v3eq } from '@pushform/core';
 import { meshTopologyProblems } from '@pushform/kernel';
 import { loopPoints, SketchGraph, type Body, type EntityRef, type FaceRecord } from '@pushform/model';
-import { arrayMatrices, m4rotationAbout, m4scaleAbout, rigidMatrixRoot } from './transform';
+import { arrayMatrices, m4rotationAbout, m4scaleAbout, rigidMatrixRoot, transformRefusal } from './transform';
+import { groupCommands, type MakeResult } from './groups';
 import { guideCommands } from './guides';
 import { textCommands } from './texts';
 import { disposeKernels, installBrokenPolyMeshStub, installPolyMeshStub, restorePolyMesh, setupCommands, usingRealPolyMesh } from './transform.fixtures';
@@ -405,5 +406,50 @@ describe('matrix helpers', () => {
     await expect(apply({ refs: [{ kind: 'face', path: [], id, faceId: 99 as FaceLocalId, region: null }], matrix: m4translation([0, 0, 1]) })).rejects.toMatchObject({
       code: 'transform.target',
     });
+  });
+});
+
+describe('refusing a transform before it starts', () => {
+  const setup = () => {
+    const s = setupCommands();
+    s.registry.registerAll(groupCommands);
+    return s;
+  };
+  const instanceOf = (registry: ReturnType<typeof setup>['registry'], host: ReturnType<typeof setup>['host'], id: number): EntityRef => {
+    host.selection.set([bodyRef(id)]);
+    const made = registry.execute('group.make', {}) as MakeResult;
+    return { kind: 'instance', path: [], id: made.instanceId as never };
+  };
+
+  it('refuses a locked group as the move starts and names the operation; a copy of it is allowed and unlocked', async () => {
+    const { registry, host, addBox, apply, root } = setup();
+    const ref = instanceOf(registry, host, addBox());
+    registry.execute('instance.setLocked', { refs: [ref], locked: true });
+    expect(transformRefusal(host, [ref], false, 'Move')).toBe('A locked group or component cannot be moved');
+    expect(transformRefusal(host, [ref], false, 'Rotate')).toBe('A locked group or component cannot be rotated');
+    expect(transformRefusal(host, [ref], false, 'Scale')).toBe('A locked group or component cannot be scaled');
+    await expect(apply({ refs: [ref], matrix: m4translation([1, 0, 0]), label: 'Rotate' })).rejects.toThrow('cannot be rotated');
+    expect(transformRefusal(host, [ref], true, 'Move')).toBeNull();
+    const res = await apply({ refs: [ref], matrix: m4translation([2, 0, 0]), copy: true });
+    const copy = root().instances.get(res.refs[0]!.id)!;
+    expect(copy.locked).toBe(false);
+    expect(root().instances.get(ref.id)!.locked).toBe(true);
+  });
+
+  it('refuses entities of different groups, entities outside the open group, copies of solid faces and lone vertex copies', () => {
+    const { registry, host, addBox, body, addRectangle, root } = setup();
+    const ref = instanceOf(registry, host, addBox());
+    const def = host.doc.state.definitions.get(root().instances.get(ref.id)!.definitionId)!;
+    const innerBody: EntityRef = { kind: 'body', path: [ref.id], id: [...def.entities.bodies.keys()][0]! };
+    const other = addBox([3, 0, 0], [4, 1, 1]);
+    expect(transformRefusal(host, [innerBody, bodyRef(other)], false, 'Rotate')).toBe('Entities of different groups or components cannot be rotated together');
+    expect(transformRefusal(host, [innerBody], false, 'Move')).toBe('Only what is in the open group or component can be moved.');
+    const top = faceWithNormal(body(other), [0, 0, 1]);
+    expect(transformRefusal(host, [{ kind: 'face', path: [], id: other as never, faceId: top.id, region: null }], true, 'Move')).toContain('cannot be copied');
+    addRectangle(1, 1, 5);
+    const v = [...root().sketch.vertices.values()][0]!;
+    expect(transformRefusal(host, [{ kind: 'sketchVertex', path: [], id: v.id }], true, 'Move')).toContain('vertices on their own cannot be copied');
+    expect(transformRefusal(host, [{ kind: 'sketchVertex', path: [], id: v.id }], false, 'Move')).toBeNull();
+    expect(transformRefusal(host, [bodyRef(other)], true, 'Move')).toBeNull();
   });
 });

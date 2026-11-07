@@ -38,7 +38,7 @@ import { draftContainerAt } from './context';
 import { mapGuide, mapDimension, pointMapFromMatrix } from './groups';
 import { mapNormal, mapSectionPlane } from './sectionPlanes';
 import { EntityRefSchema } from './sketch';
-import { toEntityRefs, transformBodyInPlace } from './transform';
+import { toEntityRefs, transformBodyInPlace, transformVerb } from './transform';
 import { componentAxesPick } from '../tools/impl/ComponentAxesTool';
 
 /**
@@ -241,7 +241,7 @@ export const componentPlaceOnFace = defineCommand({
     const ref = toEntityRefs([p.ref])[0]!;
     const state = host.doc.state;
     const inst = componentInstance(state, ref, 'place it');
-    if (inst.locked && !p.copy) throw new PushFormError('instance.locked', 'A locked group/component cannot be moved');
+    if (inst.locked && !p.copy) throw new PushFormError('instance.locked', `A locked group or component cannot be ${transformVerb('Move')}`);
     const parent = contextMatrix(state, ref.path);
     const parentInv = m4invert(parent);
     if (!parentInv) throw new PushFormError('context.singular', 'The context transform is singular');
@@ -253,7 +253,8 @@ export const componentPlaceOnFace = defineCommand({
       const source = container.instances.get(ref.id)!;
       let target = source;
       if (p.copy) {
-        target = { ...source, id: allocId<Id>(draft), attributes: JSON.parse(JSON.stringify(source.attributes)) as typeof source.attributes };
+        // a copy is never locked, whatever its original is
+        target = { ...source, id: allocId<Id>(draft), locked: false, attributes: JSON.parse(JSON.stringify(source.attributes)) as typeof source.attributes };
         container.instances.set(target.id, target);
         container.order.push(target.id);
       }

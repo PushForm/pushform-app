@@ -5,14 +5,16 @@ import type { Box3, Id, Ray, Vec2, Vec3 } from '@pushform/core';
 import { formatLength, v3eq } from '@pushform/core';
 import { freeInference, GROUND_PLANE, SNAP_COLORS } from '@pushform/inference';
 import type { InferenceResult, PickHit } from '@pushform/inference';
-import { DEFAULT_AXES, SketchGraph } from '@pushform/model';
-import type { Guide } from '@pushform/model';
+import { allocId, DEFAULT_AXES, defaultSceneLight, SketchGraph } from '@pushform/model';
+import type { Guide, MeshPart } from '@pushform/model';
 import { CommandRegistry } from '../../registry/CommandRegistry';
 import { editCommands } from '../../registry/editCommands';
 import { sketchCommands } from '../../commands/sketch';
 import { guideCommands } from '../../commands/guides';
 import { axesCommands } from '../../commands/axes';
 import { offsetCommands } from '../../commands/offset';
+import { groupCommands, type MakeResult } from '../../commands/groups';
+import { contextCommands } from '../../commands/context';
 import { DocumentHost } from '../../host/DocumentHost';
 import { SERVICE_DOCUMENT } from '../../host/services';
 import type { CameraHost, CameraState } from '../../camera/CameraHost';
@@ -249,6 +251,56 @@ describe('TapeTool', () => {
     expect(host.undo()).toBe(true);
     expect([...sketch().vertices.values()].map((v) => v.p[0]).sort()).toEqual([0, 0, 1, 1]);
   });
+
+  it('resizes the whole model from inside a group, mesh parts and placed lights included', () => {
+    const { tools, square, host, registry, root, sketch } = setup();
+    registry.registerAll(groupCommands);
+    registry.registerAll(contextCommands);
+    square();
+    const edges = [...sketch().edges.keys()].map((id) => ({ kind: 'sketchEdge' as const, path: [], id }));
+    const group = (registry.execute('group.make', { refs: edges }) as MakeResult).instanceId!;
+    let partId = 0 as Id;
+    host.edit('Part and light', (draft) => {
+      const entities = draft.definitions.get(draft.rootDefinitionId)!.entities;
+      partId = allocId<Id>(draft);
+      const part: MeshPart = {
+        id: partId, name: 'Part', source: { format: 'STL', system: '' }, tagId: draft.defaultTagId, hidden: false, locked: true,
+        castShadows: true, receiveShadows: true, attributes: {}, materialId: null,
+        geometry: {
+          positions: new Float64Array([1, 0, 0, 2, 0, 0, 2, 1, 0]), triangles: new Uint32Array([0, 1, 2]), triangleFace: new Uint32Array([0]),
+          faceCount: 1, faceMaterials: new Uint32Array([0]), edgeOffsets: new Uint32Array([0, 2]), edgePositions: new Float64Array([1, 0, 0, 2, 0, 0]),
+          edgeFlags: new Uint8Array([0]),
+        },
+      };
+      entities.meshParts.set(partId, part as never);
+      entities.order.push(partId);
+      draft.sceneLights = [{ ...defaultSceneLight('area'), id: allocId<Id>(draft), position: [1, 2, 3], target: [1, 2, 0], width: 0.5, height: 0.25 }];
+    });
+    registry.execute('context.enter', { path: [group] });
+    const inGroup = () => host.doc.state.definitions.get(root().instances.get(group as Id)!.definitionId)!.entities.sketch;
+    const localXs = () => [...inGroup().vertices.values()].map((v) => v.p[0]).sort();
+    // measure the group's bottom edge and type twice its length
+    tools.activate('tape');
+    const tape = tools.activeTool as TapeTool;
+    tape.setMode('measure');
+    tools.click(at([0, 0, 0]));
+    tools.click(at([1, 0, 0]));
+    tools.onVcb(vcb('2'));
+    expect(tape.pendingResize?.factor).toBeCloseTo(2);
+    expect(tape.confirmResize()).toBe(true);
+    expect(host.context.path).toEqual([group]);
+    // the group scales through its placement; its own geometry is untouched
+    expect(root().instances.get(group as Id)!.transform[0]).toBeCloseTo(2);
+    expect(localXs()).toEqual([0, 0, 1, 1]);
+    const g = root().meshParts.get(partId)!.geometry;
+    expect([...g.positions]).toEqual([2, 0, 0, 4, 0, 0, 4, 2, 0]);
+    expect([...g.edgePositions]).toEqual([2, 0, 0, 4, 0, 0]);
+    expect(host.doc.state.sceneLights![0]).toMatchObject({ position: [2, 4, 6], target: [2, 4, 0], width: 1, height: 0.5 });
+    expect(host.undo()).toBe(true);
+    expect([...root().meshParts.get(partId)!.geometry.positions]).toEqual([1, 0, 0, 2, 0, 0, 2, 1, 0]);
+    expect(host.doc.state.sceneLights![0]).toMatchObject({ position: [1, 2, 3], target: [1, 2, 0], width: 0.5 });
+  });
+
 });
 
 describe('ProtractorTool', () => {

@@ -4,7 +4,7 @@
 
 Choose **Tape Measure** from the Measure dropdown. Choose **Measure only** in the tool options bar, or tap Ctrl to cycle to it; **Guide lines** and **Guide points** create guides. Click the start point, then the endpoint, and read the Length field beside the pointer. Hovering an edge also displays its length. Escape cancels an unfinished measurement.
 
-Typing a new length after a completed measurement proposes resizing the whole model. Choose **Resize Model** in the tool options bar only when you intend to change the model's size; Escape cancels it, and measuring alone does not resize anything.
+Typing a new length after a completed measurement proposes resizing the whole model. Choose **Resize Model** in the tool options bar only when you intend to change the model's size; Escape cancels it, and measuring alone does not resize anything. Resizing scales the whole model about its origin, including groups, components, imported mesh parts and placed lights, even when you measured inside a group.
 
 ## Make a guide line or guide point with Tape Measure
 

@@ -280,7 +280,7 @@ export class RotateTool extends TransformToolBase implements SectionPreviewTool 
       out.push({ kind: 'polyline', points: [s.center, v3addScaled(s.center, s.baseDir, radius)], color: '#111111', width: 1, dashed: true });
       out.push({ kind: 'polyline', points: [s.center, v3addScaled(s.center, cur, radius)], color: '#111111', width: 2 });
       // section planes are drawn, with their cuts, where they would go (sectionPreview)
-      if (Math.abs(s.angle) > 1e-9) out.push(...movedOutline(state, withoutSectionPlanes(s.refs), m4rotationAbout(s.center, s.axis, s.angle)));
+      if (Math.abs(s.angle) > 1e-9) out.push(...movedOutline(state, withoutSectionPlanes(s.refs), m4rotationAbout(s.center, s.axis, s.angle), undefined, this.copy));
       out.push({ kind: 'label', position: v3addScaled(s.center, cur, radius), text: this.fmtAngle(s.angle), offset: [12, -12] });
     } else if (s.kind === 'center' && this.cursorInference) {
       out.push({ kind: 'polyline', points: [s.center, this.cursorInference.point], color: '#111111', width: 1, dashed: true });

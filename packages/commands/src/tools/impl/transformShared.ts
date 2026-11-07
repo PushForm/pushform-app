@@ -56,13 +56,14 @@ export function refsKey(refs: readonly EntityRef[]): string {
  * body edges, instance edges, sketch edges touching moved vertices (stretched), guides, leader and
  * model text (leader line and text), and for body faces/edges every edge of the body with the moved
  * points displaced (the stretch the model folds into a valid solid).
- * Refs may live in any context: each group of refs is drawn through its context matrix.
+ * Refs may live in any context: each group of refs is drawn through its context matrix. With `copy`, only
+ * the copies are drawn: copied sketch edges whole, and nothing stretched, since the originals stay.
  */
-export function movedOutline(state: DocumentState, refs: readonly EntityRef[], m: Mat4 | MMat4, color = OUTLINE_COLOR): OverlayPrimitive[] {
+export function movedOutline(state: DocumentState, refs: readonly EntityRef[], m: Mat4 | MMat4, color = OUTLINE_COLOR, copy = false): OverlayPrimitive[] {
   const out: OverlayPrimitive[] = [];
   const groups = new Map<string, EntityRef[]>();
   for (const ref of refs) (groups.get(pathKeyOf(ref.path)) ?? groups.set(pathKeyOf(ref.path), []).get(pathKeyOf(ref.path))!).push(ref);
-  for (const group of groups.values()) out.push(...movedOutlineInContext(state, group, m, color));
+  for (const group of groups.values()) out.push(...movedOutlineInContext(state, group, m, color, copy));
   return out;
 }
 
@@ -103,7 +104,7 @@ export function withoutSectionPlanes(refs: readonly EntityRef[]): EntityRef[] {
   return refs.filter((r) => r.kind !== 'sectionPlane');
 }
 
-function movedOutlineInContext(state: DocumentState, refs: readonly EntityRef[], m: Mat4 | MMat4, color: string): OverlayPrimitive[] {
+function movedOutlineInContext(state: DocumentState, refs: readonly EntityRef[], m: Mat4 | MMat4, color: string, copy: boolean): OverlayPrimitive[] {
   const path = refs[0]?.path ?? [];
   let root: EntityContainer;
   try {
@@ -131,6 +132,8 @@ function movedOutlineInContext(state: DocumentState, refs: readonly EntityRef[],
   };
   const wholeBodies = new Set<number>();
   const movedSketchVertices = new Set<number>();
+  /** Sketch edges a copy draws. */
+  const copiedSketchEdges = new Set<number>();
   const movedBodyPoints = new Map<number, Vec3[]>();
   const sketch = root.sketch;
   for (const ref of refs) {
@@ -213,6 +216,7 @@ function movedOutlineInContext(state: DocumentState, refs: readonly EntityRef[],
         if (e) {
           movedSketchVertices.add(e.a);
           movedSketchVertices.add(e.b);
+          copiedSketchEdges.add(e.id);
         }
         break;
       }
@@ -224,6 +228,7 @@ function movedOutlineInContext(state: DocumentState, refs: readonly EntityRef[],
             if (e) {
               movedSketchVertices.add(e.a);
               movedSketchVertices.add(e.b);
+              copiedSketchEdges.add(e.id);
             }
           }
         }
@@ -248,6 +253,15 @@ function movedOutlineInContext(state: DocumentState, refs: readonly EntityRef[],
       default:
         break;
     }
+  }
+  if (copy) {
+    // the originals stay as they are: the copied edges are drawn where the copies go, and solids' faces or edges are not copied
+    for (const id of copiedSketchEdges) {
+      const e = sketch.edges.get(id as EntityRef['id']);
+      const a = e && sketch.vertices.get(e.a)?.p, b = e && sketch.vertices.get(e.b)?.p;
+      if (a && b) push([moved(a), moved(b)]);
+    }
+    return out;
   }
   if (movedSketchVertices.size) {
     for (const e of sketch.edges.values()) {

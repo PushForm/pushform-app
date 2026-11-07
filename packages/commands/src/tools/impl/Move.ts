@@ -288,7 +288,7 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
       const end = v3add(s.base, s.delta);
       if (s.face && this.glue) out.push(...movedOutline(state, s.refs, placeOnFaceMatrix(state, this.glue.ref, s.face.point, s.face.normal)));
       // section planes are drawn, with their cuts, where they would go (sectionPreview)
-      else if (v3len(s.delta) > MERGE_TOL) out.push(...movedOutline(state, withoutSectionPlanes(s.refs), m4translation(s.delta)));
+      else if (v3len(s.delta) > MERGE_TOL) out.push(...movedOutline(state, withoutSectionPlanes(s.refs), m4translation(s.delta), undefined, this.copy));
       out.push({ kind: 'polyline', points: [s.base, end], color: rubberBandColor(this.cursorInference?.primary), width: 2 });
       out.push({ kind: 'point', position: s.base, color: '#111111', shape: 'square', size: 6 });
     } else if (this.hover) {

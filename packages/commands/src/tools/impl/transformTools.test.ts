@@ -582,6 +582,27 @@ describe('transform tools: what a press picks up', () => {
   });
 });
 
+describe('MoveTool: copies', () => {
+  it('previews a copy of sketch edges as the copies alone, leaving the originals unstretched', () => {
+    const { host, tools, root, addRectangle } = setup();
+    addRectangle(2, 1);
+    const s = root().sketch;
+    const top = [...s.edges.values()].find((e) => s.vertices.get(e.a)!.p[1] > 0.5 && s.vertices.get(e.b)!.p[1] > 0.5)!;
+    const lone = [...s.vertices.values()].find((v) => near(v.p, [0, 0, 0]))!;
+    host.selection.set([{ kind: 'sketchEdge', path: [], id: top.id }, { kind: 'sketchVertex', path: [], id: lone.id }]);
+    tools.activate('move');
+    tools.pointerDown(at(TOP_CAMERA, [0, 1, 0]));
+    tools.pointerMove(at(TOP_CAMERA, [0, 2, 0]));
+    // a move stretches the two side edges and drags the top one (plus the rubber band)
+    expect(tools.overlay().filter((o) => o.kind === 'polyline')).toHaveLength(4 + 1);
+    tools.keyDown(key('Control', CTRL));
+    tools.keyUp(key('Control'));
+    const lines = tools.overlay().filter((o) => o.kind === 'polyline');
+    expect(lines).toHaveLength(1 + 1);
+    expect(lines[0]!.kind === 'polyline' && lines[0]!.points.every((p) => near([0, p[1], 0], [0, 2, 0]))).toBe(true);
+  });
+});
+
 describe('MoveTool: guides and text', () => {
   it('previews and moves guides and leader text with the selection', async () => {
     const { host, registry, tools, root } = setup();

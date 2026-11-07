@@ -96,7 +96,7 @@ export const TOOL_HELP: Readonly<Record<string, ToolHelp>> = {
   },
   offset: {
     summary:
-      'Click a face (or two or more preselected coplanar connected edges), move to set the offset distance and click, or type a distance. Double-click another face to repeat the same offset.',
+      'Click a face of the context you are editing (or two or more preselected connected edges in one plane) and click again, or press, drag and release; inside the face insets, outside outsets. Type a distance for the pointer\'s side, a negative one for the other side; typed right after, it redoes the offset. Double-click a face to repeat the last face offset.',
     keys: [],
   },
   tape: {

@@ -268,15 +268,31 @@ function movedOutlineInContext(state: DocumentState, refs: readonly EntityRef[],
   return out;
 }
 
+/** An `Nx` (external) or `/N` (internal) array of copies. */
+export interface TransformArray {
+  readonly count: number;
+  readonly mode: 'external' | 'internal';
+}
+
 /** The last transform a tool committed, for VCB re-edits and arrays. */
 export interface TransformCommit {
   readonly refs: EntityRef[];
+  /** The transform applied (for an array, of its first copy, or of the whole run for `/N`). */
   matrix: MMat4;
   copy: boolean;
+  /** The array that replaced the copy, if any: a re-edit keeps its count. */
+  array: TransformArray | null;
   readonly label: string;
   /** Undo entry the commit produced (re-edits only while it is still on top). */
   entry: UndoEntry | null;
   applied: boolean;
+}
+
+/** What a re-edit of the last commit applies instead. */
+interface TransformRedo {
+  readonly matrix: MMat4;
+  readonly copy: boolean;
+  readonly array: TransformArray | null;
 }
 
 /**
@@ -389,7 +405,7 @@ export abstract class TransformToolBase implements Tool {
   protected commitTransform(refs: EntityRef[], matrix: MMat4, copy: boolean, label: string): void {
     const ctx = this.ctx;
     if (!ctx) return;
-    const commit: TransformCommit = { refs, matrix, copy, label, entry: null, applied: false };
+    const commit: TransformCommit = { refs, matrix, copy, array: null, label, entry: null, applied: false };
     this.lastCommit = commit;
     this.lastError = null;
     this.keepPickup();
@@ -412,49 +428,65 @@ export abstract class TransformToolBase implements Tool {
     return !!host && !!last && last.applied && last.entry !== null && host.undoStack.peek() === last.entry;
   }
 
-  /** VCB re-edit: undo the last commit and re-apply it with a new matrix (still one undo entry). */
+  /**
+   * VCB or bar re-edit: undo the last commit and apply it again with `matrix` (and `copy`, when given), as
+   * one undo entry; an array keeps its count, and switching Copy off makes it a plain move again. The last
+   * commit records the new values only once they are applied: if the redo fails, the commit stays as it
+   * was, the status says why, and `restoreCopy` puts the tool's Copy back.
+   */
   protected reapplyLast(matrix: MMat4, copy?: boolean): boolean {
-    const ctx = this.ctx;
     const last = this.lastCommit;
-    if (!ctx || !last) return false;
-    last.matrix = matrix;
-    if (copy !== undefined) last.copy = copy;
+    if (!this.ctx || !last) return false;
+    const nextCopy = copy ?? last.copy;
     this.enqueue(async () => {
       if (this.lastCommit !== last || !this.lastIsOnTop()) return;
-      const host = hostOfTool(ctx);
-      host.undo();
-      last.applied = false;
-      try {
-        await ctx.commands.execute('transform.apply', { refs: last.refs, matrix, copy: last.copy, label: last.label });
-      } catch (err) {
-        host.redo();
-        throw err;
-      }
-      last.entry = host.undoStack.peek();
-      last.applied = true;
-      ctx.committed?.();
-      ctx.statusChanged();
-      ctx.requestRender();
+      await this.redoLast(last, { matrix, copy: nextCopy, array: nextCopy ? last.array : null });
     });
     return true;
   }
 
-  /** `3x` / `/3` after a copy: replace the single copy by an array (one undo entry). */
+  /** `3x` / `/3` after a copy (or an array): replace it by an array of that many copies (one undo entry). */
   protected arrayLast(count: number, mode: 'external' | 'internal'): boolean {
-    const ctx = this.ctx;
     const last = this.lastCommit;
-    if (!ctx || !last || !last.copy) return false;
+    if (!this.ctx || !last || !last.copy) return false;
     this.enqueue(async () => {
       if (this.lastCommit !== last || !this.lastIsOnTop()) return;
-      const host = hostOfTool(ctx);
-      host.undo();
-      last.applied = false;
-      await ctx.commands.execute('transform.array', { refs: last.refs, matrix: last.matrix, count, mode, label: last.label });
-      last.entry = host.undoStack.peek();
-      last.applied = true;
-      ctx.statusChanged();
-      ctx.requestRender();
+      await this.redoLast(last, { matrix: last.matrix, copy: true, array: { count, mode } });
     });
     return true;
+  }
+
+  /** The tool's Copy setting after a re-edit that switched it failed (default: the tool keeps none). */
+  protected restoreCopy(_copy: boolean): void {}
+
+  /** Undo `last` and apply `next` in its place; on failure put `last` back as it was. */
+  private async redoLast(last: TransformCommit, next: TransformRedo): Promise<void> {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const host = hostOfTool(ctx);
+    host.undo();
+    last.applied = false;
+    try {
+      const { refs, label } = last;
+      if (next.array) await ctx.commands.execute('transform.array', { refs, matrix: next.matrix, count: next.array.count, mode: next.array.mode, label });
+      else await ctx.commands.execute('transform.apply', { refs, matrix: next.matrix, copy: next.copy, label });
+    } catch (err) {
+      host.redo();
+      last.applied = true;
+      this.lastError = err instanceof Error ? err.message : String(err);
+      if (next.copy !== last.copy) this.restoreCopy(last.copy);
+      ctx.statusChanged();
+      ctx.requestRender();
+      return;
+    }
+    last.matrix = next.matrix;
+    last.copy = next.copy;
+    last.array = next.array;
+    last.entry = host.undoStack.peek();
+    last.applied = true;
+    this.lastError = null;
+    ctx.committed?.();
+    ctx.statusChanged();
+    ctx.requestRender();
   }
 }

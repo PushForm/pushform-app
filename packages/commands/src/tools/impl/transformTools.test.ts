@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Id, Vec2, Vec3 } from '@pushform/core';
 import { meshBounds, v3dist } from '@pushform/core';
 import { meshTopologyProblems } from '@pushform/kernel';
@@ -274,6 +274,75 @@ describe('MoveTool', () => {
     expect(host.undoStack.length).toBe(entries + 1);
   });
 
+  it('a length typed after an array keeps its count and changes its spacing; the bar shows the array as applied', async () => {
+    const { host, tools, addBox, bodies } = setup();
+    host.selection.set([bodyRef(addBox())]);
+    const entries = host.undoStack.length;
+    tools.activate('move');
+    const tool = tools.activeTool as MoveTool;
+    tools.keyDown(key('Control', CTRL));
+    tools.keyUp(key('Control', CTRL));
+    tools.pointerDown(at(TOP_CAMERA, [0, 0, 0]));
+    tools.pointerMove(at(TOP_CAMERA, [0, 1.5, 0]));
+    tools.pointerUp(at(TOP_CAMERA, [0, 1.5, 0]));
+    await tool.settled;
+    tools.onVcb({ kind: 'array', mode: 'external', count: 3 });
+    await tool.settled;
+    expect(tools.status().applied).toBe(true);
+    tools.onVcb({ kind: 'length', meters: 2, raw: 2, unit: 'm' });
+    await tool.settled;
+    const ys = (): number[] => bodies().map((b) => +meshBounds(b.mesh).min[1].toFixed(6)).sort((a, b) => a - b);
+    expect(ys()).toEqual([0, 2, 4, 6]);
+    expect(host.undoStack.length).toBe(entries + 1);
+    expect(host.selection.size).toBe(3);
+    // `/N` keeps its count too: the length is where the last copy goes
+    tools.onVcb({ kind: 'array', mode: 'internal', count: 4 });
+    await tool.settled;
+    tools.onVcb({ kind: 'length', meters: 4, raw: 4, unit: 'm' });
+    await tool.settled;
+    expect(ys()).toEqual([0, 1, 2, 3, 4]);
+    expect(host.undoStack.length).toBe(entries + 1);
+  });
+
+  it('a failed array or re-edit leaves the last move as it was, and the field shows only applied values', async () => {
+    const { host, registry, tools, addBox, bodies } = setup();
+    host.selection.set([bodyRef(addBox())]);
+    tools.activate('move');
+    const tool = tools.activeTool as MoveTool;
+    tools.keyDown(key('Control', CTRL));
+    tools.keyUp(key('Control', CTRL));
+    tools.pointerDown(at(TOP_CAMERA, [0, 0, 0]));
+    tools.pointerMove(at(TOP_CAMERA, [0, 1.5, 0]));
+    tools.pointerUp(at(TOP_CAMERA, [0, 1.5, 0]));
+    await tool.settled;
+    tools.onVcb({ kind: 'array', mode: 'external', count: 2 });
+    await tool.settled;
+    const entry = host.undoStack.peek();
+    const ys = (): number[] => bodies().map((b) => +meshBounds(b.mesh).min[1].toFixed(6)).sort((a, b) => a - b);
+    expect(ys()).toEqual([0, 1.5, 3]);
+    const execute = registry.execute.bind(registry);
+    const spy = vi.spyOn(registry, 'execute').mockImplementation((id: string, params?: unknown) => {
+      if (id === 'transform.array' || id === 'transform.apply') return Promise.reject(new Error('Would create an invalid solid'));
+      return execute(id, params);
+    });
+    tools.onVcb({ kind: 'array', mode: 'external', count: 5 });
+    await tool.settled;
+    expect(ys()).toEqual([0, 1.5, 3]);
+    expect(host.undoStack.peek()).toBe(entry);
+    expect(tools.status().instructor).toContain('invalid solid');
+    const shown = tools.status().vcbValue;
+    tools.onVcb({ kind: 'length', meters: 4, raw: 4, unit: 'm' });
+    expect(tools.status().vcbValue).toBe(shown);
+    await tool.settled;
+    expect(ys()).toEqual([0, 1.5, 3]);
+    expect(tools.status().vcbValue).toBe(shown);
+    spy.mockRestore();
+    // the copies are still the last change and can be re-edited
+    tools.onVcb({ kind: 'length', meters: 1, raw: 1, unit: 'm' });
+    await tool.settled;
+    expect(ys()).toEqual([0, 1, 2]);
+  });
+
   it('with nothing selected, the hovered entity is picked up on press', async () => {
     const { host, tools, addBox, body } = setup();
     const id = addBox();
@@ -542,6 +611,15 @@ describe('RotateTool', () => {
     expect(mins.some((m) => near(m, [-2, -1, 0]))).toBe(true); // 180°
     expect(mins.some((m) => near(m, [0, -2, 0]))).toBe(true); // 270°
     expect(host.undoStack.peek()?.label).toBe('Rotate');
+
+    // an angle typed after the array keeps its three copies, now 45° apart
+    const entries = host.undoStack.length;
+    tools.onVcb({ kind: 'angle', degrees: 45 });
+    await tool.settled;
+    expect(bodies()).toHaveLength(4);
+    expect(host.undoStack.length).toBe(entries);
+    const turned = bodies().map((b) => meshBounds(b.mesh).min.map((x) => +x.toFixed(6)) as unknown as Vec3);
+    expect(turned.some((m) => near(m, [-1, 1, 0]))).toBe(true); // 90°
   });
 });
 

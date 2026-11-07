@@ -298,6 +298,10 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     return this.reapplyLast(last.matrix, this.copy);
   }
 
+  protected override restoreCopy(copy: boolean): void {
+    this.copy = copy;
+  }
+
   onSetting(id: string, value: ToolSettingValue): void {
     if (typeof value !== 'boolean' || id !== 'copy') return;
     this.copy = value;

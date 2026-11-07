@@ -484,13 +484,12 @@ describe('matrix helpers', () => {
     // 200° clockwise
     const cw = arrayMatrices(m4rotationAbout(center, axis, (-200 * Math.PI) / 180), 2, 'internal', { center, axis, angle: (-200 * Math.PI) / 180 });
     expect(near(m4transformPoint(cw[0]!, p), [1 + Math.cos((-100 * Math.PI) / 180), Math.sin((-100 * Math.PI) / 180), 0])).toBe(true);
-    // a whole turn: the matrix is the identity, the copies spread evenly round the circle
+    // a whole turn: the matrix is the identity; the original counts as one of the N, so no copy lands on it
     const round = arrayMatrices(m4rotationAbout(center, axis, 2 * Math.PI), 4, 'internal', { center, axis, angle: 2 * Math.PI });
     expect(round.map((s) => m4transformPoint(s, p).map((x) => +x.toFixed(9) + 0))).toEqual([
       [1, 1, 0],
       [0, 0, 0],
       [1, -1, 0],
-      [2, 0, 0],
     ]);
     // external arrays repeat the matrix
     const ext = arrayMatrices(m, 2, 'external', { center, axis, angle: 1.5 * Math.PI });

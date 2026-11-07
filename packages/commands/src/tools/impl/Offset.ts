@@ -225,9 +225,9 @@ export class OffsetTool implements Tool {
 
   onKeyDown(e: ToolKeyEvent): boolean {
     if (e.key !== 'Alt' || e.repeat) return false;
-    // the same as switching Allow overlaps in the bar: just after an offset it redoes that offset
+    // switches Allow overlaps for the next offset; just after one, the tool manager turns the tap into the bar's switch,
+    // which redoes it
     this.onSetting('overlaps', !this.overlaps);
-    if (this.lastCommit && this.state.kind !== 'dragging') this.adjustLast('overlaps');
     return true;
   }
 

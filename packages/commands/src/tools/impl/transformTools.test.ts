@@ -954,7 +954,7 @@ describe('RotateTool: typed angles, snapping, locks and arrays', () => {
     expect(host.undoStack.peek()?.label).toBe('Rotate');
   });
 
-  it('a copy turned all the way round, then /N, spreads N copies evenly round the circle', async () => {
+  it('a copy turned all the way round, then /N, makes N evenly round the circle, the original counted', async () => {
     const { tools, tool, click, bodies } = started();
     tools.keyDown(key('Control', CTRL));
     tools.keyUp(key('Control', CTRL));
@@ -966,12 +966,13 @@ describe('RotateTool: typed angles, snapping, locks and arrays', () => {
     expect(bodies()).toHaveLength(2);
     tools.onVcb({ kind: 'array', mode: 'internal', count: 4 });
     await tool.settled;
+    // the original counts as one of the four: three copies, none on top of it
     const mins = bodies().map(min);
-    expect(mins).toHaveLength(5);
+    expect(mins).toHaveLength(4);
     expect(mins).toContainEqual([0, -2, 0]); // 90° clockwise first
     expect(mins).toContainEqual([-2, -1, 0]);
     expect(mins).toContainEqual([-1, 1, 0]);
-    expect(mins.filter((m) => near(m, [1, 0, 0]))).toHaveLength(2); // the last copy is back at the start
+    expect(mins.filter((m) => near(m, [1, 0, 0]))).toHaveLength(1);
   });
 
   it('switching Copy in the bar just after a rotation redoes it as a copy and back, as one step', async () => {

@@ -50,7 +50,7 @@ With angle snapping on in **Model Info**, the angle snaps to multiples of the sn
 
 After setting the starting direction, type an angle in degrees, such as `45` or `45°`, or a rise:run slope, and press Enter. It turns the way the preview turns, and a negative value turns the other way; before you move the pointer it turns counterclockwise. Typing just after a rotation redoes it.
 
-Tap Ctrl, or click **Copy**, to keep the original in place. After a rotated copy, type `3x` for three more copies at the same step, or `/3` to spread three copies over the angle turned. A copy turned 360° and then `/6` spreads six copies evenly round the whole circle, the last one where the original is.
+Tap Ctrl, or click **Copy**, to keep the original in place. After a rotated copy, type `3x` for three more copies at the same step, or `/3` to spread three copies over the angle turned. A copy turned 360° and then `/6` makes six evenly round the whole circle, the original counting as one, so no copy lands on it.
 
 ## Scale with grips
 

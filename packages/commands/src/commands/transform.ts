@@ -293,8 +293,12 @@ export function arrayMatrices(m: Mat4 | MMat4, count: number, mode: 'external' |
     mode !== 'internal' ? [...m]
     : rotation && v3len(rotation.axis) > 0 ? m4rotationAbout(rotation.center, v3normalize(rotation.axis), rotation.angle / count)
     : rigidMatrixRoot(m, count);
+  // A whole turn ends where it started: the last copy would sit on the original, so the original counts as one
+  // of the N, spread evenly round the circle.
+  const wholeTurn = mode === 'internal' && !!rotation && Math.abs(Math.abs(rotation.angle) - 2 * Math.PI) <= ANGLE_TOL;
+  const last = wholeTurn ? count - 1 : count;
   const out: MMat4[] = [];
-  for (let k = 1; k <= count; k++) out.push(m4power(step, k));
+  for (let k = 1; k <= last; k++) out.push(m4power(step, k));
   return out;
 }
 

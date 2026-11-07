@@ -24,9 +24,9 @@ import type { OverlayPrimitive } from '../overlay';
 import type { ToolKeyEvent, ToolPointerEvent, ToolSettingValue, ToolStatus } from '../Tool';
 import { toggleSetting } from '../settings';
 import { pointerField } from '../entry';
-import { DRAG_PX, entityOverlay, HOVER_COLOR, hostOfTool, inferenceOverlay, screenDist, worldPerPixelAt } from '../toolUtil';
+import { DRAG_PX, entityOverlay, HOVER_COLOR, inferenceOverlay, screenDist, worldPerPixelAt } from '../toolUtil';
 import { AXIS_COLOR, AXIS_DIR, movedOutline, pickRef, sectionPreviewFor, TransformToolBase, withoutSectionPlanes, worldToScreen } from './transformShared';
-import type { TransformCommit } from './transformShared';
+import type { TransformRotation } from './transformShared';
 import { degreesFromVcb } from './drawingUtil';
 import type { SectionPreview, SectionPreviewTool } from '../sectionPreview';
 import { planeTag } from '../held';
@@ -59,11 +59,6 @@ type State =
 
 const IDLE: State = { kind: 'idle' };
 
-/** Center and axis of a committed rotation; its angle is kept per matrix, since a matrix alone loses turns past 180°. */
-interface RotationPivot {
-  readonly center: Vec3;
-  readonly axis: Vec3;
-}
 
 /**
  * Rotate (Q). A protractor follows the cursor, oriented to the hovered face normal, an arrow-key
@@ -91,10 +86,6 @@ export class RotateTool extends TransformToolBase implements SectionPreviewTool 
   private camera: ToolPointerEvent['camera'] | null = null;
   /** Message shown in place of the step hint until the next step, such as for an angle typed too early. */
   private notice: string | null = null;
-  /** Center and axis of each commit this tool made. */
-  private pivots = new WeakMap<TransformCommit, RotationPivot>();
-  /** Signed angle of each rotation matrix this tool committed. */
-  private angles = new WeakMap<object, number>();
 
   get copyMode(): boolean {
     return this.copy;
@@ -275,8 +266,8 @@ export class RotateTool extends TransformToolBase implements SectionPreviewTool 
     const rad = (last.angle < 0 ? -1 : 1) * deg * DEG;
     if (Math.abs(rad) < 1e-9) return;
     const matrix = m4rotationAbout(last.center, last.axis, rad);
-    this.angles.set(matrix, rad);
-    this.reapplyLast(matrix);
+    // the turn travels with the commit, so a /N array after it divides the angle the way it turned
+    this.reapplyLast(matrix, undefined, { center: last.center, axis: last.axis, angle: rad });
     this.ctx?.statusChanged();
   }
 
@@ -350,36 +341,9 @@ export class RotateTool extends TransformToolBase implements SectionPreviewTool 
       return { instructor: `Pick second point or enter angle.`, vcbLabel: 'Angle', vcbValue: this.fmtAngle(s.angle), fields: [pointerField('Angle', 'angle', this.fmtAngle(s.angle))] };
     }
     if (s.kind === 'center') return { instructor: this.notice ?? `Click to set the starting direction.`, vcbLabel: 'Angle' };
-    const instructor = this.lastError ? `Rotate failed: ${this.lastError}` : `Pick the centre of rotation. Hover a face to align the protractor, arrows lock an axis.`;
+    const instructor = this.lastError ? `Rotate failed: ${this.lastError}` : this.lastNotice ?? `Pick the centre of rotation. Hover a face to align the protractor, arrows lock an axis.`;
     const last = this.lastRotation();
     return { instructor, vcbLabel: 'Angle', vcbValue: last ? this.fmtAngle(last.angle) : undefined };
-  }
-
-  /** `/N` after a rotated copy divides the angle turned, past 180° and round a whole turn, which the matrix alone cannot tell. */
-  protected override arrayLast(count: number, mode: 'external' | 'internal'): boolean {
-    const ctx = this.ctx;
-    const last = this.lastCommit;
-    const rotation = this.lastRotation();
-    if (mode !== 'internal' || !rotation || !ctx || !last || !last.copy) return super.arrayLast(count, mode);
-    const { center, axis, angle } = rotation;
-    this.enqueue(async () => {
-      if (this.lastCommit !== last || !this.lastIsOnTop()) return;
-      const host = hostOfTool(ctx);
-      host.undo();
-      last.applied = false;
-      try {
-        await ctx.commands.execute('transform.array', { refs: last.refs, matrix: last.matrix, count, mode, label: last.label, rotation: { center, axis, angle } });
-      } catch (err) {
-        // the copy stays as it was
-        host.redo();
-        throw err;
-      }
-      last.entry = host.undoStack.peek();
-      last.applied = true;
-      ctx.statusChanged();
-      ctx.requestRender();
-    });
-    return true;
   }
 
   // --- internals ------------------------------------------------------------------------------
@@ -388,13 +352,11 @@ export class RotateTool extends TransformToolBase implements SectionPreviewTool 
    * The rotation just committed, while typing can still redo it: the last commit, still the last change
    * (or still being applied). Null after a tool switch, Esc, another change, or a failed commit.
    */
-  private lastRotation(): (RotationPivot & { angle: number }) | null {
+  private lastRotation(): TransformRotation | null {
     const last = this.lastCommit;
-    const pivot = last ? this.pivots.get(last) : undefined;
-    const angle = last ? this.angles.get(last.matrix) : undefined;
-    if (!last || !pivot || angle === undefined) return null;
+    if (!last?.rotation) return null;
     if (last.applied && !this.lastIsOnTop()) return null;
-    return { ...pivot, angle };
+    return last.rotation;
   }
 
   private fmtAngle(rad: number): string {
@@ -494,8 +456,6 @@ export class RotateTool extends TransformToolBase implements SectionPreviewTool 
       return;
     }
     const matrix = m4rotationAbout(center, axis, angle);
-    this.angles.set(matrix, angle);
-    this.commitTransform(refs, matrix, copy, 'Rotate');
-    if (this.lastCommit) this.pivots.set(this.lastCommit, { center, axis });
+    this.commitTransform(refs, matrix, copy, 'Rotate', { center, axis, angle });
   }
 }

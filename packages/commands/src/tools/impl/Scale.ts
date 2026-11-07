@@ -431,9 +431,9 @@ export class ScaleTool extends TransformToolBase implements SectionPreviewTool {
     }
     const instructor = this.lastError
       ? `Scale failed: ${this.lastError}`
-      : this.box
+      : this.lastNotice ?? (this.box
         ? 'Drag a grip to scale. Corners = uniform, edges = two axes, faces = one axis. Hold Shift to maintain aspect ratio, Alt to keep the centre.'
-        : 'Select the entities to scale.';
+        : 'Select the entities to scale.');
     const last = this.lastScale();
     return { instructor, vcbLabel: 'Scale', vcbValue: last ? this.fmtFactors(last.factors, last.dims) : undefined };
   }

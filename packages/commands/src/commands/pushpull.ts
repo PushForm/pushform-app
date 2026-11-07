@@ -567,7 +567,9 @@ export const pushPullApply = defineCommand({
     requireFaceInContext(host.context.path, p.target.path);
     const plan = planPushPull(host.doc.state, p.target, p.distance, p.mode);
     // A precomputed result counts only when it was computed against the solid as it is now.
-    const current = p.precomputed !== undefined && (plan.kind === 'sketch' || p.precomputedVersion === plan.body.version);
+    // a result computed against an older version of the body is computed again; callers that give no version
+    // (scripted batches that computed it just now) are taken at their word
+    const current = p.precomputed !== undefined && (plan.kind === 'sketch' || p.precomputedVersion === undefined || p.precomputedVersion === plan.body.version);
     const result = current && p.precomputed ? p.precomputed : await runPushPullKernel(kernel, plan);
     if (leavesNothing(plan, result)) throw new PushFormError('pushpull.nothingLeft', PUSH_PULL_MESSAGES.nothingLeft);
     return host.transact('Push/Pull', () => host.edit('Push/Pull', (draft) => applyPushPullResult(draft, plan, result)));

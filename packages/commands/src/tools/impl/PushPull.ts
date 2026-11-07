@@ -1,17 +1,37 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import type { MeshData, Ray, Vec2, Vec3 } from '@pushform/core';
-import { basisToLocal, basisToWorld, COPLANAR_TOL, formatLength, v3addScaled, v3dot, v3sub } from '@pushform/core';
+import {
+  basisToLocal,
+  basisToWorld,
+  COPLANAR_TOL,
+  formatLength,
+  planeBasis,
+  PUSH_PULL_MATCH_HEIGHT_ANGLE,
+  PushFormError,
+  v3addScaled,
+  v3dot,
+  v3sub,
+} from '@pushform/core';
 import type { PushPullMode, PushPullResult } from '@pushform/kernel';
-import type { InferenceOptions, PickHit } from '@pushform/inference';
+import type { InferenceOptions, InferenceResult, PickHit, Snap } from '@pushform/inference';
 import { SNAP_COLORS } from '@pushform/inference';
 import type { DocumentState, EntityContainer, EntityRef } from '@pushform/model';
-import { computeRegions, containerAt, regionAt, sketchFaceLoops } from '@pushform/model';
+import { computeRegions, containerAt, regionAt, sketchFaceLoops, surfaceFaceIds } from '@pushform/model';
+import { pointInPolygon } from '@pushform/geom';
 import type { MMat4 } from '@pushform/core';
 import { DocumentHost } from '../../host/DocumentHost';
 import { hostOf, kernelOf, SERVICE_DOCUMENT } from '../../host/services';
 import { contextFrame, samePath } from '../../commands/context';
-import { planPushPull, runPushPullKernel, type PushPullApplyParams, type PushPullTarget } from '../../commands/pushpull';
+import { sketchSurfaceFaceIds } from '../../commands/sketchQueries';
+import {
+  planPushPull,
+  PUSH_PULL_MESSAGES,
+  runPushPullKernel,
+  type PushPullApplyParams,
+  type PushPullPlan,
+  type PushPullTarget,
+} from '../../commands/pushpull';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
 import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolSettingValue, ToolStatus } from '../Tool';
@@ -22,8 +42,12 @@ import { pointerField } from '../entry';
 const DRAG_PX = 4;
 /** Minimum spacing between real kernel previews while dragging. */
 const PREVIEW_INTERVAL_MS = 80;
-/** A hovered face must not be nearly parallel to the pull line for "match height" to apply. */
-const MATCH_HEIGHT_MIN_COS = 0.05;
+/** A hovered face matches its height only when it is this close to parallel with the pulled face. */
+const MATCH_HEIGHT_MIN_COS = Math.cos(PUSH_PULL_MATCH_HEIGHT_ANGLE);
+/** Point snaps: on the way, they win over a matched height. */
+const POINT_SNAPS: ReadonlySet<Snap['kind']> = new Set(['endpoint', 'midpoint', 'center', 'intersection', 'origin']);
+/** Status when a distance is typed with no face to apply it to. */
+const POINT_TO_FACE = 'Point to a face, then type the distance.';
 
 const HOVER_COLOR = '#2d5bd1';
 const GHOST_FACE_COLOR = '#2d5bd1';
@@ -42,6 +66,8 @@ interface Target {
   readonly bodyId: number | null;
   /** local → world matrix of the face's container (identity at the root). */
   readonly matrix: MMat4;
+  /** Why the face cannot be pushed or pulled (a face of a smooth surface), else null. */
+  readonly refusal: string | null;
 }
 
 type State =
@@ -52,6 +78,11 @@ type State =
       readonly target: Target;
       readonly base: Vec3;
       readonly downScreen: Vec2;
+      /**
+       * Where the pointer was along the pull line at the press. Zero when the press was on the face;
+       * a press elsewhere (a preselected face) moves the face by how far the pointer moves from there.
+       */
+      readonly offset: number;
       /** Button still held since the press that started the drag. */
       pressed: boolean;
       /** Pointer travelled more than DRAG_PX since the press. */
@@ -65,21 +96,26 @@ interface Preview {
   readonly mode: PushPullMode;
   readonly result: PushPullResult;
   readonly replacesBodyId: number | null;
+  /** The body or sketch the result was computed against (its identity changes with every edit). */
+  readonly source: unknown;
 }
 
 interface LastCommit {
   params: PushPullApplyParams;
   /** The apply command finished successfully (the VCB may re-edit it). */
   applied: boolean;
+  /** Its undo entry, once applied: a redo replaces it only while it is the top entry. */
+  entry: unknown;
 }
 
 const IDLE: State = { kind: 'idle' };
 
 /**
  * Push/Pull (P). Hover highlights the face/region under the cursor; press (or click) on it to
- * start, move along the face normal, release after a drag or click again to commit. Double-click
- * repeats the last distance; a typed length applies during the drag or re-edits the last commit
- * (undo + re-apply, one undo entry). Ctrl/Alt toggles `newBody` ("keep starting face"). Esc cancels.
+ * start, move along the face normal, release after a drag or click again to commit. With one face
+ * selected when the tool is chosen, the next press anywhere pulls that face. Double-click repeats
+ * the last distance; a typed length applies during the drag, re-edits the last commit (undo +
+ * re-apply, one undo entry) or pulls the hovered face. A Ctrl/Alt tap toggles `newBody`. Esc cancels.
  *
  * Drag feedback is a transient prism in the overlay plus a debounced real kernel preview exposed
  * through `previewMeshes` / `previewReplacesBodyId` for the renderer (see those getters).
@@ -93,6 +129,8 @@ export class PushPullTool implements Tool {
   private ctx: ToolContext | null = null;
   private state: State = IDLE;
   private mode: PushPullMode = 'merge';
+  /** The one face selected when the tool was chosen: the next press pulls it. */
+  private preselected: Target | null = null;
   private lastDistance: number | null = null;
   private lastCommit: LastCommit | null = null;
   private lastError: string | null = null;
@@ -146,21 +184,26 @@ export class PushPullTool implements Tool {
 
   // --- lifecycle ------------------------------------------------------------------------------
 
+  /** Only a pull under way is an operation in progress; hovering a face is not. */
   hasPendingWork(): boolean {
-    return this.state.kind !== 'idle';
+    return this.state.kind === 'dragging';
   }
 
   activate(ctx: ToolContext): void {
     this.ctx = ctx;
     this.state = IDLE;
+    // New body is a mode toggle: off each time the tool is chosen.
+    this.mode = 'merge';
     this.lastCommit = null;
     this.lastError = null;
+    this.preselected = this.selectedFace();
   }
 
   deactivate(): void {
     this.clearPreview();
     this.state = IDLE;
     this.lastCommit = null;
+    this.preselected = null;
     this.ctx = null;
   }
 
@@ -199,7 +242,7 @@ export class PushPullTool implements Tool {
     if (this.state.kind === 'dragging') {
       const s = this.state;
       if (!s.moved && screenDist(e.screen, s.downScreen) > DRAG_PX) s.moved = true;
-      s.distance = this.distanceFor(e, s.target, s.base);
+      s.distance = this.distanceFor(e, s);
       this.schedulePreview();
       this.ctx?.requestRender();
       return;
@@ -218,18 +261,34 @@ export class PushPullTool implements Tool {
         this.hover(e.inference?.hit ?? null);
         return;
       }
-      this.commit(this.distanceFor(e, s.target, s.base));
+      this.commit(s.target, this.distanceFor(e, s));
       return;
     }
     const hit = e.inference?.hit ?? null;
-    const target = this.resolveTarget(hit);
-    if (!target || !hit) {
-      this.state = IDLE;
-      return;
-    }
+    const hovered = this.resolveTarget(hit);
+    const pre = this.preselected;
+    this.preselected = null;
     this.lastCommit = null;
     this.lastError = null;
-    this.state = { kind: 'dragging', target, base: hit.point, downScreen: e.screen, pressed: true, moved: false, distance: 0 };
+    if (pre && !(hovered && hit && sameFace(hovered.ref, pre.ref))) {
+      // The selected face is pulled from a press anywhere: by how far the pointer moves along its line.
+      const base = loopCentroid(pre.loops[0] ?? []);
+      const offset = closestParamOnLine(base, pre.normal, e.ray);
+      this.state = { kind: 'dragging', target: pre, base, offset, downScreen: e.screen, pressed: true, moved: false, distance: 0 };
+      this.ctx?.statusChanged();
+      return;
+    }
+    if (!hovered || !hit) {
+      this.state = IDLE;
+      this.ctx?.statusChanged();
+      return;
+    }
+    if (hovered.refusal) {
+      this.lastError = hovered.refusal;
+      this.ctx?.statusChanged();
+      return;
+    }
+    this.state = { kind: 'dragging', target: hovered, base: hit.point, offset: 0, downScreen: e.screen, pressed: true, moved: false, distance: 0 };
     this.ctx?.statusChanged();
   }
 
@@ -238,16 +297,22 @@ export class PushPullTool implements Tool {
     const s = this.state;
     s.pressed = false;
     if (!s.moved && screenDist(e.screen, s.downScreen) <= DRAG_PX) return; // click-move-click continues
-    this.commit(this.distanceFor(e, s.target, s.base));
+    this.commit(s.target, this.distanceFor(e, s));
   }
 
+  /** Repeat the last distance on the face under the pointer: out after a pull out, in after a push in, along its front. */
   onDoubleClick(e: ToolPointerEvent): void {
     if (e.button !== 0 || this.lastDistance === null) return;
     if (this.state.kind === 'dragging') this.endDrag();
     const target = this.resolveTarget(e.inference?.hit ?? null);
     if (!target) return;
+    if (target.refusal) {
+      this.lastError = target.refusal;
+      this.ctx?.statusChanged();
+      return;
+    }
     this.state = { kind: 'hover', target };
-    this.commit(this.lastDistance);
+    this.commit(target, this.lastDistance);
   }
 
   // --- keys / VCB -----------------------------------------------------------------------------
@@ -255,11 +320,7 @@ export class PushPullTool implements Tool {
   onKeyDown(e: ToolKeyEvent): boolean {
     if (e.repeat) return false;
     if (e.key === 'Control') {
-      this.mode = this.mode === 'merge' ? 'newBody' : 'merge';
-      this.clearPreview();
-      this.schedulePreview();
-      this.ctx?.statusChanged();
-      this.ctx?.requestRender();
+      this.setMode(this.mode === 'merge' ? 'newBody' : 'merge');
       return true;
     }
     return false;
@@ -270,50 +331,42 @@ export class PushPullTool implements Tool {
     const s = this.state;
     if (s.kind === 'dragging') {
       // A loose face takes the distance in the direction it is being pulled; a solid's face along its front.
-      this.commit(isLoose(s.target.ref) ? (s.distance !== 0 ? Math.sign(s.distance) : this.viewerSide(s.target)) * v.meters : v.meters);
+      this.commit(s.target, isLoose(s.target.ref) ? (s.distance !== 0 ? Math.sign(s.distance) : this.viewerSide(s.target)) * v.meters : v.meters);
       return;
     }
     const last = this.lastCommit;
-    if (!last) return;
-    // Re-editing a loose face's pull keeps its direction.
-    const distance = isLoose(last.params.target) ? (Math.sign(last.params.distance) || 1) * v.meters : v.meters;
-    this.lastDistance = distance;
-    this.redoLast(last, { target: last.params.target, distance, mode: last.params.mode });
-    this.ctx?.statusChanged();
+    if (last && this.redoable(last)) {
+      // Just after a pull: redo it at the new distance, the same way it went (a negative one goes the other way).
+      if (Math.abs(v.meters) <= COPLANAR_TOL) return;
+      this.redoLast(last, (p) => ({ ...p, distance: (Math.sign(p.distance) || 1) * v.meters }));
+      this.ctx?.statusChanged();
+      return;
+    }
+    // Nothing in progress: pull the face the pointer is on.
+    const target = this.pointedTarget();
+    if (!target) {
+      this.lastError = POINT_TO_FACE;
+      this.ctx?.statusChanged();
+      return;
+    }
+    if (target.refusal) {
+      this.lastError = target.refusal;
+      this.ctx?.statusChanged();
+      return;
+    }
+    this.preselected = null;
+    this.commit(target, isLoose(target.ref) ? this.viewerSide(target) * v.meters : v.meters);
   }
 
   /** The bar switched New body just after a pull: redo that pull in the new mode, as one undo step. */
-  adjustLast(id: string): boolean {
+  adjustLast(id: string, value: ToolSettingValue): boolean {
     const last = this.lastCommit;
     if (id !== 'newBody' || !last) return false;
-    this.redoLast(last, { ...last.params, mode: this.mode });
+    const mode: PushPullMode = typeof value === 'boolean' ? (value ? 'newBody' : 'merge') : this.mode;
+    if (mode === last.params.mode) return true;
+    const redone = this.redoLast(last, (p) => ({ ...p, mode }));
     this.ctx?.statusChanged();
-    return true;
-  }
-
-  /** Undo the last pull and apply it again with `params` (one undo entry); the original stays if that fails. */
-  private redoLast(last: LastCommit, params: PushPullApplyParams): void {
-    const previous = last.params;
-    last.params = params;
-    this.enqueue(async () => {
-      if (!last.applied || this.lastCommit !== last) return;
-      const ctx = this.ctx;
-      if (!ctx) return;
-      const host = hostOf(ctx.commands.ctx);
-      // Only re-edit when our commit is still the last thing that happened to the document.
-      if (host.undoStack.peek()?.label !== 'Push/Pull' || !host.undo()) return;
-      last.applied = false;
-      try {
-        await ctx.commands.execute('pushpull.apply', params);
-      } catch (err) {
-        host.redo();
-        last.params = previous;
-        last.applied = true;
-        throw err;
-      }
-      last.applied = true;
-      ctx.committed?.();
-    });
+    return redone;
   }
 
   onCancel(): void {
@@ -323,17 +376,22 @@ export class PushPullTool implements Tool {
     }
     this.lastCommit = null;
     this.lastError = null;
+    this.preselected = null;
     this.state = IDLE;
+    this.ctx?.statusChanged();
+    this.ctx?.requestRender();
   }
 
   // --- overlay / status -----------------------------------------------------------------------
 
   overlay(): readonly OverlayPrimitive[] {
     const s = this.state;
-    if (s.kind === 'hover') return highlight(s.target.loops);
-    if (s.kind !== 'dragging') return [];
-    if (Math.abs(s.distance) <= COPLANAR_TOL) return highlight(s.target.loops);
-    return ghostPrism(s.target.loops, s.target.normal, s.distance);
+    if (s.kind === 'dragging') {
+      if (Math.abs(s.distance) <= COPLANAR_TOL) return highlight(s.target.loops);
+      return ghostPrism(s.target.loops, s.target.normal, s.distance);
+    }
+    const target = this.pointedTarget();
+    return target && !target.refusal ? highlight(target.loops) : [];
   }
 
   status(): ToolStatus {
@@ -342,9 +400,16 @@ export class PushPullTool implements Tool {
 
   onSetting(id: string, value: ToolSettingValue): void {
     if (id !== 'newBody' || typeof value !== 'boolean') return;
-    this.mode = value ? 'newBody' : 'merge';
-    this.ctx?.requestRender();
+    this.setMode(value ? 'newBody' : 'merge');
+  }
+
+  private setMode(mode: PushPullMode): void {
+    this.mode = mode;
+    // A pull under way is previewed again in the new mode.
+    this.clearPreview();
+    this.schedulePreview();
     this.ctx?.statusChanged();
+    this.ctx?.requestRender();
   }
 
   private baseStatus(): ToolStatus {
@@ -357,12 +422,21 @@ export class PushPullTool implements Tool {
       const shown = isLoose(s.target.ref) ? Math.abs(s.distance) : s.distance;
       return { instructor: `Click or type distance.`, vcbLabel: 'Distance', vcbValue: fmt(shown), fields: [pointerField('Distance', 'length', fmt(shown))] };
     }
-    const instructor = this.lastError ? `Push/Pull failed: ${this.lastError}` : `Select face to push or pull.`;
+    const pointed = this.pointedTarget();
+    const instructor = this.lastError
+      ?? pointed?.refusal
+      ?? (this.preselected ? 'Click anywhere to pull the selected face, or type a distance.' : `Select face to push or pull.`);
     const last = this.lastCommit ? (isLoose(this.lastCommit.params.target) ? Math.abs(this.lastCommit.params.distance) : this.lastCommit.params.distance) : this.lastDistance;
     return { instructor, vcbLabel: 'Distance', vcbValue: last === null ? undefined : fmt(last) };
   }
 
   // --- internals ------------------------------------------------------------------------------
+
+  /** The face a typed distance or the highlight applies to: the preselected face, else the hovered one. */
+  private pointedTarget(): Target | null {
+    if (this.preselected) return this.preselected;
+    return this.state.kind === 'hover' ? this.state.target : null;
+  }
 
   /** +1 when the face's front looks toward the camera, else -1: the side a loose face is pulled to before the pointer moves. */
   private viewerSide(target: Target): number {
@@ -375,7 +449,10 @@ export class PushPullTool implements Tool {
     const target = this.resolveTarget(hit);
     const prevKey = this.state.kind === 'hover' ? this.state.target.key : null;
     this.state = target ? { kind: 'hover', target } : IDLE;
-    if ((target?.key ?? null) !== prevKey) this.ctx?.requestRender();
+    if ((target?.key ?? null) !== prevKey) {
+      this.ctx?.requestRender();
+      this.ctx?.statusChanged();
+    }
   }
 
   private endDrag(): void {
@@ -385,10 +462,26 @@ export class PushPullTool implements Tool {
     this.ctx?.requestRender();
   }
 
+  /** The face to pull from the next press: exactly one face selected in the open context, if it can be pulled. */
+  private selectedFace(): Target | null {
+    if (!this.ctx) return null;
+    const host = hostOf(this.ctx.commands.ctx);
+    const refs = host.selection.refs;
+    if (refs.length !== 1) return null;
+    const ref = refs[0]!;
+    if (ref.kind !== 'face' && ref.kind !== 'sketchFace') return null;
+    const target = this.resolveRef(ref, null);
+    return target && !target.refusal ? target : null;
+  }
+
   /** Resolve the geometry under the cursor into a target (world normal and loops) using the current document state. */
   private resolveTarget(hit: PickHit | null): Target | null {
-    if (!hit || !this.ctx) return null;
-    const ref: EntityRef = hit.ref;
+    return hit ? this.resolveRef(hit.ref, hit.point) : null;
+  }
+
+  /** Resolve a face ref into a target; `point` (world) picks the region of a divided face when the ref names none. */
+  private resolveRef(ref: EntityRef, point: Vec3 | null): Target | null {
+    if (!this.ctx) return null;
     const host = hostOf(this.ctx.commands.ctx);
     if (!samePath(ref.path, host.context.path)) return null; // only the open context is editable
     const state: DocumentState = host.doc.state;
@@ -411,6 +504,7 @@ export class PushPullTool implements Tool {
         loops: toWorld(sketchFaceLoops(container.sketch, face)),
         bodyId: null,
         matrix: frame.matrix,
+        refusal: sketchSurfaceFaceIds(container.sketch, face.id).length > 1 ? PUSH_PULL_MESSAGES.smooth : null,
       };
     }
     if (ref.kind !== 'face') return null;
@@ -419,8 +513,8 @@ export class PushPullTool implements Tool {
     if (!body || !face) return null;
     const regions = computeRegions(body, ref.faceId);
     let index = ref.region ?? -1;
-    if (index < 0 && regions.length > 1) {
-      const l = basisToLocal(face.basis, frame.toLocal(hit.point));
+    if (index < 0 && regions.length > 1 && point) {
+      const l = basisToLocal(face.basis, frame.toLocal(point));
       index = regionAt(regions, [l[0], l[1]]);
     }
     if (index < 0) index = 0;
@@ -436,32 +530,35 @@ export class PushPullTool implements Tool {
       loops: toWorld(loops),
       bodyId: body.id,
       matrix: frame.matrix,
+      refusal: surfaceFaceIds(body, ref.faceId).length > 1 ? PUSH_PULL_MESSAGES.smooth : null,
     };
   }
 
   /**
-   * Signed distance along the normal for a pointer event: a hovered face (other than the target)
-   * sets the height where the pull line crosses its plane ("match height"); otherwise the
-   * inference point is projected onto the pull line; without inference, the ray's closest point.
+   * Signed distance along the normal for a pointer event. A point snap on the way sets it exactly;
+   * otherwise a hovered face nearly parallel to the pulled one (other than the pulled face itself,
+   * and not one seen through it) sets the height where the pull line crosses its plane ("match
+   * height"); otherwise the pointer is followed along the pull line.
    */
-  private distanceFor(e: ToolPointerEvent, target: Target, base: Vec3): number {
+  private distanceFor(e: ToolPointerEvent, s: Extract<State, { kind: 'dragging' }>): number {
+    const { target, base } = s;
+    const along = (p: Vec3): number => v3dot(v3sub(p, base), target.normal);
     const inf = e.inference;
-    if (!inf) return closestParamOnLine(base, target.normal, e.ray);
-    const hit = inf.hit;
-    if (hit?.normal && hit.ref.kind === 'face' && !sameRef(hit.ref, target.ref)) {
-      const denom = v3dot(hit.normal, target.normal);
-      if (Math.abs(denom) > MATCH_HEIGHT_MIN_COS) {
-        const t = v3dot(hit.normal, v3sub(hit.point, base)) / denom;
-        if (Number.isFinite(t)) return t;
-      }
+    if (!inf) return closestParamOnLine(base, target.normal, e.ray) - s.offset;
+    if (POINT_SNAPS.has(inf.primary.kind) || inf.secondary.some((snap) => POINT_SNAPS.has(snap.kind) || (snap.kind === 'guide' && !snap.dir))) {
+      return along(inf.point);
     }
-    return v3dot(v3sub(inf.point, base), target.normal);
+    const matched = matchHeight(inf, e.ray, target, base);
+    if (matched !== null) return matched;
+    // The point was put on a hovered face that does not set the height: follow the pointer instead.
+    if (inf.secondary.some((snap) => snap.kind === 'onFace')) return closestParamOnLine(base, target.normal, e.ray) - s.offset;
+    // Crossing an edge sets the point exactly.
+    if (inf.secondary.some((snap) => snap.kind === 'onEdge')) return along(inf.point);
+    return along(inf.point) - s.offset;
   }
 
-  private commit(distance: number): void {
-    const s = this.state;
-    const target = s.kind === 'dragging' || s.kind === 'hover' ? s.target : null;
-    if (!target || !this.ctx) return;
+  private commit(target: Target, distance: number): void {
+    if (!this.ctx) return;
     if (!Number.isFinite(distance) || Math.abs(distance) <= COPLANAR_TOL) {
       this.endDrag();
       return;
@@ -469,27 +566,70 @@ export class PushPullTool implements Tool {
     const mode = this.mode;
     const params: PushPullApplyParams = { target: target.ref, distance, mode };
     const pre = this.preview;
-    const precomputed = pre && pre.key === target.key && pre.distance === distance && pre.mode === mode ? pre.result : undefined;
-    const last: LastCommit = { params, applied: false };
+    const preview = pre && pre.key === target.key && pre.distance === distance && pre.mode === mode ? pre : null;
+    const last: LastCommit = { params, applied: false, entry: null };
     this.lastCommit = last;
-    this.lastDistance = distance;
     this.lastError = null;
     this.clearPreview();
     this.state = IDLE;
     const ctx = this.ctx;
     this.enqueue(async () => {
-      await ctx.commands.execute('pushpull.apply', precomputed ? { ...params, precomputed } : params);
+      const host = hostOf(ctx.commands.ctx);
+      try {
+        await ctx.commands.execute('pushpull.apply', { ...params, ...reusablePreview(host.doc.state, params, preview) });
+      } catch (err) {
+        if (this.lastCommit === last) this.lastCommit = null;
+        throw err;
+      }
       last.applied = true;
-      ctx.committed?.();
+      last.entry = host.undoStack.peek();
+      this.lastDistance = distance;
+      if (this.ctx === ctx) ctx.committed?.();
+      ctx.statusChanged();
     });
     ctx.statusChanged();
     ctx.requestRender();
   }
 
+  /** The last pull can still be redone: it is queued, or its undo entry is the last change. */
+  private redoable(last: LastCommit): boolean {
+    if (!this.ctx || this.lastCommit !== last) return false;
+    if (!last.applied) return true;
+    return hostOf(this.ctx.commands.ctx).undoStack.peek() === last.entry;
+  }
+
+  /**
+   * Undo the last pull and apply it again with `next(params)` (one undo entry). The original stays,
+   * and the shown and double-click distances keep their values, when the redo is skipped or fails.
+   * False when the last pull can no longer be redone.
+   */
+  private redoLast(last: LastCommit, next: (p: PushPullApplyParams) => PushPullApplyParams): boolean {
+    if (!this.redoable(last) || !this.ctx) return false;
+    const ctx = this.ctx;
+    this.enqueue(async () => {
+      if (this.lastCommit !== last || !last.applied) return;
+      const host = hostOf(ctx.commands.ctx);
+      // Only re-edit while our commit is still the last thing that happened to the document.
+      if (host.undoStack.peek() !== last.entry || !host.undo()) return;
+      const params = next(last.params);
+      try {
+        await ctx.commands.execute('pushpull.apply', params);
+      } catch (err) {
+        host.redo();
+        throw err;
+      }
+      last.params = params;
+      last.entry = host.undoStack.peek();
+      this.lastDistance = params.distance;
+      if (this.ctx === ctx) ctx.committed?.();
+      ctx.statusChanged();
+    });
+    return true;
+  }
+
   private enqueue(task: () => Promise<void>): void {
     this.queue = this.queue.then(task).catch((err: unknown) => {
-      this.lastError = err instanceof Error ? err.message : String(err);
-      this.lastCommit = null;
+      this.lastError = userMessage(err);
       this.ctx?.statusChanged();
     });
   }
@@ -526,7 +666,9 @@ export class PushPullTool implements Tool {
       const plan = planPushPull(host.doc.state, target.ref, distance, mode);
       const r = await kernel.coalesced('pushpull-preview', () => runPushPullKernel(kernel, plan, true));
       if (r.status !== 'current') return;
-      this.preview = { key: target.key, distance, mode, result: r.value, replacesBodyId: mode === 'merge' ? target.bodyId : null };
+      // A push that would leave nothing is refused when it ends; until then the ghost shows it.
+      if (r.value.components.length === 0) return;
+      this.preview = { key: target.key, distance, mode, result: r.value, replacesBodyId: mode === 'merge' ? target.bodyId : null, source: planSource(plan) };
       if (this.currentPreview()) ctx.requestRender();
     } catch {
       // A failed preview is not an error the user needs to see; the ghost stays.
@@ -553,9 +695,78 @@ function screenDist(a: Vec2, b: Vec2): number {
   return Math.hypot(a[0] - b[0], a[1] - b[1]);
 }
 
-function sameRef(a: EntityRef, b: PushPullTarget): boolean {
-  if (a.kind !== b.kind || a.id !== b.id) return false;
+/** Same face (any region of it), as an entity ref or a push/pull target. */
+function sameFace(a: EntityRef | PushPullTarget, b: PushPullTarget): boolean {
+  if (a.kind !== b.kind || a.id !== b.id || !samePath(a.path, b.path)) return false;
   return a.kind !== 'face' || b.kind !== 'face' || a.faceId === b.faceId;
+}
+
+function loopCentroid(loop: readonly Vec3[]): Vec3 {
+  const c: [number, number, number] = [0, 0, 0];
+  for (const p of loop) for (let i = 0; i < 3; i++) c[i]! += p[i]! / loop.length;
+  return c;
+}
+
+/**
+ * The height a hovered face sets for the pull (along its normal from `base`), or null when it sets
+ * none: the face is the pulled one, is more than 30° from parallel to it, is a solid's face seen
+ * from behind, or is seen through the pulled face.
+ */
+function matchHeight(inf: InferenceResult, ray: Ray, target: Target, base: Vec3): number | null {
+  // The engine reports the face whose plane it put the point on; a hand-made pick only has the hit.
+  const onFace = inf.secondary.find((snap) => snap.kind === 'onFace' && snap.plane && snap.ref);
+  const hit = inf.hit;
+  const surface = onFace?.ref && onFace.plane
+    ? { ref: onFace.ref, normal: onFace.plane.n, point: onFace.point }
+    : hit?.normal && (hit.ref.kind === 'face' || hit.ref.kind === 'sketchFace')
+      ? { ref: hit.ref, normal: hit.normal, point: hit.point }
+      : null;
+  if (!surface || sameFace(surface.ref, target.ref)) return null;
+  // A solid's face turned away from the view is only in sight through the pulled face.
+  if (surface.ref.kind === 'face' && v3dot(surface.normal, ray.dir) > 0) return null;
+  const denom = v3dot(surface.normal, target.normal);
+  if (Math.abs(denom) < MATCH_HEIGHT_MIN_COS) return null;
+  if (seenThroughTarget(ray, target, base, surface.point)) return null;
+  const t = v3dot(surface.normal, v3sub(surface.point, base)) / denom;
+  return Number.isFinite(t) ? t : null;
+}
+
+/** The ray passes through the pulled face, where it was when the pull started, before reaching `point`. */
+function seenThroughTarget(ray: Ray, target: Target, base: Vec3, point: Vec3): boolean {
+  const denom = v3dot(ray.dir, target.normal);
+  if (Math.abs(denom) <= 1e-12) return false;
+  const s = v3dot(v3sub(base, ray.origin), target.normal) / denom;
+  if (s <= 0 || s >= v3dot(v3sub(point, ray.origin), ray.dir) - COPLANAR_TOL) return false;
+  const basis = planeBasis(base, target.normal);
+  const flat = (p: Vec3): [number, number] => {
+    const l = basisToLocal(basis, p);
+    return [l[0], l[1]];
+  };
+  return pointInPolygon(flat(v3addScaled(ray.origin, ray.dir, s)), target.loops.map((loop) => loop.map(flat)));
+}
+
+/** What a preview or commit was computed against: its identity changes with every edit of it. */
+function planSource(plan: PushPullPlan): unknown {
+  return plan.kind === 'body' ? plan.body : plan.container.sketch;
+}
+
+/** The preview result to commit, when it was computed against the face as it is now. */
+function reusablePreview(state: DocumentState, params: PushPullApplyParams, preview: Preview | null): Partial<PushPullApplyParams> {
+  if (!preview) return {};
+  let plan: PushPullPlan;
+  try {
+    plan = planPushPull(state, params.target, params.distance, params.mode);
+  } catch {
+    return {};
+  }
+  if (planSource(plan) !== preview.source) return {};
+  return plan.kind === 'body' ? { precomputed: preview.result, precomputedVersion: plan.body.version } : { precomputed: preview.result };
+}
+
+/** A failure in the words the status bar shows. */
+function userMessage(err: unknown): string {
+  if (err instanceof PushFormError && (err.code.startsWith('pushpull.') || err.code === 'context.mismatch')) return err.message;
+  return PUSH_PULL_MESSAGES.failed;
 }
 
 /** Parameter t of the point on the line `base + t·dir` (unit dir) closest to the ray. */

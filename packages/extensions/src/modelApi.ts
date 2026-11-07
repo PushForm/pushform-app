@@ -840,7 +840,16 @@ export class ModelDocumentApi {
         const distance = (op.distance * along) / localPushPullDistance(state, path, face.plane.n, 1);
         const plan = planPushPull(state, face.target, distance, mode);
         const precomputed = await runPushPullKernel(kernelOf(this.commands.ctx), plan);
-        const result = await exec<Promise<PushPullApplyResult>>('pushpull.apply', { target: face.target, distance, mode, precomputed });
+        const removesAll = (): ModelApiFailure => this.failure('invalid_geometry', `Pushing ${face.shown} by ${op.distance} m would remove all of solid ${plan.kind === 'body' ? plan.body.id : ''}; delete the solid instead.`);
+        let result: PushPullApplyResult;
+        try {
+          result = await exec<Promise<PushPullApplyResult>>('pushpull.apply', { target: face.target, distance, mode, precomputed });
+        } catch (err) {
+          // the command refuses a push that would leave nothing; say what to do instead
+          if (err instanceof PushFormError && err.code === 'pushpull.nothingLeft') throw removesAll();
+          if (err instanceof PushFormError && err.code === 'pushpull.smooth') throw this.failure('invalid_geometry', `${face.shown} is part of a smooth surface; push_pull works on flat faces.`);
+          throw err;
+        }
         if (plan.kind === 'body' && mode === 'merge' && !result.bodyIds.includes(plan.body.id))
           throw this.failure('invalid_geometry', `Pushing ${face.shown} by ${op.distance} m would remove all of solid ${plan.body.id}; delete the solid instead.`);
         if (result.bodyIds.length === 0) throw this.failure('invalid_geometry', `Pulling ${face.shown} by ${op.distance} m makes no solid.`);

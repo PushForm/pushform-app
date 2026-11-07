@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { CurveId, FaceLocalId, Id, MeshData, SurfaceId, Vec2, Vec3 } from '@pushform/core';
 import { MERGE_TOL, planeProject, PushFormError, v3dist, v3dot, v3eq, v3scale } from '@pushform/core';
 import { pointInPolygon } from '@pushform/geom';
+import { KernelError } from '@pushform/kernel';
 import type {
   ExtrudeSketchRequest,
   KernelClient,
@@ -41,12 +42,14 @@ import {
   facePolygonUv,
   sketchFaceEdgeIds,
   sketchFacePolygonUv,
+  surfaceFaceIds,
   textureTiles,
   uvRebase,
 } from '@pushform/model';
 import { defineCommand } from '../registry/Command';
 import { hostOf, kernelOf } from '../host/services';
-import { contextFrame, draftContainerAt, requireContextPath, sketchGraphAt } from './context';
+import { contextFrame, draftContainerAt, samePath, sketchGraphAt } from './context';
+import { sketchSurfaceFaceIds } from './sketchQueries';
 
 // ---------------------------------------------------------------------------------------------
 // Params
@@ -78,6 +81,11 @@ export const PushPullApplyParamsSchema = z.object({
   mode: modeSchema,
   /** A kernel result already computed for exactly these params (the tool's last matching preview). */
   precomputed: z.custom<PushPullResult>(isPushPullResult).optional(),
+  /**
+   * Version of the body `precomputed` was computed against. A body face's precomputed result is used
+   * only when the body still has this version; otherwise the result is computed again.
+   */
+  precomputedVersion: z.number().int().optional(),
 });
 export type PushPullApplyParams = z.infer<typeof PushPullApplyParamsSchema>;
 
@@ -107,14 +115,26 @@ export type PushPullPlan =
       path: readonly Id[];
       container: EntityContainer;
       face: SketchFace;
+      mode: PushPullMode;
       request: Params<ExtrudeSketchRequest>;
     };
+
+/** Messages for refused pushes and pulls, in the words the status bar shows. */
+export const PUSH_PULL_MESSAGES = {
+  gone: 'The face to push or pull is no longer in the model.',
+  context: 'This face is not in the open edit context.',
+  smooth: 'Push/Pull works on flat faces. This face is part of a smooth surface.',
+  nothingLeft: 'Pushing the whole face to the other side would leave nothing of the solid.',
+  noArea: 'This face has no area to push or pull.',
+  failed: 'Push/Pull could not make a valid solid from this face.',
+  changed: 'The face changed before Push/Pull could be applied. Try again.',
+} as const;
 
 function containerOf(state: DocumentState, path: readonly number[]): EntityContainer {
   try {
     return containerAt(state, path as unknown as readonly Id[]);
-  } catch (e) {
-    throw new PushFormError('pushpull.context', e instanceof Error ? e.message : String(e));
+  } catch {
+    throw new PushFormError('pushpull.context', PUSH_PULL_MESSAGES.gone);
   }
 }
 
@@ -136,32 +156,36 @@ export function localPushPullDistance(state: DocumentState, path: readonly numbe
  * Resolve a target in `state` and build the kernel request for it. Pure: reads the state only.
  * `distance` is measured along the face's world normal (what a tool sees) unless `space` is
  * `'local'`; the request always carries the context-local distance. Throws
- * `PushFormError('pushpull.target')` when the target no longer exists.
+ * `PushFormError('pushpull.target')` when the target no longer exists and
+ * `PushFormError('pushpull.smooth')` when it is a face of a smooth surface.
  */
 export function planPushPull(state: DocumentState, target: PushPullTarget, distance: number, mode: PushPullMode, space: 'world' | 'local' = 'world'): PushPullPlan {
   const path = target.path as unknown as readonly Id[];
   const container = containerOf(state, path);
   if (target.kind === 'sketchFace') {
     const face = container.sketch.faces.get(target.id as Id);
-    if (!face) throw new PushFormError('pushpull.target', `Sketch face ${target.id} not found`);
+    if (!face) throw new PushFormError('pushpull.target', PUSH_PULL_MESSAGES.gone);
+    if (sketchSurfaceFaceIds(container.sketch, face.id).length > 1) throw new PushFormError('pushpull.smooth', PUSH_PULL_MESSAGES.smooth);
     const d = space === 'local' ? distance : localPushPullDistance(state, path, face.plane.n, distance);
     return {
       kind: 'sketch',
       path,
       container,
       face,
+      mode,
       request: { basis: face.basis, polygon: sketchFacePolygonUv(container.sketch, face), distance: d, nextFaceId: 0 },
     };
   }
   const body = container.bodies.get(target.id as Id);
-  if (!body) throw new PushFormError('pushpull.target', `Body ${target.id} not found`);
+  if (!body) throw new PushFormError('pushpull.target', PUSH_PULL_MESSAGES.gone);
   const faceId = target.faceId as FaceLocalId;
   const face = body.faces.get(faceId);
-  if (!face) throw new PushFormError('pushpull.target', `Face ${target.faceId} not found on body ${target.id}`);
+  if (!face) throw new PushFormError('pushpull.target', PUSH_PULL_MESSAGES.gone);
+  if (surfaceFaceIds(body, faceId).length > 1) throw new PushFormError('pushpull.smooth', PUSH_PULL_MESSAGES.smooth);
   const regions = computeRegions(body, faceId);
   const index = target.region ?? 0;
   const region = regions[index];
-  if (!region) throw new PushFormError('pushpull.target', `Region ${index} not found on face ${target.faceId}`);
+  if (!region) throw new PushFormError('pushpull.target', PUSH_PULL_MESSAGES.gone);
   const imprint = body.imprints.get(faceId);
   const regionIsWholeFace = !imprint || imprint.edges.size === 0 || regions.length === 1;
   const d = space === 'local' ? distance : localPushPullDistance(state, path, face.plane.n, distance);
@@ -188,11 +212,25 @@ export function planPushPull(state: DocumentState, target: PushPullTarget, dista
   };
 }
 
-/** Run the plan on the kernel (uploading the body first when needed). `preview` marks drag previews. */
+/**
+ * Run the plan on the kernel (uploading the body first when needed). `preview` marks drag previews.
+ * Kernel failures come back as `PushFormError('pushpull.kernel')` in user words.
+ */
 export async function runPushPullKernel(kernel: KernelClient, plan: PushPullPlan, preview = false): Promise<PushPullResult> {
-  if (plan.kind === 'sketch') return kernel.extrudeSketch(plan.request);
-  await kernel.ensureBody(plan.body.id, plan.body.version, plan.body.mesh);
-  return kernel.pushPull(preview ? { ...plan.request, preview: true } : plan.request);
+  try {
+    if (plan.kind === 'sketch') return await kernel.extrudeSketch(plan.request);
+    await kernel.ensureBody(plan.body.id, plan.body.version, plan.body.mesh);
+    return await kernel.pushPull(preview ? { ...plan.request, preview: true } : plan.request);
+  } catch (err) {
+    if (!(err instanceof KernelError) || err.code === 'Aborted') throw err;
+    const noArea = err.code === 'InvalidInput' && /no area/.test(err.message);
+    throw new PushFormError('pushpull.kernel', noArea ? PUSH_PULL_MESSAGES.noArea : PUSH_PULL_MESSAGES.failed, { code: err.code, message: err.message });
+  }
+}
+
+/** A merging push that would leave nothing of the solid (a whole face pushed to or past the other side). */
+function leavesNothing(plan: PushPullPlan, result: PushPullResult): boolean {
+  return plan.kind === 'body' && plan.request.mode === 'merge' && result.components.length === 0;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -290,11 +328,6 @@ function relocateImprints(body: Body, faceId: FaceLocalId, region: Region, compo
 
 /** cast: inside a transaction the container is a draft; Body and Draft<Body> differ only in tuple mutability. */
 const asDraft = (c: EntityContainer): Draft<EntityContainer> => c as unknown as Draft<EntityContainer>;
-
-function removeBody(container: EntityContainer, id: Id): void {
-  container.bodies.delete(id);
-  container.order = container.order.filter((x) => x !== id);
-}
 
 // ---------------------------------------------------------------------------------------------
 // Curves → surfaces (extruded circles/arcs become smooth face groups, the caps keep the curve)
@@ -465,7 +498,7 @@ export function applyPushPullResult(draft: DocumentDraft, plan: PushPullPlan, re
 
   if (plan.kind === 'sketch') {
     const face = container.sketch.faces.get(plan.face.id);
-    if (!face) throw new PushFormError('pushpull.stale', 'The sketch face changed before Push/Pull could be applied');
+    if (!face) throw new PushFormError('pushpull.stale', PUSH_PULL_MESSAGES.changed);
     const plusN = plan.request.distance > 0 ? TOOL_FAR_CAP : TOOL_NEAR_CAP;
     const minusN = plan.request.distance > 0 ? TOOL_NEAR_CAP : TOOL_FAR_CAP;
     const boundary = sketchBoundaryCurves(container.sketch, face);
@@ -485,6 +518,8 @@ export function applyPushPullResult(draft: DocumentDraft, plan: PushPullPlan, re
       markCurveSurfaces(draft, body, result, boundary);
       bodyIds.push(body.id);
     }
+    // New body leaves the sheet face where it was.
+    if (plan.mode === 'newBody') return { bodyIds };
     const g = sketchGraphAt(draft, plan.path);
     const edgeIds = sketchFaceEdgeIds(face);
     g.removeFace(face.id);
@@ -494,17 +529,14 @@ export function applyPushPullResult(draft: DocumentDraft, plan: PushPullPlan, re
 
   const current = container.bodies.get(plan.body.id);
   if (!current || current.version !== plan.body.version) {
-    throw new PushFormError('pushpull.stale', 'The body changed before Push/Pull could be applied');
+    throw new PushFormError('pushpull.stale', PUSH_PULL_MESSAGES.changed);
   }
   const [first, ...extras] = result.components;
   if (plan.request.mode === 'newBody') {
     for (const c of result.components) bodyIds.push(bodyFromComponent(draft, container, c, plan.body, result.bodyRunId).id);
     return { bodyIds };
   }
-  if (!first) {
-    removeBody(container, plan.body.id);
-    return { bodyIds };
-  }
+  if (!first || leavesNothing(plan, result)) throw new PushFormError('pushpull.nothingLeft', PUSH_PULL_MESSAGES.nothingLeft);
   const boundary = bodyBoundaryCurves(plan.body, plan.face, plan.region, plan.request.region.regionIsWholeFace);
   const updated = applyKernelResult(draft, plan.body.id, toKernelResult(first, result.bodyRunId));
   updated.nextFaceId = Math.max(updated.nextFaceId, result.nextFaceId);
@@ -520,7 +552,8 @@ export function applyPushPullResult(draft: DocumentDraft, plan: PushPullPlan, re
 /**
  * Push/Pull a body face region or a sketch face of the current edit context. `distance` is along
  * the face's world normal. Async: the kernel runs first, then the document edit is recorded as one
- * undo entry ("Push/Pull"). Returns `{ bodyIds }`.
+ * undo entry ("Push/Pull"). Returns `{ bodyIds }`. Refuses, changing nothing, a face of a smooth
+ * surface and a push that would leave nothing of the solid.
  */
 export const pushPullApply = defineCommand({
   id: 'pushpull.apply',
@@ -531,9 +564,14 @@ export const pushPullApply = defineCommand({
   async run(ctx, p): Promise<PushPullApplyResult> {
     const host = hostOf(ctx);
     const kernel = kernelOf(ctx);
-    requireContextPath(host, p.target.path, 'Face');
+    requireFaceInContext(host.context.path, p.target.path);
     const plan = planPushPull(host.doc.state, p.target, p.distance, p.mode);
-    const result = p.precomputed ?? (await runPushPullKernel(kernel, plan));
+    // A precomputed result counts only when it was computed against the solid as it is now.
+    // a result computed against an older version of the body is computed again; callers that give no version
+    // (scripted batches that computed it just now) are taken at their word
+    const current = p.precomputed !== undefined && (plan.kind === 'sketch' || p.precomputedVersion === undefined || p.precomputedVersion === plan.body.version);
+    const result = current && p.precomputed ? p.precomputed : await runPushPullKernel(kernel, plan);
+    if (leavesNothing(plan, result)) throw new PushFormError('pushpull.nothingLeft', PUSH_PULL_MESSAGES.nothingLeft);
     return host.transact('Push/Pull', () => host.edit('Push/Pull', (draft) => applyPushPullResult(draft, plan, result)));
   },
 });
@@ -547,10 +585,14 @@ export const pushPullPreview = defineCommand({
   undoable: false,
   run(ctx, p): Promise<PushPullResult> {
     const host = hostOf(ctx);
-    requireContextPath(host, p.target.path, 'Face');
+    requireFaceInContext(host.context.path, p.target.path);
     const plan = planPushPull(host.doc.state, p.target, p.distance, p.mode);
     return runPushPullKernel(kernelOf(ctx), plan, true);
   },
 });
+
+function requireFaceInContext(context: readonly number[], path: readonly number[]): void {
+  if (!samePath(path, context)) throw new PushFormError('context.mismatch', PUSH_PULL_MESSAGES.context);
+}
 
 export const pushPullCommands = [pushPullApply, pushPullPreview];

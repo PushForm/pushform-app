@@ -2,7 +2,7 @@
 // Copyright 2026 PushForm contributors
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { Id, Vec3 } from '@pushform/core';
-import { m4transformDir, m4transformPoint } from '@pushform/core';
+import { m4invert, m4transformDir, m4transformPoint } from '@pushform/core';
 import { freeInference, GROUND_PLANE, type PickHit } from '@pushform/inference';
 import { instanceAt, type EntityRef } from '@pushform/model';
 import { ToolManager } from '../ToolManager';
@@ -99,5 +99,88 @@ describe('MoveTool with glue', () => {
     const inst = instanceAt(host.doc.state, [ref.id])!;
     expect(m4transformPoint(inst.transform, [0, 0, 0])).toEqual([3, 0, 0]);
     expect(inst.gluedPlane).toBeUndefined();
+  });
+
+  /** A wall face at x = 5 facing -x, hit at `point`. */
+  const wallHit = (s: ReturnType<typeof setup>, point: Vec3): PickHit => {
+    const wallId = s.registry.execute('model.addBox', { min: [5, -5, 0], max: [5.2, 5, 3] }) as number;
+    const body = s.host.doc.state.definitions.get(s.host.doc.state.rootDefinitionId)!.entities.bodies.get(wallId as Id)!;
+    const face = [...body.faces.values()].find((f) => f.plane.n[0] < -0.5)!;
+    return { ref: { kind: 'face', path: [], id: wallId as Id, faceId: face.id, region: null }, point, t: 1, normal: face.plane.n, screenDist: 0 };
+  };
+
+  it('keeps the offset between the pointer and the origin as the component slides onto a face', async () => {
+    const s = setup();
+    const ref = s.component('vertical', [0, 0, 0], [1, 0.1, 1]);
+    const hit = wallHit(s, [5, 1, 1.5]);
+    s.host.selection.set([ref]);
+    const before = instanceAt(s.host.doc.state, [ref.id])!.transform;
+    // picked up by a point away from its origin
+    const grab: Vec3 = [0.5, 0, 0.5];
+    const grabLocal = m4transformPoint(m4invert(before)!, grab);
+    s.tools.activate('move');
+    const tool = s.tools.activeTool as MoveTool;
+    s.tools.pointerDown(at(grab));
+    s.tools.pointerMove(at([5, 1, 1.5], hit));
+    s.tools.pointerUp(at([5, 1, 1.5], hit));
+    await tool.settled;
+    const inst = instanceAt(s.host.doc.state, [ref.id])!;
+    const origin = m4transformPoint(inst.transform, [0, 0, 0]);
+    const grabbed = m4transformPoint(inst.transform, grabLocal);
+    // the origin lies on the face, and the point picked up is over the pointer
+    expect(origin[0]).toBeCloseTo(5, 9);
+    expect(grabbed[1]).toBeCloseTo(1, 9);
+    expect(grabbed[2]).toBeCloseTo(1.5, 9);
+    expect(Math.hypot(origin[1] - 1, origin[2] - 1.5)).toBeGreaterThan(0.1);
+    expect(inst.gluedPlane!.n[0]).toBeCloseTo(-1, 9);
+  });
+
+  it('a value typed over a glue face moves by that value; an axis lock ends the glue target', async () => {
+    const s = setup();
+    const ref = s.component('vertical', [0, 0, 0], [1, 0.1, 1]);
+    const hit = wallHit(s, [5, 1, 1.5]);
+    s.host.selection.set([ref]);
+    s.tools.activate('move');
+    const tool = s.tools.activeTool as MoveTool;
+    s.tools.pointerDown(at([0, 0, 0]));
+    s.tools.pointerMove(at([5, 1, 1.5], hit));
+    expect(s.tools.status().instructor).toContain('glue');
+    s.tools.keyDown({ key: 'ArrowRight', code: 'ArrowRight', modifiers: NO_MODIFIERS, repeat: false });
+    expect(s.tools.status().instructor).not.toContain('glue');
+    s.tools.keyDown({ key: 'ArrowRight', code: 'ArrowRight', modifiers: NO_MODIFIERS, repeat: false });
+    s.tools.pointerMove(at([5, 1, 1.5], hit));
+    expect(s.tools.status().instructor).toContain('glue');
+    s.tools.onVcb({ kind: 'relative', coords: [1, 0, 0] });
+    await tool.settled;
+    const inst = instanceAt(s.host.doc.state, [ref.id])!;
+    expect(m4transformPoint(inst.transform, [0, 0, 0])).toEqual([1, 0, 0]);
+    expect(inst.gluedPlane).toBeUndefined();
+  });
+
+  it('typed coordinates and lengths keep a glued placement in its glue plane', async () => {
+    const s = setup();
+    const ref = s.component('horizontal', [0, 0, 0], [1, 1, 1]);
+    s.registry.execute('component.placeOnFace', { ref, point: [0, 0, 0], normal: [0, 0, 1] });
+    s.host.selection.set([ref]);
+    s.tools.activate('move');
+    const tool = s.tools.activeTool as MoveTool;
+    s.tools.pointerDown(at([0, 0, 0]));
+    s.tools.pointerUp(at([0, 0, 0]));
+    s.tools.onVcb({ kind: 'relative', coords: [1, 0, 2] });
+    await tool.settled;
+    const origin = (): Vec3 => m4transformPoint(instanceAt(s.host.doc.state, [ref.id])!.transform, [0, 0, 0]);
+    expect(origin()).toEqual([1, 0, 0]);
+    // re-edited with [x,y,z]: the base point goes there, within the plane
+    s.tools.onVcb({ kind: 'absolute', coords: [2, 1, 5] });
+    await tool.settled;
+    expect(origin()).toEqual([2, 1, 0]);
+    // a length along an axis lock in the plane moves that far
+    s.tools.pointerDown(at([2, 1, 0]));
+    s.tools.pointerUp(at([2, 1, 0]));
+    s.tools.keyDown({ key: 'ArrowRight', code: 'ArrowRight', modifiers: NO_MODIFIERS, repeat: false });
+    s.tools.onVcb({ kind: 'length', meters: 0.5, raw: 0.5, unit: 'm' });
+    await tool.settled;
+    expect(origin()).toEqual([2.5, 1, 0]);
+    expect(instanceAt(s.host.doc.state, [ref.id])!.gluedPlane!.d).toBeCloseTo(0, 9);
   });
 });

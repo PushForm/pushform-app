@@ -300,6 +300,124 @@ export class SketchGraph {
   }
 
   /**
+   * Split `edgeIds` (edges already in the sketch, such as edges whose vertices just moved) and the edges they
+   * cross or touch where they meet, as adding them with `addEdge` would: at proper crossings, at vertices
+   * lying on an edge, and at the given edges' ends lying on another edge. Faces and curves follow the splits.
+   * Edges that end up between the same two vertices are left for the caller to merge. Runs no face finder.
+   * Returns the ids of the pieces of the given edges (`along`), of every other edge they split (`split`),
+   * and for each given edge that was split, its pieces.
+   */
+  splitAtCrossings(edgeIds: readonly Id[]): { along: Id[]; split: Id[]; pieces: Map<Id, Id[]> } {
+    const tol = this.tol;
+    const t2 = tol * tol;
+    const interior = (t: number, len: number): boolean => t * len > tol && (1 - t) * len > tol;
+    const along = new Set(edgeIds.filter((id) => this.sketch.edges.has(id)));
+    const split = new Set<Id>();
+    const queue = [...along];
+    /** Piece of a given edge → the given edge it came from. */
+    const origin = new Map<Id, Id>([...along].map((id) => [id, id]));
+    const divide = (id: Id, at: Id): [Id, Id] | null => {
+      const pieces = this.splitEdge(id, at);
+      const from = origin.get(id);
+      if (pieces && from !== undefined) for (const p of pieces) origin.set(p, from);
+      return pieces;
+    };
+    // every split makes shorter edges, so this ends; the cap only guards against a tolerance loop
+    for (let guard = 0; queue.length && guard < 100000; guard++) {
+      const id = queue.pop()!;
+      const e = this.sketch.edges.get(id);
+      if (!e) continue;
+      const A = this.pos(e.a), B = this.pos(e.b);
+      const AB = v3sub(B, A);
+      const lenAB = v3len(AB);
+      /** Where `e` meets another edge: the vertex to split `e` at and/or the other edge to split there. */
+      let meet: { self: Id | null; other: Id | null; at: Id } | null = null;
+      for (const f of this.sketch.edges.values()) {
+        if (f.id === id) continue;
+        const P = this.pos(f.a), Q = this.pos(f.b);
+        const lenPQ = v3dist(P, Q);
+        for (const q of [f.a, f.b]) {
+          if (q === e.a || q === e.b) continue;
+          const c = pointSegmentClosest3D(this.pos(q), A, B);
+          if (c.distSq <= t2 && interior(c.t, lenAB)) meet = { self: id, other: null, at: q };
+        }
+        if (meet) break;
+        for (const v of [e.a, e.b]) {
+          if (v === f.a || v === f.b) continue;
+          const c = pointSegmentClosest3D(this.pos(v), P, Q);
+          if (c.distSq <= t2 && interior(c.t, lenPQ)) meet = { self: null, other: f.id, at: v };
+        }
+        if (meet) break;
+        if (f.a === e.a || f.a === e.b || f.b === e.a || f.b === e.b) continue;
+        const n = v3cross(AB, v3sub(Q, P));
+        if (v3len(n) <= 1e-12 * lenAB * lenPQ) continue; // parallel: the end tests above cover overlaps
+        let point: Vec3 | null = null;
+        let ts: { t: number; s: number } | null = null;
+        if (segmentsCoplanar(A, B, P, Q, tol)) {
+          const basis = planeBasis(A, n);
+          const uv = (p: Vec3): [number, number] => {
+            const l = basisToLocal(basis, p);
+            return [l[0], l[1]];
+          };
+          const r = segSegIntersect2D(uv(A), uv(B), uv(P), uv(Q), tol);
+          if (r.kind === 'point') {
+            ts = { t: r.t, s: r.s };
+            point = [A[0] + AB[0] * r.t, A[1] + AB[1] * r.t, A[2] + AB[2] * r.t];
+          }
+        } else {
+          const r = segSegClosest3D(A, B, P, Q);
+          if (r.distSq <= t2) {
+            ts = { t: r.t, s: r.s };
+            point = [(r.p[0] + r.q[0]) / 2, (r.p[1] + r.q[1]) / 2, (r.p[2] + r.q[2]) / 2];
+          }
+        }
+        if (point && ts && interior(ts.t, lenAB) && interior(ts.s, lenPQ)) {
+          meet = { self: id, other: f.id, at: this.addVertex(point) };
+          break;
+        }
+      }
+      if (!meet) continue;
+      let changed = false;
+      if (meet.other !== null) {
+        const inAlong = along.has(meet.other);
+        const pieces = divide(meet.other, meet.at);
+        if (pieces) {
+          changed = true;
+          along.delete(meet.other);
+          split.delete(meet.other);
+        }
+        for (const p of pieces ?? []) {
+          if (inAlong) {
+            along.add(p);
+            queue.push(p);
+          } else split.add(p);
+        }
+      }
+      if (meet.self !== null) {
+        const pieces = divide(id, meet.at);
+        if (pieces) {
+          along.delete(id);
+          for (const p of pieces) {
+            along.add(p);
+            queue.push(p);
+          }
+          continue;
+        }
+      }
+      // `e` itself is unchanged but may meet more edges
+      if (changed) queue.push(id);
+    }
+    const pieces = new Map<Id, Id[]>();
+    for (const [piece, from] of origin) {
+      if (piece === from || !this.sketch.edges.has(piece) || this.sketch.edges.has(from)) continue;
+      const list = pieces.get(from);
+      if (list) list.push(piece);
+      else pieces.set(from, [piece]);
+    }
+    return { along: [...along].filter((id) => this.sketch.edges.has(id)), split: [...split].filter((id) => this.sketch.edges.has(id)), pieces };
+  }
+
+  /**
    * Delete an edge. Faces using it are deleted; coplanar faces that merge across the removed
    * edge heal into one face. Orphaned vertices and empty curves are removed.
    */

@@ -70,8 +70,6 @@ export class CircleTool implements Tool {
   protected cursorInference: InferenceResult | null = null;
   protected cursorScreen: Vec2 | null = null;
   protected last: LastCommit<CircleParams> | null = null;
-  /** The bar shows the last shape as applied: set by a commit, ended by a press in the view (as the tool manager does). */
-  protected lastShown = false;
   protected readonly gesture = new ClickGesture();
 
   get centerPoint(): Vec3 | null {
@@ -94,7 +92,6 @@ export class CircleTool implements Tool {
   deactivate(): void {
     this.reset();
     this.last = null;
-    this.lastShown = false;
     this.ctx = null;
   }
 
@@ -111,7 +108,6 @@ export class CircleTool implements Tool {
   }
 
   onPointerDown(e: ToolPointerEvent): void {
-    this.lastShown = false;
     if (!this.gesture.down(e)) return;
     if (!this.center && e.inference) {
       this.track(e);
@@ -361,7 +357,6 @@ export class CircleTool implements Tool {
     const payload: AddCurveInput = { points: tess.points, closed: true, curve: tess.curve };
     const res = ctx.commands.execute('sketch.addCurve', payload) as AddCurveResult;
     this.last = { params, entry: hostOfTool(ctx).undoStack.peek() };
-    this.lastShown = true;
     ctx.committed?.();
     return res;
   }

@@ -82,7 +82,7 @@ describe('user manual retrieval over the actual corpus', () => {
     ['model', 'Intersect', ['second click applies', 'shared volume', '**Undo**']],
     ['model', 'Split', ['second click applies', 'separate solid pieces']],
     ['model', 'Move', ['click a base point', 'click again to finish', 'Escape']],
-    ['model', 'Rotate', ['center of rotation', 'set the baseline', 'click again to commit']],
+    ['model', 'Rotate', ['center of rotation', 'set the starting direction', 'click again to commit']],
     ['model', 'Scale', ['Drag a grip', 'release to commit', 'Escape']],
     ['model', 'Orbit', ['drag to turn', 'Release to stop']],
     ['model', 'Pan', ['drag to shift', 'Release to stop']],

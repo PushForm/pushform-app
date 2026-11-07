@@ -96,22 +96,39 @@ export function offsetPolygonFull(poly: PolygonsWithHoles, distance: number, opt
 
 /**
  * Offset an open polyline: `distance > 0` moves it to the right of its travel direction. Joins
- * are mitred (bevelled past `mitreLimit`); the ends are not capped.
+ * are mitred (bevelled past `mitreLimit`); the ends are not capped. Segments tagged in
+ * `opts.arcs[0]` (segment `i` runs from point `i` to point `i + 1`) are offset as concentric arcs.
  */
 export function offsetPolyline(points: readonly Vec2[], distance: number, opts: OffsetOptions = {}): MVec2[] {
+  return offsetPolylineFull(points, distance, opts).points;
+}
+
+/** `offsetPolyline` with the arc tag of every output segment (`tags[i]` for points `i` → `i + 1`). */
+export function offsetPolylineFull(points: readonly Vec2[], distance: number, opts: OffsetOptions = {}): { points: MVec2[]; tags: (OffsetArc | null)[] } {
   const mitreLimit = opts.mitreLimit ?? DEFAULT_MITRE_LIMIT;
-  const pts = dedupe(points);
+  const { pts, tags } = dedupeTagged(points, opts.arcs?.[0] ?? []);
   const n = pts.length;
-  if (n < 2) return pts;
+  if (n < 2) return { points: pts, tags: [] };
   const segs: Seg[] = [];
-  for (let i = 0; i + 1 < n; i++) segs.push(offsetStraight(pts[i]!, pts[i + 1]!, distance));
+  for (let i = 0; i + 1 < n; i++) {
+    const tag = tags[i] ?? null;
+    segs.push(tag ? offsetArcEdge(pts[i]!, pts[i + 1]!, distance, tag) : offsetStraight(pts[i]!, pts[i + 1]!, distance));
+  }
   const out: MVec2[] = [segs[0]!.a];
+  const outTags: (OffsetArc | null)[] = [];
   for (let i = 0; i + 1 < segs.length; i++) {
-    const j = join(segs[i]!, segs[i + 1]!, pts[i + 1]!, Math.abs(distance) * mitreLimit, false, false);
-    for (const p of j) out.push(p);
+    const s = segs[i]!, t = segs[i + 1]!;
+    const sameArc = s.tag !== null && t.tag !== null && s.tag.key === t.tag.key;
+    const j = join(s, t, pts[i + 1]!, Math.abs(distance) * mitreLimit, sameArc, false);
+    outTags.push(s.tag);
+    for (let k = 0; k < j.length; k++) {
+      out.push(j[k]!);
+      if (k + 1 < j.length) outTags.push(null); // bevel edges carry no arc
+    }
   }
   out.push(segs[segs.length - 1]!.b);
-  return out;
+  outTags.push(segs[segs.length - 1]!.tag);
+  return { points: out, tags: outTags };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -123,14 +140,17 @@ interface Seg {
   tag: OffsetArc | null;
 }
 
-function dedupe(points: readonly Vec2[]): MVec2[] {
-  const out: MVec2[] = [];
-  for (const p of points) {
-    const last = out[out.length - 1];
-    if (last && Math.hypot(p[0] - last[0], p[1] - last[1]) <= LENGTH_TOL) continue;
-    out.push([p[0], p[1]]);
-  }
-  return out;
+/** Drop repeated points, keeping the tag of the segment that leaves each kept point. */
+function dedupeTagged(points: readonly Vec2[], tags: readonly (OffsetArc | null)[]): { pts: MVec2[]; tags: (OffsetArc | null)[] } {
+  const pts: MVec2[] = [];
+  const out: (OffsetArc | null)[] = [];
+  points.forEach((p, i) => {
+    const last = pts[pts.length - 1];
+    if (last && Math.hypot(p[0] - last[0], p[1] - last[1]) <= LENGTH_TOL) return;
+    if (pts.length) out.push(tags[i - 1] ?? null);
+    pts.push([p[0], p[1]]);
+  });
+  return { pts, tags: out };
 }
 
 function offsetStraight(a: Vec2, b: Vec2, d: number): Seg {

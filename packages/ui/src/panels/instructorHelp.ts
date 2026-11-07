@@ -65,30 +65,30 @@ export const TOOL_HELP: Readonly<Record<string, ToolHelp>> = {
   },
   pushpull: {
     summary:
-      'Click a face, move to extrude it and click again (or type a distance). Pulling adds material; pushing into the body removes it and pushing through to the back face cuts a hole. Hover another face to match its height. Double-click repeats the last distance.',
+      'Click a flat face, move to extrude it and click again, or drag and release; type a distance for an exact one. With one face selected, the next click anywhere pulls it. Pulling adds material; pushing into the solid removes it and pushing through to the back face cuts a hole. Hover a face within 30° of parallel to match its height. Type a distance right after a pull to redo it; double-click a face to repeat the last distance.',
     keys: [
     ],
   },
   move: {
     summary:
-      'Select, click a reference point, move and click the destination (with nothing selected the hovered entity moves). Type a distance, an absolute [x,y,z] or a relative <x,y,z>. After a copy, type 3x for an external array or 3/ for an internal one.',
+      'Select, click a base point, move and click the destination. With nothing selected, a press picks up what a Select click there would select; Esc cancels and deselects it. Type a length (lock an axis first if the pointer has not moved), [x,y,z] for the base point or <x,y,z> to move by. After a copy, type 3x or /3 for an array, then a length for its spacing.',
     keys: [
       ['Shift', 'Lock the current inference'],
       ['↓', 'Lock parallel / perpendicular to the last edge'],
-      ['↑ / → / ←', 'Lock to an axis'],
+      ['↑ / → / ←', 'Lock to the blue, red or green axis'],
     ],
   },
   rotate: {
     summary:
-      'Place the protractor on a face or axis, click the baseline start, then move to the end angle and click. The protractor snaps every 15° near its rim and finer farther out. Type degrees or a rise:run slope.',
+      'Place the protractor on a face or axis, click the center, click the starting direction, then move to the angle and click. With angle snapping on in Model Info the angle snaps to the snap angle shown by the ticks. Type degrees (45) or a rise:run slope; it turns the way the preview turns, a negative value the other way. After a copy, type 3x for more copies at the same step or /3 to spread them over the angle turned.',
     keys: [
-      ['Shift', 'Lock the protractor plane'],
-      ['↑ / → / ←', 'Pick the rotation axis'],
+      ['Shift', 'Hold the protractor plane (before the center)'],
+      ['↑ / → / ←', 'Lock the protractor square to an axis (before the center)'],
     ],
   },
   scale: {
     summary:
-      'Select, then drag a green grip of the yellow box: corner grips scale uniformly, edge grips scale in two directions, face grips in one. Type a factor, three factors x,y,z, or a length with a unit; negative values mirror.',
+      'Select, then drag a green grip of the yellow box: corner grips scale uniformly, edge grips scale in two directions, face grips in one. Type a factor, three factors x,y,z, or a length with a unit (the size along a face grip, or of the longest side for a corner or edge grip); negative values mirror.',
     keys: [
       ['Ctrl or Alt', 'Scale about the center'],
       ['Shift', 'Maintain aspect ratio (on a corner grip, scale freely)'],
@@ -96,7 +96,7 @@ export const TOOL_HELP: Readonly<Record<string, ToolHelp>> = {
   },
   offset: {
     summary:
-      'Click a face (or two or more preselected coplanar connected edges), move to set the offset distance and click, or type a distance. Double-click another face to repeat the same offset.',
+      'Click a face of the context you are editing (or two or more preselected connected edges in one plane) and click again, or press, drag and release; inside the face insets, outside outsets. Type a distance for the pointer\'s side, a negative one for the other side; typed right after, it redoes the offset. Double-click a face to repeat the last face offset.',
     keys: [],
   },
   tape: {

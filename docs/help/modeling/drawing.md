@@ -36,6 +36,8 @@ Choose **Polygon** from its toolbar stack or command search. Before placing the 
 
 The Modeling Polygon tool starts with six segments. Typing a number followed by **s** changes the segment count even while positioning the radius. For an existing curve, select one of its edges and use **Segments** in Entity Info where available.
 
+**Circumscribed** in the tool options bar, or a tap of Ctrl (Cmd on a Mac), puts the polygon's sides against the radius instead of its corners. It goes back to inscribed each time you choose Polygon. Right after you draw a polygon, switching it redraws that polygon in the other mode, and changing Sides keeps its mode.
+
 ## Draw a circle and set its segments
 
 Choose **Circle**. Click its center, then its radius point. You can type a segment count such as **24s** before the first click. After placing the center, a plain length sets the diameter, a value ending in **r** sets the radius and a value ending in **s** changes the segments.

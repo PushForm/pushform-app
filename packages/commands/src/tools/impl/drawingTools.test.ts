@@ -241,6 +241,67 @@ describe('PolygonTool', () => {
     expect(c.radius).toBeCloseTo(1 / Math.cos(Math.PI / 6), 9);
     expect(hasVertex(sketch(), [5 + c.radius, 5, 0])).toBe(true);
   });
+
+  it('Circumscribed goes back to its default each time the tool is chosen', () => {
+    const { tools } = setup();
+    tools.activate('polygon');
+    const poly = tools.get('polygon') as PolygonTool;
+    tools.setting('mode', 'circumscribed');
+    expect(poly.circumscribed).toBe(true);
+    tools.activate('circle');
+    tools.activate('polygon');
+    expect(poly.circumscribed).toBe(false);
+    expect(tools.status().settings!.find((x) => x.id === 'mode')).toMatchObject({ value: 'inscribed' });
+    expect(tap(tools, 'Control')).toBe(true);
+    tools.activate('line');
+    tools.activate('polygon');
+    expect(poly.circumscribed).toBe(false);
+  });
+
+  it('a Ctrl tap while the polygon is applied redraws it in the other mode, as one undo step; Sides then keeps that mode', () => {
+    const { host, tools, sketch } = setup();
+    tools.activate('polygon');
+    tools.click(at([0, 0, 0]));
+    tools.click(at([1, 0, 0]));
+    expect(tools.status().applied).toBe(true);
+    const entries = host.undoStack.length;
+    const curve = () => [...sketch().curves.values()][0]!;
+    expect(tap(tools, 'Control')).toBe(true);
+    expect(host.undoStack.length).toBe(entries);
+    expect(sketch().curves.size).toBe(1);
+    expect(curve().radius).toBeCloseTo(1 / Math.cos(Math.PI / 6), 9);
+    expect(tools.status().applied).toBe(true);
+    expect(tools.status().settings!.find((x) => x.id === 'mode')).toMatchObject({ value: 'circumscribed' });
+    // a second tap goes back to inscribed, still one step
+    tap(tools, 'Control');
+    expect(host.undoStack.length).toBe(entries);
+    expect(curve().radius).toBeCloseTo(1, 9);
+    // the bar's toggle does the same; a later Sides change keeps the polygon's mode
+    tools.setting('mode', 'circumscribed');
+    expect(curve().radius).toBeCloseTo(1 / Math.cos(Math.PI / 6), 9);
+    tools.setting('sides', { kind: 'segments', count: 8 });
+    expect(host.undoStack.length).toBe(entries);
+    expect(curve()).toMatchObject({ segments: 8 });
+    expect(curve().radius).toBeCloseTo(1 / Math.cos(Math.PI / 8), 9);
+    host.undo();
+    expect(sketch().curves.size).toBe(0);
+  });
+
+  it('after a press in the view, a Ctrl tap is for the next polygon only', () => {
+    const { host, tools, sketch } = setup();
+    tools.activate('polygon');
+    tools.click(at([0, 0, 0]));
+    tools.click(at([1, 0, 0]));
+    tools.pointerDown(at([5, 5, 0], { button: 2 })); // a press that starts nothing
+    expect(tools.status().applied).toBe(false);
+    const entries = host.undoStack.length;
+    tap(tools, 'Control');
+    expect(host.undoStack.length).toBe(entries);
+    expect([...sketch().curves.values()][0]!.radius).toBeCloseTo(1, 9);
+    // the toggle changed but the last polygon did not: a later Sides change leaves it alone
+    tools.setting('sides', { kind: 'segments', count: 5 });
+    expect([...sketch().curves.values()][0]).toMatchObject({ segments: 6, radius: 1 });
+  });
 });
 
 describe('ArcTool / PieTool', () => {

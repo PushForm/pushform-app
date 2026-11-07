@@ -18,7 +18,7 @@ import { groupCommands, type MakeResult } from '../../commands/groups';
 import { sectionPlaneCommands } from '../../commands/sectionPlanes';
 import { guideCommands } from '../../commands/guides';
 import { textCommands } from '../../commands/texts';
-import { containerAt } from '@pushform/model';
+import { containerAt, SketchGraph } from '@pushform/model';
 import { TransformToolBase, worldToScreen, type TransformRotation } from './transformShared';
 import { m4rotationAbout } from '../../commands/transform';
 
@@ -415,7 +415,7 @@ describe('MoveTool', () => {
 });
 
 describe('MoveTool: typed values and locks', () => {
-  const len = (m: number) => ({ kind: 'length' as const, meters: m, raw: m, unit: 'm' });
+  const len = (m: number) => ({ kind: 'length' as const, meters: m, raw: m, unit: 'm' as const });
 
   it('a length typed before the pointer moves applies only with an axis lock; otherwise the status says what to do', async () => {
     const { host, tools, addBox, body } = setup();
@@ -579,6 +579,31 @@ describe('transform tools: what a press picks up', () => {
     s.tools.pointerDown(at(ISO_CAMERA, grip.pos, { screen }));
     expect(scale.dragFactors).toBeNull();
     expect(s.tools.status().instructor).toContain('cannot be scaled');
+  });
+});
+
+describe('MoveTool: sketch moves', () => {
+  it('says so when a face with holes is replaced by its edges', async () => {
+    const { host, tools, root } = setup();
+    host.edit('Frame', (draft) => {
+      const g = SketchGraph.for(draft);
+      for (const [a, b] of [[0, 3], [1, 2]] as const) {
+        g.addEdge([a, a, 0], [b, a, 0]);
+        g.addEdge([b, a, 0], [b, b, 0]);
+        g.addEdge([b, b, 0], [a, b, 0]);
+        g.addEdge([a, b, 0], [a, a, 0]);
+      }
+    });
+    const corner = [...root().sketch.vertices.values()].find((v) => near(v.p, [3, 3, 0]))!;
+    host.selection.set([{ kind: 'sketchVertex', path: [], id: corner.id }]);
+    tools.activate('move');
+    const tool = tools.activeTool as MoveTool;
+    tools.pointerDown(at(TOP_CAMERA, [3, 3, 0]));
+    tools.pointerUp(at(TOP_CAMERA, [3, 3, 0]));
+    tools.keyDown(key('ArrowUp'));
+    tools.onVcb({ kind: 'length', meters: 1, raw: 1, unit: 'm' });
+    await tool.settled;
+    expect(tools.status().instructor).toContain('replaced by its edges');
   });
 });
 

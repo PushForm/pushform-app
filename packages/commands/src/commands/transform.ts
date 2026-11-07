@@ -112,7 +112,13 @@ export interface TransformApplyResult {
   bodyIds: number[];
   /** Mesh parts created or modified by the operation. */
   meshPartIds: number[];
+  /** Something the operation changed besides what was asked, for the status (a face replaced by its edges). */
+  notice?: string;
+  /** Moved sketch edges split where they crossed others, by ref key: the pieces that replace them in the selection. */
+  edgePieces?: Map<string, EntityRef[]>;
 }
+
+const FACES_REPLACED = 'A face with holes could no longer be flat and was replaced by its edges.';
 
 type RefParam = z.infer<typeof EntityRefSchema>;
 
@@ -1112,6 +1118,18 @@ function mergeSketchVertex(sketch: Sketch, from: Id, into: Id, tol: number): voi
     if (e.b === from) e.b = into;
     if (e.a === e.b) degenerate.add(e.id);
   }
+  dropCollapsedEdges(sketch, degenerate);
+  const v = sketch.vertices.get(from);
+  if (v) unhashVertex(sketch, from, v.p, tol);
+  sketch.vertices.delete(from);
+}
+
+/**
+ * Remove the `degenerate` edges (both ends on one vertex) and every edge that duplicates another between
+ * the same two vertices, keeping one; face loops and curves are mapped to the kept edges and a loop that
+ * collapses to fewer than 3 edges goes (with its face, for an outer loop).
+ */
+function dropCollapsedEdges(sketch: Sketch, degenerate: ReadonlySet<Id>): void {
   const seen = new Map<string, Id>();
   const dup = new Map<Id, Id>();
   for (const e of sketch.edges.values()) {
@@ -1153,9 +1171,6 @@ function mergeSketchVertex(sketch: Sketch, from: Id, into: Id, tol: number): voi
   }
   for (const id of degenerate) sketch.edges.delete(id);
   for (const id of dup.keys()) sketch.edges.delete(id);
-  const v = sketch.vertices.get(from);
-  if (v) unhashVertex(sketch, from, v.p, tol);
-  sketch.vertices.delete(from);
 }
 
 function newellNormal(pts: readonly Vec3[]): Vec3 {
@@ -1172,9 +1187,11 @@ function newellNormal(pts: readonly Vec3[]): Vec3 {
 /**
  * Re-plane the faces touching moved vertices. A face that is still planar gets a new plane/basis;
  * a non-planar one is removed and, when it has no holes, fan-split from a moved vertex into
- * planar pieces (fold edges, as autofold does for sheet geometry).
+ * planar pieces (fold edges, as autofold does for sheet geometry). Returns how many faces with holes
+ * could not stay flat and were replaced by their edges.
  */
-function replaneSketchFaces(g: SketchGraphType, moved: ReadonlySet<Id>): void {
+function replaneSketchFaces(g: SketchGraphType, moved: ReadonlySet<Id>): number {
+  let replaced = 0;
   const sketch = g.sketch;
   for (const f of [...sketch.faces.values()]) {
     const touches = f.loops.some((loop) =>
@@ -1205,7 +1222,10 @@ function replaneSketchFaces(g: SketchGraphType, moved: ReadonlySet<Id>): void {
       continue;
     }
     sketch.faces.delete(f.id);
-    if (f.loops.length > 1) continue;
+    if (f.loops.length > 1) {
+      replaced++;
+      continue;
+    }
     const vids = loopVertexIds(sketch, outer);
     const mi = vids.findIndex((id) => moved.has(id));
     if (mi < 0) continue;
@@ -1213,13 +1233,26 @@ function replaneSketchFaces(g: SketchGraphType, moved: ReadonlySet<Id>): void {
     const count = vids.length;
     for (let k = 2; k <= count - 2; k++) g.addEdge(apex, vids[(mi + k) % count]!);
   }
+  return replaced;
 }
 
-/** Move sketch vertices by `m`, merging within MERGE_TOL and re-planing the faces they bound. */
-export function moveSketchVertices(g: SketchGraphType, ids: readonly Id[], m: Mat4 | MMat4): void {
+export interface SketchMoveResult {
+  /** Faces with holes that could no longer be flat and were replaced by their edges. */
+  readonly facesReplacedByEdges: number;
+  /** Edges split where they now cross or touch others: each edge's pieces. */
+  readonly pieces: ReadonlyMap<Id, readonly Id[]>;
+}
+
+/**
+ * Move sketch vertices by `m` as drawing would: a vertex landing on another merges with it (edges that
+ * collapse go), the faces they bound are re-planed, edges touching them are split where they cross or
+ * touch other edges, and faces form where edges now close.
+ */
+export function moveSketchVertices(g: SketchGraphType, ids: readonly Id[], m: Mat4 | MMat4): SketchMoveResult {
   const sketch = g.sketch;
   const tol = g.tol;
   const moved = new Set<Id>();
+  let merged = false;
   for (const id of ids) {
     const v = sketch.vertices.get(id);
     if (!v) continue;
@@ -1239,8 +1272,16 @@ export function moveSketchVertices(g: SketchGraphType, ids: readonly Id[], m: Ma
     mergeSketchVertex(sketch, drop, keep, tol);
     moved.delete(drop);
     moved.add(keep);
+    merged = true;
   }
-  replaneSketchFaces(g, moved);
+  const facesReplacedByEdges = replaneSketchFaces(g, moved);
+  const movedEdges = [...sketch.edges.values()].filter((e) => moved.has(e.a) || moved.has(e.b)).map((e) => e.id);
+  const { along, split, pieces } = g.splitAtCrossings(movedEdges);
+  const wasSplit = split.length > 0 || pieces.size > 0;
+  // edges laid over others now run between the same vertices: keep one of each
+  if (wasSplit) dropCollapsedEdges(sketch, new Set());
+  if (merged || wasSplit) model.FaceFinder.onEdgesAdded(g, [...along, ...split].filter((id) => sketch.edges.has(id)));
+  return { facesReplacedByEdges, pieces };
 }
 
 // --- apply ------------------------------------------------------------------------------------
@@ -1252,6 +1293,8 @@ export function applyTransformPlan(draft: DocumentDraft, plan: TransformPlan, wo
   const refs: EntityRef[] = [];
   const bodyIds: number[] = [], meshPartIds: number[] = [];
   const m = plan.matrix;
+  let notice: string | undefined;
+  const edgePieces = new Map<string, EntityRef[]>();
 
   if (plan.pushPull && work.pushPull) {
     const r = applyPushPullResult(draft, work.pushPull.plan, work.pushPull.result);
@@ -1329,9 +1372,14 @@ export function applyTransformPlan(draft: DocumentDraft, plan: TransformPlan, wo
     for (const id of g.sketch.faces.keys()) if (!facesBefore.has(id)) refs.push({ kind: 'sketchFace', path, id });
   } else if (!plan.copy && plan.sketchVertexIds.length) {
     const g = sketchGraphAt(draft, path);
-    moveSketchVertices(g, plan.sketchVertexIds, m);
+    const moved = moveSketchVertices(g, plan.sketchVertexIds, m);
+    if (moved.facesReplacedByEdges > 0) notice = FACES_REPLACED;
     for (const id of plan.sketchVertexIds) if (g.sketch.vertices.has(id)) refs.push({ kind: 'sketchVertex', path, id });
-    for (const id of plan.sketchEdgeIds) if (g.sketch.edges.has(id)) refs.push({ kind: 'sketchEdge', path, id });
+    for (const id of plan.sketchEdgeIds) {
+      if (g.sketch.edges.has(id)) refs.push({ kind: 'sketchEdge', path, id });
+      else for (const piece of moved.pieces.get(id) ?? []) refs.push({ kind: 'sketchEdge', path, id: piece });
+    }
+    for (const [id, list] of moved.pieces) edgePieces.set(entityRefKey({ kind: 'sketchEdge', path, id }), list.map((piece): EntityRef => ({ kind: 'sketchEdge', path, id: piece })));
   }
 
   // placed pictures: the whole picture follows the transform; a copy is a new picture of the same image
@@ -1443,7 +1491,7 @@ export function applyTransformPlan(draft: DocumentDraft, plan: TransformPlan, wo
     }
   }
 
-  return { refs, bodyIds, meshPartIds };
+  return { refs, bodyIds, meshPartIds, ...(notice ? { notice } : {}), ...(edgePieces.size ? { edgePieces } : {}) };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1462,10 +1510,17 @@ async function executeTransform(host: DocumentHost, kernel: KernelClient, plans:
         out.refs.push(...r.refs);
         out.bodyIds.push(...r.bodyIds);
         out.meshPartIds.push(...r.meshPartIds);
+        if (r.notice) out.notice = r.notice;
+        if (r.edgePieces) out.edgePieces = new Map([...(out.edgePieces ?? []), ...r.edgePieces]);
       });
     }),
   );
   if (plans.some((p) => p.copy)) host.selection.set(out.refs);
+  else if (out.edgePieces) {
+    const pieces = out.edgePieces;
+    // a selected edge that was split stays selected as its pieces
+    host.selection.set(host.selection.refs.flatMap((r) => pieces.get(entityRefKey(r)) ?? [r]));
+  }
   return out;
 }
 

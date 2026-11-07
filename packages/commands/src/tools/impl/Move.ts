@@ -172,6 +172,7 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     const inf = e.inference;
     if (!inf) return;
     this.lastError = null;
+    this.lastNotice = null;
     const refs = this.targetRefs(this.hover ?? pickRef(inf.hit), this.copy);
     if (!refs.length) return;
     this.hover = null;
@@ -272,6 +273,7 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     this.lastCommit = null;
     this.lastBase = null;
     this.lastError = null;
+    this.lastNotice = null;
     this.hover = null;
     this.lockAxis = null;
     this.ctx?.requestRender();
@@ -339,7 +341,9 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     const host = this.host();
     const instructor = this.lastError
       ? `Move failed: ${this.lastError}`
-      : host && !host.selection.isEmpty
+      : this.lastNotice
+        ? this.lastNotice
+        : host && !host.selection.isEmpty
         ? `Pick a base point to move the selection.`
         : `Select objects or hover an entity, then pick a base point.`;
     const last = this.lastCommit;

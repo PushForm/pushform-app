@@ -241,6 +241,79 @@ describe('transform.apply on sketch geometry', () => {
   });
 });
 
+describe('transform.apply: sketch moves draw as drawing does', () => {
+  const edgeAt = (sketch: ReturnType<ReturnType<typeof setupCommands>['root']>['sketch'], a: Vec3, b: Vec3) =>
+    [...sketch.edges.values()].find((e) => {
+      const p = sketch.vertices.get(e.a)!.p, q = sketch.vertices.get(e.b)!.p;
+      return (near(p, a) && near(q, b)) || (near(p, b) && near(q, a));
+    });
+
+  it('splits the edges a moved edge crosses, and keeps the moved edge selected as its pieces', async () => {
+    const { host, apply, root } = setupCommands();
+    host.edit('Lines', (draft) => {
+      const g = SketchGraph.for(draft);
+      g.addEdge([0, 0, 0], [2, 0, 0]);
+      g.addEdge([1, 1, 0], [1, 2, 0]);
+    });
+    const moving = edgeAt(root().sketch, [1, 1, 0], [1, 2, 0])!;
+    const ref: EntityRef = { kind: 'sketchEdge', path: [], id: moving.id };
+    host.selection.set([ref]);
+    const res = await apply({ refs: [ref], matrix: m4translation([0, -1.5, 0]) });
+    const s = root().sketch;
+    expect(s.edges.size).toBe(4);
+    expect([...s.vertices.values()].some((v) => near(v.p, [1, 0, 0]))).toBe(true);
+    expect(edgeAt(s, [0, 0, 0], [1, 0, 0])).toBeDefined();
+    expect(edgeAt(s, [1, -0.5, 0], [1, 0, 0])).toBeDefined();
+    expect(host.selection.size).toBe(2);
+    expect(host.selection.refs.every((r) => r.kind === 'sketchEdge' && s.edges.has(r.id))).toBe(true);
+    expect(res.refs.filter((r) => r.kind === 'sketchEdge')).toHaveLength(2);
+  });
+
+  it('forms a face where a moved edge closes a loop, and splits a face a moved edge runs across', async () => {
+    const { host, apply, root } = setupCommands();
+    host.edit('U', (draft) => {
+      const g = SketchGraph.for(draft);
+      g.addEdge([0, 0, 0], [1, 0, 0]);
+      g.addEdge([1, 0, 0], [1, 1, 0]);
+      g.addEdge([1, 1, 0], [0, 1, 0]);
+      g.addEdge([3, 0, 0], [3, 1, 0]);
+      g.addEdge([0.5, 3, 0], [0.5, 4.5, 0]);
+    });
+    expect(root().sketch.faces.size).toBe(0);
+    const closer = edgeAt(root().sketch, [3, 0, 0], [3, 1, 0])!;
+    await apply({ refs: [{ kind: 'sketchEdge', path: [], id: closer.id }], matrix: m4translation([-3, 0, 0]) });
+    expect(root().sketch.faces.size).toBe(1);
+    const across = edgeAt(root().sketch, [0.5, 3, 0], [0.5, 4.5, 0])!;
+    await apply({ refs: [{ kind: 'sketchEdge', path: [], id: across.id }], matrix: m4translation([0, -3.25, 0]) });
+    const s = root().sketch;
+    expect(s.faces.size).toBe(2);
+    for (const f of s.faces.values()) expect(f.loops[0]).toHaveLength(4);
+  });
+
+  it('replaces a face with holes that can no longer be flat by its edges, and says so', async () => {
+    const { host, apply, root } = setupCommands();
+    host.edit('Frame', (draft) => {
+      const g = SketchGraph.for(draft);
+      const square = (a: number, b: number): void => {
+        g.addEdge([a, a, 0], [b, a, 0]);
+        g.addEdge([b, a, 0], [b, b, 0]);
+        g.addEdge([b, b, 0], [a, b, 0]);
+        g.addEdge([a, b, 0], [a, a, 0]);
+      };
+      square(0, 3);
+      square(1, 2);
+    });
+    const framed = [...root().sketch.faces.values()].find((f) => f.loops.length === 2)!;
+    expect(framed).toBeDefined();
+    const edges = root().sketch.edges.size;
+    const corner = [...root().sketch.vertices.values()].find((v) => near(v.p, [3, 3, 0]))!;
+    const res = await apply({ refs: [{ kind: 'sketchVertex', path: [], id: corner.id }], matrix: m4translation([0, 0, 1]) });
+    expect(root().sketch.faces.has(framed.id)).toBe(false);
+    expect(root().sketch.edges.size).toBe(edges);
+    expect(res.notice).toBe('A face with holes could no longer be flat and was replaced by its edges.');
+  });
+});
+
 describe('transform.apply on body sub-entities', () => {
   it('a face moved along its normal with perpendicular neighbours routes to push/pull', async () => {
     const { apply, addBox, body, host } = setupCommands();

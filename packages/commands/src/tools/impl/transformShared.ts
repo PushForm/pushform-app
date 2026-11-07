@@ -10,7 +10,7 @@ import { mapNormal } from '../../commands/sectionPlanes';
 import type { SectionPreview } from '../sectionPreview';
 import { contextFrame, pathKeyOf } from '../../commands/context';
 import { surfaceRefs } from '../../commands/sketchQueries';
-import { transformRefusal } from '../../commands/transform';
+import { transformRefusal, type TransformApplyResult } from '../../commands/transform';
 import type { CameraState } from '../../camera/CameraHost';
 import type { DocumentHost } from '../../host/DocumentHost';
 import type { OverlayPrimitive } from '../overlay';
@@ -333,6 +333,8 @@ export abstract class TransformToolBase implements Tool {
   protected ctx: ToolContext | null = null;
   protected lastCommit: TransformCommit | null = null;
   protected lastError: string | null = null;
+  /** What the last commit changed besides what was asked (a face replaced by its edges), for the status. */
+  protected lastNotice: string | null = null;
   private queue: Promise<void> = Promise.resolve();
   /** Key of the refs a press selected from an empty selection, until the operation ends. */
   private pickedUp: string | null = null;
@@ -435,9 +437,11 @@ export abstract class TransformToolBase implements Tool {
     const commit: TransformCommit = { refs, matrix, rotation: rotation ?? null, copy, array: null, label, entry: null, applied: false };
     this.lastCommit = commit;
     this.lastError = null;
+    this.lastNotice = null;
     this.keepPickup();
     this.enqueue(async () => {
-      await ctx.commands.execute('transform.apply', { refs, matrix, copy, label });
+      const result = (await ctx.commands.execute('transform.apply', { refs, matrix, copy, label })) as TransformApplyResult | undefined;
+      this.lastNotice = result?.notice ?? null;
       commit.entry = hostOfTool(ctx).undoStack.peek();
       commit.applied = true;
       ctx.committed?.();
@@ -498,13 +502,13 @@ export abstract class TransformToolBase implements Tool {
     const host = hostOfTool(ctx);
     host.undo();
     last.applied = false;
+    let result: TransformApplyResult | undefined;
     try {
       const { refs, label } = last;
       if (next.array) {
         const turn = next.rotation ? { rotation: { center: [...next.rotation.center], axis: [...next.rotation.axis], angle: next.rotation.angle } } : {};
-        await ctx.commands.execute('transform.array', { refs, matrix: next.matrix, count: next.array.count, mode: next.array.mode, label, ...turn });
-      }
-      else await ctx.commands.execute('transform.apply', { refs, matrix: next.matrix, copy: next.copy, label });
+        result = (await ctx.commands.execute('transform.array', { refs, matrix: next.matrix, count: next.array.count, mode: next.array.mode, label, ...turn })) as TransformApplyResult | undefined;
+      } else result = (await ctx.commands.execute('transform.apply', { refs, matrix: next.matrix, copy: next.copy, label })) as TransformApplyResult | undefined;
     } catch (err) {
       host.redo();
       last.applied = true;
@@ -521,6 +525,7 @@ export abstract class TransformToolBase implements Tool {
     last.entry = host.undoStack.peek();
     last.applied = true;
     this.lastError = null;
+    this.lastNotice = result?.notice ?? null;
     ctx.committed?.();
     ctx.statusChanged();
     ctx.requestRender();

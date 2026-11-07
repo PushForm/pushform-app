@@ -80,15 +80,15 @@ export const TOOL_HELP: Readonly<Record<string, ToolHelp>> = {
   },
   rotate: {
     summary:
-      'Place the protractor on a face or axis, click the baseline start, then move to the end angle and click. The protractor snaps every 15° near its rim and finer farther out. Type degrees or a rise:run slope.',
+      'Place the protractor on a face or axis, click the center, click the starting direction, then move to the angle and click. With angle snapping on in Model Info the angle snaps to the snap angle shown by the ticks. Type degrees (45) or a rise:run slope; it turns the way the preview turns, a negative value the other way. After a copy, type 3x for more copies at the same step or /3 to spread them over the angle turned.',
     keys: [
-      ['Shift', 'Lock the protractor plane'],
-      ['↑ / → / ←', 'Pick the rotation axis'],
+      ['Shift', 'Hold the protractor plane (before the center)'],
+      ['↑ / → / ←', 'Lock the protractor square to an axis (before the center)'],
     ],
   },
   scale: {
     summary:
-      'Select, then drag a green grip of the yellow box: corner grips scale uniformly, edge grips scale in two directions, face grips in one. Type a factor, three factors x,y,z, or a length with a unit; negative values mirror.',
+      'Select, then drag a green grip of the yellow box: corner grips scale uniformly, edge grips scale in two directions, face grips in one. Type a factor, three factors x,y,z, or a length with a unit (the size along a face grip, or of the longest side for a corner or edge grip); negative values mirror.',
     keys: [
       ['Ctrl or Alt', 'Scale about the center'],
       ['Shift', 'Maintain aspect ratio (on a corner grip, scale freely)'],

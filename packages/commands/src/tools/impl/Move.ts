@@ -221,6 +221,7 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
         if (!e.repeat) {
           const p = this.cursorInference?.primary ?? null;
           this.lockSnap = p && (p.dir || p.plane) ? p : null;
+          if (this.lockSnap && this.state.kind === 'moving') this.state.face = null;
         }
         return true;
       case 'Control':
@@ -246,7 +247,11 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     }
     if (this.state.kind === 'moving') {
       const delta = this.deltaFromVcb(v, this.state.base, this.state.delta);
-      if (delta) this.commit(delta);
+      if (delta) {
+        // a typed value is the move, even with the pointer over a face the component would glue to
+        this.state.face = null;
+        this.commit(delta);
+      }
       else if (v.kind === 'length') {
         // before the pointer has moved, a length has no direction to go without an axis lock
         this.hint = 'Move the pointer or lock an axis with an arrow key, then type the length.';
@@ -257,8 +262,10 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     const last = this.lastCommit;
     if (!last) return;
     const prev: Vec3 = [last.matrix[12]!, last.matrix[13]!, last.matrix[14]!];
-    // [x,y,z] puts the last move's base point there
+    // [x,y,z] puts the last move's base point there; a glued placement stays in its glue plane
+    this.glue = this.glueFor(last.refs);
     const delta = this.deltaFromVcb(v, this.lastBase ?? [0, 0, 0], prev, prev);
+    this.glue = null;
     if (!delta || v3len(delta) < MERGE_TOL) return;
     this.reapplyLast(m4translation(delta));
     this.ctx?.statusChanged();
@@ -288,7 +295,7 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     const s = this.state;
     if (s.kind === 'moving') {
       const end = v3add(s.base, s.delta);
-      if (s.face && this.glue) out.push(...movedOutline(state, s.refs, placeOnFaceMatrix(state, this.glue.ref, s.face.point, s.face.normal)));
+      if (s.face && this.glue) out.push(...movedOutline(state, s.refs, placeOnFaceMatrix(state, this.glue.ref, s.face.point, s.face.normal, s.base), undefined, this.copy));
       // section planes are drawn, with their cuts, where they would go (sectionPreview)
       else if (v3len(s.delta) > MERGE_TOL) out.push(...movedOutline(state, withoutSectionPlanes(s.refs), m4translation(s.delta), undefined, this.copy));
       out.push({ kind: 'polyline', points: [s.base, end], color: rubberBandColor(this.cursorInference?.primary), width: 2 });
@@ -392,17 +399,22 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     return { point: e.inference.point, normal: v3dot(n, e.ray.dir) > 0 ? v3scale(n, -1) : n };
   }
 
-  /** Displacement from a typed value: a length along the current direction, `[x,y,z]` or `<x,y,z>`. */
+  /**
+   * Displacement from a typed value: a length along the current direction, `[x,y,z]` or `<x,y,z>`. A glued
+   * placement stays in its glue plane: a length goes along the direction laid in the plane, and
+   * coordinates are projected onto it.
+   */
   private deltaFromVcb(v: VcbValue, base: Vec3, current: Vec3, fallbackDir: Vec3 | null = null): Vec3 | null {
     if (v.kind === 'length') {
-      const dir = this.lockDirection() ?? (v3len(current) >= MERGE_TOL ? v3normalize(current) : fallbackDir && v3len(fallbackDir) >= MERGE_TOL ? v3normalize(fallbackDir) : null);
-      return dir ? v3scale(dir, v.meters) : null;
+      const raw = this.lockDirection() ?? (v3len(current) >= MERGE_TOL ? current : fallbackDir && v3len(fallbackDir) >= MERGE_TOL ? fallbackDir : null);
+      const dir = raw ? this.inGluePlane(raw) : null;
+      return dir && v3len(dir) >= MERGE_TOL ? v3scale(v3normalize(dir), v.meters) : null;
     }
     if (v.kind === 'absolute') {
       const cur: Vec3 = [base[0] + current[0], base[1] + current[1], base[2] + current[2]];
-      return [(v.coords[0] ?? cur[0]) - base[0], (v.coords[1] ?? cur[1]) - base[1], (v.coords[2] ?? cur[2]) - base[2]];
+      return this.inGluePlane([(v.coords[0] ?? cur[0]) - base[0], (v.coords[1] ?? cur[1]) - base[1], (v.coords[2] ?? cur[2]) - base[2]]);
     }
-    if (v.kind === 'relative') return [v.coords[0] ?? 0, v.coords[1] ?? 0, v.coords[2] ?? 0];
+    if (v.kind === 'relative') return this.inGluePlane([v.coords[0] ?? 0, v.coords[1] ?? 0, v.coords[2] ?? 0]);
     return null;
   }
 
@@ -449,6 +461,8 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
 
   /** Re-project the current displacement onto the locked direction, if any. */
   private applyLock(): void {
+    // a locked move does not glue: the face found before the lock is no longer the target
+    if (this.state.kind === 'moving' && (this.lockAxis || this.lockSnap || this.edgeLock.active)) this.state.face = null;
     if (this.state.kind === 'moving' && this.cursorInference) {
       const d = v3sub(this.cursorInference.point, this.state.base);
       const dir = this.lockDirection();
@@ -487,7 +501,8 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
       const { point, normal } = s.face;
       this.lastCommit = null;
       this.enqueue(async () => {
-        await ctx.commands.execute('component.placeOnFace', { ref: glue.ref, point: [point[0], point[1], point[2]], normal: [normal[0], normal[1], normal[2]], copy });
+        // the pointer keeps its place on the component: the base point is where it was picked up
+        await ctx.commands.execute('component.placeOnFace', { ref: glue.ref, point: [point[0], point[1], point[2]], normal: [normal[0], normal[1], normal[2]], copy, grab: [s.base[0], s.base[1], s.base[2]] });
         ctx.statusChanged();
         ctx.requestRender();
       });

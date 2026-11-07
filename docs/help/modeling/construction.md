@@ -2,7 +2,7 @@
 
 ## Measure a distance with Tape Measure
 
-Choose **Tape Measure** from the Measure dropdown. Choose **Measure only** in the tool options bar, or tap Ctrl to cycle to it; **Guide lines** and **Guide points** create guides. Click the start point, then the endpoint, and read the Length field beside the pointer. Hovering an edge also displays its length. Escape cancels an unfinished measurement.
+Choose **Tape Measure** from the Measure dropdown. It starts in **Guide lines** each time you choose it, so choose **Measure only** in the tool options bar, or tap Ctrl to cycle to it; **Guide lines** and **Guide points** create guides. Click the start point, then the endpoint, and read the Length field beside the pointer. Hovering an edge also displays its length. Escape cancels an unfinished measurement.
 
 Typing a new length after a completed measurement proposes resizing the whole model. Choose **Resize Model** in the tool options bar only when you intend to change the model's size; Escape cancels it, and measuring alone does not resize anything. Resizing scales the whole model about its origin, including groups, components, imported mesh parts and placed lights, even when you measured inside a group.
 
@@ -16,7 +16,7 @@ For a guide point, cycle to **Guide Points**, click a starting point, then click
 
 Choose **Protractor** from the Measure dropdown. Hover a face to orient the protractor; hold Shift to keep that plane. Click the angle's vertex, then click a point along its baseline. Move to read the angle, and click a third time to finish, or type an angle and press Enter.
 
-By default, finishing creates a guide line at that angle. Turn off **Create guides** in the tool options bar, or tap Ctrl, when you are only measuring. Escape cancels the pending angle. Right, Left and Up lock the plane normal to the red, green and blue axes; Down releases the axis lock.
+By default, finishing creates a guide line at that angle. Turn off **Create guides** in the tool options bar, or tap Ctrl, when you are only measuring; it is on again each time you choose Protractor. Escape cancels the pending angle. Right, Left and Up lock the plane normal to the red, green and blue axes; Down releases the axis lock.
 
 ## Place the drawing Axes
 

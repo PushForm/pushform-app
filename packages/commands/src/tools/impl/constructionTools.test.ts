@@ -301,6 +301,20 @@ describe('TapeTool', () => {
     expect(host.doc.state.sceneLights![0]).toMatchObject({ position: [1, 2, 3], target: [1, 2, 0], width: 0.5 });
   });
 
+  it('starts in Guide lines mode each time it is chosen', () => {
+    const { tools } = setup();
+    tools.activate('tape');
+    const tape = tools.activeTool as TapeTool;
+    expect(tape.mode).toBe('guideLine');
+    tap(tools, 'Control');
+    expect(tape.mode).toBe('guidePoint');
+    tools.setting('mode', 'measure');
+    expect(tape.mode).toBe('measure');
+    tools.activate('protractor');
+    tools.activate('tape');
+    expect(tape.mode).toBe('guideLine');
+    expect(tools.status().settings?.find((c) => c.id === 'mode')).toMatchObject({ value: 'guideLine' });
+  });
 });
 
 describe('ProtractorTool', () => {
@@ -341,6 +355,18 @@ describe('ProtractorTool', () => {
     tools.click(at([1, 0, 0]));
     tools.click(at([2, 2, 0]));
     expect(guides()).toHaveLength(2);
+  });
+
+  it('creates guides again each time it is chosen', () => {
+    const { tools } = setup();
+    tools.activate('protractor');
+    const pro = tools.activeTool as ProtractorTool;
+    tools.setting('guides', false);
+    expect(pro.guidesEnabled).toBe(false);
+    tools.activate('tape');
+    tools.activate('protractor');
+    expect(pro.guidesEnabled).toBe(true);
+    expect(tools.status().settings?.find((c) => c.id === 'guides')).toMatchObject({ on: true });
   });
 });
 

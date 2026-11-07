@@ -75,7 +75,11 @@ h2 { font-size: 29px; letter-spacing: -.8px; font-weight: 500; margin: 0; }
 .rights p, .rights li { font-size: 13px; line-height: 1.7; color: var(--muted); white-space: pre-wrap; }
 .credit { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 16px; font-size: 13px; }
 .site-footer { display: flex; justify-content: space-between; gap: 24px; border-top: 1px solid var(--line); padding: 26px 0 40px; color: var(--muted); font-size: 12px; }
-.site-footer div { display: flex; gap: 22px; }
+.site-footer div { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px; }
+.site-footer-social { display: flex; gap: 14px; list-style: none; margin: 0; padding: 0; }
+.site-footer-social a { display: block; }
+.site-footer-social a:hover { color: var(--ink); }
+.site-footer-social svg { display: block; width: 16px; height: 16px; fill: currentColor; }
 .hero h1 { font-size:clamp(32px,4.2vw,54px); letter-spacing:-1.7px; margin-bottom:16px; }
 .section-description { font-size:13px; line-height:1.6; color:var(--muted); }
 .featured-section { padding:0 0 32px; border-bottom:1px solid var(--line); }

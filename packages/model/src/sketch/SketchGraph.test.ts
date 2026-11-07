@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { describe, expect, it } from 'vitest';
-import type { Id, MaterialId, PlaneBasis, Vec3 } from '@pushform/core';
+import type { Id, MaterialId, PlaneBasis, TagId, Vec3 } from '@pushform/core';
 import { basisToLocal, planeBasis } from '@pushform/core';
 import { createDocument, type Document } from '../Document';
 import { UndoStack } from '../UndoStack';
@@ -47,9 +47,9 @@ describe('FaceFinder texture placements', () => {
     draw(doc, [[[2, 0, 0], [2, 2, 0]]]);
     const sk = sketchOf(doc);
     expect(sk.faces.size).toBe(2);
-    // The piece that takes over the face's attributes (the other piece starts unpainted).
-    const pieces = [...sk.faces.values()].filter((f) => f.frontMaterialId === front);
-    expect(pieces).toHaveLength(1);
+    // Both pieces keep the face's materials, and the texture continues across them.
+    const pieces = [...sk.faces.values()];
+    expect(pieces.map((f) => [f.frontMaterialId, f.backMaterialId])).toEqual([[front, back], [front, back]]);
     for (const f of pieces) {
       expect(f.plane.n[2]).toBeCloseTo(1);
       for (const p of sketchFaceLoops(sk, f).flat()) {
@@ -57,6 +57,30 @@ describe('FaceFinder texture placements', () => {
         st(f.basis, f.uvBack ?? f.uv, p).forEach((x, i) => expect(x).toBeCloseTo(st(basis, pinnedBack, p)[i]!, 9));
       }
     }
+  });
+
+  it('gives every piece of a split face its look, and its tag only to the piece that takes it over', () => {
+    const doc = createDocument();
+    draw(doc, rect);
+    const paint = 7 as MaterialId, faceTag = 41 as TagId, drawTag = 42 as TagId;
+    doc.transact('paint', (d) => {
+      const f = [...d.definitions.get(d.rootDefinitionId)!.entities.sketch.faces.values()][0]!;
+      Object.assign(f, { frontMaterialId: paint, backMaterialId: paint, tagId: faceTag, castShadows: false });
+    });
+    // Two lines across the face in one step make three pieces.
+    doc.transact('draw', (d) => {
+      const g = SketchGraph.for(d);
+      g.addEdge([1, 0, 0], [1, 2, 0], { faceTagId: drawTag });
+      g.addEdge([3, 0, 0], [3, 2, 0], { faceTagId: drawTag });
+    });
+    const pieces = [...sketchOf(doc).faces.values()];
+    expect(pieces).toHaveLength(3);
+    for (const f of pieces) {
+      expect([f.frontMaterialId, f.backMaterialId]).toEqual([paint, paint]);
+      expect(f.castShadows).toBe(false);
+    }
+    expect(pieces.filter((f) => f.tagId === faceTag)).toHaveLength(1);
+    expect(pieces.filter((f) => f.tagId === drawTag)).toHaveLength(2);
   });
 
   it('swaps and re-expresses the sides of a template facing the other way', () => {

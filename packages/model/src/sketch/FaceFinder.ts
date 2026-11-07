@@ -43,9 +43,11 @@ const MAX_BFS_EDGES = 64;
  * Automatic face creation on a sketch.
  * - `onEdgesAdded`: for every plane the new edges could close a loop in, arrange all coplanar
  *   edges and create faces for new bounded cells touching a new edge. A cell whose outer loop
- *   matches an existing face only updates that face's holes (a loop drawn inside a face); a new
- *   cell lying inside an existing face replaces it (a line splitting a face). A face with no
- *   existing face to take its attributes from goes on `tagId` (default: the document's default tag).
+ *   matches an existing face only updates that face's holes (a loop drawn inside a face); every new
+ *   cell lying inside an existing face replaces it and keeps its materials, texture placement and
+ *   other attributes (a line splitting a face). The first such cell takes over the face's tag too;
+ *   the others, and faces with no existing face to take attributes from, go on `tagId` (default:
+ *   the document's default tag).
  * - `heal`: after an edge removal, recreate the merged cell bounded only by the removed faces'
  *   remaining edges.
  */
@@ -72,24 +74,23 @@ export const FaceFinder = {
           result.push(match.id);
         } else pending.push({ cell, loops });
       }
-      const created = new Set<Id>();
-      for (const { cell, loops } of pending) {
+      // the faces each new cell lies in, found before any is replaced so every piece of a split face keeps its attributes
+      const existing = coplanarFaces();
+      const containing = pending.map(({ cell }) => {
         const ip = polygonInteriorPoint([cell.outer, ...cell.holes]);
-        let template: SketchFace | undefined;
-        if (ip) {
-          const p3 = basisToWorld(basis, ip[0], ip[1]);
-          for (const f of coplanarFaces()) {
-            if (created.has(f.id)) continue;
-            if (sketchFaceContainsPoint(g.sketch, f, p3)) {
-              template ??= f;
-              g.sketch.faces.delete(f.id);
-            }
-          }
-        }
-        const id = createFace(g, plane, basis, loops, template, tagId);
-        created.add(id);
-        result.push(id);
-      }
+        if (!ip) return [];
+        const p3 = basisToWorld(basis, ip[0], ip[1]);
+        return existing.filter((f) => sketchFaceContainsPoint(g.sketch, f, p3));
+      });
+      const takenOver = new Set<Id>();
+      pending.forEach(({ loops }, i) => {
+        const faces = containing[i]!;
+        for (const f of faces) g.sketch.faces.delete(f.id);
+        const template = faces[0];
+        const takesOver = template !== undefined && !takenOver.has(template.id);
+        if (template) takenOver.add(template.id);
+        result.push(createFace(g, plane, basis, loops, template, tagId, takesOver));
+      });
     }
     return result;
   },
@@ -195,7 +196,8 @@ function cellLoops(arr: Arrangement, cell: ArrangementCell): LoopRef[][] {
   return [toRefs(ringSegmentRefs(arr, cell.outerEdges)), ...cell.holeEdges.map((h) => toRefs(ringSegmentRefs(arr, h)))];
 }
 
-function createFace(g: SketchGraph, plane: Plane, basis: PlaneBasis, loops: LoopRef[][], template?: SketchFace, tagId?: TagId): Id {
+/** A face with `template`'s attributes; its tag too when it `takesOver` the template, else `tagId`. */
+function createFace(g: SketchGraph, plane: Plane, basis: PlaneBasis, loops: LoopRef[][], template?: SketchFace, tagId?: TagId, takesOver = true): Id {
   const id = g.alloc<Id>();
   const face: SketchFace = {
     id,
@@ -210,7 +212,7 @@ function createFace(g: SketchGraph, plane: Plane, basis: PlaneBasis, loops: Loop
     frontMaterialId: template?.frontMaterialId ?? null,
     backMaterialId: template?.backMaterialId ?? null,
     uv: template?.uv ?? UV_AUTO,
-    tagId: template?.tagId ?? tagId ?? g.defaultTagId,
+    tagId: (takesOver ? template?.tagId : undefined) ?? tagId ?? g.defaultTagId,
     hidden: template?.hidden ?? false,
     locked: template?.locked ?? false,
     castShadows: template?.castShadows ?? true,

@@ -134,6 +134,7 @@ const tap = (tools: ToolManager, k: string): boolean => {
 };
 const CTRL: Modifiers = { ...NO_MODIFIERS, ctrl: true };
 const SHIFT: Modifiers = { ...NO_MODIFIERS, shift: true };
+const ALT: Modifiers = { ...NO_MODIFIERS, alt: true };
 
 function vertexPositions(s: { vertices: Map<Id, { p: Vec3 }> }): Vec3[] {
   return [...s.vertices.values()].map((v) => [+v.p[0].toFixed(6), +v.p[1].toFixed(6), +v.p[2].toFixed(6)]);
@@ -408,6 +409,18 @@ describe('SelectTool', () => {
     expect(host.undoStack.length).toBe(0); // selection is not undoable
   });
 
+  it('Alt is not Ctrl: Alt+click replaces the selection and Alt+Shift+click toggles', () => {
+    const { tools, host } = setup();
+    tools.activate('select');
+    tools.click(at([0, 0, 0], { hit: FACE }));
+    tools.click(at([1, 0, 0], { hit: FACE2, modifiers: ALT }));
+    expect(host.selection.refs).toEqual([FACE2.ref]);
+    tools.click(at([0, 0, 0], { hit: FACE, modifiers: { ...ALT, shift: true } }));
+    expect(host.selection.size).toBe(2);
+    tools.click(at([0, 0, 0], { hit: FACE, modifiers: { ...ALT, shift: true } }));
+    expect(host.selection.refs).toEqual([FACE2.ref]);
+  });
+
   it('double-click a sketch face selects it with its edges, triple-click all connected, body face → body', () => {
     const { tools, host, registry, sketch } = setup();
     registry.execute('sketch.rectangle', { a: [0, 0, 0], b: [1, 0, 0], c: [1, 1, 0], d: [0, 1, 0] });
@@ -502,6 +515,15 @@ describe('LassoTool', () => {
     expect(tools.overlay()).toEqual([]);
   });
 
+  it('Alt is not Ctrl: an Alt lasso replaces the selection', () => {
+    const { tools, host } = lassoSetup();
+    host.selection.set([{ kind: 'sketchEdge', path: [], id: 1 as Id }]);
+    tools.activate('lasso');
+    for (const p of [[0, 0, 0], [1, 0, 0], [1, 1, 0]] as Vec3[]) tools.click(at(p));
+    tools.doubleClick(at([1, 1, 0], { modifiers: ALT }));
+    expect(host.selection.refs).toEqual([{ kind: 'sketchEdge', path: [], id: 99 }]);
+  });
+
   it('clicked points close on double-click or Enter with Select modifiers; Esc drops the outline', () => {
     const { tools, host, calls } = lassoSetup();
     host.selection.set([{ kind: 'sketchEdge', path: [], id: 1 as Id }]);
@@ -552,6 +574,16 @@ describe('EraserTool', () => {
     host.undo();
     expect(sketch().edges.size).toBe(4);
     expect(sketch().faces.size).toBe(1);
+  });
+
+  it('Alt is not Ctrl: Alt+click erases the edge instead of softening it', () => {
+    const { tools, registry, sketch } = setup();
+    rectangle(registry);
+    const e1 = [...sketch().edges.keys()][0]!;
+    tools.activate('eraser');
+    tools.click(at([0.5, 0, 0], { hit: edgeHit(e1, [0.5, 0, 0]), modifiers: ALT }));
+    expect(sketch().edges.has(e1)).toBe(false);
+    expect(sketch().edges.size).toBe(3);
   });
 
   it('Shift hides, Ctrl softens, Ctrl+Shift unsoftens; body edges are a no-op with a message', () => {

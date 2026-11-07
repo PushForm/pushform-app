@@ -13,7 +13,7 @@ import { contextFrame } from '../commands/context';
 import { sketchSurfaceFaceIds } from '../commands/sketchQueries';
 import { definitionBounds } from '../commands/transform';
 import type { OverlayPrimitive, PointGlyphShape } from './overlay';
-import type { Modifiers, ToolContext } from './Tool';
+import type { ToolContext } from './Tool';
 
 /** Pointer distance in CSS px below which a down/up pair counts as a click, not a drag. */
 export const DRAG_PX = 3;
@@ -30,9 +30,6 @@ export function hostOfTool(ctx: ToolContext): DocumentHost {
 export function hostOfRegistry(commands: CommandRegistry): DocumentHost {
   return hostOf(commands.ctx);
 }
-
-/** Win Ctrl = Mac Option: both count as the "Ctrl" modifier. */
-export const ctrlLike = (m: Modifiers): boolean => m.ctrl || m.alt;
 
 /**
  * World length of one CSS pixel at point `p` for the given camera. Used for screen-space

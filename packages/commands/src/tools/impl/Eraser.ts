@@ -6,7 +6,7 @@ import { entityRefKey } from '@pushform/model';
 import type { EntityRef } from '@pushform/model';
 import type { OverlayPrimitive } from '../overlay';
 import type { Modifiers, Tool, ToolContext, ToolPointerEvent, ToolStatus } from '../Tool';
-import { ctrlLike, entityOverlay, hostOfTool } from '../toolUtil';
+import { entityOverlay, hostOfTool } from '../toolUtil';
 import { samePath } from '../../commands/context';
 
 const ERASE_COLOR = '#1e63d1';
@@ -117,8 +117,8 @@ export class EraserTool implements Tool {
     const marked = [...this.marked.values()];
     this.marked.clear();
     if (!this.ctx || marked.length === 0) return;
-    const ctrl = ctrlLike(m);
-    const flags = ctrl && m.shift ? { soft: false, smooth: false } : ctrl ? { soft: true, smooth: true } : m.shift ? { hidden: true } : null;
+    // Only Ctrl (Cmd on macOS) softens; Alt is not a modifier here.
+    const flags = m.ctrl && m.shift ? { soft: false, smooth: false } : m.ctrl ? { soft: true, smooth: true } : m.shift ? { hidden: true } : null;
     const ids = marked.filter((r) => r.kind === 'sketchEdge').map((r) => r.id as number);
     const imprints = marked.filter((r) => r.kind === 'imprintEdge');
     const bodyEdges = marked.filter((r) => r.kind === 'edge');

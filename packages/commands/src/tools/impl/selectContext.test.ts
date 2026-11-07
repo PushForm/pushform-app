@@ -202,7 +202,7 @@ describe('SelectTool edit contexts', () => {
     expect(host.selection.refs).toEqual([{ kind: 'body', path: [outer, inner], id: 7 }]);
   });
 
-  it('Esc with nothing selected and a click on empty space exit one level; Esc with a selection does not', () => {
+  it('Esc clears the selection first, then exits one level; a click on empty space exits one level', () => {
     const { host, tools, log, registry } = setup();
     const { outer, inner } = addNestedGroups(host);
     registry.execute('context.enter', { path: [outer, inner] });
@@ -211,7 +211,7 @@ describe('SelectTool edit contexts', () => {
     tools.keyDown({ key: 'Escape', code: 'Escape', modifiers: NO_MODIFIERS, repeat: false });
     expect(log).toEqual([]);
     expect(host.context.path).toEqual([outer, inner]);
-    host.selection.clear();
+    expect(host.selection.isEmpty).toBe(true);
     tools.keyDown({ key: 'Escape', code: 'Escape', modifiers: NO_MODIFIERS, repeat: false });
     expect(log).toEqual(['exit']);
     expect(host.context.path).toEqual([outer]);
@@ -224,6 +224,55 @@ describe('SelectTool edit contexts', () => {
     tools.click(at([3, 3, 0]));
     expect(host.selection.isEmpty).toBe(true);
     expect(log).toEqual(['exit', 'exit']);
+  });
+
+  it('a click outside the open group closes out to the container holding what was clicked, then selects it', () => {
+    const { host, tools, log, registry } = setup();
+    const { outer, inner } = addNestedGroups(host);
+    registry.execute('context.enter', { path: [outer, inner] });
+    log.length = 0;
+    // a solid directly in `outer`, seen from inside `inner`
+    const body: EntityRef = { kind: 'body', path: [outer], id: 9 as Id };
+    tools.click(at([2, 0, 0], { ref: body, point: [2, 0, 0], t: 10, screenDist: 0, selectable: body, inContext: false }));
+    expect(log).toEqual(['exit']);
+    expect(host.context.path).toEqual([outer]);
+    expect(host.selection.refs).toEqual([body]);
+    // a root solid closes everything
+    const rootBody: EntityRef = { kind: 'body', path: [], id: 11 as Id };
+    tools.click(at([4, 0, 0], { ref: rootBody, point: [4, 0, 0], t: 10, screenDist: 0, selectable: rootBody, inContext: false }));
+    expect(host.context.path).toEqual([]);
+    expect(host.selection.refs).toEqual([rootBody]);
+  });
+
+  it('a locked group is selected, not opened, by a double-click or Enter, and the status says why', () => {
+    const { host, tools, log, select } = setup();
+    const { outer } = addNestedGroups(host);
+    host.doc.transact('lock', (d) => { (d.definitions.get(d.rootDefinitionId)!.entities.instances.get(outer) as { locked: boolean }).locked = true; });
+    const instRef: EntityRef = { kind: 'instance', path: [], id: outer };
+    const hit: PickHit = { ref: instRef, point: [1, 0, 0], t: 10, screenDist: 0 };
+    tools.click(at([1, 0, 0], hit));
+    tools.doubleClick(at([1, 0, 0], hit));
+    expect(log).toEqual([]);
+    expect(host.context.path).toEqual([]);
+    expect(host.selection.refs).toEqual([instRef]);
+    expect(select.status().instructor).toMatch(/^This group is locked\. Unlock it to edit it\./);
+    expect(tools.keyDown({ key: 'Enter', code: 'Enter', modifiers: NO_MODIFIERS, repeat: false })).toBe(true);
+    expect(host.context.path).toEqual([]);
+  });
+
+  it('Enter opens the one selected group or component', () => {
+    const { host, tools, log } = setup();
+    const { outer, inner } = addNestedGroups(host);
+    host.selection.set([{ kind: 'instance', path: [], id: outer }]);
+    tools.keyDown({ key: 'Enter', code: 'Enter', modifiers: NO_MODIFIERS, repeat: false });
+    expect(log).toEqual(['enter ' + outer]);
+    expect(host.context.path).toEqual([outer]);
+    host.selection.set([{ kind: 'instance', path: [outer], id: inner }]);
+    tools.keyDown({ key: 'Enter', code: 'Enter', modifiers: NO_MODIFIERS, repeat: false });
+    expect(host.context.path).toEqual([outer, inner]);
+    // with no single group selected, Enter is not taken
+    host.selection.clear();
+    expect(tools.keyDown({ key: 'Enter', code: 'Enter', modifiers: NO_MODIFIERS, repeat: false })).toBe(false);
   });
 
   it('Esc during a box drag inside a group keeps the selection and the group open after release', () => {

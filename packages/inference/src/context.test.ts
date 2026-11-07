@@ -219,6 +219,33 @@ describe('whole-model index: instances in world space', () => {
     expect(engine.pickBox({ ...rect, mode: 'window' }, { context: [inst] })).toEqual([{ kind: 'body', path: [inst], id: bodyId }]);
   });
 
+  it('pickBox takes guides, leader text and section planes in the open context: window inside, crossing touching', () => {
+    const { engine, doc } = fixture();
+    const ids = doc.transact('annotations', (d) => {
+      const root = d.definitions.get(d.rootDefinitionId)!.entities;
+      const base = { tagId: d.defaultTagId, hidden: false, locked: false, castShadows: false, receiveShadows: false, attributes: {} };
+      const point = d.meta.nextId++ as Id, segment = d.meta.nextId++ as Id, line = d.meta.nextId++ as Id, text = d.meta.nextId++ as Id, plane = d.meta.nextId++ as Id;
+      root.guides.set(point, { ...base, id: point, kind: 'point', origin: [20, 0, 0] } as never);
+      root.guides.set(segment, { ...base, id: segment, kind: 'segment', origin: [20, 1, 0], end: [22, 1, 0] } as never);
+      root.guides.set(line, { ...base, id: line, kind: 'line', origin: [21, -5, 0], dir: [0, 1, 0] } as never);
+      root.texts.set(text, { ...base, id: text, kind: 'leader', text: 'Note', position: [20.5, 0.5, 0], offset: [0.2, 0, 0], leader: 'pushpin', fontFamily: 'Arial', fontSizePt: 12, color: [0, 0, 0] } as never);
+      // a vertical plane at x = 23 keeping x >= 23: its outline frames the model's contents
+      root.sectionPlanes.set(plane, { ...base, id: plane, name: 'Section 1', symbol: '1', plane: { n: [1, 0, 0], d: -23 }, origin: [23, 0, 0] } as never);
+      return { point, segment, line, text, plane };
+    }).value;
+    engine.setState(doc.state);
+    engine.pick(input(down(0, 0))); // seeds the projector
+    const ref = (kind: 'guide' | 'text' | 'sectionPlane', id: Id) => ({ kind, path: [], id });
+    const window = engine.pickBox({ min: [19.5, -0.5] as Vec2, max: [22.5, 1.5] as Vec2, mode: 'window' });
+    expect(window).toEqual(expect.arrayContaining([ref('guide', ids.point), ref('guide', ids.segment), ref('text', ids.text)]));
+    // an endless guide line is never inside a window, and the plane's outline reaches far beyond it
+    expect(window).not.toContainEqual(ref('guide', ids.line));
+    expect(window).not.toContainEqual(ref('sectionPlane', ids.plane));
+    const crossing = engine.pickBox({ min: [20.8, 0.8] as Vec2, max: [23.2, 1.2] as Vec2, mode: 'crossing' });
+    expect(crossing).toEqual(expect.arrayContaining([ref('guide', ids.segment), ref('guide', ids.line), ref('sectionPlane', ids.plane)]));
+    expect(crossing).not.toContainEqual(ref('guide', ids.point));
+  });
+
   it('ignore: an instance ref hides everything inside it', () => {
     const { engine, inst } = fixture();
     expect(engine.pick(input(down(9.5, 1.0)), { ignore: [{ kind: 'instance', path: [], id: inst }] })).toBeNull();

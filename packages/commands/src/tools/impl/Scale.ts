@@ -12,7 +12,7 @@ import { NO_MODIFIERS } from '../Tool';
 import type { Modifiers, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
 import { pointerField } from '../entry';
 import { DRAG_PX, entityOverlay, HOVER_COLOR, inferenceOverlay, screenDist } from '../toolUtil';
-import { AXIS_COLOR, AXIS_DIR, movedOutline, refsKey, sectionPreviewFor, TransformToolBase, withoutSectionPlanes, worldToScreen } from './transformShared';
+import { AXIS_COLOR, AXIS_DIR, movedOutline, pickRef, refsKey, sectionPreviewFor, TransformToolBase, withoutSectionPlanes, worldToScreen } from './transformShared';
 import type { SectionPreview, SectionPreviewTool } from '../sectionPreview';
 
 /** Grip pick radius in CSS px. */
@@ -235,7 +235,7 @@ export class ScaleTool extends TransformToolBase implements SectionPreviewTool {
     this.refresh();
     const vp = this.ctx?.camera.viewportSize() ?? { width: 800, height: 600 };
     this.hoverGrip = this.box ? pickGrip(this.box, e.screen, e.camera, vp) : null;
-    this.hover = this.box ? null : (e.inference?.hit?.ref ?? null);
+    this.hover = this.box ? null : pickRef(e.inference?.hit);
     this.ctx?.requestRender();
   }
 
@@ -252,8 +252,9 @@ export class ScaleTool extends TransformToolBase implements SectionPreviewTool {
     }
     this.refresh();
     if (!this.box) {
-      const hit = this.hover ?? e.inference?.hit?.ref ?? null;
+      const hit = this.hover ?? pickRef(e.inference?.hit);
       if (hit) {
+        this.lastError = null;
         this.targetRefs(hit);
         this.hover = null;
         this.refresh();
@@ -266,6 +267,7 @@ export class ScaleTool extends TransformToolBase implements SectionPreviewTool {
     const grip = pickGrip(this.box, e.screen, e.camera, vp);
     if (!grip) return;
     this.lastError = null;
+    if (this.refuse(this.refs, false)) return;
     const box = this.box;
     this.state = {
       kind: 'scaling',
@@ -317,6 +319,7 @@ export class ScaleTool extends TransformToolBase implements SectionPreviewTool {
   }
 
   onCancel(): void {
+    this.dropPickup();
     if (this.state.kind === 'scaling') {
       this.state = IDLE;
       this.ctx?.statusChanged();

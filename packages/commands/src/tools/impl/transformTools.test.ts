@@ -317,6 +317,96 @@ describe('MoveTool', () => {
   });
 });
 
+describe('transform tools: what a press picks up', () => {
+  /** A box made into a group, and a hit on its top face as seen from the model: the group is what Select would select. */
+  const groupedBox = (s: ReturnType<typeof setup>) => {
+    s.registry.registerAll(groupCommands);
+    const id = s.addBox();
+    s.host.selection.set([bodyRef(id)]);
+    const made = s.registry.execute('group.make', {}) as MakeResult;
+    s.host.selection.set([]);
+    const instance: EntityRef = { kind: 'instance', path: [], id: made.instanceId as Id };
+    const def = s.host.doc.state.definitions.get(s.root().instances.get(made.instanceId as Id)!.definitionId)!;
+    const inner = [...def.entities.bodies.values()][0]!;
+    const face = bodyHit(inner, [0.5, 0.5, 1]);
+    const hit: PickHit = { ...face, ref: { ...face.ref, path: [made.instanceId as Id] }, selectable: instance, inContext: false };
+    return { instance, hit };
+  };
+
+  it('Move picks up the group a Select click would select, and Esc restores the empty selection', async () => {
+    const s = setup();
+    const { instance, hit } = groupedBox(s);
+    s.tools.activate('move');
+    const tool = s.tools.activeTool as MoveTool;
+    s.tools.pointerMove(at(TOP_CAMERA, [0.5, 0.5, 1], { hit }));
+    s.tools.pointerDown(at(TOP_CAMERA, [0.5, 0.5, 1], { hit }));
+    expect(s.host.selection.refs).toEqual([instance]);
+    s.tools.pointerMove(at(TOP_CAMERA, [1.5, 0.5, 1]));
+    expect(tool.dragDelta).toEqual([1, 0, 0]);
+    s.tools.keyDown(key('Escape'));
+    expect(tool.dragDelta).toBeNull();
+    expect(s.host.selection.isEmpty).toBe(true);
+    // the move itself keeps what it picked up selected
+    s.tools.pointerDown(at(TOP_CAMERA, [0.5, 0.5, 1], { hit }));
+    s.tools.pointerMove(at(TOP_CAMERA, [1.5, 0.5, 1]));
+    s.tools.pointerUp(at(TOP_CAMERA, [1.5, 0.5, 1]));
+    await tool.settled;
+    expect(s.root().instances.get(instance.id)!.transform[12]).toBeCloseTo(1, 9);
+    expect(s.host.selection.refs).toEqual([instance]);
+  });
+
+  it('refuses a locked group as the move starts: a message, nothing picked up and nothing previewed', () => {
+    const s = setup();
+    const { instance, hit } = groupedBox(s);
+    s.registry.execute('instance.setLocked', { refs: [instance], locked: true });
+    s.tools.activate('move');
+    const tool = s.tools.activeTool as MoveTool;
+    s.tools.pointerMove(at(TOP_CAMERA, [0.5, 0.5, 1], { hit }));
+    s.tools.pointerDown(at(TOP_CAMERA, [0.5, 0.5, 1], { hit }));
+    expect(tool.dragDelta).toBeNull();
+    expect(s.host.selection.isEmpty).toBe(true);
+    expect(s.tools.status().instructor).toContain('A locked group or component cannot be moved');
+    // selected first, it is refused the same way; with Copy on it may be copied
+    s.host.selection.set([instance]);
+    s.tools.pointerDown(at(TOP_CAMERA, [0.5, 0.5, 1]));
+    expect(tool.dragDelta).toBeNull();
+    s.tools.keyDown(key('Control', CTRL));
+    s.tools.keyUp(key('Control'));
+    s.tools.pointerDown(at(TOP_CAMERA, [0.5, 0.5, 1]));
+    expect(tool.dragDelta).toEqual([0, 0, 0]);
+    // switching Copy off during the move would make it a refused move: Copy stays on and the status says why
+    s.tools.keyDown(key('Control', CTRL));
+    s.tools.keyUp(key('Control'));
+    expect(tool.copyMode).toBe(true);
+    expect(s.tools.status().instructor).toContain('cannot be moved');
+  });
+
+  it('Rotate and Scale pick up the group too and refuse it when locked, naming the operation', () => {
+    const s = setup(ISO_CAMERA);
+    const { instance, hit } = groupedBox(s);
+    s.tools.activate('rotate');
+    s.tools.pointerMove(at(ISO_CAMERA, [0.5, 0.5, 1], { hit }));
+    s.tools.pointerDown(at(ISO_CAMERA, [0.5, 0.5, 1], { hit }));
+    expect(s.host.selection.refs).toEqual([instance]);
+    s.tools.keyDown(key('Escape'));
+    expect(s.host.selection.isEmpty).toBe(true);
+    s.registry.execute('instance.setLocked', { refs: [instance], locked: true });
+    s.tools.pointerDown(at(ISO_CAMERA, [0.5, 0.5, 1], { hit }));
+    expect(s.host.selection.isEmpty).toBe(true);
+    expect(s.tools.status().instructor).toContain('cannot be rotated');
+
+    s.tools.activate('scale');
+    const scale = s.tools.activeTool as ScaleTool;
+    s.host.selection.set([instance]);
+    s.tools.pointerMove(at(ISO_CAMERA, [0.5, 0.5, 1]));
+    const grip = scale.scaleBox!.grips[0]!;
+    const screen = worldToScreen(ISO_CAMERA, VIEWPORT, grip.pos)!;
+    s.tools.pointerDown(at(ISO_CAMERA, grip.pos, { screen }));
+    expect(scale.dragFactors).toBeNull();
+    expect(s.tools.status().instructor).toContain('cannot be scaled');
+  });
+});
+
 describe('MoveTool: guides and text', () => {
   it('previews and moves guides and leader text with the selection', async () => {
     const { host, registry, tools, root } = setup();

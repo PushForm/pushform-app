@@ -25,7 +25,7 @@ import type { ToolKeyEvent, ToolPointerEvent, ToolSettingValue, ToolStatus } fro
 import { toggleSetting } from '../settings';
 import { pointerField } from '../entry';
 import { DRAG_PX, entityOverlay, HOVER_COLOR, inferenceOverlay, screenDist, worldPerPixelAt } from '../toolUtil';
-import { AXIS_COLOR, AXIS_DIR, movedOutline, sectionPreviewFor, TransformToolBase, withoutSectionPlanes, worldToScreen } from './transformShared';
+import { AXIS_COLOR, AXIS_DIR, movedOutline, pickRef, sectionPreviewFor, TransformToolBase, withoutSectionPlanes, worldToScreen } from './transformShared';
 import type { SectionPreview, SectionPreviewTool } from '../sectionPreview';
 import { planeTag } from '../held';
 
@@ -148,7 +148,7 @@ export class RotateTool extends TransformToolBase implements SectionPreviewTool 
       const hit = e.inference?.hit ?? null;
       this.hoverNormal = hit?.normal && (hit.ref.kind === 'face' || hit.ref.kind === 'sketchFace') ? v3normalize(hit.normal) : null;
       const host = this.host();
-      this.hover = host && host.selection.isEmpty ? (hit?.ref ?? null) : null;
+      this.hover = host && host.selection.isEmpty ? pickRef(hit) : null;
     }
     this.ctx?.requestRender();
   }
@@ -174,7 +174,8 @@ export class RotateTool extends TransformToolBase implements SectionPreviewTool 
       this.ctx?.requestRender();
       return;
     }
-    const refs = this.targetRefs(this.hover ?? inf.hit?.ref ?? null);
+    this.lastError = null;
+    const refs = this.targetRefs(this.hover ?? pickRef(inf.hit), this.copy);
     if (!refs.length) return;
     this.hover = null;
     this.lastError = null;
@@ -250,6 +251,7 @@ export class RotateTool extends TransformToolBase implements SectionPreviewTool 
   onCancel(): void {
     if (this.state.kind !== 'idle') {
       this.state = IDLE;
+      this.dropPickup();
       this.ctx?.statusChanged();
       this.ctx?.requestRender();
       return;

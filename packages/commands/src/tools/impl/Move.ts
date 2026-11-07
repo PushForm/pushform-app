@@ -15,7 +15,7 @@ import { toggleSetting } from '../settings';
 import { pointerField } from '../entry';
 import { EdgeLock } from '../edgeLock';
 import { DRAG_PX, entityOverlay, HOVER_COLOR, inferenceOverlay, rubberBandColor, screenDist } from '../toolUtil';
-import { AXIS_DIR, movedOutline, sectionPreviewFor, TransformToolBase, withoutSectionPlanes } from './transformShared';
+import { AXIS_DIR, movedOutline, pickRef, sectionPreviewFor, TransformToolBase, withoutSectionPlanes } from './transformShared';
 import type { SectionPreview, SectionPreviewTool } from '../sectionPreview';
 import { axisTag, EDGE_LOCKED, SHIFT_HELD } from '../held';
 
@@ -41,6 +41,9 @@ interface GlueMove {
 }
 
 const IDLE: State = { kind: 'idle' };
+
+/** A message as a sentence, ending with a full stop. */
+const sentence = (text: string): string => (/[.!?]$/.test(text) ? text : `${text}.`);
 
 /**
  * Move (M). Idle → pick a base point (hovering picks the entity under the cursor when nothing is
@@ -142,8 +145,8 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
       return;
     }
     const host = this.host();
-    const hit = e.inference?.hit?.ref ?? null;
-    this.hover = host && host.selection.isEmpty ? hit : null;
+    // with nothing selected, a press picks up what a Select click would select
+    this.hover = host && host.selection.isEmpty ? pickRef(e.inference?.hit) : null;
     this.ctx?.requestRender();
   }
 
@@ -154,6 +157,7 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
       if (s.pressed) return;
       if (!s.moved && screenDist(e.screen, s.downScreen) <= DRAG_PX) {
         this.endMove();
+        this.dropPickup();
         return;
       }
       s.face = this.glueFace(e);
@@ -162,7 +166,8 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     }
     const inf = e.inference;
     if (!inf) return;
-    const refs = this.targetRefs(this.hover ?? inf.hit?.ref ?? null);
+    this.lastError = null;
+    const refs = this.targetRefs(this.hover ?? pickRef(inf.hit), this.copy);
     if (!refs.length) return;
     this.hover = null;
     this.lastError = null;
@@ -213,11 +218,7 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
         }
         return true;
       case 'Control':
-        if (!e.repeat) {
-          this.copy = !this.copy;
-          this.ctx?.statusChanged();
-          this.ctx?.requestRender();
-        }
+        if (!e.repeat) this.toggleCopy();
         return true;
       default:
         return false;
@@ -254,6 +255,7 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
   onCancel(): void {
     if (this.state.kind === 'moving') {
       this.endMove();
+      this.dropPickup();
       return;
     }
     this.lastCommit = null;
@@ -306,9 +308,11 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
   private baseStatus(): ToolStatus {
     if (this.state.kind === 'moving') {
       return {
-        instructor: this.state.face
-          ? `Click to glue the component to this face.`
-          : `Pick end point or enter distance. Arrows lock an axis.`,
+        instructor: this.lastError
+          ? sentence(this.lastError)
+          : this.state.face
+            ? `Click to glue the component to this face.`
+            : `Pick end point or enter distance. Arrows lock an axis.`,
         vcbLabel: 'Length',
         vcbValue: this.fmtLength(v3len(this.state.delta)),
         fields: [pointerField('Length', 'length', this.fmtLength(v3len(this.state.delta)))],
@@ -403,6 +407,16 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
       else if (v3len(v3cross(normal, v3normalize(n))) > ANGLE_TOL) return null;
     }
     return normal ? { kind: 'perpendicular', point: base, dir: normal, color: SNAP_COLORS.perpendicular, label: 'Along Section Plane Normal' } : null;
+  }
+
+  /** Ctrl tap: switch Copy; during a move, a switch that would make the move one that is refused is not made. */
+  private toggleCopy(): void {
+    const s = this.state;
+    if (s.kind === 'moving' && this.refuse(s.refs, !this.copy)) return;
+    if (s.kind === 'moving') this.lastError = null;
+    this.copy = !this.copy;
+    this.ctx?.statusChanged();
+    this.ctx?.requestRender();
   }
 
   private setLock(axis: Axis | null): void {

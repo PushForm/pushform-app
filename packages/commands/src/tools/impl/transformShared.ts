@@ -2,14 +2,15 @@
 // Copyright 2026 PushForm contributors
 import type { Mat4, MMat4, UnitSettings, Vec2, Vec3 } from '@pushform/core';
 import { formatLength, m4mul, m4transformPoint, MERGE_TOL, v3add, v3cross, v3dist, v3dot, v3len, v3normalize, v3scale, v3sub } from '@pushform/core';
-import type { Axis } from '@pushform/inference';
-import { SNAP_COLORS } from '@pushform/inference';
+import type { Axis, PickHit } from '@pushform/inference';
+import { hitSelectable, SNAP_COLORS } from '@pushform/inference';
 import type { DocumentState, EntityContainer, EntityRef, MeshPartGeometry, UndoEntry } from '@pushform/model';
 import { containerAt, contentWorldBounds, contextMatrix, entityRefKey, imageEntityCorners, sectionPlaneCorners, worldSectionPlane } from '@pushform/model';
 import { mapNormal } from '../../commands/sectionPlanes';
 import type { SectionPreview } from '../sectionPreview';
 import { contextFrame, pathKeyOf } from '../../commands/context';
 import { surfaceRefs } from '../../commands/sketchQueries';
+import { transformRefusal } from '../../commands/transform';
 import type { CameraState } from '../../camera/CameraHost';
 import type { DocumentHost } from '../../host/DocumentHost';
 import type { OverlayPrimitive } from '../overlay';
@@ -38,6 +39,11 @@ export function worldToScreen(cam: CameraState, viewport: { width: number; heigh
   if (z <= 1e-9) return null;
   const f = h / 2 / Math.tan(((cam.fov / 2) * Math.PI) / 180);
   return [w / 2 + (x / z) * f, h / 2 - (y / z) * f];
+}
+
+/** What a press on `hit` picks up when nothing is selected: what a Select click there would select. */
+export function pickRef(hit: PickHit | null | undefined): EntityRef | null {
+  return hit ? hitSelectable(hit) : null;
 }
 
 /** Stable key of a ref list (selection change detection). */
@@ -285,6 +291,8 @@ export abstract class TransformToolBase implements Tool {
   protected lastCommit: TransformCommit | null = null;
   protected lastError: string | null = null;
   private queue: Promise<void> = Promise.resolve();
+  /** Key of the refs a press selected from an empty selection, until the operation ends. */
+  private pickedUp: string | null = null;
 
   /** Resolves when every queued commit / re-apply has settled (tests). */
   get settled(): Promise<void> {
@@ -295,11 +303,13 @@ export abstract class TransformToolBase implements Tool {
     this.ctx = ctx;
     this.lastCommit = null;
     this.lastError = null;
+    this.pickedUp = null;
     this.onActivate();
   }
   deactivate(): void {
     this.onDeactivate();
     this.lastCommit = null;
+    this.pickedUp = null;
     this.ctx = null;
   }
   protected onActivate(): void {}
@@ -323,18 +333,47 @@ export abstract class TransformToolBase implements Tool {
     return u ? formatLength(meters, u) : meters.toFixed(4);
   }
 
-  /** Entities a transform tool acts on: the selection, else the hovered entity. */
-  protected targetRefs(hover: EntityRef | null): EntityRef[] {
+  /**
+   * Entities a transform acts on as it starts: the selection, else what a Select click on `hover` (see
+   * `pickRef`) selects, a face of a smooth surface standing for the whole surface; those are selected
+   * until Esc ends the operation (`dropPickup`). Empty, with the reason in `lastError`, when the
+   * transform (a copy when `copy`) is refused, so nothing is picked up or previewed.
+   */
+  protected targetRefs(hover: EntityRef | null, copy = false): EntityRef[] {
     const host = this.host();
     if (!host) return [];
-    if (!host.selection.isEmpty) return host.selection.refs;
-    if (hover) {
-      // A hovered face of a smooth surface stands for the whole surface, as its highlight shows.
-      const refs = surfaceRefs(host.doc.state, hover);
+    const picking = host.selection.isEmpty;
+    const refs = !picking ? host.selection.refs : hover ? surfaceRefs(host.doc.state, hover) : [];
+    if (!refs.length || this.refuse(refs, copy)) return [];
+    if (picking) {
       this.ctx?.commands.execute('selection.set', { refs });
-      return refs;
+      this.pickedUp = refsKey(refs);
     }
-    return [];
+    return refs;
+  }
+
+  /** True, with the reason in `lastError` and the status updated, when transforming `refs` is refused. */
+  protected refuse(refs: readonly EntityRef[], copy: boolean): boolean {
+    const host = this.host();
+    const why = host ? transformRefusal(host, refs, copy, this.title) : null;
+    if (!why) return false;
+    this.lastError = why;
+    this.ctx?.statusChanged();
+    this.ctx?.requestRender();
+    return true;
+  }
+
+  /** The operation ended without a change (Esc): what a press picked up from an empty selection is deselected. */
+  protected dropPickup(): void {
+    const key = this.pickedUp;
+    this.pickedUp = null;
+    const host = this.host();
+    if (key !== null && host && refsKey(host.selection.refs) === key) this.ctx?.commands.execute('selection.set', { refs: [] });
+  }
+
+  /** The operation ended with a change: what a press picked up stays selected. */
+  protected keepPickup(): void {
+    this.pickedUp = null;
   }
 
   protected enqueue(task: () => Promise<void>): void {
@@ -353,6 +392,7 @@ export abstract class TransformToolBase implements Tool {
     const commit: TransformCommit = { refs, matrix, copy, label, entry: null, applied: false };
     this.lastCommit = commit;
     this.lastError = null;
+    this.keepPickup();
     this.enqueue(async () => {
       await ctx.commands.execute('transform.apply', { refs, matrix, copy, label });
       commit.entry = hostOfTool(ctx).undoStack.peek();

@@ -2,7 +2,7 @@
 
 ## Orbit, Pan or Zoom without changing geometry
 
-Choose **Orbit** and drag to turn around the model, or choose **Pan** and drag to shift the camera sideways. Release to stop. With **Zoom**, drag upward to zoom in or downward to zoom out. These change the camera without resizing geometry.
+Choose **Orbit** and drag to turn around the model, or choose **Pan** and drag to shift the camera sideways. Release to stop. In Orbit, hold Shift as you start a drag to pan instead, or hold Ctrl to orbit freely, letting the view roll. With **Zoom**, drag upward to zoom in or downward to zoom out. These change the camera without resizing geometry.
 
 You can switch to **Orbit**, **Pan**, **Zoom** or **Zoom Window** in the middle of another tool, for example with edges picked for a chamfer or halfway through a line. The tool you were using waits with everything you picked, and its preview stays visible while you move the view. Press Escape, or choose that tool again, to go back to it. Enter and typed values still reach it while Orbit or Pan is active, so you can apply a chamfer without leaving Orbit. **Select** (or the Space bar) works the same way for a tool with something in progress: select what you need, then press Escape or choose the tool again to carry on. Choosing any other tool ends the waiting one.
 

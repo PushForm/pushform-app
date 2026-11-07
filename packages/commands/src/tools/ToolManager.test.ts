@@ -268,6 +268,50 @@ describe('ToolManager: camera tools and Select set the active tool aside', () =>
   });
 });
 
+describe('ToolManager: the Orbit tool', () => {
+  class RecordingCamera extends FakeCamera {
+    readonly calls: string[] = [];
+    override orbitStart(_screen?: unknown, opts?: { free?: boolean }): void {
+      this.calls.push(opts?.free ? 'orbitStart(free)' : 'orbitStart');
+    }
+    override orbitDrag(): void {
+      this.calls.push('orbitDrag');
+    }
+    override orbitEnd(): void {
+      this.calls.push('orbitEnd');
+    }
+    override panStart(): void {
+      this.calls.push('panStart');
+    }
+    override panDrag(): void {
+      this.calls.push('panDrag');
+    }
+    override panEnd(): void {
+      this.calls.push('panEnd');
+    }
+  }
+  const drag = (tools: ToolManager, camera: FakeCamera, modifiers = NO_MODIFIERS): void => {
+    const e = (screen: [number, number], buttons: number) => ({ screen, ray: { origin: [0, 0, 0] as Vec3, dir: [0, 0, -1] as Vec3 }, button: 0, buttons, modifiers, inference: null, camera: camera.state });
+    tools.pointerDown(e([10, 10], 1));
+    tools.pointerMove(e([30, 10], 1));
+    tools.pointerUp(e([30, 10], 0));
+  };
+
+  it('orbits on a drag, orbits freely with Ctrl and pans with Shift', () => {
+    const camera = new RecordingCamera();
+    const tools = new ToolManager(new CommandRegistry({ tx: new DocumentHost(), camera, services: new Map() }), camera);
+    tools.register(new OrbitTool());
+    tools.activate('orbit');
+    drag(tools, camera);
+    expect(camera.calls.splice(0)).toEqual(['orbitStart', 'orbitDrag', 'orbitEnd']);
+    drag(tools, camera, { ...NO_MODIFIERS, ctrl: true });
+    expect(camera.calls.splice(0)).toEqual(['orbitStart(free)', 'orbitDrag', 'orbitEnd']);
+    drag(tools, camera, { ...NO_MODIFIERS, shift: true });
+    expect(camera.calls.splice(0)).toEqual(['panStart', 'panDrag', 'panEnd']);
+    expect(tools.status().instructor).toContain('Shift = Pan');
+  });
+});
+
 describe('ToolManager: tool options bar', () => {
   class BarTool extends WorkTool {
     copy = false;

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import type { Mat4, MMat4, UnitSettings, Vec2, Vec3 } from '@pushform/core';
-import { formatLength, m4mul, m4transformPoint, MERGE_TOL, v3cross, v3dist, v3dot, v3len, v3normalize, v3sub } from '@pushform/core';
+import { formatLength, m4mul, m4transformPoint, MERGE_TOL, v3add, v3cross, v3dist, v3dot, v3len, v3normalize, v3scale, v3sub } from '@pushform/core';
 import type { Axis } from '@pushform/inference';
 import { SNAP_COLORS } from '@pushform/inference';
 import type { DocumentState, EntityContainer, EntityRef, MeshPartGeometry, UndoEntry } from '@pushform/model';
@@ -47,8 +47,9 @@ export function refsKey(refs: readonly EntityRef[]): string {
 
 /**
  * Overlay polylines (world space) showing where `refs` end up under the world transform `m`:
- * body edges, instance edges, sketch edges touching moved vertices (stretched), and for body
- * faces/edges every edge of the body with the moved points displaced (the autofold stretch).
+ * body edges, instance edges, sketch edges touching moved vertices (stretched), guides, leader and
+ * model text (leader line and text), and for body faces/edges every edge of the body with the moved
+ * points displaced (the stretch the model folds into a valid solid).
  * Refs may live in any context: each group of refs is drawn through its context matrix.
  */
 export function movedOutline(state: DocumentState, refs: readonly EntityRef[], m: Mat4 | MMat4, color = OUTLINE_COLOR): OverlayPrimitive[] {
@@ -113,6 +114,15 @@ function movedOutlineInContext(state: DocumentState, refs: readonly EntityRef[],
   const push = (points: readonly Vec3[]): void => {
     if (points.length >= 2) out.push({ kind: 'polyline', points, color, width: 1 });
   };
+  /** Half the length an infinite guide line is drawn with: the size of the context's contents, at least 1 m. */
+  let span: number | null = null;
+  const guideSpan = (): number => {
+    if (span === null) {
+      const b = contentWorldBounds(state, path);
+      span = Math.max(1, b ? v3dist(b.min, b.max) : 0);
+    }
+    return span;
+  };
   const wholeBodies = new Set<number>();
   const movedSketchVertices = new Set<number>();
   const movedBodyPoints = new Map<number, Vec3[]>();
@@ -169,6 +179,24 @@ function movedOutlineInContext(state: DocumentState, refs: readonly EntityRef[],
       case 'image': {
         const image = root.images.get(ref.id);
         if (image) push([...imageEntityCorners(image), imageEntityCorners(image)[0]!].map(moved));
+        break;
+      }
+      case 'guide': {
+        const g = root.guides.get(ref.id);
+        if (!g) break;
+        if (g.kind === 'point') out.push({ kind: 'point', position: moved(g.origin), color, shape: 'cross', size: 8 });
+        else if (g.kind === 'segment') out.push({ kind: 'polyline', points: [moved(g.origin), moved(g.end)], color, width: 1, dashed: true });
+        else out.push({ kind: 'polyline', points: [moved(v3add(g.origin, v3scale(g.dir, -guideSpan()))), moved(v3add(g.origin, v3scale(g.dir, guideSpan())))], color, width: 1, dashed: true });
+        break;
+      }
+      case 'text': {
+        // screen text is fixed to the screen and does not move
+        const t = root.texts.get(ref.id);
+        if (!t || t.kind === 'screen') break;
+        const anchor = moved(t.position);
+        const label = t.offset ? moved(v3add(t.position, t.offset)) : anchor;
+        if (t.offset) push([anchor, label]);
+        out.push({ kind: 'label', position: label, text: t.text, color });
         break;
       }
       case 'sketchVertex':

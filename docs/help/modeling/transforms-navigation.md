@@ -20,7 +20,7 @@ To hide or show the cube, choose **View › Navigation Cube**, or tick **Navigat
 
 Select the geometry, choose **Move**, and click a base point. Move the pointer to preview the destination, then click again to finish. You can also press, drag and release. While positioning, type a distance and press Enter for an exact move along the current direction. Escape cancels the preview. The moving outline includes geometry inside nested groups and components.
 
-Tap Ctrl, or click **Copy** in the tool options bar, to toggle copying before placement. Work inside the group or component you intend to edit. Moving a component instance differs from editing the geometry shared by its instances.
+Tap Ctrl, or click **Copy** in the tool options bar, to toggle copying before placement. Move, Rotate and Scale also take guides and text, and copy them too. Screen text stays where it is on the screen, and edges drawn on a solid's face stay on the face: move the solid to move them. Work inside the group or component you intend to edit. Moving a component instance differs from editing the geometry shared by its instances.
 
 ## Rotate geometry around a pivot
 

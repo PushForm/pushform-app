@@ -16,6 +16,8 @@ import type { RotateTool } from './Rotate';
 import type { ScaleTool } from './Scale';
 import { groupCommands, type MakeResult } from '../../commands/groups';
 import { sectionPlaneCommands } from '../../commands/sectionPlanes';
+import { guideCommands } from '../../commands/guides';
+import { textCommands } from '../../commands/texts';
 import { containerAt } from '@pushform/model';
 import { worldToScreen } from './transformShared';
 
@@ -312,6 +314,33 @@ describe('MoveTool', () => {
     expect(near(root().sketch.vertices.get(v.id)!.p, [3, 1, 0])).toBe(true);
     expect(root().sketch.faces.size).toBe(1);
     expect(root().sketch.edges.size).toBe(4);
+  });
+});
+
+describe('MoveTool: guides and text', () => {
+  it('previews and moves guides and leader text with the selection', async () => {
+    const { host, registry, tools, root } = setup();
+    registry.registerAll(guideCommands);
+    registry.registerAll(textCommands);
+    const line = registry.execute('guides.addLine', { point: [0, 0, 0], dir: [1, 0, 0] }) as number;
+    const point = (registry.execute('guides.addPoint', { point: [1, 1, 0] }) as { id: number }).id;
+    const text = registry.execute('text.add', { kind: 'leader', anchor: [0, 1, 0], label: [1, 2, 0], text: 'Drawer' }) as EntityRef;
+    host.selection.set([{ kind: 'guide', path: [], id: line as Id }, { kind: 'guide', path: [], id: point as Id }, text]);
+    tools.activate('move');
+    const tool = tools.activeTool as MoveTool;
+    tools.pointerDown(at(TOP_CAMERA, [0, 0, 0]));
+    tools.pointerMove(at(TOP_CAMERA, [0, 1, 0]));
+    const overlay = tools.overlay();
+    const guideLine = overlay.find((o) => o.kind === 'polyline' && o.dashed);
+    expect(guideLine?.kind === 'polyline' && guideLine.points.every((p) => near([0, p[1], p[2]], [0, 1, 0]))).toBe(true);
+    expect(overlay.some((o) => o.kind === 'point' && o.shape === 'cross' && near(o.position, [1, 2, 0]))).toBe(true);
+    expect(overlay.some((o) => o.kind === 'label' && o.text === 'Drawer' && near(o.position, [1, 3, 0]))).toBe(true);
+    tools.pointerUp(at(TOP_CAMERA, [0, 1, 0]));
+    await tool.settled;
+    expect(tools.status().instructor).not.toContain('failed');
+    expect(near(root().guides.get(line as Id)!.origin, [0, 1, 0])).toBe(true);
+    expect(near(root().guides.get(point as Id)!.origin, [1, 2, 0])).toBe(true);
+    expect(near(root().texts.get(text.id)!.position, [0, 2, 0])).toBe(true);
   });
 });
 

@@ -25,6 +25,7 @@ import { RectangleTool } from './Rectangle';
 import type { CircleTool } from './Circle';
 import type { PolygonTool } from './Polygon';
 import type { TwoPointArcTool } from './TwoPointArc';
+import type { ThreePointArcTool } from './ThreePointArc';
 import type { FreehandTool } from './Freehand';
 import type { RotatedRectangleTool } from './RotatedRectangle';
 
@@ -378,7 +379,9 @@ describe('ThreePointArcTool', () => {
     tools.click(at([-1, 0, 0]));
     tools.click(at([0, 1, 0]));
     tools.pointerMove(at([1, 0, 0]));
-    expect(tools.status()).toMatchObject({ vcbLabel: 'Radius', vcbValue: `3' 3 3/8"` });
+    // the end stage's value is the distance from the second point to the end (√2 m here)
+    expect(tools.status()).toMatchObject({ vcbLabel: 'Length', vcbValue: `4' 7 11/16"` });
+    expect(tools.status().fields).toEqual([expect.objectContaining({ label: 'Length', value: `4' 7 11/16"` })]);
     tools.click(at([1, 0, 0]));
     expect(sketch().edges.size).toBe(12);
     expect(sketch().faces.size).toBe(0);
@@ -386,6 +389,21 @@ describe('ThreePointArcTool', () => {
     expect(c.radius).toBeCloseTo(1, 9);
     expect(hasVertex(sketch(), [0, 1, 0])).toBe(true);
     expect(hasVertex(sketch(), [1, 0, 0])).toBe(true);
+  });
+});
+
+describe('ThreePointArcTool end stage', () => {
+  it('a typed length places the end that far from the second point, toward the pointer', () => {
+    const { tools, sketch } = setup();
+    tools.activate('arc3');
+    tools.click(at([-1, 0, 0]));
+    tools.click(at([0, 1, 0]));
+    tools.pointerMove(at([0.5, 0.5, 0])); // pointer down-right of the second point
+    vcb(tools, '1m');
+    const end: Vec3 = [Math.SQRT1_2, 1 - Math.SQRT1_2, 0];
+    expect(sketch().curves.size).toBe(1);
+    expect(hasVertex(sketch(), end)).toBe(true);
+    expect((tools.get('arc3') as ThreePointArcTool).lastParams?.end[0]).toBeCloseTo(end[0], 9);
   });
 });
 
@@ -677,6 +695,37 @@ describe('typed values before the first click', () => {
     expect(tools.status().settings![0]).toMatchObject({ id: 'sides', value: '24' });
     tools.onVcb({ kind: 'segments', count: 8 });
     expect(tools.status().settings![0]).toMatchObject({ id: 'sides', value: '8' });
+    expect(tools.status().instructor).toBe('Select center point.');
+  });
+
+  it.each([
+    ['arc', 'Select center point.'],
+    ['pie', 'Select center point.'],
+    ['arc2', 'Select start point of arc, or double-click a corner to fillet it.'],
+    ['arc3', 'Select start point of arc.'],
+  ])('%s: a bare number sets no segment count; the hint says to type it with s', (id, instructor) => {
+    const { tools, sketch } = setup();
+    tools.activate(id);
+    expect(tools.status()).toMatchObject({ instructor, vcbLabel: 'Segments', vcbValue: '12' });
+    tools.onVcb({ kind: 'length', meters: 0.3048, raw: 16, unit: null });
+    expect(tools.status().settings![0]).toMatchObject({ id: 'segments', value: '12' });
+    expect(tools.status().instructor).toMatch(/^Type 16s for 16 segments, or set Segments in the tool options bar\. Then select /);
+    expect(sketch().edges.size).toBe(0);
+    tools.onVcb({ kind: 'segments', count: 16 });
+    expect(tools.status().settings![0]).toMatchObject({ id: 'segments', value: '16' });
+    expect(tools.status()).toMatchObject({ instructor, vcbLabel: 'Segments', vcbValue: '16' });
+  });
+
+  it('right after an arc, a bare number still re-edits it', () => {
+    const { tools, sketch, host } = setup();
+    tools.activate('arc');
+    tools.click(at([0, 0, 0]));
+    tools.click(at([1, 0, 0]));
+    tools.click(at([0, 1, 0]));
+    const entries = host.undoStack.length;
+    vcb(tools, '4m');
+    expect(host.undoStack.length).toBe(entries);
+    expect([...sketch().curves.values()][0]).toMatchObject({ radius: 2 });
     expect(tools.status().instructor).toBe('Select center point.');
   });
 });

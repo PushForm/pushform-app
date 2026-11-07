@@ -176,6 +176,16 @@ export class ClickGesture {
   }
 }
 
+/**
+ * Instruction before an arc tool's first click: after a bare number, which sets nothing there, how to
+ * type it as a segment count; otherwise `next`.
+ */
+export function segmentCountHint(bareNumber: number | null, next: string): string {
+  if (bareNumber === null || !Number.isInteger(bareNumber) || bareNumber < 1) return next;
+  const n = bareNumber;
+  return `Type ${n}s for ${n} segments, or set Segments in the tool options bar. Then ${next.charAt(0).toLowerCase()}${next.slice(1)}`;
+}
+
 /** Last committed shape for the "type a value after finishing" re-edit. */
 export interface LastCommit<P> {
   readonly params: P;

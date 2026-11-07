@@ -25,6 +25,7 @@ import {
   onPlane,
   planeLockFromKey,
   shapePreview,
+  segmentCountHint,
   toggleLock,
   undoLast,
   wrapPi,
@@ -47,8 +48,8 @@ export const ARC_SEGMENTS = 12;
 /**
  * Arc tool (centre arc): Idle → Center → Radius point → End angle → commit. VCB: the circle's
  * diameter (or `24r` a radius) in the radius stage, angle (degrees, `45` or `45deg`) in the angle
- * stage, `Ns` segments any time; typing
- * after the commit re-edits the last arc. The plane comes from the hovered face / arrow lock /
+ * stage, `Ns` segments any time; typing after the commit re-edits the last arc. Before the first
+ * click (with no arc to re-edit) a bare number sets nothing, and the hint says to type it with `s`. The plane comes from the hovered face / arrow lock /
  * Shift. Pie (`pie: true`) closes the arc back through the centre with two edges so a face forms.
  */
 export class ArcTool implements Tool {
@@ -70,6 +71,8 @@ export class ArcTool implements Tool {
   protected lockNormal: Axis | null = null;
   protected heldPlane: Plane | null = null;
   protected lockSnap: Snap | null = null;
+  /** A bare number typed before the first click, which sets nothing; the hint says how to set the segments. */
+  private bareNumber: number | null = null;
   protected cursorInference: InferenceResult | null = null;
   protected cursorScreen: Vec2 | null = null;
   protected last: LastCommit<ArcParams> | null = null;
@@ -176,12 +179,17 @@ export class ArcTool implements Tool {
     }
     switch (this.stage) {
       case 'center': {
-        if (!this.last) return;
-        if (v.kind === 'length' || v.kind === 'radius') this.reapplyLast({ radius: v.kind === 'length' ? v.meters / 2 : v.meters });
-        else {
-          const deg = degreesFromVcb(v);
-          if (deg !== null) this.reapplyLast({ sweep: (deg * Math.PI) / 180 });
+        let done = false;
+        if (this.last) {
+          if (v.kind === 'length' || v.kind === 'radius') done = this.reapplyLast({ radius: v.kind === 'length' ? v.meters / 2 : v.meters });
+          else {
+            const deg = degreesFromVcb(v);
+            if (deg !== null) done = this.reapplyLast({ sweep: (deg * Math.PI) / 180 });
+          }
         }
+        // with no arc to re-edit, a bare number sets nothing (the segments take their suffix, `12s`)
+        this.bareNumber = !done && v.kind === 'length' && v.unit === null ? v.raw : null;
+        this.ctx?.statusChanged();
         return;
       }
       case 'radius': {
@@ -250,15 +258,14 @@ export class ArcTool implements Tool {
   /** The bar changed the segments just after a commit: redraw that arc with them, as one undo step. */
   adjustLast(id: string): boolean {
     if (id !== 'segments' || !this.last) return false;
-    this.reapplyLast({ segments: this.segments });
-    return true;
+    return this.reapplyLast({ segments: this.segments });
   }
 
   /** Segments in the tool options bar. */
   onSetting(id: string, value: ToolSettingValue): void {
     const n = id === 'segments' ? countFrom(value) : null;
     if (n === null) return;
-    this.segments = Math.max(1, Math.round(n));
+    this.setSegments(n);
     this.ctx?.requestRender();
     this.ctx?.statusChanged();
   }
@@ -266,7 +273,7 @@ export class ArcTool implements Tool {
   private stageStatus(): ToolStatus {
     switch (this.stage) {
       case 'center':
-        return { instructor: 'Select center point.', vcbLabel: 'Sides', vcbValue: String(this.segments) };
+        return { instructor: segmentCountHint(this.bareNumber, 'Select center point.'), vcbLabel: 'Segments', vcbValue: String(this.segments) };
       case 'radius':
         return {
           instructor: 'Select point on arc or enter diameter.',
@@ -295,6 +302,7 @@ export class ArcTool implements Tool {
   }
 
   protected setSegments(n: number): void {
+    this.bareNumber = null;
     this.segments = Math.max(1, Math.round(n));
     this.ctx?.statusChanged();
   }
@@ -306,6 +314,7 @@ export class ArcTool implements Tool {
     this.center = p;
     this.radius = null;
     this.sweep = 0;
+    this.bareNumber = null;
     this.ctx?.statusChanged();
   }
 
@@ -390,14 +399,16 @@ export class ArcTool implements Tool {
     return res;
   }
 
-  private reapplyLast(patch: Partial<ArcParams>): void {
-    if (!this.ctx || !this.last) return;
+  /** Redraw the last arc with `patch` as one undo step; false when there is none to redraw. */
+  private reapplyLast(patch: Partial<ArcParams>): boolean {
+    if (!this.ctx || !this.last) return false;
     const next = { ...this.last.params, ...patch };
-    if (next.radius <= MERGE_TOL || Math.abs(next.sweep) < 1e-9) return;
-    if (!undoLast(this.ctx, this.last)) return;
+    if (next.radius <= MERGE_TOL || Math.abs(next.sweep) < 1e-9) return false;
+    if (!undoLast(this.ctx, this.last)) return false;
     this.execute(next);
     this.ctx.requestRender();
     this.ctx.statusChanged();
+    return true;
   }
 
   private setLock(axis: Axis | null): void {

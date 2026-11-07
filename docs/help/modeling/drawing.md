@@ -28,7 +28,7 @@ Modeling Freehand creates a segmented sketch curve. To turn a closed planar face
 
 Open the Arc dropdown and choose the variant matching your reference points. **Arc** uses three clicks: center, start point, then end direction. **2 Point Arc** uses start, end, then bulge. **3 Point Arc** uses start, an intermediate point on the arc, then end. The last click completes the arc.
 
-**Pie** uses center, start and end like Arc, but closes back to the center with two radii to form a face. For Arc and Pie, you can type the circle's diameter after the center, then the angle of the sweep. Escape cancels unfinished placement. Repeated or collinear points cannot define a valid curved arc; choose distinct points.
+**Pie** uses center, start and end like Arc, but closes back to the center with two radii to form a face. For Arc and Pie, you can type the circle's diameter after the center, then the angle of the sweep. Before the first click, type a segment count followed by **s**, such as **12s**, or set **Segments** in the tool options bar; a plain number there changes nothing. Escape cancels unfinished placement. Repeated or collinear points cannot define a valid curved arc; choose distinct points.
 
 ## Draw an eight-sided polygon in Modeling
 

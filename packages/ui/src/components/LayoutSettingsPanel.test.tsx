@@ -54,7 +54,7 @@ it('titles the top panel by the selection and shows only its editable properties
   dispose();
 });
 
-it('shows the count and no style or Arrange controls for several objects', () => {
+it('shows the count and Arrange, but no style controls, for several objects', () => {
   const { panel, sections, click, dispose } = setup();
   click(25, 20);
   const canvas = screen.getByLabelText('Page 1 canvas');
@@ -63,7 +63,8 @@ it('shows the count and no style or Arrange controls for several objects', () =>
   expect(sections()[0]).toBe('2 Objects');
   expect(within(panel).getByText('2 objects selected')).toBeTruthy();
   expect(within(panel).queryByLabelText('Weight (pt)')).toBeNull();
-  expect(within(panel).queryByRole('region', { name: 'Arrange' })).toBeNull();
+  // Arrange acts on the selection as a whole.
+  expect(within(panel).getByRole('region', { name: 'Arrange' })).toBeTruthy();
   dispose();
 });
 

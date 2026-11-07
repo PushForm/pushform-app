@@ -295,6 +295,7 @@ export class ToolManager implements ToolHost {
     if (e.key === 'Control' || e.key === 'Alt') {
       const tap = this.pendingTap === e.key;
       this.pendingTap = null;
+      if (tap && this.toggleApplied(e.key)) return true;
       if (tap) {
         const press: ToolKeyEvent = { ...e, repeat: false };
         if (this.call(() => this.active?.onKeyDown?.(press) || (this.camerasParked() && this.parked!.onKeyDown?.(press)))) {
@@ -339,6 +340,24 @@ export class ToolManager implements ToolHost {
       if (adjusting && !tool.adjustLast?.(id, value)) this.applied = null;
     });
     this.afterInteraction();
+  }
+
+  /**
+   * A tapped Ctrl (`primary`) or Alt (`secondary`) while the bar shows the operation just applied: switch
+   * the setting the tool marks with that key as its bar control would, which redoes the operation. False
+   * when nothing is applied or no setting has that key; the tap then goes to the tool.
+   */
+  private toggleApplied(key: string): boolean {
+    if (!this.isApplied()) return false;
+    const want = key === 'Control' ? 'primary' : 'secondary';
+    const control = this.visualTool?.status().settings?.find((c) => (c.kind === 'toggle' || c.kind === 'choice') && c.key === want);
+    if (!control) return false;
+    if (control.kind === 'toggle') this.setting(control.id, !control.on);
+    else if (control.kind === 'choice' && control.options.length) {
+      const i = control.options.findIndex((o) => o.value === control.value);
+      this.setting(control.id, control.options[(i + 1) % control.options.length]!.value);
+    } else return false;
+    return true;
   }
 
   lockEntry(id: string, value: VcbValue | null): void {

@@ -4,9 +4,11 @@ import { describe, expect, it } from 'vitest';
 import type { Box3, Ray, Vec3 } from '@pushform/core';
 import type { CameraHost, CameraState } from '../camera/CameraHost';
 import { DocumentHost } from '../host/DocumentHost';
+import { SERVICE_DOCUMENT } from '../host/services';
+import { SketchGraph } from '@pushform/model';
 import { CommandRegistry } from '../registry/CommandRegistry';
 import type { VcbValue } from '../vcb/parse';
-import { NO_MODIFIERS, type Tool, type ToolKeyEvent, type ToolSettingValue, type ToolStatus } from './Tool';
+import { NO_MODIFIERS, type Tool, type ToolContext, type ToolKeyEvent, type ToolSettingValue, type ToolStatus } from './Tool';
 import { ToolManager } from './ToolManager';
 import { OrbitTool } from './impl/Orbit';
 import { PanTool } from './impl/Pan';
@@ -375,5 +377,97 @@ describe('ToolManager: Ctrl and Alt reach tools only as taps', () => {
     tools.keyDown(key('Alt'));
     tools.keyUp(key('Alt'));
     expect(seen()).toEqual(['Control', 'Alt']);
+  });
+});
+
+describe('ToolManager: a tapped Ctrl or Alt just after an operation', () => {
+  /** A tool whose Copy (Ctrl) and Mode (Alt) settings redo its last operation, and that also takes Ctrl itself. */
+  class AppliedTool extends WorkTool {
+    copy = false;
+    mode = 'a';
+    readonly redone: string[] = [];
+    private ctx: ToolContext | null = null;
+    constructor(private readonly host: DocumentHost) {
+      super('applied');
+    }
+    override activate(ctx?: ToolContext): void {
+      super.activate();
+      this.ctx = ctx ?? null;
+    }
+    /** Make an undoable change and tell the manager the bar can show it as applied. */
+    commit(): void {
+      this.host.edit('Op', (draft) => SketchGraph.for(draft).addVertex([this.redone.length + this.host.undoStack.length, 0, 0]));
+      this.ctx?.committed?.();
+    }
+    override onKeyDown(e: ToolKeyEvent): boolean {
+      super.onKeyDown(e);
+      if (e.key !== 'Control') return false;
+      this.copy = !this.copy;
+      return true;
+    }
+    override status(): ToolStatus {
+      return {
+        ...super.status(),
+        settings: [
+          { kind: 'toggle', id: 'copy', label: 'Copy', on: this.copy, key: 'primary' },
+          { kind: 'choice', id: 'mode', label: 'Mode', value: this.mode, options: [{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }], key: 'secondary' },
+        ],
+      };
+    }
+    onSetting(id: string, value: ToolSettingValue): void {
+      if (id === 'copy' && typeof value === 'boolean') this.copy = value;
+      if (id === 'mode' && typeof value === 'string') this.mode = value;
+    }
+    adjustLast(id: string): boolean {
+      this.redone.push(id);
+      this.commit();
+      return true;
+    }
+  }
+
+  const setupApplied = () => {
+    const camera = new FakeCamera();
+    const host = new DocumentHost();
+    const registry = new CommandRegistry({ tx: host, camera, services: new Map([[SERVICE_DOCUMENT, host]]) });
+    const tools = new ToolManager(registry, camera);
+    const tool = new AppliedTool(host);
+    tools.register(tool);
+    tools.activate('applied');
+    return { tools, tool, host };
+  };
+  const tap = (tools: ToolManager, k: string): void => {
+    tools.keyDown(key(k));
+    tools.keyUp(key(k));
+  };
+
+  it('toggles the keyed setting as its bar control would, redoing the operation, without the tool toggling it again', () => {
+    const { tools, tool } = setupApplied();
+    tool.commit();
+    expect(tools.status().applied).toBe(true);
+    tap(tools, 'Control');
+    expect(tool.copy).toBe(true);
+    expect(tool.redone).toEqual(['copy']);
+    expect(tool.keys).not.toContain('Control');
+    expect(tools.status().applied).toBe(true);
+    // Alt steps a choice to its next option
+    tap(tools, 'Alt');
+    expect(tool.mode).toBe('b');
+    expect(tool.redone).toEqual(['copy', 'mode']);
+    tap(tools, 'Alt');
+    expect(tool.mode).toBe('a');
+  });
+
+  it('goes to the tool as before when nothing is applied', () => {
+    const { tools, tool, host } = setupApplied();
+    tap(tools, 'Control');
+    expect(tool.copy).toBe(true);
+    expect(tool.keys).toEqual(['Control']);
+    expect(tool.redone).toEqual([]);
+    // an undo ends the applied state
+    tool.commit();
+    host.undo();
+    tap(tools, 'Control');
+    expect(tool.copy).toBe(false);
+    expect(tool.redone).toEqual([]);
   });
 });

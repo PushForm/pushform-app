@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Id, ImageId, Mat4, MaterialId, MMat4, PlaneBasis, Vec3 } from '@pushform/core';
-import { basisToLocal, m4mul, m4rotationAxis, m4transformPoint, m4translation, meshBounds, v3eq } from '@pushform/core';
+import { basisToLocal, m4mul, m4rotationAxis, m4scaling, m4transformPoint, m4translation, meshBounds, v3addScaled, v3dot, v3eq } from '@pushform/core';
+import { freeInference, GROUND_PLANE, type PickHit } from '@pushform/inference';
 import { allocId, containerAt, contextMatrix, sketchFaceLoops, uvApply, uvToAffine, type Body, type EntityContainer, type EntityRef, type FaceRecord, type UvMapping } from '@pushform/model';
 import { disposeKernels, setupCommands } from './transform.fixtures';
-import { contextCommands } from './context';
+import { contextCommands, contextFrame } from './context';
+import { ToolManager } from '../tools/ToolManager';
+import { NO_MODIFIERS, type ToolPointerEvent } from '../tools/Tool';
+import { pushPullTools, type PushPullTool } from '../tools/impl/PushPull';
 import { groupCommands, instanceInfo, type ExplodeResult, type MakeResult, type MakeUniqueResult } from './groups';
 import type { PushPullApplyResult } from './pushpull';
 import type { TransformApplyResult } from './transform';
@@ -529,6 +533,55 @@ describe('editing inside a context', () => {
     expect(meshBounds(after2.mesh).max.map((v) => +v.toFixed(9))).toEqual([2.5, 1, 2]);
     const worldMax: Vec3 = instanceInfo(s.host.doc.state, s.instanceRef(inner.instanceId!, [outer.instanceId!])).bounds!.max;
     expect(worldMax.map((v) => +v.toFixed(9))).toEqual([10, 7.5, 2]);
+  });
+});
+
+describe('push/pull in a scaled group', () => {
+  it('moves the face by the distance in the model, as the preview shows it, whatever the group\'s scale', async () => {
+    const s = setup();
+    const boxId = s.registry.execute('model.addBox', { min: [0, 0, 0], max: [1, 1, 1] }) as number;
+    const made = s.makeGroup([s.bodyRef(boxId)]);
+    const inst = made.instanceId!;
+    // Scaled twice as tall, then tilted: the face's normal and its distances change in the model.
+    s.setInstanceTransform([], inst, m4mul(m4rotationAxis([1, 0, 0], Math.PI / 6), m4scaling([1, 1, 2])));
+    const path = [inst];
+    s.registry.execute('context.enter', { path });
+    const tools = new ToolManager(s.registry, s.camera);
+    s.registry.ctx.tools = tools;
+    for (const t of pushPullTools()) tools.register(t);
+    tools.activate('pushpull');
+    const tool = tools.activeTool as PushPullTool;
+    const body = (): Body => s.host.doc.state.definitions.get(s.host.context.definitionId)!.entities.bodies.get(boxId as Id)!;
+    const frame = contextFrame(s.host.doc.state, path as Id[]);
+    const top = topFace(body());
+    const n = frame.toWorldNormal(top.plane.n);
+    const base = frame.toWorld([0.5, 0.5, 1]);
+    /** Height of a mesh (container coordinates) along the face's world normal. */
+    const height = (verts: ArrayLike<number>, m: MMat4): number => {
+      let h = -Infinity;
+      for (let i = 0; i < verts.length; i += 3) h = Math.max(h, v3dot(n, m4transformPoint(m, [verts[i]!, verts[i + 1]!, verts[i + 2]!])));
+      return h;
+    };
+    const before = height(body().mesh.verts, frame.matrix);
+    const ev = (point: Vec3, hit: PickHit | null, button = 0): ToolPointerEvent => ({
+      screen: [100, 100], ray: { origin: [0, 0, 10], dir: [0, 0, -1] }, button, buttons: button === 0 ? 1 : 0, modifiers: NO_MODIFIERS,
+      inference: freeInference(point, GROUND_PLANE, hit), camera: s.camera.getState(),
+    });
+    const hit: PickHit = { ref: { kind: 'face', path: path as Id[], id: boxId as Id, faceId: top.id, region: null }, point: base, t: 1, normal: n, screenDist: 0 };
+    tools.pointerDown(ev(base, hit));
+    tools.pointerUp(ev(base, hit));
+    const to = v3addScaled(base, n, 0.5);
+    tools.pointerMove({ ...ev(to, null, -1), screen: [100, 50] });
+    expect(tool.dragDistance).toBeCloseTo(0.5, 9);
+    await vi.waitFor(() => expect(tool.previewMeshes).toHaveLength(1), { timeout: 3000 });
+    expect(height(tool.previewMeshes[0]!.verts, tool.previewMatrix) - before).toBeCloseTo(0.5, 9);
+    tools.pointerDown({ ...ev(to, null), screen: [100, 50] });
+    await tool.settled;
+    expect(height(body().mesh.verts, frame.matrix) - before).toBeCloseTo(0.5, 9);
+    // A typed redo is in the model too.
+    tools.onVcb({ kind: 'length', meters: 0.25, raw: 0.25, unit: 'm' });
+    await tool.settled;
+    expect(height(body().mesh.verts, frame.matrix) - before).toBeCloseTo(0.25, 9);
   });
 });
 

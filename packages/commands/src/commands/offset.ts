@@ -365,7 +365,7 @@ interface PlannedArc {
   readonly center: Vec3;
 }
 /** An offset ring (or open polyline) in context-local coordinates, with the arc tag of each edge. */
-interface PlannedRing {
+export interface PlannedRing {
   readonly points: Vec3[];
   readonly tags: (PlannedArc | null)[];
   readonly closed: boolean;
@@ -516,7 +516,7 @@ function applyFaceOffset(draft: DocumentDraft, info: FaceTargetInfo, planned: re
  * Plan the offset of a chain of connected coplanar sketch edges in world space (open: a parallel
  * polyline; closed: a polygon offset), returned in context-local coordinates.
  */
-function planEdgeOffset(sketch: Sketch, frame: ContextFrame, edgeIds: readonly Id[], distance: number, allowOverlap: boolean): { rings: PlannedRing[]; curves: Map<string | number, Curve>; normal: Vec3 } {
+export function planEdgeOffset(sketch: Sketch, frame: ContextFrame, edgeIds: readonly Id[], distance: number, allowOverlap: boolean): { rings: PlannedRing[]; curves: Map<string | number, Curve>; normal: Vec3 } {
   const chain = orderSketchEdgeChain(sketch, edgeIds);
   const world = chain.points.map((p) => frame.toWorld(p));
   const plane = chainPlane(world);

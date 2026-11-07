@@ -1,5 +1,23 @@
 # Shaping and cutting solids in Modeling
 
+## Push or pull a face with Push/Pull
+
+Choose **Push/Pull** and hover a flat face of a solid, or a face that isn't part of a solid yet, in the group or component you are editing. The face highlights; on a face divided by drawn edges, only the region under the pointer is highlighted and pulled. Then click the face, move to preview the result, and click again to commit. You can also press, drag and release. Escape cancels the preview. If exactly one face is selected when you choose Push/Pull, your next click anywhere in the view pulls that face.
+
+While pulling, hover another face within 30° of parallel to match its height: the pull ends where that face's plane crosses the pull line. A snap to a point on the way, such as an endpoint, wins over a matched height. With the pointer over the face you are pushing, the push follows how far the pointer moves.
+
+Pulling a solid's face outward extends the solid. Pushing a region in makes a pocket, or a hole when it reaches the other side; a push that cuts a solid apart leaves separate solids, each keeping its materials. Pulling a loose face makes a new solid in its place. Pulled circles and arcs get smooth sides. Each pull is one Undo step.
+
+## Exact Push/Pull lengths, double-click and New body
+
+While pulling, type a distance and press Enter to end the pull there: positive pulls out of the solid, negative pushes in. For a loose face, it goes the way you are pulling. A typed 0 changes nothing. Typing a distance right after a pull, before anything else changes, redoes it at that distance in the same direction. With nothing in progress, a typed distance pulls the face under the pointer; with no face there, the status bar asks you to point to one.
+
+Double-click a face to repeat the last distance: out if the last pull went out, in if it went in, whichever way the face points.
+
+Turn on **New body** in the tool options bar, or tap Ctrl (Cmd on macOS), to make the pulled region a separate solid and leave the original as it was; a loose face stays too. It is off each time you choose the tool. Switching it right after a pull redoes that pull the other way.
+
+Push/Pull refuses, says why and changes nothing when pushing a whole face to or past the opposite side would leave nothing, and on a face of a smooth surface, such as a cylinder's side: it works on flat faces. In a group or component, distances are in the model, as the preview shows, even when it is scaled.
+
 ## Sweep a profile with Follow Me
 
 Prepare a profile face and a connected chain of sketch edges for its path in the editing context you intend to change. Choose **Follow Me**, click the profile face, then move the pointer along the connected path edges. The collected edges highlight red. Click to finish the sweep. Escape cancels the pending path.

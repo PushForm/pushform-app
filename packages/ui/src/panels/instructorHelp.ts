@@ -65,7 +65,7 @@ export const TOOL_HELP: Readonly<Record<string, ToolHelp>> = {
   },
   pushpull: {
     summary:
-      'Click a face, move to extrude it and click again (or type a distance). Pulling adds material; pushing into the body removes it and pushing through to the back face cuts a hole. Hover another face to match its height. Double-click repeats the last distance.',
+      'Click a flat face, move to extrude it and click again, or drag and release; type a distance for an exact one. With one face selected, the next click anywhere pulls it. Pulling adds material; pushing into the solid removes it and pushing through to the back face cuts a hole. Hover a face within 30° of parallel to match its height. Type a distance right after a pull to redo it; double-click a face to repeat the last distance.',
     keys: [
     ],
   },

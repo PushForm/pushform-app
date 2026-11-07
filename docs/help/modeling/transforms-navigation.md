@@ -18,9 +18,27 @@ To hide or show the cube, choose **View › Navigation Cube**, or tick **Navigat
 
 ## Move geometry from a base point
 
-Select the geometry, choose **Move**, and click a base point. Move the pointer to preview the destination, then click again to finish. You can also press, drag and release. While positioning, type a distance and press Enter for an exact move along the current direction. Escape cancels the preview. The moving outline includes geometry inside nested groups and components.
+Select the geometry, choose **Move**, and click a base point. Move the pointer to preview the destination, then click again to finish, or press, drag and release. With nothing selected, pressing on something picks up what a Select click there would select, such as a whole solid, group or component; to move a single face or edge, select it first. Escape, or a second click on the base point before the pointer moves, cancels the move, and anything picked up that way is no longer selected. The moving outline includes geometry inside nested groups and components.
 
-Tap Ctrl, or click **Copy** in the tool options bar, to toggle copying before placement. Move, Rotate and Scale also take guides and text, and copy them too. Screen text stays where it is on the screen, and edges drawn on a solid's face stay on the face: move the solid to move them. Work inside the group or component you intend to edit. Moving a component instance differs from editing the geometry shared by its instances.
+The Right, Left and Up arrow keys lock the move to the red, green and blue axes of the model, and the same key again releases the lock; Down locks parallel or perpendicular to the last edge; hold Shift to keep the inference shown. The locks end with the move.
+
+While moving, type a length and press Enter to move that far in the locked direction or the way the pointer has moved. Before the pointer has moved, lock an axis first. Type [x,y,z] to put the base point at those model coordinates, or <x,y,z> to move by that much. Typed just after a move, a value redoes it as one Undo step.
+
+A selection with anything locked, with entities from different groups or components, or outside the group or component you have open is not moved: the status says why. Work inside the group or component you intend to edit. Moving a component instance differs from editing the geometry its instances share.
+
+## Copy with Move and make arrays
+
+Tap Ctrl (Cmd on a Mac), or click **Copy** in the tool options bar, to copy instead of moving, at any time during a move. Just after a move, tapping Ctrl or clicking **Copy** redoes it as a copy, or back as a plain move. The copies are selected afterwards and are never locked, and the preview shows only the copies. Faces and edges of a solid cannot be copied on their own: copy the solid. Sketch vertices are copied only with their edges.
+
+After a copy, type 3x and press Enter for three copies at the same spacing, or /3 for three copies spread evenly up to where the copy went. Then type a length to change their spacing; the number of copies stays. If an array cannot be made, the copies stay as they were.
+
+Move, Rotate and Scale also take guides and text, and copy them too. Screen text stays where it is on the screen, and edges drawn on a solid's face stay on the face: move the solid to move them.
+
+## Move sketch geometry and glued components
+
+Moving sketch vertices or edges stretches the edges connected to them, as drawing does: a vertex that lands on another joins it, edges that collapse are removed, edges the moved ones cross are split, and new faces form where edges close. A face that can no longer be flat is tilted to fit or split into flat pieces; a face with holes that cannot stay flat is replaced by its edges, and the status says so. Moving a face or edge of a solid folds the solid so it stays closed, and a move that cannot leave a valid solid is refused.
+
+A component that glues to faces slides onto the face under the pointer, keeping the pointer's place on the component. A component already glued moves only within its glue plane, typed values included. Typing a value while over a face moves by that value instead of gluing.
 
 ## Rotate geometry around a pivot
 

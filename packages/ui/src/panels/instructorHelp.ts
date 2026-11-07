@@ -71,11 +71,11 @@ export const TOOL_HELP: Readonly<Record<string, ToolHelp>> = {
   },
   move: {
     summary:
-      'Select, click a reference point, move and click the destination (with nothing selected the hovered entity moves). Type a distance, an absolute [x,y,z] or a relative <x,y,z>. After a copy, type 3x for an external array or 3/ for an internal one.',
+      'Select, click a base point, move and click the destination. With nothing selected, a press picks up what a Select click there would select; Esc cancels and deselects it. Type a length (lock an axis first if the pointer has not moved), [x,y,z] for the base point or <x,y,z> to move by. After a copy, type 3x or /3 for an array, then a length for its spacing.',
     keys: [
       ['Shift', 'Lock the current inference'],
       ['↓', 'Lock parallel / perpendicular to the last edge'],
-      ['↑ / → / ←', 'Lock to an axis'],
+      ['↑ / → / ←', 'Lock to the blue, red or green axis'],
     ],
   },
   rotate: {

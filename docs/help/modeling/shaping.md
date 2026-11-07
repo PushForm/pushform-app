@@ -10,7 +10,7 @@ A disconnected edge cannot extend the path. If the sweep cannot form a valid sol
 
 ## Offset a face or connected edges in Modeling
 
-Choose **Offset** and click the face whose boundary you want to offset. Move inside or outside the face to preview the inset or outset, then click again to commit. While positioning, type a positive length and press Enter to use that distance on the previewed side. Escape cancels the pending offset.
+Choose **Offset** and click the face whose boundary you want to offset. Move inside or outside the face to preview the inset or outset, then click again to commit. While positioning, type a length and press Enter to use that distance on the previewed side; a negative length uses the other side. Typing a new length right after the offset redoes it on the same side; if that distance can't be offset, the original offset stays. Escape cancels the pending offset.
 
 To offset an open chain, preselect at least two connected coplanar sketch edges before activating Offset, click to start, then set the distance. Double-click another face with Offset to repeat the last distance.
 

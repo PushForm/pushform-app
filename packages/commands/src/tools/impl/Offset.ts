@@ -55,8 +55,10 @@ const IDLE: State = { kind: 'idle' };
 
 /**
  * Offset (F). Hover a face (highlight) → click → move the cursor for the distance (inward when
- * the cursor is inside the face, outward when outside) or type it → click. Double-click another
- * face repeats the last distance. With ≥ 2 connected coplanar sketch edges preselected the tool
+ * the cursor is inside the face, outward when outside) or type it → click. A typed distance goes
+ * to the pointer's side (inward while the pointer is on the outline), a negative one to the other
+ * side; typed after the commit it redoes the last offset on its side, keeping the original when
+ * the new distance fails. Double-click another face repeats the last distance. With ≥ 2 connected coplanar sketch edges preselected the tool
  * offsets that chain instead. Alt toggles "allow overlaps" (raw rings, no self-intersection cleanup).
  */
 export class OffsetTool implements Tool {
@@ -173,27 +175,16 @@ export class OffsetTool implements Tool {
     const last = this.lastCommit;
     if (!last) return;
     // re-edit the last offset (undo + re-apply) while it is still the top undo entry
-    const host = hostOfTool(this.ctx);
-    if (!last.entry || host.undoStack.peek() !== last.entry) return;
     const sign = last.params.distance < 0 ? -1 : 1;
     const distance = v.raw < 0 ? -sign * Math.abs(v.meters) : sign * Math.abs(v.meters);
-    host.undo();
-    this.execute({ ...last.params, distance });
+    this.reapplyLast(last, { ...last.params, distance });
   }
 
   /** The bar switched Allow overlaps just after an offset: redo it that way, as one undo step. */
   adjustLast(id: string): boolean {
     const last = this.lastCommit;
-    if (id !== 'overlaps' || !this.ctx || !last?.entry) return false;
-    const host = hostOfTool(this.ctx);
-    if (host.undoStack.peek() !== last.entry || !host.undo()) return false;
-    this.execute({ ...last.params, allowOverlap: this.overlaps });
-    if (this.lastCommit === null) {
-      // the original stays; lastError says why
-      host.redo();
-      this.lastCommit = last;
-    }
-    return true;
+    if (id !== 'overlaps' || !last) return false;
+    return this.reapplyLast(last, { ...last.params, allowOverlap: this.overlaps });
   }
 
   onCancel(): void {
@@ -239,7 +230,7 @@ export class OffsetTool implements Tool {
   private baseStatus(): ToolStatus {
     const s = this.state;
     if (s.kind === 'dragging') {
-      return { instructor: `Click or type the offset distance (negative = inward).`, vcbLabel: 'Distance', vcbValue: fmtLength(this.ctx, s.distance), fields: [pointerField('Distance', 'length', fmtLength(this.ctx, s.distance))] };
+      return { instructor: `Click or type the offset distance. A typed value offsets toward the pointer's side; a negative one, the other side.`, vcbLabel: 'Distance', vcbValue: fmtLength(this.ctx, s.distance), fields: [pointerField('Distance', 'length', fmtLength(this.ctx, s.distance))] };
     }
     const instructor = this.lastError
       ? `Offset failed: ${this.lastError}`
@@ -357,6 +348,25 @@ export class OffsetTool implements Tool {
         : { edgeIds: s.target.edgeIds as number[], distance, allowOverlap: this.overlaps };
     this.state = IDLE;
     this.execute(params);
+  }
+
+  /**
+   * Redo the last offset with `params` as one undo step while it is still the top undo entry. When the
+   * new offset fails the original is put back (lastError says why). False when there is none to redo.
+   */
+  private reapplyLast(last: LastCommit, params: OffsetParams): boolean {
+    if (!this.ctx || !last.entry) return false;
+    const host = hostOfTool(this.ctx);
+    if (host.undoStack.peek() !== last.entry || !host.undo()) return false;
+    this.execute(params);
+    if (this.lastCommit === null) {
+      // the original goes back, still the operation the bar shows as applied
+      host.redo();
+      this.lastCommit = last;
+      this.ctx.committed?.();
+      this.ctx.requestRender();
+    }
+    return true;
   }
 
   private execute(params: OffsetParams): void {

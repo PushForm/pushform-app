@@ -28,11 +28,13 @@ A disconnected edge cannot extend the path. If the sweep cannot form a valid sol
 
 ## Offset a face or connected edges in Modeling
 
-Choose **Offset** and click the face whose boundary you want to offset. Move inside or outside the face to preview the inset or outset, then click again to commit. While positioning, type a length and press Enter to use that distance on the previewed side; a negative length uses the other side. Typing a new length right after the offset redoes it on the same side; if that distance can't be offset, the original offset stays. Escape cancels the pending offset.
+Choose **Offset**, click the face to offset in the context you're editing, move to where the offset should reach and click again to commit, or press on the face, drag and release. The distance runs from the pointer to the face's nearest edge and snaps to vertices and edges on the face's plane: inside the face insets, outside outsets. The distance box shows the length and the status bar says which way it goes. Type a length and press Enter to use it on the pointer's side (inward before you move); a negative length goes the other way. Typing a new length or switching **Allow overlaps** right after an offset redoes it; a click in the view ends that. Escape cancels. Double-click a face to repeat the last face offset.
 
-To offset an open chain, preselect at least two connected coplanar sketch edges before activating Offset, click to start, then set the distance. Double-click another face with Offset to repeat the last distance.
+Every loop of the face is offset, so holes grow as the face shrinks, and arcs and circles stay arcs. Overlapping loops are merged unless **Allow overlaps** (Alt, Option on macOS) is on; it is off each time you choose Offset. An offset that would leave nothing, or run past the edges of a solid's face, is refused with a message.
 
-This creates offset sketch geometry; it does not by itself give the face depth. Use Push/Pull when you want an extrusion.
+On a loose face an inset adds a face inside with the original's material and tag; an outset adds a ring around it. On a solid's face the offset divides the face. New edges go on the active tag.
+
+To offset a chain, select two or more connected coplanar edges before choosing Offset, click, then move to a side; type the length if you like. Offset adds outlines only; use Push/Pull to give a face depth.
 
 ## Subtract or Trim one solid with another
 

@@ -96,6 +96,14 @@ export const TransformArrayParamsSchema = z.object({
   /** `external`: copies at matrix^k, k = 1..count. `internal`: count copies dividing the matrix. */
   mode: z.enum(['external', 'internal']),
   label: z.string().default('Move'),
+  /**
+   * The turn the matrix makes when it is a rotation: its center, axis and signed angle in radians, which
+   * may pass 180° or be a whole turn. An internal array then divides this angle, the way it turned, rather
+   * than the matrix's shortest equivalent rotation.
+   */
+  rotation: z
+    .object({ center: z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]), axis: z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]), angle: z.number().finite() })
+    .optional(),
 });
 export type TransformArrayParams = z.infer<typeof TransformArrayParamsSchema>;
 
@@ -262,9 +270,23 @@ export function rigidMatrixRoot(m: Mat4 | MMat4, n: number): MMat4 {
   return m4mul(m4translation(v3scale(tPar, 1 / n)), m4rotationAbout(center, axis, angle / n));
 }
 
-/** Transforms of the copies of an array: external `m^k`, internal `root(m, count)^k`, k = 1..count. */
-export function arrayMatrices(m: Mat4 | MMat4, count: number, mode: 'external' | 'internal'): MMat4[] {
-  const step = mode === 'internal' ? rigidMatrixRoot(m, count) : [...m];
+/** A turn about a line: center, axis and signed angle in radians (any size, a whole turn included). */
+export interface ArrayRotation {
+  readonly center: Vec3;
+  readonly axis: Vec3;
+  readonly angle: number;
+}
+
+/**
+ * Transforms of the copies of an array: external `m^k`, internal `root(m, count)^k`, k = 1..count. With
+ * `rotation`, the turn `m` makes, an internal array steps by its angle / count about its axis, so copies
+ * follow the way it turned past 180° and round a whole turn, where `m` alone is the identity.
+ */
+export function arrayMatrices(m: Mat4 | MMat4, count: number, mode: 'external' | 'internal', rotation?: ArrayRotation): MMat4[] {
+  const step =
+    mode !== 'internal' ? [...m]
+    : rotation && v3len(rotation.axis) > 0 ? m4rotationAbout(rotation.center, v3normalize(rotation.axis), rotation.angle / count)
+    : rigidMatrixRoot(m, count);
   const out: MMat4[] = [];
   for (let k = 1; k <= count; k++) out.push(m4power(step, k));
   return out;
@@ -1399,7 +1421,7 @@ export const transformArray = defineCommand({
   async run(ctx, p): Promise<TransformApplyResult> {
     const host = hostOf(ctx);
     const refs = refsOrSelection(host, p.refs);
-    const plans = arrayMatrices(p.matrix, p.count, p.mode).map((mk) => planTransform(host.doc.state, refs, mk, true, p.label));
+    const plans = arrayMatrices(p.matrix, p.count, p.mode, p.rotation).map((mk) => planTransform(host.doc.state, refs, mk, true, p.label));
     return executeTransform(host, kernelOf(ctx), plans, p.label);
   },
 });

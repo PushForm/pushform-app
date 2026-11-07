@@ -576,6 +576,41 @@ describe('PositionTextureTool', () => {
     expect(activeMaterialOf(registry.ctx).get()).toBe(tex);
   });
 
+  it('offers Done, Reset, Flip and Rotate in the tool options bar', async () => {
+    const { registry, host, body, faceIds, faceRef, paint } = setup();
+    const tools = new ToolManager(registry, camera2);
+    registry.ctx.tools = tools;
+    tools.register(new PositionTextureTool());
+    tools.register(placeholderTool('select', 'Select'));
+    const f0 = faceIds()[0]!;
+    const img = await host.images.put(new Uint8Array([9, 9, 9, 9]), 'image/png', 't.png', { width: 2, height: 2 });
+    const tex = registry.execute('material.create', { name: 'Tex', color: [1, 1, 1], texture: { imageId: img.id, widthM: 0.5, heightM: 0.25 } }) as number;
+    paint({ refs: [faceRef(f0)], materialId: tex });
+    // chosen without a face, the actions show but are disabled
+    tools.activate('texturePosition');
+    expect(tools.status().settings?.every((c) => c.kind === 'action' && c.disabled === true)).toBe(true);
+    tools.setting('rotate90', undefined);
+    expect(body().faces.get(f0 as never)!.uv).toEqual({ kind: 'auto' });
+    registry.execute('texture.positionTool', { ref: faceRef(f0) });
+    const bar = tools.status().settings ?? [];
+    expect(bar.map((c) => (c.kind === 'action' ? c.label : c.kind))).toEqual(['Done', 'Reset', 'Flip Left/Right', 'Flip Up/Down', 'Rotate 90°', 'Rotate 180°', 'Rotate 270°']);
+    expect(bar.find((c) => c.id === 'done')).toMatchObject({ primary: true, disabled: false });
+    const uv = () => body().faces.get(f0 as never)!.uv;
+    const before = host.undoStack.length;
+    tools.setting('rotate90', undefined);
+    expect(uv().kind).toBe('affine');
+    expect(host.undoStack.length).toBe(before + 1);
+    const rotated = uv();
+    tools.setting('flipLeftRight', undefined);
+    expect(uv()).not.toEqual(rotated);
+    tools.setting('reset', undefined);
+    expect(uv()).toEqual({ kind: 'auto' });
+    tools.setting('rotate180', undefined);
+    tools.setting('done', undefined);
+    expect(tools.activeToolId).toBe('select');
+    expect(uv().kind).toBe('affine');
+  });
+
   it('the yellow pin distorts exactly: the four pins keep their tile corners through a projective placement', async () => {
     const { registry, host, body, faceIds, faceRef, paint } = setup();
     const tools = new ToolManager(registry, camera2);

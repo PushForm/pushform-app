@@ -1731,8 +1731,8 @@ export function LayoutWorkspace({
   }, [zoomMenuOpen]);
 
   useEffect(() => {
-    // Copy and paste on an object browser item leave the canvas selection and the page alone.
-    const nativeEditing = (event: ClipboardEvent): boolean => editingTextId !== null || presenting || printing || event.defaultPrevented ||
+    // Copy and paste on an object browser item, or while Commons is shown, leave the canvas selection and the page alone.
+    const nativeEditing = (event: ClipboardEvent): boolean => catalogActive || editingTextId !== null || presenting || printing || event.defaultPrevented ||
       event.target instanceof Element && Boolean(event.target.closest('input, textarea, select, [contenteditable="true"], [role="dialog"], .pf-layout-object-browser, .pf-workspace-files'));
     const copy = (event: ClipboardEvent) => {
       if (nativeEditing(event) || !selectionIds.length || !event.clipboardData) return;
@@ -1759,15 +1759,15 @@ export function LayoutWorkspace({
     };
     window.addEventListener('copy', copy);
     return () => window.removeEventListener('copy', copy);
-  }, [tab, page, state, selectionIds, editingTextId, presenting, printing]);
+  }, [tab, page, state, selectionIds, editingTextId, presenting, printing, catalogActive]);
 
   useEffect(() => {
     let active = true;
     let plain = false;
     const pasteKey = (event: KeyboardEvent) => { if (event.key.toLowerCase() === 'v') plain = (event.metaKey || event.ctrlKey) && event.shiftKey; };
     const releaseKey = () => { plain = false; };
-    // Copy and paste on an object browser item leave the canvas selection and the page alone.
-    const nativeEditing = (event: ClipboardEvent): boolean => editingTextId !== null || presenting || printing || event.defaultPrevented ||
+    // Copy and paste on an object browser item, or while Commons is shown, leave the canvas selection and the page alone.
+    const nativeEditing = (event: ClipboardEvent): boolean => catalogActive || editingTextId !== null || presenting || printing || event.defaultPrevented ||
       event.target instanceof Element && Boolean(event.target.closest('input, textarea, select, [contenteditable="true"], [role="dialog"], .pf-layout-object-browser, .pf-workspace-files'));
     const paste = (event: ClipboardEvent) => {
       if (nativeEditing(event) || !event.clipboardData) return;
@@ -1827,10 +1827,12 @@ export function LayoutWorkspace({
     window.addEventListener('keydown', pasteKey, true);
     window.addEventListener('keyup', releaseKey, true);
     return () => { active = false; window.removeEventListener('paste', paste); window.removeEventListener('keydown', pasteKey, true); window.removeEventListener('keyup', releaseKey, true); };
-  }, [tab, page.id, editingTextId, presenting, printing, cloudApi]);
+  }, [tab, page.id, editingTextId, presenting, printing, cloudApi, catalogActive]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      // While Commons is shown over the page, every key belongs to Commons.
+      if (catalogActive) return;
       const target = event.target as HTMLElement | null;
       const inField = target instanceof Element && Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
       // From the object browser only Print, undo and redo reach Layout shortcuts. Select All there selects nothing,
@@ -1844,8 +1846,7 @@ export function LayoutWorkspace({
         event.preventDefault(); setPrinting(true); return;
       }
       // Ctrl+A (Cmd+A) selects every object on the page; in a field or text being edited it selects the text instead.
-      // While Commons is shown over the page, the key belongs to Commons.
-      if (isSelectAllKey(event) && !inField && !catalogActive) {
+      if (isSelectAllKey(event) && !inField) {
         event.preventDefault();
         const dragging = pointerDown.current || moveStart.current || scaleStart.current || selectionScaleStart.current || boxStart.current ||
           gripDrag.current || pointEditStart.current || tableDrag.current || viewportDrag.current || lassoPress.current || bezierPress.current ||
@@ -2031,7 +2032,7 @@ export function LayoutWorkspace({
 
   useEffect(() => {
     updatePolygonAlt(false);
-    if (!isPolygonTool(tool) || presenting || printing) return;
+    if (!isPolygonTool(tool) || presenting || printing || catalogActive) return;
     const validTarget = (event: KeyboardEvent) => {
       const target = event.target;
       return !(target instanceof Element && (target.closest('[role="menu"], [role="dialog"]') ||
@@ -2056,7 +2057,7 @@ export function LayoutWorkspace({
       window.removeEventListener('keyup', up, true);
       window.removeEventListener('blur', cancel);
     };
-  }, [tool, presenting, printing, updatePolygonAlt]);
+  }, [tool, presenting, printing, catalogActive, updatePolygonAlt]);
 
   // Pressing or releasing Ctrl (Cmd) during a Select drag updates the copy preview at once.
   useEffect(() => {
@@ -2075,7 +2076,7 @@ export function LayoutWorkspace({
   const copyTap = useRef<string | null>(null);
   const copyKey = MAC ? 'Meta' : 'Control';
   useEffect(() => {
-    if (tool !== 'move') { copyTap.current = null; return; }
+    if (tool !== 'move' || catalogActive) { copyTap.current = null; return; }
     const tapTarget = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       return !(target instanceof Element && (target.closest('.pf-layout-context-menu, .pf-layout-object-browser') ||
@@ -2106,7 +2107,7 @@ export function LayoutWorkspace({
       window.removeEventListener('wheel', cancel, true);
       window.removeEventListener('pointerdown', cancel, true);
     };
-  }, [tool, moveDraft]);
+  }, [tool, moveDraft, catalogActive]);
 
   useEffect(() => {
     setAnchor(null);

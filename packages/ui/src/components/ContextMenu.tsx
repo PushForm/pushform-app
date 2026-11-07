@@ -7,6 +7,7 @@ import type { ContextMenuItem } from '@pushform/commands';
 import type { EntityRef } from '@pushform/model';
 import { useApp } from '../AppContext';
 import { installUiCommands } from '../engine/uiCommands';
+import { noticeFromError } from '../hooks/useCommandNotices';
 import { useEditContext } from '../hooks/useEditContext';
 import { useAppStore } from '../store';
 import type { ContextMenuRequest } from '../store';
@@ -72,7 +73,9 @@ export function ContextMenu({ x, y, refs, onClose }: ContextMenuProps): JSX.Elem
 
   const activate = (item: ContextMenuItem) => {
     onClose();
-    app.commands.tryExecute(item.command, item.params);
+    const run = app.commands.tryExecute(item.command, item.params);
+    // A command that finishes later (a Solid Tools operation) can still refuse: show why in the status bar.
+    if (run.ok && run.result instanceof Promise) run.result.catch((error: unknown) => useAppStore.getState().setNotice(noticeFromError(error)));
   };
 
   const renderItem = (item: ContextMenuItem, i: number): JSX.Element => {

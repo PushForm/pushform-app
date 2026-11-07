@@ -144,7 +144,7 @@ export const TOOL_HELP: Readonly<Record<string, ToolHelp>> = {
   zoomWindow: { summary: 'Drag a rectangle to fill the view with it.', keys: [] },
   texturePosition: {
     summary:
-      'Drag the pins to position the texture on the face: red moves, green scales and rotates about the red pin, blue scales and shears, yellow distorts. Right-click for Done, Reset, Flip and Rotate.',
+      'Drag the pins to position the texture on the face: red moves, green scales and rotates about the red pin, blue scales and shears, yellow distorts. Done, Reset, Flip and Rotate are in the tool options bar and the right-click menu.',
     keys: [
       ['Enter', 'Done'],
       ['Esc', 'Cancel and restore the previous position'],

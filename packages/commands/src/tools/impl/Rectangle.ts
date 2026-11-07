@@ -45,10 +45,10 @@ const AXIS_NORMAL: Record<Axis, Vec3> = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 
 /**
  * Rectangle tool (R). Idle → Corner1 → Dragging → commit. The drawing plane comes
  * from the hovered face at the first click, an arrow-key lock, or the inference plane (ground).
- * Width/height run along the plane basis (`planeBasis`). VCB `w,h` (either
- * omitted), negative flips; typing after the commit re-applies to the last rectangle. Width and
- * Height fields keep the pointer's side of the first corner unless typed negative; a value left
- * with Tab is locked into the preview.
+ * Width/height run along the plane basis (`planeBasis`). VCB `w,h` (either omitted) and the Width
+ * and Height fields keep the pointer's side of the first corner, and a negative value takes the
+ * other side; typing after the commit re-applies to the last rectangle, keeping its sides the same
+ * way. A field value left with Tab is locked into the preview.
  */
 export class RectangleTool implements Tool {
   readonly id = 'rectangle';
@@ -169,14 +169,14 @@ export class RectangleTool implements Tool {
     } else return;
     if (this.corner && this.basis) {
       const cur = this.dims();
-      this.commit(this.basis, w ?? cur?.w ?? 0, h ?? cur?.h ?? 0);
+      this.commit(this.basis, sided(w, cur?.w ?? 0), sided(h, cur?.h ?? 0));
       return;
     }
     if (this.last) {
       const host = this.ctx ? hostOfTool(this.ctx) : null;
       if (!host || !this.last.entry || host.undoStack.peek() !== this.last.entry) return;
       host.undo();
-      this.commit(this.last.basis, w ?? this.last.w, h ?? this.last.h);
+      this.commit(this.last.basis, sided(w, this.last.w), sided(h, this.last.h));
     }
   }
 
@@ -189,7 +189,7 @@ export class RectangleTool implements Tool {
     const cur = this.dims();
     if (!cur) return;
     const w = entryLength(values.width), h = entryLength(values.height);
-    this.commit(this.basis, w === null ? cur.w : sideOf(cur.w) * w, h === null ? cur.h : sideOf(cur.h) * h);
+    this.commit(this.basis, sided(w, cur.w), sided(h, cur.h));
   }
 
   onEntryLock(id: string, value: VcbValue | null): void {
@@ -359,6 +359,11 @@ export class RectangleTool implements Tool {
 /** Sign of the pointer's side along an axis, positive when on the axis itself. */
 function sideOf(x: number): number {
   return x < 0 ? -1 : 1;
+}
+
+/** A typed size on the side of `current` (negative takes the other side), or `current` when none was typed. */
+function sided(typed: number | null, current: number): number {
+  return typed === null ? current : sideOf(current) * typed;
 }
 
 function cornersOf(basis: PlaneBasis, w: number, h: number): RectangleParams {

@@ -27,7 +27,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { SERVICE_LAYOUT_WORKSPACE, LAYOUT_TOOLS, detectPlatform, parseVcb, type LayoutWorkspaceHost, type ToolSetting, type ToolSettingValue, type VcbValue } from '@pushform/commands';
-import { removeLayoutPathVertex, nextLayoutPathIndex, layoutPathContours, layoutPathSegmentIndices,isLayoutLayerVisible, labelAnchorAt, layoutLabelDragPart, layoutLabelWholeMovePart, moveLayoutLabel, previewLayoutLabel, type LayoutLabelDragPart, formatLayoutTextRange, layoutTextStyleAt, layoutLabelLeader, createLayoutLabelGeometry, inferLinearDimensionAlignment, layoutRotationAngle, snapLayoutRotationAngle, rotateLayoutEntities, scaleLayoutEntities, rotateLayoutPoint, layoutTextCenter, resizeLayoutTextPoints, createLayoutCornerBetween, isLayoutCornerTool, createLayoutOffset, layoutOffsetDistance, createLayoutArc, isLayoutArcTool, layoutArcSweep, createLayoutRectangle, isLayoutRectangleTool, type LayoutRectanglePath, pointInsideLayoutPath, angularRaysFromPoints, angularEdgesFromPicks, type LayoutAngularEdgeAnchor, angularDimensionError, angularPlacementReflex, angularMeasurement, autoDimensionExtent, entitiesInSelectionBox, entitiesInLasso, lassoIsCrossing, layoutEntityBounds, angularDimensionGeometry, formatAngularDimension, createAngularDimension, type LayoutAngularDimension, createLinearDimension, dimensionAnchorAt, linearMeasurement, linearDimensionGeometry, formatLinearDimension, formatLayoutLength, layoutLengthPrecisionLabel, layoutDimensionScaleLabel, LAYOUT_DIMENSION_SCALES, previewLayoutDimension, type LayoutDimensionAnchor, type LayoutLinearDimension, editLayoutTextContent, importLayoutText, entitiesForLayer, entityOnPage, flattenLayoutPath, pathSegment, pointOnPathSegment, splitLayoutPathSegment, snapPaperPoint, alignToPaperReference, addLayoutBezierAnchor, pullLayoutBezierHandle, removeLastLayoutBezierAnchor, previewLayoutBezier, finishLayoutBezier, type LayoutBezierDraft, type PaperAlignment, type LayoutEntity, type LayoutPathHandle, type LayoutPage, type LayoutDocumentState, type PaperSnapKind } from '@pushform/layout';
+import { removeLayoutPathVertex, nextLayoutPathIndex, layoutPathContours, layoutPathSegmentIndices,isLayoutLayerVisible, labelAnchorAt, layoutLabelDragPart, layoutLabelWholeMovePart, moveLayoutLabel, previewLayoutLabel, type LayoutLabelDragPart, formatLayoutTextRange, layoutTextStyleAt, layoutLabelLeader, createLayoutLabelGeometry, inferLinearDimensionAlignment, layoutRotationAngle, snapLayoutRotationAngle, rotateLayoutEntities, scaleLayoutEntities, rotateLayoutPoint, layoutTextCenter, resizeLayoutTextPoints, createLayoutCornerBetween, isLayoutCornerTool, createLayoutOffset, layoutOffsetDistance, createLayoutArc, isLayoutArcTool, layoutArcSweep, createLayoutRectangle, isLayoutRectangleTool, type LayoutRectanglePath, pointInsideLayoutPath, angularRaysFromPoints, angularEdgesFromPicks, type LayoutAngularEdgeAnchor, angularDimensionError, angularPlacementReflex, angularMeasurement, autoDimensionExtent, entitiesInSelectionBox, selectableLayoutEntities, entitiesInLasso, lassoIsCrossing, layoutEntityBounds, angularDimensionGeometry, formatAngularDimension, createAngularDimension, type LayoutAngularDimension, createLinearDimension, dimensionAnchorAt, linearMeasurement, linearDimensionGeometry, formatLinearDimension, formatLayoutLength, layoutLengthPrecisionLabel, layoutDimensionScaleLabel, LAYOUT_DIMENSION_SCALES, previewLayoutDimension, type LayoutDimensionAnchor, type LayoutLinearDimension, editLayoutTextContent, importLayoutText, entitiesForLayer, entityOnPage, flattenLayoutPath, pathSegment, pointOnPathSegment, splitLayoutPathSegment, snapPaperPoint, alignToPaperReference, addLayoutBezierAnchor, pullLayoutBezierHandle, removeLastLayoutBezierAnchor, previewLayoutBezier, finishLayoutBezier, type LayoutBezierDraft, type PaperAlignment, type LayoutEntity, type LayoutPathHandle, type LayoutPage, type LayoutDocumentState, type PaperSnapKind } from '@pushform/layout';
 import { FREEHAND_SMOOTHING_PX, LENGTH_TOL } from '@pushform/core';
 import { createLayoutFreehand } from '@pushform/layout';
 import { dxfLayoutEntities, isDxfFile } from '@pushform/io';
@@ -77,6 +77,10 @@ import { LayoutObjectBrowser, layoutBrowserPassesKey, type LayoutBrowserDrop, ty
 type Point = [number, number];
 function objectLocked(entity: LayoutEntity, state: LayoutDocumentState): boolean {
   return Boolean(entity.locked || state.layers.get(entity.layerId)?.locked);
+}
+/** Ctrl+A, or Cmd+A on macOS: Select All. */
+function isSelectAllKey(event: KeyboardEvent): boolean {
+  return (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'a';
 }
 function expandLayoutGroups(ids: number[], page: LayoutPage, state: LayoutDocumentState): number[] {
   const groups = new Set(ids.flatMap(id => { const groupId = entityOnPage(page, state, id)?.groupId; return groupId === undefined ? [] : [groupId]; }));
@@ -1828,14 +1832,31 @@ export function LayoutWorkspace({
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      // From the object browser only Print, undo and redo reach Layout shortcuts.
-      if (target instanceof Element && target.closest('.pf-layout-object-browser') && !layoutBrowserPassesKey(event)) return;
+      const inField = target instanceof Element && Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
+      // From the object browser only Print, undo and redo reach Layout shortcuts. Select All there selects nothing,
+      // not even the text of the panels.
+      if (target instanceof Element && target.closest('.pf-layout-object-browser') && !layoutBrowserPassesKey(event)) {
+        if (isSelectAllKey(event) && !inField) event.preventDefault();
+        return;
+      }
       setStatusNote(null);
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'p') {
         event.preventDefault(); setPrinting(true); return;
       }
+      // Ctrl+A (Cmd+A) selects every object on the page; in a field or text being edited it selects the text instead.
+      // While Commons is shown over the page, the key belongs to Commons.
+      if (isSelectAllKey(event) && !inField && !catalogActive) {
+        event.preventDefault();
+        const dragging = pointerDown.current || moveStart.current || scaleStart.current || selectionScaleStart.current || boxStart.current ||
+          gripDrag.current || pointEditStart.current || tableDrag.current || viewportDrag.current || lassoPress.current || bezierPress.current ||
+          eraserStroke.current;
+        if (!presenting && !printing && !dragging && !shapeBuilder.session &&
+            !(target instanceof Element && target.closest('.pf-layout-context-menu, [role="dialog"], [role="menu"]')) &&
+            !document.querySelector('[role="dialog"][aria-modal="true"]')) selectAllObjects();
+        return;
+      }
       if (target instanceof Element && target.closest('.pf-layout-context-menu')) return;
-      if (target instanceof Element && target.closest('input, textarea, select, [contenteditable="true"]')) return;
+      if (inField) return;
       // Tab cycles only through the value fields while a tool shows them.
       if (event.key === 'Tab' && !event.ctrlKey && !event.metaKey && !event.altKey && entryTabRef.current(event.shiftKey)) { event.preventDefault(); return; }
       if (!presenting && !printing && shapeBuilder.keyDown(event)) return;
@@ -2005,7 +2026,7 @@ export function LayoutWorkspace({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [tab, selectionIds, selectedEntity, editingPathId, editingTextId, activePointIndex, canTransform, tool, page, state, presenting, printing, moveDraft, lasso, bezierDraft, booleanIds, shapeBuilder,
+  }, [tab, selectionIds, selectedEntity, editingPathId, editingTextId, activePointIndex, canTransform, tool, page, state, presenting, printing, catalogActive, moveDraft, lasso, bezierDraft, booleanIds, shapeBuilder,
     anchor, rotationDraft, offsetDraft, cornerFirst, dimensionDraft, labelDraft, arcDraft, freehand, reattachModel, tableCounting]);
 
   useEffect(() => {
@@ -3969,6 +3990,14 @@ export function LayoutWorkspace({
     selectionScaleStart.current = null; setSelectionScale(null);
     setMoveDraft(null); setMovePreview(null);
     setEditingPathId(null); setEditPoints(null); setEditHandles(null); setActivePointIndex(null);
+  };
+  // Select All keeps the tools that act on a selection and switches any other to Select. Choosing the tool
+  // again ends its unfinished step, as Esc does.
+  const selectAllObjects = (): void => {
+    chooseTool(tool === 'select' || tool === 'lasso' || tool === 'move' || tool === 'rotate' || tool === 'scale' ? tool : 'select');
+    setLasso(null); lassoLast.current = null;
+    setFreehand([]); setCursor(null); setSnapKind(null); setReattachModel(null);
+    setSelectionIds(selectableLayoutEntities(page, tab.doc.state).map((entity) => entity.id));
   };
   useEffect(() => () => { imageImportRequest.current++; setImportNote(null); }, [tab, page.id]);
   const openImageImport = (): void => {

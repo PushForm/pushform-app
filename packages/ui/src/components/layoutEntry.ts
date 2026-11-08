@@ -33,24 +33,22 @@ export interface LayoutEntryLocks {
   /** Locked move offsets in millimeters, positive right and down the page. */
   readonly x?: number | undefined;
   readonly y?: number | undefined;
-  /** A locked scale factor; a scale can instead lock its new length, width or height. */
+  /** A locked scale factor; a scale can instead lock its new width or height. */
   readonly factor?: number | undefined;
 }
 
 /** Scale's fields, each another way to give its one factor: a value in one releases the others. */
-export const SCALE_FIELDS: readonly (keyof LayoutEntryLocks)[] = ['factor', 'length', 'width', 'height'];
+export const SCALE_FIELDS: readonly (keyof LayoutEntryLocks)[] = ['factor', 'width', 'height'];
 
-/** What a scale's fields measure: its factor, the reference distance before scaling, and the size of what scales. */
+/** What a scale's fields measure: its factor and the size of what scales. */
 export interface LayoutScaleEntry {
   readonly factor: number;
-  readonly reference: number | null;
   readonly size: readonly [number, number];
 }
 
 /** The factor a scale's locked field gives, if one is locked and can give one. */
 export function lockedScaleFactor(locks: LayoutEntryLocks, scale: Omit<LayoutScaleEntry, 'factor'>): number | undefined {
   if (locks.factor !== undefined) return locks.factor;
-  if (locks.length !== undefined && scale.reference) return locks.length / scale.reference;
   if (locks.width !== undefined && scale.size[0] > 1e-9) return locks.width / scale.size[0];
   if (locks.height !== undefined && scale.size[1] > 1e-9) return locks.height / scale.size[1];
   return undefined;
@@ -151,13 +149,12 @@ export function layoutEntryFields(input: LayoutEntryInput): { fields: LayoutEntr
   }
   if (kind === 'arc') return arcFields(input, off);
   if (kind === 'scale') {
-    // Shown in the tool options bar: the factor, then the reference's new length and the new width and height.
+    // Shown in the tool options bar: the factor, then the new width and height.
     const s = input.scale;
     if (!s) return { fields: [], segments: [] };
     const [w, h] = s.size;
     return { fields: [
       { id: 'factor', label: 'Scale', value: formatScalePercent(s.factor), locked: locks.factor !== undefined },
-      { id: 'length', label: 'Length', value: s.reference !== null ? formatLength(s.reference * s.factor) : '', disabled: s.reference === null, locked: locks.length !== undefined },
       { id: 'width', label: 'Width', value: w > 1e-9 ? formatLength(w * s.factor) : '', disabled: w <= 1e-9, locked: locks.width !== undefined },
       { id: 'height', label: 'Height', value: h > 1e-9 ? formatLength(h * s.factor) : '', disabled: h <= 1e-9, locked: locks.height !== undefined },
     ], segments: [] };

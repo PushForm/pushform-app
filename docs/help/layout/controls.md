@@ -2,7 +2,7 @@
 
 ## Select, Lasso, Move, Rotate, Scale and Eraser
 
-**Select** chooses objects for editing. **Lasso** chooses several objects with a drawn boundary. **Move** changes position, **Rotate** changes orientation, and **Scale** changes size by a factor or to a known length. Use these Transform controls when existing artwork needs adjusting rather than drawing another object. **Eraser** removes eligible objects it is used on; Undo can restore an accidental edit.
+**Select** chooses objects for editing. **Lasso** chooses several objects with a drawn boundary. **Move** changes position, **Rotate** changes orientation, and **Scale** changes size by a factor or to a set width or height. Use these Transform controls when existing artwork needs adjusting rather than drawing another object. **Eraser** removes eligible objects it is used on; Undo can restore an accidental edit.
 
 Selection and editability matter: hidden or locked objects and layers can prevent an operation. Inspect the selection or layer before repeating the tool.
 

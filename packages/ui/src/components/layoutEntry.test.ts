@@ -15,20 +15,17 @@ it('takes a line length and angle, box sizes, a radius, a move, or one value by 
   expect(layoutEntryKind('select', false, false)).toBe('none');
 });
 
-it('gives Scale its factor, the new reference length and the new width and height, each giving the one factor', () => {
-  const scale = { factor: 2, reference: 20, size: [30, 0] as const };
+it('gives Scale its factor and the new width and height, each giving the one factor', () => {
+  const scale = { factor: 2, size: [30, 0] as const };
   const { fields, segments } = layoutEntryFields({ ...base, kind: 'scale', label: 'Scale', scale, locks: { width: 60 } });
   expect(fields.map(f => [f.id, f.label, f.value, Boolean(f.disabled), Boolean(f.locked)])).toEqual([
-    ['factor', 'Scale', '200%', false, false], ['length', 'Length', '40.0 mm', false, false],
-    ['width', 'Width', '60.0 mm', false, true], ['height', 'Height', '', true, false],
+    ['factor', 'Scale', '200%', false, false], ['width', 'Width', '60.0 mm', false, true], ['height', 'Height', '', true, false],
   ]);
   expect(segments).toEqual([]);
-  // The new length waits for a reference point.
-  expect(layoutEntryFields({ ...base, kind: 'scale', scale: { ...scale, reference: null }, locks: {} }).fields[1]).toMatchObject({ value: '', disabled: true });
+  expect(layoutEntryFields({ ...base, kind: 'scale', locks: {} }).fields).toEqual([]);
   expect(lockedScaleFactor({ factor: 0.5 }, scale)).toBe(0.5);
-  expect(lockedScaleFactor({ length: 30 }, scale)).toBe(1.5);
   expect(lockedScaleFactor({ width: 90 }, scale)).toBe(3);
-  expect(lockedScaleFactor({ length: 30 }, { ...scale, reference: null })).toBeUndefined();
+  // A side with no size gives no factor.
   expect(lockedScaleFactor({ height: 10 }, scale)).toBeUndefined();
   expect(readScalePercent(' 50 % ')).toBe(0.5); expect(readScalePercent('50')).toBeNull();
 });

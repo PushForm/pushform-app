@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   CommandRegistry, DocumentHost, SERVICE_DOCUMENT, SERVICE_FONTS, SERVICE_KERNEL, componentCommands, contextCommands, curveCommands, dimensionCommands,
   edgeBlendCommands, edgeCommands, editCommands, followMeCommands, groupCommands, guideCommands, intersectCommands, materialCommands, modelCommands,
-  offsetCommands, pushPullCommands, sectionPlaneCommands, sketchCommands, solidCommands, tagCommands, text3dCommands, textCommands, transformCommands, cabinetCommands,
+  offsetCommands, pushPullCommands, sectionPlaneCommands, sketchCommands, solidCommands, tagCommands, text3dCommands, textCommands, transformCommands, builderCommands,
   type FontSource,
 } from '@pushform/commands';
 import { readFileSync } from 'node:fs';
@@ -34,7 +34,7 @@ function setup(options: { fonts?: boolean } = {}) {
   const commands = new CommandRegistry({ tx: host, services });
   for (const group of [editCommands, modelCommands, sketchCommands, transformCommands, groupCommands, componentCommands, contextCommands, tagCommands, materialCommands,
     curveCommands, pushPullCommands, solidCommands, followMeCommands, edgeBlendCommands, offsetCommands, intersectCommands, edgeCommands, guideCommands,
-    dimensionCommands, textCommands, text3dCommands, sectionPlaneCommands, cabinetCommands])
+    dimensionCommands, textCommands, text3dCommands, sectionPlaneCommands, builderCommands])
     commands.registerAll(group);
   const api = new ModelDocumentApi(commands, 'AI Chat');
   const root = () => host.doc.rootDefinition.entities;
@@ -256,10 +256,10 @@ describe('ModelDocumentApi batches', () => {
       const s = setup();
       const { entry } = await cabinet(s, { type: 'base', width: 24 * inch });
       const side = entry.parts!.find(p => p.name === 'Left Side')!;
-      expect(side.size[0]).toBeCloseTo(34.5 * inch, 3);
-      expect(side.size[2]).toBeCloseTo(0.75 * inch, 3);
+      expect(side.size![0]).toBeCloseTo(34.5 * inch, 3);
+      expect(side.size![2]).toBeCloseTo(0.75 * inch, 3);
       const definition = s.api.getDocument().definitions.find(d => d.name.startsWith('Left Side'))!;
-      expect(definition.type).toBe('component');
+      expect(definition.type).toBe('group');
       expect(definition.bounds!.max[0]).toBeCloseTo(34.5 * inch, 6);
       expect(definition.bounds!.max[2]).toBeCloseTo(0.75 * inch, 6);
     });

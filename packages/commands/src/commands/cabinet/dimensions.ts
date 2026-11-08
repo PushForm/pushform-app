@@ -72,8 +72,8 @@ export const WIDTH_RANGE = [inches(9), inches(48)] as const;
 export const HEIGHT_RANGE = [inches(12), inches(108)] as const;
 export const DEPTH_RANGE = [inches(9), inches(30)] as const;
 
-export const DEFAULT_HEIGHT = { base: inches(34.5), wall: inches(30), tall: inches(84) } as const;
-export const DEFAULT_DEPTH = { base: inches(23.25), wall: inches(11.25), tall: inches(23.25) } as const;
+export const DEFAULT_HEIGHT = { base: inches(34.5), wall: inches(30), tall: inches(84), vanity: inches(31.5) } as const;
+export const DEFAULT_DEPTH = { base: inches(23.25), wall: inches(11.25), tall: inches(23.25), vanity: inches(21) } as const;
 export const SINGLE_DOOR_UP_TO = inches(24);
 
 /** Library key of the prefinished maple the box and drawer boxes are made of. */

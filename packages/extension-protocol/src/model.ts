@@ -2,6 +2,7 @@
 // Copyright 2026 PushForm contributors
 import { z } from 'zod';
 import { LOCAL_REFERENCE } from './layout.ts';
+import { MODEL_BUILDER_KEYS, modelBuilderList } from './builders/index';
 
 /**
  * Model document API, version 1. Lengths are meters in right-handed Z-up coordinates, local to the container a
@@ -205,8 +206,8 @@ export const modelOperationSchema = z.discriminatedUnion('op', [
     screen: z.tuple([z.number().min(0).max(1), z.number().min(0).max(1)]).optional().describe('Or fixed on the screen: [x, y] from the top left, as fractions of the view.') })
     .refine(o => (o.anchor === undefined) !== (o.screen === undefined), 'Give either anchor or screen.')
     .describe('Add a text label, with a leader to a point in the model or fixed on the screen.'),
-  z.object({ op: z.literal('add_cabinet'), as: localName.optional(), type: z.enum(['base', 'wall', 'tall']), width: meters,
-    height: meters.optional().describe('Overall, with toe kick. Default base 0.8763, wall 0.762, tall 2.1336.'), depth: meters.optional().describe('Box depth, doors excluded. Default base and tall 0.5906, wall 0.2858.'),
+  z.object({ op: z.literal('add_cabinet'), as: localName.optional(), type: z.enum(['base', 'wall', 'tall', 'vanity']), width: meters,
+    height: meters.optional().describe('Overall, with toe kick. Default base 0.8763, wall 0.762, tall 2.1336, vanity 0.8001.'), depth: meters.optional().describe('Box depth, doors excluded. Default base and tall 0.5906, wall 0.2858, vanity 0.5334.'),
     at: point.optional().describe('The box\'s front left bottom corner; width runs +x, depth +y, the front faces -y and overlay doors stand in front of it. Default the origin, a wall cabinet at z 1.3716.'),
     frame: z.enum(['frameless', 'face_frame']).optional().describe('Default frameless.'), overlay: z.enum(['full', 'partial', 'inset']).optional().describe('Frameless takes full only; a face frame defaults to partial.'),
     doorStyle: z.enum(['slab', 'shaker', 'raised', 'glass', 'none']).optional().describe('Default shaker; none is an open cabinet.'), doors: z.number().int().min(0).max(2).optional().describe('Default 1 up to 0.6096 wide, else 2.'),
@@ -223,6 +224,8 @@ export const modelOperationSchema = z.discriminatedUnion('op', [
     finishedInterior: z.boolean().optional().describe('The inside takes the door finish, often wanted behind glass. Default false.'),
     finishedEnds: z.enum(['none', 'left', 'right', 'both']).optional(), name: name.optional() })
     .describe('Generate one complete standard US kitchen cabinet as a named group: box with toe kick and back, face frame if asked, doors, drawers with boxes, shelves, trade-standard part sizes, finish and grain. Each part is its own named component, each door and drawer a group. Use it for every standard base, wall or tall cabinet, including stacked and glass doors and blind, diagonal and L-shaped corners, instead of assembling boxes. Do not use it for curved work, furniture, a picture\'s unusual shapes, or changing a cabinet already in the model. It adds no hardware, countertop or crown. The result has used (the sizes and options chosen) and parts (name, id, size as [length, width, thickness], and path, which is the container for a later batch that edits that part).'),
+  z.object({ op: z.literal('build'), as: localName.optional(), builder: z.enum(MODEL_BUILDER_KEYS), params: z.record(z.string(), z.unknown()).describe('The builder\'s parameters; read them from model_builder_info first.') })
+    .describe('Generate a standard assembly with one of the builders model_builder_info lists, as one named group of named parts. Returns the same used and parts as add_cabinet.'),
   z.object({ op: z.literal('add_3d_text'), as: localName.optional(), text: z.string().min(1).max(2000), position: point.describe('The text\'s lower left corner; it lies flat facing up, so rotate it to stand.'),
     height: z.number().positive().max(1000).optional().describe('Capital height; default 0.3048.'), extrude: z.number().finite().optional().describe('Thickness; 0 (default) leaves flat faces.'),
     font: z.enum(['sans', 'serif', 'mono']).optional(), bold: z.boolean().optional(), align: z.enum(['left', 'center', 'right']).optional() })
@@ -314,6 +317,7 @@ export const modelQuerySchema = z.object({
   limit: z.number().int().min(1).max(MODEL_LIMITS.entitiesPerQuery).nullable().describe('null: 50.'),
 });
 export type ModelQuery = z.infer<typeof modelQuerySchema>;
+export const modelBuilderInfoSchema = z.object({ builder: z.string().describe('A builder name from this tool\'s description.') });
 export const modelGetDocumentSchema = z.object({});
 
 /** Which solids of a container interpenetrate, in the container's coordinates, through nested groups and components. */
@@ -478,8 +482,8 @@ export interface ModelLibraryResult { categories?: { name: string; count: number
 export interface ModelSkipped { ref: ModelRef; reason: 'no_texture' | 'no_grain' | 'end_grain' | 'inside_edge' }
 /** What an `as` name of an earlier batch names: its kind and id, and a group's or placement's definition. */
 export interface ModelNameEntry { kind: string; id: number; definitionId?: number }
-/** A part of a generated cabinet; `path` runs from the model down to and including the part. */
-export interface ModelCabinetPart { name: string; id: number; path: number[]; size: [number, number, number] }
+/** A part of a generated object; `path` runs from the model down to and including it. `copies` counts the placements sharing its definition. */
+export interface ModelBuilderPart { name: string; id: number; path: number[]; size?: [number, number, number]; copies?: number }
 export interface ModelBatchResult {
   ok: true;
   revision: number;
@@ -499,7 +503,7 @@ export interface ModelBatchResult {
    * Per operation: `id` is the main result (a new solid, the face a shape made, a group's instance), `refs` what it
    * created or changed, and `deleted` what it removed, such as the cutters of a subtract.
    */
-  results: { op: ModelOperationName; id?: number; definitionId?: number; refs?: ModelRef[]; deleted?: ModelRef[]; count?: number; name?: string; skipped?: ModelSkipped[]; used?: Record<string, unknown>; parts?: ModelCabinetPart[] }[];
+  results: { op: ModelOperationName; id?: number; definitionId?: number; refs?: ModelRef[]; deleted?: ModelRef[]; count?: number; name?: string; skipped?: ModelSkipped[]; used?: unknown; parts?: ModelBuilderPart[] }[];
 }
 
 /** Tool names and descriptions shared by the host and every client that offers them to a model. */
@@ -515,6 +519,10 @@ export const MODEL_TOOLS = {
   applyOperations: {
     name: 'model_apply_operations',
     description: 'Edit the open 3D model in one atomic batch: every operation applies or none does, and the batch is one undo entry labelled with label. Lengths are meters, local to the container being edited; angles are degrees; z is up. Entities are named by {kind, id} from model_query (faces as {kind: "face", id: bodyId, faceId}). Create operations accept as: "name", and so does a move, rotate, scale or mirror that copies one entity (it names the copy); any other operation given as fails. Later operations refer to the result as "$name", in this batch or a later one of the same message (names lists the earlier ones still live). Returns the new revision and the created ids, or an error naming the failed operation; Your own batches of this message, applied or failed, never make expectedRevision stale, so a corrected batch can be resent with the same one; a stale_revision error means someone else changed the model, so read it again before retrying. add_box adds a rectangular solid; add_cabinet generates a complete standard kitchen cabinet of named parts. Drawing operations (add_edges, add_polyline, add_rectangle, add_circle, add_polygon) make loose edges and faces, or divide the face of a solid when drawn on it; push_pull turns a loose face into a solid or pushes and pulls the face of a solid; union, subtract, intersect and split combine overlapping solids of the container; follow_me sweeps a face along a path; fillet_edges, chamfer_edges and profile_edges round, bevel or shape edges of a solid, picked by face ({face: {facing, point?}, which?}) or by the two faces they join, which never go stale; add_arc, offset and fillet_corner draw more shapes; mirror reflects entities. Guides, dimensions, text, 3D text, section planes and library materials have their own operations. Geometry that would not leave a valid solid fails with invalid_geometry and changes nothing. A face of a solid can be named as {body, facing, point?} instead of by id. Scene operations add, update, delete, rename, reorder and include scenes; a framed camera fits a subject from a view direction.',
+  },
+  builderInfo: {
+    name: 'model_builder_info',
+    get description(): string { return `Read one builder's parameters, guidance and an example before using it with the build operation. Builders: ${modelBuilderList()}.`; },
   },
   overlaps: {
     name: 'model_find_overlaps',

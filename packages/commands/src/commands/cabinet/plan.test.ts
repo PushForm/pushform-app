@@ -2,23 +2,25 @@
 // Copyright 2026 PushForm contributors
 import { describe, expect, it } from 'vitest';
 import type { Vec3 } from '@pushform/core';
-import { CabinetPlanError, planCabinet } from './plan';
-import type { CabinetParams, CabinetPart, CabinetPlan } from './plan';
+import { BuilderPlanError } from '../builders/parts';
+import type { BuilderPart } from '../builders/parts';
+import { planCabinet } from './plan';
+import type { CabinetParams, CabinetPlan } from './plan';
 import { inches as i } from './dimensions';
 
-const named = (plan: CabinetPlan, name: string, assembly: string | null = null): CabinetPart => {
+const named = (plan: CabinetPlan, name: string, assembly: string | null = null): BuilderPart => {
   const part = plan.parts.find(p => p.name === name && p.assembly === assembly);
   if (!part) throw new Error(`no ${assembly ?? 'box'}/${name} in ${plan.parts.map(p => `${p.assembly}/${p.name}`).join(', ')}`);
   return part;
 };
 /** The part's box in the cabinet's coordinates. */
-function bounds(p: CabinetPart): { min: Vec3; max: Vec3 } {
+function bounds(p: BuilderPart): { min: Vec3; max: Vec3 } {
   const far = [0, 1, 2].map(k => p.origin[k]! + p.x[k]! * p.size[0] + p.y[k]! * p.size[1] + p.z[k]! * p.size[2]);
   return { min: [0, 1, 2].map(k => Math.min(p.origin[k]!, far[k]!)) as unknown as Vec3, max: [0, 1, 2].map(k => Math.max(p.origin[k]!, far[k]!)) as unknown as Vec3 };
 }
 const closeTo = (actual: number, inchesExpected: number): void => { expect(actual / 0.0254).toBeCloseTo(inchesExpected, 6); };
-const refused = (params: CabinetParams): CabinetPlanError => {
-  try { planCabinet(params); } catch (e) { if (e instanceof CabinetPlanError) return e; throw e; }
+const refused = (params: CabinetParams): BuilderPlanError => {
+  try { planCabinet(params); } catch (e) { if (e instanceof BuilderPlanError) return e; throw e; }
   throw new Error('expected a refusal');
 };
 
@@ -51,6 +53,22 @@ describe('planCabinet defaults', () => {
     const heights = ['Drawer 1', 'Drawer 2', 'Drawer 3'].map(a => plan.parts.filter(p => p.assembly === a && p.role === 'show').reduce((h, p) => Math.max(h, bounds(p).max[2] - bounds(p).min[2]), 0));
     expect(heights[0]).toBeLessThan(heights[1]!);
     expect(heights[1]).toBeLessThan(heights[2]!);
+  });
+});
+
+describe('planCabinet vanity', () => {
+  it('builds a vanity like a shorter, shallower base cabinet', () => {
+    const plan = planCabinet({ type: 'vanity', width: i(30), sinkFront: true });
+    closeTo(plan.used.height, 31.5);
+    closeTo(plan.used.depth, 21);
+    expect(plan.used.toeKick).toBe(true);
+    expect(plan.name).toBe('Vanity Cabinet 30 in');
+    named(plan, 'False Front');
+    named(plan, 'Front Stretcher');
+  });
+
+  it('refuses stacked doors on a vanity', () => {
+    expect(refused({ type: 'vanity', width: i(30), stackedDoors: true }).code).toBe('invalid_operation');
   });
 });
 
@@ -181,8 +199,8 @@ describe('planCabinet parts', () => {
 
   it('marks only the asked ends as finished', () => {
     const plan = planCabinet({ type: 'base', width: i(24), finishedEnds: 'right' });
-    expect(named(plan, 'Left Side').finishedOutside).toBe(false);
-    expect(named(plan, 'Right Side').finishedOutside).toBe(true);
+    expect(named(plan, 'Left Side').plusZRole).toBeUndefined();
+    expect(named(plan, 'Right Side').plusZRole).toBe('show');
   });
 });
 
@@ -236,7 +254,7 @@ describe('planCabinet stacked and glass doors', () => {
 
 describe('planCabinet glass patterns and interiors', () => {
   const wall: CabinetParams = { type: 'wall', width: i(24), height: i(42), doors: 1, doorStyle: 'glass' };
-  const bars = (plan: CabinetPlan): CabinetPart[] => plan.parts.filter(p => p.name.includes('Mullion'));
+  const bars = (plan: CabinetPlan): BuilderPart[] => plan.parts.filter(p => p.name.includes('Mullion'));
 
   it('leaves a plain glass door with no bars and clear glass', () => {
     const plan = planCabinet(wall);
@@ -287,7 +305,7 @@ describe('planCabinet glass patterns and interiors', () => {
     expect(named(plan, 'Shelf').role).toBe('show');
     expect(named(plan, 'Bottom').role).toBe('show');
     expect(named(plan, 'Left Side').role).toBe('box');
-    expect(named(plan, 'Left Side').finishedInside).toBe(true);
+    expect(named(plan, 'Left Side').zeroFaceRole).toBe('show');
     expect(named(plan, 'Box Bottom', 'Drawer').role).toBe('box');
   });
 
@@ -381,8 +399,8 @@ describe('planCabinet corners', () => {
 
   it('marks finished ends by the side of the room they face', () => {
     const plan = planCabinet({ type: 'base', width: i(36), finishedEnds: 'right', corner: { style: 'diagonal' } });
-    expect(named(plan, 'Back Wing Side').finishedOutside).toBe(true);
-    expect(named(plan, 'Left Wing Side').finishedOutside).toBe(false);
+    expect(named(plan, 'Back Wing Side').plusZRole).toBe('show');
+    expect(named(plan, 'Left Wing Side').plusZRole).toBeUndefined();
   });
 });
 

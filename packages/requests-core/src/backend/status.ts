@@ -21,7 +21,7 @@ export const SAYING = 'saying';
 /** A browser tool call the turn sent and how it ended, as the request that resumes the turn received it. */
 export interface PreviousStep { name: string; isError: boolean }
 
-const READ_TOOLS: ReadonlySet<string> = new Set([MODEL_TOOLS.getDocument.name, MODEL_TOOLS.query.name, MODEL_TOOLS.overlaps.name, MODEL_TOOLS.materialLibrary.name]);
+const READ_TOOLS: ReadonlySet<string> = new Set([MODEL_TOOLS.getDocument.name, MODEL_TOOLS.query.name, MODEL_TOOLS.overlaps.name, MODEL_TOOLS.materialLibrary.name, MODEL_TOOLS.builderInfo.name]);
 export const NEXT_STEP: StatusLine = { phase: 'planning', text: 'Working out the next step…' };
 /**
  * Lines for a retry and for long silences. Each only says that work goes on, mostly as a light woodworking figure of

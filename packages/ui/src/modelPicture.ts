@@ -9,7 +9,7 @@ import { sectionsToRender } from './engine/sectionAdapter';
 import { applyDocumentView } from './engine/viewSync';
 
 export interface ModelPictureOptions {
-  width: number; height: number; background?: string;
+  width: number; height: number; background?: string | null;
   camera?: CameraState;
   lighting?: 'document' | 'camera' | 'soft' | 'bright';
   isometric?: boolean;
@@ -52,7 +52,7 @@ export async function modelPicture(state: DocumentState, images: ImageStore, opt
       if (options.lighting === 'soft' || options.lighting === 'bright') { const p = STUDIO_LIGHTING[options.lighting]; studioLightLevels.value.set(p.ambient, p.facing, p.key); }
       const picture = document.createElement('canvas');
       const environmentBackground = options.background === undefined && (options.lighting === undefined || options.lighting === 'document') && !!state.styles.get(state.activeStyleId)?.environment;
-      return viewport.snapshotInto(picture, options.width, options.height, viewport.camera.getState(), { background: options.background ?? '#ffffff', environmentBackground }) ? picture : null;
+      return viewport.snapshotInto(picture, options.width, options.height, viewport.camera.getState(), { background: options.background === undefined ? '#ffffff' : options.background, environmentBackground }) ? picture : null;
     } finally { studioLight.value = before; studioLightLevels.value.copy(levels); }
   } finally { const renderer = viewport.renderer; viewport.dispose(); renderer?.forceContextLoss(); }
 }

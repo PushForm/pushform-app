@@ -69,7 +69,7 @@ import { checkLayoutReferences, convertEmbeddedModel, layoutClipboardEntity, lin
   type LayoutCloudAccess, type LayoutReferenceStatus } from './layoutCloudModels';
 import { LayoutCloudModelPicker } from './LayoutCloudModelPicker';
 import { LayoutEntryFields } from './LayoutEntryFields';
-import { entryDeg, entryMm, LAYOUT_POINTER_FIELD, layoutEntryFields, layoutEntryKind, lockedPoint, type LayoutEntryField, type LayoutEntryLocks } from './layoutEntry';
+import { entryDeg, entryMm, LAYOUT_POINTER_FIELD, layoutEntryFields, layoutEntryKind, lockedPoint, MOVE_OFFSET_FIELDS, MOVE_POLAR_FIELDS, type LayoutEntryField, type LayoutEntryLocks } from './layoutEntry';
 import { LayoutReferencesPanel } from './LayoutReferencesPanel';
 import { ToolOptionsBarView } from './ToolOptionsBar';
 import { LayoutObjectBrowser, layoutBrowserPassesKey, type LayoutBrowserDrop, type LayoutBrowserSelectMode, type LayoutBrowserTarget } from './LayoutObjectBrowser';
@@ -2366,7 +2366,9 @@ export function LayoutWorkspace({
   /** Offset from the base point to `target`, kept horizontal or vertical when constrained. */
   const moveDelta = (draft: MoveDraft, target: Point, constrain: boolean): Point => {
     const delta: Point = [target[0] - draft.base[0], target[1] - draft.base[1]];
-    return constrain ? Math.abs(delta[0]) >= Math.abs(delta[1]) ? [delta[0], 0] : [0, delta[1]] : delta;
+    const free: Point = constrain ? Math.abs(delta[0]) >= Math.abs(delta[1]) ? [delta[0], 0] : [0, delta[1]] : delta;
+    // Values locked in the bar's fields hold their part of the move; the pointer sets the rest.
+    return lockedPoint('move', [0, 0], free, entryLocksRef.current);
   };
   const endMove = (): void => {
     setMoveDraft(null); setMovePreview(null); setCursor(null); setSnapKind(null); clearEntry(); setVcbError(null);
@@ -3327,7 +3329,7 @@ export function LayoutWorkspace({
     units: drawingUnits === 'mm' ? 'mm' : 'inch', format: drawingUnits === 'architectural' ? 'architectural' : 'decimal',
     precision: state.settings.precision, showUnits: true });
   const entrySingle = ((): { label: string; value?: string | undefined } => {
-    if (tool === 'move') return { label: 'Distance', value: moveDraft ? formatEntryLength(Math.hypot(...(movePreview?.delta ?? [0, 0]))) : undefined };
+    if (tool === 'move') return { label: 'Distance' };
     if (tool === 'rotate') return { label: 'Angle', value: rotationDraft?.reference ? `${rotationDraft.angleDeg.toFixed(1)}°` : undefined };
     if (tool === 'scale') return { label: 'Scale', value: scaleDraft?.reference ? formatScalePercent(scaleDraft.factor) : undefined };
     if (tool === 'offset') return { label: 'Distance', value: offsetDraft ? formatEntryLength(offsetDraft.distanceMm) : undefined };
@@ -3339,7 +3341,7 @@ export function LayoutWorkspace({
   const entryCorners = entryKind === 'box' && anchor && cursor
     ? placementCorners(anchor, cursor, usesPlacementModifiers(tool) ? placementModifiers : NO_PLACEMENT_MODIFIERS) : undefined;
   const entry = presenting || printing ? { fields: [], segments: [] } : layoutEntryFields({
-    kind: entryKind, anchor, cursor, corners: entryCorners, label: entrySingle.label, value: entrySingle.value,
+    kind: entryKind, anchor: entryKind === 'move' ? moveDraft?.base ?? null : anchor, cursor, corners: entryCorners, label: entrySingle.label, value: entrySingle.value,
     arc: arcDraft && isLayoutArcTool(tool) ? { tool, points: arcDraft.points, sweep: arcDraft.sweep } : undefined,
     locks: entryLocks, mmPerPx: 1 / (PX_PER_MM * zoom), formatLength: formatEntryLength,
   });
@@ -3368,7 +3370,18 @@ export function LayoutWorkspace({
     setEntryDrafts({ [first]: text }); setEntryFocus(first); setEntryError(null); setVcbError(null);
   };
   const lockable = (id: string): id is keyof LayoutEntryLocks =>
-    entryKind === 'line' ? id === 'length' || id === 'angle' : entryKind === 'box' ? id === 'width' || id === 'height' : false;
+    entryKind === 'line' ? id === 'length' || id === 'angle' : entryKind === 'box' ? id === 'width' || id === 'height'
+      : entryKind === 'move' ? (MOVE_OFFSET_FIELDS as readonly string[]).includes(id) || (MOVE_POLAR_FIELDS as readonly string[]).includes(id) : false;
+  /** Move's other pair of fields: the distance and angle for an offset, and the offsets for a distance or angle. */
+  const otherMovePair = (id: string): readonly (keyof LayoutEntryLocks)[] =>
+    entryKind !== 'move' ? [] : (MOVE_OFFSET_FIELDS as readonly string[]).includes(id) ? MOVE_POLAR_FIELDS : MOVE_POLAR_FIELDS.includes(id as keyof LayoutEntryLocks) ? MOVE_OFFSET_FIELDS : [];
+  /** Shows the move with its locked values held, from where the preview is now. */
+  const relockMove = (locks: LayoutEntryLocks): void => {
+    if (!moveDraft || !cursor) return;
+    const delta = lockedPoint('move', [0, 0], [cursor[0] - moveDraft.base[0], cursor[1] - moveDraft.base[1]], locks);
+    setCursor([moveDraft.base[0] + delta[0], moveDraft.base[1] + delta[1]]);
+    setMovePreview({ entityIds: new Set(moveDraft.entityIds), delta, copy: moveDraft.copy, whole: true });
+  };
   /** The value typed in a line or box field, or an error message, or null when it is something else to apply as entered. */
   const readEntry = (id: keyof LayoutEntryLocks, text: string): number | string | null => {
     const parsed = parseVcb(text, entryUnit);
@@ -3389,10 +3402,14 @@ export function LayoutWorkspace({
       else {
         const value = readEntry(id, text);
         if (typeof value === 'string') { setEntryError(id); setVcbError(value); return; }
-        if (value !== null) next[id] = value;
+        if (value !== null) {
+          next[id] = value;
+          for (const other of otherMovePair(id)) delete next[other];
+        }
       }
       setEntryLocks(next); entryLocksRef.current = next;
       if (anchor && cursor && (entryKind === 'line' || entryKind === 'box')) setCursor(lockedPoint(entryKind, anchor, cursor, next, entryDivisor()));
+      if (entryKind === 'move') relockMove(next);
     }
     const i = entryFields.findIndex(f => f.id === id);
     const target = entryFields[(i + (back ? entryFields.length - 1 : 1)) % entryFields.length]!;
@@ -3470,7 +3487,7 @@ export function LayoutWorkspace({
       return;
     }
     // A single value, or anything the fields do not read as their own, goes to the tool as entered.
-    const passThrough = (entryKind !== 'line' && entryKind !== 'box') || typed.some(f => !lockable(f.id) || readEntry(f.id, entryDrafts[f.id]!) === null);
+    const passThrough = (entryKind !== 'line' && entryKind !== 'box' && entryKind !== 'move') || typed.some(f => !lockable(f.id) || readEntry(f.id, entryDrafts[f.id]!) === null);
     if (passThrough) {
       const f = typed.find(g => !lockable(g.id) || readEntry(g.id, entryDrafts[g.id]!) === null) ?? typed[0];
       if (!f) return;
@@ -3490,6 +3507,23 @@ export function LayoutWorkspace({
       if (value !== null) values[f.id] = value;
     }
     if (!Object.keys(values).length) return;
+    if (entryKind === 'move') {
+      // Offsets set the move outright, each falling back to the pointer's; or a distance and angle do, as a line's.
+      if (!moveDraft) { setVcbError('Click an object to choose the base point first.'); return; }
+      const live = movePreview?.delta ?? [0, 0], liveLength = Math.hypot(live[0], live[1]);
+      let delta: Point;
+      if (values.x !== undefined || values.y !== undefined) delta = [values.x ?? live[0], values.y ?? live[1]];
+      else if (values.angle !== undefined) {
+        const radians = values.angle * Math.PI / 180, length = values.length ?? liveLength;
+        delta = [length * Math.cos(radians), length * Math.sin(radians)];
+      } else {
+        if (liveLength <= LENGTH_TOL * 1000) { setEntryError('length'); setVcbError('Move the pointer to show the direction first.'); return; }
+        delta = [live[0] * values.length! / liveLength, live[1] * values.length! / liveLength];
+      }
+      leaveEntry();
+      commitMove(delta);
+      return;
+    }
     if (!anchor) { setVcbError('Start a shape before entering a measurement'); return; }
     const pointer = cursor ?? [anchor[0] + 1, anchor[1]];
     if (entryKind === 'line') {
@@ -3513,6 +3547,21 @@ export function LayoutWorkspace({
     const height = values.height !== undefined ? side(pointer[1] - anchor[1]) * values.height : b[1] - a[1];
     leaveEntry();
     commit(anchor, [anchor[0] + width / divisor, anchor[1] + height / divisor], undefined, undefined, modifiers);
+  };
+  /** A field being typed in; in Move, typing an offset releases the distance and angle, and the other way round. */
+  const draftEntry = (id: string, text: string): void => {
+    const others = otherMovePair(id);
+    setEntryDrafts(d => {
+      const next: Record<string, string> = { ...d, [id]: text };
+      for (const other of others) delete next[other];
+      return next;
+    });
+    if (others.some(other => entryLocksRef.current[other] !== undefined)) {
+      const next: { -readonly [K in keyof LayoutEntryLocks]: LayoutEntryLocks[K] } = { ...entryLocksRef.current };
+      for (const other of others) delete next[other];
+      setEntryLocks(next); entryLocksRef.current = next; relockMove(next);
+    }
+    setEntryError(null); setVcbError(null);
   };
   const escapeEntry = (): void => {
     leaveEntry();
@@ -4206,7 +4255,22 @@ export function LayoutWorkspace({
     return parsed.value.kind === 'length' || parsed.value.kind === 'radius' ? parsed.value : null;
   };
   // picking Corner's segments keeps the bar usable, as edge picking does in 3D
-  const barPlacing = Boolean(moveDraft || rotationDraft || scaleDraft || offsetDraft || arcDraft);
+  /** What both sets of value fields share: the page's and Move's in the tool options bar. */
+  const entryFieldEvents = {
+    drafts: entryDrafts, focus: entryFocus, error: entryError, onDraft: draftEntry, onFocus: setEntryFocus,
+    onBlur: (id: string) => {
+      // A value that is not locked into the preview does not outlive its field's focus.
+      if (!(lockable(id) && entryLocksRef.current[id] !== undefined)) setEntryDrafts(d => { const { [id]: _, ...rest } = d; return rest; });
+      setEntryFocus(f => f === id ? null : f);
+    },
+    onTab: tabEntry, onEnter: applyEntry, onEscape: escapeEntry,
+  };
+  /** Move's offsets, distance and angle in the bar; until a base point is chosen they wait, empty. */
+  const moveBarFields: readonly LayoutEntryField[] = entryKind !== 'move' ? []
+    : moveDraft && entryFields.some(f => f.id === 'x') ? entryFields
+      : (['X', 'Y', 'Distance', 'Angle'] as const).map(label => ({ id: `waiting-${label}`, label, value: '', disabled: true }));
+  // Move's bar holds the move's own fields, so it stays usable while the destination is chosen.
+  const barPlacing = Boolean(rotationDraft || scaleDraft || offsetDraft || arcDraft);
   return (
     <>
       {contextMenu ? <LayoutContextMenu x={contextMenu.x} y={contextMenu.y} items={contextItems} onClose={() => { setContextMenu(null); canvasRef.current?.focus(); }} /> : null}
@@ -4319,7 +4383,9 @@ export function LayoutWorkspace({
               {editing ? <LayoutTextToolbar text={editing.text!} range={textSelection} getSelection={getTextSelection} onCaptureSelection={setTextSelection}
                 onChange={formatEditingText} onReturnToText={returnToText} onFinish={() => setEditingTextId(null)} />
                 : selectedText ? <LayoutTextToolbar text={selectedText.text!} range={wholeText()} getSelection={wholeText} onCaptureSelection={() => {}}
-                  onChange={formatSelectedText} onReturnToText={() => canvasRef.current?.focus()} onFinish={() => {}} /> : null}
+                  onChange={formatSelectedText} onReturnToText={() => canvasRef.current?.focus()} onFinish={() => {}} />
+                  : moveBarFields.length ? <LayoutEntryFields inline fields={moveBarFields} segments={[]} pageSize={page.size} scale={1} pointer={null} {...entryFieldEvents} />
+                    : null}
             </ToolOptionsBarView>;
           })()}
         </div>
@@ -4341,16 +4407,8 @@ export function LayoutWorkspace({
                 return d + (contour.closed ? 'Z' : '');
               }).join(' ')} fillRule="evenodd" />)}
           </svg> : null}
-          {editingTextId === null ? <LayoutEntryFields fields={entryFields} segments={entry.segments} pageSize={page.size} scale={PX_PER_MM * zoom}
-            pointer={cursor} drafts={entryDrafts} focus={entryFocus} error={entryError}
-            onDraft={(id, text) => { setEntryDrafts(d => ({ ...d, [id]: text })); setEntryError(null); setVcbError(null); }}
-            onFocus={setEntryFocus}
-            onBlur={(id) => {
-              // A value that is not locked into the preview does not outlive its field's focus.
-              if (!(lockable(id) && entryLocksRef.current[id] !== undefined)) setEntryDrafts(d => { const { [id]: _, ...rest } = d; return rest; });
-              setEntryFocus(f => f === id ? null : f);
-            }}
-            onTab={tabEntry} onEnter={applyEntry} onEscape={escapeEntry} /> : null}
+          {editingTextId === null ? <LayoutEntryFields fields={entryKind === 'move' ? entryFields.filter(f => f.id === LAYOUT_POINTER_FIELD) : entryFields}
+            segments={entry.segments} pageSize={page.size} scale={PX_PER_MM * zoom} pointer={cursor} {...entryFieldEvents} /> : null}
           {tool === 'line' && lineGuide && cursor ? <LayoutAlignmentGuide axis={lineGuide.axis}
             from={[lineGuide.reference[0] * PX_PER_MM * zoom, lineGuide.reference[1] * PX_PER_MM * zoom]}
             to={[cursor[0] * PX_PER_MM * zoom, cursor[1] * PX_PER_MM * zoom]} /> : null}
@@ -4374,12 +4432,10 @@ export function LayoutWorkspace({
               {`${tableColumns} x ${tableRows}`}
             </output> : null}
           {/* The readout gives the move's x, y offsets, positive x right and positive y down, as typed in. */}
-          {tool === 'move' && moveDraft && cursor ? <output className="pf-layout-rotation-angle" aria-label="Move offset preview"
+          {tool === 'move' && moveDraft && cursor ? <output className="pf-layout-rotation-angle" aria-label="Move distance preview"
             style={{ left: Math.max(0, Math.min(page.size[0] * PX_PER_MM * zoom - 160, cursor[0] * PX_PER_MM * zoom + 14)),
               top: Math.max(0, Math.min(page.size[1] * PX_PER_MM * zoom - 28, cursor[1] * PX_PER_MM * zoom + 14)) }}>
-            {moveDraft.copy ? 'Copy ' : ''}{(movePreview?.delta ?? [0, 0]).map((offset) => formatLayoutLength(offset / 25.4, {
-              units: drawingUnits === 'mm' ? 'mm' : 'inch', format: drawingUnits === 'architectural' ? 'architectural' : 'decimal',
-              precision: state.settings.precision, showUnits: true })).join(', ')}
+            {moveDraft.copy ? 'Copy ' : ''}{formatEntryLength(Math.hypot(...(movePreview?.delta ?? [0, 0])))}
           </output> : null}
           {angularPreview && cursor ? <output className="pf-layout-rotation-angle" aria-label="Angular dimension preview"
             style={{ left: Math.max(0, Math.min(page.size[0] * PX_PER_MM * zoom - 90, cursor[0] * PX_PER_MM * zoom + 14)),

@@ -954,6 +954,37 @@
 .pf-entry.is-error {
   border-color: var(--pf-danger);
 }
+/* Value fields in a row in the tool options bar, such as Move's offsets. */
+.pf-entry.is-inline {
+  position: static;
+  z-index: auto;
+  transform: none;
+  height: 20px;
+  box-sizing: content-box;
+  padding: 0 5px;
+  border-color: var(--pf-border);
+  border-radius: 3px;
+  background: var(--pf-surface);
+  backdrop-filter: none;
+  box-shadow: none;
+  color: inherit;
+  font-size: inherit;
+}
+.pf-entry.is-inline:focus,
+.pf-entry.is-inline.is-editing,
+.pf-entry.is-inline.is-locked {
+  border-color: var(--pf-accent);
+}
+.pf-entry.is-inline.is-locked {
+  background: var(--pf-surface);
+  box-shadow: inset 0 0 0 1px var(--pf-accent);
+}
+.pf-entry.is-inline.is-error {
+  border-color: var(--pf-danger);
+}
+.pf-entry.is-inline:disabled {
+  opacity: 0.45;
+}
 
 /* Entity Info panel */
 .pf-ei-title {

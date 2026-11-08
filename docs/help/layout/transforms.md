@@ -4,11 +4,17 @@
 
 Choose **Move** in Transform, or press **M**. Click an editable object to choose it and set the base point. To move several objects together, select them first, then click a selected object or empty paper to set the base point.
 
-Move the pointer to preview the destination, then click again to finish. Hold Shift to constrain movement horizontally or vertically. After the base point, type a length and press Enter for that distance along the pointer direction, or enter two offsets such as **10mm, 5mm**. Positive offsets go right and down the page. Escape cancels the pending move.
+Move the pointer to preview the destination, then click again to finish. The distance shows beside the pointer. Hold Shift to constrain movement horizontally or vertically. Escape cancels the pending move.
+
+## Type exact offsets, a distance or an angle for Move
+
+After you click the base point, the tool options bar shows **X**, **Y**, **Distance** and **Angle** for the move, and the cursor is in **X**. Type a horizontal offset and press Enter to move that far across, keeping the pointer's vertical offset. Positive X goes right and positive Y goes down the page. Press Tab to keep a value and go to the next field: the pointer then sets only what is left, so typing **0** in X and pressing Tab moves straight up or down. You can also type both offsets in any field, such as **10mm, 5mm**.
+
+Type a **Distance** to move that far in the pointer's direction, or a Distance and an **Angle** to set both. Angles are measured from the right and turn clockwise, so 90 is straight down the page. Typing a distance or angle releases the X and Y values, and typing an offset releases the distance and angle. Escape cancels the move.
 
 ## Copy and repeat objects with Move
 
-Choose **Move**, click the object to set its base point, then tap Ctrl (Cmd on a Mac) or click **Copy** in the tool options bar to toggle copying. Check that the status says Copy. Copy stays on for later moves until you choose Move again. Click the destination, or type a distance, to place a copy while leaving the original.
+Choose **Move**, click the object to set its base point, then tap Ctrl (Cmd on a Mac) or click **Copy** in the tool options bar to toggle copying. Check that the status says Copy. Copy stays on for later moves until you choose Move again. Click the destination, or type offsets or a distance, to place a copy while leaving the original.
 
 Immediately after that copy, type **3x** and press Enter to make three copies in total at the same spacing. Type **/3** instead for three copies spaced between the original and the first copy's position. Do this before picking another base point or changing tools. One Undo removes the copy array.
 

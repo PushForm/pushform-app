@@ -17,20 +17,29 @@ export interface LayoutEntryField {
   /** Page direction, away from the shape, in which the field is drawn clear of `at`. */
   readonly away?: Point | undefined;
   readonly locked?: boolean | undefined;
+  /** Shown but not taking a value yet, as Move's offsets are before its base point. */
+  readonly disabled?: boolean | undefined;
 }
 
 /** A gray dimension line on the page, in millimeters. */
 export type LayoutEntrySegment = readonly [Point, Point];
 
 export interface LayoutEntryLocks {
-  /** Locked line length or rectangle sizes, in millimeters, and line angle in degrees. */
+  /** Locked line or move length or rectangle sizes, in millimeters, and line or move angle in degrees. */
   readonly length?: number | undefined;
   readonly angle?: number | undefined;
   readonly width?: number | undefined;
   readonly height?: number | undefined;
+  /** Locked move offsets in millimeters, positive right and down the page. */
+  readonly x?: number | undefined;
+  readonly y?: number | undefined;
 }
 
-export type LayoutEntryKind = 'line' | 'box' | 'radius' | 'arc' | 'single' | 'none';
+/** A move is set either by its offsets or by its distance and angle; a value in one pair releases the other. */
+export const MOVE_OFFSET_FIELDS: readonly (keyof LayoutEntryLocks)[] = ['x', 'y'];
+export const MOVE_POLAR_FIELDS: readonly (keyof LayoutEntryLocks)[] = ['length', 'angle'];
+
+export type LayoutEntryKind = 'line' | 'box' | 'radius' | 'arc' | 'move' | 'single' | 'none';
 
 /** Screen gap between a shape and its dimension line. */
 export const ENTRY_DIMENSION_OFFSET_PX = 28;
@@ -41,10 +50,11 @@ export const LAYOUT_POINTER_FIELD = 'value';
 /** How a tool takes typed values: a line's length and angle, a box's width and height, a radius, an arc's step, or one value. */
 export function layoutEntryKind(tool: string, boxTool: boolean, radiusTool: boolean, arcTool = false): LayoutEntryKind {
   if (tool === 'line') return 'line';
+  if (tool === 'move') return 'move';
   if (arcTool) return 'arc';
   if (boxTool) return 'box';
   if (radiusTool) return 'radius';
-  if (tool === 'move' || tool === 'rotate' || tool === 'scale' || tool === 'offset' || tool === 'fillet' || tool === 'chamfer') return 'single';
+  if (tool === 'rotate' || tool === 'scale' || tool === 'offset' || tool === 'fillet' || tool === 'chamfer') return 'single';
   return 'none';
 }
 
@@ -62,7 +72,11 @@ const sideOf = (v: number): number => (v < 0 ? -1 : 1);
  * (`divisor` 2 when drawn from the center, where the pointer sets half of each).
  */
 export function lockedPoint(kind: LayoutEntryKind, anchor: Point, p: Point, locks: LayoutEntryLocks, divisor = 1): [number, number] {
-  if (kind === 'line') {
+  // A move's locked offsets hold each axis; otherwise its distance and angle act as a line's.
+  if (kind === 'move' && (locks.x !== undefined || locks.y !== undefined)) {
+    return [anchor[0] + (locks.x ?? p[0] - anchor[0]), anchor[1] + (locks.y ?? p[1] - anchor[1])];
+  }
+  if (kind === 'line' || kind === 'move') {
     if (locks.length === undefined && locks.angle === undefined) return [p[0], p[1]];
     const dx = p[0] - anchor[0], dy = p[1] - anchor[1];
     const length = locks.length ?? Math.hypot(dx, dy);
@@ -104,6 +118,16 @@ export function layoutEntryFields(input: LayoutEntryInput): { fields: LayoutEntr
   }
   if (kind === 'arc') return arcFields(input, off);
   if (!anchor || !cursor) return { fields: [], segments: [] };
+  if (kind === 'move') {
+    // Shown in the tool options bar rather than on the page: the offsets, then the distance and angle.
+    const dx = cursor[0] - anchor[0], dy = cursor[1] - anchor[1], len = Math.hypot(dx, dy);
+    return { fields: [
+      { id: 'x', label: 'X', value: formatLength(dx), locked: locks.x !== undefined },
+      { id: 'y', label: 'Y', value: formatLength(dy), locked: locks.y !== undefined },
+      { id: 'length', label: 'Distance', value: formatLength(len), locked: locks.length !== undefined },
+      { id: 'angle', label: 'Angle', value: `${len > 1e-9 ? formatAngle(pageAngle(anchor, cursor)) : '0'}°`, locked: locks.angle !== undefined },
+    ], segments: [] };
+  }
   if (kind === 'line') {
     const len = Math.hypot(cursor[0] - anchor[0], cursor[1] - anchor[1]);
     const fields: LayoutEntryField[] = [];

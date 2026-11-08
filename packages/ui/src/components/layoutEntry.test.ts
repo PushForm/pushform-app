@@ -5,12 +5,31 @@ import { layoutEntryFields, layoutEntryKind, lockedPoint, pageAngle, type Layout
 
 const base: LayoutEntryInput = { kind: 'line', anchor: [10, 10], cursor: [40, 10], label: 'Length', locks: {}, mmPerPx: 0.5, formatLength: (mm) => `${mm.toFixed(1)} mm` };
 
-it('takes a line length and angle, box sizes, a radius, or one value by tool', () => {
+it('takes a line length and angle, box sizes, a radius, a move, or one value by tool', () => {
   expect(layoutEntryKind('line', false, false)).toBe('line');
+  expect(layoutEntryKind('move', false, false)).toBe('move');
   expect(layoutEntryKind('rectangle', true, false)).toBe('box');
   expect(layoutEntryKind('circle', false, true)).toBe('radius');
-  for (const tool of ['move', 'rotate', 'offset', 'fillet', 'chamfer']) expect(layoutEntryKind(tool, false, false)).toBe('single');
+  for (const tool of ['rotate', 'scale', 'offset', 'fillet', 'chamfer']) expect(layoutEntryKind(tool, false, false)).toBe('single');
   expect(layoutEntryKind('select', false, false)).toBe('none');
+});
+
+it('gives Move its offsets, distance and angle, and holds locked offsets or a locked distance and angle', () => {
+  const { fields, segments } = layoutEntryFields({ ...base, kind: 'move', label: 'Distance', anchor: [10, 10], cursor: [40, 50], locks: { x: 30 } });
+  expect(fields.map(f => [f.id, f.label, f.value, f.locked])).toEqual([
+    ['x', 'X', '30.0 mm', true], ['y', 'Y', '40.0 mm', false], ['length', 'Distance', '50.0 mm', false], ['angle', 'Angle', '53.1°', false],
+  ]);
+  // They sit in the tool options bar, so nothing ties them to the page.
+  expect(fields.every(f => f.at === undefined)).toBe(true); expect(segments).toEqual([]);
+  expect(layoutEntryFields({ ...base, kind: 'move', anchor: null, cursor: null }).fields).toEqual([]);
+  // A locked offset holds its axis; the pointer sets the other.
+  expect(lockedPoint('move', [10, 10], [15, 17], { x: 30 })).toEqual([40, 17]);
+  expect(lockedPoint('move', [10, 10], [15, 17], { y: -5 })).toEqual([15, 5]);
+  // Without offsets, a distance keeps the pointer's direction and an angle its distance, as a line's do.
+  const [x, y] = lockedPoint('move', [0, 0], [3, 4], { length: 10 });
+  expect(x).toBeCloseTo(6); expect(y).toBeCloseTo(8);
+  const [ax, ay] = lockedPoint('move', [0, 0], [3, 4], { angle: 90 });
+  expect(ax).toBeCloseTo(0); expect(ay).toBeCloseTo(5);
 });
 
 it('shows a line Length field on a dimension line beside it and an Angle field on an arc at its start', () => {

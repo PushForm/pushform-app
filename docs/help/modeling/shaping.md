@@ -6,7 +6,7 @@ Choose **Push/Pull** and hover a flat face of a solid, or a face that isn't part
 
 While pulling, hover another face within 30° of parallel to match its height: the pull ends where that face's plane crosses the pull line. A snap to a point on the way, such as an endpoint, wins over a matched height. With the pointer over the face you are pushing, the push follows how far the pointer moves.
 
-Pulling a solid's face outward extends the solid. Pushing a region in makes a pocket, or a hole when it reaches the other side; a push that cuts a solid apart leaves separate solids, each keeping its materials. Pulling a loose face makes a new solid in its place. Pulled circles and arcs get smooth sides. Each pull is one Undo step.
+Pulling a solid's face outward extends the solid. Pushing a region in makes a pocket, or a hole when it reaches the other side; a push that cuts a solid apart leaves separate solids, each keeping its materials. Pulling a loose face makes a new solid in its place. Pulled circles and arcs get smooth sides, with **New body** too. A whole face whose neighbours are square to it, such as the top of a box or a cylinder, moves while its sides stretch or shorten, so pushing and pulling it again and again adds no extra faces or edges and smooth sides stay smooth. Each pull is one Undo step.
 
 ## Exact Push/Pull lengths, double-click and New body
 

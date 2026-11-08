@@ -36,14 +36,23 @@ function setup() {
   const measure = (value: string) => enterLayoutValue(value);
   const page = () => tab.doc.state.pages.get(tab.activePageId)!;
   const points = (id: number) => page().entities.get(id)!.points;
-  const readout = () => screen.queryByLabelText('Move offset preview')?.textContent ?? null;
+  const readout = () => screen.queryByLabelText('Move distance preview')?.textContent ?? null;
+  /** The X and Y offsets shown in the tool options bar. */
+  const offsets = () => [layoutEntryField('X').value, layoutEntryField('Y').value];
+  /** Types into one of the bar's fields and leaves it with `key`. */
+  const typeIn = (label: string, value: string, key: 'Enter' | 'Tab' = 'Enter') => {
+    const input = layoutEntryField(label);
+    act(() => { input.focus(); });
+    fireEvent.change(input, { target: { value } });
+    fireEvent.keyDown(input, { key });
+  };
   const status = () => document.querySelector('.pf-layout-footer-spacer')!.textContent;
   const alert = () => screen.queryByRole('alert')?.textContent ?? null;
   const selected = () => tab.workspace.selectedEntityId;
   const useMove = () => fireEvent.keyDown(window, { key: 'm', code: 'KeyM' });
   const tap = (key: string, target: Element | Window = window) => { fireEvent.keyDown(target, { key }); fireEvent.keyUp(target, { key }); };
   const dispose = () => { cleanup(); session.dispose(); app.dispose(); };
-  return { app, session, tab, view, pageId, a, b, canvas, click, move, measure, page, points, readout, status, alert, selected, useMove, tap, dispose };
+  return { app, session, tab, view, pageId, a, b, canvas, click, move, measure, page, points, readout, offsets, typeIn, status, alert, selected, useMove, tap, dispose };
 }
 
 const A = [[20, 20], [60, 20], [60, 40], [20, 40]];
@@ -80,7 +89,7 @@ describe('Layout Move tool', () => {
   });
 
   it('picks an unselected object by its unfilled interior, selects it alone and moves it from a snapped base point', () => {
-    const { tab, a, b, click, move, points, readout, selected, useMove, dispose } = setup();
+    const { tab, a, b, click, move, points, readout, offsets, selected, useMove, dispose } = setup();
     click(40, 30); // Select itself does not pick an unfilled interior.
     expect(selected()).toBeNull();
     click(120, 110); // Select B with the Select tool.
@@ -88,7 +97,8 @@ describe('Layout Move tool', () => {
     useMove();
     click(20.6, 20.6); // Inside A near its corner: the base point snaps to the corner.
     expect(selected()).toBe(a);
-    expect(readout()).toBe('0.0 mm, 0.0 mm');
+    expect(readout()).toBe('0.0 mm');
+    expect(offsets()).toEqual(['0.0 mm', '0.0 mm']);
     move(77.7, 63.3);
     const version = tab.doc.version;
     click(77.7, 63.3);
@@ -179,7 +189,7 @@ describe('Layout Move tool', () => {
   });
 
   it('previews without touching the document, snaps only to objects that stay, and constrains with Shift', async () => {
-    const { tab, session, pageId, a, click, move, points, readout, useMove, dispose } = setup();
+    const { tab, session, pageId, a, click, move, points, readout, offsets, useMove, dispose } = setup();
     const lineTo = vi.fn(), setLineDash = vi.fn();
     const methods = new Map<string | symbol, unknown>([['lineTo', lineTo], ['setLineDash', setLineDash]]);
     const context = new Proxy({}, { get: (_target, key) => { if (!methods.has(key)) methods.set(key, vi.fn()); return methods.get(key); },
@@ -189,13 +199,14 @@ describe('Layout Move tool', () => {
     const version = tab.doc.version, saved = (await session.saveLayoutBytes(tab.id));
     click(20.5, 20.5);
     move(60.6, 40.6); // A's own corner does not attract the destination.
-    expect(readout()).toBe('40.6 mm, 20.6 mm');
+    expect(offsets()).toEqual(['40.6 mm', '20.6 mm']);
+    expect(readout()).toBe('45.5 mm'); // Beside the pointer, only the straight-line distance.
     expect(lineTo).toHaveBeenCalledWith(expect.closeTo(60.6, 5), expect.closeTo(40.6, 5));
     expect(setLineDash.mock.calls.some(([dash]) => (dash as number[]).length > 0)).toBe(true);
     move(70.3, 33.3, { shiftKey: true });
-    expect(readout()).toBe('50.3 mm, 0.0 mm');
+    expect(offsets()).toEqual(['50.3 mm', '0.0 mm']);
     move(100.6, 100.6); // B's corner does.
-    expect(readout()).toBe('80.0 mm, 80.0 mm');
+    expect(offsets()).toEqual(['80.0 mm', '80.0 mm']);
     expect(tab.doc.version).toBe(version);
     expect((await openLayoutFile((await session.saveLayoutBytes(tab.id)))).state).toEqual((await openLayoutFile(saved)).state);
     click(100.6, 100.6);
@@ -213,7 +224,7 @@ describe('Layout Move tool', () => {
   });
 
   it('does not snap to dimensions and labels that follow the moving objects', () => {
-    const { tab, pageId, a, click, move, page, readout, useMove, dispose } = setup();
+    const { tab, pageId, a, click, move, page, offsets, useMove, dispose } = setup();
     let dimension = 0;
     act(() => {
       tab.commands.execute('layout.text.add', { pageId, kind: 'label', points: [[160, 50], [200, 60], [20, 20]],
@@ -228,9 +239,9 @@ describe('Layout Move tool', () => {
     useMove();
     click(40, 30);
     move(20.6, 20.6); // The attached label's tip follows A, so it does not attract the destination.
-    expect(readout()).toBe('-19.4 mm, -9.4 mm');
+    expect(offsets()).toEqual(['-19.4 mm', '-9.4 mm']);
     move(...centre); // Nor does the centre of A's associated dimension.
-    expect(readout()).toBe(`${(centre[0] - 40).toFixed(1)} mm, ${(centre[1] - 30).toFixed(1)} mm`);
+    expect(offsets()).toEqual([`${(centre[0] - 40).toFixed(1)} mm`, `${(centre[1] - 30).toFixed(1)} mm`]);
     dispose();
   });
 
@@ -277,17 +288,17 @@ describe('Layout Move tool', () => {
     fireEvent.keyUp(window, { key: 'z', ctrlKey: true }); fireEvent.keyUp(window, { key: 'Control' });
     expect(status()).toMatch(/^Move:/);
     act(() => { tab.commands.execute('edit.redo'); });
-    // A tap still toggles while a value field has focus after typing a length.
+    // A tap still toggles while the X field has focus after typing a length.
     move(40, 40);
     fireEvent.keyDown(window, { key: '5', code: 'Digit5' });
-    const input = layoutEntryField('Distance');
+    const input = layoutEntryField('X');
     expect(document.activeElement).toBe(input);
     tap('Control', input);
     expect(status()).toMatch(/^Copy:/);
     measure('50');
     const copy = page().entityOrder[1]!;
     expect(page().entityOrder).toEqual([a, copy, b]);
-    expect(points(a)).toEqual(A); expect(points(copy)).toEqual(shifted(A, 0, 50));
+    expect(points(a)).toEqual(A); expect(points(copy)).toEqual(shifted(A, 50, 10));
     expect(page().entities.get(copy)!.style).toEqual(page().entities.get(a)!.style);
     expect(selected()).toBe(copy);
     act(() => { tab.commands.execute('edit.undo'); });
@@ -295,27 +306,76 @@ describe('Layout Move tool', () => {
     dispose();
   });
 
-  it('commits exact distances and x, y offsets typed in a value field, rejecting bad input while the move stays pending', () => {
-    const { tab, a, click, move, measure, points, readout, alert, useMove, dispose } = setup();
+  it('shows X, Y, Distance and Angle in the tool options bar, waiting until the base point and then focusing X', () => {
+    const { click, move, offsets, useMove, dispose } = setup();
     useMove();
+    const bar = screen.getByRole('toolbar', { name: 'Move options' });
+    for (const label of ['X', 'Y', 'Distance', 'Angle']) expect(layoutEntryField(label).disabled).toBe(true);
+    click(40, 30); move(70, 70);
+    for (const label of ['X', 'Y', 'Distance', 'Angle']) expect(layoutEntryField(label).disabled).toBe(false);
+    expect(document.activeElement).toBe(layoutEntryField('X'));
+    expect(offsets()).toEqual(['30.0 mm', '40.0 mm']);
+    expect(layoutEntryField('Distance').value).toBe('50.0 mm');
+    expect(layoutEntryField('Angle').value).toMatch(/^53\.1/);
+    // The bar stays solid while the destination is chosen, so its fields can be used.
+    expect(bar.className).not.toContain('is-placing');
+    dispose();
+  });
+
+  it('commits offsets, distances and angles typed in the bar, rejecting bad input while the move stays pending', () => {
+    const { tab, a, click, move, measure, points, readout, alert, typeIn, useMove, dispose } = setup();
+    const undo = () => act(() => { tab.commands.execute('edit.undo'); });
+    useMove();
+    // X has focus, so a number typed is the horizontal offset; Y keeps the pointer's.
     click(40, 30); move(43, 34);
     measure('25');
+    expectPoints(points(a), shifted(A, 25, 4));
+    undo();
+    // A distance alone keeps the pointer's direction, including its Shift constraint.
+    click(40, 30); move(43, 34);
+    typeIn('Distance', '25');
     expectPoints(points(a), shifted(A, 15, 20));
+    undo();
     click(40, 30); move(45, 33, { shiftKey: true });
-    measure('10');
-    expectPoints(points(a), shifted(A, 25, 20));
+    typeIn('Distance', '10');
+    expectPoints(points(a), shifted(A, 10, 0));
+    undo();
+    // A distance and an angle set the move outright; positive angles turn clockwise, so 90° is down the page.
+    click(40, 30); move(43, 34);
+    typeIn('Distance', '20', 'Tab'); typeIn('Angle', '90');
+    expectPoints(points(a), shifted(A, 0, 20));
+    undo();
+    // An offset left with Tab is locked: the pointer sets only the other one.
+    click(40, 30);
+    typeIn('X', '30', 'Tab');
+    expect(layoutEntryField('X').className).toContain('is-locked');
+    move(10, 60);
+    expect(layoutEntryField('X').value).toBe('30'); expect(layoutEntryField('Y').value).toBe('30.0 mm');
+    click(10, 60);
+    expectPoints(points(a), shifted(A, 30, 30));
+    undo();
+    // Typing a distance or angle releases the locked offsets.
+    click(40, 30); move(43, 34);
+    typeIn('X', '30', 'Tab');
+    typeIn('Distance', '10', 'Tab');
+    expect(layoutEntryField('X').className).not.toContain('is-locked');
+    click(43, 34);
+    expectPoints(points(a), shifted(A, 6, 8));
+    undo();
+    // Both offsets can be typed together in any field.
     click(50, 50); measure('10, -5');
-    expectPoints(points(a), shifted(A, 35, 15));
+    expectPoints(points(a), shifted(A, 10, -5));
+    undo();
     const version = tab.doc.version;
     click(50, 50); measure('abc');
     expect(alert()).toBeTruthy(); expect(readout()).not.toBeNull();
     measure('[1,2]');
     expect(alert()).toBeTruthy(); expect(readout()).not.toBeNull();
-    measure('20'); // No direction yet: the pointer has not moved from the base point.
-    expect(alert()).toBeTruthy(); expect(tab.doc.version).toBe(version);
+    typeIn('Distance', '20'); // No direction yet: the pointer has not moved from the base point.
+    expect(alert()).toContain('direction'); expect(tab.doc.version).toBe(version);
     act(() => { tab.doc.undoStack.transact('Inches', (draft) => { draft.settings.units = 'inch'; }); });
-    measure('1, 0');
-    expectPoints(points(a), shifted(A, 60.4, 15));
+    measure('1');
+    expectPoints(points(a), shifted(A, 25.4, 0));
     measure('5');
     expect(alert()).toContain('base point');
     dispose();

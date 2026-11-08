@@ -21,6 +21,7 @@ import type {
   DocumentDraft,
   DocumentState,
   Draft,
+  EdgeKey,
   EdgeRecord,
   EntityContainer,
   FaceRecord,
@@ -337,6 +338,8 @@ interface BoundaryCurves {
   readonly byIndex: Map<number, Curve>;
   /** Flattened index → next index around the same contour (wraps). */
   readonly next: Map<number, number>;
+  /** Flattened index → the face across that edge of a whole body face, before the push/pull. */
+  readonly across?: Map<number, FaceLocalId>;
 }
 
 function contourSuccessors(lengths: readonly number[]): Map<number, number> {
@@ -380,6 +383,7 @@ function bodyBoundaryCurves(body: Body, face: FaceRecord, region: Region, wholeF
     ? face.loops.map((l, li) => l.map((_, i): RegionBoundaryRef => ({ kind: 'loop', loop: li, edge: i, forward: true })))
     : [region.outer, ...region.holes];
   const byIndex = new Map<number, Curve>();
+  const across = new Map<number, FaceLocalId>();
   const imprint = body.imprints.get(face.id);
   let i = 0;
   for (const contour of contours) {
@@ -388,7 +392,9 @@ function bodyBoundaryCurves(body: Body, face: FaceRecord, region: Region, wholeF
       if (ref.kind === 'loop') {
         const loop = face.loops[ref.loop];
         const a = loop?.[ref.edge], b = loop?.[(ref.edge + 1) % (loop?.length ?? 1)];
-        if (a && b) curveId = edgeRecordForSegment(body, face.id, a, b)?.curveId ?? null;
+        const e = a && b ? edgeRecordForSegment(body, face.id, a, b) : undefined;
+        curveId = e?.curveId ?? null;
+        if (e && wholeFace) across.set(i, e.faceA === face.id ? e.faceB : e.faceA);
       } else {
         curveId = imprint?.edges.get(ref.edgeId)?.curveId ?? null;
       }
@@ -397,7 +403,36 @@ function bodyBoundaryCurves(body: Body, face: FaceRecord, region: Region, wholeF
       i++;
     }
   }
-  return { byIndex, next: contourSuccessors(contours.map((c) => c.length)) };
+  return { byIndex, next: contourSuccessors(contours.map((c) => c.length)), across };
+}
+
+/**
+ * Give a rim's edges a copy of `curve` centred at `center`: the curve record they already share,
+ * updated, or a new one. Other curves lose these edges, and a curve left with none is removed.
+ */
+function rimCurve(draft: DocumentDraft, body: Body, refs: readonly EdgeRecord[], curve: Curve, center: Vec3): CurveId {
+  const keys = new Set<EdgeKey | Id>(refs.map((r) => r.key));
+  const first = refs[0]!.curveId;
+  const kept = first !== null && refs.every((r) => r.curveId === first) ? body.curves.get(first) : undefined;
+  const id = kept ? kept.id : allocId<CurveId>(draft);
+  body.curves.set(id, {
+    id,
+    kind: curve.kind,
+    center,
+    normal: [curve.normal[0], curve.normal[1], curve.normal[2]],
+    radius: curve.radius,
+    startAngle: curve.startAngle,
+    endAngle: curve.endAngle,
+    segments: curve.segments,
+    edgeRefs: [...keys],
+  });
+  for (const r of refs) r.curveId = id;
+  for (const [cid, c] of [...body.curves]) {
+    if (cid === id || !c.edgeRefs.some((k) => keys.has(k))) continue;
+    c.edgeRefs = c.edgeRefs.filter((k) => !keys.has(k));
+    if (c.edgeRefs.length === 0) body.curves.delete(cid);
+  }
+  return id;
 }
 
 /**
@@ -405,9 +440,12 @@ function bodyBoundaryCurves(body: Body, face: FaceRecord, region: Region, wholeF
  * SurfaceRecord (not for polygons, whose sides stay hard) with soft+smooth edges between
  * consecutive sides (wrapping for closed curves). Every "rim" face (a face adjacent to all of
  * the curve's sides: the near cap, the far cap, or the opposite face of a through-hole) gets a
- * copy of the Curve on its boundary edge records, centred on that face's plane.
+ * copy of the Curve on its boundary edge records, centred on that face's plane. A whole face
+ * that is moved along its normal, or pushed in, makes no sides; its rims are found from the sides
+ * it had (`ownSides`, the solid the face belongs to). A rim's edges keep the curve record they
+ * had, moved to the rim's plane, and a curve left with no edges is removed.
  */
-function markCurveSurfaces(draft: DocumentDraft, body: Body, result: PushPullResult, boundary: BoundaryCurves): void {
+function markCurveSurfaces(draft: DocumentDraft, body: Body, result: PushPullResult, boundary: BoundaryCurves, ownSides = false): void {
   if (boundary.byIndex.size === 0) return;
   const sides = new Map<CurveId, { index: number; faceId: FaceLocalId }[]>();
   for (const [fidStr, index] of Object.entries(result.sideFaceForBoundaryEdge)) {
@@ -418,6 +456,16 @@ function markCurveSurfaces(draft: DocumentDraft, body: Body, result: PushPullRes
     const l = sides.get(c.id);
     if (l) l.push({ index, faceId });
     else sides.set(c.id, [{ index, faceId }]);
+  }
+  const extruded = new Set(sides.keys());
+  if (ownSides) {
+    for (const [index, faceId] of boundary.across ?? []) {
+      const c = boundary.byIndex.get(index);
+      if (!c || extruded.has(c.id) || !body.faces.has(faceId)) continue;
+      const l = sides.get(c.id);
+      if (l) l.push({ index, faceId });
+      else sides.set(c.id, [{ index, faceId }]);
+    }
   }
   if (sides.size === 0) return;
   const edgesBetween = new Map<string, EdgeRecord[]>();
@@ -446,23 +494,12 @@ function markCurveSurfaces(draft: DocumentDraft, body: Body, result: PushPullRes
         const refs: EdgeRecord[] = [];
         for (const s of list) refs.push(...between(fid, s.faceId));
         if (!refs.length) continue;
-        const id = allocId<CurveId>(draft);
-        const center = planeProject(face.plane, curve.center);
-        body.curves.set(id, {
-          id,
-          kind: curve.kind,
-          center,
-          normal: [curve.normal[0], curve.normal[1], curve.normal[2]],
-          radius: curve.radius,
-          startAngle: curve.startAngle,
-          endAngle: curve.endAngle,
-          segments: curve.segments,
-          edgeRefs: refs.map((r) => r.key),
-        });
-        for (const r of refs) r.curveId = id;
+        const id = rimCurve(draft, body, refs, curve, planeProject(face.plane, curve.center));
         capCurveId ??= id;
       }
     }
+    // Sides the face already had keep their surface and seams.
+    if (!extruded.has(curve.id)) continue;
     if (curve.kind === 'polygon') continue; // Extruded polygons keep hard edges
     const shared = body.faces.get(list[0]!.faceId)?.surfaceId ?? null;
     const reuse = shared !== null && list.every((s) => body.faces.get(s.faceId)?.surfaceId === shared) ? body.surfaces.get(shared) : undefined;
@@ -487,6 +524,22 @@ function markCurveSurfaces(draft: DocumentDraft, body: Body, result: PushPullRes
 
 // ---------------------------------------------------------------------------------------------
 // Apply
+
+/**
+ * A face moved along its normal leaves every edge between the same faces as before, however far
+ * it stretched: each keeps its soft, smooth and hidden flags, tag and curve.
+ */
+function keepEdgeFlags(before: Body, body: Body): void {
+  for (const [key, e] of body.edges) {
+    const old = before.edges.get(key);
+    if (!old || old.faceA !== e.faceA || old.faceB !== e.faceB) continue;
+    e.soft = old.soft;
+    e.smooth = old.smooth;
+    e.hidden = old.hidden;
+    e.tagId = old.tagId;
+    e.curveId = old.curveId;
+  }
+}
 
 /**
  * Apply a kernel result for `plan` to the document in one transaction. Exported for tests and
@@ -532,20 +585,27 @@ export function applyPushPullResult(draft: DocumentDraft, plan: PushPullPlan, re
     throw new PushFormError('pushpull.stale', PUSH_PULL_MESSAGES.changed);
   }
   const [first, ...extras] = result.components;
+  // Sides pulled from a curve's edges are one smooth surface, in a new body as in the solid itself.
+  const boundary = bodyBoundaryCurves(plan.body, plan.face, plan.region, plan.request.region.regionIsWholeFace);
+  const separate = (c: KernelComponent): number => {
+    const body = bodyFromComponent(draft, container, c, plan.body, result.bodyRunId);
+    markCurveSurfaces(draft, body, result, boundary);
+    return body.id;
+  };
   if (plan.request.mode === 'newBody') {
-    for (const c of result.components) bodyIds.push(bodyFromComponent(draft, container, c, plan.body, result.bodyRunId).id);
+    for (const c of result.components) bodyIds.push(separate(c));
     return { bodyIds };
   }
   if (!first || leavesNothing(plan, result)) throw new PushFormError('pushpull.nothingLeft', PUSH_PULL_MESSAGES.nothingLeft);
-  const boundary = bodyBoundaryCurves(plan.body, plan.face, plan.region, plan.request.region.regionIsWholeFace);
   const updated = applyKernelResult(draft, plan.body.id, toKernelResult(first, result.bodyRunId));
+  if (result.moved) keepEdgeFlags(plan.body, updated);
   updated.nextFaceId = Math.max(updated.nextFaceId, result.nextFaceId);
   if (!plan.request.region.regionIsWholeFace) {
     relocateImprints(updated, plan.face.id, plan.region, first, result.toolRunId);
   }
-  markCurveSurfaces(draft, updated, result, boundary);
+  markCurveSurfaces(draft, updated, result, boundary, true);
   bodyIds.push(updated.id);
-  for (const c of extras) bodyIds.push(bodyFromComponent(draft, container, c, plan.body, result.bodyRunId).id);
+  for (const c of extras) bodyIds.push(separate(c));
   return { bodyIds };
 }
 

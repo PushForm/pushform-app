@@ -93,10 +93,10 @@ it('keeps Move active, ends a pending move, and lets the next two clicks move ev
   const { a, b, c, canvas, click, selectAll, note, points, dispose } = setup();
   fireEvent.keyDown(window, { key: 'm', code: 'KeyM' });
   click(40, 30);
-  expect(screen.queryByLabelText('Move offset preview')).not.toBeNull();
+  expect(screen.queryByLabelText('Move distance preview')).not.toBeNull();
   selectAll();
   expect(canvas.getAttribute('data-tool')).toBe('move');
-  expect(screen.queryByLabelText('Move offset preview')).toBeNull();
+  expect(screen.queryByLabelText('Move distance preview')).toBeNull();
   expect(note()).toBe('3 objects selected');
   click(250, 190); click(260, 195);
   expect(points(a)![0]).toEqual([30, 25]);

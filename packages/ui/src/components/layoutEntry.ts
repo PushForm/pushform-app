@@ -17,20 +17,57 @@ export interface LayoutEntryField {
   /** Page direction, away from the shape, in which the field is drawn clear of `at`. */
   readonly away?: Point | undefined;
   readonly locked?: boolean | undefined;
+  /** Shown but not taking a value yet, as Move's offsets are before its base point. */
+  readonly disabled?: boolean | undefined;
 }
 
 /** A gray dimension line on the page, in millimeters. */
 export type LayoutEntrySegment = readonly [Point, Point];
 
 export interface LayoutEntryLocks {
-  /** Locked line length or rectangle sizes, in millimeters, and line angle in degrees. */
+  /** Locked line or move length or rectangle sizes, in millimeters, and line or move angle in degrees. */
   readonly length?: number | undefined;
   readonly angle?: number | undefined;
   readonly width?: number | undefined;
   readonly height?: number | undefined;
+  /** Locked move offsets in millimeters, positive right and down the page. */
+  readonly x?: number | undefined;
+  readonly y?: number | undefined;
+  /** A locked scale factor; a scale can instead lock its new width or height. */
+  readonly factor?: number | undefined;
 }
 
-export type LayoutEntryKind = 'line' | 'box' | 'radius' | 'arc' | 'single' | 'none';
+/** Scale's fields, each another way to give its one factor: a value in one releases the others. */
+export const SCALE_FIELDS: readonly (keyof LayoutEntryLocks)[] = ['factor', 'width', 'height'];
+
+/** What a scale's fields measure: its factor and the size of what scales. */
+export interface LayoutScaleEntry {
+  readonly factor: number;
+  readonly size: readonly [number, number];
+}
+
+/** The factor a scale's locked field gives, if one is locked and can give one. */
+export function lockedScaleFactor(locks: LayoutEntryLocks, scale: Omit<LayoutScaleEntry, 'factor'>): number | undefined {
+  if (locks.factor !== undefined) return locks.factor;
+  if (locks.width !== undefined && scale.size[0] > 1e-9) return locks.width / scale.size[0];
+  if (locks.height !== undefined && scale.size[1] > 1e-9) return locks.height / scale.size[1];
+  return undefined;
+}
+
+/** A scale factor as a percentage with at most two decimals: 1.5 is "150%". */
+export function formatScalePercent(factor: number): string { return `${Number((factor * 100).toFixed(2))}%`; }
+
+/** A percentage typed for Scale, such as "50%", as a factor; null for anything else. */
+export function readScalePercent(text: string): number | null {
+  const m = /^\s*([0-9]*\.?[0-9]+)\s*%\s*$/.exec(text);
+  return m ? Number(m[1]) / 100 : null;
+}
+
+/** A move is set either by its offsets or by its distance and angle; a value in one pair releases the other. */
+export const MOVE_OFFSET_FIELDS: readonly (keyof LayoutEntryLocks)[] = ['x', 'y'];
+export const MOVE_POLAR_FIELDS: readonly (keyof LayoutEntryLocks)[] = ['length', 'angle'];
+
+export type LayoutEntryKind = 'line' | 'box' | 'radius' | 'arc' | 'move' | 'scale' | 'single' | 'none';
 
 /** Screen gap between a shape and its dimension line. */
 export const ENTRY_DIMENSION_OFFSET_PX = 28;
@@ -41,10 +78,12 @@ export const LAYOUT_POINTER_FIELD = 'value';
 /** How a tool takes typed values: a line's length and angle, a box's width and height, a radius, an arc's step, or one value. */
 export function layoutEntryKind(tool: string, boxTool: boolean, radiusTool: boolean, arcTool = false): LayoutEntryKind {
   if (tool === 'line') return 'line';
+  if (tool === 'move') return 'move';
+  if (tool === 'scale') return 'scale';
   if (arcTool) return 'arc';
   if (boxTool) return 'box';
   if (radiusTool) return 'radius';
-  if (tool === 'move' || tool === 'rotate' || tool === 'offset' || tool === 'fillet' || tool === 'chamfer') return 'single';
+  if (tool === 'rotate' || tool === 'offset' || tool === 'fillet' || tool === 'chamfer') return 'single';
   return 'none';
 }
 
@@ -62,7 +101,11 @@ const sideOf = (v: number): number => (v < 0 ? -1 : 1);
  * (`divisor` 2 when drawn from the center, where the pointer sets half of each).
  */
 export function lockedPoint(kind: LayoutEntryKind, anchor: Point, p: Point, locks: LayoutEntryLocks, divisor = 1): [number, number] {
-  if (kind === 'line') {
+  // A move's locked offsets hold each axis; otherwise its distance and angle act as a line's.
+  if (kind === 'move' && (locks.x !== undefined || locks.y !== undefined)) {
+    return [anchor[0] + (locks.x ?? p[0] - anchor[0]), anchor[1] + (locks.y ?? p[1] - anchor[1])];
+  }
+  if (kind === 'line' || kind === 'move') {
     if (locks.length === undefined && locks.angle === undefined) return [p[0], p[1]];
     const dx = p[0] - anchor[0], dy = p[1] - anchor[1];
     const length = locks.length ?? Math.hypot(dx, dy);
@@ -90,6 +133,8 @@ export interface LayoutEntryInput {
   /** Live value of a single-value tool, when it has one. */
   readonly value?: string | undefined;
   readonly locks: LayoutEntryLocks;
+  /** For Scale: what its fields measure, once a base point is chosen. */
+  readonly scale?: LayoutScaleEntry | undefined;
   /** Millimeters per screen pixel. */
   readonly mmPerPx: number;
   readonly formatLength: (mm: number) => string;
@@ -103,7 +148,28 @@ export function layoutEntryFields(input: LayoutEntryInput): { fields: LayoutEntr
     return input.value === undefined ? { fields: [], segments: [] } : { fields: [{ id: LAYOUT_POINTER_FIELD, label: input.label, value: input.value }], segments: [] };
   }
   if (kind === 'arc') return arcFields(input, off);
+  if (kind === 'scale') {
+    // Shown in the tool options bar: the factor, then the new width and height.
+    const s = input.scale;
+    if (!s) return { fields: [], segments: [] };
+    const [w, h] = s.size;
+    return { fields: [
+      { id: 'factor', label: 'Scale', value: formatScalePercent(s.factor), locked: locks.factor !== undefined },
+      { id: 'width', label: 'Width', value: w > 1e-9 ? formatLength(w * s.factor) : '', disabled: w <= 1e-9, locked: locks.width !== undefined },
+      { id: 'height', label: 'Height', value: h > 1e-9 ? formatLength(h * s.factor) : '', disabled: h <= 1e-9, locked: locks.height !== undefined },
+    ], segments: [] };
+  }
   if (!anchor || !cursor) return { fields: [], segments: [] };
+  if (kind === 'move') {
+    // Shown in the tool options bar rather than on the page: the offsets, then the distance and angle.
+    const dx = cursor[0] - anchor[0], dy = cursor[1] - anchor[1], len = Math.hypot(dx, dy);
+    return { fields: [
+      { id: 'x', label: 'X', value: formatLength(dx), locked: locks.x !== undefined },
+      { id: 'y', label: 'Y', value: formatLength(dy), locked: locks.y !== undefined },
+      { id: 'length', label: 'Distance', value: formatLength(len), locked: locks.length !== undefined },
+      { id: 'angle', label: 'Angle', value: `${len > 1e-9 ? formatAngle(pageAngle(anchor, cursor)) : '0'}°`, locked: locks.angle !== undefined },
+    ], segments: [] };
+  }
   if (kind === 'line') {
     const len = Math.hypot(cursor[0] - anchor[0], cursor[1] - anchor[1]);
     const fields: LayoutEntryField[] = [];

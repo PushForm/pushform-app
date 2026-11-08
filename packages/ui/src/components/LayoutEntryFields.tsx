@@ -28,6 +28,8 @@ export interface LayoutEntryFieldsProps {
   readonly onTab: (id: string, back: boolean) => void;
   readonly onEnter: () => void;
   readonly onEscape: () => void;
+  /** Labelled fields in a row, as in the tool options bar, instead of placed on the page. */
+  readonly inline?: boolean | undefined;
 }
 
 /**
@@ -80,6 +82,41 @@ export function LayoutEntryFields(props: LayoutEntryFieldsProps): JSX.Element | 
     else if (e.key === 'Escape') { e.preventDefault(); props.onEscape(); }
     else if (e.key === 'Tab') { e.preventDefault(); props.onTab(f.id, e.shiftKey); }
   };
+
+  if (props.inline) {
+    return (
+      <>
+        {fields.map((f) => {
+          const draft = drafts[f.id];
+          const editing = draft !== undefined;
+          const cls = ['pf-entry', 'is-inline', editing ? 'is-editing' : '', f.locked ? 'is-locked' : '', error === f.id ? 'is-error' : ''].filter(Boolean).join(' ');
+          return (
+            <label key={f.id} className="pf-tob-item">
+              <span className="pf-tob-label">{f.label}</span>
+              <input
+                id={`pf-layout-entry-${f.id}`}
+                ref={(el) => { if (el) inputs.current.set(f.id, el); else inputs.current.delete(f.id); }}
+                data-tob-control
+                className={cls}
+                style={{ width: entryWidth(editing ? draft : f.value) }}
+                type="text"
+                autoComplete="off"
+                spellCheck={false}
+                aria-label={f.label}
+                aria-invalid={error === f.id}
+                disabled={f.disabled}
+                value={editing ? draft : f.value}
+                onChange={(e) => props.onDraft(f.id, e.target.value)}
+                onKeyDown={(e) => onKeyDown(e, f)}
+                onFocus={() => props.onFocus(f.id)}
+                onBlur={() => props.onBlur(f.id)}
+              />
+            </label>
+          );
+        })}
+      </>
+    );
+  }
 
   return (
     <>

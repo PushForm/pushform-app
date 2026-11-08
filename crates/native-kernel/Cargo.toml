@@ -1,0 +1,31 @@
+[package]
+name = "pushform-native-kernel"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+description = "PushForm's push/pull pipeline, run natively on Manifold for the desktop app"
+
+[lib]
+name = "pushform_native_kernel"
+path = "src/lib.rs"
+
+# The differential test's process: reads framed kernel requests on stdin, answers on stdout. Not part of any app build.
+[[bin]]
+name = "pushform-native-kernel-harness"
+path = "src/bin/harness.rs"
+required-features = ["harness"]
+
+[dependencies]
+# Manifold's Rust binding, carried here with one addition: setting a mesh's face ids (see vendor/README.md).
+manifold-csg = { path = "vendor/manifold-csg", default-features = false }
+
+[features]
+default = ["parallel"]
+# Multithreaded Manifold (oneTBB). Off gives the single-threaded build.
+parallel = ["manifold-csg/parallel"]
+harness = []
+
+[profile.release]
+opt-level = 3
+lto = "thin"

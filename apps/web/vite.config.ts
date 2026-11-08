@@ -66,6 +66,8 @@ export default defineConfig(({ mode }) => {
       thirdPartyNoticesPlugin(repoRoot)],
     define: {
       __PF_BUILD__: JSON.stringify(buildInfo()),
+      // The desktop app's native kernel: off unless PF_NATIVE_KERNEL=1 at build time, so a normal build compiles it out.
+      __PF_NATIVE_KERNEL__: JSON.stringify(process.env.PF_NATIVE_KERNEL === '1'),
     },
     server: { port: 5174, strictPort: true },
     worker: { format: 'es' },

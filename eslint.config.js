@@ -4,7 +4,7 @@ import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['**/dist/**', '**/node_modules/**', 'apps/desktop/src-tauri/**', '**/*.d.ts', '.claude/worktrees/**', '**/.astro/**'] },
+  { ignores: ['**/dist/**', '**/node_modules/**', 'apps/desktop/src-tauri/**', '**/*.d.ts', '.claude/worktrees/**', '**/.astro/**', 'crates/*/target/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

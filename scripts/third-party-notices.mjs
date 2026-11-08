@@ -27,12 +27,14 @@ export const RUST_WORKSPACES = [
     targets: ['wasm32-wasip1', 'wasm32-wasip1-threads'] },
   { manifest: 'apps/desktop/src-tauri/Cargo.toml', ships: 'desktop app',
     targets: ['x86_64-pc-windows-msvc', 'aarch64-apple-darwin', 'x86_64-unknown-linux-gnu'] },
+  { manifest: 'crates/native-kernel/Cargo.toml', ships: 'desktop app, native kernel builds',
+    targets: ['x86_64-pc-windows-msvc', 'aarch64-apple-darwin', 'x86_64-unknown-linux-gnu'] },
 ];
 
 /** Notice and license files carried with the STEP reader and the SolidCraft kernel, included verbatim. */
 export function verbatimNoticeFiles(root) {
   const vendor = join(root, 'crates/solidcraft/vendor');
-  return ['crates/step-reader/NOTICE.md', 'crates/solidcraft/NOTICE-solidcraft.txt', 'crates/solidcraft/LICENSE-MIT',
+  return ['crates/step-reader/NOTICE.md', 'crates/native-kernel/NOTICE.md', 'crates/solidcraft/NOTICE-solidcraft.txt', 'crates/solidcraft/LICENSE-MIT',
     'crates/solidcraft/LICENSE-APACHE',
     ...readdirSync(vendor, { withFileTypes: true }).filter((entry) => entry.isDirectory())
       .map((entry) => `crates/solidcraft/vendor/${entry.name}/LICENSE`).sort()];

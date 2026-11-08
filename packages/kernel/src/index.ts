@@ -9,6 +9,7 @@ export { validateSolidMesh } from './validateSolid';
 export type { KernelBackend, MeshProvider } from './backends/KernelBackend';
 export { InlineBackend, type InlineBackendOptions } from './backends/InlineBackend';
 export { WorkerBackend, type WorkerBackendOptions } from './backends/WorkerBackend';
+export { NativeKernelBackend, type NativeKernelTransport } from './backends/NativeKernelBackend';
 export { KernelClient, toMeshWire, type CoalescedResult } from './client/KernelClient';
 export { loadManifold } from './worker/ManifoldModule';
 export { ManifoldCache, type CacheEntry } from './worker/ManifoldCache';

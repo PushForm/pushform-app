@@ -144,3 +144,5 @@ export { PaintTool, paintModeOf, hitSide } from './tools/impl/Paint';
 export { PositionTextureTool, positionTextureCommands, textureTargetOf, PIN_COLORS, PIN_KINDS, PIN_PICK_PX } from './tools/impl/PositionTexture';
 export type { PinKind, TextureTarget } from './tools/impl/PositionTexture';
 export { paintTools } from './tools/paintTools';
+
+export * from './commands/hardware';

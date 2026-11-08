@@ -42,6 +42,7 @@ const store = () => useAppStore.getState();
  * `contextMenu.itemsFor` in `@pushform/commands`.
  */
 export const uiCommands: readonly AnyCommand[] = [
+  defineCommand({ id: 'ui.hardware', title: 'Cabinet Hardware…', category: 'tool', menu: 'Tools', params: z.object({}), undoable: false, run: () => store().openDialog('hardware') }),
   defineCommand({
     id: 'view.navigationCube',
     title: 'Navigation Cube',

@@ -7,6 +7,7 @@
  * results are transferred back. Face ids are local to a body; every op that produces bodies takes
  * the caller's `nextFaceId` and returns the advanced counter.
  */
+import type { HardwareOptions, ResolvedHardwareOptions } from './hardware';
 import type { Plane, PlaneBasis, Vec3 } from '@pushform/core';
 
 /** Triangle mesh on the wire. `runId` is the Manifold originalID the mesh was (or will be) registered as; 0 = unknown. */
@@ -208,7 +209,11 @@ export interface StatsRequest {
   type: 'stats';
 }
 
+export interface HardwareRequest { type: 'hardware'; options: HardwareOptions; nextFaceId: number }
+export interface HardwareResult extends ComponentsResult { mountingCenters: Vec3[]; resolved: ResolvedHardwareOptions }
+
 export type KernelRequest =
+  | HardwareRequest
   | InitRequest
   | EnsureBodyRequest
   | PushPullRequest
@@ -284,6 +289,7 @@ export interface StatsResult {
 }
 
 export interface KernelResultMap {
+  hardware: HardwareResult;
   init: InitResponse;
   ensureBody: EnsureBodyResponse;
   pushPull: PushPullResult;

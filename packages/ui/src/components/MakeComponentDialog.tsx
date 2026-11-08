@@ -11,6 +11,7 @@ import { noticeFromError } from '../hooks/useCommandNotices';
 import { useAppStore } from '../store';
 import { TextEditor } from './TextEditor';
 import { Check, Dialog, Field } from './DialogParts';
+import { HardwareDialog } from './HardwareDialog';
 import { Text3DDialog } from './Text3DDialog';
 
 export type GlueTo = ComponentBehaviors['glueTo'];
@@ -208,6 +209,7 @@ export function DialogHost(): JSX.Element | null {
   const close = useAppStore((s) => s.closeDialog);
   useEffect(() => installUiCommands(app.commands), [app]);
   if (dialog === 'makeComponent') return <MakeComponentDialog onClose={close} />;
+  if (dialog === 'hardware') return <HardwareDialog onClose={close} />;
   if (dialog === 'text3d') return <Text3DDialog onClose={close} />;
   if (dialog === 'renameInstance' && dialogRef) return <RenameInstanceDialog target={dialogRef} onClose={close} />;
   if (dialog === 'editText' && dialogRef) return <TextEditor target={dialogRef} onClose={close} />;

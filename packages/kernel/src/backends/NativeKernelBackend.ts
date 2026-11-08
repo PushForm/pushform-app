@@ -34,11 +34,16 @@ function nativeError(cause: unknown): KernelError {
   return cause instanceof Error ? new KernelError('Internal', cause.message) : new KernelError('Internal', String(cause));
 }
 
+export interface NativeKernelBackendOptions {
+  /** Whether a failure of the native path quietly reruns the request in the worker (the default) or is returned to the caller. */
+  fallback?: boolean;
+}
+
 /**
- * A kernel backend for the desktop app that runs push/pull natively and everything else in the WebAssembly worker. The
- * two have separate body caches, each filled through `ensureBody`/`sendWithReupload` from the same mesh provider, so a
- * body the native side has not seen is uploaded to it on its first push/pull. Any failure of the native path (including
- * the kernel being absent from this build) quietly runs that one request in WebAssembly instead.
+ * A kernel backend that runs push/pull in the native kernel and everything else in the WebAssembly worker. The two
+ * have separate body caches, each filled through `ensureBody`/`sendWithReupload` from the same mesh provider, so a
+ * body the native side has not seen is uploaded to it on its first push/pull. By default any failure of the native
+ * path (including the kernel being absent from this build) quietly runs that one request in the worker instead.
  */
 export class NativeKernelBackend implements KernelBackend {
   private provider: MeshProvider | undefined;
@@ -47,11 +52,15 @@ export class NativeKernelBackend implements KernelBackend {
   /** Bumped by `abortAll`; a native call begun under an older value is treated as aborted, not as a fallback. */
   private epoch = 0;
   private disposed = false;
+  private readonly fallback: boolean;
 
   constructor(
     private readonly worker: KernelBackend,
     private readonly transport: NativeKernelTransport,
-  ) {}
+    options: NativeKernelBackendOptions = {},
+  ) {
+    this.fallback = options.fallback ?? true;
+  }
 
   request<R extends KernelRequest>(req: R): Promise<ResFor<R>> {
     if (req.type === 'pushPull') return this.pushPull(req as PushPullRequest | PushPullPreviewRequest) as Promise<ResFor<R>>;
@@ -89,8 +98,10 @@ export class NativeKernelBackend implements KernelBackend {
         return await sendWithReupload(req, (q) => this.sendNative(q as NativeRequest) as never, this.provider);
       } catch (cause) {
         // Nothing of the failed attempt is kept: an aborted request stays aborted, anything else is rerun in WebAssembly.
-        if (epoch !== this.epoch) throw cause;
+        if (epoch !== this.epoch || !this.fallback) throw cause;
       }
+    } else if (!this.fallback) {
+      throw new KernelError('Internal', 'The kernel module is unavailable');
     }
     return this.worker.request(req);
   }

@@ -180,4 +180,24 @@ describe('native wire', () => {
     const pull = new DataView(encodePushPull(request).buffer);
     expect(pull.getUint32(0, true)).toBe(2);
   });
+
+  it('returns a native failure to the caller without running it in the worker when fallback is off', async () => {
+    const t = transport({ call: async () => Promise.reject(JSON.stringify({ code: 'ManifoldError', message: 'rejected' })) });
+    const worker = new InlineBackend();
+    const request = vi.spyOn(worker, 'request');
+    const backend = new NativeKernelBackend(worker, t, { fallback: false });
+    await expect(backend.request(pushPullRequest)).rejects.toMatchObject({ code: 'ManifoldError', message: 'rejected' });
+    expect(request).not.toHaveBeenCalled();
+    backend.dispose();
+  });
+
+  it('reports the native kernel as unavailable instead of falling back when fallback is off', async () => {
+    const t = transport({ available: async () => false });
+    const worker = new InlineBackend();
+    const request = vi.spyOn(worker, 'request');
+    const backend = new NativeKernelBackend(worker, t, { fallback: false });
+    await expect(backend.request(pushPullRequest)).rejects.toMatchObject({ code: 'Internal' });
+    expect(request).not.toHaveBeenCalled();
+    backend.dispose();
+  });
 });

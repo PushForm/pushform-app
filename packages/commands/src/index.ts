@@ -123,6 +123,8 @@ export * from './commands/builders/parts';
 export * from './commands/builders/mesh';
 export * from './commands/builders/generate';
 export * from './commands/countertop/plan';
+export * from './commands/filler/plan';
+export * from './commands/endPanel/plan';
 export * from './commands/kitchen-run/plan';
 export { TapeTool } from './tools/impl/Tape';
 export type { TapeMode, TapeMeasurement, PendingResize } from './tools/impl/Tape';

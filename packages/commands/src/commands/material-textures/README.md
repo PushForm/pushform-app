@@ -9,7 +9,9 @@ including rectangular textile maps. They are JPEG derivatives encoded at quality
 90 with 4:4:4 chroma and optimized encoding. The `-preview.jpg` files fit within
 128 × 128 pixels, resized proportionally with Lanczos filtering (JPEG quality 85).
 Only color maps are used: these are surface-color presets, not a full PBR shader
-library. Glass presets are transparent colors without image maps.
+library. Glass presets are transparent colors without image maps, except
+`glass_seeded` and `glass_reeded`, which were generated for this project rather
+than taken from Poly Haven and are covered by its GPL-3.0-or-later license.
 
 The application bundles these files and does not call the Poly Haven API.
 Repeat dimensions use the source's physical dimensions in meters. Source download

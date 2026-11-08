@@ -66,6 +66,14 @@ Ask for a new document based on the one you have open, such as “Clone this mod
 
 After cloning, the copy's chat starts with “Continued from” and the original's name, followed by the agent's short summary of the earlier conversation and your request. The agent then makes the change in the copy. The original's chat shows “Cloned to” and the copy's name, with **Show it** to switch to the copy. Sending another message before you choose leaves the card unanswered, and nothing is copied.
 
+## Generate a kitchen cabinet
+
+In a 3D model, the agent can generate a standard kitchen cabinet in one step, for example “Add a 30″ base cabinet with shaker doors and a drawer.” Base, wall and tall cabinets come complete with a toe kick, back, shelves, doors and drawers with their boxes, in frameless or face-frame construction, with slab, shaker, raised-panel or glass doors. Glass doors can be a single pane or divided into a grid, prairie or mission pattern, in clear, frosted, seeded or reeded glass, and you can ask for the inside of the cabinet to match the doors.
+
+Wall and tall cabinets can have stacked doors, such as glass above and shaker below. Blind, diagonal and L-shaped corner cabinets are included too, for either side of a room's corner, with a lazy Susan if you want one.
+
+Every part is its own named component, and each door and drawer is a group, so you can ask for changes to a single part afterwards. The agent builds furniture and other unusual shapes piece by piece instead, and hardware and countertops are added separately. Changing a cabinet's parameters later doesn't rebuild it; ask for the change and the agent edits its parts, or generates a new one.
+
 ## Ask for a change to a 3D model
 
 In a 3D model the agent can:

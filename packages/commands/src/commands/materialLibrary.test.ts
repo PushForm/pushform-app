@@ -11,7 +11,7 @@ describe('bundled material library', () => {
   it('contains the requested totals with unique material and source identities', () => {
     const expected = {
       Colors: 24, Wood: 50, Brick: 30, Ceramic: 26, 'Concrete & Asphalt': 50,
-      Stone: 50, Metal: 26, Terrain: 50, Textiles: 44, Plastic: 6, Organic: 6, Glass: 6,
+      Stone: 50, Metal: 26, Terrain: 50, Textiles: 44, Plastic: 6, Organic: 6, Glass: 9,
     };
     expect(new Set(LIBRARY_CATEGORIES)).toEqual(new Set(Object.keys(expected)));
     for (const category of LIBRARY_CATEGORIES) {
@@ -21,7 +21,7 @@ describe('bundled material library', () => {
     }
     expect(new Set(BUILTIN_LIBRARY.map((m) => m.key)).size).toBe(BUILTIN_LIBRARY.length);
     expect(new Set(BUILTIN_LIBRARY.map((m) => m.name)).size).toBe(BUILTIN_LIBRARY.length);
-    expect(new Set(sources.textures.map((m) => m.asset)).size).toBe(338);
+    expect(new Set(sources.textures.map((m) => m.asset)).size).toBe(340);
     expect(sources.textures.filter((m) => m.sourceCategory.startsWith('Concrete/'))).toHaveLength(38);
     expect(sources.textures.filter((m) => m.sourceCategory.startsWith('Asphalt & Bitumen/'))).toHaveLength(12);
   });
@@ -58,6 +58,6 @@ describe('bundled material library', () => {
       expect(Math.abs(previewSize.width / previewSize.height - texture.widthPx / texture.heightPx)).toBeLessThan(0.02);
       expect(preview.byteLength).toBeLessThan(20_000);
     }
-    expect(hashes.size).toBe(338);
+    expect(hashes.size).toBe(340);
   });
 });

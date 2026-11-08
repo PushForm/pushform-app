@@ -35,6 +35,7 @@ import {
   styleCommands,
   tagCommands,
   text3dCommands,
+  cabinetCommands,
   textCommands,
   transformCommands,
   viewCommands,
@@ -55,7 +56,7 @@ export const HEADLESS_COMMAND_SETS: readonly (readonly AnyCommand[])[] = [
   transformCommands, viewCommands, lastOpCommands, edgeCommands, guideCommands, dimensionCommands, textCommands,
   axesCommands, offsetCommands, followMeCommands, solidCommands, intersectCommands, contextCommands, groupCommands,
   componentBehaviorCommands, tagCommands, styleCommands, shadowCommands, fogCommands, materialCommands,
-  modelInfoCommands, componentCommands, sceneCommands, edgeBlendCommands, sectionPlaneCommands, text3dCommands,
+  modelInfoCommands, componentCommands, sceneCommands, edgeBlendCommands, sectionPlaneCommands, text3dCommands, cabinetCommands,
 ];
 
 /** One open model: its document host and the registry that edits it, on the inline kernel. */

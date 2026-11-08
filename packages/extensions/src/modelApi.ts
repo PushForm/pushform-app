@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import {
-  DEFAULT_BLEND_SEGMENTS, SERVICE_FONTS, checkEdgeBlendResult, Text3DParamsSchema, isHardEdge, libraryMaterial, loadLibraryMaterial, planEdgeBlend, planEdgeProfile, runEdgeBlendKernel, runIntersectKernel,
+  BOX_MATERIAL_KEY, CabinetPlanError, GLASS_KEYS, DEFAULT_BLEND_SEGMENTS, SERVICE_FONTS, grainMapping, planCabinet, checkEdgeBlendResult, Text3DParamsSchema, isHardEdge, libraryMaterial, loadLibraryMaterial, planEdgeBlend, planEdgeProfile, runEdgeBlendKernel, runIntersectKernel,
   runText3DKernel, BUILTIN_LIBRARY, LIBRARY_CATEGORIES, activeTagOpt, applyTransformPlan, arrayMatrices, contextFrame, curvePoints, definitionBounds, hostOf, instanceCount, kernelOf, localPushPullDistance,
   m4rotationAbout, m4scaleAbout, planPushPull, planTransform, runFollowMeKernel, runPushPullKernel, runSolidsKernel, runTransformKernel, sceneRuntimeOf, solidsResultIsEmpty,
-  type CameraHost, type CameraState, type CommandRegistry, type DocumentHost, type ExplodeResult, type FollowMeApplyResult, type FollowMeParams,
+  type CabinetGenerateResult, type CabinetPlan, type CameraHost, type CameraState, type CommandRegistry, type DocumentHost, type ExplodeResult, type FollowMeApplyResult, type FollowMeParams,
   type EdgeBlendMode, type EdgeBlendPlan, type MakeResult, type StandardView, type PushPullApplyResult, type PushPullTarget, type SolidsApplyResult, type SolidsKernelWork, type SolidsPairMode, type TransformKernelWork, type TransformPlan,
 } from '@pushform/commands';
 import {
@@ -794,6 +794,34 @@ export class ModelDocumentApi {
         if (thin !== undefined) throw this.failure('invalid_geometry', `A box needs max greater than min on every axis; ${'xyz'[thin]} is ${op.min[thin]} to ${op.max[thin]}.`);
         const id = exec<number>('model.addBox', { min: op.min, max: op.max });
         return { id, named: { kind: 'body', id } };
+      }
+      case 'add_cabinet': {
+        let plan: CabinetPlan;
+        try {
+          plan = planCabinet(op);
+        } catch (cause) {
+          if (cause instanceof CabinetPlanError) throw this.failure(cause.code, `${cause.message} Nothing was changed.`);
+          throw cause;
+        }
+        const finish = plan.used.finish;
+        if ('stain' in finish && !libraryMaterial(finish.stain)) throw this.failure('invalid_reference', `There is no library material "${finish.stain}". Call ${MODEL_TOOLS.materialLibrary.name} for the keys.`);
+        const library = async (key: string): Promise<number> => {
+          const precomputed = await loadLibraryMaterial(host, key);
+          return exec<Promise<number>>('material.fromLibrary', { key, activate: false, precomputed });
+        };
+        const box = await library(BOX_MATERIAL_KEY);
+        let show: number;
+        if ('stain' in finish) show = await library(finish.stain);
+        else {
+          const name = `Paint ${finish.paint}`;
+          const existing = [...host.doc.state.materials.values()].find(m => m.name === name);
+          show = existing ? existing.id : exec<number>('material.create', { name, color: rgb(finish.paint), activate: false });
+        }
+        const glass = plan.parts.some(part => part.role === 'glass') ? await library(GLASS_KEYS[plan.used.glass?.type ?? 'clear']) : undefined;
+        const made = await exec<CabinetGenerateResult | Promise<CabinetGenerateResult>>('cabinet.generate', { plan, materials: { box, show, ...(glass !== undefined ? { glass } : {}) } });
+        const round = (m: number): number => Math.round(m * 1e5) / 1e5;
+        return { ...instanceResult(made.instanceId), name: made.name, used: { ...plan.used },
+          parts: made.parts.map(part => ({ name: part.name, id: part.id, path: part.path, size: part.size.map(round) as [number, number, number] })) };
       }
       case 'add_edges': {
         const at = op.edges.findIndex(([a, b]) => !(dist(a, b) > MERGE_TOL));
@@ -1602,17 +1630,6 @@ function reflection(origin: Vec3, n: Vec3): MMat4 {
     -2 * n[0] * n[2], -2 * n[1] * n[2], 1 - 2 * n[2] * n[2], 0,
     d * n[0], d * n[1], d * n[2], 1,
   ];
-}
-/**
- * A texture placement whose image grain (its width, or its height for `height`) runs along `grain` projected onto
- * the face, or null when the grain runs square to the face, as on end grain. The placement is a rotation, so the
- * image is never mirrored.
- */
-function grainMapping(basis: PlaneBasis, normal: Vec3, grain: Vec3, axis: 'width' | 'height'): UvMapping | null {
-  const g = v3sub(grain, v3scale(normal, v3dot(grain, normal)));
-  if (!(v3len(g) > 1e-6 * v3len(grain))) return null;
-  const angle = Math.atan2(v3dot(g, basis.v), v3dot(g, basis.u)) - (axis === 'height' ? Math.PI / 2 : 0), c = Math.cos(angle), s = Math.sin(angle);
-  return { kind: 'sized', matrix: [c, s, 0, -s, c, 0] };
 }
 /** The material the instances on `path` pass to geometry with the default material: the innermost one that has one. */
 function inheritedMaterial(state: DocumentState, path: readonly Id[]): Material | null {

@@ -563,7 +563,7 @@ function paintPage(
   tableResizePreview: LayoutEntity | null = null,
   surround: LayoutSurround | null = null,
   transformed: ReadonlyMap<number, LayoutEntity> | null = null,
-  scaleGuide: { base: Point; corner: Point | null } | null = null,
+  scaleGuide: { base: Point } | null = null,
 ): void {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
@@ -922,15 +922,9 @@ function paintPage(
     ctx.beginPath(); ctx.arc(...pivot, 1.2 / zoom, 0, Math.PI * 2); ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.stroke(); ctx.restore();
   }
   if (scaleGuide) {
-    // A dashed guide from the base point to the dragged corner, where it is now, with both points marked.
-    const { base, corner } = scaleGuide;
+    // The base point, which stays fixed while the scale is previewed.
     ctx.save(); ctx.lineWidth = 0.5 / zoom; ctx.strokeStyle = '#1e63d1';
-    if (corner) {
-      ctx.setLineDash([2 / zoom, 1 / zoom]);
-      ctx.beginPath(); ctx.moveTo(...base); ctx.lineTo(...corner); ctx.stroke(); ctx.setLineDash([]);
-      ctx.beginPath(); ctx.arc(...corner, 0.9 / zoom, 0, Math.PI * 2); ctx.fillStyle = '#1e63d1'; ctx.fill();
-    }
-    ctx.beginPath(); ctx.arc(...base, 1.2 / zoom, 0, Math.PI * 2); ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.stroke(); ctx.restore();
+    ctx.beginPath(); ctx.arc(...scaleGuide.base, 1.2 / zoom, 0, Math.PI * 2); ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.stroke(); ctx.restore();
   }
   if (moveGuide) {
     // A dashed guide from the base point to the destination, with the base point marked.
@@ -1539,9 +1533,7 @@ export function LayoutWorkspace({
       false, undefined, initialLabelEdit ? editingTextId : null, tool === 'offset' ? offsetSource ?? null : null,
       tool === 'move' && moveDraft ? { base: moveDraft.base, target: cursor ?? moveDraft.base } : null, { rows: tableRows, columns: tableColumns }, placementModifiers,
       navigatingViewportId !== null && viewportCameraPreview ? { entityId: navigatingViewportId, camera: viewportCameraPreview } : null, polygonSides, tableResizePreview, surround, transformPreview,
-      tool === 'scale' && scaleDraft ? { base: scaleDraft.base, corner: scaleDraft.corner && [
-        scaleDraft.base[0] + (scaleDraft.corner[0] - scaleDraft.base[0]) * scaleDraft.factor,
-        scaleDraft.base[1] + (scaleDraft.corner[1] - scaleDraft.base[1]) * scaleDraft.factor] } : null);
+      tool === 'scale' && scaleDraft ? { base: scaleDraft.base } : null);
     if (canvasRef.current) paint(canvasRef.current);
     paintSurround.current = () => {
       const canvas = canvasRef.current, surround = surroundRef.current;

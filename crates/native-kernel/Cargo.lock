@@ -63,6 +63,7 @@ name = "pushform-native-kernel"
 version = "0.1.0"
 dependencies = [
  "manifold-csg",
+ "manifold-csg-sys",
 ]
 
 [[package]]

@@ -3,6 +3,8 @@
 //! The push/pull pipeline as a native library, for the desktop app. It keeps its own cache of solids and answers
 //! requests in the binary protocol of [`wire`]; the app's kernel backend falls back to WebAssembly on any error.
 pub mod cache;
+#[cfg(feature = "fault-injection")]
+pub mod faults;
 pub mod finalize;
 pub mod math;
 pub mod meshio;
@@ -131,6 +133,10 @@ impl Kernel {
     #[cfg(test)]
     if bytes.first() == Some(&0xff) {
       panic!("test panic");
+    }
+    #[cfg(feature = "fault-injection")]
+    if let Some(result) = faults::run(bytes) {
+      return result;
     }
     match wire::decode_request(bytes)? {
       Request::EnsureBody { body_id, version, mesh } => self.ensure_body(body_id, version, mesh, &checkpoint),

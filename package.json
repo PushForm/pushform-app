@@ -30,7 +30,8 @@
     "commons:build": "pnpm --filter @pushform/app-commons build",
     "docs:dev": "pnpm --filter @pushform/docs dev",
     "docs:build": "pnpm --filter @pushform/docs build",
-    "build:step-reader": "node scripts/build-step-reader.mjs"
+    "build:step-reader": "node scripts/build-step-reader.mjs",
+    "build:kernel-wasm": "node scripts/build-kernel-wasm.mjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.11",

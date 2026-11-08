@@ -22,7 +22,7 @@ describe('KernelClient', () => {
     expect(results.map((r) => r.status)).toEqual(['superseded', 'superseded', 'superseded', 'superseded', 'current']);
     const last = results[4]!;
     if (last.status !== 'current') throw new Error('unreachable');
-    expect(last.value.components[0]!.props.volume).toBeCloseTo(1 + 0.04 * 0.5, 8);
+    expect(Math.max(...last.value.mesh.verts.filter((_, i) => i % 3 === 2))).toBeCloseTo(1.5, 5);
     // The key is idle again: a new call runs immediately and is current.
     const again = await client.coalesced('pp:1', () => client.properties({ body }));
     expect(again.status).toBe('current');

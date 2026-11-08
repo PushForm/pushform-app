@@ -6,11 +6,11 @@
  */
 import type { Manifold } from 'manifold-3d';
 import { COPLANAR_TOL } from '@pushform/core';
-import type { FaceOrigin, KernelComponent } from '../../protocol';
+import type { FaceOrigin, KernelComponent, MeshWire } from '../../protocol';
 import type { KernelContext } from '../context';
 import { Scope } from '../context';
 import { manifoldFromSoup, readManifold } from '../meshio';
-import { normalizeTriangles, type ChooseFaceId, type NormalizedFace } from './normalize';
+import { allNewIds, normalizeTriangles, type ChooseFaceId, type NormalizedFace } from './normalize';
 
 export interface FinalizeOptions {
   nextFaceId: number;
@@ -36,6 +36,14 @@ function subsetOrigin(all: FaceOrigin, faceId: Uint32Array): FaceOrigin {
     if (o !== undefined) out.set(id, o);
   }
   return out;
+}
+
+/**
+ * Read and normalize only, enough to draw `m`: triangles of one face share an id, so the renderer
+ * draws no lines inside a face. The ids are fresh and mean nothing beyond that. Does not delete `m`.
+ */
+export function previewMesh(m: Manifold): MeshWire {
+  return normalizeTriangles(readManifold(m), 0, allNewIds).mesh;
 }
 
 /** Normalize + rebuild + simplify + decompose + properties. Does not delete `m`. */

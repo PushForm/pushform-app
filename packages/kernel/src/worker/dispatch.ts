@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import type { KernelRequest, KernelResultMap, ResFor } from '../protocol';
+import type { KernelRequest, KernelResultMap, PushPullPreview, ResFor } from '../protocol';
 import type { KernelContext } from './context';
 import { autofold } from './ops/autofold';
 import { ensureBody, release, stats } from './ops/bodies';
@@ -17,7 +17,7 @@ import { sectionCut } from './ops/sectionCut';
 import { simplify } from './ops/simplify';
 import { transform } from './ops/transform';
 
-function dispatchAny(ctx: KernelContext, req: KernelRequest): KernelResultMap[KernelRequest['type']] {
+function dispatchAny(ctx: KernelContext, req: KernelRequest): KernelResultMap[KernelRequest['type']] | PushPullPreview {
   switch (req.type) {
     case 'init':
       return { ready: true };

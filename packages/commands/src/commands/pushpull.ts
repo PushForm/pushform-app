@@ -11,6 +11,7 @@ import type {
   KernelComponent,
   MeshWire,
   PushPullMode,
+  PushPullPreview,
   PushPullRequest,
   PushPullResult,
 } from '@pushform/kernel';
@@ -80,7 +81,7 @@ export const PushPullApplyParamsSchema = z.object({
   /** Signed distance along the face normal (meters): > 0 pulls out, < 0 pushes in. */
   distance: z.number().finite(),
   mode: modeSchema,
-  /** A kernel result already computed for exactly these params (the tool's last matching preview). */
+  /** A full kernel result already computed for exactly these params; a cheap drag preview does not qualify. */
   precomputed: z.custom<PushPullResult>(isPushPullResult).optional(),
   /**
    * Version of the body `precomputed` was computed against. A body face's precomputed result is used
@@ -214,19 +215,25 @@ export function planPushPull(state: DocumentState, target: PushPullTarget, dista
 }
 
 /**
- * Run the plan on the kernel (uploading the body first when needed). `preview` marks drag previews.
- * Kernel failures come back as `PushFormError('pushpull.kernel')` in user words.
+ * Run the plan on the kernel in full (uploading the body first when needed): a result that can be
+ * committed. Kernel failures come back as `PushFormError('pushpull.kernel')` in user words.
  */
-export async function runPushPullKernel(kernel: KernelClient, plan: PushPullPlan, preview = false): Promise<PushPullResult> {
+export async function runPushPullKernel(kernel: KernelClient, plan: PushPullPlan): Promise<PushPullResult> {
   try {
     if (plan.kind === 'sketch') return await kernel.extrudeSketch(plan.request);
     await kernel.ensureBody(plan.body.id, plan.body.version, plan.body.mesh);
-    return await kernel.pushPull(preview ? { ...plan.request, preview: true } : plan.request);
+    return await kernel.pushPull(plan.request);
   } catch (err) {
     if (!(err instanceof KernelError) || err.code === 'Aborted') throw err;
     const noArea = err.code === 'InvalidInput' && /no area/.test(err.message);
     throw new PushFormError('pushpull.kernel', noArea ? PUSH_PULL_MESSAGES.noArea : PUSH_PULL_MESSAGES.failed, { code: err.code, message: err.message });
   }
+}
+
+/** The cheap kernel run for a drag preview of a body face: triangles to draw, which can never be committed. */
+export async function runPushPullPreview(kernel: KernelClient, plan: Extract<PushPullPlan, { kind: 'body' }>): Promise<PushPullPreview> {
+  await kernel.ensureBody(plan.body.id, plan.body.version, plan.body.mesh);
+  return kernel.pushPull({ ...plan.request, preview: true });
 }
 
 /** A merging push that would leave nothing of the solid (a whole face pushed to or past the other side). */
@@ -636,7 +643,7 @@ export const pushPullApply = defineCommand({
   },
 });
 
-/** Kernel-only preview of a push/pull (no document change); returns the components for the ghost. */
+/** Kernel-only run of a push/pull (no document change); returns the full components. */
 export const pushPullPreview = defineCommand({
   id: 'pushpull.preview',
   title: 'Push/Pull Preview',
@@ -647,7 +654,7 @@ export const pushPullPreview = defineCommand({
     const host = hostOf(ctx);
     requireFaceInContext(host.context.path, p.target.path);
     const plan = planPushPull(host.doc.state, p.target, p.distance, p.mode);
-    return runPushPullKernel(kernelOf(ctx), plan, true);
+    return runPushPullKernel(kernelOf(ctx), plan);
   },
 });
 

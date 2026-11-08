@@ -12,19 +12,20 @@
  *  4. coplanar merge + identity rule while normalizing (a face keeps the id of the B face that gave
  *     it most of its area; the far cap takes F's id when the region was the whole face; everything
  *     else is new);
- *  5. rebuild, simplify, decompose, measure.
+ *  5. rebuild, simplify, decompose, measure (a preview stops after normalizing, and a moved face
+ *     needs not even that: only a commit needs the rest).
  */
 import type { Manifold, Mat4, Mesh, SimplePolygon } from 'manifold-3d';
 import { AREA_TOL, box3Center, box3FromPositions, box3Union, COPLANAR_TOL, MERGE_TOL, m4fromBasis, v3cross, v3dist, v3dot, v3neg, v3parallel, v3sub, type PlaneBasis, type Vec3 } from '@pushform/core';
 import { pointInPolygon, pointOnRing } from '@pushform/geom';
-import type { ExtrudeSketchRequest, PolygonsWithHoles, PushPullRequest, PushPullResult } from '../../protocol';
+import type { ExtrudeSketchRequest, PolygonsWithHoles, PushPullPreview, PushPullPreviewRequest, PushPullRequest, PushPullResult } from '../../protocol';
 import { KernelError } from '../../protocol';
 import type { KernelContext } from '../context';
 import { withScope, type Scope } from '../context';
 import type { CacheEntry } from '../ManifoldCache';
 import { manifoldFromSoup, tryManifoldFromSoup, type ReadMesh, type TriangleSoup } from '../meshio';
 import { bodyTriangles, getBody } from './bodies';
-import { finalizeManifold } from './finalize';
+import { finalizeManifold, previewMesh } from './finalize';
 import type { ChooseFaceId, NormalizedFace } from './normalize';
 
 /** Tool face labels. Side faces are `SIDE_BASE + boundary edge index`. */
@@ -291,20 +292,20 @@ function reachesOpposingFace(body: ReadMesh, n: Vec3, farOffset: number): boolea
 interface Stretch {
   /** Every face around F is square to it, so a tool's sides would lie on them. */
   square: boolean;
-  /** The solid with F moved, or null when moving F would not give the boolean's result. */
-  manifold: Manifold | null;
+  /** Vertex positions of the solid with F moved, or null when moving F would not give the boolean's result. */
+  verts: Float64Array | null;
 }
 
 /**
  * A whole face pushed or pulled with every face around it square to it is moved rather than cut:
  * its vertices move along its normal and the faces around it stretch or shorten with it. Every
  * face and edge stays as it was, and no tool face has to coincide with the solid's faces, which a
- * boolean would round apart. Moving is not used, and `manifold` is null, when a face around F is
+ * boolean would round apart. Moving is not used, and `verts` is null, when a face around F is
  * not square to it (within what keeps that face flat), when a face around F would fold over or
  * vanish, or when F would pass any other part of the solid.
  */
-function stretchFace(ctx: KernelContext, scope: Scope, body: CacheEntry, mesh: ReadMesh, req: PushPullRequest, frame: ToolFrame, height: number): Stretch {
-  const none: Stretch = { square: false, manifold: null };
+function stretchFace(ctx: KernelContext, scope: Scope, body: CacheEntry, mesh: ReadMesh, req: PushPullRequest | PushPullPreviewRequest, frame: ToolFrame, height: number): Stretch {
+  const none: Stretch = { square: false, verts: null };
   if (req.mode !== 'merge' || !req.region.regionIsWholeFace) return none;
   const F = req.region.faceId, n = req.region.basis.n, d = req.distance;
   const { verts, tris, faceId } = mesh;
@@ -343,7 +344,7 @@ function stretchFace(ctx: KernelContext, scope: Scope, body: CacheEntry, mesh: R
     const len = Math.hypot(...sum);
     if (len === 0 || Math.abs(d) * Math.abs(v3dot(sum, n)) / len > COPLANAR_TOL / 2) return none;
   }
-  if (folds) return { square: true, manifold: null };
+  if (folds) return { square: true, verts: null };
   // No other vertex of the solid where F passes.
   const { origin: o, u, v, dir } = frame;
   for (let i = 0; i < moves.length; i++) {
@@ -352,7 +353,7 @@ function stretchFace(ctx: KernelContext, scope: Scope, body: CacheEntry, mesh: R
     const z = v3dot(w, dir);
     if (z < -MERGE_TOL || z > height + MERGE_TOL) continue;
     const xy: [number, number] = [v3dot(w, u), v3dot(w, v)];
-    if (pointInPolygon(xy, frame.contours) || frame.contours.some((ring) => pointOnRing(xy, ring, MERGE_TOL))) return { square: true, manifold: null };
+    if (pointInPolygon(xy, frame.contours) || frame.contours.some((ring) => pointOnRing(xy, ring, MERGE_TOL))) return { square: true, verts: null };
   }
   // No other face of the solid across where F passes: a slightly smaller prism there holds none of
   // the solid (pulling out) or only solid (pushing in).
@@ -361,7 +362,7 @@ function stretchFace(ctx: KernelContext, scope: Scope, body: CacheEntry, mesh: R
     if (!cs.isEmpty()) {
       const probe = scope.track(scope.track(scope.track(cs.extrude(height - 2 * OVERLAP)).translate(0, 0, OVERLAP)).transform(frame.matrix));
       const clash = scope.track(d > 0 ? body.manifold.intersect(probe) : probe.subtract(body.manifold));
-      if (clash.volume() > COPLANAR_TOL * probe.surfaceArea()) return { square: true, manifold: null };
+      if (clash.volume() > COPLANAR_TOL * probe.surfaceArea()) return { square: true, verts: null };
     }
   }
   const moved = new Float64Array(verts);
@@ -369,8 +370,7 @@ function stretchFace(ctx: KernelContext, scope: Scope, body: CacheEntry, mesh: R
     if (!moves[i]) continue;
     for (let k = 0; k < 3; k++) moved[i * 3 + k] = verts[i * 3 + k]! + d * n[k]!;
   }
-  const r = tryManifoldFromSoup(ctx.wasm, { verts: moved, tris, faceId }, body.runId);
-  return { square: true, manifold: r.manifold ? scope.track(r.manifold) : null };
+  return { square: true, verts: moved };
 }
 
 /**
@@ -386,7 +386,7 @@ function cut(
   scope: Scope,
   body: CacheEntry,
   mesh: ReadMesh,
-  req: PushPullRequest,
+  req: PushPullRequest | PushPullPreviewRequest,
   frame: ToolFrame,
   corners: ToolCorners,
   height: number,
@@ -437,8 +437,13 @@ function chooseIdFor(plan: PushPullPlan): ChooseFaceId {
 }
 
 
-/** Push/pull a region of a cached body's face; `mode: 'newBody'` extrudes a standalone solid instead. */
-export function pushPull(ctx: KernelContext, req: PushPullRequest): PushPullResult {
+/**
+ * Push/pull a region of a cached body's face; `mode: 'newBody'` extrudes a standalone solid instead.
+ * With `preview` set, stops once the result can be drawn. A moved face is the solid's own triangles
+ * at new positions, so it is drawn without building a solid; every check on whether F can move still
+ * runs first. The triangles are copied because the worker transfers a result's buffers away.
+ */
+export function pushPull(ctx: KernelContext, req: PushPullRequest | PushPullPreviewRequest): PushPullResult | PushPullPreview {
   if (!Number.isFinite(req.distance) || Math.abs(req.distance) <= COPLANAR_TOL) {
     throw new KernelError('InvalidInput', 'pushPull.distance must be a non-zero finite number');
   }
@@ -462,9 +467,14 @@ export function pushPull(ctx: KernelContext, req: PushPullRequest): PushPullResu
       out = buildStandaloneTool(ctx, scope, frame, height, toolRunId);
     } else {
       const stretch = stretchFace(ctx, scope, body, mesh, req, frame, height);
-      moved = stretch.manifold !== null;
-      out = stretch.manifold ?? cut(ctx, scope, body, mesh, req, frame, corners, height, stretch.square, toolRunId);
+      if (req.preview && stretch.verts) {
+        return { preview: true, mesh: { verts: stretch.verts, tris: mesh.tris.slice(), faceId: mesh.faceId.slice(), runId: 0 } };
+      }
+      const solid = stretch.verts ? tryManifoldFromSoup(ctx.wasm, { verts: stretch.verts, tris: mesh.tris, faceId: mesh.faceId }, body.runId).manifold : undefined;
+      moved = solid !== undefined;
+      out = solid ? scope.track(solid) : cut(ctx, scope, body, mesh, req, frame, corners, height, stretch.square, toolRunId);
     }
+    if (req.preview) return { preview: true, mesh: previewMesh(out) };
     const fin = finalizeManifold(ctx, out, { nextFaceId: req.nextFaceId, chooseId: chooseIdFor(plan) });
     return {
       components: fin.components,

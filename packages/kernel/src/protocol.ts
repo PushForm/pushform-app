@@ -96,8 +96,15 @@ export interface PushPullRequest {
   /** Signed distance along the face normal: > 0 pulls out, < 0 pushes in. */
   distance: number;
   mode: PushPullMode;
-  preview?: boolean;
+  preview?: false;
   nextFaceId: number;
+}
+/**
+ * A push/pull for a drag preview: the same inputs and the same geometry as {@link PushPullRequest},
+ * answered with a {@link PushPullPreview}. Skips everything only a commit needs.
+ */
+export interface PushPullPreviewRequest extends Omit<PushPullRequest, 'preview'> {
+  preview: true;
 }
 export interface ExtrudeSketchRequest {
   type: 'extrudeSketch';
@@ -212,6 +219,7 @@ export type KernelRequest =
   | InitRequest
   | EnsureBodyRequest
   | PushPullRequest
+  | PushPullPreviewRequest
   | ExtrudeSketchRequest
   | BooleanRequest
   | TransformRequest
@@ -256,6 +264,17 @@ export interface PushPullResult extends ComponentsResult {
    * rather than cut: the solid keeps its faces, and each edge joins the same faces as before.
    */
   moved?: boolean;
+}
+/**
+ * Answer to a `preview: true` push/pull: triangles to draw and nothing else. `mesh.verts` and
+ * `mesh.tris` are a closed mesh of the result, which may be several separate solids; `mesh.faceId`
+ * groups the triangles into faces (equal ids are one face, the numbers mean nothing else); `mesh.runId`
+ * is 0. An empty mesh means nothing of the solid would be left. There are deliberately no
+ * `components`: a preview cannot be committed, and `pushpull.apply` refuses one as a precomputed result.
+ */
+export interface PushPullPreview {
+  preview: true;
+  mesh: MeshWire;
 }
 export interface BooleanResult extends ComponentsResult {
   /** `split` only: the components outside the cutter (`components` holds the inside). */
@@ -309,7 +328,7 @@ export interface KernelResultMap {
   stats: StatsResult;
 }
 
-export type ResFor<R extends KernelRequest> = KernelResultMap[R['type']];
+export type ResFor<R extends KernelRequest> = R extends PushPullPreviewRequest ? PushPullPreview : KernelResultMap[R['type']];
 
 // ---------------------------------------------------------------------------------------------
 // Errors and envelopes

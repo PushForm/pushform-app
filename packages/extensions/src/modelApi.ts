@@ -818,7 +818,7 @@ export class ModelDocumentApi {
           show = existing ? existing.id : exec<number>('material.create', { name, color: rgb(finish.paint), activate: false });
         }
         const made = await exec<CabinetGenerateResult | Promise<CabinetGenerateResult>>('cabinet.generate', { plan, materials: { box, show } });
-        const round = (m: number): number => Math.round(m * 1e4) / 1e4;
+        const round = (m: number): number => Math.round(m * 1e5) / 1e5;
         return { ...instanceResult(made.instanceId), name: made.name, used: { ...plan.used },
           parts: made.parts.map(part => ({ name: part.name, id: part.id, path: part.path, size: part.size.map(round) as [number, number, number] })) };
       }

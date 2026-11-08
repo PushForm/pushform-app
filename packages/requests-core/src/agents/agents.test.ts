@@ -353,6 +353,7 @@ it('sends standard cabinets to add_cabinet and names what still gets built by ha
   expect(rules).toContain('say in one sentence what its used values chose');
   expect(rules).toContain('Build by hand with the rules below only for corner cabinets, curved or angled work, furniture');
   expect(rules).toContain('if it refused a cabinet, say so');
+  expect(rules).toContain('with that cabinet so the whole stays one object');
 });
 
 it('has the model agent build a cabinet in one batch and larger builds one cabinet or major assembly per batch', () => {

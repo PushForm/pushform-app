@@ -17,7 +17,7 @@ import { facePlanesFromMesh, groupCoplanarFaces, signedArea, weldVertices } from
 import { makeEdgeKey, type Body, type BodyProps, type EdgeKey, type EdgeRecord, type FaceRecord } from '../entities/body';
 import { UV_AUTO } from '../entities/attrs';
 import type { EntityContainer } from '../entities/definition';
-import { allocId, type DocumentDraft, type Draft } from '../Document';
+import { allocId, registerFreshRecordTable, sealGeometry, type DocumentDraft, type Draft } from '../Document';
 
 export interface BodyFromMeshOptions {
   tagId?: TagId;
@@ -37,6 +37,8 @@ export function bodyFromMesh(draft: DocumentDraft, mesh: MeshData, opts: BodyFro
     : mesh;
   const { faces, nextFaceId } = buildFaceRecords(m, tagId, opts.weldTol);
   const edges = deriveEdges(m, tagId, opts.weldTol);
+  registerFreshRecordTable(faces);
+  registerFreshRecordTable(edges);
   const id = allocId<Id>(draft);
   const body: Body = {
     id,
@@ -163,9 +165,9 @@ export function buildFaceRecords(
     const loops = chainLoops(mesh, byFace.get(fid) ?? [], basis);
     faces.set(fid as FaceLocalId, {
       id: fid as FaceLocalId,
-      plane,
-      basis,
-      loops,
+      plane: sealGeometry(plane),
+      basis: sealGeometry(basis),
+      loops: sealGeometry(loops),
       frontMaterialId: null,
       backMaterialId: null,
       uv: UV_AUTO,
@@ -285,7 +287,7 @@ export function deriveEdges(mesh: MeshData, tagId: TagId, weldTol = LENGTH_TOL):
     runs.sort((a, b) => cmpVec(minPoint(a), minPoint(b)));
     runs.forEach((polyline, k) => {
       const key = makeEdgeKey(faceA, faceB, k);
-      out.set(key, { key, faceA, faceB, polyline, soft: false, smooth: false, hidden: false, tagId, curveId: null });
+      out.set(key, { key, faceA, faceB, polyline: sealGeometry(polyline), soft: false, smooth: false, hidden: false, tagId, curveId: null });
     });
   }
   return out;

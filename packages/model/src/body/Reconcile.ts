@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import { current, isDraft } from 'immer';
 import type { FaceLocalId, Id, MeshData, SurfaceId } from '@pushform/core';
 import type { Body, BodyProps, EdgeKey, FaceRecord, EdgeRecord } from '../entities/body';
 import type { ComponentDefinition, EntityContainer } from '../entities/definition';
 import type { DocumentState } from '../entities/document';
-import type { DocumentDraft } from '../Document';
+import { registerFreshRecordTable, type DocumentDraft } from '../Document';
 import { buildFaceRecords, carryEdgeProps, computeBodyProps, deriveEdges } from './BodyBuilder';
 
 /** Where a new face came from: a face of the body identified by `runId` (kernel `runOriginalID`). */
@@ -60,7 +61,13 @@ export function applyKernelResult(draft: DocumentDraft, bodyId: Id, result: Kern
   return loc.body;
 }
 
+/** A value as a plain object: drafting a whole face or edge table just to read it would allocate a draft per record. */
+function readable<T extends object>(value: T): T {
+  return isDraft(value) ? (current(value) as T) : value;
+}
+
 export function reconcileBody(body: Body, result: KernelResult): void {
+  const previousFaces = readable(body.faces);
   const { faces: built, nextFaceId } = buildFaceRecords(result.mesh, body.tagId);
   const faces = new Map<FaceLocalId, FaceRecord>();
   // new face id → faces of each foreign body it originated from (by runId)
@@ -90,11 +97,14 @@ export function reconcileBody(body: Body, result: KernelResult): void {
     }
   }
   for (const [fid, rec] of built) {
-    const prev = body.faces.get(fid);
-    const own = prev ?? dominantOrigin(body, result, fid);
+    const prev = previousFaces.get(fid);
+    const own = prev ?? dominantOrigin(previousFaces, result, fid);
     const src = own ?? foreignOf.get(fid)?.face;
     faces.set(fid, {
-      ...rec,
+      id: rec.id,
+      plane: rec.plane,
+      basis: rec.basis,
+      loops: rec.loops,
       frontMaterialId: src?.frontMaterialId ?? null,
       backMaterialId: src?.backMaterialId ?? null,
       uv: src?.uv ?? rec.uv,
@@ -106,8 +116,10 @@ export function reconcileBody(body: Body, result: KernelResult): void {
   }
   const edges = deriveEdges(result.mesh, body.tagId);
   // previous edges: this body's own, plus foreign edges re-keyed onto the new face ids they map to
-  const previous = new Map<EdgeKey, EdgeRecord>(body.edges);
+  let previous: ReadonlyMap<EdgeKey, EdgeRecord> = readable(body.edges);
   if (result.foreign?.length) {
+    const merged = new Map(previous);
+    previous = merged;
     for (const f of result.foreign) {
       for (const e of f.body.edges.values()) {
         const as = foreignToNew.get(`${f.runId}:${e.faceA}`) ?? [];
@@ -117,7 +129,7 @@ export function reconcileBody(body: Body, result: KernelResult): void {
             if (na === nb) continue;
             const [faceA, faceB] = na < nb ? [na, nb] : [nb, na];
             const key = `foreign:${f.runId}:${e.key}:${faceA}:${faceB}` as EdgeKey;
-            previous.set(key, { ...e, key, faceA, faceB });
+            merged.set(key, { ...e, key, faceA, faceB });
           }
         }
       }
@@ -126,7 +138,7 @@ export function reconcileBody(body: Body, result: KernelResult): void {
   carryEdgeProps(previous, edges);
 
   for (const fid of [...body.imprints.keys()]) {
-    if (!faces.has(fid) || !body.faces.has(fid)) body.imprints.delete(fid);
+    if (!faces.has(fid) || !previousFaces.has(fid)) body.imprints.delete(fid);
   }
   // surfaces: own records keep the faces that survived; faces split by the kernel inherit the
   // surface of their dominant origin (set above), so rebuild membership from the faces
@@ -163,6 +175,8 @@ export function reconcileBody(body: Body, result: KernelResult): void {
     if (s.curveId !== null && !body.curves.has(s.curveId)) s.curveId = null;
   }
 
+  registerFreshRecordTable(faces);
+  registerFreshRecordTable(edges);
   body.faces = faces;
   body.nextFaceId = Math.max(body.nextFaceId, nextFaceId);
   body.edges = edges;
@@ -173,14 +187,14 @@ export function reconcileBody(body: Body, result: KernelResult): void {
 }
 
 /** The most frequent origin face of this body for a new faceId, or undefined. */
-function dominantOrigin(body: Body, result: KernelResult, fid: FaceLocalId): FaceRecord | undefined {
+function dominantOrigin(faces: ReadonlyMap<FaceLocalId, FaceRecord>, result: KernelResult, fid: FaceLocalId): FaceRecord | undefined {
   const origins = result.faceOrigin.get(fid);
   if (!origins?.length) return undefined;
   const counts = new Map<FaceLocalId, number>();
   let best: FaceLocalId | undefined, bestN = 0;
   for (const o of origins) {
     if (result.selfRunId !== undefined && o.runId !== result.selfRunId) continue;
-    if (!body.faces.has(o.faceId)) continue;
+    if (!faces.has(o.faceId)) continue;
     const n = (counts.get(o.faceId) ?? 0) + 1;
     counts.set(o.faceId, n);
     if (n > bestN) {
@@ -188,5 +202,5 @@ function dominantOrigin(body: Body, result: KernelResult, fid: FaceLocalId): Fac
       best = o.faceId;
     }
   }
-  return best === undefined ? undefined : body.faces.get(best);
+  return best === undefined ? undefined : faces.get(best);
 }

@@ -9,6 +9,7 @@ export default defineConfig({
         test: {
           name: 'node',
           environment: 'node',
+          env: { PUSHFORM_VERIFY_REUSED_REBUILDS: '1' },
           include: [
             'packages/{core,geom,kernel,model,layout,inference,commands,io,mcp,cloud,testing,requests-core,extension-protocol,extensions,extension-sdk,extension-dev}/**/*.test.ts',
             'workers/*/src/**/*.test.ts',
@@ -22,6 +23,7 @@ export default defineConfig({
         test: {
           name: 'dom',
           environment: 'jsdom',
+          env: { PUSHFORM_VERIFY_REUSED_REBUILDS: '1' },
           include: ['packages/{render,ui,requests-ui}/**/*.test.{ts,tsx}', 'apps/{web,commons}/**/*.test.{ts,tsx}'],
         },
       },

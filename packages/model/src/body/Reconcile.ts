@@ -6,7 +6,7 @@ import type { Body, BodyProps, EdgeKey, FaceRecord, EdgeRecord } from '../entiti
 import type { ComponentDefinition, EntityContainer } from '../entities/definition';
 import type { DocumentState } from '../entities/document';
 import { registerFreshRecordTable, type DocumentDraft } from '../Document';
-import { buildFaceRecords, carryEdgeProps, computeBodyProps, deriveEdges } from './BodyBuilder';
+import { analysisOf, buildFaceLayer, carryEdgeProps, computeBodyProps, rememberAnalysis } from './BodyBuilder';
 
 /** Where a new face came from: a face of the body identified by `runId` (kernel `runOriginalID`). */
 export interface KernelFaceOrigin {
@@ -68,7 +68,8 @@ function readable<T extends object>(value: T): T {
 
 export function reconcileBody(body: Body, result: KernelResult): void {
   const previousFaces = readable(body.faces);
-  const { faces: built, nextFaceId } = buildFaceRecords(result.mesh, body.tagId);
+  const layer = buildFaceLayer(result.mesh, body.tagId, analysisOf(readable(body.mesh)));
+  const { faces: built, nextFaceId, edges } = layer;
   const faces = new Map<FaceLocalId, FaceRecord>();
   // new face id → faces of each foreign body it originated from (by runId)
   const foreignOf = new Map<FaceLocalId, { body: Body; face: FaceRecord }>();
@@ -114,7 +115,6 @@ export function reconcileBody(body: Body, result: KernelResult): void {
       surfaceId: src?.surfaceId ?? null,
     });
   }
-  const edges = deriveEdges(result.mesh, body.tagId);
   // previous edges: this body's own, plus foreign edges re-keyed onto the new face ids they map to
   let previous: ReadonlyMap<EdgeKey, EdgeRecord> = readable(body.edges);
   if (result.foreign?.length) {
@@ -184,6 +184,7 @@ export function reconcileBody(body: Body, result: KernelResult): void {
   body.version += 1;
   body.props = result.props ?? computeBodyProps(result.mesh);
   body.valid = true;
+  rememberAnalysis(layer.analysis);
 }
 
 /** The most frequent origin face of this body for a new faceId, or undefined. */

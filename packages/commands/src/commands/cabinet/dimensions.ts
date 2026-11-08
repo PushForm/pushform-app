@@ -36,7 +36,13 @@ export const RAISED_RELIEF = inches(3 / 8);
 
 export const GLASS = inches(1 / 8);
 export const GLASS_RABBET = inches(3 / 8);
-export const GLASS_KEY = 'Translucent_Glass_Clear';
+export const GLASS_KEYS = { clear: 'Translucent_Glass_Clear', frosted: 'Translucent_Glass_Frosted', seeded: 'Translucent_Glass_Seeded', reeded: 'Translucent_Glass_Reeded' } as const;
+export const MULLION = inches(5 / 8);
+export const MIN_LITE = inches(1.5);
+export const PRAIRIE_CORNER = inches(2);
+export const MISSION_BAND_SHARE = 0.28;
+export const DEFAULT_LITES_ACROSS = 2;
+export const DEFAULT_LITES_DOWN = 3;
 
 export const UPPER_DOOR_SHARE = 0.3;
 export const MIN_CORNER_FACE = inches(9);

@@ -109,7 +109,9 @@ export const cabinetGenerate = defineCommand({
         for (const face of live.faces.values()) {
           const outside = part.finishedOutside && v3dot(face.plane.n as Vec3, [0, 0, 1]) > 0.5 && Math.abs(-face.plane.d - part.size[2]) < 1e-6;
           if (outside && show) face.frontMaterialId = show.id;
-          setGrain(face, outside ? show : material);
+          const inside = part.finishedInside && face.plane.n[2] < -0.5 && Math.abs(face.plane.d) < 1e-6;
+          if (inside && show) face.frontMaterialId = show.id;
+          setGrain(face, outside || inside ? show : material);
         }
         if (part.shape.kind === 'prism' && part.shape.round)
           for (const e of live.edges.values()) {

@@ -295,6 +295,31 @@ describe('ModelDocumentApi batches', () => {
       }
     }, 120_000);
 
+    it('leaves no overlaps across every glass pattern', async () => {
+      const glassCases: Record<string, unknown>[] = [{ pattern: 'grid', across: 3, down: 4 }, { pattern: 'prairie' }, { pattern: 'mission' }].flatMap(g => [
+        { type: 'wall', width: 24 * inch, height: 42 * inch, doors: 1, doorStyle: 'glass', glass: g },
+        { type: 'wall', width: 36 * inch, height: 42 * inch, doors: 2, frame: 'face_frame', overlay: 'inset', doorStyle: 'glass', glass: g },
+      ]);
+      for (const params of glassCases) {
+        const s = setup();
+        await cabinet(s, params);
+        const report = await s.api.findOverlaps({ container: null, minVolume: null });
+        expect(report.overlaps.map(o => `${o.a.name} / ${o.b.name}`), JSON.stringify(params)).toEqual([]);
+      }
+    }, 60_000);
+
+    it('uses the library glass that was asked for, and finishes the inside of a side only', async () => {
+      const s = setup();
+      const { entry } = await cabinet(s, { type: 'wall', width: 18 * inch, doorStyle: 'glass', glass: { type: 'reeded' }, finishedInterior: true, finish: { paint: '#123456' } });
+      const materials = s.api.getDocument().materials;
+      expect(materials.some(m => m.name === 'Reeded Glass')).toBe(true);
+      const side = entry.parts!.find(p => p.name === 'Left Side')!;
+      const body = [...(await import('@pushform/model')).containerAt(s.host.doc.state, side.path as never).bodies.values()][0]!;
+      const finished = [...body.faces.values()].filter(f => f.frontMaterialId !== null);
+      expect(finished).toHaveLength(1);
+      expect(finished[0]!.plane.n[2]).toBeCloseTo(-1, 9);
+    });
+
     it('glazes a glass door with the library clear glass, once across cabinets', async () => {
       const s = setup();
       await s.api.apply({ expectedRevision: s.api.revision, label: 'Run', operations: [

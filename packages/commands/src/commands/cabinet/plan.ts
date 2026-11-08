@@ -10,6 +10,8 @@ export type CabinetOverlay = 'full' | 'partial' | 'inset';
 export type CabinetDoorStyle = 'slab' | 'shaker' | 'raised' | 'glass' | 'none';
 export type CabinetCornerStyle = 'blind' | 'diagonal' | 'l_shaped';
 export type CabinetSide = 'left' | 'right';
+export type CabinetGlassPattern = 'single' | 'grid' | 'prairie' | 'mission';
+export type CabinetGlassType = 'clear' | 'frosted' | 'seeded' | 'reeded';
 export type CabinetFinishedEnds = 'none' | 'left' | 'right' | 'both';
 export type CabinetFinish = { readonly paint: string } | { readonly stain: string };
 
@@ -32,6 +34,8 @@ export interface CabinetParams {
   readonly finish?: { readonly paint?: string | undefined; readonly stain?: string | undefined } | undefined;
   readonly finishedEnds?: CabinetFinishedEnds | undefined;
   readonly name?: string | undefined;
+  readonly glass?: { readonly pattern?: CabinetGlassPattern | undefined; readonly across?: number | undefined; readonly down?: number | undefined; readonly type?: CabinetGlassType | undefined } | undefined;
+  readonly finishedInterior?: boolean | undefined;
   readonly stackedDoors?: boolean | undefined;
   readonly upperDoorHeight?: number | undefined;
   readonly upperDoorStyle?: CabinetDoorStyle | undefined;
@@ -63,11 +67,15 @@ export interface CabinetUsed {
   readonly back: boolean;
   readonly finish: CabinetFinish;
   readonly finishedEnds: CabinetFinishedEnds;
+  readonly glass?: GlassSpec;
+  readonly finishedInterior: boolean;
   readonly stackedDoors: boolean;
   readonly upperDoorHeight?: number;
   readonly upperDoorStyle?: CabinetDoorStyle;
   readonly corner?: { readonly style: CabinetCornerStyle; readonly side: CabinetSide; readonly returnWidth?: number; readonly blindWidth?: number; readonly lazySusan: boolean };
 }
+
+export interface GlassSpec { readonly pattern: CabinetGlassPattern; readonly type: CabinetGlassType; readonly across?: number; readonly down?: number }
 
 export type CabinetShape = { readonly kind: 'stock'; readonly cuts: readonly CutBox[] } | { readonly kind: 'lofted'; readonly rings: readonly PanelRing[] }
   | { readonly kind: 'prism'; readonly outline: readonly (readonly [number, number])[]; readonly round: boolean };
@@ -88,6 +96,8 @@ export interface CabinetPart {
   readonly role: CabinetRole;
   /** The local +z face shows the finish, on a finished end. */
   readonly finishedOutside: boolean;
+  /** The local z = 0 face shows the finish, inside a cabinet with a finished interior. */
+  readonly finishedInside: boolean;
 }
 
 export interface CabinetPlan {
@@ -143,7 +153,7 @@ class Builder {
     this.parts.push({
       name, assembly, role, size: [along(u), along(v), along(n)],
       shape: options.rings ? { kind: 'lofted', rings: options.rings } : { kind: 'stock', cuts: options.cuts ?? [] },
-      origin, x: this.place(u), y: this.place(v), z: this.place(n), finishedOutside: options.finishedOutside ?? false,
+      origin, x: this.place(u), y: this.place(v), z: this.place(n), finishedOutside: options.finishedOutside ?? false, finishedInside: false,
     });
   }
 
@@ -152,7 +162,7 @@ class Builder {
     const minX = Math.min(...outline.map(p => p[0])), minY = Math.min(...outline.map(p => p[1]));
     const local = outline.map(([x, y]) => [x - minX, y - minY] as const);
     const size: Vec3 = [Math.max(...local.map(p => p[0])), Math.max(...local.map(p => p[1])), span(z)];
-    this.parts.push({ name, assembly: null, role, size, shape: { kind: 'prism', outline: local, round }, origin: [minX, minY, z.from], x: AXES['+x'], y: AXES['+y'], z: AXES['+z'], finishedOutside: false });
+    this.parts.push({ name, assembly: null, role, size, shape: { kind: 'prism', outline: local, round }, origin: [minX, minY, z.from], x: AXES['+x'], y: AXES['+y'], z: AXES['+z'], finishedOutside: false, finishedInside: false });
   }
 }
 
@@ -171,7 +181,40 @@ type FrontStyle = 'slab' | 'shaker' | 'raised' | 'glass';
 interface Rect { readonly x: Range; readonly z: Range }
 
 /** A door or drawer front at `rect`, whose back is at y = back and whose face is toward -y. */
-function addFront(b: Builder, assembly: string, rect: Rect, front: number, style: FrontStyle, horizontalPanel: boolean, slabName: string): void {
+/** The bars of a divided door, in the frame's plane in front of its one pane. */
+function addMullions(b: Builder, assembly: string, open: Rect, front: number, glass: GlassSpec): void {
+  if (glass.pattern === 'single') return;
+  const y = range(front, front + D.STOCK - D.GLASS_RABBET), w = D.MULLION, W = span(open.x), H = span(open.z);
+  const checkLite = (size: number): void => { if (size < D.MIN_LITE - 1e-9) throw unsound(`The ${glass.pattern} pattern leaves a ${inch(size)} pane on ${assembly}. Use a simpler pattern or a larger door.`); };
+  const upright = (i: number, center: number, z: Range): void => b.add(`Vertical Mullion ${i}`, assembly, 'show', range(center - w / 2, center + w / 2), y, z, '+z', '+x');
+  const across = (name: string, center: number, x: Range): void => b.add(name, assembly, 'show', x, y, range(center - w / 2, center + w / 2), '+x', '+z');
+  if (glass.pattern === 'mission') {
+    const band = H * D.MISSION_BAND_SHARE, pane = (W - 2 * w) / 3, under = open.z.to - band - w;
+    checkLite(band); checkLite(pane); checkLite(under - open.z.from);
+    across('Horizontal Mullion 1', under + w / 2, open.x);
+    [1, 2].forEach(i => upright(i, open.x.from + pane * i + w * (i - 1) + w / 2, range(under + w, open.z.to)));
+    return;
+  }
+  let xs: number[], zs: number[];
+  if (glass.pattern === 'prairie') {
+    const s = D.PRAIRIE_CORNER;
+    checkLite(W - 2 * s - 2 * w); checkLite(H - 2 * s - 2 * w);
+    xs = [open.x.from + s + w / 2, open.x.to - s - w / 2];
+    zs = [open.z.from + s + w / 2, open.z.to - s - w / 2];
+  } else {
+    const a = glass.across!, n = glass.down!, paneW = (W - (a - 1) * w) / a, paneH = (H - (n - 1) * w) / n;
+    checkLite(paneW); checkLite(paneH);
+    xs = Array.from({ length: a - 1 }, (_, i) => open.x.from + paneW * (i + 1) + w * i + w / 2);
+    zs = Array.from({ length: n - 1 }, (_, i) => open.z.from + paneH * (i + 1) + w * i + w / 2);
+  }
+  xs.forEach((center, i) => upright(i + 1, center, open.z));
+  const edges = [open.x.from, ...xs.flatMap(c => [c - w / 2, c + w / 2]), open.x.to];
+  zs.forEach((center, row) => {
+    for (let c = 0; c < edges.length; c += 2) across(xs.length ? `Horizontal Mullion ${row + 1}.${c / 2 + 1}` : `Horizontal Mullion ${row + 1}`, center, range(edges[c]!, edges[c + 1]!));
+  });
+}
+
+function addFront(b: Builder, assembly: string, rect: Rect, front: number, style: FrontStyle, horizontalPanel: boolean, slabName: string, glass: GlassSpec | null = null): void {
   const y = range(front, front + D.STOCK);
   if (style === 'slab') {
     if (horizontalPanel) b.add(slabName, assembly, 'show', rect.x, y, rect.z, '+x', '+z');
@@ -193,6 +236,7 @@ function addFront(b: Builder, assembly: string, rect: Rect, front: number, style
   if (style === 'glass') {
     const gy = range(front + D.STOCK - D.GLASS_RABBET, front + D.STOCK - D.GLASS_RABBET + D.GLASS);
     b.add('Glass', assembly, 'glass', px, gy, pz, '+z', '+x');
+    if (glass) addMullions(b, assembly, open, front, glass);
     return;
   }
   if (style === 'raised') {
@@ -308,6 +352,16 @@ export function planCabinet(p: CabinetParams): CabinetPlan {
   if (!stackedDoors && (p.upperDoorHeight !== undefined || p.upperDoorStyle !== undefined)) throw contradiction('upperDoorHeight and upperDoorStyle need stackedDoors: true.');
   if (p.upperDoorStyle === 'none') throw contradiction('upperDoorStyle takes a door style; "none" builds no door.');
 
+  const hasGlass = doors > 0 && (doorStyle === 'glass' || (stackedDoors && p.upperDoorStyle === 'glass'));
+  if (p.glass && !hasGlass) throw contradiction('glass describes glass doors, and this cabinet has none; use doorStyle or upperDoorStyle "glass".');
+  const glassPattern = p.glass?.pattern ?? 'single';
+  if (glassPattern !== 'grid' && (p.glass?.across !== undefined || p.glass?.down !== undefined)) throw contradiction('across and down need pattern: "grid".');
+  const glass: GlassSpec | null = !hasGlass ? null : {
+    pattern: glassPattern, type: p.glass?.type ?? 'clear',
+    ...(glassPattern === 'grid' ? { across: p.glass?.across ?? D.DEFAULT_LITES_ACROSS, down: p.glass?.down ?? D.DEFAULT_LITES_DOWN } : {}),
+  };
+  const finishedInterior = p.finishedInterior ?? false;
+
   const sinkFront = p.sinkFront ?? false;
   if (sinkFront && (type !== 'base' || doors === 0)) throw contradiction('sinkFront is for a base cabinet with doors below it.');
   const drawers = p.drawers ?? (planned ? 0 : sinkFront ? 1 : type === 'base' ? (doors === 0 ? 3 : 1) : 0);
@@ -420,7 +474,7 @@ export function planCabinet(p: CabinetParams): CabinetPlan {
         for (const leaf of leaves) {
           const x = expand(leaf.x, leaf.outerLeft, leaf.outerRight);
           checkFive(style, span(x), span(row.front), leaf.name);
-          addFront(builder, leaf.name, { x, z: row.front }, frontY, style, false, 'Slab');
+          addFront(builder, leaf.name, { x, z: row.front }, frontY, style, false, 'Slab', glass);
         }
         continue;
       }
@@ -624,11 +678,18 @@ export function planCabinet(p: CabinetParams): CabinetPlan {
     shelfHeights(region).forEach((bottom, i) => b.add(shelves === 1 ? 'Shelf' : `Shelf ${i + 1}`, null, 'box', sx, sy, range(bottom, bottom + t), '+x', '+y'));
   }
 
+  const parts: CabinetPart[] = finishedInterior
+    ? b.parts.map(part => {
+      if (part.role !== 'box' || part.assembly !== null) return part;
+      return part.name.endsWith(' Side') ? { ...part, finishedInside: true } : { ...part, role: 'show' };
+    })
+    : b.parts;
   const used: CabinetUsed = {
-    type, width, height, depth, at, frame, overlay, doorStyle, doors, drawers, drawerBoxes, sinkFront, shelves, toeKick, back, finish, finishedEnds, stackedDoors,
+    type, width, height, depth, at, frame, overlay, doorStyle, doors, drawers, drawerBoxes, sinkFront, shelves, toeKick, back, finish, finishedEnds, stackedDoors, finishedInterior,
+    ...(glass ? { glass } : {}),
     ...(stackedDoors ? { upperDoorHeight: upperDoorHeight!, upperDoorStyle: p.upperDoorStyle ?? doorStyle } : {}),
     ...(cornerStyle ? { corner: { style: cornerStyle, side, lazySusan, ...(returnWidth !== undefined ? { returnWidth } : {}), ...(blindWidth !== undefined ? { blindWidth } : {}) } } : {}),
   };
   const typeName = type === 'base' ? 'Base' : type === 'wall' ? 'Wall' : 'Tall';
-  return { name: p.name ?? `${typeName} ${cornerStyle ? 'Corner ' : ''}Cabinet ${inch(width)}`, at, used, parts: b.parts };
+  return { name: p.name ?? `${typeName} ${cornerStyle ? 'Corner ' : ''}Cabinet ${inch(width)}`, at, used, parts };
 }

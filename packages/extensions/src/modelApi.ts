@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import {
-  BOX_MATERIAL_KEY, CabinetPlanError, GLASS_KEY, DEFAULT_BLEND_SEGMENTS, SERVICE_FONTS, grainMapping, planCabinet, checkEdgeBlendResult, Text3DParamsSchema, isHardEdge, libraryMaterial, loadLibraryMaterial, planEdgeBlend, planEdgeProfile, runEdgeBlendKernel, runIntersectKernel,
+  BOX_MATERIAL_KEY, CabinetPlanError, GLASS_KEYS, DEFAULT_BLEND_SEGMENTS, SERVICE_FONTS, grainMapping, planCabinet, checkEdgeBlendResult, Text3DParamsSchema, isHardEdge, libraryMaterial, loadLibraryMaterial, planEdgeBlend, planEdgeProfile, runEdgeBlendKernel, runIntersectKernel,
   runText3DKernel, BUILTIN_LIBRARY, LIBRARY_CATEGORIES, activeTagOpt, applyTransformPlan, arrayMatrices, contextFrame, curvePoints, definitionBounds, hostOf, instanceCount, kernelOf, localPushPullDistance,
   m4rotationAbout, m4scaleAbout, planPushPull, planTransform, runFollowMeKernel, runPushPullKernel, runSolidsKernel, runTransformKernel, sceneRuntimeOf, solidsResultIsEmpty,
   type CabinetGenerateResult, type CabinetPlan, type CameraHost, type CameraState, type CommandRegistry, type DocumentHost, type ExplodeResult, type FollowMeApplyResult, type FollowMeParams,
@@ -817,7 +817,7 @@ export class ModelDocumentApi {
           const existing = [...host.doc.state.materials.values()].find(m => m.name === name);
           show = existing ? existing.id : exec<number>('material.create', { name, color: rgb(finish.paint), activate: false });
         }
-        const glass = plan.parts.some(part => part.role === 'glass') ? await library(GLASS_KEY) : undefined;
+        const glass = plan.parts.some(part => part.role === 'glass') ? await library(GLASS_KEYS[plan.used.glass?.type ?? 'clear']) : undefined;
         const made = await exec<CabinetGenerateResult | Promise<CabinetGenerateResult>>('cabinet.generate', { plan, materials: { box, show, ...(glass !== undefined ? { glass } : {}) } });
         const round = (m: number): number => Math.round(m * 1e5) / 1e5;
         return { ...instanceResult(made.instanceId), name: made.name, used: { ...plan.used },

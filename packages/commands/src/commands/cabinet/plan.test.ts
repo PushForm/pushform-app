@@ -234,6 +234,70 @@ describe('planCabinet stacked and glass doors', () => {
   });
 });
 
+describe('planCabinet glass patterns and interiors', () => {
+  const wall: CabinetParams = { type: 'wall', width: i(24), height: i(42), doors: 1, doorStyle: 'glass' };
+  const bars = (plan: CabinetPlan): CabinetPart[] => plan.parts.filter(p => p.name.includes('Mullion'));
+
+  it('leaves a plain glass door with no bars and clear glass', () => {
+    const plan = planCabinet(wall);
+    expect(bars(plan)).toEqual([]);
+    expect(plan.used.glass).toEqual({ pattern: 'single', type: 'clear' });
+  });
+
+  it('divides a grid into equal panes with 5/8 bars in front of one pane', () => {
+    const plan = planCabinet({ ...wall, glass: { pattern: 'grid', across: 3, down: 2 } });
+    expect(plan.parts.filter(p => p.name === 'Glass')).toHaveLength(1);
+    expect(bars(plan).filter(p => p.name.startsWith('Vertical'))).toHaveLength(2);
+    expect(bars(plan).filter(p => p.name.startsWith('Horizontal'))).toHaveLength(3);
+    const open = bounds(named(plan, 'Left Stile', 'Door')).max[0];
+    const first = bounds(named(plan, 'Vertical Mullion 1', 'Door')), second = bounds(named(plan, 'Vertical Mullion 2', 'Door'));
+    closeTo(first.max[0] - first.min[0], 5 / 8);
+    expect(first.min[0] - open).toBeCloseTo(second.min[0] - first.max[0], 9);
+    const glass = bounds(named(plan, 'Glass', 'Door'));
+    closeTo(glass.min[1] - first.max[1], 0);
+  });
+
+  it('defaults a grid to two across and three down', () => {
+    expect(planCabinet({ ...wall, glass: { pattern: 'grid' } }).used.glass).toMatchObject({ across: 2, down: 3 });
+  });
+
+  it('leaves 2 inch square corners in a prairie door', () => {
+    const plan = planCabinet({ ...wall, glass: { pattern: 'prairie' } });
+    const open = bounds(named(plan, 'Left Stile', 'Door')).max[0];
+    closeTo(bounds(named(plan, 'Vertical Mullion 1', 'Door')).min[0] - open, 2);
+    expect(bars(plan)).toHaveLength(2 + 6);
+  });
+
+  it('puts three panes over one in a mission door', () => {
+    const plan = planCabinet({ ...wall, glass: { pattern: 'mission' } });
+    const across = bounds(named(plan, 'Horizontal Mullion 1', 'Door')), upright = bounds(named(plan, 'Vertical Mullion 1', 'Door'));
+    expect(upright.min[2]).toBeCloseTo(across.max[2], 9);
+    expect(bars(plan)).toHaveLength(3);
+  });
+
+  it('applies the pattern only to the glass doors of a stacked cabinet', () => {
+    const plan = planCabinet({ type: 'wall', width: i(24), height: i(42), doors: 1, stackedDoors: true, doorStyle: 'shaker', upperDoorStyle: 'glass', glass: { pattern: 'grid', across: 2, down: 2, type: 'seeded' } });
+    expect(plan.parts.some(p => p.assembly === 'Upper Door' && p.name.includes('Mullion'))).toBe(true);
+    expect(plan.parts.some(p => p.assembly === 'Lower Door' && p.name.includes('Mullion'))).toBe(false);
+    expect(plan.used.glass!.type).toBe('seeded');
+  });
+
+  it('gives a finished interior the door finish, leaving drawer boxes maple', () => {
+    const plan = planCabinet({ type: 'base', width: i(24), finishedInterior: true });
+    expect(named(plan, 'Shelf').role).toBe('show');
+    expect(named(plan, 'Bottom').role).toBe('show');
+    expect(named(plan, 'Left Side').role).toBe('box');
+    expect(named(plan, 'Left Side').finishedInside).toBe(true);
+    expect(named(plan, 'Box Bottom', 'Drawer').role).toBe('box');
+  });
+
+  it('refuses glass settings that have nothing to apply to, and panes too small', () => {
+    expect(refused({ type: 'wall', width: i(24), glass: { type: 'frosted' } }).code).toBe('invalid_operation');
+    expect(refused({ ...wall, glass: { pattern: 'prairie', across: 2 } }).code).toBe('invalid_operation');
+    expect(refused({ ...wall, width: i(12), glass: { pattern: 'grid', across: 6, down: 2 } }).code).toBe('invalid_geometry');
+  });
+});
+
 describe('planCabinet corners', () => {
   it('leaves a frameless blind section open behind a frame that matches the doors', () => {
     const plan = planCabinet({ type: 'base', width: i(42), corner: { style: 'blind' } });

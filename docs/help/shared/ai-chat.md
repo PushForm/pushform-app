@@ -68,7 +68,7 @@ After cloning, the copy's chat starts with “Continued from” and the original
 
 ## Generate a kitchen cabinet
 
-In a 3D model, the agent can generate a standard kitchen cabinet in one step, for example “Add a 30″ base cabinet with shaker doors and a drawer.” Base, wall and tall cabinets come complete with a toe kick, back, shelves, doors and drawers with their boxes, in frameless or face-frame construction, with slab, shaker, raised-panel or glass doors.
+In a 3D model, the agent can generate a standard kitchen cabinet in one step, for example “Add a 30″ base cabinet with shaker doors and a drawer.” Base, wall and tall cabinets come complete with a toe kick, back, shelves, doors and drawers with their boxes, in frameless or face-frame construction, with slab, shaker, raised-panel or glass doors. Glass doors can be a single pane or divided into a grid, prairie or mission pattern, in clear, frosted, seeded or reeded glass, and you can ask for the inside of the cabinet to match the doors.
 
 Wall and tall cabinets can have stacked doors, such as glass above and shaker below. Blind, diagonal and L-shaped corner cabinets are included too, for either side of a room's corner, with a lazy Susan if you want one.
 

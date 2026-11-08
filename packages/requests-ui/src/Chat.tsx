@@ -15,10 +15,11 @@ export interface ChatProps {
   /** The signed-in account: its id scopes remembered drafts, its email receives notifications. */
   readonly account: { readonly id: string; readonly email: string };
   readonly screen: ScreenInfo;
-  /** The icon that opens the panel: the pop-down hangs under it; focus returns to it on close (docked: on Escape). */
+  /** The icon that opens the pop-down, which hangs under it; focus returns to it on close. Docked ignores it. */
   readonly anchor?: HTMLElement | null | undefined;
   /** 'popover' (default, Home) hangs under its icon; 'docked' fills an editor's side dock. */
   readonly placement?: 'popover' | 'docked' | undefined;
+  /** Hides the pop-down. Docked ignores it: only its left menu bar icon hides that panel. */
   readonly onClose: () => void;
   /** False hides the pop-down without unmounting it: the conversation stays in memory for the next open. */
   readonly open?: boolean | undefined;
@@ -198,7 +199,7 @@ function fromConversation(conversation: Conversation): ChatState {
  * happens in the conversation: the agent gathers the brief, writes it back as text, asks for confirmation and
  * files on an explicit yes; the panel only shows the resulting "Filed as" or "Added you to" line. Closing keeps
  * the conversation; reopening resumes it; asking the agent to start over, Clear Chat or `/clear` discards it. There is no header row:
- * Escape or the icon hide it, and on Home also a click outside (user decisions 2026-10-24, 2026-10-25).
+ * docked in an editor only the icon hides it; on Home the icon, Escape or a click outside (user decisions 2026-10-24, 2026-10-25).
  */
 export function Chat({ client, account, screen, anchor, placement = 'popover', onClose, open = true, storage, documentTools, captureScreenshot, onMessage, scope = HOME_SCOPE, documentId, clearSignal = 0, handoff, onHandoffStarted }: ChatProps): JSX.Element {
   // The greeting, cards and composer draw at once; the profile and any resumable conversation load behind them.

@@ -18,7 +18,7 @@ function setup(build?: (tab: ReturnType<DocumentSession['newLayout']>) => void) 
   build?.(tab);
   const host = document.createElement('div');
   document.body.append(host);
-  render(<LayoutWorkspace tab={tab} session={session} objectBrowser={{ host, open: true, onClose: () => {} }} />);
+  render(<LayoutWorkspace tab={tab} session={session} objectBrowser={{ host, open: true }} />);
   const layerRow = (layerId: number): HTMLElement =>
     host.querySelector<HTMLElement>(`[data-key="layer:${tab.activePageId}:${layerId}"] > .pf-layout-browser-row`)!;
   const menu = (layerId: number, item: string): void => {

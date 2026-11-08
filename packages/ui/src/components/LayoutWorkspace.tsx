@@ -1080,7 +1080,7 @@ export function LayoutWorkspace({
   saveStatus?: ReactNode;
   catalogActive?: boolean;
   /** The left menu bar's docked Object browser: rendered into `host` while `open`. */
-  objectBrowser?: { readonly host: HTMLElement | null; readonly open: boolean; readonly onClose: () => void } | undefined;
+  objectBrowser?: { readonly host: HTMLElement | null; readonly open: boolean } | undefined;
   /** Cloud files for model references; `saves` counts cloud model saves in this session, each prompting a freshness check. */
   cloud?: (LayoutCloudAccess & { saves: number }) | undefined;
 }): JSX.Element {
@@ -4329,8 +4329,7 @@ export function LayoutWorkspace({
       {settingsOpen ? <LayoutDocumentSettingsDialog state={state} onCommand={browserCommand} onClose={() => setSettingsOpen(false)} /> : null}
       {objectBrowser?.open && objectBrowser.host ? createPortal(<LayoutObjectBrowser state={state} activePageId={page.id} selectionIds={selectionIds}
         {...browserCallbacks} onPinModel={(referenceId, pinned) => tab.commands.execute('layout.reference.pin', { referenceId, pinned })}
-        view={tab.workspace.browserView} onViewChange={view => { tab.workspace.browserView = view; }}
-        onClose={objectBrowser.onClose} />, objectBrowser.host) : null}
+        view={tab.workspace.browserView} onViewChange={view => { tab.workspace.browserView = view; }} />, objectBrowser.host) : null}
       {layerScopeChoice ? <LayoutLayerScopeDialog onCancel={() => setLayerScopeChoice(null)} onApply={(source) => {
         try { runPageCommand('layout.layer.setShared', { ...layerScopeChoice, shared: true, source }); }
         catch (error) { setVcbError(error instanceof Error ? error.message : String(error)); }

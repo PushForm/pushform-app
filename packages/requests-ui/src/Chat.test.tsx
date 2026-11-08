@@ -662,8 +662,8 @@ describe('Chat docked', () => {
     expect((await cards()).map(button => button.querySelector('strong')?.textContent)).toEqual(CARD_NAMES);
     await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Your message')));
   });
-  it('stays open on a click outside or an Escape outside, hides on Escape inside and returns focus to its icon', async () => {
-    const { anchor, onClose, view, client } = setup({}, { placement: 'docked' });
+  it('stays open on a click outside and on Escape, inside or outside', async () => {
+    const { anchor, onClose, view, client, workspaceKeys } = setup({}, { placement: 'docked' });
     const composer = await screen.findByLabelText('Your message');
     fireEvent.pointerDown(document.body);
     fireEvent.mouseDown(document.body);
@@ -671,13 +671,15 @@ describe('Chat docked', () => {
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(onClose).not.toHaveBeenCalled();
     fireEvent.change(composer, { target: { value: 'kept' } });
+    workspaceKeys.mockClear();
     fireEvent.keyDown(composer, { key: 'Escape' });
-    expect(onClose).toHaveBeenCalledTimes(1);
-    expect(document.activeElement).toBe(anchor);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(workspaceKeys).not.toHaveBeenCalled();
+    expect(screen.getByRole('region', { name: 'AI Chat' })).toBeTruthy();
     view.rerender(<Chat client={client} account={account} screen={screenInfo} anchor={anchor} onClose={onClose} placement="docked" open={false} />);
     expect(screen.queryByRole('region', { name: 'AI Chat' })).toBeNull();
     fireEvent.keyDown(composer, { key: 'Escape' });
-    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
     view.rerender(<Chat client={client} account={account} screen={screenInfo} anchor={anchor} onClose={onClose} placement="docked" open />);
     expect((screen.getByLabelText('Your message') as HTMLTextAreaElement).value).toBe('kept');
     await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Your message')));

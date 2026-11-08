@@ -59,13 +59,12 @@ function setup(defaults = false) {
   };
   const host = document.createElement('div');
   document.body.append(host);
-  const onClose = vi.fn();
   let setOpen: (open: boolean) => void = () => {};
   function Harness() {
     useSyncExternalStore(session.subscribe, () => session.revision);
     const [open, setOpenState] = useState(true);
     setOpen = setOpenState;
-    return <LayoutWorkspace tab={tab} session={session} objectBrowser={{ host, open, onClose }} />;
+    return <LayoutWorkspace tab={tab} session={session} objectBrowser={{ host, open }} />;
   }
   render(<Harness />);
   const tree = (): HTMLElement => within(host).getByRole('tree', { name: 'Object browser' });
@@ -86,7 +85,7 @@ function setup(defaults = false) {
   const dispose = (): void => { session.dispose(); app.dispose(); };
   /** Close and reopen the object browser, as its rail icon does. */
   const reopen = (): void => { act(() => setOpen(false)); act(() => setOpen(true)); };
-  return { app, session, tab, pageId, page2, base, notes, line, rect, text, label, dimension, table, image: image!, note, host, onClose, reopen,
+  return { app, session, tab, pageId, page2, base, notes, line, rect, text, label, dimension, table, image: image!, note, host, reopen,
     tree, items, names, page, layer, object, row, name, children, entity, selectionTitle, dispose };
 }
 
@@ -280,7 +279,6 @@ describe('Layout object browser', () => {
     expect(screen.queryByRole('textbox', { name: /^Rename/ })).toBeNull();
     expect(t.entity(t.line)!.name).toBe('Ridge line');
     expect(t.tab.doc.version).toBe(version);
-    expect(t.onClose).not.toHaveBeenCalled();
     // An unchanged name records nothing; leaving the field commits.
     fireEvent.keyDown(t.object(t.pageId, t.line)!, { key: 'F2' });
     fireEvent.keyDown(screen.getByRole('textbox', { name: 'Rename Ridge line' }), { key: 'Enter' });
@@ -640,9 +638,10 @@ describe('Layout object browser', () => {
     expect(t.tab.workspace.tool).toBe('select');
     expect(t.entity(t.rect)!.points).toEqual(points);
     expect(t.tab.doc.version).toBe(version);
-    expect(t.onClose).not.toHaveBeenCalled();
+    // Escape stays in the tree: the tool and the panel are left as they were.
     key('Escape');
-    expect(t.onClose).toHaveBeenCalledTimes(1);
+    expect(t.tab.workspace.tool).toBe('select');
+    expect(t.object(t.pageId, t.rect)).toBeTruthy();
     t.dispose();
   });
 
@@ -764,7 +763,6 @@ describe('Layout object browser', () => {
     const version = t.tab.doc.version;
     dragRow(t, t.layer(t.pageId, t.base)!, t.layer(t.pageId, t.notes)!, false, { cancel: true });
     expect(t.tab.doc.version).toBe(version);
-    expect(t.onClose).not.toHaveBeenCalled();
     dragRow(t, t.layer(t.pageId, t.base)!, t.layer(t.pageId, t.notes)!, false);
     expect(t.children(t.page(t.pageId))).toEqual(['Layer 1', 'Notes']);
     expect(t.tab.doc.state.layerOrder).toEqual([t.notes, t.base]);
@@ -1158,11 +1156,17 @@ describe('Object browser in the left menu bar', () => {
   });
   afterEach(() => { cloud.dispose(); app.dispose(); localStorage.clear(); });
 
-  it('shows the tree in the dock from the Layout rail, one panel at a time, and Escape returns focus to the icon', () => {
+  it('shows the tree in the dock from either rail, one panel at a time, and Escape leaves it open', () => {
     render(<App initialScreen="workspace" app={app} cloud={cloud} />);
     const rail = (): HTMLElement => screen.getByRole('navigation', { name: 'Left menu bar' });
     // The model's own Object browser starts closed; only a Layout document opens it by itself.
     expect(within(rail()).getByRole('button', { name: 'Object browser' }).getAttribute('aria-pressed')).toBe('false');
+    // Escape leaves the model's browser open too; only its icon hides it.
+    fireEvent.click(within(rail()).getByRole('button', { name: 'Object browser' }));
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Objects' }), { key: 'Escape' });
+    expect(screen.getByRole('tree', { name: 'Object browser' })).toBeTruthy();
+    fireEvent.click(within(rail()).getByRole('button', { name: 'Object browser' }));
+    expect(screen.queryByRole('tree', { name: 'Object browser' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'New document' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Layout' }));
     fireEvent.click(screen.getByRole('button', { name: 'Create Layout' }));
@@ -1183,15 +1187,13 @@ describe('Object browser in the left menu bar', () => {
     expect(within(tree).getAllByRole('treeitem').map(item => item.getAttribute('aria-level'))[0]).toBe('1');
     expect(within(tree).getByRole('treeitem', { name: 'Document Settings' })).toBeTruthy();
     expect(within(tree).getByRole('treeitem', { name: 'Page 1' })).toBeTruthy();
-    // Escape on a tree item hides the panel and returns focus to its rail icon.
+    // Escape on a tree item leaves the panel open and focus where it was.
     const settings = within(tree).getByRole('treeitem', { name: 'Document Settings' });
     settings.focus();
     fireEvent.keyDown(settings, { key: 'Escape' });
-    expect(screen.queryByRole('tree', { name: 'Object browser' })).toBeNull();
-    expect(objects.getAttribute('aria-pressed')).toBe('false');
-    expect(document.activeElement).toBe(objects);
-    fireEvent.click(objects);
     expect(screen.getByRole('tree', { name: 'Object browser' })).toBeTruthy();
+    expect(objects.getAttribute('aria-pressed')).toBe('true');
+    expect(document.activeElement).toBe(settings);
     fireEvent.click(objects);
     expect(screen.queryByRole('tree', { name: 'Object browser' })).toBeNull();
   });

@@ -80,7 +80,6 @@ export interface LayoutObjectBrowserProps {
   /** The pin button of a cloud model row. */
   readonly onPinModel?: ((referenceId: number, pinned: boolean) => void) | undefined;
   /** Escape on a tree item hides the docked panel. */
-  readonly onClose?: (() => void) | undefined;
 }
 
 const SETTINGS_KEY = 'settings', PAGE_SIZE_KEY = 'settings:page-size', UNITS_KEY = 'settings:units', MODELS_KEY = 'models';
@@ -227,7 +226,7 @@ const DEFAULT_VIEW: LayoutBrowserView = { collapsedPages: new Set(), expandedLay
 export const LayoutObjectBrowser = memo(function LayoutObjectBrowser({
   state, activePageId, selectionIds, onActivatePage, onActivateLayer, onSelectObject, onSelectGroup, onUngroup, onDeleteObjects, onRename, onDocumentSettings,
   onSetVisible, onSetLocked, onMoveObject, onMoveLayer, onMovePage, onAddPageAfter, onAddLayer, onDeletePage,
-  onDuplicatePage, onDuplicateLayer, onSetShared, onDeleteLayer, onPinModel, onClose, view: initialView, onViewChange,
+  onDuplicatePage, onDuplicateLayer, onSetShared, onDeleteLayer, onPinModel, view: initialView, onViewChange,
 }: LayoutObjectBrowserProps): JSX.Element {
   const selectionAnchor = useRef<string | null>(null);
   const idPrefix = useId();
@@ -546,7 +545,6 @@ export const LayoutObjectBrowser = memo(function LayoutObjectBrowser({
         go(next?.key);
         break;
       }
-      case 'Escape': onClose?.(); break;
       default: handled = false;
     }
     if (handled) event.preventDefault();

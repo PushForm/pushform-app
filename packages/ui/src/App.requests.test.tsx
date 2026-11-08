@@ -99,7 +99,7 @@ it('keeps the conversation in memory across hiding and showing within the sessio
   expect(calls.length).toBe(before);
 });
 
-it('docks the chat beside the editor from the left menu bar icon, sends the session token, and only the icon or Escape inside hides it', async () => {
+it('docks the chat beside the editor from the left menu bar icon, sends the session token, and only the icon hides it', async () => {
   render(<App initialScreen="workspace" app={app} cloud={cloud} buildInfo={build} requests={requests} />);
   expect(app.commands.has('help.requests')).toBe(true);
   const menu = screen.getByRole('button', { name: 'Main menu' });
@@ -156,8 +156,7 @@ it('docks the chat beside the editor from the left menu bar icon, sends the sess
   fireEvent.click(icon());
   await screen.findByRole('region', { name: 'AI Chat' });
   fireEvent.keyDown(composerField(), { key: 'Escape' });
-  expect(docked()).toBeNull();
-  expect(document.activeElement).toBe(icon());
+  expect(docked()).toBeTruthy();
   expect(app.commands.ctx.tx.canUndo()).toBe(false);
 });
 
@@ -175,9 +174,9 @@ it('offers help.requests, keeps workspace keys out of the composer, and docks th
   expect(docked()).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Close AI Chat' })).toBeNull();
   fireEvent.keyDown(composer, { key: 'Escape' });
-  expect(docked()).toBeNull();
+  expect(docked()).toBeTruthy();
+  expect(keys).not.toHaveBeenCalled();
   window.removeEventListener('keydown', keys);
-  act(() => { app.commands.tryExecute('help.requests'); });
   fireEvent.change(composer, { target: { value: 'still here' } });
   newLayout();
   // The Layout rail lists the chat, then the object browser; the chat is not in the tool row and stays open across the

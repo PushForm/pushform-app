@@ -39,7 +39,7 @@ const KIND_NAMES: Record<ModelBrowserKind, string> = { group: 'Group', component
  * The Model object browser: the model's solids, text, groups and components in the left menu bar's docked
  * panel, with the Layout object browser's look and keys. Selection, hiding, locking and renames go through commands.
  */
-export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void) | undefined }): JSX.Element {
+export function ModelObjectBrowser(): JSX.Element {
   const app = useApp();
   const refs = useSelectionRefs();
   const context = useEditContext();
@@ -181,7 +181,7 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
     event.stopPropagation();
     const item = event.target instanceof Element ? event.target.closest('[role="treeitem"]') : null;
     const node = byKey.get(item?.getAttribute('data-key') ?? tabKey ?? '');
-    if (event.key === 'Escape') { event.preventDefault(); if (tagTooltip) setTagTooltip(null); else onClose?.(); return; }
+    if (event.key === 'Escape') { event.preventDefault(); setTagTooltip(null); return; }
     if (!node) return;
     const index = visible.indexOf(node);
     const go = (key: string | undefined): void => { if (key) moveFocus(key); };
@@ -285,8 +285,7 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
             event.preventDefault(); event.stopPropagation();
             const next = event.key === 'Home' ? 'objects' : event.key === 'End' ? 'tags' : section === 'objects' ? 'tags' : 'objects';
             setSection(next); document.getElementById(`${idPrefix}-${next}-tab`)?.focus();
-          } else if (event.key === 'Escape') { event.stopPropagation(); onClose?.(); }
-          else if (!modelBrowserPassesKey(event.nativeEvent)) event.stopPropagation();
+          } else if (!modelBrowserPassesKey(event.nativeEvent)) event.stopPropagation();
         }}>{name === 'objects' ? 'Objects' : 'Tags'}</button>)}
     </div>
     <div role="tabpanel" id={`${idPrefix}-objects-panel`} aria-labelledby={`${idPrefix}-objects-tab`} hidden={section !== 'objects'}>
@@ -296,10 +295,7 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
       {tree.length ? null : <p className="pf-model-browser-empty">Solids, groups, components, text and section planes you make appear here.</p>}
     </div>
     <div role="tabpanel" id={`${idPrefix}-tags-panel`} aria-labelledby={`${idPrefix}-tags-tab`} hidden={section !== 'tags'}
-      onKeyDown={event => {
-        if (event.key === 'Escape') { event.stopPropagation(); onClose?.(); }
-        else if (!modelBrowserPassesKey(event.nativeEvent)) event.stopPropagation();
-      }}>
+      onKeyDown={event => { if (!modelBrowserPassesKey(event.nativeEvent)) event.stopPropagation(); }}>
       {section === 'tags' ? <TagsPanel /> : null}
     </div>
   </div>;

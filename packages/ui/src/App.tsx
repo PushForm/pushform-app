@@ -216,10 +216,8 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
   const [sidePanel, setSidePanel] = useState<SidePanel | null>(null);
   const [guidanceBrowserTab, setGuidanceBrowserTab] = useState<string | null>(null);
   const [requestsIcon, setRequestsIcon] = useState<HTMLButtonElement | null>(null);
-  const [filesIcon, setFilesIcon] = useState<HTMLButtonElement | null>(null);
   const filesOpened = useRef(false);
   const [filesNode] = useState(() => { const node = document.createElement('div'); node.className = 'pf-side-dock-files'; return node; });
-  const [objectsIcon, setObjectsIcon] = useState<HTMLButtonElement | null>(null);
   const [objectHost, setObjectHost] = useState<HTMLDivElement | null>(null);
   /** The docked chats render into this one element from a fixed place, so switching editors never remounts them. */
   const [chatNode] = useState(() => { const node = document.createElement('div'); node.className = 'pf-side-dock-chat'; return node; });
@@ -372,13 +370,6 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     if (id === 'files' || id === 'requests' || id === 'objects' || isExtensionPanelId(id)) showSidePanel(id, 'toggle');
   };
   const closeSidePanel = (): void => { setGuidanceBrowserTab(null); setSidePanel(null); };
-  /** The object browser hides itself on Escape; focus inside it then returns to its rail icon. */
-  const closeObjects = (): void => {
-    setGuidanceBrowserTab(null);
-    const focused = !!objectHost?.contains(document.activeElement);
-    setSidePanel(current => current === 'objects' ? null : current);
-    if (focused && objectsIcon?.isConnected) objectsIcon.focus();
-  };
   /** Home's conversation pops down under its icon; each document's docks beside its editor. */
   const chatKey = home ? HOME_SCOPE : active.id;
   if (home ? requestsPanel?.open : sidePanel === 'requests') chats.current.add(chatKey);
@@ -414,7 +405,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     const scope = !tab ? HOME_SCOPE : tab.identity ? `document:${tab.identity}` : `tab:${tab.id}`;
     return <Chat key={key} placement={tab ? 'docked' : 'popover'} client={client} account={{ id: ownerId, email: accountEmail }} screen={screenOf(tab)} scope={scope}
       documentId={tab ? cloudLocation(tab.identity)?.fileId : undefined}
-      anchor={tab ? requestsIcon : requestsPanel?.anchor ?? null} onClose={tab ? closeSidePanel : closeRequests}
+      anchor={requestsPanel?.anchor ?? null} onClose={closeRequests}
       open={key === chatKey && (tab ? sidePanel === 'requests' : !!requestsPanel?.open)}
       documentTools={tab ? () => documentToolsFor(session, tab, panel => { if (panel === 'objects' && sidePanel === 'requests') setGuidanceBrowserTab(tab.id); else showSidePanel(panel, 'open'); }, cloneFromChat, publishingForChat) : undefined}
       handoff={handoffs[key]} onHandoffStarted={() => setHandoffs(({ [key]: _used, ...rest }) => rest)} captureScreenshot={tab ? () => captureRequestScreenshot(session, tab) : undefined} onMessage={() => usage?.record('help_message')} clearSignal={clearSignals[key] ?? 0} />;
@@ -428,9 +419,9 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     : <RequestsUnavailable placement="docked" anchor={requestsIcon} open={sidePanel === 'requests'} onClose={closeSidePanel} />;
   if (sidePanel === 'files') filesOpened.current = true;
   const railItems: SideRailItem[] = [
-    { id: 'files', label: 'Files', icon: <LuFolderOpen aria-hidden="true" />, ref: setFilesIcon },
+    { id: 'files', label: 'Files', icon: <LuFolderOpen aria-hidden="true" /> },
     { id: 'requests', label: 'AI Chat', icon: <RiChatAiLine aria-hidden="true" />, ref: setRequestsIcon },
-    { id: 'objects', label: 'Object browser', icon: <PiTreeView aria-hidden="true" />, ref: setObjectsIcon },
+    { id: 'objects', label: 'Object browser', icon: <PiTreeView aria-hidden="true" /> },
     { id: 'commons', label: 'Commons', icon: <LuLibrary aria-hidden="true" /> },
     ...extensionWorkspace.railItems,
   ];
@@ -449,7 +440,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
       <DockSlot node={chatNode} attached={sidePanel === 'requests'} />
       {/* Layout portals its browser into this element; the model's renders here directly. */}
       <div ref={setObjectHost} className={`pf-side-dock-objects${companionBrowser ? ' is-guidance-companion' : ''}`} hidden={!browserVisible}>
-        {active.type === 'model' && browserVisible ? <ModelObjectBrowser key={active.id} onClose={closeObjects} /> : null}
+        {active.type === 'model' && browserVisible ? <ModelObjectBrowser key={active.id} /> : null}
       </div>
       {extensionWorkspace.panel}
     </SideDock>
@@ -529,13 +520,12 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
           </>
         ) : (
           <LayoutWorkspace key={active.id} tab={active} session={session} leading={sideBar} saveStatus={saveStatus} catalogActive={commonsShown}
-            objectBrowser={{ host: objectHost, open: browserVisible, onClose: closeObjects }}
+            objectBrowser={{ host: objectHost, open: browserVisible }}
             cloud={cloudFiles ? { api: cloudFiles, owner, session, saves: cloudModelSaves } : undefined} />
         )}
       </div>
       {filesOpened.current ? createPortal(<WorkspaceFiles api={cloudFiles} open={sidePanel === 'files'} onOpen={open}
-        onRenamed={renamed} onMoved={moved} onForgetRecents={forgetRecents}
-        onClose={() => { closeSidePanel(); filesIcon?.focus(); }} />, filesNode) : null}
+        onRenamed={renamed} onMoved={moved} onForgetRecents={forgetRecents} />, filesNode) : null}
       {dockedRequests ? createPortal(dockedRequests, chatNode) : null}
       {extensionWorkspace.activity}
       {feedback}

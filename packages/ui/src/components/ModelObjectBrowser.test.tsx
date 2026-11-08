@@ -41,10 +41,10 @@ function addSolid(a: AppInstance, path: readonly Id[] = []): Id {
   return id;
 }
 
-const mount = (a: AppInstance, onClose?: () => void) =>
+const mount = (a: AppInstance) =>
   render(
     <AppContext.Provider value={a}>
-      <ModelObjectBrowser onClose={onClose} />
+      <ModelObjectBrowser />
     </AppContext.Provider>,
   );
 
@@ -271,15 +271,14 @@ describe('ModelObjectBrowser', () => {
     expect(item('Added').getAttribute('aria-expanded')).toBe('false');
   });
 
-  it('moves with the keyboard, keeps keys from the modeler, and hides on Escape', () => {
+  it('moves with the keyboard and keeps keys, Escape among them, from the modeler', () => {
     const a = boot();
     const house = addInstance(a, { name: 'House' });
     addInstance(a, { name: 'Door', parent: [house] });
     addInstance(a, { name: 'Tree' });
-    const onClose = vi.fn();
     const shortcut = vi.fn();
     window.addEventListener('keydown', shortcut);
-    mount(a, onClose);
+    mount(a);
     expect(item('House').tabIndex).toBe(0);
     item('House').focus();
     fireEvent.keyDown(item('House'), { key: 'ArrowRight' });
@@ -303,7 +302,8 @@ describe('ModelObjectBrowser', () => {
     fireEvent.keyDown(item('Tree'), { key: 'z', ctrlKey: true });
     expect(shortcut).toHaveBeenCalledTimes(1);
     fireEvent.keyDown(item('Tree'), { key: 'Escape' });
-    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(shortcut).toHaveBeenCalledTimes(1);
+    expect(item('Tree')).toBeTruthy();
     window.removeEventListener('keydown', shortcut);
   });
 

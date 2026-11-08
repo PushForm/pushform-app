@@ -22,7 +22,7 @@ Check whether the content should be shared before changing it. Duplicating indiv
 
 Expand the page and layer to find an object. Clicking selects it. Double-click its name, or press F2 on a focused item, to rename it. Use the eye and lock controls for visibility and editability.
 
-A selection made on the page expands its ancestors and reveals it in the browser. Arrow keys navigate the tree while it has focus; Escape closes the panel rather than reaching a drawing tool.
+A selection made on the page expands its ancestors and reveals it in the browser. Arrow keys navigate the tree while it has focus. Escape stays in the browser, so it neither closes the panel nor reaches a drawing tool.
 
 ## Set paper, units and grid
 

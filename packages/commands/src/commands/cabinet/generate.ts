@@ -11,7 +11,8 @@ import { activeTagOpt, hostOf } from '../../host/services';
 import { draftContainerAt } from '../context';
 import { createDefinition, newInstance, uniqueDefinitionName } from '../groups';
 import { grainMapping } from '../materials';
-import { meshLoftedPanel, meshStock } from './mesh';
+import { edgeAngleDeg } from '../edges';
+import { meshLoftedPanel, meshPrism, meshStock } from './mesh';
 import type { CabinetPart, CabinetPlan } from './plan';
 
 export interface CabinetGeneratedPart {
@@ -28,10 +29,15 @@ export interface CabinetGenerateResult {
 }
 
 export function cabinetPartMesh(part: CabinetPart): MeshData {
-  return part.shape.kind === 'lofted' ? meshLoftedPanel(part.size[0], part.size[1], part.shape.rings) : meshStock(part.size, part.shape.cuts);
+  const { shape } = part;
+  if (shape.kind === 'lofted') return meshLoftedPanel(part.size[0], part.size[1], shape.rings);
+  if (shape.kind === 'prism') return meshPrism(shape.outline, part.size[2]);
+  return meshStock(part.size, shape.cuts);
 }
 
 const GRAIN: Vec3 = [1, 0, 0];
+/** Edges between facets of a round tray this shallow are drawn smooth. */
+const ROUND_EDGE_DEG = 20;
 
 /** Run the texture's grain along the part's length, on the faces it shows; end grain keeps the default placement. */
 function setGrain(face: FaceRecord | Draft<FaceRecord>, material: Material | undefined): void {
@@ -43,7 +49,7 @@ function setGrain(face: FaceRecord | Draft<FaceRecord>, material: Material | und
 
 const paramsSchema = z.object({
   plan: z.custom<CabinetPlan>(v => typeof v === 'object' && v !== null && 'parts' in v),
-  materials: z.object({ box: z.number().int(), show: z.number().int() }),
+  materials: z.object({ box: z.number().int(), show: z.number().int(), glass: z.number().int().optional() }),
 });
 
 /** Build a planned cabinet in the open container: a group of named assemblies and parts, in one edit. */
@@ -60,7 +66,7 @@ export const cabinetGenerate = defineCommand({
     let result: CabinetGenerateResult | null = null;
     host.edit(`Generate ${plan.name}`, (draft) => {
       const state = draft as unknown as DocumentState;
-      const materialOf = (role: CabinetPart['role']): Material | undefined => state.materials.get((role === 'box' ? materials.box : materials.show) as never);
+      const materialOf = (role: CabinetPart['role']): Material | undefined => state.materials.get((role === 'box' ? materials.box : role === 'glass' ? materials.glass ?? materials.show : materials.show) as never);
       const cabinet = createDefinition(draft, { name: uniqueDefinitionName(state, plan.name), isGroup: true });
       const cabinetContainer = cabinet.entities as unknown as Draft<EntityContainer>;
       const placed = newInstance(draft, cabinet.id, m4translation(plan.at), plan.name);
@@ -105,6 +111,11 @@ export const cabinetGenerate = defineCommand({
           if (outside && show) face.frontMaterialId = show.id;
           setGrain(face, outside ? show : material);
         }
+        if (part.shape.kind === 'prism' && part.shape.round)
+          for (const e of live.edges.values()) {
+            const deg = edgeAngleDeg(live as unknown as Body, e as never);
+            if (deg !== null && deg <= ROUND_EDGE_DEG) { e.soft = true; e.smooth = true; }
+          }
         const assembly = part.assembly === null ? null : assemblyFor(part.assembly);
         const placement: MMat4 = m4fromBasis(part.origin, part.x, part.y, part.z);
         const local = assembly ? m4mul(m4translation([-assembly.origin[0], -assembly.origin[1], -assembly.origin[2]]), placement) : placement;

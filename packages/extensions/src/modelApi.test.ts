@@ -273,6 +273,37 @@ describe('ModelDocumentApi batches', () => {
       }
     }, 60_000);
 
+    it('leaves no overlaps across stacked, glass and every corner style', async () => {
+      const cases: Record<string, unknown>[] = [
+        { type: 'tall', width: 36 * inch, stackedDoors: true, doorStyle: 'shaker', upperDoorStyle: 'glass', frame: 'face_frame' },
+        { type: 'wall', width: 18 * inch, height: 42 * inch, stackedDoors: true, doorStyle: 'glass' },
+      ];
+      for (const frame of ['frameless', 'face_frame']) for (const side of ['left', 'right']) {
+        cases.push({ type: 'base', width: 42 * inch, frame, corner: { style: 'blind', side } });
+        cases.push({ type: 'base', width: 36 * inch, frame, corner: { style: 'diagonal', side, lazySusan: true } });
+        cases.push({ type: 'wall', width: 24 * inch, depth: 12 * inch, frame, corner: { style: 'diagonal', side } });
+        cases.push({ type: 'base', width: 36 * inch, frame, corner: { style: 'l_shaped', side } });
+        cases.push({ type: 'base', width: 36 * inch, frame, corner: { style: 'l_shaped', side, lazySusan: true } });
+        cases.push({ type: 'tall', width: 36 * inch, frame, corner: { style: 'l_shaped', side } });
+      }
+      for (const overlay of ['full', 'inset']) cases.push({ type: 'base', width: 36 * inch, frame: 'face_frame', overlay, corner: { style: 'l_shaped' } });
+      for (const params of cases) {
+        const s = setup();
+        await cabinet(s, params);
+        const report = await s.api.findOverlaps({ container: null, minVolume: null });
+        expect(report.overlaps.map(o => `${o.a.name} / ${o.b.name}`), JSON.stringify(params)).toEqual([]);
+      }
+    }, 120_000);
+
+    it('glazes a glass door with the library clear glass, once across cabinets', async () => {
+      const s = setup();
+      await s.api.apply({ expectedRevision: s.api.revision, label: 'Run', operations: [
+        { op: 'add_cabinet', type: 'wall', width: 18 * inch, doorStyle: 'glass' },
+        { op: 'add_cabinet', type: 'wall', width: 18 * inch, doorStyle: 'glass', at: [1, 0, 1.37] },
+      ] });
+      expect(s.api.getDocument().materials.filter(m => m.name === 'Clear Glass')).toHaveLength(1);
+    });
+
     it('lets a later batch edit a part through its path', async () => {
       const s = setup();
       const { entry } = await cabinet(s, { type: 'wall', width: 18 * inch });

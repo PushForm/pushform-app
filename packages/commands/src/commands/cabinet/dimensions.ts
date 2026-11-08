@@ -34,6 +34,16 @@ export const RAISED_BEVEL = inches(1.5);
 /** How far the back relief and the front bevel start in from the panel's edge: past the groove, with room to move. */
 export const RAISED_RELIEF = inches(3 / 8);
 
+export const GLASS = inches(1 / 8);
+export const GLASS_RABBET = inches(3 / 8);
+export const GLASS_KEY = 'Translucent_Glass_Clear';
+
+export const UPPER_DOOR_SHARE = 0.3;
+export const MIN_CORNER_FACE = inches(9);
+export const MIN_BLIND = inches(6);
+export const DEFAULT_BLIND_DOOR = inches(18);
+export const TRAY_SEGMENTS = 48;
+
 export const DRAWER_FRONT = inches(6);
 export const SLAB_DRAWER_BELOW = inches(7);
 export const DRAWER_SIDE = inches(1 / 2);

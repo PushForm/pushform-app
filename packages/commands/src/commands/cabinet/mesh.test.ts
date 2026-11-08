@@ -7,7 +7,7 @@ import { InlineBackend, KernelClient, validateSolidMesh } from '@pushform/kernel
 import { DocumentHost } from '../../host/DocumentHost';
 import { bodyFromMesh } from '@pushform/model';
 import { cabinetPartMesh } from './generate';
-import { meshLoftedPanel, meshStock } from './mesh';
+import { meshLoftedPanel, meshPrism, meshStock } from './mesh';
 import { planCabinet } from './plan';
 import { inches as i } from './dimensions';
 
@@ -42,12 +42,23 @@ describe('cabinet part meshes', () => {
     expect(meshSignedVolume(mesh)).toBeCloseTo(8 * 4 + 60 + bevel, 9);
   });
 
+  it('extrudes a concave outline into a closed solid of the right volume', () => {
+    const mesh = meshPrism([[0, 0], [2, 0], [2, 1], [1, 1], [1, 2], [0, 2]], 3);
+    expectClosed(mesh);
+    expect(meshSignedVolume(mesh)).toBeCloseTo(9, 9);
+  });
+
   it('makes every part of every door style a solid the kernel accepts', async () => {
     const kernel = new KernelClient(new InlineBackend());
     kernels.push(kernel);
     let bodyId = 1;
-    for (const doorStyle of ['slab', 'shaker', 'raised'] as const) {
-      for (const part of planCabinet({ type: 'base', width: i(36), doorStyle, frame: 'face_frame' }).parts) {
+    const plans = [
+      ...(['slab', 'shaker', 'raised', 'glass'] as const).map(doorStyle => planCabinet({ type: 'base', width: i(36), doorStyle, frame: 'face_frame' })),
+      planCabinet({ type: 'base', width: i(36), corner: { style: 'diagonal', lazySusan: true } }),
+      planCabinet({ type: 'base', width: i(36), corner: { style: 'l_shaped', lazySusan: true, side: 'right' } }),
+    ];
+    for (const plan of plans) {
+      for (const part of plan.parts) {
         const mesh = cabinetPartMesh(part);
         expectClosed(mesh);
         await expect(validateSolidMesh(mesh), part.name).resolves.toBeUndefined();

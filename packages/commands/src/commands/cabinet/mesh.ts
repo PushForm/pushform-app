@@ -2,6 +2,7 @@
 // Copyright 2026 PushForm contributors
 import { MERGE_TOL } from '@pushform/core';
 import type { MeshData, Vec3 } from '@pushform/core';
+import { triangulatePolygon } from '@pushform/geom';
 
 export interface CutBox { readonly min: Vec3; readonly max: Vec3 }
 
@@ -76,5 +77,23 @@ export function meshLoftedPanel(length: number, width: number, rings: readonly P
   }
   const top = (rings.length - 1) * 4;
   tris.push(top, top + 1, top + 2, top, top + 2, top + 3);
+  return { verts: new Float64Array(verts), tris: new Uint32Array(tris), faceId: new Uint32Array(tris.length / 3) };
+}
+
+/** A flat panel with a polygon outline (counter-clockwise, in the xy plane) extruded along +z. */
+export function meshPrism(outline: readonly (readonly [number, number])[], thickness: number): MeshData {
+  const n = outline.length;
+  const verts: number[] = [];
+  for (const z of [0, thickness]) for (const [x, y] of outline) verts.push(x, y, z);
+  const caps = triangulatePolygon([outline.map(([x, y]) => [x, y])]).indices;
+  const tris: number[] = [];
+  for (let i = 0; i < caps.length; i += 3) {
+    const a = caps[i]!, b = caps[i + 1]!, c = caps[i + 2]!;
+    tris.push(a, c, b, a + n, b + n, c + n);
+  }
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    tris.push(i, j, j + n, i, j + n, i + n);
+  }
   return { verts: new Float64Array(verts), tris: new Uint32Array(tris), faceId: new Uint32Array(tris.length / 3) };
 }

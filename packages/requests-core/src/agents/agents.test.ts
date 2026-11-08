@@ -351,7 +351,8 @@ it('sends standard cabinets to add_cabinet and names what still gets built by ha
   expect(rules).toContain('with one add_cabinet operation; never assemble one from add_box parts');
   expect(rules).toContain('A run is several add_cabinet operations in one batch');
   expect(rules).toContain('say in one sentence what its used values chose');
-  expect(rules).toContain('Build by hand with the rules below only for corner cabinets, curved or angled work, furniture');
+  expect(rules).toContain('blind, diagonal and L-shaped corner cabinets, with one add_cabinet operation');
+  expect(rules).toContain('Build by hand with the rules below only for curved work, furniture');
   expect(rules).toContain('if it refused a cabinet, say so');
   expect(rules).toContain('with that cabinet so the whole stays one object');
 });

@@ -126,10 +126,12 @@ describe('planCabinet fronts', () => {
 
 describe('planCabinet parts', () => {
   const sweep: CabinetParams[] = [];
-  for (const type of ['base', 'wall', 'tall'] as const) for (const frame of ['frameless', 'face_frame'] as const) for (const doorStyle of ['slab', 'shaker', 'raised', 'none'] as const) for (const width of [i(15), i(24), i(36), i(48)]) {
+  for (const type of ['base', 'wall', 'tall'] as const) for (const frame of ['frameless', 'face_frame'] as const) for (const doorStyle of ['slab', 'shaker', 'raised', 'glass', 'none'] as const) for (const width of [i(15), i(24), i(36), i(48)]) {
     sweep.push({ type, width, frame, doorStyle });
     if (frame === 'face_frame') sweep.push({ type, width, frame, doorStyle, overlay: 'inset' }, { type, width, frame, doorStyle, overlay: 'full' });
     if (type === 'base') sweep.push({ type, width, frame, doorStyle, doors: 0, drawers: 4 });
+    if (doorStyle !== 'none' && type !== 'base') sweep.push({ type, width, frame, doorStyle, stackedDoors: true, height: i(type === 'wall' ? 42 : 84) });
+    if (doorStyle !== 'none' && width >= i(36)) sweep.push({ type, width, frame, doorStyle, corner: { style: 'blind', side: width > i(30) ? 'right' : 'left' } });
   }
 
   it('keeps every part positive, whole and proper over a sweep of parameters', () => {
@@ -149,7 +151,7 @@ describe('planCabinet parts', () => {
         const A = boxes[a]!, C = boxes[c]!;
         const overlap = [0, 1, 2].every(k => Math.min(A.b.max[k]!, C.b.max[k]!) - Math.max(A.b.min[k]!, C.b.min[k]!) > 1e-6);
         if (!overlap) continue;
-        const panelInFrame = A.p.assembly === C.p.assembly && [A.p.name, C.p.name].includes('Panel');
+        const panelInFrame = A.p.assembly === C.p.assembly && [A.p.name, C.p.name].some(n => n === 'Panel' || n === 'Glass');
         const backInSide = [A.p.name, C.p.name].includes('Back') && [A.p.name, C.p.name].some(n => n.endsWith(' Side'));
         const notchedSide = [A.p.name, C.p.name].includes('Toe Kick') && [A.p.name, C.p.name].some(n => n.endsWith(' Side'));
         expect(panelInFrame || backInSide || notchedSide, `${A.p.assembly}/${A.p.name} and ${C.p.assembly}/${C.p.name} in ${JSON.stringify(params)}`).toBe(true);
@@ -184,6 +186,142 @@ describe('planCabinet parts', () => {
   });
 });
 
+describe('planCabinet stacked and glass doors', () => {
+  it('stacks a short upper door over a tall lower one', () => {
+    const plan = planCabinet({ type: 'tall', width: i(24), stackedDoors: true, doors: 1 });
+    const upper = bounds(named(plan, 'Left Stile', 'Upper Door')), lower = bounds(named(plan, 'Left Stile', 'Lower Door'));
+    expect(upper.min[2]).toBeGreaterThan(lower.max[2]);
+    expect(upper.max[2] - upper.min[2]).toBeLessThan(lower.max[2] - lower.min[2]);
+    closeTo(upper.min[2] - lower.max[2], 1 / 8);
+    expect(plan.used.upperDoorHeight).toBeCloseTo(upper.max[2] - upper.min[2], 9);
+  });
+
+  it('honors the upper door height and puts two doors across each row', () => {
+    const plan = planCabinet({ type: 'wall', width: i(36), height: i(42), stackedDoors: true, doors: 2, upperDoorHeight: i(12), doorStyle: 'slab' });
+    const upper = bounds(named(plan, 'Slab', 'Upper Left Door'));
+    closeTo(upper.max[2] - upper.min[2], 12);
+    named(plan, 'Slab', 'Lower Right Door');
+  });
+
+  it('adds a rail and center stiles between stacked rows on a face frame', () => {
+    const plan = planCabinet({ type: 'tall', width: i(36), frame: 'face_frame', stackedDoors: true, doors: 2 });
+    named(plan, 'Middle Rail 1', 'Face Frame');
+    named(plan, 'Center Stile 1', 'Face Frame');
+    named(plan, 'Center Stile 2', 'Face Frame');
+  });
+
+  it('builds glass above a solid lower door', () => {
+    const plan = planCabinet({ type: 'wall', width: i(18), height: i(42), stackedDoors: true, doorStyle: 'shaker', upperDoorStyle: 'glass' });
+    const glass = named(plan, 'Glass', 'Upper Door');
+    expect(glass.role).toBe('glass');
+    closeTo(glass.size[2], 1 / 8);
+    named(plan, 'Panel', 'Lower Door');
+    expect(plan.parts.some(p => p.assembly === 'Lower Door' && p.name === 'Glass')).toBe(false);
+  });
+
+  it('seats the glass in a rabbet at the back of the frame', () => {
+    const plan = planCabinet({ type: 'wall', width: i(18), doorStyle: 'glass' });
+    const glass = bounds(named(plan, 'Glass', 'Door')), stile = bounds(named(plan, 'Left Stile', 'Door'));
+    closeTo(glass.min[1] - stile.min[1], 3 / 8);
+    const shape = named(plan, 'Left Stile', 'Door').shape;
+    expect(shape.kind === 'stock' && shape.cuts[0]!.max[2]).toBeCloseTo(i(3 / 4), 9);
+  });
+
+  it('makes a tall drawer front on a glass cabinet shaker, never glass', () => {
+    const plan = planCabinet({ type: 'base', width: i(24), doorStyle: 'glass', doors: 0, drawers: 2 });
+    named(plan, 'Panel', 'Drawer 2');
+    expect(plan.parts.some(p => p.name === 'Glass')).toBe(false);
+  });
+});
+
+describe('planCabinet corners', () => {
+  it('leaves a frameless blind section open behind a frame that matches the doors', () => {
+    const plan = planCabinet({ type: 'base', width: i(42), corner: { style: 'blind' } });
+    expect(plan.used.corner).toMatchObject({ style: 'blind', side: 'left' });
+    closeTo(plan.used.corner!.blindWidth!, 24);
+    expect(plan.used.doors).toBe(1);
+    const inner = named(plan, 'Inner Stile', 'Blind Frame');
+    closeTo(inner.size[1], 2.25);
+    expect(inner.role).toBe('show');
+    closeTo(bounds(inner).max[0], 24 - 1 / 16);
+    for (const name of ['Outer Stile', 'Top Rail', 'Bottom Rail']) named(plan, name, 'Blind Frame');
+    expect(plan.parts.some(p => p.assembly === 'Blind Frame' && (p.name === 'Panel' || p.name === 'Slab'))).toBe(false);
+    expect(plan.parts.some(p => p.name === 'Blind Panel')).toBe(false);
+    expect(bounds(named(plan, 'Left Stile', 'Door')).min[0]).toBeGreaterThan(bounds(inner).max[0]);
+  });
+
+  it('runs a face frame across the blind section with a stile beside the door', () => {
+    const plan = planCabinet({ type: 'wall', width: i(30), frame: 'face_frame', corner: { style: 'blind', side: 'right', blindWidth: i(12) } });
+    closeTo(named(plan, 'Right Stile', 'Face Frame').size[1], 1.5);
+    closeTo(named(plan, 'Left Stile', 'Face Frame').size[1], 1.5);
+    closeTo(named(plan, 'Top Rail', 'Face Frame').size[0], 30 - 3);
+    const blind = bounds(named(plan, 'Blind Stile', 'Face Frame'));
+    closeTo(blind.min[0], 18);
+    closeTo(blind.max[0], 19.5);
+  });
+
+  it('puts a diagonal door on the face joining the wing ends, at its angle', () => {
+    const plan = planCabinet({ type: 'wall', width: i(24), depth: i(12), corner: { style: 'diagonal' } });
+    expect(plan.used.corner!.returnWidth).toBeCloseTo(i(24), 9);
+    const stile = named(plan, 'Left Stile', 'Door');
+    expect(stile.y[0]).toBeCloseTo(Math.SQRT1_2, 9);
+    expect(stile.y[1]).toBeCloseTo(Math.SQRT1_2, 9);
+    expect(plan.parts.find(p => p.name === 'Bottom')!.shape.kind).toBe('prism');
+    expect(plan.used.doors).toBe(1);
+  });
+
+  it('never mirrors a part: every placement is a right-handed rotation', () => {
+    for (const style of ['diagonal', 'l_shaped'] as const) for (const side of ['left', 'right'] as const) for (const frame of ['frameless', 'face_frame'] as const) {
+      for (const part of planCabinet({ type: 'base', width: i(36), frame, corner: { style, side } }).parts) {
+        const [a, b, c] = [part.x, part.y, part.z];
+        const det = a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0]);
+        expect(det, `${style} ${side} ${frame} ${part.name}`).toBeCloseTo(1, 9);
+      }
+    }
+  });
+
+  it('gives an L-shaped corner a door on each face that clears the other', () => {
+    const plan = planCabinet({ type: 'base', width: i(36), corner: { style: 'l_shaped' } });
+    expect(plan.used.doors).toBe(2);
+    const front = bounds(named(plan, 'Left Stile', 'Front Door'));
+    expect(named(plan, 'Left Stile', 'Side Door').x).toEqual([0, 0, 1]);
+    expect(front.min[0]).toBeGreaterThan(i(23.25 + 3 / 4));
+    named(plan, 'Front Toe Kick');
+    named(plan, 'Side Toe Kick');
+  });
+
+  it('keeps stacked doors on an L-shaped corner as separate doors', () => {
+    const plan = planCabinet({ type: 'tall', width: i(36), stackedDoors: true, corner: { style: 'l_shaped' } });
+    for (const door of ['Upper Front Door', 'Lower Front Door', 'Upper Side Door', 'Lower Side Door']) named(plan, 'Panel', door);
+  });
+
+  it('mirrors a right corner across the width', () => {
+    const left = planCabinet({ type: 'base', width: i(36), corner: { style: 'l_shaped' } });
+    const right = planCabinet({ type: 'base', width: i(36), corner: { style: 'l_shaped', side: 'right' } });
+    expect(bounds(named(right, 'Back Wing Side')).max[0]).toBeCloseTo(i(3 / 4), 9);
+    expect(bounds(named(left, 'Back Wing Side')).min[0]).toBeCloseTo(i(36 - 3 / 4), 9);
+    named(left, 'Left Wing Side');
+    named(right, 'Right Wing Side');
+  });
+
+  it('replaces shelves with trays, round in a diagonal and quarter-cut in an L', () => {
+    const diagonal = planCabinet({ type: 'base', width: i(36), corner: { style: 'diagonal', lazySusan: true } });
+    expect(diagonal.used.shelves).toBe(2);
+    const tray = named(diagonal, 'Lazy Susan 1');
+    expect(tray.shape.kind === 'prism' && tray.shape.round).toBe(true);
+    expect(tray.size[0]).toBeCloseTo(tray.size[1], 6);
+    expect(diagonal.parts.some(p => p.name.startsWith('Shelf'))).toBe(false);
+    const pie = planCabinet({ type: 'base', width: i(36), corner: { style: 'l_shaped', lazySusan: true } }).parts.find(p => p.name === 'Lazy Susan 1')!;
+    expect(pie.shape.kind === 'prism' && pie.shape.outline.length).toBeLessThan(48);
+  });
+
+  it('marks finished ends by the side of the room they face', () => {
+    const plan = planCabinet({ type: 'base', width: i(36), finishedEnds: 'right', corner: { style: 'diagonal' } });
+    expect(named(plan, 'Back Wing Side').finishedOutside).toBe(true);
+    expect(named(plan, 'Left Wing Side').finishedOutside).toBe(false);
+  });
+});
+
 describe('planCabinet refusals', () => {
   it('names the fix for contradictions', () => {
     expect(refused({ type: 'base', width: i(24), overlay: 'inset' })).toMatchObject({ code: 'invalid_operation', message: expect.stringContaining('face_frame') });
@@ -193,6 +331,15 @@ describe('planCabinet refusals', () => {
     expect(refused({ type: 'base', width: i(24), sinkFront: true, drawers: 2 }).code).toBe('invalid_operation');
     expect(refused({ type: 'base', width: i(24), doors: 0, drawers: 3, shelves: 1 }).code).toBe('invalid_operation');
     expect(refused({ type: 'base', width: i(24), finish: { paint: '#ffffff', stain: 'x' } }).code).toBe('invalid_operation');
+    expect(refused({ type: 'base', width: i(24), stackedDoors: true }).code).toBe('invalid_operation');
+    expect(refused({ type: 'wall', width: i(24), upperDoorHeight: i(12) }).code).toBe('invalid_operation');
+    expect(refused({ type: 'tall', width: i(24), stackedDoors: true, doorStyle: 'none' }).code).toBe('invalid_operation');
+    expect(refused({ type: 'base', width: i(36), corner: { style: 'diagonal' }, drawers: 1 }).code).toBe('invalid_operation');
+    expect(refused({ type: 'base', width: i(36), corner: { style: 'l_shaped' }, doors: 1 }).code).toBe('invalid_operation');
+    expect(refused({ type: 'base', width: i(36), corner: { style: 'blind', returnWidth: i(36) } }).code).toBe('invalid_operation');
+    expect(refused({ type: 'base', width: i(36), corner: { style: 'diagonal', blindWidth: i(12) } }).code).toBe('invalid_operation');
+    expect(refused({ type: 'base', width: i(36), corner: { style: 'blind', lazySusan: true } }).code).toBe('invalid_operation');
+    expect(refused({ type: 'base', width: i(36), corner: { style: 'diagonal', lazySusan: true, returnWidth: i(42) } }).code).toBe('invalid_operation');
   });
 
   it('steers sizes it cannot build to the other operations', () => {
@@ -202,5 +349,11 @@ describe('planCabinet refusals', () => {
     expect(refused({ type: 'wall', width: i(9), doors: 2 }).code).toBe('invalid_geometry');
     expect(refused({ type: 'wall', width: i(24), height: i(12), drawers: 2, doors: 1 }).code).toBe('invalid_geometry');
     expect(refused({ type: 'wall', width: i(24), height: i(12), shelves: 8 }).code).toBe('invalid_geometry');
+    expect(refused({ type: 'wall', width: i(24), height: i(14), stackedDoors: true }).code).toBe('invalid_geometry');
+    const corner = refused({ type: 'base', width: i(30), corner: { style: 'l_shaped' } });
+    expect(corner.code).toBe('invalid_geometry');
+    expect(corner.message).toContain('add_box');
+    expect(refused({ type: 'base', width: i(24), corner: { style: 'blind', blindWidth: i(20) } }).code).toBe('invalid_geometry');
+    expect(refused({ type: 'base', width: i(30), corner: { style: 'blind', blindWidth: i(6) } }).message).toContain('too narrow for its frame');
   });
 });

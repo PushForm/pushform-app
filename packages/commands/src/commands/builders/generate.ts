@@ -34,7 +34,7 @@ export interface BuilderGenerateResult {
 export function builderPartMesh(part: BuilderPart): MeshData {
   const { shape } = part;
   if (shape.kind === 'lofted') return meshLoftedPanel(part.size[0], part.size[1], shape.rings);
-  if (shape.kind === 'prism') return meshPrism(shape.outline, part.size[2]);
+  if (shape.kind === 'prism') return meshPrism(shape.outline, part.size[2], shape.holes);
   return meshStock(part.size, shape.cuts);
 }
 

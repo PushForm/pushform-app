@@ -48,6 +48,12 @@ describe('cabinet part meshes', () => {
     expect(meshSignedVolume(mesh)).toBeCloseTo(9, 9);
   });
 
+  it('extrudes an outline with a hole into a closed solid of the right volume', () => {
+    const mesh = meshPrism([[0, 0], [4, 0], [4, 4], [0, 4]], 2, [[[1, 1], [1, 2], [2, 2], [2, 1]]]);
+    expectClosed(mesh);
+    expect(meshSignedVolume(mesh)).toBeCloseTo(30, 9);
+  });
+
   it('makes every part of every door style a solid the kernel accepts', async () => {
     const kernel = new KernelClient(new InlineBackend());
     kernels.push(kernel);

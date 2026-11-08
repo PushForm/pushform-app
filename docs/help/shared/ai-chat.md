@@ -74,7 +74,7 @@ Wall and tall cabinets can have stacked doors, such as glass above and shaker be
 
 The agent can also add a filler strip to close a gap beside a cabinet, or a finished end panel for the exposed side of a run, in the same paint or stain as the doors, for example “Add a 3″ filler between this cabinet and the wall.” A base end panel is notched for the toe kick unless you say otherwise.
 
-Every part is its own named component, and each door and drawer is a group, so you can ask for changes to a single part afterwards. The agent builds furniture and other unusual shapes piece by piece instead, and hardware and countertops are added separately. Changing a cabinet's parameters later doesn't rebuild it; ask for the change and the agent edits its parts, or generates a new one.
+Every part is named, and each door and drawer is a group, so you can ask for changes to a single part afterwards. Identical parts, such as matching shelves, share one component, so changing one changes them all unless you ask otherwise. The agent builds furniture and other unusual shapes piece by piece instead, and adds hardware separately. Changing a cabinet's parameters later doesn't rebuild it; ask for the change and the agent edits its parts, or generates a new one.
 
 ## Generate a whole kitchen
 

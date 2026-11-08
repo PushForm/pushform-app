@@ -13,7 +13,7 @@ export type Pt = readonly [number, number];
 export type BuilderShape =
   | { readonly kind: 'stock'; readonly cuts: readonly CutBox[] }
   | { readonly kind: 'lofted'; readonly rings: readonly PanelRing[] }
-  | { readonly kind: 'prism'; readonly outline: readonly Pt[]; readonly round: boolean };
+  | { readonly kind: 'prism'; readonly outline: readonly Pt[]; readonly round: boolean; readonly holes?: readonly (readonly Pt[])[] };
 
 /** One solid. Its local axes are x along its length and grain, y across its width and z through its thickness. */
 export interface BuilderPart {
@@ -68,6 +68,7 @@ export interface PartOptions {
   readonly cuts?: readonly CutBox[];
   readonly rings?: readonly PanelRing[];
   readonly plusZRole?: string | undefined;
+  readonly zeroFaceRole?: string | undefined;
 }
 
 /**
@@ -101,15 +102,16 @@ export class Builder {
     this.parts.push({
       name, assembly, role, size: [along(u), along(v), along(n)],
       shape: options.rings ? { kind: 'lofted', rings: options.rings } : { kind: 'stock', cuts: options.cuts ?? [] },
-      origin, x: this.place(u), y: this.place(v), z: this.place(n), plusZRole: options.plusZRole,
+      origin, x: this.place(u), y: this.place(v), z: this.place(n), plusZRole: options.plusZRole, zeroFaceRole: options.zeroFaceRole,
     });
   }
 
-  /** Add a flat part with a counter-clockwise outline given in the plan's coordinates. */
-  addOutline(name: string, role: string, outline: readonly Pt[], z: Range, round = false): void {
+  /** Add a flat part with a counter-clockwise outline given in the plan's coordinates, and optional clockwise holes through it. */
+  addOutline(name: string, role: string, outline: readonly Pt[], z: Range, round = false, holes: readonly (readonly Pt[])[] = []): void {
     const minX = Math.min(...outline.map(p => p[0])), minY = Math.min(...outline.map(p => p[1]));
-    const local = outline.map(([x, y]) => [x - minX, y - minY] as const);
+    const shift = (ring: readonly Pt[]): Pt[] => ring.map(([x, y]) => [x - minX, y - minY] as const);
+    const local = shift(outline);
     const size: Vec3 = [Math.max(...local.map(p => p[0])), Math.max(...local.map(p => p[1])), span(z)];
-    this.parts.push({ name, assembly: null, role, size, shape: { kind: 'prism', outline: local, round }, origin: [minX, minY, z.from], x: AXES['+x'], y: AXES['+y'], z: AXES['+z'] });
+    this.parts.push({ name, assembly: null, role, size, shape: { kind: 'prism', outline: local, round, ...(holes.length ? { holes: holes.map(shift) } : {}) }, origin: [minX, minY, z.from], x: AXES['+x'], y: AXES['+y'], z: AXES['+z'] });
   }
 }

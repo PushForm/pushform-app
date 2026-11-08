@@ -80,20 +80,25 @@ export function meshLoftedPanel(length: number, width: number, rings: readonly P
   return { verts: new Float64Array(verts), tris: new Uint32Array(tris), faceId: new Uint32Array(tris.length / 3) };
 }
 
-/** A flat panel with a polygon outline (counter-clockwise, in the xy plane) extruded along +z. */
-export function meshPrism(outline: readonly (readonly [number, number])[], thickness: number): MeshData {
-  const n = outline.length;
+/** A flat panel with a polygon outline (counter-clockwise, in the xy plane) extruded along +z, with clockwise holes through it. */
+export function meshPrism(outline: readonly (readonly [number, number])[], thickness: number, holes: readonly (readonly (readonly [number, number])[])[] = []): MeshData {
+  const rings = [outline, ...holes];
+  const flat = rings.flat(), n = flat.length;
   const verts: number[] = [];
-  for (const z of [0, thickness]) for (const [x, y] of outline) verts.push(x, y, z);
-  const caps = triangulatePolygon([outline.map(([x, y]) => [x, y])]).indices;
+  for (const z of [0, thickness]) for (const [x, y] of flat) verts.push(x, y, z);
+  const caps = triangulatePolygon(rings.map(ring => ring.map(([x, y]) => [x, y]))).indices;
   const tris: number[] = [];
   for (let i = 0; i < caps.length; i += 3) {
     const a = caps[i]!, b = caps[i + 1]!, c = caps[i + 2]!;
     tris.push(a, c, b, a + n, b + n, c + n);
   }
-  for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n;
-    tris.push(i, j, j + n, i, j + n, i + n);
+  let start = 0;
+  for (const ring of rings) {
+    for (let k = 0; k < ring.length; k++) {
+      const i = start + k, j = start + (k + 1) % ring.length;
+      tris.push(i, j, j + n, i, j + n, i + n);
+    }
+    start += ring.length;
   }
   return { verts: new Float64Array(verts), tris: new Uint32Array(tris), faceId: new Uint32Array(tris.length / 3) };
 }

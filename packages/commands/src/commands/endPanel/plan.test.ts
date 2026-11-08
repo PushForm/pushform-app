@@ -25,7 +25,9 @@ describe('planEndPanel', () => {
   it('notches a floor panel at the front bottom for the toe kick', () => {
     const cuts = notch(planEndPanel({}));
     expect(cuts).toHaveLength(1);
-    expect(cuts[0]).toEqual({ min: [0, 0, 0], max: [4 * inch, 3 * inch, 0.75 * inch] });
+    expect(cuts[0]!.max[0]).toBeCloseTo(4 * inch, 9);
+    expect(cuts[0]!.max[1]).toBeCloseTo(3.75 * inch, 9);
+    expect(cuts[0]!.max[2]).toBeCloseTo(0.75 * inch, 9);
     expect(panel(planEndPanel({})).x).toEqual([0, 0, 1]);
   });
 
@@ -33,7 +35,7 @@ describe('planEndPanel', () => {
     expect(notch(planEndPanel({ toeKick: false }))).toHaveLength(0);
     const cuts = notch(planEndPanel({ toeKick: { height: 3 * inch } }));
     expect(cuts[0]!.max[0]).toBeCloseTo(3 * inch, 9);
-    expect(cuts[0]!.max[1]).toBeCloseTo(3 * inch, 9);
+    expect(cuts[0]!.max[1]).toBeCloseTo(3.75 * inch, 9);
   });
 
   it('hangs a wall panel with no notch, twelve inches deep', () => {

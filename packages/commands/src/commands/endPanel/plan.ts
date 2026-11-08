@@ -38,7 +38,7 @@ export function planEndPanel(p: EndPanelParams): BuilderPlan {
 
   const notched = type !== 'wall' && p.toeKick !== false;
   const custom = typeof p.toeKick === 'object' ? p.toeKick : undefined;
-  const notchHeight = notched ? custom?.height ?? D.TOE_KICK_HEIGHT : 0, notchDepth = notched ? custom?.depth ?? D.TOE_KICK_DEPTH : 0;
+  const notchHeight = notched ? custom?.height ?? D.TOE_KICK_HEIGHT : 0, notchDepth = notched ? custom?.depth ?? (p.depth === undefined ? D.TOE_KICK_DEPTH + DOOR_OVERHANG : D.TOE_KICK_DEPTH) : 0;
   if (notched && (notchHeight > height - MIN_ABOVE_NOTCH + LENGTH_TOL || notchDepth > depth - MIN_BEHIND_NOTCH + LENGTH_TOL))
     throw unsound('The toe kick notch must leave at least 6 in of panel above it and 3 in behind it. Make it smaller or remove toeKick.');
 

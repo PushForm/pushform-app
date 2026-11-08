@@ -74,6 +74,18 @@ describe('planKitchenRun', () => {
     expect(counter.at[1]).toBeLessThan(-i(1.75));
   });
 
+  it('angles the countertop to follow a diagonal corner, with the same overhang', () => {
+    for (const side of ['left', 'right'] as const) {
+      const top = child(planKitchenRun(l('diagonal', side)), 'Countertop');
+      expect(top.used).toMatchObject({ leg: { chamfer: expect.closeTo(i(36 + 1.75 * (Math.SQRT2 - 1) - 25), 9) } });
+      const shape = top.parts[0]!.shape;
+      expect(shape.kind).toBe('prism');
+      if (shape.kind === 'prism') expect(shape.outline).toHaveLength(7);
+    }
+    expect(child(planKitchenRun(l('l_shaped', 'left')), 'Countertop').parts[0]!.shape.kind).toBe('stock');
+    expect(child(planKitchenRun(l('blind', 'left')), 'Countertop').parts[0]!.shape.kind).toBe('stock');
+  });
+
   it('refuses a sink on the return, a narrow blind corner, and an empty base', () => {
     expect(refused({ base: [{ width: i(24) }], corner: { style: 'diagonal', returnBase: [{ width: i(36), sinkFront: true }] } }).code).toBe('invalid_operation');
     expect(refused({ base: [{ width: i(24) }], corner: { style: 'blind', width: i(36), returnBase: [{ width: i(24) }] } }).code).toBe('invalid_geometry');

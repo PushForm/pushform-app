@@ -69,7 +69,7 @@ describe('the build operation', () => {
   it('refuses parameters the builder does not accept, changing nothing', async () => {
     const s = setup();
     const revision = s.api.revision;
-    await expect(s.api.apply({ expectedRevision: revision, label: 'x', operations: [{ op: 'build', builder: MODEL_BUILDER_KEYS[0], params: {} }] })).rejects.toBeInstanceOf(ModelApiFailure);
+    await expect(s.api.apply({ expectedRevision: revision, label: 'x', operations: [{ op: 'build', builder: 'countertop', params: {} }] })).rejects.toBeInstanceOf(ModelApiFailure);
     expect(s.api.revision).toBeGreaterThanOrEqual(revision);
     expect(s.root().instances.size).toBe(0);
   });

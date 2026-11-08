@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import { LENGTH_TOL } from '@pushform/core';
 import type { Vec3 } from '@pushform/core';
 import { Builder, BuilderPlanError, range } from '../builders/parts';
 import type { BuilderPlan, MaterialSpec } from '../builders/parts';
@@ -82,7 +83,7 @@ export function planKitchenRun(p: KitchenRunParams): BuilderPlan {
       const atX = flipped ? overall - widthHere : 0;
       if (blind) {
         const blindWidth = widthHere - D.DEFAULT_BLIND_DOOR;
-        if (blindWidth < row.depth + D.STOCK - 1e-9) throw new BuilderPlanError('invalid_geometry', `A ${Math.round(widthHere / 0.0254)} in blind corner leaves too little room for the cabinets returning into it; widen it.`);
+        if (blindWidth < row.depth + D.STOCK - LENGTH_TOL) throw new BuilderPlanError('invalid_geometry', `A ${Math.round(widthHere / 0.0254)} in blind corner leaves too little room for the cabinets returning into it; widen it.`);
         children.push(planCabinet({ ...shared, type: row.type, width: widthHere, at: [atX, frontY, row.z], name: `${label} Corner`, corner: { style: 'blind', side, blindWidth }, ...(row.height ? { height: row.height } : {}) }));
         legStart = frontY - D.STOCK - filler;
       } else {
@@ -123,6 +124,8 @@ export function planKitchenRun(p: KitchenRunParams): BuilderPlan {
     const counter = { ...(p.countertopFinish ? { finish: p.countertopFinish } : {}), ...(p.backsplash !== undefined ? { backsplash: p.backsplash } : {}) };
     // Spans of the main wall, left to right, broken at a range or refrigerator.
     interface Span { from: number; to: number; cutouts: { x: number; width: number }[] }
+    // Over a diagonal corner the top's front runs parallel to the angled doors with the same overhang as along the walls.
+    const diagonalChamfer = baseCorner + COUNTER_FRONT * (Math.SQRT2 - 1) - counterDepth;
     const spans: Span[] = [];
     let open: Span | null = corner && !flipped ? { from: 0, to: baseCorner, cutouts: [] } : null;
     let x = corner && !flipped ? baseCorner : 0;
@@ -152,7 +155,7 @@ export function planKitchenRun(p: KitchenRunParams): BuilderPlan {
         width: span.to - span.from, depth: counterDepth, ...counter, name: spans.length > 1 ? `Countertop ${i + 1}` : 'Countertop',
         at: [span.from, frontY - (onCorner ? legLength : 0), z],
         cutouts: span.cutouts.map(c => ({ x: c.x - span.from, width: c.width })),
-        ...(onCorner ? { leg: { side, length: legLength, depth: counterDepth } } : {}),
+        ...(onCorner ? { leg: { side, length: legLength, depth: counterDepth, ...(corner?.style === 'diagonal' ? { chamfer: diagonalChamfer } : {}) } } : {}),
       }));
     });
     if (corner && firstBreak >= 0) {

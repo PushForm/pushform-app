@@ -82,7 +82,9 @@ export class NativeKernelBackend implements KernelBackend {
   private async pushPull(req: PushPullRequest | PushPullPreviewRequest): Promise<PushPullResult | PushPullPreview> {
     const epoch = this.epoch;
     if (this.disposed) throw new KernelError('Aborted', 'NativeKernelBackend is disposed');
-    if (await this.isAvailable()) {
+    const available = await this.isAvailable();
+    if (epoch !== this.epoch || this.disposed) throw new KernelError('Aborted', 'Kernel worker aborted');
+    if (available) {
       try {
         return await sendWithReupload(req, (q) => this.sendNative(q as NativeRequest) as never, this.provider);
       } catch (cause) {

@@ -58,24 +58,76 @@ fn triangle_planes(verts: &[f64], tris: &[u32]) -> TriPlanes {
   TriPlanes { normals, offsets, areas }
 }
 
+/// A triangle's neighbours in the order its edges are met: up to three stored inline, any more in `overflow`.
+struct Neighbors {
+  inline: Vec<u32>,
+  count: Vec<u8>,
+  overflow: IntMap<u32, Vec<u32>>,
+}
+
+impl Neighbors {
+  fn new(num_tris: usize) -> Self {
+    Self { inline: vec![0; num_tris * 3], count: vec![0; num_tris], overflow: IntMap::default() }
+  }
+
+  fn push(&mut self, t: u32, neighbor: u32) {
+    let c = self.count[t as usize];
+    if c < 3 {
+      self.inline[t as usize * 3 + c as usize] = neighbor;
+      self.count[t as usize] = c + 1;
+    } else {
+      self.overflow.entry(t).or_default().push(neighbor);
+    }
+  }
+
+  fn for_each(&self, t: u32, mut f: impl FnMut(u32)) {
+    let c = self.count[t as usize] as usize;
+    for k in 0..c {
+      f(self.inline[t as usize * 3 + k]);
+    }
+    if c == 3 {
+      if let Some(rest) = self.overflow.get(&t) {
+        for &u in rest {
+          f(u);
+        }
+      }
+    }
+  }
+}
+
+const NO_TRIANGLE: u32 = u32::MAX;
+
 /// For each triangle, the triangles sharing an edge with it, in the order the edges are met.
-fn triangle_neighbors(tris: &[u32], num_verts: u64) -> Vec<Vec<u32>> {
+fn triangle_neighbors(tris: &[u32], num_verts: u64) -> Neighbors {
   let n = tris.len() / 3;
-  let mut by_edge: IntMap<u64, Vec<u32>> = IntMap::with_capacity_and_hasher(n * 2, Default::default());
-  let mut neighbors: Vec<Vec<u32>> = vec![Vec::new(); n];
+  // Every edge of a manifold mesh joins two triangles; `extra_on_edge` keeps any further ones in order.
+  let mut by_edge: IntMap<u64, (u32, u32)> = IntMap::with_capacity_and_hasher(n * 2, Default::default());
+  let mut extra_on_edge: IntMap<u64, Vec<u32>> = IntMap::default();
+  let mut neighbors = Neighbors::new(n);
   for t in 0..n {
+    let t32 = t as u32;
     for k in 0..3 {
       let (a, b) = (tris[t * 3 + k] as u64, tris[t * 3 + (k + 1) % 3] as u64);
       let key = a.min(b) * num_verts + a.max(b);
-      let list = by_edge.entry(key).or_default();
-      if list.is_empty() {
-        list.push(t as u32);
+      let entry = by_edge.entry(key).or_insert((NO_TRIANGLE, NO_TRIANGLE));
+      let (first, second) = *entry;
+      if first == NO_TRIANGLE {
+        entry.0 = t32;
+        continue;
+      }
+      neighbors.push(t32, first);
+      neighbors.push(first, t32);
+      if second == NO_TRIANGLE {
+        entry.1 = t32;
       } else {
-        for &u in list.iter() {
-          neighbors[t].push(u);
-          neighbors[u as usize].push(t as u32);
+        neighbors.push(t32, second);
+        neighbors.push(second, t32);
+        let rest = extra_on_edge.entry(key).or_default();
+        for &u in rest.iter() {
+          neighbors.push(t32, u);
+          neighbors.push(u, t32);
         }
-        list.push(t as u32);
+        rest.push(t32);
       }
     }
   }
@@ -83,7 +135,7 @@ fn triangle_neighbors(tris: &[u32], num_verts: u64) -> Vec<Vec<u32>> {
 }
 
 /// Grows faces from seeds taken in decreasing area, so each group's plane comes from its most reliable triangle.
-pub fn group_coplanar(verts: &[f64], tris: &[u32]) -> Vec<Vec<u32>> {
+pub fn group_coplanar(verts: &[f64], tris: &[u32]) -> (Vec<Vec<u32>>, Vec<f64>) {
   let tol = COPLANAR_TOL;
   let n = tris.len() / 3;
   let TriPlanes { normals, offsets, areas } = triangle_planes(verts, tris);
@@ -117,17 +169,17 @@ pub fn group_coplanar(verts: &[f64], tris: &[u32]) -> Vec<Vec<u32>> {
     group_of[s] = g;
     while let Some(t) = stack.pop() {
       members.push(t);
-      for &u in &neighbors[t as usize] {
+      neighbors.for_each(t, |u| {
         if group_of[u as usize] != -1 || !fits(u as usize) {
-          continue;
+          return;
         }
         group_of[u as usize] = g;
         stack.push(u);
-      }
+      });
     }
     groups.push(members);
   }
-  groups
+  (groups, areas)
 }
 
 #[derive(Clone, Copy)]
@@ -178,9 +230,8 @@ fn origins_of(read: &ReadMesh, members: &[u32], areas: &[f64]) -> Vec<WeightedOr
 /// Group `read` into faces and assign ids. `choose_id` proposes a kept id for a group from its origins (largest first);
 /// the first group claiming an id wins, later claimants and groups with none get fresh ids.
 pub fn normalize_triangles(read: &ReadMesh, next_face_id: i64, choose_id: impl Fn(&[WeightedOrigin]) -> Option<u32>) -> Normalized {
-  let groups = group_coplanar(&read.verts, &read.tris);
-  let planes = triangle_planes(&read.verts, &read.tris);
-  let origins_per_group: Vec<Vec<WeightedOrigin>> = groups.iter().map(|m| origins_of(read, m, &planes.areas)).collect();
+  let (groups, areas) = group_coplanar(&read.verts, &read.tris);
+  let origins_per_group: Vec<Vec<WeightedOrigin>> = groups.iter().map(|m| origins_of(read, m, &areas)).collect();
   let mut claimed: std::collections::HashSet<u32, BuildHasherDefault<IntHasher>> = Default::default();
   let mut ids: Vec<Option<u32>> = vec![None; groups.len()];
   let mut max_claimed = next_face_id - 1;

@@ -172,6 +172,17 @@ function largestUpFace(mesh: MeshData): number {
   return [...area.entries()].sort((x, y) => y[1] - x[1] || x[0] - y[0])[0]![0];
 }
 
+/** A base and an overhang joined by a post on the left half, as in the kernel's overhang fixture. */
+async function overhangBody(): Promise<MeshData> {
+  await wasm.ensureBody(902, 1, meshBox([0, 0, 0], [2, 1, 1]));
+  await wasm.ensureBody(903, 1, meshBox([0, 0, 1], [1, 1, 1.5]));
+  await wasm.ensureBody(904, 1, meshBox([0, 0, 1.5], [2, 1, 2.5]));
+  const u1 = await wasm.boolean({ op: 'add', a: { bodyId: 902, version: 1 }, b: { bodyId: 903, version: 1 }, nextFaceId: 6 });
+  await wasm.ensureBody(905, 1, u1.components[0]!.mesh);
+  const u2 = await wasm.boolean({ op: 'add', a: { bodyId: 905, version: 1 }, b: { bodyId: 904, version: 1 }, nextFaceId: u1.nextFaceId });
+  return u2.components[0]!.mesh;
+}
+
 const unitTop = (polygon: PolygonsWithHoles, whole: boolean): PushPullRegion => topRegion([0.5, 0.5, 1], polygon, 1, whole);
 const box = (): MeshData => meshBox([0, 0, 0], [1, 1, 1]);
 
@@ -190,6 +201,7 @@ const cases: Case[] = [
   { name: 'newBody mode extrudes a standalone solid', mesh: box, region: () => unitTop(square(0, 0, 0.5), false), distance: 0.25, mode: 'newBody', nextFaceId: 1 },
   { name: 'split the body by pushing a slot across it', mesh: () => meshBox([0, 0, 0], [3, 1, 1]), region: () => ({ faceId: 1, basis: planeBasis([1.5, 0.5, 1], [0, 0, 1]), polygon: [[[-0.25, -2], [0.25, -2], [0.25, 2], [-0.25, 2]]], regionIsWholeFace: false }), distance: -1.5, nextFaceId: 6 },
   { name: 'pull a stepped body face up to merge coplanar', mesh: lShapedBody, region: () => topRegion([1.5, 0.5, 1], square(0, 0, 1), 1, true), distance: 1, nextFaceId: 8 },
+  { name: 'pull into the underside of an overhang and fuse', mesh: overhangBody, region: () => topRegion([1.5, 0.5, 1], square(0, 0, 1), 1, true), distance: 0.5, nextFaceId: 40 },
   { name: 'rotated box far from the origin: pull a region', mesh: () => rotatedBox().mesh, region: () => rotatedRegion(square(0, 0, 0.2), false), distance: 0.5, nextFaceId: 6 },
   { name: 'rotated box: push a blind hole', mesh: () => rotatedBox().mesh, region: () => rotatedRegion(square(0, 0, 0.3), false), distance: -0.4, nextFaceId: 6 },
   { name: 'rotated box: pull the whole face', mesh: () => rotatedBox().mesh, region: () => rotatedRegion(square(0, 0, 1), true), distance: 0.7, nextFaceId: 6 },

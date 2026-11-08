@@ -57,7 +57,7 @@ describe('fromTriangles', () => {
 });
 
 describe('pushPull', () => {
-  it('pulls the whole top face of a unit box by 1: one 6-face body of volume 2, top keeps id 1', async () => {
+  it('pulls the whole top face of a unit box by 1 by moving it: one 6-face body of volume 2, top keeps id 1', async () => {
     const body = await uploadBox(client, newBodyId(), [0, 0, 0], [1, 1, 1]);
     const r = await client.pushPull({
       body,
@@ -76,7 +76,9 @@ describe('pushPull', () => {
       if (c.mesh.faceId[t] !== 1) continue;
       for (let k = 0; k < 3; k++) expect(c.mesh.verts[c.mesh.tris[t * 3 + k]! * 3 + 2]).toBeCloseTo(2, 6);
     }
-    expect(c.faceOrigin.get(1)).toEqual([{ runId: r.toolRunId, faceId: 1 }]);
+    // every face around the top is square to it, so the top moved and the sides stretched
+    expect(r.moved).toBe(true);
+    expect(c.faceOrigin.get(1)).toEqual([{ runId: r.bodyRunId, faceId: 1 }]);
     await expectManifold(client, c.mesh);
   });
 

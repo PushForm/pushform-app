@@ -251,6 +251,11 @@ export interface PushPullResult extends ComponentsResult {
   sideFaceForBoundaryEdge: Record<number, number>;
   bodyRunId: number;
   toolRunId: number;
+  /**
+   * True when the face was moved along its normal, stretching or shortening the faces around it,
+   * rather than cut: the solid keeps its faces, and each edge joins the same faces as before.
+   */
+  moved?: boolean;
 }
 export interface BooleanResult extends ComponentsResult {
   /** `split` only: the components outside the cutter (`components` holds the inside). */

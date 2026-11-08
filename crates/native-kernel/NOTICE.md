@@ -6,9 +6,9 @@ This file lists software compiled into PushForm desktop builds made with the `na
 sources are not in this repository, so their license texts are reproduced here. The Rust crates (manifold-csg and its
 dependencies) are listed by cargo-about from the crate's manifest.
 
-## Manifold 3.5.3
+## Manifold 3.5.4
 
-https://github.com/elalish/manifold (the same version, 3.5.4 in the `manifold-3d` package, runs in WebAssembly in the web app)
+https://github.com/elalish/manifold (the same version as the `manifold-3d` package that runs in WebAssembly in the web app)
 
 Apache License
                            Version 2.0, January 2004

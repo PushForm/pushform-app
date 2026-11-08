@@ -497,8 +497,9 @@ export function planCabinet(p: CabinetParams): CabinetPlan {
     if (diagonal) {
       const builder = face(D0, C0), W = diagonalLength;
       const plane: FrontPlane = {
-        builder, width: W, doors, outerLeft: true, outerRight: true,
-        opening: faceFrame ? range(FW, W - FW) : range(D.REVEAL, W - D.REVEAL),
+        // A door stands proud of the angled face, so it stops short of each end to clear the doors beside the cabinet.
+        builder, width: W, doors, outerLeft: false, outerRight: false,
+        opening: faceFrame ? range(FW, W - FW) : range(t + D.REVEAL, W - t - D.REVEAL),
         frame: faceFrame ? { assembly: 'Face Frame', width: W, leftStile: FW, rightStile: FW } : null,
       };
       addFrame(plane);

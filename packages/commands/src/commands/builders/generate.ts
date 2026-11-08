@@ -13,6 +13,7 @@ import { edgeAngleDeg } from '../edges';
 import { createDefinition, newInstance, uniqueDefinitionName } from '../groups';
 import { grainMapping } from '../materials';
 import { meshLoftedPanel, meshPrism, meshStock } from './mesh';
+import { materialKey } from './parts';
 import type { BuilderPart, BuilderPlan } from './parts';
 
 export interface BuilderGeneratedPart {
@@ -84,12 +85,12 @@ export const builderGenerate = defineCommand({
     let result: BuilderGenerateResult | null = null;
     host.edit(`Generate ${plan.name}`, (draft) => {
       const state = draft as unknown as DocumentState;
-      const materialOf = (role: string): Material | undefined => {
-        const id = materials[role];
-        return id === undefined ? undefined : state.materials.get(id as never);
-      };
-
       const buildPlan = (current: BuilderPlan, into: Draft<EntityContainer> | EntityContainer, parentPath: number[]): BuilderGenerateResult => {
+        const materialOf = (role: string): Material | undefined => {
+          const spec = current.materials[role];
+          const id = spec ? materials[materialKey(spec)] : undefined;
+          return id === undefined ? undefined : state.materials.get(id as never);
+        };
         const root = createDefinition(draft, { name: uniqueDefinitionName(state, current.name), isGroup: true });
         const rootContainer = root.entities as unknown as Draft<EntityContainer>;
         const turn = current.rotationDeg ? m4rotationAxis([0, 0, 1], (current.rotationDeg * Math.PI) / 180) : null;

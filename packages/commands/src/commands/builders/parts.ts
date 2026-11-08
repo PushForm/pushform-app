@@ -37,6 +37,9 @@ export interface BuilderPart {
 /** A material a plan needs: a library key, or a paint color reused by name across a model. */
 export type MaterialSpec = { readonly library: string } | { readonly paint: string };
 
+/** The same material gets the same key, wherever in a plan's tree it is named. */
+export const materialKey = (spec: MaterialSpec): string => ('library' in spec ? `library:${spec.library}` : `paint:${spec.paint}`);
+
 /**
  * What a builder produces: pure data, made without touching a document. Generating it makes one named group at `at`,
  * turned `rotationDeg` about +z, holding the parts and any child plans.

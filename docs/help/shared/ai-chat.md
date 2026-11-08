@@ -74,6 +74,10 @@ Wall and tall cabinets can have stacked doors, such as glass above and shaker be
 
 Every part is its own named component, and each door and drawer is a group, so you can ask for changes to a single part afterwards. The agent builds furniture and other unusual shapes piece by piece instead, and hardware and countertops are added separately. Changing a cabinet's parameters later doesn't rebuild it; ask for the change and the agent edits its parts, or generates a new one.
 
+## Generate a whole kitchen
+
+The agent can also lay out a kitchen in one step, for example “Lay out an L-shaped kitchen with a diagonal corner, a sink base under the window and openings for a range and dishwasher.” It places base and wall cabinets along one wall or around one corner, adds fillers at blind corners, and runs a countertop with sink openings. It can also add a countertop on its own, or a bathroom vanity. Appliances are left as openings. Build U-shaped kitchens and islands as separate runs.
+
 ## Ask for a change to a 3D model
 
 In a 3D model the agent can:

@@ -2,10 +2,12 @@
 // Copyright 2026 PushForm contributors
 import { z } from 'zod';
 import { countertopBuilder } from './countertop';
+import { kitchenRunBuilder } from './kitchenRun';
 
 /** Every builder the `build` operation serves. Adding one here is what makes a client able to ask for it. */
 export const MODEL_BUILDERS = {
   countertop: countertopBuilder,
+  kitchen_run: kitchenRunBuilder,
 } as const;
 
 export type ModelBuilderKey = keyof typeof MODEL_BUILDERS;

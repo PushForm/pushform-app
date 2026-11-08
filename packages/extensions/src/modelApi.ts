@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import {
-  BuilderPlanError, DEFAULT_BLEND_SEGMENTS, SERVICE_FONTS, grainMapping, planCabinet, checkEdgeBlendResult, Text3DParamsSchema, isHardEdge, libraryMaterial, loadLibraryMaterial, planEdgeBlend, planEdgeProfile, runEdgeBlendKernel, runIntersectKernel,
+  BuilderPlanError, materialKey, DEFAULT_BLEND_SEGMENTS, SERVICE_FONTS, grainMapping, planCabinet, checkEdgeBlendResult, Text3DParamsSchema, isHardEdge, libraryMaterial, loadLibraryMaterial, planEdgeBlend, planEdgeProfile, runEdgeBlendKernel, runIntersectKernel,
   runText3DKernel, BUILTIN_LIBRARY, LIBRARY_CATEGORIES, activeTagOpt, applyTransformPlan, arrayMatrices, contextFrame, curvePoints, definitionBounds, hostOf, instanceCount, kernelOf, localPushPullDistance,
   m4rotationAbout, m4scaleAbout, planPushPull, planTransform, runFollowMeKernel, runPushPullKernel, runSolidsKernel, runTransformKernel, sceneRuntimeOf, solidsResultIsEmpty,
   type BuilderGenerateResult, type BuilderPlan, type MaterialSpec, type CameraHost, type CameraState, type CommandRegistry, type DocumentHost, type ExplodeResult, type FollowMeApplyResult, type FollowMeParams,
@@ -798,25 +798,19 @@ export class ModelDocumentApi {
         throw cause;
       }
       const materials: Record<string, number> = {};
-      const specs = (current: BuilderPlan): [string, MaterialSpec][] => [...Object.entries(current.materials), ...(current.children ?? []).flatMap(specs)];
-      const made = new Map<string, number>();
-      for (const [role, spec] of specs(plan)) {
-        const key = 'library' in spec ? `library:${spec.library}` : `paint:${spec.paint}`;
-        let id = made.get(key);
-        if (id === undefined) {
-          if ('library' in spec) {
-            if (!libraryMaterial(spec.library)) throw this.failure('invalid_reference', `There is no library material "${spec.library}". Call ${MODEL_TOOLS.materialLibrary.name} for the keys.`);
-            const precomputed = await loadLibraryMaterial(host, spec.library);
-            id = await exec<Promise<number>>('material.fromLibrary', { key: spec.library, activate: false, precomputed });
-          } else {
-            const name = `Paint ${spec.paint}`;
-            const existing = [...host.doc.state.materials.values()].find(m => m.name === name);
-            id = existing ? existing.id as number : exec<number>('material.create', { name, color: rgb(spec.paint), activate: false });
-          }
-          made.set(key, id);
+      const specs = (current: BuilderPlan): MaterialSpec[] => [...Object.values(current.materials), ...(current.children ?? []).flatMap(specs)];
+      for (const spec of specs(plan)) {
+        const key = materialKey(spec);
+        if (materials[key] !== undefined) continue;
+        if ('library' in spec) {
+          if (!libraryMaterial(spec.library)) throw this.failure('invalid_reference', `There is no library material "${spec.library}". Call ${MODEL_TOOLS.materialLibrary.name} for the keys.`);
+          const precomputed = await loadLibraryMaterial(host, spec.library);
+          materials[key] = await exec<Promise<number>>('material.fromLibrary', { key: spec.library, activate: false, precomputed });
+        } else {
+          const name = `Paint ${spec.paint}`;
+          const existing = [...host.doc.state.materials.values()].find(m => m.name === name);
+          materials[key] = existing ? existing.id as number : exec<number>('material.create', { name, color: rgb(spec.paint), activate: false });
         }
-        if (materials[role] === undefined || materials[role] === id) materials[role] = id;
-        else throw this.failure('operation_failed', `The plan names two materials for the role "${role}".`);
       }
       const result = await exec<BuilderGenerateResult | Promise<BuilderGenerateResult>>('builder.generate', { plan, materials });
       const round = (m: number): number => Math.round(m * 1e5) / 1e5;

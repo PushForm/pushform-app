@@ -346,6 +346,15 @@ it('has the model agent group each door, drawer and face frame as its own named 
   expect(rules).toContain('Then group the parts and assemblies into the whole object and name it');
 });
 
+it('sends standard cabinets to add_cabinet and names what still gets built by hand', () => {
+  const rules = MODEL_DOCUMENT_RULES(ctx());
+  expect(rules).toContain('with one add_cabinet operation; never assemble one from add_box parts');
+  expect(rules).toContain('A run is several add_cabinet operations in one batch');
+  expect(rules).toContain('say in one sentence what its used values chose');
+  expect(rules).toContain('Build by hand with the rules below only for corner cabinets, curved or angled work, furniture');
+  expect(rules).toContain('if it refused a cabinet, say so');
+});
+
 it('has the model agent build a cabinet in one batch and larger builds one cabinet or major assembly per batch', () => {
   const rules = MODEL_DOCUMENT_RULES(ctx());
   expect(rules).not.toContain('Build the whole object in one batch');

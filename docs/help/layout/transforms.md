@@ -28,11 +28,15 @@ Labels stay readable as they turn: the arrow and the bend move around the pivot,
 
 ## Scale to a factor or a known length with the Scale tool
 
-Choose **Scale** in Transform. Click the object at the point that should stay put, such as a corner; clicking a member of a group picks up the whole group. To scale several objects together, select them first, then click a selected object or empty paper to set that base point. Click a second point, the reference point, to measure from. Move the pointer to preview the new size: everything scales by the pointer's distance from the base point compared with the reference point's, the same amount across and down. Click a third time to finish. The Scale field beside the pointer shows the factor, and the status bar shows the reference length before and after.
-
-You can type instead of clicking. After the base point, type a factor such as **2** or **0.5**, or a percentage such as **50%**, and press Enter. After the reference point, type a length with its unit, such as **600mm** or **24"**, to make the distance from the base point to the reference point exactly that long. To bring an imported picture or drawing to its true size, click one end of a part whose size you know, click its other end, and type the real length.
+Choose **Scale** in Transform. Click the object at the point that should stay put, such as a corner; clicking a member of a group picks up the whole group. To scale several objects together, select them first, then click a selected object or empty paper to set that base point. Click a second point, the reference point, to measure from. Move the pointer to preview the new size: everything scales by the pointer's distance from the base point compared with the reference point's, the same amount across and down. Click a third time to finish. The percentage shows beside the pointer, and the status bar shows the reference length before and after.
 
 The points snap to the corners and edges of objects and to the grid. The base and reference points can snap to the objects you are scaling; the final point snaps only to other objects. Escape cancels a pending scale. Type scales with the drawing, so a text box scaled to 200% has twice its font size. Hidden or locked objects stay as they are.
+
+## Type a scale, width, height or length for Scale
+
+After you click the base point, the tool options bar shows **Scale**, **Length**, **Width** and **Height**, and the cursor is in **Scale**. Type a factor such as **2** or **0.5**, or a percentage such as **50%**, and press Enter. To make what you are scaling a set size, type its new **Width** or **Height** instead; the other side keeps its proportion, and no reference point is needed. **Length** is the distance from the base point to the reference point after scaling, so it is available once you click the reference point. To bring an imported picture or drawing to its true size, click one end of a part whose size you know, click its other end, and type the real length. You can also type a length with its unit, such as **600mm** or **24"**, in the Scale field.
+
+Press Tab to keep a value: the preview holds it, and your next click finishes the scale. All four fields set the same factor, so typing in one releases the others.
 
 ## Resize with the handles
 

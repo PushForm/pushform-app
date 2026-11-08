@@ -69,7 +69,7 @@ import { checkLayoutReferences, convertEmbeddedModel, layoutClipboardEntity, lin
   type LayoutCloudAccess, type LayoutReferenceStatus } from './layoutCloudModels';
 import { LayoutCloudModelPicker } from './LayoutCloudModelPicker';
 import { LayoutEntryFields } from './LayoutEntryFields';
-import { entryDeg, entryMm, LAYOUT_POINTER_FIELD, layoutEntryFields, layoutEntryKind, lockedPoint, MOVE_OFFSET_FIELDS, MOVE_POLAR_FIELDS, type LayoutEntryField, type LayoutEntryLocks } from './layoutEntry';
+import { entryDeg, entryMm, formatScalePercent, LAYOUT_POINTER_FIELD, layoutEntryFields, layoutEntryKind, lockedPoint, lockedScaleFactor, MOVE_OFFSET_FIELDS, MOVE_POLAR_FIELDS, readScalePercent, SCALE_FIELDS, type LayoutEntryField, type LayoutEntryLocks } from './layoutEntry';
 import { LayoutReferencesPanel } from './LayoutReferencesPanel';
 import { ToolOptionsBarView } from './ToolOptionsBar';
 import { LayoutObjectBrowser, layoutBrowserPassesKey, type LayoutBrowserDrop, type LayoutBrowserSelectMode, type LayoutBrowserTarget } from './LayoutObjectBrowser';
@@ -120,10 +120,6 @@ interface SelectionScaleDrag {
 }
 interface CornerPick { entityId: number; segmentIndex: number; point: Point }
 interface ArcDraft { points: Point[]; sweep: number }
-/** A percentage typed for Scale, such as "50%"; the field reads it as a factor. */
-const SCALE_PERCENT = /^\s*([0-9]*\.?[0-9]+)\s*%\s*$/;
-/** A scale factor as a percentage with at most two decimals: 1.5 is "150%". */
-function formatScalePercent(factor: number): string { return `${Number((factor * 100).toFixed(2))}%`; }
 /** The platform's primary modifier, named the way its keyboard labels it. */
 const PRIMARY_MODIFIER = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? 'Cmd' : 'Ctrl';
 /** `whole` is the Move tool's preview: labels move whole and copied dimensions become fixed paper points. */
@@ -1426,7 +1422,7 @@ export function LayoutWorkspace({
     try {
       const turned = activeRotation?.reference ? rotateLayoutEntities(transformable(activeRotation.entityIds), activeRotation.pivot, activeRotation.angleDeg)
         : selectionScale ? scaleLayoutEntities(transformable(selectionScale.entityIds), selectionScale.pivot, selectionScale.scaleX, selectionScale.scaleY)
-        : tool === 'scale' && scaleDraft?.reference ? scaleLayoutEntities(transformable(scaleDraft.entityIds), scaleDraft.base, scaleDraft.factor, scaleDraft.factor) : null;
+        : tool === 'scale' && scaleDraft && (scaleDraft.reference || scaleDraft.factor !== 1) ? scaleLayoutEntities(transformable(scaleDraft.entityIds), scaleDraft.base, scaleDraft.factor, scaleDraft.factor) : null;
       return turned ? new Map(turned.map((entity) => [entity.id, entity])) : null;
     } catch { return null; }
   }, [activeRotation, selectionScale, tool, scaleDraft, transformable]);
@@ -2719,6 +2715,9 @@ export function LayoutWorkspace({
         setScaleDraft({ entityIds, base: p, reference: null, factor: 1 });
         return;
       }
+      // A factor held in the bar's fields is committed by the next click, as a locked value is.
+      const locked = scaleEntry ? lockedScaleFactor(entryLocksRef.current, scaleEntry) : undefined;
+      if (locked !== undefined) { leaveEntry(); commitScale(locked); return; }
       if (Math.hypot(p[0] - scaleDraft.base[0], p[1] - scaleDraft.base[1]) <= LENGTH_TOL * 1000) { setVcbError('Choose a point away from the base point.'); return; }
       if (!scaleDraft.reference) setScaleDraft({ ...scaleDraft, reference: p, factor: 1 });
       else commitScale(scaleFactorTo(scaleDraft, scaleDraft.reference, p));
@@ -3091,7 +3090,8 @@ export function LayoutWorkspace({
     }
     if (tool === 'scale') {
       const p = pointFromEvent(event); setCursor(p);
-      if (scaleDraft?.reference && Math.hypot(p[0] - scaleDraft.base[0], p[1] - scaleDraft.base[1]) > LENGTH_TOL * 1000) {
+      if (scaleDraft?.reference && Math.hypot(p[0] - scaleDraft.base[0], p[1] - scaleDraft.base[1]) > LENGTH_TOL * 1000 &&
+          !(scaleEntry && lockedScaleFactor(entryLocksRef.current, scaleEntry) !== undefined)) {
         setScaleDraft({ ...scaleDraft, factor: scaleFactorTo(scaleDraft, scaleDraft.reference, p) }); setVcbError(null);
       }
       return;
@@ -3331,17 +3331,25 @@ export function LayoutWorkspace({
   const entrySingle = ((): { label: string; value?: string | undefined } => {
     if (tool === 'move') return { label: 'Distance' };
     if (tool === 'rotate') return { label: 'Angle', value: rotationDraft?.reference ? `${rotationDraft.angleDeg.toFixed(1)}°` : undefined };
-    if (tool === 'scale') return { label: 'Scale', value: scaleDraft?.reference ? formatScalePercent(scaleDraft.factor) : undefined };
+    if (tool === 'scale') return { label: 'Scale' };
     if (tool === 'offset') return { label: 'Distance', value: offsetDraft ? formatEntryLength(offsetDraft.distanceMm) : undefined };
     if (tool === 'fillet') return { label: 'Radius' };
     if (tool === 'chamfer') return { label: 'Distance' };
     if (entryKind === 'arc') return { label: tool === 'arc' || tool === 'pie' ? (arcDraft?.points.length === 2 ? 'Angle' : 'Radius') : 'Length' };
     return { label: entryKind === 'line' ? 'Length' : entryKind === 'box' ? 'Width, height' : 'Radius' };
   })();
+  /** What Scale's fields measure: the reference distance before scaling and the size of what scales. */
+  const scaleEntry = ((): { reference: number | null; size: readonly [number, number] } | null => {
+    if (tool !== 'scale' || !scaleDraft) return null;
+    const box = extentOf(scaleDraft.entityIds, null);
+    const reference = scaleDraft.reference ? Math.hypot(scaleDraft.reference[0] - scaleDraft.base[0], scaleDraft.reference[1] - scaleDraft.base[1]) : null;
+    return { reference, size: box ? [box.width, box.height] : [0, 0] };
+  })();
   const entryCorners = entryKind === 'box' && anchor && cursor
     ? placementCorners(anchor, cursor, usesPlacementModifiers(tool) ? placementModifiers : NO_PLACEMENT_MODIFIERS) : undefined;
   const entry = presenting || printing ? { fields: [], segments: [] } : layoutEntryFields({
     kind: entryKind, anchor: entryKind === 'move' ? moveDraft?.base ?? null : anchor, cursor, corners: entryCorners, label: entrySingle.label, value: entrySingle.value,
+    scale: scaleEntry ? { ...scaleEntry, factor: scaleDraft!.factor } : undefined,
     arc: arcDraft && isLayoutArcTool(tool) ? { tool, points: arcDraft.points, sweep: arcDraft.sweep } : undefined,
     locks: entryLocks, mmPerPx: 1 / (PX_PER_MM * zoom), formatLength: formatEntryLength,
   });
@@ -3371,10 +3379,23 @@ export function LayoutWorkspace({
   };
   const lockable = (id: string): id is keyof LayoutEntryLocks =>
     entryKind === 'line' ? id === 'length' || id === 'angle' : entryKind === 'box' ? id === 'width' || id === 'height'
-      : entryKind === 'move' ? (MOVE_OFFSET_FIELDS as readonly string[]).includes(id) || (MOVE_POLAR_FIELDS as readonly string[]).includes(id) : false;
-  /** Move's other pair of fields: the distance and angle for an offset, and the offsets for a distance or angle. */
+      : entryKind === 'move' ? (MOVE_OFFSET_FIELDS as readonly string[]).includes(id) || (MOVE_POLAR_FIELDS as readonly string[]).includes(id)
+        : entryKind === 'scale' ? (SCALE_FIELDS as readonly string[]).includes(id) : false;
+  /**
+   * The fields a value typed in `id` releases: Move's other pair (the distance and angle for an offset, and the
+   * offsets for a distance or angle), and every other field of Scale, whose fields all give its one factor.
+   */
   const otherMovePair = (id: string): readonly (keyof LayoutEntryLocks)[] =>
-    entryKind !== 'move' ? [] : (MOVE_OFFSET_FIELDS as readonly string[]).includes(id) ? MOVE_POLAR_FIELDS : MOVE_POLAR_FIELDS.includes(id as keyof LayoutEntryLocks) ? MOVE_OFFSET_FIELDS : [];
+    entryKind === 'scale' ? (SCALE_FIELDS as readonly string[]).includes(id) ? SCALE_FIELDS.filter(other => other !== id) : []
+      : entryKind !== 'move' ? [] : (MOVE_OFFSET_FIELDS as readonly string[]).includes(id) ? MOVE_POLAR_FIELDS : MOVE_POLAR_FIELDS.includes(id as keyof LayoutEntryLocks) ? MOVE_OFFSET_FIELDS : [];
+  /** Shows the scale at its locked factor, or back at the pointer's once nothing is locked. */
+  const relockScale = (locks: LayoutEntryLocks): void => {
+    if (!scaleDraft || !scaleEntry) return;
+    const locked = lockedScaleFactor(locks, scaleEntry);
+    const factor = locked ?? (scaleDraft.reference && cursor && Math.hypot(cursor[0] - scaleDraft.base[0], cursor[1] - scaleDraft.base[1]) > LENGTH_TOL * 1000
+      ? scaleFactorTo(scaleDraft, scaleDraft.reference, cursor) : 1);
+    setScaleDraft({ ...scaleDraft, factor });
+  };
   /** Shows the move with its locked values held, from where the preview is now. */
   const relockMove = (locks: LayoutEntryLocks): void => {
     if (!moveDraft || !cursor) return;
@@ -3384,6 +3405,19 @@ export function LayoutWorkspace({
   };
   /** The value typed in a line or box field, or an error message, or null when it is something else to apply as entered. */
   const readEntry = (id: keyof LayoutEntryLocks, text: string): number | string | null => {
+    if (entryKind === 'scale') {
+      // The Scale field takes a factor, as a number or a percentage; a length with its unit goes to the tool as the
+      // reference's new length. The others take lengths in the document's units.
+      const percent = id === 'factor' ? readScalePercent(text) : null;
+      const parsed = percent === null ? parseVcb(text, entryUnit) : null;
+      if (parsed && !parsed.ok) return parsed.error.error;
+      const value = percent ?? (parsed?.ok && parsed.value.kind === 'length' ? id === 'factor' ? parsed.value.unit === null ? parsed.value.raw : undefined : parsed.value.meters * 1000 : undefined);
+      if (value === undefined) return id === 'factor' && parsed?.ok && parsed.value.kind === 'length' ? null
+        : parsed?.ok && (parsed.value.kind === 'list' || parsed.value.kind === 'absolute' || parsed.value.kind === 'relative') ? null
+          : id === 'factor' ? 'Enter a scale factor, a percentage, or a length with its unit.' : 'Enter a length.';
+      if (!(value > 0)) return id === 'factor' ? 'Enter a scale greater than zero.' : 'Enter a length greater than zero.';
+      return value;
+    }
     const parsed = parseVcb(text, entryUnit);
     if (!parsed.ok) return parsed.error.error;
     const value = id === 'angle' ? entryDeg(parsed.value) : entryMm(parsed.value);
@@ -3410,9 +3444,11 @@ export function LayoutWorkspace({
       setEntryLocks(next); entryLocksRef.current = next;
       if (anchor && cursor && (entryKind === 'line' || entryKind === 'box')) setCursor(lockedPoint(entryKind, anchor, cursor, next, entryDivisor()));
       if (entryKind === 'move') relockMove(next);
+      if (entryKind === 'scale') relockScale(next);
     }
-    const i = entryFields.findIndex(f => f.id === id);
-    const target = entryFields[(i + (back ? entryFields.length - 1 : 1)) % entryFields.length]!;
+    const order = entryFields.filter(f => !f.disabled || f.id === id);
+    const i = order.findIndex(f => f.id === id);
+    const target = order[(i + (back ? order.length - 1 : 1)) % order.length]!;
     if (target.id === id) return;
     setEntryFocus(target.id);
   };
@@ -3487,12 +3523,12 @@ export function LayoutWorkspace({
       return;
     }
     // A single value, or anything the fields do not read as their own, goes to the tool as entered.
-    const passThrough = (entryKind !== 'line' && entryKind !== 'box' && entryKind !== 'move') || typed.some(f => !lockable(f.id) || readEntry(f.id, entryDrafts[f.id]!) === null);
+    const passThrough = (entryKind !== 'line' && entryKind !== 'box' && entryKind !== 'move' && entryKind !== 'scale') || typed.some(f => !lockable(f.id) || readEntry(f.id, entryDrafts[f.id]!) === null);
     if (passThrough) {
       const f = typed.find(g => !lockable(g.id) || readEntry(g.id, entryDrafts[g.id]!) === null) ?? typed[0];
       if (!f) return;
       // Scale reads its percentages itself.
-      const parsed = tool === 'scale' && SCALE_PERCENT.test(entryDrafts[f.id]!) ? null : parseVcb(entryDrafts[f.id]!, entryUnit);
+      const parsed = tool === 'scale' && readScalePercent(entryDrafts[f.id]!) !== null ? null : parseVcb(entryDrafts[f.id]!, entryUnit);
       if (parsed && !parsed.ok) { setEntryError(f.id); setVcbError(parsed.error.error); return; }
       // The tool clears the fields when the value applies; an error keeps them for correction.
       setEntryError(null);
@@ -3507,6 +3543,14 @@ export function LayoutWorkspace({
       if (value !== null) values[f.id] = value;
     }
     if (!Object.keys(values).length) return;
+    if (entryKind === 'scale') {
+      if (!scaleDraft || !scaleEntry) { setVcbError('Click an object, or anywhere while objects are selected, to choose the base point first.'); return; }
+      const factor = lockedScaleFactor(values, scaleEntry);
+      if (factor === undefined) { setVcbError('Click a reference point before entering its new length.'); return; }
+      leaveEntry();
+      commitScale(factor);
+      return;
+    }
     if (entryKind === 'move') {
       // Offsets set the move outright, each falling back to the pointer's; or a distance and angle do, as a line's.
       if (!moveDraft) { setVcbError('Click an object to choose the base point first.'); return; }
@@ -3559,7 +3603,8 @@ export function LayoutWorkspace({
     if (others.some(other => entryLocksRef.current[other] !== undefined)) {
       const next: { -readonly [K in keyof LayoutEntryLocks]: LayoutEntryLocks[K] } = { ...entryLocksRef.current };
       for (const other of others) delete next[other];
-      setEntryLocks(next); entryLocksRef.current = next; relockMove(next);
+      setEntryLocks(next); entryLocksRef.current = next;
+      if (entryKind === 'move') relockMove(next); else relockScale(next);
     }
     setEntryError(null); setVcbError(null);
   };
@@ -3601,8 +3646,8 @@ export function LayoutWorkspace({
     if (tool === 'scale') {
       if (!scaleDraft) { setVcbError('Click an object, or anywhere while objects are selected, to choose the base point first.'); return; }
       // A percentage or a number without a unit is a factor; a length with its unit is the reference's new length.
-      const percent = SCALE_PERCENT.exec(text);
-      if (percent) { commitScale(Number(percent[1]) / 100); return; }
+      const percent = readScalePercent(text);
+      if (percent !== null) { commitScale(percent); return; }
       const parsed = parseVcb(text, drawingUnits === 'mm' ? 'mm' : 'in');
       if (!parsed.ok) { setVcbError(parsed.error.error); return; }
       const value = parsed.value;
@@ -4265,12 +4310,16 @@ export function LayoutWorkspace({
     },
     onTab: tabEntry, onEnter: applyEntry, onEscape: escapeEntry,
   };
-  /** Move's offsets, distance and angle in the bar; until a base point is chosen they wait, empty. */
-  const moveBarFields: readonly LayoutEntryField[] = entryKind !== 'move' ? []
-    : moveDraft && entryFields.some(f => f.id === 'x') ? entryFields
-      : (['X', 'Y', 'Distance', 'Angle'] as const).map(label => ({ id: `waiting-${label}`, label, value: '', disabled: true }));
-  // Move's bar holds the move's own fields, so it stays usable while the destination is chosen.
-  const barPlacing = Boolean(rotationDraft || scaleDraft || offsetDraft || arcDraft);
+  /** Move's offsets, distance and angle, or Scale's factor and sizes, in the bar; until a base point is chosen they wait, empty. */
+  const barEntryFields: readonly LayoutEntryField[] = entryKind === 'move'
+    ? moveDraft && entryFields.some(f => f.id === 'x') ? entryFields
+      : (['X', 'Y', 'Distance', 'Angle'] as const).map(label => ({ id: `waiting-${label}`, label, value: '', disabled: true }))
+    : entryKind === 'scale'
+      ? scaleDraft && entryFields.some(f => f.id === 'factor') ? entryFields
+        : (['Scale', 'Length', 'Width', 'Height'] as const).map(label => ({ id: `waiting-${label}`, label, value: '', disabled: true }))
+      : [];
+  // Move's and Scale's bars hold their own fields, so they stay usable between the tool's clicks.
+  const barPlacing = Boolean(rotationDraft || offsetDraft || arcDraft);
   return (
     <>
       {contextMenu ? <LayoutContextMenu x={contextMenu.x} y={contextMenu.y} items={contextItems} onClose={() => { setContextMenu(null); canvasRef.current?.focus(); }} /> : null}
@@ -4384,7 +4433,7 @@ export function LayoutWorkspace({
                 onChange={formatEditingText} onReturnToText={returnToText} onFinish={() => setEditingTextId(null)} />
                 : selectedText ? <LayoutTextToolbar text={selectedText.text!} range={wholeText()} getSelection={wholeText} onCaptureSelection={() => {}}
                   onChange={formatSelectedText} onReturnToText={() => canvasRef.current?.focus()} onFinish={() => {}} />
-                  : moveBarFields.length ? <LayoutEntryFields inline fields={moveBarFields} segments={[]} pageSize={page.size} scale={1} pointer={null} {...entryFieldEvents} />
+                  : barEntryFields.length ? <LayoutEntryFields inline fields={barEntryFields} segments={[]} pageSize={page.size} scale={1} pointer={null} {...entryFieldEvents} />
                     : null}
             </ToolOptionsBarView>;
           })()}
@@ -4407,7 +4456,7 @@ export function LayoutWorkspace({
                 return d + (contour.closed ? 'Z' : '');
               }).join(' ')} fillRule="evenodd" />)}
           </svg> : null}
-          {editingTextId === null ? <LayoutEntryFields fields={entryKind === 'move' ? entryFields.filter(f => f.id === LAYOUT_POINTER_FIELD) : entryFields}
+          {editingTextId === null ? <LayoutEntryFields fields={entryKind === 'move' || entryKind === 'scale' ? entryFields.filter(f => f.id === LAYOUT_POINTER_FIELD) : entryFields}
             segments={entry.segments} pageSize={page.size} scale={PX_PER_MM * zoom} pointer={cursor} {...entryFieldEvents} /> : null}
           {tool === 'line' && lineGuide && cursor ? <LayoutAlignmentGuide axis={lineGuide.axis}
             from={[lineGuide.reference[0] * PX_PER_MM * zoom, lineGuide.reference[1] * PX_PER_MM * zoom]}
@@ -4432,6 +4481,11 @@ export function LayoutWorkspace({
               {`${tableColumns} x ${tableRows}`}
             </output> : null}
           {/* The readout gives the move's x, y offsets, positive x right and positive y down, as typed in. */}
+          {tool === 'scale' && scaleDraft && cursor && (scaleDraft.reference || scaleDraft.factor !== 1) ? <output className="pf-layout-rotation-angle" aria-label="Scale preview"
+            style={{ left: Math.max(0, Math.min(page.size[0] * PX_PER_MM * zoom - 90, cursor[0] * PX_PER_MM * zoom + 14)),
+              top: Math.max(0, Math.min(page.size[1] * PX_PER_MM * zoom - 28, cursor[1] * PX_PER_MM * zoom + 14)) }}>
+            {formatScalePercent(scaleDraft.factor)}
+          </output> : null}
           {tool === 'move' && moveDraft && cursor ? <output className="pf-layout-rotation-angle" aria-label="Move distance preview"
             style={{ left: Math.max(0, Math.min(page.size[0] * PX_PER_MM * zoom - 160, cursor[0] * PX_PER_MM * zoom + 14)),
               top: Math.max(0, Math.min(page.size[1] * PX_PER_MM * zoom - 28, cursor[1] * PX_PER_MM * zoom + 14)) }}>
@@ -4835,9 +4889,10 @@ export function LayoutWorkspace({
             : booleanOperation(tool) ? booleanIds.length ? 'Pick more shapes. Enter to apply; Escape to cancel.' : 'Click the target first, then the other shapes.'
             : tool === 'scale' ? scaleDraft?.reference ? (() => {
                 const before = Math.hypot(scaleDraft.reference[0] - scaleDraft.base[0], scaleDraft.reference[1] - scaleDraft.base[1]);
-                return `Scale: ${formatScalePercent(scaleDraft.factor)} (${formatEntryLength(before)} to ${formatEntryLength(before * scaleDraft.factor)}). Click to finish, or type a factor, a percentage or a new length. Esc cancels.`;
+                return `Scale: ${formatScalePercent(scaleDraft.factor)} (${formatEntryLength(before)} to ${formatEntryLength(before * scaleDraft.factor)}). Click to finish, or type a scale or a new length in the tool options bar. Esc cancels.`;
               })()
-              : scaleDraft ? 'Click a reference point, or type a scale factor or percentage. Esc cancels.'
+              : scaleDraft ? scaleDraft.factor !== 1 ? `Scale: ${formatScalePercent(scaleDraft.factor)}. Click to finish. Esc cancels.`
+                : 'Click a reference point, or type a scale, width or height in the tool options bar. Esc cancels.'
               : 'Click an object, or anywhere to scale the selection, to choose the base point.'
             : tool === 'move' ? moveDraft
               ? `${moveDraft.copy ? 'Copy' : 'Move'}: click the destination, or type a distance or x, y offsets. Tap ${COPY_TOGGLE_KEYS} to toggle copying; hold Shift to move only horizontally or vertically. Esc cancels.`

@@ -1,17 +1,36 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { expect, it } from 'vitest';
-import { layoutEntryFields, layoutEntryKind, lockedPoint, pageAngle, type LayoutEntryInput } from './layoutEntry';
+import { layoutEntryFields, layoutEntryKind, lockedPoint, lockedScaleFactor, pageAngle, readScalePercent, type LayoutEntryInput } from './layoutEntry';
 
 const base: LayoutEntryInput = { kind: 'line', anchor: [10, 10], cursor: [40, 10], label: 'Length', locks: {}, mmPerPx: 0.5, formatLength: (mm) => `${mm.toFixed(1)} mm` };
 
 it('takes a line length and angle, box sizes, a radius, a move, or one value by tool', () => {
   expect(layoutEntryKind('line', false, false)).toBe('line');
   expect(layoutEntryKind('move', false, false)).toBe('move');
+  expect(layoutEntryKind('scale', false, false)).toBe('scale');
   expect(layoutEntryKind('rectangle', true, false)).toBe('box');
   expect(layoutEntryKind('circle', false, true)).toBe('radius');
-  for (const tool of ['rotate', 'scale', 'offset', 'fillet', 'chamfer']) expect(layoutEntryKind(tool, false, false)).toBe('single');
+  for (const tool of ['rotate', 'offset', 'fillet', 'chamfer']) expect(layoutEntryKind(tool, false, false)).toBe('single');
   expect(layoutEntryKind('select', false, false)).toBe('none');
+});
+
+it('gives Scale its factor, the new reference length and the new width and height, each giving the one factor', () => {
+  const scale = { factor: 2, reference: 20, size: [30, 0] as const };
+  const { fields, segments } = layoutEntryFields({ ...base, kind: 'scale', label: 'Scale', scale, locks: { width: 60 } });
+  expect(fields.map(f => [f.id, f.label, f.value, Boolean(f.disabled), Boolean(f.locked)])).toEqual([
+    ['factor', 'Scale', '200%', false, false], ['length', 'Length', '40.0 mm', false, false],
+    ['width', 'Width', '60.0 mm', false, true], ['height', 'Height', '', true, false],
+  ]);
+  expect(segments).toEqual([]);
+  // The new length waits for a reference point.
+  expect(layoutEntryFields({ ...base, kind: 'scale', scale: { ...scale, reference: null }, locks: {} }).fields[1]).toMatchObject({ value: '', disabled: true });
+  expect(lockedScaleFactor({ factor: 0.5 }, scale)).toBe(0.5);
+  expect(lockedScaleFactor({ length: 30 }, scale)).toBe(1.5);
+  expect(lockedScaleFactor({ width: 90 }, scale)).toBe(3);
+  expect(lockedScaleFactor({ length: 30 }, { ...scale, reference: null })).toBeUndefined();
+  expect(lockedScaleFactor({ height: 10 }, scale)).toBeUndefined();
+  expect(readScalePercent(' 50 % ')).toBe(0.5); expect(readScalePercent('50')).toBeNull();
 });
 
 it('gives Move its offsets, distance and angle, and holds locked offsets or a locked distance and angle', () => {

@@ -86,6 +86,61 @@ it('scales what its first click picks up by reference, about a fixed base point,
   dispose();
 });
 
+it('shows Scale, Length, Width and Height in the tool options bar, waiting until the base point and then focusing Scale', () => {
+  const { click, hover, status, run, dispose } = setup();
+  run('tool.scale');
+  const bar = screen.getByRole('toolbar', { name: 'Scale options' });
+  for (const label of ['Scale', 'Length', 'Width', 'Height']) expect(layoutEntryField(label).disabled).toBe(true);
+  click(10, 10);
+  expect(document.activeElement).toBe(layoutEntryField('Scale'));
+  expect(layoutEntryField('Scale').value).toBe('100%');
+  // The square is 20 mm wide and high; the new length waits for the reference point.
+  expect(layoutEntryField('Width').value).toBe('20.0 mm'); expect(layoutEntryField('Height').value).toBe('20.0 mm');
+  expect(layoutEntryField('Length').disabled).toBe(true);
+  click(30, 10); hover(40, 10);
+  expect(layoutEntryField('Length').disabled).toBe(false);
+  expect(layoutEntryField('Length').value).toBe('30.0 mm');
+  expect(layoutEntryField('Width').value).toBe('30.0 mm');
+  // Beside the pointer only the percentage shows, and the bar stays solid between the clicks.
+  expect(screen.getByLabelText('Scale preview').textContent).toBe('150%');
+  expect(bar.className).not.toContain('is-placing');
+  expect(status()).toContain('Scale: 150%');
+  dispose();
+});
+
+it('scales to a typed width or height, keeping proportions, and a value left with Tab is committed by the next click', () => {
+  const { tab, a, click, hover, expectPoints, run, dispose } = setup();
+  const typeIn = (label: string, value: string, key: 'Enter' | 'Tab' = 'Enter') => {
+    const input = layoutEntryField(label);
+    act(() => { input.focus(); });
+    fireEvent.change(input, { target: { value } });
+    fireEvent.keyDown(input, { key });
+  };
+  run('tool.scale');
+  // No reference point is needed: the base point and a width are enough.
+  click(10, 10);
+  typeIn('Width', '50');
+  expectPoints(a, [[10, 10], [60, 10], [60, 60], [10, 60]]);
+  run('edit.undo');
+  click(10, 10);
+  typeIn('Height', '10', 'Tab');
+  expect(layoutEntryField('Height').className).toContain('is-locked');
+  expect(screen.getByLabelText('Scale preview').textContent).toBe('50%');
+  // The pointer no longer changes a locked scale; the next click commits it.
+  const version = tab.doc.version;
+  click(30, 10); hover(70, 10);
+  expectPoints(a, [[10, 10], [20, 10], [20, 20], [10, 20]]);
+  expect(tab.doc.version).not.toBe(version);
+  run('edit.undo');
+  // Typing in another field releases the lock.
+  click(10, 10);
+  typeIn('Height', '10', 'Tab');
+  typeIn('Scale', '300%', 'Tab');
+  expect(layoutEntryField('Height').className).not.toContain('is-locked');
+  expect(layoutEntryField('Width').value).toBe('60.0 mm');
+  dispose();
+});
+
 it('takes a typed factor or percentage after the base point, and a length with its unit after the reference point', () => {
   const { a, click, expectPoints, error, run, dispose } = setup();
   run('tool.scale');

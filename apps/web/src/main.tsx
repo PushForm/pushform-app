@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import './zodConfig';
+import './documentFreezing';
 import { followCampaign } from '@pushform/cloud';
 import { rootErrorHandlers } from './sentry';
 import { createRoot } from 'react-dom/client';

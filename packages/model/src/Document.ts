@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { applyPatches, createDraft, enableMapSet, enablePatches, finishDraft, freeze, type Draft, type Patch, type PatchListener, produce } from 'immer';
+import { applyPatches, createDraft, enableMapSet, enablePatches, finishDraft, freeze, setAutoFreeze, type Draft, type Patch, type PatchListener, produce } from 'immer';
 import {
   DEFAULT_UNITS,
   Emitter,
@@ -35,6 +35,18 @@ export function configureImmer(): void {
   immerConfigured = true;
 }
 configureImmer();
+
+let autoFreeze = true;
+
+/**
+ * Whether every committed state is deep-frozen. On by default, so development, tests and headless use catch a stray
+ * mutation of committed state; the production web build turns it off because deep-freezing large bodies is slow.
+ * With it off, commits still freeze what they change, shallowly (`sealChanged`).
+ */
+export function setDocumentAutoFreeze(enabled: boolean): void {
+  autoFreeze = enabled;
+  setAutoFreeze(enabled);
+}
 
 export type { Draft, Patch };
 export type DocumentDraft = Draft<DocumentState>;
@@ -81,6 +93,41 @@ export class DraftIdAllocator {
   }
 }
 
+/**
+ * Freezes `value` and everything below it that could later be walked: Maps and plain objects to any depth, arrays
+ * without looking inside them (nothing below an array is walked once the array itself is frozen). An already frozen
+ * value is taken as sealed, which is why a tree must be sealed before its root is frozen.
+ */
+function sealTree(value: unknown): void {
+  if (typeof value !== 'object' || value === null || Object.isFrozen(value)) return;
+  if (value instanceof Map) {
+    for (const child of value.values()) sealTree(child);
+  } else if (!Array.isArray(value)) {
+    const proto = Object.getPrototypeOf(value) as unknown;
+    if (proto !== Object.prototype && proto !== null) return;
+    for (const child of Object.values(value)) sealTree(child);
+  }
+  freeze(value);
+}
+
+/**
+ * With auto-freeze off, freezes what a commit changed: each object from the root down a patch path (shallowly, its
+ * siblings are already sealed) and the written value with everything below it. Code relies on committed state being
+ * frozen: the content identity caches only trust frozen state, and Immer skips frozen children when it finalizes, so
+ * an edit to one face of a body does not walk every other face.
+ */
+function sealChanged(state: object, patches: readonly Patch[]): void {
+  for (const { path } of patches) {
+    let node: unknown = state;
+    for (let i = 0; i < path.length && typeof node === 'object' && node !== null; i++) {
+      freeze(node);
+      const key = path[i]!;
+      node = node instanceof Map ? node.get(key) : (node as Record<string | number, unknown>)[key];
+    }
+    sealTree(node);
+  }
+}
+
 /** Minimum state shape the transactional machinery needs: the persistent id allocator. */
 export interface DocStateMeta {
   meta: { nextId: number };
@@ -104,8 +151,14 @@ export class TransactionalDocument<S extends DocStateMeta> {
   readonly events = new Emitter<DocumentEvents>();
 
   constructor(state: S) {
-    this._state = freeze(state, true);
+    this._state = this.seal(state);
   }
+  /** Freezes a whole incoming state, including the records below its Maps, which Immer's deep freeze does not reach. */
+  private seal(state: S): S {
+    sealTree(state);
+    return freeze(state, true);
+  }
+
   /** When true, undo never rolls `meta.nextId` back (ids are never reused). The model document enables this. */
   protected get monotonicIds(): boolean {
     return false;
@@ -155,6 +208,7 @@ export class TransactionalDocument<S extends DocStateMeta> {
       next = reconciled[0]; patches.push(...reconciled[1]);
       inversePatches = [...reconciled[2], ...inversePatches];
     }
+    if (!autoFreeze) sealChanged(next, patches);
     this._state = next;
     if (patches.length) {
       this._version++;
@@ -188,6 +242,7 @@ export class TransactionalDocument<S extends DocStateMeta> {
         (d as DocStateMeta).meta.nextId = keepNextId;
       }) as S;
     }
+    if (!autoFreeze) sealChanged(next, patches);
     this._state = next;
     this._version++;
     this.events.emit('change', { label, patches, inversePatches, source });
@@ -196,7 +251,7 @@ export class TransactionalDocument<S extends DocStateMeta> {
   /** Replace the whole state (file load). Listeners rebuild from scratch on `source: 'load'`. */
   replaceState(state: S, label = 'load'): void {
     if (this.draft) throw new Error('Cannot replace state inside a transaction');
-    this._state = freeze(state, true);
+    this._state = this.seal(state);
     this._version++;
     this.events.emit('change', { label, patches: [], inversePatches: [], source: 'load' });
   }

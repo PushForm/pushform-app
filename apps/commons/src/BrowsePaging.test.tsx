@@ -3,12 +3,12 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useBrowsePaging, MoreBrowseResults } from '@pushform/commons-ui/BrowsePaging';
-import type { CommonsBrowseLoader, CommonsBrowsePage } from '@pushform/cloud';
+import type { CommonsBrowseLoader, CommonsBrowsePage, CommonsCollections, CommonsDiscovery } from '@pushform/cloud';
 import { exampleModel } from './catalog.fixture';
 import { App } from './App';
 const filters = { query: '', category: '', license: '', commercial: false };
 const page = (id: string, next: boolean): CommonsBrowsePage => ({ models: [exampleModel({ id, title: id })], total: 3, categories: ['Hardware'], licenses: ['CC0'], next: next ? { id, publishedAt: '2026-01-01T00:00:00Z', asOf: '2026-11-05T00:00:00Z' } : null });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); window.history.replaceState(null, '', '/'); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); window.history.replaceState(null, '', '/'); delete (Element.prototype as Partial<Element>).scrollIntoView; });
 function Fixture({ loader, query = '' }: { loader: CommonsBrowseLoader; query?: string }) {
   const value = useBrowsePaging(loader, { ...filters, query }, 0);
   return <>{value.models.map(model => <p key={model.id}>{model.title}</p>)}<MoreBrowseResults count={value.models.length} more={value.more} loading={value.loadingMore} error={value.error} onMore={value.loadMore}/></>;
@@ -61,6 +61,32 @@ it('keeps search focused after filtered results arrive on the browse route', asy
   fireEvent.change(search, { target: { value: 'cabinet' } });
   await screen.findByRole('link', { name: 'filtered' });
   expect(document.activeElement).toBe(search);
+});
+
+/** Opens the browse route with Featured still loading, runs `beforeSettling`, then lets Featured answer and waits for the page to handle it. */
+async function browseUntilFeaturedSettles(beforeSettling: () => void): Promise<void> {
+  window.history.replaceState(null, '', '/#browse');
+  const scrolled = vi.fn();
+  Element.prototype.scrollIntoView = scrolled;
+  let answer!: (discovery: CommonsDiscovery) => void;
+  const collections = { discovery: () => new Promise<CommonsDiscovery>((resolve) => { answer = resolve; }) } as unknown as CommonsCollections;
+  const browse = vi.fn<CommonsBrowseLoader>().mockResolvedValue(page('first', false));
+  render(<App loadCatalog={Object.assign(vi.fn().mockResolvedValue([]), { browse })} collections={collections}/>);
+  await screen.findByRole('link', { name: 'first' });
+  beforeSettling();
+  answer({ version: 1, creditedCreators: [], creators: [], collections: [], featured: [] });
+  await waitFor(() => expect(scrolled).toHaveBeenCalled());
+}
+
+it('leaves the search box focused when Featured finishes loading on the browse route', async () => {
+  let search!: HTMLElement;
+  await browseUntilFeaturedSettles(() => { search = screen.getByRole('searchbox'); search.focus(); });
+  expect(document.activeElement).toBe(search);
+});
+
+it('moves focus to the page content when Featured finishes loading and no field holds it', async () => {
+  await browseUntilFeaturedSettles(() => undefined);
+  expect(document.activeElement).toBe(document.getElementById('main'));
 });
 
 it('uses the scroll sentinel to consume a prefetched page', async () => {

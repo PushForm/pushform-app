@@ -168,7 +168,8 @@ function CommonsApp({ loadCatalog, filesUrl, account=null, publishPage, editorUr
     if (state.kind !== 'ready' || (!window.location.hash && !selectedId) || focusedRoute.current.done) return;
     // Featured sits above the library; scrolling before it fills in would move the library under the reader.
     if (!selectedId && !featuredSettled) return;
-    if (!document.activeElement?.closest('.catalog-tabs')) focusHeading();
+    // Someone moving along the tabs, or already typing or choosing in a field, keeps their place.
+    if (!document.activeElement?.closest('.catalog-tabs, input, textarea, select, [contenteditable="true"]')) focusHeading();
     const target = selectedId ? heading.current : document.getElementById('browse');
     target?.scrollIntoView?.({ block: 'start' });
     focusedRoute.current.done = true;

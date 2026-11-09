@@ -9,7 +9,6 @@
     "node": ">=22"
   },
   "scripts": {
-    "postinstall": "node scripts/fetch-kernel-wasm.mjs --postinstall",
     "dev": "pnpm --filter @pushform/app-web dev",
     "build": "pnpm --filter @pushform/app-web build",
     "desktop": "pnpm --filter @pushform/app-desktop tauri dev",
@@ -32,9 +31,7 @@
     "docs:dev": "pnpm --filter @pushform/docs dev",
     "docs:build": "pnpm --filter @pushform/docs build",
     "build:step-reader": "node scripts/build-step-reader.mjs",
-    "build:kernel-wasm": "node scripts/build-kernel-wasm.mjs",
-    "fetch:kernel-wasm": "node scripts/fetch-kernel-wasm.mjs",
-    "kernel-wasm:pin": "node scripts/kernel-wasm-artifact.mjs pin"
+    "build:kernel-wasm": "node scripts/build-kernel-wasm.mjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.11",

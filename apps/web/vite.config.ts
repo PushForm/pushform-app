@@ -59,7 +59,7 @@ function crossOriginIsolation(): Plugin {
 async function requireKernelModule(command: 'serve' | 'build'): Promise<void> {
   const { moduleStatus } = (await import(pathToFileURL(fileURLToPath(new URL('../../scripts/kernel-wasm-artifact.mjs', import.meta.url))).href)) as { moduleStatus: () => { state: string; message?: string } };
   const status = moduleStatus();
-  const howTo = 'Run `pnpm fetch:kernel-wasm` for the prebuilt module or `pnpm build:kernel-wasm` to compile it.';
+  const howTo = 'Run `pnpm build:kernel-wasm` to compile it (needs Rust, Emscripten and cmake).';
   if (status.state === 'missing' || (command === 'build' && status.state === 'stale')) throw new Error(`The kernel module is ${status.state}: ${status.message} ${howTo}`);
   if (status.state === 'stale') console.warn(`pushform: ${status.message} ${howTo}`);
 }

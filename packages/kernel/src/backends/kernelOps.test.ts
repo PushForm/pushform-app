@@ -499,6 +499,19 @@ describe('region polygons without usable contours', () => {
   });
 });
 
+describe('face ids past 2^32', () => {
+  it('keeps the mesh and its face origins on the same wrapped ids', async () => {
+    // Six fresh ids, all past 2^32 (Manifold's own face ids are signed 32-bit, so ids just under 2^32 would not survive it).
+    const result = await client.extrudeSketch({ basis: planeBasis([0, 0, 0], [0, 0, 1]), polygon: square(0, 0, 1), distance: 1, nextFaceId: 2 ** 32 });
+    const [component] = result.components;
+    expect(component).toBeDefined();
+    const faces = [...new Set(component!.mesh.faceId)].sort((a, b) => a - b);
+    expect(faces).toHaveLength(6);
+    expect([...component!.faceOrigin.keys()].sort((a, b) => a - b)).toEqual(faces);
+    expect(faces.every((id) => id < 2 ** 32)).toBe(true);
+  });
+});
+
 describe('followMe', () => {
   const squareProfile = (size: number, origin: Vec3, n: Vec3) => ({ profile: square(0, 0, size), profileBasis: planeBasis(origin, n) });
 

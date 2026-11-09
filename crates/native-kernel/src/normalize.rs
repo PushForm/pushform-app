@@ -190,7 +190,7 @@ pub struct WeightedOrigin {
 }
 
 pub struct NormalizedFace {
-  /// A JavaScript number: fresh ids grow without wrapping; only a mesh's `faceId` array holds them as `Uint32`.
+  /// The id as a mesh holds it, in `Uint32`'s range; a fresh id past 2^32 wraps like the mesh's `faceId` array.
   pub id: f64,
   pub origins: Vec<WeightedOrigin>,
 }
@@ -275,7 +275,9 @@ pub fn normalize_triangles(read: &ReadMesh, next_face_id: f64, choose_id: impl F
       next += 1.0;
       fresh
     });
-    faces.push(NormalizedFace { id, origins });
+    // A mesh holds face ids as Uint32, so an id past 2^32 is the wrapped number everywhere it is reported: the mesh,
+    // the face's origins and the side-face map all describe the same face.
+    faces.push(NormalizedFace { id: f64::from(to_uint32(id)), origins });
   }
   let num_tri = read.tris.len() / 3;
   let mut tris = vec![0u32; num_tri * 3];

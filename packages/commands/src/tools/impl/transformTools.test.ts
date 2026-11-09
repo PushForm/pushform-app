@@ -22,6 +22,10 @@ import { modelInfoCommands } from '../../commands/modelInfo';
 import { containerAt, SketchGraph } from '@pushform/model';
 import { TransformToolBase, worldToScreen, type TransformRotation } from './transformShared';
 import { m4rotationAbout } from '../../commands/transform';
+import { revolveCommands } from '../../commands/revolve';
+import { curveCommands } from '../../commands/curves';
+import { arcFrom3Points } from '@pushform/geom';
+import { InferenceEngineImpl } from '@pushform/inference';
 
 beforeAll(installPolyMeshStub);
 afterEach(disposeKernels);
@@ -657,13 +661,13 @@ describe('MoveTool: guides and text', () => {
 });
 
 describe('MoveTool: tool options bar', () => {
-  it('offers only Copy in the tool options bar; an Alt tap changes nothing', () => {
+  it('offers Copy, offset fields and a constraint indicator; an Alt tap changes nothing', () => {
     const { tools } = setup();
     tools.activate('move');
-    expect(tools.status().settings?.map((s) => s.id)).toEqual(['copy']);
+    expect(tools.status().settings?.map((s) => s.id)).toEqual(['copy', 'constraint']);
     tools.keyDown(key('Alt', ALT));
     tools.keyUp(key('Alt', ALT));
-    expect(tools.status().settings).toEqual([expect.objectContaining({ id: 'copy', on: false })]);
+    expect(tools.status().settings).toEqual([expect.objectContaining({ id: 'copy', on: false }), expect.objectContaining({ id: 'constraint', text: 'Free' })]);
     expect((tools.activeTool as MoveTool).copyMode).toBe(false);
   });
 });
@@ -1348,5 +1352,189 @@ describe('TransformToolBase: arrays of a turn', () => {
     await turn.settled;
     expect(sent[1]).toMatchObject({ count: 3, mode: 'internal', rotation: { angle: 2 * Math.PI } });
     expect(tools.status().applied).toBe(false); // no settings: the bar is not shown
+  });
+});
+
+describe('MoveTool: consistent placement and rails', () => {
+  const length = (meters: number) => ({ kind: 'length' as const, meters, raw: meters, unit: 'm' as const });
+
+  function start() {
+    const s = setup();
+    const id = s.addBox();
+    s.host.selection.set([bodyRef(id)]);
+    s.tools.activate('move');
+    s.tools.pointerDown(at(TOP_CAMERA, [0, 0, 0]));
+    s.tools.pointerUp(at(TOP_CAMERA, [0, 0, 0]));
+    return { ...s, id, tool: s.tools.activeTool as MoveTool };
+  }
+
+  it('freezes travel with Shift even without a directional inference, through the base and back', () => {
+    const { tools, tool } = start();
+    tools.pointerMove(at(TOP_CAMERA, [2, 2, 0]));
+    tools.keyDown(key('Shift', SHIFT));
+    expect(tool.inferenceOptions().lockSnap?.point).toEqual([0, 0, 0]);
+    expect(near(tool.inferenceOptions().lockSnap!.dir!, [Math.SQRT1_2, Math.SQRT1_2, 0])).toBe(true);
+    for (const [point, expected] of [
+      [[-2, -2, 0], [-2, -2, 0]], [[0, 0, 0], [0, 0, 0]], [[4, 0, 0], [2, 2, 0]],
+    ] as [Vec3, Vec3][]) {
+      tools.pointerMove(at(TOP_CAMERA, point));
+      expect(near(tool.dragDelta!, expected)).toBe(true);
+    }
+    tools.keyUp(key('Shift'));
+    tools.pointerMove(at(TOP_CAMERA, [4, 0, 0]));
+    expect(tool.dragDelta).toEqual([4, 0, 0]);
+  });
+
+  it('keeps one arrow constraint, ignores autorepeat, and leaves it unchanged when Down has no edge', () => {
+    const { tools, tool } = start();
+    tools.keyDown(key('ArrowRight'));
+    tools.keyDown({ ...key('ArrowRight'), repeat: true });
+    expect(tool.axisLock).toBe('x');
+    tools.keyDown(key('ArrowDown'));
+    expect(tool.axisLock).toBe('x');
+    expect(tool.status().instructor).toContain('Infer an edge');
+    tools.keyDown(key('Shift', SHIFT));
+    tools.pointerMove(at(TOP_CAMERA, [2, 5, 0]));
+    expect(tool.dragDelta).toEqual([2, 0, 0]);
+    tools.keyUp(key('Shift'));
+    expect(tool.axisLock).toBe('x');
+    tools.keyDown(key('ArrowLeft'));
+    expect(tool.axisLock).toBe('y');
+    expect(tool.inferenceOptions().lockSnap).toBeNull();
+    tools.keyDown(key('ArrowLeft'));
+    expect(tool.axisLock).toBeNull();
+  });
+
+  it('keeps Down locked to the chosen direction over new edges and across the base', () => {
+    const { tools, tool } = start();
+    const edge = (point: Vec3, dir: Vec3): InferenceResult => ({ ...freeInference(point, GROUND_PLANE), primary: { kind: 'onEdge', point, dir, color: SNAP_COLORS.onEdge, label: 'On Edge' } });
+    tools.pointerMove(at(TOP_CAMERA, [3, 1, 0], { inference: edge([3, 1, 0], [0, 1, 0]) }));
+    tools.keyDown(key('ArrowDown'));
+    const lock = tool.inferenceOptions().lockSnap;
+    for (const x of [2, 0, -2, 1]) {
+      tools.pointerMove(at(TOP_CAMERA, [x, 5, 0], { inference: edge([x, 5, 0], [1, 1, 0]) }));
+      expect(tool.inferenceOptions().lockSnap).toEqual(lock);
+      expect(near(tool.dragDelta!, [x, 0, 0])).toBe(true);
+    }
+    tools.keyDown(key('ArrowDown'));
+    expect(tool.inferenceOptions().lockSnap).toBeNull();
+  });
+
+  it('holds typed offsets in the live preview, commits once, and can edit the last offsets', async () => {
+    const { tools, tool, host, id, body } = start();
+    const before = host.doc.state;
+    const entries = host.undoStack.length;
+    expect(tool.status().fields?.map((f) => f.label)).toEqual(['Distance', 'ΔX', 'ΔY', 'ΔZ']);
+    tools.keyDown(key('ArrowRight'));
+    tools.lockEntry('x', length(3));
+    expect(tool.axisLock).toBeNull();
+    tools.pointerMove(at(TOP_CAMERA, [8, 2, 0]));
+    expect(tool.dragDelta).toEqual([3, 2, 0]);
+    expect(host.doc.state).toBe(before);
+    tools.onEntry({ z: length(4) });
+    await tool.settled;
+    expect(meshBounds(body(id).mesh).min).toEqual([3, 2, 4]);
+    expect(host.undoStack.length).toBe(entries + 1);
+    tools.onEntry({ x: length(-2) });
+    await tool.settled;
+    expect(meshBounds(body(id).mesh).min).toEqual([-2, 2, 4]);
+    expect(host.undoStack.length).toBe(entries + 1);
+    host.undo();
+    expect(meshBounds(body(id).mesh).min).toEqual([0, 0, 0]);
+  });
+
+  it('a typed distance follows the negative side of an arrow rail', async () => {
+    const { tools, tool, body, id } = start();
+    tools.keyDown(key('ArrowRight'));
+    tools.pointerMove(at(TOP_CAMERA, [-2, 0, 0]));
+    tools.onEntry({ distance: length(5) });
+    await tool.settled;
+    expect(meshBounds(body(id).mesh).min).toEqual([-5, 0, 0]);
+  });
+
+  it('Tab holds Distance during preview, and an offset releases that length', () => {
+    const { tools, tool } = start();
+    tools.pointerMove(at(TOP_CAMERA, [3, 4, 0]));
+    tools.lockEntry('distance', length(10));
+    tools.pointerMove(at(TOP_CAMERA, [0, 4, 0]));
+    expect(tool.dragDelta).toEqual([0, 10, 0]);
+    tools.lockEntry('x', length(2));
+    tools.pointerMove(at(TOP_CAMERA, [3, 4, 0]));
+    expect(tool.dragDelta).toEqual([2, 4, 0]);
+    expect(tool.status().fields?.find((f) => f.id === 'distance')?.locked).toBe(false);
+    tools.cancel();
+    expect(tool.hasPendingWork()).toBe(false);
+  });
+
+  it('real inference ignores the complete moving solid even when selection is all its faces', () => {
+    const { tools, tool, host, body, id } = start();
+    tools.cancel();
+    host.selection.set([...body(id).faces.values()].map((f) => ({ kind: 'face', path: [], id: id as Id, faceId: f.id, region: null })));
+    tools.pointerDown(at(TOP_CAMERA, [0, 0, 1]));
+    tools.pointerUp(at(TOP_CAMERA, [0, 0, 1]));
+    expect(tool.inferenceOptions().ignore).toEqual([bodyRef(id)]);
+    tools.keyDown(key('Shift', SHIFT));
+    const engine = new InferenceEngineImpl();
+    engine.setState(host.doc.state);
+    const result = engine.resolve({ ray: { origin: [0.5, 0.5, 10], dir: [0, 0, -1] }, screen: [50, 50], pixelSizeAt: () => 0.01 }, tool.inferenceOptions());
+    expect(result.hit).toBeNull();
+    expect(result.primary.ref).toBeUndefined();
+  });
+
+  it.each([
+    ['drag', 'surface', false], ['clicks', 'surface', false], ['drag', 'pickup', false], ['clicks', 'pickup', false],
+    ['drag', 'surface', true], ['clicks', 'surface', true],
+  ] as const)('preserves a revolved sphere: %s, %s, copy=%s', async (gesture, selection, copy) => {
+    const s = setup();
+    s.registry.registerAll(curveCommands);
+    s.registry.registerAll(revolveCommands);
+    s.registry.execute('sketch.addCurve', { ...arcFrom3Points([0, 0, -1], [1, 0, 0], [0, 0, 1], 12), closed: false });
+    s.host.edit('Close profile', (draft) => { SketchGraph.for(draft).addEdge([0, 0, -1], [0, 0, 1]); });
+    const profile = [...s.root().sketch.faces.values()][0]!;
+    await s.registry.execute('revolve.apply', { profile: { kind: 'sketchFace', path: [], id: profile.id }, axisOrigin: [0, 0, 0], axisDir: [0, 0, 1], angleDeg: 360, segments: 24 });
+    const sphere = s.bodies()[0]!;
+    expect(sphere.surfaces.size).toBe(1);
+    expect([...sphere.edges.values()].every((e) => e.soft && e.smooth)).toBe(true);
+    const faces: EntityRef[] = [...sphere.faces.values()].map((f) => ({ kind: 'face', path: [], id: sphere.id, faceId: f.id, region: null }));
+    s.host.selection.set(selection === 'surface' ? faces : []);
+    s.tools.activate('move');
+    const tool = s.tools.activeTool as MoveTool;
+    if (copy) s.tools.setting('copy', true);
+    const from = at(TOP_CAMERA, [1, 0, 0], { hit: bodyHit(sphere, [1, 0, 0]) });
+    s.tools.pointerMove(from);
+    s.tools.pointerDown(from);
+    if (gesture === 'clicks') s.tools.pointerUp(from);
+    const before = s.host.doc.state;
+    const entries = s.host.undoStack.length;
+    const autofold = vi.spyOn(s.kernel, 'autofold');
+    const to = at(TOP_CAMERA, [3, 2, 0]);
+    s.tools.pointerMove(to);
+    expect(tool.dragDelta).toEqual([2, 2, 0]);
+    expect(tool.overlay().some((p) => p.kind === 'polyline' && p.points.length >= 2)).toBe(true);
+    expect(s.host.doc.state).toBe(before);
+    // A fresh pick at the same screen coordinate must not replace the displayed destination.
+    const release = { ...to, inference: freeInference([8, 9, 0], GROUND_PLANE) };
+    if (gesture === 'clicks') s.tools.pointerDown(release);
+    else s.tools.pointerUp(release);
+    await tool.settled;
+    expect(autofold).not.toHaveBeenCalled();
+    expect(tool.status().instructor).not.toContain('failed');
+    const moved = s.bodies().find((b) => copy ? b.id !== sphere.id : b.id === sphere.id)!;
+    expect(moved.mesh.tris).toEqual(sphere.mesh.tris);
+    expect(moved.mesh.faceId).toEqual(sphere.mesh.faceId);
+    expect([...moved.surfaces.values()].map((surface) => surface.faceIds)).toEqual([...sphere.surfaces.values()].map((surface) => surface.faceIds));
+    expect(moved.props).toEqual(sphere.props);
+    expect([...moved.faces.keys()]).toEqual([...sphere.faces.keys()]);
+    expect([...moved.edges.values()].map((e) => [e.key, e.soft, e.smooth, e.hidden, e.curveId])).toEqual([...sphere.edges.values()].map((e) => [e.key, e.soft, e.smooth, e.hidden, e.curveId]));
+    const bounds = meshBounds(moved.mesh), old = meshBounds(sphere.mesh);
+    expect(near(bounds.min, [old.min[0] + 2, old.min[1] + 2, old.min[2]])).toBe(true);
+    expect(meshTopologyProblems(moved.mesh)).toEqual([]);
+    if (copy) expect(s.body(sphere.id)).toBe(sphere);
+    expect(s.host.undoStack.length).toBe(entries + 1);
+    s.host.undo();
+    expect(s.body(sphere.id).mesh).toEqual(sphere.mesh);
+    s.host.redo();
+    expect(s.body(moved.id).surfaces).toEqual(moved.surfaces);
+    expect([...s.body(moved.id).edges.values()].every((e) => e.soft && e.smooth)).toBe(true);
   });
 });

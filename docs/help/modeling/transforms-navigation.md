@@ -20,7 +20,11 @@ To hide or show the cube, choose **View › Navigation Cube**, or tick **Navigat
 
 Select the geometry, choose **Move**, and click a base point. Move the pointer to preview the destination, then click again to finish, or press, drag and release. With nothing selected, pressing on something picks up what a Select click there would select, such as a whole solid, group or component; to move a single face or edge, select it first. Escape, or a second click on the base point before the pointer moves, cancels the move, and anything picked up that way is no longer selected. The moving outline includes geometry inside nested groups and components.
 
-The Right, Left and Up arrow keys lock the move to the red, green and blue axes of the model, and the same key again releases the lock; Down locks parallel or perpendicular to the last edge; hold Shift to keep the inference shown. The locks end with the move.
+Both gestures show the same live outline and commit the previewed destination as one Undo step. Moving a smooth solid, including a surface that covers the entire solid, preserves its smooth shading and softened edges. Escape cancels either gesture without moving anything.
+
+The Right, Left and Up arrow keys lock the move to a straight rail through the base point along the red, green and blue axes of the model. The same key again releases the rail; another axis key replaces it. Down fixes a parallel or perpendicular direction from the last inferred edge and keeps that direction until you press Down again or choose another axis. Infer an edge first if Down reports that none is available. Hold Shift to freeze the current direction of travel or inferred direction; releasing Shift restores any arrow lock. Passing the base point moves smoothly to the other side. Hovering a face does not change the rail's distance calculation. The locks end with the move.
+
+The tool options bar shows **Distance**, **ΔX**, **ΔY** and **ΔZ** in the model's units, plus **Copy** and the current constraint. The offsets are relative to the base point along the model's axes. Pick a base point to enable the fields. Type an offset and press Tab to hold it in the preview while setting the other offsets; press Enter to finish. A typed offset releases direction locks; a typed Distance releases held offsets and follows the current travel direction, including the negative side of an axis. Invalid text keeps the move pending. Just after a move, editing a field adjusts that move as one Undo step.
 
 While moving, type a length and press Enter to move that far in the locked direction or the way the pointer has moved. Before the pointer has moved, lock an axis first. Type [x,y,z] to put the base point at those model coordinates, or <x,y,z> to move by that much. Typed just after a move, a value redoes it as one Undo step.
 
@@ -28,7 +32,7 @@ A selection with anything locked, with entities from different groups or compone
 
 ## Copy with Move and make arrays
 
-Tap Ctrl (Cmd on a Mac), or click **Copy** in the tool options bar, to copy instead of moving, at any time during a move. Just after a move, tapping Ctrl or clicking **Copy** redoes it as a copy, or back as a plain move. The copies are selected afterwards and are never locked, and the preview shows only the copies. Faces and edges of a solid cannot be copied on their own: copy the solid. Sketch vertices are copied only with their edges.
+Tap Ctrl (Cmd on a Mac), or click **Copy** in the tool options bar, to copy instead of moving, at any time during a move. Just after a move, tapping Ctrl or clicking **Copy** redoes it as a copy, or back as a plain move. The copies are selected afterwards and are never locked, and the preview shows only the copies. Selecting every complete face of a solid also copies the whole solid. Individual faces and edges of a solid cannot be copied on their own: copy the solid. Sketch vertices are copied only with their edges.
 
 After a copy, type 3x and press Enter for three copies at the same spacing, or /3 for three copies spread evenly up to where the copy went. Then type a length to change their spacing; the number of copies stays. If an array cannot be made, the copies stay as they were.
 

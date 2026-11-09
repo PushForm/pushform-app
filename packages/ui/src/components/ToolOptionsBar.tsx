@@ -11,6 +11,7 @@ import { useAppStore } from '../store';
 import { Icon } from './Icon';
 import { useSelectionRefs } from '../hooks/useSelection';
 import { ModelTextStyleRow } from './ModelTextStyleRow';
+import { EntryFields } from './EntryFields';
 
 /** How long the pointer rests over an empty part of the bar before it fades. */
 const REST_MS = 150;
@@ -57,6 +58,7 @@ export function ToolOptionsBar(): JSX.Element {
   const dialog = useAppStore((s) => s.dialog);
   const dialogRef = useAppStore((s) => s.dialogRef);
   const selection = useSelectionRefs();
+  const fields = useAppStore((s) => s.entryFields);
   const tool = app.toolManager.visualTool;
   // A model text's style row: for the text being edited, or one text selected with Select.
   const styled = dialog === 'editText' && dialogRef?.kind === 'text' ? dialogRef
@@ -72,7 +74,7 @@ export function ToolOptionsBar(): JSX.Element {
       read={(quantity, text) => readQuantity(app, quantity, text)}
       onLeave={() => app.viewport.container?.focus()}
     >
-      {styled ? <ModelTextStyleRow app={app} target={styled} /> : null}
+      {styled ? <ModelTextStyleRow app={app} target={styled} /> : fields.some((f) => f.location === 'bar') ? <EntryFields inline /> : null}
     </ToolOptionsBarView>
   );
 }

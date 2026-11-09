@@ -704,6 +704,13 @@ export function planTransform(state: DocumentState, refs: readonly EntityRef[], 
   }
   plan.sketchVertexIds = [...vertexIds];
   plan.sketchEdgeIds = [...edgeIds];
+  // Every complete face is a whole solid, even when selection stores it as a surface.
+  // Preserve the mesh and its edge properties instead of rebuilding it through autofold.
+  for (const [id, selected] of plan.subEntities) {
+    const body = container.bodies.get(id)!;
+    const faces = new Set(selected.flatMap((r) => r.kind === 'face' && r.region === null ? [r.faceId] : []));
+    if (body.faces.size > 0 && faces.size === body.faces.size) plan.bodies.set(id, body.version);
+  }
   // Sub-entities of a body that is itself moved go with the body.
   for (const id of plan.bodies.keys()) plan.subEntities.delete(id);
   if (copy && plan.subEntities.size) {

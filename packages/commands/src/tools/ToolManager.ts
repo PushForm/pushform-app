@@ -319,7 +319,7 @@ export class ToolManager implements ToolHost {
   onEntry(values: Readonly<Record<string, VcbValue>>): void {
     const entries = Object.entries(values).filter(([, v]) => v.kind !== 'empty');
     const tool = this.entryTool();
-    if (!entries.length || !tool) return;
+    if (!tool || (!entries.length && !tool.onEntry)) return;
     this.call(() => (tool.onEntry ? tool.onEntry(Object.fromEntries(entries)) : tool.onVcb?.(entries[0]![1])));
     this.afterInteraction();
   }
@@ -475,6 +475,6 @@ function sameFields(a: ToolStatus['fields'], b: ToolStatus['fields']): boolean {
   if (!a || !b || a.length !== b.length) return false;
   return a.every((f, i) => {
     const g = b[i]!;
-    return f.id === g.id && f.label === g.label && f.value === g.value && f.locked === g.locked && f.at?.[0] === g.at?.[0] && f.at?.[1] === g.at?.[1] && f.at?.[2] === g.at?.[2];
+    return f.id === g.id && f.label === g.label && f.value === g.value && f.locked === g.locked && f.location === g.location && f.disabled === g.disabled && f.at?.[0] === g.at?.[0] && f.at?.[1] === g.at?.[1] && f.at?.[2] === g.at?.[2];
   });
 }

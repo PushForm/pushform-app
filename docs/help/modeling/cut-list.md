@@ -177,6 +177,14 @@ A display-unit change does not round or resize the physical parts. When a rigid 
 nesting input unchanged, Cut List reuses its current plan after refreshing the measurements and outlines.
 
 
+## Export a spreadsheet
+
+Choose **Output > Parts spreadsheet**, then Summary, Parts list or Every instance. Choose CSV or Excel workbook;
+CSV also offers semicolon, comma or tab separation. **Lengths in** sets the part-dimension unit. Aggregate totals
+use meters/square meters/cubic meters for metric choices, or feet/square feet/cubic feet for imperial choices.
+The preview and exported column headings identify these units. **Copy to clipboard** produces tab-separated rows
+for pasting into a spreadsheet. **Save export options** keeps the choices for future exports.
+
 ## Set up basic labels
 
 Open **Output > Labels** from Parts or a cutting plan. Choose the paper size, labels across/down and any blank

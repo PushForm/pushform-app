@@ -61,8 +61,9 @@ function rustKernelOptions(): { enabled: boolean; alias: { find: RegExp; replace
     throw new Error('PF_RUST_KERNEL=1 needs the kernel module: run pnpm build:kernel-wasm');
   }
   // Without the flag the worker and its module must not be bundled at all, so a normal build needs no Emscripten output.
-  const stub = fileURLToPath(new URL('../../packages/kernel/src/rustWasmDisabled.ts', import.meta.url));
-  return { enabled, alias: enabled ? [] : [{ find: /^@pushform\/kernel\/rust-wasm$/, replacement: stub }] };
+  // The alias also resolves the package's import of itself in validateSolid.ts, which no workspace link provides.
+  const target = fileURLToPath(new URL(`../../packages/kernel/src/${enabled ? 'rustWasm' : 'rustWasmDisabled'}.ts`, import.meta.url));
+  return { enabled, alias: [{ find: /^@pushform\/kernel\/rust-wasm$/, replacement: target }] };
 }
 
 export default defineConfig(({ mode }) => {

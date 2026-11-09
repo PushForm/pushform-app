@@ -51,6 +51,7 @@ const OP_FOLLOW_ME = 15;
 const OP_REVOLVE = 16;
 const OP_EDGE_BLEND = 17;
 const OP_STATS = 18;
+const OP_VALIDATE_SOLID = 19;
 
 const BOOLEAN_OPS: readonly BooleanOp[] = ['add', 'subtract', 'intersect', 'split', 'trim'];
 
@@ -143,6 +144,14 @@ export function encodeEnsureBody(req: EnsureBodyRequest): Uint8Array {
   w.f64(req.version);
   w.u32(req.mesh !== undefined ? 1 : 0);
   if (req.mesh !== undefined) writeMesh(w, req.mesh);
+  return w.finish();
+}
+
+/** Asks the kernel whether a mesh is a valid solid enclosing positive volume; the answer is an empty response or an error. */
+export function encodeValidateSolid(mesh: Pick<MeshWire, 'verts' | 'tris' | 'faceId'>): Uint8Array {
+  const w = new Writer();
+  w.u32(OP_VALIDATE_SOLID);
+  writeMesh(w, mesh as MeshWire);
   return w.finish();
 }
 

@@ -4,9 +4,13 @@
  * The Rust kernel's WebAssembly path, kept out of the package's main entry because its worker imports a module that
  * only exists after `pnpm build:kernel-wasm`. Nothing in the app imports this file by default.
  */
+import type { MeshData } from '@pushform/core';
 import type { MeshProvider } from './backends/KernelBackend';
 import { NativeKernelBackend } from './backends/NativeKernelBackend';
+import { encodeValidateSolid } from './backends/nativeWire';
 import { RustWasmKernelTransport, type RustWasmKernelTransportOptions } from './backends/RustWasmKernelTransport';
+import { KernelError, type KernelErrorInfo } from './protocol';
+import { RustKernelCaller, RustKernelRejection, trapErrorInfo } from './worker/rustKernelCore';
 
 export { RustWasmKernelTransport, type RustWasmKernelTransportOptions };
 
@@ -27,4 +31,27 @@ export function createRustWasmBackend(options: RustWasmBackendOptions = {}): { b
   const backend = new NativeKernelBackend(undefined, transport, { fallback: false });
   if (meshProvider !== undefined) backend.setMeshProvider(meshProvider);
   return { backend, transport };
+}
+
+let validator: Promise<RustKernelCaller> | undefined;
+
+/** The Rust module for {@link validateSolidWithRust}, loaded once per thread and replaced after a trap. */
+function validatingModule(): Promise<RustKernelCaller> {
+  validator ??= import('../wasm/pushform-kernel.js').then(({ default: factory }) => factory()).then((module) => new RustKernelCaller(module)).catch((cause: unknown) => {
+    validator = undefined;
+    throw cause;
+  });
+  return validator;
+}
+
+/** `validateSolidMesh`'s check in the Rust kernel: Manifold must accept the mesh and it must enclose positive volume. */
+export async function validateSolidWithRust(mesh: MeshData): Promise<void> {
+  const caller = await validatingModule();
+  try {
+    caller.call(encodeValidateSolid(mesh));
+  } catch (cause) {
+    if (cause instanceof RustKernelRejection) throw KernelError.fromInfo(JSON.parse(cause.info) as KernelErrorInfo);
+    validator = undefined;
+    throw KernelError.fromInfo(JSON.parse(trapErrorInfo(cause)) as KernelErrorInfo);
+  }
 }

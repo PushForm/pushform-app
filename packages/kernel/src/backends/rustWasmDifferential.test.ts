@@ -14,9 +14,10 @@ import { meshTopologyProblems } from '../meshChecks';
 import type { FaceOrigin, KernelErrorInfo, MeshWire, PolygonsWithHoles, PushPullPreview, PushPullResult } from '../protocol';
 import { square, topRegion } from '../test/helpers';
 import { InlineBackend } from './InlineBackend';
+import { validateSolidMesh } from '../validateSolid';
 import { NativeKernelBackend } from './NativeKernelBackend';
 import { differentialCases, HarnessTransport, InlineRustTransport, largestUpFace, type DifferentialCase, type RustModuleFactory } from './differentialFixtures';
-import { encodePushPull } from './nativeWire';
+import { encodePushPull, encodeValidateSolid } from './nativeWire';
 
 const harnessPath = resolve(__dirname, '../../../../crates/native-kernel/target/release/pushform-native-kernel-harness');
 const modulePath = resolve(__dirname, '../../wasm/pushform-kernel.js');
@@ -179,5 +180,23 @@ describe.skipIf(!ready)('TypeScript, native Rust and WebAssembly Rust push/pull 
     const fromWasm = await transport.call(encoded).then(() => { throw new Error('expected a failure'); }, rejected);
     expect(fromNative).toEqual(failure);
     expect(fromWasm).toEqual(failure);
+  });
+
+  // The check `readNativeBody` runs on every stored body: the same outcome down both kernels.
+  it.skipIf(process.env.PF_KERNEL === 'rust').each([
+    { name: 'a valid box', mesh: () => meshBox([0, 0, 0], [1, 2, 3]) },
+    { name: 'an inverted box with negative volume', mesh: () => { const m = meshBox([0, 0, 0], [1, 1, 1]); const tris = new Uint32Array(m.tris); for (let i = 0; i < tris.length; i += 3) { const a = tris[i + 1]!; tris[i + 1] = tris[i + 2]!; tris[i + 2] = a; } return { ...m, tris }; } },
+    { name: 'an open mesh', mesh: () => { const m = meshBox([0, 0, 0], [1, 1, 1]); return { verts: m.verts, tris: m.tris.slice(0, 30), faceId: m.faceId.slice(0, 10) }; } },
+    { name: 'an empty mesh', mesh: () => ({ verts: new Float64Array(0), tris: new Uint32Array(0), faceId: new Uint32Array(0) }) },
+    { name: 'two separate boxes', mesh: () => { const a = meshBox([0, 0, 0], [1, 1, 1]), b = meshBox([3, 0, 0], [4, 1, 1]); return { verts: new Float64Array([...a.verts, ...b.verts]), tris: new Uint32Array([...a.tris, ...b.tris.map((i) => i + 8)]), faceId: new Uint32Array([...a.faceId, ...b.faceId]) }; } },
+  ])('validates $name the same way', async ({ mesh }) => {
+    const m = mesh();
+    const fromTs = await validateSolidMesh(m).then(() => 'ok', (e: { code: string; message: string; details?: unknown }) => JSON.stringify({ code: e.code, message: e.message, details: e.details }));
+    const transport = new InlineRustTransport(await loadFactory());
+    const fromWasm = await transport.call(encodeValidateSolid(m)).then(() => 'ok', (e: unknown) => {
+      const info = JSON.parse(String(e)) as KernelErrorInfo;
+      return JSON.stringify({ code: info.code, message: info.message, details: info.details });
+    });
+    expect(fromWasm).toEqual(fromTs);
   });
 });

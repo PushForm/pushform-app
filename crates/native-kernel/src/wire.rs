@@ -34,6 +34,7 @@ pub const OP_FOLLOW_ME: u32 = 15;
 pub const OP_REVOLVE: u32 = 16;
 pub const OP_EDGE_BLEND: u32 = 17;
 pub const OP_STATS: u32 = 18;
+pub const OP_VALIDATE_SOLID: u32 = 19;
 
 /// A triangle mesh or tool soup as sent, with each array's own length so a malformed mesh reaches the kernel as it was sent.
 pub struct Mesh {
@@ -73,6 +74,7 @@ pub enum Request {
   Revolve(RevolveRequest),
   EdgeBlend(EdgeBlendRequest),
   Stats,
+  ValidateSolid { mesh: Mesh },
 }
 
 struct Reader<'a> {
@@ -243,6 +245,7 @@ pub fn decode_request(bytes: &[u8]) -> Result<Request, KernelError> {
       Ok(Request::EdgeBlend(EdgeBlendRequest { body, cut, add, next_face_id }))
     }
     OP_STATS => Ok(Request::Stats),
+    OP_VALIDATE_SOLID => Ok(Request::ValidateSolid { mesh: r.mesh()? }),
     op => Err(KernelError::invalid(&format!("unknown kernel request {op}"))),
   }
 }
@@ -303,6 +306,12 @@ pub fn encode_release(released: usize) -> Vec<u8> {
 pub fn encode_init() -> Vec<u8> {
   let mut w = Writer::default();
   w.u32(OP_INIT);
+  w.finish()
+}
+
+pub fn encode_validate_solid() -> Vec<u8> {
+  let mut w = Writer::default();
+  w.u32(OP_VALIDATE_SOLID);
   w.finish()
 }
 

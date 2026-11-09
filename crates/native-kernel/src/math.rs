@@ -156,9 +156,10 @@ pub fn js_number_string(x: f64) -> String {
   format!("{sign}{body}")
 }
 
-/// `Math.hypot(a, b)`: the Kahan summation both JavaScript engines the app runs on use (V8 and JavaScriptCore). A
-/// plain square root of the sum of squares differs from it in the last digit, which would reorder equal-area
-/// triangles and change which faces get which fresh ids.
+/// `Math.hypot(a, b)` as V8 computes it, with Kahan summation. A plain square root of the sum of squares differs from
+/// it in the last digit, which would reorder equal-area triangles and change which faces get which fresh ids.
+/// JavaScriptCore's `Math.hypot` also differs from this in the last digits, so the TypeScript kernel's results there
+/// are not bit-identical to V8's or to this kernel's.
 pub fn hypot2(a: f64, b: f64) -> f64 {
   hypot(&[a, b])
 }

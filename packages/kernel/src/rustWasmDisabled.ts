@@ -7,3 +7,7 @@
 export function createRustWasmBackend(): never {
   throw new Error('This build does not include the Rust kernel');
 }
+
+export function validateSolidWithRust(): never {
+  throw new Error('This build does not include the Rust kernel');
+}

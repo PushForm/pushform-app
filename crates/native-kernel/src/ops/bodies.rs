@@ -27,6 +27,17 @@ pub fn ensure_body(kernel: &Kernel, body_id: f64, version: f64, mesh: Option<Mes
   Ok(Some(run_id))
 }
 
+/// `validateSolidMesh` after the column checks made by the caller: Manifold must accept the mesh, and it must enclose
+/// positive volume. Nothing is cached.
+pub fn validate_solid(mesh: &Mesh) -> Result<(), KernelError> {
+  let soup = TriangleSoup { verts: &mesh.verts, tris: &mesh.tris, face_id: &mesh.face_id };
+  let manifold = manifold_from_soup(&soup, reserve_ids(1), soup_center(&mesh.verts))?;
+  if manifold.is_empty() || !(manifold.volume() > 0.0) {
+    return Err(KernelError::invalid("Body must enclose positive volume"));
+  }
+  Ok(())
+}
+
 /// Size of the heap the kernel runs in, or 0 when there is no single such heap (a native build).
 pub fn heap_bytes() -> f64 {
   #[cfg(target_arch = "wasm32")]

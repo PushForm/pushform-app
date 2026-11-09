@@ -194,6 +194,10 @@ impl Kernel {
       Request::Revolve(req) => wire::encode_components(wire::OP_REVOLVE, &revolve::revolve(&req)?),
       Request::EdgeBlend(req) => wire::encode_edge_blend(&edge_blend::edge_blend(self, &req)?),
       Request::Stats => wire::encode_stats(self.lock_cache().len(), bodies::heap_bytes()),
+      Request::ValidateSolid { mesh } => {
+        bodies::validate_solid(&mesh)?;
+        wire::encode_validate_solid()
+      }
     };
     checkpoint.check()?;
     Ok(response)

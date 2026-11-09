@@ -1,14 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 // PF_KERNEL=rust runs every InlineBackend on the Rust kernel's WebAssembly module (see the setup file).
-const kernelSetup = process.env.PF_KERNEL === 'rust' ? ['packages/kernel/src/test/rustKernelSetup.ts'] : [];
+const rust = process.env.PF_KERNEL === 'rust';
+const kernelSetup = rust ? ['packages/kernel/src/test/rustKernelSetup.ts'] : [];
+const rustResolve = rust ? { alias: { '@pushform/kernel/rust-wasm': fileURLToPath(new URL('packages/kernel/src/rustWasm.ts', import.meta.url)) } } : {};
+const rustDefine = rust ? { __PF_RUST_KERNEL__: 'true' } : {};
 
 export default defineConfig({
+  resolve: rustResolve,
+  define: rustDefine,
   test: {
     projects: [
       {
+        extends: true,
         test: {
           name: 'node',
           environment: 'node',
@@ -24,6 +31,7 @@ export default defineConfig({
         },
       },
       {
+        extends: true,
         test: {
           name: 'dom',
           environment: 'jsdom',

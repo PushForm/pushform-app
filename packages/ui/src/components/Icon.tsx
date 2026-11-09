@@ -14,6 +14,7 @@ import { LayoutFilletIcon } from './LayoutFilletIcon';
 import { LayoutShapeBuilderIcon } from './LayoutShapeBuilderIcon';
 import { SectionPlaneIcon } from './SectionPlaneIcon';
 import { RevolveIcon } from './RevolveIcon';
+import { ArcIcon, TwoPointArcIcon, ThreePointArcIcon, PieIcon } from './ArcIcons';
 import {
   LuSave,
   LuArrowDown,
@@ -138,6 +139,10 @@ const REACT_ICONS: Record<string, IconType> = {
   'tool-rotrect': LuDiamond,
   'tool-followme': LuRoute,
   'tool-revolve': RevolveIcon,
+  'tool-arc': ArcIcon,
+  'tool-arc2': TwoPointArcIcon,
+  'tool-arc3': ThreePointArcIcon,
+  'tool-pie': PieIcon,
   'tool-protractor': LuDraftingCompass,
   'tool-tag': LuTag,
   'tool-texturePosition': LuImage,
@@ -192,10 +197,6 @@ const PATHS: Record<string, string> = {
   /** `assets/push-pull.svg` refit to the 24-unit grid: a face pulled out of a box; the Push/Pull tool. */
   'tool-pushpull':
     'M7.37 2.8H6.28L2 7.08V21.2H3.85M6.25 7.34L10.68 2.8H17.17V16.05L12.64 21.2H6.25ZM6.25 7.34H12.64V21.2M12.64 7.34L17.17 2.8M15.65 12.2H22M20.29 10.46L22 12.2L20.29 13.94',
-  'tool-arc2': 'M4 18A14 14 0 0 1 20 18M4 18h.01M20 18h.01',
-  'tool-arc3': 'M4 18A14 14 0 0 1 20 18M4 18h.01M20 18h.01M12 9.5h.01',
-  'tool-arc': 'M6 18h.01M6 18V5M6 18h13M6 5a13 13 0 0 1 13 13',
-  'tool-pie': 'M12 12V4a8 8 0 0 1 6.9 12L12 12z',
   'tool-rounded-rectangle':
     'M7 4h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3Z',
   'tool-bulged-rectangle': 'M6 4h12Q23 12 18 20H6Q1 12 6 4Z',

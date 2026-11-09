@@ -34,9 +34,11 @@ Click a flat profile face in the group or component you are editing. Then click 
 
 A solid preview appears after you choose the axis. The default angle is **360°**. Type an angle such as `90` or `90°` and press Enter to update the preview; a partial turn has flat, closed ends. Set **Segments** in the options bar, or type `48s`, to control the resolution of the curved shape. Counts run from 3 to 720 per full turn; the default is 48.
 
-To make a **sphere**, draw a filled semicircle: use **2 Point Arc** for the curved half, then use **Line** to join its endpoints with a straight diameter. Choose **Revolve**, click inside that semicircle, then click the diameter and apply a **360°** turn. A full circular face crosses its diameter and cannot be revolved around it; use half the circle. Curved regions are smoothed automatically, including the sphere's poles and closing seam. Rims and corners in the profile stay sharp. More profile arc segments and more Revolve segments make the silhouette rounder.
-
 Click **Apply**, click in the view, or press Enter with no value being edited to finish. Revolving a loose face replaces that face with the new solid. Using a face of an existing solid creates separate solids and keeps the original. The operation is one **Undo** step. Escape cancels the pending operation. If an axis is outside the profile plane or crosses the profile, the tool explains the problem; cancel and choose a suitable axis. If the model changes while you are previewing, cancel and pick the profile and axis again before applying.
+
+## Make a sphere with Revolve
+
+To make a **sphere**, draw a filled semicircle: use **2 Point Arc** for the curved half, then use **Line** to join its endpoints with a straight diameter. Choose **Revolve**, click inside that semicircle, then click the diameter and apply a **360°** turn. A full circular face crosses its diameter and cannot be revolved around it; use half the circle. Curved regions are smoothed automatically, including the sphere's poles and closing seam. Rims and corners in the profile stay sharp. More profile arc segments and more Revolve segments make the silhouette rounder.
 
 ## Offset a face or connected edges in Modeling
 

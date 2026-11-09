@@ -84,7 +84,6 @@ export default defineConfig(async ({ mode, command }) => {
     },
     server: { port: 5174, strictPort: true },
     worker: { format: 'es' },
-    optimizeDeps: { exclude: ['manifold-3d'] },
     build: { target: 'es2022', sourcemap: 'hidden' },
     clearScreen: false,
   };

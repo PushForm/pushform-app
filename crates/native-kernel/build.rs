@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-//! Generates `tolerance.rs` from `packages/core/src/tolerance.ts`, so the native kernel can never disagree with the
-//! TypeScript kernel about a tolerance.
+//! Generates `tolerance.rs` from `packages/core/src/tolerance.ts`, so the kernel can never disagree with the rest of the
+//! app about a tolerance.
 use std::{env, fs, path::Path};
 
 const NAMES: [&str; 3] = ["COPLANAR_TOL", "MERGE_TOL", "AREA_TOL"];

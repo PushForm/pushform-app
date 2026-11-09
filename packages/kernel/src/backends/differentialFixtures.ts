@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-/** The fixtures and process plumbing shared by the kernel differential tests. */
+/** The fixtures and process plumbing shared by the tests comparing the kernel's native and WebAssembly builds. */
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { meshBox, planeBasis, v3cross, v3normalize, type MeshData, type Vec3 } from '@pushform/core';
 import type { RustKernelModule } from '../../wasm/pushform-kernel.js';
@@ -93,7 +93,7 @@ function rotatedBox(): { mesh: MeshData; top: Vec3; center: Vec3 } {
   return { mesh: { verts, tris: box.tris, faceId: box.faceId }, top: rotate([0, 0, 1]), center };
 }
 
-/** Body built with the WebAssembly kernel (booleans are not part of the native kernel). */
+/** An L-shaped body built with booleans through `wasm`. */
 async function lShapedBody(wasm: KernelClient): Promise<MeshData> {
   const slab = meshBox([0, 0, 0], [2, 1, 1]);
   const block = meshBox([0, 0, 1], [1, 1, 2]);
@@ -179,7 +179,7 @@ function rotatedRegion(polygon: PolygonsWithHoles, whole: boolean): PushPullRegi
   return { faceId: 1, basis: planeBasis([center[0] + top[0] * 0.5, center[1] + top[1] * 0.5, center[2] + top[2] * 0.5], top), polygon, regionIsWholeFace: whole };
 }
 
-/** The push/pull fixtures; `kernel` is the TypeScript kernel used to build the bodies that need booleans. */
+/** The push/pull fixtures; `kernel` builds the bodies that need booleans. */
 export function differentialCases(kernel: () => KernelClient): DifferentialCase[] {
   return [
   { name: 'pull the whole top face by moving it', mesh: box, region: () => unitTop(square(0, 0, 1), true), distance: 1, nextFaceId: 6 },

@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 /**
- * Runs every kernel operation down three paths and requires them to agree bit for bit: the TypeScript kernel, the native
- * Rust kernel (threaded, through its harness process) and the Rust kernel's WebAssembly module (single-threaded). Each
- * call goes to all three in lockstep, so run ids and everything else in a result must be identical. Errors compare by
- * code, message and details. Needs the harness binary (see nativeDifferential.test.ts) and the module from
- * `pnpm build:kernel-wasm`; skipped when either is missing.
+ * Runs every kernel operation down the kernel's two builds and requires them to agree bit for bit: the native Rust kernel
+ * (threaded, through its harness process) and the Rust kernel's WebAssembly module (single-threaded), including the
+ * dense meshes where the threaded build takes its parallel code paths. Each call goes to both in lockstep, so run ids and
+ * everything else in a result must be identical. Errors compare by code, message and details. Needs the harness binary
+ * (see nativeDifferential.test.ts); skipped when it is missing.
  */
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { m4translation, meshBox, planeBasis, v3cross, v3normalize, v3sub, type MeshData, type Vec3 } from '@pushform/core';
 import { KernelClient } from '../client/KernelClient';
@@ -16,18 +16,13 @@ import { HARDWARE_SHAPES, type HardwareOptions } from '../hardware';
 import { meshTopologyProblems } from '../meshChecks';
 import { toKernelErrorInfo, type BodyRef, type KernelErrorInfo, type KernelRequest, type MeshWire, type PolygonsWithHoles, type ResFor, type ToolSoup } from '../protocol';
 import { square, topRegion } from '../test/helpers';
-import { InlineBackend } from './InlineBackend';
 import type { KernelBackend } from './KernelBackend';
 import { NativeKernelBackend, type NativeKernelTransport } from './NativeKernelBackend';
 import { differentialCases, HarnessTransport, InlineRustTransport, type RustModuleFactory } from './differentialFixtures';
-import { encodeGoldenCorpus, type GoldenRecord } from './goldenCorpus';
-import { encodeRequest } from './nativeWire';
 
 const harnessPath = process.env.PF_KERNEL_HARNESS ?? resolve(__dirname, '../../../../crates/native-kernel/target/release/pushform-native-kernel-harness');
 const modulePath = resolve(__dirname, '../../wasm/pushform-kernel.js');
 const ready = existsSync(harnessPath) && existsSync(modulePath);
-/** Set to a file path to rewrite the golden corpus from this run: fixtures and random sequences, up to the dense-mesh tests. */
-const goldenPath = process.env.PF_RECORD_GOLDENS ? resolve(process.env.PF_RECORD_GOLDENS) : undefined;
 
 type Outcome = { ok: true; value: unknown } | { ok: false; error: KernelErrorInfo };
 
@@ -98,22 +93,17 @@ const outcome = async (p: Promise<unknown>): Promise<Outcome> => {
   }
 };
 
-/** Sends every request to the three kernels in lockstep, compares the outcomes exactly and hands back the TypeScript one. */
-class TriadBackend implements KernelBackend {
+/** Sends every request to both builds in lockstep, compares the outcomes exactly and hands back the WebAssembly one. */
+class PairBackend implements KernelBackend {
   readonly counts = new Map<string, number>();
   readonly failures: string[] = [];
-  /** The Rust module's last raw response, when the transport keeps it for the golden recorder. */
-  lastResponse: ArrayBuffer | undefined;
-  readonly golden: GoldenRecord[] = [];
-  recording = false;
   constructor(
-    private readonly ts: KernelBackend,
     private readonly native: KernelBackend,
     private readonly wasm: KernelBackend,
   ) {}
 
   async request<R extends KernelRequest>(req: R): Promise<ResFor<R>> {
-    const [a, n, r] = await Promise.all([outcome(this.ts.request(req)), outcome(this.native.request(req)), outcome(this.wasm.request(req))]);
+    const [a, n] = await Promise.all([outcome(this.wasm.request(req)), outcome(this.native.request(req))]);
     this.counts.set(req.type, (this.counts.get(req.type) ?? 0) + 1);
     const compare = (b: Outcome, label: string): void => {
       const left = a.ok ? { ok: true, value: normalizeForCompare(req.type, a.value) } : a;
@@ -126,30 +116,14 @@ class TriadBackend implements KernelBackend {
       }
     };
     compare(n, 'native');
-    compare(r, 'wasm');
-    if (this.recording) this.record(req, a);
     if (!a.ok) throw Object.assign(new Error(a.error.message), a.error);
     return a.value as ResFor<R>;
-  }
-
-  /** Keep this request and the answer every kernel agreed on. A request that cannot be encoded (invalid options) stays out. */
-  private record(req: KernelRequest, a: Outcome): void {
-    let request: Uint8Array;
-    try {
-      request = new Uint8Array(encodeRequest(req));
-    } catch {
-      return;
-    }
-    if (req.type === 'stats') this.golden.push({ request, outcome: { kind: 'stats', cached: (a.ok ? (a.value as { cached: number }).cached : 0) } });
-    else if (a.ok) this.golden.push({ request, outcome: { kind: 'ok', response: new Uint8Array(this.lastResponse!.slice(0)) } });
-    else this.golden.push({ request, outcome: { kind: 'error', info: JSON.stringify(a.error) } });
   }
 
   abortAll(): void {
     throw new Error('not used by this test');
   }
   dispose(): void {
-    this.ts.dispose();
     this.native.dispose();
     this.wasm.dispose();
   }
@@ -189,11 +163,10 @@ const toolSoup = (min: Vec3, max: Vec3): ToolSoup => {
   return { verts: m.verts, tris: m.tris, faceId: m.faceId };
 };
 
-describe.skipIf(!ready)('every kernel operation agrees bit for bit across TypeScript, native Rust and WebAssembly Rust', () => {
-  let ts: KernelBackend;
+describe.skipIf(!ready)('every kernel operation agrees bit for bit across the native and WebAssembly builds', () => {
   let harness: HarnessTransport;
   let client: KernelClient;
-  let triad: TriadBackend;
+  let triad: PairBackend;
   let nextBody = 1;
   /** When set, alters the next native answer: the comparison must catch it. */
   let tamper: ((response: Uint8Array) => void) | undefined;
@@ -209,7 +182,6 @@ describe.skipIf(!ready)('every kernel operation agrees bit for bit across TypeSc
   const uploadComponent = (c: { mesh: MeshWire }) => newBody(c.mesh);
 
   beforeAll(async () => {
-    ts = new InlineBackend({ typescriptOnly: true });
     harness = new HarnessTransport(harnessPath);
     harness.start();
     const tampering: NativeKernelTransport = {
@@ -225,26 +197,15 @@ describe.skipIf(!ready)('every kernel operation agrees bit for bit across TypeSc
     };
     const native = new NativeKernelBackend(undefined, tampering, { fallback: false });
     const factory = ((await import(/* @vite-ignore */ modulePath)) as { default: RustModuleFactory }).default;
-    const wasmTransport = new InlineRustTransport(factory);
-    const keeping: NativeKernelTransport = {
-      available: () => wasmTransport.available(),
-      call: async (request) => {
-        const buffer = await wasmTransport.call(request);
-        triad.lastResponse = buffer;
-        return buffer;
-      },
-      abort: () => wasmTransport.abort(),
-    };
-    const wasm = new NativeKernelBackend(undefined, keeping, { fallback: false });
-    triad = new TriadBackend(ts, native, wasm);
-    triad.recording = goldenPath !== undefined;
+    const wasm = new NativeKernelBackend(undefined, new InlineRustTransport(factory), { fallback: false });
+    triad = new PairBackend(native, wasm);
     client = new KernelClient(triad);
     await client.init();
   });
 
   afterAll(() => {
     const line = `[${[...triad.counts.entries()].map(([k, v]) => `${k}:${v}`).join(' ')}]`;
-    if (process.env.PF_NATIVE_DIFF_SUMMARY) process.stderr.write(`\nthree-way requests ${line}\n`);
+    if (process.env.PF_NATIVE_DIFF_SUMMARY) process.stderr.write(`\ntwo-way requests ${line}\n`);
     expect(triad.failures).toEqual([]);
     harness.stop();
     client.dispose();
@@ -1015,14 +976,6 @@ describe.skipIf(!ready)('every kernel operation agrees bit for bit across TypeSc
   });
 
   describe('dense meshes, where the threaded native build takes its parallel code paths', () => {
-    // These answers are megabytes each, so the corpus ends with the random sequences.
-    beforeAll(() => {
-      if (goldenPath === undefined) return;
-      triad.recording = false;
-      mkdirSync(dirname(goldenPath), { recursive: true });
-      writeFileSync(goldenPath, encodeGoldenCorpus(triad.golden));
-    }, 600000);
-
     const torus = async (axisOffset: number, segments: number, ringSegments: number, spin: number): Promise<BodyRef & { mesh: MeshWire }> => {
       const profile: PolygonsWithHoles = [circleProfile(ringSegments, 0.45)[0]!.map(([x, y]) => [x! + 1.5, y! + 0.5])];
       const r = await client.revolve({ profile, profileBasis: { origin: [axisOffset, 0, 0], u: [1, 0, 0], v: [0, 0, 1], n: [0, -1, 0] }, axisOrigin: [axisOffset, 0, 0], axisDir: [0, 0, 1], angleDeg: 360, segments, nextFaceId: 1 });

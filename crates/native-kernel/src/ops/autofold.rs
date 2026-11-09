@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 //! Autofold: validate a re-triangulated mesh and normalize it, a port of `autofold.ts`. Rejections carry the same
-//! messages and details as the TypeScript kernel.
+//! messages and details as the former TypeScript kernel.
 use manifold_csg::reserve_ids;
 
 use crate::bvh::{build_tri_bvh, query_box};
@@ -92,7 +92,7 @@ fn triangles_intersect(p: &[Vec3; 3], q: &[Vec3; 3], tol: f64) -> bool {
   overlap / js_max(scale, 1e-300) > tol
 }
 
-/// First pair of triangles with no shared vertex index that intersect, in the order the TypeScript kernel finds them.
+/// First pair of triangles with no shared vertex index that intersect, in the order the former TypeScript kernel finds them.
 fn mesh_self_intersection(verts: &[f64], tris: &[u32]) -> Option<(usize, usize)> {
   let tol = COPLANAR_TOL;
   let bvh = build_tri_bvh(verts, tris);
@@ -119,4 +119,40 @@ fn mesh_self_intersection(verts: &[f64], tris: &[u32]) -> Option<(usize, usize)>
     }
   }
   None
+}
+
+#[cfg(test)]
+mod tests {
+  use super::mesh_self_intersection;
+
+  /// The triangles of a box with faces on each side, like `meshBox` in `@pushform/core`.
+  fn box_mesh(min: [f64; 3], max: [f64; 3], first_vert: u32) -> (Vec<f64>, Vec<u32>) {
+    let mut verts = Vec::new();
+    for &z in &[min[2], max[2]] {
+      for &(x, y) in &[(min[0], min[1]), (max[0], min[1]), (max[0], max[1]), (min[0], max[1])] {
+        verts.extend_from_slice(&[x, y, z]);
+      }
+    }
+    #[rustfmt::skip]
+    let tris: Vec<u32> = [0u32, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7].iter().map(|i| i + first_vert).collect();
+    (verts, tris)
+  }
+
+  #[test]
+  fn self_intersection_ignores_adjacent_and_merely_touching_triangles() {
+    let (verts, tris) = box_mesh([0.0, 0.0, 0.0], [1.0, 1.0, 1.0], 0);
+    assert_eq!(mesh_self_intersection(&verts, &tris), None);
+    // Two boxes sharing a face but not vertices: touching, not intersecting.
+    let (mut together, mut tris_together) = box_mesh([0.0, 0.0, 0.0], [1.0, 1.0, 1.0], 0);
+    let (top, top_tris) = box_mesh([0.25, 0.25, 1.0], [0.75, 0.75, 2.0], 8);
+    together.extend_from_slice(&top);
+    tris_together.extend_from_slice(&top_tris);
+    assert_eq!(mesh_self_intersection(&together, &tris_together), None);
+    // The second box now reaches into the first.
+    let (mut crossing, mut tris_crossing) = box_mesh([0.0, 0.0, 0.0], [1.0, 1.0, 1.0], 0);
+    let (inside, inside_tris) = box_mesh([0.25, 0.25, 0.5], [0.75, 0.75, 2.0], 8);
+    crossing.extend_from_slice(&inside);
+    tris_crossing.extend_from_slice(&inside_tris);
+    assert!(mesh_self_intersection(&crossing, &tris_crossing).is_some());
+  }
 }

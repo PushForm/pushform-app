@@ -3,9 +3,8 @@
 // Copyright 2026 PushForm contributors
 /* global process */
 // pushform-mcp. Workspace packages export TypeScript sources, which Node cannot run, so
-// this launcher bundles src/cli.ts with esbuild into a temporary module and runs it. manifold-3d and
-// the Rust kernel's WebAssembly glue stay external, loaded from where the kernel resolves them, so their
-// WASM files are found beside them.
+// this launcher bundles src/cli.ts with esbuild into a temporary module and runs it. The Rust kernel's
+// WebAssembly glue stays external, loaded from where the kernel resolves it, so its WASM file is found beside it.
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -13,7 +12,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const kernelDir = join(here, '../../kernel/src');
 
 const result = await build({
   entryPoints: [join(here, '../src/cli.ts')],
@@ -24,18 +22,6 @@ const result = await build({
   write: false,
   logLevel: 'error',
   plugins: [
-    {
-      name: 'manifold-external',
-      setup(b) {
-        b.onResolve({ filter: /^manifold-3d$/ }, async (args) => {
-          if (args.pluginData === 'inner') return undefined;
-          // resolve as the kernel would (import conditions), then load that file at run time
-          const r = await b.resolve('manifold-3d', { kind: 'import-statement', resolveDir: kernelDir, pluginData: 'inner' });
-          if (r.errors.length) return { errors: r.errors };
-          return { path: pathToFileURL(r.path).href, external: true };
-        });
-      },
-    },
     {
       name: 'kernel-wasm-external',
       setup(b) {

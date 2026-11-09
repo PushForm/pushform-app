@@ -40,7 +40,7 @@ export interface NativeKernelBackendOptions {
 /**
  * A kernel backend that runs every request in the Rust kernel over a binary transport (native on the desktop, WebAssembly
  * on the web). With a `worker` and `fallback` (the desktop), any failure of the Rust path, including the kernel being
- * absent from this build, quietly runs that one request in the TypeScript worker instead; each side has its own body
+ * absent from this build, quietly runs that one request in the WebAssembly worker instead; each side has its own body
  * cache, filled from the same mesh provider through `ensureBody`/`sendWithReupload`. With `fallback: false`, as the web
  * opt-in uses, every request is answered by Rust and its failures reach the caller.
  */

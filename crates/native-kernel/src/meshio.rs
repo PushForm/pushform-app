@@ -50,7 +50,7 @@ fn csg_status(e: CsgError) -> &'static str {
   }
 }
 
-/// What Manifold's JavaScript binding throws for a status nothing in the TypeScript kernel catches: a plain `Error` with
+/// What Manifold's JavaScript binding throws for a status nothing in the former TypeScript kernel catches: a plain `Error` with
 /// this message, reported as `Internal`.
 pub fn uncaught_manifold_error(e: CsgError) -> KernelError {
   KernelError::internal(
@@ -84,7 +84,7 @@ fn mesh_gl_from_props(props: &[f32], soup_tris: &[u32], face_id: &[u32], run_id:
   Ok(mesh)
 }
 
-/// Float32 positions of `verts` relative to `center`, as the TypeScript kernel builds its `Float32Array`.
+/// Float32 positions of `verts` relative to `center`, as the former TypeScript kernel builds its `Float32Array`.
 pub fn relative_props(verts: &[f64], center: [f64; 3]) -> Vec<f32> {
   let mut props = Vec::with_capacity(verts.len());
   for point in verts.chunks_exact(3) {
@@ -126,7 +126,7 @@ pub fn soup_center(verts: &[f64]) -> [f64; 3] {
   crate::math::bounds_center(crate::math::bounds(verts))
 }
 
-/// Read a Manifold as welded Float64 triangles with per-triangle provenance (see `readManifold` in the TypeScript kernel).
+/// Read a Manifold as welded Float64 triangles with per-triangle provenance (see `readManifold` in the former TypeScript kernel).
 pub fn read_manifold(m: &Manifold) -> ReadMesh {
   if m.is_empty() {
     return ReadMesh { verts: Vec::new(), tris: Vec::new(), run_id: Vec::new(), face_id: Vec::new() };

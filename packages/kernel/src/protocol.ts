@@ -48,7 +48,7 @@ export interface KernelComponent {
 export type BooleanOp = 'add' | 'subtract' | 'intersect' | 'split' | 'trim';
 export type PushPullMode = 'merge' | 'newBody';
 
-/** Mirror of manifold-3d's ErrorStatus so consumers need not depend on manifold-3d types. */
+/** The status codes Manifold reports for a rejected mesh, carried through the kernel protocol. */
 export type ManifoldStatus =
   | 'NoError'
   | 'NonFiniteVertex'
@@ -219,6 +219,11 @@ export interface StatsRequest {
 export interface HardwareRequest { type: 'hardware'; options: HardwareOptions; nextFaceId: number }
 export interface HardwareResult extends ComponentsResult { mountingCenters: Vec3[]; resolved: ResolvedHardwareOptions }
 
+/** Face ids a push/pull tool's prism carries in its run: near cap, far cap, then a side face per boundary edge. */
+export const TOOL_NEAR_CAP = 0;
+export const TOOL_FAR_CAP = 1;
+export const TOOL_SIDE_BASE = 2;
+
 export type KernelRequest =
   | HardwareRequest
   | InitRequest
@@ -379,11 +384,3 @@ export function toKernelErrorInfo(e: unknown): KernelErrorInfo {
   if (e instanceof Error) return { code: 'Internal', message: e.message };
   return { code: 'Internal', message: String(e) };
 }
-
-export interface KernelRequestEnvelope {
-  id: number;
-  req: KernelRequest;
-}
-export type KernelResponseEnvelope =
-  | { id: number; ok: true; result: unknown }
-  | { id: number; ok: false; error: KernelErrorInfo };

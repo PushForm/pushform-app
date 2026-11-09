@@ -2,12 +2,11 @@
 // Copyright 2026 PushForm contributors
 import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 import { meshBox, m4translation, planeBasis, type Vec3 } from '@pushform/core';
-import { InlineBackend } from '../../backends/InlineBackend';
-import { KernelClient } from '../../client/KernelClient';
-import { meshEulerCharacteristic } from '../../meshChecks';
-import type { MeshWire } from '../../protocol';
-import { meshSelfIntersection } from './autofold';
-import { expectManifold, faceCount, faceIds, square, topRegion, uploadBox, uploadComponent } from '../../test/helpers';
+import { InlineBackend } from './InlineBackend';
+import { KernelClient } from '../client/KernelClient';
+import { meshEulerCharacteristic } from '../meshChecks';
+import type { MeshWire } from '../protocol';
+import { expectManifold, faceCount, faceIds, square, topRegion, uploadBox, uploadComponent } from '../test/helpers';
 
 let client: KernelClient;
 let nextBodyId = 1;
@@ -394,11 +393,12 @@ describe('other ops', () => {
     expect(p.bounds.max).toEqual([1, 2, 3]);
     const before = (await client.stats()).cached;
     expect(before).toBeGreaterThan(0);
-    // Release in the worker only; the client still remembers the upload and re-sends on demand.
+    // Clear the kernel's cache only; the client still remembers the upload and re-sends on demand.
     const backend = new InlineBackend();
     const c2 = new KernelClient(backend);
     const b2 = await uploadBox(c2, 1, [0, 0, 0], [1, 1, 1]);
-    (await backend.getContext()).cache.clear();
+    backend.abortAll();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect((await c2.properties({ body: b2 })).volume).toBeCloseTo(1, 9);
     c2.dispose();
   });
@@ -485,18 +485,6 @@ describe('autofold', () => {
     const box = meshBox([0, 0, 0], [1, 1, 1]);
     const open = { verts: box.verts, tris: box.tris.slice(0, 30), faceId: box.faceId.slice(0, 10), runId: 0 };
     await expect(request(open, 6)).rejects.toMatchObject({ code: 'ManifoldError', details: { reason: 'NotManifold', status: 'NotManifold' } });
-  });
-
-  it('meshSelfIntersection ignores adjacent and merely touching triangles', () => {
-    expect(meshSelfIntersection({ ...meshBox([0, 0, 0], [1, 1, 1]) })).toBeNull();
-    // Two boxes sharing a face but not vertices: touching, not intersecting.
-    const a = meshBox([0, 0, 0], [1, 1, 1]), b = meshBox([0.25, 0.25, 1], [0.75, 0.75, 2]);
-    const verts = new Float64Array([...a.verts, ...b.verts]);
-    const tris = new Uint32Array([...a.tris, ...b.tris.map((i) => i + 8)]);
-    const faceId = new Uint32Array([...a.faceId, ...b.faceId]);
-    expect(meshSelfIntersection({ verts, tris, faceId })).toBeNull();
-    const c = meshBox([0.25, 0.25, 0.5], [0.75, 0.75, 2]);
-    expect(meshSelfIntersection({ verts: new Float64Array([...a.verts, ...c.verts]), tris, faceId })).not.toBeNull();
   });
 });
 

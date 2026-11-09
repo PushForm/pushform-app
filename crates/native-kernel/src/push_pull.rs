@@ -13,7 +13,7 @@ use crate::normalize::{normalize_triangles, IntMap, WeightedOrigin};
 use crate::tolerance::{AREA_TOL, COPLANAR_TOL, MERGE_TOL};
 use crate::KernelError;
 
-/// The `TypeError` the TypeScript kernel's Manifold binding throws for a polygon list with no contours: reading the
+/// The `TypeError` the former TypeScript kernel's Manifold binding throws for a polygon list with no contours: reading the
 /// first contour's length. It reaches the caller as an `Internal` error.
 const NO_CONTOURS: &str = "Cannot read properties of undefined (reading 'length')";
 
@@ -181,7 +181,7 @@ fn polygons_cross_section(frame: &ToolFrame) -> Result<CrossSection, KernelError
   Ok(CrossSection::from_polygons_with_fill_rule(&frame.contours, FillRule::Positive))
 }
 
-/// Cross-section of the frame's contours, or the region-has-no-area error of the TypeScript kernel.
+/// Cross-section of the frame's contours, or the region-has-no-area error of the former TypeScript kernel.
 fn cross_section(frame: &ToolFrame) -> Result<CrossSection, KernelError> {
   let cs = polygons_cross_section(frame)?;
   if cs.is_empty() {
@@ -343,7 +343,7 @@ struct Stretch {
 const NOT_SQUARE: Stretch = Stretch { square: false, verts: None };
 
 /// Move a whole face along its normal instead of cutting, when every face around it is square to it and nothing else of
-/// the solid is in the way. See `stretchFace` in the TypeScript kernel.
+/// the solid is in the way. See `stretchFace` in the former TypeScript kernel.
 fn stretch_face(body: &CacheEntry, mesh: &ReadMesh, req: &PushPullRequest, frame: &ToolFrame, height: f64) -> Result<Stretch, KernelError> {
   if req.new_body || !req.region_is_whole_face {
     return Ok(NOT_SQUARE);

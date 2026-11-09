@@ -28,9 +28,9 @@ export const RUST_WORKSPACES = [
     targets: ['wasm32-wasip1', 'wasm32-wasip1-threads'] },
   { manifest: 'apps/desktop/src-tauri/Cargo.toml', ships: 'desktop app',
     targets: ['x86_64-pc-windows-msvc', 'aarch64-apple-darwin', 'x86_64-unknown-linux-gnu'] },
-  { manifest: 'crates/native-kernel/Cargo.toml', ships: 'desktop app, native kernel builds',
+  { manifest: 'crates/native-kernel/Cargo.toml', ships: 'desktop app, native kernel builds (off by default)',
     targets: ['x86_64-pc-windows-msvc', 'aarch64-apple-darwin', 'x86_64-unknown-linux-gnu'] },
-  { manifest: 'crates/kernel-wasm/Cargo.toml', ships: 'web app, Rust kernel builds',
+  { manifest: 'crates/kernel-wasm/Cargo.toml', ships: 'web and desktop app kernel',
     targets: ['wasm32-unknown-emscripten'] },
 ];
 

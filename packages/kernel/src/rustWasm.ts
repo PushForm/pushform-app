@@ -22,7 +22,7 @@ export interface RustWasmBackendOptions {
   meshProvider?: MeshProvider;
 }
 
-/** A backend that answers every kernel request from the Rust module in its own worker, with no TypeScript kernel behind it. */
+/** A backend that answers every kernel request from the Rust module in its own worker. */
 export function createRustWasmBackend(options: RustWasmBackendOptions = {}): { backend: NativeKernelBackend; transport: RustWasmKernelTransport } {
   const { createRustWorker, moduleUrl, meshProvider } = options;
   const transport = new RustWasmKernelTransport({

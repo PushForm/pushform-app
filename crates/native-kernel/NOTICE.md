@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # Third-party software in the native kernel
 
-This file lists software compiled into PushForm desktop builds made with the `native-kernel` Cargo feature (off by
-default) and into the WebAssembly kernel built by `pnpm build:kernel-wasm` (opt-in). The C++ libraries are built from source by `crates/native-kernel/vendor/manifold-csg-sys`; their
+This file lists software compiled into the WebAssembly kernel every PushForm web and desktop build ships (see
+`pnpm build:kernel-wasm`) and into desktop builds made with the `native-kernel` Cargo feature (off by default). The C++ libraries are built from source by `crates/native-kernel/vendor/manifold-csg-sys`; their
 sources are not in this repository, so their license texts are reproduced here. The Rust crates (manifold-csg and its
 dependencies) are listed by cargo-about from the crate's manifest.
 
@@ -16,7 +16,7 @@ is preserved.
 
 ## Manifold 3.5.4
 
-https://github.com/elalish/manifold (the same version as the `manifold-3d` package that runs in WebAssembly in the web app)
+https://github.com/elalish/manifold
 
 Apache License
                            Version 2.0, January 2004

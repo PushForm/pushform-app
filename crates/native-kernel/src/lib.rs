@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 //! The PushForm kernel as a library, built natively for the desktop app and to WebAssembly for the web app. It keeps its
-//! own cache of solids and answers requests in the binary protocol of [`wire`]; every operation of the TypeScript
-//! kernel in `packages/kernel/src/worker/ops` has a port here that returns identical results.
+//! own cache of solids and answers requests in the binary protocol of [`wire`]. Every operation returns exactly what the
+//! golden corpus in `packages/kernel/goldens` records; the corpus was captured from the former TypeScript kernel.
 pub mod bvh;
 pub mod cache;
 pub mod earcut;

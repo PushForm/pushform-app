@@ -42,7 +42,7 @@ function previewResponse(): ArrayBuffer {
 const pushPullRequest = { type: 'pushPull' as const, body: { bodyId: 1, version: 1 }, region: topRegion([0.5, 0.5, 1], square(0, 0, 0.2), 1, false), distance: 0.5, mode: 'merge' as const, nextFaceId: 6 };
 
 function setup(t: NativeKernelTransport): { backend: NativeKernelBackend; worker: InlineBackend; request: ReturnType<typeof vi.spyOn> } {
-  const worker = new InlineBackend({ typescriptOnly: true });
+  const worker = new InlineBackend();
   const request = vi.spyOn(worker, 'request');
   const backend = new NativeKernelBackend(worker, t);
   return { backend, worker, request };
@@ -200,7 +200,7 @@ describe('native wire', () => {
 
   it('returns a native failure to the caller without running it in the worker when fallback is off', async () => {
     const t = transport({ call: async () => Promise.reject(JSON.stringify({ code: 'ManifoldError', message: 'rejected' })) });
-    const worker = new InlineBackend({ typescriptOnly: true });
+    const worker = new InlineBackend();
     const request = vi.spyOn(worker, 'request');
     const backend = new NativeKernelBackend(worker, t, { fallback: false });
     await expect(backend.request(pushPullRequest)).rejects.toMatchObject({ code: 'ManifoldError', message: 'rejected' });
@@ -210,7 +210,7 @@ describe('native wire', () => {
 
   it('reports the native kernel as unavailable instead of falling back when fallback is off', async () => {
     const t = transport({ available: async () => false });
-    const worker = new InlineBackend({ typescriptOnly: true });
+    const worker = new InlineBackend();
     const request = vi.spyOn(worker, 'request');
     const backend = new NativeKernelBackend(worker, t, { fallback: false });
     await expect(backend.request(pushPullRequest)).rejects.toMatchObject({ code: 'Internal' });

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 /**
- * Runs push/pull down both paths on the kernel's fixtures and compares them: WebAssembly through the inline backend and
- * native through the kernel's own harness process, over the real binary protocol. Needs the harness binary:
+ * Runs push/pull and the solid validation check down both paths on the kernel's fixtures and compares them: WebAssembly
+ * through the inline backend and native through the kernel's own harness process, over the real binary protocol. Needs the harness binary:
  *   cargo build --release --features harness --bin pushform-native-kernel-harness   (in crates/native-kernel)
  * Skipped when it has not been built, so the suite stays independent of cmake and C++.
  */
@@ -12,7 +12,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { meshBox, planeBasis, type MeshData, type Vec3 } from '@pushform/core';
 import { InlineBackend } from './InlineBackend';
 import { NativeKernelBackend } from './NativeKernelBackend';
-import { differentialCases, HarnessTransport, largestUpFace, type DifferentialCase } from './differentialFixtures';
+import { differentialCases, HarnessTransport, InlineRustTransport, largestUpFace, type DifferentialCase } from './differentialFixtures';
+import { encodeValidateSolid } from './nativeWire';
 import { KernelClient } from '../client/KernelClient';
 import { meshTopologyProblems } from '../meshChecks';
 import type { FaceOrigin, MeshWire, PolygonsWithHoles, PushPullPreview, PushPullResult } from '../protocol';
@@ -69,7 +70,7 @@ describe.skipIf(!haveHarness)('native push/pull matches WebAssembly', () => {
   beforeAll(async () => {
     harness = new HarnessTransport(harnessPath);
     harness.start();
-    wasm = new KernelClient(new InlineBackend({ typescriptOnly: true }));
+    wasm = new KernelClient(new InlineBackend());
     await wasm.init();
     // A worker that fails the test if the native path silently falls back.
     const noFallback = { request: () => { throw new Error('unexpected fallback to the worker'); }, abortAll: () => undefined, dispose: () => undefined };
@@ -149,6 +150,20 @@ describe.skipIf(!haveHarness)('native push/pull matches WebAssembly', () => {
       () => { throw new Error('expected a failure'); },
       (e: string) => expect(JSON.parse(e)).toMatchObject({ code: 'InvalidInput', message: 'pushPull.distance must be a non-zero finite number' }),
     );
+  });
+
+  // The check that runs on every stored body when a file is opened: the same outcome from both builds.
+  it.each([
+    { name: 'a valid box', mesh: () => meshBox([0, 0, 0], [1, 2, 3]) },
+    { name: 'an inverted box with negative volume', mesh: () => { const m = meshBox([0, 0, 0], [1, 1, 1]); const tris = new Uint32Array(m.tris); for (let i = 0; i < tris.length; i += 3) { const a = tris[i + 1]!; tris[i + 1] = tris[i + 2]!; tris[i + 2] = a; } return { ...m, tris }; } },
+    { name: 'an open mesh', mesh: () => { const m = meshBox([0, 0, 0], [1, 1, 1]); return { verts: m.verts, tris: m.tris.slice(0, 30), faceId: m.faceId.slice(0, 10) }; } },
+    { name: 'an empty mesh', mesh: () => ({ verts: new Float64Array(0), tris: new Uint32Array(0), faceId: new Uint32Array(0) }) },
+    { name: 'two separate boxes', mesh: () => { const a = meshBox([0, 0, 0], [1, 1, 1]), b = meshBox([3, 0, 0], [4, 1, 1]); return { verts: new Float64Array([...a.verts, ...b.verts]), tris: new Uint32Array([...a.tris, ...b.tris.map((i) => i + 8)]), faceId: new Uint32Array([...a.faceId, ...b.faceId]) }; } },
+  ])('validates $name the same way', async ({ mesh }) => {
+    const encoded = encodeValidateSolid(mesh());
+    const fromNative = await harness.call(encoded).then(() => 'ok', (e: unknown) => String(e));
+    const fromWasm = await new InlineRustTransport().call(encoded).then(() => 'ok', (e: unknown) => String(e));
+    expect(fromNative).toBe(fromWasm);
   });
 
   afterAll(() => {

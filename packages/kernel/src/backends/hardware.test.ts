@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { afterAll, describe, expect, it } from 'vitest';
-import { HARDWARE_SHAPES, resolveHardwareOptions } from '../../hardware';
-import { KernelClient } from '../../client/KernelClient';
-import { InlineBackend } from '../../backends/InlineBackend';
-import { meshTopologyProblems } from '../../meshChecks';
+import { HARDWARE_SHAPES, resolveHardwareOptions } from '../hardware';
+import { KernelClient } from '../client/KernelClient';
+import { InlineBackend } from './InlineBackend';
+import { meshTopologyProblems } from '../meshChecks';
 
 const client = new KernelClient(new InlineBackend());
 afterAll(() => client.dispose());

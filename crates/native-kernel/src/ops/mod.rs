@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-//! The kernel's operations other than push/pull, each a port of the matching file in the TypeScript kernel's `ops/`.
+//! The kernel's operations other than push/pull, each a port of the matching file in the former TypeScript kernel's `ops/`.
 pub mod autofold;
 pub mod bodies;
 pub mod boolean;

@@ -46,14 +46,14 @@ export function planCountertop(p: CountertopParams): BuilderPlan {
     const outline: Pt[] = p.leg.side === 'left'
       ? [[0, 0], [legDepth, 0], [legDepth, front - chamfer], [legDepth + chamfer, front], [width, front], [width, total], [0, total]]
       : [[width - legDepth, 0], [width, 0], [width, total], [0, total], [0, front], [width - legDepth - chamfer, front], [width - legDepth, front - chamfer]];
-    b.addOutline('Countertop', 'top', outline, range(0, thickness), false, openings.map(o => [[o.x0, o.y0], [o.x0, o.y1], [o.x1, o.y1], [o.x1, o.y0]]));
+    b.addOutline('Slab', 'top', outline, range(0, thickness), false, openings.map(o => [[o.x0, o.y0], [o.x0, o.y1], [o.x1, o.y1], [o.x1, o.y0]]));
   } else {
     const cuts: CutBox[] = [];
     if (p.leg) cuts.push(p.leg.side === 'left'
       ? { min: [legDepth, 0, 0], max: [width, legLength, thickness] }
       : { min: [0, 0, 0], max: [width - legDepth, legLength, thickness] });
     for (const o of openings) cuts.push({ min: [o.x0, o.y0, 0], max: [o.x1, o.y1, thickness] });
-    b.add('Countertop', null, 'top', range(0, width), range(0, total), range(0, thickness), '+x', '+y', { cuts });
+    b.add('Slab', null, 'top', range(0, width), range(0, total), range(0, thickness), '+x', '+y', { cuts });
   }
   if (p.backsplash !== undefined) b.add('Backsplash', null, 'top', range(0, width), range(total - SPLASH_THICKNESS, total), range(thickness, thickness + p.backsplash), '+x', '+z');
   const top: MaterialSpec = p.finish?.library !== undefined ? { library: p.finish.library } : { paint: p.finish?.paint ?? DEFAULT_FINISH };

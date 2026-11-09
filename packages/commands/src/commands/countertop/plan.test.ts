@@ -9,7 +9,7 @@ const refused = (run: () => unknown): BuilderPlanError => {
   try { run(); } catch (e) { if (e instanceof BuilderPlanError) return e; throw e; }
   throw new Error('expected a refusal');
 };
-const main = (plan: ReturnType<typeof planCountertop>) => plan.parts.find(p => p.name === 'Countertop')!;
+const main = (plan: ReturnType<typeof planCountertop>) => plan.parts.find(p => p.name === 'Slab')!;
 
 describe('planCountertop', () => {
   it('sits on a base cabinet at the origin by default, 1 in past its doors', () => {

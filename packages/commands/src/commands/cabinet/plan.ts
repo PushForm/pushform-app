@@ -477,11 +477,20 @@ export function planCabinet(p: CabinetParams): CabinetPlan {
     }
   };
 
-  const shelfHeights = (region: Range): number[] => {
+  /** Shelf positions in a region: evenly spaced, with one fixed at the meeting line of stacked doors. */
+  const shelfHeights = (region: Range): { bottom: number; name: string }[] => {
     if (shelves === 0) return [];
-    const free = span(region) - shelves * t, spacing = free / (shelves + 1);
-    if (spacing < D.MIN_SHELF_SPACE) throw unsound(`${shelves} shelves do not fit in ${inch(span(region))} of height. Use fewer shelves, or ${fix}`);
-    return Array.from({ length: shelves }, (_, i) => region.from + spacing * (i + 1) + t * i);
+    const even = (within: Range, n: number): number[] => {
+      const spacing = (span(within) - n * t) / (n + 1);
+      if (n > 0 && spacing < D.MIN_SHELF_SPACE) throw unsound(`${shelves} shelves do not fit in ${inch(span(region))} of height. Use fewer shelves, or ${fix}`);
+      return Array.from({ length: n }, (_, i) => within.from + spacing * (i + 1) + t * i);
+    };
+    const upperRow = rows.find(r => r.section === 'upper'), lowerRow = rows.find(r => r.section === 'lower');
+    if (!upperRow || !lowerRow) return even(region, shelves).map((bottom, i) => ({ bottom, name: shelves === 1 ? 'Shelf' : `Shelf ${i + 1}` }));
+    const split = (upperRow.opening.from + lowerRow.opening.to) / 2, fixed = split - t / 2;
+    const above = Math.round(((shelves - 1) * (region.to - split)) / span(region)), below = shelves - 1 - above;
+    const loose = [...even(range(region.from, fixed), below), ...even(range(fixed + t, region.to), above)];
+    return [{ bottom: fixed, name: 'Fixed Shelf' }, ...loose.map((bottom, i) => ({ bottom, name: `Shelf ${i + 1}` }))];
   };
 
   if (planned) {
@@ -591,10 +600,10 @@ export function planCabinet(p: CabinetParams): CabinetPlan {
         const radius = Math.min(center[0] - wall, Y - wall - center[1], X - end - center[0], center[1] - end);
         tray = [center, ...arc(center, radius, 0, 270, D.TRAY_SEGMENTS - 12), [center[0], center[1] - radius]];
       }
-      heights.forEach((bottom, i) => b.addOutline(shelves === 1 ? 'Lazy Susan' : `Lazy Susan ${i + 1}`, 'box', outlineOf(tray), range(bottom, bottom + t), true));
+      heights.forEach(({ bottom }, i) => b.addOutline(shelves === 1 ? 'Lazy Susan' : `Lazy Susan ${i + 1}`, 'box', outlineOf(tray), range(bottom, bottom + t), true));
     } else {
       const shelf = outline(frameDepth + D.SHELF_SETBACK, D.SHELF_SIDE_CLEARANCE, D.SHELF_BACK_CLEARANCE);
-      heights.forEach((bottom, i) => b.addOutline(shelves === 1 ? 'Shelf' : `Shelf ${i + 1}`, 'box', shelf, range(bottom, bottom + t)));
+      heights.forEach(({ bottom, name }) => b.addOutline(name, 'box', shelf, range(bottom, bottom + t)));
     }
   } else {
     // A rectangular box.
@@ -645,7 +654,7 @@ export function planCabinet(p: CabinetParams): CabinetPlan {
     const region = doorSections.length ? range(Math.max(doorSections[doorSections.length - 1]!.opening.from, floor + t), Math.min(doorSections[0]!.opening.to, topUnder)) : range(floor + t, topUnder);
     const sx = range(t + D.SHELF_SIDE_CLEARANCE, width - t - D.SHELF_SIDE_CLEARANCE);
     const sy = range(frameDepth + D.SHELF_SETBACK, interiorBack - D.SHELF_BACK_CLEARANCE);
-    shelfHeights(region).forEach((bottom, i) => b.add(shelves === 1 ? 'Shelf' : `Shelf ${i + 1}`, null, 'box', sx, sy, range(bottom, bottom + t), '+x', '+y'));
+    shelfHeights(region).forEach(({ bottom, name }) => b.add(name, null, 'box', sx, sy, range(bottom, bottom + t), '+x', '+y'));
   }
 
   const parts: BuilderPart[] = finishedInterior

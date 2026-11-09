@@ -34,7 +34,7 @@ export function planCabinetDoor(p: CabinetDoorParams): BuilderPlan {
   addFront(b, name, { x: range(0, p.width), z: range(0, p.height) }, 0, style, false, 'Slab', glass, stile);
   const show: MaterialSpec = p.finish?.stain !== undefined ? { library: p.finish.stain } : { paint: p.finish?.paint ?? D.DEFAULT_PAINT };
   return {
-    name, at: p.at ?? [0, 0, 0], parts: b.parts,
+    name, at: p.at ?? [0, 0, 0], parts: b.parts.map(part => ({ ...part, assembly: null })),
     materials: { show, ...(glass ? { glass: { library: D.GLASS_KEYS[glass.type] } } : {}) },
     used: { width: p.width, height: p.height, style, stileWidth: stile, ...(glass ? { glass } : {}) },
   };

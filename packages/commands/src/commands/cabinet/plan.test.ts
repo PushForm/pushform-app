@@ -221,6 +221,14 @@ describe('planCabinet stacked and glass doors', () => {
     named(plan, 'Slab', 'Lower Right Door');
   });
 
+  it('fixes one shelf at the meeting line of stacked doors, counted among the shelves', () => {
+    const plan = planCabinet({ type: 'tall', width: i(24), stackedDoors: true, doors: 1, shelves: 5 });
+    const upper = bounds(named(plan, 'Left Stile', 'Upper Door')), lower = bounds(named(plan, 'Left Stile', 'Lower Door'));
+    const fixed = bounds(named(plan, 'Fixed Shelf'));
+    expect((fixed.min[2] + fixed.max[2]) / 2).toBeCloseTo((upper.min[2] + lower.max[2]) / 2, 9);
+    expect(plan.parts.filter(p => p.name.includes('Shelf'))).toHaveLength(5);
+  });
+
   it('adds a rail and center stiles between stacked rows on a face frame', () => {
     const plan = planCabinet({ type: 'tall', width: i(36), frame: 'face_frame', stackedDoors: true, doors: 2 });
     named(plan, 'Middle Rail 1', 'Face Frame');

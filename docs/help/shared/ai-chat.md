@@ -78,7 +78,7 @@ Every part is named, and each door and drawer is a group, so you can ask for cha
 
 ## Generate a whole kitchen
 
-The agent can also lay out a kitchen in one step, for example “Lay out an L-shaped kitchen with a diagonal corner, a sink base under the window and openings for a range and dishwasher.” It places base and wall cabinets along one wall or around one corner, adds fillers at blind corners, and runs a countertop with sink openings. It can also add a countertop on its own, or a bathroom vanity. Appliances are left as openings. Build U-shaped kitchens and islands as separate runs.
+The agent can also lay out a kitchen in one step, for example “Lay out an L-shaped kitchen with a diagonal corner, a sink base under the window and openings for a range and dishwasher.” It places base and wall cabinets along one wall or around one corner, adds fillers at blind corners, and runs a countertop with sink openings. It can also add a countertop, filler, end panel or bathroom vanity on its own, or build a single cabinet door. Appliances are left as openings. Build U-shaped kitchens and islands as separate runs.
 
 ## Ask for a change to a 3D model
 

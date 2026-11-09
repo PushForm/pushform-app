@@ -30,6 +30,8 @@ export const RUST_WORKSPACES = [
     targets: ['x86_64-pc-windows-msvc', 'aarch64-apple-darwin', 'x86_64-unknown-linux-gnu'] },
   { manifest: 'crates/native-kernel/Cargo.toml', ships: 'desktop app, native kernel builds',
     targets: ['x86_64-pc-windows-msvc', 'aarch64-apple-darwin', 'x86_64-unknown-linux-gnu'] },
+  { manifest: 'crates/kernel-wasm/Cargo.toml', ships: 'web app, Rust kernel builds',
+    targets: ['wasm32-unknown-emscripten'] },
 ];
 
 /** Notice and license files carried with the STEP reader and the SolidCraft kernel, included verbatim. */

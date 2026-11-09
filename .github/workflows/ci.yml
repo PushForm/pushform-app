@@ -28,6 +28,7 @@ jobs:
       web: ${{ steps.scope.outputs.web }}
       commons: ${{ steps.scope.outputs.commons }}
       wasm: ${{ steps.scope.outputs.wasm }}
+      kernel: ${{ steps.scope.outputs.kernel }}
     steps:
       - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
@@ -66,6 +67,26 @@ jobs:
           path: packages/io/wasm/*.wasm
           if-no-files-found: error
           retention-days: 1
+  # The Rust kernel's WebAssembly module, needed by the web build only when it is built with the PF_RUST_KERNEL flag.
+  # Separate from the required checks while the flag is off, so it cannot hold them up.
+  kernel-wasm:
+    needs: plan
+    if: vars.PF_RUST_KERNEL == '1' || needs.plan.outputs.kernel == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: 24 }
+      - uses: ./.github/actions/kernel-wasm
+      - uses: actions/upload-artifact@v7
+        with:
+          name: kernel-wasm
+          path: |
+            packages/kernel/wasm/*.wasm
+            packages/kernel/wasm/pushform-kernel*.js
+          if-no-files-found: error
+          retention-days: 1
+
   typecheck:
     needs: plan
     if: needs.plan.outputs.checks == 'true'
@@ -108,8 +129,8 @@ jobs:
         env: { CI_PLAN: '${{ needs.plan.outputs.plan }}' }
 
   build-web:
-    needs: [plan, step-reader]
-    if: ${{ !cancelled() && needs.plan.outputs.web == 'true' && needs.step-reader.result == 'success' }}
+    needs: [plan, step-reader, kernel-wasm]
+    if: ${{ !cancelled() && needs.plan.outputs.web == 'true' && needs.step-reader.result == 'success' && (vars.PF_RUST_KERNEL != '1' || needs.kernel-wasm.result == 'success') }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -117,12 +138,16 @@ jobs:
       - uses: ./.github/actions/setup
       - uses: actions/download-artifact@v8
         with: { name: step-reader-wasm, path: packages/io/wasm }
+      - uses: actions/download-artifact@v8
+        if: vars.PF_RUST_KERNEL == '1'
+        with: { name: kernel-wasm, path: packages/kernel/wasm }
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@v2
         with: { tool: cargo-about }
       - run: pnpm build
         env:
           NODE_OPTIONS: --max-old-space-size=4096
+          PF_RUST_KERNEL: ${{ vars.PF_RUST_KERNEL }}
 
   build-commons:
     needs: plan
@@ -207,8 +232,8 @@ jobs:
   deploy:
     # always() so a skipped job upstream of test (such as the Commons build) does not skip the deploy;
     # test itself fails when any check failed.
-    if: ${{ always() && needs.test.result == 'success' && needs.plan.outputs.web == 'true' && ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/staging')) }}
-    needs: [test, plan]
+    if: ${{ always() && needs.test.result == 'success' && needs.plan.outputs.web == 'true' && (vars.PF_RUST_KERNEL != '1' || needs.kernel-wasm.result == 'success') && ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/staging')) }}
+    needs: [test, plan, kernel-wasm]
     runs-on: ubuntu-24.04
     environment:
       name: ${{ github.ref_name == 'staging' && 'Staging' || 'Production' }}
@@ -225,6 +250,10 @@ jobs:
       # The web bundle includes the STEP reader the test job built.
       - uses: actions/download-artifact@v8
         with: { name: step-reader-wasm, path: packages/io/wasm }
+      # With the Rust kernel flag on, the bundle includes the kernel module too.
+      - uses: actions/download-artifact@v8
+        if: vars.PF_RUST_KERNEL == '1'
+        with: { name: kernel-wasm, path: packages/kernel/wasm }
       # The third-party notices in the bundle list the Rust crates of the STEP reader and the desktop app.
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@v2
@@ -240,6 +269,7 @@ jobs:
       - run: pnpm build
         env:
           NODE_OPTIONS: --max-old-space-size=4096
+          PF_RUST_KERNEL: ${{ vars.PF_RUST_KERNEL }}
           VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}

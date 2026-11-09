@@ -1,0 +1,28 @@
+name: Prepare the kernel WebAssembly module
+description: Restore the Rust kernel's WebAssembly module or build it with the pinned Rust and Emscripten
+runs:
+  using: composite
+  steps:
+    # Rust and Emscripten are pinned together: only this pair is tested.
+    - uses: dtolnay/rust-toolchain@1.98
+      with: { targets: wasm32-unknown-emscripten }
+    - uses: mymindstorm/setup-emsdk@v14
+      with: { version: 6.0.13, cache-key: emsdk-6.0.13 }
+    - id: toolchain
+      shell: bash
+      run: echo "hash=$(rustc -Vv | sha256sum | cut -d ' ' -f1)-$(emcc --version | head -1 | sha256sum | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@v4
+      id: kernel-wasm
+      with:
+        path: |
+          packages/kernel/wasm/*.wasm
+          packages/kernel/wasm/pushform-kernel*.js
+        key: kernel-wasm-v1-${{ runner.os }}-${{ steps.toolchain.outputs.hash }}-${{ hashFiles('crates/kernel-wasm/**', 'crates/native-kernel/**', '!crates/**/target/**', 'scripts/build-kernel-wasm.mjs') }}
+    - uses: Swatinem/rust-cache@v2
+      if: steps.kernel-wasm.outputs.cache-hit != 'true'
+      with: { workspaces: crates/kernel-wasm }
+    - shell: bash
+      if: steps.kernel-wasm.outputs.cache-hit != 'true'
+      run: node scripts/build-kernel-wasm.mjs
+    - shell: bash
+      run: node scripts/build-kernel-wasm.mjs --check

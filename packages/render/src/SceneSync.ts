@@ -20,7 +20,7 @@ import { SketchRenderable, createSketchMaterials } from './renderables/SketchRen
 import { TextureCache, TexturedMaterialCache } from './materials/TextureCache';
 import type { SketchMaterials } from './renderables/SketchRenderable';
 import { DEFAULT_DISPLAY, EMPTY_HIGHLIGHT, EMPTY_SECTIONS, ROOT_EDIT_CONTEXT, renderKeyWithinInstance, renderPathKey, renderPathWithin } from './types';
-import type { HighlightState, RenderBody, RenderDimensions, RenderDisplay, RenderEditContext, RenderGuides, RenderImage, RenderSections, RenderSketch, RenderTexts } from './types';
+import type { HighlightState, RenderBody, RenderBodySurface, RenderDimensions, RenderDisplay, RenderEditContext, RenderGuides, RenderImage, RenderSections, RenderSketch, RenderTexts } from './types';
 import { DimensionLayer } from './renderables/DimensionLayer';
 import { TextLayer } from './renderables/TextLayer';
 import { SectionLayer } from './renderables/SectionLayer';
@@ -415,8 +415,8 @@ export class SceneSync {
 
   // --- previews / modes -----------------------------------------------------------------------
 
-  setPreview(meshes: readonly MeshData[] | null, transform?: Mat4): boolean {
-    return this.preview.set(meshes, this.origin, transform);
+  setPreview(meshes: readonly MeshData[] | null, transform?: Mat4, surfaces?: readonly (readonly RenderBodySurface[])[]): boolean {
+    return this.preview.set(meshes, this.origin, transform, surfaces);
   }
 
   get showHiddenGeometry(): boolean {
@@ -686,7 +686,7 @@ export class SceneSync {
       this.stage(r);
     }
     this.highlight.set(this.highlightState, origin);
-    this.preview.set(this.preview.meshes, origin);
+    this.preview.set(this.preview.meshes, origin, this.preview.matrix, this.preview.surfaces);
     this.importPreview.setOrigin(origin);
     this.guides.set(this.guides.guides, origin);
     this.images.setOrigin(origin);

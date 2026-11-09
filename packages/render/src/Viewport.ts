@@ -18,7 +18,7 @@ import type { RenderBackground } from './types';
 import { SceneSync } from './SceneSync';
 import type { EdgeStyle } from './SceneSync';
 import type { ImportPreviewBatch } from './renderables/ImportPreviewLayer';
-import type { HighlightState, RenderAxes, RenderBody, RenderDimensions, RenderDisplay, RenderEditContext, RenderGuides, RenderImage, RenderSections, RenderSketch, RenderTexts } from './types';
+import type { HighlightState, RenderAxes, RenderBody, RenderBodySurface, RenderDimensions, RenderDisplay, RenderEditContext, RenderGuides, RenderImage, RenderSections, RenderSketch, RenderTexts } from './types';
 import { DEFAULT_RENDER_FOG, DEFAULT_RENDER_SHADOWS } from './types';
 import type { RenderFog, RenderShadows } from './types';
 import { SunLight } from './shadows/SunLight';
@@ -505,8 +505,8 @@ export class Viewport {
   }
 
   /** Translucent preview bodies (Push/Pull real preview); null or [] clears. */
-  setPreview(meshes: readonly MeshData[] | null, transform?: Mat4): void {
-    if (this.sceneSync.setPreview(meshes, transform)) this.requestRender();
+  setPreview(meshes: readonly MeshData[] | null, transform?: Mat4, surfaces?: readonly (readonly RenderBodySurface[])[]): void {
+    if (this.sceneSync.setPreview(meshes, transform, surfaces)) this.requestRender();
   }
 
   /**

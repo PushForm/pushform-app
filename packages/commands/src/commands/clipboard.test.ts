@@ -3,9 +3,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { DefId, Id, ImageId, Mat4, MaterialId, TagId, Vec3 } from '@pushform/core';
 import { m4translation, meshBounds } from '@pushform/core';
-import { containerAt, type Body, type EntityRef } from '@pushform/model';
+import { allocId, DEFAULT_MATERIAL_APPEARANCE, containerAt, type Body, type EntityRef } from '@pushform/model';
 import { z } from 'zod';
 import { disposeKernels, setupCommands } from './transform.fixtures';
+import { materialCommands } from './materials';
 import { contextCommands } from './context';
 import { groupCommands, type MakeResult } from './groups';
 import { clipboardCommands, clipboardExtentPoints, modelClipboard, type CopyResult } from './clipboard';
@@ -23,6 +24,7 @@ function setup() {
   s.registry.registerAll(groupCommands);
   s.registry.registerAll(contextCommands);
   s.registry.registerAll(clipboardCommands);
+  s.registry.registerAll(materialCommands);
   const select = (refs: EntityRef[]): void => {
     s.registry.execute('selection.set', { refs });
   };
@@ -65,6 +67,23 @@ describe('edit.copy / edit.paste', () => {
     a.registry.execute('edit.copy');
     const refs = a.registry.execute('edit.pasteAt', { point: [5, 5, 0] }) as EntityRef[];
     expect(minOf(a.body(refs[0]!.id))).toEqual([5, 5, 0]);
+  });
+
+  it('copies normal-only image assets and remaps appearance into a different document', async () => {
+    const a = setup(), b = setup(), box = a.addBox([0,0,0],[1,1,1]);
+    const png = new Uint8Array(40); png.set([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a,0,0,0,13,0x49,0x48,0x44,0x52,0,0,0,2,0,0,0,2]);
+    const material = a.registry.execute('material.create', {name:'Normal',color:[0.02,0.02,0.02],appearance:{...DEFAULT_MATERIAL_APPEARANCE,roughness:0.2}}) as MaterialId;
+    await a.registry.execute('material.setNormalImage',{id:material,bytes:png,name:'normal.png',mime:'image/png'});
+    a.registry.execute('paint.apply',{refs:[a.bodyRef(box)],materialId:material,side:'both'});
+    a.select([a.bodyRef(box)]); a.registry.execute('edit.copy');
+    const copied = [...modelClipboard.current!.state.materials.values()].find(m=>m.name==='Normal')!;
+    expect(modelClipboard.current!.state.images.has(copied.appearance!.normal!.imageId)).toBe(true);
+    b.registry.execute('edit.pasteAt',{point:[0,0,0]});
+    const pasted = [...b.host.doc.state.materials.values()].find(m=>m.name==='Normal')!;
+    expect(pasted.appearance!.roughness).toBe(0.2);
+    expect(b.host.images.has(pasted.appearance!.normal!.imageId)).toBe(true);
+    b.registry.execute('edit.pasteAt',{point:[2,0,0]});
+    expect([...b.host.doc.state.materials.values()].filter(m=>m.name.startsWith('Normal'))).toHaveLength(1);
   });
 
   it('pastes into another model, reusing the pasted definition on a second paste', () => {
@@ -248,4 +267,28 @@ describe('PasteTool', () => {
     expect(selected).toBe(true);
     expect(minOf(a.body(a.host.selection.refs[0]!.id))).toEqual([4, 0, 0]);
   });
+});
+
+
+it('allocates fresh surface metadata when pasting a component into another document', () => {
+  const a = setup(), box = a.addBox([0, 0, 0], [1, 1, 1]);
+  a.host.edit('Smooth surface', draft => {
+    const body = draft.definitions.get(draft.rootDefinitionId)!.entities.bodies.get(box as never)!;
+    const id = allocId(draft) as never, face = body.faces.values().next().value!;
+    body.surfaces.set(id, { id, faceIds: [face.id], curveId: null }); face.surfaceId = id;
+  });
+  a.select([a.bodyRef(box)]);
+  const group = a.registry.execute('group.make', {}) as MakeResult;
+  a.select([a.instanceRef(group.instanceId!)]); a.registry.execute('edit.copy');
+  const b = setup(); b.registry.execute('edit.pasteInPlace');
+  const state = b.host.doc.state, ids: number[] = [];
+  for (const [id, def] of state.definitions) {
+    ids.push(id); for (const inst of def.entities.instances.values()) ids.push(inst.id);
+    for (const body of def.entities.bodies.values()) {
+      ids.push(body.id, ...body.surfaces.keys(), ...body.curves.keys());
+      for (const face of body.faces.values()) if (face.surfaceId !== null) expect(body.surfaces.has(face.surfaceId)).toBe(true);
+    }
+  }
+  expect(new Set(ids).size).toBe(ids.length);
+  expect(Math.max(...ids)).toBeLessThan(state.meta.nextId);
 });

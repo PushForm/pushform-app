@@ -30,14 +30,34 @@ export const HARDWARE_FINISHES = {
 export type HardwareFinish = keyof typeof HARDWARE_FINISHES;
 export const HardwareParamsSchema = z
   .object({
-    shape: z.enum(HARDWARE_SHAPES).default('bar-round'),
+    shape: z
+      .enum(HARDWARE_SHAPES)
+      .default('bar-round')
+      .describe('Use knob-domed for a smooth revolved head and neck.'),
     length: z.number().optional(),
     width: z.number().optional(),
     projection: z.number().optional(),
     spacing: z.number().optional(),
     grip: z.number().optional(),
     wall: z.number().optional(),
-    segments: z.number().int().min(16).max(80).default(40),
+    segments: z
+      .number()
+      .int()
+      .min(16)
+      .max(80)
+      .default(40)
+      .describe(
+        'Radial divisions. For domed knobs start with 32–48; cost grows with radial divisions times profile segments.',
+      ),
+    profileSegments: z
+      .number()
+      .int()
+      .min(8)
+      .max(32)
+      .optional()
+      .describe(
+        'Domed knob profile divisions; default 20. Use 16–20 with 32–48 radial segments for about 1,000–2,000 triangles. Increase only for visible silhouette faceting; smooth shading handles the surface.',
+      ),
     finish: z
       .enum(Object.keys(HARDWARE_FINISHES) as [HardwareFinish, ...HardwareFinish[]])
       .default('satin-nickel'),
@@ -75,6 +95,7 @@ export const hardwareCreate = defineCommand({
     const options = {
       shape,
       segments,
+      ...(p.profileSegments === undefined ? {} : { profileSegments: p.profileSegments }),
       ...(length === undefined ? {} : { length }),
       ...(width === undefined ? {} : { width }),
       ...(projection === undefined ? {} : { projection }),

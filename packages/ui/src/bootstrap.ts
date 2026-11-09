@@ -56,6 +56,7 @@ import {
   axesCommands,
   offsetCommands,
   followMeCommands,
+  revolveCommands,
   edgeBlendCommands,
   edgeToolAliasCommands,
   solidCommands,
@@ -170,6 +171,7 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
   commands.registerAll(axesCommands);
   commands.registerAll(offsetCommands);
   commands.registerAll(followMeCommands);
+  commands.registerAll(revolveCommands);
   commands.registerAll(edgeBlendCommands);
   commands.registerAll(edgeToolAliasCommands);
   commands.registerAll(solidCommands);
@@ -291,7 +293,7 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
   // Tool-driven visuals: hover highlight (Select/Eraser) and push/pull real preview.
   const syncToolVisuals = () => {
     const tool = toolManager.visualTool as
-      | (Tool & { hoverRef?: EntityRef | null; previewMeshes?: readonly MeshData[]; previewReplacesBodyId?: number | null; previewMatrix?: Mat4 })
+      | (Tool & { hoverRef?: EntityRef | null; previewMeshes?: readonly MeshData[]; previewReplacesBodyId?: number | null; previewMatrix?: Mat4; previewSurfaceGroups?: readonly (readonly { faceIds: readonly number[] }[])[] })
       | null;
     syncSections();
     const nextHover = tool?.hoverRef ?? null;
@@ -301,7 +303,7 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
     }
     const preview = tool?.previewMeshes ?? [];
     const replaced = preview.length ? (tool?.previewReplacesBodyId ?? null) : null;
-    viewport.setPreview(preview.length ? preview : null, tool?.previewMatrix);
+    viewport.setPreview(preview.length ? preview : null, tool?.previewMatrix, tool?.previewSurfaceGroups);
     const replacedKey = replaced === null ? null : renderKey(tx.context.path, replaced);
     viewport.setBodies(replacedKey === null ? bodies : bodies.filter((b) => b.id !== replacedKey));
     // Position Texture: live UV mapping while a pin is dragged (materials agent).

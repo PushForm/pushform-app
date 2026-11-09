@@ -10,6 +10,7 @@ import { manifoldFromSoup } from '../meshio';
 import { withScope } from '../context';
 import { finalizeManifold } from './finalize';
 import { allNewIds } from './normalize';
+import { rectangularCupHood } from './cupHood';
 
 /** Hardware solids are constructed, normalized and decomposed entirely inside the kernel. */
 export function hardware(ctx: KernelContext, req: HardwareRequest): HardwareResult {
@@ -151,6 +152,47 @@ export function hardware(ctx: KernelContext, req: HardwareRequest): HardwareResu
           solid = add(solid, cylinder(Math.min(g, w) / 2, z + g / 3, [x, 0, 0]));
         }
       } else for (const x of [-c / 2, c / 2]) solid = add(solid, cylinder(g / 2, g, [x, 0, 0]));
+    } else if (shape === 'knob-domed') {
+      mount.push([0, 0, 0]);
+      // Radius/height coordinates; one lathe avoids overlapping head/stem seams.
+      // Keep profile sampling independent of radial sampling: cost is about 2*n*m.
+      const profile: SimplePolygon = [
+        [0, 0],
+        [g / 2, 0],
+      ];
+      let start: [number, number] = [g / 2, 0];
+      const curve = (
+        a: [number, number],
+        b: [number, number],
+        end: [number, number],
+        count: number,
+      ) => {
+        for (let i = 1; i <= count; i++) {
+          const t = i / count,
+            u = 1 - t;
+          profile.push(
+            [0, 1].map(
+              (k) =>
+                u ** 3 * start[k]! +
+                3 * u ** 2 * t * a[k]! +
+                3 * u * t ** 2 * b[k]! +
+                t ** 3 * end[k]!,
+            ) as [number, number],
+          );
+        }
+        start = end;
+      };
+      const neck = Math.round(p.profileSegments * 0.2),
+        underside = Math.round(p.profileSegments * 0.3);
+      curve([g / 2, h * 0.095], [g * 0.4, h * 0.205], [g * 0.46, h * 0.283], neck);
+      curve(
+        [Math.min(g * 0.56, w / 2), h * 0.417],
+        [w / 2, h * 0.425],
+        [w / 2, h * 0.677],
+        underside,
+      );
+      curve([w / 2, h * 0.898], [w * 0.276, h], [0, h], p.profileSegments - neck - underside);
+      solid = lathe(profile);
     } else if (shape.startsWith('knob-')) {
       mount.push([0, 0, 0]);
       const stemH = h * 0.65,
@@ -206,10 +248,25 @@ export function hardware(ctx: KernelContext, req: HardwareRequest): HardwareResu
         ]);
       solid = add(stem, head);
     } else if (shape === 'cup' || shape === 'cup-square') {
+      // Reserve a narrow border inside the stated overall dimensions, rather than
+      // letting the shell hide the mounting rim or enlarging the finished part.
+      const lip = Math.min(1.5 * t, l * 0.05, w * 0.08, (l / 2 - t) * 0.5, (w - t) * 0.5);
+      const inset = lip * 0.35;
       if (shape === 'cup') {
-        const outer = sphere(l / 2, w, h, [0, 0, 0]);
-        const inner = sphere(l / 2 - t, w - t, h - t, [0, 0, 0]);
+        const outer = sphere(l / 2 - inset, w - inset, h, [0, 0, 0]);
+        const inner = sphere(l / 2 - inset - t, w - inset - t, h - t, [0, 0, 0]);
         solid = cut(sub(outer, inner), box(l * 2, w, h, [0, w / 2, h / 2]));
+        const steps = Math.max(8, Math.round(n / 2));
+        const rim: SimplePolygon = [];
+        for (let i = 0; i <= steps; i++) {
+          const a = (i * Math.PI) / steps;
+          rim.push([(l / 2) * Math.cos(a), w * Math.sin(a)]);
+        }
+        for (let i = steps; i >= 0; i--) {
+          const a = (i * Math.PI) / steps;
+          rim.push([(l / 2 - lip) * Math.cos(a), (w - lip) * Math.sin(a)]);
+        }
+        solid = add(solid, keep(keep(new CrossSection([rim])).extrude(t)));
         solid = moved(solid, 0, -w / 2, 0);
       } else {
         const rounded = (x: number, y: number, radius: number): SimplePolygon => {
@@ -224,22 +281,19 @@ export function hardware(ctx: KernelContext, req: HardwareRequest): HardwareResu
           }
           return pts;
         };
-        const radius = Math.min(w / 5, t * 2);
-        const outer = keep(keep(new CrossSection([rounded(l, w, radius)])).extrude(h));
-        const pocket = box(l - 2 * t, w, h - 2 * t, [0, -t, (h - 2 * t) / 2]);
-        const recess = moved(
-          keep(
-            keep(
-              new CrossSection([
-                rounded(l - 4 * t, w - 4 * t, Math.min(radius / 2, (w - 4 * t) / 4)),
-              ]),
-            ).extrude(t),
-          ),
-          0,
-          0,
-          h - t / 2,
+        const radius = Math.min(w / 5, t * 2, (l - 2 * inset) / 4, (w - inset) / 4);
+        const hood = rectangularCupHood(p, inset, lip);
+        const outer = keep(manifoldFromSoup(ctx.wasm, hood.mesh, 0));
+        const cavity = keep(
+          keep(keep(new CrossSection([hood.cavity])).extrude(hood.interiorLength)).rotate([
+            90, 0, 0,
+          ]),
         );
-        solid = sub(sub(outer, pocket), recess);
+        const pocket = moved(keep(cavity.rotate([0, 0, 90])), -hood.interiorLength / 2, 0, 0);
+        solid = sub(outer, pocket);
+        const rim = keep(keep(new CrossSection([rounded(l, w, radius)])).extrude(t));
+        const opening = box(l - 2 * lip, 2 * w, 3 * t, [0, -w / 2 - lip, t / 2]);
+        solid = add(solid, sub(rim, opening));
       }
       mount.push(
         [-Math.min(c, l - 2 * t) / 2, w * 0.2, 0],

@@ -16,6 +16,7 @@ export const HARDWARE_SHAPES = [
   'recessed-round',
   'ring',
   'knob-round',
+  'knob-domed',
   'knob-disk',
   'knob-cylinder',
   'knob-oval',
@@ -40,6 +41,8 @@ export interface HardwareOptions {
   grip?: number;
   wall?: number;
   segments?: number;
+  /** Curved profile divisions for knob-domed, independent of radial divisions. */
+  profileSegments?: number;
 }
 export interface ResolvedHardwareOptions {
   shape: HardwareShape;
@@ -50,6 +53,7 @@ export interface ResolvedHardwareOptions {
   grip: number;
   wall: number;
   segments: number;
+  profileSegments: number;
 }
 export function resolveHardwareOptions(input: HardwareOptions): ResolvedHardwareOptions {
   if (!HARDWARE_SHAPES.includes(input.shape)) throw new Error('Choose a supported hardware shape.');
@@ -92,6 +96,7 @@ export function resolveHardwareOptions(input: HardwareOptions): ResolvedHardware
     grip: input.grip ?? (input.shape === 'backplate' ? 0.004 : 0.01),
     wall: input.wall ?? 0.002,
     segments: input.segments ?? 40,
+    profileSegments: input.profileSegments ?? 20,
   };
   for (const key of ['length', 'width', 'projection', 'grip', 'wall'] as const)
     if (!Number.isFinite(o[key]) || o[key] < 0.0005 || o[key] > 2)
@@ -100,6 +105,10 @@ export function resolveHardwareOptions(input: HardwareOptions): ResolvedHardware
     throw new Error('Mounting spacing must be between zero and 2 m.');
   if (!Number.isInteger(o.segments) || o.segments < 16 || o.segments > 80)
     throw new Error('Segments must be an integer from 16 to 80.');
+  if (!Number.isInteger(o.profileSegments) || o.profileSegments < 8 || o.profileSegments > 32)
+    throw new Error('Profile segments must be an integer from 8 to 32.');
+  if (o.shape === 'knob-domed' && o.grip >= o.width)
+    throw new Error('The mounting-base diameter must be smaller than the domed head diameter.');
   if (['bar-round', 'bar-square', 'wire', 'arch', 'bridge'].includes(o.shape)) {
     if (o.spacing < o.grip * 2 || o.spacing + o.grip > o.length + LENGTH_TOL)
       throw new Error('Mounting centers and grip must fit inside the overall length.');

@@ -312,6 +312,7 @@ export function collectExportScene(state: DocumentState, options: ModelExportOpt
     throw new Error(selected ? 'The selection has no visible faces or edges to export.' : 'The model has no visible faces or edges to export.');
 
   const notes: string[] = [];
+  if ([...materialIndex.keys()].some(id => state.materials.get(id)?.appearance)) notes.push('Surface roughness, metalness, emission and normal maps are retained in native files; this export includes base colors, opacity and color textures only.');
   if (missingImages) notes.push(`${missingImages} texture image${missingImages === 1 ? ' is' : 's are'} not available; ${missingImages === 1 ? 'its material exports its' : 'their materials export their'} color.`);
   if (skipped.size) {
     const list = [...skipped];

@@ -20,11 +20,25 @@ Push/Pull refuses, says why and changes nothing when pushing a whole face to or 
 
 ## Sweep a profile with Follow Me
 
-Prepare a profile face and a connected chain of sketch edges for its path in the editing context you intend to change. Choose **Follow Me**, click the profile face, then move the pointer along the connected path edges. The collected edges highlight red. Click to finish the sweep. Escape cancels the pending path.
+Prepare a profile face and a connected chain of sketch edges for its path in the editing context you intend to change. Open the **Sweep** dropdown beside Revolve in the Modify toolbar and choose **Follow Me**. Click the profile face, then move the pointer along the connected path edges. The collected edges highlight red. Click to finish the sweep. Escape cancels the pending path.
 
 Alternatively, select the path's sketch edges before choosing Follow Me, then click the profile face to sweep immediately. After picking a profile without preselected edges, Alt+click another face to use its perimeter as a closed path.
 
 A disconnected edge cannot extend the path. If the sweep cannot form a valid solid, the tool reports an error; correct the profile or path before trying again.
+
+## Turn a profile around an axis with Revolve
+
+Use **Revolve** for turned legs, bowls, knobs or columns. It is the default button beside Offset in Modify, with **Follow Me** beneath it in the **Sweep** dropdown. You can also use command search, or ask the in-app agent to draw and revolve a profile with a specified axis and angle.
+
+Click a flat profile face in the group or component you are editing. Then click a straight edge for the axis, or click two different points in the profile plane to define its direction. The profile must stay on one side of the axis; it may touch it. For a turned leg, draw half of its side outline with its straight inner boundary on the axis.
+
+A solid preview appears after you choose the axis. The default angle is **360°**. Type an angle such as `90` or `90°` and press Enter to update the preview; a partial turn has flat, closed ends. Set **Segments** in the options bar, or type `48s`, to control the resolution of the curved shape. Counts run from 3 to 720 per full turn; the default is 48.
+
+Click **Apply**, click in the view, or press Enter with no value being edited to finish. Revolving a loose face replaces that face with the new solid. Using a face of an existing solid creates separate solids and keeps the original. The operation is one **Undo** step. Escape cancels the pending operation. If an axis is outside the profile plane or crosses the profile, the tool explains the problem; cancel and choose a suitable axis. If the model changes while you are previewing, cancel and pick the profile and axis again before applying.
+
+## Make a sphere with Revolve
+
+To make a **sphere**, draw a filled semicircle: use **2 Point Arc** for the curved half, then use **Line** to join its endpoints with a straight diameter. Choose **Revolve**, click inside that semicircle, then click the diameter and apply a **360°** turn. A full circular face crosses its diameter and cannot be revolved around it; use half the circle. Curved regions are smoothed automatically, including the sphere's poles and closing seam. Rims and corners in the profile stay sharp. More profile arc segments and more Revolve segments make the silhouette rounder.
 
 ## Offset a face or connected edges in Modeling
 

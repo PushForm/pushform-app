@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import { LENGTH_TOL } from '@pushform/core';
+import type { BodyRenderable } from '@pushform/render';
 import { describe, expect, it } from 'vitest';
 import type { Id, MaterialId, TagId } from '@pushform/core';
 import { InlineBackend, KernelClient } from '@pushform/kernel';
@@ -14,6 +16,44 @@ function boot() {
 }
 
 describe('renderAdapter materials', () => {
+  it('renders generated round hardware with continuous normals even without surface records', async () => {
+    const app=boot();
+    try {
+      const made=await app.commands.execute('hardware.create',{shape:'knob-disk',finish:'white',point:[0,0,0]}) as {definitionId:number};
+      const body=[...app.document.doc.state.definitions.get(made.definitionId as never)!.entities.bodies.values()][0]!;
+      app.commands.execute('material.update',{id:body.materialId,color:[0.03,0.03,0.03],appearance:{roughness:0.35}});
+      expect(body.surfaces.size).toBe(0);
+      const edge=[...body.edges.values()].find(e=>e.smooth && e.faceA!==e.faceB)!;
+      expect(edge).toBeTruthy();
+      const rendered=app.viewport.sceneSync.renderables().find(r=>r.name.startsWith('Body:')) as BodyRenderable;
+      const positions=rendered.front.geometry.getAttribute('position'), normals=rendered.front.geometry.getAttribute('normal'), faces=rendered.front.geometry.getAttribute('faceId');
+      const point=edge.polyline[0]!, collected=new Map<number,number[]>();
+      for(let v=0;v<positions.count;v++) {
+        const face=faces.getX(v);
+        if((face===edge.faceA || face===edge.faceB) && Math.hypot(positions.getX(v)-point[0],positions.getY(v)-point[1],positions.getZ(v)-point[2])<LENGTH_TOL)
+          collected.set(face,[normals.getX(v),normals.getY(v),normals.getZ(v)]);
+      }
+      expect(collected.size).toBe(2);
+      expect(collected.get(edge.faceA)).toEqual(collected.get(edge.faceB));
+    } finally { app.dispose(); }
+  });
+  it('keeps unrelated material bindings stable and includes appearance for bodies', () => {
+    const app = boot();
+    try {
+      const a = app.commands.execute('material.create', { name: 'A', color: [0,0,0], appearance: { roughness: 0.2 } }) as MaterialId;
+      const b = app.commands.execute('material.create', { name: 'B', color: [1,1,1] }) as MaterialId;
+      const id = app.commands.execute('model.addBox', { min:[0,0,0], max:[1,1,1] }) as Id;
+      app.commands.execute('paint.apply', { refs:[{kind:'body',path:[],id}], materialId:a, side:'both' });
+      const first = bodiesToRender(app.document.doc.state)[0]!;
+      expect([...first.faceMaterials!.values()][0]!.front!.appearance!.roughness).toBe(0.2);
+      const material = renderMaterial(app.document.doc.state, a);
+      app.commands.execute('material.update', { id:b, appearance:{ metalness:1 } });
+      expect(renderMaterial(app.document.doc.state, a)).toBe(material);
+      expect(bodiesToRender(app.document.doc.state)[0]!.faceMaterials).toBe(first.faceMaterials);
+      app.commands.execute('material.update', { id:a, appearance:{ roughness:0.8 } });
+      expect(bodiesToRender(app.document.doc.state)[0]!.faceMaterials).not.toBe(first.faceMaterials);
+    } finally { app.dispose(); }
+  });
   it('replaces painted faces and textures with inherited tag colors and restores materials when disabled', async () => {
     const app = boot();
     try {

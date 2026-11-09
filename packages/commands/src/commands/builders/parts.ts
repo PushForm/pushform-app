@@ -37,10 +37,21 @@ export interface BuilderPart {
 }
 
 /** A material a plan needs: a library key, or a paint color reused by name across a model. */
-export type MaterialSpec = { readonly library: string } | { readonly paint: string };
+export type MaterialSpec = { readonly library: string } | { readonly paint: string; readonly roughness?: number | undefined };
 
 /** The same material gets the same key, wherever in a plan's tree it is named. */
-export const materialKey = (spec: MaterialSpec): string => ('library' in spec ? `library:${spec.library}` : `paint:${spec.paint}`);
+export const materialKey = (spec: MaterialSpec): string => ('library' in spec ? `library:${spec.library}` : `paint:${spec.paint}${spec.roughness === undefined ? "" : `:roughness=${spec.roughness}`}`);
+
+/** A reusable component, mounted with its local origin on the front plane and projecting toward -y. */
+export interface BuilderPlacement {
+  readonly name: string;
+  readonly assembly: string;
+  readonly definitionId: number;
+  readonly origin: Vec3;
+  readonly x: Vec3;
+  readonly y: Vec3;
+  readonly z: Vec3;
+}
 
 /**
  * What a builder produces: pure data, made without touching a document. Generating it makes one named group at `at`,
@@ -54,6 +65,7 @@ export interface BuilderPlan<Used = unknown> {
   readonly used: Used;
   readonly parts: readonly BuilderPart[];
   readonly children?: readonly BuilderPlan[];
+  readonly placements?: readonly BuilderPlacement[];
   readonly materials: Readonly<Record<string, MaterialSpec>>;
 }
 
@@ -91,6 +103,14 @@ export class Builder {
     if (!this.face) return v;
     const { u } = this.face;
     return [v[0] * u[0] - v[1] * u[1], v[0] * u[1] + v[1] * u[0], v[2]];
+  }
+
+  /** Mount a component in this front plane, including diagonal and return faces. */
+  mount(name: string, assembly: string, definitionId: number, origin: Vec3, vertical: boolean): BuilderPlacement {
+    const p = this.place(origin);
+    return { name, assembly, definitionId, origin: this.face ? [p[0] + this.face.at[0], p[1] + this.face.at[1], p[2]] : p,
+      x: this.place(vertical ? [0, 0, 1] : [1, 0, 0]), y: this.place(vertical ? [0, 1, 0] : [0, 1, 0]),
+      z: this.place(vertical ? [-1, 0, 0] : [0, 0, 1]) };
   }
 
   /** Add the part filling a box of this builder's space, with its length and width along the given axes. */

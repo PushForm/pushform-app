@@ -237,6 +237,30 @@ describe('ModelDocumentApi batches', () => {
       return { result, entry: result.results[0]! };
     };
 
+    it('mounts a selected component with its material inside a drawer and undoes the whole cabinet', async () => {
+      const s = setup();
+      const made = await s.api.apply({ expectedRevision: s.api.revision, label: 'Hardware template', operations: [
+        { op: 'add_box', as: 'solid', min: [-0.02, -0.02, -0.01], max: [0.02, 0, 0.01] },
+        { op: 'make_component', as: 'pull', refs: ['$solid'], name: 'Selected brass pull' },
+      ] });
+      const template = s.root().instances.get(made.created.pull as never)!;
+      const { entry } = await cabinet(s, { type: 'base', width: 18 * inch, hardwarePlacement: { drawers: { definitionId: template.definitionId, width: 0.04, height: 0.02, kind: 'pull' } } });
+      const mounted = entry.parts!.find(p => p.name === 'Drawer: Cabinet Pull')!;
+      expect(mounted.path).toHaveLength(3);
+      expect(containerAt(s.host.doc.state, mounted.path.slice(0, -1) as never).instances.get(mounted.id as never)!.definitionId).toBe(template.definitionId);
+      s.host.undoStack.undo(); expect(s.root().instances.size).toBe(0);
+      s.host.undoStack.redo(); expect(s.root().instances.size).toBe(2);
+    });
+
+    it('keeps satin paint distinct from an existing white paint', async () => {
+      const s = setup();
+      await cabinet(s, { type: 'base', width: 18 * inch, finish: { paint: '#ffffff' } });
+      await cabinet(s, { type: 'base', width: 18 * inch, at: [1, 0, 0], finish: { paint: '#ffffff', roughness: 0.4 }, boxFinish: { paint: '#ffffff', roughness: 0.4 } });
+      const materials = [...s.host.doc.state.materials.values()];
+      expect(materials.find(m => m.name === 'Paint #ffffff roughness 0.4')?.appearance).toMatchObject({ roughness: 0.4, metalness: 0 });
+      expect(materials.find(m => m.name === 'Paint #ffffff')?.appearance?.roughness).not.toBe(0.4);
+    });
+
     it('builds a whole cabinet from type and width as one undo step', async () => {
       const s = setup();
       const { result, entry } = await cabinet(s, { type: 'base', width: 24 * inch });

@@ -1,22 +1,40 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import type { Vec3 } from '@pushform/core';
+import { m4fromBasis, m4mul } from '@pushform/core';
+import type { Mat4, Vec3 } from '@pushform/core';
 import type { CutBox, PanelRing } from '../builders/mesh';
 import { Builder, BuilderPlanError, range, span } from '../builders/parts';
-import type { BuilderPart, BuilderPlan, MaterialSpec, Pt, Range } from '../builders/parts';
+import type { BuilderPart, BuilderPlacement, BuilderPlan, MaterialSpec, Pt, Range } from '../builders/parts';
 import * as D from './dimensions';
 
 export type CabinetType = 'base' | 'wall' | 'tall' | 'vanity';
 export type CabinetFrame = 'frameless' | 'face_frame';
 export type CabinetOverlay = 'full' | 'partial' | 'inset';
-export type CabinetDoorStyle = 'slab' | 'shaker' | 'raised' | 'glass' | 'none';
+export type CabinetDoorStyle = 'slab' | 'shaker' | 'raised' | 'glass' | 'beadboard' | 'none';
 export type CabinetCornerStyle = 'blind' | 'diagonal' | 'l_shaped';
 export type CabinetSide = 'left' | 'right';
 export type CabinetGlassPattern = 'single' | 'grid' | 'prairie' | 'mission';
 export type CabinetGlassType = 'clear' | 'frosted' | 'seeded' | 'reeded';
 export type CabinetFinishedEnds = 'none' | 'left' | 'right' | 'both';
-export type CabinetFinish = { readonly paint: string } | { readonly stain: string };
+export type CabinetFinish = { readonly paint: string; readonly roughness?: number } | { readonly stain: string };
 
+export interface CabinetHardwareTemplate {
+  /** A component whose local origin is its mounting center; local -y projects outward. */
+  readonly definitionId: number;
+  readonly sourceTransform?: readonly number[] | undefined;
+  readonly width: number;
+  readonly height: number;
+  readonly kind: 'knob' | 'pull';
+}
+export interface CabinetHardwarePlacement {
+  readonly doors?: CabinetHardwareTemplate | undefined;
+  readonly drawers?: CabinetHardwareTemplate | undefined;
+  readonly doorEdgeInset?: number | undefined;
+  readonly doorEndInset?: number | undefined;
+  readonly drawerPosition?: 'center' | 'top' | undefined;
+  readonly drawerTopInset?: number | undefined;
+  readonly wideDrawers?: 'single' | 'double' | 'auto' | undefined;
+}
 export interface CabinetParams {
   readonly type: CabinetType;
   readonly width: number;
@@ -33,14 +51,15 @@ export interface CabinetParams {
   readonly shelves?: number | undefined;
   readonly toeKick?: boolean | undefined;
   readonly back?: boolean | undefined;
-  readonly finish?: { readonly paint?: string | undefined; readonly stain?: string | undefined } | undefined;
+  readonly finish?: { readonly paint?: string | undefined; readonly roughness?: number | undefined; readonly stain?: string | undefined } | undefined;
   readonly finishedEnds?: CabinetFinishedEnds | undefined;
   readonly name?: string | undefined;
-  readonly boxFinish?: { readonly paint?: string | undefined; readonly library?: string | undefined } | undefined;
+  readonly boxFinish?: { readonly paint?: string | undefined; readonly roughness?: number | undefined; readonly library?: string | undefined } | undefined;
   readonly beadedFrame?: boolean | undefined;
   readonly drawerFronts?: 'auto' | 'slab' | 'match' | undefined;
   readonly hardware?: 'none' | 'bar' | 'knob' | undefined;
   readonly hardwareFinish?: string | undefined;
+  readonly hardwarePlacement?: CabinetHardwarePlacement | undefined;
   readonly glass?: { readonly pattern?: CabinetGlassPattern | undefined; readonly across?: number | undefined; readonly down?: number | undefined; readonly type?: CabinetGlassType | undefined } | undefined;
   readonly finishedInterior?: boolean | undefined;
   readonly stackedDoors?: boolean | undefined;
@@ -79,6 +98,7 @@ export interface CabinetUsed {
   readonly beadedFrame: boolean;
   readonly drawerFronts: 'auto' | 'slab' | 'match';
   readonly hardware: 'none' | 'bar' | 'knob';
+  readonly hardwarePlacement?: CabinetHardwarePlacement;
   readonly stackedDoors: boolean;
   readonly upperDoorHeight?: number;
   readonly upperDoorStyle?: CabinetDoorStyle;
@@ -104,7 +124,7 @@ function raisedRings(): PanelRing[] {
   return [[D.RAISED_RELIEF, 0], [D.RAISED_RELIEF, back], [0, back], [0, front], [D.RAISED_RELIEF, front], [D.RAISED_RELIEF + D.RAISED_BEVEL, D.RAISED_PANEL]];
 }
 
-export type FrontStyle = 'slab' | 'shaker' | 'raised' | 'glass';
+export type FrontStyle = 'slab' | 'shaker' | 'raised' | 'glass' | 'beadboard';
 interface Rect { readonly x: Range; readonly z: Range }
 
 /** A door or drawer front at `rect`, whose back is at y = back and whose face is toward -y. */
@@ -172,6 +192,15 @@ export function addFront(b: Builder, assembly: string, rect: Rect, front: number
     const rings = raisedRings();
     if (horizontalPanel) b.add('Panel', assembly, 'show', px, py, pz, '+x', '+z', { rings });
     else b.add('Panel', assembly, 'show', px, py, pz, '+z', '-x', { rings });
+    return;
+  }
+  if (style === 'beadboard') {
+    const count = Math.max(1, Math.ceil(span(px) / D.inches(2)));
+    const pitch = span(px) / count, gap = D.inches(1 / 16), relief = D.inches(1 / 16);
+    // A continuous backing closes every groove; separate boards give the face readable vertical beads.
+    const backY = front + D.GROOVE_SHOULDER + relief;
+    b.add('Beadboard Backing', assembly, 'show', px, range(backY, front + D.GROOVE_SHOULDER + D.PANEL), pz, '+z', '+x');
+    for (let n = 0; n < count; n++) b.add(`Beadboard ${n + 1}`, assembly, 'show', range(px.from + pitch * n + (n ? gap / 2 : 0), px.from + pitch * (n + 1) - (n < count - 1 ? gap / 2 : 0)), range(front + D.GROOVE_SHOULDER, backY), pz, '+z', '+x');
     return;
   }
   const py = range(front + D.GROOVE_SHOULDER, front + D.GROOVE_SHOULDER + D.PANEL);
@@ -305,7 +334,8 @@ export function planCabinet(p: CabinetParams): CabinetPlan {
   if (noDoorSection && shelves > 0) throw contradiction('This cabinet is all drawers, so it has no room for shelves; remove shelves or add a door section.');
 
   if (p.finish?.paint !== undefined && p.finish.stain !== undefined) throw contradiction('finish takes paint or stain, not both.');
-  const finish: CabinetFinish = p.finish?.stain !== undefined ? { stain: p.finish.stain } : { paint: p.finish?.paint ?? D.DEFAULT_PAINT };
+  for (const value of [p.finish?.roughness, p.boxFinish?.roughness]) if (value !== undefined && (!Number.isFinite(value) || value < 0 || value > 1)) throw contradiction('Paint roughness must be between zero and one.');
+  const finish: CabinetFinish = p.finish?.stain !== undefined ? { stain: p.finish.stain } : { paint: p.finish?.paint ?? D.DEFAULT_PAINT, ...(p.finish?.roughness !== undefined ? { roughness: p.finish.roughness } : {}) };
   const back = p.back ?? true, drawerBoxes = p.drawerBoxes ?? true, finishedEnds = p.finishedEnds ?? 'both';
   const at: Vec3 = p.at ?? (type === 'wall' ? [0, 0, D.WALL_HANG_HEIGHT] : [0, 0, 0]);
 
@@ -402,6 +432,20 @@ export function planCabinet(p: CabinetParams): CabinetPlan {
     }
   };
 
+  const placements: BuilderPlacement[] = [];
+  const hp = p.hardwarePlacement;
+  for (const value of [hp?.doorEdgeInset, hp?.doorEndInset, hp?.drawerTopInset]) if (value !== undefined && (!Number.isFinite(value) || value <= 0)) throw contradiction('Hardware offsets must be positive finite lengths.');
+  for (const template of [hp?.doors, hp?.drawers]) if (template && (!Number.isInteger(template.definitionId) || template.definitionId <= 0 || ![template.width, template.height].every(v => Number.isFinite(v) && v > 0))) throw contradiction('Hardware requires a component and positive finite dimensions.');
+  const mount = (builder: Builder, assembly: string, template: CabinetHardwareTemplate, x: number, z: number, rect: Rect, vertical: boolean): void => {
+    const halfX = (vertical ? template.height : template.width) / 2, halfZ = (vertical ? template.width : template.height) / 2;
+    if (x - halfX < rect.x.from || x + halfX > rect.x.to || z - halfZ < rect.z.from || z + halfZ > rect.z.to) throw unsound(`The selected hardware does not fit ${assembly}. Reduce its size or change its offsets.`);
+    const placed = builder.mount(template.kind === 'knob' ? 'Door Knob' : 'Cabinet Pull', assembly, template.definitionId, [x, frontY, z], vertical);
+    if (template.sourceTransform) {
+      if (template.sourceTransform.length !== 16 || !template.sourceTransform.every(Number.isFinite)) throw contradiction('Hardware sourceTransform needs 16 finite matrix entries.');
+      const m = m4mul(m4fromBasis(placed.origin, placed.x, placed.y, placed.z), template.sourceTransform as Mat4);
+      placements.push({ ...placed, origin: [m[12]!, m[13]!, m[14]!], x: [m[0]!, m[1]!, m[2]!], y: [m[4]!, m[5]!, m[6]!], z: [m[8]!, m[9]!, m[10]!] });
+    } else placements.push(placed);
+  };
   const addBarOrKnob = (builder: Builder, assembly: string, cx: number, cz: number, vertical: boolean): void => {
     if (hardware === 'knob') { builder.addRound('Knob', assembly, 'hardware', cx, cz, frontY, D.KNOB_LENGTH, D.KNOB_RADIUS); return; }
     if (hardware !== 'bar') return;
@@ -432,14 +476,19 @@ export function planCabinet(p: CabinetParams): CabinetPlan {
           const x = expand(leaf.x, leaf.outerLeft, leaf.outerRight);
           checkFive(style, span(x), span(row.front), leaf.name);
           addFront(builder, leaf.name, { x, z: row.front }, frontY, style, false, 'Slab', glass);
-          if (hardware !== 'none') {
+          if (hardware !== 'none' || hp?.doors) {
             // At an L-shaped corner the doors meet at the inside corner, so the pull goes toward the outer end.
             const hingeOnLeft = plane.names ? plane.outerRight : !leaf.name.includes('Right');
-            const pullX = hingeOnLeft ? x.to - D.STILE / 2 : x.from + D.STILE / 2;
-            const atTop = type === 'wall' ? row.section === 'lower' : row.section !== 'upper' && type !== 'tall';
+            const edge = hp?.doorEdgeInset ?? (style === 'slab' ? D.inches(2.5) : D.STILE / 2);
+            const pullX = hingeOnLeft ? x.to - edge : x.from + edge;
+            const atTop = row.section === 'lower' || (type !== 'wall' && type !== 'tall' && row.section !== 'upper');
             const pullZ = type === 'tall' && row.section === null ? Math.min(row.front.to - D.PULL_INSET - D.PULL_LENGTH / 2, Math.max(row.front.from + D.PULL_LENGTH, D.TALL_PULL_HEIGHT))
               : atTop ? row.front.to - D.PULL_INSET - (hardware === 'bar' ? D.PULL_LENGTH / 2 : 0) : row.front.from + D.PULL_INSET + (hardware === 'bar' ? D.PULL_LENGTH / 2 : 0);
-            addBarOrKnob(builder, leaf.name, pullX, pullZ, true);
+            if (hp?.doors) {
+              const vertical = hp.doors.kind === 'pull', end = hp.doorEndInset ?? D.inches(2.5);
+              const reach = type === 'tall' && row.section === null ? Math.max(row.front.from + end, Math.min(row.front.to - end, D.TALL_PULL_HEIGHT)) : atTop ? row.front.to - end : row.front.from + end;
+              mount(builder, leaf.name, hp.doors, pullX, reach, { x, z: row.front }, vertical);
+            } else addBarOrKnob(builder, leaf.name, pullX, pullZ, true);
           }
         }
         continue;
@@ -457,7 +506,13 @@ export function planCabinet(p: CabinetParams): CabinetPlan {
       const stile = !tall && slimFits ? D.SLIM_STILE : D.STILE;
       checkFive(style, span(x), span(row.front), row.name, stile);
       addFront(builder, row.name, { x, z: row.front }, frontY, style, true, 'Front', null, stile);
-      addBarOrKnob(builder, row.name, (x.from + x.to) / 2, (row.front.from + row.front.to) / 2, false);
+      if (hp?.drawers) {
+        const two = hp.wideDrawers === 'double' || ((hp.wideDrawers ?? 'auto') === 'auto' && span(x) > D.inches(24));
+        const centers = two ? [x.from + span(x) / 4, x.to - span(x) / 4] : [(x.from + x.to) / 2];
+        const z = hp.drawerPosition === 'top' ? row.front.to - (hp.drawerTopInset ?? D.inches(2.5)) : (row.front.from + row.front.to) / 2;
+        if (two && hp.drawers.width >= span(x) / 2) throw unsound('The two drawer pulls would overlap.');
+        for (const cx of centers) mount(builder, row.name, hp.drawers, cx, z, { x, z: row.front }, false);
+      } else addBarOrKnob(builder, row.name, (x.from + x.to) / 2, (row.front.from + row.front.to) / 2, false);
       if (!drawerBoxes) continue;
 
       const between = faceFrame ? full : range(Math.max(t, full.from - D.REVEAL), Math.min(width - t, full.to + D.REVEAL));
@@ -664,17 +719,17 @@ export function planCabinet(p: CabinetParams): CabinetPlan {
     })
     : b.parts;
   const used: CabinetUsed = {
-    type, width, height, depth, at, frame, overlay, doorStyle, doors, drawers, drawerBoxes, sinkFront, shelves, toeKick, back, finish, finishedEnds, stackedDoors, finishedInterior, beadedFrame, drawerFronts, hardware,
+    type, width, height, depth, at, frame, overlay, doorStyle, doors, drawers, drawerBoxes, sinkFront, shelves, toeKick, back, finish, finishedEnds, stackedDoors, finishedInterior, beadedFrame, drawerFronts, hardware, ...(hp ? { hardwarePlacement: hp } : {}),
     ...(glass ? { glass } : {}),
     ...(stackedDoors ? { upperDoorHeight: upperDoorHeight!, upperDoorStyle: p.upperDoorStyle ?? doorStyle } : {}),
     ...(cornerStyle ? { corner: { style: cornerStyle, side, lazySusan, ...(returnWidth !== undefined ? { returnWidth } : {}), ...(blindWidth !== undefined ? { blindWidth } : {}) } } : {}),
   };
   const materials: Record<string, MaterialSpec> = {
-    box: p.boxFinish?.library !== undefined ? { library: p.boxFinish.library } : p.boxFinish?.paint !== undefined ? { paint: p.boxFinish.paint } : { library: D.BOX_MATERIAL_KEY },
+    box: p.boxFinish?.library !== undefined ? { library: p.boxFinish.library } : p.boxFinish?.paint !== undefined ? { paint: p.boxFinish.paint, ...(p.boxFinish.roughness !== undefined ? { roughness: p.boxFinish.roughness } : {}) } : { library: D.BOX_MATERIAL_KEY },
     ...(hardware !== 'none' ? { hardware: { paint: p.hardwareFinish ?? D.DEFAULT_HARDWARE_FINISH } } : {}),
-    show: 'stain' in finish ? { library: finish.stain } : { paint: finish.paint },
+    show: 'stain' in finish ? { library: finish.stain } : { paint: finish.paint, ...(p.finish?.roughness !== undefined ? { roughness: p.finish.roughness } : {}) },
     ...(glass ? { glass: { library: D.GLASS_KEYS[glass.type] } } : {}),
   };
   const typeName = type === 'base' ? 'Base' : type === 'wall' ? 'Wall' : type === 'tall' ? 'Tall' : 'Vanity';
-  return { name: p.name ?? `${typeName} ${cornerStyle ? 'Corner ' : ''}Cabinet ${inch(width)}`, at, used, parts, materials };
+  return { name: p.name ?? `${typeName} ${cornerStyle ? 'Corner ' : ''}Cabinet ${inch(width)}`, at, used, parts, materials, placements };
 }

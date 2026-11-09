@@ -54,7 +54,7 @@ import { draftContainerAt, refsInContext, sketchGraphAt } from './context';
 import { cloneDefinition, copySketchInto, mapGuide, pointMapFromMatrix, uniqueDefinitionName } from './groups';
 import { mapSectionPlane } from './sectionPlanes';
 import { deleteSelection, type DeleteResult } from './sketch';
-import { copyBodyRecord, copyMeshPartRecord, definitionBounds, transformBodyAffineInPlace, transformMeshPartGeometry } from './transform';
+import { reallocateBodyMetadata, copyBodyRecord, copyMeshPartRecord, definitionBounds, transformBodyAffineInPlace, transformMeshPartGeometry } from './transform';
 
 /** Where the copied model is stored, so Layout can show it in a view. */
 export interface ModelClipboardSource {
@@ -597,6 +597,7 @@ export function pasteModelClipboard(draft: DocumentDraft, clip: ModelClipboard, 
     const body = srcRoot.bodies.get(sid);
     if (body) {
       const copy = copyBodyRecord(body, allocId<Id>(draft));
+      reallocateBodyMetadata(draft, copy);
       copy.version = 0;
       if (!identity) transformBodyAffineInPlace(copy, m, tiles);
       container.bodies.set(copy.id, copy);

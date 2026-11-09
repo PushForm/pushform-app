@@ -57,9 +57,37 @@ export function resolveHardwareOptions(input: HardwareOptions): ResolvedHardware
   const pocket = input.shape.startsWith('recessed');
   const o: ResolvedHardwareOptions = {
     shape: input.shape,
-    length: input.length ?? (knob ? 0.032 : 0.152),
-    width: input.width ?? (knob ? 0.032 : pocket ? 0.04 : 0.012),
-    projection: input.projection ?? (knob ? 0.027 : pocket ? 0.012 : 0.032),
+    length:
+      input.length ??
+      (input.shape === 'wire'
+        ? (input.spacing ?? 0.128) + (input.grip ?? 0.01)
+        : knob
+          ? 0.032
+          : 0.152),
+    width:
+      input.width ??
+      (input.shape === 'ring'
+        ? 0.05
+        : input.shape === 'half-moon'
+          ? (input.length ?? 0.152) / 2
+          : ['bar-round', 'wire', 'bridge', 'knob-t'].includes(input.shape)
+            ? (input.grip ?? 0.01)
+            : knob
+              ? 0.032
+              : pocket
+                ? 0.04
+                : input.shape.startsWith('cup')
+                  ? 0.035
+                  : 0.012),
+    projection:
+      input.projection ??
+      (input.shape === 'knob-ball'
+        ? (input.width ?? 0.032) * 1.25
+        : knob
+          ? 0.027
+          : pocket
+            ? 0.012
+            : 0.032),
     spacing: input.spacing ?? (knob ? 0 : 0.128),
     grip: input.grip ?? 0.01,
     wall: input.wall ?? 0.002,
@@ -84,5 +112,17 @@ export function resolveHardwareOptions(input: HardwareOptions): ResolvedHardware
     if (o.wall * 2 >= Math.min(o.width, o.projection, o.length))
       throw new Error('Wall thickness leaves no usable opening.');
   }
+  if (o.shape === 'wire' && Math.abs(o.length - o.spacing - o.grip) > LENGTH_TOL)
+    throw new Error('For wire pulls, overall length is mounting spacing plus rod diameter.');
+  if (['bar-round', 'wire', 'knob-t'].includes(o.shape) && Math.abs(o.width - o.grip) > LENGTH_TOL)
+    throw new Error('Round grip width must equal its diameter.');
+  if (o.shape === 'ring' && (o.width <= 2 * o.grip || o.projection < o.grip))
+    throw new Error('A ring needs an open center and projection at least its section diameter.');
+  if (o.shape === 'knob-ball' && o.projection <= o.width)
+    throw new Error('Ball knob projection must exceed the ball diameter to leave a stem.');
+  if (o.shape === 'recessed' && 4 * o.wall >= Math.min(o.length, o.width))
+    throw new Error('The recessed rim leaves no pocket opening.');
+  if (o.shape === 'recessed-round' && 4 * o.wall >= o.width)
+    throw new Error('The recessed rim leaves no pocket opening.');
   return o;
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { z } from 'zod';
-import { m4fromBasis, m4translation, m4mul } from '@pushform/core';
+import { m4fromBasis, m4translation } from '@pushform/core';
 import type { DefId, Id, Vec3 } from '@pushform/core';
 import { HARDWARE_SHAPES } from '@pushform/kernel';
 import { bodyFromMesh, createMaterial } from '@pushform/model';
@@ -12,6 +12,8 @@ import { hostOf, kernelOf, activeTagOpt } from '../host/services';
 import { currentFrame, draftContainerAt } from './context';
 import { createDefinition, newInstance, uniqueDefinitionName } from './groups';
 import { componentPlacement } from './components';
+import { loadLibraryMaterial, ensureDocumentImage } from './materials';
+import { libraryMaterial } from './materialLibrary';
 import { edgeAngleDeg } from './edges';
 
 export const HARDWARE_FINISHES = {
@@ -47,7 +49,7 @@ export const HardwareParamsSchema = z
 export const hardwareCreate = defineCommand({
   id: 'hardware.create',
   title: 'Generate Cabinet Hardware',
-  category: 'internal',
+  category: 'draw',
   params: HardwareParamsSchema,
   undoable: false,
   async run(ctx, p) {
@@ -64,6 +66,9 @@ export const hardwareCreate = defineCommand({
       ...(grip === undefined ? {} : { grip }),
       ...(wall === undefined ? {} : { wall }),
     };
+    const materialKey = 'Hardware_' + p.finish;
+    const library = libraryMaterial(materialKey);
+    const loaded = library ? await loadLibraryMaterial(host, materialKey) : null;
     const made = await kernelOf(ctx).hardware({ options, nextFaceId: 1 });
     if (host.context.path.join('/') !== path.join('/'))
       throw new Error('The editing context changed while generating hardware.');
@@ -88,7 +93,19 @@ export const hardwareCreate = defineCommand({
       const f = HARDWARE_FINISHES[p.finish];
       const material =
         [...state.materials.values()].find((m) => m.name === f.name) ??
-        createMaterial(draft, { name: f.name, color: [...f.color] as Rgb });
+        createMaterial(draft, {
+          name: f.name,
+          color: [...f.color] as Rgb,
+          texture: loaded?.texture
+            ? {
+                imageId: ensureDocumentImage(host, draft, loaded.texture.imageId),
+                widthM: loaded.texture.widthM,
+                heightM: loaded.texture.heightM,
+                colorize: false,
+                grain: loaded.texture.grain,
+              }
+            : null,
+        });
       const basis =
         p.mountingPlane === 'front'
           ? m4fromBasis([0, 0, 0], [1, 0, 0], [0, 0, 1], [0, -1, 0])
@@ -112,6 +129,17 @@ export const hardwareCreate = defineCommand({
             ...activeTagOpt(ctx),
           },
         );
+        for (const face of body.faces.values()) {
+          const axis = p.mountingPlane === 'side' ? 1 : 0,
+            u = face.basis.u[axis]!,
+            v = face.basis.v[axis]!,
+            length = Math.hypot(u, v);
+          if (length > 0) {
+            const c = u / length,
+              s = v / length;
+            face.uv = { kind: 'sized', matrix: [c, s, 0, -s, c, 0] };
+          }
+        }
         for (const edge of body.edges.values()) {
           const a = edgeAngleDeg(body, edge);
           if (a !== null && a < 28) {

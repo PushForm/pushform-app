@@ -2,7 +2,7 @@
 // Copyright 2026 PushForm contributors
 import { useState } from 'react';
 import type { FormEvent, JSX } from 'react';
-import { HARDWARE_SHAPES } from '@pushform/kernel';
+import { HARDWARE_SHAPES, resolveHardwareOptions } from '@pushform/kernel';
 import type { HardwareShape } from '@pushform/kernel';
 import { HARDWARE_FINISHES } from '@pushform/commands';
 import type { HardwareFinish } from '@pushform/commands';
@@ -17,6 +17,21 @@ export function HardwareDialog({ onClose }: { onClose: () => void }): JSX.Elemen
   const [values, setValues] = useState<Record<string, string>>({});
   const [error, setError] = useState(''),
     [busy, setBusy] = useState(false);
+  const defaults = resolveHardwareOptions({ shape });
+  const fields = (
+    shape.startsWith('knob-')
+      ? shape === 'knob-oval' ||
+        shape === 'knob-square' ||
+        shape === 'knob-pyramid' ||
+        shape.startsWith('knob-t')
+        ? ['length', 'width', 'projection', 'grip']
+        : ['width', 'projection', 'grip']
+      : shape === 'ring'
+        ? ['width', 'projection', 'grip']
+        : shape.startsWith('recessed') || shape.startsWith('cup') || shape.startsWith('edge')
+          ? ['length', 'width', 'projection', 'spacing', 'wall']
+          : ['length', 'width', 'projection', 'spacing', 'grip']
+  ) as (keyof typeof values)[];
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError('');
@@ -45,7 +60,10 @@ export function HardwareDialog({ onClose }: { onClose: () => void }): JSX.Elemen
           <select
             id="hardware-shape"
             value={shape}
-            onChange={(e) => setShape(e.target.value as HardwareShape)}
+            onChange={(e) => {
+              setShape(e.target.value as HardwareShape);
+              setValues({});
+            }}
           >
             {HARDWARE_SHAPES.map((s) => (
               <option key={s} value={s}>
@@ -68,15 +86,24 @@ export function HardwareDialog({ onClose }: { onClose: () => void }): JSX.Elemen
           </select>
         </Field>
         <p>Dimensions in mm. Leave a field empty to use the shape’s default.</p>
-        {(['length', 'width', 'projection', 'spacing', 'grip', 'wall'] as const).map((key) => (
+        {fields.map((key) => (
           <Field
             key={key}
-            label={key === 'spacing' ? 'Mounting centers' : key[0]!.toUpperCase() + key.slice(1)}
+            label={
+              key === 'spacing'
+                ? 'Mounting centers'
+                : key === 'width' && ['knob-hex', 'knob-octagon'].includes(shape)
+                  ? 'Head across flats'
+                  : key[0]!.toUpperCase() + key.slice(1)
+            }
             htmlFor={'hardware-' + key}
           >
             <input
               id={'hardware-' + key}
               inputMode="decimal"
+              placeholder={String(
+                Math.round(Number(defaults[key as keyof typeof defaults]) * 100000) / 100,
+              )}
               value={values[key] ?? ''}
               onChange={(e) => setValues({ ...values, [key]: e.target.value })}
             />

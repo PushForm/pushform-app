@@ -6,6 +6,7 @@ import { resolveHardwareOptions } from '../../hardware';
 import type { HardwareRequest, HardwareResult } from '../../protocol';
 import { KernelError } from '../../protocol';
 import type { KernelContext } from '../context';
+import { manifoldFromSoup } from '../meshio';
 import { withScope } from '../context';
 import { finalizeManifold } from './finalize';
 import { allNewIds } from './normalize';
@@ -75,8 +76,8 @@ export function hardware(ctx: KernelContext, req: HardwareRequest): HardwareResu
       );
       if (shape === 'bridge')
         for (const x of [-c / 2, c / 2]) {
-          solid = add(solid, cylinder(g * 0.8, g * 0.2, [x, 0, 0]));
-          solid = add(solid, cylinder(g * 0.6, g * 0.25, [x, 0, h - g * 1.25]));
+          solid = add(solid, cylinder(Math.min(g * 0.8, w / 2), g * 0.2, [x, 0, 0]));
+          solid = add(solid, cylinder(Math.min(g * 0.6, w / 2), g * 0.25, [x, 0, h - g * 1.25]));
         }
     } else if (shape === 'wire' || shape === 'arch') {
       mount.push([-c / 2, 0, 0], [c / 2, 0, 0]);
@@ -84,7 +85,7 @@ export function hardware(ctx: KernelContext, req: HardwareRequest): HardwareResu
       if (shape === 'arch') {
         for (let i = 0; i <= 16; i++) {
           const u = i / 16;
-          pts.push([-c / 2 + c * u, 0, g / 2 + (h - g) * Math.sin(Math.PI * u)]);
+          pts.push([-(l - g) / 2 + (l - g) * u, 0, g / 2 + (h - g) * Math.sin(Math.PI * u)]);
         }
       } else {
         const r = Math.min(h / 2, c / 4);
@@ -99,11 +100,56 @@ export function hardware(ctx: KernelContext, req: HardwareRequest): HardwareResu
         }
         pts.push([c / 2, 0, g / 2]);
       }
-      solid = rod(pts[0]!, pts[1]!, g / 2);
-      for (let i = 1; i + 1 < pts.length; i++) solid = add(solid, rod(pts[i]!, pts[i + 1]!, g / 2));
-      for (let i = 1; i + 1 < pts.length; i++)
-        solid = add(solid, sphere(g / 2, g / 2, g / 2, pts[i]!));
-      for (const x of [-c / 2, c / 2]) solid = add(solid, cylinder(g / 2, g, [x, 0, 0]));
+      // A single lofted tube avoids overlapping rod/sphere seams along the grip.
+      const verts: number[] = [],
+        tris: number[] = [];
+      for (let k = 0; k < pts.length; k++) {
+        const a = pts[Math.max(0, k - 1)]!,
+          b = pts[Math.min(pts.length - 1, k + 1)]!;
+        const dx = b[0] - a[0],
+          dz = b[2] - a[2],
+          len = Math.hypot(dx, dz);
+        for (let j = 0; j < n; j++) {
+          const angle = (j * 2 * Math.PI) / n,
+            across = (Math.sin(angle) * g) / 2;
+          verts.push(
+            pts[k]![0] - (dz / len) * across,
+            (Math.cos(angle) * w) / 2,
+            pts[k]![2] + (dx / len) * across,
+          );
+        }
+      }
+      for (let k = 0; k + 1 < pts.length; k++)
+        for (let j = 0; j < n; j++) {
+          const a = k * n + j,
+            b = k * n + ((j + 1) % n);
+          tris.push(a, b, b + n, a, b + n, a + n);
+        }
+      for (let j = 1; j + 1 < n; j++) {
+        tris.push(0, j + 1, j);
+        const top = (pts.length - 1) * n;
+        tris.push(top, top + j, top + j + 1);
+      }
+      solid = keep(
+        manifoldFromSoup(
+          ctx.wasm,
+          {
+            verts: new Float64Array(verts),
+            tris: new Uint32Array(tris),
+            faceId: new Uint32Array(tris.length / 3),
+          },
+          0,
+        ),
+      );
+      if (shape === 'arch') {
+        const bounds = solid.boundingBox();
+        solid = keep(solid.scale([l / (bounds.max[0] - bounds.min[0]), 1, 1]));
+        for (const x of [-c / 2, c / 2]) {
+          const u = (x + (l - g) / 2) / (l - g);
+          const z = g / 2 + (h - g) * Math.sin(Math.PI * u);
+          solid = add(solid, cylinder(Math.min(g, w) / 2, z + g / 3, [x, 0, 0]));
+        }
+      } else for (const x of [-c / 2, c / 2]) solid = add(solid, cylinder(g / 2, g, [x, 0, 0]));
     } else if (shape.startsWith('knob-')) {
       mount.push([0, 0, 0]);
       const stemH = h * 0.65,
@@ -164,7 +210,33 @@ export function hardware(ctx: KernelContext, req: HardwareRequest): HardwareResu
         const inner = sphere(l / 2 - t, w - t, h - t, [0, 0, 0]);
         solid = cut(sub(outer, inner), box(l * 2, w, h, [0, w / 2, h / 2]));
         solid = moved(solid, 0, -w / 2, 0);
-      } else solid = sub(box(l, w, h, [0, 0, h / 2]), box(l - 2 * t, w + t, h, [0, -t, h / 2 - t]));
+      } else {
+        const profile: SimplePolygon = [
+          [-w / 2, 0],
+          [w / 2, 0],
+        ];
+        for (let i = 0; i <= 20; i++) {
+          const a = (i * Math.PI) / 20;
+          profile.push([(w / 2) * Math.cos(a), h * Math.sin(a)]);
+        }
+        const section = keep(new CrossSection([profile]));
+        const outer = moved(keep(keep(section.extrude(l)).rotate([90, 0, 90])), -l / 2, 0, 0);
+        const innerProfile: SimplePolygon = [
+          [-w / 2 + t, -t],
+          [w / 2 - t, -t],
+        ];
+        for (let i = 0; i <= 20; i++) {
+          const a = (i * Math.PI) / 20;
+          innerProfile.push([(w / 2 - t) * Math.cos(a), (h - t) * Math.sin(a)]);
+        }
+        const inner = moved(
+          keep(keep(keep(new CrossSection([innerProfile])).extrude(l - 2 * t)).rotate([90, 0, 90])),
+          -l / 2 + t,
+          0,
+          0,
+        );
+        solid = sub(outer, inner);
+      }
       mount.push(
         [-Math.min(c, l - 2 * t) / 2, w * 0.2, 0],
         [Math.min(c, l - 2 * t) / 2, w * 0.2, 0],
@@ -183,7 +255,7 @@ export function hardware(ctx: KernelContext, req: HardwareRequest): HardwareResu
     } else if (shape === 'edge' || shape === 'edge-curved') {
       solid = add(box(l, w, t, [0, w / 2, t / 2]), box(l, t, h, [0, t / 2, h / 2]));
       if (shape === 'edge-curved')
-        solid = add(solid, rod([-l / 2, 0, h - t / 2], [l / 2, 0, h - t / 2], t));
+        solid = add(solid, rod([-l / 2, t, h - t], [l / 2, t, h - t], t));
       mount.push([-Math.min(c, l * 0.8) / 2, w * 0.65, 0], [Math.min(c, l * 0.8) / 2, w * 0.65, 0]);
     } else if (shape === 'ring') {
       const profile = keep(
@@ -194,12 +266,12 @@ export function hardware(ctx: KernelContext, req: HardwareRequest): HardwareResu
           }),
         ]),
       );
-      const torus = keep(keep(profile.revolve(n)).rotate([90, 0, 0]));
-      solid = moved(torus, 0, -w / 2, h - g / 2);
-      solid = add(solid, cylinder(g * 0.65, Math.max(t, h - g), [0, 0, 0]));
+      const torus = keep(profile.revolve(n));
+      solid = moved(torus, 0, -w / 2 + g / 2, h - g / 2);
+      solid = add(solid, cylinder(g * 0.65, h - g / 3, [0, 0, 0]));
       mount.push([0, 0, 0]);
     } else if (shape === 'half-moon') {
-      const disc = cylinder(l / 2, t, [0, 0, h - t]);
+      const disc = keep(cylinder(l / 2, t, [0, 0, h - t]).scale([1, (2 * w) / l, 1]));
       solid = cut(disc, box(l * 2, l, h * 2, [0, l / 2, h]));
       solid = add(solid, box(l * 0.8, t, h, [0, t / 2, h / 2]));
       mount.push([-Math.min(c, l * 0.7) / 2, 0, 0], [Math.min(c, l * 0.7) / 2, 0, 0]);

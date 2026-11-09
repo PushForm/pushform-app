@@ -42,3 +42,39 @@ describe('hardware solid families', () => {
     expect(() => resolveHardwareOptions({ shape: 'knob-round', width: NaN })).toThrow();
   });
 });
+
+it('keeps a ball ahead of its mounting face and joins the ring to its mount', async () => {
+  const ball = await client.hardware({ options: { shape: 'knob-ball' }, nextFaceId: 1 });
+  expect(
+    Math.min(...Array.from(ball.components[0]!.mesh.verts).filter((_, i) => i % 3 === 2)),
+  ).toBeGreaterThanOrEqual(0);
+  const ring = await client.hardware({ options: { shape: 'ring' }, nextFaceId: 1 });
+  expect(ring.components).toHaveLength(1);
+  const zs = Array.from(ring.components[0]!.mesh.verts).filter((_, i) => i % 3 === 2);
+  expect(Math.max(...zs)).toBeCloseTo(ring.resolved.projection, 5);
+});
+it('uses independent arch length and grip width at maximum resolution', async () => {
+  const r = await client.hardware({
+    options: {
+      shape: 'arch',
+      length: 0.13335,
+      spacing: 0.096,
+      width: 0.01429,
+      grip: 0.008,
+      projection: 0.028575,
+      segments: 80,
+    },
+    nextFaceId: 1,
+  });
+  const mesh = r.components[0]!.mesh;
+  const axis = (a: number) => Array.from(mesh.verts).filter((_, i) => i % 3 === a);
+  expect(Math.max(...axis(0)) - Math.min(...axis(0))).toBeCloseTo(0.13335, 5);
+  expect(Math.max(...axis(1)) - Math.min(...axis(1))).toBeCloseTo(0.01429, 5);
+  expect(mesh.tris.length / 3).toBeLessThan(12000);
+});
+it('rejects closed pocket and ring openings', () => {
+  expect(() =>
+    resolveHardwareOptions({ shape: 'recessed-round', width: 0.01, wall: 0.003 }),
+  ).toThrow();
+  expect(() => resolveHardwareOptions({ shape: 'ring', width: 0.02, grip: 0.012 })).toThrow();
+});

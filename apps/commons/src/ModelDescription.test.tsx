@@ -4,17 +4,13 @@ import { afterEach, expect, it } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { ModelDescription } from './ModelDescription';
 afterEach(cleanup);
-it('renders a purchase URL as a safe clickable link and preserves its description', () => {
+it('preserves plain text without turning a contributor description into purchase links', () => {
   render(
     <ModelDescription
-      text={
-        'Reference model.\nPurchase: https://www.amazon.com/dp/B07SM751SC\nDimensions approximate.'
-      }
+      text={'Reference model.\nhttps://www.amazon.com/dp/B07SM751SC\nDimensions approximate.'}
     />,
   );
-  expect(screen.getByRole('link').getAttribute('href')).toBe(
-    'https://www.amazon.com/dp/B07SM751SC',
-  );
+  expect(screen.queryByRole('link')).toBeNull();
   expect(screen.getByText(/Dimensions approximate/)).toBeDefined();
 });
 it('leaves HTML and unsafe URLs inert', () => {

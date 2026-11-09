@@ -399,3 +399,20 @@ button.secondary { background:transparent; color:var(--ink); border:1px solid #b
 @keyframes browse-footer-out { from { transform: translateY(0); } to { transform: translateY(100%); } }
 @media (max-width: 600px) { .site-footer-shell.is-floating .site-footer { gap: 12px; padding-top: 14px; padding-bottom: calc(14px + env(safe-area-inset-bottom)); } }
 @media (prefers-reduced-motion: reduce) { .site-footer-shell.is-floating, .site-footer-shell.is-floating.is-visible { animation-duration: 0.01ms; } }
+.where-to-buy { margin: 1.7rem 0; }
+.where-to-buy > h2 { font-size: 1.2rem; margin-bottom: .5rem; }
+.where-to-buy .purchase-intro, .purchase-marketplace, .purchase-disclosure { color: var(--muted); font-size: .85rem; }
+.where-to-buy ul { list-style: none; margin: 0; padding: 0; }
+.where-to-buy li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, .65fr); gap: 1rem; padding: 1rem 0; border-top: 1px solid var(--line); }
+.where-to-buy h3 { font-size: 1rem; margin: 0 0 .3rem; }
+.where-to-buy li > div { min-width: 0; overflow-wrap: anywhere; }
+.where-to-buy p { margin: .3rem 0; }
+.where-to-buy details { margin-top: .5rem; font-size: .85rem; }
+.where-to-buy summary { cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.where-to-buy dl { display: grid; grid-template-columns: minmax(75px, .7fr) minmax(0, 1fr); gap: .25rem .5rem; }
+.where-to-buy dt { color: var(--muted); }
+.where-to-buy dd { margin: 0; overflow-wrap: anywhere; }
+.purchase-action { display: flex; flex-direction: column; align-items: flex-start; gap: .5rem; }
+.purchase-action > a { display: inline-block; padding: .6rem .8rem; border: 1px solid var(--line); border-radius: 5px; text-decoration: none; font-weight: 600; }
+.purchase-disclosure { max-width: 28ch; }
+@media (max-width: 760px) { .where-to-buy li { grid-template-columns: minmax(0, 1fr); } .purchase-disclosure { max-width: none; } }

@@ -6,6 +6,12 @@ The unfiltered browse view omits models marked low interest by Commons admins. S
 
 Open a model to see its original creator next to the title. Select a creator's name, on a model page or a model card, to see more of their work. A creator with a Commons profile opens that profile; any other creator name searches the library for that exact name. Source information, licenses and required credits are grouped under **Licenses & attribution**. When files are available, choose **Download ZIP** next to a filename. The package contains the unchanged original in `files/`, an `ATTRIBUTION.json` record and a README. Keep required credits and license notices with reused files. A free download does not remove license conditions.
 
+## Find products to buy
+
+Some model pages include **Where to buy**, with purchase options selected by PushForm. A generic model may link to products from several manufacturers. **Reference product** identifies a product used as a reference; **Similar option** identifies an alternative with the same general form. Neither label guarantees an exact fit. Open **Product details** for the manufacturer, part number, marketplace identifier, variant and verification date where known. Check the retailer's current dimensions, availability and package quantity before purchasing.
+
+**View on** opens the retailer or its approved affiliate destination directly. Active affiliate links show a disclosure beside the purchase action. Purchase sources are managed by PushForm staff, separately from model ownership, licenses and creator credits. Publishing or editing a model does not let a contributor add or change purchase links. Descriptions display as plain text.
+
 ## Browse featured projects and collections
 
 The Commons website shows **Featured** above search and filters, three projects at a time. Use **Next featured** and **Previous featured** to browse more. This section mixes individual models with collections of related models. A collection card has a mosaic cover and a **Collection** label; opening it shows the curator, description and its available models. Open any model in the collection to read its own license and credits or open it in PushForm.

@@ -28,7 +28,7 @@ A disconnected edge cannot extend the path. If the sweep cannot form a valid sol
 
 ## Turn a profile around an axis with Revolve
 
-Use **Revolve** for turned legs, bowls, knobs and other rotational shapes. You can also ask the in-app agent to revolve an existing profile or draw and revolve one, specifying the axis and angle. **Revolve** is the default button beside Offset in the Modify toolbar; **Follow Me** is available beneath it in the **Sweep** dropdown. You can also find Revolve in command search.
+Use **Revolve** for turned legs, bowls, knobs or columns. It is the default button beside Offset in Modify, with **Follow Me** beneath it in the **Sweep** dropdown. You can also use command search, or ask the in-app agent to draw and revolve a profile with a specified axis and angle.
 
 Click a flat profile face in the group or component you are editing. Then click a straight edge for the axis, or click two different points in the profile plane to define its direction. The profile must stay on one side of the axis; it may touch it. For a turned leg, draw half of its side outline with its straight inner boundary on the axis.
 

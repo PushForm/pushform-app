@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import type { EnsureBodyRequest, KernelErrorInfo, KernelRequest, PushPullPreview, PushPullPreviewRequest, PushPullRequest, PushPullResult, ReleaseRequest, ResFor } from '../protocol';
+import type { KernelErrorInfo, KernelRequest, ResFor } from '../protocol';
 import { KernelError } from '../protocol';
 import { sendWithReupload, type KernelBackend, type MeshProvider } from './KernelBackend';
-import { decodeEnsureBody, decodePushPull, decodeRelease, encodeEnsureBody, encodePushPull, encodeRelease } from './nativeWire';
+import { decodeResponse, encodeRequest } from './nativeWire';
 
 /** The IPC to the native kernel process side: raw bytes in, raw bytes out; everything else stays in the transport. */
 export interface NativeKernelTransport {
@@ -14,8 +14,6 @@ export interface NativeKernelTransport {
   /** Stop in-flight native work and clear its cache, best effort. */
   abort(): Promise<void>;
 }
-
-type NativeRequest = EnsureBodyRequest | PushPullRequest | PushPullPreviewRequest | ReleaseRequest;
 
 interface PendingNative {
   reject: (error: Error) => void;
@@ -40,10 +38,11 @@ export interface NativeKernelBackendOptions {
 }
 
 /**
- * A kernel backend that runs push/pull in the native kernel and everything else in the WebAssembly worker. The two
- * have separate body caches, each filled through `ensureBody`/`sendWithReupload` from the same mesh provider, so a
- * body the native side has not seen is uploaded to it on its first push/pull. By default any failure of the native
- * path (including the kernel being absent from this build) quietly runs that one request in the worker instead.
+ * A kernel backend that runs every request in the Rust kernel over a binary transport (native on the desktop, WebAssembly
+ * on the web). With a `worker` and `fallback` (the desktop), any failure of the Rust path, including the kernel being
+ * absent from this build, quietly runs that one request in the TypeScript worker instead; each side has its own body
+ * cache, filled from the same mesh provider through `ensureBody`/`sendWithReupload`. With `fallback: false`, as the web
+ * opt-in uses, every request is answered by Rust and its failures reach the caller.
  */
 export class NativeKernelBackend implements KernelBackend {
   private provider: MeshProvider | undefined;
@@ -55,29 +54,44 @@ export class NativeKernelBackend implements KernelBackend {
   private readonly fallback: boolean;
 
   constructor(
-    private readonly worker: KernelBackend,
+    private readonly worker: KernelBackend | undefined,
     private readonly transport: NativeKernelTransport,
     options: NativeKernelBackendOptions = {},
   ) {
     this.fallback = options.fallback ?? true;
   }
 
-  request<R extends KernelRequest>(req: R): Promise<ResFor<R>> {
-    if (req.type === 'pushPull') return this.pushPull(req as PushPullRequest | PushPullPreviewRequest) as Promise<ResFor<R>>;
-    if (req.type === 'release') this.releaseNative(req);
+  async request<R extends KernelRequest>(req: R): Promise<ResFor<R>> {
+    const epoch = this.epoch;
+    if (this.disposed) throw new KernelError('Aborted', 'NativeKernelBackend is disposed');
+    const available = await this.isAvailable();
+    if (epoch !== this.epoch || this.disposed) throw new KernelError('Aborted', 'Kernel worker aborted');
+    if (available) {
+      // The worker may hold a copy of the body from an earlier fallback; keep its cache in step with Rust's.
+      if (req.type === 'release' && this.worker !== undefined) this.worker.request(req).catch(() => undefined);
+      try {
+        return await sendWithReupload(req, (q) => this.sendNative(q) as never, this.provider);
+      } catch (cause) {
+        // Nothing of the failed attempt is kept: an aborted request stays aborted, anything else is rerun in the worker.
+        if (epoch !== this.epoch || !this.fallback) throw cause;
+      }
+    } else if (!this.fallback) {
+      throw new KernelError('Internal', 'The kernel module is unavailable');
+    }
+    if (this.worker === undefined) throw new KernelError('Internal', 'The kernel module is unavailable');
     return this.worker.request(req);
   }
 
   setMeshProvider(provider: MeshProvider | undefined): void {
     this.provider = provider;
-    this.worker.setMeshProvider?.(provider);
+    this.worker?.setMeshProvider?.(provider);
   }
 
   abortAll(): void {
     this.epoch++;
     this.rejectPending(new KernelError('Aborted', 'Kernel worker aborted'));
     this.transport.abort().catch(() => undefined);
-    this.worker.abortAll();
+    this.worker?.abortAll();
   }
 
   dispose(): void {
@@ -85,25 +99,7 @@ export class NativeKernelBackend implements KernelBackend {
     this.epoch++;
     this.rejectPending(new KernelError('Aborted', 'Kernel worker disposed'));
     this.transport.abort().catch(() => undefined);
-    this.worker.dispose();
-  }
-
-  private async pushPull(req: PushPullRequest | PushPullPreviewRequest): Promise<PushPullResult | PushPullPreview> {
-    const epoch = this.epoch;
-    if (this.disposed) throw new KernelError('Aborted', 'NativeKernelBackend is disposed');
-    const available = await this.isAvailable();
-    if (epoch !== this.epoch || this.disposed) throw new KernelError('Aborted', 'Kernel worker aborted');
-    if (available) {
-      try {
-        return await sendWithReupload(req, (q) => this.sendNative(q as NativeRequest) as never, this.provider);
-      } catch (cause) {
-        // Nothing of the failed attempt is kept: an aborted request stays aborted, anything else is rerun in WebAssembly.
-        if (epoch !== this.epoch || !this.fallback) throw cause;
-      }
-    } else if (!this.fallback) {
-      throw new KernelError('Internal', 'The kernel module is unavailable');
-    }
-    return this.worker.request(req);
+    this.worker?.dispose();
   }
 
   /** Whether the native kernel is usable; `false` is remembered, a transport failure is asked again next time. */
@@ -115,23 +111,16 @@ export class NativeKernelBackend implements KernelBackend {
     return this.availability;
   }
 
-  private releaseNative(req: ReleaseRequest): void {
-    void this.availability?.then((available) => {
-      if (available) this.transport.call(encodeRelease(req)).catch(() => undefined);
-    });
-  }
-
-  private sendNative(req: NativeRequest): Promise<unknown> {
+  private sendNative<R extends KernelRequest>(req: R): Promise<ResFor<R>> {
     if (this.disposed) return Promise.reject(new KernelError('Aborted', 'NativeKernelBackend is disposed'));
     return new Promise((resolve, reject) => {
       const entry: PendingNative = { reject };
       this.pending.add(entry);
-      const request = req.type === 'ensureBody' ? encodeEnsureBody(req) : req.type === 'release' ? encodeRelease(req) : encodePushPull(req);
-      this.transport.call(request).then(
+      this.transport.call(encodeRequest(req)).then(
         (buffer) => {
           if (!this.pending.delete(entry)) return;
           try {
-            resolve(req.type === 'ensureBody' ? decodeEnsureBody(buffer) : req.type === 'release' ? decodeRelease(buffer) : decodePushPull(buffer));
+            resolve(decodeResponse(req, buffer));
           } catch (e) {
             reject(e instanceof Error ? e : new KernelError('Internal', String(e)));
           }

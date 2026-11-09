@@ -49,19 +49,33 @@ function setup(t: NativeKernelTransport): { backend: NativeKernelBackend; worker
 }
 
 describe('NativeKernelBackend', () => {
-  it('sends push/pull to native and leaves everything else to the worker', async () => {
+  it('sends every request to the Rust kernel and none to the worker while it answers', async () => {
     const t = transport();
     const { backend, request } = setup(t);
     await backend.request({ type: 'ensureBody', bodyId: 1, version: 1 });
+    expect(request).not.toHaveBeenCalled();
+    expect(t.call).toHaveBeenCalledTimes(1);
+    backend.dispose();
+  });
+
+  it('releases in both the Rust kernel and the worker', async () => {
+    const release = new ArrayBuffer(8);
+    new DataView(release).setUint32(0, 3, true);
+    new DataView(release).setUint32(4, 1, true);
+    const t = transport({ call: async () => release });
+    const { backend, request } = setup(t);
+    const answer = await backend.request({ type: 'release', bodyId: 1 });
+    expect(answer.released).toBe(1);
+    expect(t.call).toHaveBeenCalledTimes(1);
     expect(request).toHaveBeenCalledTimes(1);
-    expect(t.call).not.toHaveBeenCalled();
     backend.dispose();
   });
 
   it('falls back to the worker when native reports an error, for that request only', async () => {
     let attempts = 0;
     const t = transport({
-      call: async () => {
+      call: async (request) => {
+        if (new DataView(request.buffer, request.byteOffset).getUint32(0, true) === 1) return ensureOk();
         attempts++;
         if (attempts === 1) throw new Error('native failed');
         return previewResponse();
@@ -70,7 +84,7 @@ describe('NativeKernelBackend', () => {
     const { backend, worker, request } = setup(t);
     const client = new KernelClient(backend);
     await client.ensureBody(1, 1, meshBox([0, 0, 0], [1, 1, 1]));
-    request.mockClear();
+    worker.setMeshProvider((bodyId, version) => (bodyId === 1 && version === 1 ? { ...meshBox([0, 0, 0], [1, 1, 1]), runId: 0 } : undefined));
     const first = await backend.request(pushPullRequest);
     expect(request).toHaveBeenCalledTimes(1); // the failed native attempt reran in the worker
     expect(first.components[0]!.props.volume).toBeCloseTo(1.02, 6);
@@ -118,11 +132,14 @@ describe('NativeKernelBackend', () => {
   });
 
   it('falls back when the mesh for an uncached body is unknown', async () => {
-    const t = transport({ call: async () => { throw JSON.stringify({ code: 'BodyNotCached', message: 'missing', details: { bodyId: 1, version: 1 } }); } });
-    const { backend, request } = setup(t);
+    const t = transport({ call: async (request) => { if (new DataView(request.buffer, request.byteOffset).getUint32(0, true) === 1) return ensureOk(); throw JSON.stringify({ code: 'BodyNotCached', message: 'missing', details: { bodyId: 1, version: 1 } }); } });
+    const { backend, worker, request } = setup(t);
+    const mesh = meshBox([0, 0, 0], [1, 1, 1]);
+    worker.setMeshProvider((bodyId, version) => (bodyId === 1 && version === 1 ? { ...mesh, runId: 0 } : undefined));
     const client = new KernelClient(backend);
-    await client.ensureBody(1, 1, meshBox([0, 0, 0], [1, 1, 1]));
+    await client.ensureBody(1, 1, mesh);
     backend.setMeshProvider?.(() => undefined);
+    worker.setMeshProvider((bodyId, version) => (bodyId === 1 && version === 1 ? { ...mesh, runId: 0 } : undefined));
     const r = await backend.request(pushPullRequest);
     expect(request).toHaveBeenCalled();
     expect(r.components[0]!.props.volume).toBeCloseTo(1.02, 6);
@@ -132,7 +149,7 @@ describe('NativeKernelBackend', () => {
   it('abortAll rejects in-flight requests with Aborted, without falling back, and stops native work', async () => {
     const pendingCalls: Array<(buffer: ArrayBuffer) => void> = [];
     const abort = vi.fn(async () => undefined);
-    const t = transport({ abort, call: () => new Promise<ArrayBuffer>((resolve) => pendingCalls.push(resolve)) });
+    const t = transport({ abort, call: (request) => (new DataView(request.buffer, request.byteOffset).getUint32(0, true) === 1 ? Promise.resolve(ensureOk()) : new Promise<ArrayBuffer>((resolve) => pendingCalls.push(resolve))) });
     const { backend, request } = setup(t);
     const client = new KernelClient(backend);
     await client.ensureBody(1, 1, meshBox([0, 0, 0], [1, 1, 1]));
@@ -175,7 +192,7 @@ describe('native wire', () => {
     expect(view.getUint32(0, true)).toBe(1);
     expect(view.getFloat64(4, true)).toBe(3);
     expect(view.getUint32(20, true)).toBe(1);
-    expect(view.getUint32(24, true)).toBe(mesh.verts.length / 3);
+    expect(view.getUint32(24, true)).toBe(mesh.verts.length);
     const request: KernelRequest = { type: 'pushPull', body: { bodyId: 2, version: 4 }, region: topRegion([0, 0, 0], square(0, 0, 1), 3, true), distance: -1, mode: 'newBody', preview: true, nextFaceId: 100 };
     const pull = new DataView(encodePushPull(request).buffer);
     expect(pull.getUint32(0, true)).toBe(2);

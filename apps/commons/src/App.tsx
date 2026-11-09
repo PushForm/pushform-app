@@ -54,7 +54,7 @@ function ModelDetail({ model, filesUrl, account, editorUrl }: { model: CatalogMo
         <h1>{model.title}</h1><p className="creator"><CreatorCredit model={model}/></p>
         <ModelDescription text={model.description}/>
         <dl className="metadata"><div><dt>Formats</dt><dd>{model.formats.join(', ')}</dd></div>
-          <div><dt>Revision</dt><dd>{model.revision}</dd></div>
+          <div><dt>Revision</dt><dd title={model.revision}>{model.revision.slice(-6)}</dd></div>
           <div><dt>Published</dt><dd>{new Date(model.publishedAt).toLocaleDateString()}</dd></div></dl>
         {owned && <OwnerModelActions key={owned.id} model={owned} filesUrl={filesUrl} />}
         <CommonsOpenAction model={model} editorUrl={editorUrl} />

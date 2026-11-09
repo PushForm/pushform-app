@@ -4,18 +4,19 @@
 
 ## Stack
 
-TypeScript monorepo (pnpm). Geometry kernel: [Manifold](https://github.com/elalish/manifold) (wasm, in a Web Worker). Renderer: three.js (WebGL2). UI: React. Desktop: Tauri 2. Cloud: Supabase.
+TypeScript monorepo (pnpm). Geometry kernel: Rust on [Manifold](https://github.com/elalish/manifold), compiled to WebAssembly and run in a Web Worker. Renderer: three.js (WebGL2). UI: React. Desktop: Tauri 2. Cloud: Supabase.
 
 ## Develop
 
 ```sh
 corepack enable            # provides pnpm
-pnpm install
+pnpm install               # also downloads the prebuilt WebAssembly kernel for these sources
 pnpm dev                   # web app at http://localhost:5174 (uses apps/web/.env.local)
 pnpm commons:dev           # community catalog frontend at http://localhost:5176
 pnpm commons:build         # build the independent catalog frontend
 pnpm desktop               # Tauri desktop app (needs Rust)
-pnpm test                  # unit tests (vitest)
+pnpm test                  # unit tests (vitest); stops with a message if the kernel module is missing or stale
+pnpm build:kernel-wasm     # compile the kernel to WebAssembly yourself (needs Rust and Emscripten)
 pnpm typecheck
 pnpm lint
 pnpm license-check         # fails on licenses that are not GPLv3-compatible

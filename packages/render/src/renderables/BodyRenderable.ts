@@ -307,7 +307,7 @@ export class BodyRenderable extends Group {
   }
 
   update(body: RenderBody, origin: Vec3): void {
-    const arrays = buildFaceArrays(body.mesh, body.transform, origin, { smoothGroups: body.surfaces, faceMaterials: body.faceMaterials,
+    const arrays = buildFaceArrays(body.mesh, body.transform, origin, { smoothGroups: body.surfaces, smoothEdges: body.edges, faceMaterials: body.faceMaterials,
       defaultColor: body.defaultColor, hiddenFaces: this.showHidden ? undefined : body.hiddenFaces });
     const geometry = new BufferGeometry();
     geometry.setAttribute('position', new BufferAttribute(arrays.positions, 3));

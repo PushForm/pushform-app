@@ -87,6 +87,8 @@ Enable **Emission** to make the surface self-lit, then set its color and strengt
 
 ## View and save material finishes
 
+Round surfaces follow the model’s Smooth edge settings, while caps and hard edges remain sharp. Roughness controls reflections without changing those edge settings.
+
 Surface finishes appear in shaded and textured modeling views. Normal maps appear in the textured view. Hidden Line, Monochrome and Color by Tag retain their display overrides. Materials without appearance settings retain their earlier shading until you apply a finish or edit a surface property.
 
 Native model saves, recovery, duplication and copying between documents retain appearance settings and normal images. Mesh exchange exports currently include base color, opacity and color textures, with a note that the new surface properties are omitted. Commons previews have not changed in this release. Clearcoat, refractive glass, live mirrors and ray tracing are not included.

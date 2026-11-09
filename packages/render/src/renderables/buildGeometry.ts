@@ -4,10 +4,15 @@ import { LENGTH_TOL, basisToLocal, m4transformPoint } from '@pushform/core';
 import type { Mat4, MeshData, Vec3 } from '@pushform/core';
 import { BufferAttribute, BufferGeometry, Color } from 'three';
 import { EDGE_FLAG_BOUNDARY, EDGE_FLAG_HIDDEN, EDGE_FLAG_SMOOTH, EDGE_FLAG_SOFT, cssToRgb, edgeStyleFlags } from '../types';
+import { applySmoothEdgeNormals } from './smoothEdgeNormals';
+import { cornerAngle } from './cornerAngle';
+export { cornerAngle } from './cornerAngle';
 import { palette } from './palette';
 import type { EdgeSegments, RenderBodyEdge, RenderBodySurface, RenderFaceGroup, RenderFaceMaterial, RenderMaterial, RenderUvMapping } from '../types';
 
 export interface FaceGeometryOptions {
+  /** Known face-pair edges are authoritative for corner smoothing; surface groups remain a fallback for mesh parts. */
+  readonly smoothEdges?: readonly RenderBodyEdge[] | undefined;
   /**
    * Smooth face groups: triangles of these faces get per-vertex normals averaged over the group's
    * triangles sharing a vertex position (welded by position within the group only), so the sides
@@ -130,7 +135,8 @@ export function buildFaceArrays(mesh: MeshData, transform: Mat4, origin: Vec3, o
       faceIds[t * 3 + k] = mesh.faceId[t] ?? 0;
     }
   }
-  if (opts.smoothGroups && opts.smoothGroups.length) applySmoothNormals(mesh, world, normals, opts.smoothGroups);
+  if (opts.smoothEdges?.some(edge => edge.faceA >= 0 && edge.faceB >= 0)) applySmoothEdgeNormals(mesh, world, normals, opts.smoothEdges);
+  else if (opts.smoothGroups && opts.smoothGroups.length) applySmoothNormals(mesh, world, normals, opts.smoothGroups);
   const colored = buildFaceColors(mesh, opts);
   if (!colored.order) return { positions, normals, faceIds, flags, ...colored.arrays, frontGroups: [], backGroups: [] };
   // Permute every per-triangle array into material order so each material's triangles are contiguous.
@@ -409,14 +415,6 @@ export function extractEdgeSegments(mesh: MeshData, world: Float64Array): EdgeSe
     normalB: new Float32Array(nB),
     flags: new Uint8Array(flags),
   };
-}
-
-/** Angle at p between the directions to q and r. */
-export function cornerAngle(px: number, py: number, pz: number, qx: number, qy: number, qz: number, rx: number, ry: number, rz: number): number {
-  const ux = qx - px, uy = qy - py, uz = qz - pz;
-  const vx = rx - px, vy = ry - py, vz = rz - pz;
-  const d = (ux * vx + uy * vy + uz * vz) / ((Math.hypot(ux, uy, uz) || 1) * (Math.hypot(vx, vy, vz) || 1));
-  return Math.acos(Math.max(-1, Math.min(1, d)));
 }
 
 /** Unit normal per faceId (from the first non-degenerate triangle of each face), in `world` space. */

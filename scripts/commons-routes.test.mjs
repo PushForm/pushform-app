@@ -5,14 +5,11 @@ import { resolve } from 'node:path';
 import { expect, it } from 'vitest';
 
 it('routes every Pages function to the worker rather than the static site fallback', () => {
-  const routes = JSON.parse(readFileSync(resolve('apps/commons/public/_routes.json'), 'utf8')) as {
-    include: string[];
-    exclude: string[];
-  };
+  const routes = JSON.parse(readFileSync(resolve('apps/commons/public/_routes.json'), 'utf8'));
   const functions = readdirSync(resolve('apps/commons/functions'), {
     recursive: true,
-  }) as string[];
-  const matches = (pattern: string, path: string) =>
+  });
+  const matches = (pattern, path) =>
     new RegExp(
       '^' +
         pattern

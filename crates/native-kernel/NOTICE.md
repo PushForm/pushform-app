@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # Third-party software in the native kernel
 
-This file lists software compiled into PushForm desktop builds made with the `native-kernel` Cargo feature
-(off by default). The C++ libraries are built from source by `crates/native-kernel/vendor/manifold-csg-sys`; their
+This file lists software compiled into PushForm desktop builds made with the `native-kernel` Cargo feature (off by
+default) and into the WebAssembly kernel built by `pnpm build:kernel-wasm` (opt-in). The C++ libraries are built from source by `crates/native-kernel/vendor/manifold-csg-sys`; their
 sources are not in this repository, so their license texts are reproduced here. The Rust crates (manifold-csg and its
 dependencies) are listed by cargo-about from the crate's manifest.
 
@@ -312,6 +312,27 @@ SHALL THE COPYRIGHT HOLDERS OR ANYONE DISTRIBUTING THE SOFTWARE BE LIABLE
 FOR ANY DAMAGES OR OTHER LIABILITY, WHETHER IN CONTRACT, TORT OR OTHERWISE,
 ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+## earcut 3.2.4
+
+https://github.com/mapbox/earcut. `src/earcut.rs` is a port of its triangulation to Rust. The same library runs as the
+`earcut` npm package in the web and desktop apps and is listed with the other npm packages.
+
+ISC License
+
+Copyright (c) 2026, Mapbox
+
+Permission to use, copy, modify, and/or distribute this software for any purpose
+with or without fee is hereby granted, provided that the above copyright notice
+and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
+OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
+THIS SOFTWARE.
 
 ## oneAPI Threading Building Blocks (oneTBB)
 

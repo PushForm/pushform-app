@@ -10,7 +10,7 @@ Choose **Generate and place**, then click to place the new component. Undo remov
 
 Round and rectangular cup pulls include a raised top-and-side mounting rim with an open bottom for fingers. The rim stays within the entered overall dimensions; wall thickness controls its scale.
 
-The rectangular pull has a plain front with gently rounded perimeter edges.
+The rectangular pull has a broad, nearly flat hood with a rounded shoulder, ends and front edges. Its hollow underside provides the finger grip, and a separate raised rim follows the rear top and sides.
 
 The generator supports round and square bars, wire and arch pulls, classic bridges, round and rectangular cups, edge pulls, recessed pockets, rings, geometric knobs, half-moon pulls and plain round backplates. Generic profiles approximate common hardware; verify purchased hardware and screw positions before fabrication. Finish presets include original small-scale textures and diffuse colors in the modeling viewport, so chrome tone does not show mirror reflections.
 
@@ -23,13 +23,30 @@ Start with 32–48 radial divisions and 16–20 profile segments. The defaults, 
 For example, generate a domed knob with a 38.1 mm head, 31.75 mm projection and 17 mm base:
 
 ```json
-{"shape":"knob-domed","width":0.0381,"projection":0.03175,"grip":0.017,"segments":48,"profileSegments":20,"finish":"white","point":[0,0,0]}
+{
+  "shape": "knob-domed",
+  "width": 0.0381,
+  "projection": 0.03175,
+  "grip": 0.017,
+  "segments": 48,
+  "profileSegments": 20,
+  "finish": "white",
+  "point": [0, 0, 0]
+}
 ```
 
 Automation uses the `hardware.create` command. Dimensions are meters, `point` sets placement, and `mountingPlane` selects `front` (projection toward −Y), `top` (+Z), or `side` (+X). For example:
 
 ```json
-{"shape":"bar-round","length":0.152,"spacing":0.128,"grip":0.012,"projection":0.032,"finish":"satin-nickel","point":[0,0,0]}
+{
+  "shape": "bar-round",
+  "length": 0.152,
+  "spacing": 0.128,
+  "grip": 0.012,
+  "projection": 0.032,
+  "finish": "satin-nickel",
+  "point": [0, 0, 0]
+}
 ```
 
 

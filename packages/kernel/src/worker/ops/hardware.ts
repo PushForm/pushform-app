@@ -281,11 +281,46 @@ export function hardware(ctx: KernelContext, req: HardwareRequest): HardwareResu
           return pts;
         };
         const radius = Math.min(w / 5, t * 2, (l - 2 * inset) / 4, (w - inset) / 4);
-        const outer = moved(
-          keep(keep(new CrossSection([rounded(l - 2 * inset, w - inset, radius)])).extrude(h)),
-          0,
-          -inset / 2,
-          0,
+        const roll = Math.min(t * 0.4, radius * 0.5);
+        const verts: number[] = [],
+          tris: number[] = [];
+        const rings = [
+          { z: 0, offset: 0 },
+          { z: h - roll, offset: 0 },
+        ];
+        for (let i = 1; i <= 4; i++) {
+          const a = (i * Math.PI) / 8;
+          rings.push({ z: h - roll + roll * Math.sin(a), offset: roll * (1 - Math.cos(a)) });
+        }
+        const count = rounded(l - 2 * inset, w - inset, radius).length;
+        for (const ring of rings)
+          for (const [x, y] of rounded(
+            l - 2 * inset - 2 * ring.offset,
+            w - inset - 2 * ring.offset,
+            radius - ring.offset,
+          ))
+            verts.push(x, y - inset / 2, ring.z);
+        for (let k = 0; k < rings.length - 1; k++)
+          for (let i = 0; i < count; i++) {
+            const a = k * count + i,
+              b = k * count + ((i + 1) % count);
+            tris.push(a, b, b + count, a, b + count, a + count);
+          }
+        for (let i = 1; i < count - 1; i++) {
+          tris.push(0, i + 1, i);
+          const top = (rings.length - 1) * count;
+          tris.push(top, top + i, top + i + 1);
+        }
+        const outer = keep(
+          manifoldFromSoup(
+            ctx.wasm,
+            {
+              verts: new Float64Array(verts),
+              tris: new Uint32Array(tris),
+              faceId: new Uint32Array(tris.length / 3),
+            },
+            0,
+          ),
         );
         const pocket = box(l - 2 * inset - 2 * t, w, h - 2 * t, [0, -t - inset, (h - 2 * t) / 2]);
         solid = sub(outer, pocket);

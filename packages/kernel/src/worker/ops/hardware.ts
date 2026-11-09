@@ -288,19 +288,7 @@ export function hardware(ctx: KernelContext, req: HardwareRequest): HardwareResu
           0,
         );
         const pocket = box(l - 2 * inset - 2 * t, w, h - 2 * t, [0, -t - inset, (h - 2 * t) / 2]);
-        const recess = moved(
-          keep(
-            keep(
-              new CrossSection([
-                rounded(l - 4 * t, w - 4 * t, Math.min(radius / 2, (w - 4 * t) / 4)),
-              ]),
-            ).extrude(t),
-          ),
-          0,
-          0,
-          h - t / 2,
-        );
-        solid = sub(sub(outer, pocket), recess);
+        solid = sub(outer, pocket);
         const rim = keep(keep(new CrossSection([rounded(l, w, radius)])).extrude(t));
         const opening = box(l - 2 * lip, 2 * w, 3 * t, [0, -w / 2 - lip, t / 2]);
         solid = add(solid, sub(rim, opening));

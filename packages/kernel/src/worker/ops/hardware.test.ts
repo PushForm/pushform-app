@@ -39,6 +39,10 @@ it('joins raised cup rims without closing the finger openings or enlarging the p
       await overlap([-0.0005, 0.015 - 0.00007, 0.004], [0.0005, 0.015 - 0.00002, 0.0044]),
     ).toBe(0);
     expect(await overlap([-0.001, -0.0145, 0.0002], [0.001, -0.0135, 0.0008])).toBe(0);
+    if (shape === 'cup-square') {
+      // The face is continuous stock up to the stated projection, with no decorative recess.
+      expect(await overlap([-0.001, -0.001, 0.0248], [0.001, 0.001, 0.025])).toBeCloseTo(8e-10, 12);
+    }
     for (const [axis, size] of [
       [0, 0.1],
       [1, 0.03],

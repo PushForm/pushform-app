@@ -9,6 +9,45 @@ import { meshTopologyProblems } from '../../meshChecks';
 const client = new KernelClient(new InlineBackend());
 afterAll(() => client.dispose());
 describe('hardware solid families', () => {
+  it('keeps revolved dome dimensions and a bounded mesh across density settings', async () => {
+    for (const [segments, profileSegments, budget] of [
+      [40, 20, 2000],
+      [80, 32, 5200],
+      [16, 8, 300],
+    ] as const) {
+      const r = await client.hardware({
+        options: {
+          shape: 'knob-domed',
+          width: 0.0381,
+          projection: 0.03175,
+          grip: 0.017,
+          segments,
+          profileSegments,
+        },
+        nextFaceId: 1,
+      });
+      expect(r.components).toHaveLength(1);
+      const mesh = r.components[0]!.mesh;
+      expect(meshTopologyProblems(mesh)).toEqual([]);
+      expect(mesh.tris.length / 3).toBeLessThan(budget);
+      for (const [axis, size] of [
+        [0, 0.0381],
+        [1, 0.0381],
+        [2, 0.03175],
+      ] as const) {
+        const coords = Array.from(mesh.verts).filter((_, i) => i % 3 === axis);
+        expect(Math.max(...coords) - Math.min(...coords)).toBeCloseTo(size, 6);
+      }
+      expect(r.mountingCenters).toEqual([[0, 0, 0]]);
+    }
+  });
+  it('rejects invalid dome tessellation and a base wider than the head', () => {
+    for (const profileSegments of [7, 33, 8.5, NaN])
+      expect(() => resolveHardwareOptions({ shape: 'knob-domed', profileSegments })).toThrow();
+    expect(() =>
+      resolveHardwareOptions({ shape: 'knob-domed', grip: 0.04, width: 0.032 }),
+    ).toThrow();
+  });
   for (const shape of HARDWARE_SHAPES)
     it(`creates closed positive-volume ${shape}`, async () => {
       const result = await client.hardware({

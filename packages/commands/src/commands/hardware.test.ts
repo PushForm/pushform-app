@@ -8,6 +8,49 @@ import { SERVICE_DOCUMENT, SERVICE_KERNEL } from '../host/services';
 import { hardwareCommands } from './hardware';
 const kernel = new KernelClient(new InlineBackend());
 afterAll(() => kernel.dispose());
+it('retains dome density through regeneration and undo in each mounting plane', async () => {
+  for (const mountingPlane of ['front', 'top', 'side']) {
+    const host = new DocumentHost();
+    const reg = new CommandRegistry({
+      tx: host,
+      services: new Map<string, unknown>([
+        [SERVICE_DOCUMENT, host],
+        [SERVICE_KERNEL, kernel],
+      ]),
+    });
+    reg.registerAll(hardwareCommands);
+    const made = (await reg.execute('hardware.create', {
+      shape: 'knob-domed',
+      mountingPlane,
+      point: [1, 2, 3],
+      segments: 48,
+      profileSegments: 20,
+    })) as { definitionId: number; instanceId: number };
+    const def = () => host.doc.state.definitions.get(made.definitionId as never)!;
+    const placement = () =>
+      host.doc.state.definitions
+        .get(host.doc.state.rootDefinitionId)!
+        .entities.instances.get(made.instanceId as never)!.transform;
+    const originalPlacement = placement();
+    expect(JSON.parse(def().description)).toMatchObject({
+      segments: 48,
+      profileSegments: 20,
+      mountingPlane,
+    });
+    expect([...def().entities.bodies.values()][0]!.mesh.tris.length / 3).toBeLessThan(2000);
+    await reg.execute('hardware.create', {
+      shape: 'knob-domed',
+      mountingPlane,
+      replaceDefinitionId: made.definitionId,
+      segments: 32,
+      profileSegments: 16,
+    });
+    expect(JSON.parse(def().description)).toMatchObject({ segments: 32, profileSegments: 16 });
+    expect(placement()).toEqual(originalPlacement);
+    expect(host.undo()).toBe(true);
+    expect(JSON.parse(def().description)).toMatchObject({ segments: 48, profileSegments: 20 });
+  }
+});
 it('creates a reusable parameterized component in one undo step and restores it with redo', async () => {
   const host = new DocumentHost();
   const reg = new CommandRegistry({

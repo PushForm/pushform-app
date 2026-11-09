@@ -31,6 +31,28 @@ function boot() {
   );
   return a;
 }
+it('restores and submits independent dome density settings when regenerating', async () => {
+  const a = boot();
+  await act(async () => {
+    await a.commands.execute('hardware.create', {
+      shape: 'knob-domed',
+      finish: 'chrome',
+      point: [0, 0, 0],
+      segments: 48,
+      profileSegments: 16,
+    });
+  });
+  act(() => void a.commands.execute('ui.hardware'));
+  expect((screen.getByLabelText('Radial divisions') as HTMLInputElement).value).toBe('48');
+  expect((screen.getByLabelText('Profile segments') as HTMLInputElement).value).toBe('16');
+  fireEvent.change(screen.getByLabelText('Profile segments'), { target: { value: '20' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Regenerate selected hardware' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  const def = [...a.document.doc.state.definitions.values()].find((d) =>
+    d.description.includes('"generator":"hardware"'),
+  )!;
+  expect(JSON.parse(def.description)).toMatchObject({ segments: 48, profileSegments: 20 });
+});
 it('shows real family defaults and only applicable plate and pocket controls', () => {
   const a = boot();
   act(() => void a.commands.execute('ui.hardware'));

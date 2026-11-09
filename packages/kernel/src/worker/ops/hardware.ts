@@ -151,6 +151,47 @@ export function hardware(ctx: KernelContext, req: HardwareRequest): HardwareResu
           solid = add(solid, cylinder(Math.min(g, w) / 2, z + g / 3, [x, 0, 0]));
         }
       } else for (const x of [-c / 2, c / 2]) solid = add(solid, cylinder(g / 2, g, [x, 0, 0]));
+    } else if (shape === 'knob-domed') {
+      mount.push([0, 0, 0]);
+      // Radius/height coordinates; one lathe avoids overlapping head/stem seams.
+      // Keep profile sampling independent of radial sampling: cost is about 2*n*m.
+      const profile: SimplePolygon = [
+        [0, 0],
+        [g / 2, 0],
+      ];
+      let start: [number, number] = [g / 2, 0];
+      const curve = (
+        a: [number, number],
+        b: [number, number],
+        end: [number, number],
+        count: number,
+      ) => {
+        for (let i = 1; i <= count; i++) {
+          const t = i / count,
+            u = 1 - t;
+          profile.push(
+            [0, 1].map(
+              (k) =>
+                u ** 3 * start[k]! +
+                3 * u ** 2 * t * a[k]! +
+                3 * u * t ** 2 * b[k]! +
+                t ** 3 * end[k]!,
+            ) as [number, number],
+          );
+        }
+        start = end;
+      };
+      const neck = Math.round(p.profileSegments * 0.2),
+        underside = Math.round(p.profileSegments * 0.3);
+      curve([g / 2, h * 0.095], [g * 0.4, h * 0.205], [g * 0.46, h * 0.283], neck);
+      curve(
+        [Math.min(g * 0.56, w / 2), h * 0.417],
+        [w / 2, h * 0.425],
+        [w / 2, h * 0.677],
+        underside,
+      );
+      curve([w / 2, h * 0.898], [w * 0.276, h], [0, h], p.profileSegments - neck - underside);
+      solid = lathe(profile);
     } else if (shape.startsWith('knob-')) {
       mount.push([0, 0, 0]);
       const stemH = h * 0.65,

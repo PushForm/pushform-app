@@ -154,7 +154,7 @@ export const modelOperationSchema = z.discriminatedUnion('op', [
     axisOrigin: point.describe('A point on the axis, in the batch container coordinates. The axis must lie in the profile plane.'),
     axisDir: direction.describe('The axis direction, in the batch container coordinates; need not be unit length.'),
     angleDeg: z.number().finite().positive().max(360).optional().describe('Degrees around the axis, greater than 0 and at most 360; default 360. Partial turns have capped ends.'),
-    segments: z.number().int().min(3).max(720).optional().describe('Facets per full turn; default 48.') })
+    segments: z.number().int().min(3).max(720).optional().describe('Facets per full turn; default 48. For cabinet knobs start with 32–48 and a profile of 16–20 segments, about 1,000–2,000 triangles. Mesh cost is approximately 2 × radial facets × profile segments. Use smooth shading; increase only for visible silhouette faceting.') })
     .describe('Rotate a profile around an axis to make a turned leg, bowl, knob, column or other rotational solid. The profile may touch the axis but must not cross it. Profile holes remain voids. Returns the new solid; as names it for later operations.'),
   z.object({ op: z.literal('follow_me'), as: localName.optional(),
     profile: modelRefSchema.describe('The face to sweep: "$name" of a closed shape, a sketchFace, or a face of a solid (the sweep then joins that solid).'),

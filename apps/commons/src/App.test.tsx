@@ -33,11 +33,13 @@ it('searches and combines filters, clears them and keeps creator credits on card
 });
 it('opens a direct model link with original license notices and creator credits', async () => {
   window.history.replaceState(null, '', '/#models/workshop-hinge');
-  render(<App loadCatalog={async () => [exampleModel()]} />);
+  render(<App loadCatalog={async () => [exampleModel({ revision: '12345678-1234-4123-8123-123456abcdef' })]} />);
   expect(await screen.findByRole('heading', { level: 1, name: 'Workshop hinge' })).toBeTruthy();
   expect(screen.getByRole('link', { name: 'Attribution 3.0 ↗' }).getAttribute('href')).toBe('https://example.com/license');
   expect(screen.getByText('Credit Example Maker.')).toBeTruthy();
   expect(screen.getByText('Original model by Example Maker.')).toBeTruthy();
+  const revision = screen.getByTitle('12345678-1234-4123-8123-123456abcdef');
+  expect(revision.textContent).toBe('abcdef');
   expect(screen.getByRole('link', { name: 'Example Library ↗' }).getAttribute('href')).toBe('https://example.com/model');
   window.history.replaceState(null, '', '/#browse'); fireEvent(window, new Event('hashchange'));
   expect(await screen.findByRole('heading', { name: 'Browse models' })).toBeTruthy();

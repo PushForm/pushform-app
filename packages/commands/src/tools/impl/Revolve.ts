@@ -63,6 +63,9 @@ export class RevolveTool implements Tool {
       ? this.work.result.components.map((c) => c.mesh)
       : [];
   }
+  get previewSurfaceGroups(): readonly (readonly { faceIds: readonly number[] }[])[] | undefined {
+    return this.work?.surfaceGroups.map((groups) => groups.map((faceIds) => ({ faceIds })));
+  }
   get previewMatrix(): MMat4 {
     return this.ctx
       ? contextFrame(stateOf(this.ctx), hostOfTool(this.ctx).context.path).matrix

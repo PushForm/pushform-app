@@ -34,7 +34,8 @@ const IGNORED = new Set(['target', '.DS_Store']);
 
 function listFiles(dir, out) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (IGNORED.has(entry.name)) continue;
+    // Documentation never reaches the module, so editing it must not make everyone's module stale.
+    if (IGNORED.has(entry.name) || entry.name.endsWith('.md')) continue;
     const path = join(dir, entry.name);
     if (entry.isDirectory()) listFiles(path, out);
     else if (entry.isFile()) out.push(path);

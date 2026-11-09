@@ -9,12 +9,13 @@ use crate::math::{hypot3, to_uint32};
 use crate::meshio::ReadMesh;
 use crate::tolerance::{AREA_TOL, COPLANAR_TOL};
 
-/// Fast hashing for integer edge keys, which are already well spread after multiplying.
+/// Fast hashing for integer keys and whole numbers held as doubles.
 #[derive(Default)]
 pub struct IntHasher(u64);
 impl Hasher for IntHasher {
   fn finish(&self) -> u64 {
-    self.0
+    // Multiplying only carries bits upward, so keys with zero low bits need the high bits rotated into the bucket index.
+    self.0.rotate_left(26)
   }
   fn write(&mut self, bytes: &[u8]) {
     for b in bytes {
@@ -294,4 +295,27 @@ pub fn normalize_triangles(read: &ReadMesh, next_face_id: f64, choose_id: impl F
     }
   }
   Normalized { mesh: NormalizedMesh { verts: read.verts.clone(), tris, face_id }, faces, next_face_id: next }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn int_hasher_spreads_float_keys_with_zero_low_bits() {
+    // Whole numbers as doubles, the way `number_key` hands out face ids: at least the low 36 bits of each key are zero.
+    let keys: Vec<u64> = (1..=1u32 << 16).map(|i| number_key(f64::from(i))).collect();
+    assert!(keys.iter().all(|k| k.trailing_zeros() >= 36));
+    // A hash table picks the bucket from the hash's low bits; this is a table with twice as many buckets as keys.
+    let mask = (1u64 << 17) - 1;
+    let buckets: std::collections::HashSet<u64> = keys
+      .iter()
+      .map(|&key| {
+        let mut hasher = IntHasher::default();
+        hasher.write_u64(key);
+        hasher.finish() & mask
+      })
+      .collect();
+    assert!(buckets.len() > keys.len() / 2, "{} buckets for {} keys", buckets.len(), keys.len());
+  }
 }

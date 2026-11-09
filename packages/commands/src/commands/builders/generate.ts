@@ -35,6 +35,13 @@ export function builderPartMesh(part: BuilderPart): MeshData {
   const { shape } = part;
   if (shape.kind === 'lofted') return meshLoftedPanel(part.size[0], part.size[1], shape.rings);
   if (shape.kind === 'prism') return meshPrism(shape.outline, part.size[2], shape.holes);
+  if (shape.kind === 'section') {
+    const mesh = meshPrism(shape.outline, part.size[0]);
+    const verts = new Float64Array(mesh.verts.length);
+    // A cyclic swap of axes keeps the mesh's handedness: the profile's plane becomes y-z and its depth x.
+    for (let i = 0; i < verts.length; i += 3) verts.set([mesh.verts[i + 2]!, mesh.verts[i]!, mesh.verts[i + 1]!], i);
+    return { verts, tris: mesh.tris, faceId: mesh.faceId };
+  }
   return meshStock(part.size, shape.cuts);
 }
 
@@ -91,6 +98,19 @@ export const builderGenerate = defineCommand({
           const id = spec ? materials[materialKey(spec)] : undefined;
           return id === undefined ? undefined : state.materials.get(id as never);
         };
+        const only = current.parts.length === 1 && !current.children?.length && current.parts[0]!.assembly === null ? current.parts[0]! : null;
+        if (only) {
+          // One part needs no group around it: the part's own group, named for the plan, is the object.
+          const def = createDefinition(draft, { name: uniqueDefinitionName(state, current.name), isGroup: true });
+          const material = materialOf(only.role);
+          const body: Body = bodyFromMesh(draft, builderPartMesh(only), { container: def.entities as unknown as Draft<EntityContainer>, materialId: material?.id ?? null, regroupFaces: true, ...tag });
+          const live = (def.entities as unknown as Draft<EntityContainer>).bodies.get(body.id)!;
+          for (const face of live.faces.values()) setGrain(face, material);
+          const outer = current.rotationDeg ? m4mul(m4translation(current.at), m4rotationAxis([0, 0, 1], (current.rotationDeg * Math.PI) / 180)) : m4translation(current.at);
+          const inst = newInstance(draft, def.id, m4mul(outer, m4fromBasis(only.origin, only.x, only.y, only.z)), current.name);
+          instanceInto(into, inst);
+          return { instanceId: inst.id, definitionId: def.id, name: current.name, parts: [{ name: only.name, id: inst.id, path: [...parentPath, inst.id as number], size: only.size }] };
+        }
         const root = createDefinition(draft, { name: uniqueDefinitionName(state, current.name), isGroup: true });
         const rootContainer = root.entities as unknown as Draft<EntityContainer>;
         const turn = current.rotationDeg ? m4rotationAxis([0, 0, 1], (current.rotationDeg * Math.PI) / 180) : null;
@@ -148,7 +168,7 @@ export const builderGenerate = defineCommand({
             if (faceRole !== undefined && shown) face.frontMaterialId = shown.id;
             setGrain(face, shown);
           }
-          if (part.shape.kind === 'prism' && part.shape.round)
+          if ((part.shape.kind === 'prism' && part.shape.round) || part.shape.kind === 'section')
             for (const e of live.edges.values()) {
               const deg = edgeAngleDeg(live as unknown as Body, e as never);
               if (deg !== null && deg <= ROUND_EDGE_DEG) { e.soft = true; e.smooth = true; }

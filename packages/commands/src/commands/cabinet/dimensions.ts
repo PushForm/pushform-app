@@ -50,6 +50,19 @@ export const MIN_BLIND = inches(6);
 export const DEFAULT_BLIND_DOOR = inches(18);
 export const TRAY_SEGMENTS = 48;
 
+export const SLIM_STILE = inches(1.5);
+export const BEAD_RADIUS = inches(1 / 8);
+export const BEAD_QUIRK = inches(1 / 16);
+export const BEAD_SEGMENTS = 12;
+export const PULL_LENGTH = inches(5);
+export const PULL_BAR = inches(3 / 8);
+export const PULL_STANDOFF = inches(1);
+export const PULL_INSET = inches(2.5);
+export const KNOB_RADIUS = inches(1 / 2);
+export const KNOB_LENGTH = inches(1.125);
+export const TALL_PULL_HEIGHT = inches(36);
+export const DEFAULT_HARDWARE_FINISH = '#a8a8a3';
+
 export const DRAWER_FRONT = inches(6);
 export const SLAB_DRAWER_BELOW = inches(7);
 export const DRAWER_SIDE = inches(1 / 2);

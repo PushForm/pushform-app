@@ -13,6 +13,8 @@ export type Pt = readonly [number, number];
 export type BuilderShape =
   | { readonly kind: 'stock'; readonly cuts: readonly CutBox[] }
   | { readonly kind: 'lofted'; readonly rings: readonly PanelRing[] }
+  /** A profile in the part's y-z plane, counter-clockwise from +x, run along its length. */
+  | { readonly kind: 'section'; readonly outline: readonly Pt[] }
   | { readonly kind: 'prism'; readonly outline: readonly Pt[]; readonly round: boolean; readonly holes?: readonly (readonly Pt[])[] };
 
 /** One solid. Its local axes are x along its length and grain, y across its width and z through its thickness. */
@@ -67,6 +69,7 @@ const cross = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0
 export interface PartOptions {
   readonly cuts?: readonly CutBox[];
   readonly rings?: readonly PanelRing[];
+  readonly section?: readonly Pt[] | undefined;
   readonly plusZRole?: string | undefined;
   readonly zeroFaceRole?: string | undefined;
 }
@@ -101,9 +104,21 @@ export class Builder {
     const origin: Vec3 = this.face ? [rotated[0] + this.face.at[0], rotated[1] + this.face.at[1], rotated[2]] : local;
     this.parts.push({
       name, assembly, role, size: [along(u), along(v), along(n)],
-      shape: options.rings ? { kind: 'lofted', rings: options.rings } : { kind: 'stock', cuts: options.cuts ?? [] },
+      shape: options.rings ? { kind: 'lofted', rings: options.rings } : options.section ? { kind: 'section', outline: options.section } : { kind: 'stock', cuts: options.cuts ?? [] },
       origin, x: this.place(u), y: this.place(v), z: this.place(n), plusZRole: options.plusZRole, zeroFaceRole: options.zeroFaceRole,
     });
+  }
+
+  /** Add a round part, such as a knob, standing out of this builder's space toward -y from `back`. */
+  addRound(name: string, assembly: string | null, role: string, centerX: number, centerZ: number, back: number, length: number, radius: number, segments = 24): void {
+    const outline: Pt[] = Array.from({ length: segments }, (_, i) => {
+      const a = (2 * Math.PI * i) / segments;
+      return [radius + radius * Math.cos(a), radius + radius * Math.sin(a)] as const;
+    });
+    const local: Vec3 = [centerX - radius, back, centerZ - radius];
+    const rotated = this.place(local);
+    const origin: Vec3 = this.face ? [rotated[0] + this.face.at[0], rotated[1] + this.face.at[1], rotated[2]] : local;
+    this.parts.push({ name, assembly, role, size: [2 * radius, 2 * radius, length], shape: { kind: 'prism', outline, round: true }, origin, x: this.place(AXES['+x']), y: this.place(AXES['+z']), z: this.place(AXES['-y']) });
   }
 
   /** Add a flat part with a counter-clockwise outline given in the plan's coordinates, and optional clockwise holes through it. */

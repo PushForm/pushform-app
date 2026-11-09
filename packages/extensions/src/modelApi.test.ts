@@ -310,7 +310,7 @@ describe('ModelDocumentApi batches', () => {
 
     it('uses the library glass that was asked for, and finishes the inside of a side only', async () => {
       const s = setup();
-      const { entry } = await cabinet(s, { type: 'wall', width: 18 * inch, doorStyle: 'glass', glass: { type: 'reeded' }, finishedInterior: true, finish: { paint: '#123456' } });
+      const { entry } = await cabinet(s, { type: 'wall', width: 18 * inch, doorStyle: 'glass', glass: { type: 'reeded' }, finishedInterior: true, finishedEnds: 'none', finish: { paint: '#123456' } });
       const materials = s.api.getDocument().materials;
       expect(materials.some(m => m.name === 'Reeded Glass')).toBe(true);
       const side = entry.parts!.find(p => p.name === 'Left Side')!;
@@ -319,6 +319,22 @@ describe('ModelDocumentApi batches', () => {
       expect(finished).toHaveLength(1);
       expect(finished[0]!.plane.n[2]).toBeCloseTo(-1, 9);
     });
+
+    it('leaves no overlaps with hardware, beaded frames and matched fronts', async () => {
+      for (const params of [
+        { type: 'base', width: 30 * inch, hardware: 'bar', drawerFronts: 'match' },
+        { type: 'wall', width: 18 * inch, hardware: 'knob', frame: 'face_frame', overlay: 'inset', beadedFrame: true },
+        { type: 'base', width: 36 * inch, frame: 'face_frame', beadedFrame: true, doors: 2, hardware: 'bar', corner: { style: 'blind', side: 'left' } },
+        { type: 'tall', width: 24 * inch, stackedDoors: true, doors: 2, hardware: 'bar' },
+        { type: 'base', width: 36 * inch, hardware: 'knob', corner: { style: 'l_shaped' } },
+        { type: 'base', width: 36 * inch, hardware: 'bar', corner: { style: 'diagonal', side: 'right' } },
+      ]) {
+        const s = setup();
+        await cabinet(s, params);
+        const report = await s.api.findOverlaps({ container: null, minVolume: null });
+        expect(report.overlaps.map(o => `${o.a.name} / ${o.b.name}`), JSON.stringify(params)).toEqual([]);
+      }
+    }, 60_000);
 
     it('glazes a glass door with the library clear glass, once across cabinets', async () => {
       const s = setup();

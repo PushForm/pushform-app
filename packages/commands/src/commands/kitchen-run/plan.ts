@@ -14,7 +14,7 @@ const COUNTER_FRONT = inches(1.75);
 const DEFAULT_FILLER = inches(3);
 const DEFAULT_CORNER = { base: { blind: inches(42), other: inches(36) }, wall: { blind: inches(30), other: inches(24) } } as const;
 
-type CabinetOptions = Pick<CabinetParams, 'doors' | 'drawers' | 'drawerBoxes' | 'sinkFront' | 'shelves' | 'doorStyle' | 'glass' | 'stackedDoors' | 'upperDoorHeight' | 'upperDoorStyle' | 'finishedInterior'>;
+type CabinetOptions = Pick<CabinetParams, 'doors' | 'drawers' | 'drawerBoxes' | 'drawerFronts' | 'sinkFront' | 'shelves' | 'doorStyle' | 'glass' | 'stackedDoors' | 'upperDoorHeight' | 'upperDoorStyle' | 'finishedInterior'>;
 export interface KitchenRunItem extends CabinetOptions {
   readonly width: number;
   /** An opening for an appliance instead of a cabinet. A dishwasher keeps the counter going; a range or refrigerator breaks it. */
@@ -40,6 +40,10 @@ export interface KitchenRunParams {
   readonly doorStyle?: CabinetParams['doorStyle'];
   readonly finish?: CabinetParams['finish'];
   readonly wallHeight?: number | undefined;
+  readonly boxFinish?: CabinetParams['boxFinish'];
+  readonly beadedFrame?: boolean | undefined;
+  readonly hardware?: CabinetParams['hardware'];
+  readonly hardwareFinish?: string | undefined;
   readonly countertop?: boolean | undefined;
   readonly countertopFinish?: { readonly paint?: string | undefined; readonly library?: string | undefined } | undefined;
   readonly backsplash?: number | undefined;
@@ -54,8 +58,9 @@ interface Row { readonly type: 'base' | 'wall'; readonly depth: number; readonly
 export function planKitchenRun(p: KitchenRunParams): BuilderPlan {
   if (p.base.length === 0) throw new BuilderPlanError('invalid_operation', 'base needs at least one item.');
   const corner = p.corner, side = corner?.side ?? 'left', flipped = side === 'right';
-  const shared: Pick<CabinetParams, 'frame' | 'overlay' | 'doorStyle' | 'finish'> = {
+  const shared: Pick<CabinetParams, 'frame' | 'overlay' | 'doorStyle' | 'finish' | 'boxFinish' | 'beadedFrame' | 'hardware' | 'hardwareFinish'> = {
     ...(p.frame ? { frame: p.frame } : {}), ...(p.overlay ? { overlay: p.overlay } : {}), ...(p.doorStyle ? { doorStyle: p.doorStyle } : {}), ...(p.finish ? { finish: p.finish } : {}),
+    ...(p.boxFinish ? { boxFinish: p.boxFinish } : {}), ...(p.beadedFrame !== undefined ? { beadedFrame: p.beadedFrame } : {}), ...(p.hardware ? { hardware: p.hardware } : {}), ...(p.hardwareFinish ? { hardwareFinish: p.hardwareFinish } : {}),
   };
   const baseRow: Row = { type: 'base', depth: D.DEFAULT_DEPTH.base, z: 0 };
   const wallRow: Row = { type: 'wall', depth: D.DEFAULT_DEPTH.wall, z: D.WALL_HANG_HEIGHT, height: p.wallHeight };
@@ -67,10 +72,16 @@ export function planKitchenRun(p: KitchenRunParams): BuilderPlan {
   const overall = total(p.base) + baseCorner;
   const b = new Builder();
   const children: BuilderPlan[] = [];
-  const cabinet = (row: Row, item: KitchenRunItem, at: Vec3, label: string, rotationDeg?: number): void => {
+  const roleLabel = (item: KitchenRunItem, row: Row): string | null => {
+    if (row.type !== 'base') return null;
+    if (item.sinkFront) return 'Sink Base';
+    return (item.doors === 0 && (item.drawers ?? 3) > 0) ? 'Drawer Base' : null;
+  };
+  const cabinet = (row: Row, item: KitchenRunItem, at: Vec3, label: string, ends: 'none' | 'left' | 'right' | 'both', rotationDeg?: number): void => {
     if (item.appliance) return;
     const { width, appliance: _appliance, name, ...options } = item;
-    const plan = planCabinet({ ...shared, ...options, type: row.type, width, at, name: name ?? label, ...(row.height ? { height: row.height } : {}) });
+    const role = roleLabel(item, row);
+    const plan = planCabinet({ ...shared, ...options, type: row.type, width, at, finishedEnds: ends, name: name ?? (role ? `${role} ${Math.round(width / 0.0254)} in` : label), ...(row.height ? { height: row.height } : {}) });
     children.push(rotationDeg ? { ...plan, rotationDeg } : plan);
   };
 
@@ -84,15 +95,19 @@ export function planKitchenRun(p: KitchenRunParams): BuilderPlan {
       if (blind) {
         const blindWidth = widthHere - D.DEFAULT_BLIND_DOOR;
         if (blindWidth < row.depth + D.STOCK - LENGTH_TOL) throw new BuilderPlanError('invalid_geometry', `A ${Math.round(widthHere / 0.0254)} in blind corner leaves too little room for the cabinets returning into it; widen it.`);
-        children.push(planCabinet({ ...shared, type: row.type, width: widthHere, at: [atX, frontY, row.z], name: `${label} Corner`, corner: { style: 'blind', side, blindWidth }, ...(row.height ? { height: row.height } : {}) }));
+        children.push(planCabinet({ ...shared, type: row.type, width: widthHere, at: [atX, frontY, row.z], name: `${label} Corner`, finishedEnds: 'none', corner: { style: 'blind', side, blindWidth }, ...(row.height ? { height: row.height } : {}) }));
         legStart = frontY - D.STOCK - filler;
       } else {
-        children.push(planCabinet({ ...shared, type: row.type, width: widthHere, depth: row.depth, at: [atX, back - widthHere, row.z], name: `${label} Corner`, corner: { style: corner.style, side, returnWidth: widthHere, lazySusan: row.type === 'base' ? corner.lazySusan ?? false : false }, ...(row.height ? { height: row.height } : {}) }));
+        children.push(planCabinet({ ...shared, type: row.type, width: widthHere, depth: row.depth, at: [atX, back - widthHere, row.z], name: `${label} Corner`, finishedEnds: 'none', corner: { style: corner.style, side, returnWidth: widthHere, lazySusan: row.type === 'base' ? corner.lazySusan ?? false : false }, ...(row.height ? { height: row.height } : {}) }));
         legStart = back - widthHere;
       }
     }
     let x = flipped || !corner ? (flipped && corner ? overall - widthHere - total(items) : 0) : widthHere;
-    items.forEach((item, i) => { cabinet(row, item, [x, frontY, row.z], item.name ?? `${label} ${i + 1}`); x += item.width; });
+    const endsOf = (i: number): 'none' | 'left' | 'right' | 'both' => {
+      const left = i === 0 && (!corner || flipped), right = i === items.length - 1 && (!corner || !flipped);
+      return left && right ? 'both' : left ? 'left' : right ? 'right' : 'none';
+    };
+    items.forEach((item, i) => { cabinet(row, item, [x, frontY, row.z], item.name ?? `${label} ${i + 1}`, endsOf(i)); x += item.width; });
     return legStart;
   };
 
@@ -101,7 +116,7 @@ export function planKitchenRun(p: KitchenRunParams): BuilderPlan {
     let y = start;
     items.forEach((item, i) => {
       const at: Vec3 = flipped ? [overall - row.depth, y, row.z] : [row.depth, y - item.width, row.z];
-      cabinet(row, item, at, item.name ?? `${label} ${i + 1}`, flipped ? -90 : 90);
+      cabinet(row, item, at, item.name ?? `${label} ${i + 1}`, i === items.length - 1 ? (flipped ? 'right' : 'left') : 'none', flipped ? -90 : 90);
       y -= item.width;
     });
     if (blind) {

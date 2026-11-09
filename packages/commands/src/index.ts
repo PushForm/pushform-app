@@ -119,6 +119,7 @@ export * from './commands/images';
 export * from './commands/text3d';
 export * from './commands/cabinet/dimensions';
 export * from './commands/cabinet/plan';
+export * from './commands/cabinet/door';
 export * from './commands/builders/parts';
 export * from './commands/builders/mesh';
 export * from './commands/builders/generate';

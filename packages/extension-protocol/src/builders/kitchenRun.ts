@@ -7,7 +7,7 @@ const doorStyle = z.enum(['slab', 'shaker', 'raised', 'glass', 'none']);
 const item = z.object({
   width: length, appliance: z.enum(['dishwasher', 'range', 'refrigerator']).optional().describe('An opening instead of a cabinet. A dishwasher keeps the countertop going; a range or refrigerator breaks it.'),
   name: z.string().trim().min(1).max(200).optional(),
-  doors: z.number().int().min(0).max(2).optional(), drawers: z.number().int().min(0).max(4).optional(), drawerBoxes: z.boolean().optional(), sinkFront: z.boolean().optional().describe('Also cuts a sink opening in the countertop above.'), shelves: z.number().int().min(0).max(8).optional(), doorStyle: doorStyle.optional(),
+  doors: z.number().int().min(0).max(2).optional(), drawers: z.number().int().min(0).max(4).optional(), drawerBoxes: z.boolean().optional(), drawerFronts: z.enum(['auto', 'slab', 'match']).optional(), sinkFront: z.boolean().optional().describe('Also cuts a sink opening in the countertop above.'), shelves: z.number().int().min(0).max(8).optional(), doorStyle: doorStyle.optional(),
   glass: z.object({ pattern: z.enum(['single', 'grid', 'prairie', 'mission']).optional(), across: z.number().int().min(1).max(6).optional(), down: z.number().int().min(1).max(6).optional(), type: z.enum(['clear', 'frosted', 'seeded', 'reeded']).optional() }).optional(),
   stackedDoors: z.boolean().optional(), upperDoorHeight: length.optional(), upperDoorStyle: z.enum(['slab', 'shaker', 'raised', 'glass']).optional(), finishedInterior: z.boolean().optional(),
 });
@@ -25,6 +25,7 @@ export const kitchenRunBuilder = defineBuilder({
       returnBase: z.array(item).max(30).describe('Base row along the side wall, starting at the corner.'), returnWall: z.array(item).max(30).optional(),
     }).optional(),
     frame: z.enum(['frameless', 'face_frame']).optional(), overlay: z.enum(['full', 'partial', 'inset']).optional(), doorStyle: doorStyle.optional().describe('Default for every cabinet.'),
+    boxFinish: z.object({ paint: hexColor.optional(), library: z.string().max(100).optional() }).optional(), beadedFrame: z.boolean().optional(), hardware: z.enum(['none', 'bar', 'knob']).optional(), hardwareFinish: hexColor.optional(),
     finish: z.object({ paint: hexColor.optional(), stain: z.string().max(100).optional() }).optional(), wallHeight: length.optional().describe('Default 0.762.'),
     countertop: z.boolean().optional().describe('Default true.'), countertopFinish: z.object({ paint: hexColor.optional(), library: z.string().max(100).optional() }).optional(), backsplash: length.optional(),
     name: z.string().trim().min(1).max(200).optional(),

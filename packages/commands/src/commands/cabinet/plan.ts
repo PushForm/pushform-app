@@ -36,6 +36,11 @@ export interface CabinetParams {
   readonly finish?: { readonly paint?: string | undefined; readonly stain?: string | undefined } | undefined;
   readonly finishedEnds?: CabinetFinishedEnds | undefined;
   readonly name?: string | undefined;
+  readonly boxFinish?: { readonly paint?: string | undefined; readonly library?: string | undefined } | undefined;
+  readonly beadedFrame?: boolean | undefined;
+  readonly drawerFronts?: 'auto' | 'slab' | 'match' | undefined;
+  readonly hardware?: 'none' | 'bar' | 'knob' | undefined;
+  readonly hardwareFinish?: string | undefined;
   readonly glass?: { readonly pattern?: CabinetGlassPattern | undefined; readonly across?: number | undefined; readonly down?: number | undefined; readonly type?: CabinetGlassType | undefined } | undefined;
   readonly finishedInterior?: boolean | undefined;
   readonly stackedDoors?: boolean | undefined;
@@ -71,6 +76,9 @@ export interface CabinetUsed {
   readonly finishedEnds: CabinetFinishedEnds;
   readonly glass?: GlassSpec;
   readonly finishedInterior: boolean;
+  readonly beadedFrame: boolean;
+  readonly drawerFronts: 'auto' | 'slab' | 'match';
+  readonly hardware: 'none' | 'bar' | 'knob';
   readonly stackedDoors: boolean;
   readonly upperDoorHeight?: number;
   readonly upperDoorStyle?: CabinetDoorStyle;
@@ -96,7 +104,7 @@ function raisedRings(): PanelRing[] {
   return [[D.RAISED_RELIEF, 0], [D.RAISED_RELIEF, back], [0, back], [0, front], [D.RAISED_RELIEF, front], [D.RAISED_RELIEF + D.RAISED_BEVEL, D.RAISED_PANEL]];
 }
 
-type FrontStyle = 'slab' | 'shaker' | 'raised' | 'glass';
+export type FrontStyle = 'slab' | 'shaker' | 'raised' | 'glass';
 interface Rect { readonly x: Range; readonly z: Range }
 
 /** A door or drawer front at `rect`, whose back is at y = back and whose face is toward -y. */
@@ -133,7 +141,7 @@ function addMullions(b: Builder, assembly: string, open: Rect, front: number, gl
   });
 }
 
-function addFront(b: Builder, assembly: string, rect: Rect, front: number, style: FrontStyle, horizontalPanel: boolean, slabName: string, glass: GlassSpec | null = null): void {
+export function addFront(b: Builder, assembly: string, rect: Rect, front: number, style: FrontStyle, horizontalPanel: boolean, slabName: string, glass: GlassSpec | null = null, stile: number = D.STILE): void {
   const y = range(front, front + D.STOCK);
   if (style === 'slab') {
     if (horizontalPanel) b.add(slabName, assembly, 'show', rect.x, y, rect.z, '+x', '+z');
@@ -141,11 +149,11 @@ function addFront(b: Builder, assembly: string, rect: Rect, front: number, style
     return;
   }
   const { x, z } = rect;
-  const open: Rect = { x: range(x.from + D.STILE, x.to - D.STILE), z: range(z.from + D.STILE, z.to - D.STILE) };
+  const open: Rect = { x: range(x.from + stile, x.to - stile), z: range(z.from + stile, z.to - stile) };
   const height = span(z), railLength = span(open.x);
   // A member's thickness runs back from the face when `backIsFar`, and forward from the back otherwise.
-  const edge = (length: number, backIsFar: boolean): CutBox[] => style !== 'glass' ? [groove(length, D.STILE)]
-    : [{ min: [0, D.STILE - D.GLASS_RABBET, backIsFar ? D.STOCK - D.GLASS_RABBET : 0], max: [length, D.STILE, backIsFar ? D.STOCK : D.GLASS_RABBET] }];
+  const edge = (length: number, backIsFar: boolean): CutBox[] => style !== 'glass' ? [groove(length, stile)]
+    : [{ min: [0, stile - D.GLASS_RABBET, backIsFar ? D.STOCK - D.GLASS_RABBET : 0], max: [length, stile, backIsFar ? D.STOCK : D.GLASS_RABBET] }];
   b.add('Left Stile', assembly, 'show', range(x.from, open.x.from), y, z, '+z', '+x', { cuts: edge(height, true) });
   b.add('Right Stile', assembly, 'show', range(open.x.to, x.to), y, z, '+z', '-x', { cuts: edge(height, false) });
   b.add('Top Rail', assembly, 'show', open.x, y, range(open.z.to, z.to), '+x', '-z', { cuts: edge(railLength, true) });
@@ -175,12 +183,12 @@ function minRaisedPanelOpening(): number {
   return 2 * (D.RAISED_RELIEF + D.RAISED_BEVEL) - 2 * (D.GROOVE_DEPTH - D.PANEL_CLEARANCE / 2) + D.MIN_PANEL_OPENING / 2;
 }
 
-function checkFive(style: FrontStyle, width: number, height: number, what: string): void {
+export function checkFive(style: FrontStyle, width: number, height: number, what: string, stile: number = D.STILE): void {
   if (style === 'slab') {
     if (width < D.MIN_SLAB || height < D.MIN_SLAB) throw unsound(`${what} would be ${inch(width)} by ${inch(height)}, too small to make.`);
     return;
   }
-  const openW = width - 2 * D.STILE, openH = height - 2 * D.STILE;
+  const openW = width - 2 * stile, openH = height - 2 * stile;
   const least = style === 'raised' ? minRaisedPanelOpening() : D.MIN_PANEL_OPENING;
   if (openW < least || openH < least)
     throw unsound(`${what} would be ${inch(width)} by ${inch(height)}, too small for ${style === 'raised' ? 'a raised panel' : 'its stiles, rails and panel'}.`);
@@ -281,20 +289,24 @@ export function planCabinet(p: CabinetParams): CabinetPlan {
     ...(glassPattern === 'grid' ? { across: p.glass?.across ?? D.DEFAULT_LITES_ACROSS, down: p.glass?.down ?? D.DEFAULT_LITES_DOWN } : {}),
   };
   const finishedInterior = p.finishedInterior ?? false;
+  if (p.beadedFrame && !faceFrame) throw contradiction('beadedFrame needs frame: "face_frame".');
+  if (p.boxFinish?.paint !== undefined && p.boxFinish.library !== undefined) throw contradiction('boxFinish takes paint or library, not both.');
+  const beadedFrame = p.beadedFrame ?? false, drawerFronts = p.drawerFronts ?? 'auto', hardware = p.hardware ?? 'none';
 
   const sinkFront = p.sinkFront ?? false;
   if (sinkFront && (!baseLike || doors === 0)) throw contradiction('sinkFront is for a base cabinet or vanity with doors below it.');
-  const drawers = p.drawers ?? (planned ? 0 : sinkFront ? 1 : baseLike ? (doors === 0 ? 3 : 1) : 0);
+  // A sink front stands where the top drawer would, so `drawers: 0` and `drawers: 1` both mean that one row.
+  const drawers = sinkFront && (p.drawers === undefined || p.drawers === 0) ? 1 : p.drawers ?? (planned ? 0 : baseLike ? (doors === 0 ? 3 : 1) : 0);
   if (sinkFront && drawers !== 1) throw contradiction('sinkFront replaces the single drawer row; use drawers: 1 or leave it out.');
 
   const noDoorSection = doors === 0 && drawers > 0;
-  const shelfDefault = lazySusan ? (type === 'tall' ? 4 : 2) : noDoorSection ? 0 : baseLike ? 1 : type === 'tall' ? 4 : height >= D.inches(42) - 1e-9 ? 3 : height >= D.inches(30) - 1e-9 ? 2 : 1;
+  const shelfDefault = lazySusan ? (type === 'tall' ? 4 : 2) : noDoorSection || sinkFront ? 0 : baseLike ? 1 : type === 'tall' ? 4 : height >= D.inches(42) - 1e-9 ? 3 : height >= D.inches(30) - 1e-9 ? 2 : 1;
   const shelves = p.shelves ?? shelfDefault;
   if (noDoorSection && shelves > 0) throw contradiction('This cabinet is all drawers, so it has no room for shelves; remove shelves or add a door section.');
 
   if (p.finish?.paint !== undefined && p.finish.stain !== undefined) throw contradiction('finish takes paint or stain, not both.');
   const finish: CabinetFinish = p.finish?.stain !== undefined ? { stain: p.finish.stain } : { paint: p.finish?.paint ?? D.DEFAULT_PAINT };
-  const back = p.back ?? true, drawerBoxes = p.drawerBoxes ?? true, finishedEnds = p.finishedEnds ?? 'none';
+  const back = p.back ?? true, drawerBoxes = p.drawerBoxes ?? true, finishedEnds = p.finishedEnds ?? 'both';
   const at: Vec3 = p.at ?? (type === 'wall' ? [0, 0, D.WALL_HANG_HEIGHT] : [0, 0, 0]);
 
   const t = D.STOCK, frameDepth = faceFrame ? t : 0, backT = back ? D.BACK : 0, floor = toeKick ? D.TOE_KICK_HEIGHT : 0;
@@ -356,23 +368,48 @@ export function planCabinet(p: CabinetParams): CabinetPlan {
     });
   }
 
+
   const inset = overlay === 'inset';
   const frontY = inset ? 0 : -t;
 
+  const beadOn = (w: number, frontAtZero: boolean, low: boolean, high: boolean): { section: readonly Pt[] } | Record<string, never> => {
+    if (!beadedFrame) return {};
+    const r = D.BEAD_RADIUS, q = D.BEAD_QUIRK, halfRound = (from: number): Pt[] => Array.from({ length: D.BEAD_SEGMENTS + 1 }, (_, i) => {
+      const angle = Math.PI + (Math.PI * i) / D.BEAD_SEGMENTS;
+      return [from + r + r * Math.cos(angle), r + r * Math.sin(angle)] as const;
+    });
+    const front: Pt[] = [
+      ...(low ? [...halfRound(0), [2 * r + q, r] as const, [2 * r + q, 0] as const] : [[0, 0] as const]),
+      ...(high ? [[w - 2 * r - q, 0] as const, [w - 2 * r - q, r] as const, ...halfRound(w - 2 * r)] : [[w, 0] as const]),
+    ];
+    const outline: Pt[] = [...front, [w, t], [0, t]];
+    return { section: frontAtZero ? outline : outline.map(([y, z]) => [y, t - z] as const).reverse() };
+  };
+
   const addFrame = (plane: FrontPlane): void => {
     if (!plane.frame) return;
-    const f = plane.frame, A = f.assembly, fy = range(0, t);
+    const f = plane.frame, A = f.assembly, fy = range(0, t), FW = D.FRAME_WIDTH;
     const rail = range(f.leftStile, f.width - f.rightStile);
-    plane.builder.add('Left Stile', A, 'show', range(0, f.leftStile), fy, range(floor, height), '+z', '+x');
-    plane.builder.add('Right Stile', A, 'show', range(f.width - f.rightStile, f.width), fy, range(floor, height), '+z', '-x');
-    plane.builder.add('Top Rail', A, 'show', rail, fy, range(height - D.FRAME_WIDTH, height), '+x', '-z');
-    plane.builder.add('Bottom Rail', A, 'show', rail, fy, range(floor, floor + D.FRAME_WIDTH), '+x', '+z');
-    rows.slice(1).forEach((row, i) => plane.builder.add(`Middle Rail ${i + 1}`, A, 'show', plane.opening, fy, range(row.opening.to, row.opening.to + D.FRAME_WIDTH), '+x', '+z'));
-    if (f.blindStile) plane.builder.add('Blind Stile', A, 'show', f.blindStile, fy, range(floor + D.FRAME_WIDTH, height - D.FRAME_WIDTH), '+z', '+x');
+    plane.builder.add('Left Stile', A, 'show', range(0, f.leftStile), fy, range(floor, height), '+z', '+x', beadOn(f.leftStile, true, false, true));
+    plane.builder.add('Right Stile', A, 'show', range(f.width - f.rightStile, f.width), fy, range(floor, height), '+z', '-x', beadOn(f.rightStile, false, false, true));
+    plane.builder.add('Top Rail', A, 'show', rail, fy, range(height - FW, height), '+x', '-z', beadOn(FW, true, false, true));
+    plane.builder.add('Bottom Rail', A, 'show', rail, fy, range(floor, floor + FW), '+x', '+z', beadOn(FW, false, false, true));
+    rows.slice(1).forEach((row, i) => plane.builder.add(`Middle Rail ${i + 1}`, A, 'show', plane.opening, fy, range(row.opening.to, row.opening.to + FW), '+x', '+z', beadOn(FW, false, true, true)));
+    if (f.blindStile) plane.builder.add('Blind Stile', A, 'show', f.blindStile, fy, range(floor + FW, height - FW), '+z', '+x', beadOn(FW, true, f.blindStile.to > plane.opening.to, f.blindStile.to <= plane.opening.from + 1e-9));
     if (plane.doors === 2) {
       const mid = (plane.opening.from + plane.opening.to) / 2;
-      rows.filter(r => r.kind === 'door').forEach((row, i, all) => plane.builder.add(all.length > 1 ? `Center Stile ${i + 1}` : 'Center Stile', A, 'show', range(mid - D.FRAME_WIDTH / 2, mid + D.FRAME_WIDTH / 2), fy, row.opening, '+z', '+x'));
+      rows.filter(r => r.kind === 'door').forEach((row, i, all) => plane.builder.add(all.length > 1 ? `Center Stile ${i + 1}` : 'Center Stile', A, 'show', range(mid - FW / 2, mid + FW / 2), fy, row.opening, '+z', '+x', beadOn(FW, true, true, true)));
     }
+  };
+
+  const addBarOrKnob = (builder: Builder, assembly: string, cx: number, cz: number, vertical: boolean): void => {
+    if (hardware === 'knob') { builder.addRound('Knob', assembly, 'hardware', cx, cz, frontY, D.KNOB_LENGTH, D.KNOB_RADIUS); return; }
+    if (hardware !== 'bar') return;
+    const half = D.PULL_LENGTH / 2, bar = D.PULL_BAR, y = range(frontY - D.PULL_STANDOFF - bar, frontY - D.PULL_STANDOFF), post = range(frontY - D.PULL_STANDOFF, frontY);
+    const postAt = (d: number): [Range, Range] => vertical ? [range(cx - bar / 2, cx + bar / 2), range(cz + d - bar / 2, cz + d + bar / 2)] : [range(cx + d - bar / 2, cx + d + bar / 2), range(cz - bar / 2, cz + bar / 2)];
+    if (vertical) builder.add('Pull Bar', assembly, 'hardware', range(cx - bar / 2, cx + bar / 2), y, range(cz - half, cz + half), '+z', '+x');
+    else builder.add('Pull Bar', assembly, 'hardware', range(cx - half, cx + half), y, range(cz - bar / 2, cz + bar / 2), '+x', '+z');
+    [-half + bar / 2, half - bar / 2].forEach((d, i) => { const [px, pz] = postAt(d); builder.add(`Pull Post ${i + 1}`, assembly, 'hardware', px, post, pz, '+x', '+z'); });
   };
 
   const expand = (open: Range, outerLeft: boolean, outerRight: boolean): Range => range(open.from - overlayAt(outerLeft), open.to + overlayAt(outerRight));
@@ -395,6 +432,15 @@ export function planCabinet(p: CabinetParams): CabinetPlan {
           const x = expand(leaf.x, leaf.outerLeft, leaf.outerRight);
           checkFive(style, span(x), span(row.front), leaf.name);
           addFront(builder, leaf.name, { x, z: row.front }, frontY, style, false, 'Slab', glass);
+          if (hardware !== 'none') {
+            // At an L-shaped corner the doors meet at the inside corner, so the pull goes toward the outer end.
+            const hingeOnLeft = plane.names ? plane.outerRight : !leaf.name.includes('Right');
+            const pullX = hingeOnLeft ? x.to - D.STILE / 2 : x.from + D.STILE / 2;
+            const atTop = type === 'wall' ? row.section === 'lower' : row.section !== 'upper' && type !== 'tall';
+            const pullZ = type === 'tall' && row.section === null ? Math.min(row.front.to - D.PULL_INSET - D.PULL_LENGTH / 2, Math.max(row.front.from + D.PULL_LENGTH, D.TALL_PULL_HEIGHT))
+              : atTop ? row.front.to - D.PULL_INSET - (hardware === 'bar' ? D.PULL_LENGTH / 2 : 0) : row.front.from + D.PULL_INSET + (hardware === 'bar' ? D.PULL_LENGTH / 2 : 0);
+            addBarOrKnob(builder, leaf.name, pullX, pullZ, true);
+          }
         }
         continue;
       }
@@ -404,11 +450,14 @@ export function planCabinet(p: CabinetParams): CabinetPlan {
         continue;
       }
       const tall = span(row.front) >= D.SLAB_DRAWER_BELOW - 1e-9;
-      const wanted: FrontStyle = !tall || doorStyle === 'none' ? 'slab' : doorStyle === 'glass' ? 'shaker' : doorStyle;
+      const slimFits = drawerFronts === 'match' && doorStyle !== 'slab' && doorStyle !== 'none' && span(row.front) - 2 * D.SLIM_STILE >= D.MIN_PANEL_OPENING;
+      const wanted: FrontStyle = drawerFronts === 'slab' || doorStyle === 'none' ? 'slab' : tall ? (doorStyle === 'glass' ? 'shaker' : doorStyle) : slimFits ? 'shaker' : 'slab';
       const raisedFits = span(x) - 2 * D.STILE >= minRaisedPanelOpening() && span(row.front) - 2 * D.STILE >= minRaisedPanelOpening();
       const style: FrontStyle = wanted === 'raised' && !raisedFits ? 'shaker' : wanted;
-      checkFive(style, span(x), span(row.front), row.name);
-      addFront(builder, row.name, { x, z: row.front }, frontY, style, true, 'Front');
+      const stile = !tall && slimFits ? D.SLIM_STILE : D.STILE;
+      checkFive(style, span(x), span(row.front), row.name, stile);
+      addFront(builder, row.name, { x, z: row.front }, frontY, style, true, 'Front', null, stile);
+      addBarOrKnob(builder, row.name, (x.from + x.to) / 2, (row.front.from + row.front.to) / 2, false);
       if (!drawerBoxes) continue;
 
       const between = faceFrame ? full : range(Math.max(t, full.from - D.REVEAL), Math.min(width - t, full.to + D.REVEAL));
@@ -606,13 +655,14 @@ export function planCabinet(p: CabinetParams): CabinetPlan {
     })
     : b.parts;
   const used: CabinetUsed = {
-    type, width, height, depth, at, frame, overlay, doorStyle, doors, drawers, drawerBoxes, sinkFront, shelves, toeKick, back, finish, finishedEnds, stackedDoors, finishedInterior,
+    type, width, height, depth, at, frame, overlay, doorStyle, doors, drawers, drawerBoxes, sinkFront, shelves, toeKick, back, finish, finishedEnds, stackedDoors, finishedInterior, beadedFrame, drawerFronts, hardware,
     ...(glass ? { glass } : {}),
     ...(stackedDoors ? { upperDoorHeight: upperDoorHeight!, upperDoorStyle: p.upperDoorStyle ?? doorStyle } : {}),
     ...(cornerStyle ? { corner: { style: cornerStyle, side, lazySusan, ...(returnWidth !== undefined ? { returnWidth } : {}), ...(blindWidth !== undefined ? { blindWidth } : {}) } } : {}),
   };
   const materials: Record<string, MaterialSpec> = {
-    box: { library: D.BOX_MATERIAL_KEY },
+    box: p.boxFinish?.library !== undefined ? { library: p.boxFinish.library } : p.boxFinish?.paint !== undefined ? { paint: p.boxFinish.paint } : { library: D.BOX_MATERIAL_KEY },
+    ...(hardware !== 'none' ? { hardware: { paint: p.hardwareFinish ?? D.DEFAULT_HARDWARE_FINISH } } : {}),
     show: 'stain' in finish ? { library: finish.stain } : { paint: finish.paint },
     ...(glass ? { glass: { library: D.GLASS_KEYS[glass.type] } } : {}),
   };

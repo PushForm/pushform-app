@@ -404,6 +404,49 @@ describe('planCabinet corners', () => {
   });
 });
 
+describe('planCabinet finish and detail options', () => {
+  it('finishes both ends by default and lets a run turn them off', () => {
+    expect(named(planCabinet({ type: 'base', width: i(24) }), 'Left Side').plusZRole).toBe('show');
+    expect(named(planCabinet({ type: 'base', width: i(24), finishedEnds: 'none' }), 'Left Side').plusZRole).toBeUndefined();
+  });
+
+  it('uses the box finish it is given, and maple otherwise', () => {
+    expect(planCabinet({ type: 'base', width: i(24), boxFinish: { paint: '#f5f5f2' } }).materials.box).toEqual({ paint: '#f5f5f2' });
+    expect(planCabinet({ type: 'base', width: i(24) }).materials.box).toEqual({ library: 'Wood_white_maple_veneer' });
+  });
+
+  it('treats drawers 0 with a sink front as the one false-front row, with no shelf', () => {
+    const plan = planCabinet({ type: 'vanity', width: i(30), doors: 2, drawers: 0, sinkFront: true });
+    named(plan, 'False Front');
+    expect(plan.used.shelves).toBe(0);
+  });
+
+  it('beads the opening edges of a face frame and refuses it on frameless', () => {
+    const plan = planCabinet({ type: 'base', width: i(18), frame: 'face_frame', overlay: 'inset', beadedFrame: true });
+    expect(named(plan, 'Left Stile', 'Face Frame').shape.kind).toBe('section');
+    expect(named(plan, 'Middle Rail 1', 'Face Frame').shape.kind).toBe('section');
+    expect(refused({ type: 'base', width: i(18), beadedFrame: true }).code).toBe('invalid_operation');
+  });
+
+  it('gives short drawer fronts a slim frame when they should match the doors', () => {
+    const auto = planCabinet({ type: 'base', width: i(24) });
+    expect(auto.parts.some(p => p.assembly === 'Drawer' && p.name === 'Panel')).toBe(false);
+    const match = planCabinet({ type: 'base', width: i(24), drawerFronts: 'match' });
+    closeTo(named(match, 'Left Stile', 'Drawer').size[1], 1.5);
+    named(match, 'Panel', 'Drawer');
+  });
+
+  it('adds pulls on the edge away from the hinge and centers them on drawers', () => {
+    const plan = planCabinet({ type: 'base', width: i(30), hardware: 'bar' });
+    const left = bounds(named(plan, 'Pull Bar', 'Left Door')), right = bounds(named(plan, 'Pull Bar', 'Right Door'));
+    expect(left.max[0]).toBeGreaterThan(i(12));
+    expect(right.min[0]).toBeLessThan(i(18));
+    const drawer = bounds(named(plan, 'Pull Bar', 'Drawer'));
+    closeTo((drawer.min[0] + drawer.max[0]) / 2, 15);
+    expect(named(planCabinet({ type: 'wall', width: i(18), hardware: 'knob' }), 'Knob', 'Door').shape.kind).toBe('prism');
+  });
+});
+
 describe('planCabinet refusals', () => {
   it('names the fix for contradictions', () => {
     expect(refused({ type: 'base', width: i(24), overlay: 'inset' })).toMatchObject({ code: 'invalid_operation', message: expect.stringContaining('face_frame') });

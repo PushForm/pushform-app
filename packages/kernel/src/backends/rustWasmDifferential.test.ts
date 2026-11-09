@@ -9,49 +9,20 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { meshBox, planeBasis, type MeshData, type Vec3 } from '@pushform/core';
-import type { RustKernelModule } from '../../wasm/pushform-kernel.js';
 import { KernelClient } from '../client/KernelClient';
 import { meshTopologyProblems } from '../meshChecks';
 import type { FaceOrigin, KernelErrorInfo, MeshWire, PolygonsWithHoles, PushPullPreview, PushPullResult } from '../protocol';
 import { square, topRegion } from '../test/helpers';
-import { RustKernelCaller, RustKernelRejection, trapErrorInfo } from '../worker/rustKernelCore';
 import { InlineBackend } from './InlineBackend';
-import { NativeKernelBackend, type NativeKernelTransport } from './NativeKernelBackend';
-import { differentialCases, HarnessTransport, largestUpFace, type DifferentialCase } from './differentialFixtures';
+import { NativeKernelBackend } from './NativeKernelBackend';
+import { differentialCases, HarnessTransport, InlineRustTransport, largestUpFace, type DifferentialCase, type RustModuleFactory } from './differentialFixtures';
 import { encodePushPull } from './nativeWire';
 
 const harnessPath = resolve(__dirname, '../../../../crates/native-kernel/target/release/pushform-native-kernel-harness');
 const modulePath = resolve(__dirname, '../../wasm/pushform-kernel.js');
 const ready = existsSync(harnessPath) && existsSync(modulePath);
 
-type ModuleFactory = (options?: object) => Promise<RustKernelModule>;
-const loadFactory = async (): Promise<ModuleFactory> => ((await import(/* @vite-ignore */ modulePath)) as { default: ModuleFactory }).default;
-
-/** The WebAssembly module in this process, with the worker's trap behaviour: a crash answers as a kernel error. */
-class InlineRustTransport implements NativeKernelTransport {
-  private caller: Promise<RustKernelCaller> | undefined;
-  constructor(private readonly factory: ModuleFactory) {}
-  available(): Promise<boolean> {
-    return Promise.resolve(true);
-  }
-  private get(): Promise<RustKernelCaller> {
-    this.caller ??= this.factory().then((module) => new RustKernelCaller(module));
-    return this.caller;
-  }
-  async call(request: Uint8Array): Promise<ArrayBuffer> {
-    const caller = await this.get();
-    try {
-      return caller.call(request);
-    } catch (e) {
-      if (e instanceof RustKernelRejection) throw e.info;
-      this.caller = undefined;
-      throw trapErrorInfo(e);
-    }
-  }
-  async abort(): Promise<void> {
-    (await this.caller)?.abort();
-  }
-}
+const loadFactory = async (): Promise<RustModuleFactory> => ((await import(/* @vite-ignore */ modulePath)) as { default: RustModuleFactory }).default;
 
 const bits = (v: number): string => new BigUint64Array(new Float64Array([v]).buffer)[0]!.toString(16);
 

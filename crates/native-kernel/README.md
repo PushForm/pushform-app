@@ -29,7 +29,7 @@ The one implementation of PushForm's solid modeling operations, in Rust on [Mani
 
 The native build is off by default. It needs two settings together: the Cargo feature `native-kernel` on the desktop app and `PF_NATIVE_KERNEL=1` when building the web bundle. `pnpm desktop:native` sets both. It has only been tested on Apple Silicon. When it can't finish a request, that request reruns in the WebAssembly worker.
 
-Most contributors don't need either toolchain. See "The compiled module" in `packages/kernel/README.md`.
+Every contributor needs the WebAssembly toolchain to run the app or its tests. See "The compiled module" in `packages/kernel/README.md`.
 
 ## Results must be exact
 
@@ -61,4 +61,3 @@ Every build has to produce the same bytes for the same request. A solid's face i
    ```
 
    Put that in its own commit. The test lists the records it rewrote, and the commit message should explain them. Run ids come from one counter across the corpus, so an operation that reserves more of them changes the run ids in every later record. Those differences are expected only if they are run ids and nothing else. Anything else changing is a bug until shown otherwise.
-5. After the change is on `main` and CI has published the new module, run `pnpm kernel-wasm:pin` on that commit and commit `packages/kernel/kernel-wasm.lock.json`. Until then, other contributors have to build the module themselves.

@@ -1,5 +1,5 @@
 name: Prepare the kernel WebAssembly module
-description: Download the published module for these sources, or build it with the pinned Rust and Emscripten
+description: Build the module with the pinned Rust and Emscripten, or restore it from the cache for these sources
 runs:
   using: composite
   steps:
@@ -7,41 +7,27 @@ runs:
     - id: plan
       shell: bash
       run: node scripts/kernel-wasm-artifact.mjs ci-plan >> "$GITHUB_OUTPUT"
-    # Downloading is the normal case; a pull request that changes the kernel builds its own copy below.
-    - if: steps.plan.outputs.pinned == 'true'
-      shell: bash
-      continue-on-error: true
-      run: node scripts/fetch-kernel-wasm.mjs
-    - id: status
-      shell: bash
-      run: |
-        if node scripts/kernel-wasm-artifact.mjs status > /dev/null; then echo "fresh=true" >> "$GITHUB_OUTPUT"; else echo "fresh=false" >> "$GITHUB_OUTPUT"; fi
     # Rust and Emscripten are pinned together: only this pair is tested.
     - uses: dtolnay/rust-toolchain@master
-      if: steps.status.outputs.fresh != 'true'
       with:
         toolchain: ${{ steps.plan.outputs.rust }}
         targets: wasm32-unknown-emscripten
     - uses: mymindstorm/setup-emsdk@v14
-      if: steps.status.outputs.fresh != 'true'
       with:
         version: ${{ steps.plan.outputs.emscripten }}
         cache-key: emsdk-${{ steps.plan.outputs.emscripten }}
-    # A rebuilt module is cached by source hash, so reruns of the same sources do not rebuild.
+    # A built module is cached by source hash, so the same sources do not rebuild.
     - uses: actions/cache@v4
       id: kernel-wasm
-      if: steps.status.outputs.fresh != 'true'
       with:
         path: |
           packages/kernel/wasm/*.wasm
           packages/kernel/wasm/pushform-kernel*.js
           packages/kernel/wasm/kernel-wasm.stamp.json
-        key: kernel-wasm-v2-${{ runner.os }}-${{ steps.plan.outputs.source_hash }}
-    - uses: Swatinem/rust-cache@v2
-      if: steps.status.outputs.fresh != 'true' && steps.kernel-wasm.outputs.cache-hit != 'true'
-      with: { workspaces: crates/kernel-wasm }
+        key: kernel-wasm-v3-${{ runner.os }}-${{ steps.plan.outputs.source_hash }}
+    # No cache of Cargo's target directory: its CMake files name this run's Emscripten path, which changes every run.
     - shell: bash
-      if: steps.status.outputs.fresh != 'true' && steps.kernel-wasm.outputs.cache-hit != 'true'
+      if: steps.kernel-wasm.outputs.cache-hit != 'true'
       run: node scripts/build-kernel-wasm.mjs --faults
     - shell: bash
       run: node scripts/kernel-wasm-artifact.mjs status

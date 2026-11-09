@@ -16,15 +16,11 @@ Tests: `pnpm vitest run --project node packages/kernel`.
 
 ## The compiled module
 
-The kernel module is built from Rust and C++ that most contributors cannot compile. `pnpm install` downloads the prebuilt
-module matching the current sources; `pnpm fetch:kernel-wasm` does the same on demand, and `pnpm build:kernel-wasm` builds it
-locally (needs the pinned Rust and Emscripten, see `scripts/kernel-wasm-artifact.mjs`) and overrides any downloaded one.
-`pnpm test` and production web builds stop with a message if the module is missing or stale.
-
-Modules are addressed by a hash over the kernel crates, the vendored binding, the build script and the pinned toolchain.
-CI publishes each one to a GitHub Release tagged `kernel-wasm-<hash>`, and `packages/kernel/kernel-wasm.lock.json` records
-its checksums, so a download that does not match is refused. After a change to the kernel lands on main and CI has
-published its module, run `pnpm kernel-wasm:pin` and commit the lock file so everyone else gets the new module.
+The kernel module is compiled from Rust and C++ and is not committed. `pnpm build:kernel-wasm` builds it, using the Rust and
+Emscripten versions pinned in `scripts/kernel-wasm-artifact.mjs`, plus cmake. See "Develop" in the root README for setup.
+Each build is stamped with a hash over the kernel crates, the vendored binding, the build script and the pinned toolchain.
+`pnpm test` and production web builds stop with a message if the module is missing or no longer matches its sources, so
+run `pnpm build:kernel-wasm` again after pulling a kernel change. CI builds it too, caching by that hash.
 
 ## Golden corpus
 

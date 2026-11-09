@@ -7,7 +7,7 @@
 // Needs the wasm32-unknown-emscripten Rust target (`rustup target add wasm32-unknown-emscripten`) and Emscripten's
 // emcc, emcmake and emmake on PATH (`brew install emscripten`, or `source emsdk_env.sh`). The first build clones
 // Manifold and compiles it. Usage: node scripts/build-kernel-wasm.mjs [--check] [--faults]
-// The result is stamped with the hash of its sources, so it overrides any downloaded module until the sources change.
+// The result is stamped with the hash of its sources, so tests and builds can tell when it needs building again.
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -51,4 +51,4 @@ for (const { bin, args } of modules) {
     built.push(file);
   }
 }
-writeStamp('local', sourceHash(), built);
+writeStamp(sourceHash(), built);

@@ -65,11 +65,11 @@ pub fn boolean(kernel: &Kernel, req: &BooleanRequest) -> Result<BooleanOutput, K
       (inside, Some(outside))
     }
   };
-  let fin = finalize_manifold(&primary, &FinalizeOptions { next_face_id: req.next_face_id, simplify_tolerance: None }, &choose_id)?;
+  let fin = finalize_manifold(&primary, &FinalizeOptions { next_face_id: req.next_face_id, simplify_tolerance: None, connected_solid: false }, &choose_id)?;
   let mut secondary = Vec::new();
   let mut next_face_id = fin.next_face_id;
   if let Some(second) = &secondary_manifold {
-    let fin2 = finalize_manifold(second, &FinalizeOptions { next_face_id, simplify_tolerance: None }, &choose_id)?;
+    let fin2 = finalize_manifold(second, &FinalizeOptions { next_face_id, simplify_tolerance: None, connected_solid: false }, &choose_id)?;
     secondary = fin2.components;
     next_face_id = fin2.next_face_id;
   }

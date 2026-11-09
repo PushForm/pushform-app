@@ -12,6 +12,6 @@ pub fn simplify(kernel: &Kernel, body: (f64, f64), tolerance: Option<f64>, next_
   let tolerance = tolerance.unwrap_or(COPLANAR_TOL);
   let simplified = entry.manifold.simplify(tolerance);
   let run_ids = [entry.run_id];
-  let fin = finalize_manifold(&simplified, &FinalizeOptions { next_face_id, simplify_tolerance: Some(tolerance) }, keep_ids_from_runs(&run_ids))?;
+  let fin = finalize_manifold(&simplified, &FinalizeOptions { next_face_id, simplify_tolerance: Some(tolerance), connected_solid: false }, keep_ids_from_runs(&run_ids))?;
   Ok(ComponentsOutput { components: fin.components, next_face_id: fin.next_face_id })
 }

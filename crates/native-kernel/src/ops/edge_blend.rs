@@ -67,6 +67,6 @@ pub fn edge_blend(kernel: &Kernel, req: &EdgeBlendRequest) -> Result<EdgeBlendOu
     solid = solid.union(&add);
   }
   let run_ids = [body.run_id];
-  let fin = finalize_manifold(&solid, &FinalizeOptions { next_face_id: req.next_face_id, simplify_tolerance: None }, keep_ids_from_runs(&run_ids))?;
+  let fin = finalize_manifold(&solid, &FinalizeOptions { next_face_id: req.next_face_id, simplify_tolerance: None, connected_solid: false }, keep_ids_from_runs(&run_ids))?;
   Ok(EdgeBlendOutput { components: fin.components, next_face_id: fin.next_face_id, body_run_id: body.run_id, tool_run_id })
 }

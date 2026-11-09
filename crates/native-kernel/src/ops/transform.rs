@@ -15,6 +15,6 @@ pub fn transform(kernel: &Kernel, body: (f64, f64), matrix: &[f64], next_face_id
   let m: [f64; 16] = matrix.try_into().expect("checked above");
   let moved = entry.manifold.transform(&m4_affine(&m));
   let run_ids = [entry.run_id];
-  let fin = finalize_manifold(&moved, &FinalizeOptions { next_face_id, simplify_tolerance: None }, keep_ids_from_runs(&run_ids))?;
+  let fin = finalize_manifold(&moved, &FinalizeOptions { next_face_id, simplify_tolerance: None, connected_solid: false }, keep_ids_from_runs(&run_ids))?;
   Ok(ComponentsOutput { components: fin.components, next_face_id: fin.next_face_id })
 }

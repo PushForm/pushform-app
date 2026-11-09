@@ -8,6 +8,7 @@ pub mod decompose;
 pub mod edge_blend;
 pub mod follow_me;
 pub mod from_triangles;
+pub mod hardware;
 pub mod hull;
 pub mod properties;
 pub mod revolve;

@@ -34,6 +34,8 @@ pub struct FinalizeOptions {
   pub next_face_id: f64,
   /// Edges shorter than this and collinear vertices are removed; defaults to `COPLANAR_TOL`.
   pub simplify_tolerance: Option<f64>,
+  /// The caller has already isolated one connected solid; keep its enclosed cavity shells together.
+  pub connected_solid: bool,
 }
 
 /// Normalize, rebuild, simplify, decompose and measure `m`, which is left alone.
@@ -48,7 +50,8 @@ pub fn finalize_manifold(m: &Manifold, opts: &FinalizeOptions, choose_id: impl F
   let soup = TriangleSoup { verts: &norm.mesh.verts, tris: &norm.mesh.tris, face_id: &norm.mesh.face_id };
   let rebuilt = manifold_from_soup(&soup, run_id, center)?;
   let simplified = rebuilt.simplify(opts.simplify_tolerance.unwrap_or(COPLANAR_TOL));
-  let mut measured: Vec<(Manifold, f64, f64)> = simplified.decompose().into_iter().map(|part| {
+  let parts = if opts.connected_solid { vec![simplified] } else { simplified.decompose() };
+  let mut measured: Vec<(Manifold, f64, f64)> = parts.into_iter().map(|part| {
     let (volume, area) = (part.volume(), part.surface_area());
     (part, volume, area)
   }).collect();

@@ -12,6 +12,7 @@ import { resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { m4translation, meshBox, planeBasis, v3cross, v3normalize, v3sub, type MeshData, type Vec3 } from '@pushform/core';
 import { KernelClient } from '../client/KernelClient';
+import { HARDWARE_SHAPES, type HardwareOptions } from '../hardware';
 import { meshTopologyProblems } from '../meshChecks';
 import { toKernelErrorInfo, type BodyRef, type KernelErrorInfo, type KernelRequest, type MeshWire, type PolygonsWithHoles, type ResFor, type ToolSoup } from '../protocol';
 import { square, topRegion } from '../test/helpers';
@@ -564,6 +565,15 @@ describe.skipIf(!ready)('every kernel operation agrees bit for bit across TypeSc
       await client.revolve({ profile: [...rectProfile(1, 2, 1), [[1.25, 0.25], [1.25, 0.75], [1.75, 0.75], [1.75, 0.25]]], profileBasis: xz, axisOrigin: [0, 0, 0], axisDir: [0, 0, 1], angleDeg: 200, segments: 36, nextFaceId: 1 });
     });
 
+    it('keeps enclosed cavities with their solid and splits a profile the axis cuts into pieces', async () => {
+      // A hole away from the axis stays a cavity of its torus.
+      await client.revolve({ profile: [...rectProfile(0.5, 2, 1.5), [[0.8, 0.25], [0.8, 1.25], [1.7, 1.25], [1.7, 0.25]]], profileBasis: xz, axisOrigin: [0, 0, 0], axisDir: [0, 0, 1], angleDeg: 360, segments: 32, nextFaceId: 1 });
+      // A C whose arms reach across the axis: clipped to the near side it becomes two pieces, each its own solid.
+      const c: PolygonsWithHoles = [[[-1, -2], [2, -2], [2, -1.5], [0.25, -1.5], [0.25, 1.5], [2, 1.5], [2, 2], [-1, 2], [-1, 1.25], [-0.5, 1.25], [-0.5, -1.25], [-1, -1.25]]];
+      await client.revolve({ profile: c, profileBasis: xz, axisOrigin: [0, 0, 0], axisDir: [0, 0, 1], angleDeg: 270, segments: 40, nextFaceId: 3 });
+      await client.revolve({ profile: c, profileBasis: xz, axisOrigin: [0.25, 0, 0], axisDir: [0, 0, 1], angleDeg: 90, segments: 12, nextFaceId: 100 });
+    });
+
     it('rejects bad angles, segments, axes and profiles the same way', async () => {
       const base = { type: 'revolve' as const, profile: rectProfile(0.5, 1, 1), profileBasis: xz, axisOrigin: [0, 0, 0] as Vec3, axisDir: [0, 0, 1] as Vec3, segments: 24, nextFaceId: 1 };
       await expectAllAgree({ ...base, angleDeg: 0 });
@@ -603,6 +613,65 @@ describe.skipIf(!ready)('every kernel operation agrees bit for bit across TypeSc
       const nan = new Float64Array(good.verts);
       nan[0] = Number.NaN;
       await expectAllAgree({ type: 'edgeBlend', body, cut: [{ ...good, verts: nan }], add: [], nextFaceId: 6 });
+    });
+  });
+
+  describe('hardware', () => {
+    const variants: HardwareOptions[] = HARDWARE_SHAPES.flatMap((shape): HardwareOptions[] => {
+      const base = { shape };
+      const knob = shape.startsWith('knob-');
+      const roundGrip = shape === 'bar-round' || shape === 'wire' || shape === 'knob-t';
+      const list: HardwareOptions[] = [base, { ...base, segments: 16 }, { ...base, segments: 80 }];
+      if (knob) {
+        list.push({ ...base, length: 0.02, width: 0.02, projection: 0.03 });
+        list.push({ ...base, length: 0.05, width: 0.045, projection: 0.06, grip: 0.008 });
+      } else if (shape === 'wire') {
+        list.push({ ...base, spacing: 0.096, grip: 0.006 }, { ...base, spacing: 0.16, grip: 0.0127, projection: 0.04 });
+      } else if (shape === 'arch') {
+        list.push({ ...base, length: 0.13335, spacing: 0.096, width: 0.01429, grip: 0.008, projection: 0.028575 }, { ...base, length: 0.2, spacing: 0.16, grip: 0.012 });
+      } else if (shape === 'ring') {
+        list.push({ ...base, width: 0.06, grip: 0.012, projection: 0.02 }, { ...base, width: 0.04, grip: 0.006, projection: 0.03 });
+      } else if (shape === 'half-moon') {
+        list.push({ ...base, length: 0.1, width: 0.04, projection: 0.03 }, { ...base, length: 0.2, width: 0.06, wall: 0.004 });
+      } else if (shape === 'backplate') {
+        list.push({ ...base, width: 0.05, wall: 0.003, grip: 0.01 }, { ...base, width: 0.09, wall: 0.0015 });
+      } else {
+        list.push({ ...base, length: 0.2, spacing: 0.16, ...(roundGrip ? { width: 0.012, grip: 0.012 } : { width: 0.02 }) }, { ...base, length: 0.1, spacing: 0.076, projection: 0.04, wall: 0.0025, ...(roundGrip ? {} : { width: 0.03 }) });
+      }
+      return list;
+    });
+
+    it('builds every shape the same way, across sizes and resolutions', async () => {
+      let next = 1;
+      let built = 0;
+      for (const options of variants) {
+        const out = await expectAllAgree({ type: 'hardware', options, nextFaceId: next });
+        if (out.ok) {
+          built++;
+          next = (out.value as { nextFaceId: number }).nextFaceId;
+        }
+      }
+      expect(built).toBeGreaterThan(90);
+    }, 120000);
+
+    it('reports bad options the same way', async () => {
+      const bad: HardwareOptions[] = [
+        { shape: 'knob-round', width: Number.NaN },
+        { shape: 'wire', spacing: 0.2, length: 0.1 },
+        { shape: 'cup', wall: 0.02 },
+        { shape: 'ring', width: 0.02, grip: 0.012 },
+        { shape: 'recessed-round', width: 0.01, wall: 0.003 },
+        { shape: 'knob-round', segments: 15 },
+        { shape: 'knob-round', segments: 16.5 },
+        { shape: 'not-a-shape' as HardwareOptions['shape'] },
+      ];
+      for (const options of bad) await expectAllAgree({ type: 'hardware', options, nextFaceId: 1 });
+    });
+
+    it('agrees on the mounting centres and resolved options of a default bar pull', async () => {
+      const r = await client.hardware({ options: { shape: 'bar-round' }, nextFaceId: 40 });
+      expect(r.mountingCenters).toHaveLength(2);
+      expect(r.resolved.shape).toBe('bar-round');
     });
   });
 
@@ -733,7 +802,7 @@ describe.skipIf(!ready)('every kernel operation agrees bit for bit across TypeSc
         return made;
       };
       const pickSolid = (): Solid | undefined => solids[Math.floor(r() * solids.length)];
-      const op = Math.floor(r() * 16);
+      const op = Math.floor(r() * 17);
       const victim = pickSolid();
       const replace = async (components: Array<{ mesh: MeshWire }>): Promise<void> => {
         const made = await newSolidsFrom(components);
@@ -861,7 +930,13 @@ describe.skipIf(!ready)('every kernel operation agrees bit for bit across TypeSc
           break;
         }
         case 11: {
-          const out = await outcome(triad.request({ type: 'revolve', profile: [starPolygon(r, 1 + r(), r() * 0.5, 0.1 + 0.4 * r())], profileBasis: xz, axisOrigin: [0, 0, 0], axisDir: [r() * 0.3, r() * 0.3, 1], angleDeg: 30 + r() * 330, segments: 3 + Math.floor(r() * 60), nextFaceId: nextFace.value }));
+          const center = 1 + r();
+          const outer = starPolygon(r, center, r() * 0.5, 0.1 + 0.4 * r());
+          const withHole = r() < 0.3;
+          const hole = withHole ? [starPolygon(r, center, 0, 0.03 + 0.03 * r()).reverse()] : [];
+          // A profile that strays across the axis is clipped there, sometimes into several pieces.
+          const profile: PolygonsWithHoles = r() < 0.2 ? [outer.map(([x, y]) => [x! - center - 0.2, y!]), ...hole] : [outer, ...hole];
+          const out = await outcome(triad.request({ type: 'revolve', profile, profileBasis: xz, axisOrigin: [0, 0, 0], axisDir: [r() * 0.3, r() * 0.3, 1], angleDeg: 30 + r() * 330, segments: 3 + Math.floor(r() * 60), nextFaceId: nextFace.value }));
           if (out.ok) {
             const v = out.value as { components: Array<{ mesh: MeshWire }>; nextFaceId: number };
             nextFace.value = v.nextFaceId;
@@ -889,6 +964,26 @@ describe.skipIf(!ready)('every kernel operation agrees bit for bit across TypeSc
           const verts = new Float64Array(victim.mesh.verts);
           for (let i = 0; i < verts.length; i++) verts[i] = verts[i]! + (r() - 0.5) * 0.005;
           await outcome(triad.request({ type: 'autofold', body: victim.ref, mesh: { ...victim.mesh, verts }, nextFaceId: nextFace.value }));
+          break;
+        }
+        case 16: {
+          const shape = HARDWARE_SHAPES[Math.floor(r() * HARDWARE_SHAPES.length)]!;
+          const options: HardwareOptions = {
+            shape,
+            segments: 16 + Math.floor(r() * 24),
+            ...(r() < 0.5 ? { length: 0.03 + r() * 0.25 } : {}),
+            ...(r() < 0.5 ? { width: 0.01 + r() * 0.05 } : {}),
+            ...(r() < 0.5 ? { projection: 0.015 + r() * 0.05 } : {}),
+            ...(r() < 0.5 ? { spacing: r() * 0.2 } : {}),
+            ...(r() < 0.5 ? { grip: 0.004 + r() * 0.012 } : {}),
+            ...(r() < 0.5 ? { wall: 0.001 + r() * 0.004 } : {}),
+          };
+          const out = await outcome(triad.request({ type: 'hardware', options, nextFaceId: nextFace.value }));
+          if (out.ok) {
+            const v = out.value as { components: Array<{ mesh: MeshWire }>; nextFaceId: number };
+            nextFace.value = v.nextFaceId;
+            await replace(v.components);
+          }
           break;
         }
         case 14: {

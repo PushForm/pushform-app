@@ -27,7 +27,7 @@ pub fn autofold(mesh: &Mesh, next_face_id: f64) -> Result<ComponentsOutput, Kern
     return Err(KernelError::manifold_with("Would create a self-intersecting solid".to_string(), format!("{{\"reason\":\"SelfIntersecting\",\"status\":\"NoError\",\"triangles\":[{i},{j}]}}")));
   }
   let run_ids = [run_id];
-  let fin = finalize_manifold(&manifold, &FinalizeOptions { next_face_id, simplify_tolerance: None }, keep_ids_from_runs(&run_ids))?;
+  let fin = finalize_manifold(&manifold, &FinalizeOptions { next_face_id, simplify_tolerance: None, connected_solid: false }, keep_ids_from_runs(&run_ids))?;
   Ok(ComponentsOutput { components: fin.components, next_face_id: fin.next_face_id })
 }
 

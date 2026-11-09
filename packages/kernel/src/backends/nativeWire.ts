@@ -5,6 +5,7 @@
  * little-endian. Meshes stay as raw typed arrays, never JSON. Every decoded result owns its buffers, like a result
  * from the worker, since consumers may transfer them onwards.
  */
+import { resolveHardwareOptions } from '../hardware';
 import type {
   BooleanOp,
   BooleanResult,
@@ -15,6 +16,7 @@ import type {
   EnsureBodyResponse,
   FaceOrigin,
   FromTrianglesResult,
+  HardwareResult,
   KernelComponent,
   KernelRequest,
   ManifoldStatus,
@@ -52,6 +54,7 @@ const OP_REVOLVE = 16;
 const OP_EDGE_BLEND = 17;
 const OP_STATS = 18;
 const OP_VALIDATE_SOLID = 19;
+const OP_HARDWARE = 20;
 
 const BOOLEAN_OPS: readonly BooleanOp[] = ['add', 'subtract', 'intersect', 'split', 'trim'];
 
@@ -77,6 +80,15 @@ class Writer {
     this.reserve(4);
     this.view.setUint32(this.at, value, true);
     this.at += 4;
+  }
+
+  /** A string as its UTF-8 length and bytes. */
+  string(value: string): void {
+    const bytes = new TextEncoder().encode(value);
+    this.u32(bytes.byteLength);
+    this.reserve(bytes.byteLength);
+    new Uint8Array(this.buffer, this.at, bytes.byteLength).set(bytes);
+    this.at += bytes.byteLength;
   }
 
   f64(value: number): void {
@@ -280,6 +292,20 @@ export function encodeRequest(req: KernelRequest): Uint8Array {
       for (const soup of req.add) writeMesh(w, soup);
       w.f64(req.nextFaceId);
       break;
+    case 'hardware': {
+      const options = resolveHardwareOptions(req.options);
+      w.u32(OP_HARDWARE);
+      w.string(options.shape);
+      w.f64(options.length);
+      w.f64(options.width);
+      w.f64(options.projection);
+      w.f64(options.spacing);
+      w.f64(options.grip);
+      w.f64(options.wall);
+      w.f64(options.segments);
+      w.f64(req.nextFaceId);
+      break;
+    }
     case 'stats':
       w.u32(OP_STATS);
       break;
@@ -416,6 +442,17 @@ function decodeBoolean(buffer: ArrayBuffer): BooleanResult {
   return { components, secondary, nextFaceId, aRunId, bRunId };
 }
 
+function decodeHardware(buffer: ArrayBuffer, req: Extract<KernelRequest, { type: 'hardware' }>): HardwareResult {
+  const r = new Reader(buffer);
+  r.u32();
+  const numComponents = r.u32();
+  const numCenters = r.u32();
+  const nextFaceId = r.f64();
+  const mountingCenters: HardwareResult['mountingCenters'] = [];
+  for (let i = 0; i < numCenters; i++) mountingCenters.push([r.f64(), r.f64(), r.f64()]);
+  return { components: readComponents(r, numComponents), nextFaceId, mountingCenters, resolved: resolveHardwareOptions(req.options) };
+}
+
 function decodeEdgeBlend(buffer: ArrayBuffer): EdgeBlendResult {
   const r = new Reader(buffer);
   r.u32();
@@ -481,6 +518,8 @@ export function decodeResponse<R extends KernelRequest>(req: R, buffer: ArrayBuf
         return decodeEdgeBlend(buffer);
       case 'fromTriangles':
         return decodeFromTriangles(buffer);
+      case 'hardware':
+        return decodeHardware(buffer, req);
       case 'sectionCut':
         return decodeSectionCut(buffer);
       case 'properties':

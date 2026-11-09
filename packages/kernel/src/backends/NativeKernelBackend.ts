@@ -113,10 +113,17 @@ export class NativeKernelBackend implements KernelBackend {
 
   private sendNative<R extends KernelRequest>(req: R): Promise<ResFor<R>> {
     if (this.disposed) return Promise.reject(new KernelError('Aborted', 'NativeKernelBackend is disposed'));
+    let bytes: Uint8Array;
+    try {
+      bytes = encodeRequest(req);
+    } catch (e) {
+      // Bad request parameters (hardware options fail validation in the encoder): the same `Internal` error the kernel reports.
+      return Promise.reject(e instanceof KernelError ? e : new KernelError('Internal', e instanceof Error ? e.message : String(e)));
+    }
     return new Promise((resolve, reject) => {
       const entry: PendingNative = { reject };
       this.pending.add(entry);
-      this.transport.call(encodeRequest(req)).then(
+      this.transport.call(bytes).then(
         (buffer) => {
           if (!this.pending.delete(entry)) return;
           try {

@@ -6,6 +6,14 @@ default) and into the WebAssembly kernel built by `pnpm build:kernel-wasm` (opt-
 sources are not in this repository, so their license texts are reproduced here. The Rust crates (manifold-csg and its
 dependencies) are listed by cargo-about from the crate's manifest.
 
+## fdlibm (through V8)
+
+`src/jsmath.rs` reproduces `Math.sin`, `Math.cos` and `Math.atan2` from V8's port of fdlibm:
+
+Developed at SunPro, a Sun Microsystems, Inc. business.
+Permission to use, copy, modify, and distribute this software is freely granted, provided that this notice
+is preserved.
+
 ## Manifold 3.5.4
 
 https://github.com/elalish/manifold (the same version as the `manifold-3d` package that runs in WebAssembly in the web app)

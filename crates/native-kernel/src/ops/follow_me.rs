@@ -202,6 +202,6 @@ pub fn follow_me(req: &FollowMeRequest) -> Result<ComponentsOutput, KernelError>
     joined = Manifold::batch_union(&segments);
     &joined
   };
-  let fin = finalize_manifold(solid, &FinalizeOptions { next_face_id: req.next_face_id, simplify_tolerance: None }, all_new_ids)?;
+  let fin = finalize_manifold(solid, &FinalizeOptions { next_face_id: req.next_face_id, simplify_tolerance: None, connected_solid: false }, all_new_ids)?;
   Ok(ComponentsOutput { components: fin.components, next_face_id: fin.next_face_id })
 }

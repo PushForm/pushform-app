@@ -84,8 +84,16 @@ pub fn revolve(req: &RevolveRequest) -> Result<ComponentsOutput, KernelError> {
     return Err(KernelError::invalid("revolve.profile lies entirely on the far side of the axis"));
   }
   let divisions = js_max(3.0, ((req.segments * req.angle_deg) / 360.0).ceil());
-  let local = Manifold::revolve(&clipped, to_int32(divisions), req.angle_deg);
-  let solid = local.transform(&m4_affine(&frame.matrix));
-  let fin = finalize_manifold(&solid, &FinalizeOptions { next_face_id: req.next_face_id, simplify_tolerance: None }, all_new_ids)?;
-  Ok(ComponentsOutput { components: fin.components, next_face_id: fin.next_face_id })
+  // A connected planar region rotates into one connected solid. Split regions before revolving so an enclosed hole
+  // stays a cavity of its solid rather than a separate shell.
+  let mut components = Vec::new();
+  let mut next_face_id = req.next_face_id;
+  for region in clipped.decompose() {
+    let local = Manifold::revolve(&region, to_int32(divisions), req.angle_deg);
+    let solid = local.transform(&m4_affine(&frame.matrix));
+    let fin = finalize_manifold(&solid, &FinalizeOptions { next_face_id, simplify_tolerance: None, connected_solid: true }, all_new_ids)?;
+    components.extend(fin.components);
+    next_face_id = fin.next_face_id;
+  }
+  Ok(ComponentsOutput { components, next_face_id })
 }

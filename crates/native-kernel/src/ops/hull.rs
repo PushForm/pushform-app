@@ -29,6 +29,6 @@ pub fn hull(kernel: &Kernel, bodies: &[(f64, f64)], next_face_id: f64) -> Result
   let entries = bodies.iter().map(|&(id, version)| kernel.get_body(id, version)).collect::<Result<Vec<_>, _>>()?;
   let manifolds: Vec<&Manifold> = entries.iter().map(|e| &e.manifold).collect();
   let h = hull_of(&manifolds);
-  let fin = finalize_manifold(&h, &FinalizeOptions { next_face_id, simplify_tolerance: None }, all_new_ids)?;
+  let fin = finalize_manifold(&h, &FinalizeOptions { next_face_id, simplify_tolerance: None, connected_solid: false }, all_new_ids)?;
   Ok(ComponentsOutput { components: fin.components, next_face_id: fin.next_face_id })
 }

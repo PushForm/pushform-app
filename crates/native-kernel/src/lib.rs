@@ -9,6 +9,7 @@ pub mod earcut;
 #[cfg(feature = "fault-injection")]
 pub mod faults;
 pub mod finalize;
+pub mod jsmath;
 pub mod math;
 pub mod meshio;
 pub mod normalize;
@@ -28,7 +29,7 @@ use std::sync::{Arc, Mutex};
 
 use cache::{BodyCache, CacheEntry};
 use math::js_number_string;
-use ops::{autofold, bodies, boolean, decompose, edge_blend, follow_me, from_triangles, hull, properties, revolve, section_cut, simplify, transform};
+use ops::{autofold, bodies, boolean, decompose, edge_blend, follow_me, from_triangles, hardware, hull, properties, revolve, section_cut, simplify, transform};
 use push_pull::Checkpoint;
 use tolerance::COPLANAR_TOL;
 use wire::Request;
@@ -193,6 +194,7 @@ impl Kernel {
       Request::FollowMe(req) => wire::encode_components(wire::OP_FOLLOW_ME, &follow_me::follow_me(&req)?),
       Request::Revolve(req) => wire::encode_components(wire::OP_REVOLVE, &revolve::revolve(&req)?),
       Request::EdgeBlend(req) => wire::encode_edge_blend(&edge_blend::edge_blend(self, &req)?),
+      Request::Hardware(req) => wire::encode_hardware(&hardware::hardware(&req)?),
       Request::Stats => wire::encode_stats(self.lock_cache().len(), bodies::heap_bytes()),
       Request::ValidateSolid { mesh } => {
         bodies::validate_solid(&mesh)?;

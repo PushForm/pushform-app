@@ -508,7 +508,7 @@ pub fn push_pull(body: &CacheEntry, req: &PushPullRequest, checkpoint: &dyn Chec
   if req.preview {
     return Ok(preview_mesh(&out));
   }
-  let fin = finalize_manifold(&out, &FinalizeOptions { next_face_id: req.next_face_id, simplify_tolerance: None }, choose_id)?;
+  let fin = finalize_manifold(&out, &FinalizeOptions { next_face_id: req.next_face_id, simplify_tolerance: None, connected_solid: false }, choose_id)?;
   Ok(PushPullOutput::Full {
     side_face_for_boundary_edge: side_face_map(&fin, tool_run_id),
     next_face_id: fin.next_face_id,
@@ -545,7 +545,7 @@ pub fn extrude_sketch(req: &ExtrudeSketchRequest, checkpoint: &dyn Checkpoint) -
   let tool = build_standalone_tool(&frame, height, tool_run_id)?;
   checkpoint.check()?;
   let choose_id = choose_id_for(0, tool_run_id, None);
-  let fin = finalize_manifold(&tool, &FinalizeOptions { next_face_id: req.next_face_id, simplify_tolerance: None }, choose_id)?;
+  let fin = finalize_manifold(&tool, &FinalizeOptions { next_face_id: req.next_face_id, simplify_tolerance: None, connected_solid: false }, choose_id)?;
   Ok(PushPullOutput::Full {
     side_face_for_boundary_edge: side_face_map(&fin, tool_run_id),
     next_face_id: fin.next_face_id,

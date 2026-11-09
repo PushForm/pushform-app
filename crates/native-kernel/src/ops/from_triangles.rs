@@ -24,6 +24,6 @@ pub fn from_triangles(mesh: &Mesh, next_face_id: f64) -> Result<FromTrianglesOut
     Err(status) => return Ok(FromTrianglesOutput { status, components: Vec::new(), next_face_id }),
   };
   let run_ids = [run_id];
-  let fin = finalize_manifold(&manifold, &FinalizeOptions { next_face_id, simplify_tolerance: None }, keep_ids_from_runs(&run_ids))?;
+  let fin = finalize_manifold(&manifold, &FinalizeOptions { next_face_id, simplify_tolerance: None, connected_solid: false }, keep_ids_from_runs(&run_ids))?;
   Ok(FromTrianglesOutput { status: "NoError", components: fin.components, next_face_id: fin.next_face_id })
 }

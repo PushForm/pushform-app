@@ -9,6 +9,7 @@ use crate::ops::boolean::{BooleanOutput, BooleanRequest};
 use crate::ops::edge_blend::{EdgeBlendOutput, EdgeBlendRequest};
 use crate::ops::follow_me::FollowMeRequest;
 use crate::ops::from_triangles::FromTrianglesOutput;
+use crate::ops::hardware::{HardwareOutput, HardwareRequest};
 use crate::ops::properties::PropertiesOutput;
 use crate::ops::revolve::RevolveRequest;
 use crate::ops::section_cut::SectionCutOutput;
@@ -35,6 +36,7 @@ pub const OP_REVOLVE: u32 = 16;
 pub const OP_EDGE_BLEND: u32 = 17;
 pub const OP_STATS: u32 = 18;
 pub const OP_VALIDATE_SOLID: u32 = 19;
+pub const OP_HARDWARE: u32 = 20;
 
 /// A triangle mesh or tool soup as sent, with each array's own length so a malformed mesh reaches the kernel as it was sent.
 pub struct Mesh {
@@ -75,6 +77,7 @@ pub enum Request {
   EdgeBlend(EdgeBlendRequest),
   Stats,
   ValidateSolid { mesh: Mesh },
+  Hardware(HardwareRequest),
 }
 
 struct Reader<'a> {
@@ -122,6 +125,10 @@ impl Reader<'_> {
   fn meshes(&mut self) -> Result<Vec<Mesh>, KernelError> {
     let n = self.u32()? as usize;
     (0..n).map(|_| self.mesh()).collect()
+  }
+  fn string(&mut self) -> Result<String, KernelError> {
+    let len = self.u32()? as usize;
+    Ok(String::from_utf8_lossy(self.take(len)?).into_owned())
   }
   fn polygon(&mut self) -> Result<Vec<Vec<Pt>>, KernelError> {
     let num_contours = self.u32()? as usize;
@@ -246,6 +253,17 @@ pub fn decode_request(bytes: &[u8]) -> Result<Request, KernelError> {
     }
     OP_STATS => Ok(Request::Stats),
     OP_VALIDATE_SOLID => Ok(Request::ValidateSolid { mesh: r.mesh()? }),
+    OP_HARDWARE => Ok(Request::Hardware(HardwareRequest {
+      shape: r.string()?,
+      length: r.f64()?,
+      width: r.f64()?,
+      projection: r.f64()?,
+      spacing: r.f64()?,
+      grip: r.f64()?,
+      wall: r.f64()?,
+      segments: r.f64()?,
+      next_face_id: r.f64()?,
+    })),
     op => Err(KernelError::invalid(&format!("unknown kernel request {op}"))),
   }
 }
@@ -409,6 +427,21 @@ pub fn encode_edge_blend(output: &EdgeBlendOutput) -> Vec<u8> {
   w.u32(output.tool_run_id);
   w.u32(output.components.len() as u32);
   w.f64(output.next_face_id);
+  write_components(&mut w, &output.components);
+  w.finish()
+}
+
+pub fn encode_hardware(output: &HardwareOutput) -> Vec<u8> {
+  let mut w = Writer::default();
+  w.u32(OP_HARDWARE);
+  w.u32(output.components.len() as u32);
+  w.u32(output.mounting_centers.len() as u32);
+  w.f64(output.next_face_id);
+  for center in &output.mounting_centers {
+    w.f64(center[0]);
+    w.f64(center[1]);
+    w.f64(center[2]);
+  }
   write_components(&mut w, &output.components);
   w.finish()
 }

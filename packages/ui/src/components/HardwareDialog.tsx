@@ -12,26 +12,60 @@ import { Dialog, Field } from './DialogParts';
 /** Optional dimensions use the selected family's defaults. Explicit entries are millimeters. */
 export function HardwareDialog({ onClose }: { onClose: () => void }): JSX.Element {
   const app = useApp();
-  const [shape, setShape] = useState<HardwareShape>('bar-round');
-  const [finish, setFinish] = useState<HardwareFinish>('satin-nickel');
-  const [values, setValues] = useState<Record<string, string>>({});
+  const selected = app.document.selection.refs.length === 1 ? app.document.selection.refs[0] : null;
+  const selectedInstance =
+    selected?.kind === 'instance'
+      ? app.document.doc.state.definitions
+          .get(app.document.doc.state.rootDefinitionId)
+          ?.entities.instances.get(selected.id)
+      : null;
+  const selectedDefinition = selectedInstance
+    ? app.document.doc.state.definitions.get(selectedInstance.definitionId)
+    : null;
+  let seed: Record<string, unknown> = {};
+  try {
+    const data = JSON.parse(selectedDefinition?.description ?? '{}');
+    if (data.generator === 'hardware') seed = data;
+  } catch {
+    /* A regular component has no generator parameters. */
+  }
+  const editId = seed.generator === 'hardware' ? selectedDefinition?.id : undefined;
+  const [shape, setShape] = useState<HardwareShape>((seed.shape as HardwareShape) ?? 'bar-round');
+  const [finish, setFinish] = useState<HardwareFinish>(
+    (seed.finish as HardwareFinish) ?? 'satin-nickel',
+  );
+  const [values, setValues] = useState<Record<string, string>>(
+    Object.fromEntries(
+      ['length', 'width', 'projection', 'spacing', 'grip', 'wall']
+        .filter((k) => typeof seed[k] === 'number')
+        .map((k) => [k, String(Number(seed[k]) * 1000)]),
+    ),
+  );
   const [error, setError] = useState(''),
     [busy, setBusy] = useState(false);
   const defaults = resolveHardwareOptions({ shape });
-  const fields = (
-    shape.startsWith('knob-')
-      ? shape === 'knob-oval' ||
-        shape === 'knob-square' ||
-        shape === 'knob-pyramid' ||
-        shape.startsWith('knob-t')
-        ? ['length', 'width', 'projection', 'grip']
-        : ['width', 'projection', 'grip']
-      : shape === 'ring'
-        ? ['width', 'projection', 'grip']
-        : shape.startsWith('recessed') || shape.startsWith('cup') || shape.startsWith('edge')
-          ? ['length', 'width', 'projection', 'spacing', 'wall']
-          : ['length', 'width', 'projection', 'spacing', 'grip']
-  ) as (keyof typeof values)[];
+  const fields: string[] =
+    shape === 'backplate'
+      ? ['width', 'wall', 'grip']
+      : shape === 'half-moon'
+        ? ['length', 'width', 'projection', 'spacing', 'wall']
+        : shape === 'recessed-round'
+          ? ['width', 'projection', 'wall']
+          : shape === 'wire'
+            ? ['spacing', 'projection', 'grip']
+            : shape === 'bar-round' || shape === 'knob-t'
+              ? ['length', 'projection', ...(shape === 'bar-round' ? ['spacing'] : []), 'grip']
+              : shape.startsWith('knob-')
+                ? ['knob-oval', 'knob-square', 'knob-pyramid', 'knob-t-square'].includes(shape)
+                  ? ['length', 'width', 'projection', 'grip']
+                  : ['width', 'projection', 'grip']
+                : shape === 'ring'
+                  ? ['width', 'projection', 'grip']
+                  : shape.startsWith('recessed')
+                    ? ['length', 'width', 'projection', 'wall']
+                    : shape.startsWith('cup') || shape.startsWith('edge')
+                      ? ['length', 'width', 'projection', 'spacing', 'wall']
+                      : ['length', 'width', 'projection', 'spacing', 'grip'];
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError('');
@@ -45,7 +79,12 @@ export function HardwareDialog({ onClose }: { onClose: () => void }): JSX.Elemen
             throw new Error('Enter finite, nonnegative dimensions in millimeters.');
           dims[key] = v / 1000;
         }
-      await app.commands.execute('hardware.create', { shape, finish, ...dims });
+      await app.commands.execute('hardware.create', {
+        shape,
+        finish,
+        ...dims,
+        ...(editId ? { replaceDefinitionId: editId, mountingPlane: seed.mountingPlane } : {}),
+      });
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Hardware could not be generated.');
@@ -54,7 +93,7 @@ export function HardwareDialog({ onClose }: { onClose: () => void }): JSX.Elemen
     }
   }
   return (
-    <Dialog title="Cabinet Hardware" onClose={onClose}>
+    <Dialog title="Cabinet Hardware" onClose={busy ? () => {} : onClose}>
       <form onSubmit={(e) => void submit(e)}>
         <Field label="Shape" htmlFor="hardware-shape">
           <select
@@ -85,16 +124,26 @@ export function HardwareDialog({ onClose }: { onClose: () => void }): JSX.Elemen
             ))}
           </select>
         </Field>
+        {editId && (
+          <p>
+            Regenerating changes all instances of this hardware component. Manual changes to its
+            generated solids are replaced.
+          </p>
+        )}
         <p>Dimensions in mm. Leave a field empty to use the shape’s default.</p>
         {fields.map((key) => (
           <Field
             key={key}
             label={
-              key === 'spacing'
-                ? 'Mounting centers'
-                : key === 'width' && ['knob-hex', 'knob-octagon'].includes(shape)
-                  ? 'Head across flats'
-                  : key[0]!.toUpperCase() + key.slice(1)
+              key === 'wall'
+                ? 'Wall / plate thickness'
+                : key === 'grip' && shape === 'backplate'
+                  ? 'Screw hole diameter'
+                  : key === 'spacing'
+                    ? 'Mounting centers'
+                    : key === 'width' && ['knob-hex', 'knob-octagon'].includes(shape)
+                      ? 'Head across flats'
+                      : key[0]!.toUpperCase() + key.slice(1)
             }
             htmlFor={'hardware-' + key}
           >
@@ -119,7 +168,7 @@ export function HardwareDialog({ onClose }: { onClose: () => void }): JSX.Elemen
             Cancel
           </button>
           <button type="submit" disabled={busy}>
-            {busy ? 'Generating…' : 'Generate and place'}
+            {busy ? 'Generating…' : editId ? 'Regenerate selected hardware' : 'Generate and place'}
           </button>
         </div>
       </form>

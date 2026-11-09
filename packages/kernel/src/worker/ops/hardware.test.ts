@@ -78,3 +78,9 @@ it('rejects closed pocket and ring openings', () => {
   ).toThrow();
   expect(() => resolveHardwareOptions({ shape: 'ring', width: 0.02, grip: 0.012 })).toThrow();
 });
+for (const shape of HARDWARE_SHAPES)
+  it(`bounds the high-resolution ${shape} preview budget`, async () => {
+    const r = await client.hardware({ options: { shape, segments: 80 }, nextFaceId: 1 });
+    expect(r.components.reduce((n, c) => n + c.mesh.tris.length / 3, 0)).toBeLessThan(12000);
+    for (const c of r.components) expect(meshTopologyProblems(c.mesh)).toEqual([]);
+  });

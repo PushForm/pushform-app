@@ -51,3 +51,43 @@ it('leaves the model unchanged after incompatible input', async () => {
   expect(host.doc.state).toBe(before);
   expect(host.canUndo()).toBe(false);
 });
+it('regenerates a definition in place, preserving placements and undo', async () => {
+  const host = new DocumentHost();
+  const reg = new CommandRegistry({
+    tx: host,
+    services: new Map([
+      [SERVICE_DOCUMENT, host],
+      [SERVICE_KERNEL, kernel],
+    ] as [string, unknown][]),
+  });
+  reg.registerAll(hardwareCommands);
+  const made = (await reg.execute('hardware.create', {
+    shape: 'knob-disk',
+    point: [1, 2, 3],
+    finish: 'walnut',
+  })) as { definitionId: number; instanceId: number };
+  const root = host.doc.state.definitions.get(host.doc.state.rootDefinitionId)!;
+  const transform = root.entities.instances.get(made.instanceId as never)!.transform;
+  await reg.execute('hardware.create', {
+    shape: 'knob-disk',
+    width: 0.04,
+    finish: 'walnut',
+    replaceDefinitionId: made.definitionId,
+  });
+  expect(
+    host.doc.state.definitions.get(host.doc.state.rootDefinitionId)!.entities.instances.size,
+  ).toBe(1);
+  expect(
+    host.doc.state.definitions
+      .get(host.doc.state.rootDefinitionId)!
+      .entities.instances.get(made.instanceId as never)!.transform,
+  ).toEqual(transform);
+  expect(
+    JSON.parse(host.doc.state.definitions.get(made.definitionId as never)!.description).width,
+  ).toBe(0.04);
+  expect(host.undo()).toBe(true);
+  expect(
+    JSON.parse(host.doc.state.definitions.get(made.definitionId as never)!.description).width,
+  ).toBe(0.032);
+  expect(host.doc.state.images.size).toBeGreaterThan(0);
+});

@@ -89,7 +89,7 @@ export function resolveHardwareOptions(input: HardwareOptions): ResolvedHardware
             ? 0.012
             : 0.032),
     spacing: input.spacing ?? (knob ? 0 : 0.128),
-    grip: input.grip ?? 0.01,
+    grip: input.grip ?? (input.shape === 'backplate' ? 0.004 : 0.01),
     wall: input.wall ?? 0.002,
     segments: input.segments ?? 40,
   };
@@ -120,9 +120,15 @@ export function resolveHardwareOptions(input: HardwareOptions): ResolvedHardware
     throw new Error('A ring needs an open center and projection at least its section diameter.');
   if (o.shape === 'knob-ball' && o.projection <= o.width)
     throw new Error('Ball knob projection must exceed the ball diameter to leave a stem.');
+  if (o.shape === 'cup-square' && 4 * o.wall >= Math.min(o.length, o.width))
+    throw new Error('The rectangular cup rim leaves no pocket.');
   if (o.shape === 'recessed' && 4 * o.wall >= Math.min(o.length, o.width))
     throw new Error('The recessed rim leaves no pocket opening.');
   if (o.shape === 'recessed-round' && 4 * o.wall >= o.width)
     throw new Error('The recessed rim leaves no pocket opening.');
+  if (o.shape === 'backplate' && o.grip >= o.width)
+    throw new Error('The screw hole must fit inside the backplate.');
+  if (['half-moon', 'edge', 'edge-curved'].includes(o.shape) && o.wall >= o.projection)
+    throw new Error('The thickness must be smaller than the projection.');
   return o;
 }

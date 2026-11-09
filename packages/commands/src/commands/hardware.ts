@@ -23,7 +23,7 @@ export const HARDWARE_FINISHES = {
   brass: { name: 'Hardware — brass', color: [0.72, 0.53, 0.24] },
   'champagne-bronze': { name: 'Hardware — champagne bronze', color: [0.68, 0.56, 0.38] },
   'oil-rubbed-bronze': { name: 'Hardware — oil-rubbed bronze', color: [0.2, 0.14, 0.1] },
-  white: { name: 'Hardware — white ceramic', color: [0.95, 0.94, 0.91] },
+  white: { name: 'Hardware — white finish', color: [0.95, 0.94, 0.91] },
   walnut: { name: 'Hardware — walnut', color: [0.28, 0.15, 0.08] },
   maple: { name: 'Hardware — maple', color: [0.77, 0.61, 0.41] },
 } as const;
@@ -42,6 +42,7 @@ export const HardwareParamsSchema = z
       .enum(Object.keys(HARDWARE_FINISHES) as [HardwareFinish, ...HardwareFinish[]])
       .default('satin-nickel'),
     name: z.string().trim().min(1).max(180).optional(),
+    replaceDefinitionId: z.number().int().positive().optional(),
     point: z.tuple([z.number(), z.number(), z.number()]).optional(),
     mountingPlane: z.enum(['front', 'top', 'side']).default('front'),
   })
@@ -55,6 +56,21 @@ export const hardwareCreate = defineCommand({
   async run(ctx, p) {
     const host = hostOf(ctx),
       path = [...host.context.path];
+    const original =
+      p.replaceDefinitionId === undefined
+        ? null
+        : host.doc.state.definitions.get(p.replaceDefinitionId as DefId);
+    if (p.replaceDefinitionId !== undefined && !original)
+      throw new Error('The hardware definition no longer exists.');
+    if (original) {
+      let saved;
+      try {
+        saved = JSON.parse(original.description);
+      } catch {
+        throw new Error('Select a generated hardware component.');
+      }
+      if (saved.generator !== 'hardware') throw new Error('Select a generated hardware component.');
+    }
     const { shape, length, width, projection, spacing, grip, wall, segments } = p;
     const options = {
       shape,
@@ -77,18 +93,33 @@ export const hardwareCreate = defineCommand({
     const name = p.name ?? p.shape.replaceAll('-', ' ');
     host.edit('Generate Cabinet Hardware', (draft) => {
       const state = draft as unknown as DocumentState;
-      const def = createDefinition(draft, {
-        name: uniqueDefinitionName(state, name),
-        isGroup: false,
-        description: JSON.stringify({
+      const def: ReturnType<typeof createDefinition> = original
+        ? (draft.definitions.get(original.id)! as unknown as ReturnType<typeof createDefinition>)
+        : createDefinition(draft, {
+            name: uniqueDefinitionName(state, name),
+            isGroup: false,
+            description: JSON.stringify({
+              generator: 'hardware',
+              version: 1,
+              ...made.resolved,
+              finish: p.finish,
+              mountingPlane: p.mountingPlane,
+              mountingCenters: made.mountingCenters,
+            }),
+          });
+      if (original) {
+        const ids = new Set(def.entities.bodies.keys());
+        def.entities.bodies.clear();
+        def.entities.order = def.entities.order.filter((id) => !ids.has(id));
+        def.description = JSON.stringify({
           generator: 'hardware',
           version: 1,
           ...made.resolved,
           finish: p.finish,
           mountingPlane: p.mountingPlane,
           mountingCenters: made.mountingCenters,
-        }),
-      });
+        });
+      }
       definitionId = def.id;
       const f = HARDWARE_FINISHES[p.finish];
       const material =
@@ -148,7 +179,7 @@ export const hardwareCreate = defineCommand({
           }
         }
       }
-      const at = p.point ?? (ctx.tools ? null : [0, 0, 0]);
+      const at = original ? null : (p.point ?? (ctx.tools ? null : [0, 0, 0]));
       if (at) {
         const placed = newInstance(
           draft,
@@ -163,7 +194,7 @@ export const hardwareCreate = defineCommand({
       }
     });
     if (instanceId !== null) host.selection.set([{ kind: 'instance', path, id: instanceId }]);
-    else {
+    else if (!original) {
       componentPlacement.current = definitionId;
       ctx.tools?.activate('placeComponent');
     }

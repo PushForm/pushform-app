@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import { ModelDescription } from './ModelDescription';
 import { BrowseImagesProvider } from '@pushform/commons-ui/BrowseImages';
 import { useBrowsePaging, MoreBrowseResults } from '@pushform/commons-ui/BrowsePaging';
 import { commonsFileUrl, CommonsUnavailableError, type CommonsProfile, type CommonsCollections } from '@pushform/cloud';
@@ -50,7 +51,7 @@ function ModelDetail({ model, filesUrl, account, editorUrl }: { model: CatalogMo
       <div>
         <p className="eyebrow">{model.category}</p>
         <h1>{model.title}</h1><p className="creator"><CreatorCredit model={model}/></p>
-        <p className="description">{model.description}</p>
+        <ModelDescription text={model.description}/>
         <dl className="metadata"><div><dt>Formats</dt><dd>{model.formats.join(', ')}</dd></div>
           <div><dt>Revision</dt><dd>{model.revision}</dd></div>
           <div><dt>Published</dt><dd>{new Date(model.publishedAt).toLocaleDateString()}</dd></div></dl>

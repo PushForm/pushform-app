@@ -114,7 +114,8 @@ export function hardware(ctx: KernelContext, req: HardwareRequest): HardwareResu
             across = (Math.sin(angle) * g) / 2;
           verts.push(
             pts[k]![0] - (dz / len) * across,
-            (Math.cos(angle) * w) / 2,
+            ((Math.cos(angle) * w) / 2) *
+              (shape === 'arch' ? 0.6 + 0.4 * Math.abs((2 * k) / (pts.length - 1) - 1) : 1),
             pts[k]![2] + (dx / len) * across,
           );
         }
@@ -211,31 +212,34 @@ export function hardware(ctx: KernelContext, req: HardwareRequest): HardwareResu
         solid = cut(sub(outer, inner), box(l * 2, w, h, [0, w / 2, h / 2]));
         solid = moved(solid, 0, -w / 2, 0);
       } else {
-        const profile: SimplePolygon = [
-          [-w / 2, 0],
-          [w / 2, 0],
-        ];
-        for (let i = 0; i <= 20; i++) {
-          const a = (i * Math.PI) / 20;
-          profile.push([(w / 2) * Math.cos(a), h * Math.sin(a)]);
-        }
-        const section = keep(new CrossSection([profile]));
-        const outer = moved(keep(keep(section.extrude(l)).rotate([90, 0, 90])), -l / 2, 0, 0);
-        const innerProfile: SimplePolygon = [
-          [-w / 2 + t, -t],
-          [w / 2 - t, -t],
-        ];
-        for (let i = 0; i <= 20; i++) {
-          const a = (i * Math.PI) / 20;
-          innerProfile.push([(w / 2 - t) * Math.cos(a), (h - t) * Math.sin(a)]);
-        }
-        const inner = moved(
-          keep(keep(keep(new CrossSection([innerProfile])).extrude(l - 2 * t)).rotate([90, 0, 90])),
-          -l / 2 + t,
+        const rounded = (x: number, y: number, radius: number): SimplePolygon => {
+          const pts: SimplePolygon = [];
+          for (let k = 0; k < 4; k++) {
+            const cx = (k === 0 || k === 3 ? 1 : -1) * (x / 2 - radius),
+              cy = (k < 2 ? 1 : -1) * (y / 2 - radius);
+            for (let i = 0; i <= 6; i++) {
+              const angle = ((k + i / 6) * Math.PI) / 2;
+              pts.push([cx + radius * Math.cos(angle), cy + radius * Math.sin(angle)]);
+            }
+          }
+          return pts;
+        };
+        const radius = Math.min(w / 5, t * 2);
+        const outer = keep(keep(new CrossSection([rounded(l, w, radius)])).extrude(h));
+        const pocket = box(l - 2 * t, w, h - 2 * t, [0, -t, (h - 2 * t) / 2]);
+        const recess = moved(
+          keep(
+            keep(
+              new CrossSection([
+                rounded(l - 4 * t, w - 4 * t, Math.min(radius / 2, (w - 4 * t) / 4)),
+              ]),
+            ).extrude(t),
+          ),
           0,
           0,
+          h - t / 2,
         );
-        solid = sub(outer, inner);
+        solid = sub(sub(outer, pocket), recess);
       }
       mount.push(
         [-Math.min(c, l - 2 * t) / 2, w * 0.2, 0],
@@ -276,7 +280,7 @@ export function hardware(ctx: KernelContext, req: HardwareRequest): HardwareResu
       solid = add(solid, box(l * 0.8, t, h, [0, t / 2, h / 2]));
       mount.push([-Math.min(c, l * 0.7) / 2, 0, 0], [Math.min(c, l * 0.7) / 2, 0, 0]);
     } else {
-      solid = sub(cylinder(w / 2, t), cylinder(Math.min(g / 4, w / 8), t * 2, [0, 0, -t / 2]));
+      solid = sub(cylinder(w / 2, t), cylinder(g / 2, t * 2, [0, 0, -t / 2]));
       mount.push([0, 0, 0]);
     }
     if (solid.isEmpty() || solid.volume() <= LENGTH_TOL ** 3)

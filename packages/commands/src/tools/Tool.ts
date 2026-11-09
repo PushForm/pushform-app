@@ -231,6 +231,8 @@ export interface Tool {
    */
   onKeyDown?(e: ToolKeyEvent): boolean | void;
   onKeyUp?(e: ToolKeyEvent): boolean | void;
+  /** Raw held modifiers, separate from Ctrl/Alt taps that change tool modes. */
+  onModifiersChanged?(modifiers: Modifiers): void;
   onWheel?(e: ToolWheelEvent): boolean | void;
   onVcb?(value: VcbValue): void;
   /**

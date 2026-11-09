@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import type { Box3, Vec2, Vec3 } from '@pushform/core';
-import { box3Center, box3Size, LENGTH_TOL, m4transformPoint, planeFromPointNormal, v3dot, v3len, v3normalize, v3sub } from '@pushform/core';
-import type { InferenceOptions, InferenceResult, Snap } from '@pushform/inference';
+import { box3Center, box3Size, LENGTH_TOL, RATIO_TOL, m4transformPoint, planeFromPointNormal, rayAt, v3dist, v3dot, v3len, v3normalize, v3sub } from '@pushform/core';
+import type { InferenceEngine, InferenceOptions, InferenceResult, Snap } from '@pushform/inference';
 import { SNAP_COLORS } from '@pushform/inference';
 import type { EntityRef } from '@pushform/model';
-import { m4scaleAbout, refsBounds } from '../../commands/transform';
+import { m4scaleAbout, planTransform, refsBounds } from '../../commands/transform';
+import { SERVICE_INFERENCE } from '../../host/services';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
 import { NO_MODIFIERS } from '../Tool';
-import type { Modifiers, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
-import { pointerField } from '../entry';
-import { DRAG_PX, entityOverlay, HOVER_COLOR, inferenceOverlay, screenDist } from '../toolUtil';
+import type { EntryField, Modifiers, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import { DRAG_PX, entityOverlay, HOVER_COLOR, inferenceOverlay, screenDist, worldPerPixelAt } from '../toolUtil';
 import { AXIS_COLOR, AXIS_DIR, movedOutline, pickRef, refsKey, sectionPreviewFor, TransformToolBase, withoutSectionPlanes, worldToScreen } from './transformShared';
 import type { TransformCommit } from './transformShared';
 import type { SectionPreview, SectionPreviewTool } from '../sectionPreview';
@@ -49,6 +49,7 @@ type State =
   | {
       readonly kind: 'scaling';
       readonly refs: EntityRef[];
+      readonly ignore: EntityRef[];
       readonly box: ScaleBox;
       readonly grip: ScaleGrip;
       readonly downScreen: Vec2;
@@ -69,6 +70,7 @@ interface ScaleEdit {
   readonly dims: readonly number[];
   readonly kind: GripKind;
   readonly uniform: boolean;
+  readonly centered?: boolean;
 }
 
 const IDLE: State = { kind: 'idle' };
@@ -173,6 +175,9 @@ export class ScaleTool extends TransformToolBase implements SectionPreviewTool {
   private hover: EntityRef | null = null;
   private cursorInference: InferenceResult | null = null;
   private cursorScreen: Vec2 | null = null;
+  private pointer: ToolPointerEvent | null = null;
+  /** A uniform value holds all factors; free Size fields hold their individual axes. */
+  private entryLocks = new Map<string, Vec3>();
   /** What each commit this tool made scaled, for typed redos. */
   private edits = new WeakMap<TransformCommit, ScaleEdit>();
 
@@ -194,6 +199,8 @@ export class ScaleTool extends TransformToolBase implements SectionPreviewTool {
     this.mods = NO_MODIFIERS;
     this.boxKey = '';
     this.box = null;
+    this.entryLocks.clear();
+    this.pointer = null;
     this.refresh();
   }
   hasPendingWork(): boolean {
@@ -205,6 +212,11 @@ export class ScaleTool extends TransformToolBase implements SectionPreviewTool {
     this.box = null;
     this.hoverGrip = null;
     this.hover = null;
+    this.entryLocks.clear();
+    this.pointer = null;
+    this.cursorInference = null;
+    this.cursorScreen = null;
+    this.sectionCache = null;
   }
 
   /** Section planes being scaled, drawn and cutting where the scale would put them. */
@@ -223,7 +235,7 @@ export class ScaleTool extends TransformToolBase implements SectionPreviewTool {
     const s = this.state;
     if (s.kind !== 'scaling') return { pickOnly: this.box !== null };
     const g = s.grip;
-    const base = { anchor: g.pos, ignore: s.refs };
+    const base = { anchor: g.pos, ignore: s.ignore, lineMode: 'rail' as const };
     if (g.kind === 'corner' && !s.uniform && s.box.dims.length > 1) {
       // Shift on a corner scales each axis freely: no diagonal lock (only the flat box's own plane)
       if (s.box.dims.length === 3) return base;
@@ -261,9 +273,7 @@ export class ScaleTool extends TransformToolBase implements SectionPreviewTool {
     const s = this.state;
     if (s.kind === 'scaling') {
       if (!s.moved && screenDist(e.screen, s.downScreen) > DRAG_PX) s.moved = true;
-      s.uniform = this.isUniform(s.grip, e.modifiers.shift);
-      s.anchor = e.modifiers.ctrl || e.modifiers.alt ? s.box.center : this.opposite(s.box, s.grip);
-      s.factors = this.factorsFor(e, s);
+      this.updatePreview(e);
       this.ctx?.requestRender();
       this.ctx?.statusChanged();
       return;
@@ -276,14 +286,12 @@ export class ScaleTool extends TransformToolBase implements SectionPreviewTool {
   }
 
   onPointerDown(e: ToolPointerEvent): void {
-    this.mods = e.modifiers;
     if (e.button !== 0) return;
     const s = this.state;
     if (s.kind === 'scaling') {
       if (s.pressed) return;
       if (!s.moved && screenDist(e.screen, s.downScreen) <= DRAG_PX) return;
-      s.factors = this.factorsFor(e, s);
-      this.commit(s.anchor, s.factors);
+      this.finishAt(e);
       return;
     }
     this.refresh();
@@ -305,9 +313,18 @@ export class ScaleTool extends TransformToolBase implements SectionPreviewTool {
     this.lastError = null;
     if (this.refuse(this.refs, false)) return;
     const box = this.box;
+    const plan = planTransform(this.docState()!, this.refs, m4scaleAbout([0, 0, 0], [1, 1, 1]), false, 'Scale');
+    const ignore = this.refs.filter((r) => !plan.bodies.has(r.id));
+    for (const id of plan.bodies.keys()) ignore.push({ kind: 'body', path: [...plan.path], id });
+    this.entryLocks.clear();
+    this.pointer = e;
+    this.mods = e.modifiers;
+    this.cursorScreen = e.screen;
+    this.cursorInference = e.inference;
     this.state = {
       kind: 'scaling',
       refs: [...this.refs],
+      ignore,
       box,
       grip,
       downScreen: e.screen,
@@ -326,33 +343,21 @@ export class ScaleTool extends TransformToolBase implements SectionPreviewTool {
     const s = this.state;
     s.pressed = false;
     if (!s.moved && screenDist(e.screen, s.downScreen) <= DRAG_PX) return;
-    s.factors = this.factorsFor(e, s);
-    this.commit(s.anchor, s.factors);
+    this.finishAt(e);
   }
 
   onKeyDown(e: ToolKeyEvent): boolean {
-    if (e.key === 'Shift') this.setShift(true);
-    if ((e.key === 'Control' || e.key === 'Alt' || e.key === 'Shift') && this.state.kind === 'scaling' && this.cursorInference) {
-      // the factors re-evaluate on the next move; just redraw
-      this.ctx?.requestRender();
-      return true;
-    }
-    return false;
+    return e.key === 'Shift' && this.state.kind === 'scaling';
   }
 
   onKeyUp(e: ToolKeyEvent): boolean {
-    if (e.key !== 'Shift') return false;
-    this.setShift(false);
-    return this.state.kind === 'scaling';
+    return e.key === 'Shift' && this.state.kind === 'scaling';
   }
 
   /** Shift went down or up: the drag's uniform mode (and its inference lock) follows before the next move. */
-  private setShift(down: boolean): void {
-    this.mods = { ...this.mods, shift: down };
-    const s = this.state;
-    if (s.kind !== 'scaling') return;
-    s.uniform = this.isUniform(s.grip, down);
-    this.ctx?.statusChanged();
+  onModifiersChanged(modifiers: Modifiers): void {
+    this.mods = modifiers;
+    if (this.state.kind === 'scaling' && this.pointer) this.updatePreview({ ...this.pointer, modifiers }, true);
   }
 
   onVcb(v: VcbValue): void {
@@ -360,18 +365,20 @@ export class ScaleTool extends TransformToolBase implements SectionPreviewTool {
     if (s.kind === 'scaling') {
       const f = this.factorsFromVcb(v, { anchor: s.anchor, factors: s.factors, size: s.box.size, axes: s.grip.axes, dims: s.box.dims, kind: s.grip.kind, uniform: s.uniform });
       if (f) this.commit(s.anchor, f);
+      else this.rejectEntry();
       return;
     }
     const last = this.lastScale();
     if (!last) return;
     const f = this.factorsFromVcb(v, last);
-    if (!f || f.every((k) => Math.abs(k - 1) < 1e-9)) return;
+    if (!f || !this.validFactors(f)) { this.rejectEntry(); return; }
     last.factors = f;
     this.reapplyLast(m4scaleAbout(last.anchor, f));
     this.ctx?.statusChanged();
   }
 
   onCancel(): void {
+    this.entryLocks.clear();
     this.dropPickup();
     if (this.state.kind === 'scaling') {
       this.state = IDLE;
@@ -417,15 +424,29 @@ export class ScaleTool extends TransformToolBase implements SectionPreviewTool {
   }
 
   status(): ToolStatus {
+    if (this.state.kind === 'idle') this.refresh();
+    const edit = this.currentEdit();
+    const fields: EntryField[] = [
+      { id: 'scale', label: 'Scale', kind: 'number', value: edit ? this.fmtFactors(edit.factors, edit.dims) : '', disabled: !edit, location: 'bar', locked: this.entryLocks.has('scale') },
+      ...(['x', 'y', 'z'] as const).map((id, axis): EntryField => ({
+        id, label: `Size ${id.toUpperCase()}`, kind: 'length', location: 'bar',
+        value: edit ? this.fmtLength(Math.abs(edit.size[axis]! * edit.factors[axis]!)) : '',
+        disabled: !edit || !edit.dims.includes(axis), locked: this.entryLocks.has(id),
+      })),
+    ];
+    const text = edit ? `${edit.uniform ? 'Keep proportions' : 'Free proportions'} · ${edit.centered ? 'About center' : 'Opposite grip'}` : 'Pick a grip';
+    return { ...this.baseStatus(), fields, placing: false, settings: [{ kind: 'note', id: 'mode', text }] };
+  }
+
+  private baseStatus(): ToolStatus {
     const s = this.state;
     if (s.kind === 'scaling') {
       return {
-        instructor: s.grip.kind === 'corner'
+        instructor: this.lastError ? this.lastError : s.grip.kind === 'corner'
           ? 'Drag the grip or enter a scale factor. Aspect ratio is kept; hold Shift to scale freely. Hold Alt (or Ctrl) to keep the centre.'
           : 'Drag the grip or enter a scale factor. Hold Shift to maintain aspect ratio, Alt (or Ctrl) to keep the centre.',
         vcbLabel: 'Scale',
         vcbValue: this.fmtFactors(s.factors, s.box.dims),
-        fields: [pointerField('Scale', 'number', this.fmtFactors(s.factors, s.box.dims))],
         ...this.heldTags(s.grip.kind === 'corner'),
       };
     }
@@ -447,6 +468,118 @@ export class ScaleTool extends TransformToolBase implements SectionPreviewTool {
   }
 
   // --- internals ------------------------------------------------------------------------------
+
+  private currentEdit(): ScaleEdit | null {
+    const s = this.state;
+    return s.kind === 'scaling' ? { anchor: s.anchor, factors: s.factors, size: s.box.size, axes: s.grip.axes, dims: s.box.dims, kind: s.grip.kind, uniform: s.uniform, centered: v3dist(s.anchor, s.box.center) <= LENGTH_TOL } : this.lastScale();
+  }
+
+  private validFactors(factors: Vec3): boolean {
+    return factors.every((k) => Number.isFinite(k) && Math.abs(k) >= RATIO_TOL);
+  }
+
+  private rejectEntry(): void {
+    this.lastError = 'Enter a nonzero scale factor or a positive size for an axis with an extent.';
+    this.ctx?.statusChanged();
+  }
+
+  private factorsFromEntry(id: string, value: VcbValue, edit: ScaleEdit): Vec3 | null {
+    if (id === 'scale') return this.factorsFromVcb(value, edit);
+    const axis = ['x', 'y', 'z'].indexOf(id);
+    if (axis < 0 || !edit.dims.includes(axis) || value.kind !== 'length' || value.meters <= LENGTH_TOL) return null;
+    const factors: [number, number, number] = [...edit.factors];
+    if (edit.uniform) {
+      const extent = Math.abs(edit.size[axis]! * edit.factors[axis]!);
+      if (extent <= LENGTH_TOL) return null;
+      const ratio = value.meters / extent;
+      for (const a of edit.dims) factors[a] = edit.factors[a]! * ratio;
+    } else factors[axis] = (edit.factors[axis]! < 0 ? -1 : 1) * value.meters / edit.size[axis]!;
+    return factors;
+  }
+
+  onEntry(values: Readonly<Record<string, VcbValue>>): void {
+    let edit = this.currentEdit();
+    if (!edit) return;
+    for (const id of ['x', 'y', 'z', 'scale']) {
+      const value = values[id];
+      if (!value) continue;
+      const factors = this.factorsFromEntry(id, value, edit);
+      if (!factors || !this.validFactors(factors)) { this.rejectEntry(); return; }
+      edit = { ...edit, factors };
+    }
+    if (this.state.kind === 'scaling') this.commit(edit.anchor, edit.factors);
+    else {
+      const last = this.lastScale();
+      if (!last) return;
+      last.factors = edit.factors;
+      this.reapplyLast(m4scaleAbout(edit.anchor, edit.factors));
+    }
+  }
+
+  onEntryLock(id: string, value: VcbValue | null): void {
+    const s = this.state, edit = this.currentEdit();
+    if (s.kind !== 'scaling' || !edit) return;
+    if (value === null) {
+      this.entryLocks.delete(id);
+      if (this.pointer) this.updatePreview(this.pointer);
+      return;
+    }
+    const factors = this.factorsFromEntry(id, value, edit);
+    if (!factors || !this.validFactors(factors)) { this.rejectEntry(); return; }
+    if (s.uniform || id === 'scale') this.entryLocks.clear();
+    else this.entryLocks.delete('scale');
+    this.entryLocks.set(id, factors);
+    s.factors = this.withEntryLocks(s.factors, s.uniform);
+    this.lastError = null;
+    this.ctx?.requestRender();
+    this.ctx?.statusChanged();
+  }
+
+  private withEntryLocks(factors: Vec3, uniform: boolean): Vec3 {
+    let out: [number, number, number] = [...factors];
+    for (const [id, locked] of this.entryLocks) {
+      if (uniform || id === 'scale') out = [...locked];
+      else { const axis = ['x', 'y', 'z'].indexOf(id); if (axis >= 0) out[axis] = locked[axis]!; }
+    }
+    return out;
+  }
+
+  /** Recalculate held modes before inference so modifier changes cannot use the previous rail. */
+  private updatePreview(e: ToolPointerEvent, force = false): void {
+    const s = this.state, ctx = this.ctx;
+    if (s.kind !== 'scaling') return;
+    const uniform = this.isUniform(s.grip, e.modifiers.shift);
+    const anchor = e.modifiers.ctrl || e.modifiers.alt ? s.box.center : this.opposite(s.box, s.grip);
+    const changed = uniform !== s.uniform || v3dist(anchor, s.anchor) > LENGTH_TOL;
+    s.uniform = uniform;
+    s.anchor = anchor;
+    let inference = e.inference;
+    const engine = ctx?.commands.ctx.services.get(SERVICE_INFERENCE) as InferenceEngine | undefined;
+    if ((force || changed) && ctx && engine) {
+      const camera = ctx.camera.getState(), size = ctx.camera.viewportSize();
+      inference = engine.resolve({ ray: e.ray, screen: e.screen,
+        pixelSizeAt: (t) => worldPerPixelAt(camera, size.height, rayAt(e.ray, t)),
+        project: (p) => worldToScreen(camera, size, p) ?? [Infinity, Infinity],
+      }, this.inferenceOptions());
+    }
+    this.pointer = { ...e, inference };
+    this.mods = e.modifiers;
+    this.cursorScreen = e.screen;
+    this.cursorInference = inference;
+    s.factors = this.withEntryLocks(this.factorsFor(this.pointer, s), s.uniform);
+    this.lastError = null;
+    this.ctx?.requestRender();
+    this.ctx?.statusChanged();
+  }
+
+  private finishAt(e: ToolPointerEvent): void {
+    const s = this.state;
+    if (s.kind !== 'scaling') return;
+    const previous = this.pointer?.modifiers;
+    const changed = !previous || previous.shift !== e.modifiers.shift || previous.ctrl !== e.modifiers.ctrl || previous.alt !== e.modifiers.alt;
+    if (!this.cursorScreen || screenDist(e.screen, this.cursorScreen) > 0 || changed) this.updatePreview(e, changed);
+    this.commit(s.anchor, s.factors);
+  }
 
   /**
    * The scale just committed, while typing can still redo it: the last commit, still the last change (or
@@ -558,14 +691,17 @@ export class ScaleTool extends TransformToolBase implements SectionPreviewTool {
     const s = this.state;
     if (s.kind !== 'scaling') return;
     const refs = s.refs;
+    if (!this.validFactors(factors)) { this.rejectEntry(); return; }
     this.state = IDLE;
-    if (factors.some((k) => !Number.isFinite(k) || Math.abs(k) < 1e-6) || factors.every((k) => Math.abs(k - 1) < 1e-9)) {
+    this.entryLocks.clear();
+    if (factors.every((k) => Math.abs(k - 1) < RATIO_TOL)) {
+      this.lastCommit = null;
       this.ctx?.statusChanged();
       this.ctx?.requestRender();
       return;
     }
     this.commitTransform(refs, m4scaleAbout(anchor, factors), false, 'Scale');
-    const edit: ScaleEdit = { anchor, factors, size: s.box.size, axes: s.grip.axes, dims: s.box.dims, kind: s.grip.kind, uniform: s.uniform };
+    const edit: ScaleEdit = { anchor, factors, size: s.box.size, axes: s.grip.axes, dims: s.box.dims, kind: s.grip.kind, uniform: s.uniform, centered: v3dist(anchor, s.box.center) <= LENGTH_TOL };
     if (this.lastCommit) this.edits.set(this.lastCommit, edit);
   }
 }

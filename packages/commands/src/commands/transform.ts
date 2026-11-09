@@ -1044,20 +1044,8 @@ export function transformBodyInPlace(body: Body, m: Mat4 | MMat4, tiles?: Textur
   body.version += 1;
 }
 
-/**
- * General affine transform of a body without the kernel: vertices are mapped, the winding is
- * flipped for mirroring matrices, the face layer is rebuilt from the mesh (face ids and their
- * materials survive, edges are re-derived with their flags), imprints are re-expressed in the new
- * bases and curves follow (radius scaled by the mean axis scale). Exact for rigid motions and
- * mirrors; uniform scale keeps every solid valid; non-uniform scale is what the kernel's transform
- * would produce for planar faces. With `tiles`, texture placements are re-expressed as in
- * `transformBodyInPlace`.
- */
-export function transformBodyAffineInPlace(body: Body, m: Mat4 | MMat4, tiles?: TextureTileOf): void {
-  if (isRigidTransform(m)) {
-    transformBodyInPlace(body, m, tiles);
-    return;
-  }
+/** Face decorations and inference geometry in the destination coordinate system. */
+function captureBodyAffineMetadata(body: Body, m: Mat4 | MMat4) {
   const bases = new Map<FaceLocalId, PlaneBasis>([...body.faces].map(([fid, f]) => [fid, f.basis]));
   const imprintWorld = new Map<FaceLocalId, Map<number, Vec3>>();
   for (const [fid, g] of body.imprints) {
@@ -1067,25 +1055,13 @@ export function transformBodyAffineInPlace(body: Body, m: Mat4 | MMat4, tiles?: 
     for (const [vid, uv] of g.vertices) pts.set(vid, m4transformPoint(m, basisToWorld(face.basis, uv[0], uv[1])));
     imprintWorld.set(fid, pts);
   }
-  const src = body.mesh.verts;
-  const verts = new Float64Array(src.length);
-  for (let i = 0; i < src.length; i += 3) {
-    const p = m4transformPoint(m, [src[i]!, src[i + 1]!, src[i + 2]!]);
-    verts[i] = p[0];
-    verts[i + 1] = p[1];
-    verts[i + 2] = p[2];
-  }
-  let tris = body.mesh.tris;
-  if (m4linearDeterminant(m) < 0) {
-    tris = new Uint32Array(tris.length);
-    for (let i = 0; i < tris.length; i += 3) {
-      tris[i] = body.mesh.tris[i]!;
-      tris[i + 1] = body.mesh.tris[i + 2]!;
-      tris[i + 2] = body.mesh.tris[i + 1]!;
-    }
-  }
-  const curves = new Map(body.curves);
-  reconcileBody(body, { mesh: { verts, tris, faceId: body.mesh.faceId }, faceOrigin: new Map() });
+  const curves = new Map([...body.curves].map(([id, curve]) => [id, { ...curve }]));
+  const edges = new Map([...body.edges].map(([key, edge]) => [key, { ...edge, polyline: edge.polyline.map((p) => m4transformPoint(m, p)) }]));
+  return { bases, imprintWorld, curves, edges };
+}
+
+function restoreBodyAffineMetadata(body: Body, metadata: ReturnType<typeof captureBodyAffineMetadata>, m: Mat4 | MMat4, tiles?: TextureTileOf): void {
+  const { bases, imprintWorld, curves } = metadata;
   if (tiles) {
     for (const [fid, face] of body.faces) {
       const from = bases.get(fid);
@@ -1107,9 +1083,45 @@ export function transformBodyAffineInPlace(body: Body, m: Mat4 | MMat4, tiles?: 
     const kept = body.curves.get(c.id);
     if (!kept) continue;
     kept.center = m4transformPoint(m, c.center);
-    kept.normal = v3normalize(m4transformDir(m, c.normal));
+    kept.normal = mapNormal(m, c.normal);
     kept.radius = c.radius * scale;
   }
+}
+
+/**
+ * General affine transform of a body without the kernel: vertices are mapped, the winding is
+ * flipped for mirroring matrices, the face layer is rebuilt from the mesh (face ids and their
+ * materials survive, edges are re-derived with their flags), imprints are re-expressed in the new
+ * bases and curves follow (radius scaled by the mean axis scale). Exact for rigid motions and
+ * mirrors; uniform scale keeps every solid valid; non-uniform scale is what the kernel's transform
+ * would produce for planar faces. With `tiles`, texture placements are re-expressed as in
+ * `transformBodyInPlace`.
+ */
+export function transformBodyAffineInPlace(body: Body, m: Mat4 | MMat4, tiles?: TextureTileOf): void {
+  if (isRigidTransform(m)) {
+    transformBodyInPlace(body, m, tiles);
+    return;
+  }
+  const metadata = captureBodyAffineMetadata(body, m);
+  const src = body.mesh.verts;
+  const verts = new Float64Array(src.length);
+  for (let i = 0; i < src.length; i += 3) {
+    const p = m4transformPoint(m, [src[i]!, src[i + 1]!, src[i + 2]!]);
+    verts[i] = p[0];
+    verts[i + 1] = p[1];
+    verts[i + 2] = p[2];
+  }
+  let tris = body.mesh.tris;
+  if (m4linearDeterminant(m) < 0) {
+    tris = new Uint32Array(tris.length);
+    for (let i = 0; i < tris.length; i += 3) {
+      tris[i] = body.mesh.tris[i]!;
+      tris[i + 1] = body.mesh.tris[i + 2]!;
+      tris[i + 2] = body.mesh.tris[i + 1]!;
+    }
+  }
+  reconcileBody(body, { mesh: { verts, tris, faceId: body.mesh.faceId }, faceOrigin: new Map(), previousEdges: metadata.edges });
+  restoreBodyAffineMetadata(body, metadata, m, tiles);
 }
 
 function cloneInstance(draft: DocumentDraft, container: EntityContainer, src: ComponentInstance): ComponentInstance {
@@ -1369,7 +1381,9 @@ export function applyTransformPlan(draft: DocumentDraft, plan: TransformPlan, wo
       removeBody(container, target.id);
       continue;
     }
-    const updated = applyKernelResult(draft, target.id, toKernelResult(first, w));
+    const metadata = captureBodyAffineMetadata(target, m);
+    const updated = applyKernelResult(draft, target.id, { ...toKernelResult(first, w), previousEdges: metadata.edges });
+    restoreBodyAffineMetadata(updated, metadata, m);
     updated.nextFaceId = Math.max(updated.nextFaceId, w.result.nextFaceId);
     refs.push({ kind: 'body', path, id: updated.id });
     bodyIds.push(updated.id);

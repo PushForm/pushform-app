@@ -427,6 +427,7 @@ export abstract class TransformToolBase implements Tool {
       this.lastCommit = null;
       this.ctx?.statusChanged();
       this.ctx?.requestRender();
+      this.ctx?.overlayChanged?.();
     });
   }
 
@@ -447,6 +448,7 @@ export abstract class TransformToolBase implements Tool {
       ctx.committed?.();
       ctx.statusChanged();
       ctx.requestRender();
+      ctx.overlayChanged?.();
     });
     ctx.statusChanged();
     ctx.requestRender();
@@ -529,5 +531,6 @@ export abstract class TransformToolBase implements Tool {
     ctx.committed?.();
     ctx.statusChanged();
     ctx.requestRender();
+    ctx.overlayChanged?.();
   }
 }

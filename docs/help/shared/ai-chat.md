@@ -72,7 +72,13 @@ In a 3D model, the agent can generate a standard kitchen cabinet in one step, fo
 
 Wall and tall cabinets can have stacked doors, such as glass above and shaker below. Blind, diagonal and L-shaped corner cabinets are included too, for either side of a room's corner, with a lazy Susan if you want one.
 
-Every part is its own named component, and each door and drawer is a group, so you can ask for changes to a single part afterwards. The agent builds furniture and other unusual shapes piece by piece instead, and hardware and countertops are added separately. Changing a cabinet's parameters later doesn't rebuild it; ask for the change and the agent edits its parts, or generates a new one.
+The agent can also add a filler strip to close a gap beside a cabinet, or a finished end panel for the exposed side of a run, in the same paint or stain as the doors, for example “Add a 3″ filler between this cabinet and the wall.” A base end panel is notched for the toe kick unless you say otherwise.
+
+Every part is named, and each door and drawer is a group, so you can ask for changes to a single part afterwards. Identical parts, such as matching shelves, share one component, so changing one changes them all unless you ask otherwise. The agent builds furniture and other unusual shapes piece by piece instead, and adds hardware separately. Changing a cabinet's parameters later doesn't rebuild it; ask for the change and the agent edits its parts, or generates a new one.
+
+## Generate a whole kitchen
+
+The agent can also lay out a kitchen in one step, for example “Lay out an L-shaped kitchen with a diagonal corner, a sink base under the window and openings for a range and dishwasher.” It places base and wall cabinets along one wall or around one corner, adds fillers at blind corners, and runs a countertop with sink openings. It can also add a countertop, filler, end panel or bathroom vanity on its own, or build a single cabinet door. Appliances are left as openings. Build U-shaped kitchens and islands as separate runs.
 
 ## Ask for a change to a 3D model
 

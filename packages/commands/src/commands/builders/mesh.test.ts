@@ -6,10 +6,10 @@ import type { MeshData } from '@pushform/core';
 import { InlineBackend, KernelClient, validateSolidMesh } from '@pushform/kernel';
 import { DocumentHost } from '../../host/DocumentHost';
 import { bodyFromMesh } from '@pushform/model';
-import { cabinetPartMesh } from './generate';
+import { builderPartMesh } from './generate';
 import { meshLoftedPanel, meshPrism, meshStock } from './mesh';
-import { planCabinet } from './plan';
-import { inches as i } from './dimensions';
+import { planCabinet } from '../cabinet/plan';
+import { inches as i } from '../cabinet/dimensions';
 
 const kernels: KernelClient[] = [];
 afterAll(() => { for (const k of kernels) k.dispose(); });
@@ -48,6 +48,12 @@ describe('cabinet part meshes', () => {
     expect(meshSignedVolume(mesh)).toBeCloseTo(9, 9);
   });
 
+  it('extrudes an outline with a hole into a closed solid of the right volume', () => {
+    const mesh = meshPrism([[0, 0], [4, 0], [4, 4], [0, 4]], 2, [[[1, 1], [1, 2], [2, 2], [2, 1]]]);
+    expectClosed(mesh);
+    expect(meshSignedVolume(mesh)).toBeCloseTo(30, 9);
+  });
+
   it('makes every part of every door style a solid the kernel accepts', async () => {
     const kernel = new KernelClient(new InlineBackend());
     kernels.push(kernel);
@@ -59,7 +65,7 @@ describe('cabinet part meshes', () => {
     ];
     for (const plan of plans) {
       for (const part of plan.parts) {
-        const mesh = cabinetPartMesh(part);
+        const mesh = builderPartMesh(part);
         expectClosed(mesh);
         await expect(validateSolidMesh(mesh), part.name).resolves.toBeUndefined();
         expect(meshSignedVolume(mesh), part.name).toBeGreaterThan(0);
@@ -73,7 +79,7 @@ describe('cabinet part meshes', () => {
     const host = new DocumentHost();
     let faces = 0, edges = 0;
     host.edit('test', (draft) => {
-      const body = bodyFromMesh(draft, cabinetPartMesh(side), { regroupFaces: true });
+      const body = bodyFromMesh(draft, builderPartMesh(side), { regroupFaces: true });
       faces = body.faces.size;
       edges = body.edges.size;
     });

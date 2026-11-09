@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import {
-  BOX_MATERIAL_KEY, CabinetPlanError, GLASS_KEYS, DEFAULT_BLEND_SEGMENTS, SERVICE_FONTS, grainMapping, planCabinet, checkEdgeBlendResult, Text3DParamsSchema, isHardEdge, libraryMaterial, loadLibraryMaterial, planEdgeBlend, planEdgeProfile, runEdgeBlendKernel, runIntersectKernel,
+  BuilderPlanError, materialKey, DEFAULT_BLEND_SEGMENTS, SERVICE_FONTS, grainMapping, planCabinet, checkEdgeBlendResult, Text3DParamsSchema, isHardEdge, libraryMaterial, loadLibraryMaterial, planEdgeBlend, planEdgeProfile, runEdgeBlendKernel, runIntersectKernel,
   runText3DKernel, BUILTIN_LIBRARY, LIBRARY_CATEGORIES, activeTagOpt, applyTransformPlan, arrayMatrices, contextFrame, curvePoints, definitionBounds, hostOf, instanceCount, kernelOf, localPushPullDistance,
   m4rotationAbout, m4scaleAbout, planPushPull, planTransform, runFollowMeKernel, runPushPullKernel, runSolidsKernel, runTransformKernel, sceneRuntimeOf, solidsResultIsEmpty,
-  type CabinetGenerateResult, type CabinetPlan, type CameraHost, type CameraState, type CommandRegistry, type DocumentHost, type ExplodeResult, type FollowMeApplyResult, type FollowMeParams,
+  type BuilderGenerateResult, type BuilderPlan, type MaterialSpec, type CameraHost, type CameraState, type CommandRegistry, type DocumentHost, type ExplodeResult, type FollowMeApplyResult, type FollowMeParams,
   type EdgeBlendMode, type EdgeBlendPlan, type MakeResult, type StandardView, type PushPullApplyResult, type PushPullTarget, type SolidsApplyResult, type SolidsKernelWork, type SolidsPairMode, type TransformKernelWork, type TransformPlan,
 } from '@pushform/commands';
 import {
-  LOCAL_REFERENCE, MODEL_API_VERSION, MODEL_LIMITS, MODEL_RENDER_LIMITS, modelRenderSchema, modelRenderViewName, modelRenderViews, type ModelRenderImage, type ModelRenderResult, MODEL_PLANNED_OPERATIONS, MODEL_TOOLS, modelBatchSchema, modelMaterialLibrarySchema, modelOperationSchema, modelOverlapsSchema, modelQuerySchema,
+  LOCAL_REFERENCE, MODEL_BUILDERS, MODEL_BUILDER_KEYS, modelBuilderInfo, modelBuilderInfoSchema, type ModelBuilderKey, MODEL_API_VERSION, MODEL_LIMITS, MODEL_RENDER_LIMITS, modelRenderSchema, modelRenderViewName, modelRenderViews, type ModelRenderImage, type ModelRenderResult, MODEL_PLANNED_OPERATIONS, MODEL_TOOLS, modelBatchSchema, modelMaterialLibrarySchema, modelOperationSchema, modelOverlapsSchema, modelQuerySchema,
   type ModelLibraryResult, type ModelOverlap, type ModelOverlapsResult,
   modelViewSchema, type ModelApiError, type ModelApiErrorCode, type ModelBatchResult, type ModelBounds, type ModelCameraInput, type ModelCameraSummary,
   type ModelDocumentSnapshot, type ModelEntitySummary, type ModelOperation, type ModelQueryResult, type ModelRef, type ModelRefInput, type ModelSceneSaves,
@@ -24,6 +24,7 @@ import {
   type Body, type DocumentState, type EdgeRecord, type EntityContainer, type EntityRef, type FaceRecord, type Material, type Rgb, type Scene, type SceneFlags, type SketchFace,
   type UndoEntry, type UvMapping,
 } from '@pushform/model';
+import { planBuilder } from './builders';
 import { summarizeLabels, type ToolCallResult } from './layoutApi';
 import { frameCamera } from './modelCamera';
 
@@ -787,6 +788,35 @@ export class ModelDocumentApi {
       check?.(precomputed);
       return exec<Promise<SolidsApplyResult>>(`solids.${mode}`, { a, b, precomputed });
     };
+    /** Plan a builder's object, make the materials it names, and generate it inside the batch's undo step. */
+    const generate = async (planner: () => BuilderPlan): Promise<OpResult> => {
+      let plan: BuilderPlan;
+      try {
+        plan = planner();
+      } catch (cause) {
+        if (cause instanceof BuilderPlanError) throw this.failure(cause.code, `${cause.message} Nothing was changed.`);
+        throw cause;
+      }
+      const materials: Record<string, number> = {};
+      const specs = (current: BuilderPlan): MaterialSpec[] => [...Object.values(current.materials), ...(current.children ?? []).flatMap(specs)];
+      for (const spec of specs(plan)) {
+        const key = materialKey(spec);
+        if (materials[key] !== undefined) continue;
+        if ('library' in spec) {
+          if (!libraryMaterial(spec.library)) throw this.failure('invalid_reference', `There is no library material "${spec.library}". Call ${MODEL_TOOLS.materialLibrary.name} for the keys.`);
+          const precomputed = await loadLibraryMaterial(host, spec.library);
+          materials[key] = await exec<Promise<number>>('material.fromLibrary', { key: spec.library, activate: false, precomputed });
+        } else {
+          const name = `Paint ${spec.paint}`;
+          const existing = [...host.doc.state.materials.values()].find(m => m.name === name);
+          materials[key] = existing ? existing.id as number : exec<number>('material.create', { name, color: rgb(spec.paint), activate: false });
+        }
+      }
+      const result = await exec<BuilderGenerateResult | Promise<BuilderGenerateResult>>('builder.generate', { plan, materials });
+      const round = (m: number): number => Math.round(m * 1e5) / 1e5;
+      return { ...instanceResult(result.instanceId), name: result.name, used: plan.used,
+        parts: result.parts.map(part => ({ name: part.name, id: part.id, path: part.path, ...(part.size ? { size: part.size.map(round) as [number, number, number] } : {}), ...(part.copies ? { copies: part.copies } : {}) })) };
+    };
     const resolver = { named, ref };
     switch (op.op) {
       case 'add_box': {
@@ -795,33 +825,12 @@ export class ModelDocumentApi {
         const id = exec<number>('model.addBox', { min: op.min, max: op.max });
         return { id, named: { kind: 'body', id } };
       }
-      case 'add_cabinet': {
-        let plan: CabinetPlan;
-        try {
-          plan = planCabinet(op);
-        } catch (cause) {
-          if (cause instanceof CabinetPlanError) throw this.failure(cause.code, `${cause.message} Nothing was changed.`);
-          throw cause;
-        }
-        const finish = plan.used.finish;
-        if ('stain' in finish && !libraryMaterial(finish.stain)) throw this.failure('invalid_reference', `There is no library material "${finish.stain}". Call ${MODEL_TOOLS.materialLibrary.name} for the keys.`);
-        const library = async (key: string): Promise<number> => {
-          const precomputed = await loadLibraryMaterial(host, key);
-          return exec<Promise<number>>('material.fromLibrary', { key, activate: false, precomputed });
-        };
-        const box = await library(BOX_MATERIAL_KEY);
-        let show: number;
-        if ('stain' in finish) show = await library(finish.stain);
-        else {
-          const name = `Paint ${finish.paint}`;
-          const existing = [...host.doc.state.materials.values()].find(m => m.name === name);
-          show = existing ? existing.id : exec<number>('material.create', { name, color: rgb(finish.paint), activate: false });
-        }
-        const glass = plan.parts.some(part => part.role === 'glass') ? await library(GLASS_KEYS[plan.used.glass?.type ?? 'clear']) : undefined;
-        const made = await exec<CabinetGenerateResult | Promise<CabinetGenerateResult>>('cabinet.generate', { plan, materials: { box, show, ...(glass !== undefined ? { glass } : {}) } });
-        const round = (m: number): number => Math.round(m * 1e5) / 1e5;
-        return { ...instanceResult(made.instanceId), name: made.name, used: { ...plan.used },
-          parts: made.parts.map(part => ({ name: part.name, id: part.id, path: part.path, size: part.size.map(round) as [number, number, number] })) };
+      case 'add_cabinet': return generate(() => planCabinet(op));
+      case 'build': {
+        const spec = MODEL_BUILDERS[op.builder];
+        const parsed = spec.schema.safeParse(op.params);
+        if (!parsed.success) throw this.failure('invalid_operation', `Parameters for ${op.builder}: ${zodMessage(parsed.error)}. Call ${MODEL_TOOLS.builderInfo.name} for them. Nothing was changed.`);
+        return generate(() => planBuilder(op.builder, parsed.data as never));
       }
       case 'add_edges': {
         const at = op.edges.findIndex(([a, b]) => !(dist(a, b) > MERGE_TOL));
@@ -1850,6 +1859,11 @@ export async function runModelTool(api: ModelDocumentApi, name: string, input: u
       case MODEL_TOOLS.query.name: return { content: JSON.stringify(api.query(input)), isError: false };
       case MODEL_TOOLS.applyOperations.name: return { content: JSON.stringify(await api.apply(input, signal)), isError: false };
       case MODEL_TOOLS.view.name: return { content: JSON.stringify(api.view(input)), isError: false };
+      case MODEL_TOOLS.builderInfo.name: {
+        const key = modelBuilderInfoSchema.safeParse(input).data?.builder;
+        if (!key || !MODEL_BUILDER_KEYS.includes(key as ModelBuilderKey)) return { content: JSON.stringify({ ok: false, error: { code: 'invalid_reference', message: `There is no builder "${key ?? ''}". Builders: ${MODEL_BUILDER_KEYS.join(', ')}.`, revision: api.revision } }), isError: true };
+        return { content: JSON.stringify(modelBuilderInfo(key as ModelBuilderKey)), isError: false };
+      }
       case MODEL_TOOLS.overlaps.name: return { content: JSON.stringify(await api.findOverlaps(input)), isError: false };
       case MODEL_TOOLS.materialLibrary.name: return { content: JSON.stringify(api.materialLibrary(input)), isError: false };
       default: return { content: JSON.stringify({ ok: false, error: { code: 'invalid_operation', message: `Unknown model tool "${name}".`, revision: api.revision } }), isError: true };

@@ -488,6 +488,17 @@ describe('autofold', () => {
   });
 });
 
+describe('region polygons without usable contours', () => {
+  it('rejects them as invalid input', async () => {
+    const body = await uploadBox(client, newBodyId(), [0, 0, 0], [1, 1, 1]);
+    const region = topRegion([0.5, 0.5, 1], square(0, 0, 1), 1, false);
+    const expected = { code: 'InvalidInput', message: 'pushPull region polygon has no area' };
+    await expect(client.pushPull({ body, region: { ...region, polygon: [] }, distance: 1, mode: 'merge', nextFaceId: 6 })).rejects.toMatchObject(expected);
+    await expect(client.pushPull({ body, region: { ...region, polygon: [[[0, 0], [1, 0]]] }, distance: 1, mode: 'merge', nextFaceId: 6 })).rejects.toMatchObject(expected);
+    await expect(client.extrudeSketch({ basis: region.basis, polygon: [], distance: 1, nextFaceId: 1 })).rejects.toMatchObject(expected);
+  });
+});
+
 describe('followMe', () => {
   const squareProfile = (size: number, origin: Vec3, n: Vec3) => ({ profile: square(0, 0, size), profileBasis: planeBasis(origin, n) });
 

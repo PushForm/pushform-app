@@ -4,10 +4,10 @@
  * Replays the golden corpus through the Rust kernel and requires every answer to match bit for bit: the permanent record
  * of the results the kernel has to keep producing. The native build is compared too when its test binary exists.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { decodeGoldenCorpus, type GoldenRecord } from './goldenCorpus';
+import { decodeGoldenCorpus, encodeGoldenCorpus, type GoldenRecord } from './goldenCorpus';
 import { HarnessTransport } from './differentialFixtures';
 import type { RustKernelModule } from '../../wasm/pushform-kernel.js';
 import { RustKernelCaller, RustKernelRejection, trapErrorInfo } from '../worker/rustKernelCore';
@@ -40,15 +40,24 @@ function difference(record: GoldenRecord, answer: Answer): string | undefined {
   return Buffer.compare(answer.bytes, outcome.response) === 0 ? undefined : firstDifference(answer.bytes, outcome.response);
 }
 
-function replay(records: readonly GoldenRecord[], call: (request: Uint8Array, index: number) => Answer): void {
+/** With `PF_UPDATE_GOLDENS` set, a replay rewrites the records that changed and lists them. A change here is a behavior change: review the list. */
+const updating = process.env.PF_UPDATE_GOLDENS !== undefined;
+
+function replay(records: GoldenRecord[], call: (request: Uint8Array, index: number) => Answer): void {
+  const changed: string[] = [];
   for (let i = 0; i < records.length; i++) {
     const record = records[i]!;
     const answer = call(record.request, i);
     const diff = difference(record, answer);
-    if (diff !== undefined) {
-      const op = new DataView(record.request.buffer, record.request.byteOffset).getUint32(0, true);
-      expect.fail(`record ${i} (kernel op ${op}) differs from the corpus: ${diff}`);
-    }
+    if (diff === undefined) continue;
+    const op = new DataView(record.request.buffer, record.request.byteOffset).getUint32(0, true);
+    if (!updating) expect.fail(`record ${i} (kernel op ${op}) differs from the corpus: ${diff}`);
+    changed.push(`record ${i} (kernel op ${op}): ${diff}`);
+    records[i] = { request: record.request, outcome: answer.ok ? { kind: 'ok', response: answer.bytes } : { kind: 'error', info: answer.info } };
+  }
+  if (updating) {
+    writeFileSync(corpusPath, encodeGoldenCorpus(records));
+    process.stderr.write(`\nkernel golden corpus: ${changed.length} records rewritten\n${changed.join('\n')}\n`);
   }
 }
 

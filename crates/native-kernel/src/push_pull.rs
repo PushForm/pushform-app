@@ -13,10 +13,6 @@ use crate::normalize::{normalize_triangles, IntMap, WeightedOrigin};
 use crate::tolerance::{AREA_TOL, COPLANAR_TOL, MERGE_TOL};
 use crate::KernelError;
 
-/// The `TypeError` the former TypeScript kernel's Manifold binding throws for a polygon list with no contours: reading the
-/// first contour's length. It reaches the caller as an `Internal` error.
-const NO_CONTOURS: &str = "Cannot read properties of undefined (reading 'length')";
-
 const TOOL_NEAR_CAP: u32 = 0;
 const TOOL_FAR_CAP: u32 = 1;
 const TOOL_SIDE_BASE: u32 = 2;
@@ -173,10 +169,11 @@ fn label_tool_faces(props: &[f32], np: usize, tris: &[u32], edges: &[(Pt, Pt)]) 
   face_id
 }
 
-/// `CrossSection.ofPolygons(contours, 'Positive')`, which throws on an empty contour list.
+/// The region's contours as a cross-section. A region with no usable contour (none given, or every one under three
+/// points) has no area and is the caller's mistake, like any other region without area.
 fn polygons_cross_section(frame: &ToolFrame) -> Result<CrossSection, KernelError> {
   if frame.contours.is_empty() {
-    return Err(KernelError::internal(NO_CONTOURS.to_string()));
+    return Err(KernelError::invalid("pushPull region polygon has no area"));
   }
   Ok(CrossSection::from_polygons_with_fill_rule(&frame.contours, FillRule::Positive))
 }

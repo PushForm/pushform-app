@@ -5,13 +5,14 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { imageSizeFromHeader } from '@pushform/model';
 import { BUILTIN_LIBRARY, LIBRARY_CATEGORIES, loadLibraryTexture } from './materialLibrary';
+import hardwareSources from './material-textures/hardware-sources.json';
 import sources from './material-textures/sources.json';
 
 describe('bundled material library', () => {
   it('contains the requested totals with unique material and source identities', () => {
     const expected = {
-      Colors: 24, Wood: 50, Brick: 30, Ceramic: 26, 'Concrete & Asphalt': 50,
-      Stone: 50, Metal: 26, Terrain: 50, Textiles: 44, Plastic: 6, Organic: 6, Glass: 9,
+      Colors: 24, Wood: 52, Brick: 30, Ceramic: 26, 'Concrete & Asphalt': 50,
+      Stone: 50, Metal: 31, Terrain: 50, Textiles: 44, Plastic: 6, Organic: 6, Glass: 9,
     };
     expect(new Set(LIBRARY_CATEGORIES)).toEqual(new Set(Object.keys(expected)));
     for (const category of LIBRARY_CATEGORIES) {
@@ -46,7 +47,7 @@ describe('bundled material library', () => {
       expect(texture.widthM).toBeGreaterThan(0);
       expect(texture.heightM).toBeGreaterThan(0);
       const hash = createHash('sha256').update(bytes).digest('hex');
-      const source = sources.textures.find((s) => s.key === material.key)!;
+      const source = sources.textures.find((s) => s.key === material.key) ?? hardwareSources.textures.find((s) => s.key === material.key)!;
       expect(source.sha256).toBe(hash);
       expect(source.widthPx).toBe(texture.widthPx);
       expect(source.heightPx).toBe(texture.heightPx);
@@ -58,6 +59,6 @@ describe('bundled material library', () => {
       expect(Math.abs(previewSize.width / previewSize.height - texture.widthPx / texture.heightPx)).toBeLessThan(0.02);
       expect(preview.byteLength).toBeLessThan(20_000);
     }
-    expect(hashes.size).toBe(340);
+    expect(hashes.size).toBe(347);
   });
 });

@@ -20,6 +20,7 @@ import {
   imageCommands,
   text3dCommands,
   builderCommands,
+  hardwareCommands,
   SERVICE_FONTS,
   detectPlatform,
   editCommands,
@@ -156,6 +157,7 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
   commands.registerAll(imageCommands);
   commands.registerAll(text3dCommands);
   commands.registerAll(builderCommands);
+  commands.registerAll(hardwareCommands);
   commands.registerAll(pushPullCommands);
   commands.registerAll(curveCommands);
   commands.registerAll(transformCommands);

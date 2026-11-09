@@ -5,9 +5,62 @@ import { HARDWARE_SHAPES, resolveHardwareOptions } from '../hardware';
 import { KernelClient } from '../client/KernelClient';
 import { InlineBackend } from './InlineBackend';
 import { meshTopologyProblems } from '../meshChecks';
+import { uploadBox, uploadComponent } from '../test/helpers';
 
 const client = new KernelClient(new InlineBackend());
 afterAll(() => client.dispose());
+
+it('joins raised cup rims without closing the finger openings or enlarging the part', async () => {
+  let id = 1000;
+  for (const shape of ['cup', 'cup-square'] as const) {
+    const r = await client.hardware({
+      options: { shape, length: 0.1, width: 0.03, projection: 0.025, spacing: 0.076, wall: 0.002 },
+      nextFaceId: 1,
+    });
+    expect(r.components).toHaveLength(1);
+    const c = r.components[0]!;
+    expect(meshTopologyProblems(c.mesh)).toEqual([]);
+    const body = await uploadComponent(client, ++id, 1, c);
+    async function overlap(min: [number, number, number], max: [number, number, number]) {
+      const probe = await uploadBox(client, ++id, min, max);
+      const cut = await client.boolean({
+        op: 'intersect',
+        a: body,
+        b: probe,
+        nextFaceId: r.nextFaceId,
+      });
+      return cut.components.reduce((sum, c) => sum + c.props.volume, 0);
+    }
+    // A solid raised flange at the mounting plane, with a visible step above it.
+    expect(
+      await overlap([-0.0005, 0.015 - 0.00007, 0.0013], [0.0005, 0.015 - 0.00002, 0.0016]),
+    ).toBeGreaterThan(0);
+    expect(
+      await overlap([-0.0005, 0.015 - 0.00007, 0.004], [0.0005, 0.015 - 0.00002, 0.0044]),
+    ).toBe(0);
+    expect(await overlap([-0.001, -0.0145, 0.0002], [0.001, -0.0135, 0.0008])).toBe(0);
+    if (shape === 'cup-square') {
+      // The broad face stays nearly flat, with the curve concentrated near the rear flange.
+      expect(await overlap([-0.001, -0.001, 0.0248], [0.001, 0.001, 0.025])).toBe(0);
+      expect(await overlap([-0.001, -0.0002, 0.0243], [0.001, 0.0002, 0.0244])).toBeGreaterThan(0);
+      // Rounded ends retreat from the central face while preserving the silhouette.
+      expect(await overlap([0.04896, -0.0001, 0.0243], [0.04906, 0.0001, 0.0244])).toBe(0);
+      expect(await overlap([0.046, -0.0001, 0.0243], [0.0462, 0.0001, 0.0244])).toBeGreaterThan(0);
+      // The finger cavity stays hollow behind that continuous curved face.
+      expect(await overlap([-0.001, -0.0002, 0.01], [0.001, 0.0002, 0.012])).toBe(0);
+    }
+    for (const [axis, size] of [
+      [0, 0.1],
+      [1, 0.03],
+      [2, 0.025],
+    ] as const) {
+      const v = Array.from(c.mesh.verts).filter((_, i) => i % 3 === axis);
+      expect(Math.max(...v) - Math.min(...v)).toBeCloseTo(size, 6);
+    }
+    expect(r.mountingCenters[1]![0] - r.mountingCenters[0]![0]).toBeCloseTo(0.076, 9);
+    expect(c.mesh.tris.length / 3).toBeLessThan(2000);
+  }
+});
 describe('hardware solid families', () => {
   it('keeps revolved dome dimensions and a bounded mesh across density settings', async () => {
     for (const [segments, profileSegments, budget] of [

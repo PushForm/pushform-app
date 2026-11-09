@@ -2,7 +2,7 @@
 // Copyright 2026 PushForm contributors
 import { z } from 'zod';
 import { m4fromBasis, m4mul, m4rotationAxis, m4translation, v3dot } from '@pushform/core';
-import type { Id, MeshData, MMat4, Vec3 } from '@pushform/core';
+import type { DefId, Id, MeshData, MMat4, Vec3 } from '@pushform/core';
 import { bodyFromMesh } from '@pushform/model';
 import type { Body, Draft, DocumentState, EntityContainer, FaceRecord, Material } from '@pushform/model';
 import { defineCommand } from '../../registry/Command';
@@ -89,6 +89,15 @@ export const builderGenerate = defineCommand({
     const host = hostOf(ctx);
     const tag = activeTagOpt(ctx);
     const contextPath = [...host.context.path];
+    // Resolve all templates before editing, so missing sources cannot leave a partial cabinet.
+    const validate = (p: BuilderPlan): void => {
+      for (const item of p.placements ?? []) {
+        if (!host.doc.state.definitions.has(item.definitionId as DefId)) throw new Error('The selected hardware component no longer exists.');
+        if (!p.parts.some(part => part.assembly === item.assembly)) throw new Error('Hardware needs a door or drawer assembly.');
+      }
+      for (const child of p.children ?? []) validate(child);
+    };
+    validate(plan);
     let result: BuilderGenerateResult | null = null;
     host.edit(`Generate ${plan.name}`, (draft) => {
       const state = draft as unknown as DocumentState;
@@ -98,7 +107,7 @@ export const builderGenerate = defineCommand({
           const id = spec ? materials[materialKey(spec)] : undefined;
           return id === undefined ? undefined : state.materials.get(id as never);
         };
-        const only = current.parts.length === 1 && !current.children?.length && current.parts[0]!.assembly === null ? current.parts[0]! : null;
+        const only = current.parts.length === 1 && !current.children?.length && !current.placements?.length && current.parts[0]!.assembly === null ? current.parts[0]! : null;
         if (only) {
           // One part needs no group around it: the part's own group, named for the plan, is the object.
           const def = createDefinition(draft, { name: uniqueDefinitionName(state, current.name), isGroup: true });
@@ -189,6 +198,14 @@ export const builderGenerate = defineCommand({
             path: [...here, ...(assembly ? [assembly.id as number] : []), inst.id as number], size: part.size,
             ...(copies > 1 ? { copies } : {}),
           });
+        }
+        for (const item of current.placements ?? []) {
+          const assembly = assemblyFor(item.assembly);
+          const placement = m4fromBasis(item.origin, item.x, item.y, item.z);
+          const local = m4mul(m4translation([-assembly.origin[0], -assembly.origin[1], -assembly.origin[2]]), placement);
+          const inst = newInstance(draft, item.definitionId as DefId, local, item.name);
+          instanceInto(assembly.container, inst);
+          parts.push({ name: `${item.assembly}: ${item.name}`, id: inst.id, path: [...here, assembly.id as number, inst.id as number] });
         }
         for (const child of current.children ?? []) {
           const made = buildPlan(child, rootContainer, here);

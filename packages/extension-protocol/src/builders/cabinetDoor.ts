@@ -8,7 +8,7 @@ export const cabinetDoorBuilder = defineBuilder({
   guidance: 'Use when the request is for a door or a door sample, not a whole cabinet; add_cabinet already makes the doors of a cabinet. The door stands upright with its face toward -y. It has a square top: build an arched door by hand.',
   schema: z.object({
     width: length, height: length,
-    style: z.enum(['slab', 'shaker', 'raised', 'glass']).optional().describe('Default shaker.'),
+    style: z.enum(['slab', 'shaker', 'raised', 'glass', 'beadboard']).optional().describe('Default shaker.'),
     stileWidth: length.optional().describe('Stiles and rails. Default 0.05715.'),
     glass: z.object({ pattern: z.enum(['single', 'grid', 'prairie', 'mission']).optional(), across: z.number().int().min(1).max(6).optional(), down: z.number().int().min(1).max(6).optional(), type: z.enum(['clear', 'frosted', 'seeded', 'reeded']).optional() }).optional(),
     at: position.optional().describe('Front left bottom corner. Default the origin.'),

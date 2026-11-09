@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { DefId, Id, ImageId, Mat4, MaterialId, TagId, Vec3 } from '@pushform/core';
 import { m4translation, meshBounds } from '@pushform/core';
-import { DEFAULT_MATERIAL_APPEARANCE, containerAt, type Body, type EntityRef } from '@pushform/model';
+import { allocId, DEFAULT_MATERIAL_APPEARANCE, containerAt, type Body, type EntityRef } from '@pushform/model';
 import { z } from 'zod';
 import { disposeKernels, setupCommands } from './transform.fixtures';
 import { materialCommands } from './materials';
@@ -267,4 +267,28 @@ describe('PasteTool', () => {
     expect(selected).toBe(true);
     expect(minOf(a.body(a.host.selection.refs[0]!.id))).toEqual([4, 0, 0]);
   });
+});
+
+
+it('allocates fresh surface metadata when pasting a component into another document', () => {
+  const a = setup(), box = a.addBox([0, 0, 0], [1, 1, 1]);
+  a.host.edit('Smooth surface', draft => {
+    const body = draft.definitions.get(draft.rootDefinitionId)!.entities.bodies.get(box as never)!;
+    const id = allocId(draft) as never, face = body.faces.values().next().value!;
+    body.surfaces.set(id, { id, faceIds: [face.id], curveId: null }); face.surfaceId = id;
+  });
+  a.select([a.bodyRef(box)]);
+  const group = a.registry.execute('group.make', {}) as MakeResult;
+  a.select([a.instanceRef(group.instanceId!)]); a.registry.execute('edit.copy');
+  const b = setup(); b.registry.execute('edit.pasteInPlace');
+  const state = b.host.doc.state, ids: number[] = [];
+  for (const [id, def] of state.definitions) {
+    ids.push(id); for (const inst of def.entities.instances.values()) ids.push(inst.id);
+    for (const body of def.entities.bodies.values()) {
+      ids.push(body.id, ...body.surfaces.keys(), ...body.curves.keys());
+      for (const face of body.faces.values()) if (face.surfaceId !== null) expect(body.surfaces.has(face.surfaceId)).toBe(true);
+    }
+  }
+  expect(new Set(ids).size).toBe(ids.length);
+  expect(Math.max(...ids)).toBeLessThan(state.meta.nextId);
 });

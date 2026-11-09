@@ -48,7 +48,7 @@ A standalone sketch edge not bounding a face or belonging to a curve can have an
 
 ## Select a curved surface
 
-The side of a pulled circle or arc is made of flat faces joined by soft edges, and it works as one surface. Click any part of it with **Select** to select the whole surface; Ctrl adds, Shift toggles and Ctrl+Shift removes all of it at once. Hovering highlights the whole surface, outlined along its hard edges such as a cylinder's rims.
+The side of a pulled circle or arc is made of flat faces joined by soft edges, and it works as one surface. Click any part of it with **Select** to select the whole surface; Ctrl adds, Shift toggles and Ctrl+Shift removes all of it at once. Hovering highlights the whole surface uniformly, without picking out the flat face beneath the pointer, and outlines it only along its hard edges such as a cylinder's rims.
 
 Entity Info shows a selected surface as **Surface** with its total area. The Paint Bucket paints the whole surface, and Move, Rotate or Scale on a hovered surface moves all of it. Faces whose shared edges you soften become one surface too; unsoften an edge to split them again.
 
@@ -63,5 +63,3 @@ Choose the **Tags** tab in the Object browser to create, rename, recolor or dele
 In **Objects**, each tagged object shows a small dot in that tag’s color. Hover over the dot or focus the object row with the keyboard to see a popup containing the tag name in a colored pill. Untagged objects have no dot. Dots and popups update when tags change, including undo and redo. Switching between **Objects** and **Tags** keeps your tree expansion and selection.
 
 Use the **Color by Tag** checkbox below the tag table to display tag colors in place of materials and textures. Untagged geometry inside a tagged group or component inherits that tag’s color; an explicitly tagged child uses its own color. Turn it off to restore the original materials and textures. A tag opened from a SketchUp file can carry a pattern image as its color, such as hatching for lawn or paving on a site plan; Color by Tag draws that pattern on the tagged faces, and choosing a new color for the tag replaces it. Below the checkbox, **Select All** selects entities with the selected tag (or the active tag if none is selected), and **Purge** removes unused tags and empty folders.
-
-Hovering a smooth surface highlights it uniformly, without highlighting the individual tessellation beneath the pointer. Only the surface boundary is outlined.

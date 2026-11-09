@@ -898,7 +898,10 @@ export function highlightsFor(state: DocumentState, hoverRef: EntityRef | null, 
     const h = highlightForCached(state, ref, cache);
     if (h) selected.push(h);
   }
-  return { hover: hoverRef ? highlightForCached(state, hoverRef, cache) : null, selected };
+  // Tools already fill face hovers through entityOverlay, including the whole smooth surface.
+  // Adding a renderer face highlight would tint the facet under the pointer a second time.
+  const toolFillsHover = hoverRef?.kind === 'face' || hoverRef?.kind === 'sketchFace';
+  return { hover: hoverRef && !toolFillsHover ? highlightForCached(state, hoverRef, cache) : null, selected };
 }
 
 /** Active style's background → sky/ground gradient settings. */

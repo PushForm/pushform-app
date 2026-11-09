@@ -67,6 +67,25 @@ describe('sketchToRender', () => {
 });
 
 describe('highlightsFor', () => {
+  it('leaves smooth face hover fills to the tool overlay while retaining selected faces', () => {
+    const { doc, body } = docWithBox();
+    doc.transact('soften', (draft) => {
+      const solid = draft.definitions.get(draft.rootDefinitionId)!.entities.bodies.get(body.id)!;
+      for (const edge of solid.edges.values()) edge.soft = true;
+    });
+    for (const faceId of body.faces.keys()) {
+      const ref: EntityRef = { kind: 'face', path: [], id: body.id, faceId, region: null };
+      const h = highlightsFor(doc.state, ref, [ref]);
+      expect(h.hover).toBeNull();
+      expect(h.selected).toHaveLength(1);
+      expect(h.selected[0]).toMatchObject({ kind: 'face', faceId });
+    }
+    const sketchDoc = docWithRectangle();
+    const id = sketchDoc.rootDefinition.entities.sketch.faces.keys().next().value!;
+    const ref: EntityRef = { kind: 'sketchFace', path: [], id };
+    expect(highlightsFor(sketchDoc.state, ref, [ref])).toMatchObject({ hover: null, selected: [{ kind: 'sketchFace', id }] });
+  });
+
   it('maps body, face and edge refs of a box to loops / polylines / tints', () => {
     const { doc, body } = docWithBox();
     const faceId = body.faces.keys().next().value!;
@@ -75,8 +94,8 @@ describe('highlightsFor', () => {
     const edgeRef: EntityRef = { kind: 'edge', path: [], id: body.id, edgeKey };
     const bodyRef: EntityRef = { kind: 'body', path: [], id: body.id };
     const h = highlightsFor(doc.state, faceRef, [edgeRef, bodyRef]);
-    expect(h.hover).toEqual({ kind: 'face', key: renderKey([], body.id), faceId, loops: body.faces.get(faceId)!.loops });
-    expect(h.hover?.kind === 'face' && h.hover.loops[0]!.length).toBe(4);
+    expect(h.hover).toBeNull();
+    expect(highlightFor(doc.state, faceRef)).toEqual({ kind: 'face', key: renderKey([], body.id), faceId, loops: body.faces.get(faceId)!.loops });
     expect(h.selected).toHaveLength(2);
     expect(h.selected[0]).toEqual({ kind: 'edge', points: body.edges.get(edgeKey)!.polyline });
     const whole = h.selected[1]!;

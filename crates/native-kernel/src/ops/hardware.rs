@@ -10,7 +10,7 @@ use manifold_csg::{CrossSection, FillRule, Manifold};
 
 use crate::finalize::{finalize_manifold, Component, FinalizeOptions};
 use crate::jsmath::{atan2, cos, cube, sin};
-use crate::math::{hypot2, hypot3, js_min, Vec3};
+use crate::math::{hypot2, hypot3, js_max, js_min, Vec3};
 use crate::meshio::{manifold_from_soup, soup_center, TriangleSoup};
 use crate::normalize::all_new_ids;
 use crate::KernelError;
@@ -112,6 +112,83 @@ fn rounded(x: f64, y: f64, radius: f64) -> Vec<Point> {
     }
   }
   points
+}
+
+/// The solid pieces of a rectangular cup's hood, in the order the mesh and profile lists were built.
+struct CupHood {
+  verts: Vec<f64>,
+  tris: Vec<u32>,
+  /// The finger cavity's outline, in local Y (height) and Z (projection).
+  cavity: Vec<Point>,
+  interior_length: f64,
+}
+
+/// A curved open-bottom hood: a soft lower grip edge and rounded closed ends.
+fn rectangular_cup_hood(req: &HardwareRequest, inset: f64, lip: f64) -> CupHood {
+  use std::f64::consts::PI;
+  let l = req.length - 2.0 * inset;
+  let (w, h, t) = (req.width, req.projection, req.wall);
+  let base = js_min(t * 0.8, h * 0.1);
+  let roll = js_min(t * 0.4, (w - lip) * 0.05);
+  let low = -w / 2.0;
+  let high = w / 2.0 - lip;
+  let span = high - low;
+  let mut profile: Vec<Point> = vec![[low, 0.0], [low, h - roll]];
+  for i in 1..=4 {
+    let a = (f64::from(i) * PI) / 8.0;
+    profile.push([low + roll - roll * cos(a), h - roll + roll * sin(a)]);
+  }
+  // A fourth-power profile keeps a broad face and a tighter shoulder than an ellipse.
+  for i in 1..=10 {
+    let a = ((1.0 - f64::from(i) / 10.0) * PI) / 2.0;
+    profile.push([low + roll + (span - roll) * cos(a).sqrt(), base + (h - base) * sin(a).sqrt()]);
+  }
+  profile.push([high, 0.0]);
+  // Cross-sections use local Y for height and Z for projection.
+  profile.reverse();
+  let end = js_min(js_min(js_min(2.0 * t, l * 0.025), w * 0.08), h * 0.08);
+  let mut rings: Vec<(f64, f64)> = Vec::new();
+  for i in (0..=4).rev() {
+    let a = (f64::from(i) * PI) / 8.0;
+    rings.push((-(l / 2.0 - end + end * sin(a)), end * (1.0 - cos(a))));
+  }
+  for i in 0..=4 {
+    let a = (f64::from(i) * PI) / 8.0;
+    rings.push((l / 2.0 - end + end * sin(a), end * (1.0 - cos(a))));
+  }
+  let count = profile.len() as u32;
+  let center = (low + high) / 2.0;
+  let mut verts = Vec::with_capacity(3 * rings.len() * profile.len());
+  for &(x, offset) in &rings {
+    for &[y, z] in &profile {
+      verts.push(x);
+      verts.push(center + ((y - center) * (span - 2.0 * offset)) / span);
+      verts.push(h / 2.0 + ((z - h / 2.0) * (h - 2.0 * offset)) / h);
+    }
+  }
+  let mut tris: Vec<u32> = Vec::new();
+  let last_ring = rings.len() as u32 - 1;
+  for k in 0..last_ring {
+    for i in 0..count {
+      let a = k * count + i;
+      let b = k * count + (i + 1) % count;
+      tris.extend_from_slice(&[a, b, b + count, a, b + count, a + count]);
+    }
+  }
+  for i in 1..count - 1 {
+    tris.extend_from_slice(&[0, i + 1, i]);
+    let top = last_ring * count;
+    tris.extend_from_slice(&[top, top + i, top + i + 1]);
+  }
+  let mut cavity: Vec<Point> = vec![[low - t, -t], [low - t, h - t], [low + roll, h - t]];
+  // The same fourth-power curve, one wall inside the hood.
+  for i in 1..=10 {
+    let a = ((1.0 - f64::from(i) / 10.0) * PI) / 2.0;
+    cavity.push([low + roll + (span - roll - t) * cos(a).sqrt(), base + (h - t - base) * sin(a).sqrt()]);
+  }
+  cavity.push([high - t, -t]);
+  cavity.reverse();
+  CupHood { verts, tris, cavity, interior_length: l - 2.0 * js_max(t * 1.5, end * 1.5) }
 }
 
 /// A wire or arch grip as one lofted tube along `points`.
@@ -276,22 +353,45 @@ pub fn hardware(req: &HardwareRequest) -> Result<HardwareOutput, KernelError> {
     };
     b.add(&stem, &head)
   } else if matches!(shape, "cup" | "cup-square") {
+    // A narrow border reserved inside the stated overall dimensions, so the shell neither hides the mounting rim nor
+    // enlarges the finished part.
+    let lip = js_min(js_min(js_min(js_min(1.5 * t, l * 0.05), w * 0.08), (l / 2.0 - t) * 0.5), (w - t) * 0.5);
+    let inset = lip * 0.35;
     let solid = if shape == "cup" {
-      let outer = b.sphere(l / 2.0, w, h, [0.0, 0.0, 0.0]);
-      let inner = b.sphere(l / 2.0 - t, w - t, h - t, [0.0, 0.0, 0.0]);
+      let outer = b.sphere(l / 2.0 - inset, w - inset, h, [0.0, 0.0, 0.0]);
+      let inner = b.sphere(l / 2.0 - inset - t, w - inset - t, h - t, [0.0, 0.0, 0.0]);
       let hollow = b.sub(&outer, &inner);
       let keep = b.box_at(l * 2.0, w, h, [0.0, w / 2.0, h / 2.0]);
       let half = b.cut(&hollow, &keep);
-      b.moved(&half, 0.0, -w / 2.0, 0.0)
+      let steps = js_max(8.0, (f64::from(n) / 2.0).round());
+      let last = steps as i32;
+      let mut rim: Vec<Point> = Vec::new();
+      for i in 0..=last {
+        let a = (f64::from(i) * std::f64::consts::PI) / steps;
+        rim.push([(l / 2.0) * cos(a), w * sin(a)]);
+      }
+      for i in (0..=last).rev() {
+        let a = (f64::from(i) * std::f64::consts::PI) / steps;
+        rim.push([(l / 2.0 - lip) * cos(a), (w - lip) * sin(a)]);
+      }
+      let raised = b.extruded(&section(rim), t, 1.0);
+      let joined = b.add(&half, &raised);
+      b.moved(&joined, 0.0, -w / 2.0, 0.0)
     } else {
-      let radius = js_min(w / 5.0, t * 2.0);
-      let outer = b.extruded(&section(rounded(l, w, radius)), h, 1.0);
-      let pocket = b.box_at(l - 2.0 * t, w, h - 2.0 * t, [0.0, -t, (h - 2.0 * t) / 2.0]);
-      let recess_section = section(rounded(l - 4.0 * t, w - 4.0 * t, js_min(radius / 2.0, (w - 4.0 * t) / 4.0)));
-      let recess_solid = b.extruded(&recess_section, t, 1.0);
-      let recess = b.moved(&recess_solid, 0.0, 0.0, h - t / 2.0);
-      let pocketed = b.sub(&outer, &pocket);
-      b.sub(&pocketed, &recess)
+      let radius = js_min(js_min(js_min(w / 5.0, t * 2.0), (l - 2.0 * inset) / 4.0), (w - inset) / 4.0);
+      let hood = rectangular_cup_hood(req, inset, lip);
+      let face_id = vec![0u32; hood.tris.len() / 3];
+      let soup = TriangleSoup { verts: &hood.verts, tris: &hood.tris, face_id: &face_id };
+      let outer = b.keep(manifold_from_soup(&soup, 0, soup_center(&hood.verts))?);
+      let extruded = b.extruded(&section(hood.cavity), hood.interior_length, 1.0);
+      let cavity = b.keep(extruded.rotate(90.0, 0.0, 0.0));
+      let turned = b.keep(cavity.rotate(0.0, 0.0, 90.0));
+      let pocket = b.moved(&turned, -hood.interior_length / 2.0, 0.0, 0.0);
+      let hollow = b.sub(&outer, &pocket);
+      let rim = b.extruded(&section(rounded(l, w, radius)), t, 1.0);
+      let opening = b.box_at(l - 2.0 * lip, 2.0 * w, 3.0 * t, [0.0, -w / 2.0 - lip, t / 2.0]);
+      let frame = b.sub(&rim, &opening);
+      b.add(&hollow, &frame)
     };
     mount.push([-js_min(c, l - 2.0 * t) / 2.0, w * 0.2, 0.0]);
     mount.push([js_min(c, l - 2.0 * t) / 2.0, w * 0.2, 0.0]);

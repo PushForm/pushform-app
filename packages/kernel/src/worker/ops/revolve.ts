@@ -73,9 +73,18 @@ export function revolve(ctx: KernelContext, req: RevolveRequest): ComponentsResu
     if (clipped.isEmpty()) throw new KernelError('InvalidInput', 'revolve.profile lies entirely on the far side of the axis');
     // Manifold spreads `circularSegments` over the revolved angle, so scale the per-turn count.
     const divisions = Math.max(3, Math.ceil((req.segments * req.angleDeg) / 360));
-    const local = scope.track(clipped.revolve(divisions, req.angleDeg));
-    const solid = scope.track(local.transform(frame.matrix));
-    const fin = finalizeManifold(ctx, solid, { nextFaceId: req.nextFaceId, chooseId: allNewIds });
-    return { components: fin.components, nextFaceId: fin.nextFaceId };
+    // A connected planar region rotates into one connected solid. Split regions before
+    // revolving so an enclosed hole stays a cavity of its solid rather than a separate shell.
+    const components: ComponentsResult['components'] = [];
+    let nextFaceId = req.nextFaceId;
+    for (const region of clipped.decompose()) {
+      scope.track(region);
+      const local = scope.track(region.revolve(divisions, req.angleDeg));
+      const solid = scope.track(local.transform(frame.matrix));
+      const fin = finalizeManifold(ctx, solid, { nextFaceId, chooseId: allNewIds, connectedSolid: true });
+      components.push(...fin.components);
+      nextFaceId = fin.nextFaceId;
+    }
+    return { components, nextFaceId };
   });
 }

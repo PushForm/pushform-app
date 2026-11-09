@@ -100,6 +100,7 @@ Beyond boxes, the agent can:
 - push or pull a face of a solid, or a shape drawn on it, to make it bigger or to cut a pocket or a hole;
 - combine overlapping solids: join them, cut one out of another, keep what they share, or split them. This is how it cuts grooves, dadoes, rabbets, cutouts and holes, for example “Make a shaker door with its panel set in grooves” or “Cut a sink opening in the countertop”;
 - sweep a profile along a path with Follow Me, for a moulding or a rail;
+- revolve a profile around an axis for a turned leg, bowl, knob or column, including a full turn or a capped partial turn, for example “Revolve this profile 360° around its straight inner edge”;
 - round over or bevel edges, draw arcs, offset outlines, round corners, and mirror parts.
 
 When a change would not leave a valid solid, for example pushing a face all the way through, the agent tells you and changes nothing. After building, it checks that no parts overlap by mistake.

@@ -106,6 +106,8 @@ export * from './commands/texts';
 export * from './commands/axes';
 export * from './commands/offset';
 export * from './commands/followme';
+export * from './commands/revolve';
+export { RevolveTool } from './tools/impl/Revolve';
 export * from './commands/solids';
 export * from './commands/edgeBlend';
 export * from './commands/intersect';

@@ -247,10 +247,25 @@ export function hardware(ctx: KernelContext, req: HardwareRequest): HardwareResu
         ]);
       solid = add(stem, head);
     } else if (shape === 'cup' || shape === 'cup-square') {
+      // Reserve a narrow border inside the stated overall dimensions, rather than
+      // letting the shell hide the mounting rim or enlarging the finished part.
+      const lip = Math.min(1.5 * t, l * 0.05, w * 0.08, (l / 2 - t) * 0.5, (w - t) * 0.5);
+      const inset = lip * 0.35;
       if (shape === 'cup') {
-        const outer = sphere(l / 2, w, h, [0, 0, 0]);
-        const inner = sphere(l / 2 - t, w - t, h - t, [0, 0, 0]);
+        const outer = sphere(l / 2 - inset, w - inset, h, [0, 0, 0]);
+        const inner = sphere(l / 2 - inset - t, w - inset - t, h - t, [0, 0, 0]);
         solid = cut(sub(outer, inner), box(l * 2, w, h, [0, w / 2, h / 2]));
+        const steps = Math.max(8, Math.round(n / 2));
+        const rim: SimplePolygon = [];
+        for (let i = 0; i <= steps; i++) {
+          const a = (i * Math.PI) / steps;
+          rim.push([(l / 2) * Math.cos(a), w * Math.sin(a)]);
+        }
+        for (let i = steps; i >= 0; i--) {
+          const a = (i * Math.PI) / steps;
+          rim.push([(l / 2 - lip) * Math.cos(a), (w - lip) * Math.sin(a)]);
+        }
+        solid = add(solid, keep(keep(new CrossSection([rim])).extrude(t)));
         solid = moved(solid, 0, -w / 2, 0);
       } else {
         const rounded = (x: number, y: number, radius: number): SimplePolygon => {
@@ -265,22 +280,53 @@ export function hardware(ctx: KernelContext, req: HardwareRequest): HardwareResu
           }
           return pts;
         };
-        const radius = Math.min(w / 5, t * 2);
-        const outer = keep(keep(new CrossSection([rounded(l, w, radius)])).extrude(h));
-        const pocket = box(l - 2 * t, w, h - 2 * t, [0, -t, (h - 2 * t) / 2]);
-        const recess = moved(
-          keep(
-            keep(
-              new CrossSection([
-                rounded(l - 4 * t, w - 4 * t, Math.min(radius / 2, (w - 4 * t) / 4)),
-              ]),
-            ).extrude(t),
+        const radius = Math.min(w / 5, t * 2, (l - 2 * inset) / 4, (w - inset) / 4);
+        const roll = Math.min(t * 0.4, radius * 0.5);
+        const verts: number[] = [],
+          tris: number[] = [];
+        const rings = [
+          { z: 0, offset: 0 },
+          { z: h - roll, offset: 0 },
+        ];
+        for (let i = 1; i <= 4; i++) {
+          const a = (i * Math.PI) / 8;
+          rings.push({ z: h - roll + roll * Math.sin(a), offset: roll * (1 - Math.cos(a)) });
+        }
+        const count = rounded(l - 2 * inset, w - inset, radius).length;
+        for (const ring of rings)
+          for (const [x, y] of rounded(
+            l - 2 * inset - 2 * ring.offset,
+            w - inset - 2 * ring.offset,
+            radius - ring.offset,
+          ))
+            verts.push(x, y - inset / 2, ring.z);
+        for (let k = 0; k < rings.length - 1; k++)
+          for (let i = 0; i < count; i++) {
+            const a = k * count + i,
+              b = k * count + ((i + 1) % count);
+            tris.push(a, b, b + count, a, b + count, a + count);
+          }
+        for (let i = 1; i < count - 1; i++) {
+          tris.push(0, i + 1, i);
+          const top = (rings.length - 1) * count;
+          tris.push(top, top + i, top + i + 1);
+        }
+        const outer = keep(
+          manifoldFromSoup(
+            ctx.wasm,
+            {
+              verts: new Float64Array(verts),
+              tris: new Uint32Array(tris),
+              faceId: new Uint32Array(tris.length / 3),
+            },
+            0,
           ),
-          0,
-          0,
-          h - t / 2,
         );
-        solid = sub(sub(outer, pocket), recess);
+        const pocket = box(l - 2 * inset - 2 * t, w, h - 2 * t, [0, -t - inset, (h - 2 * t) / 2]);
+        solid = sub(outer, pocket);
+        const rim = keep(keep(new CrossSection([rounded(l, w, radius)])).extrude(t));
+        const opening = box(l - 2 * lip, 2 * w, 3 * t, [0, -w / 2 - lip, t / 2]);
+        solid = add(solid, sub(rim, opening));
       }
       mount.push(
         [-Math.min(c, l - 2 * t) / 2, w * 0.2, 0],

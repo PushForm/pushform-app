@@ -19,10 +19,11 @@ function OptionField({ app, field }: { app: AppInstance; field: EntryField }): J
     if (!app.toolManager.onRawEntry({ [field.id]: draft }, unit)) {
       const parsed = parseVcb(draft, unit);
       if (parsed.ok) app.toolManager.onEntry({ [field.id]: parsed.value });
-      else app.store.getState().setNotice(parsed.error.error);
+      else { app.store.getState().setNotice(parsed.error.error); return; }
     }
+    if (!fromBlur) app.viewport.container?.focus();
   };
-  return <label className="pf-tob-item"><span className="pf-tob-label">{field.label}</span>
+  return <label className="pf-tob-item pf-tob-extension-field"><span className="pf-tob-label">{field.label}</span>
     <input data-tob-control className="pf-tob-input" size={field.kind === 'text' ? 18 : 10} ref={input} type="text" value={draft} autoComplete="off" spellCheck={false} maxLength={field.kind === 'text' ? 200 : 500}
       onChange={event => { submitted.current = null; setDraft(event.target.value); }} onBlur={() => commit(true)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); commit(); } }} />
   </label>;

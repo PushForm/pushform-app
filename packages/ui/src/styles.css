@@ -3709,6 +3709,9 @@ h4.pf-xui-text { font-size: 12px; }
   align-items: center;
   min-width: 0;
 }
+.pf-tob .pf-tob-custom:has(.pf-tob-extension-field) {
+  flex-shrink: 0;
+}
 .pf-tob .pf-layout-text-toolbar {
   display: flex;
   flex-wrap: nowrap;

@@ -106,7 +106,7 @@ export function cargoAboutReports(root, version, { runCommand = run } = {}) {
   const cache = join(root, 'node_modules/.cache/pushform-notices');
   return RUST_WORKSPACES.map(({ manifest, ships, targets }) => {
     const path = join(root, manifest);
-    const hash = createHash('sha256').update(`${version}\n${targets.join(' ')}\n`);
+    const hash = createHash('sha256').update(`${version}\n${manifest}\n${targets.join(' ')}\n`);
     for (const file of [config, path, join(dirname(path), 'Cargo.lock')]) hash.update(readFileSync(file));
     const cached = join(cache, `${hash.digest('hex').slice(0, 24)}.json`);
     if (existsSync(cached)) return { ships, report: JSON.parse(readFileSync(cached, 'utf8')) };

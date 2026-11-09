@@ -601,6 +601,22 @@ function makeDefinitionInDraft(draft: DocumentDraft, path: readonly Id[], refs: 
     dst.images.set(copy.id, copy);
     dst.order.push(copy.id);
   }
+  // section planes: a moved plane that was its container's cut becomes the new definition's cut
+  for (const id of collected.sectionPlanes) {
+    const plane = src.sectionPlanes.get(id);
+    if (!plane) continue;
+    const copy = mapSectionPlane(plane, move ? plane.id : allocId<Id>(draft), toLocal);
+    if (move) {
+      src.sectionPlanes.delete(id);
+      removed.add(id);
+      if (src.activeSectionPlaneId === id) {
+        src.activeSectionPlaneId = null;
+        dst.activeSectionPlaneId = copy.id;
+      }
+    }
+    dst.sectionPlanes.set(copy.id, copy);
+    dst.order.push(copy.id);
+  }
   // sketch
   if (collected.edges.size) {
     const srcGraph = sketchGraphAt(draft, path);

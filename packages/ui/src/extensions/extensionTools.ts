@@ -71,7 +71,7 @@ class ExtensionViewportTool implements Tool, ExtensionToolViewport {
   }
   finish(reason: ToolStopReason): void { if (!this.closed) { this.request.ended(reason); this.close(reason); } }
   status(): ToolStatus { return { instructor: this.view?.instructor ?? `Starting ${this.title}...`, vcbLabel: this.view?.measurement?.label ?? '',
-    vcbValue: this.view?.measurement?.value, fields: this.view?.fields ?? [], placing: false, settings: (this.view?.choices ?? []).map(choice => ({ ...choice, kind: 'choice' as const, display: 'menu' as const })) }; }
+    vcbValue: this.view?.measurement?.value, fields: this.view?.fields ?? [], placing: false, settings: (this.view?.choices ?? []).map(choice => ({ ...choice, kind: 'choice' as const, display: 'menu' as const, priority: 2 as const })) }; }
   overlay(): readonly OverlayPrimitive[] {
     if (this.invalidated) return [];
     return (this.view?.overlay ?? []).map(primitive => {

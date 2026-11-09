@@ -730,7 +730,6 @@ export type ModelOperation =
       as?: string | undefined;
     }
   | {
-      [x: string]: any;
       op: 'add_cabinet';
       type: 'base' | 'wall' | 'tall' | 'vanity';
       width: number;
@@ -776,10 +775,42 @@ export type ModelOperation =
       drawerFronts?: 'slab' | 'auto' | 'match' | undefined;
       hardware?: 'none' | 'bar' | 'knob' | undefined;
       hardwareFinish?: string | undefined;
+      hardwarePlacement?:
+        | {
+            doors?:
+              | {
+                  definitionId: number;
+                  width: number;
+                  height: number;
+                  kind: 'knob' | 'pull';
+                  sourceTransform?: number[] | undefined;
+                }
+              | undefined;
+            drawers?:
+              | {
+                  definitionId: number;
+                  width: number;
+                  height: number;
+                  kind: 'knob' | 'pull';
+                  sourceTransform?: number[] | undefined;
+                }
+              | undefined;
+            doorEdgeInset?: number | undefined;
+            doorEndInset?: number | undefined;
+            drawerPosition?: 'center' | 'top' | undefined;
+            drawerTopInset?: number | undefined;
+            wideDrawers?: 'single' | 'auto' | 'double' | undefined;
+          }
+        | undefined;
       finishedEnds?: 'none' | 'left' | 'right' | 'both' | undefined;
       name?: string | undefined;
     }
-  | { op: 'build'; builder: any; params: Record<string, unknown>; as?: string | undefined }
+  | {
+      op: 'build';
+      builder: 'filler' | 'countertop' | 'cabinet_door' | 'end_panel' | 'kitchen_run';
+      params: Record<string, unknown>;
+      as?: string | undefined;
+    }
   | {
       op: 'add_3d_text';
       text: string;
@@ -1192,7 +1223,7 @@ export type ModelOperation =
           }
         | {
             mode: 'framed';
-            direction?: 'back' | 'left' | 'right' | 'front' | 'top' | 'bottom' | 'iso' | 'current' | undefined;
+            direction?: 'back' | 'left' | 'right' | 'top' | 'front' | 'bottom' | 'iso' | 'current' | undefined;
             orbitDeg?: { horizontal?: number | undefined; vertical?: number | undefined } | undefined;
             subject?:
               | 'target'
@@ -1245,7 +1276,7 @@ export type ModelOperation =
           }
         | {
             mode: 'framed';
-            direction?: 'back' | 'left' | 'right' | 'front' | 'top' | 'bottom' | 'iso' | 'current' | undefined;
+            direction?: 'back' | 'left' | 'right' | 'top' | 'front' | 'bottom' | 'iso' | 'current' | undefined;
             orbitDeg?: { horizontal?: number | undefined; vertical?: number | undefined } | undefined;
             subject?:
               | 'target'

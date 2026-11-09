@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { InlineBackend, KernelClient } from '@pushform/kernel';
 import type { EdgeBlendTool } from '@pushform/commands';
@@ -125,4 +125,21 @@ it('shows a selected model text\'s style row and sets its font size, emphasis an
   // nothing selected: no bar for Select
   act(() => { a.document.selection.set([]); });
   expect(bar().classList.contains('is-shown')).toBe(false);
+});
+
+
+it('shows extension text fields in the current bar and sends their raw text without parsing it as a length', () => {
+  const a = mount(), entered = vi.fn();
+  a.toolManager.register({ id: 'manufacturing-group', title: 'Grain continuity',
+    activate() {}, deactivate() {}, onCancel() {}, overlay: () => [], onRawEntry: entered,
+    status: () => ({ instructor: 'Capture the group', vcbLabel: '', placing: false,
+      fields: [{ id: 'name', label: 'Group name', kind: 'text', value: '', placement: 'options' }] }) });
+  act(() => a.toolManager.activate('manufacturing-group'));
+  const toolbar = screen.getByRole('toolbar', { name: 'Grain continuity options' });
+  const name = within(toolbar).getByLabelText('Group name');
+  fireEvent.change(name, { target: { value: 'Maple fronts' } });
+  fireEvent.keyDown(name, { key: 'Enter' });
+  expect(entered).toHaveBeenCalledWith({ name: 'Maple fronts' }, 'in');
+  act(() => a.toolManager.activate('select'));
+  expect(screen.queryByLabelText('Group name')).toBeNull();
 });

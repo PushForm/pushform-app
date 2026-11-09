@@ -6,9 +6,13 @@ import { ToolButton } from './ToolButton';
 
 export interface SideRailItem {
   readonly id: string;
+  /** Shown as the button's tooltip, and its accessible name unless `accessibleLabel` gives another. */
   readonly label: string;
+  readonly accessibleLabel?: string | undefined;
   readonly icon: ReactNode;
   readonly ref?: Ref<HTMLButtonElement> | undefined;
+  /** `end` sits the item at the bottom of the rail, after a gap, apart from the panel toggles above it. */
+  readonly placement?: 'end' | undefined;
 }
 
 /** The left menu bar of both editors, mirroring the right-hand strip: one toggle icon per docked side panel. */
@@ -18,8 +22,8 @@ export function SideRail({ items, active, onToggle }: {
   onToggle: (id: string) => void;
 }): JSX.Element {
   return <nav className="pf-side-rail" aria-label="Left menu bar" data-orientation="vertical">
-    {items.map(item => <ToolButton key={item.id} data-guidance-id={`sidebar:${item.id}`} ref={item.ref} type="button" className={`pf-toolbtn pf-side-rail-button${active === item.id ? ' is-active' : ''}`}
-      aria-label={item.label} title={item.label} aria-pressed={active === item.id} onClick={() => onToggle(item.id)}>{item.icon}</ToolButton>)}
+    {items.map(item => <ToolButton key={item.id} data-guidance-id={`sidebar:${item.id}`} ref={item.ref} type="button" className={`pf-toolbtn pf-side-rail-button${active === item.id ? ' is-active' : ''}${item.placement === 'end' ? ' is-end' : ''}`}
+      aria-label={item.accessibleLabel ?? item.label} title={item.label} aria-pressed={active === item.id} onClick={() => onToggle(item.id)}>{item.icon}</ToolButton>)}
   </nav>;
 }
 

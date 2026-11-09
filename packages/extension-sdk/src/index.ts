@@ -3,9 +3,21 @@
 // @pushform/extension-sdk: types and small helpers for PushForm extensions. MIT licensed, so extensions under any
 // license can use it.
 export type * from './context.ts';
+export type * from './model.ts';
 export type * from './ui.ts';
 export * from './errors.ts';
 export * from './units.ts';
 
 /** The extension API version this SDK describes; declare a matching range as `apiVersion` in the manifest. */
 export const API_VERSION = '0.1.0';
+
+export type * from './metadata.ts';
+export type * from './inspector.ts';
+
+export type * from './materialAssets.ts';
+
+export type * from './assets.ts';
+export type * from './fileTransfers.ts';
+export type * from './stagedEdits.ts';
+export type * from './tools.ts';
+export type * from './fragments.ts';

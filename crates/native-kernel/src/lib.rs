@@ -15,6 +15,7 @@ pub mod meshio;
 pub mod normalize;
 pub mod ops;
 pub mod polygon;
+mod profile_validation;
 pub mod push_pull;
 pub mod wire;
 

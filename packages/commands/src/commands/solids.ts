@@ -2,9 +2,9 @@
 // Copyright 2026 PushForm contributors
 import { z } from 'zod';
 import type { CurveId, FaceLocalId, Id, MeshData, SurfaceId } from '@pushform/core';
-import { PushFormError } from '@pushform/core';
+import { MERGE_TOL, m4invert, m4mul, PushFormError } from '@pushform/core';
 import type { BooleanResult, KernelClient, KernelComponent } from '@pushform/kernel';
-import { allocId, applyKernelResult, bodyFromMesh } from '@pushform/model';
+import { textureTiles, contextMatrix, reviewPluginBodies, allocId, applyKernelResult, bodyFromMesh } from '@pushform/model';
 import type { Body, DocumentDraft, DocumentState, EntityContainer, Draft, KernelFaceOrigin, KernelResult } from '@pushform/model';
 import { defineCommand } from '../registry/Command';
 import type { AnyCommand } from '../registry/Command';
@@ -12,6 +12,8 @@ import { hostOf, kernelOf } from '../host/services';
 import type { DocumentHost } from '../host/DocumentHost';
 import { draftContainerAt, samePath } from './context';
 import { rootContainerOf } from './offset';
+import { capturePartOccurrence } from './groups';
+import { m4linearDeterminant, toEntityRefs, transformBodyAffineInPlace } from './transform';
 
 /**
  * Solid Tools over bodies (always available: every body is a Manifold solid).
@@ -68,6 +70,7 @@ function toKernelResult(c: KernelComponent, selfRunId: number, foreign: Readonly
 /** New body from a component, copying face attributes from `source` faces it originated from (by run + face id). */
 function bodyFromComponent(draft: DocumentDraft, root: EntityContainer, c: KernelComponent, source: Body, sourceRunId: number): Body {
   const body = bodyFromMesh(draft, toMesh(c), { container: asDraft(root), tagId: source.tagId, materialId: source.materialId });
+  if (source.referenceFrame) body.referenceFrame = source.referenceFrame;
   for (const [fid, rec] of body.faces) {
     const origin = (c.faceOrigin.get(fid) ?? []).find((o) => o.runId === sourceRunId && source.faces.has(o.faceId as FaceLocalId));
     const src = origin ? source.faces.get(origin.faceId as FaceLocalId) : undefined;
@@ -210,6 +213,7 @@ export function commitSolids(host: DocumentHost, work: SolidsKernelWork): Solids
         const root = draftRoot(draft, host);
         assertUnchanged(root, a, label);
         assertUnchanged(root, b, label);
+        reviewPluginBodies(draft, new Set([a.id, b.id]));
         const bodyIds: number[] = [];
         for (const c of split.components) bodyIds.push(bodyFromComponent(draft, root, c, a, split.aRunId).id);
         for (const c of split.secondary) bodyIds.push(bodyFromComponent(draft, root, c, a, split.aRunId).id);
@@ -227,6 +231,8 @@ export function commitSolids(host: DocumentHost, work: SolidsKernelWork): Solids
       const root = draftRoot(draft, host);
       const k = assertUnchanged(root, keep, label);
       if (deleteOther) assertUnchanged(root, other, label);
+      if (work.mode === 'union' || work.mode === 'intersect') reviewPluginBodies(draft, new Set([keep.id, other.id]));
+      else if (res.components.length > 1) reviewPluginBodies(draft, new Set([keep.id]));
       const bodyIds = applyComponents(draft, root, k, res.components, res.aRunId, res.nextFaceId, [{ runId: res.bRunId, body: other }]);
       if (!deleteOther) {
         for (const id of bodyIds) reidentifyCutterMetadata(draft, root.bodies.get(id as Id)!, other);
@@ -335,6 +341,7 @@ export const solidsUnion = defineCommand({
         const root = draftRoot(draft, host);
         const f = assertUnchanged(root, first, 'Union');
         for (const b of bodies.slice(1)) assertUnchanged(root, b, 'Union');
+        reviewPluginBodies(draft, new Set(bodies.map(body => body.id)));
         const bodyIds = applyComponents(draft, root, f, components, selfRunId, nextFaceId);
         const deleted: number[] = bodyIds.includes(f.id) ? [] : [f.id];
         for (const b of bodies.slice(1)) {
@@ -347,7 +354,65 @@ export const solidsUnion = defineCommand({
   },
 });
 
-export const solidCommands: readonly AnyCommand[] = [solidsUnion, solidsSubtract, solidsTrim, solidsIntersect, solidsSplit];
+export type PhysicalBooleanMode = 'union' | 'subtract' | 'intersect';
+export interface PhysicalBooleanWork {
+  mode: PhysicalBooleanMode;
+  target: BodyRefParam; tool: BodyRefParam;
+  source: Body; cutter: Body; foreign: Body;
+  result: BooleanResult;
+}
+export interface PhysicalBooleanResult { refs: BodyRefParam[]; deleted: BodyRefParam[] }
+/** Read complete physical operands without switching the host editing context. */
+export async function runPhysicalBooleanKernel(host: DocumentHost, kernel: KernelClient, mode: PhysicalBooleanMode,
+  target: BodyRefParam, tool: BodyRefParam): Promise<PhysicalBooleanWork> {
+  capturePartOccurrence(host,toEntityRefs([target])[0]!,false);
+  capturePartOccurrence(host,toEntityRefs([tool])[0]!,false);
+  if(target.id===tool.id&&target.path.length===tool.path.length&&target.path.every((id,i)=>tool.path[i]===id))
+    throw new PushFormError('solids.target','A physical part cannot be its own tool.');
+  const state=host.doc.state,source=rootContainerOf(state,target.path).bodies.get(target.id as Id)!,cutter=rootContainerOf(state,tool.path).bodies.get(tool.id as Id)!;
+  if(source.locked)throw new PushFormError('part.locked','Unlock the target part before editing it.');
+  if(!source.valid||!cutter.valid)throw new PushFormError('solids.notSolid','Choose two valid solid parts.');
+  const frame=contextMatrix(state,target.path as Id[]),inverse=m4invert(frame);
+  if(!inverse)throw new PushFormError('solids.target','The target assembly has a singular transform.');
+  const foreign=structuredClone(cutter);
+  transformBodyAffineInPlace(foreign,m4mul(inverse,contextMatrix(state,tool.path as Id[])),textureTiles(state));
+  const temp={bodyId:TEMP_BODY_BASE+(tempCounter++ % 0xffff),version:foreign.version};
+  let result:BooleanResult;
+  try {
+    await kernel.ensureBody(source.id,source.version,source.mesh);
+    await kernel.ensureBody(temp.bodyId,temp.version,foreign.mesh);
+    result=await kernel.boolean({op:KERNEL_OP[mode],a:{bodyId:source.id,version:source.version},b:temp,nextFaceId:source.nextFaceId});
+  } finally { await kernel.release(temp.bodyId,temp.version).catch(()=>undefined); }
+  const scale=Math.abs(m4linearDeterminant(frame)),volume=result.components.reduce((sum,part)=>sum+part.props.volume,0);
+  if(!result.components.length||result.components.some(part=>!Number.isFinite(part.props.volume)||part.props.volume*scale<=MERGE_TOL**3))
+    throw new PushFormError('kernel.invalidMesh','The operation would leave no usable solid.');
+  if(mode==='subtract'&&!((source.props.volume-volume)*scale>MERGE_TOL**3))
+    throw new PushFormError('kernel.invalidMesh','The tool does not remove any material from the target part.');
+  return{mode,target,tool,source,cutter,foreign,result};
+}
+/** Trusted normalized result, installed through the ordinary face/topology reconciliation. */
+export const physicalBoolean = defineCommand({
+  id:'part.boolean',title:'Edit Physical Part',category:'internal',undoable:true,
+  params:z.object({work:z.custom<PhysicalBooleanWork>(value=>typeof value==='object'&&value!==null&&'result'in value),keepTool:z.boolean()}),
+  run(ctx,{work,keepTool}):PhysicalBooleanResult {
+    const host=hostOf(ctx);capturePartOccurrence(host,toEntityRefs([work.target])[0]!,false);
+    capturePartOccurrence(host,toEntityRefs([work.tool])[0]!,false);
+    if(!keepTool&&work.cutter.locked)throw new PushFormError('part.locked','Unlock the tool part before consuming it.');
+    if(!keepTool&&work.source.id===work.cutter.id)throw new PushFormError('solids.target','Separate the shared target and tool placements before consuming either.');
+    return host.edit('Edit Physical Part',draft=>{
+      const root=draftContainerAt(draft,work.target.path as Id[]),tools=draftContainerAt(draft,work.tool.path as Id[]);
+      const target=assertUnchanged(root,work.source,'physical boolean');assertUnchanged(tools,work.cutter,'physical boolean');
+      const result=work.result;
+      if(work.mode!=='subtract'||result.components.length>1)reviewPluginBodies(draft,new Set([target.id]));
+      const ids=applyComponents(draft,root,target,result.components,result.aRunId,result.nextFaceId,[{runId:result.bRunId,body:work.foreign}]);
+      if(keepTool)for(const id of ids)reidentifyCutterMetadata(draft,root.bodies.get(id as Id)!,work.foreign);
+      const deleted:BodyRefParam[]=[];
+      if(!keepTool){removeBody(tools,work.cutter.id);deleted.push(work.tool);}
+      return{refs:ids.map(id=>({kind:'body',id,path:[...work.target.path]})),deleted};
+    });
+  },
+});
+export const solidCommands: readonly AnyCommand[] = [solidsUnion, solidsSubtract, solidsTrim, solidsIntersect, solidsSplit, physicalBoolean];
 
 /** Command id for a Solid Tools mode. */
 export const solidCommandId = (mode: SolidMode): string => `solids.${mode}`;

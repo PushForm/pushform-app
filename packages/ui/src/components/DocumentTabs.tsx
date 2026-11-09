@@ -8,15 +8,28 @@ import { displayDocumentName } from '../documentName';
 import { allowOpeningDocument } from '../desktopUpdates';
 import { Icon } from './Icon';
 
+/**
+ * Extension tabs shown after the document tabs: each is one extension panel, with the extension's icon, the panel's
+ * name and a close button. While one is in front (`activeId`), no document tab is marked current.
+ */
+export interface DocumentTabStrip {
+  readonly items: readonly { readonly id: string; readonly title: string; readonly extensionName: string; readonly icon: ReactNode }[];
+  readonly activeId: string | null;
+  /** Puts an extension tab in front, or, with null, the active document. */
+  readonly onSelect: (id: string | null) => void;
+  readonly onClose: (id: string) => void;
+}
+
 export function DocumentTabs({
   session,
   onClose,
-  onNewLayout, extraTab, activeExtra, onActivate,
+  onNewLayout, extensionTabs, extraTab, activeExtra, onActivate,
 }: {
   extraTab?: ReactNode; activeExtra?: boolean | undefined; onActivate?: (() => void) | undefined;
   session: DocumentSession;
   onClose?: (id: string) => void;
   onNewLayout: () => void;
+  extensionTabs?: DocumentTabStrip | null | undefined;
 }): JSX.Element {
   const [editing, setEditing] = useState<{ id: string; name: string } | null>(null);
   const cancelRename = useRef(false);
@@ -30,10 +43,11 @@ export function DocumentTabs({
       {session.tabs.map((tab) => {
         const name = displayDocumentName(tab);
         const typeLabel = tab.type === 'model' ? '3D model' : '2D drawing';
+        const current = !activeExtra && tab.id === session.activeId && !extensionTabs?.activeId;
         return (
           <div
             key={tab.id}
-            className={`pf-document-tab${!activeExtra && tab.id === session.activeId ? ' is-active' : ''}`}
+            className={`pf-document-tab${current ? ' is-active' : ''}`}
           >
             {editing?.id === tab.id ? <input
               className="pf-document-tab-rename"
@@ -53,8 +67,8 @@ export function DocumentTabs({
               className="pf-document-tab-select"
               data-guidance-id={`tab:${tab.id}`}
               aria-label={`${typeLabel}: ${name}`}
-              aria-current={!activeExtra && tab.id === session.activeId ? 'page' : undefined}
-              onClick={() => { session.activate(tab.id); onActivate?.(); }}
+              aria-current={current ? 'page' : undefined}
+              onClick={() => { session.activate(tab.id); extensionTabs?.onSelect(null); onActivate?.(); }}
               onDoubleClick={() => { cancelRename.current = false; setEditing({ id: tab.id, name }); }}
             >
               {tab.type === 'model' ? (
@@ -63,7 +77,7 @@ export function DocumentTabs({
                 <TbVector size={16} aria-hidden="true" />
               )}
               <span className="pf-document-tab-name">{name}</span>
-              {session.isDirty(tab) ? <span className="pf-document-tab-dirty" aria-label="Unsaved changes">•</span> : null}
+              {session.isDirty(tab) ? <span className="pf-document-tab-dirty" aria-label="Unsaved changes">{'\u2022'}</span> : null}
             </button>}
             {session.tabs.length > 1 ? (
               <button
@@ -75,9 +89,28 @@ export function DocumentTabs({
                   else if (!session.isDirty(tab)) session.close(tab.id);
                 }}
               >
-                ×
+                <Icon name="close" size={12} />
               </button>
             ) : null}
+          </div>
+        );
+      })}
+      {extensionTabs?.items.map((tab) => {
+        const current = !activeExtra && tab.id === extensionTabs.activeId;
+        return (
+          <div key={tab.id} className={`pf-document-tab pf-extension-tab${current ? ' is-active' : ''}`}>
+            <button
+              type="button"
+              className="pf-document-tab-select"
+              data-guidance-id={`tab:${tab.id}`}
+              aria-label={`${tab.title}, from ${tab.extensionName}`}
+              aria-current={current ? 'page' : undefined}
+              onClick={() => { extensionTabs.onSelect(tab.id); onActivate?.(); }}
+            >
+              {tab.icon}
+              <span className="pf-document-tab-name">{tab.title}</span>
+            </button>
+            <button type="button" className="pf-document-tab-close" aria-label={`Close ${tab.title}`} onClick={() => extensionTabs.onClose(tab.id)}><Icon name="close" size={12} /></button>
           </div>
         );
       })}

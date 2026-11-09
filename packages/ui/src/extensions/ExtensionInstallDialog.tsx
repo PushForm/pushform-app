@@ -21,9 +21,10 @@ export function ExtensionInstallDialog({ request, onInstall, onCancel, busy = fa
   const { manifest, integrity, replaces } = request;
   const newPermissions = new Set(request.newPermissions);
   const newDestinations = new Set(request.newDestinations);
+  const blocked = new Map(request.blockedPermissions?.map(entry => [entry.permission, entry.reason]));
   const action = replaces ? (replaces.version === manifest.version ? 'Reload' : 'Update') : 'Install';
   return (
-    <Dialog title={`${action} ${manifest.name}?`} onClose={onCancel}>
+    <Dialog title={`${action} ${manifest.name}?`} onClose={() => { if (!busy) onCancel(); }}>
       <div className="pf-xinstall">
         <p className="pf-xinstall-meta">
           <span>{manifest.publisher}</span> · <span>version {manifest.version}</span>
@@ -39,10 +40,12 @@ export function ExtensionInstallDialog({ request, onInstall, onCancel, busy = fa
         {manifest.permissions.length ? (
           <ul className="pf-xinstall-list">
             {manifest.permissions.map((p) => (
-              <li key={p}>{PERMISSION_TEXT[p]}{replaces && newPermissions.has(p) ? <strong className="pf-xinstall-new"> New</strong> : null}</li>
+              <li key={p}>{PERMISSION_TEXT[p]}{blocked.has(p) ? <strong className="pf-xinstall-error"> Unavailable: {blocked.get(p)}</strong>
+                : replaces && newPermissions.has(p) ? <strong className="pf-xinstall-new"> New</strong> : null}</li>
             ))}
           </ul>
         ) : <p>It needs no permissions.</p>}
+        {blocked.size ? <p className="pf-xinstall-warning">Permissions marked Unavailable have been revoked and will not be granted.</p> : null}
 
         {manifest.destinations.length ? <>
           <h3 className="pf-xinstall-heading">Internet addresses</h3>
@@ -61,8 +64,8 @@ export function ExtensionInstallDialog({ request, onInstall, onCancel, busy = fa
         </dl>
         {error ? <p className="pf-xinstall-error" role="alert">{error}</p> : null}
         <div className="pf-form-actions">
-          <button type="button" className="pf-btn pf-xui-button is-primary" disabled={busy} onClick={onInstall}>{busy ? `${action}ing…` : action}</button>
-          <button type="button" className="pf-btn" onClick={onCancel}>Cancel</button>
+          <button type="button" className="pf-btn pf-xui-button is-primary" disabled={busy} onClick={onInstall}>{busy ? action === 'Update' ? 'Updating…' : action === 'Reload' ? 'Reloading…' : 'Installing…' : action}</button>
+          <button type="button" className="pf-btn" disabled={busy} onClick={onCancel}>Cancel</button>
         </div>
       </div>
     </Dialog>

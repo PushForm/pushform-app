@@ -2,6 +2,7 @@
 // Copyright 2026 PushForm contributors
 import { z } from 'zod';
 import type { Box3, CurveId, SurfaceId, FaceLocalId, Id, Mat4, MMat4, MeshData, PlaneBasis, Vec3 } from '@pushform/core';
+
 import {
   ANGLE_TOL,
   AREA_TOL,
@@ -13,6 +14,7 @@ import {
   box3IsEmpty,
   COPLANAR_TOL,
   LENGTH_TOL,
+  m4identity,
   m4mul,
   m4rotationAxis,
   m4scaling,
@@ -42,6 +44,7 @@ import * as model from '@pushform/model';
 import type {
   Body,
   ComponentInstance,
+  Curve,
   DocumentDraft,
   DocumentState,
   Draft,
@@ -58,7 +61,7 @@ import type {
   SketchGraph as SketchGraphType,
   TextureTileOf,
 } from '@pushform/model';
-import { allocId, applyKernelResult, bodyFromMesh, containerAt, entityRefKey, imageEntityCorners, loopPoints, loopVertexIds, meshPartBounds, planeOrigin, reconcileBody } from '@pushform/model';
+import { recordTopologyContinuation, copyPluginEntries, pluginIdentityMap, reviewPluginBodies, allocId, applyKernelResult, bodyFromMesh, containerAt, entityRefKey, imageEntityCorners, loopPoints, loopVertexIds, meshPartBounds, planeOrigin, reconcileBody } from '@pushform/model';
 import { mapNormal, mapSectionPlane } from './sectionPlanes';
 import { mapGuide, pointMapFromMatrix } from './groups';
 import { defineCommand } from '../registry/Command';
@@ -856,6 +859,7 @@ function removeBody(container: EntityContainer, id: Id): void {
 /** New body from a kernel component, copying face attributes from `source` by origin face id. */
 function bodyFromComponent(draft: DocumentDraft, container: EntityContainer, c: KernelComponent, source: Body, w: BodyKernelWork): Body {
   const body = bodyFromMesh(draft, toMesh(c.mesh), { container: asDraft(container), tagId: source.tagId, materialId: source.materialId });
+  if (source.referenceFrame) body.referenceFrame = [...source.referenceFrame] as unknown as Mat4;
   const r = toKernelResult(c, w);
   for (const [fid, rec] of body.faces) {
     const origin = (r.faceOrigin.get(fid) ?? []).find((o) => (r.selfRunId === undefined || o.runId === r.selfRunId) && source.faces.has(o.faceId));
@@ -875,11 +879,13 @@ const cloneVec = (p: Vec3): Vec3 => [p[0], p[1], p[2]];
 const cloneJson = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
 /** Deep copy of a body under a new id (version 0), inserted into the container. */
-export function cloneBody(draft: DocumentDraft, container: EntityContainer, src: Body): Body {
+export function cloneBody(draft: DocumentDraft, container: EntityContainer, src: Body, ids?: Map<number, number>): Body {
   const body = copyBodyRecord(src, allocId<Id>(draft));
-  reallocateBodyMetadata(draft, body);
+  reidentifyBodyCurves(draft,body,ids);
   body.version = 0;
+  recordTopologyContinuation(src.mesh, src.version, body.mesh, body.version, null, null);
   body.locked = false;
+
   container.bodies.set(body.id, body);
   container.order.push(body.id);
   return body;
@@ -887,14 +893,7 @@ export function cloneBody(draft: DocumentDraft, container: EntityContainer, src:
 
 /** Curves and surfaces use document-global IDs, unlike owner-local face and imprint IDs. */
 export function reallocateBodyMetadata(draft: DocumentDraft, body: Body): void {
-  const curves = new Map([...body.curves.keys()].map(id => [id, allocId<CurveId>(draft)]));
-  const surfaces = new Map([...body.surfaces.keys()].map(id => [id, allocId<SurfaceId>(draft)]));
-  const curve = (id: CurveId | null): CurveId | null => id === null ? null : curves.get(id) ?? null;
-  body.curves = new Map([...body.curves].map(([id, c]) => { const next = curves.get(id)!; return [next, { ...c, id: next }]; }));
-  body.surfaces = new Map([...body.surfaces].map(([id, s]) => { const next = surfaces.get(id)!; return [next, { ...s, id: next, curveId: curve(s.curveId) }]; }));
-  for (const face of body.faces.values()) face.surfaceId = face.surfaceId === null ? null : surfaces.get(face.surfaceId) ?? null;
-  for (const edge of body.edges.values()) edge.curveId = curve(edge.curveId);
-  for (const imprint of body.imprints.values()) for (const edge of imprint.edges.values()) edge.curveId = curve(edge.curveId);
+  reidentifyBodyCurves(draft, body);
 }
 
 /** Copy of a mesh part under `id` sharing its (immutable) geometry; not inserted anywhere. */
@@ -941,8 +940,10 @@ export function transformMeshPartGeometry(g: MeshPartGeometry, m: Mat4 | MMat4):
 /** Deep plain copy of a body record under `id` (same version; not inserted anywhere). */
 export function copyBodyRecord(src: Body, id: Id): Body {
   const body: Body = {
+    ...src,
     id,
     version: src.version,
+    ...(src.referenceFrame ? { referenceFrame: [...src.referenceFrame] as unknown as Mat4 } : {}),
     mesh: meshClone(src.mesh),
     faces: new Map(
       [...src.faces].map(([fid, f]) => [
@@ -968,6 +969,7 @@ export function copyBodyRecord(src: Body, id: Id): Body {
       [...src.imprints].map(([fid, g]) => [
         fid,
         {
+          ...(g.nativeUnknownFields ? { nativeUnknownFields: g.nativeUnknownFields.map(bytes => new Uint8Array(bytes)) } : {}),
           vertices: new Map([...g.vertices].map(([vid, p]) => [vid, [p[0], p[1]] as [number, number]])),
           edges: new Map([...g.edges].map(([eid, e]) => [eid, { ...e }])),
           nextId: g.nextId,
@@ -987,7 +989,19 @@ export function copyBodyRecord(src: Body, id: Id): Body {
     receiveShadows: src.receiveShadows,
     attributes: cloneJson(src.attributes),
   };
+  recordTopologyContinuation(src.mesh, src.version, body.mesh, body.version, null, null);
   return body;
+}
+
+/** Curves and surfaces use global persistent IDs even though their face references are body-local. */
+export function reidentifyBodyCurves(draft:DocumentDraft,body:Body,ids?:Map<number,number>):void{
+ const curves=new Map<CurveId,CurveId>();
+ for(const [old,curve]of [...body.curves]){const id=allocId<CurveId>(draft);curves.set(old,id);ids?.set(old,id);body.curves.delete(old);body.curves.set(id,{...curve,id});}
+ for(const edge of body.edges.values())if(edge.curveId!==null)edge.curveId=curves.get(edge.curveId)??edge.curveId;
+ for(const graph of body.imprints.values())for(const edge of graph.edges.values())if(edge.curveId!==null)edge.curveId=curves.get(edge.curveId)??edge.curveId;
+ const surfaces=new Map<SurfaceId,SurfaceId>();
+ for(const [old,surface]of [...body.surfaces]){const id=allocId<SurfaceId>(draft);surfaces.set(old,id);ids?.set(old,id);body.surfaces.delete(old);body.surfaces.set(id,{...surface,id,curveId:surface.curveId===null?null:curves.get(surface.curveId)??surface.curveId});}
+ for(const face of body.faces.values())if(face.surfaceId!==null)face.surfaceId=surfaces.get(face.surfaceId)??face.surfaceId;
 }
 
 /** Re-express a moved body face's texture placements (from basis `from`, points moved by `m`) in its new basis. */
@@ -1000,6 +1014,13 @@ function rebaseFaceUv(body: Body, face: FaceRecord, from: PlaneBasis, m: Mat4 | 
   else delete face.uvBack;
 }
 
+function carryBodyFrame(body: Body, matrix: Mat4 | MMat4, previous: Mat4 | MMat4 = body.referenceFrame ?? m4identity()): void {
+  const frame = m4mul(matrix, previous), identity = m4identity();
+  if (frame.every((value, index) => value === identity[index])) delete body.referenceFrame;
+  else body.referenceFrame = frame as unknown as Mat4;
+}
+
+
 /**
  * Rigid transform of a body in the model (coordinates of its container): mesh vertices, face
  * planes/bases/loops (imprints are re-expressed in the recomputed basis so they stay where they
@@ -1008,6 +1029,7 @@ function rebaseFaceUv(body: Body, face: FaceRecord, from: PlaneBasis, m: Mat4 | 
  * mirrored matrices use `transformBodyAffineInPlace`.
  */
 export function transformBodyInPlace(body: Body, m: Mat4 | MMat4, tiles?: TextureTileOf): void {
+  const topologySource = body.mesh, topologyVersion = body.version;
   const src = body.mesh.verts;
   const verts = new Float64Array(src.length);
   for (let i = 0; i < src.length; i += 3) {
@@ -1041,7 +1063,9 @@ export function transformBodyInPlace(body: Body, m: Mat4 | MMat4, tiles?: Textur
     c.center = m4transformPoint(m, c.center);
     c.normal = v3normalize(m4transformDir(m, c.normal));
   }
+  carryBodyFrame(body, m);
   body.version += 1;
+  recordTopologyContinuation(topologySource, topologyVersion, body.mesh, body.version, null, null);
 }
 
 /** Face decorations and inference geometry in the destination coordinate system. */
@@ -1078,13 +1102,23 @@ function restoreBodyAffineMetadata(body: Body, metadata: ReturnType<typeof captu
     }
     g.version += 1;
   }
-  const scale = Math.cbrt(Math.abs(m4linearDeterminant(m)));
-  for (const c of curves.values()) {
+  transformCurves(body, [...curves.values()], m);
+}
+
+/** Carry curve geometry through an affine solid edit while retaining its surviving edge identities. */
+function transformCurves(body: Body, curves: readonly Curve[], m: Mat4 | MMat4): void {
+  for (const c of curves) {
     const kept = body.curves.get(c.id);
     if (!kept) continue;
+    const u = v3normalize(v3anyPerpendicular(c.normal)), v = v3normalize(v3cross(c.normal, u));
+    const mappedU = m4transformDir(m, u), mappedV = m4transformDir(m, v), su = v3len(mappedU), sv = v3len(mappedV);
+    const circular = Math.abs(su - sv) <= ANGLE_TOL * Math.max(su, sv) && Math.abs(v3dot(mappedU, mappedV)) <= ANGLE_TOL * su * sv;
     kept.center = m4transformPoint(m, c.center);
     kept.normal = mapNormal(m, c.normal);
-    kept.radius = c.radius * scale;
+    if (c.kind === 'circle' || c.kind === 'arc') {
+      if (circular) kept.radius = c.radius * su;
+      else { kept.kind = 'freehand'; kept.radius = 0; }
+    }
   }
 }
 
@@ -1092,7 +1126,8 @@ function restoreBodyAffineMetadata(body: Body, metadata: ReturnType<typeof captu
  * General affine transform of a body without the kernel: vertices are mapped, the winding is
  * flipped for mirroring matrices, the face layer is rebuilt from the mesh (face ids and their
  * materials survive, edges are re-derived with their flags), imprints are re-expressed in the new
- * bases and curves follow (radius scaled by the mean axis scale). Exact for rigid motions and
+ * bases and curves follow their own plane; deformed circles retain their edge groups as freehand
+ * curves. Exact for rigid motions and
  * mirrors; uniform scale keeps every solid valid; non-uniform scale is what the kernel's transform
  * would produce for planar faces. With `tiles`, texture placements are re-expressed as in
  * `transformBodyInPlace`.
@@ -1121,6 +1156,7 @@ export function transformBodyAffineInPlace(body: Body, m: Mat4 | MMat4, tiles?: 
     }
   }
   reconcileBody(body, { mesh: { verts, tris, faceId: body.mesh.faceId }, faceOrigin: new Map(), previousEdges: metadata.edges });
+  carryBodyFrame(body, m);
   restoreBodyAffineMetadata(body, metadata, m, tiles);
 }
 
@@ -1350,6 +1386,7 @@ export function applyTransformPlan(draft: DocumentDraft, plan: TransformPlan, wo
   const path = plan.path;
   const refs: EntityRef[] = [];
   const bodyIds: number[] = [], meshPartIds: number[] = [];
+  const copiedIds = new Map<number, number>(), splitIds = new Set<number>();
   const m = plan.matrix;
   let notice: string | undefined;
   const edgePieces = new Map<string, EntityRef[]>();
@@ -1368,6 +1405,8 @@ export function applyTransformPlan(draft: DocumentDraft, plan: TransformPlan, wo
     if (!source) continue;
     if (source.version !== version) throw new PushFormError('transform.stale', 'The body changed before the transform could be applied');
     const target = plan.copy ? cloneBody(draft, container, source) : source;
+    const referenceBefore = source.referenceFrame ?? m4identity();
+    if (plan.copy) copiedIds.set(source.id, target.id);
     if (plan.rigid) {
       transformBodyInPlace(target, m);
       refs.push({ kind: 'body', path, id: target.id });
@@ -1381,14 +1420,17 @@ export function applyTransformPlan(draft: DocumentDraft, plan: TransformPlan, wo
       removeBody(container, target.id);
       continue;
     }
+    if (extras.length) splitIds.add(target.id);
     const metadata = captureBodyAffineMetadata(target, m);
     const updated = applyKernelResult(draft, target.id, { ...toKernelResult(first, w), previousEdges: metadata.edges });
     restoreBodyAffineMetadata(updated, metadata, m);
+    carryBodyFrame(updated, m, referenceBefore);
     updated.nextFaceId = Math.max(updated.nextFaceId, w.result.nextFaceId);
     refs.push({ kind: 'body', path, id: updated.id });
     bodyIds.push(updated.id);
     for (const c of extras) {
       const extra = bodyFromComponent(draft, container, c, source, w);
+      carryBodyFrame(extra, m, referenceBefore);
       refs.push({ kind: 'body', path, id: extra.id });
       bodyIds.push(extra.id);
     }
@@ -1411,6 +1453,7 @@ export function applyTransformPlan(draft: DocumentDraft, plan: TransformPlan, wo
     if (!source) continue;
     if (source.locked && !plan.copy) throw lockedError('instance', plan.label);
     const target = plan.copy ? cloneInstance(draft, container, source) : source;
+    if (plan.copy) copiedIds.set(source.id, target.id);
     target.transform = m4mul(m, target.transform) as unknown as Mat4;
     // a glued placement's plane moves with it
     if (target.gluedPlane) target.gluedPlane = planeFromPointNormal(m4transformPoint(m, planeOrigin(target.gluedPlane)), mapNormal(m, target.gluedPlane.n));
@@ -1537,6 +1580,7 @@ export function applyTransformPlan(draft: DocumentDraft, plan: TransformPlan, wo
       removeBody(container, id);
       continue;
     }
+    if (extras.length) splitIds.add(id);
     const updated = applyKernelResult(draft, id, toKernelResult(first, w));
     updated.nextFaceId = Math.max(updated.nextFaceId, w.result.nextFaceId);
     bodyIds.push(updated.id);
@@ -1551,7 +1595,10 @@ export function applyTransformPlan(draft: DocumentDraft, plan: TransformPlan, wo
     }
   }
 
+  copyPluginEntries(draft, pluginIdentityMap(copiedIds));
+  reviewPluginBodies(draft, splitIds);
   return { refs, bodyIds, meshPartIds, ...(notice ? { notice } : {}), ...(edgePieces.size ? { edgePieces } : {}) };
+
 }
 
 // ---------------------------------------------------------------------------------------------

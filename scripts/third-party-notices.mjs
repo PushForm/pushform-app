@@ -16,8 +16,9 @@
 // fails in CI, with --complete, or with PUSHFORM_NOTICES=complete, and otherwise writes the file without them and
 // warns, so local builds work without it. Release builds always run in CI.
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { formatGroups, normalizeText, npmNoticesSection } from './license-check.mjs';
@@ -100,7 +101,7 @@ export function cargoAboutVersion() {
  * The cargo-about report of each Rust workspace, cached in node_modules/.cache by the inputs that decide it (the
  * cargo-about version, its configuration, and each workspace's Cargo.toml and Cargo.lock), so repeated builds skip it.
  */
-export function cargoAboutReports(root, version) {
+export function cargoAboutReports(root, version, { runCommand = run } = {}) {
   const config = join(root, 'scripts/notices/about.toml');
   const cache = join(root, 'node_modules/.cache/pushform-notices');
   return RUST_WORKSPACES.map(({ manifest, ships, targets }) => {
@@ -109,13 +110,16 @@ export function cargoAboutReports(root, version) {
     for (const file of [config, path, join(dirname(path), 'Cargo.lock')]) hash.update(readFileSync(file));
     const cached = join(cache, `${hash.digest('hex').slice(0, 24)}.json`);
     if (existsSync(cached)) return { ships, report: JSON.parse(readFileSync(cached, 'utf8')) };
-    // cargo-about refuses redirected output in PowerShell, so it writes to a file that is read back.
     mkdirSync(cache, { recursive: true });
-    const raw = `${cached}.raw`;
-    run('cargo', ['about', 'generate', '--format', 'json', '--fail', '--locked', '-c', config, '-m', path,
-      ...targets.flatMap((target) => ['--target', target]), '-o', raw]);
-    const full = JSON.parse(readFileSync(raw, 'utf8'));
-    rmSync(raw, { force: true });
+    const output = join(cache, `cargo-about-${randomUUID()}.json`);
+    let full;
+    try {
+      // cargo-about refuses redirected stdout in PowerShell. Its output option also avoids shell encoding changes.
+      runCommand('cargo', ['about', 'generate', '--format', 'json', '--fail', '--locked', '-c', config, '-m', path,
+        ...targets.flatMap((target) => ['--target', target]), '--output-file', output], { stdio: ['ignore', 'ignore', 'inherit'] });
+      full = JSON.parse(readFileSync(output, 'utf8'));
+    } finally { if (existsSync(output)) rmSync(output, { force: true }); }
+
     const report = {
       crates: full.crates.map(({ package: pkg }) => ({ package: { id: pkg.id, name: pkg.name, version: pkg.version,
         license: pkg.license, authors: pkg.authors, repository: pkg.repository } })),

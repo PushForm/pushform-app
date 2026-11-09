@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import type { Ray, Vec2, Vec3 } from '@pushform/core';
+import type { LengthUnit, Ray, Vec2, Vec3 } from '@pushform/core';
 import type { InferenceOptions, InferenceResult } from '@pushform/inference';
 import type { CameraHost, CameraState } from '../camera/CameraHost';
 import type { CommandRegistry } from '../registry/CommandRegistry';
@@ -42,10 +42,12 @@ export interface ToolWheelEvent {
   readonly modifiers: Modifiers;
 }
 
-export type EntryFieldKind = 'length' | 'angle' | 'number';
+export type EntryFieldKind = 'length' | 'angle' | 'number' | 'text';
 
 /** A value the tool takes, drawn as a field in the viewport beside the geometry it sets. */
 export interface EntryField {
+  /** Secondary settings live in the host options popover; dimensions default to the viewport. */
+  readonly placement?: 'viewport' | 'options' | undefined;
   /** Stable id within the tool (`length`, `angle`, `width`, …); keys `onEntry` values. */
   readonly id: string;
   /** Accessible name, e.g. "Width". */
@@ -235,6 +237,10 @@ export interface Tool {
   onModifiersChanged?(modifiers: Modifiers): void;
   onWheel?(e: ToolWheelEvent): boolean | void;
   onVcb?(value: VcbValue): void;
+  /** Active extension tools parse bounded expressions themselves; built-in tools keep parsed VCB values. */
+  onRawVcb?(text: string, defaultUnit: LengthUnit): void;
+  onRawEntry?(values: Readonly<Record<string, string>>, defaultUnit: LengthUnit): void;
+  onRawEntryLock?(id: string, text: string | null, defaultUnit: LengthUnit): void;
   /**
    * Apply the typed values of the tool's fields, keyed by field id; fields left out keep their live
    * value. Values whose kind the field does not take (`8s`, `[x,y,z]`) go to `onVcb` instead.

@@ -45,6 +45,7 @@ describe('direct packed geometry writing', () => {
   it('rewrites body decorations including curves, surfaces and imprints without object reconstruction', async () => {
     const doc = createDocument(); const body = doc.transact('body', d => {
       const b = bodyFromMesh(d, meshBox([0, 0, 0], [1, 2, 3]));
+      b.referenceFrame = [0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 2, 3, 1, 1];
       const key = b.edges.keys().next().value!, face = b.faces.keys().next().value!;
       b.curves.set(0 as CurveId, { id: 0 as CurveId, kind: 'freehand', center: [0, 0, 0], normal: [0, 0, 1], radius: 0, startAngle: 0, endAngle: 0, segments: 1, edgeRefs: [key] }); b.edges.get(key)!.curveId = 0 as CurveId;
       b.surfaces.set(0 as SurfaceId, { id: 0 as SurfaceId, faceIds: [face], curveId: 0 as CurveId }); b.faces.get(face)!.surfaceId = 0 as SurfaceId;

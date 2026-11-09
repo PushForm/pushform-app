@@ -9,7 +9,9 @@ import {
 } from '@pushform/commands';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { modelOperationSchema, MODEL_TOOLS, type ModelBatchResult, type ModelOperation } from '@pushform/extension-protocol';
+import { modelOperationSchema, MODEL_TOOLS, type ModelBatchResult, type ModelOperation, MODEL_LIMITS, type ModelEntitySummary, type ModelVec3 } from '@pushform/extension-protocol';
+
+import type { CameraHost, CameraState } from '@pushform/commands';
 import { basisToLocal } from '@pushform/core';
 import { containerAt, uvAt } from '@pushform/model';
 import { InlineBackend, KernelClient, meshTopologyProblems } from '@pushform/kernel';
@@ -18,6 +20,18 @@ import { ModelApiFailure, ModelDocumentApi, runModelTool } from './modelApi';
 const kernels: KernelClient[] = [];
 afterEach(() => { for (const kernel of kernels.splice(0)) kernel.dispose(); });
 
+/** The parts of a viewport framing uses: a camera looking at the origin from the front right, in a 16:9 view. */
+function fakeCamera(): CameraHost & { state: CameraState } {
+  const camera = {
+    state: { eye: [10, -10, 5], target: [0, 0, 0], up: [0, 0, 1], fov: 35, projection: 'perspective', orthoHeight: 10 } as CameraState,
+    getState: () => camera.state,
+    setState: (state: CameraState) => { camera.state = state; },
+    viewportSize: () => ({ width: 1600, height: 900 }),
+    sceneBounds: () => null,
+  };
+  return camera as unknown as CameraHost & { state: CameraState };
+}
+
 /** Roboto for every family, from the commands package's test fonts. */
 const fontFile = (name: string): ArrayBuffer => {
   const b = readFileSync(createRequire(new URL('../../commands/package.json', import.meta.url)).resolve(`@fontsource/roboto/files/${name}`));
@@ -25,13 +39,13 @@ const fontFile = (name: string): ArrayBuffer => {
 };
 const fonts: FontSource = { load: (_font, bold) => Promise.resolve([fontFile(`roboto-latin-${bold ? 700 : 400}-normal.woff`)]) };
 
-function setup(options: { fonts?: boolean } = {}) {
+function setup(options: { fonts?: boolean; camera?: CameraHost } = {}) {
   const host = new DocumentHost();
   const kernel = new KernelClient(new InlineBackend());
   kernels.push(kernel);
   const services = new Map<string, unknown>([[SERVICE_DOCUMENT, host], [SERVICE_KERNEL, kernel]]);
   if (options.fonts) services.set(SERVICE_FONTS, fonts);
-  const commands = new CommandRegistry({ tx: host, services });
+  const commands = new CommandRegistry({ tx: host, ...(options.camera ? { camera: options.camera } : {}), services });
   for (const group of [editCommands, modelCommands, sketchCommands, transformCommands, groupCommands, componentCommands, contextCommands, tagCommands, materialCommands,
     curveCommands, pushPullCommands, solidCommands, revolveCommands, followMeCommands, edgeBlendCommands, offsetCommands, intersectCommands, edgeCommands, guideCommands,
     dimensionCommands, textCommands, text3dCommands, sectionPlaneCommands, builderCommands])
@@ -70,7 +84,7 @@ describe('ModelDocumentApi reads', () => {
     expect(listing.entities[0]!.volume).toBeCloseTo(1);
     const top = api.query({ container: null, kinds: ['face'], ids: [id], facing: [0, 0, 1], containing: null, fields: ['geometry'], offset: null, limit: null });
     expect(top.total).toBe(1);
-    expect(top.entities[0]).toMatchObject({ ref: { kind: 'face', id }, normal: [0, 0, 1], holes: 0 });
+    expect(top.entities[0]).toMatchObject({ ref: { kind: 'face', id }, normal: [0, 0, 1], holes: [], truncated: false, loopPointCount: 4 });
     expect(top.entities[0]!.area).toBeCloseTo(1);
     expect(top.entities[0]!.bounds).toBeUndefined();
     const side = api.query({ container: null, kinds: ['face'], ids: null, facing: null, containing: [1, 0.5, 0.5], fields: null, offset: null, limit: null });
@@ -84,6 +98,143 @@ describe('ModelDocumentApi reads', () => {
     expect(page).toMatchObject({ total: 3, offset: 1, next: 2 });
     expect(() => api.query({ container: [999], kinds: null, ids: null, facing: null, containing: null, fields: null, offset: null, limit: null })).toThrow(/No group or component/);
     expect(() => api.query({ limit: 1000 })).toThrow(ModelApiFailure);
+  });
+
+  it('projects exact vertices in carried body coordinates while retaining ordinary container bounds', async () => {
+    const { host, api, commands, addBox } = setup();
+    const id = addBox([0, 0, 0], [.6, .3, .018]);
+    const angle = .63, c = Math.cos(angle), s = Math.sin(angle);
+    const matrix = [c, s, 0, 0, -s, c, 0, 0, 0, 0, 1, 0, 2, 3, 1, 1];
+    await commands.execute('transform.apply', { refs: [{ kind: 'body', path: [], id }], matrix });
+    const query = { container: null, kinds: ['body'], ids: [id], facing: null, containing: null, fields: ['bounds', 'geometry'], offset: null, limit: null };
+    const body = api.query({ ...query, projection: [[c, s, 0], [-s, c, 0], [0, 0, 2]] }).entities[0]!;
+    expect(body.referenceFrame).toEqual(matrix);
+    expect(body.bounds!.max[0] - body.bounds!.min[0]).toBeGreaterThan(.6);
+    expect(body.referenceBounds!.max[0] - body.referenceBounds!.min[0]).toBeCloseTo(.6, 10);
+    expect(body.projectedBounds!.max[0] - body.projectedBounds!.min[0]).toBeCloseTo(.6, 10);
+    expect(body.projectedBounds!.max[2] - body.projectedBounds!.min[2]).toBeCloseTo(.036, 10);
+    const before = host.doc.state;
+    expect(() => api.query({ ...query, projection: [[0, 0, 0], [0, 1, 0], [0, 0, 1]] })).toThrow();
+    expect(host.doc.state).toBe(before);
+  });
+
+  it('reports a body geometry version independently of document settings revisions', () => {
+    const { host, api, addBox } = setup();
+    const id = addBox([0, 0, 0], [1, 1, 1]);
+    const query = () => api.query({ container: null, kinds: ['body'], ids: [id], fields: ['geometry'], facing: null, containing: null, offset: null, limit: null }).entities[0]!;
+    const before = query().geometryVersion, revision = api.revision;
+    expect(before).toBeTypeOf('number');
+    host.doc.transact('Display precision', draft => { draft.meta.units.lengthPrecision = 2; });
+    expect(api.revision).toBeGreaterThan(revision);
+    expect(query().geometryVersion).toBe(before);
+    expect(api.query({ container: null, kinds: ['body'], ids: [id], fields: ['bounds'], facing: null, containing: null, offset: null, limit: null }).entities[0]!.geometryVersion).toBeUndefined();
+  });
+});
+
+describe('ModelDocumentApi face outlines', () => {
+  const faces = (api: ReturnType<typeof setup>['api'], kinds: ('face' | 'sketchFace')[], ids: number[] | null = null, limit: number | null = null) =>
+    api.query({ container: null, kinds, ids, facing: null, containing: null, fields: ['geometry'], offset: null, limit });
+  /** Twice the signed area of a loop about the normal: positive counterclockwise. */
+  const signedArea = (loop: ModelVec3[], normal: ModelVec3): number => {
+    let x = 0, y = 0, z = 0;
+    for (let i = 0; i < loop.length; i++) {
+      const a = loop[i]!, b = loop[(i + 1) % loop.length]!;
+      x += (a[1] - b[1]) * (a[2] + b[2]); y += (a[2] - b[2]) * (a[0] + b[0]); z += (a[0] - b[0]) * (a[1] + b[1]);
+    }
+    return x * normal[0] + y * normal[1] + z * normal[2];
+  };
+  const circle = (count: number, radius: number, z: number): [number, number, number][] =>
+    Array.from({ length: count }, (_, i): [number, number, number] => [0.5 + radius * Math.cos((2 * Math.PI * i) / count), 0.5 + radius * Math.sin((2 * Math.PI * i) / count), z]);
+  /** Replaces the loops of the top face of a box with `loops`, as a cut or an import would leave them. */
+  const setTopLoops = (host: ReturnType<typeof setup>['host'], bodyId: number, loops: [number, number, number][][]) => host.edit('Loops', draft => {
+    const body = draft.definitions.get(draft.rootDefinitionId)!.entities.bodies.get(bodyId as never)!;
+    const top = [...body.faces.values()].find(face => face.plane.n[2] > 0.5)!;
+    top.loops = loops;
+  });
+  const topOf = (api: ReturnType<typeof setup>['api'], bodyId: number): ModelEntitySummary =>
+    api.query({ container: null, kinds: ['face'], ids: [bodyId], facing: [0, 0, 1], containing: null, fields: ['geometry'], offset: null, limit: null }).entities[0]!;
+
+  it('leaves a plain triangle as it is', () => {
+    const { api, host, addBox } = setup();
+    const id = addBox([0, 0, 0], [1, 1, 1]);
+    setTopLoops(host, id, [[[0, 0, 1], [1, 0, 1], [0, 1, 1]]]);
+    const top = topOf(api, id);
+    expect(top).toMatchObject({ outerLoop: [[0, 0, 1], [1, 0, 1], [0, 1, 1]], holes: [], truncated: false, loopPointCount: 3 });
+    expect(top.area).toBeCloseTo(0.5);
+  });
+
+  it('reports a hole of a solid face clockwise about the normal, with the outline counterclockwise', () => {
+    const { api, host, addBox } = setup();
+    const id = addBox([0, 0, 0], [1, 1, 1]);
+    // The hole is stored counterclockwise here; the API reports it clockwise regardless.
+    setTopLoops(host, id, [[[0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], [[0.25, 0.25, 1], [0.75, 0.25, 1], [0.75, 0.75, 1], [0.25, 0.75, 1]]]);
+    const top = topOf(api, id);
+    expect(top.holes).toHaveLength(1);
+    expect(top.holes![0]).toHaveLength(4);
+    expect(top.holes![0]!.every(p => p[2] === 1)).toBe(true);
+    expect(signedArea(top.outerLoop!, top.normal!)).toBeGreaterThan(0);
+    expect(signedArea(top.holes![0]!, top.normal!)).toBeLessThan(0);
+    expect(top.area).toBeCloseTo(0.75);
+    expect(top).toMatchObject({ truncated: false, loopPointCount: 4 });
+  });
+
+  it('reports a sketch face drawn around another as an outline with a hole', () => {
+    const { api, commands } = setup();
+    commands.execute('sketch.rectangle', { a: [0, 0, 0], b: [2, 0, 0], c: [2, 2, 0], d: [0, 2, 0] });
+    commands.execute('sketch.rectangle', { a: [0.5, 0.5, 0], b: [1.5, 0.5, 0], c: [1.5, 1.5, 0], d: [0.5, 1.5, 0] });
+    const listing = faces(api, ['sketchFace']);
+    expect(listing.total).toBe(2);
+    const outer = listing.entities.find(face => face.holes!.length === 1)!, inner = listing.entities.find(face => face.holes!.length === 0)!;
+    expect(outer.area).toBeCloseTo(3);
+    expect(inner.area).toBeCloseTo(1);
+    expect(outer.holes![0]).toHaveLength(4);
+    expect(signedArea(outer.outerLoop!, outer.normal!)).toBeGreaterThan(0);
+    expect(signedArea(outer.holes![0]!, outer.normal!)).toBeLessThan(0);
+    expect(signedArea(inner.outerLoop!, inner.normal!)).toBeGreaterThan(0);
+    expect(outer.holes![0]!.map(p => p[0]).sort()).toEqual([0.5, 0.5, 1.5, 1.5]);
+  });
+
+  it('simplifies a loop past the point limit to the limit, keeps the corners, and says so', () => {
+    const { api, host, addBox } = setup();
+    const id = addBox([0, 0, 0], [1, 1, 1]);
+    // A 600-point outline: a circle whose 599 other points are joined by one sharp corner, inside a 600-point hole-free face.
+    const outline = circle(600, 0.45, 1);
+    outline[0] = [1, 1, 1];
+    setTopLoops(host, id, [outline]);
+    const top = topOf(api, id);
+    expect(top.outerLoop!.length).toBeLessThanOrEqual(MODEL_LIMITS.loopPointsPerFace);
+    expect(top.outerLoop!.length).toBe(512);
+    expect(top).toMatchObject({ truncated: true, loopPointCount: 600 });
+    expect(top.outerLoop).toContainEqual([1, 1, 1]);
+    expect(signedArea(top.outerLoop!, top.normal!)).toBeGreaterThan(0);
+    // The area is that of the full loop, and the simplified loop stays close to it.
+    expect(signedArea(top.outerLoop!, top.normal!) / 2).toBeCloseTo(top.area!, 2);
+    // A hole past the limit is simplified on its own.
+    setTopLoops(host, id, [[[0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], circle(700, 0.3, 1).reverse()]);
+    const holed = topOf(api, id);
+    expect(holed.outerLoop).toHaveLength(4);
+    expect(holed.holes![0]).toHaveLength(512);
+    expect(holed).toMatchObject({ truncated: true, loopPointCount: 4 });
+  });
+
+  it('ends a page of faces early once their loops reach the point budget', () => {
+    const { api, host, addBox } = setup();
+    const ids = Array.from({ length: 5 }, (_, i) => addBox([i * 2, 0, 0], [i * 2 + 1, 1, 1]));
+    // Each top face carries a 512-point outline and 20 holes of 512 points: 10,752 points a face, so four faces pass the budget.
+    const holes = Array.from({ length: 20 }, (_, i) => circle(512, 0.01, 1).map((p): [number, number, number] => [p[0] + i * 0.02 - 0.2, p[1], p[2]]).reverse());
+    for (const id of ids) setTopLoops(host, id, [circle(512, 0.45, 1), ...holes]);
+    const query = (offset: number | null, fields: ('geometry' | 'bounds')[]) =>
+      api.query({ container: null, kinds: ['face'], ids, facing: [0, 0, 1], containing: null, fields, offset, limit: null });
+    const page = query(null, ['geometry']);
+    expect(page.total).toBe(5);
+    expect(page.entities).toHaveLength(Math.ceil(MODEL_LIMITS.loopPointsPerQueryPage / (21 * 512)));
+    expect(page.entities).toHaveLength(4);
+    expect(page.next).toBe(4);
+    const rest = query(page.next, ['geometry']);
+    expect(rest).toMatchObject({ offset: 4, next: null });
+    expect(rest.entities).toHaveLength(1);
+    // Without geometry there are no loops to count, so the whole page comes at once.
+    expect(query(null, ['bounds']).entities).toHaveLength(5);
   });
 });
 
@@ -1385,6 +1536,68 @@ describe('ModelDocumentApi raised panels and edge profiles', () => {
   });
 });
 
+describe('ModelDocumentApi selection and framing', () => {
+  /** A box at the root, and a box inside a group inside another group, with the editor back at the root. */
+  async function nested(options: { camera?: CameraHost } = {}) {
+    const made = setup(options);
+    const { api, host, addBox } = made;
+    const loose = addBox([0, 0, 0], [1, 1, 1]), grouped = addBox([5, 0, 0], [6, 1, 1]);
+    const outer = (await api.apply({ expectedRevision: api.revision, label: 'Outer', operations: [{ op: 'make_group', as: 'g', refs: [box(grouped)] }] })).created.g!;
+    host.setContext([outer as never]);
+    const insideId = addBox([0, 0, 0], [1, 1, 1]);
+    const inner = (await api.apply({ expectedRevision: api.revision, label: 'Inner', operations: [{ op: 'make_group', as: 'n', refs: [box(insideId)] }] })).created.n!;
+    host.setContext([]);
+    const path = [outer, inner];
+    const part = api.query({ container: path, kinds: ['body'], ids: null, facing: null, containing: null, fields: ['bounds'], offset: null, limit: null }).entities[0]!;
+    return { ...made, loose, outer, inner, path, part };
+  }
+
+  it('selects entities inside groups by their instance path, in place, and leaves the open container alone', async () => {
+    const { api, host, loose, path, part } = await nested();
+    const selected = api.select([{ kind: 'body', id: part.ref.id, path }, { kind: 'body', id: loose }, { kind: 'instance', id: path[1]!, path: [path[0]!] }]);
+    expect(selected).toEqual([{ path, kind: 'body', id: part.ref.id }, { path: [], kind: 'body', id: loose }, { path: [path[0]], kind: 'instance', id: path[1] }]);
+    expect(host.selection.refs).toEqual(selected);
+    expect(host.context.path).toEqual([]);
+    expect(api.getDocument().selection).toEqual(selected);
+    // A ref carrying the open container's own path is the plain form.
+    expect(api.select([{ kind: 'body', id: loose, path: [] }])).toEqual([{ path: [], kind: 'body', id: loose }]);
+  });
+
+  it('refuses entities that are not at their path, or paths that lead nowhere, selecting nothing', async () => {
+    const { api, host, loose, path, part } = await nested();
+    api.select([{ kind: 'body', id: loose }]);
+    const missing = await failure(async () => api.select([{ kind: 'body', id: part.ref.id, path }, { kind: 'body', id: 999, path }]));
+    expect(missing.error).toMatchObject({ code: 'invalid_reference' });
+    expect(missing.error.message).toContain(`at instance path [${path.join(', ')}]`);
+    const nowhere = await failure(async () => api.select([{ kind: 'body', id: part.ref.id, path: [999] }]));
+    expect(nowhere.error.message).toContain('No group or component at instance path [999]');
+    expect(host.selection.refs).toEqual([{ kind: 'body', path: [], id: loose }]);
+  });
+
+  it('frames the world bounds of nested entities', async () => {
+    const camera = fakeCamera();
+    const { api, path, part, outer } = await nested({ camera });
+    await api.apply({ expectedRevision: api.revision, label: 'Shift', operations: [{ op: 'move', refs: [{ kind: 'instance', id: outer }], offset: [10, 20, 0] }] });
+    api.frame([{ kind: 'body', id: part.ref.id, path }], false);
+    // The part is a unit box at the origin of the inner group; its world center is where that container's transform puts it.
+    expect(part.bounds).toEqual({ min: [0, 0, 0], max: [1, 1, 1] });
+    const m = api.query({ container: path, kinds: ['body'], ids: null, facing: null, containing: null, fields: null, offset: null, limit: null }).worldTransform;
+    const center = [0, 1, 2].map(i => m[i]! * 0.5 + m[4 + i]! * 0.5 + m[8 + i]! * 0.5 + m[12 + i]!);
+    expect(center[0]).toBeGreaterThan(10);
+    expect(center[1]).toBeGreaterThan(20);
+    for (const i of [0, 1, 2]) expect(camera.state.target[i]).toBeCloseTo(center[i]!);
+  });
+
+  it('keeps a batch to its own container: a ref of another container names it and fails', async () => {
+    const { api, path, part } = await nested();
+    const error = await failure(() => api.apply({ expectedRevision: api.revision, label: 'Hide', operations: [{ op: 'set_hidden', refs: [{ kind: 'body', id: part.ref.id, path }], hidden: true }] }));
+    expect(error.error).toMatchObject({ code: 'invalid_reference', operationIndex: 0 });
+    expect(error.error.message).toContain(`[${path.join(', ')}]`);
+    await api.apply({ expectedRevision: api.revision, container: path, label: 'Hide', operations: [{ op: 'set_hidden', refs: [{ kind: 'body', id: part.ref.id, path }], hidden: true }] });
+    expect(api.query({ container: path, kinds: ['body'], ids: null, facing: null, containing: null, fields: null, offset: null, limit: null }).entities[0]!.hidden).toBe(true);
+  });
+});
+
 describe('runModelTool', () => {
   it('returns results and errors as tool results', async () => {
     const { api } = setup();
@@ -1558,4 +1771,40 @@ describe('Revolve model operations', () => {
   it.each([{ angleDeg: 0 }, { angleDeg: 361 }, { segments: 2 }, { segments: 721 }, { axisDir: [0, 0, 0] }])('rejects malformed revolve parameters: %j', patch => {
     expect(modelOperationSchema.safeParse({ ...revolve, ...patch }).success).toBe(false);
   });
+});
+
+it('paints a captured descendant part atomically and rolls back isolation when a later operation fails', async () => {
+  const s = setup(), body = s.addBox([0, 0, 0], [1, 0.5, 0.018]);
+  const made = await s.api.apply({ expectedRevision: s.api.revision, label: 'Assembly', operations: [{ op: 'make_component', refs: [box(body)], as: 'shelf' }, { op: 'move', refs: ['$shelf'], offset: [2, 0, 0], copy: true, as: 'other' }, { op: 'add_material', color: '#ddaa66', as: 'maple' }] });
+  const ref = { kind: 'body', id: body, path: [made.created.other!] } as const;
+  const before = s.host.doc.state, undo = s.host.undoStack.length;
+  await failure(() => s.api.apply({ expectedRevision: s.api.revision, label: 'Refuse partial paint', operations: [{ op: 'paint_part', ref, materialId: made.created.maple!, scope: 'placement' }, { op: 'paint', refs: [box(999999)], materialId: null }] }));
+  expect(s.host.doc.state.definitions).toEqual(before.definitions); expect(s.host.undoStack.length).toBe(undo);
+  const painted = await s.api.apply({ expectedRevision: s.api.revision, label: 'Paint physical part', operations: [{ op: 'paint_part', ref, materialId: made.created.maple!, scope: 'placement' }] }, undefined, () => {});
+  const next = painted.results[0]!.refs![0]!; expect(next.id).not.toBe(body); expect(next.path).toEqual(ref.path);
+  expect(s.host.undoStack.length).toBe(undo + 1); s.host.undo(); expect(s.host.doc.state.definitions).toEqual(before.definitions);
+});
+
+
+it('reflects one nested physical part through the kernel without changing its shared sibling', async () => {
+ const s=setup();const made=await s.api.apply({expectedRevision:s.api.revision,label:'Part fixture',operations:[{op:'add_prism',as:'part',points:[[0,0,0],[0.5,0,0],[0.5,0.1,0],[0.2,0.1,0],[0.2,0.3,0],[0,0.3,0]],normal:[0,0,1],distance:0.018},{op:'make_component',refs:['$part'],as:'shelf'},{op:'move',refs:['$shelf'],offset:[0.8,0,0],copy:true,as:'other'}]});
+ const body=made.created.part!,first=made.created.shelf!,second=made.created.other!,before=s.host.doc.state,undo=s.host.undoStack.length;
+ const result=await s.api.apply({expectedRevision:s.api.revision,label:'Reflect one physical part',operations:[{op:'transform_part',ref:{kind:'body',id:body,path:[first]},worldMatrix:[-1,0,0,0,0,1,0,0,0,0,1,0,0.5,0,0,1]}]},undefined,()=>{});
+ const next=result.results[0]!.refs![0]!;expect(next.path).toEqual([first]);expect(next.id).not.toBe(body);
+ const root=s.root(),original=before.definitions.get(before.rootDefinitionId)!.entities.instances.get(first as never)!,unchanged=root.instances.get(second as never)!;expect(unchanged.definitionId).toBe(original.definitionId);expect(root.instances.get(first as never)!.definitionId).not.toBe(unchanged.definitionId);
+ const transformed=s.host.doc.state.definitions.get(root.instances.get(first as never)!.definitionId)!.entities.bodies.get(next.id as never)!,source=before.definitions.get(original.definitionId)!.entities.bodies.get(body as never)!;
+ expect(transformed.valid).toBe(true);expect(transformed.props.volume).toBeCloseTo(source.props.volume);expect(transformed.referenceFrame![0]).toBeCloseTo(-1);
+ const coordinates=(verts:ArrayLike<number>,flip=false)=>Array.from({length:verts.length/3},(_,index)=>[flip?0.5-verts[index*3]!:verts[index*3]!,verts[index*3+1]!,verts[index*3+2]!].map(value=>Number(value.toFixed(6))).join(',')).sort();
+ expect(coordinates(transformed.mesh.verts)).toEqual(coordinates(source.mesh.verts,true));expect(s.host.undoStack.length).toBe(undo+1);s.host.undo();expect(s.root().instances.get(first as never)!.definitionId).toBe(unchanged.definitionId);
+});
+
+it('physical part transforms refuse invalid matrices and roll preparatory isolation back on cancellation or later failure', async()=>{
+ const s=setup(),body=s.addBox([0,0,0],[0.5,0.3,0.018]),made=await s.api.apply({expectedRevision:s.api.revision,label:'Shared fixture',operations:[{op:'make_component',refs:[box(body)],as:'shelf'},{op:'move',refs:['$shelf'],offset:[1,0,0],copy:true}]});
+ const ref={kind:'body',id:body,path:[made.created.shelf!]};const before=s.host.doc.state,undo=s.host.undoStack.length;
+ for(const matrix of [[0,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1],[1,0,0,0.1,0,1,0,0,0,0,1,0,0,0,0,1]])await failure(()=>s.api.apply({expectedRevision:s.api.revision,label:'Invalid reflection',operations:[{op:'transform_part',ref,worldMatrix:matrix}]}));
+ expect(s.host.doc.state.definitions).toBe(before.definitions);
+ await failure(()=>s.api.apply({expectedRevision:s.api.revision,label:'Rollback reflected part',operations:[{op:'transform_part',ref,worldMatrix:[-1,0,0,0,0,1,0,0,0,0,1,0,0.5,0,0,1]},{op:'delete',refs:[box(999999)]}]}));
+ expect(s.host.doc.state.definitions).toEqual(before.definitions);expect(s.host.undoStack.length).toBe(undo);
+ const controller=new AbortController();controller.abort();await failure(()=>s.api.apply({expectedRevision:s.api.revision,label:'Cancelled reflection',operations:[{op:'transform_part',ref,worldMatrix:[-1,0,0,0,0,1,0,0,0,0,1,0,0.5,0,0,1]}]},controller.signal));expect(s.host.doc.state.definitions).toEqual(before.definitions);
+
 });

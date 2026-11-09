@@ -626,6 +626,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.pf-cmd-search-desc {
+  display: block;
+  color: var(--pf-text-muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .pf-cmd-search-source {
   flex: none;
   max-width: 40%;
@@ -718,6 +725,9 @@
   margin: 0 4px;
   background: var(--pf-border);
 }
+/* Extension buttons join the end of a toolbar group after a thinner, shorter separator. */
+.pf-toolbar-sep-extensions { height: 18px; margin: 0 2px; opacity: 0.7; }
+.pf-toolbtn-extension > img.pf-xicon { border-radius: 3px; }
 .pf-viewport-wrap {
   flex: 1;
   position: relative;
@@ -904,6 +914,21 @@
 }
 .pf-status-choice { display: flex; align-items: center; gap: 6px; flex: none; color: var(--pf-text-muted); }
 .pf-status-choice select { height: 20px; padding: 0 4px; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); color: var(--pf-text); background: var(--pf-surface-2); font: inherit; }
+.pf-tool-options-trigger { display: inline-flex; flex: none; align-items: center; gap: 5px; height: 24px; padding: 0 7px; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); background: var(--pf-surface-2); color: var(--pf-text); font: inherit; cursor: pointer; white-space: nowrap; }
+.pf-tool-options-trigger:hover, .pf-tool-options-trigger[aria-expanded=true] { border-color: var(--pf-accent); background: var(--pf-accent-bg); }
+.pf-tool-options { position: fixed; z-index: 1900; right: 12px; bottom: calc(var(--pf-statusbar-h) + 8px); width: min(360px, calc(100vw - 24px)); max-height: calc(100dvh - 100px); box-sizing: border-box; overflow: auto; padding: 16px; border: 1px solid var(--pf-border); border-radius: 10px; background: var(--pf-surface); color: var(--pf-text); box-shadow: 0 8px 32px #0003; font: 12px/1.4 var(--pf-font); }
+.pf-tool-options header { display: flex; justify-content: space-between; align-items: start; gap: 12px; margin-bottom: 16px; }
+.pf-tool-options h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.pf-tool-options header p { margin: 3px 0 0; color: var(--pf-text-muted); }
+.pf-tool-options-context { margin: 0 0 14px; color: var(--pf-text-muted); line-height: 1.45; white-space: normal; overflow-wrap: anywhere; }
+.pf-tool-options-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px 12px; }
+.pf-tool-options-grid label { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.pf-tool-options-grid label > span { color: var(--pf-text-muted); }
+.pf-tool-options-grid label.is-wide { grid-column: 1 / -1; }
+.pf-tool-options-grid select, .pf-tool-options-grid input { box-sizing: border-box; width: 100%; min-width: 0; height: 30px; padding: 4px 7px; color: var(--pf-text); background: var(--pf-surface-2); border: 1px solid var(--pf-border); border-radius: var(--pf-radius); font: inherit; }
+.pf-tool-options-grid :is(select, input):focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 1px; }
+.pf-tool-options-grid label.pf-tool-options-primary { display: none; }
+@media (max-width: 720px) { .pf-statusbar.has-tool-options > .pf-status-choice { display: none; } .pf-tool-options-grid label.pf-tool-options-primary { display: flex; } }
 .pf-status-mid {
   flex: 1;
   min-width: 0;
@@ -987,6 +1012,43 @@
 }
 
 /* Entity Info panel */
+.pf-ei-plugin {
+  border-top: 1px solid var(--pf-border);
+  margin-top: 12px;
+  padding-top: 8px;
+  font: var(--pf-panel-font-size)/1.4 var(--pf-font);
+}
+.pf-ei-plugin > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  list-style: none;
+  padding: 6px 0;
+}
+.pf-ei-plugin > summary::-webkit-details-marker { display: none; }
+.pf-ei-plugin > summary::before { content: ''; flex: none; width: 5px; height: 5px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); color: var(--pf-text-muted); }
+.pf-ei-plugin[open] > summary::before { transform: rotate(45deg); }
+.pf-ei-plugin > summary:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 2px; border-radius: var(--pf-radius); }
+.pf-ei-plugin > p { margin: 8px 0; line-height: 1.45; }
+.pf-ei-plugin-scope { display: grid; gap: 5px; margin-top: 8px; color: var(--pf-text-muted); font-size: 11px; }
+.pf-ei-plugin-scope .pf-ei-select { height: 28px; background: var(--pf-surface); color: var(--pf-text); font-size: 12px; }
+.pf-ei-plugin > .pf-ei-muted { font-size: 11px; }
+.pf-ei-plugin .pf-xui { margin-top: 12px; }
+.pf-ei-plugin .pf-xui-stack { gap: 12px; }
+.pf-ei-plugin .pf-xui-label { font-size: 12px; color: var(--pf-text); font-weight: 500; }
+.pf-ei-plugin .pf-xui-input, .pf-ei-plugin .pf-xui-select { min-height: 28px; }
+.pf-ei-plugin textarea.pf-xui-input { min-height: 56px; resize: vertical; }
+.pf-ei-plugin .pf-xui-section { border: 0; border-top: 1px solid var(--pf-border); border-radius: 0; }
+.pf-ei-plugin .pf-xui-section-head { background: transparent; padding: 5px 0; }
+.pf-ei-plugin .pf-xui-section.is-open > .pf-xui-section-head { border-bottom: 0; }
+.pf-ei-plugin .pf-xui-section-toggle { padding: 4px 0; font-weight: 500; }
+.pf-ei-plugin .pf-xui-section-body { padding: 4px 0 8px; gap: 12px; }
+.pf-ei-plugin .pf-xui-menu > .pf-btn { background: transparent; height: 28px; }
+.pf-xui-field-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.pf-xui-field-source { color: var(--pf-text-muted); font-size: 11px; line-height: 1.4; }
 .pf-ei-title {
   margin: 0 0 8px;
   font-size: 13px;
@@ -2383,6 +2445,7 @@
 .pf-about-facts dt { color: var(--pf-text-muted); }
 .pf-about-facts dd { margin: 0; font-variant-numeric: tabular-nums; }
 .pf-about-copyright { margin: 18px 0 0; color: var(--pf-text-muted); font-size: 12px; }
+.pf-about-credits { margin: 8px 0 0; color: var(--pf-text-muted); font-size: 11px; }
 .pf-about-facts code { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .pf-about-dialog button:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 2px; }
 .pf-about-channel { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
@@ -2702,6 +2765,8 @@ button.pf-brand { border: 0; background: transparent; color: inherit; font: inhe
 /* Left menu bar and docked side panel: the rail mirrors .pf-rightstrip on the editor's left edge. */
 .pf-side-rail { width: var(--pf-toolbar-w); flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 0; background: var(--pf-surface); border-right: 1px solid var(--pf-border); }
 .pf-side-rail-button > svg { width: 24px; height: 24px; }
+.pf-side-rail-button.is-end { position: relative; margin-top: auto; }
+.pf-side-rail-button.is-end::before { content: ''; position: absolute; top: -5px; left: 6px; right: 6px; border-top: 1px solid var(--pf-border); }
 .pf-side-dock { position: relative; flex: none; display: flex; min-height: 0; background: var(--pf-surface); border-right: 1px solid var(--pf-border); }
 .pf-side-dock[hidden] { display: none; }
 .pf-side-dock-content { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
@@ -2891,10 +2956,15 @@ html.pf-document-loading, html.pf-document-loading * { cursor: progress !importa
 .pf-workspace-loading progress { width: 100%; accent-color: var(--pf-accent); }
 
 /* Extension interfaces: host components for trees sent by extensions. */
-.pf-xui { display: flex; flex-direction: column; gap: 8px; color: var(--pf-text); }
+.pf-xui { display: flex; flex-direction: column; gap: 8px; color: var(--pf-text); font: var(--pf-panel-font-size)/1.4 var(--pf-font); }
+.pf-xui, .pf-xui * { box-sizing: border-box; }
+.pf-xui :is(button, input, select, textarea) { font: inherit; }
 .pf-xui-stack { display: flex; }
 .pf-xui-stack.is-vertical { flex-direction: column; }
 .pf-xui-stack.is-horizontal { flex-direction: row; flex-wrap: wrap; }
+/* Nothing an extension shows may run out of a narrow panel: children shrink, long labels and toolbars wrap. */
+.pf-xui-stack > *, .pf-xui-field, .pf-xui-input, .pf-xui-select { min-width: 0; max-width: 100%; }
+.pf-xui-button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: center; }
 .pf-xui-stack.gap-none { gap: 0; }
 .pf-xui-stack.gap-small { gap: 4px; }
 .pf-xui-stack.gap-medium { gap: 8px; }
@@ -2911,6 +2981,7 @@ h4.pf-xui-text { font-size: 12px; }
 .pf-xui-text.is-code { font-family: ui-monospace, monospace; white-space: pre-wrap; }
 .pf-xui-text.tone-muted, .pf-xui-label { color: var(--pf-text-muted); }
 .pf-xui-text.tone-error, .pf-xui-error, .pf-xui-message.tone-error { color: var(--pf-danger); }
+.pf-xui-text, .pf-xui-message { white-space: pre-line; }
 .pf-xui-message { margin: 0; padding: 6px 8px; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); background: var(--pf-surface-2); }
 .pf-xui-message.tone-error { border-color: var(--pf-danger); }
 .pf-xui-message.tone-info, .pf-xui-message.tone-success { border-color: var(--pf-accent); }
@@ -2929,10 +3000,46 @@ h4.pf-xui-text { font-size: 12px; }
 .pf-xui td:focus-visible, .pf-xui button:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 1px; }
 .pf-xui-color { width: 48px; height: 24px; padding: 0; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); }
 .pf-xui-check { display: flex; align-items: center; gap: 6px; }
+.pf-xui-check input { flex: none; width: 14px; height: 14px; margin: 0; accent-color: var(--pf-accent); }
 .pf-xui-button.is-primary { background: var(--pf-accent); border-color: var(--pf-accent); color: #fff; }
+/* The shared button hover paints the light accent background, under which a primary button's text cannot be read. */
+.pf-xui-button.is-primary:hover:not(:disabled) { background: var(--pf-accent); filter: brightness(0.92); }
 .pf-xui-button.is-danger { border-color: var(--pf-danger); color: var(--pf-danger); }
+.pf-xui-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+.pf-xui-button.is-icon { width: 26px; height: 26px; padding: 0; }
+.pf-xui-icon { display: inline-flex; flex: none; }
 .pf-xui-progress { display: flex; flex-direction: column; gap: 2px; }
+/* A section: a disclosure header with a title, badge, subtitle and actions, over its children. */
+.pf-xui-section { display: flex; flex-direction: column; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); }
+.pf-xui-section-head { display: flex; align-items: center; gap: 4px; padding: 2px 4px 2px 2px; background: var(--pf-surface-2); border-radius: var(--pf-radius); }
+.pf-xui-section.is-open > .pf-xui-section-head { border-bottom: 1px solid var(--pf-border); border-radius: var(--pf-radius) var(--pf-radius) 0 0; }
+.pf-xui-section-toggle { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; padding: 3px 4px; font: inherit; font-weight: 600; color: inherit; text-align: start; background: none; border: 0; border-radius: var(--pf-radius); cursor: pointer; }
+.pf-xui-section-toggle:hover { background: var(--pf-accent-bg); }
+.pf-xui-section-chevron { display: inline-flex; flex: none; color: var(--pf-text-muted); }
+/* The title takes the toggle's first line beside the chevron and wraps within it, so a narrow dock never leaves the chevron alone on a line; the badge follows it, the subtitle takes the next line. */
+.pf-xui-section-title { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
+.pf-xui-section-badge { flex: none; padding: 0 6px; border-radius: 9px; background: var(--pf-accent-bg); color: var(--pf-text); font-size: 11px; font-weight: 600; line-height: 18px; }
+.pf-xui-section-detail { display: contents; }
+.pf-xui-section-subtitle { flex-basis: 100%; min-width: 0; font-weight: 400; font-size: 11px; color: var(--pf-text-muted); overflow-wrap: anywhere; }
+.pf-xui-section-actions { flex: none; display: flex; align-items: center; gap: 2px; }
+.pf-xui-section-actions .pf-xui-button.is-action:not(.is-icon) { padding: 2px 8px; }
+.pf-xui-section-body { display: flex; flex-direction: column; gap: 8px; padding: 8px; }
+/* A menu button and its dropdown, drawn by the host. */
+.pf-xui-menu { position: relative; display: inline-flex; max-width: 100%; }
+.pf-xui-menu-caret { display: inline-flex; margin-inline-start: -2px; color: var(--pf-text-muted); }
+.pf-xui-menu-list {
+  position: absolute; top: calc(100% + 2px); left: 0; z-index: 20; min-width: 160px; max-width: min(320px, calc(100vw - 16px)); padding: 4px;
+  background: var(--pf-surface); color: var(--pf-text); border: 1px solid var(--pf-border); border-radius: var(--pf-radius); box-shadow: 0 6px 20px rgb(0 0 0 / 20%);
+}
+.pf-xui-menu-list.is-end { left: auto; right: 0; }
+.pf-xui-menu-list .has-separator { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--pf-border); }
+.pf-xui-menu-item { display: block; width: 100%; padding: 4px 8px; font: inherit; color: inherit; text-align: start; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: none; border: 0; border-radius: var(--pf-radius); cursor: pointer; }
+.pf-xui-menu-item:hover:not(:disabled), .pf-xui-menu-item:focus-visible { background: var(--pf-accent-bg); outline: none; }
+.pf-xui-menu-item:disabled { color: var(--pf-text-muted); cursor: default; }
 .pf-xui-progress progress { width: 100%; }
+.pf-xui-tablist { flex-wrap: wrap; row-gap: 2px; }
+.pf-xui-tablist .pf-tab { max-width: 100%; overflow-wrap: anywhere; text-align: start; }
+.pf-xui-tablist .pf-tab:focus-visible { outline-offset: -2px; }
 .pf-xui-tabpanel { padding-top: 8px; }
 .pf-xui-tree, .pf-xui-tree ul { margin: 0; padding: 0; list-style: none; }
 .pf-xui-tree-row { display: flex; align-items: center; gap: 2px; border-radius: var(--pf-radius); }
@@ -2940,13 +3047,13 @@ h4.pf-xui-text { font-size: 12px; }
 .pf-xui-tree-toggle { width: 16px; padding: 0; font: inherit; color: var(--pf-text-muted); background: none; border: 0; cursor: pointer; }
 .pf-xui-tree-label { flex: 1; padding: 2px 4px; font: inherit; color: inherit; text-align: start; background: none; border: 0; cursor: pointer; }
 .pf-xui-table-wrap { display: flex; flex-direction: column; gap: 4px; }
-.pf-xui-table-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pf-xui-table-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; }
 .pf-xui-columns { position: relative; }
 .pf-xui-columns-menu {
   position: absolute; inset-inline-end: 0; z-index: 2; margin: 2px 0 0; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px;
   background: var(--pf-surface); border: 1px solid var(--pf-border); border-radius: var(--pf-radius);
 }
-.pf-xui-table-scroll { overflow: auto; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); }
+.pf-xui-table-scroll { --pf-xui-table-max: 360px; max-height: var(--pf-xui-table-max); overflow: auto; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); }
 .pf-xui-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .pf-xui-table th, .pf-xui-table td { padding: 0 6px; border-bottom: 1px solid var(--pf-border); text-align: start; white-space: nowrap; }
 .pf-xui-table thead th { position: sticky; top: 0; z-index: 1; background: var(--pf-surface-2); font-weight: 600; height: 26px; }
@@ -2978,7 +3085,30 @@ h4.pf-xui-text { font-size: 12px; }
 .pf-xmanager-confirm { border: 1px solid #b26a00; border-radius: var(--pf-radius); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
 .pf-xmanager-confirm p { margin: 0; }
 .pf-xmanager-details { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.pf-xmanager.is-panel { max-width: none; }
+.pf-xmanager.is-panel .pf-xmanager-row-head { flex-wrap: wrap; }
+.pf-xmanager.is-panel .pf-xmanager-network { display: block; overflow-x: auto; }
+.pf-xmanager-browse, .pf-xmanager-installed { display: flex; flex-direction: column; gap: 6px; }
+.pf-xdirectory-heading, .pf-xdirectory-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; width: 100%; }
+.pf-xdirectory-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.pf-xdirectory-identity > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pf-xdirectory-icon { display: grid; place-items: center; padding: 9px; border-radius: var(--pf-radius); background: var(--pf-surface-2); color: var(--pf-text); }
+.pf-xdirectory-card { gap: 10px; padding: 12px; background: var(--pf-bg); overflow-wrap: anywhere; }
+.pf-xdirectory-card p { margin: 0; }
+.pf-xdirectory-status { color: var(--pf-text-muted); font-size: 12px; line-height: 1.5; }
+.pf-xdirectory-details { width: 100%; border-top: 1px solid var(--pf-border); padding-top: 8px; }
+.pf-xdirectory-details summary { cursor: pointer; font-size: 12px; color: var(--pf-text); }
+.pf-xdirectory-details[open] > * + * { margin-top: 8px; }
+.pf-xdirectory-notes { white-space: pre-wrap; }
+.pf-xdirectory-search { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.pf-xdirectory-search input { width: 100%; min-width: 0; box-sizing: border-box; }
 .pf-xmanager-logs pre { max-height: 160px; overflow: auto; font-size: 11px; margin: 4px 0 0; white-space: pre-wrap; }
+.pf-xmanager-network { border-collapse: collapse; width: 100%; font-size: 12px; }
+.pf-xmanager-network th, .pf-xmanager-network td { text-align: start; padding: 2px 8px 2px 0; overflow-wrap: anywhere; }
+.pf-xmanager-network thead th { color: var(--pf-text-muted); font-weight: normal; }
+.pf-xmanager-network td { font-variant-numeric: tabular-nums; }
+.pf-xmanager-activity { list-style: none; margin: 0; padding: 0; max-height: 200px; overflow: auto; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.pf-xmanager-activity time { color: var(--pf-text-muted); margin-inline-end: 6px; }
 .pf-xinstall-integrity { font-size: 11px; font-weight: 600; }
 .pf-xinstall-integrity.is-official { color: var(--pf-accent); }
 .pf-xinstall-integrity.is-unsigned { color: #8a5300; }
@@ -2996,7 +3126,7 @@ h4.pf-xui-text { font-size: 12px; }
   .pf-xinstall-error { color: #ff8a80; }
 }
 
-/* Extension panels: a frame PushForm draws, naming the panel and the extension it comes from. */
+/* Extension side panels: a frame PushForm draws, naming the extension the content comes from. */
 .pf-xpanel { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .pf-xpanel-head { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--pf-border); }
 .pf-xpanel-icon { flex: none; display: inline-flex; color: var(--pf-text-muted); }
@@ -3006,6 +3136,42 @@ h4.pf-xui-text { font-size: 12px; }
 .pf-xpanel-unsigned { color: #8a5300; }
 .pf-xpanel-body { flex: 1; overflow: auto; padding: 10px 12px; }
 .pf-xpanel-status { margin: 0; color: var(--pf-text-muted); }
+.pf-xpanel-head .pf-iconbtn { flex: none; }
+/* Several sidebar views of one extension: a tab strip under the header. */
+.pf-xpanel-tabs { display: flex; flex-wrap: wrap; gap: 2px; padding: 4px 8px 0; border-bottom: 1px solid var(--pf-border); }
+.pf-xpanel-tab { padding: 4px 8px; margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--pf-text-muted); font: inherit; cursor: pointer; }
+.pf-xpanel-tab.is-active { color: var(--pf-text); border-bottom-color: var(--pf-accent); }
+.pf-xpanel-tab:hover { color: var(--pf-text); }
+
+/* An extension's icon: a host glyph or the package's PNG, sized by where it shows. */
+.pf-xicon { display: inline-flex; align-items: center; justify-content: center; flex: none; object-fit: contain; }
+.pf-side-rail-button > .pf-xicon { width: 24px; height: 24px; }
+.pf-side-rail-button > img.pf-xicon { border-radius: 4px; }
+.pf-extension-tab .pf-xicon { width: 16px; height: 16px; }
+
+/* An extension tab in front: it fills the editor area while the viewport and its panels stay mounted behind it. */
+.pf-xtab-host { flex: 1; display: flex; min-width: 0; min-height: 0; background: var(--pf-surface); }
+.pf-main.has-xtab > :not(.pf-side-rail):not(.pf-side-dock):not(.pf-xtab-host),
+.pf-layout-main.has-xtab > :not(.pf-side-rail):not(.pf-side-dock):not(.pf-xtab-host) { display: none; }
+.pf-xtab { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; font: 12px/1.4 var(--pf-font); color: var(--pf-text); }
+.pf-xtab-head { display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-bottom: 1px solid var(--pf-border); }
+.pf-xtab-title { margin: 0; font-size: 13px; font-weight: 600; white-space: nowrap; }
+.pf-xtab-body { flex: 1; min-height: 0; overflow: auto; padding: 12px 16px; }
+/* Tables in a tab show as many rows as fit, and a drawing sized from its proportions stays within the tab's height. */
+.pf-xtab .pf-xui-table-scroll { --pf-xui-table-max: max(240px, calc(100vh - 260px)); }
+.pf-xtab .pf-xui-vector-frame.is-auto-height { max-height: max(200px, calc(100vh - 280px)); }
+
+/* A dialog an extension shows over its side panel or tab, below PushForm's own prompts (z-index 200). */
+.pf-xdialog-backdrop { position: fixed; inset: 0; z-index: 160; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgb(0 0 0 / 25%); }
+.pf-xdialog {
+  display: flex; flex-direction: column; width: min(480px, 100%); max-height: 100%; min-height: 0;
+  background: var(--pf-surface); color: var(--pf-text); border: 1px solid var(--pf-border); border-radius: 6px;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 25%); font: 12px/1.4 var(--pf-font);
+}
+.pf-xdialog:focus { outline: none; }
+.pf-xdialog-head { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 14px; border-bottom: 1px solid var(--pf-border); }
+.pf-xdialog-title { flex: 1; min-width: 0; margin: 0; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.pf-xdialog-body { flex: 1; min-height: 0; overflow: auto; padding: 12px 14px; }
 @media (prefers-color-scheme: dark) { .pf-xpanel-unsigned { color: #e0a040; } }
 
 /* Extension commands that are running or failed, above the status bar. Short runs finish before they show. */
@@ -3027,7 +3193,7 @@ h4.pf-xui-text { font-size: 12px; }
 
 /* Extension vector views: a drawing PushForm renders from the extension's shapes. */
 .pf-xui-vector { display: flex; flex-direction: column; gap: 4px; }
-.pf-xui-vector-tools { display: flex; align-items: center; gap: 4px; }
+.pf-xui-vector-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .pf-xui-vector-tools .pf-xui-label { flex: 1; }
 .pf-xui-vector-tool { min-width: 28px; padding: 2px 8px; }
 .pf-xui-vector-frame { position: relative; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); background: #ffffff; overflow: hidden; }

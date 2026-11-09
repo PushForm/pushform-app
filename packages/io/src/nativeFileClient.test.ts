@@ -53,6 +53,21 @@ class FakeWorker {
 }
 
 describe('native file client', () => {
+  it('terminates an active native writer on abort without detaching live geometry',async()=>{
+    const workers:FakeWorker[]=[];
+    class PendingWorker extends FakeWorker { constructor(){super();workers.push(this);}override postMessage():void{} }
+    vi.stubGlobal('Worker',PendingWorker);const {doc}=modelWithImage(),vertices=[...doc.rootDefinition.entities.bodies.values()][0]!.mesh.verts,abort=new AbortController();
+    const pending=encodeModelSnapshot(doc.state,[],{signal:abort.signal});abort.abort(new Error('Cancelled native snapshot'));
+    await expect(pending).rejects.toThrow('Cancelled native snapshot');expect(workers[0]!.terminated).toBe(true);expect(vertices.byteLength).toBeGreaterThan(0);
+    workers[0]!.onerror?.({message:'Late worker failure'});
+  });
+  it('bounds native decoded allocations and can explicitly refuse legacy module input',async()=>{
+    const {doc}=modelWithImage(),native=await encodeModelSnapshot(doc.state,[]);
+    await expect(openModelFile(native,{decodedBytes:0,nativeOnly:true})).rejects.toThrow(/budget/i);
+    const legacy=await encodeModelArchive(modelJson(doc.state),[]);await expect(openModelFile(legacy,{nativeOnly:true})).rejects.toThrow(/current native/);
+    expect((await openModelFile(legacy)).state.rootDefinitionId).toBe(doc.state.rootDefinitionId);
+    const abort=new AbortController();abort.abort(new Error('No native read'));await expect(openModelFile(native,{signal:abort.signal})).rejects.toThrow('No native read');
+  });
   afterEach(() => { vi.unstubAllGlobals(); FakeWorker.fail = 'none'; FakeWorker.instances = 0; });
 
   it.each(['none', 'worker', 'fallback'])('saves captured binary Layout state through %s', async mode => {

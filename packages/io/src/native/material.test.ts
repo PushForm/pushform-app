@@ -43,6 +43,18 @@ describe('native material adapter', () => {
     expect(Array.from(schema.encode(schema.decode(bytes)).finish())).toEqual(Array.from(bytes));
     value.appearance.roughness = 2; expect(() => encodeNativeMaterial(value)).toThrow();
   });
+  it('preserves per-material image filenames while leaving older texture records unchanged', () => {
+    const older=fixture();expect(Object.hasOwn(decodeNativeMaterial(encodeNativeMaterial(older)).value.texture!,'imageName')).toBe(false);
+    const value=fixture();value.texture!.imageName='Birch grain \u00e9.png';
+    const bytes=encodeNativeMaterial(value);expect(decodeNativeMaterial(bytes).value).toEqual(value);
+    expect(Array.from(schema.encode(schema.decode(bytes)).finish())).toEqual(Array.from(bytes));
+    for(const name of ['', 'x'.repeat(201)]){
+      value.texture!.imageName=name;expect(()=>encodeNativeMaterial(value)).toThrow();
+      const wire=schema.decode(bytes) as unknown as {texture:{value:{imageName:string}}};wire.texture.value.imageName=name;
+      expect(()=>decodeNativeMaterial(schema.encode(wire).finish())).toThrow();
+    }
+
+  });
   it('retains unknown texture fields while editing width', () => {
     const future = protobuf.Root.fromJSON(root.toJSON()); future.lookupType('pushform.native.MaterialTexture').add(new protobuf.Field('futureData', 90, 'bytes')); future.resolveAll();
     const newer = future.lookupType('pushform.native.Material');

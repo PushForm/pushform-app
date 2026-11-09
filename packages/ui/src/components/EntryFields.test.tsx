@@ -9,7 +9,7 @@ import { AppContext } from '../AppContext';
 import { createApp } from '../bootstrap';
 import type { AppInstance } from '../bootstrap';
 import { useAppStore } from '../store';
-import { beginEntry, clearOf, EntryFields } from './EntryFields';
+import { beginEntry, clearOf, withinViewport, EntryFields } from './EntryFields';
 
 let app: AppInstance | null = null;
 afterEach(() => {
@@ -113,4 +113,33 @@ it('places a field wholly past the dimension line it labels, so it covers neithe
   }
   // No direction on screen: centred on the anchor.
   expect(clearOf([5, 5], [5, 5], size)).toEqual([5, 5]);
+});
+
+
+it('forwards extension expressions and default model units without forcing the built-in numeric grammar', () => {
+  const a = mount({ format: 'decimal', lengthUnit: 'mm' });
+  const received: unknown[] = [];
+  act(() => {
+    a.toolManager.register({ id: 'expressions', title: 'Expressions', activate() {}, deactivate() {}, onCancel() {}, overlay: () => [],
+      status: () => ({ instructor: 'Enter dimensions', vcbLabel: 'Dimensions', fields: FIELDS }),
+      onRawEntry: (values, unit) => received.push(['entry', values, unit]),
+      onRawEntryLock: (id, text, unit) => received.push(['lock', id, text, unit]),
+    }, { command: false });
+    a.toolManager.activate('expressions'); beginEntry('@+10mm');
+  });
+  const width = screen.getByRole('textbox', { name: 'Width' });
+  fireEvent.keyDown(width, { key: 'Tab' });
+  expect(received).toEqual([['lock', 'width', '@+10mm', 'mm']]);
+  const height = screen.getByRole('textbox', { name: 'Height' });
+  fireEvent.change(height, { target: { value: '2*(100mm+25mm)' } });
+  fireEvent.keyDown(height, { key: 'Enter' });
+  expect(received.at(-1)).toEqual(['entry', { height: '2*(100mm+25mm)' }, 'mm']);
+  expect(useAppStore.getState().entryDrafts).toEqual({});
+});
+
+
+it('keeps off-screen dimension inputs inside the model viewport instead of over the sidebar or toolbar', () => {
+  expect(withinViewport([-100, -30], [78, 26], { width: 516, height: 650 })).toEqual([45, 19]);
+  expect(withinViewport([900, 800], [78, 26], { width: 516, height: 650 })).toEqual([471, 631]);
+  expect(withinViewport([250, 250], [78, 26], { width: 516, height: 650 })).toEqual([250, 250]);
 });

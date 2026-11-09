@@ -22,6 +22,7 @@ import {
   builderCommands,
   hardwareCommands,
   SERVICE_FONTS,
+  SERVICE_MESH_EDITABLE,
   detectPlatform,
   editCommands,
   placeholderTool,
@@ -31,6 +32,8 @@ import type { Mat4, MeshData } from '@pushform/core';
 import { InlineBackend, KernelClient } from '@pushform/kernel';
 import { desktopKernelBackend } from './desktopKernel';
 import { rustKernelBackend } from './rustKernel';
+import { makeMeshPartEditable } from '@pushform/io';
+
 import { bodyFromMesh } from '@pushform/model';
 import { Viewport, renderKey } from '@pushform/render';
 import type { RenderBody, RenderDisplay } from '@pushform/render';
@@ -149,6 +152,7 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
     [SERVICE_KERNEL, kernel],
     [SERVICE_INFERENCE, inference],
     [SERVICE_FONTS, bundledFonts],
+    [SERVICE_MESH_EDITABLE, { makeEditable: makeMeshPartEditable }],
   ]);
   const commands = new CommandRegistry({ tx, camera: viewport.camera, services });
   commands.registerAll(editCommands);

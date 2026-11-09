@@ -25,6 +25,8 @@ export interface CommandSearchProps {
 export interface SearchItem {
   readonly id: string;
   readonly title: string;
+  /** One line on what the command does, shown under the title. */
+  readonly description: string | null;
   readonly icon: string;
   readonly key: string | null;
   readonly enabled: boolean;
@@ -174,7 +176,10 @@ export function CommandSearch({ source, compact = false }: CommandSearchProps): 
               onClick={() => run(item)}
             >
               <Icon name={item.icon} size={16} />
-              <span className="pf-cmd-search-title">{item.title}</span>
+              <span className="pf-cmd-search-title">
+                {item.title}
+                {item.description ? <span className="pf-cmd-search-desc">{item.description}</span> : null}
+              </span>
               {item.source ? <span className="pf-cmd-search-source">{item.source}</span> : null}
               {item.key ? <kbd aria-hidden="true">{item.key}</kbd> : null}
             </li>
@@ -210,6 +215,7 @@ export function searchableCommands(registry: CommandRegistry, keymap: Keymap | n
     out.push({
       id: c.id,
       title: c.title,
+      description: c.description ?? null,
       icon: c.icon ?? (c.id.startsWith('tool.') ? `tool-${c.id.slice(5)}` : 'command'),
       key: keymap ? keymap.label(c.id) : (c.keybinding ?? null),
       enabled: c.enabled,

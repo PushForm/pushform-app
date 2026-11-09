@@ -19,6 +19,9 @@
     },
     {
       "path": "../requests-core"
+    },
+    {
+      "path": "../extension-protocol"
     }
   ]
 }

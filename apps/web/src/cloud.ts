@@ -6,7 +6,8 @@ import type { RequestsConfig } from '@pushform/ui';
 export function configuredCloud() {
   const url = import.meta.env.VITE_SUPABASE_URL;
   const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY;
-  const none = { commons: undefined, session: new CloudSession(null), files: undefined, profiles: undefined, account: undefined, billing: undefined, usage: undefined, staff: undefined, campaign: undefined, activity: undefined };
+  const none = { extensionStorage: undefined, commons: undefined, session: new CloudSession(null), files: undefined, profiles: undefined, account: undefined, billing: undefined, usage: undefined, staff: undefined, campaign: undefined, activity: undefined };
+
   if (!url || !publishableKey) return none;
   try { return createBrowserCloud({ url, publishableKey }); }
   catch { return none; }
@@ -41,6 +42,7 @@ export function clearCommonsIntent(): void {
   for (const name of ['commonsModel', 'commonsRevision', 'commonsAsset']) url.searchParams.delete(name);
   window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
 }
-export const { session: cloudSession, files: cloudFiles, profiles: cloudProfiles, account: cloudAccount, billing: cloudBilling, usage: cloudUsage, staff: cloudStaff, campaign: cloudCampaign, activity: cloudActivity, commons: cloudCommons } = configuredCloud();
+export const { extensionStorage: cloudExtensionStorage, session: cloudSession, files: cloudFiles, profiles: cloudProfiles, account: cloudAccount, billing: cloudBilling, usage: cloudUsage, staff: cloudStaff, campaign: cloudCampaign, activity: cloudActivity, commons: cloudCommons } = configuredCloud();
+
 export const requestsConfig = configuredRequests();
 if (import.meta.hot) import.meta.hot.dispose(() => cloudSession.dispose());

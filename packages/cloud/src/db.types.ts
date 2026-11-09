@@ -749,6 +749,60 @@ isOneToOne: false
                   Relationships: [
 
                   ]
+                },"extension_asset_accounts": {
+                  Row: {
+                    "owner_id": string,"revision": number
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "owner_id": string,"revision"?: number
+                  }
+                  Update: {
+                    "owner_id"?: string,"revision"?: number
+                  }
+                  Relationships: [
+
+                  ]
+                },"extension_asset_blobs": {
+                  Row: {
+                    "asset_key": string,"content_type": string,"created_at": string,"data_version": number,"expected_revision": number | null,"expires_at": string,"extension_id": string,"id": string,"owner_id": string,"revision": number | null,"sha256": string,"size_bytes": number,"state": string,"updated_at": string,"extension_assets_descriptor": Json | null
+                  }
+                  ComputedFields: "extension_assets_descriptor"
+                  Insert: {
+                    "asset_key": string,"content_type": string,"created_at"?: string,"data_version": number,"expected_revision"?: number | null,"expires_at"?: string,"extension_id": string,"id"?: string,"owner_id": string,"revision"?: number | null,"sha256": string,"size_bytes": number,"state"?: string,"updated_at"?: string
+                  }
+                  Update: {
+                    "asset_key"?: string,"content_type"?: string,"created_at"?: string,"data_version"?: number,"expected_revision"?: number | null,"expires_at"?: string,"extension_id"?: string,"id"?: string,"owner_id"?: string,"revision"?: number | null,"sha256"?: string,"size_bytes"?: number,"state"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "extension_asset_blobs_owner_id_fkey"
+      columns: ["owner_id"]
+isOneToOne: false
+      referencedRelation: "extension_asset_accounts"
+      referencedColumns: ["owner_id"]
+    }
+                  ]
+                },"extension_assets": {
+                  Row: {
+                    "asset_key": string,"blob_id": string,"extension_id": string,"owner_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "asset_key": string,"blob_id": string,"extension_id": string,"owner_id": string
+                  }
+                  Update: {
+                    "asset_key"?: string,"blob_id"?: string,"extension_id"?: string,"owner_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "extension_assets_blob_id_owner_id_extension_id_asset_key_fkey"
+      columns: ["blob_id","owner_id","extension_id","asset_key"]
+isOneToOne: false
+      referencedRelation: "extension_asset_blobs"
+      referencedColumns: ["id","owner_id","extension_id","asset_key"]
+    }
+                  ]
                 },"extension_settings": {
                   Row: {
                     "extension_id": string,"owner_id": string,"revision": number,"schema_version": number,"updated_at": string,"value": NonNullable<Json>
@@ -1174,6 +1228,7 @@ isOneToOne: false
 "admin_commons_commerce_settings":
 { Args: Record<PropertyKey, never>; Returns: Json
                            },
+
 "admin_commons_feature":
 { Args: { "p_target_id": string,"p_type": string }; Returns: Json
                            },
@@ -1213,6 +1268,7 @@ isOneToOne: false
 "admin_commons_save_purchase_source":
 { Args: { "p_expected_version": number,"p_fields": Json,"p_id": string,"p_model": string }; Returns: Json
                            },
+
 "admin_commons_set_low_interest":
 { Args: { "p_low_interest": boolean,"p_models": Json }; Returns: undefined
                            },
@@ -1641,6 +1697,7 @@ isOneToOne: false
 "commons_commerce_url_valid":
 { Args: { "domains"?: Json,"v": string }; Returns: boolean
                            },
+
 "commons_credited_creator":
 { Args: { "p_id": string }; Returns: Json
                            },
@@ -1798,6 +1855,44 @@ isOneToOne: false
                            },
 "commons_withdraw_model":
 { Args: { "p_expected_published": string,"p_id": string }; Returns: undefined
+                           },
+"extension_assets_abort":
+{ Args: { "p_upload": string }; Returns: Json
+                           },
+"extension_assets_access":
+{ Args: { "p_action": string,"p_path": string }; Returns: boolean
+                           },
+"extension_assets_ack":
+{ Args: { "p_upload": string }; Returns: boolean
+                           },
+"extension_assets_begin":
+{ Args: { "p_content_type": string,"p_expected_revision"?: number,"p_extension": string,"p_key": string,"p_sha256": string,"p_size": number,"p_version": number }; Returns: Json
+                           },
+"extension_assets_cleanup":
+{ Args: { "p_limit"?: number }; Returns: {
+              "path": string,"upload": string
+            }[]
+                           },
+"extension_assets_clear":
+{ Args: { "p_extension": string }; Returns: undefined
+                           },
+"extension_assets_descriptor":
+{ Args: { "p_blob": Omit<Database["public"]['Tables']["extension_asset_blobs"]['Row'], Database["public"]['Tables']["extension_asset_blobs"]['ComputedFields']> }; Returns: Json
+                           },
+"extension_assets_finish":
+{ Args: { "p_upload": string }; Returns: Json
+                           },
+"extension_assets_get":
+{ Args: { "p_extension": string,"p_key": string }; Returns: Json
+                           },
+"extension_assets_list":
+{ Args: { "p_after"?: string,"p_extension": string,"p_limit"?: number }; Returns: Json
+                           },
+"extension_assets_lock":
+{ Args: Record<PropertyKey, never>; Returns: string
+                           },
+"extension_assets_remove":
+{ Args: { "p_expected_revision": number,"p_extension": string,"p_key": string }; Returns: boolean
                            },
 "extension_settings_delete":
 { Args: { "p_extension": string }; Returns: boolean
@@ -2071,6 +2166,129 @@ isOneToOne: false
                            },
 "fr_withdraw":
 { Args: { "p_id": string }; Returns: Json
+                           },
+"plugins_audit":
+{ Args: { "p_before"?: number,"p_limit"?: number }; Returns: Json
+                           },
+"plugins_authorize_signing":
+{ Args: { "p_content_hash": string,"p_release": string }; Returns: Json
+                           },
+"plugins_begin_artifact":
+{ Args: { "p_archive_hash": string,"p_byte_length": number,"p_kind": string,"p_manifest_hash": string,"p_minimum_app_version": string,"p_release": string }; Returns: Json
+                           },
+"plugins_begin_signed_artifact":
+{ Args: { "p_archive_hash": string,"p_byte_length": number,"p_manifest_hash": string,"p_minimum_app_version": string,"p_release": string,"p_signature": Json }; Returns: Json
+                           },
+"plugins_claim_work":
+{ Args: { "p_kinds"?: (string)[],"p_lease_seconds"?: number,"p_limit"?: number }; Returns: Json
+                           },
+"plugins_commit_snapshot":
+{ Args: { "p_snapshot": string }; Returns: Json
+                           },
+"plugins_complete_checks":
+{ Args: { "p_full_review": boolean,"p_release": string,"p_sends_model_data": boolean }; Returns: Json
+                           },
+"plugins_complete_work_checks":
+{ Args: { "p_full_review": boolean,"p_job": string,"p_sends_model_data": boolean,"p_token": string }; Returns: Json
+                           },
+"plugins_create_plugin":
+{ Args: { "p_category": string,"p_icon_path"?: string,"p_id": string,"p_license": string,"p_name": string,"p_privacy_statement": string,"p_source_url": string,"p_summary": string,"p_support_contact": string }; Returns: Json
+                           },
+"plugins_create_release":
+{ Args: { "p_plugin": string,"p_release_notes"?: string,"p_version": string }; Returns: Json
+                           },
+"plugins_deprecate_release":
+{ Args: { "p_reason": string,"p_release": string }; Returns: Json
+                           },
+"plugins_discard_artifact":
+{ Args: { "p_upload": string }; Returns: boolean
+                           },
+"plugins_distribution_head":
+{ Args: { "p_audience": string }; Returns: Json
+                           },
+"plugins_finish_artifact":
+{ Args: { "p_upload": string }; Returns: Json
+                           },
+"plugins_finish_work":
+{ Args: { "p_error_code"?: string,"p_job": string,"p_outcome": string,"p_token": string }; Returns: Json
+                           },
+"plugins_grant_role":
+{ Args: { "p_email": string,"p_role": string }; Returns: Json
+                           },
+"plugins_mine":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"plugins_pause_release":
+{ Args: { "p_reason": string,"p_release": string }; Returns: Json
+                           },
+"plugins_prepare_snapshot":
+{ Args: { "p_registry_bytes": number,"p_registry_hash": string,"p_revocations_bytes": number,"p_revocations_hash": string,"p_snapshot": string }; Returns: Json
+                           },
+"plugins_publish_release":
+{ Args: { "p_percent"?: number,"p_release": string,"p_stage": string }; Returns: Json
+                           },
+"plugins_queue":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"plugins_record_artifact_signature":
+{ Args: { "p_signature": Json,"p_upload": string }; Returns: Json
+                           },
+"plugins_record_check":
+{ Args: { "p_check": string,"p_details"?: Json,"p_outcome": string,"p_release": string,"p_summary": string }; Returns: undefined
+                           },
+"plugins_record_signature":
+{ Args: { "p_algorithm": string,"p_content_hash": string,"p_key_id": string,"p_release": string,"p_signature": string }; Returns: Json
+                           },
+"plugins_record_work_check":
+{ Args: { "p_check": string,"p_details"?: Json,"p_job": string,"p_outcome": string,"p_summary": string,"p_token": string }; Returns: undefined
+                           },
+"plugins_registry_source":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"plugins_release_job":
+{ Args: { "p_release": string }; Returns: Json
+                           },
+"plugins_reopen_review":
+{ Args: { "p_reason": string,"p_release": string }; Returns: Json
+                           },
+"plugins_reserve_snapshot":
+{ Args: { "p_audience": string,"p_expected_generation": number }; Returns: Json
+                           },
+"plugins_resume_release":
+{ Args: { "p_release": string }; Returns: Json
+                           },
+"plugins_review_release":
+{ Args: { "p_checklist": Json,"p_content_hash": string,"p_decision": string,"p_model_data_acknowledged"?: boolean,"p_reasons"?: string,"p_release": string }; Returns: Json
+                           },
+"plugins_revoke_key":
+{ Args: { "p_key_id": string,"p_reason": string }; Returns: Json
+                           },
+"plugins_revoke_permission":
+{ Args: { "p_permission": string,"p_plugin"?: string,"p_reason": string }; Returns: Json
+                           },
+"plugins_revoke_release":
+{ Args: { "p_reason": string,"p_release": string }; Returns: Json
+                           },
+"plugins_revoke_role":
+{ Args: { "p_email": string,"p_role": string }; Returns: boolean
+                           },
+"plugins_session":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"plugins_set_rollout":
+{ Args: { "p_percent"?: number,"p_release": string,"p_stage": string }; Returns: Json
+                           },
+"plugins_submit_release":
+{ Args: { "p_content_hash": string,"p_contributors"?: (string)[],"p_manifest": Json,"p_package_size": number,"p_release": string }; Returns: Json
+                           },
+"plugins_update_plugin":
+{ Args: { "p_category": string,"p_icon_path"?: string,"p_id": string,"p_license": string,"p_name": string,"p_privacy_statement": string,"p_source_url": string,"p_summary": string,"p_support_contact": string }; Returns: Json
+                           },
+"plugins_withdraw_release":
+{ Args: { "p_reason": string,"p_release": string }; Returns: Json
+                           },
+"plugins_work_status":
+{ Args: { "p_release"?: string }; Returns: Json
                            }
           }
           Enums: {

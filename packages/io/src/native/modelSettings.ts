@@ -12,7 +12,8 @@ import { encodeNativeIds, decodeNativeIds } from './idList';
 import { validateNativeTagHierarchy } from './tags';
 import { encodeNativeSceneLight, decodeNativeSceneLight } from './environment';
 import { MAX_SCENE_LIGHTS, MAX_SCENE_SHADOW_SAMPLES, sceneShadowSamples } from '@pushform/model';
-export type NativeModelSettings = Omit<DocumentState, 'nativeStyleUnknownFields' | 'nativeSceneUnknownFields' | 'nativeImageUnknownFields' | 'nativeMaterialUnknownFields' | 'nativeTagUnknownFields' | 'nativeSettingsUnknownFields' | 'nativeRootUnknownFields' | 'definitions' | 'materials' | 'tags' | 'tagFolders' | 'styles' | 'scenes' | 'images'>;
+export type NativeModelSettings = Omit<DocumentState, 'pluginData' | 'nativeStyleUnknownFields' | 'nativeSceneUnknownFields' | 'nativeImageUnknownFields' | 'nativeMaterialUnknownFields' | 'nativeTagUnknownFields' | 'nativeSettingsUnknownFields' | 'nativeRootUnknownFields' | 'definitions' | 'materials' | 'tags' | 'tagFolders' | 'styles' | 'scenes' | 'images'>;
+
 export interface ModelSettingsExtensions {
   records: Map<string, Uint8Array[]>;
   meta: ModelMetaExtensions;

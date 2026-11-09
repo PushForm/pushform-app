@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import { m4invert, type Mat4 } from '@pushform/core';
 import { FORMAT_VERSION, parseModelAttributions, type DocumentState } from '@pushform/model';
 
 /**
@@ -90,6 +91,12 @@ export function validateModelState(state: unknown): DocumentState {
         !(entities.instances instanceof Map) || !(entities.images instanceof Map) || !Array.isArray(entities.order))
       throw new Error('Invalid model snapshot');
     for (const body of entities.bodies.values()) {
+      if (body?.referenceFrame !== undefined) {
+        const frame = body.referenceFrame;
+        if (!Array.isArray(frame) || frame.length !== 16 || !frame.every(Number.isFinite) || frame[3] !== 0 || frame[7] !== 0 || frame[11] !== 0 || frame[15] !== 1) throw new Error('Invalid body reference frame');
+        const inverse = m4invert(frame as unknown as Mat4);
+        if (!inverse || !inverse.every(Number.isFinite)) throw new Error('Invalid body reference frame');
+      }
       const mesh = body?.mesh;
       if (!mesh || !(mesh.verts instanceof Float64Array) ||
           !(mesh.tris instanceof Uint32Array) ||

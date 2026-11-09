@@ -10,6 +10,7 @@ import type { AppInstance } from '../bootstrap';
 import { useAppStore } from '../store';
 import { Icon } from './Icon';
 import { useSelectionRefs } from '../hooks/useSelection';
+import { ToolOptionsFields } from './ToolOptions';
 import { ModelTextStyleRow } from './ModelTextStyleRow';
 import { EntryFields } from './EntryFields';
 
@@ -52,6 +53,7 @@ export interface ToolOptionsBarProps {
 export function ToolOptionsBar(): JSX.Element {
   const app = useApp();
   const settings = useAppStore((s) => s.toolSettings);
+  const optionFields = useAppStore((s) => s.entryFields).filter(field => field.placement === 'options');
   const placing = useAppStore((s) => s.toolPlacing);
   const applied = useAppStore((s) => s.toolApplied);
   const activeToolId = useAppStore((s) => s.activeToolId);
@@ -74,7 +76,10 @@ export function ToolOptionsBar(): JSX.Element {
       read={(quantity, text) => readQuantity(app, quantity, text)}
       onLeave={() => app.viewport.container?.focus()}
     >
-      {styled ? <ModelTextStyleRow app={app} target={styled} /> : fields.some((f) => f.location === 'bar') ? <EntryFields inline /> : null}
+      {styled ? <ModelTextStyleRow app={app} target={styled} /> : <>
+        {fields.some((f) => f.location === 'bar' && f.placement !== 'options') ? <EntryFields inline /> : null}
+        {optionFields.length ? <ToolOptionsFields key={activeToolId} app={app} fields={optionFields} /> : null}
+      </>}
     </ToolOptionsBarView>
   );
 }

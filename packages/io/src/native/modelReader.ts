@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import { decodeNativePluginData } from './pluginData';
+import { PLUGIN_DATA_LIMITS } from '@pushform/model';
 import type { DefId, Id, ImageId, MaterialId, TagId } from '@pushform/core';
 import type { CommonAttrs, ComponentInstance, Guide, ImageEntity, SectionPlane, TextEntity, Dimension, ImageBlob } from '@pushform/model';
 import { nativeAttributeScope } from '@pushform/model';
@@ -42,11 +44,11 @@ function hasExtensions(value: unknown): boolean {
 function insert<K, V>(map: Map<K, V>, key: K, value: V): void { if (map.has(key)) fail('Duplicate native entity ID'); map.set(key, value); }
 /** Stage a model in packed storage. Does not install legacy DocumentState or rebuild spatial indexes. */
 export async function readNativeModel(source: NativeFileSource, options: { signal?: AbortSignal; budget?: NativeColumnBudget } = {}) {
-  const signal = options.signal, index = await openNativeDocumentIndex(source, NATIVE_MODEL_CAPABILITIES, (kind, schema) => (schema === 1 && [2, 3, 4].includes(kind)) || (kind === 2 && schema === 2), signal);
+  const signal = options.signal, index = await openNativeDocumentIndex(source, NATIVE_MODEL_CAPABILITIES, (kind, schema) => (schema === 1 && [2, 3, 4, 5].includes(kind)) || (kind === 2 && schema === 2), signal);
   if (index.root.documentKind !== 1) return fail('Expected native Modeling document');
   const settings = decodeNativeModelSettings(await index.container.read(index.metadata)), catalogs = new NativeCatalogStore(), properties = new NativeCommonPropertyReader();
   let hasUnsupportedExtensions =
-    index.container.entries.some(e => ![1, 2, 3, 4].includes(e.descriptor.kind) || e.descriptor.schemaId !== 1 || hasExtensions(e.descriptor));
+    index.container.entries.some(e => ![1, 2, 3, 4, 5].includes(e.descriptor.kind) || e.descriptor.schemaId !== 1 || hasExtensions(e.descriptor));
   const definitions = new Map<DefId, NativePackedDefinition>(), imageBlobs = new Map<ImageId, ImageBlob>(), budget = options.budget ?? new NativeColumnBudget();
   const consumed = new Set<number>(), entries = new Map(index.container.entries.map(e => [e.descriptor.id, e]));
   const columns = new NativeColumnReader({ entries: index.container.entries, read: async entry => {
@@ -174,7 +176,17 @@ export async function readNativeModel(source: NativeFileSource, options: { signa
     }
   }
   signal?.throwIfAborted();
-  return { settings: settings.value, settingsExtensions: settings.extensions, catalogs, properties, definitions, imageBlobs, unknown, extras,
+  const pluginParts: Uint8Array[] = []; let pluginBytes = 0;
+  for (const id of index.root.pluginChunks ?? []) {
+    const entry = entries.get(id)!;
+    pluginBytes += entry.descriptor.decodedBytes;
+    if (pluginBytes > PLUGIN_DATA_LIMITS.document) return fail('Plugin metadata exceeds document budget');
+    pluginParts.push(await index.container.read(entry));
+  }
+  const pluginSection = new Uint8Array(pluginBytes); let pluginAt = 0;
+  for (const part of pluginParts) { pluginSection.set(part, pluginAt); pluginAt += part.length; }
+  const pluginData = decodeNativePluginData(pluginSection);
+  return { pluginData, settings: settings.value, settingsExtensions: settings.extensions, catalogs, properties, definitions, imageBlobs, unknown, extras,
     rootExtensions: index.root.unknownFields, canonicalAndIndexBytes: budget.usedBytes, hasUnsupportedExtensions };
 }
 export type NativePackedModel = Awaited<ReturnType<typeof readNativeModel>>;

@@ -211,6 +211,8 @@ export function encodeRequest(req: KernelRequest): Uint8Array {
       w.f64(req.distance);
       w.f64(req.nextFaceId);
       writePolygon(w, req.polygon, 0);
+      // Leave ordinary requests byte-identical to the existing binary protocol.
+      if (req.validateProfile) w.u32(1);
       break;
     case 'boolean':
       w.u32(OP_BOOLEAN);

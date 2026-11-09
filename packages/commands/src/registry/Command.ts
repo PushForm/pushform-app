@@ -56,6 +56,8 @@ export interface CommandContext {
 export interface Command<P = unknown> {
   readonly id: string;
   readonly title: string;
+  /** One line on what the command does, shown in command search. */
+  readonly description?: string | undefined;
   readonly category: CommandCategory;
   /** Icon name (resolved by the UI). */
   readonly icon?: string | undefined;

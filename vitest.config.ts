@@ -14,6 +14,8 @@ export default defineConfig({
   resolve: rustResolve,
   define: rustDefine,
   test: {
+    // Fails the run with one clear message when the kernel module is missing or out of date.
+    globalSetup: ['scripts/vitest-kernel-check.mjs'],
     projects: [
       {
         extends: true,

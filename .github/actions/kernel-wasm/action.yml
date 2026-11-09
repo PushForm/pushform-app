@@ -1,28 +1,47 @@
 name: Prepare the kernel WebAssembly module
-description: Restore the Rust kernel's WebAssembly module or build it with the pinned Rust and Emscripten
+description: Download the published module for these sources, or build it with the pinned Rust and Emscripten
 runs:
   using: composite
   steps:
-    # Rust and Emscripten are pinned together: only this pair is tested.
-    - uses: dtolnay/rust-toolchain@1.98
-      with: { targets: wasm32-unknown-emscripten }
-    - uses: mymindstorm/setup-emsdk@v14
-      with: { version: 6.0.13, cache-key: emsdk-6.0.13 }
-    - id: toolchain
+    # The source hash and pinned toolchain, read from the repository so there is one place to change them.
+    - id: plan
       shell: bash
-      run: echo "hash=$(rustc -Vv | sha256sum | cut -d ' ' -f1)-$(emcc --version | head -1 | sha256sum | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
+      run: node scripts/kernel-wasm-artifact.mjs ci-plan >> "$GITHUB_OUTPUT"
+    # Downloading is the normal case; a pull request that changes the kernel builds its own copy below.
+    - if: steps.plan.outputs.pinned == 'true'
+      shell: bash
+      continue-on-error: true
+      run: node scripts/fetch-kernel-wasm.mjs
+    - id: status
+      shell: bash
+      run: |
+        if node scripts/kernel-wasm-artifact.mjs status > /dev/null; then echo "fresh=true" >> "$GITHUB_OUTPUT"; else echo "fresh=false" >> "$GITHUB_OUTPUT"; fi
+    # Rust and Emscripten are pinned together: only this pair is tested.
+    - uses: dtolnay/rust-toolchain@master
+      if: steps.status.outputs.fresh != 'true'
+      with:
+        toolchain: ${{ steps.plan.outputs.rust }}
+        targets: wasm32-unknown-emscripten
+    - uses: mymindstorm/setup-emsdk@v14
+      if: steps.status.outputs.fresh != 'true'
+      with:
+        version: ${{ steps.plan.outputs.emscripten }}
+        cache-key: emsdk-${{ steps.plan.outputs.emscripten }}
+    # A rebuilt module is cached by source hash, so reruns of the same sources do not rebuild.
     - uses: actions/cache@v4
       id: kernel-wasm
+      if: steps.status.outputs.fresh != 'true'
       with:
         path: |
           packages/kernel/wasm/*.wasm
           packages/kernel/wasm/pushform-kernel*.js
-        key: kernel-wasm-v1-${{ runner.os }}-${{ steps.toolchain.outputs.hash }}-${{ hashFiles('crates/kernel-wasm/**', 'crates/native-kernel/**', '!crates/**/target/**', 'scripts/build-kernel-wasm.mjs') }}
+          packages/kernel/wasm/kernel-wasm.stamp.json
+        key: kernel-wasm-v2-${{ runner.os }}-${{ steps.plan.outputs.source_hash }}
     - uses: Swatinem/rust-cache@v2
-      if: steps.kernel-wasm.outputs.cache-hit != 'true'
+      if: steps.status.outputs.fresh != 'true' && steps.kernel-wasm.outputs.cache-hit != 'true'
       with: { workspaces: crates/kernel-wasm }
     - shell: bash
-      if: steps.kernel-wasm.outputs.cache-hit != 'true'
-      run: node scripts/build-kernel-wasm.mjs
+      if: steps.status.outputs.fresh != 'true' && steps.kernel-wasm.outputs.cache-hit != 'true'
+      run: node scripts/build-kernel-wasm.mjs --faults
     - shell: bash
-      run: node scripts/build-kernel-wasm.mjs --check
+      run: node scripts/kernel-wasm-artifact.mjs status

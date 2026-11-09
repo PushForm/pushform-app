@@ -7,9 +7,11 @@
 // Needs the wasm32-unknown-emscripten Rust target (`rustup target add wasm32-unknown-emscripten`) and Emscripten's
 // emcc, emcmake and emmake on PATH (`brew install emscripten`, or `source emsdk_env.sh`). The first build clones
 // Manifold and compiles it. Usage: node scripts/build-kernel-wasm.mjs [--check] [--faults]
+// The result is stamped with the hash of its sources, so it overrides any downloaded module until the sources change.
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { sourceHash, TOOLCHAIN, writeStamp } from './kernel-wasm-artifact.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const crate = `${root}crates/kernel-wasm`;
@@ -30,11 +32,23 @@ if (process.argv.includes('--check')) {
   process.exit(0);
 }
 mkdirSync(outDir, { recursive: true });
+// Only this toolchain pair is tested; a different one still builds, but warns.
+for (const [tool, expected, version] of [['rustc', TOOLCHAIN.rust, 'rustc'], ['emcc', TOOLCHAIN.emscripten, 'emcc']]) {
+  try {
+    const reported = execFileSync(version, ['--version'], { encoding: 'utf8' });
+    if (!reported.includes(expected)) console.warn(`kernel: ${tool} is not the pinned ${expected}: ${reported.split('\n')[0]}`);
+  } catch {
+    console.warn(`kernel: could not run ${tool} to check its version`);
+  }
+}
+const built = [];
 for (const { bin, args } of modules) {
   execFileSync('cargo', ['build', '--release', '--target', target, '--no-default-features', '--bin', bin, ...args], { cwd: crate, stdio: 'inherit' });
   for (const file of outputs(bin)) {
     const out = `${outDir}/${file}`;
     copyFileSync(`${crate}/target/${target}/release/${file}`, out);
     console.log(`kernel: ${(statSync(out).size / 1048576).toFixed(2)} MiB at packages/kernel/wasm/${file}`);
+    built.push(file);
   }
 }
+writeStamp('local', sourceHash(), built);

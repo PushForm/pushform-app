@@ -47,9 +47,7 @@ export function planChanges(files, projects) {
   return { full, paths, typecheck: projects.filter(p => selected.has(p.path) && p.typecheck).map(p => p.path).sort(),
     tests: full ? ['.'] : paths.length ? [...paths, 'scripts'] : [], lint: full ? ['.'] : paths,
     web: selected.has('apps/web'), commons: selected.has('apps/commons'),
-    wasm: full || selected.has('packages/io') || selected.has('apps/web'),
-    // What the Rust kernel's WebAssembly module is built from.
-    kernel: full || (files ?? []).some(file => /^(crates\/(native-kernel|kernel-wasm)\/|scripts\/build-kernel-wasm\.mjs$)/.test(file)) };
+    wasm: full || selected.has('packages/io') || selected.has('apps/web') };
 }
 
 export function runTask(task, plan) {
@@ -80,7 +78,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const plan = planChanges(files, readProjects());
     console.log(JSON.stringify(plan, null, 2));
     if (process.env.GITHUB_OUTPUT) {
-      appendFileSync(process.env.GITHUB_OUTPUT, `plan=${JSON.stringify(plan)}\nchecks=${plan.paths.length > 0}\nweb=${plan.web}\ncommons=${plan.commons}\nwasm=${plan.wasm}\nkernel=${plan.kernel}\n`);
+      appendFileSync(process.env.GITHUB_OUTPUT, `plan=${JSON.stringify(plan)}\nchecks=${plan.paths.length > 0}\nweb=${plan.web}\ncommons=${plan.commons}\nwasm=${plan.wasm}\n`);
     }
     if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,
       `### CI scope\n\n${plan.full ? 'Full validation (new or uncertain baseline/configuration).' : 'Affected projects and their transitive dependents.'}\n\n${plan.paths.join(', ') || 'Documentation only.'}\n`);

@@ -27,14 +27,6 @@ describe('affected CI plan', () => {
   });
   it('runs everything when no trustworthy baseline exists', () => {
     expect(planChanges(null, projects).full).toBe(true);
-    expect(planChanges(null, projects).kernel).toBe(true);
-  });
-  it('builds the kernel WebAssembly module only when its sources change', () => {
-    expect(planChanges(['crates/native-kernel/src/lib.rs'], projects).kernel).toBe(true);
-    expect(planChanges(['crates/kernel-wasm/build.rs'], projects).kernel).toBe(true);
-    expect(planChanges(['scripts/build-kernel-wasm.mjs'], projects).kernel).toBe(true);
-    expect(planChanges(['crates/solidcraft/kernel/src/lib.rs'], projects).kernel).toBe(false);
-    expect(planChanges(['apps/web/src/App.tsx'], projects).kernel).toBe(false);
   });
   it('skips application builds for documentation', () => {
     const plan = planChanges(['docs/help/commons.md', 'README.md'], projects);

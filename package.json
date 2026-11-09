@@ -31,7 +31,9 @@
     "docs:dev": "pnpm --filter @pushform/docs dev",
     "docs:build": "pnpm --filter @pushform/docs build",
     "build:step-reader": "node scripts/build-step-reader.mjs",
-    "build:kernel-wasm": "node scripts/build-kernel-wasm.mjs"
+    "build:kernel-wasm": "node scripts/build-kernel-wasm.mjs",
+    "fetch:kernel-wasm": "node scripts/fetch-kernel-wasm.mjs",
+    "kernel-wasm:pin": "node scripts/kernel-wasm-artifact.mjs pin"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.11",

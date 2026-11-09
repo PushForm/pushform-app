@@ -28,7 +28,6 @@ jobs:
       web: ${{ steps.scope.outputs.web }}
       commons: ${{ steps.scope.outputs.commons }}
       wasm: ${{ steps.scope.outputs.wasm }}
-      kernel: ${{ steps.scope.outputs.kernel }}
     steps:
       - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
@@ -67,11 +66,9 @@ jobs:
           path: packages/io/wasm/*.wasm
           if-no-files-found: error
           retention-days: 1
-  # The Rust kernel's WebAssembly module, needed by the web build only when it is built with the PF_RUST_KERNEL flag.
-  # Separate from the required checks while the flag is off, so it cannot hold them up.
+  # The kernel's WebAssembly module, which the test suite, the web build and the deploy all need. Published modules are
+  # downloaded by source hash; a change to the kernel (a pull request, a fork) builds its own for this run.
   kernel-wasm:
-    needs: plan
-    if: vars.PF_RUST_KERNEL == '1' || needs.plan.outputs.kernel == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -84,8 +81,27 @@ jobs:
           path: |
             packages/kernel/wasm/*.wasm
             packages/kernel/wasm/pushform-kernel*.js
+            packages/kernel/wasm/kernel-wasm.stamp.json
           if-no-files-found: error
           retention-days: 1
+
+  # Publishes the module on main when no release exists for these sources yet. The only job with write access, and it
+  # runs no build steps of its own. Pinning the checksums afterwards is a commit (`pnpm kernel-wasm:pin`), not CI's to make.
+  publish-kernel-wasm:
+    needs: kernel-wasm
+    if: ${{ github.ref == 'refs/heads/main' && github.repository == 'PushForm/pushform-app' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: 24 }
+      - uses: actions/download-artifact@v8
+        with: { name: kernel-wasm, path: packages/kernel/wasm }
+      - run: node scripts/publish-kernel-wasm.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   typecheck:
     needs: plan
@@ -116,8 +132,8 @@ jobs:
       - run: pnpm spdx-check
 
   unit:
-    needs: [plan, step-reader]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.checks == 'true' && (needs.step-reader.result == 'success' || needs.step-reader.result == 'skipped') }}
+    needs: [plan, step-reader, kernel-wasm]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.checks == 'true' && (needs.step-reader.result == 'success' || needs.step-reader.result == 'skipped') && needs.kernel-wasm.result == 'success' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -125,6 +141,8 @@ jobs:
       - uses: actions/download-artifact@v8
         if: needs.plan.outputs.wasm == 'true'
         with: { name: step-reader-wasm, path: packages/io/wasm }
+      - uses: actions/download-artifact@v8
+        with: { name: kernel-wasm, path: packages/kernel/wasm }
       - run: node scripts/ci-plan.mjs test
         env: { CI_PLAN: '${{ needs.plan.outputs.plan }}' }
 
@@ -160,7 +178,7 @@ jobs:
 
   # Keep one required status while independent checks run concurrently.
   test:
-    needs: [plan, step-reader, typecheck, lint, policy, unit, build-web, build-commons]
+    needs: [plan, step-reader, kernel-wasm, typecheck, lint, policy, unit, build-web, build-commons]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     steps:

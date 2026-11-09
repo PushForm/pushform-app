@@ -58,6 +58,14 @@ interface Row { readonly type: 'base' | 'wall'; readonly depth: number; readonly
 export function planKitchenRun(p: KitchenRunParams): BuilderPlan {
   if (p.base.length === 0) throw new BuilderPlanError('invalid_operation', 'base needs at least one item.');
   const corner = p.corner, side = corner?.side ?? 'left', flipped = side === 'right';
+  if (corner) {
+    const besideCorner = [flipped ? p.base[p.base.length - 1] : p.base[0], corner.returnBase[0]];
+    for (const item of besideCorner) {
+      if (item?.appliance) {
+        throw new BuilderPlanError('invalid_geometry', 'Place a base cabinet at least 9 in wide between an appliance opening and the inside corner, on each run. A corner cabinet or filler alone does not provide this buffer.');
+      }
+    }
+  }
   const shared: Pick<CabinetParams, 'frame' | 'overlay' | 'doorStyle' | 'finish' | 'boxFinish' | 'beadedFrame' | 'hardware' | 'hardwareFinish'> = {
     ...(p.frame ? { frame: p.frame } : {}), ...(p.overlay ? { overlay: p.overlay } : {}), ...(p.doorStyle ? { doorStyle: p.doorStyle } : {}), ...(p.finish ? { finish: p.finish } : {}),
     ...(p.boxFinish ? { boxFinish: p.boxFinish } : {}), ...(p.beadedFrame !== undefined ? { beadedFrame: p.beadedFrame } : {}), ...(p.hardware ? { hardware: p.hardware } : {}), ...(p.hardwareFinish ? { hardwareFinish: p.hardwareFinish } : {}),

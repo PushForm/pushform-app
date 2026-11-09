@@ -66,8 +66,8 @@ jobs:
           path: packages/io/wasm/*.wasm
           if-no-files-found: error
           retention-days: 1
-  # The kernel's WebAssembly module, which the test suite, the web build and the deploy all need. Published modules are
-  # downloaded by source hash; a change to the kernel (a pull request, a fork) builds its own for this run.
+  # The kernel's WebAssembly module, which the test suite, the web build and the deploy all need. It is built here and
+  # cached by source hash, so unchanged kernel sources do not rebuild.
   kernel-wasm:
     runs-on: ubuntu-24.04
     steps:

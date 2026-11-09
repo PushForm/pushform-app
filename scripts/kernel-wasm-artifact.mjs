@@ -5,7 +5,7 @@
 // everything it is built from: the kernel crates, the vendored binding, the build flags and the pinned toolchain. This
 // module computes that hash, so tests and builds can tell when a module no longer matches its sources.
 // Usage: node scripts/kernel-wasm-artifact.mjs <hash|status|ci-plan>
-/* global process, console, URL */
+/* global process, console, URL, Buffer */
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
@@ -38,11 +38,14 @@ function listFiles(dir, out) {
 
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
+/** One input's hash. Git for Windows checks text out with CRLF, and a module built on another platform must still match. */
+export const sourceFileHash = (bytes) => sha256(Buffer.from(bytes.toString('latin1').replace(/\r\n/g, '\n'), 'latin1'));
+
 /** The hash a built module is stamped with. */
 export function sourceHash() {
   const files = [...INPUT_FILES.map((f) => join(root, f))];
   for (const dir of INPUT_DIRS) listFiles(join(root, dir), files);
-  const entries = files.map((file) => `${relative(root, file).split(sep).join('/')}\0${sha256(readFileSync(file))}\n`);
+  const entries = files.map((file) => `${relative(root, file).split(sep).join('/')}\0${sourceFileHash(readFileSync(file))}\n`);
   entries.sort();
   return sha256(`${TOOLCHAIN.rust}\0${TOOLCHAIN.emscripten}\n${entries.join('')}`);
 }

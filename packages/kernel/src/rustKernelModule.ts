@@ -19,7 +19,7 @@ export async function createRustKernelModule(options?: object): Promise<RustKern
   try {
     factory = (await import('../wasm/pushform-kernel.js')).default;
   } catch (cause) {
-    throw new Error('The kernel module is missing: run `pnpm build:kernel-wasm` (or fetch the prebuilt module) first.', { cause });
+    throw new Error('The kernel module is missing: run `pnpm build:kernel-wasm` first.', { cause });
   }
   return factory(options);
 }

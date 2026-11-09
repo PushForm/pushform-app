@@ -268,6 +268,7 @@ export class ToolManager implements ToolHost {
 
   /** Returns true when the key was consumed by the manager or the active tool. */
   keyDown(e: ToolKeyEvent): boolean {
+    this.updateModifiers(e);
     // Ctrl and Alt reach tools only as taps: pressed and released with nothing between.
     if (e.key === 'Control' || e.key === 'Alt') {
       if (!e.repeat) this.pendingTap = e.key;
@@ -292,6 +293,7 @@ export class ToolManager implements ToolHost {
   }
 
   keyUp(e: ToolKeyEvent): boolean {
+    this.updateModifiers(e);
     if (e.key === 'Control' || e.key === 'Alt') {
       const tap = this.pendingTap === e.key;
       this.pendingTap = null;
@@ -309,6 +311,12 @@ export class ToolManager implements ToolHost {
     return consumed;
   }
 
+  private updateModifiers(e: ToolKeyEvent): void {
+    if (!['Shift', 'Control', 'Alt'].includes(e.key) || !this.active?.onModifiersChanged) return;
+    this.call(() => this.active?.onModifiersChanged?.(e.modifiers));
+    this.afterInteraction();
+  }
+
   onVcb(value: VcbValue): void {
     if (value.kind === 'empty') return;
     this.call(() => this.entryTool()?.onVcb?.(value));
@@ -324,9 +332,10 @@ export class ToolManager implements ToolHost {
     this.afterInteraction();
   }
 
-  /** Re-read the status (after the document changed outside a tool, such as an undo ending the applied state). */
+  /** Refresh status and geometry overlays after a document change, including undo/redo. */
   refreshStatus(): void {
     this.emitStatus();
+    this.overlayChanged();
   }
 
   /** A control of the tool options bar was changed: goes to the tool whose settings the bar shows. */

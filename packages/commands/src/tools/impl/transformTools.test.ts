@@ -21,7 +21,7 @@ import { textCommands } from '../../commands/texts';
 import { modelInfoCommands } from '../../commands/modelInfo';
 import { containerAt, SketchGraph } from '@pushform/model';
 import { TransformToolBase, worldToScreen, type TransformRotation } from './transformShared';
-import { m4rotationAbout } from '../../commands/transform';
+import { m4rotationAbout, m4scaleAbout, transformBodyAffineInPlace } from '../../commands/transform';
 import { revolveCommands } from '../../commands/revolve';
 import { curveCommands } from '../../commands/curves';
 import { arcFrom3Points } from '@pushform/geom';
@@ -1536,5 +1536,105 @@ describe('MoveTool: consistent placement and rails', () => {
     s.host.redo();
     expect(s.body(moved.id).surfaces).toEqual(moved.surfaces);
     expect([...s.body(moved.id).edges.values()].every((e) => e.soft && e.smooth)).toBe(true);
+  });
+});
+
+describe('ScaleTool: smooth solids and consistent placement', () => {
+  async function sphere() {
+    const s = setup(ISO_CAMERA);
+    s.registry.registerAll(curveCommands);
+    s.registry.registerAll(revolveCommands);
+    s.registry.execute('sketch.addCurve', { ...arcFrom3Points([0, 0, -1], [1, 0, 0], [0, 0, 1], 12), closed: false });
+    s.host.edit('Close profile', (draft) => { SketchGraph.for(draft).addEdge([0, 0, -1], [0, 0, 1]); });
+    const profile = [...s.root().sketch.faces.values()][0]!;
+    await s.registry.execute('revolve.apply', { profile: { kind: 'sketchFace', path: [], id: profile.id }, axisOrigin: [0, 0, 0], axisDir: [0, 0, 1], angleDeg: 360, segments: 24 });
+    const id = s.bodies()[0]!.id;
+    s.host.edit('Edge display property', (draft) => {
+      const body = draft.definitions.get(draft.rootDefinitionId)!.entities.bodies.get(id)!;
+      [...body.edges.values()][0]!.hidden = true;
+    });
+    const source = s.body(id);
+    s.host.selection.set([...source.faces.values()].map((f) => ({ kind: 'face', path: [], id, faceId: f.id, region: null })));
+    s.tools.activate('scale');
+    return { ...s, id, source, tool: s.tools.activeTool as ScaleTool };
+  }
+
+  it.each([{ factors: [2, 2, 2] as Vec3 }, { factors: [-1, 2, 1] as Vec3 }])('preserves smoothing when a transformed container bakes its affine matrix $factors', async ({ factors }) => {
+    const s = await sphere();
+    s.host.edit('Bake affine transform', (draft) => {
+      const body = draft.definitions.get(draft.rootDefinitionId)!.entities.bodies.get(s.id)!;
+      transformBodyAffineInPlace(body as unknown as Body, m4scaleAbout([0, 0, 0], factors));
+    });
+    expect(meshTopologyProblems(s.body(s.id).mesh)).toEqual([]);
+    expect([...s.body(s.id).edges.values()].every((edge) => edge.soft && edge.smooth)).toBe(true);
+    expect([...s.body(s.id).edges.values()].filter((edge) => edge.hidden)).toHaveLength(1);
+    expect(s.body(s.id).surfaces.size).toBe(1);
+  });
+
+  it.each([
+    ['drag', 'corner', [3, 3, 3], [2, 2, 2]], ['clicks', 'corner', [3, 3, 3], [2, 2, 2]],
+    ['drag', 'face', [3, 0, 0], [2, 1, 1]], ['clicks', 'face', [3, 0, 0], [2, 1, 1]],
+    ['drag', 'corner', [-3, -3, -3], [-1, -1, -1]], ['clicks', 'face', [-5, 0, 0], [-2, 1, 1]],
+  ] as const)('preserves a smooth revolved sphere through %s %s scaling to %j', async (gesture, kind, target, factors) => {
+    const s = await sphere();
+    const pos: Vec3 = kind === 'corner' ? [1, 1, 1] : [1, 0, 0];
+    const grip = s.tool.scaleBox!.grips.find((g) => near(g.pos, pos))!;
+    const start = at(ISO_CAMERA, grip.pos);
+    s.tools.pointerDown(start);
+    if (gesture === 'clicks') s.tools.pointerUp(start);
+    expect(s.tool.inferenceOptions().ignore).toEqual([bodyRef(s.id)]);
+    const before = s.host.doc.state;
+    const entries = s.host.undoStack.length;
+    s.tools.pointerMove(at(ISO_CAMERA, target));
+    expect(s.tool.dragFactors!.map((f) => +f.toFixed(6))).toEqual(factors);
+    expect(s.host.doc.state).toBe(before);
+    const preview = s.tool.overlay();
+    expect(preview.filter((p) => p.kind === 'polyline').length).toBeGreaterThan(12);
+    const finish = at(ISO_CAMERA, [20, 30, 40], { screen: worldToScreen(ISO_CAMERA, VIEWPORT, target)! });
+    if (gesture === 'drag') s.tools.pointerUp(finish);
+    else s.tools.pointerDown(finish);
+    await s.tool.settled;
+    expect(s.tool.status().instructor).not.toContain('failed');
+    const scaled = s.body(s.id);
+    expect(meshTopologyProblems(scaled.mesh)).toEqual([]);
+    expect(scaled.mesh.tris.length).toBe(s.source.mesh.tris.length);
+    expect(scaled.faces.size).toBe(s.source.faces.size);
+    expect(scaled.surfaces.size).toBe(1);
+    expect([...scaled.surfaces.values()][0]!.faceIds).toHaveLength(scaled.faces.size);
+    expect([...scaled.edges.values()].every((e) => e.soft && e.smooth)).toBe(true);
+    expect([...scaled.edges.values()].filter((e) => e.hidden)).toHaveLength(1);
+    expect(scaled.props.volume).toBeCloseTo(s.source.props.volume * Math.abs(factors[0] * factors[1] * factors[2]), 5);
+    const anchor = kind === 'corner' ? [-1, -1, -1] : [-1, 0, 0];
+    const old = meshBounds(s.source.mesh), bounds = meshBounds(scaled.mesh);
+    for (let axis = 0; axis < 3; axis++) {
+      const a = anchor[axis]! + (old.min[axis]! - anchor[axis]!) * factors[axis]!;
+      const b = anchor[axis]! + (old.max[axis]! - anchor[axis]!) * factors[axis]!;
+      expect(bounds.min[axis]).toBeCloseTo(Math.min(a, b), 5);
+      expect(bounds.max[axis]).toBeCloseTo(Math.max(a, b), 5);
+    }
+    expect(s.host.undoStack.length).toBe(entries + 1);
+    s.host.undo();
+    expect(s.body(s.id).mesh).toEqual(s.source.mesh);
+    s.host.redo();
+    expect([...s.body(s.id).edges.values()].every((e) => e.soft && e.smooth)).toBe(true);
+  });
+});
+
+describe('ScaleTool: toolbar input details', () => {
+  it('disables a planar selection\'s missing dimension and clears held values when switching tools', () => {
+    const s = setup(ISO_CAMERA);
+    s.addRectangle(2, 1);
+    s.host.selection.set([{ kind: 'sketchFace', path: [], id: [...s.root().sketch.faces.keys()][0]! }]);
+    s.tools.activate('scale');
+    const tool = s.tools.activeTool as ScaleTool;
+    const corner = tool.scaleBox!.grips.find((grip) => near(grip.pos, [2, 1, 0]))!;
+    s.tools.pointerDown(at(ISO_CAMERA, corner.pos));
+    expect(tool.status().fields?.find((f) => f.id === 'z')?.disabled).toBe(true);
+    s.tools.lockEntry('x', { kind: 'length', meters: 4, raw: 4, unit: 'm' });
+    expect(tool.status().fields?.find((f) => f.id === 'x')?.locked).toBe(true);
+    s.tools.activate('move');
+    s.tools.activate('scale');
+    expect(tool.status().fields?.every((f) => !f.locked)).toBe(true);
+    expect(tool.hasPendingWork()).toBe(false);
   });
 });

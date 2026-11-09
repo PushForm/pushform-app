@@ -58,7 +58,11 @@ Tap Ctrl, or click **Copy**, to keep the original in place. After a rotated copy
 
 ## Scale with grips
 
-Choose **Scale** for the selection. Its box and grips line up with the model's red, green and blue axes. Drag a grip to resize, then release to commit; Escape cancels the preview. Corner grips keep proportions, and Shift lets a corner scale each axis freely. With an edge or face grip, Shift keeps proportions. Hold Alt or Ctrl to scale about the selection's center instead of the opposite grip. Where grips overlap on screen, the one nearest you is used.
+Choose **Scale** for the selection. Its box and grips line up with the model's red, green and blue axes. Drag a grip to resize, then release to commit, or click a grip, move and click again. Both gestures show a live outline of the resized geometry and bounding box, and commit the displayed result as one Undo step. Escape cancels the preview. Corner grips keep proportions, and Shift lets a corner scale each axis freely. With an edge or face grip, Shift keeps proportions. Hold Alt or Ctrl to scale about the selection's center instead of the opposite grip. These keys update the preview immediately. Where grips overlap on screen, the one nearest you is used.
+
+The tool options bar shows **Scale**, **Size X**, **Size Y** and **Size Z**. Pick a grip to enable the fields; sizes are the selection's extents along the model's axes, in its display units. Type a size and press Tab to hold it in the preview, then Enter or a placement click to finish. A uniform grip changes the other sizes proportionally. With a free grip, you can hold sizes for separate axes while moving the pointer to set the remaining axes. A typed Scale replaces held sizes. Fields for a flat selection's missing axis stay disabled. Invalid text or a zero scale keeps the operation pending. Editing a field just after a resize adjusts that resize as one Undo step.
+
+Resizing a smooth solid preserves its smooth shading and softened edges, including when stretching one axis or mirroring. Undo and Redo restore its appearance as well as its dimensions.
 
 Type a number for a scale factor, or a length with a unit, such as `600mm`, for a size: along a face grip's axis, or for the longest side a corner or edge grip scales, with the other sides following. Type `x,y,z` for a factor per axis; a negative value mirrors. Typing just after a scale redoes it, keeping proportions if the drag did. Scale does not make copies.
 

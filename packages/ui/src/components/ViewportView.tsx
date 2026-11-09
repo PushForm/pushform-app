@@ -86,10 +86,10 @@ export function ViewportView(): JSX.Element {
       app.toolManager.pointerDown(toEvent(e, e.button, true));
     };
     const onPointerMove = (e: PointerEvent) => {
-      // Move uses the same inferred destination during a held-button drag as between clicks.
+      // Transforms use the same inferred destination during a held-button drag as between clicks.
       // Camera drags and selection boxes do not need a pick on every pointer event.
-      const moving = app.toolManager.activeToolId === 'move' && e.buttons === 1;
-      app.toolManager.pointerMove(toEvent(e, -1, e.buttons === 0 || moving));
+      const transforming = ['move', 'scale'].includes(app.toolManager.activeToolId ?? '') && e.buttons === 1;
+      app.toolManager.pointerMove(toEvent(e, -1, e.buttons === 0 || transforming));
     };
     const onPointerUp = (e: PointerEvent) => {
       if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
@@ -97,7 +97,7 @@ export function ViewportView(): JSX.Element {
     };
     const onClick = (e: MouseEvent) => app.toolManager.click(toEvent(e, e.button, true));
     const onPointerCancel = (e: PointerEvent) => {
-      if (app.toolManager.activeToolId !== 'move') { onPointerUp(e); return; }
+      if (!['move', 'scale'].includes(app.toolManager.activeToolId ?? '')) { onPointerUp(e); return; }
       if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
       app.toolManager.cancel();
     };

@@ -25,6 +25,8 @@ export interface KernelResult {
   selfRunId?: number;
   /** Precomputed properties from the kernel; computed from the mesh when omitted. */
   props?: BodyProps;
+  /** Prior edge properties expressed in the result's coordinates, for whole-body affine transforms. */
+  previousEdges?: ReadonlyMap<EdgeKey, EdgeRecord>;
   /**
    * Other bodies that contributed faces (booleans): their face attributes, surfaces, curves and
    * edge flags are carried onto the faces/edges that originated from them.
@@ -116,7 +118,7 @@ export function reconcileBody(body: Body, result: KernelResult): void {
     });
   }
   // previous edges: this body's own, plus foreign edges re-keyed onto the new face ids they map to
-  let previous: ReadonlyMap<EdgeKey, EdgeRecord> = readable(body.edges);
+  let previous: ReadonlyMap<EdgeKey, EdgeRecord> = result.previousEdges ?? readable(body.edges);
   if (result.foreign?.length) {
     const merged = new Map(previous);
     previous = merged;

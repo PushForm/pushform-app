@@ -490,3 +490,48 @@ describe('planCabinet refusals', () => {
     expect(refused({ type: 'base', width: i(30), corner: { style: 'blind', blindWidth: i(6) } }).message).toContain('too narrow for its frame');
   });
 });
+
+
+describe('mounted cabinet components', () => {
+  const knob = { definitionId: 99, width: i(0.95), height: i(0.95), kind: 'knob' as const };
+  const pull = { definitionId: 100, width: 0.092, height: 0.027, kind: 'pull' as const };
+  it('puts knobs at accessible corners and pairs wide drawer pulls inside their moving assemblies', () => {
+    const p = planCabinet({ type: 'base', width: i(36), doors: 2, hardwarePlacement: { doors: knob, drawers: pull } });
+    const doors = p.placements!.filter(x => x.definitionId === 99), drawers = p.placements!.filter(x => x.definitionId === 100);
+    expect(doors).toHaveLength(2); expect(drawers).toHaveLength(2);
+    expect(doors[0]!.origin[0]).toBeLessThan(doors[1]!.origin[0]);
+    expect(drawers[0]!.origin[0]).toBeLessThan(i(18)); expect(drawers[1]!.origin[0]).toBeGreaterThan(i(18));
+    expect(drawers.every(x => x.assembly === 'Drawer')).toBe(true);
+    expect(p.used.hardwarePlacement?.doors).toEqual(knob);
+  });
+  it('uses the lower end on a wall door and the upper end on a base door', () => {
+    for (const type of ['wall', 'base'] as const) {
+      const p = planCabinet({ type, width: i(18), hardwarePlacement: { doors: knob } });
+      const z = p.parts.filter(x => x.assembly === 'Door').map(bounds);
+      const lo = Math.min(...z.map(x => x.min[2])), hi = Math.max(...z.map(x => x.max[2]));
+      expect(p.placements![0]!.origin[2]).toBeCloseTo(type === 'wall' ? lo + i(2.5) : hi - i(2.5));
+    }
+  });
+  it('keeps false sink fronts free and supports single pulls on wide drawers', () => {
+    expect(planCabinet({ type: 'base', width: i(36), sinkFront: true, hardwarePlacement: { drawers: pull } }).placements).toHaveLength(0);
+    expect(planCabinet({ type: 'base', width: i(36), hardwarePlacement: { drawers: pull, wideDrawers: 'single' } }).placements).toHaveLength(1);
+  });
+  it('rejects hardware that overhangs the front and nonfinite offsets', () => {
+    expect(() => planCabinet({ type: 'base', width: i(18), hardwarePlacement: { drawers: { ...pull, width: i(30) } } })).toThrow(/does not fit/);
+    expect(() => planCabinet({ type: 'base', width: i(18), hardwarePlacement: { doorEndInset: NaN } })).toThrow(/finite/);
+  });
+  it('builds beadboard backing and vertical face boards in white finish roles', () => {
+    const p = planCabinet({ type: 'wall', width: i(18), doorStyle: 'beadboard' });
+    expect(p.parts.some(x => x.name === 'Beadboard Backing')).toBe(true);
+    expect(p.parts.filter(x => /^Beadboard [0-9]/.test(x.name)).length).toBeGreaterThan(3);
+  });
+});
+
+
+it('keeps stacked pantry knobs together at the accessible middle ends', () => {
+  const p = planCabinet({ type: 'tall', width: i(24), height: i(90), stackedDoors: true,
+    hardwarePlacement: { doors: { definitionId: 99, width: 0.024, height: 0.024, kind: 'knob' } } });
+  const upper = p.placements!.find(x => x.assembly === 'Upper Door')!, lower = p.placements!.find(x => x.assembly === 'Lower Door')!;
+  expect(upper.origin[2]).toBeGreaterThan(lower.origin[2]);
+  expect(upper.origin[2] - lower.origin[2]).toBeLessThan(i(8));
+});

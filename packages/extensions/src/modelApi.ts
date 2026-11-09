@@ -807,9 +807,9 @@ export class ModelDocumentApi {
           const precomputed = await loadLibraryMaterial(host, spec.library);
           materials[key] = await exec<Promise<number>>('material.fromLibrary', { key: spec.library, activate: false, precomputed });
         } else {
-          const name = `Paint ${spec.paint}`;
+          const name = `Paint ${spec.paint}${spec.roughness === undefined ? "" : ` roughness ${spec.roughness}`}`;
           const existing = [...host.doc.state.materials.values()].find(m => m.name === name);
-          materials[key] = existing ? existing.id as number : exec<number>('material.create', { name, color: rgb(spec.paint), activate: false });
+          materials[key] = existing ? existing.id as number : exec<number>('material.create', { name, color: rgb(spec.paint), activate: false, ...(spec.roughness !== undefined ? { appearance: { roughness: spec.roughness, metalness: 0 } } : {}) });
         }
       }
       const result = await exec<BuilderGenerateResult | Promise<BuilderGenerateResult>>('builder.generate', { plan, materials });

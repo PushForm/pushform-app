@@ -183,7 +183,9 @@ Estimate starts with **Production job**, including every included part in the sa
 or selecting a row in Parts does not narrow the estimate. For a subset, select rows in Parts, then choose
 **Estimate scope > Use selected rows**. This captures those rows; later selections do not change that estimate.
 Choose **Production job** to return to the whole job. If captured rows disappear or their occurrence membership
-changes, recapture the rows before using their totals. Switching models clears these temporary output selections.
+changes, select the current rows again and recapture them before using their totals. This also applies if a row
+changed before you captured it, such as after editing a hardware package size. Switching models clears these
+temporary output selections.
 
 ## Assign banding and veneer
 

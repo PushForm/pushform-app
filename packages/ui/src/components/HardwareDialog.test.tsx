@@ -51,3 +51,41 @@ it('rejects an invalid dimension without adding geometry', async () => {
   await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('finite'));
   expect(a.document.doc.state.definitions.size).toBe(before);
 });
+it('regenerates a selected round bar with a new grip without submitting stale derived width', async () => {
+  const a = boot();
+  await act(async () => {
+    await a.commands.execute('hardware.create', {
+      shape: 'bar-round',
+      finish: 'chrome',
+      point: [0, 0, 0],
+    });
+  });
+  act(() => void a.commands.execute('ui.hardware'));
+  fireEvent.change(screen.getByLabelText('Grip'), { target: { value: '12' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Regenerate selected hardware' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  const def = [...a.document.doc.state.definitions.values()].find((d) =>
+    d.description.includes('"generator":"hardware"'),
+  )!;
+  expect(JSON.parse(def.description).grip).toBe(0.012);
+  expect(JSON.parse(def.description).width).toBe(0.012);
+});
+it('regenerates wire mounting centers without submitting the old derived length', async () => {
+  const a = boot();
+  await act(async () => {
+    await a.commands.execute('hardware.create', {
+      shape: 'wire',
+      finish: 'chrome',
+      point: [0, 0, 0],
+    });
+  });
+  act(() => void a.commands.execute('ui.hardware'));
+  fireEvent.change(screen.getByLabelText('Mounting centers'), { target: { value: '140' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Regenerate selected hardware' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  const def = [...a.document.doc.state.definitions.values()].find((d) =>
+    d.description.includes('"generator":"hardware"'),
+  )!;
+  expect(JSON.parse(def.description).spacing).toBe(0.14);
+  expect(JSON.parse(def.description).length).toBeCloseTo(0.15, 9);
+});

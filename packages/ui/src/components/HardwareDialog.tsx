@@ -2,6 +2,7 @@
 // Copyright 2026 PushForm contributors
 import { useState } from 'react';
 import type { FormEvent, JSX } from 'react';
+import { containerAt } from '@pushform/model';
 import { HARDWARE_SHAPES, resolveHardwareOptions } from '@pushform/kernel';
 import type { HardwareShape } from '@pushform/kernel';
 import { HARDWARE_FINISHES } from '@pushform/commands';
@@ -13,12 +14,15 @@ import { Dialog, Field } from './DialogParts';
 export function HardwareDialog({ onClose }: { onClose: () => void }): JSX.Element {
   const app = useApp();
   const selected = app.document.selection.refs.length === 1 ? app.document.selection.refs[0] : null;
-  const selectedInstance =
-    selected?.kind === 'instance'
-      ? app.document.doc.state.definitions
-          .get(app.document.doc.state.rootDefinitionId)
-          ?.entities.instances.get(selected.id)
-      : null;
+  let selectedInstance;
+  try {
+    selectedInstance =
+      selected?.kind === 'instance'
+        ? containerAt(app.document.doc.state, selected.path).instances.get(selected.id)
+        : null;
+  } catch {
+    selectedInstance = null;
+  }
   const selectedDefinition = selectedInstance
     ? app.document.doc.state.definitions.get(selectedInstance.definitionId)
     : null;
@@ -72,7 +76,7 @@ export function HardwareDialog({ onClose }: { onClose: () => void }): JSX.Elemen
     setBusy(true);
     try {
       const dims: Record<string, number> = {};
-      for (const [key, text] of Object.entries(values))
+      for (const [key, text] of Object.entries(values).filter(([key]) => fields.includes(key)))
         if (text.trim()) {
           const v = Number(text);
           if (!Number.isFinite(v) || v < 0)

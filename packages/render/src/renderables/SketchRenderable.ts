@@ -7,7 +7,7 @@ import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { EDGE_FLAG_BOUNDARY, EDGE_FLAG_HIDDEN, EDGE_FLAG_SMOOTH, EDGE_FLAG_SOFT, cssToRgb, edgeStyleFlags } from '../types';
 import type { EdgeSegments, RenderFaceGroup, RenderMaterial, RenderPath, RenderSketch, RenderFaceCamera } from '../types';
 import { LENGTH_TOL, basisToLocal } from '@pushform/core';
-import type { TexturedMaterialCache } from '../materials/TextureCache';
+import type { FaceSurfaceMaterial, TexturedMaterialCache } from '../materials/TextureCache';
 import { needsOwnMaterial } from '../materials/TextureCache';
 import { cornerAngle, faceMaterialNeedsGroup, writeFaceUv } from './buildGeometry';
 import { FACE_MATERIAL_COMMON, FADE_OPACITY, fillFlags, patchSelectTint, shadowDisplay } from './BodyRenderable';
@@ -207,9 +207,9 @@ export function buildSketchGeometry(sketch: RenderSketch, origin: Vec3, opts: Sk
       const n = face.basis.n;
       const fc = face.frontColor ? tmp.set(face.frontColor).clone() : front;
       const bc = face.backColor ? tmp.set(face.backColor).clone() : back;
-      const tex = face.frontMaterial?.textureUrl ? face.frontMaterial : face.backMaterial?.textureUrl ? face.backMaterial : (face.frontMaterial ?? face.backMaterial ?? null);
+      const tex = (face.frontMaterial?.textureUrl || face.frontMaterial?.normalUrl) ? face.frontMaterial : (face.backMaterial?.textureUrl || face.backMaterial?.normalUrl) ? face.backMaterial : (face.frontMaterial ?? face.backMaterial ?? null);
       // Each side uses its own texture size; an untextured side follows the textured one.
-      const frontTex = face.frontMaterial?.textureUrl ? face.frontMaterial : tex, backTex = face.backMaterial?.textureUrl ? face.backMaterial : tex;
+      const frontTex = (face.frontMaterial?.textureUrl || face.frontMaterial?.normalUrl) ? face.frontMaterial : tex, backTex = (face.backMaterial?.textureUrl || face.backMaterial?.normalUrl) ? face.backMaterial : tex;
       const frontUv = face.uv ?? AUTO_UV, backUv = face.uvBack ?? frontUv, uvBasis = face.uvBasis ?? face.basis;
       const textured = !!tex;
       if (key !== '') {
@@ -309,8 +309,8 @@ export function buildSketchGeometry(sketch: RenderSketch, origin: Vec3, opts: Sk
  * edges that is only visible in hidden-geometry mode. Keyed by the container's path key.
  */
 export class SketchRenderable extends Group {
-  readonly front: Mesh<BufferGeometry, MeshLambertMaterial>;
-  readonly back: Mesh<BufferGeometry, MeshLambertMaterial>;
+  readonly front: Mesh<BufferGeometry, FaceSurfaceMaterial>;
+  readonly back: Mesh<BufferGeometry, FaceSurfaceMaterial>;
   readonly edges: EdgeBatch;
   readonly hiddenEdges: EdgeBatch;
   /** Back-edges pass sharing the solid batch's geometry (visibility through the shared material). */
@@ -372,6 +372,12 @@ export class SketchRenderable extends Group {
   }
 
   /** Textured face style on/off (see `BodyRenderable.setTextured`). */
+  private materialAppearanceEnabled = true;
+  setMaterialAppearance(on: boolean): boolean {
+    if (this.materialAppearanceEnabled === on) return false;
+    this.materialAppearanceEnabled = on; this.applyGroups(); return true;
+  }
+
   setTextured(on: boolean): void {
     if (this._textured === on) return;
     this._textured = on;
@@ -383,7 +389,7 @@ export class SketchRenderable extends Group {
   }
 
   private applyGroups(): void {
-    const apply = (mesh: Mesh<BufferGeometry, MeshLambertMaterial>, groups: readonly RenderFaceGroup[], side: 'front' | 'back') => {
+    const apply = (mesh: Mesh<BufferGeometry, FaceSurfaceMaterial>, groups: readonly RenderFaceGroup[], side: 'front' | 'back') => {
       const shared = this.shared[side];
       const g = mesh.geometry;
       g.clearGroups();
@@ -391,11 +397,11 @@ export class SketchRenderable extends Group {
         mesh.material = shared;
         return;
       }
-      const list: MeshLambertMaterial[] = [shared];
-      const index = new Map<MeshLambertMaterial, number>([[shared, 0]]);
+      const list: FaceSurfaceMaterial[] = [shared];
+      const index = new Map<FaceSurfaceMaterial, number>([[shared, 0]]);
       for (const grp of groups) {
-        let mat = shared;
-        if (needsOwnMaterial(grp.material, this._textured)) mat = this.texturedCache.get(grp.material, side, this._faded, this._textured);
+        let mat: FaceSurfaceMaterial = shared;
+        if (this.materialAppearanceEnabled && needsOwnMaterial(grp.material, this._textured)) mat = this.texturedCache.get(grp.material, side, this._faded, this._textured);
         let i = index.get(mat);
         if (i === undefined) {
           i = list.length;
@@ -404,7 +410,7 @@ export class SketchRenderable extends Group {
         }
         g.addGroup(grp.start, grp.count, i);
       }
-      (mesh as Mesh<BufferGeometry, MeshLambertMaterial | MeshLambertMaterial[]>).material = list;
+      (mesh as Mesh<BufferGeometry, FaceSurfaceMaterial | FaceSurfaceMaterial[]>).material = list;
     };
     apply(this.front, this.frontGroups, 'front');
     apply(this.back, this.backGroups, 'back');

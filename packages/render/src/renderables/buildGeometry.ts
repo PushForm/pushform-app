@@ -70,7 +70,7 @@ export function writeFaceUv(out: { [i: number]: number }, at: number, uv: Render
 
 /** A face side needs its own draw group when it has a texture or is translucent. */
 export function faceMaterialNeedsGroup(m: RenderMaterial | null | undefined): boolean {
-  return !!m && (!!m.textureUrl || m.alpha < 1);
+  return !!m && (!!m.textureUrl || m.alpha < 1 || !!m.appearance);
 }
 
 /**
@@ -210,8 +210,8 @@ function buildFaceColors(mesh: MeshData, opts: FaceGeometryOptions): { arrays: F
     }
     if (entry) {
       // Each side uses its own texture size; an untextured side follows the textured one.
-      const tex = entry.front?.textureUrl ? entry.front : entry.back?.textureUrl ? entry.back : entry.front ?? entry.back;
-      const frontTex = entry.front?.textureUrl ? entry.front : tex, backTex = entry.back?.textureUrl ? entry.back : tex;
+      const tex = (entry.front?.textureUrl || entry.front?.normalUrl) ? entry.front : (entry.back?.textureUrl || entry.back?.normalUrl) ? entry.back : entry.front ?? entry.back;
+      const frontTex = (entry.front?.textureUrl || entry.front?.normalUrl) ? entry.front : tex, backTex = (entry.back?.textureUrl || entry.back?.normalUrl) ? entry.back : tex;
       const backUv = entry.uvBack ?? entry.uv;
       for (let k = 0; k < 3; k++) {
         const vi = mesh.tris[t * 3 + k]!;

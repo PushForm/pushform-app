@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright 2026 PushForm contributors
 syntax = "proto2";
 package pushform.native;
 import "modelMeta.proto";
@@ -12,10 +14,25 @@ message MaterialTexture {
   optional uint32 grain = 6; // 0 width, 1 height, 2 none; absent means width
 }
 message NullableTexture { oneof state { EmptyState null_value = 2; MaterialTexture value = 3; } }
+message MaterialNormal {
+  required uint32 image_id = 1;
+  required double strength = 2;
+  required bool flip_green = 3;
+  required double width_m = 4;
+  required double height_m = 5;
+}
+message MaterialAppearance {
+  required double roughness = 1;
+  required double metalness = 2;
+  required Rgb emission_color = 3;
+  required double emission_strength = 4;
+  optional MaterialNormal normal = 5;
+}
 message Material {
   required uint32 id = 1;
   required string name = 2;
   required Rgb color = 3;
   required double alpha = 4;
   required NullableTexture texture = 5;
+  optional MaterialAppearance appearance = 6;
 }

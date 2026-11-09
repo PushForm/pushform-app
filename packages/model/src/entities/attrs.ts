@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import type { Id, ImageId, MaterialId, SceneId, StyleId, TagFolderId, TagId, Vec3 } from '@pushform/core';
+import type { MaterialAppearance } from '../materialAppearance';
 import type { ColorizeType } from '../colorize';
 import type { EnvironmentSettings } from '../environment';
 
@@ -24,6 +25,8 @@ export interface MaterialTexture {
   grain?: TextureGrain | undefined;
 }
 export interface Material {
+  /** Optional on older materials; resolved defaults live at the model boundary. */
+  appearance?: MaterialAppearance;
   id: MaterialId;
   name: string;
   color: Rgb;

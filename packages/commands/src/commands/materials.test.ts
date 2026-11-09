@@ -74,6 +74,33 @@ describe('material.* commands', () => {
     expect(body().faces.get(faceIds()[0]!)?.frontMaterialId).toBe(red);
   });
 
+  it('validates appearance atomically and preserves it through duplicate and undo', () => {
+    const { registry, host, red } = setup();
+    const value = () => host.doc.state.materials.get(red as MaterialId)!;
+    registry.execute('material.update', { id: red, appearance: { roughness: 0, metalness: 1, emissionColor: [0.1, 0.2, 0.3], emissionStrength: 4 } });
+    expect(value().appearance).toMatchObject({ roughness: 0, metalness: 1, emissionStrength: 4, normal: null });
+    const before = host.doc.state;
+    expect(() => registry.execute('material.update', { id: red, name: 'Must not change', appearance: { roughness: -1 } })).toThrow();
+    expect(() => registry.execute('material.update', { id: red, appearance: { emissionStrength: Infinity } })).toThrow();
+    expect(() => registry.execute('material.update', { id: red, appearance: { normal: { imageId: 999999 } } })).toThrow();
+    expect(host.doc.state).toBe(before);
+    const copy = registry.execute('material.duplicate', { id: red }) as MaterialId;
+    expect(host.doc.state.materials.get(copy)!.appearance).toEqual(value().appearance);
+    host.undo(); host.undo(); expect(value().appearance).toBeUndefined();
+    host.redo(); expect(value().appearance!.roughness).toBe(0);
+  });
+
+  it('imports and replaces a normal image in one undo step without a color texture', async () => {
+    const { registry, host, red } = setup();
+    const png = new Uint8Array(40); png.set([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a,0,0,0,13,0x49,0x48,0x44,0x52,0,0,0,2,0,0,0,2]);
+    await registry.execute('material.setNormalImage', { id: red, bytes: png, name: 'normal.png', mime: 'image/png' });
+    const material = host.doc.state.materials.get(red as MaterialId)!;
+    expect(material.texture).toBeNull(); expect(material.appearance!.normal).toMatchObject({ strength: 1, widthM: 1, heightM: 1 });
+    expect(host.doc.state.images.has(material.appearance!.normal!.imageId)).toBe(true);
+    host.undo(); expect(host.doc.state.materials.get(red as MaterialId)!.appearance).toBeUndefined(); expect(host.doc.state.images.size).toBe(0);
+    host.redo(); expect(host.doc.state.materials.get(red as MaterialId)!.appearance!.normal).toBeTruthy();
+  });
+
   it('purgeUnused removes materials no face/body/instance references', () => {
     const { registry, host, red, blue, faceRef, faceIds } = setup();
     registry.execute('paint.apply', { refs: [faceRef(faceIds()[1]!)], materialId: blue });

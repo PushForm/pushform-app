@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { meshBox } from '@pushform/core';
 import type { DefId, Id, ImageId } from '@pushform/core';
-import { allocId, bodyFromMesh, createDocument, createEntityContainer } from '@pushform/model';
+import { DEFAULT_MATERIAL_APPEARANCE, allocId, bodyFromMesh, createMaterial, createDocument, createEntityContainer } from '@pushform/model';
 import { writeNativeModel } from './modelWriter';
 import { openNativeDocumentIndex } from './documentRoot';
 import { decodeNativeModelSettings } from './modelSettings';
@@ -25,6 +25,7 @@ function document() {
     const id = (): Id => { const id = allocId<Id>(d); e.order.push(id); return id; };
     const guide = id(); e.guides.set(guide, { ...common, id: guide, kind: 'segment', origin: [0, 0, 0], end: [1, 2, 3] });
     const imageId = allocId<ImageId>(d); d.images.set(imageId, { id: imageId, name: 'fixture', mime: 'image/png', width: 1, height: 1, sha256: 'source hash' });
+    createMaterial(d, { name: 'Normal only', color: [0.02, 0.02, 0.02], appearance: { ...DEFAULT_MATERIAL_APPEARANCE, roughness: 0.2, emissionStrength: 2, normal: { imageId, strength: 1, flipGreen: false, widthM: 0.2, heightM: 0.4 } } });
     const image = id(); e.images.set(image, { ...common, id: image, imageId, widthM: 2, heightM: 3, transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] });
     const plane = id(); e.sectionPlanes.set(plane, { ...common, id: plane, name: 'cut', symbol: 'A', plane: { n: [0, 0, 1], d: 1 }, origin: [0, 0, 1] }); e.activeSectionPlaneId = plane;
     const text = id(); e.texts.set(text, { ...common, id: text, text: 'hello', kind: 'screen', position: [0.5, 0.5, 0], offset: null, leader: 'none', fontFamily: 'Arial', fontSizePt: 12, color: [0, 0, 0], bold: undefined });

@@ -197,6 +197,7 @@ export class SceneSync {
       if (!r) {
         r = new BodyRenderable(body.id, this.materials, this.texturedMaterials);
         r.setShowHidden(this._showHiddenGeometry);
+        r.setMaterialAppearance(this._display.faceStyle === 'shaded' || this._display.faceStyle === 'shadedTextured');
         r.setTextured(this._display.faceStyle === 'shadedTextured');
         this.bodies.set(body.id, r);
         r.update(body, this.origin);
@@ -247,6 +248,7 @@ export class SceneSync {
       if (!r) {
         r = new SketchRenderable(sketch.id, this.sketchMaterials, this.materials, this.texturedMaterials);
         r.setShowHidden(this._showHiddenGeometry);
+        r.setMaterialAppearance(this._display.faceStyle === 'shaded' || this._display.faceStyle === 'shadedTextured');
         r.setTextured(this._display.faceStyle === 'shadedTextured');
         this.sketches.set(sketch.id, r);
         r.update(sketch, this.origin);
@@ -616,7 +618,8 @@ export class SceneSync {
     const textured = d.faceStyle === 'shadedTextured';
     this.texturedMaterials.setDisplay({ xray, xrayOpacity: d.xrayOpacity ?? XRAY_OPACITY, faces });
     for (const r of [...this.bodies.values(), ...this.sketches.values()]) {
-      if (r.isTextured === textured) continue;
+      const appearanceChanged = r.setMaterialAppearance(d.faceStyle === 'shaded' || textured);
+      if (r.isTextured === textured && !appearanceChanged) continue;
       r.setTextured(textured);
       this.stage(r);
     }

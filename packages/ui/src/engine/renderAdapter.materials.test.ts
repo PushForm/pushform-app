@@ -14,6 +14,23 @@ function boot() {
 }
 
 describe('renderAdapter materials', () => {
+  it('keeps unrelated material bindings stable and includes appearance for bodies', () => {
+    const app = boot();
+    try {
+      const a = app.commands.execute('material.create', { name: 'A', color: [0,0,0], appearance: { roughness: 0.2 } }) as MaterialId;
+      const b = app.commands.execute('material.create', { name: 'B', color: [1,1,1] }) as MaterialId;
+      const id = app.commands.execute('model.addBox', { min:[0,0,0], max:[1,1,1] }) as Id;
+      app.commands.execute('paint.apply', { refs:[{kind:'body',path:[],id}], materialId:a, side:'both' });
+      const first = bodiesToRender(app.document.doc.state)[0]!;
+      expect([...first.faceMaterials!.values()][0]!.front!.appearance!.roughness).toBe(0.2);
+      const material = renderMaterial(app.document.doc.state, a);
+      app.commands.execute('material.update', { id:b, appearance:{ metalness:1 } });
+      expect(renderMaterial(app.document.doc.state, a)).toBe(material);
+      expect(bodiesToRender(app.document.doc.state)[0]!.faceMaterials).toBe(first.faceMaterials);
+      app.commands.execute('material.update', { id:a, appearance:{ roughness:0.8 } });
+      expect(bodiesToRender(app.document.doc.state)[0]!.faceMaterials).not.toBe(first.faceMaterials);
+    } finally { app.dispose(); }
+  });
   it('replaces painted faces and textures with inherited tag colors and restores materials when disabled', async () => {
     const app = boot();
     try {

@@ -156,6 +156,31 @@ describe('MaterialsPanel', () => {
     expect(screen.getByRole('option', { name: 'Color_B01' })).toBeTruthy();
   });
 
+  it('edits finishes and emission with undo, and only commits a slider gesture once', () => {
+    const a = boot(); const id = a.commands.execute('material.create', { name: 'Black finish', color: [0.02, 0.02, 0.02] }) as MaterialId;
+    mount(a, <MaterialsPanel />); fireEvent.click(screen.getByRole('tab', { name: 'Edit' }));
+    const material = () => a.document.doc.state.materials.get(id)!;
+    fireEvent.change(screen.getByLabelText('Finish'), { target: { value: 'metal' } });
+    expect(material().appearance).toMatchObject({ roughness: 0.25, metalness: 1 });
+    fireEvent.change(screen.getByLabelText('Roughness'), { target: { value: '0.6' } });
+    fireEvent.change(screen.getByLabelText('Roughness'), { target: { value: '0.7' } });
+    expect(material().appearance!.roughness).toBe(0.25);
+    fireEvent.pointerUp(screen.getByLabelText('Roughness'));
+    expect(material().appearance!.roughness).toBe(0.7);
+    act(() => a.document.undo()); expect(material().appearance!.roughness).toBe(0.25);
+    fireEvent.change(screen.getByLabelText('Roughness'), { target: { value: '0.8' } });
+    fireEvent.keyDown(screen.getByLabelText('Roughness'), { key: 'Escape' }); fireEvent.blur(screen.getByLabelText('Roughness'));
+    expect(material().appearance!.roughness).toBe(0.25);
+    fireEvent.change(screen.getByLabelText('Metalness value'), { target: { value: '2' } }); fireEvent.blur(screen.getByLabelText('Metalness value'));
+    expect(screen.getByRole('alert').textContent).toContain('0 to 1'); expect(material().appearance!.metalness).toBe(1);
+    fireEvent.click(screen.getByLabelText('Enable emission')); expect(material().appearance!.emissionStrength).toBe(1);
+    fireEvent.change(screen.getByLabelText('Emission strength value'), { target: { value: '4' } }); fireEvent.blur(screen.getByLabelText('Emission strength value'));
+    fireEvent.click(screen.getByLabelText('Enable emission')); expect(material().appearance!.emissionStrength).toBe(0);
+    fireEvent.click(screen.getByLabelText('Enable emission')); expect(material().appearance!.emissionStrength).toBe(4);
+    expect(material().color).toEqual([0.02, 0.02, 0.02]);
+    fireEvent.click(screen.getByRole('button', { name: 'Open scene lights' })); expect(useAppStore.getState().openPanel).toBe('shadows');
+  });
+
   it('color helpers round-trip', () => {
     expect(cssToRgb01('#ff8000')).toEqual([1, 128 / 255, 0]);
     expect(rgbToHls([1, 0, 0])).toEqual([0, 50, 100]);

@@ -938,6 +938,8 @@ describe('document tools', () => {
     expect(first.messages[0]!.content).toContain('open_document: model (the model_* tools read and edit it)');
     const operations = (first.tools!.find(tool => 'name' in tool && tool.name === 'model_apply_operations') as { input_schema: { properties: { operations: { items: { oneOf?: unknown[]; anyOf?: unknown[] } } } } }).input_schema.properties.operations.items;
     expect((operations.oneOf ?? operations.anyOf)?.length).toBeGreaterThan(10);
+    expect(JSON.stringify(operations)).toContain('"const":"revolve"');
+    expect(system).toContain('For turned legs, bowls, knobs and columns');
     // Model tabs sent apiVersion 1 for guidance alone before models could be edited.
     const guidanceOnly = harness({ turns: [{ text: ['Hi'] }] });
     await (await call(guidanceOnly.handler, 'POST', `/conversations/${CONVERSATION_ID}/messages`, { text: 'hi', document: { type: 'model', apiVersion: 1, guidance: 1 } })).text();

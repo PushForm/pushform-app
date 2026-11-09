@@ -9,6 +9,7 @@ import { resolve } from 'node:path';
 import { NativeKernelBackend } from '../backends/NativeKernelBackend';
 import { setInlineKernelFactory } from '../backends/InlineBackend';
 import { InlineRustTransport, type RustModuleFactory } from '../backends/differentialFixtures';
+import { setRustKernelModuleFactory } from '../rustWasm';
 
 const modulePath = resolve(__dirname, '../../wasm/pushform-kernel.js');
 if (!existsSync(modulePath)) throw new Error('PF_KERNEL=rust needs the kernel module: run pnpm build:kernel-wasm');
@@ -25,4 +26,5 @@ const instantiate: RustModuleFactory = (options) =>
     },
   });
 
+setRustKernelModuleFactory(() => instantiate());
 setInlineKernelFactory(() => new NativeKernelBackend(undefined, new InlineRustTransport(instantiate), { fallback: false }));

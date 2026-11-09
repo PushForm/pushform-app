@@ -39,7 +39,7 @@ PushForm has two editors: **Modeling** for 3D work and **Layout** for drawings o
 - [Modeling toolbar controls and their purpose](modeling/controls.md)
 - [Drawing faces, circles, polygons and Push/Pull](modeling/drawing.md)
 - [Navigation, Move, Rotate and Scale](modeling/transforms-navigation.md)
-- [Follow Me, Offset, Profile Edges (fillet, chamfer, router profiles) and solid combinations and cuts](modeling/shaping.md)
+- [Follow Me, Revolve, Offset, Profile Edges (fillet, chamfer, router profiles) and solid combinations and cuts](modeling/shaping.md)
 - [Tape Measure, guide lines, Protractor and Axes](modeling/construction.md)
 - [Typing exact values](modeling/measurements.md)
 - [Delete objects and erase sketch geometry](modeling/deleting.md)

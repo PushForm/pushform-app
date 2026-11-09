@@ -3,7 +3,7 @@
 import {
   BuilderPlanError, materialKey, DEFAULT_BLEND_SEGMENTS, SERVICE_FONTS, grainMapping, planCabinet, checkEdgeBlendResult, Text3DParamsSchema, isHardEdge, libraryMaterial, loadLibraryMaterial, planEdgeBlend, planEdgeProfile, runEdgeBlendKernel, runIntersectKernel,
   runText3DKernel, BUILTIN_LIBRARY, LIBRARY_CATEGORIES, activeTagOpt, applyTransformPlan, arrayMatrices, contextFrame, curvePoints, definitionBounds, hostOf, instanceCount, kernelOf, localPushPullDistance,
-  m4rotationAbout, m4scaleAbout, planPushPull, planTransform, runFollowMeKernel, runPushPullKernel, runSolidsKernel, runTransformKernel, sceneRuntimeOf, solidsResultIsEmpty,
+  m4rotationAbout, m4scaleAbout, planPushPull, planTransform, runRevolveKernel, runFollowMeKernel, runPushPullKernel, runSolidsKernel, runTransformKernel, sceneRuntimeOf, solidsResultIsEmpty,
   type BuilderGenerateResult, type BuilderPlan, type MaterialSpec, type CameraHost, type CameraState, type CommandRegistry, type DocumentHost, type ExplodeResult, type FollowMeApplyResult, type FollowMeParams,
   type EdgeBlendMode, type EdgeBlendPlan, type MakeResult, type StandardView, type PushPullApplyResult, type PushPullTarget, type SolidsApplyResult, type SolidsKernelWork, type SolidsPairMode, type TransformKernelWork, type TransformPlan,
 } from '@pushform/commands';
@@ -976,6 +976,21 @@ export class ModelDocumentApi {
         this.checkSolids(path, result.bodyIds, 'split');
         return { id: result.bodyIds[0]!, refs: result.bodyIds.map(bodyOut), deleted: result.deleted.map(bodyOut) };
       }
+      case 'revolve': {
+        const profile = this.faceTarget(path, op.profile, resolver, 'revolve');
+        const frame = contextFrame(host.doc.state, path);
+        const params = {
+          profile: profile.target,
+          axisOrigin: frame.toWorld(op.axisOrigin),
+          axisDir: frame.toWorldDir(op.axisDir),
+          angleDeg: op.angleDeg ?? 360,
+          segments: op.segments ?? 48,
+        };
+        const precomputed = await runRevolveKernel(host, kernelOf(this.commands.ctx), params);
+        const result = await exec<Promise<{ bodyIds: number[] }>>('revolve.apply', { ...params, precomputed });
+        this.checkSolids(path, result.bodyIds, 'revolve');
+        return { id: result.bodyIds[0]!, refs: result.bodyIds.map(bodyOut), named: { kind: 'body', id: result.bodyIds[0]! } };
+      }
       case 'follow_me': {
         const profile = this.faceTarget(path, op.profile, resolver, 'sweep');
         const params: Record<string, unknown> = { profile: profile.target, ...(op.closed !== undefined ? { closed: op.closed } : {}) };
@@ -1557,6 +1572,7 @@ function pointCount(op: ModelOperation): number {
     case 'add_circle': return op.segments ?? 24;
     case 'add_polygon': return op.sides;
     case 'subtract': return op.cutters.length + 1;
+    case 'revolve': return 3;
     case 'follow_me': return (op.pathPoints?.length ?? 0) + (op.pathEdges?.length ?? 0) + 1;
     default: return 'refs' in op ? op.refs.length : 1;
   }
@@ -1685,7 +1701,7 @@ function errorCode(cause: unknown): ModelApiErrorCode {
   if (cause instanceof Error && cause.name === 'KernelError') return 'invalid_geometry';
   const code = cause instanceof PushFormError ? cause.code : '';
   if (code === 'service.missing') return 'unavailable';
-  if (/invalidSolid|invalid_geometry|kernel|notSolid|^solids\.empty|degenerate|^path\.|^followme\.(path|empty)|^edgeblend\.(?!target|stale)|^fillet\.|^offset\.|^dimension\.|^text3d\./i.test(code)) return 'invalid_geometry';
+  if (/invalidSolid|invalid_geometry|kernel|notSolid|^solids\.empty|degenerate|^path\.|^followme\.(path|empty)|^revolve\.(axis|crossing|empty)|^edgeblend\.(?!target|stale)|^fillet\.|^offset\.|^dimension\.|^text3d\./i.test(code)) return 'invalid_geometry';
   if (/missing|notFound|target/i.test(code)) return 'invalid_reference';
   return 'operation_failed';
 }

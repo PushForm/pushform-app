@@ -56,6 +56,7 @@ import {
   axesCommands,
   offsetCommands,
   followMeCommands,
+  revolveCommands,
   edgeBlendCommands,
   edgeToolAliasCommands,
   solidCommands,
@@ -170,6 +171,7 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
   commands.registerAll(axesCommands);
   commands.registerAll(offsetCommands);
   commands.registerAll(followMeCommands);
+  commands.registerAll(revolveCommands);
   commands.registerAll(edgeBlendCommands);
   commands.registerAll(edgeToolAliasCommands);
   commands.registerAll(solidCommands);

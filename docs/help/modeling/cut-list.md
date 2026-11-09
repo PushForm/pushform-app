@@ -177,6 +177,21 @@ A display-unit change does not round or resize the physical parts. When a rigid 
 nesting input unchanged, Cut List reuses its current plan after refreshing the measurements and outlines.
 
 
+## Set up basic labels
+
+Open **Output > Labels** from Parts or a cutting plan. Choose the paper size, labels across/down and any blank
+labels at the start of the first sheet. Open **Page dimensions, margins and spacing**, or choose **Custom size…**,
+to enter a custom paper width/height, four margins and gaps between rows and columns. Lengths follow the current
+Cut List units; you can also enter an explicit unit, such as `5 mm`.
+
+The preview updates as you commit each setting. If the margins or gaps leave no room, printing stays disabled
+until you correct them. **Save page setup** keeps these settings for future label jobs. Check the paper size and
+page count in PushForm's print dialog, and print at 100% scale for sheets of adhesive labels.
+
+Basic labels include the part number, name, dimensions and material, even for one selected material. The footer
+shows the piece's position/quantity and **Stock N** for its sheet or board when a current plan provides one.
+Parts without a plan assignment have no stock number.
+
 ## Estimate the job or selected rows
 
 Estimate starts with **Production job**, including every included part in the saved production scope. Highlighting

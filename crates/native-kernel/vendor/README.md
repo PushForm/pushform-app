@@ -11,6 +11,9 @@ Changes from the published crates:
 - `manifold-csg-sys/src/lib.rs` declares that function; `manifold-csg/src/mesh.rs` adds `MeshGL::set_face_id`.
 - `manifold-csg-sys/build/build.rs` builds Manifold with `-ffp-contract=off`, so double-precision results match the
   WebAssembly build, which never fuses multiply-adds.
+- `manifold-csg-sys/patches/0002-sequential-dedupe-edges.patch`: keeps `DedupeEdges` on its sequential path, because
+  the threaded path reports duplicates in a different order and the resulting mesh differs from the single-threaded
+  WebAssembly build.
 - Unused pieces of the crates (examples, tests, the wasm32-unknown-unknown build support) are left out.
 
 Dropping these would be possible if upstream's C API gains a way to set face ids.

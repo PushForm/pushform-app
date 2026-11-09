@@ -23,9 +23,13 @@ export function rectangularCupHood(p: ResolvedHardwareOptions, inset: number, li
     const a = (i * Math.PI) / 8;
     profile.push([low + roll - roll * Math.cos(a), h - roll + roll * Math.sin(a)]);
   }
+  // A fourth-power profile keeps a broad face and a tighter shoulder than an ellipse.
   for (let i = 1; i <= 10; i++) {
     const a = ((1 - i / 10) * Math.PI) / 2;
-    profile.push([low + roll + (span - roll) * Math.cos(a), base + (h - base) * Math.sin(a)]);
+    profile.push([
+      low + roll + (span - roll) * Math.sqrt(Math.cos(a)),
+      base + (h - base) * Math.sqrt(Math.sin(a)),
+    ]);
   }
   profile.push([high, 0]);
   // Cross-sections use local Y for height and Z for projection.
@@ -67,11 +71,12 @@ export function rectangularCupHood(p: ResolvedHardwareOptions, inset: number, li
     [low - t, h - t],
     [low + roll, h - t],
   ];
+  // A fourth-power profile keeps a broad face and a tighter shoulder than an ellipse.
   for (let i = 1; i <= 10; i++) {
     const a = ((1 - i / 10) * Math.PI) / 2;
     cavity.push([
-      low + roll + (span - roll - t) * Math.cos(a),
-      base + (h - t - base) * Math.sin(a),
+      low + roll + (span - roll - t) * Math.sqrt(Math.cos(a)),
+      base + (h - t - base) * Math.sqrt(Math.sin(a)),
     ]);
   }
   cavity.push([high - t, -t]);

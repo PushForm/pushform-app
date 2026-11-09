@@ -40,12 +40,12 @@ it('joins raised cup rims without closing the finger openings or enlarging the p
     ).toBe(0);
     expect(await overlap([-0.001, -0.0145, 0.0002], [0.001, -0.0135, 0.0008])).toBe(0);
     if (shape === 'cup-square') {
-      // The hood curves toward the rear flange rather than forming a deep box.
+      // The broad face stays nearly flat, with the curve concentrated near the rear flange.
       expect(await overlap([-0.001, -0.001, 0.0248], [0.001, 0.001, 0.025])).toBe(0);
-      expect(await overlap([-0.001, -0.0002, 0.0205], [0.001, 0.0002, 0.0207])).toBeGreaterThan(0);
+      expect(await overlap([-0.001, -0.0002, 0.0243], [0.001, 0.0002, 0.0244])).toBeGreaterThan(0);
       // Rounded ends retreat from the central face while preserving the silhouette.
-      expect(await overlap([0.04896, -0.0001, 0.0212], [0.04906, 0.0001, 0.0213])).toBe(0);
-      expect(await overlap([0.046, -0.0001, 0.0212], [0.0462, 0.0001, 0.0213])).toBeGreaterThan(0);
+      expect(await overlap([0.04896, -0.0001, 0.0243], [0.04906, 0.0001, 0.0244])).toBe(0);
+      expect(await overlap([0.046, -0.0001, 0.0243], [0.0462, 0.0001, 0.0244])).toBeGreaterThan(0);
       // The finger cavity stays hollow behind that continuous curved face.
       expect(await overlap([-0.001, -0.0002, 0.01], [0.001, 0.0002, 0.012])).toBe(0);
     }

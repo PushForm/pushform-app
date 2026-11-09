@@ -10,7 +10,7 @@ Choose **Generate and place**, then click to place the new component. Undo remov
 
 Round and rectangular cup pulls include a raised top-and-side mounting rim with an open bottom for fingers. The rim stays within the entered overall dimensions; wall thickness controls its scale.
 
-The rectangular pull has a continuous curved hood with softly rounded ends and front edges. Its hollow underside provides the finger grip, and a separate raised rim follows the rear top and sides.
+The rectangular pull has a broad, nearly flat hood with a rounded shoulder, ends and front edges. Its hollow underside provides the finger grip, and a separate raised rim follows the rear top and sides.
 
 The generator supports round and square bars, wire and arch pulls, classic bridges, round and rectangular cups, edge pulls, recessed pockets, rings, geometric knobs, half-moon pulls and plain round backplates. Generic profiles approximate common hardware; verify purchased hardware and screw positions before fabrication. Finish presets include original small-scale textures and diffuse colors in the modeling viewport, so chrome tone does not show mirror reflections.
 

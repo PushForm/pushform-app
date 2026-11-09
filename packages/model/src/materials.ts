@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import { validMaterialAppearance } from './materialAppearance';
+import type { MaterialAppearance } from './materialAppearance';
 import type { Id, MaterialId } from '@pushform/core';
 import type { Material, MaterialTexture, Rgb } from './entities/attrs';
 import type { DocumentState } from './entities/document';
@@ -11,6 +13,7 @@ import { allocId, type DocumentDraft } from './Document';
  */
 
 export interface CreateMaterialOptions {
+  readonly appearance?: MaterialAppearance | undefined;
   readonly name: string;
   readonly color: Rgb;
   readonly alpha?: number | undefined;
@@ -32,6 +35,7 @@ export function uniqueMaterialName(state: Pick<DocumentState, 'materials'>, name
 
 /** Create a material in the draft (unique name, alpha clamped to 0..1). */
 export function createMaterial(draft: DocumentDraft, opts: CreateMaterialOptions): Material {
+  if (opts.appearance && !validMaterialAppearance(opts.appearance)) throw new Error('Invalid material appearance');
   const id = allocId<MaterialId>(draft);
   const m: Material = {
     id,
@@ -39,6 +43,7 @@ export function createMaterial(draft: DocumentDraft, opts: CreateMaterialOptions
     color: [clamp01(opts.color[0]), clamp01(opts.color[1]), clamp01(opts.color[2])],
     alpha: clamp01(opts.alpha ?? 1),
     texture: opts.texture ? { ...opts.texture } : null,
+    ...(opts.appearance ? { appearance: { ...opts.appearance, emissionColor: [...opts.appearance.emissionColor], normal: opts.appearance.normal ? { ...opts.appearance.normal } : null } } : {}),
   };
   (draft.materials as unknown as Map<MaterialId, Material>).set(id, m);
   return (draft as unknown as DocumentState).materials.get(id)!;
@@ -105,7 +110,10 @@ export function materialsInUse(state: DocumentState): Set<MaterialId> {
 /** Ids of image assets referenced by any material or tag texture, image entity or watermark. */
 export function imagesInUse(state: DocumentState): Set<number> {
   const used = new Set<number>();
-  for (const m of state.materials.values()) if (m.texture) used.add(m.texture.imageId);
+  for (const m of state.materials.values()) {
+    if (m.texture) used.add(m.texture.imageId);
+    if (m.appearance?.normal) used.add(m.appearance.normal.imageId);
+  }
   for (const t of state.tags.values()) if (t.texture) used.add(t.texture.imageId);
   for (const def of state.definitions.values()) for (const img of def.entities.images.values()) used.add(img.imageId);
   for (const s of state.styles.values()) for (const w of s.watermarks) used.add(w.imageId);

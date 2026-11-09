@@ -439,12 +439,13 @@ export function copyModelSelection(
   for (const tag of out.tags.values()) tag.folderId = null;
   const blobs = new Map<ImageId, ImageBlob>();
   for (const m of [...out.materials.values(), ...out.tags.values()]) {
-    const imageId = m.texture?.imageId;
-    const asset = imageId === undefined ? undefined : state.images.get(imageId);
-    if (!asset) continue;
-    out.images.set(asset.id, { ...asset });
-    const blob = opts.images?.get(asset.id);
-    if (blob) blobs.set(asset.id, blob);
+    for (const imageId of [m.texture?.imageId, 'appearance' in m ? m.appearance?.normal?.imageId : undefined]) {
+      const asset = imageId === undefined ? undefined : state.images.get(imageId);
+      if (!asset) continue;
+      out.images.set(asset.id, { ...asset });
+      const blob = opts.images?.get(asset.id);
+      if (blob) blobs.set(asset.id, blob);
+    }
   }
 
   const clip: ModelClipboard = {
@@ -471,6 +472,7 @@ const sameColor = (a: Material, b: Material): boolean => a.color.every((v, i) =>
 /** Whether existing material `a` stands for pasted `b`: same color, opacity and texture, and `b`'s name or that name as `Name#n` from an earlier paste. */
 function sameMaterial(a: Material, b: Material): boolean {
   if ((a.name !== b.name && a.name.replace(/#\d+$/, '') !== b.name) || !sameColor(a, b)) return false;
+  if (JSON.stringify(a.appearance) !== JSON.stringify(b.appearance)) return false;
   if (!a.texture || !b.texture) return a.texture === b.texture;
   return a.texture.imageId === b.texture.imageId && a.texture.widthM === b.texture.widthM && a.texture.heightM === b.texture.heightM && a.texture.colorize === b.texture.colorize &&
     (a.texture.colorizeType ?? 'shift') === (b.texture.colorizeType ?? 'shift') && (a.texture.grain ?? 'width') === (b.texture.grain ?? 'width');
@@ -529,6 +531,7 @@ export function pasteModelClipboard(draft: DocumentDraft, clip: ModelClipboard, 
   for (const m of src.materials.values()) {
     if (materialMap.has(m.id)) continue;
     const candidate: Material = { ...m, texture: m.texture ? { ...m.texture, imageId: imageMap.get(m.texture.imageId) ?? m.texture.imageId } : null };
+    if (candidate.appearance?.normal) candidate.appearance = { ...candidate.appearance, normal: { ...candidate.appearance.normal, imageId: imageMap.get(candidate.appearance.normal.imageId) ?? candidate.appearance.normal.imageId } };
     const same = [...target.materials.values()].find((t) => sameMaterial(t, candidate));
     if (same) {
       materialMap.set(m.id, same.id);

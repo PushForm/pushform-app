@@ -17,6 +17,8 @@ export interface FinalizeOptions {
   chooseId: ChooseFaceId;
   /** Edges shorter than this and collinear vertices are removed; defaults to COPLANAR_TOL. */
   simplifyTolerance?: number;
+  /** The caller has already isolated one connected solid; keep its enclosed cavity shells together. */
+  connectedSolid?: boolean;
 }
 
 export interface Finalized {
@@ -57,7 +59,7 @@ export function finalizeManifold(ctx: KernelContext, m: Manifold, opts: Finalize
   try {
     const rebuilt = scope.track(manifoldFromSoup(ctx.wasm, norm.mesh, runId));
     const simplified = scope.track(rebuilt.simplify(opts.simplifyTolerance ?? COPLANAR_TOL));
-    const parts = simplified.decompose().map((p) => scope.track(p));
+    const parts = opts.connectedSolid ? [simplified] : simplified.decompose().map((p) => scope.track(p));
     const measured = parts.map((part) => ({ part, volume: part.volume(), area: part.surfaceArea() }));
     measured.sort((a, b) => b.volume - a.volume);
     const components: KernelComponent[] = measured.map(({ part, volume, area }) => {

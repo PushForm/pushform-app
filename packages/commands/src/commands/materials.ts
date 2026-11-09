@@ -5,6 +5,8 @@ import { planeBasis, planeFlip, PushFormError, v3dot, v3len, v3scale, v3sub } fr
 import type { FaceLocalId, Id, ImageId, MaterialId, PlaneBasis, Vec3 } from '@pushform/core';
 import {
   base64ToBytes,
+  materialAppearance,
+  imageSizeFromHeader,
   containerAt,
   createMaterial,
   materialsInUse,
@@ -53,6 +55,10 @@ const textureSchema = z.object({
   /** Which way the image's grain runs; absent means along its width. */
   grain: z.enum(['width', 'height', 'none']).optional(),
 });
+const normalSchema = z.object({ imageId: idSchema, strength: z.number().min(0).max(2), flipGreen: z.boolean(), widthM: z.number().positive(), heightM: z.number().positive() });
+const appearanceSchema = z.object({ roughness: z.number().min(0).max(1).optional(), metalness: z.number().min(0).max(1).optional(),
+  emissionColor: z.tuple([z.number().min(0).max(1), z.number().min(0).max(1), z.number().min(0).max(1)]).optional(),
+  emissionStrength: z.number().min(0).max(100).optional(), normal: normalSchema.partial().nullable().optional() });
 const uvSchema = z.union([
   z.object({ kind: z.literal('auto') }),
   z.object({ kind: z.literal('affine'), matrix: z.tuple([z.number(), z.number(), z.number(), z.number(), z.number(), z.number()]) }),
@@ -427,6 +433,20 @@ export function expandPaintTargets(host: DocumentHost, targets: readonly Target[
 // ---------------------------------------------------------------------------------------------
 // material.* commands
 
+function mergeAppearance(host: DocumentHost, draft: DocumentDraft, material: Material | undefined, patch: z.infer<typeof appearanceSchema>) {
+  const previous = materialAppearance(material ?? {});
+  let normal = previous.normal ? { ...previous.normal } : null;
+  if (patch.normal === null) normal = null;
+  else if (patch.normal) {
+    const p = patch.normal, imageId = p.imageId === undefined ? normal?.imageId : ensureDocumentImage(host, draft, p.imageId);
+    if (imageId === undefined) throw new PushFormError('command.params', 'A normal image needs an imageId');
+    normal = { imageId, strength: p.strength ?? normal?.strength ?? 1, flipGreen: p.flipGreen ?? normal?.flipGreen ?? false,
+      widthM: p.widthM ?? normal?.widthM ?? material?.texture?.widthM ?? 1, heightM: p.heightM ?? normal?.heightM ?? material?.texture?.heightM ?? 1 };
+  }
+  return { roughness: patch.roughness ?? previous.roughness, metalness: patch.metalness ?? previous.metalness,
+    emissionColor: [...(patch.emissionColor ?? previous.emissionColor)] as [number, number, number], emissionStrength: patch.emissionStrength ?? previous.emissionStrength, normal };
+}
+
 export const materialCreate = defineCommand({
   id: 'material.create',
   title: 'Create Material',
@@ -436,6 +456,7 @@ export const materialCreate = defineCommand({
     color: rgb.default([1, 1, 1]),
     alpha: z.number().min(0).max(1).optional(),
     texture: textureSchema.optional(),
+    appearance: appearanceSchema.optional(),
     /** Make it the active (Paint Bucket) material (default true). */
     activate: z.boolean().default(true),
   }),
@@ -448,7 +469,8 @@ export const materialCreate = defineCommand({
         texture = { imageId: ensureDocumentImage(host, draft, p.texture.imageId), widthM: p.texture.widthM, heightM: p.texture.heightM, colorize: p.texture.colorize ?? false,
           ...(p.texture.colorizeType ? { colorizeType: p.texture.colorizeType } : {}), ...(p.texture.grain ? { grain: p.texture.grain } : {}) };
       }
-      const m = createMaterial(draft, { name: p.name ?? 'Material', color: p.color as Rgb, alpha: p.alpha, texture });
+      const appearance = p.appearance ? mergeAppearance(host, draft, undefined, p.appearance) : undefined;
+      const m = createMaterial(draft, { appearance, name: p.name ?? 'Material', color: p.color as Rgb, alpha: p.alpha, texture });
       return m.id as number;
     });
     if (p.activate) activeMaterialOf(ctx).set(id);
@@ -467,6 +489,7 @@ export const materialUpdate = defineCommand({
     alpha: z.number().min(0).max(1).optional(),
     /** New texture, a partial update of the existing one, or null to remove it. */
     texture: textureSchema.partial().nullable().optional(),
+    appearance: appearanceSchema.optional(),
   }),
   undoable: true,
   run(ctx, p): boolean {
@@ -475,10 +498,14 @@ export const materialUpdate = defineCommand({
     return host.edit('Edit Material', (draft) => {
       const m = draft.materials.get(p.id as MaterialId);
       if (!m) return false;
+      if (p.appearance) m.appearance = mergeAppearance(host, draft, m as Material, p.appearance);
       if (p.name !== undefined) m.name = uniqueMaterialName(draft as unknown as DocumentState, p.name, m.id);
       if (p.color) m.color = [p.color[0], p.color[1], p.color[2]];
       if (p.alpha !== undefined) m.alpha = p.alpha;
-      if (p.texture === null) m.texture = null;
+      if (p.texture === null) {
+        if (m.appearance?.normal && m.texture) { m.appearance.normal.widthM = m.texture.widthM; m.appearance.normal.heightM = m.texture.heightM; }
+        m.texture = null;
+      }
       else if (p.texture) {
         const prev = m.texture;
         const imageId = p.texture.imageId !== undefined ? ensureDocumentImage(host, draft, p.texture.imageId) : prev?.imageId;
@@ -527,7 +554,7 @@ export const materialDuplicate = defineCommand({
   run(ctx, p): number {
     const host = hostOf(ctx);
     const src = requireMaterial(host.doc.state, p.id);
-    const id = host.edit('Duplicate Material', (draft) => createMaterial(draft, { name: src.name, color: src.color, alpha: src.alpha, texture: src.texture }).id as number);
+    const id = host.edit('Duplicate Material', (draft) => createMaterial(draft, { name: src.name, color: src.color, alpha: src.alpha, texture: src.texture, appearance: src.appearance }).id as number);
     if (p.activate) activeMaterialOf(ctx).set(id);
     return id;
   },
@@ -576,6 +603,28 @@ export function ensureImageAsset(host: DocumentHost, draft: DocumentDraft, bytes
 
 /** Default physical width of an imported texture (1 m). */
 export const DEFAULT_TEXTURE_WIDTH_M = 1;
+
+export const materialSetNormalImage = defineCommand({
+  id: 'material.setNormalImage', title: 'Set Normal Image', category: 'edit',
+  params: z.object({ id: idSchema, bytes: z.instanceof(Uint8Array), name: z.string(), mime: z.enum(['image/png', 'image/jpeg']) }),
+  undoable: false,
+  async run(ctx, p): Promise<void> {
+    const host = hostOf(ctx); requireMaterial(host.doc.state, p.id);
+    const documentGuid = host.doc.state.meta.guid;
+    if (!p.bytes.length || p.bytes.length > 16 * 1024 * 1024) throw new PushFormError('image.size', 'Choose an image up to 16 MiB');
+    const dimensions = imageSizeFromHeader(p.bytes);
+    if (!dimensions || dimensions.width < 1 || dimensions.height < 1) throw new PushFormError('image.invalid', 'The normal image has no valid dimensions');
+    const d = await host.images.describe(p.bytes, p.mime);
+    if (d.width > 8192 || d.height > 8192 || d.width * d.height > 16 * 1024 * 1024) throw new PushFormError('image.size', 'Normal images must be at most 8192 pixels per side and 16 megapixels');
+    if (host.doc.state.meta.guid !== documentGuid) throw new PushFormError('document.changed', 'The document changed while loading the normal image');
+    host.transact('Set Normal Image', () => host.edit('Set Normal Image', draft => {
+      const material = draft.materials.get(p.id as MaterialId);
+      if (!material) throw new PushFormError('material.missing', 'Material not found');
+      const asset = ensureImageAsset(host, draft, p.bytes, p.name, p.mime, d);
+      material.appearance = mergeAppearance(host, draft, material as Material, { normal: { imageId: asset.id } });
+    }));
+  },
+});
 
 export const materialImportImage = defineCommand({
   id: 'material.importImage',
@@ -920,6 +969,7 @@ export const materialCommands: readonly AnyCommand[] = [
   materialDuplicate,
   materialPurgeUnused,
   materialImportImage,
+  materialSetNormalImage,
   materialFromLibrary,
   materialLibraryList,
   materialSetActive,

@@ -43,3 +43,5 @@ The **Text** dropdown in **Draw** contains **Text** for model annotations and **
 **Orbit** changes the view direction, **Pan** shifts the camera view, and **Zoom** changes framing. **Zoom Window** focuses on a chosen screen region. **Zoom Extents** frames the model and is useful when you have lost sight of it.
 
 These camera controls change what you see, not the model's dimensions. Use Scale when you intend to change geometry size, and a camera control when you only want a closer view.
+
+For **Revolve**, choose it from the **Sweep** dropdown, click the profile face, then click a straight axis edge or two points in the profile plane. Set the angle in the preview (360° by default), then click **Apply** or press Enter. Escape cancels.

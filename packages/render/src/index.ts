@@ -117,3 +117,4 @@ export { TextureCache, TexturedMaterialCache, colorizedImageUrl, needsOwnMateria
 export type { TexturedDisplay } from './materials/TextureCache';
 
 export { studioLight, studioLightLevels } from './renderables/BodyRenderable';
+export { MaterialStudio } from './materials/MaterialStudio';

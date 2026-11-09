@@ -136,6 +136,7 @@ const REACT_ICONS: Record<string, IconType> = {
   'tool-tape': LuRuler,
   'tool-rotrect': LuDiamond,
   'tool-followme': LuRoute,
+  'tool-revolve': LuOrbit,
   'tool-protractor': LuDraftingCompass,
   'tool-tag': LuTag,
   'tool-texturePosition': LuImage,

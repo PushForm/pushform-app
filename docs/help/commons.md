@@ -6,6 +6,14 @@ The unfiltered browse view omits models marked low interest by Commons admins. S
 
 Open a model to see its original creator next to the title. Select a creator's name, on a model page or a model card, to see more of their work. A creator with a Commons profile opens that profile; any other creator name searches the library for that exact name. Source information, licenses and required credits are grouped under **Licenses & attribution**. When files are available, choose **Download ZIP** next to a filename. The package contains the unchanged original in `files/`, an `ATTRIBUTION.json` record and a README. Keep required credits and license notices with reused files. A free download does not remove license conditions.
 
+On a model page, **Revision** shows the last six characters of the revision identifier. Hover over it to see the full identifier.
+
+## Find products to buy
+
+Some model pages include **Where to buy**, with purchase options selected by PushForm. A generic model may link to products from several manufacturers. **Reference product** identifies a product used as a reference; **Similar option** identifies an alternative with the same general form. Neither label guarantees an exact fit. Open **Product details** for the manufacturer, part number, marketplace identifier, variant and verification date where known. Check the retailer's current dimensions, availability and package quantity before purchasing.
+
+**View on** opens the retailer or its approved affiliate destination directly. Active affiliate links show a disclosure beside the purchase action. Purchase sources are managed by PushForm staff, separately from model ownership, licenses and creator credits. Publishing or editing a model does not let a contributor add or change purchase links. Descriptions display as plain text.
+
 ## Browse featured projects and collections
 
 The Commons website shows **Featured** above search and filters, three projects at a time. Use **Next featured** and **Previous featured** to browse more. This section mixes individual models with collections of related models. A collection card has a mosaic cover and a **Collection** label; opening it shows the curator, description and its available models. Open any model in the collection to read its own license and credits or open it in PushForm.
@@ -101,7 +109,7 @@ Choose **My profile**, then open a card under **My Models**. Your model's detail
 
 ## Preview a model
 
-Commons renders thumbnails from supported model geometry on its server; a contributor does not need to upload a screenshot. An optional uploaded PNG or JPEG is used as the listing image instead. Choose **Explore in 3D** on a model page to rotate the geometry, zoom, or reset the view. Drag to orbit, use the labeled controls, or focus the viewer and use arrow keys, plus/minus, and zero to reset. Previews are available without signing in; original downloads require your PushForm account and initial account setup.
+Commons renders thumbnails from supported model geometry on its server; a contributor does not need to upload a screenshot. Generated thumbnails use Bright studio lighting and a transparent background, so the Commons backdrop shows through. Sharing a saved model from the editor uses the same lighting and transparency with your current camera. An optional uploaded PNG or JPEG is used as the listing image instead. Choose **Explore in 3D** on a model page to rotate the geometry, zoom, or reset the view. Drag to orbit, use the labeled controls, or focus the viewer and use arrow keys, plus/minus, and zero to reset. Previews are available without signing in; original downloads require your PushForm account and initial account setup.
 
 Commons converts every format it accepts as soon as the upload is checked: native PushForm, STEP, FreeCAD, SketchUp (SKP and SKB), DXF, KMZ and mesh files (STL, OBJ, GLB/glTF, COLLADA, 3DS and model ZIPs). Drafts get previews too, visible only to you until you publish. It accepts originals up to 128 MiB for conversion and displays up to 12,000 triangles. It shows geometry and material colors, with no textures, annotations, recorded dimensions, units or fabrication suitability. Unsupported content and models over those limits show an unavailable preview; try **Open in PushForm** or download the original where supported. A failed image falls back to the generated thumbnail when possible.
 

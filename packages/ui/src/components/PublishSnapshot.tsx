@@ -49,7 +49,7 @@ export function PublishSnapshot({ account, filesUrl, snapshot, onClose, preset, 
         const images = new ImageStore();
         try {
           for (const [id, blob] of file.images) { const asset = file.state.images.get(id); if (asset) images.register(asset, blob.bytes, blob.mime); }
-          const picture = await modelPicture(file.state, images, { ...snapshot.view, lighting: 'bright', background: '#eef0e8' });
+          const picture = await modelPicture(file.state, images, { ...snapshot.view, lighting: 'bright', background: null });
           if (!picture) throw new Error('Your current view could not be rendered. Try sharing again.');
           const blob = await new Promise<Blob | null>(resolve => picture.toBlob(resolve, 'image/png'));
           if (!blob) throw new Error('Your preview could not be prepared. Try sharing again.');

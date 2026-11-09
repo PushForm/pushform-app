@@ -50,6 +50,19 @@ export const MIN_BLIND = inches(6);
 export const DEFAULT_BLIND_DOOR = inches(18);
 export const TRAY_SEGMENTS = 48;
 
+export const SLIM_STILE = inches(1.5);
+export const BEAD_RADIUS = inches(1 / 8);
+export const BEAD_QUIRK = inches(1 / 16);
+export const BEAD_SEGMENTS = 12;
+export const PULL_LENGTH = inches(5);
+export const PULL_BAR = inches(3 / 8);
+export const PULL_STANDOFF = inches(1);
+export const PULL_INSET = inches(2.5);
+export const KNOB_RADIUS = inches(1 / 2);
+export const KNOB_LENGTH = inches(1.125);
+export const TALL_PULL_HEIGHT = inches(36);
+export const DEFAULT_HARDWARE_FINISH = '#a8a8a3';
+
 export const DRAWER_FRONT = inches(6);
 export const SLAB_DRAWER_BELOW = inches(7);
 export const DRAWER_SIDE = inches(1 / 2);
@@ -72,8 +85,8 @@ export const WIDTH_RANGE = [inches(9), inches(48)] as const;
 export const HEIGHT_RANGE = [inches(12), inches(108)] as const;
 export const DEPTH_RANGE = [inches(9), inches(30)] as const;
 
-export const DEFAULT_HEIGHT = { base: inches(34.5), wall: inches(30), tall: inches(84) } as const;
-export const DEFAULT_DEPTH = { base: inches(23.25), wall: inches(11.25), tall: inches(23.25) } as const;
+export const DEFAULT_HEIGHT = { base: inches(34.5), wall: inches(30), tall: inches(84), vanity: inches(31.5) } as const;
+export const DEFAULT_DEPTH = { base: inches(23.25), wall: inches(11.25), tall: inches(23.25), vanity: inches(21) } as const;
 export const SINGLE_DOOR_UP_TO = inches(24);
 
 /** Library key of the prefinished maple the box and drawer boxes are made of. */

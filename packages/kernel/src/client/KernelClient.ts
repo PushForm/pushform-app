@@ -3,6 +3,8 @@
 import type { MeshData } from '@pushform/core';
 import type { KernelBackend } from '../backends/KernelBackend';
 import type {
+  HardwareRequest,
+  HardwareResult,
   BooleanRequest,
   BooleanResult,
   ComponentsResult,
@@ -145,6 +147,9 @@ export class KernelClient {
   }
   edgeBlend(params: Params<EdgeBlendRequest>): Promise<EdgeBlendResult> {
     return this.backend.request({ type: 'edgeBlend', ...params });
+  }
+  hardware(params: Params<HardwareRequest>): Promise<HardwareResult> {
+    return this.backend.request({ type: 'hardware', ...params });
   }
   stats(): Promise<StatsResult> {
     return this.backend.request({ type: 'stats' });

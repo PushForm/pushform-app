@@ -3631,3 +3631,20 @@ h4.pf-xui-text { font-size: 12px; }
   height: 22px;
   padding: 0 2px;
 }
+
+/* Material appearance editor. The preview never drives an animation loop. */
+.pf-material-preview { min-width: 0; margin: 10px 0; }
+.pf-material-preview canvas { display: block; width: 100%; height: 160px; border: 1px solid var(--pf-border); border-radius: 5px; touch-action: none; }
+.pf-material-preview-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
+.pf-material-section { border-top: 1px solid var(--pf-border); padding: 10px 0; min-width: 0; }
+.pf-material-section > summary { font-weight: 600; cursor: pointer; margin-bottom: 8px; }
+.pf-material-value { margin: 8px 0; min-width: 0; }
+.pf-material-value > label { display: block; }
+.pf-material-value-inputs { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.pf-material-value-inputs input[type=range] { flex: 1; width: 0; min-width: 0; }
+.pf-material-value-inputs input[type=number] { width: 74px; flex: 0 0 74px; }
+.pf-material-finish { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+.pf-material-finish select { min-width: 0; flex: 1; }
+.pf-material-map { border: 1px dashed var(--pf-border); padding: 8px; margin: 10px 0; border-radius: 4px; overflow-wrap: anywhere; }
+.pf-material-file { display: block; margin: 8px 0; }
+.pf-material-file input { display: block; max-width: 100%; margin-top: 4px; }

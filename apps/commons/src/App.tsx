@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import { ModelDescription } from './ModelDescription';
+import { WhereToBuy } from './WhereToBuy';
 import { BrowseImagesProvider } from '@pushform/commons-ui/BrowseImages';
 import { useBrowsePaging, MoreBrowseResults } from '@pushform/commons-ui/BrowsePaging';
 import { commonsFileUrl, CommonsUnavailableError, type CommonsProfile, type CommonsCollections } from '@pushform/cloud';
@@ -50,13 +52,14 @@ function ModelDetail({ model, filesUrl, account, editorUrl }: { model: CatalogMo
       <div>
         <p className="eyebrow">{model.category}</p>
         <h1>{model.title}</h1><p className="creator"><CreatorCredit model={model}/></p>
-        <p className="description">{model.description}</p>
+        <ModelDescription text={model.description}/>
         <dl className="metadata"><div><dt>Formats</dt><dd>{model.formats.join(', ')}</dd></div>
-          <div><dt>Revision</dt><dd>{model.revision}</dd></div>
+          <div><dt>Revision</dt><dd title={model.revision}>{model.revision.slice(-6)}</dd></div>
           <div><dt>Published</dt><dd>{new Date(model.publishedAt).toLocaleDateString()}</dd></div></dl>
         {owned && <OwnerModelActions key={owned.id} model={owned} filesUrl={filesUrl} />}
         <CommonsOpenAction model={model} editorUrl={editorUrl} />
         <div className="collection-actions"><ModelCollectionAction model={model} /><FeatureAction key={model.id} type="model" targetId={model.id} eligible={model.files.length > 0} /></div>
+        <WhereToBuy key={'purchase:'+model.id} modelId={model.id} account={account}/>
         {model.files.length > 0 && <section className="downloads" aria-label="Model files"><h2>Model files</h2>
           <p>Each ZIP download includes the original file, licenses and creator credits.</p>
           <ul>{sortedModelFiles(model.files).map((file) => <li key={file.id}><span>{file.name} · {(file.sizeBytes / 1024).toFixed(1)} KiB</span>

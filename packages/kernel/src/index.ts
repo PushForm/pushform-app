@@ -20,3 +20,5 @@ export { groupCoplanar, normalizeTriangles, keepIdsFromRuns, allNewIds } from '.
 export type { ChooseFaceId, CoplanarGroups, Normalized, NormalizedFace, WeightedOrigin } from './worker/ops/normalize';
 export { TOOL_NEAR_CAP, TOOL_FAR_CAP, TOOL_SIDE_BASE } from './worker/ops/pushPull';
 export { meshSelfIntersection, trianglesIntersect, type AutofoldRejection } from './worker/ops/autofold';
+
+export * from './hardware';

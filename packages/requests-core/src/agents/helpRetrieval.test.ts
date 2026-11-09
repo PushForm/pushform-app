@@ -75,6 +75,7 @@ describe('user manual retrieval over the actual corpus', () => {
     ['layout', 'Scale width height', ['**Width**', 'keeps its proportion', 'Press Tab']],
     ['layout', 'navigate model view', ['drag to orbit', 'Shift+drag', 'scroll to zoom', '**Escape**']],
     ['layout', 'Presentation mode', ['Page Down', '**Escape**']],
+    ['model', 'Revolve', ['profile face', 'two different points', 'Click **Apply**', 'Escape cancels']],
     ['model', 'Follow Me', ['click the profile face', 'connected path edges', 'Click to finish']],
     ['model', 'Offset', ['click the face', 'click again to commit', 'coplanar']],
     ['model', 'Subtract', ['Click the cutter first', 'second click applies', 'removes the cutter']],

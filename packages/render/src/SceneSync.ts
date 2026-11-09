@@ -20,7 +20,7 @@ import { SketchRenderable, createSketchMaterials } from './renderables/SketchRen
 import { TextureCache, TexturedMaterialCache } from './materials/TextureCache';
 import type { SketchMaterials } from './renderables/SketchRenderable';
 import { DEFAULT_DISPLAY, EMPTY_HIGHLIGHT, EMPTY_SECTIONS, ROOT_EDIT_CONTEXT, renderKeyWithinInstance, renderPathKey, renderPathWithin } from './types';
-import type { HighlightState, RenderBody, RenderDimensions, RenderDisplay, RenderEditContext, RenderGuides, RenderImage, RenderSections, RenderSketch, RenderTexts } from './types';
+import type { HighlightState, RenderBody, RenderBodySurface, RenderDimensions, RenderDisplay, RenderEditContext, RenderGuides, RenderImage, RenderSections, RenderSketch, RenderTexts } from './types';
 import { DimensionLayer } from './renderables/DimensionLayer';
 import { TextLayer } from './renderables/TextLayer';
 import { SectionLayer } from './renderables/SectionLayer';
@@ -197,6 +197,7 @@ export class SceneSync {
       if (!r) {
         r = new BodyRenderable(body.id, this.materials, this.texturedMaterials);
         r.setShowHidden(this._showHiddenGeometry);
+        r.setMaterialAppearance(this._display.faceStyle === 'shaded' || this._display.faceStyle === 'shadedTextured');
         r.setTextured(this._display.faceStyle === 'shadedTextured');
         this.bodies.set(body.id, r);
         r.update(body, this.origin);
@@ -247,6 +248,7 @@ export class SceneSync {
       if (!r) {
         r = new SketchRenderable(sketch.id, this.sketchMaterials, this.materials, this.texturedMaterials);
         r.setShowHidden(this._showHiddenGeometry);
+        r.setMaterialAppearance(this._display.faceStyle === 'shaded' || this._display.faceStyle === 'shadedTextured');
         r.setTextured(this._display.faceStyle === 'shadedTextured');
         this.sketches.set(sketch.id, r);
         r.update(sketch, this.origin);
@@ -413,8 +415,8 @@ export class SceneSync {
 
   // --- previews / modes -----------------------------------------------------------------------
 
-  setPreview(meshes: readonly MeshData[] | null, transform?: Mat4): boolean {
-    return this.preview.set(meshes, this.origin, transform);
+  setPreview(meshes: readonly MeshData[] | null, transform?: Mat4, surfaces?: readonly (readonly RenderBodySurface[])[]): boolean {
+    return this.preview.set(meshes, this.origin, transform, surfaces);
   }
 
   get showHiddenGeometry(): boolean {
@@ -616,7 +618,8 @@ export class SceneSync {
     const textured = d.faceStyle === 'shadedTextured';
     this.texturedMaterials.setDisplay({ xray, xrayOpacity: d.xrayOpacity ?? XRAY_OPACITY, faces });
     for (const r of [...this.bodies.values(), ...this.sketches.values()]) {
-      if (r.isTextured === textured) continue;
+      const appearanceChanged = r.setMaterialAppearance(d.faceStyle === 'shaded' || textured);
+      if (r.isTextured === textured && !appearanceChanged) continue;
       r.setTextured(textured);
       this.stage(r);
     }
@@ -683,7 +686,7 @@ export class SceneSync {
       this.stage(r);
     }
     this.highlight.set(this.highlightState, origin);
-    this.preview.set(this.preview.meshes, origin);
+    this.preview.set(this.preview.meshes, origin, this.preview.matrix, this.preview.surfaces);
     this.importPreview.setOrigin(origin);
     this.guides.set(this.guides.guides, origin);
     this.images.setOrigin(origin);

@@ -7,7 +7,8 @@ import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import type { RenderBody, RenderFaceGroup, RenderPath, RenderFaceCamera } from '../types';
 import { EMPTY_SEGMENTS } from '../types';
 import { buildBodyEdgeSegments, buildFaceArrays, extractEdgeSegments, meshFaceNormals, transformedVerts } from './buildGeometry';
-import type { TexturedMaterialCache } from '../materials/TextureCache';
+import type { FaceSurfaceMaterial, TexturedMaterialCache } from '../materials/TextureCache';
+import { applyAppearanceToneMapping } from '../materials/appearance';
 import { needsOwnMaterial } from '../materials/TextureCache';
 import { EdgeBatch } from './EdgeBatch';
 import { createEdgeMaterial, DEFAULT_EDGE_WIDTH, DEFAULT_PROFILE_WIDTH } from './EdgeMaterial';
@@ -77,6 +78,8 @@ export function patchSelectTint(material: Material, color?: number): void {
   // The palette's color is shared by reference, so a style's selection color reaches every material without a rebuild.
   const tint = color === undefined ? palette.select : new Color(color);
   material.onBeforeCompile = (shader: WebGLProgramParametersWithUniforms) => {
+    if ('metalness' in material) applyAppearanceToneMapping(shader);
+    shader.uniforms['uPfMetalness'] = { get value() { return 'metalness' in material ? material.metalness : 0; } };
     shader.uniforms['uPfSelectColor'] = { value: tint };
     shader.uniforms['uPfHiddenShade'] = hiddenLineShade;
     shader.uniforms['uPfCameraLight'] = cameraLight;
@@ -86,9 +89,9 @@ export function patchSelectTint(material: Material, color?: number): void {
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nattribute float flags;\nvarying float vPfFlags;\nattribute float uvq;\nvarying float vPfUvQ;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvPfFlags = flags;')
-      .replace('#include <uv_vertex>', '#include <uv_vertex>\nvPfUvQ = 1.0 + uvq;\n#ifdef USE_MAP\nvMapUv = ( mapTransform * vec3( MAP_UV, vPfUvQ ) ).xy;\n#endif');
+      .replace('#include <uv_vertex>', '#include <uv_vertex>\nvPfUvQ = 1.0 + uvq;\n#ifdef USE_MAP\nvMapUv = ( mapTransform * vec3( MAP_UV, vPfUvQ ) ).xy;\n#endif\n#ifdef USE_NORMALMAP\nvNormalMapUv = ( normalMapTransform * vec3( NORMALMAP_UV, vPfUvQ ) ).xy;\n#endif');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform vec3 uPfSelectColor;\nuniform vec2 uPfHiddenShade;\nuniform float uPfCameraLight;\nuniform float uPfStudioLight;\nuniform vec3 uPfStudioLevels;\nuniform vec3 uPfStudioDirection;\nvarying float vPfFlags;\nvarying float vPfUvQ;')
+      .replace('#include <common>', '#include <common>\nuniform float uPfMetalness;\nuniform vec3 uPfSelectColor;\nuniform vec2 uPfHiddenShade;\nuniform float uPfCameraLight;\nuniform float uPfStudioLight;\nuniform vec3 uPfStudioLevels;\nuniform vec3 uPfStudioDirection;\nvarying float vPfFlags;\nvarying float vPfUvQ;')
       .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
 if ( uPfHiddenShade.x > 0.5 ) {
   vec3 pfSun = reflectedLight.directDiffuse;
@@ -98,15 +101,17 @@ if ( uPfHiddenShade.x > 0.5 ) {
 } else if ( uPfStudioLight > 0.5 ) {
   float pfKey = max( dot( normal, uPfStudioDirection ), 0.0 );
   float pfLevel = min( 1.0, uPfStudioLevels.x + uPfStudioLevels.y * max( normal.z, 0.0 ) + uPfStudioLevels.z * pfKey );
-  reflectedLight.indirectDiffuse += diffuseColor.rgb * pfLevel;
+  reflectedLight.indirectDiffuse += diffuseColor.rgb * pfLevel * (1.0 - uPfMetalness);
 } else if ( uPfCameraLight > 0.5 ) {
   // View space: the camera looks along -z, so the normal's z is the cosine to the view direction.
   vec3 pfColor = sRGBTransferOETF( vec4( diffuseColor.rgb, 1.0 ) ).rgb;
   vec3 pfLit = min( pfColor * ( ${CAMERA_LIGHT.ambient} + ${CAMERA_LIGHT.facing} * max( normal.z, 0.0 ) ), vec3( 1.0 ) );
   reflectedLight.directDiffuse = vec3( 0.0 );
-  reflectedLight.indirectDiffuse = sRGBTransferEOTF( vec4( pfLit, 1.0 ) ).rgb;
+  reflectedLight.indirectDiffuse = sRGBTransferEOTF( vec4( pfLit, 1.0 ) ).rgb * (1.0 - uPfMetalness);
 }`)
       .replace('#include <map_fragment>', ShaderChunk.map_fragment.replace('texture2D( map, vMapUv )', 'texture2D( map, vMapUv / vPfUvQ )'))
+      .replace('#include <normal_fragment_begin>', ShaderChunk.normal_fragment_begin.replaceAll('vNormalMapUv', '( vNormalMapUv / vPfUvQ )'))
+      .replace('#include <normal_fragment_maps>', ShaderChunk.normal_fragment_maps.replace('texture2D( normalMap, vNormalMapUv )', 'texture2D( normalMap, vNormalMapUv / vPfUvQ )'))
       .replace(
         '#include <color_fragment>',
         '#include <color_fragment>\nif ( vPfFlags >= 0.5 ) diffuseColor.rgb = mix( diffuseColor.rgb, uPfSelectColor, 0.25 );',
@@ -185,8 +190,8 @@ export function fillFlags(geometry: BufferGeometry, value: number, start = 0, co
  * through the shared `backEdge` material). Keyed by the body's render key (`path/entityId`).
  */
 export class BodyRenderable extends Group {
-  readonly front: Mesh<BufferGeometry, MeshLambertMaterial>;
-  readonly back: Mesh<BufferGeometry, MeshLambertMaterial>;
+  readonly front: Mesh<BufferGeometry, FaceSurfaceMaterial>;
+  readonly back: Mesh<BufferGeometry, FaceSurfaceMaterial>;
   readonly edges: EdgeBatch;
   readonly hiddenEdges: EdgeBatch;
   readonly backEdges: LineSegments2;
@@ -252,6 +257,12 @@ export class BodyRenderable extends Group {
   }
 
   /** Textured face style on/off: textured groups use their map material or fall back to the shared vertex colors. */
+  private materialAppearanceEnabled = true;
+  setMaterialAppearance(on: boolean): boolean {
+    if (this.materialAppearanceEnabled === on) return false;
+    this.materialAppearanceEnabled = on; this.applyGroups(); return true;
+  }
+
   setTextured(on: boolean): void {
     if (this._textured === on) return;
     this._textured = on;
@@ -268,7 +279,7 @@ export class BodyRenderable extends Group {
    * material gets its own index from the cache (textures only while `textured`).
    */
   private applyGroups(): void {
-    const apply = (mesh: Mesh<BufferGeometry, MeshLambertMaterial>, groups: readonly RenderFaceGroup[], side: 'front' | 'back') => {
+    const apply = (mesh: Mesh<BufferGeometry, FaceSurfaceMaterial>, groups: readonly RenderFaceGroup[], side: 'front' | 'back') => {
       const shared = this.shared[side];
       const g = mesh.geometry;
       g.clearGroups();
@@ -276,11 +287,11 @@ export class BodyRenderable extends Group {
         mesh.material = shared;
         return;
       }
-      const list: MeshLambertMaterial[] = [shared];
-      const index = new Map<MeshLambertMaterial, number>([[shared, 0]]);
+      const list: FaceSurfaceMaterial[] = [shared];
+      const index = new Map<FaceSurfaceMaterial, number>([[shared, 0]]);
       for (const grp of groups) {
-        let mat = shared;
-        if (needsOwnMaterial(grp.material, this._textured)) mat = this.texturedCache.get(grp.material, side, this._faded, this._textured);
+        let mat: FaceSurfaceMaterial = shared;
+        if (this.materialAppearanceEnabled && needsOwnMaterial(grp.material, this._textured)) mat = this.texturedCache.get(grp.material, side, this._faded, this._textured);
         let i = index.get(mat);
         if (i === undefined) {
           i = list.length;
@@ -289,14 +300,14 @@ export class BodyRenderable extends Group {
         }
         g.addGroup(grp.start, grp.count, i);
       }
-      (mesh as Mesh<BufferGeometry, MeshLambertMaterial | MeshLambertMaterial[]>).material = list;
+      (mesh as Mesh<BufferGeometry, FaceSurfaceMaterial | FaceSurfaceMaterial[]>).material = list;
     };
     apply(this.front, this.frontGroups, 'front');
     apply(this.back, this.backGroups, 'back');
   }
 
   update(body: RenderBody, origin: Vec3): void {
-    const arrays = buildFaceArrays(body.mesh, body.transform, origin, { smoothGroups: body.surfaces, faceMaterials: body.faceMaterials,
+    const arrays = buildFaceArrays(body.mesh, body.transform, origin, { smoothGroups: body.surfaces, smoothEdges: body.edges, faceMaterials: body.faceMaterials,
       defaultColor: body.defaultColor, hiddenFaces: this.showHidden ? undefined : body.hiddenFaces });
     const geometry = new BufferGeometry();
     geometry.setAttribute('position', new BufferAttribute(arrays.positions, 3));

@@ -26,6 +26,16 @@ Alternatively, select the path's sketch edges before choosing Follow Me, then cl
 
 A disconnected edge cannot extend the path. If the sweep cannot form a valid solid, the tool reports an error; correct the profile or path before trying again.
 
+## Turn a profile around an axis with Revolve
+
+Use **Revolve** for turned legs, bowls, knobs and other rotational shapes. You can also ask the in-app agent to revolve an existing profile or draw and revolve one, specifying the axis and angle. Open the **Sweep** dropdown beside Offset in the Modify toolbar and choose **Revolve**, or find it in command search.
+
+Click a flat profile face in the group or component you are editing. Then click a straight edge for the axis, or click two different points in the profile plane to define its direction. The profile must stay on one side of the axis; it may touch it. For a turned leg, draw half of its side outline with its straight inner boundary on the axis.
+
+A solid preview appears after you choose the axis. The default angle is **360°**. Type an angle such as `90` or `90°` and press Enter to update the preview; a partial turn has flat, closed ends. Set **Segments** in the options bar, or type `48s`, to control faceting. Counts run from 3 to 720 per full turn; the default is 48.
+
+Click **Apply**, click in the view, or press Enter with no value being edited to finish. Revolving a loose face replaces that face with the new solid. Using a face of an existing solid creates separate solids and keeps the original. The operation is one **Undo** step. Escape cancels the pending operation. If an axis is outside the profile plane or crosses the profile, the tool explains the problem; cancel and choose a suitable axis. If the model changes while you are previewing, cancel and pick the profile and axis again before applying.
+
 ## Offset a face or connected edges in Modeling
 
 Choose **Offset**, click the face to offset in the context you're editing, move to where the offset should reach and click again to commit, or press on the face, drag and release. The distance runs from the pointer to the face's nearest edge and snaps to vertices and edges on the face's plane: inside the face insets, outside outsets. The distance box shows the length and the status bar says which way it goes. Type a length and press Enter to use it on the pointer's side (inward before you move); a negative length goes the other way. Typing a new length or switching **Allow overlaps** right after an offset redoes it; a click in the view ends that. Escape cancels. Double-click a face to repeat the last face offset.

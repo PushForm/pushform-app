@@ -634,6 +634,24 @@ describe('revolve', () => {
     await expectManifold(client, c.mesh);
   });
 
+  it('keeps an enclosed cavity in the same solid', async () => {
+    const r = await client.revolve({ profile: [rect(0, 1, 2)[0]!, [[0.2, 0.5], [0.8, 0.5], [0.8, 1.5], [0.2, 1.5]]], profileBasis: xz, axisOrigin: [0, 0, 0], axisDir: [0, 0, 1], angleDeg: 360, segments: 48, nextFaceId: 1 });
+    expect(r.components).toHaveLength(1);
+    const c = r.components[0]!;
+    expect(c.props.volume).toBeCloseTo(ringVolume(0, 1, 2, 48) - ringVolume(0.2, 0.8, 1, 48), 6);
+    await expectManifold(client, c.mesh);
+  });
+
+  it('returns separate solids when clipping separates the profile into regions', async () => {
+    const profile = [[[-0.2, 0], [1, 0], [1, 1], [0, 1], [0, 2], [1, 2], [1, 3], [-0.2, 3]]];
+    const r = await client.revolve({ profile, profileBasis: xz, axisOrigin: [0, 0, 0], axisDir: [0, 0, 1], angleDeg: 360, segments: 24, nextFaceId: 1 });
+    expect(r.components).toHaveLength(2);
+    for (const c of r.components) {
+      expect(c.props.volume).toBeCloseTo(ringVolume(0, 1, 1, 24), 6);
+      await expectManifold(client, c.mesh);
+    }
+  });
+
   it('rejects bad angles, segment counts and axes', async () => {
     const base = { profile: rect(0.5, 1, 1), profileBasis: xz, axisOrigin: [0, 0, 0] as Vec3, axisDir: [0, 0, 1] as Vec3, segments: 24, nextFaceId: 1 };
     await expect(client.revolve({ ...base, angleDeg: 0 })).rejects.toMatchObject({ code: 'InvalidInput' });

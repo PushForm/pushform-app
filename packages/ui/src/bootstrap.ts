@@ -19,8 +19,8 @@ import {
   sectionPlaneCommands,
   imageCommands,
   text3dCommands,
+  builderCommands,
   hardwareCommands,
-  cabinetCommands,
   SERVICE_FONTS,
   detectPlatform,
   editCommands,
@@ -56,6 +56,7 @@ import {
   axesCommands,
   offsetCommands,
   followMeCommands,
+  revolveCommands,
   edgeBlendCommands,
   edgeToolAliasCommands,
   solidCommands,
@@ -156,8 +157,8 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
   commands.registerAll(sectionPlaneCommands);
   commands.registerAll(imageCommands);
   commands.registerAll(text3dCommands);
+  commands.registerAll(builderCommands);
   commands.registerAll(hardwareCommands);
-  commands.registerAll(cabinetCommands);
   commands.registerAll(pushPullCommands);
   commands.registerAll(curveCommands);
   commands.registerAll(transformCommands);
@@ -170,6 +171,7 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
   commands.registerAll(axesCommands);
   commands.registerAll(offsetCommands);
   commands.registerAll(followMeCommands);
+  commands.registerAll(revolveCommands);
   commands.registerAll(edgeBlendCommands);
   commands.registerAll(edgeToolAliasCommands);
   commands.registerAll(solidCommands);

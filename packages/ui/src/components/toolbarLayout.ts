@@ -46,7 +46,7 @@ export const TOOLBAR_GROUPS: readonly { title: string; slots: readonly Slot[] }[
     slots: [
       tool('pushpull'),
       tool('offset'),
-      tool('followme'),
+      stack('Sweep', 'followme', 'revolve'),
       tool('profile'),
       stack(
         'Solid',

@@ -17,6 +17,7 @@ import {
   editCommands,
   fogCommands,
   followMeCommands,
+  revolveCommands,
   groupCommands,
   guideCommands,
   imageCommands,
@@ -35,8 +36,8 @@ import {
   styleCommands,
   tagCommands,
   text3dCommands,
+  builderCommands,
   hardwareCommands,
-  cabinetCommands,
   textCommands,
   transformCommands,
   viewCommands,
@@ -55,9 +56,9 @@ import { Document } from '@pushform/model';
 export const HEADLESS_COMMAND_SETS: readonly (readonly AnyCommand[])[] = [
   editCommands, modelCommands, sketchCommands, clipboardCommands, imageCommands, pushPullCommands, curveCommands,
   transformCommands, viewCommands, lastOpCommands, edgeCommands, guideCommands, dimensionCommands, textCommands,
-  axesCommands, offsetCommands, followMeCommands, solidCommands, intersectCommands, contextCommands, groupCommands,
+  axesCommands, offsetCommands, followMeCommands, revolveCommands, solidCommands, intersectCommands, contextCommands, groupCommands,
   componentBehaviorCommands, tagCommands, styleCommands, shadowCommands, fogCommands, materialCommands,
-  modelInfoCommands, componentCommands, sceneCommands, edgeBlendCommands, sectionPlaneCommands, text3dCommands, hardwareCommands, cabinetCommands,
+  modelInfoCommands, componentCommands, sceneCommands, edgeBlendCommands, sectionPlaneCommands, text3dCommands, builderCommands, hardwareCommands,
 ];
 
 /** One open model: its document host and the registry that edits it, on the inline kernel. */

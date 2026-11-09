@@ -29,8 +29,11 @@ published its module, run `pnpm kernel-wasm:pin` and commit the lock file so eve
 ## Golden corpus
 
 `goldens/kernel-corpus.bin.br` is the record of what every kernel operation answers: requests and their exact results,
-compared bit for bit by `src/backends/goldenCorpus.test.ts`. It was captured from the former TypeScript kernel on V8 and
-is only ever changed on purpose, one verified record at a time (`src/backends/goldenCorpus.ts`).
+compared bit for bit by `src/backends/goldenCorpus.test.ts`. Its answers were checked against the former TypeScript kernel
+on V8 before that kernel was removed, and it only changes on purpose (`src/backends/goldenCorpus.ts`).
+
+To change the kernel, see `crates/native-kernel/README.md`: it covers how the operations are laid out, the rules that keep
+every build's results identical, and what to do when a golden record changes.
 
 ## Bundling the worker with Vite
 

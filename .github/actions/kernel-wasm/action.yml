@@ -25,9 +25,7 @@ runs:
           packages/kernel/wasm/pushform-kernel*.js
           packages/kernel/wasm/kernel-wasm.stamp.json
         key: kernel-wasm-v3-${{ runner.os }}-${{ steps.plan.outputs.source_hash }}
-    - uses: Swatinem/rust-cache@v2
-      if: steps.kernel-wasm.outputs.cache-hit != 'true'
-      with: { workspaces: crates/kernel-wasm }
+    # No cache of Cargo's target directory: its CMake files name this run's Emscripten path, which changes every run.
     - shell: bash
       if: steps.kernel-wasm.outputs.cache-hit != 'true'
       run: node scripts/build-kernel-wasm.mjs --faults

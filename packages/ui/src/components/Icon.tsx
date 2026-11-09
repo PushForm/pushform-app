@@ -13,6 +13,7 @@ import { LayoutDifferenceIcon, LayoutIntersectionIcon, LayoutExclusionIcon, Layo
 import { LayoutFilletIcon } from './LayoutFilletIcon';
 import { LayoutShapeBuilderIcon } from './LayoutShapeBuilderIcon';
 import { SectionPlaneIcon } from './SectionPlaneIcon';
+import { RevolveIcon } from './RevolveIcon';
 import {
   LuSave,
   LuArrowDown,
@@ -136,7 +137,7 @@ const REACT_ICONS: Record<string, IconType> = {
   'tool-tape': LuRuler,
   'tool-rotrect': LuDiamond,
   'tool-followme': LuRoute,
-  'tool-revolve': LuOrbit,
+  'tool-revolve': RevolveIcon,
   'tool-protractor': LuDraftingCompass,
   'tool-tag': LuTag,
   'tool-texturePosition': LuImage,

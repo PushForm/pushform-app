@@ -2,6 +2,9 @@
 // Copyright 2026 PushForm contributors
 import { defineConfig } from 'vitest/config';
 
+// PF_KERNEL=rust runs every InlineBackend on the Rust kernel's WebAssembly module (see the setup file).
+const kernelSetup = process.env.PF_KERNEL === 'rust' ? ['packages/kernel/src/test/rustKernelSetup.ts'] : [];
+
 export default defineConfig({
   test: {
     projects: [
@@ -10,6 +13,7 @@ export default defineConfig({
           name: 'node',
           environment: 'node',
           env: { PUSHFORM_VERIFY_REUSED_REBUILDS: '1' },
+          setupFiles: kernelSetup,
           include: [
             'packages/{core,geom,kernel,model,layout,inference,commands,io,mcp,cloud,testing,requests-core,extension-protocol,extensions,extension-sdk,extension-dev}/**/*.test.ts',
             'workers/*/src/**/*.test.ts',
@@ -24,6 +28,7 @@ export default defineConfig({
           name: 'dom',
           environment: 'jsdom',
           env: { PUSHFORM_VERIFY_REUSED_REBUILDS: '1' },
+          setupFiles: kernelSetup,
           include: ['packages/{render,ui,requests-ui}/**/*.test.{ts,tsx}', 'apps/{web,commons}/**/*.test.{ts,tsx}'],
         },
       },

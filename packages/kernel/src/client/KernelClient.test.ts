@@ -41,10 +41,9 @@ describe('KernelClient', () => {
     const client = new KernelClient(backend);
     const runId = await client.ensureBody(7, 1, meshBox([0, 0, 0], [1, 1, 1]));
     expect(await client.ensureBody(7, 1, meshBox([0, 0, 0], [1, 1, 1]))).toBe(runId);
-    const ctx = await backend.getContext();
-    expect(ctx.cache.size).toBe(1);
+    expect((await client.stats()).cached).toBe(1);
     await client.ensureBody(7, 2, meshBox([0, 0, 0], [2, 2, 2]));
-    expect(ctx.cache.size).toBe(2);
+    expect((await client.stats()).cached).toBe(2);
     expect((await client.release(7)).released).toBe(2);
     client.dispose();
   });

@@ -186,7 +186,7 @@ describe.skipIf(!ready)('every kernel operation agrees bit for bit across TypeSc
   const uploadComponent = (c: { mesh: MeshWire }) => newBody(c.mesh);
 
   beforeAll(async () => {
-    ts = new InlineBackend();
+    ts = new InlineBackend({ typescriptOnly: true });
     harness = new HarnessTransport(harnessPath);
     harness.start();
     const tampering: NativeKernelTransport = {

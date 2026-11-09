@@ -38,6 +38,9 @@ function watch(): { solids: () => number; simplifies: () => number; decomposes: 
   return { solids: () => mesh.mock.calls.length, simplifies: () => simplify.mock.calls.length, decomposes: () => decompose.mock.calls.length };
 }
 
+/** These watch the TypeScript kernel's internals (its cache and calls into Manifold), which the Rust kernel does not expose. */
+const typescriptInternals = process.env.PF_KERNEL === 'rust';
+
 describe('pushPull preview', () => {
   it('answers with triangles to draw and nothing that could be committed', async () => {
     const body = await uploadBox(client, newBodyId(), [0, 0, 0], [1, 1, 1]);
@@ -53,7 +56,7 @@ describe('pushPull preview', () => {
     expect(faceCount(preview.mesh)).toBe(faceCount(full.components[0]!.mesh));
   });
 
-  it('skips the rebuild, the simplify and the decompose of a boolean result', async () => {
+  it.skipIf(typescriptInternals)('skips the rebuild, the simplify and the decompose of a boolean result', async () => {
     const body = await uploadBox(client, newBodyId(), [0, 0, 0], [1, 1, 1]);
     const request = { body, region: topRegion([0.5, 0.5, 1], square(0, 0, 0.2), 1, false), distance: 0.5, mode: 'merge' as const, nextFaceId: 6 };
     const full = watch();
@@ -80,7 +83,7 @@ describe('pushPull preview', () => {
     expect(meshTopologyProblems(preview.mesh)).toEqual([]);
   });
 
-  it('gives a moved face its own buffers, since the worker transfers a result away', async () => {
+  it.skipIf(typescriptInternals)('gives a moved face its own buffers, since the worker transfers a result away', async () => {
     const body = await uploadBox(client, newBodyId(), [0, 0, 0], [1, 1, 1]);
     const preview = await client.pushPull({ body, region: topRegion([0.5, 0.5, 1], square(0, 0, 1), 1, true), distance: 0.5, mode: 'merge', preview: true, nextFaceId: 6 });
     const cached = ctx.cache.get(body.bodyId, body.version)!.mesh!;
@@ -105,7 +108,7 @@ describe('pushPull preview', () => {
     expect(faceCount(preview.mesh)).toBe(faceCount(full.components[0]!.mesh));
   });
 
-  it('does not move a face that would pass through another face of the solid', async () => {
+  it.skipIf(typescriptInternals)('does not move a face that would pass through another face of the solid', async () => {
     // A box and a bar across above it: moving the top by 2.5 meets no vertex of the bar, only its faces.
     const box = meshBox([0, 0, 0], [1, 1, 1]);
     const bar = meshBox([-1, 0.4, 2], [2, 0.6, 3]);

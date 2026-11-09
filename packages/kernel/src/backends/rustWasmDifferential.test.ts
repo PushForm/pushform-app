@@ -89,7 +89,7 @@ describe.skipIf(!ready)('TypeScript, native Rust and WebAssembly Rust push/pull 
   const summary: string[] = [];
 
   beforeAll(async () => {
-    ts = new KernelClient(new InlineBackend());
+    ts = new KernelClient(new InlineBackend({ typescriptOnly: true }));
     await ts.init();
     harness = new HarnessTransport(harnessPath);
     harness.start();

@@ -6,6 +6,13 @@ browser) and the typed `KernelClient` with request coalescing and upload trackin
 
 Tests: `pnpm vitest run --project node packages/kernel` (Node, `InlineBackend`).
 
+## Running on the Rust kernel
+
+`pnpm build:kernel-wasm` (Rust and Emscripten) builds the Rust kernel to WebAssembly in `wasm/`. `PF_RUST_KERNEL=1` at
+build time makes the web app and desktop web view use it for every request, with no TypeScript kernel behind it. A
+normal build needs no Emscripten: without the flag the module's worker is not bundled at all. `PF_KERNEL=rust pnpm test`
+runs the whole suite on it, through `InlineBackend`, apart from the tests that compare it with TypeScript.
+
 ## Bundling the worker with Vite
 
 `WorkerBackend` creates `new Worker(new URL('../worker/kernel.worker.ts', import.meta.url), { type: 'module' })`,

@@ -69,7 +69,7 @@ describe.skipIf(!haveHarness)('native push/pull matches WebAssembly', () => {
   beforeAll(async () => {
     harness = new HarnessTransport(harnessPath);
     harness.start();
-    wasm = new KernelClient(new InlineBackend());
+    wasm = new KernelClient(new InlineBackend({ typescriptOnly: true }));
     await wasm.init();
     // A worker that fails the test if the native path silently falls back.
     const noFallback = { request: () => { throw new Error('unexpected fallback to the worker'); }, abortAll: () => undefined, dispose: () => undefined };

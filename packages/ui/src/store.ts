@@ -22,7 +22,7 @@ export const PANEL_IDS = [
 export type PanelId = (typeof PANEL_IDS)[number];
 
 /** Modal dialogs the shell can show (opened by `ui.*` commands, rendered by `DialogHost`). */
-export type DialogId = 'makeComponent' | 'renameInstance' | 'editText' | 'text3d';
+export type DialogId = 'makeComponent' | 'renameInstance' | 'editText' | 'text3d' | 'hardware';
 
 /** A pending right-click menu: viewport-relative CSS px and the refs it is for (empty = empty space). */
 export interface ContextMenuRequest {

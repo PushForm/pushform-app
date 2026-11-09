@@ -9,6 +9,7 @@ import { decompose } from './ops/decompose';
 import { edgeBlend } from './ops/edgeBlend';
 import { followMe } from './ops/followMe';
 import { fromTriangles } from './ops/fromTriangles';
+import { hardware } from './ops/hardware';
 import { hull } from './ops/hull';
 import { properties } from './ops/properties';
 import { revolve } from './ops/revolve';
@@ -19,6 +20,7 @@ import { transform } from './ops/transform';
 
 function dispatchAny(ctx: KernelContext, req: KernelRequest): KernelResultMap[KernelRequest['type']] {
   switch (req.type) {
+    case 'hardware': return hardware(ctx, req);
     case 'init':
       return { ready: true };
     case 'ensureBody':

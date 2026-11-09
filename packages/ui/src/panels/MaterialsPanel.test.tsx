@@ -50,8 +50,8 @@ describe('MaterialsPanel', () => {
     const library = screen.getByLabelText('Library');
     expect(within(library).queryByRole('option', { name: /^Tile$/ })).toBeNull();
     for (const [category, count] of Object.entries({
-      Wood: 50, Brick: 30, Ceramic: 26, 'Concrete & Asphalt': 50, Stone: 50,
-      Metal: 26, Terrain: 50, Textiles: 44, Plastic: 6, Organic: 6,
+      Wood: 52, Brick: 30, Ceramic: 26, 'Concrete & Asphalt': 50, Stone: 50,
+      Metal: 31, Terrain: 50, Textiles: 44, Plastic: 6, Organic: 6,
     })) {
       fireEvent.change(library, { target: { value: category } });
       expect(within(screen.getByRole('listbox', { name: category })).getAllByRole('option')).toHaveLength(count);

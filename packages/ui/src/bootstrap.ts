@@ -19,6 +19,7 @@ import {
   sectionPlaneCommands,
   imageCommands,
   text3dCommands,
+  hardwareCommands,
   cabinetCommands,
   SERVICE_FONTS,
   detectPlatform,
@@ -155,6 +156,7 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
   commands.registerAll(sectionPlaneCommands);
   commands.registerAll(imageCommands);
   commands.registerAll(text3dCommands);
+  commands.registerAll(hardwareCommands);
   commands.registerAll(cabinetCommands);
   commands.registerAll(pushPullCommands);
   commands.registerAll(curveCommands);

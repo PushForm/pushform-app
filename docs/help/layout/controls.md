@@ -2,7 +2,7 @@
 
 ## Select, Lasso, Move, Rotate, Scale and Eraser
 
-**Select** chooses objects for editing. **Lasso** chooses several objects with a drawn boundary. **Move** changes position, **Rotate** changes orientation, and **Scale** changes size. Use these Transform controls when existing artwork needs adjusting rather than drawing another object. **Eraser** removes eligible objects it is used on; Undo can restore an accidental edit.
+**Select** chooses objects for editing. **Lasso** chooses several objects with a drawn boundary. **Move** changes position, **Rotate** changes orientation, and **Scale** changes size by a factor or to a set width or height. Use these Transform controls when existing artwork needs adjusting rather than drawing another object. **Eraser** removes eligible objects it is used on; Undo can restore an accidental edit.
 
 Selection and editability matter: hidden or locked objects and layers can prevent an operation. Inspect the selection or layer before repeating the tool.
 
@@ -18,9 +18,9 @@ Use **Rectangle** for box-like shapes; its arrow offers rounded, bulged and loze
 
 Arc variants offer different placement points, and **Pie** closes an arc into a filled sector. Choose the variant that matches the reference points you already know.
 
-## Offset, Fillet, Chamfer and Boolean controls
+## Offset, Corner and Boolean controls
 
-**Offset** makes a parallel copy without changing its source. **Fillet** rounds a corner; **Chamfer** bevels it. Use these Modify controls to derive geometry from an existing path.
+**Offset** makes a parallel copy without changing its source. **Corner** rounds a corner or bevels it, chosen in its tool options bar. Use these Modify controls to derive geometry from an existing path.
 
 The Boolean button offers whole-shape combinations and cuts. **Shape Builder** instead starts from selected paths and lets you keep, merge or remove individual bounded regions. Read the preview and Apply/Cancel controls before committing: these operations are different from ordinary selection.
 

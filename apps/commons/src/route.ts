@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { browseSearchPath, modelPath } from './seo';
+import { browseSearchPath, collectionPath, modelPath } from './seo';
 
-export { browseSearchPath, modelPath };
-/** Models live at `/models/<id>` and public profiles at `/u/<handle>`, so search engines can index each page. Account,
- * collection and publishing screens remain hash routes on `/`. Older `#models/<id>` links still work and move to the path. */
+export { browseSearchPath, collectionPath, modelPath };
+/** Models live at `/models/<id>`, public profiles at `/u/<handle>` and collections at `/collections/<id>`, so search
+ * engines can index each page and link previews show its own picture. Account, new-collection and publishing screens remain
+ * hash routes on `/`. Older `#models/<id>` and `#collections/<id>` links still work and move to the path. */
 const handlePattern = /^[a-z][a-z0-9-]{1,30}[a-z0-9]$/;
 const modelIdPattern = /^[a-z0-9][a-z0-9-]{0,95}$/;
+const collectionIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 export const profilePath = (handle: string): string => `/u/${handle}`;
 export function profileHandleFromPath(path: string): string | null {
   const handle = /^\/u\/([^/]+)\/?$/.exec(path)?.[1];
@@ -16,15 +18,24 @@ export function modelIdFromPath(path: string): string | null {
   const id = /^\/models\/([^/]+)\/?$/.exec(path)?.[1];
   return id !== undefined && modelIdPattern.test(id) ? id : null;
 }
+export function collectionIdFromPath(path: string): string | null {
+  const id = /^\/collections\/([^/]+)\/?$/.exec(path)?.[1];
+  return id !== undefined && collectionIdPattern.test(id) ? id : null;
+}
 export interface CommonsLocation { path: string; hash: string }
-/** Reads the current route. An old `#models/<id>` link moves to its path, and any other hash route opened from a model
- * or profile path moves back to `/` so each hash keeps one meaning. */
+/** Reads the current route. An old `#models/<id>` or `#collections/<id>` link moves to its path, and any other hash route
+ * opened from a model, profile or collection path moves back to `/` so each hash keeps one meaning. */
 export function currentCommonsLocation(): CommonsLocation {
   const { pathname, hash } = window.location;
   const legacyModel = /^#models\/([^/]+)$/.exec(hash)?.[1];
   if (legacyModel !== undefined && modelIdPattern.test(legacyModel)) {
     window.history.replaceState(window.history.state, '', modelPath(legacyModel));
     return { path: modelPath(legacyModel), hash: '' };
+  }
+  const legacyCollection = /^#collections\/([^/]+)$/.exec(hash)?.[1];
+  if (legacyCollection !== undefined && collectionIdPattern.test(legacyCollection)) {
+    window.history.replaceState(window.history.state, '', collectionPath(legacyCollection));
+    return { path: collectionPath(legacyCollection), hash: '' };
   }
   if (pathname !== '/' && hash && hash !== '#main') {
     window.history.replaceState(window.history.state, '', '/' + hash);
@@ -57,4 +68,12 @@ export function openInApp(event: { button: number; metaKey: boolean; ctrlKey: bo
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
   navigateCommons(path);
+}
+
+/** Upload and edit routes open the contributor dialog. */
+export type PublishRoute = { kind: 'upload' } | { kind: 'edit'; model: string };
+export function publishRoute(hash: string): PublishRoute | null {
+  if (hash === '#upload' || hash === '#publish') return { kind: 'upload' };
+  const edit = /^#edit\/([a-z0-9][a-z0-9-]{0,95})$/.exec(hash);
+  return edit ? { kind: 'edit', model: edit[1]! } : null;
 }

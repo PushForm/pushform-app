@@ -3,7 +3,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { openLayoutFile } from '@pushform/io';
-import { rotateLayoutEntity, rotateLayoutPath } from '@pushform/layout';
+import { rotateLayoutEntities, rotateLayoutPath } from '@pushform/layout';
 import { createApp } from '../bootstrap';
 import { DocumentSession } from '../session';
 import { LayoutWorkspace } from './LayoutWorkspace';
@@ -77,7 +77,7 @@ it('rejects degenerate directions and cancels drafts without committing geometry
   const { app, session, tab, canvas, click, move, sourceId, page } = setup();
   const source = page().entities.get(sourceId)!;
   fireEvent.click(screen.getByRole('button', { name: 'Rotate' }));
-  click(100, 100); expect(screen.getByRole('alert').textContent).toContain('within a shape');
+  click(100, 100); expect(screen.getByRole('alert').textContent).toContain('Click an object');
   click(40, 30); click(40, 30); expect(screen.getByRole('alert').textContent).toContain('away');
   click(60, 30); move(40, 50); click(40, 30);
   expect(page().entities.get(sourceId)).toEqual(source);
@@ -194,12 +194,13 @@ it.each(['label', 'text', 'image'] as const)('holds %s pointer rotation at 90-de
   expect(screen.getByLabelText('Rotation angle preview').textContent).toBe('90.0°');
   expect(tab.doc.version).toBe(version); expect(page().entities.get(id)).toEqual(source);
   click(pivot[0] + 1, pivot[1] + 30);
-  expect(page().entities.get(id)).toEqual(rotateLayoutEntity(source, pivot, 90));
+  // A label turns about the pivot with its text upright; the rest turn rigidly.
+  expect(page().entities.get(id)).toEqual(rotateLayoutEntities([source], pivot, 90)[0]);
   expect((await openLayoutFile((await session.saveLayoutBytes(tab.id)))).state.pages.get(page().id)!.entities.get(id)).toEqual(page().entities.get(id));
   act(() => { tab.commands.execute('edit.undo'); }); expect(page().entities.get(id)).toEqual(source);
   click(...pivot); click(pivot[0] + 30, pivot[1]); move(pivot[0] + 1, pivot[1] - 30);
   expect(screen.getByLabelText('Rotation angle preview').textContent).toBe('-90.0°');
   click(pivot[0] + 1, pivot[1] - 30);
-  expect(page().entities.get(id)).toEqual(rotateLayoutEntity(source, pivot, -90));
+  expect(page().entities.get(id)).toEqual(rotateLayoutEntities([source], pivot, -90)[0]);
   session.dispose(); app.dispose();
 });

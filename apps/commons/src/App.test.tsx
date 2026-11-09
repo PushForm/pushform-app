@@ -185,15 +185,18 @@ it('serves a model at its own path with search tags, and keeps a missing model o
   window.history.replaceState(null, '', '/models/workshop-hinge');
   const view = render(<App loadCatalog={async () => [exampleModel()]} />);
   expect(await screen.findByRole('heading', { name: 'Workshop hinge', level: 1 })).toBeTruthy();
-  expect(document.title).toBe('Workshop hinge — Hardware 3D model | PushForm Commons');
-  expect(document.head.querySelector('link[rel="canonical"]')?.getAttribute('href')).toBe('https://commons.pushform.io/models/workshop-hinge');
-  expect(document.head.querySelector('meta[name="robots"]')?.getAttribute('content')).not.toContain('noindex');
-  expect(document.head.querySelector('script[type="application/ld+json"]')?.textContent).toContain('"@type":"3DModel"');
+  // The page's tags are written just after the page renders, so they can trail its heading.
+  await waitFor(() => {
+    expect(document.title).toBe('Workshop hinge — Hardware 3D model | PushForm Commons');
+    expect(document.head.querySelector('link[rel="canonical"]')?.getAttribute('href')).toBe('https://commons.pushform.io/models/workshop-hinge');
+    expect(document.head.querySelector('meta[name="robots"]')?.getAttribute('content')).not.toContain('noindex');
+    expect(document.head.querySelector('script[type="application/ld+json"]')?.textContent).toContain('"@type":"3DModel"');
+  });
   view.unmount();
   window.history.replaceState(null, '', '/models/removed-model');
   render(<App loadCatalog={async () => [exampleModel()]} />);
   await screen.findByText(/may have been removed/);
-  expect(document.head.querySelector('meta[name="robots"]')?.getAttribute('content')).toContain('noindex');
+  await waitFor(() => expect(document.head.querySelector('meta[name="robots"]')?.getAttribute('content')).toContain('noindex'));
 });
 
 it('opens a model from the library without leaving the page and links to it by path', async () => {

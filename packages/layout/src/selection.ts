@@ -67,6 +67,14 @@ export function entitiesInSelectionBox(from: Point, to: Point, page: LayoutPage,
 }
 
 /**
+ * Every object on the page that a selection box could select, for Select All: objects on visible layers, including
+ * layers shown on every page, locked or not, but never hidden objects. Order follows layer and drawing order.
+ */
+export function selectableLayoutEntities(page: LayoutPage, state: LayoutDocumentState): LayoutEntity[] {
+  return state.layerOrder.flatMap((layerId) => entitiesForLayer(page, state, layerId).filter((entity) => layoutEntityBounds(entity) !== null));
+}
+
+/**
  * True when a lasso outline runs clockwise as seen on the page (paper y points down), so it selects what it
  * touches; counterclockwise outlines select only what they enclose.
  */

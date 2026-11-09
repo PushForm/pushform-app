@@ -236,6 +236,23 @@ describe('section planes and cuts', () => {
     expect(fx.engine.resolve(input(down(3, -1.495)), { pickOnly: true }).hit?.ref).toEqual({ kind: 'sectionPlane', path: [], id });
     expect(fx.engine.resolve(input(down(3, -1.495))).hit?.ref.kind).not.toBe('sectionPlane');
   });
+
+  it('Move picks a section plane up while snapping', () => {
+    const fx = fixture();
+    const id = withCut(fx);
+    expect(fx.engine.resolve(input(down(3, -1.495)), { annotations: true }).hit?.ref).toEqual({ kind: 'sectionPlane', path: [], id });
+  });
+
+  it('a hidden section plane is picked only while hidden geometry is shown', () => {
+    const fx = fixture();
+    const id = withCut(fx);
+    fx.doc.transact('hide', (d) => { d.definitions.get(d.rootDefinitionId)!.entities.sectionPlanes.get(id)!.hidden = true; });
+    fx.engine.setState(fx.doc.state);
+    expect(fx.engine.resolve(input(down(3, -1.495)), { pickOnly: true }).hit?.ref.kind).not.toBe('sectionPlane');
+    fx.doc.transact('show hidden', (d) => { d.styles.get(d.activeStyleId)!.modeling.hiddenGeometry = true; });
+    fx.engine.setState(fx.doc.state);
+    expect(fx.engine.resolve(input(down(3, -1.495)), { pickOnly: true }).hit?.ref).toEqual({ kind: 'sectionPlane', path: [], id });
+  });
 });
 
 describe('directional snaps', () => {

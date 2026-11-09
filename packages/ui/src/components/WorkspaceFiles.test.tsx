@@ -19,7 +19,7 @@ function setup() {
     thumbnailUrls: vi.fn().mockImplementation(async (ids: string[]) => new Map(ids.map(id => [id, `https://example.test/${id}.jpg`]))),
     open: vi.fn(), head: vi.fn(), openRevision: vi.fn(), save: vi.fn(), recordImport: vi.fn(),
     rename: vi.fn().mockResolvedValue(undefined), moveFile: vi.fn().mockResolvedValue(undefined), moveFolder: vi.fn().mockResolvedValue(undefined), trash: vi.fn().mockResolvedValue(undefined) };
-  const props = { api, open: true, onOpen: vi.fn().mockResolvedValue(undefined), onClose: vi.fn(), onRenamed: vi.fn(), onMoved: vi.fn(), onForgetRecents: vi.fn() };
+  const props = { api, open: true, onOpen: vi.fn().mockResolvedValue(undefined), onRenamed: vi.fn(), onMoved: vi.fn(), onForgetRecents: vi.fn() };
   vi.stubGlobal('URL', { createObjectURL: () => 'blob:preview', revokeObjectURL: vi.fn() });
   const service = new ThumbnailService({ ownerId: 'alice', api, render: async () => null, fetch: vi.fn().mockResolvedValue({ ok: true, headers: new Headers(), arrayBuffer: async () => new Uint8Array([255, 216, 255, 217]).buffer }) });
   const view = render(<WorkspaceFiles {...props} />, { wrapper: ({ children }) => <ThumbnailContext.Provider value={service}>{children}</ThumbnailContext.Provider> });
@@ -120,11 +120,10 @@ it('blocks duplicate opening, reports failures, and keeps file-panel keys out of
     const row = screen.getByRole('button', { name: 'Open Root.pfl' });
     fireEvent.keyDown(row, { key: 'Delete' }); expect(shortcut).not.toHaveBeenCalled();
     fireEvent.click(row); fireEvent.click(row);
-    fireEvent.keyDown(row, { key: 'Escape' }); expect(props.onClose).not.toHaveBeenCalled();
+    fireEvent.keyDown(row, { key: 'Escape' }); expect(shortcut).not.toHaveBeenCalled();
     expect(props.onOpen).toHaveBeenCalledOnce();
     await act(async () => fail(new Error('Could not open file')));
     expect(screen.getByRole('alert').textContent).toContain('Could not open file');
-    fireEvent.keyDown(row, { key: 'Escape' }); expect(props.onClose).toHaveBeenCalledOnce();
   } finally { window.removeEventListener('keydown', shortcut); }
 });
 
@@ -163,5 +162,5 @@ it('offers management only through the context menu, with keyboard navigation an
   expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'Move…' }));
   fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
   expect(screen.queryByRole('menu')).toBeNull(); expect(document.activeElement).toBe(row);
-  expect(props.onClose).not.toHaveBeenCalled(); expect(props.onOpen).not.toHaveBeenCalled();
+  expect(props.onOpen).not.toHaveBeenCalled();
 });

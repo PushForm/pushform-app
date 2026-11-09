@@ -11,7 +11,8 @@
 :is(.pf-fr-popover, .pf-fr-docked) p { margin: 0; }
 :is(.pf-fr-popover, .pf-fr-docked) button { font: inherit; color: inherit; cursor: pointer; }
 :is(.pf-fr-popover, .pf-fr-docked) button:disabled { cursor: default; opacity: .55; }
-:is(.pf-fr-popover, .pf-fr-docked) button:not(.pf-fr-choice):not(.pf-fr-primary) { padding: 6px 12px; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); background: var(--pf-surface-2); }
+/* The plain button look. Keep its specificity at (0,3,1): the composer's icon and Stop buttons override it by coming later. */
+:is(.pf-fr-popover, .pf-fr-docked) button:not(.pf-fr-choice):not(.pf-fr-primary, .pf-fr-link) { padding: 6px 12px; border: 1px solid var(--pf-border); border-radius: var(--pf-radius); background: var(--pf-surface-2); }
 /* Same blue and text color as Home's Create button (.pf-home-primary). */
 :is(.pf-fr-popover, .pf-fr-docked) button.pf-fr-primary { padding: 6px 12px; border: 1px solid var(--pf-accent); border-radius: var(--pf-radius); background: var(--pf-accent); color: #fff; }
 @media (prefers-color-scheme: dark) { :is(.pf-fr-popover, .pf-fr-docked) button.pf-fr-primary { color: #14213a; } }
@@ -121,3 +122,22 @@
 .pf-fr-sent-pictures { margin-top: 6px; }
 .pf-fr-sent-pictures img { max-width: 180px; max-height: 140px; object-fit: contain; border-radius: 4px; border: 1px solid var(--pf-border, #bbb); display: block; }
 .pf-fr-chat.is-dropping { outline: 2px dashed var(--pf-accent, #3b82f6); outline-offset: -4px; }
+
+/* The card that asks before cloning the document. */
+.pf-fr-clone { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--pf-border, #bbb); border-radius: 8px; }
+.pf-fr-clone h3 { margin: 0; font-size: 13px; }
+.pf-fr-clone p { margin: 0; }
+.pf-fr-clone label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--pf-text-muted); }
+.pf-fr-clone input { font: inherit; padding: 4px 6px; }
+.pf-fr-clone-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.pf-fr-link { padding: 0; background: none; border: none; color: inherit; text-decoration: underline; cursor: pointer; font: inherit; }
+
+/* The card that proposes a Commons publication. */
+.pf-fr-publish { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--pf-border, #bbb); border-radius: 8px; }
+.pf-fr-publish h3 { margin: 0; font-size: 13px; }
+.pf-fr-publish p { margin: 0; }
+.pf-fr-publish dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 10px; margin: 0; }
+.pf-fr-publish dt { color: var(--pf-text-muted); }
+.pf-fr-publish dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.pf-fr-publish-description { max-height: 8em; overflow-y: auto; white-space: pre-wrap; }
+.pf-fr-publish-picture { width: 100%; max-height: 160px; object-fit: contain; border-radius: 4px; border: 1px solid var(--pf-border, #bbb); }

@@ -19,7 +19,7 @@ import * as materialLibrary from './materialLibrary';
 import type { PaintResult } from './materials';
 import { modelCommands } from './model';
 import { sketchCommands } from './sketch';
-import { PaintTool, paintModeOf, paintModifierKeys, hitSide } from '../tools/impl/Paint';
+import { PaintTool, paintModeOf, hitSide } from '../tools/impl/Paint';
 import { PositionTextureTool, reflectionAcross, rotationAbout, similarityAbout } from '../tools/impl/PositionTexture';
 import { ToolManager } from '../tools/ToolManager';
 import type { CameraHost } from '../camera/CameraHost';
@@ -399,26 +399,14 @@ describe('texture.* commands', () => {
 describe('Paint tool helpers', () => {
   it('maps modifiers to paint modes and the hit normal to a side', () => {
     const m = (p: Partial<{ shift: boolean; ctrl: boolean; alt: boolean; meta: boolean }>) => ({ shift: false, ctrl: false, alt: false, meta: false, ...p });
-    for (const platform of ['win', 'linux'] as const) {
-      expect(paintModeOf(m({}), false, platform)).toBe('single');
-      expect(paintModeOf(m({ ctrl: true }), false, platform)).toBe('adjacent');
-      expect(paintModeOf(m({ shift: true }), false, platform)).toBe('replaceAll');
-      expect(paintModeOf(m({ ctrl: true, shift: true }), false, platform)).toBe('replaceOnObject');
-      expect(paintModeOf(m({ alt: true }), false, platform)).toBe('sample');
-      expect(paintModeOf(m({ meta: true }), false, platform)).toBe('sample');
-      expect(paintModeOf(m({}), true, platform)).toBe('sample');
-      expect(paintModifierKeys(platform)).toEqual({ ctrl: 'Ctrl', sample: 'Alt' });
-    }
-    // A Mac: Ctrl+click is the context menu, so Option stands in for Ctrl and Cmd samples.
-    expect(paintModeOf(m({}), false, 'mac')).toBe('single');
-    expect(paintModeOf(m({ alt: true }), false, 'mac')).toBe('adjacent');
-    expect(paintModeOf(m({ ctrl: true }), false, 'mac')).toBe('adjacent');
-    expect(paintModeOf(m({ shift: true }), false, 'mac')).toBe('replaceAll');
-    expect(paintModeOf(m({ alt: true, shift: true }), false, 'mac')).toBe('replaceOnObject');
-    expect(paintModeOf(m({ meta: true }), false, 'mac')).toBe('sample');
-    expect(paintModeOf(m({ meta: true, alt: true }), false, 'mac')).toBe('sample');
-    expect(paintModeOf(m({}), true, 'mac')).toBe('sample');
-    expect(paintModifierKeys('mac')).toEqual({ ctrl: 'Option', sample: 'Cmd' });
+    // Windows and Linux keys; on macOS the shell passes Cmd as Ctrl and Option as Alt
+    expect(paintModeOf(m({}), false)).toBe('single');
+    expect(paintModeOf(m({ ctrl: true }), false)).toBe('adjacent');
+    expect(paintModeOf(m({ shift: true }), false)).toBe('replaceAll');
+    expect(paintModeOf(m({ ctrl: true, shift: true }), false)).toBe('replaceOnObject');
+    expect(paintModeOf(m({ alt: true }), false)).toBe('sample');
+    expect(paintModeOf(m({ meta: true }), false)).toBe('single');
+    expect(paintModeOf(m({}), true)).toBe('sample');
     const hit = { ref: { kind: 'body', path: [], id: 1 as Id } as EntityRef, point: [0, 0, 0] as const, t: 1, screenDist: 0, normal: [0, 0, 1] as const };
     expect(hitSide(hit, [0, 0, -1])).toBe('front');
     expect(hitSide(hit, [0, 0, 1])).toBe('back');
@@ -586,6 +574,41 @@ describe('PositionTextureTool', () => {
     expect(tools.activeToolId).not.toBe('texturePosition');
     expect(body().faces.get(f0 as never)!.uv.kind).toBe('affine');
     expect(activeMaterialOf(registry.ctx).get()).toBe(tex);
+  });
+
+  it('offers Done, Reset, Flip and Rotate in the tool options bar', async () => {
+    const { registry, host, body, faceIds, faceRef, paint } = setup();
+    const tools = new ToolManager(registry, camera2);
+    registry.ctx.tools = tools;
+    tools.register(new PositionTextureTool());
+    tools.register(placeholderTool('select', 'Select'));
+    const f0 = faceIds()[0]!;
+    const img = await host.images.put(new Uint8Array([9, 9, 9, 9]), 'image/png', 't.png', { width: 2, height: 2 });
+    const tex = registry.execute('material.create', { name: 'Tex', color: [1, 1, 1], texture: { imageId: img.id, widthM: 0.5, heightM: 0.25 } }) as number;
+    paint({ refs: [faceRef(f0)], materialId: tex });
+    // chosen without a face, the actions show but are disabled
+    tools.activate('texturePosition');
+    expect(tools.status().settings?.every((c) => c.kind === 'action' && c.disabled === true)).toBe(true);
+    tools.setting('rotate90', undefined);
+    expect(body().faces.get(f0 as never)!.uv).toEqual({ kind: 'auto' });
+    registry.execute('texture.positionTool', { ref: faceRef(f0) });
+    const bar = tools.status().settings ?? [];
+    expect(bar.map((c) => (c.kind === 'action' ? c.label : c.kind))).toEqual(['Done', 'Reset', 'Flip Left/Right', 'Flip Up/Down', 'Rotate 90°', 'Rotate 180°', 'Rotate 270°']);
+    expect(bar.find((c) => c.id === 'done')).toMatchObject({ primary: true, disabled: false });
+    const uv = () => body().faces.get(f0 as never)!.uv;
+    const before = host.undoStack.length;
+    tools.setting('rotate90', undefined);
+    expect(uv().kind).toBe('affine');
+    expect(host.undoStack.length).toBe(before + 1);
+    const rotated = uv();
+    tools.setting('flipLeftRight', undefined);
+    expect(uv()).not.toEqual(rotated);
+    tools.setting('reset', undefined);
+    expect(uv()).toEqual({ kind: 'auto' });
+    tools.setting('rotate180', undefined);
+    tools.setting('done', undefined);
+    expect(tools.activeToolId).toBe('select');
+    expect(uv().kind).toBe('affine');
   });
 
   it('the yellow pin distorts exactly: the four pins keep their tile corners through a projective placement', async () => {

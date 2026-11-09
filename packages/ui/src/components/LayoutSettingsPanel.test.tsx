@@ -29,7 +29,7 @@ function setup() {
 
 it('shows only the selection panel, with Document Setup, Layers and Pages moved out', () => {
   const { sections, dispose } = setup();
-  expect(sections()).toEqual(['Default Style']);
+  expect(sections()).toEqual(['New Shapes']);
   dispose();
 });
 
@@ -54,7 +54,7 @@ it('titles the top panel by the selection and shows only its editable properties
   dispose();
 });
 
-it('shows the count and no style or Arrange controls for several objects', () => {
+it('shows the count and Arrange, but no style controls, for several objects', () => {
   const { panel, sections, click, dispose } = setup();
   click(25, 20);
   const canvas = screen.getByLabelText('Page 1 canvas');
@@ -63,7 +63,8 @@ it('shows the count and no style or Arrange controls for several objects', () =>
   expect(sections()[0]).toBe('2 Objects');
   expect(within(panel).getByText('2 objects selected')).toBeTruthy();
   expect(within(panel).queryByLabelText('Weight (pt)')).toBeNull();
-  expect(within(panel).queryByRole('region', { name: 'Arrange' })).toBeNull();
+  // Arrange acts on the selection as a whole.
+  expect(within(panel).getByRole('region', { name: 'Arrange' })).toBeTruthy();
   dispose();
 });
 
@@ -94,4 +95,32 @@ it('offers start and end arrows only for lines: line tools with nothing selected
   click(25, 20);
   expect(within(panel).queryByRole('combobox', { name: 'Start arrow' })).toBeNull();
   dispose();
+});
+
+it('clears a leftover selection when a drawing tool is chosen, so style edits go to new shapes', () => {
+  const { sections, click, dispose } = setup();
+  click(25, 20);
+  expect(sections()[0]).toBe('Shape');
+  fireEvent.keyDown(window, { key: 'r', code: 'KeyR' });
+  expect(sections()[0]).toBe('New Shapes');
+  // other tools keep the selection
+  click(25, 20);
+  fireEvent.click(screen.getByRole('button', { name: 'Select' }));
+  click(25, 20);
+  fireEvent.keyDown(window, { key: 'm', code: 'KeyM' });
+  expect(sections()[0]).toBe('Shape');
+  dispose();
+});
+
+it('remembers tool settings while the app is open, also when the workspace remounts', () => {
+  const first = setup();
+  act(() => { first.tab.commands.execute('tool.polygon'); });
+  const sides = screen.getByLabelText('Sides');
+  fireEvent.change(sides, { target: { value: '9' } });
+  fireEvent.keyDown(sides, { key: 'Enter' });
+  first.dispose();
+  const second = setup();
+  act(() => { second.tab.commands.execute('tool.polygon'); });
+  expect((screen.getByLabelText('Sides') as HTMLInputElement).value).toBe('9');
+  second.dispose();
 });

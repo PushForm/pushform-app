@@ -99,13 +99,60 @@ describe('home and profile pages', () => {
   });
 });
 
+const collectionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const publicCollection = { id: collectionId, title: 'Workshop essentials', description: 'Useful fittings for the workshop.', visibility: 'public', version: 1,
+  modelIds: ['a-bench', 'withdrawn-model', 'workshop-hinge'], curator: { handle: 'example-maker', displayName: 'Example Maker' }, updatedAt: '2026-11-04T00:00:00Z' };
+describe('collection pages', () => {
+  it('serve the collection’s tags, sharing its first pictured model when no member can be drawn', async () => {
+    const members = [exampleModel({ id: 'workshop-hinge', imageUrl: 'https://img.example/hinge.png' }), exampleModel({ id: 'a-bench', title: 'Bench & stool' })];
+    const fetcher = rpcFetcher({ commons_collection: ok(publicCollection), commons_catalog_models: ok(members) });
+    const response = await renderPage(at(`https://commons.pushform.io/collections/${collectionId}`), env(), { kind: 'collection', id: collectionId }, { fetcher });
+    const html = await response.text();
+    expect(response.status).toBe(200);
+    expect(html).toContain('<title>Workshop essentials — collection by Example Maker | PushForm Commons</title>');
+    expect(html).toContain(`<link rel="canonical" href="https://commons.pushform.io/collections/${collectionId}" />`);
+    expect(html).toContain('<meta property="og:image" content="https://img.example/hinge.png" />');
+    expect(html).toContain('<meta name="twitter:card" content="summary_large_image" />');
+    expect(html).toContain('"@type":"CollectionPage"');
+    expect(html).toContain('index, follow');
+    // Members keep the collection's order; a model that is no longer published is left out.
+    expect(html.indexOf('Bench &amp; stool')).toBeLessThan(html.indexOf('Workshop hinge</a>'));
+    expect(html).not.toContain('withdrawn-model');
+    expect(JSON.parse(String(fetcher.mock.calls[1]![1]!.body))).toEqual({ p_ids: publicCollection.modelIds });
+  });
+  it('share the cover the file service draws when a member has a model it can preview', async () => {
+    const file = { id: '33333333-3333-4333-8333-333333333333', name: 'hinge.stl', format: 'STL', sizeBytes: 100, sha256: 'a'.repeat(64) };
+    const members = [exampleModel({ id: 'workshop-hinge', files: [file], imageUrl: 'https://img.example/hinge.png' })];
+    const response = await renderPage(at(`https://commons.pushform.io/collections/${collectionId}`), env(), { kind: 'collection', id: collectionId }, { fetcher: rpcFetcher({ commons_collection: ok(publicCollection), commons_catalog_models: ok(members) }) });
+    const html = await response.text();
+    expect(html).toContain(`<meta property="og:image" content="https://files.example/collection-covers/${collectionId}" />`);
+    expect(html).toContain('<meta property="og:image:width" content="1200" />');
+    expect(html).toContain('<meta property="og:image:height" content="630" />');
+    expect(html).toContain(`<meta name="twitter:image" content="https://files.example/collection-covers/${collectionId}" />`);
+  });
+  it('reveal nothing about a private or missing collection', async () => {
+    for (const body of [null, { ...publicCollection, visibility: 'private' }]) {
+      const response = await renderPage(at(`https://commons.pushform.io/collections/${collectionId}`), env(), { kind: 'collection', id: collectionId }, { fetcher: rpcFetcher({ commons_collection: ok(body), commons_catalog_models: ok([exampleModel()]) }) });
+      const html = await response.text();
+      expect(html).not.toContain('Workshop essentials');
+      expect(html).toContain('noindex');
+    }
+  });
+  it('answer 404 for an address that cannot be a collection', async () => {
+    const response = await renderPage(at('https://commons.pushform.io/collections/not-an-id'), env(), { kind: 'collection', id: 'not-an-id' }, { fetcher: rpcFetcher({}) });
+    expect(response.status).toBe(404);
+  });
+});
+
 describe('sitemap and robots', () => {
-  it('list the home page, every model with its image, and each creator', async () => {
+  it('list the home page, every model with its image, each creator and each nonempty public collection', async () => {
     const withProfile = exampleModel({ creatorProfile: { id: '11111111-1111-4111-8111-111111111111', handle: 'example-maker', displayName: 'Example Maker' }, imageUrl: 'https://img.example/a.png' });
-    const response = await renderSitemap(at('https://commons.pushform.io/sitemap.xml'), env(), { fetcher: rpcFetcher({ commons_catalog: ok(catalog([withProfile, exampleModel({ id: 'a-bench', title: 'Bench & stool', imageUrl: 'https://img.example/b.png' })])) }) });
+    const response = await renderSitemap(at('https://commons.pushform.io/sitemap.xml'), env(), { fetcher: rpcFetcher({ commons_catalog: ok(catalog([withProfile, exampleModel({ id: 'a-bench', title: 'Bench & stool', imageUrl: 'https://img.example/b.png' })])),
+      commons_discovery: ok({ version: 1, featured: [], collections: [publicCollection, { ...publicCollection, id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', modelIds: [] }] }) }) });
     const xml = await response.text();
     expect(response.headers.get('Content-Type')).toContain('application/xml');
-    for (const loc of ['https://commons.pushform.io/', 'https://commons.pushform.io/models/workshop-hinge', 'https://commons.pushform.io/models/a-bench', 'https://commons.pushform.io/u/example-maker']) expect(xml).toContain(`<loc>${loc}</loc>`);
+    for (const loc of ['https://commons.pushform.io/', 'https://commons.pushform.io/models/workshop-hinge', 'https://commons.pushform.io/models/a-bench', 'https://commons.pushform.io/u/example-maker', `https://commons.pushform.io/collections/${collectionId}`]) expect(xml).toContain(`<loc>${loc}</loc>`);
+    expect(xml).not.toContain('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
     expect(xml).toContain('<image:loc>https://img.example/a.png</image:loc>');
     expect(xml).toContain('Bench &amp; stool');
     expect(xml).toContain('<lastmod>2026-10-31T12:00:00Z</lastmod>');

@@ -27,6 +27,8 @@
     "spec-check": "node scripts/spec-ids.mjs",
     "commons:dev": "pnpm --filter @pushform/app-commons dev",
     "commons:build": "pnpm --filter @pushform/app-commons build",
+    "docs:dev": "pnpm --filter @pushform/docs dev",
+    "docs:build": "pnpm --filter @pushform/docs build",
     "build:step-reader": "node scripts/build-step-reader.mjs"
   },
   "devDependencies": {
@@ -38,6 +40,7 @@
     "prettier": "^3.6.0",
     "typescript": "~5.9.0",
     "typescript-eslint": "^8.46.0",
+    "vite": "^7.1.0",
     "vitest": "^4.0.0",
     "wrangler": "^4.151.3"
   },

@@ -70,6 +70,23 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   { key: 'Color_E03', name: 'Color_E03', category: 'Colors', color: c(68, 136, 48) },
   // Transparent glass tints; these intentionally have no surface pattern.
   { key: 'Translucent_Glass_Clear', name: 'Clear Glass', category: 'Glass', color: c(230, 242, 242), alpha: 0.18 },
+  { key: 'Translucent_Glass_Frosted', name: 'Frosted Glass', category: 'Glass', color: c(238, 243, 243), alpha: 0.72 },
+  {
+    key: 'Translucent_Glass_Seeded', name: 'Seeded Glass', category: 'Glass', color: c(226, 236, 234), alpha: 0.45,
+    texture: {
+      widthM: 0.25, heightM: 0.25, widthPx: 1024, heightPx: 1024, grain: 'none',
+      url: new URL('./material-textures/glass_seeded.jpg', import.meta.url).href,
+      previewUrl: new URL('./material-textures/glass_seeded-preview.jpg?no-inline', import.meta.url).href,
+    },
+  },
+  {
+    key: 'Translucent_Glass_Reeded', name: 'Reeded Glass', category: 'Glass', color: c(212, 226, 226), alpha: 0.6,
+    texture: {
+      widthM: 0.1016, heightM: 0.1016, widthPx: 1024, heightPx: 1024, grain: 'width',
+      url: new URL('./material-textures/glass_reeded.jpg', import.meta.url).href,
+      previewUrl: new URL('./material-textures/glass_reeded-preview.jpg?no-inline', import.meta.url).href,
+    },
+  },
   { key: 'Translucent_Glass_Blue', name: 'Blue Glass', category: 'Glass', color: c(170, 205, 235), alpha: 0.45 },
   { key: 'Translucent_Glass_Gray', name: 'Smoke Glass', category: 'Glass', color: c(180, 185, 190), alpha: 0.5 },
   { key: 'Translucent_Glass_Green', name: 'Green Glass', category: 'Glass', color: c(157, 205, 181), alpha: 0.35 },

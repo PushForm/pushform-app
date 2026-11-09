@@ -48,4 +48,38 @@ describe('section planes to render', () => {
     expect(off.planes).toEqual([]);
     expect(off.cuts).toEqual([]);
   });
+
+  it('draws a tool\'s preview: moved planes cut where they would go, copies never cut, an added plane takes over the cut', () => {
+    const doc = createDocument();
+    doc.transact('sections', (draft) => {
+      const root = draft.definitions.get(draft.rootDefinitionId)!.entities;
+      root.sectionPlanes.set(50 as Id, { ...plane(50, 1), tagId: draft.defaultTagId } as never);
+      root.order.push(50 as Id);
+      root.activeSectionPlaneId = 50 as Id;
+    });
+    const movedTo = sectionsToRender(doc.state, [], { moved: [{ path: [], id: 50 as Id, normal: [0, 0, 1], d: -2 }], copies: [], added: null });
+    expect(movedTo.cuts).toEqual([{ key: '/50', path: [], normal: [0, 0, 1], d: -2 }]);
+    expect(movedTo.planes.map((p) => p.corners[0][2])).toEqual([2]);
+    const copied = sectionsToRender(doc.state, [], { moved: [], copies: [{ path: [], id: 50 as Id, normal: [0, 0, 1], d: -2 }], added: null });
+    expect(copied.cuts).toEqual([{ key: '/50', path: [], normal: [0, 0, 1], d: -1 }]);
+    expect(copied.planes.map((p) => [p.entityId, p.active])).toEqual([[50, true], [50, false]]);
+    const adding = sectionsToRender(doc.state, [], { moved: [], copies: [], added: { path: [], normal: [0, 0, 1], d: -3 } });
+    expect(adding.cuts).toEqual([{ key: '/-1', path: [], normal: [0, 0, 1], d: -3 }]);
+    expect(adding.planes.map((p) => [p.entityId, p.active])).toEqual([[50, false], [-1, true]]);
+    // the document's own sections are unchanged
+    expect(sectionsToRender(doc.state).cuts).toEqual([{ key: '/50', path: [], normal: [0, 0, 1], d: -1 }]);
+  });
+
+  it('draws hidden planes, marked hidden, only while hidden geometry is shown', () => {
+    const doc = createDocument();
+    doc.transact('sections', (draft) => {
+      const root = draft.definitions.get(draft.rootDefinitionId)!.entities;
+      const p = { ...plane(51, 2), hidden: true };
+      root.sectionPlanes.set(p.id, { ...p, tagId: draft.defaultTagId } as never);
+      root.order.push(p.id);
+    });
+    expect(sectionsToRender(doc.state).planes).toEqual([]);
+    doc.transact('style', (draft) => { draft.styles.get(draft.activeStyleId)!.modeling.hiddenGeometry = true; });
+    expect(sectionsToRender(doc.state).planes.map((p) => [p.entityId, p.hidden])).toEqual([[51, true]]);
+  });
 });

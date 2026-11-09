@@ -5,8 +5,8 @@ import { useEffect, useRef, type RefObject } from 'react';
 export interface KeyIsolationOptions {
   /** Listen only while the panel is shown. */
   readonly active: boolean;
-  /** Called for Escape pressed inside the panel. */
-  readonly onEscape: () => void;
+  /** Called for Escape pressed inside the panel. Without it, Escape is isolated like any other key. */
+  readonly onEscape?: (() => void) | undefined;
   /** The pop-down also takes an Escape pressed with nothing focused (focus on the page body). */
   readonly escapeWhenUnfocused?: boolean | undefined;
 }
@@ -14,7 +14,7 @@ export interface KeyIsolationOptions {
 /**
  * Key isolation shared by the pop-down and docked chat: keys typed inside `container` stop at the window
  * capture phase so workspace shortcuts never see them, Enter inside a `data-submit-on-enter` textarea submits its
- * form (Shift+Enter inserts a newline), and Escape inside calls `onEscape`.
+ * form (Shift+Enter inserts a newline), and Escape inside calls `onEscape` when there is one.
  */
 export function useKeyIsolation(container: RefObject<HTMLElement | null>, { active, onEscape, escapeWhenUnfocused = false }: KeyIsolationOptions): void {
   const escape = useRef(onEscape);
@@ -26,7 +26,7 @@ export function useKeyIsolation(container: RefObject<HTMLElement | null>, { acti
       const target = event.target;
       const within = inside(target);
       const unfocused = !(target instanceof Element) || target === document.body || target === document.documentElement;
-      if (event.key === 'Escape' && (within || (escapeWhenUnfocused && unfocused))) {
+      if (escape.current && event.key === 'Escape' && (within || (escapeWhenUnfocused && unfocused))) {
         event.preventDefault(); event.stopImmediatePropagation(); escape.current(); return;
       }
       if (!within) return;

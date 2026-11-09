@@ -20,6 +20,10 @@ On a model page, **Save to collection** adds or removes that model using your co
 
 On your collection's page, choose **Edit collection** to change its details or visibility, remove models, and use **Move up** or **Move down** to set their order. To add models, open a model's page and choose **Save to collection**. The first four available models form its cover. Choose **Save collection** to apply your edits. You can keep up to 100 collections with up to 100 models each. If someone edits the same collection in another tab, reload before saving again; a failed save keeps your draft available for correction.
 
+## Add a model to collections while publishing
+
+Open the **Collections** dropdown in the publishing dialog to see your collections; check the ones the model belongs in, or type a name and choose **Add** to create a new private collection. The model is added when you choose **Publish model**, because collections only hold published models; saving a draft does not keep these choices. When you edit a model that is already published, its current collections are checked. Unchecking one removes the model, and if nothing else changed, **Save collections** applies the change without publishing a new version. If a collection can't be updated, the model stays published and the dialog names the collection so you can fix it from the model page.
+
 ## Collection visibility and credits
 
 Collections follow each model's current published version. Withdrawn models disappear from public collection views, and making a collection private removes it from public browsing and Featured. A collection does not transfer ownership or replace its models' licenses and credits. **Delete collection** removes only the collection; its models stay in Commons.
@@ -97,7 +101,7 @@ Choose **My profile**, then open a card under **My Models**. Your model's detail
 
 ## Preview a model
 
-Commons renders thumbnails from supported model geometry on its server; a contributor does not need to upload a screenshot. An optional uploaded PNG or JPEG is used as the listing image instead. Choose **Explore in 3D** on a model page to rotate the geometry, zoom, or reset the view. Drag to orbit, use the labeled controls, or focus the viewer and use arrow keys, plus/minus, and zero to reset. Previews are available without signing in; original downloads require your PushForm account and initial account setup.
+Commons renders thumbnails from supported model geometry on its server; a contributor does not need to upload a screenshot. Generated thumbnails use Bright studio lighting and a transparent background, so the Commons backdrop shows through. Sharing a saved model from the editor uses the same lighting and transparency with your current camera. An optional uploaded PNG or JPEG is used as the listing image instead. Choose **Explore in 3D** on a model page to rotate the geometry, zoom, or reset the view. Drag to orbit, use the labeled controls, or focus the viewer and use arrow keys, plus/minus, and zero to reset. Previews are available without signing in; original downloads require your PushForm account and initial account setup.
 
 Commons converts every format it accepts as soon as the upload is checked: native PushForm, STEP, FreeCAD, SketchUp (SKP and SKB), DXF, KMZ and mesh files (STL, OBJ, GLB/glTF, COLLADA, 3DS and model ZIPs). Drafts get previews too, visible only to you until you publish. It accepts originals up to 128 MiB for conversion and displays up to 12,000 triangles. It shows geometry and material colors, with no textures, annotations, recorded dimensions, units or fabrication suitability. Unsupported content and models over those limits show an unavailable preview; try **Open in PushForm** or download the original where supported. A failed image falls back to the generated thumbnail when possible.
 

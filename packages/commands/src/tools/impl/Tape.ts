@@ -6,11 +6,12 @@ import type { Axis, InferenceOptions, InferenceResult, Snap } from '@pushform/in
 import type { EntityRef } from '@pushform/model';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
-import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolSettingValue, ToolStatus } from '../Tool';
 import { pointerField } from '../entry';
 import { EdgeLock } from '../edgeLock';
 import { inferenceOverlay, PREVIEW_COLOR } from '../toolUtil';
 import { AXIS_NORMAL, closestOnLine, edgeSegment, fmtLength, GUIDE_COLOR, stateOf } from './constructionUtil';
+import { axisTag, EDGE_LOCKED, SHIFT_HELD } from '../held';
 
 export type TapeMode = 'guideLine' | 'guidePoint' | 'measure';
 const MODE_CYCLE: readonly TapeMode[] = ['guideLine', 'guidePoint', 'measure'];
@@ -44,7 +45,8 @@ export interface PendingResize {
 const IDLE: State = { kind: 'idle' };
 
 /**
- * Tape Measure (T). Modes cycle with Ctrl/Alt: Guide Lines (default) → Guide Points → Measure.
+ * Tape Measure (T). Modes cycle with Ctrl/Alt: Guide Lines (default, again each time the tool is
+ * chosen) → Guide Points → Measure.
  * - Guide Lines: click an edge, move away perpendicular, click (or type the offset) → infinite
  *   guide parallel to the edge through the offset point. Clicking a point instead starts a guide
  *   point with a dashed leader.
@@ -119,6 +121,8 @@ export class TapeTool implements Tool {
   activate(ctx: ToolContext): void {
     this.ctx = ctx;
     this.state = IDLE;
+    // every time the tool is chosen it starts in its default mode, Guide lines
+    this.modeIndex = 0;
   }
   deactivate(): void {
     this.reset();
@@ -160,7 +164,6 @@ export class TapeTool implements Tool {
   onKeyDown(e: ToolKeyEvent): boolean {
     switch (e.key) {
       case 'Control':
-      case 'Alt':
         if (!e.repeat) {
           this.modeIndex = (this.modeIndex + 1) % MODE_CYCLE.length;
           this.ctx?.statusChanged();
@@ -258,12 +261,41 @@ export class TapeTool implements Tool {
   }
 
   status(): ToolStatus {
+    const held = [...axisTag(this.lockAxis), ...(this.lockSnap ? [SHIFT_HELD] : []), ...(this.edgeLock.active ? [EDGE_LOCKED] : [])];
+    return {
+      ...this.baseStatus(),
+      ...(held.length ? { held } : {}),
+      settings: [
+        {
+          kind: 'choice',
+          id: 'mode',
+          label: 'Mode',
+          value: this.mode,
+          options: [
+            { value: 'guideLine', label: 'Guide lines' },
+            { value: 'guidePoint', label: 'Guide points' },
+            { value: 'measure', label: 'Measure only' },
+          ],
+          key: 'primary',
+        },
+        { kind: 'action', id: 'resize', label: 'Resize Model', disabled: this.resize === null },
+      ],
+    };
+  }
+
+  onSetting(id: string, value: ToolSettingValue): void {
+    if (id === 'mode' && (MODE_CYCLE as readonly unknown[]).includes(value)) this.setMode(value as TapeMode);
+    else if (id === 'resize') this.confirmResize();
+    else return;
+    this.ctx?.requestRender();
+    this.ctx?.statusChanged();
+  }
+
+  private baseStatus(): ToolStatus {
     const s = this.state;
-    const modeName = this.mode === 'guideLine' ? 'Guide Lines' : this.mode === 'guidePoint' ? 'Guide Points' : 'Measure';
-    const tail = ` [${modeName}: Ctrl cycles]`;
     if (this.resize) {
       return {
-        instructor: `Resize model by ${this.resize.factor.toFixed(4)}? Confirm to resize, Esc to cancel.`,
+        instructor: `Resize model by ${this.resize.factor.toFixed(4)}? Choose Resize Model in the tool bar to resize, or Esc to cancel.`,
         vcbLabel: 'Length',
         vcbValue: fmtLength(this.ctx, this.resize.target),
       };
@@ -271,10 +303,10 @@ export class TapeTool implements Tool {
     if (s.kind === 'idle') {
       const instructor =
         this.mode === 'measure'
-          ? `Select start point to measure, or hover an edge.${tail}`
+          ? `Select start point to measure, or hover an edge.`
           : this.mode === 'guidePoint'
-            ? `Select start point for the guide point.${tail}`
-            : `Select an edge for a parallel guide line, or a point for a guide point.${tail}`;
+            ? `Select start point for the guide point.`
+            : `Select an edge for a parallel guide line, or a point for a guide point.`;
       const value = this.hoverEdgeLength ?? this.lastMeasurement?.length ?? null;
       return { instructor, vcbLabel: 'Length', vcbValue: value === null ? undefined : fmtLength(this.ctx, value) };
     }
@@ -285,10 +317,10 @@ export class TapeTool implements Tool {
     }
     const instructor =
       this.mode === 'measure'
-        ? `Select end point or enter value.${tail}`
+        ? `Select end point or enter value.`
         : s.kind === 'fromEdge' && this.mode === 'guideLine'
-          ? `Select offset for the guide line or enter value.${tail}`
-          : `Select the guide point position or enter value.${tail}`;
+          ? `Select offset for the guide line or enter value.`
+          : `Select the guide point position or enter value.`;
     return { instructor, vcbLabel: 'Length', vcbValue: fmtLength(this.ctx, live), fields: [pointerField('Length', 'length', fmtLength(this.ctx, live))] };
   }
 

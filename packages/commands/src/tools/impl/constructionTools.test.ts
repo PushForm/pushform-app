@@ -1,18 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Box3, Id, Ray, Vec2, Vec3 } from '@pushform/core';
 import { formatLength, v3eq } from '@pushform/core';
 import { freeInference, GROUND_PLANE, SNAP_COLORS } from '@pushform/inference';
 import type { InferenceResult, PickHit } from '@pushform/inference';
-import { DEFAULT_AXES, SketchGraph } from '@pushform/model';
-import type { Guide } from '@pushform/model';
+import { allocId, DEFAULT_AXES, defaultSceneLight, SketchGraph } from '@pushform/model';
+import type { Guide, MeshPart } from '@pushform/model';
 import { CommandRegistry } from '../../registry/CommandRegistry';
 import { editCommands } from '../../registry/editCommands';
 import { sketchCommands } from '../../commands/sketch';
 import { guideCommands } from '../../commands/guides';
 import { axesCommands } from '../../commands/axes';
 import { offsetCommands } from '../../commands/offset';
+import { groupCommands, type MakeResult } from '../../commands/groups';
+import { contextCommands } from '../../commands/context';
 import { DocumentHost } from '../../host/DocumentHost';
 import { SERVICE_DOCUMENT } from '../../host/services';
 import type { CameraHost, CameraState } from '../../camera/CameraHost';
@@ -129,6 +131,11 @@ const edgeHit = (id: Id, p: Vec3): PickHit => ({ ref: { kind: 'sketchEdge', path
 const sketchFaceHit = (id: Id, p: Vec3): PickHit => ({ ref: { kind: 'sketchFace', path: [], id }, point: p, t: 10, normal: [0, 0, 1], screenDist: 0 });
 
 const key = (k: string, modifiers: Modifiers = NO_MODIFIERS) => ({ key: k, code: k, modifiers, repeat: false });
+/** Tap a modifier: press and release it with nothing between (how Ctrl and Alt reach tools). */
+const tap = (tools: ToolManager, k: string): boolean => {
+  tools.keyDown(key(k));
+  return tools.keyUp(key(k));
+};
 const vcb = (s: string) => {
   const v = parseVcb(s, 'm');
   if (!v.ok) throw new Error(JSON.stringify(v.error));
@@ -175,7 +182,7 @@ describe('TapeTool', () => {
     const { tools, guides } = setup();
     tools.activate('tape');
     const tape = tools.activeTool as TapeTool;
-    expect(tools.keyDown(key('Control'))).toBe(true);
+    expect(tap(tools, 'Control')).toBe(true);
     expect(tape.mode).toBe('guidePoint');
     tools.click(at([0, 0, 0]));
     tools.pointerMove(at([1, 1, 0]));
@@ -196,7 +203,7 @@ describe('TapeTool', () => {
   it('Down arrow locks the tape parallel to the last inferred edge, and a typed distance places the guide point along it', () => {
     const { tools, guides } = setup();
     tools.activate('tape');
-    tools.keyDown(key('Control')); // guide point mode
+    tap(tools, 'Control'); // guide point mode
     tools.click(at([0, 0, 0]));
     const onEdge: InferenceResult = { ...freeInference([3, 1, 0], GROUND_PLANE),
       primary: { kind: 'onEdge', point: [3, 1, 0], dir: [0, 1, 0], color: SNAP_COLORS.onEdge, label: 'On Edge' } };
@@ -217,8 +224,8 @@ describe('TapeTool', () => {
     square();
     tools.activate('tape');
     const tape = tools.activeTool as TapeTool;
-    tools.keyDown(key('Control'));
-    tools.keyDown(key('Control'));
+    tap(tools, 'Control');
+    tap(tools, 'Control');
     expect(tape.mode).toBe('measure');
     // hovering an edge reads its length
     const bottom = [...sketch().edges.values()][0]!;
@@ -243,6 +250,70 @@ describe('TapeTool', () => {
     expect(tape.lastMeasure?.length).toBeCloseTo(10);
     expect(host.undo()).toBe(true);
     expect([...sketch().vertices.values()].map((v) => v.p[0]).sort()).toEqual([0, 0, 1, 1]);
+  });
+
+  it('resizes the whole model from inside a group, mesh parts and placed lights included', () => {
+    const { tools, square, host, registry, root, sketch } = setup();
+    registry.registerAll(groupCommands);
+    registry.registerAll(contextCommands);
+    square();
+    const edges = [...sketch().edges.keys()].map((id) => ({ kind: 'sketchEdge' as const, path: [], id }));
+    const group = (registry.execute('group.make', { refs: edges }) as MakeResult).instanceId!;
+    let partId = 0 as Id;
+    host.edit('Part and light', (draft) => {
+      const entities = draft.definitions.get(draft.rootDefinitionId)!.entities;
+      partId = allocId<Id>(draft);
+      const part: MeshPart = {
+        id: partId, name: 'Part', source: { format: 'STL', system: '' }, tagId: draft.defaultTagId, hidden: false, locked: true,
+        castShadows: true, receiveShadows: true, attributes: {}, materialId: null,
+        geometry: {
+          positions: new Float64Array([1, 0, 0, 2, 0, 0, 2, 1, 0]), triangles: new Uint32Array([0, 1, 2]), triangleFace: new Uint32Array([0]),
+          faceCount: 1, faceMaterials: new Uint32Array([0]), edgeOffsets: new Uint32Array([0, 2]), edgePositions: new Float64Array([1, 0, 0, 2, 0, 0]),
+          edgeFlags: new Uint8Array([0]),
+        },
+      };
+      entities.meshParts.set(partId, part as never);
+      entities.order.push(partId);
+      draft.sceneLights = [{ ...defaultSceneLight('area'), id: allocId<Id>(draft), position: [1, 2, 3], target: [1, 2, 0], width: 0.5, height: 0.25 }];
+    });
+    registry.execute('context.enter', { path: [group] });
+    const inGroup = () => host.doc.state.definitions.get(root().instances.get(group as Id)!.definitionId)!.entities.sketch;
+    const localXs = () => [...inGroup().vertices.values()].map((v) => v.p[0]).sort();
+    // measure the group's bottom edge and type twice its length
+    tools.activate('tape');
+    const tape = tools.activeTool as TapeTool;
+    tape.setMode('measure');
+    tools.click(at([0, 0, 0]));
+    tools.click(at([1, 0, 0]));
+    tools.onVcb(vcb('2'));
+    expect(tape.pendingResize?.factor).toBeCloseTo(2);
+    expect(tape.confirmResize()).toBe(true);
+    expect(host.context.path).toEqual([group]);
+    // the group scales through its placement; its own geometry is untouched
+    expect(root().instances.get(group as Id)!.transform[0]).toBeCloseTo(2);
+    expect(localXs()).toEqual([0, 0, 1, 1]);
+    const g = root().meshParts.get(partId)!.geometry;
+    expect([...g.positions]).toEqual([2, 0, 0, 4, 0, 0, 4, 2, 0]);
+    expect([...g.edgePositions]).toEqual([2, 0, 0, 4, 0, 0]);
+    expect(host.doc.state.sceneLights![0]).toMatchObject({ position: [2, 4, 6], target: [2, 4, 0], width: 1, height: 0.5 });
+    expect(host.undo()).toBe(true);
+    expect([...root().meshParts.get(partId)!.geometry.positions]).toEqual([1, 0, 0, 2, 0, 0, 2, 1, 0]);
+    expect(host.doc.state.sceneLights![0]).toMatchObject({ position: [1, 2, 3], target: [1, 2, 0], width: 0.5 });
+  });
+
+  it('starts in Guide lines mode each time it is chosen', () => {
+    const { tools } = setup();
+    tools.activate('tape');
+    const tape = tools.activeTool as TapeTool;
+    expect(tape.mode).toBe('guideLine');
+    tap(tools, 'Control');
+    expect(tape.mode).toBe('guidePoint');
+    tools.setting('mode', 'measure');
+    expect(tape.mode).toBe('measure');
+    tools.activate('protractor');
+    tools.activate('tape');
+    expect(tape.mode).toBe('guideLine');
+    expect(tools.status().settings?.find((c) => c.id === 'mode')).toMatchObject({ value: 'guideLine' });
   });
 });
 
@@ -278,12 +349,24 @@ describe('ProtractorTool', () => {
     tools.onVcb(vcb('1:1'));
     expect(guides()).toHaveLength(2);
     // Ctrl turns guide creation off
-    tools.keyDown(key('Control'));
+    tap(tools, 'Control');
     expect(pro.guidesEnabled).toBe(false);
     tools.click(at([0, 0, 0]));
     tools.click(at([1, 0, 0]));
     tools.click(at([2, 2, 0]));
     expect(guides()).toHaveLength(2);
+  });
+
+  it('creates guides again each time it is chosen', () => {
+    const { tools } = setup();
+    tools.activate('protractor');
+    const pro = tools.activeTool as ProtractorTool;
+    tools.setting('guides', false);
+    expect(pro.guidesEnabled).toBe(false);
+    tools.activate('tape');
+    tools.activate('protractor');
+    expect(pro.guidesEnabled).toBe(true);
+    expect(tools.status().settings?.find((c) => c.id === 'guides')).toMatchObject({ on: true });
   });
 });
 
@@ -304,9 +387,13 @@ describe('AxesTool', () => {
     tools.doubleClick(at([3, 3, 0]));
     expect(host.doc.rootDefinition.axes.origin).toEqual([3, 3, 0]);
     expect(host.doc.rootDefinition.axes.x).toEqual([1, 0, 0]);
-    // Alt: place green first, then blue; red follows right-handedly
+    // a Ctrl tap: place green first, then blue; red follows right-handedly (Alt no longer cycles)
     const tool = tools.activeTool as AxesTool;
     tools.keyDown(key('Alt', ALT));
+    tools.keyUp(key('Alt', ALT));
+    expect(tool.firstAxis).toBe('x');
+    tools.keyDown(key('Control'));
+    tools.keyUp(key('Control'));
     expect(tool.firstAxis).toBe('y');
     tools.click(at([0, 0, 0]));
     tools.click(at([-1, 0, 0]));
@@ -322,8 +409,27 @@ describe('AxesTool', () => {
   });
 });
 
+/** A click as the view sends it: press and release in place, then the click. */
+const clickAt = (tools: ToolManager, e: ToolPointerEvent): void => {
+  tools.pointerDown(e);
+  tools.pointerUp({ ...e, buttons: 0 });
+  tools.click(e);
+};
+/** A double-click: two clicks, then the double-click. */
+const doubleClickAt = (tools: ToolManager, e: ToolPointerEvent): void => {
+  clickAt(tools, e);
+  clickAt(tools, e);
+  tools.doubleClick(e);
+};
+const len = (host: DocumentHost, m: number): string => formatLength(m, host.doc.state.meta.units);
+/** x extent of the outer loop of a sketch face. */
+const faceXs = (sketch: ReturnType<ReturnType<typeof setup>['sketch']>, faceId: Id): [number, number] => {
+  const xs = sketch.faces.get(faceId)!.loops[0]!.map((r) => sketch.vertices.get(sketch.edges.get(r.edgeId)!.a)!.p[0]);
+  return [Math.min(...xs), Math.max(...xs)];
+};
+
 describe('OffsetTool', () => {
-  it('offsets a sketch face inward by the cursor distance: an inner face forms (2 faces)', () => {
+  it('offsets a sketch face inward by the pointer distance with click-move-click; the field shows it unsigned', () => {
     const { tools, sketch, square, host } = setup();
     square();
     const face = [...sketch().faces.values()][0]!;
@@ -331,53 +437,277 @@ describe('OffsetTool', () => {
     const tool = tools.activeTool as OffsetTool;
     tools.pointerMove(at([0.5, 0.5, 0], { hit: sketchFaceHit(face.id, [0.5, 0.5, 0]) }));
     expect(tools.overlay().some((o) => o.kind === 'polygon')).toBe(true);
-    tools.click(at([0.5, 0.5, 0], { hit: sketchFaceHit(face.id, [0.5, 0.5, 0]) }));
+    // hovering is not an operation in progress
+    expect(tool.hasPendingWork()).toBe(false);
+    clickAt(tools, at([0.5, 0.5, 0], { hit: sketchFaceHit(face.id, [0.5, 0.5, 0]) }));
+    expect(tool.hasPendingWork()).toBe(true);
     tools.pointerMove(at([0.5, 0.1, 0]));
     expect(tool.dragDistance).toBeCloseTo(-0.1);
-    expect(tools.status().vcbValue).toBe(formatLength(-0.1, host.doc.state.meta.units));
+    expect(tools.status().vcbValue).toBe(len(host, 0.1));
+    expect(tools.status().instructor).toMatch(/^Offsetting inward\./);
     const entries = host.undoStack.length;
-    tools.click(at([0.5, 0.1, 0]));
+    clickAt(tools, at([0.5, 0.1, 0]));
     expect(sketch().faces.size).toBe(2);
     expect(sketch().edges.size).toBe(8);
     expect(host.undoStack.length).toBe(entries + 1);
     expect(host.undoStack.peek()?.label).toBe('Offset');
     const inner = [...sketch().faces.values()].find((f) => f.id !== face.id)!;
-    const xs = inner.loops[0]!.map((r) => sketch().vertices.get(sketch().edges.get(r.edgeId)!.a)!.p[0]);
-    expect(Math.min(...xs)).toBeCloseTo(0.1);
-    expect(Math.max(...xs)).toBeCloseTo(0.9);
+    expect(faceXs(sketch(), inner.id)[0]).toBeCloseTo(0.1);
+    expect(faceXs(sketch(), inner.id)[1]).toBeCloseTo(0.9);
     expect(sketch().faces.get(face.id)!.loops).toHaveLength(2); // the original got a hole
     // typing a new value re-applies the last offset (undo + redo, no extra entry)
     tools.onVcb(vcb('0.2'));
     expect(host.undoStack.length).toBe(entries + 1);
     expect(sketch().faces.size).toBe(2);
     const inner2 = [...sketch().faces.values()].find((f) => f.id !== face.id)!;
-    const xs2 = inner2.loops[0]!.map((r) => sketch().vertices.get(sketch().edges.get(r.edgeId)!.a)!.p[0]);
-    expect(Math.min(...xs2)).toBeCloseTo(0.2);
-    // outward offset grows a new face around the original
-    tools.click(at([0.5, 0.5, 0], { hit: sketchFaceHit(face.id, [0.5, 0.5, 0]) }));
+    expect(faceXs(sketch(), inner2.id)[0]).toBeCloseTo(0.2);
+    // outward offset grows a new face around the original; the status names the side
+    clickAt(tools, at([0.5, 0.5, 0], { hit: sketchFaceHit(face.id, [0.5, 0.5, 0]) }));
     tools.pointerMove(at([0.5, -0.3, 0]));
     expect(tool.dragDistance).toBeCloseTo(0.3);
-    tools.click(at([0.5, -0.3, 0]));
+    expect(tools.status().vcbValue).toBe(len(host, 0.3));
+    expect(tools.status().instructor).toMatch(/^Offsetting outward\./);
+    clickAt(tools, at([0.5, -0.3, 0]));
     expect(sketch().faces.size).toBe(3);
   });
 
-  it('offsets preselected connected edges as a parallel polyline', () => {
+  it('offsets with a press dragged and released', () => {
+    const { tools, sketch, square, host } = setup();
+    square();
+    const face = [...sketch().faces.values()][0]!;
+    tools.activate('offset');
+    const entries = host.undoStack.length;
+    tools.pointerDown(at([0.5, 0.5, 0], { hit: sketchFaceHit(face.id, [0.5, 0.5, 0]) }));
+    tools.pointerMove(at([0.5, 0.3, 0]));
+    tools.pointerMove(at([0.5, 0.2, 0]));
+    tools.pointerUp({ ...at([0.5, 0.2, 0]), buttons: 0 });
+    expect(host.undoStack.length).toBe(entries + 1);
+    const inner = [...sketch().faces.values()].find((f) => f.id !== face.id)!;
+    expect(faceXs(sketch(), inner.id)[0]).toBeCloseTo(0.2);
+    expect((tools.activeTool as OffsetTool).hasPendingWork()).toBe(false);
+  });
+
+  it('measures to a snapped vertex on the face plane, and ignores snaps off the plane', () => {
+    const { tools, sketch, square } = setup();
+    square();
+    const face = [...sketch().faces.values()][0]!;
+    tools.activate('offset');
+    const tool = tools.activeTool as OffsetTool;
+    clickAt(tools, at([0.5, 0.5, 0], { hit: sketchFaceHit(face.id, [0.5, 0.5, 0]) }));
+    const snapped = (point: Vec3, pointer: Vec3): ToolPointerEvent => {
+      const free = freeInference(point, GROUND_PLANE);
+      return at(pointer, { inference: { ...free, primary: { kind: 'endpoint', point, color: SNAP_COLORS.endpoint, label: 'Endpoint' } } });
+    };
+    tools.pointerMove(snapped([0.5, 0.25, 0], [0.5, 0.27, 0]));
+    expect(tool.dragDistance).toBeCloseTo(-0.25);
+    // a vertex above the plane does not count: the pointer's point on the plane does
+    tools.pointerMove(snapped([0.5, 0.25, 1], [0.5, 0.3, 0]));
+    expect(tool.dragDistance).toBeCloseTo(-0.3);
+  });
+
+  it('a typed re-edit that fails keeps the original offset; a typed value goes to the pointer side', () => {
+    const { tools, sketch, square, host, registry } = setup();
+    square();
+    const face = [...sketch().faces.values()][0]!;
+    tools.activate('offset');
+    clickAt(tools, at([0.5, 0.5, 0], { hit: sketchFaceHit(face.id, [0.5, 0.5, 0]) }));
+    tools.pointerMove(at([0.5, 0.1, 0]));
+    expect(tools.status().instructor).toBe('Offsetting inward. Click, or type a distance; a negative one offsets outward.');
+    clickAt(tools, at([0.5, 0.1, 0]));
+    const entries = host.undoStack.length;
+    const top = host.undoStack.peek();
+    const before = { faces: sketch().faces.size, edges: sketch().edges.size };
+    // the next offset fails
+    const execute = registry.execute.bind(registry);
+    const spy = vi.spyOn(registry, 'execute').mockImplementation(((id: string, params?: unknown) => {
+      if (id === 'sketch.offset' && (params as { distance: number }).distance !== -0.1) throw new Error('Offset collapsed');
+      return execute(id, params as never);
+    }) as typeof registry.execute);
+    tools.onVcb(vcb('0.3'));
+    expect(host.undoStack.length).toBe(entries);
+    expect(host.undoStack.peek()).toBe(top);
+    expect({ faces: sketch().faces.size, edges: sketch().edges.size }).toEqual(before);
+    expect(tools.status().instructor).toBe('Offset failed: Offset collapsed');
+    expect(tools.status().applied).toBe(true);
+    // the original can still be re-edited
+    spy.mockRestore();
+    tools.onVcb(vcb('0.2'));
+    expect(host.undoStack.length).toBe(entries);
+    const inner = [...sketch().faces.values()].find((f) => f.id !== face.id)!;
+    expect(faceXs(sketch(), inner.id)[0]).toBeCloseTo(0.2);
+    // a negative value goes the other way
+    tools.onVcb(vcb('-0.2'));
+    expect(sketch().faces.size).toBe(2);
+    const ring = [...sketch().faces.values()].find((f) => f.id !== face.id)!;
+    expect(faceXs(sketch(), ring.id)[0]).toBeCloseTo(-0.2);
+  });
+
+  it('a typed distance before the pointer moves goes inward; a click in the view ends the redo', () => {
+    const { tools, sketch, square, host } = setup();
+    square();
+    const face = [...sketch().faces.values()][0]!;
+    tools.activate('offset');
+    clickAt(tools, at([0.5, 0.5, 0], { hit: sketchFaceHit(face.id, [0.5, 0.5, 0]) }));
+    tools.onVcb(vcb('0.1'));
+    const inner = [...sketch().faces.values()].find((f) => f.id !== face.id)!;
+    expect(faceXs(sketch(), inner.id)[0]).toBeCloseTo(0.1);
+    const entries = host.undoStack.length;
+    const edges = sketch().edges.size;
+    // a click on empty space ends the chance to redo
+    clickAt(tools, at([3, 3, 0]));
+    tools.onVcb(vcb('0.3'));
+    expect(host.undoStack.length).toBe(entries);
+    expect(sketch().edges.size).toBe(edges);
+    expect(tools.status().applied).toBe(false);
+  });
+
+  it('double-clicking a face repeats the last face offset once, inward as it went', () => {
+    const { tools, sketch, host } = setup();
+    host.edit('Squares', (draft) => {
+      const g = SketchGraph.for(draft);
+      for (const o of [0, 3]) {
+        g.addEdge([o, 0, 0], [o + 1, 0, 0]);
+        g.addEdge([o + 1, 0, 0], [o + 1, 1, 0]);
+        g.addEdge([o + 1, 1, 0], [o, 1, 0]);
+        g.addEdge([o, 1, 0], [o, 0, 0]);
+      }
+    });
+    const [a, b] = [...sketch().faces.values()].sort((p, q) => faceXs(sketch(), p.id)[0] - faceXs(sketch(), q.id)[0]);
+    tools.activate('offset');
+    clickAt(tools, at([0.5, 0.5, 0], { hit: sketchFaceHit(a!.id, [0.5, 0.5, 0]) }));
+    tools.pointerMove(at([0.5, 0.1, 0]));
+    clickAt(tools, at([0.5, 0.1, 0]));
+    const entries = host.undoStack.length;
+    const facesBefore = new Set(sketch().faces.keys());
+    // off-centre, so that a click pair measuring its own distance would show
+    doubleClickAt(tools, at([3.3, 0.5, 0], { hit: sketchFaceHit(b!.id, [3.3, 0.5, 0]) }));
+    // one offset, not one per click
+    expect(host.undoStack.length).toBe(entries + 1);
+    const added = [...sketch().faces.values()].filter((f) => !facesBefore.has(f.id));
+    expect(added).toHaveLength(1);
+    expect(faceXs(sketch(), added[0]!.id)[0]).toBeCloseTo(3.1);
+    expect(faceXs(sketch(), added[0]!.id)[1]).toBeCloseTo(3.9);
+    expect((tools.activeTool as OffsetTool).hasPendingWork()).toBe(false);
+  });
+
+  it('offers only faces of the open edit context, never mesh parts', () => {
+    const { tools, sketch, square, host } = setup();
+    square();
+    const face = [...sketch().faces.values()][0]!;
+    tools.activate('offset');
+    const tool = tools.activeTool as OffsetTool;
+    const outside: PickHit = { ...sketchFaceHit(face.id, [0.5, 0.5, 0]), inContext: false };
+    tools.pointerMove(at([0.5, 0.5, 0], { hit: outside }));
+    expect(tools.overlay()).toEqual([]);
+    clickAt(tools, at([0.5, 0.5, 0], { hit: outside }));
+    expect(tool.hasPendingWork()).toBe(false);
+    const part: PickHit = { ref: { kind: 'meshPart', path: [], id: 99 as Id }, point: [0.5, 0.5, 0], t: 10, normal: [0, 0, 1], screenDist: 0 };
+    tools.pointerMove(at([0.5, 0.5, 0], { hit: part }));
+    expect(tools.overlay()).toEqual([]);
+    clickAt(tools, at([0.5, 0.5, 0], { hit: part }));
+    expect(tool.hasPendingWork()).toBe(false);
+    expect(host.undoStack.peek()?.label).not.toBe('Offset');
+  });
+
+  it('refuses an offset that leaves nothing, says why, and does not adopt an older undo step', () => {
+    const { tools, sketch, square, host } = setup();
+    square();
+    const face = [...sketch().faces.values()][0]!;
+    host.edit('Line', (draft) => SketchGraph.for(draft).addEdge([3, 0, 0], [4, 0, 0]));
+    tools.activate('offset');
+    const top = host.undoStack.peek();
+    const entries = host.undoStack.length;
+    clickAt(tools, at([0.5, 0.5, 0], { hit: sketchFaceHit(face.id, [0.5, 0.5, 0]) }));
+    tools.onVcb(vcb('0.6'));
+    expect(host.undoStack.length).toBe(entries);
+    expect(tools.status().instructor).toMatch(/^Offset failed: Nothing is left/);
+    expect(tools.status().applied).toBe(false);
+    // typing again does not undo the line drawn before
+    tools.onVcb(vcb('0.1'));
+    expect(host.undoStack.peek()).toBe(top);
+    expect(sketch().edges.size).toBe(5);
+  });
+
+  it('offsets preselected connected edges as a parallel polyline; a double-click after it does nothing', () => {
     const { tools, sketch, host } = setup();
     host.edit('L', (draft) => {
       const g = SketchGraph.for(draft);
       g.addEdge([0, 0, 0], [1, 0, 0]);
       g.addEdge([1, 0, 0], [1, 1, 0]);
+      g.addEdge([5, 0, 0], [6, 0, 0]);
+      g.addEdge([6, 0, 0], [6, 1, 0]);
+      g.addEdge([6, 1, 0], [5, 1, 0]);
+      g.addEdge([5, 1, 0], [5, 0, 0]);
     });
-    host.selection.set([...sketch().edges.keys()].map((id) => ({ kind: 'sketchEdge', path: [], id })));
+    const square = [...sketch().faces.values()][0]!;
+    const chain = [...sketch().edges.values()].filter((e) => sketch().vertices.get(e.a)!.p[0] < 3).map((e) => e.id);
+    host.selection.set(chain.map((id) => ({ kind: 'sketchEdge', path: [], id })));
     tools.activate('offset');
     expect(tools.status().instructor).toMatch(/selected edges/);
-    tools.click(at([0.5, 0.5, 0]));
+    clickAt(tools, at([0.5, 0.5, 0]));
+    // before the pointer moves, a typed distance has no side
+    tools.onVcb(vcb('0.1'));
+    expect(tools.status().instructor).toMatch(/^Move the pointer to the side/);
+    expect(sketch().edges.size).toBe(6);
     tools.pointerMove(at([1.5, 0.5, 0])); // right of travel along the second edge
     expect((tools.activeTool as OffsetTool).dragDistance).toBeCloseTo(0.5);
+    expect(tools.status().instructor).toMatch(/pointer's side/);
     tools.onVcb(vcb('0.1'));
-    expect(sketch().edges.size).toBe(4);
-    expect(sketch().faces.size).toBe(0);
+    expect(sketch().edges.size).toBe(8);
+    expect(sketch().faces.size).toBe(1);
     const xs = [...sketch().vertices.values()].map((v) => +v.p[0].toFixed(6));
     expect(xs).toContain(1.1);
+    const entries = host.undoStack.length;
+    doubleClickAt(tools, at([5.5, 0.5, 0], { hit: sketchFaceHit(square.id, [5.5, 0.5, 0]) }));
+    expect(host.undoStack.length).toBe(entries);
+  });
+
+  it('does not use selected edges that branch, and says why', () => {
+    const { tools, sketch, square, host } = setup();
+    square();
+    host.edit('Spur', (draft) => SketchGraph.for(draft).addEdge([1, 0, 0], [2, -1, 0]));
+    const ids = [...sketch().edges.values()].filter((e) => [e.a, e.b].some((v) => v3eq(sketch().vertices.get(v)!.p, [1, 0, 0]))).map((e) => e.id);
+    expect(ids).toHaveLength(3);
+    host.selection.set(ids.map((id) => ({ kind: 'sketchEdge', path: [], id })));
+    tools.activate('offset');
+    expect(tools.status().instructor).toMatch(/^The selected edges branch/);
+    // faces can still be offset
+    const face = [...sketch().faces.values()][0]!;
+    clickAt(tools, at([0.5, 0.5, 0], { hit: sketchFaceHit(face.id, [0.5, 0.5, 0]) }));
+    expect((tools.activeTool as OffsetTool).hasPendingWork()).toBe(true);
+  });
+
+  it('Allow overlaps is off each time the tool is chosen; Alt or the bar redoes the offset just made, once', () => {
+    const { tools, sketch, square, host, registry } = setup();
+    square();
+    const face = [...sketch().faces.values()][0]!;
+    tools.activate('offset');
+    tools.setting('overlaps', true);
+    expect((tools.activeTool as OffsetTool).allowOverlap).toBe(true);
+    tools.activate('tape');
+    tools.activate('offset');
+    const tool = tools.activeTool as OffsetTool;
+    expect(tool.allowOverlap).toBe(false);
+    clickAt(tools, at([0.5, 0.5, 0], { hit: sketchFaceHit(face.id, [0.5, 0.5, 0]) }));
+    tools.pointerMove(at([0.5, 0.1, 0]));
+    clickAt(tools, at([0.5, 0.1, 0]));
+    const entries = host.undoStack.length;
+    const calls: unknown[] = [];
+    const execute = registry.execute.bind(registry);
+    const spy = vi.spyOn(registry, 'execute').mockImplementation(((id: string, params?: unknown) => {
+      if (id === 'sketch.offset') calls.push(params);
+      return execute(id, params as never);
+    }) as typeof registry.execute);
+    tap(tools, 'Alt');
+    expect(tool.allowOverlap).toBe(true);
+    expect(calls).toEqual([expect.objectContaining({ allowOverlap: true, distance: expect.closeTo(-0.1) })]);
+    expect(host.undoStack.length).toBe(entries);
+    expect(tools.status().applied).toBe(true);
+    tools.setting('overlaps', false);
+    expect(tool.allowOverlap).toBe(false);
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toMatchObject({ allowOverlap: false });
+    expect(host.undoStack.length).toBe(entries);
+    spy.mockRestore();
   });
 });

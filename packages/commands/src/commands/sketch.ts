@@ -2,12 +2,12 @@
 // Copyright 2026 PushForm contributors
 import { z } from 'zod';
 import type { FaceLocalId, Id, TagId, Vec3 } from '@pushform/core';
-import { addImprintEdge, containerAt, entityRefKey, findFaceContainingPoints, segmentFaceSpans, removeImprintEdge } from '@pushform/model';
+import { addImprintEdge, containerAt, entityRefKey, findFaceContainingPoints, segmentFaceSpans, removeImprintEdge, tagVisible } from '@pushform/model';
 import type { DocumentDraft, DocumentState, EdgeKey, EntityRef } from '@pushform/model';
 import { defineCommand } from '../registry/Command';
 import type { AnyCommand, CommandContext } from '../registry/Command';
 import { DocumentHost } from '../host/DocumentHost';
-import { activeTagOpt, hostOf, SERVICE_DOCUMENT } from '../host/services';
+import { activeDrawTagOpts, hostOf, SERVICE_DOCUMENT } from '../host/services';
 import { currentFrame, draftBodyAt, draftContainerAt, refsInContext, requireContextPath, sketchGraphAt, type ContextFrame } from './context';
 
 const vec3 = z.tuple([z.number(), z.number(), z.number()]);
@@ -91,13 +91,46 @@ export function allContextRefs(host: DocumentHost): EntityRef[] {
   for (const id of c.meshParts.keys()) refs.push({ kind: 'meshPart', path, id });
   for (const id of c.instances.keys()) refs.push({ kind: 'instance', path, id });
   for (const id of c.guides.keys()) refs.push({ kind: 'guide', path, id });
+  for (const id of c.images.keys()) refs.push({ kind: 'image', path, id });
+  for (const id of c.dimensions.keys()) refs.push({ kind: 'dimension', path, id });
+  for (const id of c.texts.keys()) refs.push({ kind: 'text', path, id });
+  for (const id of c.sectionPlanes.keys()) refs.push({ kind: 'sectionPlane', path, id });
   return refs;
+}
+
+/**
+ * Everything in the open edit context that is drawn now: what Select All takes. Hidden entities count only while
+ * hidden geometry is shown; entities on hidden tags never do, nor guides or section planes while their display is off.
+ */
+export function visibleContextRefs(host: DocumentHost): EntityRef[] {
+  const state = host.doc.state;
+  const c = containerAt(state, host.context.path);
+  const style = state.styles.get(state.activeStyleId)?.modeling;
+  const showHidden = style?.hiddenGeometry === true;
+  const shown = (e: { readonly hidden?: boolean; readonly tagId?: TagId } | undefined): boolean =>
+    !!e && (showHidden || !e.hidden) && (e.tagId === undefined || tagVisible(state, e.tagId));
+  return allContextRefs(host).filter((r) => {
+    switch (r.kind) {
+      case 'sketchEdge': return shown(c.sketch.edges.get(r.id));
+      case 'sketchFace': return shown(c.sketch.faces.get(r.id));
+      case 'body': return shown(c.bodies.get(r.id));
+      case 'meshPart': return shown(c.meshParts.get(r.id));
+      case 'instance': return shown(c.instances.get(r.id));
+      case 'guide': return style?.guidesVisible !== false && shown(c.guides.get(r.id));
+      case 'image': return shown(c.images.get(r.id));
+      case 'dimension': return shown(c.dimensions.get(r.id));
+      case 'text': return shown(c.texts.get(r.id));
+      case 'sectionPlane': return style?.sectionPlanesVisible !== false && shown(c.sectionPlanes.get(r.id));
+      default: return true;
+    }
+  });
 }
 
 const edgeFlags = { soft: z.boolean().optional(), smooth: z.boolean().optional(), hidden: z.boolean().optional() };
 type EdgeFlags = { soft?: boolean | undefined; smooth?: boolean | undefined; hidden?: boolean | undefined };
-function flagOpts(f: EdgeFlags): { soft?: boolean; smooth?: boolean; hidden?: boolean; tagId?: TagId } {
-  const o: { soft?: boolean; smooth?: boolean; hidden?: boolean; tagId?: TagId } = {};
+type EdgeOpts = { soft?: boolean; smooth?: boolean; hidden?: boolean; tagId?: TagId; faceTagId?: TagId };
+function flagOpts(f: EdgeFlags): EdgeOpts {
+  const o: EdgeOpts = {};
   if (f.soft !== undefined) o.soft = f.soft;
   if (f.smooth !== undefined) o.smooth = f.smooth;
   if (f.hidden !== undefined) o.hidden = f.hidden;
@@ -150,7 +183,7 @@ export const addEdge = defineCommand({
   run(ctx, p) {
     const host = hostOf(ctx);
     const frame = currentFrame(host);
-    return host.edit('Line', (draft) => addRoutedEdge(draft, frame.path, localPoint(frame, p.a), localPoint(frame, p.b), { ...flagOpts(p), ...activeTagOpt(ctx) }));
+    return host.edit('Line', (draft) => addRoutedEdge(draft, frame.path, localPoint(frame, p.a), localPoint(frame, p.b), { ...flagOpts(p), ...activeDrawTagOpts(ctx) }));
   },
 });
 
@@ -170,7 +203,7 @@ export const addPolyline = defineCommand({
       const count = p.closed && n > 2 ? n : n - 1;
       for (let i = 0; i < count; i++) {
         const a = pts[i]!, b = pts[(i + 1) % n]!;
-        ids.push(...addRoutedEdge(draft, frame.path, a, b, { ...flagOpts(p), ...activeTagOpt(ctx) }, !p.closed));
+        ids.push(...addRoutedEdge(draft, frame.path, a, b, { ...flagOpts(p), ...activeDrawTagOpts(ctx) }, !p.closed));
       }
       return ids;
     });
@@ -189,7 +222,7 @@ export const rectangle = defineCommand({
     return host.edit('Rectangle', (draft) => {
       const corners = [p.a, p.b, p.c, p.d].map((q) => localPoint(frame, q));
       const ids: number[] = [];
-      for (let i = 0; i < 4; i++) ids.push(...addRoutedEdge(draft, frame.path, corners[i]!, corners[(i + 1) % 4]!, { ...activeTagOpt(ctx) }, false));
+      for (let i = 0; i < 4; i++) ids.push(...addRoutedEdge(draft, frame.path, corners[i]!, corners[(i + 1) % 4]!, { ...activeDrawTagOpts(ctx) }, false));
       return ids;
     });
   },
@@ -525,7 +558,7 @@ export const selectAll = defineCommand({
   undoable: false,
   run(ctx) {
     const host = hostOf(ctx);
-    host.selection.set(allContextRefs(host));
+    host.selection.set(visibleContextRefs(host));
     return host.selection.size;
   },
 });
@@ -554,7 +587,7 @@ export const invertSelection = defineCommand({
   run(ctx) {
     const host = hostOf(ctx);
     const sel = host.selection;
-    sel.set(allContextRefs(host).filter((r) => !sel.has(r)));
+    sel.set(visibleContextRefs(host).filter((r) => !sel.has(r)));
     return sel.size;
   },
 });

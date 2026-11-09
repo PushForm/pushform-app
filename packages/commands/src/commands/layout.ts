@@ -3,12 +3,12 @@
 import { cloneLayoutValue, layoutDimensionUnits, layoutValuesEqual, setLayoutGridUnits } from '@pushform/layout';
 import { operateLayoutPaths, LAYOUT_PATH_OPERATIONS, createLayoutShapeRegions, replayLayoutShapeBuild, layoutShapeBuildSnapshot, retainedLayoutShapeSources, retainLayoutShapeOpenSource } from '@pushform/layout';
 import { LENGTH_TOL } from '@pushform/core';
-import { resizedViewportCamera } from '@pushform/layout';
+import { resizedViewportCamera, rotateLayoutEntities, scaleLayoutEntities } from '@pushform/layout';
 import { detachedLayoutModelAnnotation, copyLayoutModelAnnotation, refreshLayoutModelAnnotations, validLayoutModelAttachment, validLayoutModelAnnotation, type LayoutModelAttachment, type LayoutAnnotationModels } from '@pushform/layout';
 import { LAYOUT_ARROW_TYPES, createLayoutTable, cloneLayoutTable, validLayoutTable, validTableFrame, tableFrame, copyLayoutImage, isViewport, isCloudSource, isCloudReference, LAYOUT_OBJECT_NAME_MAX, LAYOUT_NON_PAGE_NUMBER_TAGS, LAYOUT_PAGE_NUMBER_STYLES, type LayoutTable } from '@pushform/layout';
 import { z } from 'zod';
 import { allocId, type Draft } from '@pushform/model';
-import { layoutAnchorOnPath, validLayoutContourStarts, isLayoutLayerVisible, moveLayoutLabel, layoutLabelWholeMovePart, refreshLayoutLabels, resolveLayoutLabelAnchor, rotateLayoutEntity, layoutTextCenter, resizeLayoutTextPoints, createLayoutCornerBetween, createLayoutOffset, createLayoutArc, LAYOUT_ARC_KINDS, createLayoutRectangle, LAYOUT_RECTANGLE_KINDS, addLayoutLine, angularRaysFromPoints, resolveAngularEdgePoints, angularMeasurement, angularDimensionError, createAngularDimension, createLinearDimension, refreshLayoutDimensions, linearMeasurement, normalizeDimensionAngle, flattenLayoutPath, snapPaperPoint, type LayoutDocument, type LayoutDocumentState, type LayoutEntity, type LayoutPathHandle, type LayoutLinearDimension, type LayoutAngularDimension } from '@pushform/layout';
+import { layoutAnchorOnPath, validLayoutContourStarts, isLayoutLayerVisible, moveLayoutLabel, layoutLabelWholeMovePart, refreshLayoutLabels, resolveLayoutLabelAnchor, layoutTextCenter, resizeLayoutTextPoints, createLayoutCornerBetween, createLayoutOffset, createLayoutArc, LAYOUT_ARC_KINDS, createLayoutRectangle, LAYOUT_RECTANGLE_KINDS, addLayoutLine, angularRaysFromPoints, resolveAngularEdgePoints, angularMeasurement, angularDimensionError, createAngularDimension, createLinearDimension, refreshLayoutDimensions, linearMeasurement, normalizeDimensionAngle, flattenLayoutPath, snapPaperPoint, type LayoutDocument, type LayoutDocumentState, type LayoutEntity, type LayoutPathHandle, type LayoutLinearDimension, type LayoutAngularDimension } from '@pushform/layout';
 import type { TransactionHost, AnyCommand } from '../registry/Command';
 import { defineCommand } from '../registry/Command';
 import { CommandRegistry } from '../registry/CommandRegistry';
@@ -637,12 +637,15 @@ export const layoutCommands: readonly AnyCommand[] = [
   }),
   defineCommand({
     id: 'layout.viewport.setCamera', title: 'Change View', category: 'layout', menu: 'Tools', undoable: true,
-    params: z.object({ pageId: id, entityId: id, camera: viewportCamera, scene: z.string().nullable() }),
+    // `cameraModified`: the camera is no longer the scene's own, while the scene's other settings still apply.
+    params: z.object({ pageId: id, entityId: id, camera: viewportCamera, scene: z.string().nullable(), cameraModified: z.boolean().default(false) }),
     run: (ctx, params) => host(ctx).edit('Change View', draft => {
       const entity = editablePath(draft, params.pageId, params.entityId);
       if (!isViewport(entity)) throw new Error('Object is not a model view');
       entity.image.viewport.camera = params.camera;
       entity.image.viewport.scene = params.scene;
+      if (params.scene !== null && params.cameraModified) entity.image.viewport.cameraModified = true;
+      else delete entity.image.viewport.cameraModified;
     }),
   }),
   defineCommand({
@@ -1722,17 +1725,24 @@ export const layoutCommands: readonly AnyCommand[] = [
     title: 'Rotate Shape',
     category: 'layout',
     menu: 'Arrange',
-    params: z.object({ pageId: id, entityId: id, angleDeg: finite, pivot: point.optional() }),
+    // One object turns about its center unless a pivot is given; several objects turn together about the pivot.
+    params: z.object({ pageId: id, entityId: id.optional(), entityIds: z.array(id).min(1).optional(), angleDeg: finite, pivot: point.optional() })
+      .refine((params) => params.entityId !== undefined || (params.entityIds !== undefined && params.pivot !== undefined),
+        { message: 'entityId, or entityIds with a pivot, is required' }),
     undoable: true,
     run: (ctx, params) =>
       host(ctx).edit('Rotate Shape', (draft) => {
-        const entity = editablePath(draft, params.pageId, params.entityId);
-        const pivot = params.pivot ?? (entity.text ? layoutTextCenter(entity) : pathCenter(entity.kind === 'path'
-          ? flattenLayoutPath(entity.points, entity.handles, entity.closed, 20, entity.contourStarts) : entity.points));
-        const rotated = rotateLayoutEntity(entity, pivot, params.angleDeg);
-        entity.points = rotated.points; entity.handles = rotated.handles;
-        if (rotated.text) entity.text = rotated.text;
-        if (entity.dimension && rotated.dimension?.angleDeg !== undefined) entity.dimension.angleDeg = rotated.dimension.angleDeg;
+        const entities = [...new Set(params.entityIds ?? [params.entityId!])].map(entityId => editablePath(draft, params.pageId, entityId));
+        const first = entities[0]!;
+        const pivot = params.pivot ?? (first.text ? layoutTextCenter(first) : pathCenter(first.kind === 'path'
+          ? flattenLayoutPath(first.points, first.handles, first.closed, 20, first.contourStarts) : first.points));
+        const rotated = rotateLayoutEntities(entities, pivot, params.angleDeg);
+        entities.forEach((entity, index) => {
+          const next = rotated[index]!;
+          entity.points = next.points; entity.handles = next.handles;
+          if (next.text) entity.text = next.text;
+          if (next.dimension) entity.dimension = next.dimension;
+        });
       }),
   }),
   defineCommand({
@@ -1740,14 +1750,32 @@ export const layoutCommands: readonly AnyCommand[] = [
     title: 'Scale Shape',
     category: 'layout',
     menu: 'Arrange',
+    // One object scales in its own frame, keeping its type; several scale together along the page's axes about the
+    // pivot, their type with them (`scaleLayoutEntities`).
     params: z.object({
-      pageId: id, entityId: id,
+      pageId: id, entityId: id.optional(), entityIds: z.array(id).min(1).optional(),
       scaleX: finite.positive(), scaleY: finite.positive(), pivot: point.optional(),
-    }),
+    }).refine((params) => params.entityId !== undefined || (params.entityIds !== undefined && params.pivot !== undefined),
+      { message: 'entityId, or entityIds with a pivot, is required' }),
     undoable: true,
     run: (ctx, params) =>
       host(ctx).edit('Scale Shape', (draft) => {
-        const entity = editablePath(draft, params.pageId, params.entityId);
+        if (params.entityIds) {
+          const entities = [...new Set(params.entityIds)].map(entityId => editablePath(draft, params.pageId, entityId));
+          const scaled = scaleLayoutEntities(entities, params.pivot!, params.scaleX, params.scaleY);
+          entities.forEach((entity, index) => {
+            const next = scaled[index]!;
+            entity.points = next.points; entity.handles = next.handles;
+            if (next.text) entity.text = next.text;
+            if (next.image) entity.image = next.image;
+            if (next.table) entity.table = next.table;
+            if (next.dimension) entity.dimension = next.dimension;
+            if (next.angularDimension) entity.angularDimension = next.angularDimension;
+            if (entity.table && !validTableFrame(entity.points)) throw new Error('Invalid table size');
+          });
+          return;
+        }
+        const entity = editablePath(draft, params.pageId, params.entityId!);
         const pivot = params.pivot ?? pathCenter(entity.kind === 'path'
           ? flattenLayoutPath(entity.points, entity.handles, entity.closed, 20, entity.contourStarts) : entity.points);
         const angle = entity.image || entity.table ? Math.atan2(entity.points[1]![1] - entity.points[0]![1], entity.points[1]![0] - entity.points[0]![0]) : 0;

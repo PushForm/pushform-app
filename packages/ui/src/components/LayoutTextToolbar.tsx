@@ -14,7 +14,7 @@ function emphasisActive(text: LayoutText, range: Range, key: Emphasis): boolean 
   return true;
 }
 
-/** Contextual formatting in the right-side tool pane while an inline text editor is active. */
+/** Formatting in the tool options bar while an inline text editor is active: one row of style controls. */
 export function LayoutTextToolbar({ text, range, getSelection, onCaptureSelection, onChange, onReturnToText, onFinish }: {
   text: LayoutText; range: Range; getSelection: () => Range; onCaptureSelection: (range: Range) => void;
   onChange: (patch: Partial<LayoutText>, returnFocus?: boolean) => void;

@@ -211,7 +211,7 @@ export class InferenceEngineImpl implements InferenceEngine {
 
   private pickOptions(opts: InferenceOptions): { kinds: InferenceOptions['kinds']; ignore: InferenceOptions['ignore']; context: readonly Id[]; dimensions: boolean } {
     // Dimensions are picked by selection (a pick-only query for any kind) or when asked for by kind.
-    return { kinds: opts.kinds, ignore: opts.ignore, context: opts.context ?? this.ctxPath, dimensions: (!!opts.pickOnly && !opts.kinds) || !!opts.kinds?.includes('dimension') };
+    return { kinds: opts.kinds, ignore: opts.ignore, context: opts.context ?? this.ctxPath, dimensions: ((!!opts.pickOnly || !!opts.annotations) && !opts.kinds) || !!opts.kinds?.includes('dimension') };
   }
 
   /** Screen projector used by `pickBox`; remembered from the last input that carried one. */

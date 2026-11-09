@@ -8,6 +8,7 @@ import type { EntityRef } from '@pushform/model';
 import { CommandRegistry } from '../../registry/CommandRegistry';
 import { editCommands } from '../../registry/editCommands';
 import { sketchCommands } from '../../commands/sketch';
+import { guideCommands } from '../../commands/guides';
 import { DocumentHost } from '../../host/DocumentHost';
 import { SERVICE_DOCUMENT, SERVICE_INFERENCE } from '../../host/services';
 import type { CameraHost, CameraState } from '../../camera/CameraHost';
@@ -127,8 +128,14 @@ const faceHit = (id: number, faceId: number, p: Vec3): PickHit => ({
 });
 
 const key = (k: string, modifiers: Modifiers = NO_MODIFIERS) => ({ key: k, code: k, modifiers, repeat: false });
+/** Tap a modifier: press and release it with nothing between (how Ctrl and Alt reach tools). */
+const tap = (tools: ToolManager, k: string): boolean => {
+  tools.keyDown(key(k));
+  return tools.keyUp(key(k));
+};
 const CTRL: Modifiers = { ...NO_MODIFIERS, ctrl: true };
 const SHIFT: Modifiers = { ...NO_MODIFIERS, shift: true };
+const ALT: Modifiers = { ...NO_MODIFIERS, alt: true };
 
 function vertexPositions(s: { vertices: Map<Id, { p: Vec3 }> }): Vec3[] {
   return [...s.vertices.values()].map((v) => [+v.p[0].toFixed(6), +v.p[1].toFixed(6), +v.p[2].toFixed(6)]);
@@ -251,21 +258,21 @@ describe('LineTool', () => {
     const { tools } = setup();
     tools.activate('line');
     expect(tools.activeTool?.inferenceOptions?.().snapping).toBe('all');
-    tools.keyDown(key('Alt'));
+    tap(tools, 'Alt');
     expect(tools.activeTool?.inferenceOptions?.().snapping).toBe('none');
     expect(tools.status().instructor).toBe('Select start point. Inference off (Alt).');
     tools.click(at([0, 0, 0]));
-    tools.keyDown(key('Alt'));
+    tap(tools, 'Alt');
     expect(tools.activeTool?.inferenceOptions?.().snapping).toBe('directional');
     expect(tools.status().instructor).toBe('Select end point or enter value. Parallel and perpendicular inference only (Alt).');
     tools.keyDown({ ...key('Alt'), repeat: true });
     expect(tools.activeTool?.inferenceOptions?.().snapping).toBe('directional');
-    tools.keyDown(key('Alt'));
+    tap(tools, 'Alt');
     expect(tools.activeTool?.inferenceOptions?.().snapping).toBe('all');
     expect(tools.status().instructor).toBe('Select end point or enter value.');
     // Choosing the tool again starts with all inferences once no line is in progress; a line in
     // progress continues as it was.
-    tools.keyDown(key('Alt'));
+    tap(tools, 'Alt');
     tools.activate('select');
     tools.activate('line');
     expect(tools.activeTool?.inferenceOptions?.().snapping).toBe('none');
@@ -338,6 +345,32 @@ describe('RectangleTool', () => {
     expect(sketch().faces.size).toBe(2);
   });
 
+  it('typed dimensions and a re-edit after the commit keep the side the pointer is on', () => {
+    const { tools, sketch, host } = setup();
+    const vcb = (text: string) => {
+      const v = parseVcb(text, 'in');
+      if (v.ok) tools.onVcb(v.value);
+    };
+    tools.activate('rectangle');
+    tools.click(at([0, 0, 0]));
+    tools.pointerMove(at([-0.5, -0.5, 0])); // toward −x/−y
+    vcb('2m,3m');
+    expect(host.undoStack.length).toBe(1);
+    expect(vertexPositions(sketch()).sort()).toEqual([[-2, -3, 0], [-2, 0, 0], [0, -3, 0], [0, 0, 0]].sort());
+    // re-edit after the commit: the rectangle stays on that side
+    vcb('4m,5m');
+    expect(host.undoStack.length).toBe(1);
+    expect(vertexPositions(sketch()).sort()).toEqual([[-4, -5, 0], [-4, 0, 0], [0, -5, 0], [0, 0, 0]].sort());
+    // the Width and Height fields after the commit re-edit the same way
+    const one = parseVcb('1m', 'in');
+    if (one.ok) tools.onEntry({ width: one.value });
+    expect(host.undoStack.length).toBe(1);
+    expect(vertexPositions(sketch()).sort()).toEqual([[-1, -5, 0], [-1, 0, 0], [0, -5, 0], [0, 0, 0]].sort());
+    // a negative value takes the other side of the first corner
+    vcb(',-2m');
+    expect(vertexPositions(sketch()).sort()).toEqual([[-1, 0, 0], [-1, 2, 0], [0, 0, 0], [0, 2, 0]].sort());
+  });
+
   it('shows Square / Golden Section hints within 2 px and snaps to them', () => {
     const { tools, sketch } = setup();
     tools.activate('rectangle');
@@ -403,6 +436,18 @@ describe('SelectTool', () => {
     expect(host.undoStack.length).toBe(0); // selection is not undoable
   });
 
+  it('Alt is not Ctrl: Alt+click replaces the selection and Alt+Shift+click toggles', () => {
+    const { tools, host } = setup();
+    tools.activate('select');
+    tools.click(at([0, 0, 0], { hit: FACE }));
+    tools.click(at([1, 0, 0], { hit: FACE2, modifiers: ALT }));
+    expect(host.selection.refs).toEqual([FACE2.ref]);
+    tools.click(at([0, 0, 0], { hit: FACE, modifiers: { ...ALT, shift: true } }));
+    expect(host.selection.size).toBe(2);
+    tools.click(at([0, 0, 0], { hit: FACE, modifiers: { ...ALT, shift: true } }));
+    expect(host.selection.refs).toEqual([FACE2.ref]);
+  });
+
   it('double-click a sketch face selects it with its edges, triple-click all connected, body face → body', () => {
     const { tools, host, registry, sketch } = setup();
     registry.execute('sketch.rectangle', { a: [0, 0, 0], b: [1, 0, 0], c: [1, 1, 0], d: [0, 1, 0] });
@@ -462,6 +507,53 @@ describe('SelectTool', () => {
     expect(host.selection.isEmpty).toBe(true);
     expect(tools.keyDown(key('Backspace'))).toBe(true); // nothing selected: consumed, no-op
   });
+
+  it('Esc during a box drag cancels it and the release and trailing click change nothing', () => {
+    const calls: unknown[] = [];
+    const engine = {
+      pickBox(rect: unknown) {
+        calls.push(rect);
+        return [{ kind: 'sketchEdge', path: [], id: 99 as Id }];
+      },
+    };
+    const { tools, host } = setup([[SERVICE_INFERENCE, engine]]);
+    tools.activate('select');
+    host.selection.set([FACE.ref]);
+    for (const hit of [FACE2, null]) {
+      tools.pointerDown(at([0, 0, 0]));
+      tools.pointerMove(at([1, -1, 0], { button: -1, buttons: 1 }));
+      tools.keyDown(key('Escape'));
+      expect(tools.overlay().filter((o) => o.kind === 'screenRect')).toEqual([]);
+      tools.pointerUp(at([1, -1, 0], { hit }));
+      tools.click(at([1, -1, 0], { hit }));
+      expect(calls).toEqual([]);
+      expect(host.selection.refs).toEqual([FACE.ref]);
+    }
+    // the next click is an ordinary one again
+    tools.pointerDown(at([1, 0, 0], { hit: FACE2 }));
+    tools.pointerUp(at([1, 0, 0], { hit: FACE2 }));
+    tools.click(at([1, 0, 0], { hit: FACE2 }));
+    expect(host.selection.refs).toEqual([FACE2.ref]);
+  });
+
+  it('Esc during a box drag over a set-aside tool stays in Select; the trailing click reaches no tool', () => {
+    const { tools, host, sketch } = setup();
+    tools.activate('rectangle');
+    tools.click(at([0, 0, 0]));
+    expect(tools.activeTool?.hasPendingWork?.()).toBe(true);
+    tools.activate('select');
+    expect(tools.parkedToolId).toBe('rectangle');
+    tools.pointerDown(at([2, 0, 0]));
+    tools.pointerMove(at([3, -1, 0], { button: -1, buttons: 1 }));
+    tools.keyDown(key('Escape'));
+    expect(tools.activeTool?.id).toBe('select');
+    tools.pointerUp(at([3, -1, 0]));
+    tools.click(at([3, -1, 0]));
+    expect(sketch().edges.size).toBe(0);
+    expect(host.undoStack.length).toBe(0);
+    tools.keyDown(key('Escape'));
+    expect(tools.activeTool?.id).toBe('rectangle');
+  });
 });
 
 describe('LassoTool', () => {
@@ -495,6 +587,38 @@ describe('LassoTool', () => {
     expect(calls).toEqual([{ outline: [[400, 300], [500, 300], [500, 400], [400, 400]], mode: 'crossing' }]);
     expect(host.selection.refs).toEqual([{ kind: 'sketchEdge', path: [], id: 99 }]);
     expect(tools.overlay()).toEqual([]);
+  });
+
+  it('Alt is not Ctrl: an Alt lasso replaces the selection', () => {
+    const { tools, host } = lassoSetup();
+    host.selection.set([{ kind: 'sketchEdge', path: [], id: 1 as Id }]);
+    tools.activate('lasso');
+    for (const p of [[0, 0, 0], [1, 0, 0], [1, 1, 0]] as Vec3[]) tools.click(at(p));
+    tools.doubleClick(at([1, 1, 0], { modifiers: ALT }));
+    expect(host.selection.refs).toEqual([{ kind: 'sketchEdge', path: [], id: 99 }]);
+  });
+
+  it('Esc during a freehand drag drops the outline; the release and trailing click add no point', () => {
+    const { tools, host, calls } = lassoSetup();
+    host.selection.set([{ kind: 'sketchEdge', path: [], id: 1 as Id }]);
+    tools.activate('lasso');
+    const lasso = tools.activeTool as LassoTool;
+    tools.pointerDown(at([0, 0, 0]));
+    for (const p of [[1, 0, 0], [1, -1, 0]] as Vec3[]) tools.pointerMove(at(p, { button: -1, buttons: 1 }));
+    tools.keyDown(key('Escape'));
+    expect(lasso.outline).toHaveLength(0);
+    tools.pointerMove(at([0, -1, 0], { button: -1, buttons: 1 }));
+    tools.pointerUp(at([0, -1, 0]));
+    tools.click(at([0, -1, 0]));
+    expect(lasso.outline).toHaveLength(0);
+    expect(tools.overlay()).toEqual([]);
+    expect(calls).toEqual([]);
+    expect(host.selection.refs).toEqual([{ kind: 'sketchEdge', path: [], id: 1 }]);
+    // the next click starts a click outline as usual
+    tools.pointerDown(at([0, 0, 0]));
+    tools.pointerUp(at([0, 0, 0]));
+    tools.click(at([0, 0, 0]));
+    expect(lasso.outline).toHaveLength(1);
   });
 
   it('clicked points close on double-click or Enter with Select modifiers; Esc drops the outline', () => {
@@ -547,6 +671,74 @@ describe('EraserTool', () => {
     host.undo();
     expect(sketch().edges.size).toBe(4);
     expect(sketch().faces.size).toBe(1);
+  });
+
+  it('erases a guide together with the edges of the same stroke in one undo step; modifiers leave guides alone', () => {
+    const { tools, host, registry, sketch } = setup();
+    registry.registerAll(guideCommands);
+    rectangle(registry);
+    registry.execute('guides.addLine', { point: [0, 0.5, 0], dir: [1, 0, 0] });
+    const guides = () => host.doc.rootDefinition.entities.guides;
+    const guideId = [...guides().keys()][0]!;
+    const guideHit: PickHit = { ref: { kind: 'guide', path: [], id: guideId }, point: [0.5, 0.5, 0], t: 9, screenDist: 0 };
+    const e1 = [...sketch().edges.keys()][0]!;
+    tools.activate('eraser');
+    tools.click(at([0.5, 0.5, 0], { hit: guideHit, modifiers: SHIFT }));
+    tools.click(at([0.5, 0.5, 0], { hit: guideHit, modifiers: CTRL }));
+    expect(guides().has(guideId)).toBe(true);
+    const undoDepth = host.undoStack.length;
+    tools.pointerDown(at([0.5, 0.5, 0], { hit: guideHit }));
+    expect((tools.activeTool as EraserTool).markedRefs).toEqual([guideHit.ref]);
+    tools.pointerMove(at([0.5, 0, 0], { button: -1, buttons: 1, hit: edgeHit(e1, [0.5, 0, 0]) }));
+    tools.pointerUp(at([0.5, 0, 0], { hit: edgeHit(e1, [0.5, 0, 0]) }));
+    tools.click(at([0.5, 0, 0], { hit: edgeHit(e1, [0.5, 0, 0]) }));
+    expect(guides().size).toBe(0);
+    expect(sketch().edges.size).toBe(3);
+    expect(host.undoStack.length).toBe(undoDepth + 1);
+    host.undo();
+    expect(guides().has(guideId)).toBe(true);
+    expect(sketch().edges.size).toBe(4);
+  });
+
+  it('leaves a guide outside the open context alone', () => {
+    const { tools, host, registry } = setup();
+    registry.registerAll(guideCommands);
+    registry.execute('guides.addLine', { point: [0, 0.5, 0], dir: [1, 0, 0] });
+    const guideId = [...host.doc.rootDefinition.entities.guides.keys()][0]!;
+    const elsewhere: PickHit = { ref: { kind: 'guide', path: [123 as Id], id: guideId }, point: [0.5, 0.5, 0], t: 9, screenDist: 0 };
+    tools.activate('eraser');
+    tools.click(at([0.5, 0.5, 0], { hit: elsewhere }));
+    expect(host.doc.rootDefinition.entities.guides.has(guideId)).toBe(true);
+  });
+
+  it('Esc during a drag erases nothing, on release or on the trailing click', () => {
+    const { tools, host, registry, sketch } = setup();
+    rectangle(registry);
+    const [e1, e2] = [...sketch().edges.keys()];
+    tools.activate('eraser');
+    tools.pointerDown(at([0.5, 0, 0], { hit: edgeHit(e1!, [0.5, 0, 0]) }));
+    tools.pointerMove(at([1, 0.5, 0], { button: -1, buttons: 1, hit: edgeHit(e2!, [1, 0.5, 0]) }));
+    tools.keyDown(key('Escape'));
+    expect((tools.activeTool as EraserTool).markedRefs).toHaveLength(0);
+    tools.pointerUp(at([1, 0.5, 0], { hit: edgeHit(e2!, [1, 0.5, 0]) }));
+    tools.click(at([1, 0.5, 0], { hit: edgeHit(e2!, [1, 0.5, 0]) }));
+    expect(sketch().edges.size).toBe(4);
+    expect(host.undoStack.length).toBe(1); // only the rectangle
+    // the next click erases as usual
+    tools.pointerDown(at([1, 0.5, 0], { hit: edgeHit(e2!, [1, 0.5, 0]) }));
+    tools.pointerUp(at([1, 0.5, 0], { hit: edgeHit(e2!, [1, 0.5, 0]) }));
+    tools.click(at([1, 0.5, 0], { hit: edgeHit(e2!, [1, 0.5, 0]) }));
+    expect(sketch().edges.size).toBe(3);
+  });
+
+  it('Alt is not Ctrl: Alt+click erases the edge instead of softening it', () => {
+    const { tools, registry, sketch } = setup();
+    rectangle(registry);
+    const e1 = [...sketch().edges.keys()][0]!;
+    tools.activate('eraser');
+    tools.click(at([0.5, 0, 0], { hit: edgeHit(e1, [0.5, 0, 0]), modifiers: ALT }));
+    expect(sketch().edges.has(e1)).toBe(false);
+    expect(sketch().edges.size).toBe(3);
   });
 
   it('Shift hides, Ctrl softens, Ctrl+Shift unsoftens; body edges are a no-op with a message', () => {

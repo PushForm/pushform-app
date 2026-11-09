@@ -22,3 +22,18 @@ it('detects stale HTML, unavailable assets and incorrect asset bytes after a pub
     await expect(check(html, 200, 'wrong application')).rejects.toThrow('does not match');
   } finally { await rm(dist, { recursive: true, force: true }); }
 });
+
+it('checks the hashed assets of an Astro build', async () => {
+  const dist = await mkdtemp(join(tmpdir(), 'static-deploy-check-'));
+  const html = '<link rel="stylesheet" href="/_astro/common.Dc0m0a4Y.css"><script type="module" src="/_astro/page.cNngjUgL.js"></script>';
+  try {
+    await mkdir(join(dist, '_astro'));
+    await writeFile(join(dist, 'index.html'), html);
+    await writeFile(join(dist, '_astro/page.cNngjUgL.js'), 'page script');
+    await writeFile(join(dist, '_astro/common.Dc0m0a4Y.css'), 'page styles');
+    const files = { '/_astro/page.cNngjUgL.js': 'page script', '/_astro/common.Dc0m0a4Y.css': 'page styles' };
+    const check = async (liveHtml = html) => verifyStaticDeploy('https://example.com', dist, async url => new Response(url.pathname === '/' ? liveHtml : files[url.pathname]));
+    expect(await check()).toContain('2 build assets');
+    await expect(check(html.replace('page.cNngjUgL', 'page.older'))).rejects.toThrow('does not reference this build');
+  } finally { await rm(dist, { recursive: true, force: true }); }
+});

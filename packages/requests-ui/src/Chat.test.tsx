@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { RequestsClient, type Brief, type ScreenInfo } from './client';
 import { readDrafts, rememberDraft } from './drafts';
 import { BASE, FAKE_OPENER, fakeBackend, filedTurn, makeFiledRequest, type FakeBackendOptions, type FakeTurn } from './fakeBackend';
-import { Chat, GREETING } from './Chat';
+import { Chat, GREETING, type ClonedDocument, type CloneRequest, type DocumentToolSession, type PreparedPublication, type PublishedModel } from './Chat';
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); localStorage.clear(); document.body.innerHTML = ''; });
 const account = { id: 'alice', email: 'artist@example.com' };
@@ -662,8 +662,8 @@ describe('Chat docked', () => {
     expect((await cards()).map(button => button.querySelector('strong')?.textContent)).toEqual(CARD_NAMES);
     await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Your message')));
   });
-  it('stays open on a click outside or an Escape outside, hides on Escape inside and returns focus to its icon', async () => {
-    const { anchor, onClose, view, client } = setup({}, { placement: 'docked' });
+  it('stays open on a click outside and on Escape, inside or outside', async () => {
+    const { anchor, onClose, view, client, workspaceKeys } = setup({}, { placement: 'docked' });
     const composer = await screen.findByLabelText('Your message');
     fireEvent.pointerDown(document.body);
     fireEvent.mouseDown(document.body);
@@ -671,13 +671,15 @@ describe('Chat docked', () => {
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(onClose).not.toHaveBeenCalled();
     fireEvent.change(composer, { target: { value: 'kept' } });
+    workspaceKeys.mockClear();
     fireEvent.keyDown(composer, { key: 'Escape' });
-    expect(onClose).toHaveBeenCalledTimes(1);
-    expect(document.activeElement).toBe(anchor);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(workspaceKeys).not.toHaveBeenCalled();
+    expect(screen.getByRole('region', { name: 'AI Chat' })).toBeTruthy();
     view.rerender(<Chat client={client} account={account} screen={screenInfo} anchor={anchor} onClose={onClose} placement="docked" open={false} />);
     expect(screen.queryByRole('region', { name: 'AI Chat' })).toBeNull();
     fireEvent.keyDown(composer, { key: 'Escape' });
-    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
     view.rerender(<Chat client={client} account={account} screen={screenInfo} anchor={anchor} onClose={onClose} placement="docked" open />);
     expect((screen.getByLabelText('Your message') as HTMLTextAreaElement).value).toBe('kept');
     await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Your message')));
@@ -1038,5 +1040,141 @@ describe('render review and progress', () => {
     expect(log().textContent).toContain('A 24 in base cabinet. Starting on it now.');
     // The greeting, the requester, then one label over the acknowledgment and the reply that follows it.
     expect([...log().querySelectorAll('.pf-fr-role')].map(el => el.textContent)).toEqual(['Agent', 'You', 'Agent']);
+  });
+});
+
+describe('cloning the document', () => {
+  const MODEL = { type: 'model', apiVersion: 1, edit: 1, clone: 1 } as const;
+  const proposal = { id: 'c1', name: 'document_clone', input: { name: 'Bookcase 36 in wide', summary: 'A 30 in bookcase; make it 36 in wide.' } };
+  const proposed: FakeTurn[] = [text('I can make a copy.'), { event: 'tool_request', data: { calls: [proposal] } },
+    { event: 'done', data: { messageCount: 1, limitReached: false, ended: false, awaitingTools: true } }];
+  type Clone = (request: CloneRequest) => Promise<ClonedDocument>;
+  const tools = (clone: Clone) => (): DocumentToolSession => ({ document: MODEL, name: 'Bookcase', run: () => ({ content: '{}', isError: false }), clone });
+  const card = async (): Promise<HTMLElement> => screen.findByRole('region', { name: 'Clone this document?' });
+
+  it('asks first, then clones under the name on the card and ends the turn with the clone made', async () => {
+    const show = vi.fn();
+    const clone = vi.fn<Clone>(async request => ({ name: request.name, show }));
+    const { backend } = setup({ turns: [proposed, [done(1)]] }, { documentTools: tools(clone) });
+    await say('clone this model, but make it 36 wide');
+    const asked = await card();
+    expect(asked.textContent).toContain('A copy of Bookcase opens in a new tab as an unsaved document');
+    expect(within(asked).getByRole('button', { name: 'Copy within this model' })).toBeTruthy();
+    expect(clone).not.toHaveBeenCalled();
+    fireEvent.change(within(asked).getByLabelText('Name of the copy'), { target: { value: 'Wide bookcase' } });
+    fireEvent.click(within(asked).getByRole('button', { name: 'Clone document' }));
+    await waitFor(() => expect(log().textContent).toContain('Cloned to Wide bookcase.'));
+    expect(clone).toHaveBeenCalledWith({ name: 'Wide bookcase', summary: 'A 30 in bookcase; make it 36 in wide.', request: 'clone this model, but make it 36 wide' });
+    await waitFor(() => expect(backend.calls.find(c => c.path.endsWith('/tool-results'))?.body).toEqual({ results: [{ toolUseId: 'c1', content: JSON.stringify({ ok: true, choice: 'clone', name: 'Wide bookcase' }), isError: false }] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show it' }));
+    expect(show).toHaveBeenCalled();
+  });
+
+  it('reports Copy within and Cancel to the agent without cloning', async () => {
+    for (const [choice, button, line] of [['copy', 'Copy within this model', 'Copying within this document instead.'], ['cancel', 'Cancel', 'Not cloned.']] as const) {
+      const clone = vi.fn<Clone>();
+      const { backend } = setup({ turns: [proposed, [done(1)]] }, { documentTools: tools(clone) });
+      await say('make a copy of this');
+      fireEvent.click(within(await card()).getByRole('button', { name: button }));
+      await waitFor(() => expect(log().textContent).toContain(line));
+      await waitFor(() => expect(backend.calls.find(c => c.path.endsWith('/tool-results'))?.body).toEqual({ results: [{ toolUseId: 'c1', content: JSON.stringify({ ok: true, choice }), isError: false }] }));
+      expect(clone).not.toHaveBeenCalled();
+      cleanup();
+    }
+  });
+
+  it('reports a clone that could not be made as an error result', async () => {
+    const clone = vi.fn<Clone>(async () => { throw new Error('A downloaded update must be installed before another document opens.'); });
+    const { backend } = setup({ turns: [proposed, [text('The copy could not be made.'), done(1)]] }, { documentTools: tools(clone) });
+    await say('clone this');
+    fireEvent.click(within(await card()).getByRole('button', { name: 'Clone document' }));
+    await waitFor(() => expect(log().textContent).toContain('Not cloned. A downloaded update must be installed'));
+    await waitFor(() => expect(backend.calls.find(c => c.path.endsWith('/tool-results'))?.body).toMatchObject({ results: [{ toolUseId: 'c1', isError: true }] }));
+  });
+
+  it('leaves an unanswered card not cloned when the requester sends another message', async () => {
+    const clone = vi.fn<Clone>();
+    const { backend } = setup({ turns: [proposed, [text('Okay.'), done(2)]] }, { documentTools: tools(clone) });
+    await say('clone this');
+    await card();
+    await say('never mind');
+    await waitFor(() => expect(log().textContent).toContain('Not cloned.'));
+    expect(screen.queryByRole('region', { name: 'Clone this document?' })).toBeNull();
+    expect(backend.calls.some(c => c.path.endsWith('/tool-results'))).toBe(false);
+    expect(clone).not.toHaveBeenCalled();
+  });
+
+  it('opens a clone\'s chat from the handoff and sends the request that made it, without the greeting', async () => {
+    const onHandoffStarted = vi.fn(), onMessage = vi.fn();
+    const { backend } = setup({ turns: [[text('Widening it to 36 in.'), done(1)]] }, { documentTools: tools(vi.fn<Clone>()), onMessage, onHandoffStarted,
+      handoff: { from: 'Bookcase', summary: 'A 30 in bookcase; make it 36 in wide.', request: 'clone this model, but make it 36 wide' } });
+    await waitFor(() => expect(log().textContent).toContain('Widening it to 36 in.'));
+    const lines = [...log().querySelectorAll('.pf-fr-message')].map(el => el.textContent ?? '');
+    expect(lines.slice(0, 3)).toEqual(['Continued from Bookcase', 'AgentA 30 in bookcase; make it 36 in wide.', 'Youclone this model, but make it 36 wide']);
+    expect(log().textContent).not.toContain(GREETING);
+    expect(backend.calls.find(c => c.path.endsWith('/messages'))?.body).toMatchObject({ text: 'clone this model, but make it 36 wide',
+      handoff: { from: 'Bookcase', summary: 'A 30 in bookcase; make it 36 in wide.' }, document: MODEL });
+    expect(onHandoffStarted).toHaveBeenCalledTimes(1);
+    expect(onMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe('saving and publishing', () => {
+  const MODEL = { type: 'model', apiVersion: 1, edit: 1, save: 1, publish: 1 } as const;
+  const awaiting: FakeTurn = { event: 'done', data: { messageCount: 1, limitReached: false, ended: false, awaitingTools: true } };
+  const proposal = { id: 'p1', name: 'commons_publish_propose', input: { title: 'Shaker base', collections: ['Shaker cabinets'] } };
+  const prepared: PreparedPublication = { revision: 4, savedLine: 'Saved version 4.', update: false, title: 'Shaker base', description: 'A 30 in base cabinet.', category: 'Cabinets and built-ins',
+    license: { name: 'CC BY 4.0', summary: 'Others may share and adapt it, even commercially, with credit.', url: 'https://creativecommons.org/licenses/by/4.0/' }, retained: null,
+    collections: [{ name: 'Shaker cabinets', isNew: false }, { name: 'Kitchens', isNew: true }], host: null };
+  type Publish = (prepared: PreparedPublication, auto: boolean) => Promise<PublishedModel | null>;
+  const session = (publish: Publish, prepare = vi.fn(async () => prepared)) => (): DocumentToolSession =>
+    ({ document: MODEL, name: 'Shaker base', run: () => ({ content: '{}', isError: false }), preparePublication: prepare, publish });
+  const card = async (): Promise<HTMLElement> => screen.findByRole('region', { name: 'Publish to Commons' });
+
+  it('shows a save\'s own line beside the change line', async () => {
+    const run = vi.fn(() => ({ content: '{"ok":true,"version":5,"saved":true}', isError: false, line: 'Saved version 5.' }));
+    setup({ turns: [[{ event: 'tool_request', data: { calls: [{ id: 's1', name: 'document_save', input: {} }] } }, awaiting], [text('Saved.'), done(1)]] },
+      { documentTools: () => ({ document: MODEL, run }) });
+    await say('save it');
+    await waitFor(() => expect(log().textContent).toContain('Saved version 5.'));
+  });
+
+  it('proposes on a card after saving, and publishes only when Publish is chosen', async () => {
+    const publish = vi.fn<Publish>(async () => ({ title: 'Shaker base', url: 'https://commons.pushform.io/#models/design-1', failedCollections: [] }));
+    const { backend } = setup({ turns: [[text('Here it is.'), { event: 'tool_request', data: { calls: [proposal] } }, awaiting], [done(1)]] }, { documentTools: session(publish) });
+    await say('publish this to commons in my shaker cabinet collection');
+    const shown = await card();
+    expect(log().textContent).toContain('Saved version 4.');
+    expect(shown.textContent).toContain('Private cloud revision 4');
+    expect(shown.textContent).toContain('Shaker cabinets, Kitchens (new, private)');
+    expect(shown.textContent).toContain('Publishing makes this model public under CC BY 4.0');
+    expect(publish).not.toHaveBeenCalled();
+    fireEvent.click(within(shown).getByRole('button', { name: 'Publish model' }));
+    await waitFor(() => expect(log().textContent).toContain('Published Shaker base.'));
+    expect(publish).toHaveBeenCalledWith(prepared, true);
+    expect(screen.getByRole('link', { name: 'Shaker base' }).getAttribute('href')).toBe('https://commons.pushform.io/#models/design-1');
+    await waitFor(() => expect(backend.calls.find(c => c.path.endsWith('/tool-results'))?.body).toEqual({ results: [{ toolUseId: 'p1',
+      content: JSON.stringify({ ok: true, outcome: 'published', title: 'Shaker base', url: 'https://commons.pushform.io/#models/design-1' }), isError: false }] }));
+  });
+
+  it('keeps the card when the dialog closes without publishing, and reports Cancel', async () => {
+    const publish = vi.fn<Publish>(async () => null);
+    const { backend } = setup({ turns: [[{ event: 'tool_request', data: { calls: [proposal] } }, awaiting], [done(1)]] }, { documentTools: session(publish) });
+    await say('publish this');
+    fireEvent.click(within(await card()).getByRole('button', { name: 'Edit details' }));
+    await waitFor(() => expect(publish).toHaveBeenCalledWith(prepared, false));
+    await waitFor(() => expect((within(screen.getByRole('region', { name: 'Publish to Commons' })).getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(within(await card()).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(log().textContent).toContain('Not published.'));
+    await waitFor(() => expect(backend.calls.find(c => c.path.endsWith('/tool-results'))?.body).toEqual({ results: [{ toolUseId: 'p1', content: JSON.stringify({ ok: true, outcome: 'cancel' }), isError: false }] }));
+  });
+
+  it('reports a publication that could not be prepared to the agent, without a card', async () => {
+    const prepare = vi.fn(async (): Promise<PreparedPublication> => { throw new Error('This model includes a source with a no-derivatives condition.'); });
+    const { backend } = setup({ turns: [[{ event: 'tool_request', data: { calls: [proposal] } }, awaiting], [text('It cannot be published.'), done(1)]] }, { documentTools: session(vi.fn<Publish>(), prepare) });
+    await say('publish this');
+    await waitFor(() => expect(log().textContent).toContain('It cannot be published.'));
+    expect(screen.queryByRole('region', { name: 'Publish to Commons' })).toBeNull();
+    expect(backend.calls.find(c => c.path.endsWith('/tool-results'))?.body).toMatchObject({ results: [{ toolUseId: 'p1', isError: true }] });
   });
 });

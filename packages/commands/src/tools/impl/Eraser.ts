@@ -6,15 +6,16 @@ import { entityRefKey } from '@pushform/model';
 import type { EntityRef } from '@pushform/model';
 import type { OverlayPrimitive } from '../overlay';
 import type { Modifiers, Tool, ToolContext, ToolPointerEvent, ToolStatus } from '../Tool';
-import { ctrlLike, entityOverlay, hostOfTool } from '../toolUtil';
+import { entityOverlay, hostOfTool } from '../toolUtil';
 import { samePath } from '../../commands/context';
 
 const ERASE_COLOR = '#1e63d1';
 const BODY_MESSAGE = 'Edges of a solid cannot be erased. Shift = hide, Ctrl = soften, or Push/Pull the face.';
 
 /**
- * Eraser tool (E). Click or drag over sketch edges (and mesh parts, which go whole); everything touched is highlighted
- * and erased on release in one undo step. Shift = hide, Ctrl = soften + smooth,
+ * Eraser tool (E). Click or drag over sketch edges (and mesh parts, which go whole), guides,
+ * dimensions and text of the open context; everything touched is highlighted and erased on
+ * release in one undo step. Shift = hide, Ctrl = soften + smooth,
  * Ctrl+Shift = unsoften. Body edges are a no-op with a status message in M1.
  */
 export class EraserTool implements Tool {
@@ -54,6 +55,8 @@ export class EraserTool implements Tool {
 
   onPointerDown(e: ToolPointerEvent): void {
     if (e.button !== 0) return;
+    // A new press means any click owed to the last release has come or never will.
+    this.suppressNextClick = false;
     this.dragging = true;
     this.marked.clear();
     this.message = null;
@@ -80,8 +83,11 @@ export class EraserTool implements Tool {
     this.applyMarked(e.modifiers);
   }
 
+  /** Esc drops the marked edges; pressed mid-drag, the click that follows the release is swallowed too. */
   onCancel(): void {
+    const wasDragging = this.dragging;
     this.reset();
+    this.suppressNextClick = wasDragging;
     this.ctx?.requestRender();
     this.ctx?.statusChanged();
   }
@@ -105,7 +111,7 @@ export class EraserTool implements Tool {
   private mark(e: ToolPointerEvent): void {
     const ref = e.inference?.hit?.ref;
     if (!ref) return;
-    if (ref.kind === 'sketchEdge' || ref.kind === 'imprintEdge' || ref.kind === 'edge' || ref.kind === 'meshPart' || ref.kind === 'dimension' || ref.kind === 'text') {
+    if (ref.kind === 'sketchEdge' || ref.kind === 'imprintEdge' || ref.kind === 'edge' || ref.kind === 'meshPart' || ref.kind === 'guide' || ref.kind === 'dimension' || ref.kind === 'text') {
       if (this.ctx && samePath(ref.path, hostOfTool(this.ctx).context.path)) this.marked.set(entityRefKey(ref), ref);
     } else if (ref.kind === 'face' || ref.kind === 'body') {
       this.message = BODY_MESSAGE;
@@ -117,11 +123,12 @@ export class EraserTool implements Tool {
     const marked = [...this.marked.values()];
     this.marked.clear();
     if (!this.ctx || marked.length === 0) return;
-    const ctrl = ctrlLike(m);
-    const flags = ctrl && m.shift ? { soft: false, smooth: false } : ctrl ? { soft: true, smooth: true } : m.shift ? { hidden: true } : null;
+    // Only Ctrl (Cmd on macOS) softens; Alt is not a modifier here.
+    const flags = m.ctrl && m.shift ? { soft: false, smooth: false } : m.ctrl ? { soft: true, smooth: true } : m.shift ? { hidden: true } : null;
     const ids = marked.filter((r) => r.kind === 'sketchEdge').map((r) => r.id as number);
     const imprints = marked.filter((r) => r.kind === 'imprintEdge');
     const bodyEdges = marked.filter((r) => r.kind === 'edge');
+    const guides = marked.filter((r) => r.kind === 'guide').map((r) => r.id as number);
     const dimensions = marked.filter((r) => r.kind === 'dimension').map((r) => r.id as number);
     const texts = marked.filter((r) => r.kind === 'text');
     const meshParts = marked.filter((r) => r.kind === 'meshPart');
@@ -136,7 +143,8 @@ export class EraserTool implements Tool {
         if (flags) this.ctx.commands.execute('edges.setFlags', { refs: imprints, ...flags });
         else this.ctx.commands.execute('imprint.erase', { refs: imprints });
       }
-      // Dimensions have no hidden or soft state: the modifiers leave them alone.
+      // Guides and dimensions have no hidden or soft state: the modifiers leave them alone.
+      if (guides.length && !flags) this.ctx.commands.execute('guides.delete', { ids: guides });
       if (dimensions.length && !flags) this.ctx.commands.execute('dimension.delete', { ids: dimensions });
       // so do texts
       if (texts.length && !flags) this.ctx.commands.execute('text.delete', { refs: texts });

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { z } from 'zod';
-import { planeBasis, planeFlip, PushFormError } from '@pushform/core';
-import type { FaceLocalId, Id, ImageId, MaterialId } from '@pushform/core';
+import { planeBasis, planeFlip, PushFormError, v3dot, v3len, v3scale, v3sub } from '@pushform/core';
+import type { FaceLocalId, Id, ImageId, MaterialId, PlaneBasis, Vec3 } from '@pushform/core';
 import {
   base64ToBytes,
   containerAt,
@@ -813,6 +813,18 @@ function setUv(draft: DocumentDraft, path: readonly number[], refs: readonly Ent
     n++;
   }
   return n;
+}
+
+/**
+ * A texture placement whose image grain (its width, or its height for `height`) runs along `grain` projected onto
+ * the face, or null when the grain runs square to the face, as on end grain. The placement is a rotation, so the
+ * image is never mirrored.
+ */
+export function grainMapping(basis: PlaneBasis, normal: Vec3, grain: Vec3, axis: 'width' | 'height'): UvMapping | null {
+  const g = v3sub(grain, v3scale(normal, v3dot(grain, normal)));
+  if (!(v3len(g) > 1e-6 * v3len(grain))) return null;
+  const angle = Math.atan2(v3dot(g, basis.v), v3dot(g, basis.u)) - (axis === 'height' ? Math.PI / 2 : 0), c = Math.cos(angle), s = Math.sin(angle);
+  return { kind: 'sized', matrix: [c, s, 0, -s, c, 0] };
 }
 
 export const texturePosition = defineCommand({

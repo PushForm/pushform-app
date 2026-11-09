@@ -1,0 +1,17 @@
+{
+  "name": "@pushform/docs",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "dev": "astro dev --port 4321",
+    "build": "astro build",
+    "preview": "astro preview --port 4321",
+    "check": "astro check"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.42.10",
+    "astro": "^7.4.7"
+  }
+}

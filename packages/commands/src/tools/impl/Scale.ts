@@ -8,13 +8,18 @@ import type { EntityRef } from '@pushform/model';
 import { m4scaleAbout, refsBounds } from '../../commands/transform';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
-import type { ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import { NO_MODIFIERS } from '../Tool';
+import type { Modifiers, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
 import { pointerField } from '../entry';
 import { DRAG_PX, entityOverlay, HOVER_COLOR, inferenceOverlay, screenDist } from '../toolUtil';
-import { AXIS_COLOR, AXIS_DIR, movedOutline, refsKey, TransformToolBase, worldToScreen } from './transformShared';
+import { AXIS_COLOR, AXIS_DIR, movedOutline, pickRef, refsKey, sectionPreviewFor, TransformToolBase, withoutSectionPlanes, worldToScreen } from './transformShared';
+import type { TransformCommit } from './transformShared';
+import type { SectionPreview, SectionPreviewTool } from '../sectionPreview';
 
 /** Grip pick radius in CSS px. */
 export const GRIP_PICK_PX = 8;
+/** Grips drawn within this many CSS px of each other overlap on screen: the one nearest the viewer is picked. */
+const GRIP_OVERLAP_PX = 3.5;
 const BOX_COLOR = '#e8c400';
 const GRIP_COLOR = '#2faa3c';
 const GRIP_HOVER_COLOR = '#e53935';
@@ -49,9 +54,22 @@ type State =
       readonly downScreen: Vec2;
       anchor: Vec3;
       factors: Vec3;
+      /** Whether the drag scales every axis by one factor (a corner grip, or an edge or face grip with Shift). */
+      uniform: boolean;
       pressed: boolean;
       moved: boolean;
     };
+
+/** What a committed scale needs for a typed redo: its anchor, factors, box and grip, and whether the drag was uniform. */
+interface ScaleEdit {
+  readonly anchor: Vec3;
+  factors: Vec3;
+  readonly size: Vec3;
+  readonly axes: readonly number[];
+  readonly dims: readonly number[];
+  readonly kind: GripKind;
+  readonly uniform: boolean;
+}
 
 const IDLE: State = { kind: 'idle' };
 
@@ -84,19 +102,27 @@ export function buildScaleBox(bounds: Box3): ScaleBox {
   return { bounds, center, size, dims, grips };
 }
 
-/** Nearest grip within `GRIP_PICK_PX` of the cursor, or null. */
+/**
+ * Nearest grip within `GRIP_PICK_PX` of the cursor, or null. Of grips that overlap on screen, such as a
+ * front and a back corner seen square on, the one nearest the viewer.
+ */
 export function pickGrip(box: ScaleBox, screen: Vec2, camera: ToolPointerEvent['camera'], viewport: { width: number; height: number }): ScaleGrip | null {
-  let best: ScaleGrip | null = null, bestD = GRIP_PICK_PX;
-  for (const g of box.grips) {
-    const s = worldToScreen(camera, viewport, g.pos);
-    if (!s) continue;
-    const d = screenDist(s, screen);
-    if (d <= bestD) {
-      bestD = d;
-      best = g;
-    }
+  const near: { grip: ScaleGrip; at: Vec2; d: number }[] = [];
+  for (const grip of box.grips) {
+    const at = worldToScreen(camera, viewport, grip.pos);
+    if (!at) continue;
+    const d = screenDist(at, screen);
+    if (d <= GRIP_PICK_PX) near.push({ grip, at, d });
   }
-  return best;
+  if (!near.length) return null;
+  const closest = near.reduce((a, b) => (b.d < a.d ? b : a));
+  const forward = v3normalize(v3sub(camera.target, camera.eye));
+  const depth = (p: Vec3): number => v3dot(v3sub(p, camera.eye), forward);
+  let best = closest;
+  for (const c of near) {
+    if (screenDist(c.at, closest.at) <= GRIP_OVERLAP_PX && depth(c.grip.pos) < depth(best.grip.pos) - LENGTH_TOL) best = c;
+  }
+  return best.grip;
 }
 
 /** Edges of the box (12 for a solid, 4 for a planar box, 1 for a line). */
@@ -125,9 +151,15 @@ function boxEdges(box: ScaleBox): Vec3[][] {
  * Scale (S). Yellow bounding box of the selection with green grips: corners scale uniformly,
  * edge midpoints two axes, face centres one axis. Drag a grip to scale about the opposite grip
  * (Ctrl or Alt = about the centre, Shift toggles uniform); commit on release or click. VCB: a factor,
- * `x,y,z` factors, a length with a unit (absolute size along the grip's axis); negative mirrors.
+ * `x,y,z` factors, a length with a unit (the size along a face grip's axis, or of the longest side an
+ * edge or corner grip scales, the others following uniformly); negative mirrors.
  */
-export class ScaleTool extends TransformToolBase {
+export class ScaleTool extends TransformToolBase implements SectionPreviewTool {
+  /** The last section preview and what it was made for, so an unchanged one is the same object. */
+  private sectionCache: { refs: readonly EntityRef[]; key: string; preview: SectionPreview | null } | null = null;
+
+  /** Modifiers of the last pointer event, for the held-key tags. */
+  private mods: Modifiers = NO_MODIFIERS;
   readonly id = 'scale';
   readonly title = 'Scale';
   readonly cursor = 'default';
@@ -141,7 +173,8 @@ export class ScaleTool extends TransformToolBase {
   private hover: EntityRef | null = null;
   private cursorInference: InferenceResult | null = null;
   private cursorScreen: Vec2 | null = null;
-  private lastScale: { anchor: Vec3; factors: Vec3; size: Vec3; axes: readonly number[]; dims: readonly number[] } | null = null;
+  /** What each commit this tool made scaled, for typed redos. */
+  private edits = new WeakMap<TransformCommit, ScaleEdit>();
 
   /** Current box (grips) of the selection, or null when nothing is selected. */
   get scaleBox(): ScaleBox | null {
@@ -158,6 +191,7 @@ export class ScaleTool extends TransformToolBase {
 
   protected override onActivate(): void {
     this.state = IDLE;
+    this.mods = NO_MODIFIERS;
     this.boxKey = '';
     this.box = null;
     this.refresh();
@@ -173,11 +207,31 @@ export class ScaleTool extends TransformToolBase {
     this.hover = null;
   }
 
+  /** Section planes being scaled, drawn and cutting where the scale would put them. */
+  get sectionPreview(): SectionPreview | null {
+    const s = this.state, state = this.docState();
+    if (s.kind !== 'scaling' || !state) return null;
+    const key = `${s.anchor.join(',')}|${s.factors.join(',')}`;
+    const cached = this.sectionCache;
+    if (cached && cached.refs === s.refs && cached.key === key) return cached.preview;
+    const preview = sectionPreviewFor(state, s.refs, m4scaleAbout(s.anchor, s.factors), false);
+    this.sectionCache = { refs: s.refs, key, preview };
+    return preview;
+  }
+
   inferenceOptions(): InferenceOptions {
     const s = this.state;
     if (s.kind !== 'scaling') return { pickOnly: this.box !== null };
     const g = s.grip;
     const base = { anchor: g.pos, ignore: s.refs };
+    if (g.kind === 'corner' && !s.uniform && s.box.dims.length > 1) {
+      // Shift on a corner scales each axis freely: no diagonal lock (only the flat box's own plane)
+      if (s.box.dims.length === 3) return base;
+      const flat = [0, 1, 2].find((a) => !s.box.dims.includes(a))!;
+      const normal = AXIS_DIR[(['x', 'y', 'z'] as const)[flat]!];
+      const lock: Snap = { kind: 'onPlane', point: g.pos, plane: planeFromPointNormal(g.pos, normal), color: SNAP_COLORS.onPlane, label: 'On Plane' };
+      return { ...base, lockSnap: lock };
+    }
     if (g.kind === 'face' || (g.kind === 'corner' && s.box.dims.length === 1)) {
       const a = g.axes[0]!;
       const axis = (['x', 'y', 'z'] as const)[a]!;
@@ -201,11 +255,13 @@ export class ScaleTool extends TransformToolBase {
   // --- pointer --------------------------------------------------------------------------------
 
   onPointerMove(e: ToolPointerEvent): void {
+    this.mods = e.modifiers;
     this.cursorInference = e.inference;
     this.cursorScreen = e.screen;
     const s = this.state;
     if (s.kind === 'scaling') {
       if (!s.moved && screenDist(e.screen, s.downScreen) > DRAG_PX) s.moved = true;
+      s.uniform = this.isUniform(s.grip, e.modifiers.shift);
       s.anchor = e.modifiers.ctrl || e.modifiers.alt ? s.box.center : this.opposite(s.box, s.grip);
       s.factors = this.factorsFor(e, s);
       this.ctx?.requestRender();
@@ -215,11 +271,12 @@ export class ScaleTool extends TransformToolBase {
     this.refresh();
     const vp = this.ctx?.camera.viewportSize() ?? { width: 800, height: 600 };
     this.hoverGrip = this.box ? pickGrip(this.box, e.screen, e.camera, vp) : null;
-    this.hover = this.box ? null : (e.inference?.hit?.ref ?? null);
+    this.hover = this.box ? null : pickRef(e.inference?.hit);
     this.ctx?.requestRender();
   }
 
   onPointerDown(e: ToolPointerEvent): void {
+    this.mods = e.modifiers;
     if (e.button !== 0) return;
     const s = this.state;
     if (s.kind === 'scaling') {
@@ -231,8 +288,9 @@ export class ScaleTool extends TransformToolBase {
     }
     this.refresh();
     if (!this.box) {
-      const hit = this.hover ?? e.inference?.hit?.ref ?? null;
+      const hit = this.hover ?? pickRef(e.inference?.hit);
       if (hit) {
+        this.lastError = null;
         this.targetRefs(hit);
         this.hover = null;
         this.refresh();
@@ -245,6 +303,7 @@ export class ScaleTool extends TransformToolBase {
     const grip = pickGrip(this.box, e.screen, e.camera, vp);
     if (!grip) return;
     this.lastError = null;
+    if (this.refuse(this.refs, false)) return;
     const box = this.box;
     this.state = {
       kind: 'scaling',
@@ -254,6 +313,7 @@ export class ScaleTool extends TransformToolBase {
       downScreen: e.screen,
       anchor: e.modifiers.ctrl || e.modifiers.alt ? box.center : this.opposite(box, grip),
       factors: [1, 1, 1],
+      uniform: this.isUniform(grip, e.modifiers.shift),
       pressed: true,
       moved: false,
     };
@@ -271,31 +331,48 @@ export class ScaleTool extends TransformToolBase {
   }
 
   onKeyDown(e: ToolKeyEvent): boolean {
+    if (e.key === 'Shift') this.setShift(true);
     if ((e.key === 'Control' || e.key === 'Alt' || e.key === 'Shift') && this.state.kind === 'scaling' && this.cursorInference) {
-      // modifiers re-evaluate on the next move; just redraw
+      // the factors re-evaluate on the next move; just redraw
       this.ctx?.requestRender();
       return true;
     }
     return false;
   }
 
+  onKeyUp(e: ToolKeyEvent): boolean {
+    if (e.key !== 'Shift') return false;
+    this.setShift(false);
+    return this.state.kind === 'scaling';
+  }
+
+  /** Shift went down or up: the drag's uniform mode (and its inference lock) follows before the next move. */
+  private setShift(down: boolean): void {
+    this.mods = { ...this.mods, shift: down };
+    const s = this.state;
+    if (s.kind !== 'scaling') return;
+    s.uniform = this.isUniform(s.grip, down);
+    this.ctx?.statusChanged();
+  }
+
   onVcb(v: VcbValue): void {
     const s = this.state;
     if (s.kind === 'scaling') {
-      const f = this.factorsFromVcb(v, s.factors, s.box.size, s.grip.axes, s.box.dims, s.grip.kind === 'corner');
+      const f = this.factorsFromVcb(v, { anchor: s.anchor, factors: s.factors, size: s.box.size, axes: s.grip.axes, dims: s.box.dims, kind: s.grip.kind, uniform: s.uniform });
       if (f) this.commit(s.anchor, f);
       return;
     }
-    const last = this.lastScale;
+    const last = this.lastScale();
     if (!last) return;
-    const f = this.factorsFromVcb(v, last.factors, last.size, last.axes, last.dims, last.axes.length === last.dims.length);
-    if (!f) return;
+    const f = this.factorsFromVcb(v, last);
+    if (!f || f.every((k) => Math.abs(k - 1) < 1e-9)) return;
     last.factors = f;
     this.reapplyLast(m4scaleAbout(last.anchor, f));
     this.ctx?.statusChanged();
   }
 
   onCancel(): void {
+    this.dropPickup();
     if (this.state.kind === 'scaling') {
       this.state = IDLE;
       this.ctx?.statusChanged();
@@ -303,7 +380,6 @@ export class ScaleTool extends TransformToolBase {
       return;
     }
     this.lastCommit = null;
-    this.lastScale = null;
     this.lastError = null;
     this.ctx?.requestRender();
   }
@@ -318,7 +394,8 @@ export class ScaleTool extends TransformToolBase {
     if (s.kind === 'scaling') {
       const m = m4scaleAbout(s.anchor, s.factors);
       for (const e of boxEdges(s.box)) out.push({ kind: 'polyline', points: e.map((p) => m4transformPoint(m, p)), color: BOX_COLOR, width: 1.5 });
-      out.push(...movedOutline(state, s.refs, m));
+      // section planes are drawn, with their cuts, where they would go (sectionPreview)
+      out.push(...movedOutline(state, withoutSectionPlanes(s.refs), m));
       out.push({ kind: 'point', position: m4transformPoint(m, s.grip.pos), color: GRIP_HOVER_COLOR, shape: 'square', size: 10 });
       out.push({ kind: 'point', position: s.anchor, color: '#111111', shape: 'square', size: 6 });
       out.push({ kind: 'label', position: m4transformPoint(m, s.grip.pos), text: this.fmtFactors(s.factors, s.box.dims), offset: [12, -12] });
@@ -349,18 +426,44 @@ export class ScaleTool extends TransformToolBase {
         vcbLabel: 'Scale',
         vcbValue: this.fmtFactors(s.factors, s.box.dims),
         fields: [pointerField('Scale', 'number', this.fmtFactors(s.factors, s.box.dims))],
+        ...this.heldTags(s.grip.kind === 'corner'),
       };
     }
     const instructor = this.lastError
       ? `Scale failed: ${this.lastError}`
-      : this.box
+      : this.lastNotice ?? (this.box
         ? 'Drag a grip to scale. Corners = uniform, edges = two axes, faces = one axis. Hold Shift to maintain aspect ratio, Alt to keep the centre.'
-        : 'Select the entities to scale.';
-    const last = this.lastScale;
+        : 'Select the entities to scale.');
+    const last = this.lastScale();
     return { instructor, vcbLabel: 'Scale', vcbValue: last ? this.fmtFactors(last.factors, last.dims) : undefined };
   }
 
+  /** Tags for the held keys while a grip is dragged: Shift's aspect ratio and Ctrl or Alt's centre. */
+  private heldTags(corner: boolean): { held?: string[] } {
+    const held: string[] = [];
+    if (this.mods.shift) held.push(corner ? 'Free aspect ratio · Shift' : 'Uniform · Shift');
+    if (this.mods.ctrl || this.mods.alt) held.push('About the center · Ctrl/Alt');
+    return held.length ? { held } : {};
+  }
+
   // --- internals ------------------------------------------------------------------------------
+
+  /**
+   * The scale just committed, while typing can still redo it: the last commit, still the last change (or
+   * still being applied). Null after a tool switch, Esc, another change, or a failed commit.
+   */
+  private lastScale(): ScaleEdit | null {
+    const last = this.lastCommit;
+    const edit = last ? this.edits.get(last) : undefined;
+    if (!last || !edit) return null;
+    if (last.applied && !this.lastIsOnTop()) return null;
+    return edit;
+  }
+
+  /** A corner grip scales uniformly and an edge or face grip per axis; Shift switches each to the other. */
+  private isUniform(grip: ScaleGrip, shift: boolean): boolean {
+    return (grip.kind === 'corner') !== shift;
+  }
 
   /** Rebuild the box when the selection or the document changed. */
   private refresh(): void {
@@ -392,7 +495,7 @@ export class ScaleTool extends TransformToolBase {
     if (!inf) return s.factors;
     const { grip, box, anchor } = s;
     const cursor = inf.point;
-    const uniform = (grip.kind === 'corner') !== e.modifiers.shift;
+    const uniform = this.isUniform(grip, e.modifiers.shift);
     const f: [number, number, number] = [1, 1, 1];
     if (uniform) {
       const d = v3sub(grip.pos, anchor);
@@ -413,10 +516,13 @@ export class ScaleTool extends TransformToolBase {
   }
 
   /**
-   * Typed value → factors: bare number = factor; a length with a unit = absolute size along the
-   * grip's axis; `x,y,z` = per-axis factors (blank keeps the current one); negative = mirror.
+   * Typed value → factors: bare number = factor for the grip's axes (every axis when uniform); a length
+   * with a unit = the size along a face grip's axis, or of the longest side an edge or corner grip
+   * scales, the others following uniformly; `x,y,z` = per-axis factors (blank keeps the current one);
+   * negative = mirror.
    */
-  private factorsFromVcb(v: VcbValue, current: Vec3, size: Vec3, axes: readonly number[], dims: readonly number[], uniform: boolean): Vec3 | null {
+  private factorsFromVcb(v: VcbValue, edit: ScaleEdit): Vec3 | null {
+    const { factors: current, size, axes, dims, kind, uniform } = edit;
     const f: [number, number, number] = [current[0], current[1], current[2]];
     const factorOf = (val: { kind: 'length'; meters: number; raw: number; unit: string | null }, axis: number): number | null => {
       if (val.unit === null) return val.raw;
@@ -425,11 +531,11 @@ export class ScaleTool extends TransformToolBase {
     };
     if (v.kind === 'length') {
       const targets = uniform ? dims : axes;
-      for (const a of targets) {
-        const k = factorOf(v, a);
-        if (k === null || k === 0) return null;
-        f[a] = k;
-      }
+      // the side a length sets: a face grip's axis, else the longest side the grip scales
+      const ref = kind === 'face' ? axes[0]! : axes.reduce((a, b) => (size[b]! > size[a]! ? b : a));
+      const k = factorOf(v, ref);
+      if (k === null || k === 0) return null;
+      for (const a of targets) f[a] = k;
       return f;
     }
     if (v.kind === 'list') {
@@ -458,7 +564,8 @@ export class ScaleTool extends TransformToolBase {
       this.ctx?.requestRender();
       return;
     }
-    this.lastScale = { anchor, factors, size: s.box.size, axes: s.grip.axes, dims: s.box.dims };
     this.commitTransform(refs, m4scaleAbout(anchor, factors), false, 'Scale');
+    const edit: ScaleEdit = { anchor, factors, size: s.box.size, axes: s.grip.axes, dims: s.box.dims, kind: s.grip.kind, uniform: s.uniform };
+    if (this.lastCommit) this.edits.set(this.lastCommit, edit);
   }
 }

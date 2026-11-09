@@ -30,11 +30,11 @@ function setup() {
   const entity = () => [...tab.doc.state.pages.get(tab.activePageId)!.entities.values()][0]!;
   return { tab, session, editor, canvas, entity, dispose: () => { cleanup(); session.dispose(); app.dispose(); } };
 }
-it('places formatting in the temporary right-side pane, preserves editing focus, and hides on exit', async () => {
+it('places formatting in the tool options bar, preserves editing focus, and formats the whole text after editing ends', async () => {
   const { tab, session, editor, entity, dispose } = setup();
   const group = screen.getByRole('group', { name: 'Text formatting' });
-  expect(group.closest('aside')?.getAttribute('aria-label')).toBe('Layout settings');
-  expect(screen.getByRole('region', { name: 'Text tool options' }).contains(group)).toBe(true);
+  expect(group.closest('[role="toolbar"]')?.getAttribute('aria-label')).toBe('Text options');
+  expect(group.closest('aside')).toBeNull();
   expect(within(screen.getByRole('navigation', { name: 'Layout tools' })).queryByRole('group', { name: 'Text formatting' })).toBeNull();
   const families = within(within(group).getByRole('combobox', { name: 'Text toolbar font' })).getAllByRole('option').map(option => option.textContent);
   expect(families).toHaveLength(167);
@@ -59,7 +59,7 @@ it('places formatting in the temporary right-side pane, preserves editing focus,
   fireEvent.click(within(group).getByRole('button', { name: 'Text toolbar align center' }));
   expect(entity().text).toMatchObject({ fontFamily: 'Georgia', fontSizePt: 18, color: '#ff0000', align: 'center', bold: true });
   fireEvent.keyDown(editor, { key: 'Escape' });
-  expect(screen.queryByRole('group', { name: 'Text formatting' })).toBeNull();
+  expect(screen.queryByRole('textbox', { name: 'Edit text on page' })).toBeNull();
   const saved = (await openLayoutFile((await session.saveLayoutBytes(tab.id))));
   expect(saved.state.pages.get(tab.activePageId)?.entities.get(entity().id)?.text).toEqual(entity().text);
   fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
@@ -79,7 +79,8 @@ it('toggles emphasis on the selected range and exits when clicking outside the e
   fireEvent.click(bold);
   expect(entity().text?.spans).toEqual([{ start: 0, end: 11, bold: false, italic: false, underline: false }]);
   fireEvent.pointerDown(canvas, { button: 0, pointerId: 2, clientX: 600, clientY: 600 });
-  expect(screen.queryByRole('group', { name: 'Text formatting' })).toBeNull();
+  // editing ends; while the text stays selected the bar formats it as a whole
+  expect(screen.queryByRole('textbox', { name: 'Edit text on page' })).toBeNull();
   dispose();
 });
 it('keeps keyboard tool shortcuts from firing while editing toolbar values and allows Escape to finish', () => {
@@ -91,7 +92,7 @@ it('keeps keyboard tool shortcuts from firing while editing toolbar values and a
   fireEvent.keyDown(size, { key: 'Enter' });
   expect(document.activeElement).toBe(editor);
   fireEvent.keyDown(size, { key: 'Escape' });
-  expect(screen.queryByRole('group', { name: 'Text formatting' })).toBeNull();
+  expect(screen.queryByRole('textbox', { name: 'Edit text on page' })).toBeNull();
   dispose();
 });
 
@@ -155,7 +156,7 @@ it('keeps the editor and selection when clicking toolbar blank areas, buttons, a
   setLayoutTextSelection(editor, 1, 4); fireEvent.select(editor);
   const toolbar = screen.getByRole('navigation', { name: 'Layout tools' });
   const formatting = screen.getByRole('group', { name: 'Text formatting' });
-  for (const target of [toolbar, screen.getByRole('region', { name: 'Text tool options' }), formatting, formatting.querySelector('.pf-layout-text-toolbar-divider')!]) {
+  for (const target of [toolbar, screen.getByRole('toolbar', { name: 'Text options' }), formatting, formatting.querySelector('.pf-layout-text-toolbar-divider')!]) {
     expect(fireEvent.pointerDown(target, { button: 0 })).toBe(false);
     expect(fireEvent.mouseDown(target, { button: 0 })).toBe(false);
     fireEvent.click(target);

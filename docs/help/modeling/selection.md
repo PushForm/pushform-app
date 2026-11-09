@@ -1,5 +1,21 @@
 # Selection and objects in Modeling
 
+## Select with the Select tool
+
+Choose **Select** in the toolbar or press **Space**. Click something to select it; Ctrl (Cmd on a Mac) adds to the selection, Shift adds or removes, and Ctrl+Shift removes. Clicking empty space clears the selection.
+
+Double-click a face to select it with its edges, an edge to select it with the faces it bounds, and a face of a solid to select the whole solid. Triple-click to select everything connected to what you click.
+
+Drag to draw a selection box. Dragging left to right selects only what lies entirely inside the box; dragging right to left, drawn dashed, selects everything the box touches. A box takes everything visible in the group you are editing: geometry, groups and components, images, imported meshes, guides, dimensions, text and section planes. Guide lines that run on forever are taken only by a right-to-left box.
+
+**Select All** (Ctrl+A, or Cmd+A on a Mac) selects everything visible in the group you are editing, and **Select None** (Ctrl+T or Cmd+T) clears the selection. Press **Delete** or **Backspace** to delete what is selected.
+
+## Open and close a group with Select
+
+Double-click a group or component, or select it and press **Enter**, to edit inside it. A locked group or component is selected instead of opened, and the status bar says it is locked; unlock it first.
+
+While you edit inside a group, **Esc** clears the selection, and a second **Esc** closes the group, one level at a time. Clicking empty space also closes it. Clicking something outside the group closes it, and any groups around it, out to the one that holds what you clicked, and selects that.
+
 ## Find a solid, group or component
 
 Open **Object browser** in the left menu bar and choose **Objects**. It lists loose solids, groups, components and text annotations. Screen and leader text appear by their contents, including inside groups and components. Groups and components start collapsed. Expand the ones you want to inspect; selecting an item elsewhere reveals its ancestors. Loose solids appear as **Solid N** in creation order; those numbers can change as the model changes.

@@ -28,7 +28,7 @@ function setup() {
 }
 
 // These tools pick whole objects; they do not place a point using the snap resolver.
-const objectPickingTools = ['scale', 'boolean-union', 'boolean-subtract', 'boolean-intersect',
+const objectPickingTools = ['boolean-union', 'boolean-subtract', 'boolean-intersect',
   'boolean-exclude', 'boolean-division', 'boolean-cut-path'] as const satisfies readonly LayoutToolId[];
 const nonSnappingTools = new Set<LayoutToolId>(['select', 'lasso', 'eraser', 'freehand', 'shape-builder', ...objectPickingTools]);
 

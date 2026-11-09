@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import type { Mat4, MMat4, UnitSettings, Vec2, Vec3 } from '@pushform/core';
-import { formatLength, m4mul, m4transformPoint, MERGE_TOL, v3cross, v3dist, v3dot, v3len, v3normalize, v3sub } from '@pushform/core';
-import type { Axis } from '@pushform/inference';
-import { SNAP_COLORS } from '@pushform/inference';
+import { formatLength, m4mul, m4transformPoint, MERGE_TOL, v3add, v3cross, v3dist, v3dot, v3len, v3normalize, v3scale, v3sub } from '@pushform/core';
+import type { Axis, PickHit } from '@pushform/inference';
+import { hitSelectable, SNAP_COLORS } from '@pushform/inference';
 import type { DocumentState, EntityContainer, EntityRef, MeshPartGeometry, UndoEntry } from '@pushform/model';
-import { containerAt, entityRefKey, imageEntityCorners } from '@pushform/model';
+import { containerAt, contentWorldBounds, contextMatrix, entityRefKey, imageEntityCorners, sectionPlaneCorners, worldSectionPlane } from '@pushform/model';
+import { mapNormal } from '../../commands/sectionPlanes';
+import type { SectionPreview } from '../sectionPreview';
 import { contextFrame, pathKeyOf } from '../../commands/context';
 import { surfaceRefs } from '../../commands/sketchQueries';
+import { transformRefusal, type TransformApplyResult } from '../../commands/transform';
 import type { CameraState } from '../../camera/CameraHost';
 import type { DocumentHost } from '../../host/DocumentHost';
 import type { OverlayPrimitive } from '../overlay';
@@ -38,6 +41,11 @@ export function worldToScreen(cam: CameraState, viewport: { width: number; heigh
   return [w / 2 + (x / z) * f, h / 2 - (y / z) * f];
 }
 
+/** What a press on `hit` picks up when nothing is selected: what a Select click there would select. */
+export function pickRef(hit: PickHit | null | undefined): EntityRef | null {
+  return hit ? hitSelectable(hit) : null;
+}
+
 /** Stable key of a ref list (selection change detection). */
 export function refsKey(refs: readonly EntityRef[]): string {
   return refs.map(entityRefKey).join('|');
@@ -45,15 +53,17 @@ export function refsKey(refs: readonly EntityRef[]): string {
 
 /**
  * Overlay polylines (world space) showing where `refs` end up under the world transform `m`:
- * body edges, instance edges, sketch edges touching moved vertices (stretched), and for body
- * faces/edges every edge of the body with the moved points displaced (the autofold stretch).
- * Refs may live in any context: each group of refs is drawn through its context matrix.
+ * body edges, instance edges, sketch edges touching moved vertices (stretched), guides, leader and
+ * model text (leader line and text), and for body faces/edges every edge of the body with the moved
+ * points displaced (the stretch the model folds into a valid solid).
+ * Refs may live in any context: each group of refs is drawn through its context matrix. With `copy`, only
+ * the copies are drawn: copied sketch edges whole, and nothing stretched, since the originals stay.
  */
-export function movedOutline(state: DocumentState, refs: readonly EntityRef[], m: Mat4 | MMat4, color = OUTLINE_COLOR): OverlayPrimitive[] {
+export function movedOutline(state: DocumentState, refs: readonly EntityRef[], m: Mat4 | MMat4, color = OUTLINE_COLOR, copy = false): OverlayPrimitive[] {
   const out: OverlayPrimitive[] = [];
   const groups = new Map<string, EntityRef[]>();
   for (const ref of refs) (groups.get(pathKeyOf(ref.path)) ?? groups.set(pathKeyOf(ref.path), []).get(pathKeyOf(ref.path))!).push(ref);
-  for (const group of groups.values()) out.push(...movedOutlineInContext(state, group, m, color));
+  for (const group of groups.values()) out.push(...movedOutlineInContext(state, group, m, color, copy));
   return out;
 }
 
@@ -66,7 +76,35 @@ function* meshPartEdgePolylines(g: MeshPartGeometry): Generator<Vec3[]> {
   }
 }
 
-function movedOutlineInContext(state: DocumentState, refs: readonly EntityRef[], m: Mat4 | MMat4, color: string): OverlayPrimitive[] {
+/**
+ * The section planes among `refs` transformed by `m` (world coordinates), for a tool's live preview: moved planes, or
+ * copies when `copy`; null when no section plane is transformed.
+ */
+export function sectionPreviewFor(state: DocumentState, refs: readonly EntityRef[], m: Mat4 | MMat4, copy: boolean): SectionPreview | null {
+  const planes: SectionPreview['moved'][number][] = [];
+  for (const r of refs) {
+    if (r.kind !== 'sectionPlane') continue;
+    try {
+      const sp = containerAt(state, r.path).sectionPlanes.get(r.id);
+      if (!sp) continue;
+      const { normal, d } = worldSectionPlane(sp.plane, contextMatrix(state, r.path));
+      // a point of the plane and its normal, both mapped, keep the side it cuts away
+      const point = m4transformPoint(m, [-normal[0] * d, -normal[1] * d, -normal[2] * d]);
+      const n = mapNormal(m, normal);
+      planes.push({ path: r.path, id: r.id, normal: [n[0], n[1], n[2]], d: -v3dot(n, point) });
+    } catch {
+      // a plane that is gone is not previewed
+    }
+  }
+  return planes.length ? { moved: copy ? [] : planes, copies: copy ? planes : [], added: null } : null;
+}
+
+/** `refs` without their section planes, which a live section preview draws instead of an outline. */
+export function withoutSectionPlanes(refs: readonly EntityRef[]): EntityRef[] {
+  return refs.filter((r) => r.kind !== 'sectionPlane');
+}
+
+function movedOutlineInContext(state: DocumentState, refs: readonly EntityRef[], m: Mat4 | MMat4, color: string, copy: boolean): OverlayPrimitive[] {
   const path = refs[0]?.path ?? [];
   let root: EntityContainer;
   try {
@@ -83,12 +121,32 @@ function movedOutlineInContext(state: DocumentState, refs: readonly EntityRef[],
   const push = (points: readonly Vec3[]): void => {
     if (points.length >= 2) out.push({ kind: 'polyline', points, color, width: 1 });
   };
+  /** Half the length an infinite guide line is drawn with: the size of the context's contents, at least 1 m. */
+  let span: number | null = null;
+  const guideSpan = (): number => {
+    if (span === null) {
+      const b = contentWorldBounds(state, path);
+      span = Math.max(1, b ? v3dist(b.min, b.max) : 0);
+    }
+    return span;
+  };
   const wholeBodies = new Set<number>();
   const movedSketchVertices = new Set<number>();
+  /** Sketch edges a copy draws. */
+  const copiedSketchEdges = new Set<number>();
   const movedBodyPoints = new Map<number, Vec3[]>();
   const sketch = root.sketch;
   for (const ref of refs) {
     switch (ref.kind) {
+      case 'sectionPlane': {
+        // the plane's rectangle as drawn, framing its container's contents, then moved
+        const sp = root.sectionPlanes.get(ref.id);
+        if (!sp) break;
+        const { normal, d } = worldSectionPlane(sp.plane, frame.matrix);
+        const corners = sectionPlaneCorners(normal, d, contentWorldBounds(state, path));
+        push([...corners, corners[0]].map((p) => m4transformPoint(m, p)));
+        break;
+      }
       case 'body': {
         const b = root.bodies.get(ref.id);
         if (!b) break;
@@ -132,6 +190,24 @@ function movedOutlineInContext(state: DocumentState, refs: readonly EntityRef[],
         if (image) push([...imageEntityCorners(image), imageEntityCorners(image)[0]!].map(moved));
         break;
       }
+      case 'guide': {
+        const g = root.guides.get(ref.id);
+        if (!g) break;
+        if (g.kind === 'point') out.push({ kind: 'point', position: moved(g.origin), color, shape: 'cross', size: 8 });
+        else if (g.kind === 'segment') out.push({ kind: 'polyline', points: [moved(g.origin), moved(g.end)], color, width: 1, dashed: true });
+        else out.push({ kind: 'polyline', points: [moved(v3add(g.origin, v3scale(g.dir, -guideSpan()))), moved(v3add(g.origin, v3scale(g.dir, guideSpan())))], color, width: 1, dashed: true });
+        break;
+      }
+      case 'text': {
+        // screen text is fixed to the screen and does not move
+        const t = root.texts.get(ref.id);
+        if (!t || t.kind === 'screen') break;
+        const anchor = moved(t.position);
+        const label = t.offset ? moved(v3add(t.position, t.offset)) : anchor;
+        if (t.offset) push([anchor, label]);
+        out.push({ kind: 'label', position: label, text: t.text, color });
+        break;
+      }
       case 'sketchVertex':
         movedSketchVertices.add(ref.id);
         break;
@@ -140,6 +216,7 @@ function movedOutlineInContext(state: DocumentState, refs: readonly EntityRef[],
         if (e) {
           movedSketchVertices.add(e.a);
           movedSketchVertices.add(e.b);
+          copiedSketchEdges.add(e.id);
         }
         break;
       }
@@ -151,6 +228,7 @@ function movedOutlineInContext(state: DocumentState, refs: readonly EntityRef[],
             if (e) {
               movedSketchVertices.add(e.a);
               movedSketchVertices.add(e.b);
+              copiedSketchEdges.add(e.id);
             }
           }
         }
@@ -176,6 +254,15 @@ function movedOutlineInContext(state: DocumentState, refs: readonly EntityRef[],
         break;
     }
   }
+  if (copy) {
+    // the originals stay as they are: the copied edges are drawn where the copies go, and solids' faces or edges are not copied
+    for (const id of copiedSketchEdges) {
+      const e = sketch.edges.get(id as EntityRef['id']);
+      const a = e && sketch.vertices.get(e.a)?.p, b = e && sketch.vertices.get(e.b)?.p;
+      if (a && b) push([moved(a), moved(b)]);
+    }
+    return out;
+  }
   if (movedSketchVertices.size) {
     for (const e of sketch.edges.values()) {
       const ma = movedSketchVertices.has(e.a), mb = movedSketchVertices.has(e.b);
@@ -195,15 +282,44 @@ function movedOutlineInContext(state: DocumentState, refs: readonly EntityRef[],
   return out;
 }
 
+/**
+ * The turn a rotation's matrix makes: center, axis and signed angle in radians, which may pass 180° or be a
+ * whole turn. `transform.array` takes it as `rotation` so a `/N` array divides that angle the way it turned.
+ */
+export interface TransformRotation {
+  readonly center: Vec3;
+  readonly axis: Vec3;
+  readonly angle: number;
+}
+
+/** An `Nx` (external) or `/N` (internal) array of copies. */
+export interface TransformArray {
+  readonly count: number;
+  readonly mode: 'external' | 'internal';
+}
+
 /** The last transform a tool committed, for VCB re-edits and arrays. */
 export interface TransformCommit {
   readonly refs: EntityRef[];
+  /** The transform applied (for an array, of its first copy, or of the whole run for `/N`). */
   matrix: MMat4;
-  readonly copy: boolean;
+  /** The turn `matrix` makes, for a rotation (passed to an array). */
+  rotation: TransformRotation | null;
+  copy: boolean;
+  /** The array that replaced the copy, if any: a re-edit keeps its count. */
+  array: TransformArray | null;
   readonly label: string;
   /** Undo entry the commit produced (re-edits only while it is still on top). */
   entry: UndoEntry | null;
   applied: boolean;
+}
+
+/** What a re-edit of the last commit applies instead. */
+interface TransformRedo {
+  readonly matrix: MMat4;
+  readonly rotation: TransformRotation | null;
+  readonly copy: boolean;
+  readonly array: TransformArray | null;
 }
 
 /**
@@ -217,7 +333,11 @@ export abstract class TransformToolBase implements Tool {
   protected ctx: ToolContext | null = null;
   protected lastCommit: TransformCommit | null = null;
   protected lastError: string | null = null;
+  /** What the last commit changed besides what was asked (a face replaced by its edges), for the status. */
+  protected lastNotice: string | null = null;
   private queue: Promise<void> = Promise.resolve();
+  /** Key of the refs a press selected from an empty selection, until the operation ends. */
+  private pickedUp: string | null = null;
 
   /** Resolves when every queued commit / re-apply has settled (tests). */
   get settled(): Promise<void> {
@@ -228,11 +348,13 @@ export abstract class TransformToolBase implements Tool {
     this.ctx = ctx;
     this.lastCommit = null;
     this.lastError = null;
+    this.pickedUp = null;
     this.onActivate();
   }
   deactivate(): void {
     this.onDeactivate();
     this.lastCommit = null;
+    this.pickedUp = null;
     this.ctx = null;
   }
   protected onActivate(): void {}
@@ -256,18 +378,47 @@ export abstract class TransformToolBase implements Tool {
     return u ? formatLength(meters, u) : meters.toFixed(4);
   }
 
-  /** Entities a transform tool acts on: the selection, else the hovered entity. */
-  protected targetRefs(hover: EntityRef | null): EntityRef[] {
+  /**
+   * Entities a transform acts on as it starts: the selection, else what a Select click on `hover` (see
+   * `pickRef`) selects, a face of a smooth surface standing for the whole surface; those are selected
+   * until Esc ends the operation (`dropPickup`). Empty, with the reason in `lastError`, when the
+   * transform (a copy when `copy`) is refused, so nothing is picked up or previewed.
+   */
+  protected targetRefs(hover: EntityRef | null, copy = false): EntityRef[] {
     const host = this.host();
     if (!host) return [];
-    if (!host.selection.isEmpty) return host.selection.refs;
-    if (hover) {
-      // A hovered face of a smooth surface stands for the whole surface, as its highlight shows.
-      const refs = surfaceRefs(host.doc.state, hover);
+    const picking = host.selection.isEmpty;
+    const refs = !picking ? host.selection.refs : hover ? surfaceRefs(host.doc.state, hover) : [];
+    if (!refs.length || this.refuse(refs, copy)) return [];
+    if (picking) {
       this.ctx?.commands.execute('selection.set', { refs });
-      return refs;
+      this.pickedUp = refsKey(refs);
     }
-    return [];
+    return refs;
+  }
+
+  /** True, with the reason in `lastError` and the status updated, when transforming `refs` is refused. */
+  protected refuse(refs: readonly EntityRef[], copy: boolean): boolean {
+    const host = this.host();
+    const why = host ? transformRefusal(host, refs, copy, this.title) : null;
+    if (!why) return false;
+    this.lastError = why;
+    this.ctx?.statusChanged();
+    this.ctx?.requestRender();
+    return true;
+  }
+
+  /** The operation ended without a change (Esc): what a press picked up from an empty selection is deselected. */
+  protected dropPickup(): void {
+    const key = this.pickedUp;
+    this.pickedUp = null;
+    const host = this.host();
+    if (key !== null && host && refsKey(host.selection.refs) === key) this.ctx?.commands.execute('selection.set', { refs: [] });
+  }
+
+  /** The operation ended with a change: what a press picked up stays selected. */
+  protected keepPickup(): void {
+    this.pickedUp = null;
   }
 
   protected enqueue(task: () => Promise<void>): void {
@@ -280,16 +431,20 @@ export abstract class TransformToolBase implements Tool {
   }
 
   /** Queue a `transform.apply` and remember it as the last commit. */
-  protected commitTransform(refs: EntityRef[], matrix: MMat4, copy: boolean, label: string): void {
+  protected commitTransform(refs: EntityRef[], matrix: MMat4, copy: boolean, label: string, rotation?: TransformRotation): void {
     const ctx = this.ctx;
     if (!ctx) return;
-    const commit: TransformCommit = { refs, matrix, copy, label, entry: null, applied: false };
+    const commit: TransformCommit = { refs, matrix, rotation: rotation ?? null, copy, array: null, label, entry: null, applied: false };
     this.lastCommit = commit;
     this.lastError = null;
+    this.lastNotice = null;
+    this.keepPickup();
     this.enqueue(async () => {
-      await ctx.commands.execute('transform.apply', { refs, matrix, copy, label });
+      const result = (await ctx.commands.execute('transform.apply', { refs, matrix, copy, label })) as TransformApplyResult | undefined;
+      this.lastNotice = result?.notice ?? null;
       commit.entry = hostOfTool(ctx).undoStack.peek();
       commit.applied = true;
+      ctx.committed?.();
       ctx.statusChanged();
       ctx.requestRender();
     });
@@ -304,42 +459,75 @@ export abstract class TransformToolBase implements Tool {
     return !!host && !!last && last.applied && last.entry !== null && host.undoStack.peek() === last.entry;
   }
 
-  /** VCB re-edit: undo the last commit and re-apply it with a new matrix (still one undo entry). */
-  protected reapplyLast(matrix: MMat4): boolean {
-    const ctx = this.ctx;
+  /**
+   * VCB or bar re-edit: undo the last commit and apply it again with `matrix` (and `copy`, when given), as
+   * one undo entry; an array keeps its count, and switching Copy off makes it a plain move again. The last
+   * commit records the new values only once they are applied: if the redo fails, the commit stays as it
+   * was, the status says why, and `restoreCopy` puts the tool's Copy back.
+   */
+  protected reapplyLast(matrix: MMat4, copy?: boolean, rotation?: TransformRotation): boolean {
     const last = this.lastCommit;
-    if (!ctx || !last) return false;
-    last.matrix = matrix;
+    if (!this.ctx || !last) return false;
+    const nextCopy = copy ?? last.copy;
+    // a new matrix comes with its own turn (none for a move); the same matrix keeps the one it had
+    const nextRotation = rotation ?? (matrix === last.matrix ? last.rotation : null);
     this.enqueue(async () => {
       if (this.lastCommit !== last || !this.lastIsOnTop()) return;
-      const host = hostOfTool(ctx);
-      host.undo();
-      last.applied = false;
-      await ctx.commands.execute('transform.apply', { refs: last.refs, matrix, copy: last.copy, label: last.label });
-      last.entry = host.undoStack.peek();
-      last.applied = true;
-      ctx.statusChanged();
-      ctx.requestRender();
+      await this.redoLast(last, { matrix, rotation: nextRotation, copy: nextCopy, array: nextCopy ? last.array : null });
     });
     return true;
   }
 
-  /** `3x` / `/3` after a copy: replace the single copy by an array (one undo entry). */
-  protected arrayLast(count: number, mode: 'external' | 'internal'): boolean {
-    const ctx = this.ctx;
+  /**
+   * `3x` / `/3` after a copy (or an array): replace it by an array of that many copies (one undo entry).
+   * `rotation`, the turn the last commit made, overrides the one it recorded.
+   */
+  protected arrayLast(count: number, mode: 'external' | 'internal', rotation?: TransformRotation): boolean {
     const last = this.lastCommit;
-    if (!ctx || !last || !last.copy) return false;
+    if (!this.ctx || !last || !last.copy) return false;
     this.enqueue(async () => {
       if (this.lastCommit !== last || !this.lastIsOnTop()) return;
-      const host = hostOfTool(ctx);
-      host.undo();
-      last.applied = false;
-      await ctx.commands.execute('transform.array', { refs: last.refs, matrix: last.matrix, count, mode, label: last.label });
-      last.entry = host.undoStack.peek();
-      last.applied = true;
-      ctx.statusChanged();
-      ctx.requestRender();
+      await this.redoLast(last, { matrix: last.matrix, rotation: rotation ?? last.rotation, copy: true, array: { count, mode } });
     });
     return true;
+  }
+
+  /** The tool's Copy setting after a re-edit that switched it failed (default: the tool keeps none). */
+  protected restoreCopy(_copy: boolean): void {}
+
+  /** Undo `last` and apply `next` in its place; on failure put `last` back as it was. */
+  private async redoLast(last: TransformCommit, next: TransformRedo): Promise<void> {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const host = hostOfTool(ctx);
+    host.undo();
+    last.applied = false;
+    let result: TransformApplyResult | undefined;
+    try {
+      const { refs, label } = last;
+      if (next.array) {
+        const turn = next.rotation ? { rotation: { center: [...next.rotation.center], axis: [...next.rotation.axis], angle: next.rotation.angle } } : {};
+        result = (await ctx.commands.execute('transform.array', { refs, matrix: next.matrix, count: next.array.count, mode: next.array.mode, label, ...turn })) as TransformApplyResult | undefined;
+      } else result = (await ctx.commands.execute('transform.apply', { refs, matrix: next.matrix, copy: next.copy, label })) as TransformApplyResult | undefined;
+    } catch (err) {
+      host.redo();
+      last.applied = true;
+      this.lastError = err instanceof Error ? err.message : String(err);
+      if (next.copy !== last.copy) this.restoreCopy(last.copy);
+      ctx.statusChanged();
+      ctx.requestRender();
+      return;
+    }
+    last.matrix = next.matrix;
+    last.rotation = next.rotation;
+    last.copy = next.copy;
+    last.array = next.array;
+    last.entry = host.undoStack.peek();
+    last.applied = true;
+    this.lastError = null;
+    this.lastNotice = result?.notice ?? null;
+    ctx.committed?.();
+    ctx.statusChanged();
+    ctx.requestRender();
   }
 }

@@ -69,8 +69,15 @@ export function layoutTextCorners(source: LayoutEntity): Point[] {
 export function rotateLayoutEntity(source: LayoutEntity, pivot: Point, angleDeg: number): LayoutEntity {
   if (!source.text) {
     const rotated: LayoutEntity = { ...source, ...rotateLayoutPath(source, pivot, angleDeg) };
-    // A rotated dimension's line turns with it.
-    if (source.dimension?.alignment === 'rotated') rotated.dimension = { ...source.dimension, angleDeg: normalizeDimensionAngle((source.dimension.angleDeg ?? 0) + angleDeg) };
+    // A dimension's line turns with it. A horizontal or vertical one becomes rotated, unless turned by quarter turns.
+    const dimension = source.dimension;
+    if (dimension?.alignment === 'rotated') rotated.dimension = { ...dimension, angleDeg: normalizeDimensionAngle((dimension.angleDeg ?? 0) + angleDeg) };
+    else if (dimension?.alignment === 'horizontal' || dimension?.alignment === 'vertical') {
+      const turned = normalizeDimensionAngle((dimension.alignment === 'vertical' ? 90 : 0) + angleDeg);
+      const near = (target: number): boolean => Math.abs(turned - target) < 1e-9;
+      rotated.dimension = near(0) || near(180) ? { ...dimension, alignment: 'horizontal' } : near(90) ? { ...dimension, alignment: 'vertical' }
+        : { ...dimension, alignment: 'rotated', angleDeg: turned };
+    }
     return rotated;
   }
   const center = layoutTextCenter(source), next = rotateLayoutPoint(center, pivot, angleDeg);

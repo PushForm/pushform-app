@@ -4,13 +4,13 @@
 
 Choose **Paint Bucket** to open Materials. Choose a material and click the intended target. If the clicked object belongs to the selection, paint applies to the selected paintable entities; clicking outside the selection affects the clicked entity instead.
 
-On a face, the side facing the camera is painted. Painting a group or component supplies its default material, but explicitly painted faces inside it keep their own materials.
+On a face, the side facing the camera is painted. Painting a group or component supplies its default material, but explicitly painted faces inside it keep their own materials. Exploding a painted group or component keeps every color as it was: faces, parts and nested groups that showed its material are painted with it, and anything with a material of its own keeps that one. A line drawn across a painted face divides it into faces that all keep its material, with the texture continuing across them.
 
 ## Sample or replace materials
 
 Use **Sample** in Materials or hold Alt with Paint Bucket and click to sample a material. Choose the replacement material, then hold Ctrl and click to fill edge-connected faces with the same material. Shift+click replaces the clicked material throughout the current editing context; Ctrl+Shift+click replaces it on the clicked object.
 
-On a Mac, Ctrl+click opens the context menu, so the keys differ: Option+click fills edge-connected faces, Option+Shift+click replaces on the clicked object, and Cmd+click samples. The status bar names the keys for your platform.
+On a Mac, use Cmd wherever these steps say Ctrl, and Option for Alt: Cmd+click fills edge-connected faces, Cmd+Shift+click replaces on the clicked object, and Option+click samples. The status bar names the keys for your platform.
 
 Check the tool's status and active mode before clicking when you want only one face painted. A broad replacement is different from ordinary painting; Undo reverses the applied change.
 

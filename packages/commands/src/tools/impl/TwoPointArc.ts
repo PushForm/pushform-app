@@ -9,10 +9,12 @@ import { SNAP_COLORS } from '@pushform/inference';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { AddCurveInput, AddCurveResult, FilletResult } from '../../commands/curves';
 import type { OverlayPrimitive } from '../overlay';
-import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolSettingValue, ToolStatus } from '../Tool';
+import { countFrom, countSetting } from '../settings';
 import { pointerField } from '../entry';
 import { hostOfTool, inferenceOverlay, PREVIEW_COLOR } from '../toolUtil';
 import { ARC_SEGMENTS } from './Arc';
+import { planeTag, SHIFT_HELD } from '../held';
 import {
   contextCurveTangentAt,
   AXIS_NORMAL,
@@ -24,6 +26,7 @@ import {
   onPlane,
   pixelTolerance,
   planeLockFromKey,
+  segmentCountHint,
   shapePreview,
   toggleLock,
   undoLast,
@@ -53,7 +56,8 @@ interface Bulge {
 /**
  * 2-Point Arc (A): Idle → Start → End (chord) → Bulge → commit. VCB: chord length in the
  * end stage; in the bulge stage the bulge (sagitta) as a length, `24r` radius, `20s` segments;
- * after the commit the same values re-edit the last arc. Half Circle inference when the bulge is
+ * after the commit the same values re-edit the last arc. Before the first click (with no arc to
+ * re-edit) a bare number sets nothing, and the hint says to type it with `s`. Half Circle inference when the bulge is
  * half the chord; Tangent at Vertex (cyan) when the arc starts at the end of an existing curve.
  * Double-click a corner (two edges meeting) to fillet it with the last radius.
  */
@@ -80,6 +84,8 @@ export class TwoPointArcTool implements Tool {
   private cursorEvent: ToolPointerEvent | null = null;
   private last: LastCommit<Arc2Params> | null = null;
   private message: string | null = null;
+  /** A bare number typed before the first click, which sets nothing; the hint says how to set the segments. */
+  private bareNumber: number | null = null;
   private readonly gesture = new ClickGesture();
 
   get stage(): 'start' | 'end' | 'bulge' {
@@ -202,20 +208,25 @@ export class TwoPointArcTool implements Tool {
 
   onVcb(v: VcbValue): void {
     if (v.kind === 'segments') {
-      this.segments = Math.max(1, Math.round(v.count));
+      this.setSegments(v.count);
       if (this.stage === 'start' && this.last) this.reapplyLast({ segments: this.segments });
       this.ctx?.statusChanged();
       return;
     }
     switch (this.stage) {
       case 'start': {
-        if (!this.last) return;
-        const chord = v3dist(this.last.params.start, this.last.params.end);
-        if (v.kind === 'length') this.reapplyLast({ bulge: this.bulgeOf(v.meters, chord, this.last.params.bulge) });
-        else if (v.kind === 'radius') {
-          const s = sagittaForRadius(v.meters, chord);
-          if (s !== null) this.reapplyLast({ bulge: this.bulgeOf(s, chord, this.last.params.bulge) });
+        let done = false;
+        if (this.last) {
+          const chord = v3dist(this.last.params.start, this.last.params.end);
+          if (v.kind === 'length') done = this.reapplyLast({ bulge: this.bulgeOf(v.meters, chord, this.last.params.bulge) });
+          else if (v.kind === 'radius') {
+            const s = sagittaForRadius(v.meters, chord);
+            if (s !== null) done = this.reapplyLast({ bulge: this.bulgeOf(s, chord, this.last.params.bulge) });
+          }
         }
+        // with no arc to re-edit, a bare number sets nothing (the segments take their suffix, `12s`)
+        this.bareNumber = !done && v.kind === 'length' && v.unit === null ? v.raw : null;
+        this.ctx?.statusChanged();
         return;
       }
       case 'end': {
@@ -267,10 +278,39 @@ export class TwoPointArcTool implements Tool {
   }
 
   status(): ToolStatus {
+    const held = [...planeTag(this.lockNormal), ...(this.heldPlane ? [SHIFT_HELD] : [])];
+    const s = this.statusWithoutHeld();
+    return held.length ? { ...s, held } : s;
+  }
+
+  private statusWithoutHeld(): ToolStatus {
+    return { ...this.stageStatus(), settings: [countSetting('segments', 'Segments', this.segments)] };
+  }
+
+  /** The bar changed the segments just after a commit: redraw that arc with them, as one undo step. */
+  adjustLast(id: string): boolean {
+    if (id !== 'segments' || !this.last) return false;
+    return this.reapplyLast({ segments: this.segments });
+  }
+
+  /** Segments in the tool options bar. */
+  onSetting(id: string, value: ToolSettingValue): void {
+    const n = id === 'segments' ? countFrom(value) : null;
+    if (n === null) return;
+    this.setSegments(n);
+    this.ctx?.requestRender();
+    this.ctx?.statusChanged();
+  }
+
+  private stageStatus(): ToolStatus {
     if (this.message) return { instructor: this.message, vcbLabel: 'Bulge' };
     switch (this.stage) {
       case 'start':
-        return { instructor: 'Select start point of arc, or double-click a corner to fillet it.', vcbLabel: 'Length' };
+        return {
+          instructor: segmentCountHint(this.bareNumber, 'Select start point of arc, or double-click a corner to fillet it.'),
+          vcbLabel: 'Segments',
+          vcbValue: String(this.segments),
+        };
       case 'end': {
         const len = this.start && this.cursorInference ? v3dist(this.start, onPlane(this.plane, this.cursorInference.point)) : 0;
         return { instructor: 'Select end point of arc or enter length.', vcbLabel: 'Length', vcbValue: formatLen(this.ctx, len), fields: [pointerField('Length', 'length', formatLen(this.ctx, len))] };
@@ -291,11 +331,17 @@ export class TwoPointArcTool implements Tool {
     this.cursorEvent = e;
   }
 
+  private setSegments(n: number): void {
+    this.bareNumber = null;
+    this.segments = Math.max(1, Math.round(n));
+  }
+
   private begin(inf: InferenceResult): void {
     const p = inf.point;
     this.plane = drawingPlaneAt(inf, p, this.lockNormal, this.heldPlane);
     this.start = p;
     this.end = null;
+    this.bareNumber = null;
     this.tangent = this.ctx ? contextCurveTangentAt(hostOfTool(this.ctx), p) : null;
     this.ctx?.statusChanged();
   }
@@ -398,18 +444,21 @@ export class TwoPointArcTool implements Tool {
     const payload: AddCurveInput = { points: tess.points, closed: false, curve: tess.curve };
     const res = ctx.commands.execute('sketch.addCurve', payload) as AddCurveResult;
     this.last = { params, entry: hostOfTool(ctx).undoStack.peek() };
+    ctx.committed?.();
     this.lastRadius = tess.curve.radius;
     return res;
   }
 
-  private reapplyLast(patch: Partial<Arc2Params>): void {
-    if (!this.ctx || !this.last) return;
+  /** Redraw the last arc with `patch` as one undo step; false when there is none to redraw. */
+  private reapplyLast(patch: Partial<Arc2Params>): boolean {
+    if (!this.ctx || !this.last) return false;
     const next = { ...this.last.params, ...patch };
-    if (Math.abs(next.bulge) < 1e-12) return;
-    if (!undoLast(this.ctx, this.last)) return;
+    if (Math.abs(next.bulge) < 1e-12) return false;
+    if (!undoLast(this.ctx, this.last)) return false;
     this.execute(next);
     this.ctx.requestRender();
     this.ctx.statusChanged();
+    return true;
   }
 
   private reset(): void {

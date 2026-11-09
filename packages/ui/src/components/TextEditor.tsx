@@ -15,6 +15,9 @@ export function TextEditor({ target, onClose }: { target: EntityRef; onClose: ()
   const app = useApp();
   const ref = useRef<HTMLTextAreaElement>(null);
   const done = useRef(false);
+  /** Where focus was last, and how to keep the edit, for focus that leaves the style row. */
+  const lastFocus = useRef<Element | null>(null);
+  const commit = useRef<() => void>(() => {});
   const [initial] = useState(() => {
     const state = app.document.doc.state;
     const [width, height] = [app.viewport.size.width, app.viewport.size.height];
@@ -37,6 +40,18 @@ export function TextEditor({ target, onClose }: { target: EntityRef; onClose: ()
   useEffect(() => {
     if (!initial) onClose();
   }, [initial, onClose]);
+  // While focus is in the style row the editor stays open; focus going anywhere else commits the text.
+  useEffect(() => {
+    const onFocusIn = (e: FocusEvent) => {
+      const el = e.target as Element | null;
+      const fromBar = inStyleBar(lastFocus.current);
+      lastFocus.current = el;
+      if (el === ref.current || inStyleBar(el)) return;
+      if (fromBar) commit.current();
+    };
+    document.addEventListener('focusin', onFocusIn);
+    return () => document.removeEventListener('focusin', onFocusIn);
+  }, []);
   if (!initial) return null;
 
   const finish = (keep: boolean) => {
@@ -46,6 +61,7 @@ export function TextEditor({ target, onClose }: { target: EntityRef; onClose: ()
     if (keep && value !== initial.text) app.commands.tryExecute('text.edit', { ref: target, text: value });
     onClose();
   };
+  commit.current = () => finish(true);
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     e.stopPropagation();
     if (e.key === 'Escape') {
@@ -66,7 +82,16 @@ export function TextEditor({ target, onClose }: { target: EntityRef; onClose: ()
       rows={lines}
       style={{ left: initial.at[0], top: initial.at[1] }}
       onKeyDown={onKeyDown}
-      onBlur={() => finish(true)}
+      // the style row in the tool options bar keeps the editor open; anywhere else commits it
+      onBlur={(e) => {
+        if (!inStyleBar(e.relatedTarget)) finish(true);
+      }}
     />
   );
 }
+
+/** Whether focus moved into the tool options bar, whose style row edits this text. */
+function inStyleBar(el: EventTarget | null): boolean {
+  return el instanceof Element && Boolean(el.closest('.pf-tob'));
+}
+

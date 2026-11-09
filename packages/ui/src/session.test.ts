@@ -555,3 +555,41 @@ it('keeps template Frame content shared when adding, duplicating, and editing pa
   expect(reopened.doc.state.sharedEntities).toEqual(tab.doc.state.sharedEntities);
   expect(reopened.doc.state.layers.get(reopened.doc.state.activeLayerId)?.name).toBe('Layer 1');
 });
+
+describe('cloning a document', () => {
+  it('copies a model as it is now into a new, active, unsaved tab with a new identity, leaving the original unchanged', async () => {
+    const first = createApp({ demo: false, expose: false });
+    session = new DocumentSession(first, () => createApp({ demo: false, expose: false }), true);
+    const source = session.active;
+    if (source.type !== 'model') throw new Error('expected a model tab');
+    source.app.document.edit('Rename root', draft => { draft.definitions.get(draft.rootDefinitionId)!.name = 'Bookcase'; });
+    const sourceGuid = source.app.document.doc.state.meta.guid;
+    const clone = await session.cloneDocument(source.id, 'Bookcase 36 in wide', { projectId: 'project-1', folderId: 'folder-1' });
+    if (clone.type !== 'model') throw new Error('expected a model clone');
+    expect(session.active).toBe(clone);
+    expect(clone.name).toBe('Bookcase 36 in wide.pf');
+    expect(clone.identity).toBeUndefined();
+    expect(clone.cloudDraft).toMatchObject({ projectId: 'project-1', folderId: 'folder-1' });
+    expect(clone.app.document.doc.rootDefinition.name).toBe('Bookcase');
+    expect(clone.app.document.doc.state.meta.guid).not.toBe(sourceGuid);
+    expect(clone.app.document.canUndo()).toBe(false);
+    expect(session.isDirty(clone)).toBe(true);
+    clone.app.document.edit('Rename clone', draft => { draft.definitions.get(draft.rootDefinitionId)!.name = 'Wide bookcase'; });
+    expect(source.app.document.doc.rootDefinition.name).toBe('Bookcase');
+    expect(source.app.document.canUndo()).toBe(true);
+    expect((await session.cloneDocument(source.id, 'Bookcase 36 in wide')).name).toBe('Bookcase 36 in wide 2.pf');
+  });
+
+  it('copies a Layout drawing with its contents and a new identity', async () => {
+    session = new DocumentSession(createApp({ demo: false, expose: false }), () => createApp({ demo: false, expose: false }), true);
+    const drawing = session.newLayout();
+    drawing.commands.execute('layout.shape.add', { pageId: drawing.activePageId, points: [[0, 0], [100, 0]], closed: false });
+    const clone = await session.cloneDocument(drawing.id, 'Sheet copy');
+    if (clone.type !== 'layout') throw new Error('expected a Layout clone');
+    expect(clone.name).toBe('Sheet copy.pfl');
+    expect(clone.doc.state.pages.get(clone.activePageId)?.entities.size).toBe(1);
+    expect(clone.doc.state.meta.guid).not.toBe(drawing.doc.state.meta.guid);
+    expect(session.isDirty(clone)).toBe(true);
+    expect(session.active).toBe(clone);
+  });
+});

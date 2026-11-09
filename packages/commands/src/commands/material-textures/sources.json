@@ -4278,7 +4278,7 @@
       "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/grey_cartago_02/grey_cartago_02_diff_1k.jpg",
       "authors": [
         "Jenelle van Heerden",
-        "Lucas Sánchez Ros"
+        "Lucas S\u00e1nchez Ros"
       ],
       "sourceSha256": "abd903b9d568671e93bb5f95695188f260508ac5375bd1efa8b1f0801d693059",
       "sha256": "ae098639bfef99cc1e0022645992d3b32cc738d5efd1f0cb1cae819aeaf1eedf",
@@ -4302,7 +4302,7 @@
       "sourceCategory": "Stone/Slabs & Tiles/Polished Stone",
       "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/grey_cartago_03/grey_cartago_03_diff_1k.jpg",
       "authors": [
-        "Lucas Sánchez Ros"
+        "Lucas S\u00e1nchez Ros"
       ],
       "sourceSha256": "38847595a6f7bf4410aa25a5dbb381d1ac17b9d3475a393537918b59fca21dd3",
       "sha256": "33420ab0685cd5dc10ce052a05906243316345181f30811813754382ca8ce12a",
@@ -8208,6 +8208,56 @@
       "heightPx": 1024,
       "previewWidthPx": 128,
       "previewHeightPx": 128
+    },
+    {
+      "key": "Translucent_Glass_Seeded",
+      "name": "Seeded Glass",
+      "category": "Glass",
+      "asset": "glass_seeded",
+      "sourceCategory": "Generated/Glass",
+      "url": "",
+      "authors": [
+        "PushForm contributors"
+      ],
+      "sourceSha256": "8d262d5e231fecbdee14756799c487e2651be5ab01cbb7590488d83ff7ab91bd",
+      "sha256": "8d262d5e231fecbdee14756799c487e2651be5ab01cbb7590488d83ff7ab91bd",
+      "color": [
+        226,
+        236,
+        234
+      ],
+      "widthM": 0.25,
+      "heightM": 0.25,
+      "widthPx": 1024,
+      "heightPx": 1024,
+      "previewWidthPx": 128,
+      "previewHeightPx": 128,
+      "license": "GPL-3.0-or-later"
+    },
+    {
+      "key": "Translucent_Glass_Reeded",
+      "name": "Reeded Glass",
+      "category": "Glass",
+      "asset": "glass_reeded",
+      "sourceCategory": "Generated/Glass",
+      "url": "",
+      "authors": [
+        "PushForm contributors"
+      ],
+      "sourceSha256": "1ca1a06769531852200c8bce0ae6641c376ceb20a96df4e3bac1cf4b20db0663",
+      "sha256": "1ca1a06769531852200c8bce0ae6641c376ceb20a96df4e3bac1cf4b20db0663",
+      "color": [
+        212,
+        226,
+        226
+      ],
+      "widthM": 0.1016,
+      "heightM": 0.1016,
+      "widthPx": 1024,
+      "heightPx": 1024,
+      "previewWidthPx": 128,
+      "previewHeightPx": 128,
+      "license": "GPL-3.0-or-later"
     }
   ]
 }

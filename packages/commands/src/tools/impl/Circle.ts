@@ -9,9 +9,11 @@ import { SNAP_COLORS } from '@pushform/inference';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { AddCurveInput, AddCurveResult } from '../../commands/curves';
 import type { OverlayPrimitive } from '../overlay';
-import type { EntryField, Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import type { EntryField, Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolSetting, ToolSettingValue, ToolStatus } from '../Tool';
+import { countFrom, countSetting } from '../settings';
 import { DIMENSION_COLOR, field, pxAt } from '../entry';
 import { hostOfTool, inferenceOverlay, PREVIEW_COLOR } from '../toolUtil';
+import { planeTag, SHIFT_HELD } from '../held';
 import {
   AXIS_NORMAL,
   ClickGesture,
@@ -22,7 +24,6 @@ import {
   onPlane,
   planeLockFromKey,
   shapePreview,
-  sidesFromVcb,
   toggleLock,
   undoLast,
   type LastCommit,
@@ -36,6 +37,8 @@ export interface CircleParams {
   readonly segments: number;
   /** Angle of the first vertex in the plane basis (the vertex follows the cursor). */
   readonly startAngle: number;
+  /** Polygon: edges tangent to the radius instead of vertices on it. */
+  readonly circumscribed?: boolean;
 }
 
 /**
@@ -61,6 +64,8 @@ export class CircleTool implements Tool {
   protected basis: PlaneBasis | null = null;
   protected lockNormal: Axis | null = null;
   protected heldPlane: Plane | null = null;
+  /** A bare number typed before the first click, which sets nothing; the hint says how to set the sides. */
+  private bareNumber: number | null = null;
   protected lockSnap: Snap | null = null;
   protected cursorInference: InferenceResult | null = null;
   protected cursorScreen: Vec2 | null = null;
@@ -155,8 +160,10 @@ export class CircleTool implements Tool {
       if (this.last && this.ctx && (v.kind === 'length' || v.kind === 'radius' || v.kind === 'circumscribed' || v.kind === 'segments')) {
         if (this.reapplyLast(v)) return;
       }
-      const sides = sidesFromVcb(v);
-      if (sides !== null) this.setSegments(sides);
+      // A side count takes its suffix (`24s`); a bare number before the first click sets nothing.
+      if (v.kind === 'segments') this.setSegments(v.count);
+      else this.bareNumber = v.kind === 'length' && v.unit === null ? v.raw : null;
+      this.ctx?.statusChanged();
       return;
     }
     if (v.kind === 'segments') {
@@ -180,7 +187,7 @@ export class CircleTool implements Tool {
     if (this.center && this.plane && inf) {
       const r = this.currentRadius();
       if (r > MERGE_TOL) {
-        const tess = this.tessellate(this.center, this.plane.n, r, this.segments, this.currentStartAngle());
+        const tess = this.tessellate({ center: this.center, normal: this.plane.n, radius: r, segments: this.segments, startAngle: this.currentStartAngle(), ...this.modeParams() });
         out.push(...shapePreview(tess.points, true, PREVIEW_COLOR, SNAP_COLORS.onFace));
         out.push(...this.diameterDimension(r).overlay);
       }
@@ -191,14 +198,68 @@ export class CircleTool implements Tool {
   }
 
   status(): ToolStatus {
-    if (!this.center) return { instructor: 'Select center point.', vcbLabel: 'Sides', vcbValue: String(this.segments) };
+    const held = [...planeTag(this.lockNormal), ...(this.heldPlane ? [SHIFT_HELD] : [])];
+    const s = this.statusWithoutHeld();
+    return held.length ? { ...s, held } : s;
+  }
+
+  private statusWithoutHeld(): ToolStatus {
+    const settings = this.barSettings();
+    if (!this.center) {
+      const n = this.bareNumber;
+      const instructor = n !== null && Number.isInteger(n) && n >= 3
+        ? `Type ${n}s for ${n} sides, or set Sides in the tool options bar. Then select the center point.`
+        : 'Select center point.';
+      return { instructor, vcbLabel: 'Sides', vcbValue: String(this.segments), settings };
+    }
     const r = this.currentRadius();
     return {
       instructor: `Select point on ${this.shapeName} or enter value.`,
       vcbLabel: 'Diameter',
       vcbValue: formatLen(this.ctx, 2 * r),
       fields: this.diameterDimension(r).fields,
+      settings,
     };
+  }
+
+  /** The tool options bar: the side count. */
+  protected barSettings(): ToolSetting[] {
+    return [countSetting('sides', 'Sides', this.segments)];
+  }
+
+  onSetting(id: string, value: ToolSettingValue): void {
+    if (!this.applySetting(id, value)) return;
+    this.ctx?.requestRender();
+    this.ctx?.statusChanged();
+  }
+
+  /** The bar changed `id` just after a commit: redraw that shape with the new value, as one undo step. */
+  adjustLast(id: string): boolean {
+    if (!this.ctx || !this.last || !this.adjustable(id)) return false;
+    const next = this.adjustedParams(id, this.last.params);
+    if (!undoLast(this.ctx, this.last)) return false;
+    this.execute(next);
+    this.ctx.requestRender();
+    return true;
+  }
+
+  /** Bar controls that change the last shape. */
+  protected adjustable(id: string): boolean {
+    return id === 'sides';
+  }
+
+  /** The last shape redone for a change of bar control `id`: only that value changes. */
+  protected adjustedParams(id: string, prev: CircleParams): CircleParams {
+    return id === 'sides' ? { ...prev, segments: this.segments } : prev;
+  }
+
+  /** Apply a bar control; false when it is not one of this tool's. */
+  protected applySetting(id: string, value: ToolSettingValue): boolean {
+    if (id !== 'sides') return false;
+    const n = countFrom(value);
+    if (n === null) return false;
+    this.setSegments(n);
+    return true;
   }
 
   // --- hooks for Polygon ----------------------------------------------------------------------
@@ -209,8 +270,12 @@ export class CircleTool implements Tool {
   protected get minSides(): number {
     return 3;
   }
-  protected tessellate(center: Vec3, normal: Vec3, radius: number, segments: number, startAngle: number): Tessellation {
-    return tessellateCircle(center, normal, radius, segments, startAngle);
+  protected tessellate(p: CircleParams): Tessellation {
+    return tessellateCircle(p.center, p.normal, p.radius, p.segments, p.startAngle);
+  }
+  /** Mode settings of the next shape, recorded with it so a later change redraws it the same way (Polygon). */
+  protected modeParams(): Partial<CircleParams> {
+    return {};
   }
   /** A bare length is the diameter; `24r` is a radius. */
   protected radiusFromVcb(v: VcbValue): number | null {
@@ -245,6 +310,7 @@ export class CircleTool implements Tool {
   }
 
   protected setSegments(n: number): void {
+    this.bareNumber = null;
     this.segments = Math.max(this.minSides, Math.round(n));
     this.ctx?.statusChanged();
   }
@@ -254,6 +320,7 @@ export class CircleTool implements Tool {
     this.plane = drawingPlaneAt(inf, p, this.lockNormal, this.heldPlane);
     this.basis = planeBasis(p, this.plane.n);
     this.center = p;
+    this.bareNumber = null;
     this.ctx?.statusChanged();
   }
 
@@ -276,7 +343,7 @@ export class CircleTool implements Tool {
 
   protected commit(radius: number, segments: number, startAngle: number): void {
     if (!this.ctx || !this.center || !this.plane) return;
-    const params: CircleParams = { center: this.center, normal: this.plane.n, radius, segments, startAngle };
+    const params: CircleParams = { center: this.center, normal: this.plane.n, radius, segments, startAngle, ...this.modeParams() };
     this.execute(params);
     this.reset();
     this.ctx.requestRender();
@@ -286,10 +353,11 @@ export class CircleTool implements Tool {
   /** Run `sketch.addCurve` for the params and remember the undo entry for VCB re-edits. */
   protected execute(params: CircleParams): AddCurveResult {
     const ctx = this.ctx!;
-    const tess = this.tessellate(params.center, params.normal, params.radius, params.segments, params.startAngle);
+    const tess = this.tessellate(params);
     const payload: AddCurveInput = { points: tess.points, closed: true, curve: tess.curve };
     const res = ctx.commands.execute('sketch.addCurve', payload) as AddCurveResult;
     this.last = { params, entry: hostOfTool(ctx).undoStack.peek() };
+    ctx.committed?.();
     return res;
   }
 
@@ -304,7 +372,8 @@ export class CircleTool implements Tool {
     } else {
       const r = this.radiusFromVcb(v);
       if (r === null || r <= MERGE_TOL) return false;
-      next = { ...prev, radius: r };
+      // a suffixed radius (`r`, Polygon's `c`) also picks the mode; a bare length keeps the shape's
+      next = { ...prev, radius: r, ...(v.kind === 'length' ? {} : this.modeParams()) };
     }
     if (!undoLast(this.ctx, this.last)) return false;
     this.execute(next);

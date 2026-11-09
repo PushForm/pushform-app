@@ -2,24 +2,20 @@
 // Copyright 2026 PushForm contributors
 import { useEffect, useRef } from 'react';
 import type { JSX } from 'react';
-import type { Modifiers, ToolPointerEvent } from '@pushform/commands';
+import type { ToolPointerEvent } from '@pushform/commands';
 import { GROUND_PLANE, freeInference, hitSelectable } from '@pushform/inference';
 import { ContextMenuHost } from './ContextMenu';
 import { DialogHost } from './MakeComponentDialog';
 import { EntryFields } from './EntryFields';
 import { NavigationCube } from './NavigationCube';
 import { SceneTabs } from './SceneTabs';
-import type { InferenceResult } from '@pushform/inference';
+import { ToolOptionsBar } from './ToolOptionsBar';
+import { toolModifiers } from '../platformKeys';
+import { HeldTags } from './HeldTags';
+import type { InferenceOptions, InferenceResult } from '@pushform/inference';
 import { useApp } from '../AppContext';
 import { useAppStore } from '../store';
 import { viewAxesOf } from '../engine/viewAxes';
-
-const modifiersOf = (e: { shiftKey: boolean; ctrlKey: boolean; altKey: boolean; metaKey: boolean }): Modifiers => ({
-  shift: e.shiftKey,
-  ctrl: e.ctrlKey,
-  alt: e.altKey,
-  meta: e.metaKey,
-});
 
 /** Mounts the render Viewport and forwards pointer/wheel events to the ToolManager. */
 export function ViewportView(): JSX.Element {
@@ -28,6 +24,23 @@ export function ViewportView(): JSX.Element {
   const activeToolId = useAppStore((s) => s.activeToolId);
   const hint = useAppStore((s) => s.cursorHint);
   const pointer = useRef<[number, number]>([0, 0]);
+  const underBand = useRef<HTMLDivElement>(null);
+  const bandBottom = useRef(0);
+  // Framing keeps the scene tabs and the tool options bar's band clear.
+  useEffect(() => {
+    const el = underBand.current;
+    if (!el) return;
+    const update = () => {
+      bandBottom.current = el.offsetTop;
+      app.viewport.camera.setFrameInsetTop(el.offsetTop);
+    };
+    update();
+    const top = el.parentElement;
+    if (!top || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(update);
+    ro.observe(top);
+    return () => ro.disconnect();
+  }, [app]);
   const cursor = (activeToolId && app.toolManager.get(activeToolId)?.cursor) || 'default';
 
   useEffect(() => {
@@ -36,7 +49,7 @@ export function ViewportView(): JSX.Element {
     app.viewport.mount(el);
     el.focus();
 
-    const toEvent = (e: PointerEvent | MouseEvent, button: number, withPick: boolean): ToolPointerEvent => {
+    const toEvent = (e: PointerEvent | MouseEvent, button: number, withPick: boolean, pickOptions?: InferenceOptions): ToolPointerEvent => {
       const rect = el.getBoundingClientRect();
       const screen: [number, number] = [e.clientX - rect.left, e.clientY - rect.top];
       pointer.current = screen;
@@ -44,7 +57,7 @@ export function ViewportView(): JSX.Element {
       let inference: InferenceResult | null = null;
       if (withPick) {
         const tool = app.toolManager.activeTool;
-        const opts = tool?.inferenceOptions?.() ?? {};
+        const opts = pickOptions ?? tool?.inferenceOptions?.() ?? {};
         try {
           inference = app.inference.resolve(
             { ray, screen, pixelSizeAt: app.viewport.pixelSizeAlong(ray), project: (p) => app.viewport.project(p), view: viewAxesOf(app.viewport.camera.getState(), rect.width, rect.height) },
@@ -60,7 +73,7 @@ export function ViewportView(): JSX.Element {
         ray,
         button,
         buttons: e.buttons,
-        modifiers: modifiersOf(e),
+        modifiers: toolModifiers(e, app.keymap.platform === 'mac'),
         inference,
         camera: app.viewport.camera.getState(),
       };
@@ -83,11 +96,12 @@ export function ViewportView(): JSX.Element {
       e.preventDefault();
       const rect = el.getBoundingClientRect();
       const deltaY = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
-      app.toolManager.wheel({ screen: [e.clientX - rect.left, e.clientY - rect.top], deltaY, modifiers: modifiersOf(e) });
+      app.toolManager.wheel({ screen: [e.clientX - rect.left, e.clientY - rect.top], deltaY, modifiers: toolModifiers(e, app.keymap.platform === 'mac') });
     };
     const onContextMenu = (e: MouseEvent) => {
       e.preventDefault();
-      const ev = toEvent(e, 2, true);
+      // the menu is for what is under the cursor as Select picks it, whatever tool is active
+      const ev = toEvent(e, 2, true, { pickOnly: true });
       const hit = ev.inference?.hit ?? null;
       app.commands.tryExecute('ui.contextMenu.open', { x: e.clientX, y: e.clientY, refs: hit ? [hitSelectable(hit)] : [] });
     };
@@ -116,12 +130,21 @@ export function ViewportView(): JSX.Element {
   const hintPos = hint?.screen ?? pointer.current;
   return (
     <div className="pf-viewport-wrap">
-      <SceneTabs />
       <div ref={ref} className="pf-viewport" tabIndex={0} style={{ cursor }} aria-label="3D viewport" />
-      <NavigationCube />
+      {/* Over the canvas: scene tabs, the tool options bar's band, then the navigation cube below the band. */}
+      <div className="pf-viewport-top">
+        <SceneTabs />
+        <div className="pf-tob-band">
+          <ToolOptionsBar />
+        </div>
+        <div ref={underBand} className="pf-viewport-under-band">
+          <NavigationCube />
+        </div>
+      </div>
       <DialogHost />
       <ContextMenuHost />
       <EntryFields pointer={pointer} />
+      <HeldTags pointer={pointer} minTop={bandBottom} />
       {hint ? (
         <div className="pf-cursor-hint" style={{ left: hintPos[0] + 14, top: hintPos[1] + 18 }}>
           {hint.text}

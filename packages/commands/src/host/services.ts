@@ -62,6 +62,15 @@ export function activeTagOpt(ctx: CommandContext): { tagId?: TagId } {
   return { tagId: id as TagId };
 }
 
+/**
+ * `activeTagOpt` for drawing commands: the active tag for the new edges (`tagId`) and for the faces they
+ * form that take no attributes from an existing face (`faceTagId`).
+ */
+export function activeDrawTagOpts(ctx: CommandContext): { tagId?: TagId; faceTagId?: TagId } {
+  const { tagId } = activeTagOpt(ctx);
+  return tagId === undefined ? {} : { tagId, faceTagId: tagId };
+}
+
 /** Active material of the Paint Bucket / Materials panel (runtime UI state; the UI backs it with its store). */
 export const SERVICE_ACTIVE_MATERIAL = 'activeMaterial';
 

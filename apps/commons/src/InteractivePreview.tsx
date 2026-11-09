@@ -1,0 +1,76 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright 2026 PushForm contributors
+import { useEffect, useRef, useState } from 'react';
+import type { CatalogModel } from '@pushform/cloud';
+import { DEFAULT_PREVIEW_VIEW, parsePreviewMesh, rasterPreview, type PreviewMesh, type PreviewView } from '@pushform/cloud/preview';
+import { CommonsThumbnail, usePreviewStatus } from './CommonsPreview';
+
+export function InteractivePreview({ url, model }: { url: string; model: CatalogModel }) {
+  const status = usePreviewStatus(url.replace('/previews/', '/preview-status/'), true);
+  const [mesh, setMesh] = useState<PreviewMesh | null>(null), [error, setError] = useState(''), [attempt, setAttempt] = useState(0);
+  const [view, setView] = useState({ ...DEFAULT_PREVIEW_VIEW });
+  const drag = useRef<{ x: number; y: number } | null>(null);
+  const [moving, setMoving] = useState(false);
+  useEffect(() => {
+    if (status.status !== 'ready') return;
+    const abort = new AbortController(); setMesh(null); setError('');
+    void (async () => {
+      const response = await fetch(url, { signal: abort.signal, credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer' });
+      if (response.status === 202) { status.refresh(); return; }
+      if (!response.ok) throw new Error(response.status === 422 ? 'This model cannot be previewed yet. Try Open in PushForm.' : 'The model preview is unavailable.');
+      if (response.headers.get('Content-Type')?.split(';')[0] !== 'application/json') throw new Error('The preview response is invalid.');
+      if (!response.body) throw new Error('The model preview is empty.');
+      const reader = response.body.getReader(); const chunks: Uint8Array[] = []; let size = 0;
+      try { for (;;) { const next = await reader.read(); if (next.done) break; size += next.value.length;
+        if (size > 2 * 1024 * 1024) { await reader.cancel(); throw new Error('The preview exceeds its display limit.'); } chunks.push(next.value);
+      } } finally { reader.releaseLock(); }
+      const bytes = new Uint8Array(size); let offset = 0; for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+      const result = JSON.parse(new TextDecoder().decode(bytes)) as { modelId?: unknown; revision?: unknown; mesh?: unknown };
+      if (result.modelId !== model.id || result.revision !== model.revision) throw new Error('The model revision changed. Refresh its page.');
+      if (!abort.signal.aborted) setMesh(parsePreviewMesh(result.mesh));
+    })().catch(failure => { if (!abort.signal.aborted) setError(failure instanceof Error ? failure.message : 'The model preview is unavailable.'); });
+    return () => abort.abort();
+  }, [url, model.id, model.revision, attempt, status.status]);
+  const zoom = (factor: number) => setView(current => ({ ...current, zoom: Math.max(.4, Math.min(2.5, current.zoom * factor)) }));
+  const orbit = (yaw: number, pitch = 0) => setView(current => ({ ...current, yaw: current.yaw + yaw, pitch: Math.max(-1.4, Math.min(1.4, current.pitch + pitch)) }));
+  if (status.status === 'failed' || status.status === 'unsupported') return <div className="preview-error"><p role="alert">{status.error || 'This model cannot be previewed yet. Try Open in PushForm.'}</p><p>Original files and license notices remain available below.</p></div>;
+  if (error) return <div className="preview-error"><CommonsThumbnail model={model} filesUrl={new URL(url).origin}/><p role="alert">{error}</p><button onClick={() => { setAttempt(value => value + 1); status.refresh(); }}>Retry preview</button></div>;
+  if (!mesh) return <div className="preview-loading" role="status">{status.status === 'queued' ? 'Model preview is queued…' : 'Rendering model preview…'}</div>;
+  return <>
+    <PreviewCanvas mesh={mesh} view={view} moving={moving} tabIndex={0} role="img" aria-label={`Interactive 3D preview of ${model.title}. Use arrow keys to rotate, plus or minus to zoom, and zero to reset.`}
+      onPointerDown={event => { if(event.button!==0)return; drag.current = { x: event.clientX, y: event.clientY }; setMoving(true); event.currentTarget.setPointerCapture(event.pointerId); }}
+      onPointerMove={event => { const previous = drag.current; if (previous) { orbit((event.clientX - previous.x) / 120, (event.clientY - previous.y) / 120); drag.current = { x: event.clientX, y: event.clientY }; } }}
+      onPointerUp={() => { drag.current = null; setMoving(false); }} onPointerCancel={() => { drag.current = null; setMoving(false); }} onLostPointerCapture={() => { drag.current = null; setMoving(false); }}
+      onKeyDown={event => { if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','+','=','-','0'].includes(event.key)) event.preventDefault();
+        if (event.key === 'ArrowLeft') orbit(-.2); if (event.key === 'ArrowRight') orbit(.2); if (event.key === 'ArrowUp') orbit(0, -.2); if (event.key === 'ArrowDown') orbit(0, .2);
+        if (event.key === '+' || event.key === '=') zoom(1.2); if (event.key === '-') zoom(1 / 1.2); if (event.key === '0') setView({ ...DEFAULT_PREVIEW_VIEW }); }}/>
+    <div className="preview-controls" aria-label="3D preview controls">
+      <button aria-label="Rotate left" title="Rotate left" onClick={() => orbit(-.3)}><RotateIcon/></button><button aria-label="Rotate right" title="Rotate right" onClick={() => orbit(.3)}><RotateIcon clockwise/></button>
+      <button aria-label="Tilt up" onClick={() => orbit(0, -.2)}>↑</button><button aria-label="Tilt down" onClick={() => orbit(0, .2)}>↓</button>
+      <button aria-label="Zoom out" onClick={() => zoom(1 / 1.2)}>−</button><button aria-label="Zoom in" onClick={() => zoom(1.2)}>+</button>
+      <button onClick={() => setView({ ...DEFAULT_PREVIEW_VIEW })}>Reset view</button>
+    </div><p className="preview-caption">Drag to rotate · use controls to zoom. Geometry and material colors; textures, units and dimensions are not shown.</p>
+  </>;
+}
+
+/** Draws the model with the shared depth-buffered renderer: quicker while dragging, antialiased when it stops. */
+function PreviewCanvas({ mesh, view, moving, ...props }: { mesh: PreviewMesh; view: PreviewView; moving: boolean } & React.CanvasHTMLAttributes<HTMLCanvasElement>) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const element = canvas.current; if (!element) return;
+    const frame = requestAnimationFrame(() => {
+      const ratio = Math.min(2, window.devicePixelRatio || 1), width = Math.round((element.clientWidth || 480) * ratio), height = Math.round(width * 400 / 480);
+      if (element.width !== width || element.height !== height) { element.width = width; element.height = height; }
+      const pixels = rasterPreview(mesh, view, { width, height, supersample: moving ? 1 : 2, edgeWidth: 1.6 * ratio });
+      element.getContext('2d')?.putImageData(new ImageData(new Uint8ClampedArray(pixels), width, height), 0, 0);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [mesh, view, moving]);
+  return <canvas ref={canvas} className="preview-viewer" data-view={`${view.yaw.toFixed(3)} ${view.pitch.toFixed(3)} ${view.zoom.toFixed(3)}`} {...props}/>;
+}
+
+function RotateIcon({ clockwise = false }: { clockwise?: boolean }) {
+  return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <g transform={clockwise ? 'translate(24 0) scale(-1 1)' : undefined}><path d="M3 10a9 9 0 1 1 2.7 8.4"/><path d="M3 4v6h6"/></g>
+  </svg>;
+}

@@ -11,6 +11,8 @@ import { retrieveUserHelp, USER_HELP_RULES } from '../agents/digest.ts';
 import { GUIDANCE_RULES } from '../guidance.ts';
 import { PICTURE_RULES } from '../agents/pictures.ts';
 import { DOCUMENT_RULES, MODEL_DOCUMENT_RULES, RENDER_TOOL, documentTools, editableDocument, type DocumentCapability } from '../agents/document.ts';
+import { CLONE_RULES, CLONE_TOOL, cloneAnswerOf, handoffBlock, handoffSchema, quietCloneAnswer } from '../clone.ts';
+import { PUBLISH_RULES, PUBLISH_TOOL, SAVE_RULES, SAVE_TOOL, publishAnswerOf, quietPublishAnswer } from '../publish.ts';
 import { MODEL_TOOLS, modelRenderSchema, modelRenderViewName, modelRenderViews } from '@pushform/extension-protocol';
 import type { DigestSection } from '../agents/digest.ts';
 import { helpAgent } from '../agents/help.ts';
@@ -110,7 +112,8 @@ export function turnPrompt(models: Config['models'], ctx: AgentContext, document
   const editable = editableDocument(document);
   return {
     model: tools.length ? models.document : models.conversation,
-    system: [agent.system(ctx), USER_HELP_RULES, PICTURE_RULES, ...(editable === 'layout' ? [DOCUMENT_RULES(ctx)] : editable === 'model' ? [MODEL_DOCUMENT_RULES(ctx)] : []), ...(document?.guidance ? [GUIDANCE_RULES] : [])].join('\n\n'),
+    system: [agent.system(ctx), USER_HELP_RULES, PICTURE_RULES, ...(editable === 'layout' ? [DOCUMENT_RULES(ctx)] : editable === 'model' ? [MODEL_DOCUMENT_RULES(ctx)] : []), ...(document?.guidance ? [GUIDANCE_RULES] : []), ...(tools.some(tool => tool.name === SAVE_TOOL) ? [SAVE_RULES] : []), ...(tools.some(tool => tool.name === PUBLISH_TOOL) ? [PUBLISH_RULES] : []),
+      ...(tools.some(tool => tool.name === CLONE_TOOL) ? [CLONE_RULES] : [])].join('\n\n'),
     tools: [...agent.tools(ctx), ...tools],
   };
 }
@@ -120,8 +123,8 @@ export function turnPrompt(models: Config['models'], ctx: AgentContext, document
  */
 export const WARM_DOCUMENTS: readonly (DocumentCapability | null)[] = [
   null,
-  { type: 'model', apiVersion: 1, edit: 1, guidance: 1 },
-  { type: 'layout', apiVersion: 1, guidance: 1 },
+  { type: 'model', apiVersion: 1, edit: 1, guidance: 1, clone: 1, save: 1, publish: 1 },
+  { type: 'layout', apiVersion: 1, guidance: 1, clone: 1, save: 1 },
 ];
 /** A first-message context with no account in it: the prompt does not depend on the account (see `turnPrompt`). */
 function warmContext(config: Config, document: DocumentCapability | null): AgentContext {
@@ -177,10 +180,10 @@ const startSchema = z.object({ kind: z.enum(['help', 'intake']), path: z.enum(['
   .refine(b => (b.kind === 'help') === (b.path === 'help'), { message: 'kind help pairs with path help; kind intake with open, problem or feature', path: ['path'] });
 /** `intent` is the card the requester clicked; it settles an open conversation's path before the agent runs and is ignored once a path is set. */
 /** `document` is what the sending tab can edit this turn; absent or null offers no document tools. */
-const documentSchema = z.object({ type: z.enum(['layout', 'model']), apiVersion: z.int().min(1), guidance: z.literal(1).optional(), edit: z.literal(1).optional() });
+const documentSchema = z.object({ type: z.enum(['layout', 'model']), apiVersion: z.int().min(1), guidance: z.literal(1).optional(), edit: z.literal(1).optional(), clone: z.literal(1).optional(), save: z.literal(1).optional(), publish: z.literal(1).optional() });
 /** `attachments` are the ids of uploaded pictures of this conversation sent with the message; a message may be pictures alone. */
 const messageSchema = z.object({ text: z.string().max(MESSAGE_MAX_CHARS), intent: z.enum(['help', 'problem', 'feature']).optional(), document: documentSchema.nullable().optional(),
-  attachments: z.array(z.uuid()).max(PICTURES_PER_MESSAGE).optional() })
+  attachments: z.array(z.uuid()).max(PICTURES_PER_MESSAGE).optional(), handoff: handoffSchema.optional() })
   .refine(b => b.text.trim().length > 0 || (b.attachments?.length ?? 0) > 0, { message: 'A message needs text or a picture.', path: ['text'] });
 /** The editor's answers to a suspended turn; a call left out is answered as not run. */
 /** `images` are a render's pictures as base64, in view order; only a `model_render` answer may carry them. */
@@ -378,7 +381,10 @@ export function historyOf(messages: readonly ConversationMessage[], contextBlock
   for (const m of messages) {
     if (m.role === 'tool') { tools.push(m); continue; }
     flushTools();
-    if (m.role === 'user') out.push({ role: 'user', content: m.attachments?.length ? [...pictureBlocks(m.attachments, images), { type: 'text', text: frameRequesterText(m.text) }] : frameRequesterText(m.text) });
+    if (m.role === 'user') {
+      const text = m.handoff ? `${handoffBlock(m.handoff)}\n\n${frameRequesterText(m.text)}` : frameRequesterText(m.text);
+      out.push({ role: 'user', content: m.attachments?.length ? [...pictureBlocks(m.attachments, images), { type: 'text', text }] : text });
+    }
     // An acknowledgment restated the request for the requester only: no model ever reads it.
     else if (m.text.trim() && !m.acknowledgment) out.push({ role: 'assistant', content: m.text });
   }
@@ -1070,6 +1076,8 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     if (loaded.status === 'rejected') throw loaded.reason;
     const conversation = loaded.value;
     if (conversation.status !== 'open') throw new HttpError('invalid', 'The conversation is closed; start a new one.');
+    // A handoff opens a clone's chat, so it can only be the first message.
+    if (body.handoff && conversation.messages.length) throw new HttpError('invalid', 'A handoff can only start a conversation.');
     if (rate.status === 'rejected') throw rate.reason;
     if (!deps.anthropic) throw new HttpError('unavailable', 'The assistant is not configured (ANTHROPIC_API_KEY missing).');
     if (account.status === 'rejected') throw account.reason;
@@ -1088,14 +1096,14 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     const prior = [...conversation.messages, ...closers];
     const help = path === 'help' || path === 'open'
       ? `\n\n<retrieved_help>\n${retrieveUserHelp(deps.digest, body.text.slice(0, 300), ctx.screen.editor)}\n</retrieved_help>` : '';
-    const context = agent.context(ctx) + help;
+    const context = agent.context(ctx) + help + (body.handoff ? `\n\n${handoffBlock(body.handoff)}` : '');
     const pictures = body.attachments?.length ? await timed(timing, 'pictures', messagePictures(conversation, user.id, body.attachments)) : [];
     const seen = recentHistory(prior);
     const images = await timed(timing, 'images', pictureData([...seen.messages, { role: 'user', text: body.text, at: base.now, attachments: pictures }]));
     return streamTurn({
       timing,
       user, conversation, store, handlers: agent.handlers(ctx, store), pathChanged: path !== conversation.path,
-      leading: [...closers, { role: 'user', text: body.text, at: base.now, ...(pictures.length ? { attachments: pictures } : {}) }],
+      leading: [...closers, { role: 'user', text: body.text, at: base.now, ...(pictures.length ? { attachments: pictures } : {}), ...(body.handoff ? { handoff: body.handoff } : {}) }],
       status: messageStatus(),
       ...(config.models.acknowledge ? { acknowledge: acknowledgeContent({ text: body.text, pictures: pictures.length, previousReply: previousReplyOf(prior) }) } : {}),
       setup: {
@@ -1141,8 +1149,12 @@ export function createConversationHandler(deps: ConversationDeps): (req: Request
     const pending = turn.pending as PendingClientTools;
     // A missed cue is not a conversational event. Persist the result without spending another model round
     // or emitting a follow-up that blames the user for not clicking; current instructions remain in chat.
+    // Likewise a clone made or a clone card cancelled: the work goes on in the clone's own chat, or nothing was asked for;
+    // and a publication made or its card cancelled, which the card already reports.
     const quietCue = pending.calls.length > 0 && pending.calls.every(call => {
       const answer = answers.get(call.id);
+      if (call.name === CLONE_TOOL) return !!answer && !answer.isError && quietCloneAnswer(cloneAnswerOf(answer.content));
+      if (call.name === PUBLISH_TOOL) return !!answer && !answer.isError && quietPublishAnswer(publishAnswerOf(answer.content));
       if (call.name !== 'ui_highlight' || !answer || answer.isError) return false;
       try { return ['expired', 'cancelled', 'dismissed'].includes((JSON.parse(answer.content) as { status?: string }).status ?? ''); }
       catch { return false; }

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { current, isDraft } from 'immer';
-import type { LayoutDocumentState, LayoutEntity, LayoutImage, LayoutViewport, LayoutViewportCamera, LayoutViewportSource, ModelReference } from './LayoutDocument';
+import { entitiesForLayer } from './LayoutDocument';
+import type { LayoutDocumentState, LayoutEntity, LayoutImage, LayoutViewport, LayoutViewportCamera, LayoutViewportSections, LayoutViewportSource, ModelReference } from './LayoutDocument';
+import { DEFAULT_LAYOUT_PAGE_NUMBERING, layoutPageNumberText, layoutPageNumbering } from './text';
 
 type V3 = [number, number, number];
 type P2 = [number, number];
@@ -38,6 +40,46 @@ export function viewportSourceKey(state: LayoutDocumentState, source: LayoutView
   if (!isCloudSource(source)) return `${source.archiveId}\u0000${source.modelReferenceId}`;
   const reference = viewportCloudReference(state, source);
   return reference ? `cloud\u0000${reference.target.documentId}\u0000${reference.target.sha256}` : `cloud\u0000missing\u0000${source.referenceId}`;
+}
+
+/** Views of a model that show its sections alike: those of one scene, with the same section display settings. */
+export interface LayoutSectionViews {
+  readonly scene: string | null;
+  readonly sections: LayoutViewportSections | undefined;
+  /** The page number, as `<PageNumber>` shows it, of the first page that draws one of them. */
+  readonly sheet: string;
+}
+
+/**
+ * The sheets a model's views are drawn on: for each scene and section display settings its views show, the first
+ * page drawing such a view, in the order the pages first show them. Views alike are cut alike, so a section plane is
+ * drawn on the sheet of the first of these that cuts with it. Hidden views and views on layers hidden on a page do
+ * not count.
+ */
+export function viewportSourceSectionViews(state: LayoutDocumentState, source: LayoutViewportSource): LayoutSectionViews[] {
+  const key = viewportSourceKey(state, source);
+  const numbering = layoutPageNumbering('PageNumber', state) ?? DEFAULT_LAYOUT_PAGE_NUMBERING;
+  const views: LayoutSectionViews[] = [], seen = new Set<string>();
+  for (const pageId of state.pageOrder) {
+    const page = state.pages.get(pageId);
+    if (!page) continue;
+    for (const layerId of state.layerOrder) {
+      for (const entity of entitiesForLayer(page, state, layerId)) {
+        if (!isViewport(entity) || viewportSourceKey(state, entity.image.viewport.source) !== key) continue;
+        const { scene, display } = entity.image.viewport, sections = display?.sections;
+        const alike = JSON.stringify([scene, sections ?? null]);
+        if (seen.has(alike)) continue;
+        seen.add(alike);
+        views.push({ scene, sections, sheet: layoutPageNumberText(numbering, page, state) });
+      }
+    }
+  }
+  return views;
+}
+
+/** `viewportSourceSectionViews` as one string, for stamping a picture with the sheets its section markers show. */
+export function viewportSourceSheetsKey(state: LayoutDocumentState, source: LayoutViewportSource): string {
+  return JSON.stringify(viewportSourceSectionViews(state, source).map(({ scene, sections, sheet }) => [scene, sections ?? null, sheet]));
 }
 
 /** An independent copy of a picture. A copied viewport keeps its source and settings but is no longer the imported original. */
@@ -123,7 +165,7 @@ export function viewportCamerasEqual(a: LayoutViewportCamera, b: LayoutViewportC
 
 /**
  * Whether the viewport's picture was rendered for its current camera and frame size and,
- * for a cloud model, from the revision its reference now names.
+ * for a cloud model, from the revision its reference now names, with the sheets its section markers show.
  */
 export function viewportCacheCurrent(viewport: LayoutViewport, points: readonly P2[], state?: LayoutDocumentState): boolean {
   const cache = viewport.cache;
@@ -132,6 +174,7 @@ export function viewportCacheCurrent(viewport: LayoutViewport, points: readonly 
     const reference = state ? viewportCloudReference(state, viewport.source) : undefined;
     if (!reference || cache.sha256 !== reference.target.sha256) return false;
   }
+  if (cache.sheet !== undefined && (!state || cache.sheet !== viewportSourceSheetsKey(state, viewport.source))) return false;
   const { width, height } = layoutFrameSize(points);
   // Paper coordinates round-trip through inches; a micrometer is far below a rendered pixel.
   const sameSize = Math.abs(cache.widthMm - width) < 1e-3 && Math.abs(cache.heightMm - height) < 1e-3;

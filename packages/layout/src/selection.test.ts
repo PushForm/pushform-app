@@ -3,7 +3,7 @@
 import { expect, it } from 'vitest';
 import { createLayoutDocument, type LayoutEntity } from './LayoutDocument';
 import { createLinearDimension } from './dimensions';
-import { entitiesInLasso, entitiesInSelectionBox, lassoIsCrossing, layoutEntityBounds } from './selection';
+import { entitiesInLasso, entitiesInSelectionBox, lassoIsCrossing, layoutEntityBounds, selectableLayoutEntities } from './selection';
 
 function populate() {
   const doc = createLayoutDocument();
@@ -53,6 +53,31 @@ it('skips hidden layers and measures drawn extents for curves, text, and dimensi
   expect(bounds.maxY - bounds.minY).toBeCloseTo(40);
   const dimension: LayoutEntity = { id: 11, kind: 'dimension', layerId: 1, closed: false, points: [[10, 40], [30, 40], [20, 50]], dimension: createLinearDimension() };
   expect(layoutEntityBounds(dimension)).toEqual({ minX: 10, minY: 40, maxX: 30, maxY: 50 });
+});
+
+it('Select All takes every visible object on the page, locked or shared, but nothing hidden', () => {
+  const { doc, page, square, line, far, dimension } = populate();
+  const ids = () => selectableLayoutEntities(page, doc.state).map((entity) => entity.id);
+  expect(ids()).toEqual([square, line, far, dimension]);
+  // Locked objects and objects on locked layers can be selected; hidden objects cannot.
+  page.entities.set(line, { ...page.entities.get(line)!, locked: true });
+  page.entities.set(far, { ...page.entities.get(far)!, hidden: true });
+  doc.state.layers.get(doc.state.layerOrder[0]!)!.locked = true;
+  expect(ids()).toEqual([square, line, dimension]);
+  // Objects on a layer shown on every page come after the page's own layer, in layer order.
+  const pageLayer = doc.state.layerOrder[0]!;
+  const state = { ...doc.state, layerOrder: [...doc.state.layerOrder, 50],
+    layers: new Map([...doc.state.layers, [50, { id: 50, name: 'Shared', visible: true, locked: false, shared: true }]]),
+    sharedEntities: new Map([[60, { id: 60, layerId: 50, kind: 'path', closed: false, points: [[0, 0], [5, 5]] } as LayoutEntity]]),
+    sharedEntityOrder: [60] };
+  expect(selectableLayoutEntities(page, state).map((entity) => entity.id)).toEqual([square, line, dimension, 60]);
+  // Objects without an extent are skipped, and a layer hidden on this page, or everywhere, contributes nothing.
+  page.entities.set(70, { id: 70, layerId: pageLayer, kind: 'path', closed: false, points: [] });
+  page.entityOrder.push(70);
+  const hiddenHere = { ...page, layerVisibility: new Map([[50, false]]) };
+  expect(selectableLayoutEntities(hiddenHere, state).map((entity) => entity.id)).toEqual([square, line, dimension]);
+  doc.state.layers.get(pageLayer)!.visible = false;
+  expect(ids()).toEqual([]);
 });
 
 it('lasso: counterclockwise selects what it encloses, clockwise what it touches', () => {

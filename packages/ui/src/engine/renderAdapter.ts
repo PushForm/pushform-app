@@ -30,6 +30,7 @@ import type {
   RenderSketch,
 } from '@pushform/render';
 import { rgbToCss } from './format';
+import { modelTextFontUrl } from './modelTextFonts';
 
 // --- materials (materials agent) ----------------------------------------------------------------
 
@@ -546,6 +547,9 @@ export function textsToRender(state: DocumentState, selection: readonly EntityRe
           arrow: t.arrow ?? 'closed',
           color: rgbToCss(t.color),
           fontSizePt: t.fontSizePt,
+          bold: t.bold ?? false,
+          italic: t.italic ?? false,
+          fontUrl: modelTextFontUrl(t.fontFamily, t.bold ?? false, t.italic ?? false),
           selected: selected.has(key),
         });
       }

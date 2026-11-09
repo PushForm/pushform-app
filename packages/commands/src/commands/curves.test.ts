@@ -2,7 +2,7 @@
 // Copyright 2026 PushForm contributors
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Box3, Ray, Vec3 } from '@pushform/core';
-import { v3dist } from '@pushform/core';
+import { planeDistance, v3dist, v3dot } from '@pushform/core';
 import { tessellateCircle, tessellateArc } from '@pushform/geom';
 import { InlineBackend, KernelClient, meshTopologyProblems } from '@pushform/kernel';
 import type { Body, EntityContainer } from '@pushform/model';
@@ -221,5 +221,129 @@ describe('extruding curves', () => {
       expect(v3dist(c.center, [0, 0, c.center[2]])).toBeLessThan(1e-9);
     }
     expect(rims.map((c) => Math.round(c.center[2] * 1e6) / 1e6).sort()).toEqual([0, 1]);
+  });
+});
+
+/** A circle of `segments` sides about `normal`. */
+function addCircleAbout(registry: CommandRegistry, center: Vec3, normal: Vec3, radius: number, segments = 24): AddCurveResult {
+  const t = tessellateCircle(center, normal, radius, segments);
+  const input: AddCurveInput = { points: t.points, closed: true, curve: t.curve };
+  return registry.execute('sketch.addCurve', input) as AddCurveResult;
+}
+
+/** The area of a regular polygon of `segments` sides inscribed in a circle of `radius`. */
+const polygonArea = (radius: number, segments: number): number => 0.5 * segments * radius * radius * Math.sin((2 * Math.PI) / segments);
+
+/**
+ * A pulled circle as it should stay: its caps and sides, the sides one smooth surface joined by
+ * soft, smooth seams, each side a plain quadrilateral, and on each rim a curve centred on its cap.
+ */
+function expectSmoothCylinder(body: Body, axis: Vec3, segments = 24): void {
+  expect(meshTopologyProblems(body.mesh)).toEqual([]);
+  expect(body.faces.size).toBe(segments + 2);
+  expect(body.edges.size).toBe(segments * 3);
+  expect(body.surfaces.size).toBe(1);
+  const surface = [...body.surfaces.values()][0]!;
+  expect(surface.faceIds).toHaveLength(segments);
+  for (const fid of surface.faceIds) expect(body.faces.get(fid)!.loops.map((l) => l.length)).toEqual([4]);
+  const sides = new Set(surface.faceIds);
+  const seams = [...body.edges.values()].filter((e) => sides.has(e.faceA) && sides.has(e.faceB));
+  expect(seams).toHaveLength(segments);
+  for (const e of seams) expect([e.soft, e.smooth]).toEqual([true, true]);
+  expect(body.curves.size).toBe(2);
+  for (const c of body.curves.values()) {
+    expect(c.edgeRefs).toHaveLength(segments);
+    for (const key of c.edgeRefs) expect(body.edges.get(key as never)?.curveId).toBe(c.id);
+    const cap = [...body.faces.values()].find((f) => Math.abs(v3dot(f.plane.n, axis)) > 0.99 && Math.abs(planeDistance(f.plane, c.center)) < 1e-6);
+    expect(cap).toBeDefined();
+  }
+}
+
+describe('pushing and pulling a pulled circle', () => {
+  /** A cylinder of height 2 pulled from a circle of radius 1 about `axis`; returns it with its axis made unit. */
+  async function cylinder(axis: Vec3 = [0, 0, 1]) {
+    const s = setup();
+    const len = Math.hypot(...axis);
+    const n: Vec3 = [axis[0] / len, axis[1] / len, axis[2] / len];
+    addCircleAbout(s.registry, [0.3, -0.2, 0.1], n, 1);
+    const face = [...s.root().sketch.faces.values()][0]!;
+    await apply(s.registry, { target: { kind: 'sketchFace', path: [], id: face.id }, distance: 2 * Math.sign(v3dot(face.basis.n, n)), mode: 'merge' });
+    const id = s.bodies()[0]!.id;
+    const body = (): Body => s.root().bodies.get(id)!;
+    const top = () => [...body().faces.values()].find((f) => v3dot(f.plane.n, n) > 0.99)!;
+    return { ...s, n, id, body, top };
+  }
+
+  it('a New body pulled from the top of a cylinder has smooth sides and its rims carry the curve', async () => {
+    const { registry, root, id, body, top } = await cylinder();
+    const out = await apply(registry, { target: { kind: 'face', path: [], id, faceId: top().id }, distance: 1, mode: 'newBody' });
+    expect(out.bodyIds).toHaveLength(1);
+    const made = root().bodies.get(out.bodyIds[0]! as never)!;
+    expectSmoothCylinder(made, [0, 0, 1]);
+    expect(made.props.volume).toBeCloseTo(polygonArea(1, 24), 6);
+    expectSmoothCylinder(body(), [0, 0, 1]);
+  });
+
+  for (const [name, axis] of [['upright', [0, 0, 1]], ['tilted', [1, 1, 1]]] as const) {
+    it(`pulling the top of the ${name} cylinder up, pushing it down and pulling it again keeps the cylinder as it was drawn`, async () => {
+      const { registry, id, n, body, top } = await cylinder([...axis]);
+      let height = 2;
+      for (const d of [1, -1, 1, -0.5, 1.5, -0.25, 0.75, -2.1, 0.37]) {
+        await apply(registry, { target: { kind: 'face', path: [], id, faceId: top().id }, distance: d, mode: 'merge' });
+        height += d;
+        expectSmoothCylinder(body(), n);
+        // the kernel keeps vertices in float32, so a tilted solid's volume is good to about 1e-7 of it
+        expect(body().props.volume).toBeCloseTo(polygonArea(1, 24) * height, 5);
+      }
+    });
+  }
+
+  it('after the top is pushed down, a New body pulled from it is smooth too', async () => {
+    const { registry, root, id, top } = await cylinder();
+    await apply(registry, { target: { kind: 'face', path: [], id, faceId: top().id }, distance: -0.5, mode: 'merge' });
+    const out = await apply(registry, { target: { kind: 'face', path: [], id, faceId: top().id }, distance: 1, mode: 'newBody' });
+    expectSmoothCylinder(root().bodies.get(out.bodyIds[0]! as never)!, [0, 0, 1]);
+  });
+
+  it('the floor of a round pocket pushed to more than twice its depth keeps the pocket walls smooth', async () => {
+    const { registry, root, bodies } = setup();
+    const bodyId = registry.execute('model.addBox', { min: [-2, -2, 0], max: [2, 2, 1] }) as number;
+    const top = [...root().bodies.get(bodyId as never)!.faces.values()].find((f) => f.plane.n[2] > 0.5)!;
+    addCircle(registry, [0, 0, 1], 0.5, 12);
+    const { computeRegions } = await import('@pushform/model');
+    const inner = computeRegions(root().bodies.get(bodyId as never)!, top.id).reduce((a, b) => (b.area < a.area ? b : a));
+    await apply(registry, { target: { kind: 'face', path: [], id: bodyId, faceId: top.id, region: inner.index }, distance: -0.2, mode: 'merge' });
+    const floor = [...bodies()[0]!.faces.values()].find((f) => f.plane.n[2] > 0.5 && Math.abs(planeDistance(f.plane, [0, 0, 0.8])) < 1e-6)!;
+    await apply(registry, { target: { kind: 'face', path: [], id: bodyId, faceId: floor.id }, distance: -0.5, mode: 'merge' });
+    const after = bodies()[0]!;
+    expect(meshTopologyProblems(after.mesh)).toEqual([]);
+    expect(after.props.volume).toBeCloseTo(16 - polygonArea(0.5, 12) * 0.7, 6);
+    const surface = [...after.surfaces.values()][0]!;
+    expect(surface.faceIds).toHaveLength(12);
+    const walls = new Set(surface.faceIds);
+    const seams = [...after.edges.values()].filter((e) => walls.has(e.faceA) && walls.has(e.faceB));
+    expect(seams).toHaveLength(12);
+    for (const e of seams) expect([e.soft, e.smooth]).toEqual([true, true]);
+  });
+
+  it('pulling a face into another part of the solid joins it there', async () => {
+    const { registry, root, bodies } = setup();
+    // A C profile: a lower arm (z 0–1) and an upper arm (z 3–4) reaching out to x = 3 from a back at x 0–1.
+    const pts: Vec3[] = [[0, 0, 0], [3, 0, 0], [3, 0, 1], [1, 0, 1], [1, 0, 3], [3, 0, 3], [3, 0, 4], [0, 0, 4]];
+    for (let i = 0; i < pts.length; i++) registry.execute('sketch.addEdge', { a: pts[i], b: pts[(i + 1) % pts.length] });
+    const face = [...root().sketch.faces.values()][0]!;
+    await apply(registry, { target: { kind: 'sketchFace', path: [], id: face.id }, distance: -Math.sign(face.basis.n[1]), mode: 'merge' });
+    const id = bodies()[0]!.id;
+    const armTop = (z: number) => [...root().bodies.get(id)!.faces.values()].find((f) => f.plane.n[2] > 0.99 && Math.abs(planeDistance(f.plane, [0, 0, z])) < 1e-6)!;
+    // moved while it stays clear of the upper arm
+    await apply(registry, { target: { kind: 'face', path: [], id, faceId: armTop(1).id }, distance: 1, mode: 'merge' });
+    expect(bodies()[0]!.faces.size).toBe(10);
+    expect(bodies()[0]!.props.volume).toBeCloseTo(10, 6);
+    // pulled on through the gap and into the upper arm, it fills the gap: one block
+    await apply(registry, { target: { kind: 'face', path: [], id, faceId: armTop(2).id }, distance: 1.5, mode: 'merge' });
+    expect(bodies()).toHaveLength(1);
+    expect(meshTopologyProblems(bodies()[0]!.mesh)).toEqual([]);
+    expect(bodies()[0]!.faces.size).toBe(6);
+    expect(bodies()[0]!.props.volume).toBeCloseTo(12, 6);
   });
 });

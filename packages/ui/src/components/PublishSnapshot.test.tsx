@@ -17,7 +17,7 @@ it('renders the saved revision using the captured camera, aspect and studio ligh
   const snapshot = { file: { id: 'file', name: 'cabinet.pf', revision_number: 12 }, bytes: new Uint8Array([1,2,3]), view: { camera, width: 1200, height: 700 } } as unknown as PublishingSnapshot;
   render(<PublishSnapshot account={{ client: {} } as CommonsAccount} filesUrl="https://files.example.com" snapshot={snapshot} onClose={vi.fn()} />);
   await waitFor(() => expect(received.props?.initialImage).toBeInstanceOf(File));
-  expect(modelPicture).toHaveBeenCalledWith(expect.anything(), expect.anything(), { camera, width: 1200, height: 700, lighting: 'bright', background: '#eef0e8' });
+  expect(modelPicture).toHaveBeenCalledWith(expect.anything(), expect.anything(), { camera, width: 1200, height: 700, lighting: 'bright', background: null });
   expect((received.props!.initialImage as File).name).toBe('current-view.png');
   expect((received.props!.initialFile as File).size).toBe(3);
   expect(camera.up).toEqual([.1,0,.995]);

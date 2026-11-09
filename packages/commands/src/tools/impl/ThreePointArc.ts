@@ -8,10 +8,12 @@ import type { Axis, InferenceOptions, InferenceResult, Snap } from '@pushform/in
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { AddCurveInput, AddCurveResult } from '../../commands/curves';
 import type { OverlayPrimitive } from '../overlay';
-import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolSettingValue, ToolStatus } from '../Tool';
+import { countFrom, countSetting } from '../settings';
 import { pointerField } from '../entry';
 import { hostOfTool, inferenceOverlay, PREVIEW_COLOR } from '../toolUtil';
 import { ARC_SEGMENTS } from './Arc';
+import { planeTag, SHIFT_HELD } from '../held';
 import {
   AXIS_NORMAL,
   ClickGesture,
@@ -21,6 +23,7 @@ import {
   isShiftPress,
   onPlane,
   planeLockFromKey,
+  segmentCountHint,
   shapePreview,
   toggleLock,
   undoLast,
@@ -36,8 +39,10 @@ export interface Arc3Params {
 
 /**
  * 3-Point Arc: Idle → Start → Pivot (second point on the arc) → End → commit, through
- * `arcFrom3Points`. VCB: length of the start→pivot leg in the pivot stage, `Ns` segments any
- * time; `Ns` after the commit re-tessellates the last arc. The drawing plane (hovered face /
+ * `arcFrom3Points`. VCB: length of the start→pivot leg in the pivot stage and of the pivot→end
+ * leg (toward the pointer) in the end stage, `Ns` segments any time; `Ns` after the commit
+ * re-tessellates the last arc. Before the first click a bare number sets nothing, and the hint
+ * says to type it with `s`. The drawing plane (hovered face /
  * arrow lock / Shift) only constrains free points; three snapped points define their own plane.
  */
 export class ThreePointArcTool implements Tool {
@@ -57,6 +62,8 @@ export class ThreePointArcTool implements Tool {
   private lockSnap: Snap | null = null;
   private cursorInference: InferenceResult | null = null;
   private cursorScreen: Vec2 | null = null;
+  /** A bare number typed before the first click, which sets nothing; the hint says how to set the segments. */
+  private bareNumber: number | null = null;
   private last: LastCommit<Arc3Params> | null = null;
   private readonly gesture = new ClickGesture();
 
@@ -150,11 +157,17 @@ export class ThreePointArcTool implements Tool {
 
   onVcb(v: VcbValue): void {
     if (v.kind === 'segments') {
-      this.segments = Math.max(1, Math.round(v.count));
+      this.setSegments(v.count);
       if (this.stage === 'start' && this.last && this.ctx && undoLast(this.ctx, this.last)) {
         this.execute({ ...this.last.params, segments: this.segments });
         this.ctx.requestRender();
       }
+      this.ctx?.statusChanged();
+      return;
+    }
+    if (this.stage === 'start') {
+      // a bare number sets nothing here (the segments take their suffix, `12s`)
+      this.bareNumber = v.kind === 'length' && v.unit === null ? v.raw : null;
       this.ctx?.statusChanged();
       return;
     }
@@ -191,16 +204,46 @@ export class ThreePointArcTool implements Tool {
   }
 
   status(): ToolStatus {
+    const held = [...planeTag(this.lockNormal), ...(this.heldPlane ? [SHIFT_HELD] : [])];
+    const s = this.statusWithoutHeld();
+    return held.length ? { ...s, held } : s;
+  }
+
+  private statusWithoutHeld(): ToolStatus {
+    return { ...this.stageStatus(), settings: [countSetting('segments', 'Segments', this.segments)] };
+  }
+
+  /** The bar changed the segments just after a commit: redraw that arc with them, as one undo step. */
+  adjustLast(id: string): boolean {
+    if (id !== 'segments' || !this.ctx || !this.last) return false;
+    const next = { ...this.last.params, segments: this.segments };
+    if (!undoLast(this.ctx, this.last)) return false;
+    this.execute(next);
+    this.ctx.requestRender();
+    return true;
+  }
+
+  /** Segments in the tool options bar. */
+  onSetting(id: string, value: ToolSettingValue): void {
+    const n = id === 'segments' ? countFrom(value) : null;
+    if (n === null) return;
+    this.setSegments(n);
+    this.ctx?.requestRender();
+    this.ctx?.statusChanged();
+  }
+
+  private stageStatus(): ToolStatus {
     switch (this.stage) {
       case 'start':
-        return { instructor: 'Select start point of arc.', vcbLabel: 'Length' };
+        return { instructor: segmentCountHint(this.bareNumber, 'Select start point of arc.'), vcbLabel: 'Segments', vcbValue: String(this.segments) };
       case 'pivot': {
         const len = this.start && this.cursorInference ? v3dist(this.start, onPlane(this.plane, this.cursorInference.point)) : 0;
         return { instructor: 'Select second point on arc or enter length.', vcbLabel: 'Length', vcbValue: formatLen(this.ctx, len), fields: [pointerField('Length', 'length', formatLen(this.ctx, len))] };
       }
       default: {
-        const tess = this.cursorInference ? this.tessellation(onPlane(this.plane, this.cursorInference.point)) : null;
-        return { instructor: 'Select end point of arc.', vcbLabel: 'Radius', vcbValue: tess ? formatLen(this.ctx, tess.curve.radius) : undefined };
+        // a typed length sets the end point's distance from the second point, toward the pointer
+        const len = this.pivot && this.cursorInference ? v3dist(this.pivot, onPlane(this.plane, this.cursorInference.point)) : 0;
+        return { instructor: 'Select end point of arc or enter length from the second point.', vcbLabel: 'Length', vcbValue: formatLen(this.ctx, len), fields: [pointerField('Length', 'length', formatLen(this.ctx, len))] };
       }
     }
   }
@@ -212,11 +255,17 @@ export class ThreePointArcTool implements Tool {
     this.cursorScreen = e.screen;
   }
 
+  private setSegments(n: number): void {
+    this.bareNumber = null;
+    this.segments = Math.max(1, Math.round(n));
+  }
+
   private begin(inf: InferenceResult): void {
     const p = inf.point;
     this.plane = drawingPlaneAt(inf, p, this.lockNormal, this.heldPlane);
     this.start = p;
     this.pivot = null;
+    this.bareNumber = null;
     this.ctx?.statusChanged();
   }
 
@@ -250,6 +299,7 @@ export class ThreePointArcTool implements Tool {
     const payload: AddCurveInput = { points: tess.points, closed: false, curve: tess.curve };
     const res = ctx.commands.execute('sketch.addCurve', payload) as AddCurveResult;
     this.last = { params, entry: hostOfTool(ctx).undoStack.peek() };
+    ctx.committed?.();
     return res;
   }
 

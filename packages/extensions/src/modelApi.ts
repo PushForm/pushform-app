@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import {
-  DEFAULT_BLEND_SEGMENTS, SERVICE_FONTS, checkEdgeBlendResult, Text3DParamsSchema, isHardEdge, libraryMaterial, loadLibraryMaterial, planEdgeBlend, planEdgeProfile, runEdgeBlendKernel, runIntersectKernel,
+  BOX_MATERIAL_KEY, CabinetPlanError, GLASS_KEYS, DEFAULT_BLEND_SEGMENTS, SERVICE_FONTS, grainMapping, planCabinet, checkEdgeBlendResult, Text3DParamsSchema, isHardEdge, libraryMaterial, loadLibraryMaterial, planEdgeBlend, planEdgeProfile, runEdgeBlendKernel, runIntersectKernel,
   runText3DKernel, BUILTIN_LIBRARY, LIBRARY_CATEGORIES, activeTagOpt, applyTransformPlan, arrayMatrices, contextFrame, curvePoints, definitionBounds, hostOf, instanceCount, kernelOf, localPushPullDistance,
-  m4rotationAbout, m4scaleAbout, planPushPull, planTransform, runFollowMeKernel, runPushPullKernel, runSolidsKernel, runTransformKernel, sceneRuntimeOf,
-  type CameraHost, type CameraState, type CommandRegistry, type DocumentHost, type ExplodeResult, type FollowMeApplyResult, type FollowMeParams,
+  m4rotationAbout, m4scaleAbout, planPushPull, planTransform, runFollowMeKernel, runPushPullKernel, runSolidsKernel, runTransformKernel, sceneRuntimeOf, solidsResultIsEmpty,
+  type CabinetGenerateResult, type CabinetPlan, type CameraHost, type CameraState, type CommandRegistry, type DocumentHost, type ExplodeResult, type FollowMeApplyResult, type FollowMeParams,
   type EdgeBlendMode, type EdgeBlendPlan, type MakeResult, type StandardView, type PushPullApplyResult, type PushPullTarget, type SolidsApplyResult, type SolidsKernelWork, type SolidsPairMode, type TransformKernelWork, type TransformPlan,
 } from '@pushform/commands';
 import {
@@ -795,6 +795,34 @@ export class ModelDocumentApi {
         const id = exec<number>('model.addBox', { min: op.min, max: op.max });
         return { id, named: { kind: 'body', id } };
       }
+      case 'add_cabinet': {
+        let plan: CabinetPlan;
+        try {
+          plan = planCabinet(op);
+        } catch (cause) {
+          if (cause instanceof CabinetPlanError) throw this.failure(cause.code, `${cause.message} Nothing was changed.`);
+          throw cause;
+        }
+        const finish = plan.used.finish;
+        if ('stain' in finish && !libraryMaterial(finish.stain)) throw this.failure('invalid_reference', `There is no library material "${finish.stain}". Call ${MODEL_TOOLS.materialLibrary.name} for the keys.`);
+        const library = async (key: string): Promise<number> => {
+          const precomputed = await loadLibraryMaterial(host, key);
+          return exec<Promise<number>>('material.fromLibrary', { key, activate: false, precomputed });
+        };
+        const box = await library(BOX_MATERIAL_KEY);
+        let show: number;
+        if ('stain' in finish) show = await library(finish.stain);
+        else {
+          const name = `Paint ${finish.paint}`;
+          const existing = [...host.doc.state.materials.values()].find(m => m.name === name);
+          show = existing ? existing.id : exec<number>('material.create', { name, color: rgb(finish.paint), activate: false });
+        }
+        const glass = plan.parts.some(part => part.role === 'glass') ? await library(GLASS_KEYS[plan.used.glass?.type ?? 'clear']) : undefined;
+        const made = await exec<CabinetGenerateResult | Promise<CabinetGenerateResult>>('cabinet.generate', { plan, materials: { box, show, ...(glass !== undefined ? { glass } : {}) } });
+        const round = (m: number): number => Math.round(m * 1e5) / 1e5;
+        return { ...instanceResult(made.instanceId), name: made.name, used: { ...plan.used },
+          parts: made.parts.map(part => ({ name: part.name, id: part.id, path: part.path, size: part.size.map(round) as [number, number, number] })) };
+      }
       case 'add_edges': {
         const at = op.edges.findIndex(([a, b]) => !(dist(a, b) > MERGE_TOL));
         if (at >= 0) throw this.failure('invalid_geometry', `Segment ${at} has no length: its ends must be more than ${MERGE_TOL} m apart.`);
@@ -840,7 +868,16 @@ export class ModelDocumentApi {
         const distance = (op.distance * along) / localPushPullDistance(state, path, face.plane.n, 1);
         const plan = planPushPull(state, face.target, distance, mode);
         const precomputed = await runPushPullKernel(kernelOf(this.commands.ctx), plan);
-        const result = await exec<Promise<PushPullApplyResult>>('pushpull.apply', { target: face.target, distance, mode, precomputed });
+        const removesAll = (): ModelApiFailure => this.failure('invalid_geometry', `Pushing ${face.shown} by ${op.distance} m would remove all of solid ${plan.kind === 'body' ? plan.body.id : ''}; delete the solid instead.`);
+        let result: PushPullApplyResult;
+        try {
+          result = await exec<Promise<PushPullApplyResult>>('pushpull.apply', { target: face.target, distance, mode, precomputed });
+        } catch (err) {
+          // the command refuses a push that would leave nothing; say what to do instead
+          if (err instanceof PushFormError && err.code === 'pushpull.nothingLeft') throw removesAll();
+          if (err instanceof PushFormError && err.code === 'pushpull.smooth') throw this.failure('invalid_geometry', `${face.shown} is part of a smooth surface; push_pull works on flat faces.`);
+          throw err;
+        }
         if (plan.kind === 'body' && mode === 'merge' && !result.bodyIds.includes(plan.body.id))
           throw this.failure('invalid_geometry', `Pushing ${face.shown} by ${op.distance} m would remove all of solid ${plan.body.id}; delete the solid instead.`);
         if (result.bodyIds.length === 0) throw this.failure('invalid_geometry', `Pulling ${face.shown} by ${op.distance} m makes no solid.`);
@@ -892,7 +929,10 @@ export class ModelDocumentApi {
           const after: number[] = [];
           for (const [j, piece] of touched.entries()) {
             // The last cut deletes the cutter unless it is kept; earlier pieces are trimmed so it survives them.
-            const result = await boolean(!op.keepCutters && j === touched.length - 1 ? 'subtract' : 'trim', cutter, { kind: 'body', path, id: piece });
+            // The command refuses a cut that leaves nothing; say which cutter covers which solid instead.
+            const result = await boolean(!op.keepCutters && j === touched.length - 1 ? 'subtract' : 'trim', cutter, { kind: 'body', path, id: piece }, work => {
+              if (solidsResultIsEmpty(work)) throw this.failure('invalid_geometry', `Cutter ${i} (solid ${cutter.id}) covers all of solid ${piece}, so nothing would be left; delete the solid instead.`);
+            });
             after.push(...result.bodyIds);
             deleted.push(...result.deleted);
           }
@@ -910,8 +950,9 @@ export class ModelDocumentApi {
         let pieces = [first!.id];
         for (const other of rest) {
           if (pieces.length > 1) throw this.failure('invalid_geometry', `The shared volume of the first solids is in ${pieces.length} pieces; intersect them with solid ${other.id} one at a time.`);
-          const result = await boolean('intersect', first!, other);
-          if (result.bodyIds.length === 0) throw this.failure('invalid_geometry', `Solids ${first!.id} and ${other.id} do not overlap, so they share no volume.`);
+          const result = await boolean('intersect', first!, other, work => {
+            if (solidsResultIsEmpty(work)) throw this.failure('invalid_geometry', `Solids ${first!.id} and ${other.id} do not overlap, so they share no volume.`);
+          });
           pieces = result.bodyIds;
           deleted.push(...result.deleted);
         }
@@ -1590,17 +1631,6 @@ function reflection(origin: Vec3, n: Vec3): MMat4 {
     d * n[0], d * n[1], d * n[2], 1,
   ];
 }
-/**
- * A texture placement whose image grain (its width, or its height for `height`) runs along `grain` projected onto
- * the face, or null when the grain runs square to the face, as on end grain. The placement is a rotation, so the
- * image is never mirrored.
- */
-function grainMapping(basis: PlaneBasis, normal: Vec3, grain: Vec3, axis: 'width' | 'height'): UvMapping | null {
-  const g = v3sub(grain, v3scale(normal, v3dot(grain, normal)));
-  if (!(v3len(g) > 1e-6 * v3len(grain))) return null;
-  const angle = Math.atan2(v3dot(g, basis.v), v3dot(g, basis.u)) - (axis === 'height' ? Math.PI / 2 : 0), c = Math.cos(angle), s = Math.sin(angle);
-  return { kind: 'sized', matrix: [c, s, 0, -s, c, 0] };
-}
 /** The material the instances on `path` pass to geometry with the default material: the innermost one that has one. */
 function inheritedMaterial(state: DocumentState, path: readonly Id[]): Material | null {
   let def = state.definitions.get(state.rootDefinitionId), material: Material | null = null;
@@ -1646,7 +1676,7 @@ function errorCode(cause: unknown): ModelApiErrorCode {
   if (cause instanceof Error && cause.name === 'KernelError') return 'invalid_geometry';
   const code = cause instanceof PushFormError ? cause.code : '';
   if (code === 'service.missing') return 'unavailable';
-  if (/invalidSolid|invalid_geometry|kernel|notSolid|degenerate|^path\.|^followme\.(path|empty)|^edgeblend\.(?!target|stale)|^fillet\.|^offset\.|^dimension\.|^text3d\./i.test(code)) return 'invalid_geometry';
+  if (/invalidSolid|invalid_geometry|kernel|notSolid|^solids\.empty|degenerate|^path\.|^followme\.(path|empty)|^edgeblend\.(?!target|stale)|^fillet\.|^offset\.|^dimension\.|^text3d\./i.test(code)) return 'invalid_geometry';
   if (/missing|notFound|target/i.test(code)) return 'invalid_reference';
   return 'operation_failed';
 }

@@ -8,7 +8,7 @@ While placing a segment, hold Shift to constrain it horizontally or vertically. 
 
 ## Draw a Bézier curve
 
-Open the Line button's arrow and choose **Bézier Curve**. Click to place a sharp corner, or press and drag to pull out smooth curve handles. Continue placing anchors. Click the first anchor to close and fill the path. Press Enter or Escape to finish an open path. Switching tools or pages discards an unfinished Bézier curve.
+Open the Line button's arrow and choose **Bézier Curve**. Click to place a sharp corner, or press and drag to pull out smooth curve handles. Continue placing anchors. Click the first anchor to close and fill the path. Press Enter or Escape to finish an open path, or Delete or Backspace to remove the last anchor placed. Switching tools or pages discards an unfinished Bézier curve.
 
 The finished curve remains editable: select it and enter vertex editing to move its anchors and handles.
 
@@ -22,7 +22,7 @@ Escape, switching tools, or changing pages cancels an unfinished stroke.
 
 Open the Rectangle button's arrow and choose **Rectangle**, **Rounded**, **Bulged**, or **Lozenge**. Drag between opposite corners, or click each corner. Hold Shift for square bounds. Hold Ctrl, or Cmd on macOS, to draw outward from the center. The modifiers can be combined.
 
-After the first point, type the width and height. Rounded and Bulged show their radius or bulge controls in the temporary tool pane on the right. Lozenge makes a capsule with fully rounded ends.
+After the first point, type the width and height. Rounded and Bulged show their corner radius or bulge in the tool options bar over the page view. Lozenge makes a capsule with fully rounded ends.
 
 ## Draw circles and ellipses
 

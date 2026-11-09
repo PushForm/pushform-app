@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { z } from 'zod';
-import type { Box3, CurveId, DefId, Id, Mat4, MMat4, MVec3, Vec3 } from '@pushform/core';
+import type { Box3, CurveId, DefId, Id, Mat4, MaterialId, MMat4, MVec3, Vec3 } from '@pushform/core';
 import {
   box3Empty,
   box3Expand,
@@ -232,6 +232,7 @@ function newellNormal(pts: readonly Vec3[]): MVec3 {
  * Copy sketch edges (with their curves) and faces from `src` into `dst`, mapping positions with
  * `map`. Edges merge with existing geometry in `dst` (vertices within MERGE_TOL, crossings split);
  * faces are recreated from the mapped loops (no face finding, so loose loops stay loose). `edgeIds` / `faceIds` select what to copy ('all' = the whole sketch).
+ * Face sides without a material of their own take `inherited` (the material they showed in their instance).
  */
 export function copySketchInto(
   draft: DocumentDraft,
@@ -240,6 +241,7 @@ export function copySketchInto(
   faceIds: ReadonlySet<Id> | 'all',
   dst: SketchGraph,
   map: PointMap,
+  inherited: MaterialId | null = null,
 ): SketchCopyResult {
   const edgeMap = new Map<Id, Id[]>();
   const curveMap = new Map<CurveId, CurveId>();
@@ -298,16 +300,17 @@ export function copySketchInto(
     const plane = planeFromPointNormal([centroid[0] / pts.length, centroid[1] / pts.length, centroid[2] / pts.length], un);
     // basis at the plane's point nearest the origin, as the face finder and importer build it
     const basis = planeBasis([-plane.n[0] * plane.d, -plane.n[1] * plane.d, -plane.n[2] * plane.d], plane.n);
+    const front = f.frontMaterialId ?? inherited, back = f.backMaterialId ?? inherited;
     // texture placements keep each mapped point's texture coordinates in the new basis
-    const sides = uvRebaseSides(f, f.basis, basis, tiles(f.frontMaterialId), tiles(f.backMaterialId), (p) => map.point(p));
+    const sides = uvRebaseSides(f, f.basis, basis, tiles(front), tiles(back), (p) => map.point(p));
     const id = dst.alloc<Id>();
     const face: SketchFace = {
       id,
       plane,
       basis,
       loops,
-      frontMaterialId: f.frontMaterialId,
-      backMaterialId: f.backMaterialId,
+      frontMaterialId: front,
+      backMaterialId: back,
       uv: cloneJson(sides.uv),
       ...(sides.uvBack ? { uvBack: cloneJson(sides.uvBack) } : {}),
       tagId: f.tagId,
@@ -358,6 +361,7 @@ interface Collected {
   readonly instances: Id[];
   readonly guides: Id[];
   readonly images: Id[];
+  readonly sectionPlanes: Id[];
   readonly edges: Set<Id>;
   readonly faces: Set<Id>;
   readonly size: number;
@@ -365,11 +369,12 @@ interface Collected {
 
 /**
  * Entities of a container a group/component is made from: bodies (a face/edge ref selects its
- * solid), instances, guides, sketch faces (with their edges) and sketch edges (faces bounded
+ * solid), instances, guides, section planes, sketch faces (with their edges) and sketch edges (faces bounded
  * only by selected edges come along).
  */
 function collect(container: EntityContainer, refs: readonly EntityRef[]): Collected {
   const bodies = new Set<Id>(), meshParts = new Set<Id>(), instances = new Set<Id>(), guides = new Set<Id>(), images = new Set<Id>();
+  const planes = new Set<Id>();
   const edges = new Set<Id>(), faces = new Set<Id>();
   const sketch = container.sketch;
   for (const r of refs) {
@@ -391,6 +396,9 @@ function collect(container: EntityContainer, refs: readonly EntityRef[]): Collec
         break;
       case 'image':
         if (container.images.has(r.id)) images.add(r.id);
+        break;
+      case 'sectionPlane':
+        if (container.sectionPlanes.has(r.id)) planes.add(r.id);
         break;
       case 'sketchEdge':
         if (sketch.edges.has(r.id)) edges.add(r.id);
@@ -418,9 +426,10 @@ function collect(container: EntityContainer, refs: readonly EntityRef[]): Collec
     instances: [...instances],
     guides: [...guides],
     images: [...images],
+    sectionPlanes: [...planes],
     edges,
     faces,
-    size: bodies.size + meshParts.size + instances.size + guides.size + images.size + edges.size,
+    size: bodies.size + meshParts.size + instances.size + guides.size + images.size + planes.size + edges.size,
   };
 }
 
@@ -579,6 +588,22 @@ function makeDefinition(host: DocumentHost, refs: readonly EntityRef[], opts: Ma
       dst.images.set(copy.id, copy);
       dst.order.push(copy.id);
     }
+    // section planes: a moved plane that was its container's cut becomes the new definition's cut
+    for (const id of collected.sectionPlanes) {
+      const plane = src.sectionPlanes.get(id);
+      if (!plane) continue;
+      const copy = mapSectionPlane(plane, move ? plane.id : allocId<Id>(draft), toLocal);
+      if (move) {
+        src.sectionPlanes.delete(id);
+        removed.add(id);
+        if (src.activeSectionPlaneId === id) {
+          src.activeSectionPlaneId = null;
+          dst.activeSectionPlaneId = copy.id;
+        }
+      }
+      dst.sectionPlanes.set(copy.id, copy);
+      dst.order.push(copy.id);
+    }
     // sketch
     if (collected.edges.size) {
       const srcGraph = sketchGraphAt(draft, path);
@@ -684,7 +709,8 @@ export const componentMake = defineCommand({
  * geometry merging with the container's sketch, nested instances and pictures re-parented with composed
  * transforms, guides, section planes and dimensions mapped; the definition's active section plane
  * becomes the container's when the container has none); the instance is deleted, and so is the definition when nothing
- * else uses it. The exploded entities become the selection.
+ * else uses it. A painted instance's material moves onto what showed it (face sides, mesh parts and nested instances
+ * without a material of their own), so nothing changes color. The exploded entities become the selection.
  */
 export const groupExplode = defineCommand({
   id: 'group.explode',
@@ -712,6 +738,7 @@ export const groupExplode = defineCommand({
         const sole = instanceCount(state, def.id) === 1;
         const m = inst.transform;
         const map = pointMapFromMatrix(m);
+        const inherited = inst.materialId ?? null;
         const defOrder = def.entities.order.length ? def.entities.order : [...def.entities.bodies.keys(), ...def.entities.meshParts.keys(), ...def.entities.instances.keys(), ...def.entities.guides.keys()];
 
         container.instances.delete(inst.id);
@@ -722,6 +749,13 @@ export const groupExplode = defineCommand({
           const body = def.entities.bodies.get(id);
           if (body) {
             const copy = copyBodyRecord(body, sole ? body.id : allocId<Id>(draft));
+            // before the transform, so texture placements are re-expressed for the material the faces show
+            if (inherited !== null && copy.materialId === null) {
+              for (const face of copy.faces.values()) {
+                face.frontMaterialId ??= inherited;
+                face.backMaterialId ??= inherited;
+              }
+            }
             transformBodyAffineInPlace(copy, m, textureTiles(draft));
             container.bodies.set(copy.id, copy);
             container.order.push(copy.id);
@@ -731,6 +765,7 @@ export const groupExplode = defineCommand({
           const part = def.entities.meshParts.get(id);
           if (part) {
             const copy = copyMeshPartRecord(part, sole ? part.id : allocId<Id>(draft));
+            copy.materialId ??= inherited;
             copy.geometry = transformMeshPartGeometry(part.geometry, m);
             container.meshParts.set(copy.id, copy);
             container.order.push(copy.id);
@@ -742,6 +777,7 @@ export const groupExplode = defineCommand({
             const copy: ComponentInstance = {
               ...nested,
               id: sole ? nested.id : allocId<Id>(draft),
+              materialId: nested.materialId ?? inherited,
               transform: m4mul(m, nested.transform) as unknown as Mat4,
               attributes: cloneJson(nested.attributes),
             };
@@ -786,7 +822,7 @@ export const groupExplode = defineCommand({
         }
         if (def.entities.sketch.edges.size) {
           const g = sketchGraphAt(draft, path);
-          const r2 = copySketchInto(draft, def.entities.sketch, 'all', 'all', g, map);
+          const r2 = copySketchInto(draft, def.entities.sketch, 'all', 'all', g, map, inherited);
           const seen = new Set<Id>();
           for (const ids of r2.edgeMap.values()) for (const id of ids) if (!seen.has(id) && seen.add(id)) out.push({ kind: 'sketchEdge', path, id });
           for (const id of r2.faceIds) out.push({ kind: 'sketchFace', path, id });

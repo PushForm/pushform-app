@@ -13,10 +13,10 @@ const tauriTransport: NativeKernelTransport = {
 };
 
 /**
- * The kernel backend for a desktop build made with the native kernel switch: every request runs in the Rust kernel (see
- * `NativeKernelBackend`), and `worker` handles any request the native kernel cannot finish. Elsewhere, including every
- * web build, this is `worker` itself. The switch is compiled out of the bundle when off, so nothing here reaches the
- * web build.
+ * The kernel backend for a desktop build made with the native kernel switch: every request runs in the native Rust
+ * kernel (see `NativeKernelBackend`), and `worker`, the same WebAssembly kernel the web app uses, handles any request
+ * the native kernel cannot finish. Elsewhere, including every web build and the default desktop build, this is `worker`
+ * itself. The switch is compiled out of the bundle when off, so nothing here reaches the web build.
  */
 export function desktopKernelBackend(worker: KernelBackend): KernelBackend {
   if (typeof __PF_NATIVE_KERNEL__ === 'undefined' || !__PF_NATIVE_KERNEL__ || !isTauri()) return worker;

@@ -183,7 +183,7 @@ describe.skipIf(!ready)('TypeScript, native Rust and WebAssembly Rust push/pull 
   });
 
   // The check `readNativeBody` runs on every stored body: the same outcome down both kernels.
-  it.skipIf(process.env.PF_KERNEL === 'rust').each([
+  it.each([
     { name: 'a valid box', mesh: () => meshBox([0, 0, 0], [1, 2, 3]) },
     { name: 'an inverted box with negative volume', mesh: () => { const m = meshBox([0, 0, 0], [1, 1, 1]); const tris = new Uint32Array(m.tris); for (let i = 0; i < tris.length; i += 3) { const a = tris[i + 1]!; tris[i + 1] = tris[i + 2]!; tris[i + 2] = a; } return { ...m, tris }; } },
     { name: 'an open mesh', mesh: () => { const m = meshBox([0, 0, 0], [1, 1, 1]); return { verts: m.verts, tris: m.tris.slice(0, 30), faceId: m.faceId.slice(0, 10) }; } },

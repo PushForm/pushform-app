@@ -106,9 +106,30 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # The kernel's WebAssembly module, the same on every platform and the same file the web app ships, in every desktop
+  # bundle (the native kernel stays an off-by-default build switch).
+  kernel-wasm:
+    needs: prepare
+    if: needs.prepare.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: 24 }
+      - uses: ./.github/actions/kernel-wasm
+      - uses: actions/upload-artifact@v7
+        with:
+          name: kernel-wasm
+          path: |
+            packages/kernel/wasm/*.wasm
+            packages/kernel/wasm/pushform-kernel*.js
+            packages/kernel/wasm/kernel-wasm.stamp.json
+          if-no-files-found: error
+          retention-days: 1
+
   # A stable release ships only a commit that passes the same checks as ci.yml.
   check:
-    needs: [prepare, step-reader]
+    needs: [prepare, step-reader, kernel-wasm]
     if: needs.prepare.outputs.channel == 'stable'
     runs-on: ubuntu-24.04
     steps:
@@ -119,13 +140,15 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - uses: actions/download-artifact@v8
         with: { name: step-reader-wasm, path: packages/io/wasm }
+      - uses: actions/download-artifact@v8
+        with: { name: kernel-wasm, path: packages/kernel/wasm }
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm license-check
 
   build:
-    needs: [prepare, step-reader, check]
+    needs: [prepare, step-reader, kernel-wasm, check]
     # `check` is skipped for nightlies; run unless something actually failed.
     if: ${{ !failure() && !cancelled() && needs.prepare.outputs.build == 'true' }}
     strategy:
@@ -159,6 +182,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - uses: actions/download-artifact@v8
         with: { name: step-reader-wasm, path: packages/io/wasm }
+      - uses: actions/download-artifact@v8
+        with: { name: kernel-wasm, path: packages/kernel/wasm }
       # The version, and with the updater key its public key and updater artifacts, reach Tauri as a config file merged
       # over tauri.conf.json (no shell quoting of JSON on Windows).
       - shell: bash

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 /**
- * The Rust kernel's WebAssembly path, kept out of the package's main entry because its worker imports a module that
- * only exists after `pnpm build:kernel-wasm`. Nothing in the app imports this file by default.
+ * The Rust kernel's WebAssembly path, kept out of the package's main entry so the worker and its module load only when
+ * the first kernel request is made.
  */
 import type { MeshData } from '@pushform/core';
 import type { MeshProvider } from './backends/KernelBackend';

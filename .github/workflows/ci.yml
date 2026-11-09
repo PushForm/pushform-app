@@ -148,7 +148,7 @@ jobs:
 
   build-web:
     needs: [plan, step-reader, kernel-wasm]
-    if: ${{ !cancelled() && needs.plan.outputs.web == 'true' && needs.step-reader.result == 'success' && (vars.PF_RUST_KERNEL != '1' || needs.kernel-wasm.result == 'success') }}
+    if: ${{ !cancelled() && needs.plan.outputs.web == 'true' && needs.step-reader.result == 'success' && needs.kernel-wasm.result == 'success' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -157,7 +157,6 @@ jobs:
       - uses: actions/download-artifact@v8
         with: { name: step-reader-wasm, path: packages/io/wasm }
       - uses: actions/download-artifact@v8
-        if: vars.PF_RUST_KERNEL == '1'
         with: { name: kernel-wasm, path: packages/kernel/wasm }
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@v2
@@ -165,7 +164,6 @@ jobs:
       - run: pnpm build
         env:
           NODE_OPTIONS: --max-old-space-size=4096
-          PF_RUST_KERNEL: ${{ vars.PF_RUST_KERNEL }}
 
   build-commons:
     needs: plan
@@ -250,7 +248,7 @@ jobs:
   deploy:
     # always() so a skipped job upstream of test (such as the Commons build) does not skip the deploy;
     # test itself fails when any check failed.
-    if: ${{ always() && needs.test.result == 'success' && needs.plan.outputs.web == 'true' && (vars.PF_RUST_KERNEL != '1' || needs.kernel-wasm.result == 'success') && ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/staging')) }}
+    if: ${{ always() && needs.test.result == 'success' && needs.plan.outputs.web == 'true' && needs.kernel-wasm.result == 'success' && ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/staging')) }}
     needs: [test, plan, kernel-wasm]
     runs-on: ubuntu-24.04
     environment:
@@ -268,9 +266,8 @@ jobs:
       # The web bundle includes the STEP reader the test job built.
       - uses: actions/download-artifact@v8
         with: { name: step-reader-wasm, path: packages/io/wasm }
-      # With the Rust kernel flag on, the bundle includes the kernel module too.
+      # The kernel module the kernel-wasm job fetched or built.
       - uses: actions/download-artifact@v8
-        if: vars.PF_RUST_KERNEL == '1'
         with: { name: kernel-wasm, path: packages/kernel/wasm }
       # The third-party notices in the bundle list the Rust crates of the STEP reader and the desktop app.
       - uses: dtolnay/rust-toolchain@stable
@@ -287,7 +284,6 @@ jobs:
       - run: pnpm build
         env:
           NODE_OPTIONS: --max-old-space-size=4096
-          PF_RUST_KERNEL: ${{ vars.PF_RUST_KERNEL }}
           VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}

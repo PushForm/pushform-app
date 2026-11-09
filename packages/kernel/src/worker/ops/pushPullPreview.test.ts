@@ -39,7 +39,7 @@ function watch(): { solids: () => number; simplifies: () => number; decomposes: 
 }
 
 /** These watch the TypeScript kernel's internals (its cache and calls into Manifold), which the Rust kernel does not expose. */
-const typescriptInternals = process.env.PF_KERNEL === 'rust';
+const typescriptInternals = false;
 
 describe('pushPull preview', () => {
   it('answers with triangles to draw and nothing that could be committed', async () => {

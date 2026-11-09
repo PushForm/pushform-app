@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { execSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 import { gitVersion } from './buildVersion';
 import { contentSecurityPolicy, contentSecurityPolicyPlugin } from './contentSecurityPolicy';
@@ -53,22 +52,21 @@ function crossOriginIsolation(): Plugin {
   };
 }
 
-/** Whether this build runs the kernel in Rust WebAssembly (PF_RUST_KERNEL=1), and what makes that possible. */
-function rustKernelOptions(): { enabled: boolean; alias: { find: RegExp; replacement: string }[] } {
-  const enabled = process.env.PF_RUST_KERNEL === '1';
-  if (enabled && process.env.PF_NATIVE_KERNEL === '1') throw new Error('PF_RUST_KERNEL and PF_NATIVE_KERNEL are alternatives; set one.');
-  if (enabled && !existsSync(fileURLToPath(new URL('../../packages/kernel/wasm/pushform-kernel.js', import.meta.url)))) {
-    throw new Error('PF_RUST_KERNEL=1 needs the kernel module: run pnpm build:kernel-wasm');
-  }
-  // Without the flag the worker and its module must not be bundled at all, so a normal build needs no Emscripten output.
-  // The alias also resolves the package's import of itself in validateSolid.ts, which no workspace link provides.
-  const target = fileURLToPath(new URL(`../../packages/kernel/src/${enabled ? 'rustWasm' : 'rustWasmDisabled'}.ts`, import.meta.url));
-  return { enabled, alias: [{ find: /^@pushform\/kernel\/rust-wasm$/, replacement: target }] };
+/**
+ * The kernel is a compiled module, fetched or built before Vite runs. A missing module stops dev and build alike; a stale
+ * one (edited Rust sources) stops only a production build, so working on the kernel does not need a rebuild per save.
+ */
+async function requireKernelModule(command: 'serve' | 'build'): Promise<void> {
+  const { moduleStatus } = (await import(pathToFileURL(fileURLToPath(new URL('../../scripts/kernel-wasm-artifact.mjs', import.meta.url))).href)) as { moduleStatus: () => { state: string; message?: string } };
+  const status = moduleStatus();
+  const howTo = 'Run `pnpm fetch:kernel-wasm` for the prebuilt module or `pnpm build:kernel-wasm` to compile it.';
+  if (status.state === 'missing' || (command === 'build' && status.state === 'stale')) throw new Error(`The kernel module is ${status.state}: ${status.message} ${howTo}`);
+  if (status.state === 'stale') console.warn(`pushform: ${status.message} ${howTo}`);
 }
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(async ({ mode, command }) => {
+  await requireKernelModule(command);
   const env = loadEnv(mode, fileURLToPath(new URL('.', import.meta.url)), 'VITE_');
-  const rustKernel = rustKernelOptions();
   // The policy names this build's own Supabase project and backends.
   const policy = () => contentSecurityPolicy('web', {
     supabaseUrls: [env.VITE_SUPABASE_URL ?? ''],
@@ -83,10 +81,7 @@ export default defineConfig(({ mode }) => {
       __PF_BUILD__: JSON.stringify(buildInfo()),
       // The desktop app's native kernel: off unless PF_NATIVE_KERNEL=1 at build time, so a normal build compiles it out.
       __PF_NATIVE_KERNEL__: JSON.stringify(process.env.PF_NATIVE_KERNEL === '1'),
-      // The Rust kernel in WebAssembly, for web and desktop: off unless PF_RUST_KERNEL=1, which needs `pnpm build:kernel-wasm`.
-      __PF_RUST_KERNEL__: JSON.stringify(rustKernel.enabled),
     },
-    resolve: { alias: rustKernel.alias },
     server: { port: 5174, strictPort: true },
     worker: { format: 'es' },
     optimizeDeps: { exclude: ['manifold-3d'] },

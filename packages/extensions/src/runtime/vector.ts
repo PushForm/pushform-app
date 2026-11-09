@@ -49,7 +49,7 @@ export function vectorPage(vector: UiVector, paper?: { width: number; height: nu
         matrix: [Math.cos(radians), -Math.sin(radians), Math.sin(radians), Math.cos(radians), px, py],
         font: `${style.fontWeight === 'bold' ? 'bold ' : ''}${size}px "Arial"`, color: alpha(style.fill ?? '#000000', style),
         align: shape.anchor === 'middle' ? 'center' : shape.anchor === 'end' ? 'end' : 'start', baseline: 'alphabetic',
-        bounds: [px, py - size, size * shape.text.length * 0.6, size] });
+        bounds: [0, -size, size * shape.text.length * 0.6, 0] });
       continue;
     }
     const corners: VectorPoint[] = shape.kind === 'rect'

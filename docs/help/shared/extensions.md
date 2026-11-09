@@ -70,6 +70,10 @@ Extension commands and tabs appear in command search with the extension's name b
 
 An extension can open a dialog over its side panel or tab, for example to edit one item. PushForm draws the dialog with its own title bar and close button. Press Escape or choose the close button to dismiss it.
 
+## Save a file from an extension
+
+PushForm names the extension and explains the export before you choose **Choose where to save?**. The desktop app then opens the system save dialog. Cancel either dialog to leave your files unchanged. The extension receives the saved file name, without its folder path.
+
 ## Print from an extension
 
 When an extension offers to print, for example a parts list or a sheet of labels, PushForm shows its own print dialog. It names the extension and what it wants to print, the number of pages and the page size, with a preview of the first page. Choose **Print…** to open your browser's print dialog, **Save as PDF…** to save the pages as a PDF file, or **Cancel** to print nothing. The extension learns only whether you printed or saved.

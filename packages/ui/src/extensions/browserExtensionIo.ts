@@ -2,6 +2,7 @@
 // Copyright 2026 PushForm contributors
 import { FILE_LIMITS, type ClipboardWriter, type FilePicker, type FileRequest } from '@pushform/extensions';
 import { ExtensionError } from '@pushform/extension-protocol';
+import { isTauri } from '@tauri-apps/api/core';
 
 /**
  * Browser implementations of extension file pickers and clipboard writes. Extensions call these long after the
@@ -9,7 +10,7 @@ import { ExtensionError } from '@pushform/extension-protocol';
  * (`confirm`); the user's choice there is the gesture the browser requires to open a picker or start a download.
  */
 
-type Confirm = (request: FileRequest) => Promise<boolean>;
+type Confirm = (request: FileRequest, signal?: AbortSignal) => Promise<boolean>;
 
 /** A file's bytes, through FileReader where Blob.arrayBuffer is missing (older engines). */
 export function readFile(file: File, signal?: AbortSignal): Promise<ArrayBuffer> {
@@ -58,7 +59,7 @@ export function browserFilePicker(confirm: Confirm, doc: Document = document): F
     async open(request,options) {
       const signal = options?.signal;
       signal?.throwIfAborted();
-      if (!(await waitFor(confirm(request),signal))) return null;
+      if (!(await waitFor(confirm(request,signal),signal))) return null;
       signal?.throwIfAborted();
       const input = doc.createElement('input');
       input.type = 'file';
@@ -85,8 +86,21 @@ export function browserFilePicker(confirm: Confirm, doc: Document = document): F
       signal?.throwIfAborted();
       if (data.length > Math.min(options?.maxBytes ?? FILE_LIMITS.bytes,FILE_LIMITS.bytes))
         throw new ExtensionError('limit.exceeded','The export exceeds the allowed file size.');
-      if (!(await waitFor(confirm(request),signal))) return null;
+      if (!(await waitFor(confirm(request,signal),signal))) return null;
       signal?.throwIfAborted();
+      if (isTauri()) {
+        const { save } = await import('@tauri-apps/plugin-dialog');
+        signal?.throwIfAborted();
+        const chosen = await waitFor(save({ defaultPath: request.suggestedName ?? 'export',
+          filters: request.accept.map(filter => ({ name: filter.description, extensions: [...filter.extensions] })),
+        }), signal);
+        if (!chosen) return null;
+        const { writeFile } = await import('@tauri-apps/plugin-fs');
+        signal?.throwIfAborted();
+        await writeFile(chosen, data);
+        // A completed native write cannot be withdrawn by cancellation that arrives during the write.
+        return { name: chosen.split(/[\\/]/).at(-1)! };
+      }
       const win = doc.defaultView as (Window & SavePickerWindow) | null;
       const name = request.suggestedName ?? 'export';
       if (win?.showSaveFilePicker) {

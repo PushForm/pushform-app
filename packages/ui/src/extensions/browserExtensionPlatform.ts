@@ -11,6 +11,7 @@ import { indexedDbAssetStore } from './indexedDbAssetStore';
 import type { UnitSettings } from '@pushform/core';
 import { browserClipboardWriter, browserFilePicker } from './browserExtensionIo';
 import { browserViewPrinter, type PrintPrompts } from './extensionPrint';
+import type { FilePrompts } from './extensionFiles';
 import { indexedDbActivityStore, indexedDbDistributionCache, indexedDbExtensionStore } from './indexedDbExtensionStore';
 
 export { browserRunsExtensions } from './browserRunsExtensions';
@@ -37,6 +38,7 @@ export function createBrowserExtensionPlatform(options: {
   readonly onFailure?: (record: InstalledExtension, failure: ExtensionFailure) => void;
   /** Where print requests wait for the user; without it extensions cannot print. */
   readonly printPrompts?: PrintPrompts;
+  readonly filePrompts?: FilePrompts;
   /** The open documents, for the model, selection and document services. */
   readonly documents?: ExtensionDocuments;
   readonly tools?: ExtensionPlatformOptions['tools'];
@@ -74,9 +76,7 @@ export function createBrowserExtensionPlatform(options: {
     })),
     settingsStore: record => record.integrity === 'unsigned' ? localSettings : officialSettings,
     assetStore: record => record.integrity === 'unsigned' ? localAssets : options.accountStorage?.assets ?? noAccountAssets,
-    // The browser's own confirmation, never the extension's interface, names the extension and its purpose; the
-    // click on it is also the gesture the file picker needs.
-    filePicker: browserFilePicker(async (request) => window.confirm(`${request.extensionName} wants to ${request.kind === 'open' ? 'open' : 'save'} a file: ${request.purpose}\n\nChoose the file?`)),
+    filePicker: browserFilePicker((request, signal) => options.filePrompts?.ask(request, signal) ?? Promise.resolve(false)),
     clipboard: browserClipboardWriter(),
     fetchTransport: null,
     ...(options.printPrompts ? { printer: browserViewPrinter(options.printPrompts, undefined, options.units) } : {}),

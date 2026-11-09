@@ -408,13 +408,24 @@ export class ExtensionSession {
 
   private startHeartbeat(): void {
     this.lastPong = performance.now();
+    let lastCheck = this.lastPong;
     this.heartbeat = setInterval(() => {
       if (this.currentState !== 'active') return;
-      if (performance.now() - this.lastPong > this.limits.unresponsiveMs) {
+      const now = performance.now(), hostPaused = now - lastCheck > this.limits.unresponsiveMs;
+      lastCheck = now;
+      if (hostPaused) {
+        // System print dialogs can pause the editor's event loop and delivery of a healthy runtime's answers.
+        // Start a fresh challenge after the host resumes; an unanswered challenge still expires normally.
+        this.lastPong = now;
+        this.ping = null;
+        this.sendPing(now);
+        return;
+      }
+      if (now - this.lastPong > this.limits.unresponsiveMs) {
         this.fail('unresponsive', new ExtensionError('extension.failed', 'The extension stopped responding and was ended.'), () => {});
         return;
       }
-      if (!this.ping) this.sendPing(performance.now());
+      if (!this.ping) this.sendPing(now);
     }, this.limits.heartbeatMs);
   }
 

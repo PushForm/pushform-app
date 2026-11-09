@@ -98,6 +98,18 @@ describe('ui.print', () => {
   const label = (id: string, width: number, height: number) => ({ type: 'vector', id, label: `Labels ${id}`, units: 'length',
     bounds: { x: 0, y: 0, width, height }, styles: [{}], shapes: [{ kind: 'rect', x: 0, y: 0, width, height, style: 0 }] });
 
+  it('keeps text bounds local to its transform so PDF alignment cannot shift a later label column off paper', () => {
+    const view = validateUiTree({ ...label('columns', 0.2, 0.3), shapes: [
+      { kind: 'text', text: 'Left label', x: 0.05, y: 0.04, size: 0.004, anchor: 'middle', style: 0 },
+      { kind: 'text', text: 'Right label', x: 0.15, y: 0.04, size: 0.004, anchor: 'middle', style: 0 },
+    ] }) as UiVector;
+    const page = vectorPage(view, { width: 200, height: 300 });
+    expect(page.items).toMatchObject([
+      { kind: 'text', point: [0, 0], bounds: [0, -4, 24, 0], matrix: [1, -0, 0, 1, 50, 40] },
+      { kind: 'text', point: [0, 0], bounds: [0, -4, 26.4, 0], matrix: [1, -0, 0, 1, 150, 40] },
+    ]);
+  });
+
   it('centers a drawing that fits at its real size, and scales down one that does not', () => {
     const small = vectorPage(validateUiTree(label('a', 0.1, 0.05)) as UiVector, { width: 210, height: 297 });
     expect(small).toMatchObject({ width: 210, height: 297 });

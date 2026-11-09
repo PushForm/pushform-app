@@ -256,6 +256,19 @@ describe('deactivation', () => {
 });
 
 describe('heartbeat', () => {
+  it('asks for a fresh answer when a system modal paused the host beyond the heartbeat deadline', async () => {
+    const { session, failures, hostPort } = connect({ activate() {} }, { limits: { heartbeatMs: 10, unresponsiveMs: 60 } });
+    await session.activate();
+    const post = vi.spyOn(hostPort, 'post'), clock = performance.now.bind(performance);
+    const paused = vi.spyOn(performance, 'now').mockImplementation(() => clock() + 10_000);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 40));
+      expect(post.mock.calls.some(([message]) => typeof message === 'object' && message !== null && 'type' in message && message.type === 'ping')).toBe(true);
+      expect(session.state).toBe('active'); expect(failures).toEqual([]);
+      await session.deactivate('disable');
+    } finally { paused.mockRestore(); }
+  });
+
   it('keeps an extension that answers active across many beats', async () => {
     const { session, failures } = connect({ activate() {} }, { limits: { heartbeatMs: 10, unresponsiveMs: 60 } });
     await session.activate();

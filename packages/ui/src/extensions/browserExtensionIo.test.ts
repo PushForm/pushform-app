@@ -11,7 +11,7 @@ describe('browserFilePicker', () => {
     const confirm = vi.fn(async () => false);
     const create = vi.spyOn(document, 'createElement');
     expect(await browserFilePicker(confirm).open(request)).toBeNull();
-    expect(confirm).toHaveBeenCalledWith(request);
+    expect(confirm).toHaveBeenCalledWith(request, undefined);
     expect(create).not.toHaveBeenCalledWith('input');
     create.mockRestore();
   });

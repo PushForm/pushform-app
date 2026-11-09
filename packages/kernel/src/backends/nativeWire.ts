@@ -304,6 +304,8 @@ export function encodeRequest(req: KernelRequest): Uint8Array {
       w.f64(options.wall);
       w.f64(options.segments);
       w.f64(req.nextFaceId);
+      // Only this shape uses the profile divisions, so every other shape's request is unchanged.
+      if (options.shape === 'knob-domed') w.f64(options.profileSegments);
       break;
     }
     case 'stats':

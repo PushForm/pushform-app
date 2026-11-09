@@ -9,7 +9,7 @@ use std::rc::Rc;
 use manifold_csg::{CrossSection, FillRule, Manifold};
 
 use crate::finalize::{finalize_manifold, Component, FinalizeOptions};
-use crate::jsmath::{atan2, cos, sin};
+use crate::jsmath::{atan2, cos, cube, sin};
 use crate::math::{hypot2, hypot3, js_min, Vec3};
 use crate::meshio::{manifold_from_soup, soup_center, TriangleSoup};
 use crate::normalize::all_new_ids;
@@ -28,6 +28,8 @@ pub struct HardwareRequest {
   pub grip: f64,
   pub wall: f64,
   pub segments: f64,
+  /// Curved profile divisions of a domed knob, independent of the radial `segments`. Only `knob-domed` carries it.
+  pub profile_segments: f64,
   pub next_face_id: f64,
 }
 
@@ -216,6 +218,31 @@ pub fn hardware(req: &HardwareRequest) -> Result<HardwareOutput, KernelError> {
       }
     }
     solid
+  } else if shape == "knob-domed" {
+    mount.push([0.0, 0.0, 0.0]);
+    // Radius/height coordinates, turned as one lathe so the head and stem have no overlapping seam. Three Bezier curves,
+    // sampled independently of the radial count: the mesh costs about 2 * segments * profile_segments triangles.
+    let mut profile: Vec<Point> = vec![[0.0, 0.0], [g / 2.0, 0.0]];
+    let mut start: Point = [g / 2.0, 0.0];
+    let neck = (req.profile_segments * 0.2).round();
+    let underside = (req.profile_segments * 0.3).round();
+    let curves: [(Point, Point, Point, f64); 3] = [
+      ([g / 2.0, h * 0.095], [g * 0.4, h * 0.205], [g * 0.46, h * 0.283], neck),
+      ([js_min(g * 0.56, w / 2.0), h * 0.417], [w / 2.0, h * 0.425], [w / 2.0, h * 0.677], underside),
+      ([w / 2.0, h * 0.898], [w * 0.276, h], [0.0, h], req.profile_segments - neck - underside),
+    ];
+    for (control_a, control_b, end, count) in curves {
+      for i in 1..=(count as i32) {
+        let along = f64::from(i) / count;
+        let rest = 1.0 - along;
+        // V8 gives `x ** 2` exactly as `x * x`, but its `x ** 3` needs `cube`. The operations and their order are the
+        // Bezier formula as the TypeScript wrote it.
+        let at = |k: usize| cube(rest) * start[k] + 3.0 * (rest * rest) * along * control_a[k] + 3.0 * rest * (along * along) * control_b[k] + cube(along) * end[k];
+        profile.push([at(0), at(1)]);
+      }
+      start = end;
+    }
+    b.lathe(profile)
   } else if shape.starts_with("knob-") {
     mount.push([0.0, 0.0, 0.0]);
     let stem_h = h * 0.65;

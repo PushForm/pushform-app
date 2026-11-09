@@ -253,17 +253,14 @@ pub fn decode_request(bytes: &[u8]) -> Result<Request, KernelError> {
     }
     OP_STATS => Ok(Request::Stats),
     OP_VALIDATE_SOLID => Ok(Request::ValidateSolid { mesh: r.mesh()? }),
-    OP_HARDWARE => Ok(Request::Hardware(HardwareRequest {
-      shape: r.string()?,
-      length: r.f64()?,
-      width: r.f64()?,
-      projection: r.f64()?,
-      spacing: r.f64()?,
-      grip: r.f64()?,
-      wall: r.f64()?,
-      segments: r.f64()?,
-      next_face_id: r.f64()?,
-    })),
+    OP_HARDWARE => {
+      let shape = r.string()?;
+      let (length, width, projection, spacing, grip, wall, segments) = (r.f64()?, r.f64()?, r.f64()?, r.f64()?, r.f64()?, r.f64()?, r.f64()?);
+      let next_face_id = r.f64()?;
+      // Only the domed knob sends its profile divisions, after everything the other shapes send.
+      let profile_segments = if shape == "knob-domed" { r.f64()? } else { 0.0 };
+      Ok(Request::Hardware(HardwareRequest { shape, length, width, projection, spacing, grip, wall, segments, profile_segments, next_face_id }))
+    }
     op => Err(KernelError::invalid(&format!("unknown kernel request {op}"))),
   }
 }

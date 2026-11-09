@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-//! `Math.sin`, `Math.cos` and `Math.atan2` as V8 on ARM64 computes them, so operations that build geometry from angles
-//! give the same numbers on every engine and build. A platform's own sine or cosine differs in the last digit on some
-//! inputs, which is enough to renumber faces.
+//! `Math.sin`, `Math.cos`, `Math.atan2` and `x ** 3` as V8 on ARM64 computes them, so operations that build geometry
+//! from them give the same numbers on every engine and build. A platform's own sine or cosine differs in the last digit
+//! on some inputs, which is enough to renumber faces.
 //!
 //! The code is V8's port of fdlibm. V8's ARM64 builds compile it with clang's default fused multiply-add contraction, so
 //! the calls to `mul_add` below sit exactly where clang fuses an expression; x86-64 builds of V8 differ from these in
@@ -318,6 +318,17 @@ pub fn atan2(y: f64, x: f64) -> f64 {
   }
 }
 
+/// `x ** 3` for the Bezier parameters of a domed knob's profile, where V8 gives the correctly rounded cube.
+/// `x * x * x` rounds twice and is a bit off on about a fifth of those values, so the cube carries the low part of each
+/// product along (exact for the 109 values that occur, see the test).
+pub fn cube(x: f64) -> f64 {
+  let square = x * x;
+  let square_error = x.mul_add(x, -square);
+  let product = square * x;
+  let product_error = square.mul_add(x, -product);
+  product + (product_error + square_error * x)
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -352,5 +363,56 @@ mod tests {
     assert_eq!(atan2(0.3, -0.7).to_bits(), 0x4005_e4c3_6ca0_118a);
     assert_eq!(atan2(-2.5, 3.25).to_bits(), 0xbfe4_fb75_64da_cded);
     assert_eq!(atan2(1.0, 1.5).to_bits(), 0x3fe2_d0ea_d606_6395);
+  }
+
+  #[test]
+  fn cube_matches_v8_on_every_domed_profile_parameter() {
+    // `x ** 3` from Node for each parameter a domed knob's profile can reach (every `i / count` and `1 - i / count`, for
+    // the counts 2 to 16 that 8 to 32 profile segments split into), as bit patterns, in ascending order of x.
+    const CUBES: [u64; 109] = [
+      0x3f30_0000_0000_0000, 0x3f33_6b06_e70b_741d, 0x3f33_6b06_e70b_7421, 0x3f37_e225_515a_4f14,
+      0x3f37_e225_515a_4f1c, 0x3f3d_d46b_aab4_9c13, 0x3f3d_d46b_aab4_9c25, 0x3f42_f684_bda1_2f67,
+      0x3f42_f684_bda1_2f6f, 0x3f48_9e7c_3fdb_1246, 0x3f48_9e7c_3fdb_124d, 0x3f50_624d_d2f1_a9f9,
+      0x3f50_624d_d2f1_a9fd, 0x3f56_7980_e0bf_08c6, 0x3f56_7980_e0bf_08d0, 0x3f60_0000_0000_0000,
+      0x3f63_6b06_e70b_741d, 0x3f63_6b06_e70b_7421, 0x3f67_e225_515a_4f1c, 0x3f67_e225_515a_4f24,
+      0x3f6d_d46b_aab4_9c25, 0x3f72_f684_bda1_2f65, 0x3f72_f684_bda1_2f67, 0x3f78_9e7c_3fdb_1240,
+      0x3f78_9e7c_3fdb_1246, 0x3f7b_0000_0000_0000, 0x3f80_624d_d2f1_a9f9, 0x3f80_624d_d2f1_a9fd,
+      0x3f84_26cf_7ca4_32c0, 0x3f84_26cf_7ca4_32c2, 0x3f86_7980_e0bf_08c6, 0x3f89_2b3a_d808_63ba,
+      0x3f89_2b3a_d808_63bf, 0x3f90_0000_0000_0000, 0x3f93_6b06_e70b_7421, 0x3f93_6b06_e70b_7424,
+      0x3f94_c5b8_d5e0_d769, 0x3f97_e225_515a_4f1c, 0x3f9b_a5e3_53f7_ced8, 0x3f9b_a5e3_53f7_cedd,
+      0x3f9d_d46b_aab4_9c25, 0x3f9f_4000_0000_0000, 0x3fa2_f684_bda1_2f67, 0x3fa2_f684_bda1_2f6a,
+      0x3fa7_52d8_7172_3140, 0x3fa7_52d8_7172_3143, 0x3fa8_9e7c_3fdb_1246, 0x3fab_0000_0000_0000,
+      0x3fad_2171_24b4_6079, 0x3fad_2171_24b4_607c, 0x3fb0_624d_d2f1_a9fd, 0x3fb2_84bd_a12f_684a,
+      0x3fb2_84bd_a12f_684d, 0x3fb4_26cf_7ca4_32c0, 0x3fb4_26cf_7ca4_32c2, 0x3fb5_7000_0000_0000,
+      0x3fb6_7980_e0bf_08c6, 0x3fb8_0ac5_565b_efd7, 0x3fb8_0ac5_565b_efda, 0x3fb9_2b3a_d808_63bf,
+      0x3fba_0466_3f90_5899, 0x3fc0_0000_0000_0000, 0x3fc3_6b06_e70b_7421, 0x3fc3_fbce_20db_fe99,
+      0x3fc4_c5b8_d5e0_d769, 0x3fc5_f2a7_db7a_8e94, 0x3fc6_c800_0000_0000, 0x3fc7_e225_515a_4f1c,
+      0x3fc9_684b_da12_f682, 0x3fc9_684b_da12_f686, 0x3fcb_a5e3_53f7_ced8, 0x3fcd_d46b_aab4_9c25,
+      0x3fcf_4000_0000_0000, 0x3fd0_7e2c_3cc7_42bd, 0x3fd1_00bf_112a_8ad1, 0x3fd1_00bf_112a_8ad4,
+      0x3fd2_f684_bda1_2f67, 0x3fd2_f684_bda1_2f6a, 0x3fd4_cc00_0000_0000, 0x3fd5_3c79_a647_1428,
+      0x3fd5_f3b6_45a1_cabf, 0x3fd7_52d8_7172_3143, 0x3fd8_9e7c_3fdb_1246, 0x3fd9_3d5d_38d0_2330,
+      0x3fd9_3d5d_38d0_2334, 0x3fdb_0000_0000_0000, 0x3fdd_2171_24b4_6079, 0x3fdd_2171_24b4_607c,
+      0x3fde_1ccb_ad1f_f4c4, 0x3fdf_0b32_017e_2255, 0x3fe0_624d_d2f1_a9fd, 0x3fe1_2a00_0000_0000,
+      0x3fe1_86d3_f475_b5c1, 0x3fe1_86d3_f475_b5c3, 0x3fe2_84bd_a12f_684d, 0x3fe3_62ed_7911_20fa,
+      0x3fe4_26cf_7ca4_32c0, 0x3fe4_26cf_7ca4_32c2, 0x3fe4_d4b0_479a_a975, 0x3fe5_7000_0000_0000,
+      0x3fe6_7980_e0bf_08c6, 0x3fe7_53f7_ced9_1688, 0x3fe8_0ac5_565b_efd7, 0x3fe8_a5ed_097b_425e,
+      0x3fe9_2b3a_d808_63bf, 0x3fe9_9ef9_4865_811f, 0x3fea_0466_3f90_5899, 0x3fea_5e00_0000_0000,
+      0x3ff0_0000_0000_0000,
+    ];
+    let mut values = std::collections::BTreeSet::new();
+    for count in 2..=16 {
+      for i in 1..=count {
+        let t = f64::from(i) / f64::from(count);
+        values.insert(t.to_bits());
+        values.insert((1.0 - t).to_bits());
+      }
+    }
+    values.remove(&0);
+    assert_eq!(values.len(), CUBES.len());
+    for (bits, expected) in values.iter().zip(CUBES) {
+      let x = f64::from_bits(*bits);
+      assert_eq!(cube(x).to_bits(), expected, "x = {x}");
+    }
+    assert_eq!(cube(0.0).to_bits(), 0);
   }
 }

@@ -12,6 +12,7 @@ import type { NativeKernelTransport } from './NativeKernelBackend';
 /** The native kernel's test process: framed requests over stdio. Needs its binary to be built. */
 export class HarnessTransport implements NativeKernelTransport {
   private child: ChildProcessWithoutNullStreams | undefined;
+  private stopped = false;
   private incoming = Buffer.alloc(0);
   private readonly waiting: Array<{ resolve: (b: ArrayBuffer) => void; reject: (e: unknown) => void }> = [];
 
@@ -20,8 +21,13 @@ export class HarnessTransport implements NativeKernelTransport {
   start(): void {
     this.child = spawn(this.path, [], { stdio: 'pipe' });
     this.child.stdout.on('data', (chunk: Buffer) => this.onData(chunk));
+    // A client disposed after `stop` still writes an abort; only a pipe that breaks before then is a real failure.
+    this.child.stdin.on('error', (error) => {
+      if (!this.stopped) throw error;
+    });
   }
   stop(): void {
+    this.stopped = true;
     this.child?.kill();
   }
   private onData(chunk: Buffer): void {

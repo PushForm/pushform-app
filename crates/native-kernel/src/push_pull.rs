@@ -6,12 +6,16 @@
 use manifold_csg::{CrossSection, FillRule, JoinType, Manifold, MeshGL, MeshGLOptions, reserve_ids};
 
 use crate::cache::CacheEntry;
-use crate::finalize::{finalize_manifold, Component, Finalized};
-use crate::math::{self, cross, dist, dot, hypot2, hypot3, neg, parallel, point_in_polygon, point_on_ring, sub, Pt, Vec3};
-use crate::meshio::{read_manifold, try_manifold_from_soup, ReadMesh, TriangleSoup};
+use crate::finalize::{finalize_manifold, Component, Finalized, FinalizeOptions};
+use crate::math::{self, cross, dist, dot, hypot2, hypot3, js_max, js_min, neg, parallel, point_in_polygon, point_on_ring, sub, Basis, Pt, Vec3};
+use crate::meshio::{manifold_from_soup, read_manifold, try_manifold_from_soup, uncaught_manifold_error, ReadMesh, TriangleSoup};
 use crate::normalize::{normalize_triangles, IntMap, WeightedOrigin};
 use crate::tolerance::{AREA_TOL, COPLANAR_TOL, MERGE_TOL};
 use crate::KernelError;
+
+/// The `TypeError` the TypeScript kernel's Manifold binding throws for a polygon list with no contours: reading the
+/// first contour's length. It reaches the caller as an `Internal` error.
+const NO_CONTOURS: &str = "Cannot read properties of undefined (reading 'length')";
 
 const TOOL_NEAR_CAP: u32 = 0;
 const TOOL_FAR_CAP: u32 = 1;
@@ -20,24 +24,24 @@ const TOOL_SIDE_BASE: u32 = 2;
 /// Start-cap overlap that removes the coincident-face degeneracy where the tool's start cap cannot coincide with the face.
 const OVERLAP: f64 = 4.0 * COPLANAR_TOL;
 
-pub struct Basis {
-  pub origin: Vec3,
-  pub u: Vec3,
-  pub v: Vec3,
-  pub n: Vec3,
-}
-
 pub struct PushPullRequest {
-  pub body_id: u64,
-  pub version: u64,
-  pub face_id: u32,
+  pub body_id: f64,
+  pub version: f64,
+  pub face_id: f64,
   pub basis: Basis,
   pub polygon: Vec<Vec<Pt>>,
   pub region_is_whole_face: bool,
   pub distance: f64,
   pub new_body: bool,
   pub preview: bool,
-  pub next_face_id: i64,
+  pub next_face_id: f64,
+}
+
+pub struct ExtrudeSketchRequest {
+  pub basis: Basis,
+  pub polygon: Vec<Vec<Pt>>,
+  pub distance: f64,
+  pub next_face_id: f64,
 }
 
 /// Checked between pipeline stages; the op stops with `Aborted` once the kernel has been reset.
@@ -48,8 +52,9 @@ pub trait Checkpoint {
 pub enum PushPullOutput {
   Full {
     components: Vec<Component>,
-    side_face_for_boundary_edge: Vec<(u32, u32)>,
-    next_face_id: i64,
+    /// Keyed by the face's id as a number, which can exceed what a mesh's `faceId` holds.
+    side_face_for_boundary_edge: Vec<(f64, u32)>,
+    next_face_id: f64,
     body_run_id: u32,
     tool_run_id: u32,
     moved: bool,
@@ -117,11 +122,11 @@ fn collinear_overlap(a: Pt, b: Pt, edge: (Pt, Pt), tol: f64) -> f64 {
   }
   let ta = (a[0] - p[0]) * ux + (a[1] - p[1]) * uy;
   let tb = (b[0] - p[0]) * ux + (b[1] - p[1]) * uy;
-  ta.max(tb).min(len) - ta.min(tb).max(0.0)
+  js_min(js_max(ta, tb), len) - js_max(js_min(ta, tb), 0.0)
 }
 
 fn contour_tol(extent: f64) -> f64 {
-  (1e-6 * extent).max(1e-9)
+  js_max(1e-6 * extent, 1e-9)
 }
 
 /// Near-cap, far-cap or side label for each triangle of an extruded prism in its local frame.
@@ -129,7 +134,7 @@ fn label_tool_faces(props: &[f32], np: usize, tris: &[u32], edges: &[(Pt, Pt)]) 
   let p = |i: usize| props[i] as f64;
   let mut extent = 0.0_f64;
   for (a, b) in edges {
-    extent = extent.max(a[0].abs()).max(a[1].abs()).max(b[0].abs()).max(b[1].abs());
+    extent = js_max(js_max(js_max(js_max(extent, a[0].abs()), a[1].abs()), b[0].abs()), b[1].abs());
   }
   let tol = contour_tol(extent);
   let num_tri = tris.len() / 3;
@@ -168,9 +173,17 @@ fn label_tool_faces(props: &[f32], np: usize, tris: &[u32], edges: &[(Pt, Pt)]) 
   face_id
 }
 
+/// `CrossSection.ofPolygons(contours, 'Positive')`, which throws on an empty contour list.
+fn polygons_cross_section(frame: &ToolFrame) -> Result<CrossSection, KernelError> {
+  if frame.contours.is_empty() {
+    return Err(KernelError::internal(NO_CONTOURS.to_string()));
+  }
+  Ok(CrossSection::from_polygons_with_fill_rule(&frame.contours, FillRule::Positive))
+}
+
 /// Cross-section of the frame's contours, or the region-has-no-area error of the TypeScript kernel.
 fn cross_section(frame: &ToolFrame) -> Result<CrossSection, KernelError> {
-  let cs = CrossSection::from_polygons_with_fill_rule(&frame.contours, FillRule::Positive);
+  let cs = polygons_cross_section(frame)?;
   if cs.is_empty() {
     return Err(KernelError::invalid("pushPull region polygon has no area"));
   }
@@ -188,9 +201,9 @@ fn build_standalone_tool(frame: &ToolFrame, height: f64, run_id: u32) -> Result<
   let run_original_id = [run_id];
   let (from, to) = (mg.merge_from_vert(), mg.merge_to_vert());
   let options = MeshGLOptions::new().runs(&run_index, &run_original_id).merge_vertices(&from, &to);
-  let mut labelled = MeshGL::new_with_options(&props, mg.num_prop(), &tri_verts, options).map_err(|e| KernelError::manifold(format!("{e}")))?;
+  let mut labelled = MeshGL::new_with_options(&props, mg.num_prop(), &tri_verts, options).map_err(|e| KernelError::internal(format!("{e}")))?;
   labelled.set_face_id(&labels);
-  let local = Manifold::from_meshgl(&labelled).map_err(|e| KernelError::manifold(format!("{e}")))?;
+  let local = Manifold::from_meshgl(&labelled).map_err(uncaught_manifold_error)?;
   Ok(local.transform(&frame.matrix))
 }
 
@@ -233,11 +246,11 @@ fn snap_corners(frame: &ToolFrame, face_verts: &[Vec3]) -> ToolCorners {
   ToolCorners { points, all_on_vertices }
 }
 
-fn face_vertices(mesh: &ReadMesh, face_id: u32) -> Vec<Vec3> {
+fn face_vertices(mesh: &ReadMesh, face_id: f64) -> Vec<Vec3> {
   let mut seen = vec![false; mesh.verts.len() / 3];
   let mut out = Vec::new();
   for t in 0..mesh.face_id.len() {
-    if mesh.face_id[t] != face_id {
+    if f64::from(mesh.face_id[t]) != face_id {
       continue;
     }
     for k in 0..3 {
@@ -267,7 +280,7 @@ fn build_tool_soup(frame: &ToolFrame, corners: &ToolCorners, height: f64, overla
   let np = mg.num_prop();
   let (props, tri_verts) = (mg.vert_properties(), mg.tri_verts());
   let face_id = label_tool_faces(&props, np, &tri_verts, &frame.edges);
-  let extent = corners.points.iter().fold(0.0_f64, |e, c| e.max(c.x.abs()).max(c.y.abs()));
+  let extent = corners.points.iter().fold(0.0_f64, |e, c| js_max(js_max(e, c.x.abs()), c.y.abs()));
   let tol = contour_tol(extent);
   let mid = (height + overlap_far - overlap_near) / 2.0;
   let near = if overlap_near > 0.0 { -overlap_near } else { 0.0 };
@@ -327,12 +340,13 @@ struct Stretch {
   verts: Option<Vec<f64>>,
 }
 
+const NOT_SQUARE: Stretch = Stretch { square: false, verts: None };
+
 /// Move a whole face along its normal instead of cutting, when every face around it is square to it and nothing else of
 /// the solid is in the way. See `stretchFace` in the TypeScript kernel.
-fn stretch_face(body: &CacheEntry, mesh: &ReadMesh, req: &PushPullRequest, frame: &ToolFrame, height: f64) -> Stretch {
-  let none = Stretch { square: false, verts: None };
+fn stretch_face(body: &CacheEntry, mesh: &ReadMesh, req: &PushPullRequest, frame: &ToolFrame, height: f64) -> Result<Stretch, KernelError> {
   if req.new_body || !req.region_is_whole_face {
-    return none;
+    return Ok(NOT_SQUARE);
   }
   let f = req.face_id;
   let n = req.basis.n;
@@ -342,7 +356,7 @@ fn stretch_face(body: &CacheEntry, mesh: &ReadMesh, req: &PushPullRequest, frame
   let mut moves = vec![false; verts.len() / 3];
   let mut any = false;
   for t in 0..num_tri {
-    if face_id[t] != f {
+    if f64::from(face_id[t]) != f {
       continue;
     }
     for k in 0..3 {
@@ -351,7 +365,7 @@ fn stretch_face(body: &CacheEntry, mesh: &ReadMesh, req: &PushPullRequest, frame
     any = true;
   }
   if !any {
-    return none;
+    return Ok(NOT_SQUARE);
   }
   let at = |i: usize, moved: bool| -> Vec3 {
     let s = if moved && moves[i] { d } else { 0.0 };
@@ -365,7 +379,7 @@ fn stretch_face(body: &CacheEntry, mesh: &ReadMesh, req: &PushPullRequest, frame
   let mut folds = false;
   for t in 0..num_tri {
     let id = face_id[t];
-    if id == f {
+    if f64::from(id) == f {
       continue;
     }
     let (a, b, c) = (tris[t * 3] as usize, tris[t * 3 + 1] as usize, tris[t * 3 + 2] as usize);
@@ -383,11 +397,11 @@ fn stretch_face(body: &CacheEntry, mesh: &ReadMesh, req: &PushPullRequest, frame
   for sum in around.values() {
     let len = hypot3(sum[0], sum[1], sum[2]);
     if len == 0.0 || d.abs() * dot(*sum, n).abs() / len > COPLANAR_TOL / 2.0 {
-      return none;
+      return Ok(NOT_SQUARE);
     }
   }
   if folds {
-    return Stretch { square: true, verts: None };
+    return Ok(Stretch { square: true, verts: None });
   }
   // No other vertex of the solid where F passes.
   let (o, u, v, dir) = (frame.origin, frame.u, frame.v, frame.dir);
@@ -402,20 +416,18 @@ fn stretch_face(body: &CacheEntry, mesh: &ReadMesh, req: &PushPullRequest, frame
     }
     let xy = [dot(w, u), dot(w, v)];
     if point_in_polygon(xy, &frame.contours) || frame.contours.iter().any(|ring| point_on_ring(xy, ring, MERGE_TOL)) {
-      return Stretch { square: true, verts: None };
+      return Ok(Stretch { square: true, verts: None });
     }
   }
   // No other face of the solid across where F passes: a slightly smaller prism there holds none of the solid (pulling
   // out) or only solid (pushing in).
   if height > 2.0 * OVERLAP {
-    if let Ok(cs) = cross_section(frame) {
-      let shrunk = cs.offset(-OVERLAP, JoinType::Miter, 2.0, 0);
-      if !shrunk.is_empty() {
-        let probe = shrunk.extrude(height - 2.0 * OVERLAP).translate(0.0, 0.0, OVERLAP).transform(&frame.matrix);
-        let clash = if d > 0.0 { body.manifold.intersection(&probe) } else { probe.difference(&body.manifold) };
-        if clash.volume() > COPLANAR_TOL * probe.surface_area() {
-          return Stretch { square: true, verts: None };
-        }
+    let shrunk = polygons_cross_section(frame)?.offset(-OVERLAP, JoinType::Miter, 2.0, 0);
+    if !shrunk.is_empty() {
+      let probe = shrunk.extrude(height - 2.0 * OVERLAP).translate(0.0, 0.0, OVERLAP).transform(&frame.matrix);
+      let clash = if d > 0.0 { body.manifold.intersection(&probe) } else { probe.difference(&body.manifold) };
+      if clash.volume() > COPLANAR_TOL * probe.surface_area() {
+        return Ok(Stretch { square: true, verts: None });
       }
     }
   }
@@ -428,7 +440,7 @@ fn stretch_face(body: &CacheEntry, mesh: &ReadMesh, req: &PushPullRequest, frame
       moved[i * 3 + k] = verts[i * 3 + k] + d * n[k];
     }
   }
-  Stretch { square: true, verts: Some(moved) }
+  Ok(Stretch { square: true, verts: Some(moved) })
 }
 
 /// B ∪ tool (pulling) or B − tool (pushing), with both uploaded around one shared centre so faces they share coincide.
@@ -439,19 +451,13 @@ fn cut(body: &CacheEntry, mesh: &ReadMesh, req: &PushPullRequest, frame: &ToolFr
   let overlap_far = if reaches_opposing_face(mesh, n, far_offset) { OVERLAP } else { 0.0 };
   let overlap_near = if req.distance > 0.0 && req.region_is_whole_face && square && corners.all_on_vertices { 0.0 } else { OVERLAP };
   let soup = build_tool_soup(frame, corners, height, overlap_near, overlap_far)?;
-  let (lo_a, hi_a) = math::bounds(&mesh.verts);
-  let (lo_b, hi_b) = math::bounds(&soup.verts);
-  let center = [
-    (lo_a[0].min(lo_b[0]) + hi_a[0].max(hi_b[0])) / 2.0,
-    (lo_a[1].min(lo_b[1]) + hi_a[1].max(hi_b[1])) / 2.0,
-    (lo_a[2].min(lo_b[2]) + hi_a[2].max(hi_b[2])) / 2.0,
-  ];
-  let solid = try_manifold_from_soup(&TriangleSoup { verts: &mesh.verts, tris: &mesh.tris, face_id: &mesh.face_id }, body.run_id, center)?;
-  let tool = try_manifold_from_soup(&TriangleSoup { verts: &soup.verts, tris: &soup.tris, face_id: &soup.face_id }, tool_run_id, center)?;
+  let center = math::bounds_center(math::union_bounds(math::bounds(&mesh.verts), math::bounds(&soup.verts)));
+  let solid = manifold_from_soup(&TriangleSoup { verts: &mesh.verts, tris: &mesh.tris, face_id: &mesh.face_id }, body.run_id, center)?;
+  let tool = manifold_from_soup(&TriangleSoup { verts: &soup.verts, tris: &soup.tris, face_id: &soup.face_id }, tool_run_id, center)?;
   Ok(if req.distance > 0.0 { solid.union(&tool) } else { solid.difference(&tool) })
 }
 
-fn side_face_map(fin: &Finalized, tool_run_id: u32) -> Vec<(u32, u32)> {
+fn side_face_map(fin: &Finalized, tool_run_id: u32) -> Vec<(f64, u32)> {
   let mut out = Vec::new();
   for face in &fin.faces {
     if let Some(side) = face.origins.iter().find(|o| o.run_id == tool_run_id && o.face_id >= TOOL_SIDE_BASE) {
@@ -462,7 +468,7 @@ fn side_face_map(fin: &Finalized, tool_run_id: u32) -> Vec<(u32, u32)> {
 }
 
 fn preview_mesh(m: &Manifold) -> PushPullOutput {
-  let norm = normalize_triangles(&read_manifold(m), 0, |_| None);
+  let norm = normalize_triangles(&read_manifold(m), 0.0, |_| None);
   PushPullOutput::Preview { verts: norm.mesh.verts, tris: norm.mesh.tris, face_id: norm.mesh.face_id }
 }
 
@@ -475,22 +481,12 @@ pub fn push_pull(body: &CacheEntry, req: &PushPullRequest, checkpoint: &dyn Chec
   let tool_run_id = reserve_ids(1);
   let body_run_id = body.run_id;
   let far_cap_id = if req.region_is_whole_face { Some(req.face_id) } else { None };
-  let choose_id = |origins: &[WeightedOrigin]| -> Option<u32> {
-    if let Some(o) = origins.iter().find(|o| o.run_id == body_run_id) {
-      return Some(o.face_id);
-    }
-    if let Some(cap) = far_cap_id {
-      if origins.iter().any(|o| o.run_id == tool_run_id && o.face_id == TOOL_FAR_CAP) {
-        return Some(cap);
-      }
-    }
-    None
-  };
+  let choose_id = choose_id_for(body_run_id, tool_run_id, far_cap_id);
   let mut moved = false;
   let out = if req.new_body {
     build_standalone_tool(&frame, height, tool_run_id)?
   } else {
-    let stretch = stretch_face(body, mesh, req, &frame, height);
+    let stretch = stretch_face(body, mesh, req, &frame, height)?;
     checkpoint.check()?;
     if req.preview {
       if let Some(verts) = stretch.verts {
@@ -512,13 +508,50 @@ pub fn push_pull(body: &CacheEntry, req: &PushPullRequest, checkpoint: &dyn Chec
   if req.preview {
     return Ok(preview_mesh(&out));
   }
-  let fin = finalize_manifold(&out, req.next_face_id, choose_id)?;
+  let fin = finalize_manifold(&out, &FinalizeOptions { next_face_id: req.next_face_id, simplify_tolerance: None }, choose_id)?;
   Ok(PushPullOutput::Full {
     side_face_for_boundary_edge: side_face_map(&fin, tool_run_id),
     next_face_id: fin.next_face_id,
     body_run_id,
     tool_run_id,
     moved,
+    components: fin.components,
+  })
+}
+
+/// `chooseIdFor`: the body face giving a face most of its area keeps its id; the far cap may take F's id.
+fn choose_id_for(body_run_id: u32, tool_run_id: u32, far_cap_id: Option<f64>) -> impl Fn(&[WeightedOrigin]) -> Option<f64> {
+  move |origins: &[WeightedOrigin]| {
+    if let Some(o) = origins.iter().find(|o| o.run_id == body_run_id) {
+      return Some(f64::from(o.face_id));
+    }
+    if let Some(cap) = far_cap_id {
+      if origins.iter().any(|o| o.run_id == tool_run_id && o.face_id == TOOL_FAR_CAP) {
+        return Some(cap);
+      }
+    }
+    None
+  }
+}
+
+/// Extrude a sketch polygon into a new solid: the new-body path of push/pull without a source body.
+pub fn extrude_sketch(req: &ExtrudeSketchRequest, checkpoint: &dyn Checkpoint) -> Result<PushPullOutput, KernelError> {
+  if !req.distance.is_finite() || req.distance.abs() <= COPLANAR_TOL {
+    return Err(KernelError::invalid("extrudeSketch.distance must be a non-zero finite number"));
+  }
+  let frame = tool_frame(&req.basis, &req.polygon, req.distance);
+  let tool_run_id = reserve_ids(1);
+  let height = req.distance.abs();
+  let tool = build_standalone_tool(&frame, height, tool_run_id)?;
+  checkpoint.check()?;
+  let choose_id = choose_id_for(0, tool_run_id, None);
+  let fin = finalize_manifold(&tool, &FinalizeOptions { next_face_id: req.next_face_id, simplify_tolerance: None }, choose_id)?;
+  Ok(PushPullOutput::Full {
+    side_face_for_boundary_edge: side_face_map(&fin, tool_run_id),
+    next_face_id: fin.next_face_id,
+    body_run_id: 0,
+    tool_run_id,
+    moved: false,
     components: fin.components,
   })
 }

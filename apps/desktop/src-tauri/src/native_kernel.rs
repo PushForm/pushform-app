@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-//! The native push/pull kernel, available in builds with the `native-kernel` feature. Requests are raw bytes over
+//! The native Rust kernel, available in builds with the `native-kernel` feature. Requests are raw bytes over
 //! Tauri's binary IPC, in the protocol of `crates/native-kernel/src/wire.rs`, and every request runs on its own
 //! blocking thread so a slow boolean never holds up the next one. The webview's backend reruns anything that fails here
 //! in WebAssembly.

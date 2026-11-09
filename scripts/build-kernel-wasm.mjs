@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-// Build the push/pull kernel (crates/kernel-wasm) to WebAssembly with Emscripten and place it where @pushform/kernel
+// Build the Rust kernel (crates/kernel-wasm) to WebAssembly with Emscripten and place it where @pushform/kernel
 // loads it from.
 /* global process, console, URL */
 // Needs the wasm32-unknown-emscripten Rust target (`rustup target add wasm32-unknown-emscripten`) and Emscripten's

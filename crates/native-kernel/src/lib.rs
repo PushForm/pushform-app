@@ -1,14 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-//! The push/pull pipeline as a native library, for the desktop app. It keeps its own cache of solids and answers
-//! requests in the binary protocol of [`wire`]; the app's kernel backend falls back to WebAssembly on any error.
+//! The PushForm kernel as a library, built natively for the desktop app and to WebAssembly for the web app. It keeps its
+//! own cache of solids and answers requests in the binary protocol of [`wire`]; every operation of the TypeScript
+//! kernel in `packages/kernel/src/worker/ops` has a port here that returns identical results.
+pub mod bvh;
 pub mod cache;
+pub mod earcut;
 #[cfg(feature = "fault-injection")]
 pub mod faults;
 pub mod finalize;
 pub mod math;
 pub mod meshio;
 pub mod normalize;
+pub mod ops;
+pub mod polygon;
 pub mod push_pull;
 pub mod wire;
 
@@ -21,10 +26,9 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use manifold_csg::reserve_ids;
-
 use cache::{BodyCache, CacheEntry};
-use meshio::{soup_center, try_manifold_from_soup, ReadMesh, TriangleSoup};
+use math::js_number_string;
+use ops::{autofold, bodies, boolean, decompose, edge_blend, follow_me, from_triangles, hull, properties, revolve, section_cut, simplify, transform};
 use push_pull::Checkpoint;
 use tolerance::COPLANAR_TOL;
 use wire::Request;
@@ -44,8 +48,14 @@ impl KernelError {
   pub fn invalid(message: &str) -> Self {
     Self { code: "InvalidInput", message: message.to_string(), details: None }
   }
+  pub fn invalid_with(message: String, details: String) -> Self {
+    Self { code: "InvalidInput", message, details: Some(details) }
+  }
   pub fn manifold(message: String) -> Self {
     Self { code: "ManifoldError", message, details: None }
+  }
+  pub fn manifold_with(message: String, details: String) -> Self {
+    Self { code: "ManifoldError", message, details: Some(details) }
   }
   fn aborted() -> Self {
     Self { code: "Aborted", message: "Native kernel request was aborted".to_string(), details: None }
@@ -53,8 +63,9 @@ impl KernelError {
   pub fn internal(message: String) -> Self {
     Self { code: "Internal", message, details: None }
   }
-  fn not_cached(body_id: u64, version: u64) -> Self {
-    Self { code: "BodyNotCached", message: format!("Body {body_id} v{version} is not cached"), details: Some(format!("{{\"bodyId\":{body_id},\"version\":{version}}}")) }
+  fn not_cached(body_id: f64, version: f64) -> Self {
+    let (id, version_string) = (js_number_string(body_id), js_number_string(version));
+    Self { code: "BodyNotCached", message: format!("Body {id} v{version_string} is not cached"), details: Some(format!("{{\"bodyId\":{id},\"version\":{version_string}}}")) }
   }
 
   /// `{code, message, details?}` as JSON, the form the webview's backend decodes.
@@ -87,7 +98,7 @@ fn json_string(s: &str) -> String {
   out
 }
 
-/// The native kernel: a cache of solids and a generation counter that stops in-flight work when the kernel is reset.
+/// The kernel: a cache of solids and a generation counter that stops in-flight work when the kernel is reset.
 pub struct Kernel {
   cache: Mutex<BodyCache>,
   generation: AtomicU64,
@@ -124,7 +135,24 @@ impl Kernel {
   /// finishes on its own thread and its result is dropped.
   pub fn abort_all(&self) {
     self.generation.fetch_add(1, Ordering::SeqCst);
-    self.cache.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    self.lock_cache().clear();
+  }
+
+  fn lock_cache(&self) -> std::sync::MutexGuard<'_, BodyCache> {
+    self.cache.lock().unwrap_or_else(|e| e.into_inner())
+  }
+
+  pub(crate) fn cached(&self, body_id: f64, version: f64) -> Option<Arc<CacheEntry>> {
+    self.lock_cache().get(body_id, version)
+  }
+
+  pub(crate) fn insert(&self, body_id: f64, version: f64, entry: Arc<CacheEntry>) {
+    self.lock_cache().set(body_id, version, entry);
+  }
+
+  /// The cached body, or `BodyNotCached` (the backend re-uploads and retries on this code).
+  pub(crate) fn get_body(&self, body_id: f64, version: f64) -> Result<Arc<CacheEntry>, KernelError> {
+    self.cached(body_id, version).ok_or_else(|| KernelError::not_cached(body_id, version))
   }
 
   fn dispatch(&self, bytes: &[u8]) -> Result<Vec<u8>, KernelError> {
@@ -138,38 +166,37 @@ impl Kernel {
     if let Some(result) = faults::run(bytes) {
       return result;
     }
-    match wire::decode_request(bytes)? {
-      Request::EnsureBody { body_id, version, mesh } => self.ensure_body(body_id, version, mesh, &checkpoint),
+    let response = match wire::decode_request(bytes)? {
+      Request::Init => wire::encode_init(),
+      Request::EnsureBody { body_id, version, mesh } => {
+        let run_id = bodies::ensure_body(self, body_id, version, mesh, &checkpoint)?;
+        wire::encode_ensure_body(run_id.is_some(), run_id.unwrap_or(0))
+      }
       Request::PushPull(req) => {
         if !req.distance.is_finite() || req.distance.abs() <= COPLANAR_TOL {
           return Err(KernelError::invalid("pushPull.distance must be a non-zero finite number"));
         }
-        let body = self.cache.lock().unwrap_or_else(|e| e.into_inner()).get(req.body_id, req.version);
-        let body = body.ok_or_else(|| KernelError::not_cached(req.body_id, req.version))?;
-        let output = push_pull::push_pull(&body, &req, &checkpoint)?;
-        checkpoint.check()?;
-        Ok(wire::encode_push_pull(&output))
+        let body = self.get_body(req.body_id, req.version)?;
+        wire::encode_push_pull(&push_pull::push_pull(&body, &req, &checkpoint)?)
       }
-      Request::Release { body_id, version } => {
-        let released = self.cache.lock().unwrap_or_else(|e| e.into_inner()).release(body_id, version);
-        Ok(wire::encode_release(released))
-      }
-    }
-  }
-
-  fn ensure_body(&self, body_id: u64, version: u64, mesh: Option<wire::Mesh>, checkpoint: &Generation) -> Result<Vec<u8>, KernelError> {
-    if let Some(existing) = self.cache.lock().unwrap_or_else(|e| e.into_inner()).get(body_id, version) {
-      return Ok(wire::encode_ensure_body(true, existing.run_id));
-    }
-    let Some(mesh) = mesh else { return Ok(wire::encode_ensure_body(false, 0)) };
-    let run_id = reserve_ids(1);
-    let soup = TriangleSoup { verts: &mesh.verts, tris: &mesh.tris, face_id: &mesh.face_id };
-    let manifold = try_manifold_from_soup(&soup, run_id, soup_center(&mesh.verts))?;
+      Request::ExtrudeSketch(req) => wire::encode_push_pull(&push_pull::extrude_sketch(&req, &checkpoint)?),
+      Request::Release { body_id, version } => wire::encode_release(self.lock_cache().release(body_id, version)),
+      Request::Boolean(req) => wire::encode_boolean(&boolean::boolean(self, &req)?),
+      Request::Transform { body, matrix, next_face_id } => wire::encode_components(wire::OP_TRANSFORM, &transform::transform(self, body, &matrix, next_face_id)?),
+      Request::Autofold { mesh, next_face_id } => wire::encode_components(wire::OP_AUTOFOLD, &autofold::autofold(&mesh, next_face_id)?),
+      Request::SectionCut { body, n, d } => wire::encode_section_cut(&section_cut::section_cut(self, body, n, d)?),
+      Request::Properties { body } => wire::encode_properties(&properties::properties(self, body)?),
+      Request::FromTriangles { mesh, next_face_id } => wire::encode_from_triangles(&from_triangles::from_triangles(&mesh, next_face_id)?),
+      Request::Decompose { body, next_face_id } => wire::encode_components(wire::OP_DECOMPOSE, &decompose::decompose(self, body, next_face_id)?),
+      Request::Simplify { body, tolerance, next_face_id } => wire::encode_components(wire::OP_SIMPLIFY, &simplify::simplify(self, body, tolerance, next_face_id)?),
+      Request::Hull { bodies: refs, next_face_id } => wire::encode_components(wire::OP_HULL, &hull::hull(self, &refs, next_face_id)?),
+      Request::FollowMe(req) => wire::encode_components(wire::OP_FOLLOW_ME, &follow_me::follow_me(&req)?),
+      Request::Revolve(req) => wire::encode_components(wire::OP_REVOLVE, &revolve::revolve(&req)?),
+      Request::EdgeBlend(req) => wire::encode_edge_blend(&edge_blend::edge_blend(self, &req)?),
+      Request::Stats => wire::encode_stats(self.lock_cache().len(), bodies::heap_bytes()),
+    };
     checkpoint.check()?;
-    let num_tri = mesh.face_id.len();
-    let entry = CacheEntry { manifold, run_id, mesh: ReadMesh { verts: mesh.verts, tris: mesh.tris, run_id: vec![run_id; num_tri], face_id: mesh.face_id } };
-    self.cache.lock().unwrap_or_else(|e| e.into_inner()).set(body_id, version, Arc::new(entry));
-    Ok(wire::encode_ensure_body(true, run_id))
+    Ok(response)
   }
 }
 
@@ -205,8 +232,9 @@ mod tests {
     b.extend((body_id as f64).to_le_bytes());
     b.extend((version as f64).to_le_bytes());
     b.extend(1u32.to_le_bytes());
-    b.extend(((mesh.0.len() / 3) as u32).to_le_bytes());
-    b.extend(((mesh.1.len() / 3) as u32).to_le_bytes());
+    b.extend((mesh.0.len() as u32).to_le_bytes());
+    b.extend((mesh.1.len() as u32).to_le_bytes());
+    b.extend((mesh.2.len() as u32).to_le_bytes());
     for v in &mesh.0 {
       b.extend(v.to_le_bytes());
     }
@@ -233,7 +261,7 @@ mod tests {
     let mut b = OP_PUSH_PULL.to_le_bytes().to_vec();
     b.extend((p.body as f64).to_le_bytes());
     b.extend((p.version as f64).to_le_bytes());
-    b.extend(1u32.to_le_bytes()); // face id: top
+    b.extend(1.0f64.to_le_bytes()); // face id: top
     b.extend(u32::from(p.whole).to_le_bytes());
     for v in [p.origin, [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]] {
       for c in v {
@@ -262,7 +290,7 @@ mod tests {
     let mesh = box_mesh([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
     kernel.handle(&ensure_request(body, 1, &mesh)).expect("upload");
     let wire::Request::PushPull(req) = wire::decode_request(&pull_request(p)).unwrap() else { panic!("not a pull") };
-    let entry = kernel.cache.lock().unwrap().get(body, 1).expect("cached");
+    let entry = kernel.cache.lock().unwrap().get(body as f64, 1.0).expect("cached");
     push_pull::push_pull(&entry, &req, &Generation { kernel, start: kernel.generation.load(Ordering::SeqCst) }).expect("push/pull")
   }
 
@@ -288,7 +316,7 @@ mod tests {
     assert!((c.volume - 1.02).abs() < 1e-6, "volume {}", c.volume);
     let faces: std::collections::HashSet<_> = c.face_id.iter().collect();
     assert_eq!(faces.len(), 11);
-    assert_eq!(next_face_id, 11);
+    assert_eq!(next_face_id, 11.0);
     assert_eq!(side_face_for_boundary_edge.len(), 4);
     expect_closed(&c.tris);
   }

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 publish = false
-description = "PushForm's push/pull kernel as a WebAssembly module with a small C ABI, built with Emscripten for the web app"
+description = "PushForm's geometry kernel as a WebAssembly module with a small C ABI, built with Emscripten for the web app"
 
 [[bin]]
 name = "pushform-kernel"

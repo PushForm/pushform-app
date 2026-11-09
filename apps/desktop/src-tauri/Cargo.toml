@@ -35,7 +35,7 @@ tauri-plugin-opener = "2"
 # The STEP reader, run natively here (the web app runs the same crate as WebAssembly).
 pushform-step-reader = { path = "../../../crates/step-reader" }
 
-# The native push/pull kernel (crates/native-kernel). Building it compiles Manifold, Clipper2 and oneTBB from source with
+# The native Rust kernel (crates/native-kernel). Building it compiles Manifold, Clipper2 and oneTBB from source with
 # cmake, so it is off by default; turn it on with `--features native-kernel` together with PF_NATIVE_KERNEL=1 for the web
 # bundle (see the root `desktop:native` script).
 pushform-native-kernel = { path = "../../../crates/native-kernel", optional = true }

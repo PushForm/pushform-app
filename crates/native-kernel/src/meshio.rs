@@ -4,6 +4,7 @@
 //! through Float32 around a shared centre, so the kernels agree on every coincidence decision. `MeshGL64` would keep
 //! more bits per vertex but disagree with the WebAssembly path, which is the contract here.
 use manifold_csg::{CsgError, Manifold, MeshGL, MeshGLOptions};
+use manifold_csg_sys::ManifoldError;
 
 use crate::KernelError;
 
@@ -20,40 +21,109 @@ pub struct TriangleSoup<'a> {
   pub face_id: &'a [u32],
 }
 
-/// The `MeshGL` for `soup`: positions relative to `center`, the given originalID, per-triangle face ids.
-fn mesh_gl_from(soup: &TriangleSoup, run_id: u32, center: [f64; 3]) -> Result<MeshGL, KernelError> {
-  let mut props = Vec::with_capacity(soup.verts.len());
-  for point in soup.verts.chunks_exact(3) {
+/// The name of a Manifold status, as the `ManifoldStatus` strings the WebAssembly build reports.
+pub fn status_name(status: ManifoldError) -> &'static str {
+  match status {
+    ManifoldError::NoError => "NoError",
+    ManifoldError::NonFiniteVertex => "NonFiniteVertex",
+    ManifoldError::NotManifold => "NotManifold",
+    ManifoldError::VertexOutOfBounds => "VertexOutOfBounds",
+    ManifoldError::PropertiesWrongLength => "PropertiesWrongLength",
+    ManifoldError::MissingPositionProperties => "MissingPositionProperties",
+    ManifoldError::MergeVectorsDifferentLengths => "MergeVectorsDifferentLengths",
+    ManifoldError::MergeIndexOutOfBounds => "MergeIndexOutOfBounds",
+    ManifoldError::TransformWrongLength => "TransformWrongLength",
+    ManifoldError::RunIndexWrongLength => "RunIndexWrongLength",
+    ManifoldError::FaceIdWrongLength => "FaceIDWrongLength",
+    ManifoldError::InvalidConstruction => "InvalidConstruction",
+    ManifoldError::ResultTooLarge => "ResultTooLarge",
+    ManifoldError::InvalidTangents => "InvalidTangents",
+    ManifoldError::Cancelled => "Cancelled",
+    _ => "Unknown",
+  }
+}
+
+fn csg_status(e: CsgError) -> &'static str {
+  match e {
+    CsgError::ManifoldStatus(status) => status_name(status),
+    _ => "Unknown",
+  }
+}
+
+/// What Manifold's JavaScript binding throws for a status nothing in the TypeScript kernel catches: a plain `Error` with
+/// this message, reported as `Internal`.
+pub fn uncaught_manifold_error(e: CsgError) -> KernelError {
+  KernelError::internal(
+    match csg_status(e) {
+      "NonFiniteVertex" => "Non-finite vertex",
+      "NotManifold" => "Not manifold",
+      "VertexOutOfBounds" => "Vertex index out of bounds",
+      "PropertiesWrongLength" => "Properties have wrong length",
+      "MissingPositionProperties" => "Less than three properties",
+      "MergeVectorsDifferentLengths" => "Merge vectors have different lengths",
+      "MergeIndexOutOfBounds" => "Merge index out of bounds",
+      "TransformWrongLength" => "Transform vector has wrong length",
+      "RunIndexWrongLength" => "Run index vector has wrong length",
+      "FaceIDWrongLength" => "Face ID vector has wrong length",
+      "InvalidConstruction" => "Manifold constructed with invalid parameters",
+      "ResultTooLarge" => "Result exceeds maximum size",
+      "InvalidTangents" => "Invalid halfedge tangents",
+      _ => "Unknown error",
+    }
+    .to_string(),
+  )
+}
+
+/// A `MeshGL` from positions already relative to the upload centre: the given originalID, per-triangle face ids.
+fn mesh_gl_from_props(props: &[f32], soup_tris: &[u32], face_id: &[u32], run_id: u32) -> Result<MeshGL, &'static str> {
+  let run_index = [0, soup_tris.len() as u32];
+  let run_original_id = [run_id];
+  let options = MeshGLOptions::new().runs(&run_index, &run_original_id);
+  let mut mesh = MeshGL::new_with_options(props, 3, soup_tris, options).map_err(csg_status)?;
+  mesh.set_face_id(face_id);
+  Ok(mesh)
+}
+
+/// Float32 positions of `verts` relative to `center`, as the TypeScript kernel builds its `Float32Array`.
+pub fn relative_props(verts: &[f64], center: [f64; 3]) -> Vec<f32> {
+  let mut props = Vec::with_capacity(verts.len());
+  for point in verts.chunks_exact(3) {
     props.push((point[0] - center[0]) as f32);
     props.push((point[1] - center[1]) as f32);
     props.push((point[2] - center[2]) as f32);
   }
-  let run_index = [0, soup.tris.len() as u32];
-  let run_original_id = [run_id];
-  let options = MeshGLOptions::new().runs(&run_index, &run_original_id);
-  let mut mesh = MeshGL::new_with_options(&props, 3, soup.tris, options).map_err(status_error)?;
-  mesh.set_face_id(soup.face_id);
-  Ok(mesh)
+  props
 }
 
-fn status_error(e: CsgError) -> KernelError {
-  KernelError::manifold(format!("{e}"))
+/// The Manifold of a mesh uploaded around `center`, or the status Manifold rejected it with.
+pub fn manifold_from_props(props: &[f32], tris: &[u32], face_id: &[u32], run_id: u32) -> Result<Manifold, &'static str> {
+  let mesh = mesh_gl_from_props(props, tris, face_id, run_id)?;
+  Manifold::from_meshgl(&mesh).map_err(csg_status)
 }
 
 /// A Manifold in world coordinates from a soup uploaded around `center`, or the status Manifold rejected it with.
-pub fn try_manifold_from_soup(soup: &TriangleSoup, run_id: u32, center: [f64; 3]) -> Result<Manifold, KernelError> {
-  if soup.tris.is_empty() || soup.tris.len() % 3 != 0 || soup.face_id.len() != soup.tris.len() / 3 {
-    return Err(KernelError::manifold("Mesh rejected by Manifold: FaceIDWrongLength".to_string()));
+pub fn try_manifold_from_soup(soup: &TriangleSoup, run_id: u32, center: [f64; 3]) -> Result<Manifold, &'static str> {
+  if soup.tris.is_empty() || !soup.tris.len().is_multiple_of(3) || soup.face_id.len() != soup.tris.len() / 3 {
+    return Err("FaceIDWrongLength");
   }
-  let mesh = mesh_gl_from(soup, run_id, center)?;
-  let local = Manifold::from_meshgl(&mesh).map_err(status_error)?;
+  let props = relative_props(soup.verts, center);
+  let local = manifold_from_props(&props, soup.tris, soup.face_id, run_id)?;
   Ok(local.translate(center[0], center[1], center[2]))
+}
+
+/// Like [`try_manifold_from_soup`], but the failure is the kernel error `manifoldFromSoup` throws.
+pub fn manifold_from_soup(soup: &TriangleSoup, run_id: u32, center: [f64; 3]) -> Result<Manifold, KernelError> {
+  try_manifold_from_soup(soup, run_id, center).map_err(rejected_mesh)
+}
+
+/// The `ManifoldError` for a mesh Manifold rejected, with its status name in the details.
+pub fn rejected_mesh(status: &'static str) -> KernelError {
+  KernelError::manifold_with(format!("Mesh rejected by Manifold: {status}"), format!("{{\"status\":\"{status}\"}}"))
 }
 
 /// The bounds centre of `verts`, the upload centre used when solids do not have to share one.
 pub fn soup_center(verts: &[f64]) -> [f64; 3] {
-  let (min, max) = crate::math::bounds(verts);
-  [(min[0] + max[0]) / 2.0, (min[1] + max[1]) / 2.0, (min[2] + max[2]) / 2.0]
+  crate::math::bounds_center(crate::math::bounds(verts))
 }
 
 /// Read a Manifold as welded Float64 triangles with per-triangle provenance (see `readManifold` in the TypeScript kernel).

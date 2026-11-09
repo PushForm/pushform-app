@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 publish = false
-description = "PushForm's push/pull pipeline, run natively on Manifold for the desktop app"
+description = "PushForm's geometry kernel on Manifold, built natively for the desktop app and to WebAssembly for the web app"
 
 [lib]
 name = "pushform_native_kernel"
@@ -19,8 +19,8 @@ required-features = ["harness"]
 [dependencies]
 # Manifold's Rust binding, carried here with one addition: setting a mesh's face ids (see vendor/README.md).
 manifold-csg = { path = "vendor/manifold-csg", default-features = false }
-# Only for the fault-injection requests, which call Manifold's C API directly.
-manifold-csg-sys = { path = "vendor/manifold-csg-sys", default-features = false, optional = true }
+# The status codes Manifold reports (`ManifoldError`) and the fault-injection requests, which call its C API directly.
+manifold-csg-sys = { path = "vendor/manifold-csg-sys", default-features = false }
 
 [features]
 default = ["parallel"]
@@ -28,7 +28,7 @@ default = ["parallel"]
 parallel = ["manifold-csg/parallel"]
 harness = []
 # Adds requests that fail on purpose (`faults.rs`), for the failure tests of the WebAssembly build. Never in a shipped build.
-fault-injection = ["dep:manifold-csg-sys"]
+fault-injection = []
 
 [profile.release]
 opt-level = 3

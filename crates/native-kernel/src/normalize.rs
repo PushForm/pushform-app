@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 
-use crate::math::hypot3;
+use crate::math::{hypot3, to_uint32};
 use crate::meshio::ReadMesh;
 use crate::tolerance::{AREA_TOL, COPLANAR_TOL};
 
@@ -190,7 +190,8 @@ pub struct WeightedOrigin {
 }
 
 pub struct NormalizedFace {
-  pub id: u32,
+  /// A JavaScript number: fresh ids grow without wrapping; only a mesh's `faceId` array holds them as `Uint32`.
+  pub id: f64,
   pub origins: Vec<WeightedOrigin>,
 }
 
@@ -203,7 +204,7 @@ pub struct NormalizedMesh {
 pub struct Normalized {
   pub mesh: NormalizedMesh,
   pub faces: Vec<NormalizedFace>,
-  pub next_face_id: i64,
+  pub next_face_id: f64,
 }
 
 fn origins_of(read: &ReadMesh, members: &[u32], areas: &[f64]) -> Vec<WeightedOrigin> {
@@ -227,31 +228,51 @@ fn origins_of(read: &ReadMesh, members: &[u32], areas: &[f64]) -> Vec<WeightedOr
   acc
 }
 
+/// `Map` and `Set` key equality for a JavaScript number (SameValueZero): -0 is +0 and every NaN is the same key.
+pub fn number_key(x: f64) -> u64 {
+  if x == 0.0 {
+    0
+  } else if x.is_nan() {
+    u64::MAX
+  } else {
+    x.to_bits()
+  }
+}
+
+/// `keepIdsFromRuns`: the smallest face id among the origins coming from one of `run_ids`.
+pub fn keep_ids_from_runs(run_ids: &[u32]) -> impl Fn(&[WeightedOrigin]) -> Option<f64> + '_ {
+  move |origins| origins.iter().filter(|o| run_ids.contains(&o.run_id)).map(|o| o.face_id).min().map(f64::from)
+}
+
+/// `allNewIds`.
+pub fn all_new_ids(_: &[WeightedOrigin]) -> Option<f64> {
+  None
+}
+
 /// Group `read` into faces and assign ids. `choose_id` proposes a kept id for a group from its origins (largest first);
 /// the first group claiming an id wins, later claimants and groups with none get fresh ids.
-pub fn normalize_triangles(read: &ReadMesh, next_face_id: i64, choose_id: impl Fn(&[WeightedOrigin]) -> Option<u32>) -> Normalized {
+pub fn normalize_triangles(read: &ReadMesh, next_face_id: f64, choose_id: impl Fn(&[WeightedOrigin]) -> Option<f64>) -> Normalized {
   let (groups, areas) = group_coplanar(&read.verts, &read.tris);
   let origins_per_group: Vec<Vec<WeightedOrigin>> = groups.iter().map(|m| origins_of(read, m, &areas)).collect();
-  let mut claimed: std::collections::HashSet<u32, BuildHasherDefault<IntHasher>> = Default::default();
-  let mut ids: Vec<Option<u32>> = vec![None; groups.len()];
-  let mut max_claimed = next_face_id - 1;
+  let mut claimed: std::collections::HashSet<u64, BuildHasherDefault<IntHasher>> = Default::default();
+  let mut ids: Vec<Option<f64>> = vec![None; groups.len()];
+  let mut max_claimed = next_face_id - 1.0;
   for (g, origins) in origins_per_group.iter().enumerate() {
     let Some(id) = choose_id(origins) else { continue };
-    if claimed.contains(&id) {
+    if !claimed.insert(number_key(id)) {
       continue;
     }
-    claimed.insert(id);
     ids[g] = Some(id);
-    if (id as i64) > max_claimed {
-      max_claimed = id as i64;
+    if id > max_claimed {
+      max_claimed = id;
     }
   }
-  let mut next = max_claimed + 1;
+  let mut next = max_claimed + 1.0;
   let mut faces = Vec::with_capacity(groups.len());
   for (g, origins) in origins_per_group.into_iter().enumerate() {
     let id = ids[g].unwrap_or_else(|| {
-      let fresh = next as u32;
-      next += 1;
+      let fresh = next;
+      next += 1.0;
       fresh
     });
     faces.push(NormalizedFace { id, origins });
@@ -266,7 +287,7 @@ pub fn normalize_triangles(read: &ReadMesh, next_face_id: i64, choose_id: impl F
       tris[out * 3] = read.tris[t * 3];
       tris[out * 3 + 1] = read.tris[t * 3 + 1];
       tris[out * 3 + 2] = read.tris[t * 3 + 2];
-      face_id[out] = faces[g].id;
+      face_id[out] = to_uint32(faces[g].id);
       out += 1;
     }
   }

@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-//! Least-recently-used cache of solids keyed by body id and version.
+//! Least-recently-used cache of solids keyed by body id and version. Ids are JavaScript numbers, matched as a
+//! `Map` with `"id:version"` string keys would match them.
 use std::collections::VecDeque;
 use std::sync::Arc;
 
 use manifold_csg::Manifold;
 
 use crate::meshio::ReadMesh;
+use crate::normalize::number_key;
 
 pub struct CacheEntry {
   pub manifold: Manifold,
@@ -16,7 +18,11 @@ pub struct CacheEntry {
 
 pub struct BodyCache {
   capacity: usize,
-  entries: VecDeque<(u64, u64, Arc<CacheEntry>)>,
+  entries: VecDeque<(f64, f64, Arc<CacheEntry>)>,
+}
+
+fn same(a: f64, b: f64) -> bool {
+  number_key(a) == number_key(b)
 }
 
 impl BodyCache {
@@ -25,8 +31,8 @@ impl BodyCache {
   }
 
   /// The entry, marked most recently used.
-  pub fn get(&mut self, body_id: u64, version: u64) -> Option<Arc<CacheEntry>> {
-    let i = self.entries.iter().position(|(b, v, _)| *b == body_id && *v == version)?;
+  pub fn get(&mut self, body_id: f64, version: f64) -> Option<Arc<CacheEntry>> {
+    let i = self.entries.iter().position(|(b, v, _)| same(*b, body_id) && same(*v, version))?;
     let hit = self.entries.remove(i).unwrap();
     let entry = hit.2.clone();
     self.entries.push_back(hit);
@@ -34,8 +40,8 @@ impl BodyCache {
   }
 
   /// Inserts, replacing any previous entry for the key and evicting the least recently used entries past capacity.
-  pub fn set(&mut self, body_id: u64, version: u64, entry: Arc<CacheEntry>) {
-    self.entries.retain(|(b, v, _)| !(*b == body_id && *v == version));
+  pub fn set(&mut self, body_id: f64, version: f64, entry: Arc<CacheEntry>) {
+    self.entries.retain(|(b, v, _)| !(same(*b, body_id) && same(*v, version)));
     self.entries.push_back((body_id, version, entry));
     while self.entries.len() > self.capacity {
       self.entries.pop_front();
@@ -43,9 +49,9 @@ impl BodyCache {
   }
 
   /// Removes one version, or every version of a body when `version` is `None`; returns how many.
-  pub fn release(&mut self, body_id: u64, version: Option<u64>) -> usize {
+  pub fn release(&mut self, body_id: f64, version: Option<f64>) -> usize {
     let before = self.entries.len();
-    self.entries.retain(|(b, v, _)| !(*b == body_id && version.is_none_or(|want| want == *v)));
+    self.entries.retain(|(b, v, _)| !(same(*b, body_id) && version.is_none_or(|want| same(want, *v))));
     before - self.entries.len()
   }
 
@@ -53,8 +59,7 @@ impl BodyCache {
     self.entries.clear();
   }
 
-  #[cfg(test)]
-  pub fn len(&self) -> usize {
+  pub(crate) fn len(&self) -> usize {
     self.entries.len()
   }
 }
@@ -71,23 +76,23 @@ mod tests {
   #[test]
   fn evicts_least_recently_used_and_refreshes_on_get() {
     let mut cache = BodyCache::new(2);
-    cache.set(1, 1, entry());
-    cache.set(2, 1, entry());
-    assert!(cache.get(1, 1).is_some());
-    cache.set(3, 1, entry());
-    assert!(cache.get(2, 1).is_none());
-    assert!(cache.get(1, 1).is_some());
-    assert!(cache.get(3, 1).is_some());
+    cache.set(1.0, 1.0, entry());
+    cache.set(2.0, 1.0, entry());
+    assert!(cache.get(1.0, 1.0).is_some());
+    cache.set(3.0, 1.0, entry());
+    assert!(cache.get(2.0, 1.0).is_none());
+    assert!(cache.get(1.0, 1.0).is_some());
+    assert!(cache.get(3.0, 1.0).is_some());
   }
 
   #[test]
   fn releases_versions() {
     let mut cache = BodyCache::new(4);
-    cache.set(1, 1, entry());
-    cache.set(1, 2, entry());
-    cache.set(2, 1, entry());
-    assert_eq!(cache.release(1, Some(2)), 1);
-    assert_eq!(cache.release(1, None), 1);
+    cache.set(1.0, 1.0, entry());
+    cache.set(1.0, 2.0, entry());
+    cache.set(2.0, 1.0, entry());
+    assert_eq!(cache.release(1.0, Some(2.0)), 1);
+    assert_eq!(cache.release(1.0, None), 1);
     assert_eq!(cache.len(), 1);
   }
 }

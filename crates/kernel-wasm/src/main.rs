@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-//! The push/pull kernel as a WebAssembly module: requests and responses are the byte buffers of the kernel's binary
+//! The kernel as a WebAssembly module: requests and responses are the byte buffers of the kernel's binary
 //! protocol (`pushform_native_kernel::wire`), passed through a small C ABI. JavaScript allocates a request with
 //! `pf_kernel_alloc`, calls `pf_kernel_call`, reads the response it gets back and frees both with `pf_kernel_free`.
 #![no_main]

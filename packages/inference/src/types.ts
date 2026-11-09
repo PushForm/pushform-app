@@ -109,6 +109,8 @@ export interface InferenceOptions {
   readonly lockAxis?: Axis | null | undefined;
   /** Shift lock: freeze this snap's constraint (line or plane). */
   readonly lockSnap?: Snap | null | undefined;
+  /** Move's fixed direction rail: use pointer distance, without hovered face/edge intersections. */
+  readonly lineMode?: 'rail' | undefined;
   /** Restrict picking to these entity kinds (default: all). */
   readonly kinds?: readonly EntityRef['kind'][] | undefined;
   /** Ignore these entities (e.g. the geometry being dragged). */

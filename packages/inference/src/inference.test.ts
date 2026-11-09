@@ -596,3 +596,46 @@ describe('lock line vs hovered surface', () => {
     expect(res.point[2]).toBeCloseTo(1.5, 3);
   });
 });
+
+describe('fixed Move rails', () => {
+  it.each(['axis', 'held'] as const)('%s rail keeps pointer distance across a face instead of intersecting its plane', (kind) => {
+    const { engine } = fixture();
+    const anchor: Vec3 = [3, 0.5, 0];
+    const dir: Vec3 = [0, 0, 1];
+    const options = kind === 'axis' ? { anchor, lockAxis: 'z' as const, lineMode: 'rail' as const }
+      : { anchor, lockSnap: { kind: 'parallel' as const, point: anchor, dir, color: '#000', label: 'Held Direction' }, lineMode: 'rail' as const };
+    // An oblique pointer ray whose closest point on the rail rises monotonically; its face hit changes.
+    const samples: number[] = [];
+    for (const height of [0.6, 0.9, 1.2, 1.5, 1.8]) {
+      const ray: Ray = { origin: [6, 0.5, height + 3], dir: [-Math.SQRT1_2, 0, -Math.SQRT1_2] };
+      const r = engine.resolve(input(ray, { project: undefined }), options);
+      near(r.point, [3, 0.5, height]);
+      samples.push(r.point[2]);
+    }
+    expect(samples).toEqual([...samples].sort((a, b) => a - b));
+  });
+
+  it('keeps the last distance when the view looks directly along the rail', () => {
+    const { engine } = fixture();
+    const options = { anchor: [3, 0.5, 0] as Vec3, lockAxis: 'z' as const, lineMode: 'rail' as const, snapping: 'none' as const };
+    const ray: Ray = { origin: [6, 0.5, 5], dir: [-Math.SQRT1_2, 0, -Math.SQRT1_2] };
+    const before = engine.resolve(input(ray), options);
+    near(before.point, [3, 0.5, 2]);
+    const aligned = engine.resolve(input({ origin: [3, 0.5, 10], dir: [0, 0, -1] }), options);
+    near(aligned.point, before.point);
+  });
+
+  it('rejects distant projected endpoints but accepts one within the rail snap tolerance', () => {
+    const { engine } = fixture();
+    const options = { anchor: [3, 0.5, -20] as Vec3, lockAxis: 'z' as const, lineMode: 'rail' as const };
+    // A box corner is under the ray, but its projected height is far from the pointer's rail distance.
+    const ray: Ray = { origin: [5, 1, 4], dir: [-Math.SQRT1_2, 0, -Math.SQRT1_2] };
+    expect(engine.resolve(input(ray)).primary.kind).toBe('endpoint');
+    const result = engine.resolve(input(ray, { project: undefined }), options);
+    // The rail's closest point has z = 2; projecting the hovered endpoint would jump to z = 1.
+    expect(result.point[2]).toBeCloseTo(2);
+    expect(result.secondary.some((snap) => snap.kind === 'endpoint')).toBe(false);
+    const nearby = engine.resolve(input(down(2.03, 1.0), { project: undefined }), { anchor: [0, 1, 1], lockAxis: 'x', lineMode: 'rail' });
+    near(nearby.point, [2, 1, 1]);
+  });
+});

@@ -63,6 +63,9 @@ export interface EntryField {
   readonly away?: Vec3 | undefined;
   /** True while a typed value is locked into the preview (`onEntryLock`). */
   readonly locked?: boolean | undefined;
+  /** Operation fields kept in the tool options bar rather than beside the geometry. */
+  readonly location?: 'bar' | undefined;
+  readonly disabled?: boolean | undefined;
 }
 
 /** Display priority of a bar control: lower numbers stay visible longest as the bar narrows. */

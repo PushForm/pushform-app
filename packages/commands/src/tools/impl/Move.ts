@@ -1,21 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import type { MMat4, Plane, Vec2, Vec3 } from '@pushform/core';
-import { ANGLE_TOL, m4translation, MERGE_TOL, planeFromPointNormal, v3add, v3cross, v3dot, v3len, v3normalize, v3scale, v3sub } from '@pushform/core';
-import type { Axis, InferenceOptions, InferenceResult, Snap } from '@pushform/inference';
+import { ANGLE_TOL, m4translation, MERGE_TOL, planeFromPointNormal, rayAt, v3add, v3cross, v3dot, v3len, v3normalize, v3scale, v3sub } from '@pushform/core';
+import type { Axis, InferenceEngine, InferenceOptions, InferenceResult, Snap } from '@pushform/inference';
 import { SNAP_COLORS } from '@pushform/inference';
 import { containerAt, contextMatrix, instanceAt, worldSectionPlane } from '@pushform/model';
 import type { ComponentBehaviors, EntityRef } from '@pushform/model';
 import { glueAllows, placeOnFaceMatrix } from '../../commands/componentBehaviors';
 import { contextFrame } from '../../commands/context';
+import { planTransform } from '../../commands/transform';
+import { SERVICE_INFERENCE } from '../../host/services';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
-import type { ToolKeyEvent, ToolPointerEvent, ToolSettingValue, ToolStatus } from '../Tool';
+import type { EntryField, ToolKeyEvent, ToolPointerEvent, ToolSettingValue, ToolStatus } from '../Tool';
 import { toggleSetting } from '../settings';
-import { pointerField } from '../entry';
+import { entryLength } from '../entry';
 import { EdgeLock } from '../edgeLock';
-import { DRAG_PX, entityOverlay, HOVER_COLOR, inferenceOverlay, rubberBandColor, screenDist } from '../toolUtil';
-import { AXIS_DIR, movedOutline, pickRef, sectionPreviewFor, TransformToolBase, withoutSectionPlanes } from './transformShared';
+import { DRAG_PX, entityOverlay, HOVER_COLOR, inferenceOverlay, rubberBandColor, screenDist, worldPerPixelAt } from '../toolUtil';
+import { AXIS_DIR, movedOutline, pickRef, sectionPreviewFor, TransformToolBase, withoutSectionPlanes, worldToScreen } from './transformShared';
 import type { SectionPreview, SectionPreviewTool } from '../sectionPreview';
 import { axisTag, EDGE_LOCKED, SHIFT_HELD } from '../held';
 
@@ -24,6 +26,7 @@ type State =
   | {
       readonly kind: 'moving';
       readonly refs: EntityRef[];
+      readonly ignore: EntityRef[];
       readonly base: Vec3;
       readonly downScreen: Vec2;
       pressed: boolean;
@@ -62,6 +65,7 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
   private hover: EntityRef | null = null;
   private cursorInference: InferenceResult | null = null;
   private cursorScreen: Vec2 | null = null;
+  private pointer: ToolPointerEvent | null = null;
   private lockAxis: Axis | null = null;
   private lockSnap: Snap | null = null;
   /** While only parallel section planes move: the line through the base point along their normal. */
@@ -76,6 +80,8 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
   private lastBase: Vec3 | null = null;
   /** Why the value just typed during the move changed nothing. */
   private hint: string | null = null;
+  private offsets: Partial<Record<'x' | 'y' | 'z', number>> = {};
+  private distance: number | null = null;
 
   get cursor(): string {
     return this.copy ? 'copy' : 'move';
@@ -122,12 +128,20 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     this.lockAxis = null;
     this.lockSnap = null;
     this.edgeLock.clear();
+    this.offsets = {};
+    this.distance = null;
+    this.pointer = null;
+    this.cursorInference = null;
+    this.cursorScreen = null;
+    this.hint = null;
+    this.glue = null;
+    this.sectionCache = null;
   }
 
   inferenceOptions(): InferenceOptions {
     if (this.state.kind === 'moving') {
       const hold = this.lockAxis ? null : this.planeHold;
-      return { anchor: this.state.base, lockAxis: this.lockAxis, lockSnap: this.lockSnap ?? this.edgeLock.snapAt(this.state.base) ?? hold, ignore: this.state.refs };
+      return { anchor: this.state.base, lockAxis: this.lockSnap ? null : this.lockAxis, lockSnap: this.lockSnap ?? this.edgeLock.snapAt(this.state.base) ?? hold, ignore: this.state.ignore, lineMode: 'rail' };
     }
     // section planes and dimensions under the cursor can be picked up
     return { lockAxis: this.lockAxis, lockSnap: this.lockSnap, annotations: true };
@@ -136,6 +150,7 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
   // --- pointer --------------------------------------------------------------------------------
 
   onPointerMove(e: ToolPointerEvent): void {
+    this.pointer = e;
     this.cursorInference = e.inference;
     this.edgeLock.observe(e.inference);
     this.cursorScreen = e.screen;
@@ -165,8 +180,7 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
         this.dropPickup();
         return;
       }
-      s.face = this.glueFace(e);
-      this.commit(this.deltaFor(e, s.base));
+      this.finishAt(e);
       return;
     }
     const inf = e.inference;
@@ -181,7 +195,15 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     // a section plane picked up by its outline moves from the point on the outline under the cursor
     const base = inf.hit?.ref.kind === 'sectionPlane' ? inf.hit.point : inf.point;
     this.planeHold = this.normalHold(refs, base);
-    this.state = { kind: 'moving', refs, base, downScreen: e.screen, pressed: true, moved: false, delta: [0, 0, 0], face: null };
+    const plan = planTransform(this.docState()!, refs, m4translation([0, 0, 0]), this.copy, 'Move');
+    const ignore = refs.filter((r) => !plan.bodies.has(r.id));
+    for (const id of plan.bodies.keys()) ignore.push({ kind: 'body', path: [...plan.path], id });
+    this.offsets = {};
+    this.distance = null;
+    this.cursorScreen = e.screen;
+    this.cursorInference = inf;
+    this.pointer = e;
+    this.state = { kind: 'moving', refs, ignore, base, downScreen: e.screen, pressed: true, moved: false, delta: [0, 0, 0], face: null };
     this.ctx?.statusChanged();
     this.ctx?.requestRender();
   }
@@ -191,13 +213,13 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     const s = this.state;
     s.pressed = false;
     if (!s.moved && screenDist(e.screen, s.downScreen) <= DRAG_PX) return; // click-move-click continues
-    s.face = this.glueFace(e);
-    this.commit(this.deltaFor(e, s.base));
+    this.finishAt(e);
   }
 
   // --- keys / VCB -----------------------------------------------------------------------------
 
   onKeyDown(e: ToolKeyEvent): boolean {
+    if (e.repeat && (e.key.startsWith('Arrow') || e.key === 'Shift')) return true;
     switch (e.key) {
       case 'ArrowRight':
         this.setLock('x');
@@ -213,15 +235,24 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
         const plane = this.cursorInference?.plane ?? planeFromPointNormal(base ?? [0, 0, 0], [0, 0, 1]);
         if (this.edgeLock.toggle(base, this.cursorInference?.point ?? null, plane)) {
           this.lockAxis = null;
+          this.lockSnap = null;
+          this.offsets = {};
           this.applyLock();
-        } else this.setLock(null);
+        } else {
+          this.hint = 'Infer an edge before pressing Down to lock parallel or perpendicular.';
+          this.ctx?.statusChanged();
+        }
         return true;
       }
       case 'Shift':
         if (!e.repeat) {
-          const p = this.cursorInference?.primary ?? null;
-          this.lockSnap = p && (p.dir || p.plane) ? p : null;
-          if (this.lockSnap && this.state.kind === 'moving') this.state.face = null;
+          const s = this.state;
+          const p = this.cursorInference?.primary;
+          const dir = this.lockDirection() ?? p?.dir ?? (s.kind === 'moving' && v3len(s.delta) >= MERGE_TOL ? s.delta : null);
+          if (dir && s.kind === 'moving') {
+            this.lockSnap = { kind: 'parallel', point: s.base, dir: v3normalize(dir), color: p?.color ?? SNAP_COLORS.parallel, label: 'Held Direction' };
+            this.applyLock();
+          }
         }
         return true;
       case 'Control':
@@ -235,6 +266,7 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
   onKeyUp(e: ToolKeyEvent): boolean {
     if (e.key === 'Shift') {
       this.lockSnap = null;
+      this.applyLock();
       return true;
     }
     return false;
@@ -286,6 +318,57 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     this.ctx?.requestRender();
   }
 
+  onEntry(values: Readonly<Record<string, VcbValue>>): void {
+    if (this.state.kind !== 'moving') {
+      const last = this.lastCommit;
+      if (!last || !this.lastIsOnTop()) return;
+      if (values['distance']) { this.onVcb(values['distance']); return; }
+      const prev: Vec3 = [last.matrix[12]!, last.matrix[13]!, last.matrix[14]!];
+      this.reapplyLast(m4translation([entryLength(values['x']) ?? prev[0], entryLength(values['y']) ?? prev[1], entryLength(values['z']) ?? prev[2]]));
+      return;
+    }
+    const distance = values['distance'];
+    if (distance) { this.onVcb(distance); return; }
+    for (const id of ['x', 'y', 'z'] as const) {
+      const n = entryLength(values[id]);
+      if (n !== null) this.onEntryLock(id, values[id]!);
+    }
+    this.state.face = null;
+    this.commit(this.state.delta);
+  }
+
+  onEntryLock(id: string, value: VcbValue | null): void {
+    if (this.state.kind !== 'moving') return;
+    if (id === 'distance') {
+      this.distance = null;
+      if (value) {
+        const delta = this.deltaFromVcb(value, this.state.base, this.state.delta);
+        if (delta) {
+          this.offsets = {};
+          this.distance = entryLength(value);
+          this.state.delta = delta;
+          this.state.face = null;
+        } else {
+          this.hint = 'Move the pointer or lock an axis with an arrow key, then type the length.';
+        }
+      }
+    } else if (id === 'x' || id === 'y' || id === 'z') {
+      const n = entryLength(value);
+      if (n === null) delete this.offsets[id];
+      else {
+        this.lockAxis = null;
+        this.lockSnap = null;
+        this.edgeLock.release();
+        this.distance = null;
+        this.offsets[id] = n;
+      }
+      this.state.delta = this.withOffsets(this.state.delta);
+      this.state.face = null;
+    }
+    this.ctx?.requestRender();
+    this.ctx?.statusChanged();
+  }
+
   // --- overlay / status -----------------------------------------------------------------------
 
   overlay(): readonly OverlayPrimitive[] {
@@ -309,7 +392,16 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
 
   status(): ToolStatus {
     const held = [...axisTag(this.lockAxis), ...(this.lockSnap ? [SHIFT_HELD] : []), ...(this.edgeLock.active ? [EDGE_LOCKED] : [])];
-    return { ...this.baseStatus(), settings: [toggleSetting('copy', 'Copy', this.copy, 'primary')], ...(held.length ? { held } : {}) };
+    const moving = this.state.kind === 'moving' ? this.state : null;
+    const last = this.lastCommit && this.lastIsOnTop() ? this.lastCommit : null;
+    const delta = moving?.delta ?? (last ? [last.matrix[12]!, last.matrix[13]!, last.matrix[14]!] as Vec3 : [0, 0, 0]);
+    const enabled = Boolean(moving || last);
+    const fields: EntryField[] = [
+      { id: 'distance', label: 'Distance', kind: 'length', value: enabled ? this.fmtLength(v3len(delta)) : '', locked: this.distance !== null, location: 'bar', disabled: !enabled },
+      ...(['x', 'y', 'z'] as const).map((id, i): EntryField => ({ id, label: `Δ${id.toUpperCase()}`, kind: 'length', value: enabled ? this.fmtLength(delta[i]!) : '', locked: this.offsets[id] !== undefined, location: 'bar', disabled: !enabled })),
+    ];
+    const constraint = this.lockSnap ? 'Held direction' : axisTag(this.lockAxis)[0] ?? this.edgeLock.snapAt(moving?.base ?? null)?.label ?? (this.planeHold ? 'Section normal' : 'Free');
+    return { ...this.baseStatus(), fields, placing: false, settings: [toggleSetting('copy', 'Copy', this.copy, 'primary'), { kind: 'note', id: 'constraint', text: constraint }], ...(held.length ? { held } : {}) };
   }
 
   /** The bar switched Copy just after a commit: redo it as a copy, or as a plain move, in one undo step. */
@@ -342,7 +434,6 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
             : `Pick end point or enter distance. Arrows lock an axis.`,
         vcbLabel: 'Length',
         vcbValue: this.fmtLength(v3len(this.state.delta)),
-        fields: [pointerField('Length', 'length', this.fmtLength(v3len(this.state.delta)))],
       };
     }
     const host = this.host();
@@ -362,10 +453,26 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
 
   private deltaFor(e: ToolPointerEvent, base: Vec3): Vec3 {
     const inf = e.inference;
-    if (!inf) return [0, 0, 0];
+    if (!inf) return this.state.kind === 'moving' ? this.state.delta : [0, 0, 0];
     const d = v3sub(inf.point, base);
     const dir = this.lockDirection();
-    return this.inGluePlane(dir ? v3scale(dir, v3dot(d, dir)) : d);
+    return this.withOffsets(this.inGluePlane(dir ? v3scale(dir, v3dot(d, dir)) : d));
+  }
+
+  private withOffsets(d: Vec3): Vec3 {
+    if (this.distance !== null && v3len(d) >= MERGE_TOL) d = v3scale(v3normalize(d), this.distance);
+    return this.inGluePlane([this.offsets.x ?? d[0], this.offsets.y ?? d[1], this.offsets.z ?? d[2]]);
+  }
+
+  /** A stationary release/click uses the last displayed destination, not a fresh pick of the source. */
+  private finishAt(e: ToolPointerEvent): void {
+    const s = this.state;
+    if (s.kind !== 'moving') return;
+    if (!this.cursorScreen || screenDist(e.screen, this.cursorScreen) > 0) {
+      s.face = this.glueFace(e);
+      s.delta = this.deltaFor(e, s.base);
+    }
+    this.commit(s.delta);
   }
 
   /** A glued placement moves only within its glue plane. */
@@ -406,7 +513,7 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
    */
   private deltaFromVcb(v: VcbValue, base: Vec3, current: Vec3, fallbackDir: Vec3 | null = null): Vec3 | null {
     if (v.kind === 'length') {
-      const raw = this.lockDirection() ?? (v3len(current) >= MERGE_TOL ? current : fallbackDir && v3len(fallbackDir) >= MERGE_TOL ? fallbackDir : null);
+      const raw = v3len(current) >= MERGE_TOL ? current : this.lockDirection() ?? (fallbackDir && v3len(fallbackDir) >= MERGE_TOL ? fallbackDir : null);
       const dir = raw ? this.inGluePlane(raw) : null;
       return dir && v3len(dir) >= MERGE_TOL ? v3scale(v3normalize(dir), v.meters) : null;
     }
@@ -419,8 +526,7 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
   }
 
   private lockDirection(): Vec3 | null {
-    if (this.lockAxis) return AXIS_DIR[this.lockAxis];
-    return this.lockSnap?.dir ? v3normalize(this.lockSnap.dir) : (this.edgeLock.direction ?? this.planeHold?.dir ?? null);
+    return this.lockSnap?.dir ? v3normalize(this.lockSnap.dir) : this.lockAxis ? AXIS_DIR[this.lockAxis] : (this.edgeLock.direction ?? this.planeHold?.dir ?? null);
   }
 
   /** When every moved entity is a section plane and their planes are parallel: a hold along their normal through `base`. */
@@ -455,6 +561,8 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
 
   private setLock(axis: Axis | null): void {
     this.lockAxis = axis !== null && this.lockAxis === axis ? null : axis;
+    this.lockSnap = null;
+    this.offsets = {};
     this.edgeLock.release();
     this.applyLock();
   }
@@ -464,11 +572,23 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     // a locked move does not glue: the face found before the lock is no longer the target
     if (this.state.kind === 'moving' && (this.lockAxis || this.lockSnap || this.edgeLock.active)) this.state.face = null;
     if (this.state.kind === 'moving' && this.cursorInference) {
+      const ctx = this.ctx;
+      const pointer = this.pointer;
+      const engine = ctx?.commands.ctx.services.get(SERVICE_INFERENCE) as InferenceEngine | undefined;
+      if (ctx && engine && pointer) {
+        const camera = ctx.camera.getState(), size = ctx.camera.viewportSize();
+        this.cursorInference = engine.resolve({
+          ray: pointer.ray, screen: pointer.screen,
+          pixelSizeAt: (t) => worldPerPixelAt(camera, size.height, rayAt(pointer.ray, t)),
+          project: (p) => worldToScreen(camera, size, p) ?? [Infinity, Infinity],
+        }, this.inferenceOptions());
+      }
       const d = v3sub(this.cursorInference.point, this.state.base);
       const dir = this.lockDirection();
-      this.state.delta = this.inGluePlane(dir ? v3scale(dir, v3dot(d, dir)) : d);
+      this.state.delta = this.withOffsets(this.inGluePlane(dir ? v3scale(dir, v3dot(d, dir)) : d));
     }
     this.ctx?.requestRender();
+    this.ctx?.statusChanged();
   }
 
   private endMove(): void {
@@ -477,7 +597,9 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     this.lockAxis = null;
     this.lockSnap = null;
     this.hint = null;
-    this.edgeLock.release();
+    this.offsets = {};
+    this.distance = null;
+    this.edgeLock.clear();
     this.glue = null;
     this.ctx?.statusChanged();
     this.ctx?.requestRender();
@@ -495,7 +617,9 @@ export class MoveTool extends TransformToolBase implements SectionPreviewTool {
     this.lockAxis = null;
     this.lockSnap = null;
     this.hint = null;
-    this.edgeLock.release();
+    this.offsets = {};
+    this.distance = null;
+    this.edgeLock.clear();
     const ctx = this.ctx;
     if (s.face && glue && ctx) {
       const { point, normal } = s.face;

@@ -85,12 +85,22 @@ export function ViewportView(): JSX.Element {
       if (e.button === 1) e.preventDefault();
       app.toolManager.pointerDown(toEvent(e, e.button, true));
     };
-    const onPointerMove = (e: PointerEvent) => app.toolManager.pointerMove(toEvent(e, -1, e.buttons === 0));
+    const onPointerMove = (e: PointerEvent) => {
+      // Move uses the same inferred destination during a held-button drag as between clicks.
+      // Camera drags and selection boxes do not need a pick on every pointer event.
+      const moving = app.toolManager.activeToolId === 'move' && e.buttons === 1;
+      app.toolManager.pointerMove(toEvent(e, -1, e.buttons === 0 || moving));
+    };
     const onPointerUp = (e: PointerEvent) => {
       if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
       app.toolManager.pointerUp(toEvent(e, e.button, true));
     };
     const onClick = (e: MouseEvent) => app.toolManager.click(toEvent(e, e.button, true));
+    const onPointerCancel = (e: PointerEvent) => {
+      if (app.toolManager.activeToolId !== 'move') { onPointerUp(e); return; }
+      if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
+      app.toolManager.cancel();
+    };
     const onDblClick = (e: MouseEvent) => app.toolManager.doubleClick(toEvent(e, e.button, true));
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
@@ -109,7 +119,7 @@ export function ViewportView(): JSX.Element {
     el.addEventListener('pointerdown', onPointerDown);
     el.addEventListener('pointermove', onPointerMove);
     el.addEventListener('pointerup', onPointerUp);
-    el.addEventListener('pointercancel', onPointerUp);
+    el.addEventListener('pointercancel', onPointerCancel);
     el.addEventListener('click', onClick);
     el.addEventListener('dblclick', onDblClick);
     el.addEventListener('wheel', onWheel, { passive: false });
@@ -118,7 +128,7 @@ export function ViewportView(): JSX.Element {
       el.removeEventListener('pointerdown', onPointerDown);
       el.removeEventListener('pointermove', onPointerMove);
       el.removeEventListener('pointerup', onPointerUp);
-      el.removeEventListener('pointercancel', onPointerUp);
+      el.removeEventListener('pointercancel', onPointerCancel);
       el.removeEventListener('click', onClick);
       el.removeEventListener('dblclick', onDblClick);
       el.removeEventListener('wheel', onWheel);

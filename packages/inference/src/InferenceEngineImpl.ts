@@ -5,6 +5,7 @@ import {
   COPLANAR_TOL,
   ANGLE_TOL,
   MERGE_TOL,
+  LENGTH_TOL,
   PICK_PX,
   m4identity,
   m4transformDir,
@@ -261,6 +262,7 @@ export class InferenceEngineImpl implements InferenceEngine {
     this.hoverEdge = null;
     this.refEdge = null;
     this.tangentCache = null;
+    this.rail = null;
   }
 
   resolve(input: InferenceInput, opts: InferenceOptions = {}): InferenceResult {
@@ -298,9 +300,12 @@ export class InferenceEngineImpl implements InferenceEngine {
     // ---- locks (override everything else)
     const lockSnap = opts.lockSnap ?? null;
     const lockAxis = opts.lockAxis ?? null;
+    if (opts.lineMode !== 'rail' || (!lockSnap?.dir && !lockAxis)) this.rail = null;
     if (lockSnap && lockSnap.dir) {
-      const r = this.resolveOnLine({ origin: lockSnap.point, dir: lockSnap.dir }, ray, ctx, strong ? primary : null);
-      const strongSnap = strong ? primary : null;
+      const r = opts.lineMode === 'rail'
+        ? this.resolveOnRail({ origin: lockSnap.point, dir: lockSnap.dir }, input, strong ? primary : null)
+        : this.resolveOnLine({ origin: lockSnap.point, dir: lockSnap.dir }, ray, ctx, strong ? primary : null);
+      const strongSnap = strong && r.via === 'point' ? primary : null;
       primary = { ...lockSnap, point: r.point };
       if (strongSnap) secondary.push(strongSnap);
       else this.pushVia(secondary, r.via, ctx);
@@ -334,8 +339,10 @@ export class InferenceEngineImpl implements InferenceEngine {
       primary = { ...lockSnap, point };
     } else if (lockAxis) {
       const origin = anchor ?? this.memory[0] ?? [0, 0, 0];
-      const r = this.resolveOnLine({ origin, dir: AXIS_DIR[lockAxis] }, ray, ctx, strong ? primary : null);
-      const strongSnap = strong ? primary : null;
+      const r = opts.lineMode === 'rail'
+        ? this.resolveOnRail({ origin, dir: AXIS_DIR[lockAxis] }, input, strong ? primary : null)
+        : this.resolveOnLine({ origin, dir: AXIS_DIR[lockAxis] }, ray, ctx, strong ? primary : null);
+      const strongSnap = strong && r.via === 'point' ? primary : null;
       primary = axisSnap(lockAxis, r.point);
       lockedAxis = lockAxis;
       if (strongSnap) secondary.push(strongSnap);
@@ -637,11 +644,37 @@ export class InferenceEngineImpl implements InferenceEngine {
   // ------------------------------------------------------------------------------------------
   // Line constraints
 
-  /**
-   * Resolve a line constraint: a strong point snap is projected onto the line; otherwise the line
-   * is intersected with the hovered face plane or edge line ("pull to the height of that face"),
-   * falling back to the point of the line nearest the cursor ray.
-   */
+  private rail: { origin: Vec3; dir: Vec3; point: Vec3 } | null = null;
+
+  /** Fixed rail, with only nearby point snaps allowed to adjust the pointer's distance. */
+  private resolveOnRail(line: LineConstraint, input: InferenceInput, strong: Snap | null): { point: Vec3; via: Via } {
+    const { origin, dir } = line;
+    const { ray, pixelSizeAt } = input;
+    const closest = lineLineClosest3D(origin, dir, ray.origin, ray.dir);
+    const previous = this.rail;
+    const parallel = closest.parallel || v3len(v3cross(dir, ray.dir)) <= ANGLE_TOL * v3len(dir) * v3len(ray.dir);
+    let point = parallel
+      ? previous && v3dist(previous.origin, origin) <= LENGTH_TOL && v3dist(previous.dir, dir) <= ANGLE_TOL ? previous.point : origin
+      : closest.p;
+    let via: Via = 'ray';
+    if (strong && !parallel) {
+      const candidate = v3addScaled(origin, dir, v3dot(v3sub(strong.point, origin), dir));
+      // Compare along the rail, rather than accepting a distant projected snap just because
+      // its source happens to lie under the pointer elsewhere in the model.
+      const depth = v3dot(v3sub(point, ray.origin), ray.dir);
+      const a = input.project?.(candidate), b = input.project?.(point);
+      const nearby = a && b ? Math.hypot(a[0] - b[0], a[1] - b[1]) <= PICK_PX.vertex
+        : v3dist(candidate, point) <= PICK_PX.vertex * pixelSizeAt(depth);
+      if (nearby) {
+        point = candidate;
+        via = 'point';
+      }
+    }
+    this.rail = { origin, dir, point };
+    return { point, via };
+  }
+
+  /** Resolve other tools' line constraints, including matching a hovered face's height. */
   private resolveOnLine(line: LineConstraint, ray: Ray, ctx: Context, strong: Snap | null): { point: Vec3; via: Via } {
     const { origin, dir } = line;
     if (strong) return { point: v3addScaled(origin, dir, v3dot(v3sub(strong.point, origin), dir)), via: 'point' };

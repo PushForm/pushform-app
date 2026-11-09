@@ -192,6 +192,9 @@ Basic labels include the part number, name, dimensions and material, even for on
 shows the piece's position/quantity and **Stock N** for its sheet or board when a current plan provides one.
 Parts without a plan assignment have no stock number.
 
+Printed and exported cutting drawings include a caption with the material, sheet or board number, stock size
+and any repeated-stock quantity, so the drawing keeps its identity outside the app.
+
 ## Estimate the job or selected rows
 
 Estimate starts with **Production job**, including every included part in the saved production scope. Highlighting

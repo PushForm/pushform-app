@@ -48,3 +48,14 @@ Automation uses the `hardware.create` command. Dimensions are meters, `point` se
   "point": [0, 0, 0]
 }
 ```
+
+
+## Hardware on generated cabinets
+
+Import or generate the desired hardware first. Cabinet and kitchen-run automation accepts `hardwarePlacement` with separate `doors` and `drawers` templates. Each template supplies its `definitionId`, `width`, `height` (meters), and `kind` (`knob` or `pull`). The component origin must be at its mounting center, with local -y pointing outward. If the imported instance has an offset or rotation, supply its 16-entry `sourceTransform` so the mounted copy preserves that placement. Its geometry and materials are reused inside each moving door or drawer assembly.
+
+Door hardware defaults to the opening stile, 2.5 inches from the accessible end. Pulls run vertically. Drawer hardware centers horizontally and vertically; fronts wider than 24 inches get two pieces at quarter points. Set `wideDrawers` to `single` or `double` to override. `doorEdgeInset`, `doorEndInset`, `drawerPosition` (`center` or `top`), and `drawerTopInset` adjust placement. False sink fronts receive no hardware. Check actual installation dimensions against your selected hardware.
+
+Use `doorStyle: "beadboard"` for framed fronts with vertical recessed grooves. Set both `finish.paint` and `boxFinish.paint` to white for white fronts, carcasses and drawer boxes.
+
+For satin white, use `{ paint: "#ffffff", roughness: 0.4 }` for both `finish` and `boxFinish`. This creates a separate nonmetallic paint material with moderate surface roughness.

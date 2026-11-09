@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { z } from 'zod';
-import type { Box3, FaceLocalId, Id, Mat4, MMat4, MeshData, PlaneBasis, Vec3 } from '@pushform/core';
+import type { Box3, CurveId, SurfaceId, FaceLocalId, Id, Mat4, MMat4, MeshData, PlaneBasis, Vec3 } from '@pushform/core';
 import {
   ANGLE_TOL,
   AREA_TOL,
@@ -870,11 +870,24 @@ const cloneJson = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 /** Deep copy of a body under a new id (version 0), inserted into the container. */
 export function cloneBody(draft: DocumentDraft, container: EntityContainer, src: Body): Body {
   const body = copyBodyRecord(src, allocId<Id>(draft));
+  reallocateBodyMetadata(draft, body);
   body.version = 0;
   body.locked = false;
   container.bodies.set(body.id, body);
   container.order.push(body.id);
   return body;
+}
+
+/** Curves and surfaces use document-global IDs, unlike owner-local face and imprint IDs. */
+export function reallocateBodyMetadata(draft: DocumentDraft, body: Body): void {
+  const curves = new Map([...body.curves.keys()].map(id => [id, allocId<CurveId>(draft)]));
+  const surfaces = new Map([...body.surfaces.keys()].map(id => [id, allocId<SurfaceId>(draft)]));
+  const curve = (id: CurveId | null): CurveId | null => id === null ? null : curves.get(id) ?? null;
+  body.curves = new Map([...body.curves].map(([id, c]) => { const next = curves.get(id)!; return [next, { ...c, id: next }]; }));
+  body.surfaces = new Map([...body.surfaces].map(([id, s]) => { const next = surfaces.get(id)!; return [next, { ...s, id: next, curveId: curve(s.curveId) }]; }));
+  for (const face of body.faces.values()) face.surfaceId = face.surfaceId === null ? null : surfaces.get(face.surfaceId) ?? null;
+  for (const edge of body.edges.values()) edge.curveId = curve(edge.curveId);
+  for (const imprint of body.imprints.values()) for (const edge of imprint.edges.values()) edge.curveId = curve(edge.curveId);
 }
 
 /** Copy of a mesh part under `id` sharing its (immutable) geometry; not inserted anywhere. */

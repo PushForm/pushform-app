@@ -44,6 +44,7 @@ export interface KitchenRunParams {
   readonly beadedFrame?: boolean | undefined;
   readonly hardware?: CabinetParams['hardware'];
   readonly hardwareFinish?: string | undefined;
+  readonly hardwarePlacement?: CabinetParams['hardwarePlacement'];
   readonly countertop?: boolean | undefined;
   readonly countertopFinish?: { readonly paint?: string | undefined; readonly library?: string | undefined } | undefined;
   readonly backsplash?: number | undefined;
@@ -58,9 +59,9 @@ interface Row { readonly type: 'base' | 'wall'; readonly depth: number; readonly
 export function planKitchenRun(p: KitchenRunParams): BuilderPlan {
   if (p.base.length === 0) throw new BuilderPlanError('invalid_operation', 'base needs at least one item.');
   const corner = p.corner, side = corner?.side ?? 'left', flipped = side === 'right';
-  const shared: Pick<CabinetParams, 'frame' | 'overlay' | 'doorStyle' | 'finish' | 'boxFinish' | 'beadedFrame' | 'hardware' | 'hardwareFinish'> = {
+  const shared: Pick<CabinetParams, 'frame' | 'overlay' | 'doorStyle' | 'finish' | 'boxFinish' | 'beadedFrame' | 'hardware' | 'hardwareFinish' | 'hardwarePlacement'> = {
     ...(p.frame ? { frame: p.frame } : {}), ...(p.overlay ? { overlay: p.overlay } : {}), ...(p.doorStyle ? { doorStyle: p.doorStyle } : {}), ...(p.finish ? { finish: p.finish } : {}),
-    ...(p.boxFinish ? { boxFinish: p.boxFinish } : {}), ...(p.beadedFrame !== undefined ? { beadedFrame: p.beadedFrame } : {}), ...(p.hardware ? { hardware: p.hardware } : {}), ...(p.hardwareFinish ? { hardwareFinish: p.hardwareFinish } : {}),
+    ...(p.boxFinish ? { boxFinish: p.boxFinish } : {}), ...(p.beadedFrame !== undefined ? { beadedFrame: p.beadedFrame } : {}), ...(p.hardware ? { hardware: p.hardware } : {}), ...(p.hardwareFinish ? { hardwareFinish: p.hardwareFinish } : {}), ...(p.hardwarePlacement ? { hardwarePlacement: p.hardwarePlacement } : {}),
   };
   const baseRow: Row = { type: 'base', depth: D.DEFAULT_DEPTH.base, z: 0 };
   const wallRow: Row = { type: 'wall', depth: D.DEFAULT_DEPTH.wall, z: D.WALL_HANG_HEIGHT, height: p.wallHeight };

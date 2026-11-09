@@ -86,6 +86,22 @@ describe('planKitchenRun', () => {
     expect(child(planKitchenRun(l('blind', 'left')), 'Countertop').parts[0]!.shape.kind).toBe('stock');
   });
 
+  it('requires a base cabinet between appliances and either side of every inside corner', () => {
+    for (const style of ['blind', 'diagonal', 'l_shaped'] as const) {
+      for (const side of ['left', 'right'] as const) {
+        for (const appliance of ['range', 'dishwasher', 'refrigerator'] as const) {
+          const opening = { width: i(30), appliance };
+          const buffer = { width: i(9) };
+          const mainWithBuffer = side === 'left' ? [buffer, opening] : [opening, buffer];
+          expect(refused({ base: [opening], corner: { style, side, returnBase: [buffer] } }).message).toContain('at least 9 in');
+          expect(refused({ base: mainWithBuffer, corner: { style, side, returnBase: [opening] }, countertop: false }).code).toBe('invalid_geometry');
+          expect(() => planKitchenRun({ base: mainWithBuffer, corner: { style, side, returnBase: [buffer, opening] } })).not.toThrow();
+          expect(refused({ base: [{ width: i(8) }, opening], corner: { style, side: 'left', returnBase: [buffer] } }).code).toBe('invalid_geometry');
+        }
+      }
+    }
+  });
+
   it('refuses a sink on the return, a narrow blind corner, and an empty base', () => {
     expect(refused({ base: [{ width: i(24) }], corner: { style: 'diagonal', returnBase: [{ width: i(36), sinkFront: true }] } }).code).toBe('invalid_operation');
     expect(refused({ base: [{ width: i(24) }], corner: { style: 'blind', width: i(36), returnBase: [{ width: i(24) }] } }).code).toBe('invalid_geometry');

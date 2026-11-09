@@ -80,6 +80,8 @@ Every part is named, and each door and drawer is a group, so you can ask for cha
 
 The agent can also lay out a kitchen in one step, for example “Lay out an L-shaped kitchen with a diagonal corner, a sink base under the window and openings for a range and dishwasher.” It places base and wall cabinets along one wall or around one corner, adds fillers at blind corners, and runs a countertop with sink openings. It can also add a countertop, filler, end panel or bathroom vanity on its own, or build a single cabinet door. Appliances are left as openings. Build U-shaped kitchens and islands as separate runs.
 
+Keep a base cabinet at least 9 inches wide between an appliance opening and an inside corner on either run. A corner cabinet or filler alone does not provide this buffer. The kitchen generator refuses appliance openings directly beside its corner; use the same spacing when arranging separate runs into a U-shaped kitchen.
+
 ## Ask for a change to a 3D model
 
 In a 3D model the agent can:

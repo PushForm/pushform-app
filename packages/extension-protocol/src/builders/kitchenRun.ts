@@ -15,7 +15,7 @@ const item = z.object({
 
 export const kitchenRunBuilder = defineBuilder({
   summary: 'a whole kitchen: base and wall cabinets, a corner, returns and countertops',
-  guidance: 'Use when a request lays out several cabinets along a wall or around one corner. Items run left to right along the back wall, with fronts facing -y; a return runs away from the corner along the side wall. For one cabinet use add_cabinet. It handles one straight wall or one L. Build U-shaped kitchens and islands as separate runs and move them into place, and select door and drawer components with hardwarePlacement. Appliances are openings: it draws no appliance.',
+  guidance: 'Use when a request lays out several cabinets along a wall or around one corner. Items run left to right along the back wall, with fronts facing -y; a return runs away from the corner along the side wall. For one cabinet use add_cabinet. It handles one straight wall or one L. Build U-shaped kitchens and islands as separate runs and move them into place, and select door and drawer components with hardwarePlacement. Appliances are openings: it draws no appliance. Keep a base cabinet at least 9 in wide between every appliance opening and an inside corner, on both runs; a corner cabinet or filler alone is insufficient. Apply this rule across separate runs too, including U-shaped kitchens.',
   schema: z.object({
     at: position.optional().describe('Floor level at the front left of the back wall row. Default the origin.'),
     base: z.array(item).min(1).max(30).describe('Base row, left to right.'),

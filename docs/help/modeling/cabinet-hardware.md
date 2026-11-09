@@ -10,6 +10,8 @@ Choose **Generate and place**, then click to place the new component. Undo remov
 
 The generator supports round and square bars, wire and arch pulls, classic bridges, round and rectangular cups, edge pulls, recessed pockets, rings, geometric knobs, half-moon pulls and plain round backplates. Generic profiles approximate common hardware; verify purchased hardware and screw positions before fabrication. Finish presets include original small-scale textures and diffuse colors in the modeling viewport, so chrome tone does not show mirror reflections.
 
+## Generate cabinet hardware with commands
+
 Automation uses the `hardware.create` command. Dimensions are meters, `point` sets placement, and `mountingPlane` selects `front` (projection toward −Y), `top` (+Z), or `side` (+X). For example:
 
 ```json

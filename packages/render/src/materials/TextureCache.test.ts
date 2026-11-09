@@ -3,6 +3,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { TextureLoader, Texture } from 'three';
 import { TextureCache, TexturedMaterialCache } from './TextureCache';
+import { needsOwnMaterial } from './TextureCache';
 
 afterEach(() => { vi.restoreAllMocks(); });
 
@@ -12,6 +13,7 @@ function stubCanvas(pixel: [number, number, number, number]): { drawn: number[] 
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(function (this: HTMLCanvasElement) {
     const data = new Uint8ClampedArray(this.width * this.height * 4);
     return {
+      fillRect: () => {},
       drawImage: () => { for (let i = 0; i < data.length; i += 4) data.set(pixel, i); },
       getImageData: () => ({ data }),
       putImageData: (image: { data: Uint8ClampedArray }) => { drawn.push(...image.data.subarray(0, 4)); },
@@ -96,4 +98,28 @@ it('waits for texture decoding before export and reports failed images', async (
   loads[1]!(); await ready; expect(finished).toHaveBeenCalledOnce();
   cache.get('missing'); errors[2]!(); await expect(cache.whenReady()).rejects.toThrow('could not be loaded');
   cache.prune(new Set(['a', 'b'])); await expect(cache.whenReady()).resolves.toBeUndefined(); cache.dispose();
+});
+
+it('shares physical materials across repeated edits and treats normal images as data', () => {
+  const textures = new TextureCache(), cache = new TexturedMaterialCache(textures);
+  const appearance = { roughness: 0.2, metalness: 0, emissionColor: [1, 0.5, 0] as const, emissionStrength: 3, normal: null };
+  const material = { id: 42, color: '#18181a', alpha: 1, appearance };
+  expect(needsOwnMaterial(material, false)).toBe(true);
+  const first = cache.get(material, 'front', false, true);
+  expect('isMeshStandardMaterial' in first).toBe(true);
+  for (let n = 0; n < 100; n++) expect(cache.get({ ...material, appearance: { ...appearance, roughness: n / 100 } }, 'front', false, true)).toBe(first);
+  expect(cache.size).toBe(1);
+  expect('roughness' in first && first.roughness).toBe(0.99);
+  const data = textures.normal('blob:normal'); expect(data.colorSpace).toBe('');
+  cache.dispose(); textures.dispose();
+});
+
+it('suppresses normal maps in plain shaded mode and keeps separate cached variants', () => {
+  const textures = new TextureCache(), cache = new TexturedMaterialCache(textures);
+  const material = { id: 8, color:'#222222', alpha:1, normalUrl:'blob:normal', appearance: {roughness:0.5,metalness:0,emissionColor:[1,1,1] as const,emissionStrength:0,normal:null} };
+  const textured = cache.get(material, 'front', false, true), plain = cache.get(material, 'front', false, false);
+  expect('normalMap' in textured && textured.normalMap).toBeTruthy();
+  expect('normalMap' in plain && plain.normalMap).toBeNull();
+  expect(cache.get(material, 'front', false, true)).toBe(textured);
+  cache.dispose(); textures.dispose();
 });

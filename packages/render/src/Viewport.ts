@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import { StudioEnvironment } from './materials/StudioEnvironment';
 import { Emitter } from '@pushform/core';
 import type { Box3, MeshData, Ray, Vec2, Vec3, Mat4 } from '@pushform/core';
 import type { CameraState, OverlayPrimitive } from '@pushform/commands';
@@ -74,6 +75,8 @@ export class Viewport {
   /** Sun light + shadow map + ground shadow plane (wraps the key and hemisphere lights). */
   readonly sunLight: SunLight;
   readonly environmentLighting: EnvironmentLighting;
+  private readonly materialEnvironment = new StudioEnvironment();
+  private reflectionUrl: string | undefined;
   private fogSettings: RenderFog = DEFAULT_RENDER_FOG;
   private shadowSettings: RenderShadows = DEFAULT_RENDER_SHADOWS;
   renderer: WebGLRenderer | null = null;
@@ -129,9 +132,15 @@ export class Viewport {
   private applyLighting(renderer: WebGLRenderer | null = this.renderer): void {
     cameraLight.value = this.environmentLighting.settings || this.shadowSettings.enabled || this.shadowSettings.useSunForShading ? 0 : 1;
     this.environmentLighting.apply(this.camera.three, this.sceneSync.sceneBounds(), this.sunLight, this.shadowSettings, renderer);
+    if (renderer && this.sceneSync.texturedMaterials.hasPhysical) {
+      const env = this.environmentLighting.settings;
+      const intensity = env ? env.brightness * (env.studioEnabled ? 1 : env.skyLight) : 1;
+      this.materialEnvironment.apply(this.scene, renderer, this.reflectionUrl, (env?.skyRotation ?? 0) * Math.PI / 180, intensity, () => this.requestRender());
+    }
   }
 
   setEnvironment(settings: EnvironmentSettings | null, lights: readonly SceneLight[] = [], skyboxUrl?: string): void {
+    this.reflectionUrl = settings?.sky === 'image' ? skyboxUrl : undefined;
     this.environmentLighting.set(settings, lights);
     this.sky.setEnvironment(settings?.sky ?? null, skyboxUrl, settings?.skyRotation ?? 0);
     void this.sky.ready.then(() => this.requestRender(), () => this.requestRender());
@@ -143,7 +152,7 @@ export class Viewport {
     this.requestRender();
   }
   setLightSelection(id: number | null): void { this.environmentLighting.setSelection(id); this.requestRender(); }
-  get environmentReady(): Promise<void> { return this.sky.ready; }
+  get environmentReady(): Promise<void> { return Promise.all([this.sky.ready, this.materialEnvironment.ready]).then(() => undefined); }
 
   /**
    * Sun and shadows: direction (NOAA solar position computed by the adapter), Light/Dark
@@ -438,6 +447,7 @@ export class Viewport {
     this.axes.dispose();
     this.sunLight.dispose();
     this.environmentLighting.dispose();
+    this.materialEnvironment.dispose();
   }
 
   resize(): void {

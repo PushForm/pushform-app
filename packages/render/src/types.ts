@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import type { MaterialAppearance } from '@pushform/model';
 import type { Box3, Mat4, MeshData, PlaneBasis, Vec3 } from '@pushform/core';
 
 /**
@@ -87,6 +88,8 @@ export interface RenderBody {
 
 /** A material as the renderer sees it (CSS color, opacity and an optional texture image URL). */
 export interface RenderMaterial {
+  readonly appearance?: MaterialAppearance | undefined;
+  readonly normalUrl?: string | undefined;
   readonly id: number;
   readonly color: string;
   readonly alpha: number;

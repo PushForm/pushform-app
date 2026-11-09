@@ -69,27 +69,41 @@ export function uvOverrideKey(ref: EntityRef): string | null {
   return null;
 }
 
-// RenderMaterial objects are identity-stable per (materials map, image store) so the renderer's
+// RenderMaterial objects are identity-stable per (material, image store) so the renderer's
 // face material diff only fires when a material really changed.
-let renderMaterialCache = new WeakMap<DocumentState['materials'], Map<MaterialId, RenderMaterial>>();
+let renderMaterialCache = new WeakMap<Material, { images: ImageStore | null; out: RenderMaterial }>();
 
-/** A model material → what the renderer needs (CSS color, alpha, texture URL and size). Cached per materials map. */
+/** A model material → what the renderer needs (CSS color, alpha, texture URL and size). Cached per immutable material. */
 export function renderMaterial(state: DocumentState, id: MaterialId | null, images: ImageStore | null = renderImages): RenderMaterial | null {
   if (id === null || id === state.defaultMaterialId) return null;
   const m: Material | undefined = state.materials.get(id);
   if (!m) return null;
-  let perMap = renderMaterialCache.get(state.materials);
-  if (!perMap) renderMaterialCache.set(state.materials, (perMap = new Map()));
-  const cached = perMap.get(id);
-  if (cached) return cached;
+  const cached = renderMaterialCache.get(m);
+  if (cached?.images === images) return cached.out;
   const out: RenderMaterial = { id: m.id, color: rgbToCss(m.color), alpha: m.alpha };
+  if (m.appearance) {
+    Object.assign(out, { appearance: m.appearance });
+    const normal = m.appearance.normal;
+    if (normal) Object.assign(out, { normalUrl: images?.objectUrl(normal.imageId), widthM: normal.widthM, heightM: normal.heightM });
+  }
   if (m.texture) {
     const url = images?.objectUrl(m.texture.imageId);
     Object.assign(out, { widthM: m.texture.widthM, heightM: m.texture.heightM,
       ...(m.texture.colorize ? { colorize: m.texture.colorizeType ?? 'shift' } : {}), ...(url ? { textureUrl: url } : {}) });
   }
-  perMap.set(id, out);
+  renderMaterialCache.set(m, { images, out });
   return out;
+}
+
+/** Reuse unchanged face bindings after an unrelated material edit, so large bodies stay batched. */
+function stableFaceMaterials(previous: ReadonlyMap<number, RenderFaceMaterial> | undefined, next: ReadonlyMap<number, RenderFaceMaterial>): ReadonlyMap<number, RenderFaceMaterial> {
+  if (!previous || previous.size !== next.size) return next;
+  for (const [id, face] of next) {
+    const old = previous.get(id);
+    if (!old || old.front !== face.front || old.back !== face.back || old.basis !== face.basis || old.uvBack !== face.uvBack ||
+      (old.uv !== face.uv && !(old.uv.kind === 'auto' && face.uv.kind === 'auto'))) return next;
+  }
+  return previous;
 }
 
 interface FaceMaterialsEntry {
@@ -132,8 +146,9 @@ export function faceMaterialsToRender(
     if (front === null && back === null && uv.kind === 'auto') continue;
     out.set(f.id, { front, back, uv, ...(f.uvBack ? { uvBack: f.uvBack } : {}), basis: f.basis });
   }
-  if (!overridden) faceMaterialsCache.set(body.faces, { materials: state.materials, bodyMaterial: body.materialId, inherited, images, out });
-  return out;
+  const result = stableFaceMaterials(cached?.out, out);
+  if (!overridden) faceMaterialsCache.set(body.faces, { materials: state.materials, bodyMaterial: body.materialId, inherited, images, out: result });
+  return result;
 }
 
 // The renderer diffs `edges` / `surfaces` by identity, so the arrays are cached per immutable
@@ -222,8 +237,9 @@ export function meshPartFaceMaterialsToRender(state: DocumentState, part: MeshPa
     const material = renderMaterial(state, id as MaterialId, images) ?? partMaterial;
     if (material) out.set(f, { front: material, back: material, uv: { kind: 'auto' }, basis: UNIT_BASIS });
   }
-  meshPartMaterialCache.set(g, { materials: state.materials, partMaterial: part.materialId, inherited, images, out });
-  return out;
+  const result = stableFaceMaterials(cached?.out, out);
+  meshPartMaterialCache.set(g, { materials: state.materials, partMaterial: part.materialId, inherited, images, out: result });
+  return result;
 }
 
 /** Body `SurfaceRecord`s → smooth face groups (cached per map). */

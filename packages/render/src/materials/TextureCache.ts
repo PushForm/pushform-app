@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { BackSide, Color, FrontSide, MeshLambertMaterial, RepeatWrapping, SRGBColorSpace, Texture, TextureLoader } from 'three';
+import { BackSide, Color, FrontSide, MeshLambertMaterial, MeshStandardMaterial, NoColorSpace, RepeatWrapping, SRGBColorSpace, Texture, TextureLoader } from 'three';
+import { applyMaterialAppearance } from './appearance';
 import type { RenderMaterial } from '../types';
 import { FACE_MATERIAL_COMMON, FADE_OPACITY, patchSelectTint } from '../renderables/BodyRenderable';
 import { colorizePixels, type ColorizeType } from '@pushform/model';
@@ -14,6 +15,7 @@ type TextureImage = CanvasImageSource & { width: number; height: number };
  */
 export class TextureCache {
   private textures = new Map<string, Texture>();
+  private normalTextures = new Map<string, Texture>();
   /** Colorized copies by `url|color|type`, drawn once the URL's image has loaded. */
   private colorizedTextures = new Map<string, { url: string; texture: Texture }>();
   private waiting = new Map<string, ((image: TextureImage) => void)[]>();
@@ -101,6 +103,21 @@ export class TextureCache {
     tex.anisotropy = this.anisotropy;
   }
 
+  normal(url: string): Texture {
+    let texture = this.normalTextures.get(url);
+    if (!texture) {
+      texture = new Texture(); this.configure(texture); texture.colorSpace = NoColorSpace;
+      // A missing/loading normal image must leave the geometry's own normals intact.
+      const placeholder = document.createElement('canvas'); placeholder.width = placeholder.height = 1;
+      const context = placeholder.getContext('2d');
+      if (context) { context.fillStyle = 'rgb(128,128,255)'; context.fillRect(0, 0, 1, 1); texture.image = placeholder; texture.needsUpdate = true; }
+      this.normalTextures.set(url, texture);
+      const target = texture;
+      this.whenLoaded(url, image => { if (this.normalTextures.get(url) === target) { target.image = image; target.needsUpdate = true; } });
+    }
+    return texture;
+  }
+
   has(url: string): boolean {
     return this.textures.has(url);
   }
@@ -119,6 +136,7 @@ export class TextureCache {
 
   /** Drop textures, and their colorized copies, whose URL is not in `keep`. */
   prune(keep: ReadonlySet<string>): void {
+    for (const [url, texture] of this.normalTextures) if (!keep.has(url)) { texture.dispose(); this.normalTextures.delete(url); }
     for (const [url, t] of this.textures) {
       if (keep.has(url)) continue;
       t.dispose();
@@ -135,6 +153,8 @@ export class TextureCache {
   }
 
   dispose(): void {
+    for (const t of this.normalTextures.values()) t.dispose();
+    this.normalTextures.clear();
     for (const t of this.textures.values()) t.dispose();
     for (const c of this.colorizedTextures.values()) c.texture.dispose();
     for (const item of this.loading.values()) item.settle(false);
@@ -209,7 +229,7 @@ export interface TexturedDisplay {
 
 /** True when a face side cannot use the shared vertex-colored material (texture or opacity). */
 export function needsOwnMaterial(m: RenderMaterial | null | undefined, textured: boolean): m is RenderMaterial {
-  return !!m && ((textured && !!m.textureUrl) || m.alpha < 1);
+  return !!m && ((textured && !!m.textureUrl) || m.alpha < 1 || !!m.appearance);
 }
 
 /**
@@ -218,32 +238,48 @@ export function needsOwnMaterial(m: RenderMaterial | null | undefined, textured:
  * does when `colorize` is set; plain variants are vertex-colored like the shared body materials so a translucent
  * color still shows the face's own color. All carry the selection tint shader patch.
  */
+export type FaceSurfaceMaterial = MeshLambertMaterial | MeshStandardMaterial;
+
 export class TexturedMaterialCache {
-  private materials = new Map<string, MeshLambertMaterial>();
+  private materials = new Map<string, FaceSurfaceMaterial>();
+  private physical = false;
   private display: TexturedDisplay = { xray: false, xrayOpacity: 0.35, faces: true };
 
   constructor(readonly textures: TextureCache) {}
 
-  get(m: RenderMaterial, side: 'front' | 'back', faded: boolean, textured: boolean): MeshLambertMaterial {
+  get(m: RenderMaterial, side: 'front' | 'back', faded: boolean, textured: boolean): FaceSurfaceMaterial {
     const useMap = textured && !!m.textureUrl;
-    const key = `${m.id}|${useMap ? m.textureUrl : ''}|${m.color}|${m.alpha}|${m.colorize ?? ''}|${side}|${faded ? 1 : 0}`;
+    const key = `${m.id}|${useMap ? 1 : 0}|${textured && m.normalUrl ? 1 : 0}|${side}|${faded ? 1 : 0}|${m.appearance ? 'physical' : 'diffuse'}`;
     let mat = this.materials.get(key);
-    if (mat) return mat;
-    mat = new MeshLambertMaterial({
+    if (mat?.userData['source'] === m) return mat;
+    const created = !mat;
+    mat ??= new (m.appearance ? MeshStandardMaterial : MeshLambertMaterial)({
       color: 0xffffff,
       vertexColors: !useMap,
       side: side === 'front' ? FrontSide : BackSide,
       ...FACE_MATERIAL_COMMON,
     });
+    const previousMap = mat.map, previousNormal = mat instanceof MeshStandardMaterial ? mat.normalMap : null;
+    mat.map = null;
+    if (mat instanceof MeshStandardMaterial) {
+      this.physical = true;
+      applyMaterialAppearance(mat, m.appearance);
+      mat.normalMap = textured && m.normalUrl ? this.textures.normal(m.normalUrl) : null;
+    }
     if (useMap) {
       mat.map = m.colorize
         ? this.textures.colorized(m.textureUrl!, m.color, m.colorize)
         : this.textures.get(m.textureUrl!);
       mat.userData['textureUrl'] = m.textureUrl;
     }
+    mat.vertexColors = !useMap;
+    mat.userData['source'] = m;
+    mat.userData['materialId'] = m.id;
+    mat.userData['normalUrl'] = textured ? m.normalUrl : undefined;
+    if (created || previousMap !== mat.map || (mat instanceof MeshStandardMaterial && previousNormal !== mat.normalMap)) mat.needsUpdate = true;
     mat.userData['alpha'] = m.alpha;
     mat.userData['faded'] = faded;
-    patchSelectTint(mat);
+    if (created) patchSelectTint(mat);
     this.applyTo(mat);
     this.materials.set(key, mat);
     // A texture with transparent pixels shows through them once its image has loaded.
@@ -260,7 +296,7 @@ export class TexturedMaterialCache {
     for (const m of this.materials.values()) this.applyTo(m);
   }
 
-  private applyTo(m: MeshLambertMaterial): void {
+  private applyTo(m: FaceSurfaceMaterial): void {
     const alpha = (m.userData['alpha'] as number | undefined) ?? 1;
     const faded = m.userData['faded'] === true;
     const url = m.userData['textureUrl'] as string | undefined;
@@ -276,6 +312,8 @@ export class TexturedMaterialCache {
     m.depthWrite = !d.xray;
   }
 
+  get hasPhysical(): boolean { return this.physical; }
+
   get size(): number {
     return this.materials.size;
   }
@@ -283,6 +321,7 @@ export class TexturedMaterialCache {
   dispose(): void {
     for (const m of this.materials.values()) m.dispose();
     this.materials.clear();
+    this.physical = false;
   }
 }
 

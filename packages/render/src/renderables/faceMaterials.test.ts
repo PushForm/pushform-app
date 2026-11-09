@@ -338,3 +338,31 @@ describe('BodyRenderable / SketchRenderable material groups', () => {
     s.dispose();
   });
 });
+
+it('draws opaque finishes as shared physical groups and suppresses them in monochrome', () => {
+  const mesh = meshBox([0,0,0],[1,1,1]), materials = new Map(boxFaceMaterials(mesh));
+  materials.set(0, { ...materials.get(0)!, front: { id:99, color:'#18181a', alpha:1,
+    appearance:{roughness:0.2,metalness:0,emissionColor:[0,1,1],emissionStrength:2,normal:null} } });
+  const sync = new SceneSync();
+  sync.sync([{ id:'/1', path:[], entityId:1, mesh, transform:M4_IDENTITY, faceMaterials:materials }]);
+  const rendered = sync.renderables().find(c => c.name === 'Body:/1') as BodyRenderable;
+  const surface = () => Array.isArray(rendered.front.material) ? rendered.front.material : [rendered.front.material];
+  expect(surface().some(m => 'isMeshStandardMaterial' in m)).toBe(true);
+  sync.setDisplay({faceStyle:'monochrome'});
+  expect(surface().some(m => 'isMeshStandardMaterial' in m)).toBe(false);
+  sync.setDisplay({faceStyle:'hiddenLine'});
+  expect(surface().some(m => 'isMeshStandardMaterial' in m)).toBe(false);
+  sync.setDisplay({faceStyle:'shadedTextured'});
+  expect(surface().some(m => 'isMeshStandardMaterial' in m)).toBe(true);
+  sync.dispose();
+});
+
+it('keeps a thousand repeated opaque finishes in a bounded number of material batches', () => {
+  const mesh = meshBox([0,0,0],[1,1,1]), bindings = boxFaceMaterials(mesh), sync = new SceneSync();
+  bindings.set(0, {...bindings.get(0)!,front:{id:99,color:'#18181a',alpha:1,appearance:{roughness:0.3,metalness:0,emissionColor:[1,1,1],emissionStrength:0,normal:null}}});
+  sync.sync(Array.from({length:1000},(_,i)=>({id:`/${i+1}`,path:[],entityId:i+1,mesh,transform:M4_IDENTITY,faceMaterials:bindings})));
+  sync.prepareFrame();
+  expect(sync.texturedMaterials.size).toBeLessThanOrEqual(6);
+  expect(sync.batches.allFaceMeshes().length).toBeLessThanOrEqual(10);
+  sync.dispose();
+});

@@ -34,6 +34,8 @@ export function HardwareDialog({ onClose }: { onClose: () => void }): JSX.Elemen
     /* A regular component has no generator parameters. */
   }
   const editId = seed.generator === 'hardware' ? selectedDefinition?.id : undefined;
+  const [segments, setSegments] = useState(String(seed.segments ?? 40));
+  const [profileSegments, setProfileSegments] = useState(String(seed.profileSegments ?? 20));
   const [shape, setShape] = useState<HardwareShape>((seed.shape as HardwareShape) ?? 'bar-round');
   const [finish, setFinish] = useState<HardwareFinish>(
     (seed.finish as HardwareFinish) ?? 'satin-nickel',
@@ -87,6 +89,9 @@ export function HardwareDialog({ onClose }: { onClose: () => void }): JSX.Elemen
         shape,
         finish,
         ...dims,
+        ...(shape === 'knob-domed'
+          ? { segments: Number(segments), profileSegments: Number(profileSegments) }
+          : {}),
         ...(editId ? { replaceDefinitionId: editId, mountingPlane: seed.mountingPlane } : {}),
       });
       onClose();
@@ -135,19 +140,53 @@ export function HardwareDialog({ onClose }: { onClose: () => void }): JSX.Elemen
           </p>
         )}
         <p>Dimensions in mm. Leave a field empty to use the shape’s default.</p>
+        {shape === 'knob-domed' && (
+          <>
+            <p>
+              A revolved dome and neck. Start with 32–48 radial divisions and 16–20 profile segments
+              (about 1,000–2,000 triangles). Smooth shading keeps the surface rounded; increase only
+              for visible silhouette faceting.
+            </p>
+            <Field label="Radial divisions" htmlFor="hardware-segments">
+              <input
+                id="hardware-segments"
+                type="number"
+                min={16}
+                max={80}
+                step={1}
+                value={segments}
+                onChange={(e) => setSegments(e.target.value)}
+              />
+            </Field>
+            <Field label="Profile segments" htmlFor="hardware-profile-segments">
+              <input
+                id="hardware-profile-segments"
+                type="number"
+                min={8}
+                max={32}
+                step={1}
+                value={profileSegments}
+                onChange={(e) => setProfileSegments(e.target.value)}
+              />
+            </Field>
+            <p>Mesh size is approximately 2 × radial divisions × profile segments.</p>
+          </>
+        )}
         {fields.map((key) => (
           <Field
             key={key}
             label={
               key === 'wall'
                 ? 'Wall / plate thickness'
-                : key === 'grip' && shape === 'backplate'
-                  ? 'Screw hole diameter'
-                  : key === 'spacing'
-                    ? 'Mounting centers'
-                    : key === 'width' && ['knob-hex', 'knob-octagon'].includes(shape)
-                      ? 'Head across flats'
-                      : key[0]!.toUpperCase() + key.slice(1)
+                : key === 'grip' && shape === 'knob-domed'
+                  ? 'Mounting-base diameter'
+                  : key === 'grip' && shape === 'backplate'
+                    ? 'Screw hole diameter'
+                    : key === 'spacing'
+                      ? 'Mounting centers'
+                      : key === 'width' && ['knob-hex', 'knob-octagon'].includes(shape)
+                        ? 'Head across flats'
+                        : key[0]!.toUpperCase() + key.slice(1)
             }
             htmlFor={'hardware-' + key}
           >

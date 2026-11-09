@@ -7,18 +7,17 @@ export function RevolveIcon({ size = 18, title, ...props }: IconBaseProps) {
     <svg
       width={size}
       height={size}
-      viewBox="96 93 68 68"
+      viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
       strokeLinecap="round"
       strokeLinejoin="round"
       {...props}
-      strokeWidth={4.2}
+      strokeWidth={1.75}
     >
       {title ? <title>{title}</title> : null}
-      <path d="M126.5 111.6 141.5 107.6C137.9 104.7 131.5 102.9 124.2 102.9 112.7 102.9 103.4 106.8 103.4 111.6c0 3.7 5.5 6.8 13.1 8.1l10-8.1Z" />
-      <path d="M103.4 111.6v30.7c0 3.7 5.5 6.8 13.1 8.1l10-8.1 15-4v-30.7M116.5 119.7v30.7m10-38.8v30.7" />
-      <path d="M132.7 130.2c13.3-.4 23.4-3.7 23.4-7.7 0-2.3-3.4-4.5-8.8-5.9m2.9 6.1-2.9-6.1 6.3-2.6" />
+      <path d="M11 6l5.6-1.8A7 3 0 1 0 11 9ZM4 6v7.5a7 3 0 0 0 7 3V9m5.6-4.8v6.55" />
+      <path d="M2.8 15.35c-1.35 1.95 2.9 5.15 9.1 5.15 4.15 0 7.7-1.8 7.7-4.15v-2.6m-2.5 2.75 2.5-2.75 2.5 2.75" />
     </svg>
   );
 }

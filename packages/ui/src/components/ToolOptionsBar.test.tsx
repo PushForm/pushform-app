@@ -143,3 +143,23 @@ it('shows extension text fields in the current bar and sends their raw text with
   act(() => a.toolManager.activate('select'));
   expect(screen.queryByLabelText('Group name')).toBeNull();
 });
+
+it('keeps inline operation fields and secondary extension fields separate in the same bar', () => {
+  const a = mount(), raw = vi.fn();
+  a.toolManager.register({ id: 'mixed-fields', title: 'Mixed fields',
+    activate() {}, deactivate() {}, onCancel() {}, overlay: () => [], onRawEntry: raw,
+    status: () => ({ instructor: '', vcbLabel: '', fields: [
+      { id: 'distance', label: 'Distance', kind: 'length', value: '1 in', location: 'bar' },
+      { id: 'name', label: 'Group name', kind: 'text', value: '', placement: 'options' },
+    ] }),
+  });
+  act(() => a.toolManager.activate('mixed-fields'));
+  const toolbar = screen.getByRole('toolbar', { name: 'Mixed fields options' });
+  const distance = within(toolbar).getByLabelText('Distance');
+  expect(within(toolbar).getAllByRole('textbox')).toHaveLength(2);
+  fireEvent.change(distance, { target: { value: '2 in' } });
+  fireEvent.keyDown(distance, { key: 'Enter' });
+  expect(raw).toHaveBeenCalledWith({ distance: '2 in' }, 'in');
+  act(() => a.toolManager.activate('select'));
+  expect(bar().classList.contains('is-shown')).toBe(false);
+});

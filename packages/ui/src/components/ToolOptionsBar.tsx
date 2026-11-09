@@ -53,14 +53,15 @@ export interface ToolOptionsBarProps {
 export function ToolOptionsBar(): JSX.Element {
   const app = useApp();
   const settings = useAppStore((s) => s.toolSettings);
-  const optionFields = useAppStore((s) => s.entryFields).filter(field => field.placement === 'options');
+  const fields = useAppStore((s) => s.entryFields);
+  const optionFields = fields.filter(field => field.placement === 'options');
+  const hasBarFields = fields.some((f) => f.location === 'bar' && f.placement !== 'options');
   const placing = useAppStore((s) => s.toolPlacing);
   const applied = useAppStore((s) => s.toolApplied);
   const activeToolId = useAppStore((s) => s.activeToolId);
   const dialog = useAppStore((s) => s.dialog);
   const dialogRef = useAppStore((s) => s.dialogRef);
   const selection = useSelectionRefs();
-  const fields = useAppStore((s) => s.entryFields);
   const tool = app.toolManager.visualTool;
   // A model text's style row: for the text being edited, or one text selected with Select.
   const styled = dialog === 'editText' && dialogRef?.kind === 'text' ? dialogRef
@@ -76,10 +77,10 @@ export function ToolOptionsBar(): JSX.Element {
       read={(quantity, text) => readQuantity(app, quantity, text)}
       onLeave={() => app.viewport.container?.focus()}
     >
-      {styled ? <ModelTextStyleRow app={app} target={styled} /> : <>
-        {fields.some((f) => f.location === 'bar' && f.placement !== 'options') ? <EntryFields inline /> : null}
+      {styled ? <ModelTextStyleRow app={app} target={styled} /> : hasBarFields || optionFields.length ? <>
+        {hasBarFields ? <EntryFields inline /> : null}
         {optionFields.length ? <ToolOptionsFields key={activeToolId} app={app} fields={optionFields} /> : null}
-      </>}
+      </> : null}
     </ToolOptionsBarView>
   );
 }

@@ -94,14 +94,17 @@ describe('resolveSlots', () => {
 });
 
 describe('MainToolbar', () => {
-  it('offers Revolve alongside Follow Me in the Sweep dropdown', () => {
+  it('defaults to Revolve and offers Follow Me beneath it in the Sweep dropdown', () => {
     const a = boot();
     render(<AppContext.Provider value={a}><MainToolbar /></AppContext.Provider>);
-    fireEvent.click(screen.getByRole('button', { name: 'Sweep tools' }));
-    expect(screen.getAllByRole('menuitemradio').map(item => item.getAttribute('aria-label'))).toEqual(['Follow Me', 'Revolve']);
-    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Revolve' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Revolve' }));
     expect(a.toolManager.activeToolId).toBe('revolve');
     expect(screen.getByRole('button', { name: 'Revolve' }).getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: 'Sweep tools' }));
+    expect(screen.getAllByRole('menuitemradio').map(item => item.getAttribute('aria-label'))).toEqual(['Revolve', 'Follow Me']);
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Follow Me' }));
+    expect(a.toolManager.activeToolId).toBe('followme');
+    expect(screen.getByRole('button', { name: 'Follow Me' }).getAttribute('aria-pressed')).toBe('true');
   });
   it('uses icon buttons and tooltips for file and Commons import without changing their actions', () => {
     const a = boot(), onCommons = vi.fn();

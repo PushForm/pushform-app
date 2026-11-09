@@ -20,7 +20,7 @@ Push/Pull refuses, says why and changes nothing when pushing a whole face to or 
 
 ## Sweep a profile with Follow Me
 
-Prepare a profile face and a connected chain of sketch edges for its path in the editing context you intend to change. Choose **Follow Me**, click the profile face, then move the pointer along the connected path edges. The collected edges highlight red. Click to finish the sweep. Escape cancels the pending path.
+Prepare a profile face and a connected chain of sketch edges for its path in the editing context you intend to change. Open the **Sweep** dropdown beside Revolve in the Modify toolbar and choose **Follow Me**. Click the profile face, then move the pointer along the connected path edges. The collected edges highlight red. Click to finish the sweep. Escape cancels the pending path.
 
 Alternatively, select the path's sketch edges before choosing Follow Me, then click the profile face to sweep immediately. After picking a profile without preselected edges, Alt+click another face to use its perimeter as a closed path.
 
@@ -28,7 +28,7 @@ A disconnected edge cannot extend the path. If the sweep cannot form a valid sol
 
 ## Turn a profile around an axis with Revolve
 
-Use **Revolve** for turned legs, bowls, knobs and other rotational shapes. You can also ask the in-app agent to revolve an existing profile or draw and revolve one, specifying the axis and angle. Open the **Sweep** dropdown beside Offset in the Modify toolbar and choose **Revolve**, or find it in command search.
+Use **Revolve** for turned legs, bowls, knobs and other rotational shapes. You can also ask the in-app agent to revolve an existing profile or draw and revolve one, specifying the axis and angle. **Revolve** is the default button beside Offset in the Modify toolbar; **Follow Me** is available beneath it in the **Sweep** dropdown. You can also find Revolve in command search.
 
 Click a flat profile face in the group or component you are editing. Then click a straight edge for the axis, or click two different points in the profile plane to define its direction. The profile must stay on one side of the axis; it may touch it. For a turned leg, draw half of its side outline with its straight inner boundary on the axis.
 

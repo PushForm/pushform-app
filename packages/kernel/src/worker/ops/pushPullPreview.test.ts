@@ -16,7 +16,7 @@ let nextBodyId = 1;
 const newBodyId = (): number => nextBodyId++;
 
 beforeAll(async () => {
-  backend = new InlineBackend();
+  backend = new InlineBackend({ typescriptOnly: true });
   client = new KernelClient(backend);
   await client.init();
   ctx = await backend.getContext();

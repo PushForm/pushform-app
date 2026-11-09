@@ -7,7 +7,7 @@ export * from './protocol';
 export * from './meshChecks';
 export { validateSolidMesh } from './validateSolid';
 export type { KernelBackend, MeshProvider } from './backends/KernelBackend';
-export { InlineBackend, setInlineKernelFactory, type InlineBackendOptions, type InlineKernelFactory } from './backends/InlineBackend';
+export { InlineBackend, type InlineBackendOptions } from './backends/InlineBackend';
 export { WorkerBackend, type WorkerBackendOptions } from './backends/WorkerBackend';
 export { DeferredBackend } from './backends/DeferredBackend';
 export { NativeKernelBackend, type NativeKernelTransport } from './backends/NativeKernelBackend';

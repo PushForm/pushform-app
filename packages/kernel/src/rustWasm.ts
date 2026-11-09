@@ -5,12 +5,12 @@
  * only exists after `pnpm build:kernel-wasm`. Nothing in the app imports this file by default.
  */
 import type { MeshData } from '@pushform/core';
-import type { RustKernelModule } from '../wasm/pushform-kernel.js';
 import type { MeshProvider } from './backends/KernelBackend';
 import { NativeKernelBackend } from './backends/NativeKernelBackend';
 import { encodeValidateSolid } from './backends/nativeWire';
 import { RustWasmKernelTransport, type RustWasmKernelTransportOptions } from './backends/RustWasmKernelTransport';
 import { KernelError, type KernelErrorInfo } from './protocol';
+import { createRustKernelModule } from './rustKernelModule';
 import { RustKernelCaller, RustKernelRejection, trapErrorInfo } from './worker/rustKernelCore';
 
 export { RustWasmKernelTransport, type RustWasmKernelTransportOptions };
@@ -34,20 +34,11 @@ export function createRustWasmBackend(options: RustWasmBackendOptions = {}): { b
   return { backend, transport };
 }
 
-type RustKernelModuleFactory = () => Promise<RustKernelModule>;
-
 let validator: Promise<RustKernelCaller> | undefined;
-let moduleFactory: RustKernelModuleFactory | undefined;
-
-/** Replaces how {@link validateSolidWithRust} creates the Rust module; the test setup uses this outside a browser. */
-export function setRustKernelModuleFactory(factory: RustKernelModuleFactory | undefined): void {
-  moduleFactory = factory;
-  validator = undefined;
-}
 
 /** The Rust module for {@link validateSolidWithRust}, loaded once per thread and replaced after a trap. */
 function validatingModule(): Promise<RustKernelCaller> {
-  validator ??= (moduleFactory ? moduleFactory() : import('../wasm/pushform-kernel.js').then(({ default: factory }) => factory())).then((module) => new RustKernelCaller(module)).catch((cause: unknown) => {
+  validator ??= createRustKernelModule().then((module) => new RustKernelCaller(module)).catch((cause: unknown) => {
     validator = undefined;
     throw cause;
   });

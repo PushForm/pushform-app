@@ -5,39 +5,32 @@ import { KernelError } from '../protocol';
 import { createKernelContext, type KernelContext } from '../worker/context';
 import { dispatch } from '../worker/dispatch';
 import { sendWithReupload, type KernelBackend, type MeshProvider } from './KernelBackend';
+import { InlineRustTransport } from './InlineRustTransport';
+import { NativeKernelBackend } from './NativeKernelBackend';
 
 export interface InlineBackendOptions {
   /** Number of (body, version) Manifolds kept alive; default 64. */
   cacheCapacity?: number;
-  /** Stay on the TypeScript kernel even when another was installed with {@link setInlineKernelFactory}; for tests that compare the two. */
+  /** Stay on the TypeScript kernel; for tests that compare the two. */
   typescriptOnly?: boolean;
 }
 
-/** Builds the kernel that new inline backends run on, in place of the TypeScript one. */
-export type InlineKernelFactory = (options: InlineBackendOptions) => KernelBackend;
-let kernelFactory: InlineKernelFactory | undefined;
-
-/** Makes every `InlineBackend` created from now on run on another kernel. Tests use this to run the suite on Rust. */
-export function setInlineKernelFactory(factory: InlineKernelFactory | undefined): void {
-  kernelFactory = factory;
-}
-
 /**
- * Runs the ops in-process (Node tests, CLI, headless MCP). Requests still return promises because
- * the wasm module loads asynchronously; after that every op runs synchronously on the caller's thread.
+ * Runs the kernel in-process on this thread (Node tests, CLI, headless MCP), on the Rust kernel's WebAssembly module.
+ * Requests still return promises because the module loads asynchronously; after that every op runs synchronously.
  */
 export class InlineBackend implements KernelBackend {
   private context: Promise<KernelContext> | undefined;
   private provider: MeshProvider | undefined;
   private disposed = false;
-  /** The other kernel this backend runs on, when one was installed with {@link setInlineKernelFactory}. */
+  /** The Rust kernel this backend runs on, unless it was made with `typescriptOnly`. */
   private readonly other: KernelBackend | undefined;
 
   constructor(private readonly options: InlineBackendOptions = {}) {
-    this.other = options.typescriptOnly ? undefined : kernelFactory?.(options);
+    this.other = options.typescriptOnly ? undefined : new NativeKernelBackend(undefined, new InlineRustTransport(), { fallback: false });
   }
 
-  /** The context, for tests that want to poke at the cache or wasm module directly. */
+  /** The TypeScript context, for tests that want to poke at its cache or wasm module directly. */
   getContext(): Promise<KernelContext> {
     if (this.disposed) return Promise.reject(new KernelError('Aborted', 'InlineBackend is disposed'));
     this.context ??= createKernelContext(this.options.cacheCapacity);

@@ -3,8 +3,9 @@
 // Copyright 2026 PushForm contributors
 /* global process */
 // pushform-mcp. Workspace packages export TypeScript sources, which Node cannot run, so
-// this launcher bundles src/cli.ts with esbuild into a temporary module and runs it. manifold-3d
-// stays external, loaded from where the kernel resolves it, so its WASM file is found beside it.
+// this launcher bundles src/cli.ts with esbuild into a temporary module and runs it. manifold-3d and
+// the Rust kernel's WebAssembly glue stay external, loaded from where the kernel resolves them, so their
+// WASM files are found beside them.
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -33,6 +34,12 @@ const result = await build({
           if (r.errors.length) return { errors: r.errors };
           return { path: pathToFileURL(r.path).href, external: true };
         });
+      },
+    },
+    {
+      name: 'kernel-wasm-external',
+      setup(b) {
+        b.onResolve({ filter: /pushform-kernel\.js$/ }, (args) => ({ path: pathToFileURL(join(dirname(args.importer), args.path)).href, external: true }));
       },
     },
     {

@@ -3,9 +3,10 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
-// PF_KERNEL=rust runs every InlineBackend on the Rust kernel's WebAssembly module (see the setup file).
+// Every InlineBackend runs on the Rust kernel's WebAssembly module (see the setup file).
+const kernelSetup = ['packages/kernel/src/test/rustKernelSetup.ts'];
+// Until the web build makes Rust its default, PF_KERNEL=rust also moves solid validation onto it.
 const rust = process.env.PF_KERNEL === 'rust';
-const kernelSetup = rust ? ['packages/kernel/src/test/rustKernelSetup.ts'] : [];
 const rustResolve = rust ? { alias: { '@pushform/kernel/rust-wasm': fileURLToPath(new URL('packages/kernel/src/rustWasm.ts', import.meta.url)) } } : {};
 const rustDefine = rust ? { __PF_RUST_KERNEL__: 'true' } : {};
 

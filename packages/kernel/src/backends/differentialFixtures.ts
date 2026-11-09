@@ -7,7 +7,6 @@ import type { RustKernelModule } from '../../wasm/pushform-kernel.js';
 import type { KernelClient } from '../client/KernelClient';
 import type { PolygonsWithHoles, PushPullRegion } from '../protocol';
 import { square, topRegion } from '../test/helpers';
-import { RustKernelCaller, RustKernelRejection, trapErrorInfo } from '../worker/rustKernelCore';
 import type { NativeKernelTransport } from './NativeKernelBackend';
 
 /** The native kernel's test process: framed requests over stdio. Needs its binary to be built. */
@@ -61,31 +60,7 @@ export class HarnessTransport implements NativeKernelTransport {
 
 export type RustModuleFactory = (options?: object) => Promise<RustKernelModule>;
 
-/** The WebAssembly module in this process, with the worker's trap behaviour: a crash answers as a kernel error. */
-export class InlineRustTransport implements NativeKernelTransport {
-  private caller: Promise<RustKernelCaller> | undefined;
-  constructor(private readonly factory: RustModuleFactory) {}
-  available(): Promise<boolean> {
-    return Promise.resolve(true);
-  }
-  private get(): Promise<RustKernelCaller> {
-    this.caller ??= this.factory().then((module) => new RustKernelCaller(module));
-    return this.caller;
-  }
-  async call(request: Uint8Array): Promise<ArrayBuffer> {
-    const caller = await this.get();
-    try {
-      return caller.call(request);
-    } catch (e) {
-      if (e instanceof RustKernelRejection) throw e.info;
-      this.caller = undefined;
-      throw trapErrorInfo(e);
-    }
-  }
-  async abort(): Promise<void> {
-    (await this.caller)?.abort();
-  }
-}
+export { InlineRustTransport } from './InlineRustTransport';
 
 export interface DifferentialCase {
   name: string;

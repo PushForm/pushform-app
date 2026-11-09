@@ -220,6 +220,9 @@ importers:
       react-dom:
         specifier: ^19.0.0
         version: 19.3.1(react@19.3.1)
+      three:
+        specifier: 0.180.0
+        version: 0.180.0
       zod:
         specifier: ^4.6.7
         version: 4.6.7
@@ -236,6 +239,9 @@ importers:
       '@types/react-dom':
         specifier: ^19.0.0
         version: 19.3.0(@types/react@19.3.0)
+      '@types/three':
+        specifier: 0.180.0
+        version: 0.180.0
       '@vitejs/plugin-react':
         specifier: ^5.0.0
         version: 5.2.0(supports-color@10.2.2)(vite@7.3.7(@types/node@24.19.2)(lightningcss@1.33.0)(yaml@2.9.1))

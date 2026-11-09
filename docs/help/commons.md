@@ -1,5 +1,7 @@
 # Download models from Commons
 
+Generated thumbnails show supported material finishes with studio lighting. The interactive preview also preserves smooth shading, roughness, metallic reflections, opacity and emission. It uses neutral studio lighting, so highlights move as you rotate the model. Source textures and normal maps are omitted from the interactive preview; open the native model in PushForm to inspect its complete materials. If WebGL is unavailable, the viewer falls back to geometry and base colors.
+
 PushForm Commons is a community model catalog with its own website. Browse models, search by name or description, and filter by category or license. A search finds models containing every word you type. Put words in double quotes to match that exact phrase as whole words: `"Ann Lee"` finds Ann Lee but not Joann Leeds or Lee, Ann. The commercial-use filter includes models only when every listed license explicitly permits commercial use; read all listed conditions before reuse.
 
 The unfiltered browse view omits models marked low interest by Commons admins. Search or apply any category, license, or commercial-use filter to find matching models from the full library. These models remain available through direct links, creator pages, and collections.

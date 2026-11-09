@@ -2,7 +2,8 @@
 # Copyright 2026 PushForm contributors
 #
 # cargo-about configuration for the Rust crates PushForm ships: the STEP reader (crates/step-reader, WebAssembly in the
-# web app and native in the desktop app) and the desktop app (apps/desktop/src-tauri). scripts/third-party-notices.mjs
+# web app and native in the desktop app), the native kernel (crates/native-kernel, desktop builds with the
+# native-kernel feature, and crates/kernel-wasm, its WebAssembly build) and the desktop app (apps/desktop/src-tauri). scripts/third-party-notices.mjs
 # runs `cargo about generate --format json` with it for each workspace and writes their license texts into the
 # third-party notices.
 #

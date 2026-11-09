@@ -22,7 +22,7 @@ describe('KernelClient', () => {
     expect(results.map((r) => r.status)).toEqual(['superseded', 'superseded', 'superseded', 'superseded', 'current']);
     const last = results[4]!;
     if (last.status !== 'current') throw new Error('unreachable');
-    expect(last.value.components[0]!.props.volume).toBeCloseTo(1 + 0.04 * 0.5, 8);
+    expect(Math.max(...last.value.mesh.verts.filter((_, i) => i % 3 === 2))).toBeCloseTo(1.5, 5);
     // The key is idle again: a new call runs immediately and is current.
     const again = await client.coalesced('pp:1', () => client.properties({ body }));
     expect(again.status).toBe('current');
@@ -41,10 +41,9 @@ describe('KernelClient', () => {
     const client = new KernelClient(backend);
     const runId = await client.ensureBody(7, 1, meshBox([0, 0, 0], [1, 1, 1]));
     expect(await client.ensureBody(7, 1, meshBox([0, 0, 0], [1, 1, 1]))).toBe(runId);
-    const ctx = await backend.getContext();
-    expect(ctx.cache.size).toBe(1);
+    expect((await client.stats()).cached).toBe(1);
     await client.ensureBody(7, 2, meshBox([0, 0, 0], [2, 2, 2]));
-    expect(ctx.cache.size).toBe(2);
+    expect((await client.stats()).cached).toBe(2);
     expect((await client.release(7)).released).toBe(2);
     client.dispose();
   });

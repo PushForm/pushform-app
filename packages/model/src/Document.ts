@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { applyPatches, createDraft, enableMapSet, enablePatches, finishDraft, freeze, type Draft, type Patch, type PatchListener, produce } from 'immer';
+import { applyPatches, createDraft, enableMapSet, enablePatches, finishDraft, freeze, isDraft, setAutoFreeze, type Draft, type Patch, type PatchListener, produce } from 'immer';
 import {
   DEFAULT_UNITS,
   Emitter,
@@ -35,6 +35,18 @@ export function configureImmer(): void {
   immerConfigured = true;
 }
 configureImmer();
+
+let autoFreeze = true;
+
+/**
+ * Whether every committed state is deep-frozen. On by default, so development, tests and headless use catch a stray
+ * mutation of committed state; the production web build turns it off because deep-freezing large bodies is slow.
+ * With it off, commits still freeze what they change, shallowly (`sealChanged`).
+ */
+export function setDocumentAutoFreeze(enabled: boolean): void {
+  autoFreeze = enabled;
+  setAutoFreeze(enabled);
+}
 
 export type { Draft, Patch };
 export type DocumentDraft = Draft<DocumentState>;
@@ -81,6 +93,121 @@ export class DraftIdAllocator {
   }
 }
 
+/**
+ * Freezes `value` and everything below it that could later be walked: Maps and plain objects to any depth, arrays
+ * without looking inside them (nothing below an array is walked once the array itself is frozen). An already frozen
+ * value is taken as sealed, which is why a tree must be sealed before its root is frozen.
+ */
+function sealTree(value: unknown): void {
+  if (typeof value !== 'object' || value === null || Object.isFrozen(value)) return;
+  if (value instanceof Map) {
+    for (const child of value.values()) sealTree(child);
+  } else if (!Array.isArray(value)) {
+    const proto = Object.getPrototypeOf(value) as unknown;
+    if (proto !== Object.prototype && proto !== null) return;
+    for (const child of Object.values(value)) sealTree(child);
+  }
+  freeze(value);
+}
+
+/**
+ * With auto-freeze off, freezes what a commit changed: each object from the root down a patch path (shallowly, its
+ * siblings are already sealed) and the written value with everything below it. Code relies on committed state being
+ * frozen: the content identity caches only trust frozen state, and Immer skips frozen children when it finalizes, so
+ * an edit to one face of a body does not walk every other face.
+ */
+function sealChanged(state: object, patches: readonly Patch[]): void {
+  for (const { path } of patches) {
+    let node: unknown = state;
+    for (let i = 0; i < path.length && typeof node === 'object' && node !== null; i++) {
+      freeze(node);
+      const key = path[i]!;
+      node = node instanceof Map ? node.get(key) : (node as Record<string | number, unknown>)[key];
+    }
+    sealTree(node);
+  }
+}
+
+/**
+ * Tables of records built outside Immer during the open transaction (see `sealFreshRecordTables`); null when no
+ * transaction is open. Save/restore around each transaction keeps a table with the document that built it.
+ */
+let freshRecordTables: Map<unknown, object>[] | null = null;
+
+/**
+ * Freezes geometry a builder just computed for a record (a plane, basis, loop list or edge polyline), so sealing and
+ * finalizing can skip it. Deep with auto-freeze on, so development still catches an edit inside it.
+ */
+export function sealGeometry<T extends object>(geometry: T): T {
+  return autoFreeze ? freeze(geometry, true) : Object.freeze(geometry);
+}
+
+/** Hand a freshly built face or edge table to the open transaction, which seals it when it commits. */
+export function registerFreshRecordTable(table: Map<unknown, object>): void {
+  if (!autoFreeze) freshRecordTables?.push(table);
+}
+
+/** True if `value` holds an Immer draft. Frozen values are committed state, which holds none. */
+function holdsDraft(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false;
+  if (isDraft(value)) return true;
+  if (Object.isFrozen(value)) return false;
+  if (Array.isArray(value)) return value.some(holdsDraft);
+  if (value instanceof Map || value instanceof Set) return [...value.values()].some(holdsDraft);
+  const proto = Object.getPrototypeOf(value) as unknown;
+  return (proto === Object.prototype || proto === null) && Object.values(value).some(holdsDraft);
+}
+
+/**
+ * Shallow-freeze new face and edge tables and their records before Immer finalizes them. It runs at commit, not when
+ * a table is built, because commands still adjust the records later in the transaction. Immer does not look inside a
+ * frozen table, so large replacements cost nothing to finalize, and frozen records keep later single-face edits from
+ * walking their siblings. A record can hold a draft (a command copied one in): Immer has to finalize that, so the
+ * record and its table stay unfrozen.
+ */
+function sealFreshRecordTables(tables: readonly Map<unknown, object>[]): void {
+  for (const table of tables) {
+    let clean = true;
+    for (const record of table.values()) {
+      if (Object.isFrozen(record)) continue;
+      if (holdsDraft(record)) clean = false;
+      else Object.freeze(record);
+    }
+    if (clean) freeze(table);
+  }
+}
+
+/**
+ * Apply recorded patches. A wholesale replacement of a Map reuses the recorded Map instead of letting Immer deep-clone
+ * it, because recorded values are committed state and nothing mutates those. Each such replacement commits on its own,
+ * so a following patch that edits inside the Map drafts it and leaves the recorded copy alone.
+ */
+function applyRecordedPatches(state: object, patches: readonly Patch[]): object {
+  let next = state;
+  let run: Patch[] = [];
+  const flush = (): void => {
+    if (run.length) next = applyPatches(next, run);
+    run = [];
+  };
+  for (const patch of patches) {
+    if (patch.op !== 'replace' || patch.path.length === 0 || !(patch.value instanceof Map)) {
+      run.push(patch);
+      continue;
+    }
+    flush();
+    next = produce(next, (draft) => {
+      let parent: unknown = draft;
+      for (const key of patch.path.slice(0, -1)) parent = parent instanceof Map ? parent.get(key) : (parent as Record<string | number, unknown>)[key];
+      const key = patch.path[patch.path.length - 1]!;
+      freeze(patch.value); // Immer skips frozen values when it finalizes, so a large Map is not walked
+      if (parent instanceof Map) parent.set(key, patch.value);
+      else (parent as Record<string | number, unknown>)[key] = patch.value;
+    });
+  }
+  flush();
+  return next;
+}
+
 /** Minimum state shape the transactional machinery needs: the persistent id allocator. */
 export interface DocStateMeta {
   meta: { nextId: number };
@@ -104,8 +231,14 @@ export class TransactionalDocument<S extends DocStateMeta> {
   readonly events = new Emitter<DocumentEvents>();
 
   constructor(state: S) {
-    this._state = freeze(state, true);
+    this._state = this.seal(state);
   }
+  /** Freezes a whole incoming state, including the records below its Maps, which Immer's deep freeze does not reach. */
+  private seal(state: S): S {
+    sealTree(state);
+    return freeze(state, true);
+  }
+
   /** When true, undo never rolls `meta.nextId` back (ids are never reused). The model document enables this. */
   protected get monotonicIds(): boolean {
     return false;
@@ -136,13 +269,17 @@ export class TransactionalDocument<S extends DocStateMeta> {
     }
     const draft = createDraft(this._state) as Draft<S>;
     this.draft = draft;
+    const outerTables = freshRecordTables;
+    const tables: Map<unknown, object>[] = (freshRecordTables = []);
     let value: T;
     try {
       value = fn(draft);
       this.prepareCommit(draft);
     } finally {
       this.draft = null;
+      freshRecordTables = outerTables;
     }
+    sealFreshRecordTables(tables);
     let patches: Patch[] = [], inversePatches: Patch[] = [];
     // cast: immer's `D extends Draft<infer T>` instantiation is too deep for the state types
     const finish = finishDraft as (d: unknown, listener?: PatchListener) => unknown;
@@ -155,6 +292,7 @@ export class TransactionalDocument<S extends DocStateMeta> {
       next = reconciled[0]; patches.push(...reconciled[1]);
       inversePatches = [...reconciled[2], ...inversePatches];
     }
+    if (!autoFreeze) sealChanged(next, patches);
     this._state = next;
     if (patches.length) {
       this._version++;
@@ -180,7 +318,7 @@ export class TransactionalDocument<S extends DocStateMeta> {
     if (this.draft) throw new Error('Cannot apply patches inside a transaction');
     // cast: immer's generic instantiation is too deep for the states' nested Maps
     const keepNextId = this._state.meta.nextId;
-    let next = applyPatches(this._state as object, patches) as S;
+    let next = applyRecordedPatches(this._state as object, patches) as S;
     // Persistent ids are never reused: undo must not roll the allocator back, or entities created
     // afterwards would collide with ids that still live in the undo/redo history and caches.
     if (this.monotonicIds && next.meta.nextId < keepNextId) {
@@ -188,6 +326,7 @@ export class TransactionalDocument<S extends DocStateMeta> {
         (d as DocStateMeta).meta.nextId = keepNextId;
       }) as S;
     }
+    if (!autoFreeze) sealChanged(next, patches);
     this._state = next;
     this._version++;
     this.events.emit('change', { label, patches, inversePatches, source });
@@ -196,7 +335,7 @@ export class TransactionalDocument<S extends DocStateMeta> {
   /** Replace the whole state (file load). Listeners rebuild from scratch on `source: 'load'`. */
   replaceState(state: S, label = 'load'): void {
     if (this.draft) throw new Error('Cannot replace state inside a transaction');
-    this._state = freeze(state, true);
+    this._state = this.seal(state);
     this._version++;
     this.events.emit('change', { label, patches: [], inversePatches: [], source: 'load' });
   }

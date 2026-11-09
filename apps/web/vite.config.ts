@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { execSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 import { gitVersion } from './buildVersion';
 import { contentSecurityPolicy, contentSecurityPolicyPlugin } from './contentSecurityPolicy';
@@ -52,7 +52,20 @@ function crossOriginIsolation(): Plugin {
   };
 }
 
-export default defineConfig(({ mode }) => {
+/**
+ * The kernel is a compiled module, fetched or built before Vite runs. A missing module stops dev and build alike; a stale
+ * one (edited Rust sources) stops only a production build, so working on the kernel does not need a rebuild per save.
+ */
+async function requireKernelModule(command: 'serve' | 'build'): Promise<void> {
+  const { moduleStatus } = (await import(pathToFileURL(fileURLToPath(new URL('../../scripts/kernel-wasm-artifact.mjs', import.meta.url))).href)) as { moduleStatus: () => { state: string; message?: string } };
+  const status = moduleStatus();
+  const howTo = 'Run `pnpm fetch:kernel-wasm` for the prebuilt module or `pnpm build:kernel-wasm` to compile it.';
+  if (status.state === 'missing' || (command === 'build' && status.state === 'stale')) throw new Error(`The kernel module is ${status.state}: ${status.message} ${howTo}`);
+  if (status.state === 'stale') console.warn(`pushform: ${status.message} ${howTo}`);
+}
+
+export default defineConfig(async ({ mode, command }) => {
+  await requireKernelModule(command);
   const env = loadEnv(mode, fileURLToPath(new URL('.', import.meta.url)), 'VITE_');
   // The policy names this build's own Supabase project and backends.
   const policy = () => contentSecurityPolicy('web', {
@@ -66,10 +79,11 @@ export default defineConfig(({ mode }) => {
       thirdPartyNoticesPlugin(repoRoot)],
     define: {
       __PF_BUILD__: JSON.stringify(buildInfo()),
+      // The desktop app's native kernel: off unless PF_NATIVE_KERNEL=1 at build time, so a normal build compiles it out.
+      __PF_NATIVE_KERNEL__: JSON.stringify(process.env.PF_NATIVE_KERNEL === '1'),
     },
     server: { port: 5174, strictPort: true },
     worker: { format: 'es' },
-    optimizeDeps: { exclude: ['manifold-3d'] },
     build: { target: 'es2022', sourcemap: 'hidden' },
     clearScreen: false,
   };

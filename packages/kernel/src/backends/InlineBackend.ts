@@ -1,50 +1,31 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import type { KernelRequest, ResFor } from '../protocol';
-import { KernelError } from '../protocol';
-import { createKernelContext, type KernelContext } from '../worker/context';
-import { dispatch } from '../worker/dispatch';
-import { sendWithReupload, type KernelBackend, type MeshProvider } from './KernelBackend';
-
-export interface InlineBackendOptions {
-  /** Number of (body, version) Manifolds kept alive; default 64. */
-  cacheCapacity?: number;
-}
+import { InlineRustTransport } from './InlineRustTransport';
+import type { KernelBackend, MeshProvider } from './KernelBackend';
+import { NativeKernelBackend } from './NativeKernelBackend';
 
 /**
- * Runs the ops in-process (Node tests, CLI, headless MCP). Requests still return promises because
- * the wasm module loads asynchronously; after that every op runs synchronously on the caller's thread.
+ * Runs the kernel in-process on this thread (Node tests, CLI, headless MCP), on the Rust kernel's WebAssembly module.
+ * Requests still return promises because the module loads asynchronously; after that every op runs synchronously.
  */
 export class InlineBackend implements KernelBackend {
-  private context: Promise<KernelContext> | undefined;
-  private provider: MeshProvider | undefined;
-  private disposed = false;
+  private readonly rust = new NativeKernelBackend(undefined, new InlineRustTransport(), { fallback: false });
 
-  constructor(private readonly options: InlineBackendOptions = {}) {}
-
-  /** The context, for tests that want to poke at the cache or wasm module directly. */
-  getContext(): Promise<KernelContext> {
-    if (this.disposed) return Promise.reject(new KernelError('Aborted', 'InlineBackend is disposed'));
-    this.context ??= createKernelContext(this.options.cacheCapacity);
-    return this.context;
-  }
-
-  async request<R extends KernelRequest>(req: R): Promise<ResFor<R>> {
-    const ctx = await this.getContext();
-    return sendWithReupload(req, (q) => Promise.resolve(dispatch(ctx, q)), this.provider);
+  request<R extends KernelRequest>(req: R): Promise<ResFor<R>> {
+    return this.rust.request(req);
   }
 
   setMeshProvider(provider: MeshProvider | undefined): void {
-    this.provider = provider;
+    this.rust.setMeshProvider(provider);
   }
 
   /** Nothing runs concurrently in-process; this just clears the body cache, like a worker restart. */
   abortAll(): void {
-    void this.context?.then((ctx) => ctx.cache.clear());
+    this.rust.abortAll();
   }
 
   dispose(): void {
-    this.abortAll();
-    this.disposed = true;
+    this.rust.dispose();
   }
 }

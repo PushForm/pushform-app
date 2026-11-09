@@ -39,6 +39,7 @@ describe('third-party notices', () => {
     expect(files.slice(0, 4)).toEqual(['crates/step-reader/NOTICE.md', 'crates/solidcraft/NOTICE-solidcraft.txt',
       'crates/solidcraft/LICENSE-MIT', 'crates/solidcraft/LICENSE-APACHE']);
     expect(files).toContain('crates/solidcraft/vendor/truck-shapeops/LICENSE');
+    expect(files).toContain('crates/native-kernel/NOTICE.md');
     const npm = { count: 1, text: 'NPM SECTION' };
     const without = noticesText(root, npm, null);
     expect(without).toContain('NPM SECTION');

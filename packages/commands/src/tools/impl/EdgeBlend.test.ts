@@ -16,7 +16,8 @@ import { modelCommands } from '../../commands/model';
 import { pushPullCommands } from '../../commands/pushpull';
 import { sketchCommands } from '../../commands/sketch';
 import { curveCommands, type AddCurveInput } from '../../commands/curves';
-import { edgeBlendCommands, edgeProfileFit } from '../../commands/edgeBlend';
+import { edgeBlendCommands } from '../../commands/edgeBlend';
+import { solidCommands } from '../../commands/solids';
 import { ToolManager } from '../ToolManager';
 import { NO_MODIFIERS, type Modifiers, type Tool, type ToolPointerEvent } from '../Tool';
 import { edgeBlendTools, edgeToolAliasCommands, type EdgeBlendTool } from './EdgeBlend';
@@ -81,7 +82,7 @@ function setup() {
     [SERVICE_KERNEL, kernel],
   ]);
   const registry = new CommandRegistry({ tx: host, camera, services });
-  for (const c of [editCommands, modelCommands, sketchCommands, curveCommands, pushPullCommands, edgeBlendCommands]) registry.registerAll(c);
+  for (const c of [editCommands, modelCommands, sketchCommands, curveCommands, pushPullCommands, solidCommands, edgeBlendCommands]) registry.registerAll(c);
   const tools = new ToolManager(registry, camera);
   registry.ctx.tools = tools;
   tools.register(selectStub);
@@ -428,11 +429,26 @@ describe('Profile Edges in place of Fillet and Chamfer', () => {
     expect(meshTopologyProblems(body(id).mesh)).toEqual([]);
   });
 
-  it('classifies the edges a router profile would cut', () => {
-    const { registry, body } = setup();
-    const id = addBox(registry);
-    const keys = [...body(id).edges.keys()];
-    expect(edgeProfileFit(body(id), keys)).toEqual({ cut: 12, inside: 0, notSquare: 0 });
+  it('offers every profile on every edge, with no disabled option or note', async () => {
+    const { tools, registry, body, root } = setup();
+    const profile = tools.get('profile') as EdgeBlendTool;
+    const a = registry.execute('model.addBox', { min: [0, 0, 0], max: [2, 1, 1] }) as number;
+    const b = registry.execute('model.addBox', { min: [1, 0, 1], max: [2, 1, 2] }) as number;
+    await registry.execute('solids.union', { a: { kind: 'body', path: [], id: a }, b: { kind: 'body', path: [], id: b } });
+    const id = [...root().bodies.keys()][0]! as number;
+    tools.activate('profile');
+    const inside = edgeAt(body(id), [1, 0, 1], [1, 1, 1]);
+    tools.click(at(edgeRef(id, inside)));
+    tools.onVcb({ kind: 'length', meters: 0.1, raw: 0.1, unit: null });
+    const choice = tools.status().settings!.find((c) => c.id === 'profile')!;
+    expect(choice.kind === 'choice' && choice.options.filter((o) => o.disabled)).toEqual([]);
+    expect(tools.status().settings!.filter((c) => c.kind === 'note')).toEqual([]);
+    for (const name of ['cove', 'ogee', 'bead', 'step', 'chamfer', 'round']) {
+      tools.setting('profile', name);
+      await profile.previewSettled();
+      expect(profile.message).toBeNull();
+      expect(profile.previewMeshes).toHaveLength(1);
+    }
   });
 });
 

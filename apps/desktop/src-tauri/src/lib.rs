@@ -2,6 +2,8 @@
 // Copyright 2026 PushForm contributors
 mod updates;
 mod clipboard;
+#[cfg(feature = "native-kernel")]
+mod native_kernel;
 mod step;
 mod window_fit;
 
@@ -22,10 +24,18 @@ pub fn run() {
       updates::update_install,
       step::step_convert,
       step::step_export,
-      step::step_cancel
+      step::step_cancel,
+      #[cfg(feature = "native-kernel")]
+      native_kernel::native_kernel_available,
+      #[cfg(feature = "native-kernel")]
+      native_kernel::native_kernel_call,
+      #[cfg(feature = "native-kernel")]
+      native_kernel::native_kernel_abort
     ])
     .setup(|app| {
       use tauri::Manager;
+      #[cfg(feature = "native-kernel")]
+      native_kernel::manage(app);
       if let Some(window) = app.get_webview_window("main") {
         // macOS keeps its traffic lights over the overlay title bar; elsewhere the app draws its own window controls.
         #[cfg(not(target_os = "macos"))]

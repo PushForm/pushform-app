@@ -1,0 +1,30 @@
+[package]
+name = "pushform-kernel-wasm"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+description = "PushForm's geometry kernel as a WebAssembly module with a small C ABI, built with Emscripten for the web app"
+
+[[bin]]
+name = "pushform-kernel"
+path = "src/main.rs"
+
+# The same module with requests that fail on purpose, for the failure tests. Never part of a shipped build.
+[[bin]]
+name = "pushform-kernel-faults"
+path = "src/main.rs"
+required-features = ["fault-injection"]
+
+[dependencies]
+pushform-native-kernel = { path = "../native-kernel", default-features = false }
+# A direct dependency so this crate's build script sees the link flags Manifold's C++ build needs (see build.rs).
+manifold-csg-sys = { path = "../native-kernel/vendor/manifold-csg-sys", default-features = false }
+
+[features]
+# Adds requests that fail on purpose, for the failure tests. Never part of a shipped build.
+fault-injection = ["pushform-native-kernel/fault-injection"]
+
+[profile.release]
+opt-level = 3
+lto = "thin"

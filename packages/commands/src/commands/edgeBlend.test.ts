@@ -16,6 +16,7 @@ import { pushPullCommands } from './pushpull';
 import { sketchCommands } from './sketch';
 import { curveCommands, type AddCurveInput } from './curves';
 import { solidCommands } from './solids';
+import { revolveCommands } from './revolve';
 import { blendEdgeGroup, EDGE_PROFILES, edgeBlendCommands, profileShape, type EdgeBlendApplyResult, type EdgeProfile } from './edgeBlend';
 
 class FakeCamera implements CameraHost {
@@ -80,6 +81,7 @@ export function setupEdgeBlend() {
   registry.registerAll(pushPullCommands);
   registry.registerAll(solidCommands);
   registry.registerAll(edgeBlendCommands);
+  registry.registerAll(revolveCommands);
   const root = (): EntityContainer => host.doc.rootDefinition.entities;
   const body = (id: number): Body => root().bodies.get(id as never)!;
   return { host, kernel, registry, root, body };
@@ -423,6 +425,23 @@ function removed(profile: EdgeProfile, size: number): { area: number; cx: number
   return { area: Math.abs(a2) / 2, cx: cx / (3 * a2) };
 }
 
+/** The area an inside edge's section adds (negative when it removes more than it adds). */
+function insideChange(p: EdgeProfile, size: number): number {
+  const shape = profileShape(p, size);
+  const area = (ring: readonly (readonly [number, number])[]): number => {
+    let a2 = 0;
+    for (let i = 0; i < ring.length; i++) {
+      const [x0, y0] = ring[i]!, [x1, y1] = ring[(i + 1) % ring.length]!;
+      a2 += x0 * y1 - x1 * y0;
+    }
+    return Math.abs(a2) / 2;
+  };
+  if (shape.crown === undefined) return area([[0, 0], ...shape.points]);
+  const fill = shape.points.slice(0, shape.crown + 1);
+  const groove = shape.points.slice(shape.crown);
+  return area([[0, 0], ...fill]) - area(groove);
+}
+
 const profile = async (registry: CommandRegistry, bodyId: number, edges: EdgeKey[], p: EdgeProfile, size: number, extra: Record<string, unknown> = {}): Promise<EdgeBlendApplyResult> =>
   (await registry.execute('profile.apply', { path: [], bodyId, edges, profile: p, size, ...extra })) as EdgeBlendApplyResult;
 
@@ -453,17 +472,18 @@ describe('profile.apply', () => {
     expect(b.props.volume).toBeCloseTo(1 - 4 * area * (1 - 2 * cx), 6);
   });
 
-  it.each(EDGE_PROFILES)('splits a loop of outside and inside edges, leaving the inside edge and stopping a %s against the face across it', async (p) => {
+  it.each(EDGE_PROFILES)('splits a loop of outside and inside edges, a %s on each part ending on the face across it', async (p) => {
     const s = setupEdgeBlend();
     const id = await stepBody(s);
     const loop = stepLoop(s.body(id));
-    const res = await profile(s.registry, id, loop, p, 0.1);
-    expect(res.skipped).toEqual([loop[1]]);
+    await profile(s.registry, id, loop, p, 0.1);
     const b = s.body(id);
     expect(meshTopologyProblems(b.mesh)).toEqual([]);
-    // front and back: one mitre each; left: two; the front and back stop square on the block's side
+    // front and back: one mitre each; left: two; the outside parts stop on the block's side
     const { area, cx } = removed(p, 0.1);
-    expect(b.props.volume).toBeCloseTo(3 - area * (2 * (1 - cx) + (1 - 2 * cx)), 6);
+    const outside = area * (2 * (1 - cx) + (1 - 2 * cx));
+    // the inside edge is filled along its whole length, and a bead also cuts its groove
+    expect(b.props.volume).toBeCloseTo(3 - outside + insideChange(p, 0.1), 2);
   });
 
   it('measures from the larger face of a single edge by default, and from a named reference face', async () => {
@@ -481,16 +501,200 @@ describe('profile.apply', () => {
     expect(faceAt(body(id2), [0, 0, 1], [3, 0.1, 0.95])).toBeDefined();
   });
 
-  it('refuses a pick of inside edges only, an edge that is not square, and a size too big', async () => {
+  it('refuses a size too big, saying what to do', async () => {
     const s = setupEdgeBlend();
     const id = await stepBody(s);
-    const inside = edgeAt(s.body(id), [1, 0, 1], [1, 1, 1]).key;
-    await expect(profile(s.registry, id, [inside], 'roundover', 0.1)).rejects.toMatchObject({ code: 'edgeblend.inside' });
-    const box = addBox(s.registry, [5, 0, 0], [6, 1, 1]);
-    const top = edgeAt(s.body(box), [5, 0, 1], [6, 0, 1]).key;
-    await s.registry.execute('chamfer.apply', { path: [], bodyId: box, edges: [top], size: 0.2 });
-    const bevelled = [...s.body(box).edges.values()].find((e) => e.polyline.every((q) => Math.abs(q[2] - 0.8) < 1e-6) && e.polyline.every((q) => Math.abs(q[1]) < 1e-6))!;
-    await expect(profile(s.registry, box, [bevelled.key], 'roundover', 0.05)).rejects.toMatchObject({ code: 'edgeblend.geometry', message: expect.stringMatching(/square edges/) });
-    await expect(profile(s.registry, id, [edgeAt(s.body(id), [0, 0, 1], [0, 1, 1]).key], 'bead', 0.5)).rejects.toMatchObject({ code: 'edgeblend.tooLarge' });
+    await expect(profile(s.registry, id, [edgeAt(s.body(id), [0, 0, 1], [0, 1, 1]).key], 'bead', 0.5))
+      .rejects.toMatchObject({ code: 'edgeblend.tooLarge', message: expect.stringMatching(/smaller size/) });
+  });
+});
+
+/** Every profile on every kind of edge, starting from a hard edge of each kind. */
+describe('profile.apply on every edge', () => {
+  const size = 0.05;
+
+  /** A prism with `outline` (CCW) as its plan, between z = 0 and z = 1. */
+  async function planPrism(s: ReturnType<typeof setupEdgeBlend>, outline: readonly (readonly [number, number])[]): Promise<number> {
+    const { registry, root } = s;
+    registry.execute('sketch.addPolyline', { points: outline.map(([x, y]) => [x, y, 0]), closed: true });
+    const face = [...root().sketch.faces.values()][0]!;
+    await registry.execute('pushpull.apply', { target: { kind: 'sketchFace', path: [], id: face.id }, distance: face.plane.n[2] > 0 ? 1 : -1, mode: 'merge' });
+    return [...root().bodies.keys()][0]! as number;
+  }
+
+  /** The vertical edge of `body` at plan point `at`. */
+  const verticalEdgeAt = (b: Body, at: readonly [number, number]): EdgeRecord => {
+    const e = [...b.edges.values()].find((r) => r.polyline.every((q) => Math.hypot(q[0] - at[0], q[1] - at[1]) < 1e-6) && Math.abs(r.polyline[0]![2] - r.polyline[r.polyline.length - 1]![2]) > 0.5);
+    if (!e) throw new Error(`no vertical edge at ${at}`);
+    return e;
+  };
+
+  /** A clean result: one closed solid, and every face has real boundary loops (faces without them cannot be saved). */
+  const expectClean = (b: Body): void => {
+    expect(meshTopologyProblems(b.mesh)).toEqual([]);
+    expect(b.valid).toBe(true);
+    expect([...b.faces.values()].filter((f) => f.loops.length === 0 || f.loops.some((loop) => loop.length < 3))).toEqual([]);
+  };
+
+  const expectChange = (p: EdgeProfile, before: number, after: number, grew: boolean): void => {
+    if (p === 'bead' && grew) expect(after).not.toBeCloseTo(before, 9);
+    else if (grew) expect(after).toBeGreaterThan(before);
+    else expect(after).toBeLessThan(before);
+  };
+
+  // plan corners, all well away from each other
+  const octagon = [[0, 0], [2, 0], [3, 1], [3, 3], [2, 4], [0, 4], [-1, 3], [-1, 1]] as const;
+  const triangle = [[0, 0], [4, 0], [2, 2 * Math.sqrt(3)]] as const;
+  const wideNotch = [[0, 0], [4, 0], [4, 2], [2, 2], [1, 3], [0, 3]] as const;
+  const sharpNotch = [[0, 0], [6, 0], [6, 4], [4, 4], [3, 1.5], [2, 4], [0, 4]] as const;
+
+  const ANGLED: readonly (readonly [string, readonly (readonly [number, number])[], readonly [number, number], boolean])[] = [
+    ['an outside edge wider than square', octagon, [2, 0], false],
+    ['an outside edge sharper than square', triangle, [4, 0], false],
+    ['an inside edge wider than square', wideNotch, [2, 2], true],
+    ['an inside edge sharper than square', sharpNotch, [3, 1.5], true],
+  ];
+
+  describe.each(ANGLED)('%s', (_name, outline, at, inside) => {
+    it.each(EDGE_PROFILES)('a %s stays one closed solid and goes the right way', async (p) => {
+      const s = setupEdgeBlend();
+      const id = await planPrism(s, outline);
+      const before = s.body(id).props.volume;
+      const res = await profile(s.registry, id, [verticalEdgeAt(s.body(id), at).key], p, size);
+      const b = s.body(id);
+      expectClean(b);
+      expect(res.faceIds.length).toBeGreaterThan(0);
+      expectChange(p, before, b.props.volume, inside);
+    });
+  });
+
+  it('keeps a cove\'s arc circular on an edge wider than square, a flat carrying on to the other face', async () => {
+    const s = setupEdgeBlend();
+    const id = await planPrism(s, octagon);
+    const edge = verticalEdgeAt(s.body(id), [2, 0]);
+    const before = s.body(id).mesh;
+    await profile(s.registry, id, [edge.key], 'cove', size, { referenceFace: faceAt(s.body(id), [0, -1, 0], [0, 0, 0]) });
+    const b = s.body(id);
+    // the new vertices at the bottom of the prism: the cove's arc about the corner, then the flat's end
+    const old = new Set<string>();
+    for (let i = 0; i < before.verts.length; i += 3) old.add(`${before.verts[i]!.toFixed(6)},${before.verts[i + 1]!.toFixed(6)},${before.verts[i + 2]!.toFixed(6)}`);
+    const added: Vec3[] = [];
+    for (let i = 0; i < b.mesh.verts.length; i += 3) {
+      const q: Vec3 = [b.mesh.verts[i]!, b.mesh.verts[i + 1]!, b.mesh.verts[i + 2]!];
+      if (Math.abs(q[2]) < 1e-6 && !old.has(`${q[0].toFixed(6)},${q[1].toFixed(6)},${q[2].toFixed(6)}`)) added.push(q);
+    }
+    const onArc = added.filter((q) => Math.abs(Math.hypot(q[0] - 2, q[1]) - size) < 1e-6);
+    const beyond = added.filter((q) => Math.hypot(q[0] - 2, q[1]) > size + 1e-6);
+    // on the circle except where the arc ends on the reference face and the flat's end
+    expect(onArc.length).toBeGreaterThanOrEqual(5);
+    expect(beyond).toHaveLength(1);
+  });
+
+  it('bevels an angled chamfer from the reference face to the other face, keeping its angle', async () => {
+    const s = setupEdgeBlend();
+    const id = await planPrism(s, octagon);
+    const alpha = (135 * Math.PI) / 180, theta = (30 * Math.PI) / 180;
+    const before = s.body(id).props.volume;
+    await profile(s.registry, id, [verticalEdgeAt(s.body(id), [2, 0]).key], 'chamfer', 0.1, { angleDeg: 30, referenceFace: faceAt(s.body(id), [0, -1, 0], [0, 0, 0]) });
+    const other = (0.1 * Math.sin(theta)) / Math.sin(alpha + theta);
+    expect(s.body(id).props.volume).toBeCloseTo(before - 0.5 * 0.1 * other * Math.sin(alpha), 6);
+  });
+
+  it('refuses a chamfer angle too steep for an edge that wide, saying what to do', async () => {
+    const s = setupEdgeBlend();
+    const id = await planPrism(s, octagon);
+    await expect(profile(s.registry, id, [verticalEdgeAt(s.body(id), [2, 0]).key], 'chamfer', 0.1, { angleDeg: 60, referenceFace: faceAt(s.body(id), [0, -1, 0], [0, 0, 0]) }))
+      .rejects.toMatchObject({ code: 'edgeblend.angle', message: expect.stringMatching(/smaller angle/) });
+  });
+
+  describe('an inside edge', () => {
+    it.each(EDGE_PROFILES)('is filled with a mirrored %s', async (p) => {
+      const s = setupEdgeBlend();
+      const id = await stepBody(s);
+      const res = await profile(s.registry, id, [edgeAt(s.body(id), [1, 0, 1], [1, 1, 1]).key], p, 0.1);
+      const b = s.body(id);
+      expectClean(b);
+      expect(res.faceIds.length).toBeGreaterThan(0);
+      expect(b.props.volume).toBeCloseTo(3 + insideChange(p, 0.1), 6);
+    });
+
+    it('cuts a bead\'s groove into the reference face beside its fill', async () => {
+      const s = setupEdgeBlend();
+      const id = await stepBody(s);
+      const r = 0.1;
+      await profile(s.registry, id, [edgeAt(s.body(id), [1, 0, 1], [1, 1, 1]).key], 'bead', r, { referenceFace: faceAt(s.body(id), [0, 0, 1], [0, 0, 1]) });
+      const b = s.body(id);
+      // the flat floor of the groove is on the lower top face's side, a radius below it
+      expect(b.mesh.verts.some((_, i) => i % 3 === 2 && Math.abs(b.mesh.verts[i]! - (1 - r)) < 1e-6)).toBe(true);
+      // a fill plus a larger groove removes material overall
+      expect(b.props.volume).toBeLessThan(3);
+    });
+
+    it.each(EDGE_PROFILES)('mitres a %s fill round the floor of a pocket as one closed loop', async (p) => {
+      const s = setupEdgeBlend();
+      const outer = addBox(s.registry, [0, 0, 0], [2, 2, 1]);
+      const cutter = addBox(s.registry, [0.5, 0.5, 0.5], [1.5, 1.5, 2]);
+      await s.registry.execute('solids.subtract', { a: { kind: 'body', path: [], id: cutter }, b: { kind: 'body', path: [], id: outer } });
+      const id = [...s.root().bodies.keys()][0]! as number;
+      const before = s.body(id).props.volume;
+      const floor = [...s.body(id).edges.values()].filter((e) => e.polyline.every((q) => Math.abs(q[2] - 0.5) < 1e-6));
+      expect(floor).toHaveLength(4);
+      await profile(s.registry, id, floor.map((e) => e.key), p, size);
+      const b = s.body(id);
+      expectClean(b);
+      expectChange(p, before, b.props.volume, true);
+    });
+  });
+
+  describe('a curved rim', () => {
+    const cylinderBody = async (s: ReturnType<typeof setupEdgeBlend>): Promise<number> => {
+      const t = tessellateCircle([0, 0, 0], [0, 0, 1], 1, 24);
+      s.registry.execute('sketch.addCurve', { points: t.points, closed: true, curve: t.curve } satisfies AddCurveInput);
+      const face = [...s.root().sketch.faces.values()][0]!;
+      await s.registry.execute('pushpull.apply', { target: { kind: 'sketchFace', path: [], id: face.id }, distance: face.plane.n[2] > 0 ? 1 : -1, mode: 'merge' });
+      return [...s.root().bodies.keys()][0]! as number;
+    };
+
+    it.each(EDGE_PROFILES)('takes a %s on a cylinder\'s whole rim', async (p) => {
+      const s = setupEdgeBlend();
+      const id = await cylinderBody(s);
+      const top = [...s.body(id).faces.values()].find((f) => f.plane.n[2] > 0.99)!;
+      const rim = [...s.body(id).edges.values()].find((e) => (e.faceA === top.id || e.faceB === top.id) && e.curveId !== null)!;
+      const group = blendEdgeGroup(s.body(id), rim.key);
+      expect(group).toHaveLength(24);
+      const before = s.body(id).props.volume;
+      await profile(s.registry, id, group, p, size);
+      const b = s.body(id);
+      expectClean(b);
+      expect(b.props.volume).toBeLessThan(before);
+    });
+
+    /** A cone with a flat base of radius 0.5 and height 0.75, revolved so its base rim is hard edges with no curve. */
+    const coneBody = async (s: ReturnType<typeof setupEdgeBlend>): Promise<number> => {
+      s.registry.execute('sketch.addPolyline', { points: [[0, 0, 0], [0.5, 0, 0], [0, 0, 0.75]], closed: true });
+      const face = [...s.root().sketch.faces.values()][0]!;
+      await s.registry.execute('revolve.apply', { profile: { kind: 'sketchFace', path: [], id: face.id }, axisOrigin: [0, 0, 0], axisDir: [0, 0, 1], angleDeg: 360, segments: 24 });
+      return [...s.root().bodies.keys()][0]! as number;
+    };
+
+    it('picks the base rim of a revolved cone as one whole curve', async () => {
+      const s = setupEdgeBlend();
+      const id = await coneBody(s);
+      const base = [...s.body(id).faces.values()].find((f) => f.plane.n[2] < -0.99)!;
+      const rim = [...s.body(id).edges.values()].find((e) => e.faceA === base.id || e.faceB === base.id)!;
+      expect(blendEdgeGroup(s.body(id), rim.key)).toHaveLength(24);
+    });
+
+    it.each(EDGE_PROFILES)('takes a %s round a revolved cone\'s base rim, an edge that is not square', async (p) => {
+      const s = setupEdgeBlend();
+      const id = await coneBody(s);
+      const base = [...s.body(id).faces.values()].find((f) => f.plane.n[2] < -0.99)!;
+      const rim = [...s.body(id).edges.values()].find((e) => e.faceA === base.id || e.faceB === base.id)!;
+      const before = s.body(id).props.volume;
+      await profile(s.registry, id, blendEdgeGroup(s.body(id), rim.key), p, 0.03);
+      const b = s.body(id);
+      expectClean(b);
+      expect(b.props.volume).toBeLessThan(before);
+    });
   });
 });

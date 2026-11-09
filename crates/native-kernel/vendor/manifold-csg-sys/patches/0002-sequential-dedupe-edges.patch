@@ -1,0 +1,16 @@
+diff --git a/src/edge_op.cpp b/src/edge_op.cpp
+index 0587b467..5cf51eba 100644
+--- a/src/edge_op.cpp
++++ b/src/edge_op.cpp
+@@ -900,7 +900,10 @@ void Manifold::Impl::DedupeEdges() {
+         });
+       }
+     };
+-#if MANIFOLD_PAR == 1
++    // PushForm addition: the parallel branch visits and reports duplicate halfedges in halfedge-index order, while the
++    // sequential branch reports them in vertex-cycle order. DedupeEdge renumbers vertices and collapses edges as it goes,
++    // so the two orders produce different meshes. Always use the sequential order, matching the WebAssembly build.
++#if 0
+     if (nbEdges > 1e4) {
+       std::mutex mutex;
+       tbb::combinable<std::vector<bool>> store(

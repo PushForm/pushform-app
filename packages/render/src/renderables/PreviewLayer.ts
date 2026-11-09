@@ -5,7 +5,7 @@ import type { MeshData, Vec3, Mat4 } from '@pushform/core';
 import { BackSide, FrontSide, Group, Mesh, MeshLambertMaterial } from 'three';
 import type { BufferGeometry } from 'three';
 import type { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
-import { BACK_COLOR, FACE_MATERIAL_COMMON, FRONT_COLOR } from './BodyRenderable';
+import { BACK_COLOR, FACE_MATERIAL_COMMON, FRONT_COLOR, patchSelectTint } from './BodyRenderable';
 import { buildFaceGeometry, extractEdgeSegments, transformedVerts } from './buildGeometry';
 import type { RenderBodySurface } from '../types';
 import { EdgeBatch } from './EdgeBatch';
@@ -42,6 +42,10 @@ export class PreviewLayer {
   constructor(private readonly edgeMaterial: LineMaterial) {
     this.group.name = 'Preview';
     this.group.renderOrder = 5;
+    // Bright Studio and the other studio environments light faces in the shader, with no scene
+    // lights, so a preview needs the same patch as the solid it replaces or it renders black.
+    patchSelectTint(this.front);
+    patchSelectTint(this.back);
   }
 
   private transform: Mat4 = M4_IDENTITY;

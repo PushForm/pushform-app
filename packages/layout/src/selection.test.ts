@@ -6,8 +6,11 @@ import { createLinearDimension } from './dimensions';
 import { entitiesInLasso, entitiesInSelectionBox, lassoIsCrossing, layoutEntityBounds, selectableLayoutEntities } from './selection';
 
 function populate() {
-  const doc = createLayoutDocument();
-  const pageId = doc.state.pageOrder[0]!, page = doc.state.pages.get(pageId)!;
+  // Committed state is frozen, and these tests build their fixtures by hand: work on a copy of what they change.
+  const committed = createLayoutDocument().state;
+  const doc = { state: { ...committed, layers: new Map([...committed.layers].map(([id, layer]) => [id, { ...layer }])) } };
+  const base = committed.pages.get(committed.pageOrder[0]!)!;
+  const page = { ...base, entities: new Map(base.entities), entityOrder: [...base.entityOrder] };
   const add = (entity: Omit<LayoutEntity, 'id' | 'layerId'>): number => {
     const id = page.entityOrder.length + 1;
     page.entities.set(id, { ...entity, id, layerId: doc.state.layerOrder[0]! } as LayoutEntity);

@@ -22,6 +22,8 @@ import type {
   MeshWire,
   PropertiesRequest,
   PropertiesResult,
+  PushPullPreview,
+  PushPullPreviewRequest,
   PushPullRequest,
   PushPullResult,
   ReleaseResult,
@@ -102,8 +104,10 @@ export class KernelClient {
     return this.backend.request(version === undefined ? { type: 'release', bodyId } : { type: 'release', bodyId, version });
   }
 
-  pushPull(params: Params<PushPullRequest>): Promise<PushPullResult> {
-    return this.backend.request({ type: 'pushPull', ...params });
+  pushPull(params: Params<PushPullPreviewRequest>): Promise<PushPullPreview>;
+  pushPull(params: Params<PushPullRequest>): Promise<PushPullResult>;
+  pushPull(params: Params<PushPullRequest> | Params<PushPullPreviewRequest>): Promise<PushPullResult | PushPullPreview> {
+    return this.backend.request({ type: 'pushPull', ...params } as PushPullRequest | PushPullPreviewRequest);
   }
   extrudeSketch(params: Params<ExtrudeSketchRequest>): Promise<PushPullResult> {
     return this.backend.request({ type: 'extrudeSketch', ...params });

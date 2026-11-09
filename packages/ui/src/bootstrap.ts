@@ -28,7 +28,9 @@ import {
 } from '@pushform/commands';
 import type { DisplayState, Platform, SectionPreviewTool, Tool } from '@pushform/commands';
 import type { Mat4, MeshData } from '@pushform/core';
-import { InlineBackend, KernelClient, WorkerBackend } from '@pushform/kernel';
+import { InlineBackend, KernelClient } from '@pushform/kernel';
+import { desktopKernelBackend } from './desktopKernel';
+import { rustKernelBackend } from './rustKernel';
 import { bodyFromMesh } from '@pushform/model';
 import { Viewport, renderKey } from '@pushform/render';
 import type { RenderBody, RenderDisplay } from '@pushform/render';
@@ -138,7 +140,7 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
   const store = useAppStore;
   const tx = new DocumentHost();
   const kernel =
-    opts.kernel ?? new KernelClient(typeof Worker !== 'undefined' ? new WorkerBackend() : new InlineBackend());
+    opts.kernel ?? new KernelClient(typeof Worker !== 'undefined' ? desktopKernelBackend(rustKernelBackend()) : new InlineBackend());
   const viewport = new Viewport();
   const inference = createInferenceEngine();
   inference.setState(tx.doc.state);

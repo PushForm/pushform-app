@@ -13,7 +13,6 @@ import {
   blendEdgeGroup,
   checkEdgeBlendResult,
   DEFAULT_BLEND_SEGMENTS,
-  edgeProfileFit,
   EdgeBlendParamsSchema,
   EdgeProfileParamsSchema,
   planEdgeBlend,
@@ -69,8 +68,6 @@ const SIZE_LABELS: Readonly<Record<EdgeToolProfile, string>> = {
   step: 'Width and depth',
 };
 
-/** Profiles cut the way a router bit cuts: square outside edges only, inside edges left alone. */
-const ROUTER_PROFILES: ReadonlySet<EdgeToolProfile> = new Set(['cove', 'ogee', 'bead', 'step']);
 /** Profiles with curves, which take a segment count. */
 const CURVED_PROFILES: ReadonlySet<EdgeToolProfile> = new Set(['round', 'cove', 'ogee', 'bead']);
 
@@ -316,8 +313,6 @@ export class EdgeBlendTool implements Tool {
 
   /** The tool options bar: profile, size, Chamfer's angle, the curved profiles' segments. */
   private barSettings(label: string, value: string | undefined): ToolSetting[] {
-    const fit = this.routerFit();
-    const reason = fit && fit.notSquare > 0 ? 'cuts square outside edges only' : undefined;
     const out: ToolSetting[] = [
       {
         kind: 'choice',
@@ -329,25 +324,13 @@ export class EdgeBlendTool implements Tool {
           value: p,
           label: EDGE_TOOL_PROFILE_LABELS[p],
           icon: `profile-${p === 'round' ? 'roundover' : p}`,
-          ...(reason && ROUTER_PROFILES.has(p) ? { disabled: true, reason } : {}),
         })),
       },
       { kind: 'quantity', id: 'size', label, value: value ?? '', quantity: 'length' },
     ];
     if (this.profile === 'chamfer') out.push({ kind: 'quantity', id: 'angle', label: 'Angle', value: `${this.angleDeg ?? 45}°`, quantity: 'angle', priority: 2 });
     if (CURVED_PROFILES.has(this.profile)) out.push({ ...countSetting('segments', 'Segments', this.segments), priority: 3 });
-    if (reason) out.push({ kind: 'note', id: 'fit', text: 'Cove, Ogee, Bead and Step need square outside edges', priority: 3 });
-    else if (fit && fit.inside > 0 && ROUTER_PROFILES.has(this.profile)) {
-      out.push({ kind: 'note', id: 'fit', text: `${fit.inside} inside edge${fit.inside === 1 ? '' : 's'} left alone`, priority: 3 });
-    }
     return out;
-  }
-
-  /** How the router profiles would treat the edge set, or null with no edges picked. */
-  private routerFit(): { cut: number; inside: number; notSquare: number } | null {
-    if (this.bodyId === null || !this.picked.length) return null;
-    const body = this.body(this.bodyId);
-    return body ? edgeProfileFit(body, this.picked) : null;
   }
 
   /** The bar changed a value just after a commit: redo that operation with it, as one undo step. */

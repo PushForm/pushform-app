@@ -13,9 +13,9 @@ import { DocumentHost } from '../host/DocumentHost';
 import { SERVICE_DOCUMENT, SERVICE_KERNEL } from '../host/services';
 import { ToolManager } from '../tools/ToolManager';
 import { NO_MODIFIERS, type ToolPointerEvent } from '../tools/Tool';
-import { pushPullTools, type PushPullTool } from '../tools/impl/PushPull';
+import { PREVIEW_PAUSE_MS, pushPullTools, type PushPullTool } from '../tools/impl/PushPull';
 import { modelCommands } from './model';
-import { planPushPull, PUSH_PULL_MESSAGES, pushPullCommands, runPushPullKernel, type PushPullApplyResult } from './pushpull';
+import { planPushPull, PUSH_PULL_MESSAGES, pushPullCommands, runPushPullKernel, runPushPullPreview, type PushPullApplyResult } from './pushpull';
 
 class FakeCamera implements CameraHost {
   state: CameraState = { eye: [10, -10, 10], target: [0, 0, 0], up: [0, 0, 1], fov: 35, projection: 'perspective', orthoHeight: 10 };
@@ -697,6 +697,231 @@ describe('PushPullTool flow', () => {
   });
 });
 
+describe('PushPullTool previews: cheap while moving, full on a pause', () => {
+  const THROTTLE = 100;
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  /** A box, the tool pressed on its top face, and the clock frozen so previews run only when advanced. */
+  async function pressed() {
+    const s = setup();
+    await s.kernel.init(); // the wasm module loads before the clock stops
+    vi.useFakeTimers();
+    const bodyId = addBox(s.registry);
+    s.tools.activate('pushpull');
+    const tool = s.tools.activeTool as PushPullTool;
+    const body = (): Body => s.root().bodies.get(bodyId as never)!;
+    const top = topFace(body());
+    const realPushPull = s.kernel.pushPull.bind(s.kernel) as unknown as (p: never) => Promise<unknown>;
+    const pushPull = vi.spyOn(s.kernel, 'pushPull');
+    const execute = vi.spyOn(s.registry, 'execute');
+    const isCheap = (p: unknown): boolean => (p as { preview?: boolean }).preview === true;
+    const cheap = (): number => pushPull.mock.calls.filter(([p]) => isCheap(p)).length;
+    const full = (): number => pushPull.mock.calls.filter(([p]) => !isCheap(p)).length;
+    /** Hold the matching kernel calls until the returned function is called. */
+    const holds: { which: (p: unknown) => boolean; gate: Promise<void> }[] = [];
+    pushPull.mockImplementation((async (p: never) => {
+      for (const h of holds) if (h.which(p)) await h.gate;
+      return realPushPull(p);
+    }) as never);
+    const hold = (which: (p: unknown) => boolean): (() => void) => {
+      let open!: () => void;
+      const gate = new Promise<void>((resolve) => (open = resolve));
+      holds.push({ which, gate });
+      return open;
+    };
+    const applied = () => execute.mock.calls.filter(([id]) => id === 'pushpull.apply').map(([, p]) => p as { precomputed?: unknown });
+    s.tools.pointerDown(pe([100, 100], 0, freeInference([0.5, 0.5, 1], GROUND_PLANE, faceHit(bodyId, top, [0.5, 0.5, 1]))));
+    const moveTo = (z: number): void => s.tools.pointerMove(pe([100, 100 - z * 10], -1, freeInference([0.5, 0.5, z], GROUND_PLANE)));
+    const release = (z: number): void => s.tools.pointerUp(pe([100, 100 - z * 10], 0, freeInference([0.5, 0.5, z], GROUND_PLANE)));
+    const advance = (ms: number): Promise<void> => vi.advanceTimersByTimeAsync(ms).then(() => undefined);
+    return { ...s, tool, body, top, bodyId, pushPull, cheap, full, isCheap, hold, applied, moveTo, release, advance };
+  }
+
+  it('runs cheap previews while moving and asks for no full result', async () => {
+    const s = await pressed();
+    for (const z of [1.1, 1.2, 1.3, 1.4, 1.5]) {
+      s.moveTo(z);
+      await s.advance(THROTTLE);
+    }
+    expect(s.cheap()).toBeGreaterThan(0);
+    expect(s.full()).toBe(0);
+    expect(s.tool.previewMeshes).toHaveLength(1);
+    expect(s.tool.previewReplacesBodyId).toBe(s.bodyId);
+    expect(s.body().props.volume).toBeCloseTo(1, 6); // the document is untouched
+  });
+
+  it('commits by running the kernel in full after a cheap preview, never reusing it', async () => {
+    const s = await pressed();
+    s.moveTo(1.25);
+    await s.advance(THROTTLE);
+    expect(s.tool.previewMeshes).toHaveLength(1);
+    expect(s.full()).toBe(0);
+    s.release(1.25);
+    await s.tool.settled;
+    expect(s.full()).toBe(1);
+    expect(s.applied()).toHaveLength(1);
+    expect(s.applied()[0]!.precomputed).toBeUndefined();
+    expect(s.body().props.volume).toBeCloseTo(1.25, 6);
+    expect(s.tool.previewMeshes).toHaveLength(0);
+  });
+
+  it('asks for one full result when the distance holds still, and a commit reuses it', async () => {
+    const s = await pressed();
+    s.moveTo(1.25);
+    await s.advance(PREVIEW_PAUSE_MS + THROTTLE);
+    expect(s.cheap()).toBe(1);
+    expect(s.full()).toBe(1);
+    await s.advance(1000);
+    expect(s.full()).toBe(1);
+    const before = s.pushPull.mock.calls.length;
+    s.release(1.25);
+    await s.tool.settled;
+    expect(s.pushPull.mock.calls.length).toBe(before);
+    expect(s.applied()[0]!.precomputed).toBeDefined();
+    expect(s.body().props.volume).toBeCloseTo(1.25, 6);
+  });
+
+  it('keeps counting the pause through pointer moves that leave the distance alone', async () => {
+    const s = await pressed();
+    s.moveTo(1.25);
+    await s.advance(THROTTLE);
+    s.moveTo(1.25); // jitter: same distance
+    await s.advance(PREVIEW_PAUSE_MS - THROTTLE / 2); // 250 ms since the distance changed, 150 since the jitter
+    expect(s.full()).toBe(1);
+    expect(s.cheap()).toBe(1);
+  });
+
+  it('restarts the pause when the distance changes', async () => {
+    const s = await pressed();
+    s.moveTo(1.25);
+    await s.advance(PREVIEW_PAUSE_MS - 10);
+    s.moveTo(1.3);
+    await s.advance(PREVIEW_PAUSE_MS - 10);
+    expect(s.full()).toBe(0);
+    await s.advance(50);
+    expect(s.full()).toBe(1);
+  });
+
+  it('lets a cheap preview under way finish before asking for the full result', async () => {
+    const s = await pressed();
+    const openCheap = s.hold(s.isCheap);
+    const openFull = s.hold((p) => !s.isCheap(p));
+    s.moveTo(1.25);
+    await s.advance(PREVIEW_PAUSE_MS * 3);
+    expect(s.full()).toBe(0); // still waiting for the cheap one
+    openCheap();
+    await s.advance(0);
+    // The cheap one is drawn while the slower full one runs, rather than being superseded by it.
+    expect(s.tool.previewMeshes).toHaveLength(1);
+    expect(s.cheap()).toBe(1);
+    expect(s.full()).toBe(1);
+    openFull();
+    await s.advance(0);
+    const before = s.pushPull.mock.calls.length;
+    s.release(1.25);
+    await s.tool.settled;
+    expect(s.pushPull.mock.calls.length).toBe(before);
+    expect(s.applied()[0]!.precomputed).toBeDefined();
+  });
+
+  it('asks only once for what is already on its way', async () => {
+    const s = await pressed();
+    const open = s.hold(() => true);
+    s.moveTo(1.25);
+    await s.advance(THROTTLE);
+    s.moveTo(1.25); // jitter while the cheap preview is held
+    await s.advance(THROTTLE);
+    open();
+    await s.advance(0);
+    expect(s.cheap()).toBe(1);
+  });
+
+  it('keeps a sketch face preview reusable: it has no solid to reprocess', async () => {
+    const s = setup();
+    await s.kernel.init();
+    vi.useFakeTimers();
+    s.host.edit('Rectangle', (draft) => {
+      const g = SketchGraph.for(draft);
+      g.addEdge([0, 0, 0], [2, 0, 0]);
+      g.addEdge([2, 0, 0], [2, 1, 0]);
+      g.addEdge([2, 1, 0], [0, 1, 0]);
+      g.addEdge([0, 1, 0], [0, 0, 0]);
+    });
+    const face = [...s.root().sketch.faces.values()][0]!;
+    s.tools.activate('pushpull');
+    const tool = s.tools.activeTool as PushPullTool;
+    const pushPull = vi.spyOn(s.kernel, 'pushPull');
+    const extrude = vi.spyOn(s.kernel, 'extrudeSketch');
+    const execute = vi.spyOn(s.registry, 'execute');
+    const hit: PickHit = { ref: { kind: 'sketchFace', path: [], id: face.id }, point: [1, 0.5, 0], t: 1, normal: face.plane.n, screenDist: 0 };
+    s.tools.pointerDown(pe([100, 100], 0, freeInference([1, 0.5, 0], GROUND_PLANE, hit)));
+    s.tools.pointerMove(pe([100, 60], -1, freeInference([1, 0.5, 0.5], GROUND_PLANE)));
+    await vi.advanceTimersByTimeAsync(THROTTLE);
+    expect(tool.previewMeshes).toHaveLength(1);
+    expect(pushPull).not.toHaveBeenCalled();
+    const before = extrude.mock.calls.length;
+    s.tools.pointerUp(pe([100, 60], 0, freeInference([1, 0.5, 0.5], GROUND_PLANE)));
+    await tool.settled;
+    expect(extrude.mock.calls.length).toBe(before);
+    expect((execute.mock.calls.find(([id]) => id === 'pushpull.apply')![1] as { precomputed?: unknown }).precomputed).toBeDefined();
+    expect(s.bodies()[0]!.props.volume).toBeCloseTo(1, 6);
+  });
+
+  it('commits the correct result on a release during a cheap preview, and drops the late preview', async () => {
+    const s = await pressed();
+    const open = s.hold(s.isCheap);
+    s.moveTo(1.25);
+    await s.advance(THROTTLE); // the cheap preview is on its way and stuck
+    expect(s.cheap()).toBe(1);
+    s.release(1.25);
+    await s.tool.settled;
+    expect(s.applied()[0]!.precomputed).toBeUndefined();
+    expect(s.body().props.volume).toBeCloseTo(1.25, 6);
+    open();
+    await s.advance(0);
+    expect(s.tool.previewMeshes).toHaveLength(0);
+  });
+
+  it('forgets a preview that lands after its drag was cancelled', async () => {
+    const s = await pressed();
+    const open = s.hold(() => true);
+    s.moveTo(1.25);
+    await s.advance(THROTTLE);
+    s.tools.keyDown({ key: 'Escape', code: 'Escape', modifiers: NO_MODIFIERS, repeat: false });
+    open();
+    await s.advance(0);
+    await s.advance(0);
+    s.tools.pointerDown(pe([100, 100], 0, freeInference([0.5, 0.5, 1], GROUND_PLANE, faceHit(s.bodyId, s.top, [0.5, 0.5, 1]))));
+    s.moveTo(1.25);
+    expect(s.tool.previewMeshes).toHaveLength(0);
+    s.tools.keyDown({ key: 'Escape', code: 'Escape', modifiers: NO_MODIFIERS, repeat: false });
+  });
+
+  it('stays silent when a cheap preview fails', async () => {
+    const s = await pressed();
+    s.pushPull.mockRejectedValue(new KernelError('ManifoldError', 'bad'));
+    s.moveTo(1.25);
+    await s.advance(THROTTLE);
+    expect(s.tool.previewMeshes).toHaveLength(0);
+    expect(s.tools.status().instructor).toBe('Click or type distance.');
+  });
+
+  it('refuses a cheap preview given to pushpull.apply as a precomputed result', async () => {
+    const { registry, kernel, root, host } = setup();
+    const bodyId = addBox(registry);
+    const top = topFace(root().bodies.get(bodyId as never)!);
+    const target = { kind: 'face' as const, path: [], id: bodyId, faceId: top.id, region: null };
+    const plan = planPushPull(host.doc.state, target, 0.25, 'merge');
+    if (plan.kind !== 'body') throw new Error('expected a body plan');
+    const cheap = await runPushPullPreview(kernel, plan);
+    await expect(apply(registry, { target, distance: 0.25, mode: 'merge', precomputed: cheap })).rejects.toThrow();
+    expect(root().bodies.get(bodyId as never)!.props.volume).toBeCloseTo(1, 6);
+  });
+});
+
 describe('pushpull.apply refusals and New body', () => {
   const addSheet = (host: DocumentHost): void => {
     host.edit('Rectangle', (draft) => {
@@ -739,7 +964,7 @@ describe('pushpull.apply refusals and New body', () => {
     const bodyId = addBox(registry);
     const top = topFace(root().bodies.get(bodyId as never)!);
     const target = { kind: 'face' as const, path: [], id: bodyId, faceId: top.id, region: null };
-    const stale = await runPushPullKernel(kernel, planPushPull(host.doc.state, target, 0.25, 'merge'), true);
+    const stale = await runPushPullKernel(kernel, planPushPull(host.doc.state, target, 0.25, 'merge'));
     const bottom = [...root().bodies.get(bodyId as never)!.faces.values()].find((f) => v3eq(f.plane.n, [0, 0, -1]))!;
     await apply(registry, { target: { ...target, faceId: bottom.id }, distance: 0.5, mode: 'merge' });
     await apply(registry, { target, distance: 0.25, mode: 'merge', precomputed: stale, precomputedVersion: root().bodies.get(bodyId as never)!.version - 1 });

@@ -13,7 +13,7 @@ import {
   v3dot,
   v3sub,
 } from '@pushform/core';
-import type { PushPullMode, PushPullResult } from '@pushform/kernel';
+import type { PushPullMode, PushPullPreview, PushPullResult } from '@pushform/kernel';
 import type { InferenceOptions, InferenceResult, PickHit, Snap } from '@pushform/inference';
 import { SNAP_COLORS } from '@pushform/inference';
 import type { DocumentState, EntityContainer, EntityRef } from '@pushform/model';
@@ -28,6 +28,7 @@ import {
   planPushPull,
   PUSH_PULL_MESSAGES,
   runPushPullKernel,
+  runPushPullPreview,
   type PushPullApplyParams,
   type PushPullPlan,
   type PushPullTarget,
@@ -42,6 +43,8 @@ import { pointerField } from '../entry';
 const DRAG_PX = 4;
 /** Minimum spacing between real kernel previews while dragging. */
 const PREVIEW_INTERVAL_MS = 80;
+/** How long the distance must hold still before the drag asks for a full kernel result. */
+export const PREVIEW_PAUSE_MS = 200;
 /** A hovered face matches its height only when it is this close to parallel with the pulled face. */
 const MATCH_HEIGHT_MIN_COS = Math.cos(PUSH_PULL_MATCH_HEIGHT_ANGLE);
 /** Point snaps: on the way, they win over a matched height. */
@@ -90,15 +93,34 @@ type State =
       distance: number;
     };
 
-interface Preview {
+/** What a preview was asked to show. */
+interface PreviewRequest {
   readonly key: string;
   readonly distance: number;
   readonly mode: PushPullMode;
-  readonly result: PushPullResult;
+  readonly quality: 'cheap' | 'full';
+}
+
+interface PreviewBase extends PreviewRequest {
+  /** One per resulting solid for a full result; a cheap preview draws all of them as one mesh. */
+  readonly meshes: readonly MeshData[];
   readonly replacesBodyId: number | null;
   /** The body or sketch the result was computed against (its identity changes with every edit). */
   readonly source: unknown;
 }
+
+/** Drawn while the pointer moves. It has no kernel result, so it cannot be committed. */
+interface CheapPreview extends PreviewBase {
+  readonly quality: 'cheap';
+}
+
+/** Computed once the pointer pauses: a kernel result a commit may reuse. */
+interface FullPreview extends PreviewBase {
+  readonly quality: 'full';
+  readonly result: PushPullResult;
+}
+
+type Preview = CheapPreview | FullPreview;
 
 interface LastCommit {
   params: PushPullApplyParams;
@@ -118,7 +140,9 @@ const IDLE: State = { kind: 'idle' };
  * re-apply, one undo entry) or pulls the hovered face. A Ctrl/Alt tap toggles `newBody`. Esc cancels.
  *
  * Drag feedback is a transient prism in the overlay plus a debounced real kernel preview exposed
- * through `previewMeshes` / `previewReplacesBodyId` for the renderer (see those getters).
+ * through `previewMeshes` / `previewReplacesBodyId` for the renderer (see those getters). The
+ * preview is cheap while the distance changes; once it holds still for `PREVIEW_PAUSE_MS` it is
+ * replaced by a full result, which is what a release can commit without running the kernel again.
  */
 export class PushPullTool implements Tool {
   readonly id = 'pushpull';
@@ -139,6 +163,12 @@ export class PushPullTool implements Tool {
   private preview: Preview | null = null;
   private previewTimer: ReturnType<typeof setTimeout> | null = null;
   private lastPreviewAt = 0;
+  /** Armed while waiting for the distance to hold still. */
+  private pauseTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The kernel preview asked for most recently, until it settles. */
+  private requested: PreviewRequest | null = null;
+  /** Settles with the kernel preview asked for most recently. */
+  private previewSettled: Promise<void> = Promise.resolve();
 
   // --- renderer contract ----------------------------------------------------------------------
 
@@ -146,14 +176,13 @@ export class PushPullTool implements Tool {
    * Real kernel preview of the drag, for the renderer (`tool.previewMeshes`). Non-empty only while
    * dragging and only when the latest preview result still matches the current target, distance
    * and mode; otherwise the overlay ghost is all there is. Meshes are `MeshData` in the
-   * coordinates of the edited container (one per resulting solid); `previewMatrix` maps them to
-   * world. In `merge` mode they replace the body `previewReplacesBodyId`, which the renderer
+   * coordinates of the edited container (one per resulting solid for a full result, one in all for
+   * a cheap one); `previewMatrix` maps them to world. In `merge` mode they replace the body `previewReplacesBodyId`, which the renderer
    * should hide while drawing them; for `newBody` and sketch-face pulls they are additional
    * solids and `previewReplacesBodyId` is null.
    */
   get previewMeshes(): readonly MeshData[] {
-    const p = this.currentPreview();
-    return p ? p.result.components.map((c) => ({ verts: c.mesh.verts, tris: c.mesh.tris, faceId: c.mesh.faceId })) : [];
+    return this.currentPreview()?.meshes ?? [];
   }
 
   /** local → world matrix for `previewMeshes` (the edit context's matrix; identity at the root). */
@@ -214,6 +243,7 @@ export class PushPullTool implements Tool {
 
   resume(): void {
     this.schedulePreview();
+    this.armPause();
   }
 
   inferenceOptions(): InferenceOptions {
@@ -242,7 +272,9 @@ export class PushPullTool implements Tool {
     if (this.state.kind === 'dragging') {
       const s = this.state;
       if (!s.moved && screenDist(e.screen, s.downScreen) > DRAG_PX) s.moved = true;
-      s.distance = this.distanceFor(e, s);
+      const distance = this.distanceFor(e, s);
+      if (distance !== s.distance) this.armPause();
+      s.distance = distance;
       this.schedulePreview();
       this.ctx?.requestRender();
       return;
@@ -408,6 +440,7 @@ export class PushPullTool implements Tool {
     // A pull under way is previewed again in the new mode.
     this.clearPreview();
     this.schedulePreview();
+    this.armPause();
     this.ctx?.statusChanged();
     this.ctx?.requestRender();
   }
@@ -565,8 +598,9 @@ export class PushPullTool implements Tool {
     }
     const mode = this.mode;
     const params: PushPullApplyParams = { target: target.ref, distance, mode };
+    // Only a full result can be committed; after a cheap preview the kernel runs in full.
     const pre = this.preview;
-    const preview = pre && pre.key === target.key && pre.distance === distance && pre.mode === mode ? pre : null;
+    const preview = pre?.quality === 'full' && pre.key === target.key && pre.distance === distance && pre.mode === mode ? pre : null;
     const last: LastCommit = { params, applied: false, entry: null };
     this.lastCommit = last;
     this.lastError = null;
@@ -649,29 +683,64 @@ export class PushPullTool implements Tool {
     this.previewTimer = setTimeout(() => {
       this.previewTimer = null;
       this.lastPreviewAt = Date.now();
-      void this.runPreview();
+      this.previewSettled = this.runPreview('cheap');
     }, delay);
   }
 
-  private async runPreview(): Promise<void> {
+  /**
+   * Ask for a full result once the distance has held still. A cheap preview still on its way is
+   * let finish first: asking now would supersede it, and the pointer would wait for the slower run
+   * with nothing new on screen.
+   */
+  private armPause(): void {
+    this.cancelPauseTimer();
+    if (this.state.kind !== 'dragging') return;
+    const timer: ReturnType<typeof setTimeout> = setTimeout(() => {
+      void this.previewSettled.then(() => {
+        if (this.pauseTimer !== timer) return; // the distance changed or the drag ended meanwhile
+        this.pauseTimer = null;
+        this.previewSettled = this.runPreview('full');
+      });
+    }, PREVIEW_PAUSE_MS);
+    this.pauseTimer = timer;
+  }
+
+  private async runPreview(quality: PreviewRequest['quality']): Promise<void> {
     const s = this.state;
     const ctx = this.ctx;
     if (!ctx || s.kind !== 'dragging' || Math.abs(s.distance) <= COPLANAR_TOL) return;
     const { target, distance } = s;
     const mode = this.mode;
-    if (this.preview && this.preview.key === target.key && this.preview.distance === distance && this.preview.mode === mode) return;
+    const covers = (p: PreviewRequest | null): boolean =>
+      p !== null && p.key === target.key && p.distance === distance && p.mode === mode && (p.quality === 'full' || quality === 'cheap');
+    // A request for something already shown, or already on its way, would only supersede it.
+    if (covers(this.preview) || covers(this.requested)) return;
+    const requested: PreviewRequest = { key: target.key, distance, mode, quality };
+    this.requested = requested;
     const host = hostOf(ctx.commands.ctx);
     const kernel = kernelOf(ctx.commands.ctx);
     try {
       const plan = planPushPull(host.doc.state, target.ref, distance, mode);
-      const r = await kernel.coalesced('pushpull-preview', () => runPushPullKernel(kernel, plan, true));
-      if (r.status !== 'current') return;
-      // A push that would leave nothing is refused when it ends; until then the ghost shows it.
-      if (r.value.components.length === 0) return;
-      this.preview = { key: target.key, distance, mode, result: r.value, replacesBodyId: mode === 'merge' ? target.bodyId : null, source: planSource(plan) };
+      // A sketch face has no solid to reprocess, so its full result is as cheap and is reusable.
+      const r = await kernel.coalesced<PushPullResult | PushPullPreview>('pushpull-preview', () =>
+        plan.kind === 'body' && quality === 'cheap' ? runPushPullPreview(kernel, plan) : runPushPullKernel(kernel, plan),
+      );
+      // A result for a drag that has ended must not linger for the next one.
+      if (r.status !== 'current' || this.state !== s) return;
+      const base = { key: target.key, distance, mode, replacesBodyId: mode === 'merge' ? target.bodyId : null, source: planSource(plan) };
+      if ('preview' in r.value) {
+        // A push that would leave nothing is refused when it ends; until then the ghost shows it.
+        if (r.value.mesh.tris.length === 0) return;
+        this.preview = { ...base, quality: 'cheap', meshes: [r.value.mesh] };
+      } else {
+        if (r.value.components.length === 0) return;
+        this.preview = { ...base, quality: 'full', meshes: r.value.components.map((c) => c.mesh), result: r.value };
+      }
       if (this.currentPreview()) ctx.requestRender();
     } catch {
       // A failed preview is not an error the user needs to see; the ghost stays.
+    } finally {
+      if (this.requested === requested) this.requested = null;
     }
   }
 
@@ -680,11 +749,20 @@ export class PushPullTool implements Tool {
       clearTimeout(this.previewTimer);
       this.previewTimer = null;
     }
+    this.cancelPauseTimer();
+  }
+
+  private cancelPauseTimer(): void {
+    if (this.pauseTimer !== null) {
+      clearTimeout(this.pauseTimer);
+      this.pauseTimer = null;
+    }
   }
 
   private clearPreview(): void {
     this.cancelPreviewTimer();
     this.preview = null;
+    this.requested = null;
   }
 }
 
@@ -750,8 +828,8 @@ function planSource(plan: PushPullPlan): unknown {
   return plan.kind === 'body' ? plan.body : plan.container.sketch;
 }
 
-/** The preview result to commit, when it was computed against the face as it is now. */
-function reusablePreview(state: DocumentState, params: PushPullApplyParams, preview: Preview | null): Partial<PushPullApplyParams> {
+/** The full preview result to commit, when it was computed against the face as it is now. */
+function reusablePreview(state: DocumentState, params: PushPullApplyParams, preview: FullPreview | null): Partial<PushPullApplyParams> {
   if (!preview) return {};
   let plan: PushPullPlan;
   try {

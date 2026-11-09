@@ -183,7 +183,7 @@ export const modelOperationSchema = z.discriminatedUnion('op', [
     angleDeg: z.number().gt(0).lt(90).optional().describe('Chamfer only: from the reference face; default 45.'),
     reference: edgeFace.optional().describe('The face the profile is measured from, as a router rides on it, beside every picked edge. Default: the face of the edges\' face selector, else the face a chain\'s edges share, else a lone edge\'s larger face.'),
     segments: z.number().int().min(3).max(96).optional().describe('Faces a full circle of the profile\'s curves would have; default 24.') })
-    .describe('Shape square outside edges of a solid with a router-bit profile, such as a bead along a face frame\'s openings ({face: {facing: [0, -1, 0]}, which: "inner"}, profile: "bead") or an ogee round a table top. Profiles mitre where picked edges meet; inside edges in the pick are left out (skipped lists them) and the profile stops square where it meets one, as a router\'s bearing does. A size too big fails with invalid_geometry and the largest that fits.'),
+    .describe('Shape edges of a solid with a router-bit profile, such as a bead along a face frame\'s openings ({face: {facing: [0, -1, 0]}, which: "inner"}, profile: "bead") or an ogee round a table top. Profiles work on any hard edge: on an inside edge the profile fills the corner (a bead also cuts its groove into the reference face), an edge whose faces are not square keeps the true profile measured from the reference face, and profiles mitre where picked edges meet. A size too big fails with invalid_geometry and the largest that fits.'),
   z.object({ op: z.literal('add_arc'), as: localName.optional(), center: point, normal: shapeNormal, radius: z.number().positive().finite(),
     startDeg: z.number().finite().describe('Counterclockwise about normal from the plane\'s first axis (+x for a level arc).'), endDeg: z.number().finite(),
     segments: z.number().int().min(1).max(360).optional().describe('Default 12.') })
@@ -490,7 +490,7 @@ export interface ModelOverlap {
 export interface ModelOverlapsResult { revision: number; container: number[]; solids: number; overlaps: ModelOverlap[]; truncated: boolean }
 export interface ModelLibraryResult { categories?: { name: string; count: number }[]; materials?: { key: string; name: string; color: string; textured: boolean; grain?: ModelTextureGrain }[] }
 /** A face an operation left as it was, and why. */
-export interface ModelSkipped { ref: ModelRef; reason: 'no_texture' | 'no_grain' | 'end_grain' | 'inside_edge' }
+export interface ModelSkipped { ref: ModelRef; reason: 'no_texture' | 'no_grain' | 'end_grain' }
 /** What an `as` name of an earlier batch names: its kind and id, and a group's or placement's definition. */
 export interface ModelNameEntry { kind: string; id: number; definitionId?: number }
 /** A part of a generated object; `path` runs from the model down to and including it. `copies` counts the placements sharing its definition. */

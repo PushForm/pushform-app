@@ -1048,8 +1048,7 @@ export class ModelDocumentApi {
         }
         await exec<Promise<unknown>>(job.command, { ...job.params, precomputed });
         this.checkSolids(path, [body.id], op.op);
-        const skipped: ModelSkipped[] = plan.skipped.map(edgeKey => ({ ref: { path: [...path], kind: 'edge', id: body.id, edgeKey }, reason: 'inside_edge' }));
-        return { id: body.id, refs: [bodyOut(body.id)], count: edges.length - skipped.length, ...(skipped.length ? { skipped } : {}) };
+        return { id: body.id, refs: [bodyOut(body.id)], count: edges.length };
       }
       case 'add_arc': {
         const sweep = op.endDeg - op.startDeg;

@@ -44,7 +44,7 @@ export const LAYOUT_CURVE_TOL = 1e-5;
 export const EDGE_BLEND_MIN_FACE_ANGLE = (1 * Math.PI) / 180;
 /** Smallest angle (radians) between a filleted or chamfered edge and the face or mitre its tool prism ends on. */
 export const EDGE_BLEND_MIN_END_ANGLE = (10 * Math.PI) / 180;
-/** Largest difference (radians) from a right angle between the faces beside an edge that Profile Edges shapes. */
+/** Largest difference (radians) from a right angle at which Profile Edges treats the faces beside an edge as square. */
 export const EDGE_PROFILE_SQUARE_TOL = (1 * Math.PI) / 180;
 
 /** Largest angle (radians) between a hovered face and the face being pushed or pulled for the pull to match the hovered face's height. */

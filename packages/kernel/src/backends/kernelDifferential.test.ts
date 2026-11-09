@@ -7,8 +7,8 @@
  * code, message and details. Needs the harness binary (see nativeDifferential.test.ts) and the module from
  * `pnpm build:kernel-wasm`; skipped when either is missing.
  */
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { m4translation, meshBox, planeBasis, v3cross, v3normalize, v3sub, type MeshData, type Vec3 } from '@pushform/core';
 import { KernelClient } from '../client/KernelClient';
@@ -20,10 +20,14 @@ import { InlineBackend } from './InlineBackend';
 import type { KernelBackend } from './KernelBackend';
 import { NativeKernelBackend, type NativeKernelTransport } from './NativeKernelBackend';
 import { differentialCases, HarnessTransport, InlineRustTransport, type RustModuleFactory } from './differentialFixtures';
+import { encodeGoldenCorpus, type GoldenRecord } from './goldenCorpus';
+import { encodeRequest } from './nativeWire';
 
 const harnessPath = process.env.PF_KERNEL_HARNESS ?? resolve(__dirname, '../../../../crates/native-kernel/target/release/pushform-native-kernel-harness');
 const modulePath = resolve(__dirname, '../../wasm/pushform-kernel.js');
 const ready = existsSync(harnessPath) && existsSync(modulePath);
+/** Set to a file path to rewrite the golden corpus from this run: fixtures and random sequences, up to the dense-mesh tests. */
+const goldenPath = process.env.PF_RECORD_GOLDENS ? resolve(process.env.PF_RECORD_GOLDENS) : undefined;
 
 type Outcome = { ok: true; value: unknown } | { ok: false; error: KernelErrorInfo };
 
@@ -98,6 +102,10 @@ const outcome = async (p: Promise<unknown>): Promise<Outcome> => {
 class TriadBackend implements KernelBackend {
   readonly counts = new Map<string, number>();
   readonly failures: string[] = [];
+  /** The Rust module's last raw response, when the transport keeps it for the golden recorder. */
+  lastResponse: ArrayBuffer | undefined;
+  readonly golden: GoldenRecord[] = [];
+  recording = false;
   constructor(
     private readonly ts: KernelBackend,
     private readonly native: KernelBackend,
@@ -119,8 +127,22 @@ class TriadBackend implements KernelBackend {
     };
     compare(n, 'native');
     compare(r, 'wasm');
+    if (this.recording) this.record(req, a);
     if (!a.ok) throw Object.assign(new Error(a.error.message), a.error);
     return a.value as ResFor<R>;
+  }
+
+  /** Keep this request and the answer every kernel agreed on. A request that cannot be encoded (invalid options) stays out. */
+  private record(req: KernelRequest, a: Outcome): void {
+    let request: Uint8Array;
+    try {
+      request = new Uint8Array(encodeRequest(req));
+    } catch {
+      return;
+    }
+    if (req.type === 'stats') this.golden.push({ request, outcome: { kind: 'stats', cached: (a.ok ? (a.value as { cached: number }).cached : 0) } });
+    else if (a.ok) this.golden.push({ request, outcome: { kind: 'ok', response: new Uint8Array(this.lastResponse!.slice(0)) } });
+    else this.golden.push({ request, outcome: { kind: 'error', info: JSON.stringify(a.error) } });
   }
 
   abortAll(): void {
@@ -203,8 +225,19 @@ describe.skipIf(!ready)('every kernel operation agrees bit for bit across TypeSc
     };
     const native = new NativeKernelBackend(undefined, tampering, { fallback: false });
     const factory = ((await import(/* @vite-ignore */ modulePath)) as { default: RustModuleFactory }).default;
-    const wasm = new NativeKernelBackend(undefined, new InlineRustTransport(factory), { fallback: false });
+    const wasmTransport = new InlineRustTransport(factory);
+    const keeping: NativeKernelTransport = {
+      available: () => wasmTransport.available(),
+      call: async (request) => {
+        const buffer = await wasmTransport.call(request);
+        triad.lastResponse = buffer;
+        return buffer;
+      },
+      abort: () => wasmTransport.abort(),
+    };
+    const wasm = new NativeKernelBackend(undefined, keeping, { fallback: false });
     triad = new TriadBackend(ts, native, wasm);
+    triad.recording = goldenPath !== undefined;
     client = new KernelClient(triad);
     await client.init();
   });
@@ -675,50 +708,6 @@ describe.skipIf(!ready)('every kernel operation agrees bit for bit across TypeSc
     });
   });
 
-  describe('dense meshes, where the threaded native build takes its parallel code paths', () => {
-    const torus = async (axisOffset: number, segments: number, ringSegments: number, spin: number): Promise<BodyRef & { mesh: MeshWire }> => {
-      const profile: PolygonsWithHoles = [circleProfile(ringSegments, 0.45)[0]!.map(([x, y]) => [x! + 1.5, y! + 0.5])];
-      const r = await client.revolve({ profile, profileBasis: { origin: [axisOffset, 0, 0], u: [1, 0, 0], v: [0, 0, 1], n: [0, -1, 0] }, axisOrigin: [axisOffset, 0, 0], axisDir: [0, 0, 1], angleDeg: 360, segments, nextFaceId: 1 });
-      const c = Math.cos(spin), s = Math.sin(spin);
-      const body = await uploadComponent(r.components[0]!);
-      const moved = await client.transform({ body, matrix: [c, 0, s, 0, 0, 1, 0, 0, -s, 0, c, 0, 0, 0, 0, 1], nextFaceId: r.nextFaceId });
-      return uploadComponent(moved.components[0]!);
-    };
-
-    it('booleans and follow-up operations on tens of thousands of triangles stay identical', async () => {
-      const a = await torus(0, 160, 24, 0.31);
-      const b = await torus(0.7, 150, 22, 1.1);
-      const add = await client.boolean({ op: 'add', a, b, nextFaceId: 100000 });
-      const sub = await client.boolean({ op: 'subtract', a, b, nextFaceId: 200000 });
-      const cross = await client.boolean({ op: 'intersect', a, b, nextFaceId: 300000 });
-      await client.boolean({ op: 'split', a, b, nextFaceId: 400000 });
-      const merged = await uploadComponent(add.components[0]!);
-      await client.sectionCut({ body: merged, plane: { n: v3normalize([0.2, 0.5, 1]), d: -0.3 } });
-      await client.properties({ body: merged });
-      await client.simplify({ body: merged, tolerance: 0.001, nextFaceId: 500000 });
-      await client.decompose({ body: await uploadComponent(sub.components[0]!), nextFaceId: 500000 });
-      await client.hull({ bodies: [a, b], nextFaceId: 600000 });
-      await client.autofold({ body: merged, mesh: cross.components[0]!.mesh, nextFaceId: 700000 });
-    }, 300000);
-
-    it('a sweep and a chain of booleans past 100k halfedges stay identical', async () => {
-      const path: Vec3[] = [];
-      for (let i = 0; i < 160; i++) {
-        const a = i * 0.22;
-        path.push([Math.cos(a) * (1 + i * 0.02), Math.sin(a) * (1 + i * 0.02), i * 0.02]);
-      }
-      const sweep = await client.followMe({ profile: circleProfile(40, 0.05), profileBasis: planeBasis(path[0]!, v3normalize(v3sub(path[1]!, path[0]!))), path, closed: false, nextFaceId: 1 });
-      const body = await uploadComponent(sweep.components[0]!);
-      const a = await torus(0.2, 300, 60, 0.7);
-      const b = await torus(-0.4, 260, 50, 2.0);
-      let current = await client.boolean({ op: 'add', a, b, nextFaceId: 1000000 });
-      const merged = await uploadComponent(current.components[0]!);
-      await client.boolean({ op: 'subtract', a: merged, b: body, nextFaceId: current.nextFaceId });
-      current = await client.boolean({ op: 'intersect', a: merged, b: a, nextFaceId: current.nextFaceId });
-      await client.pushPull({ body: await uploadComponent(current.components[0]!), region: { faceId: 7, basis: planeBasis([0, 0, 0], [0, 0, 1]), polygon: square(0, 0, 0.1), regionIsWholeFace: false }, distance: 0.1, mode: 'merge', nextFaceId: current.nextFaceId });
-    }, 600000);
-  });
-
   describe('seeded random sequences', () => {
     /** mulberry32: small, seedable, and the same everywhere. */
     function rng(seed: number): () => number {
@@ -1023,6 +1012,58 @@ describe.skipIf(!ready)('every kernel operation agrees bit for bit across TypeSc
         for (const s of solids) expect(meshTopologyProblems(s.mesh).filter((p) => p !== 'signed volume is not positive'), `seed ${seed} step ${step}: closed manifold`).toEqual([]);
       }
     }, 120000);
+  });
+
+  describe('dense meshes, where the threaded native build takes its parallel code paths', () => {
+    // These answers are megabytes each, so the corpus ends with the random sequences.
+    beforeAll(() => {
+      if (goldenPath === undefined) return;
+      triad.recording = false;
+      mkdirSync(dirname(goldenPath), { recursive: true });
+      writeFileSync(goldenPath, encodeGoldenCorpus(triad.golden));
+    }, 600000);
+
+    const torus = async (axisOffset: number, segments: number, ringSegments: number, spin: number): Promise<BodyRef & { mesh: MeshWire }> => {
+      const profile: PolygonsWithHoles = [circleProfile(ringSegments, 0.45)[0]!.map(([x, y]) => [x! + 1.5, y! + 0.5])];
+      const r = await client.revolve({ profile, profileBasis: { origin: [axisOffset, 0, 0], u: [1, 0, 0], v: [0, 0, 1], n: [0, -1, 0] }, axisOrigin: [axisOffset, 0, 0], axisDir: [0, 0, 1], angleDeg: 360, segments, nextFaceId: 1 });
+      const c = Math.cos(spin), s = Math.sin(spin);
+      const body = await uploadComponent(r.components[0]!);
+      const moved = await client.transform({ body, matrix: [c, 0, s, 0, 0, 1, 0, 0, -s, 0, c, 0, 0, 0, 0, 1], nextFaceId: r.nextFaceId });
+      return uploadComponent(moved.components[0]!);
+    };
+
+    it('booleans and follow-up operations on tens of thousands of triangles stay identical', async () => {
+      const a = await torus(0, 160, 24, 0.31);
+      const b = await torus(0.7, 150, 22, 1.1);
+      const add = await client.boolean({ op: 'add', a, b, nextFaceId: 100000 });
+      const sub = await client.boolean({ op: 'subtract', a, b, nextFaceId: 200000 });
+      const cross = await client.boolean({ op: 'intersect', a, b, nextFaceId: 300000 });
+      await client.boolean({ op: 'split', a, b, nextFaceId: 400000 });
+      const merged = await uploadComponent(add.components[0]!);
+      await client.sectionCut({ body: merged, plane: { n: v3normalize([0.2, 0.5, 1]), d: -0.3 } });
+      await client.properties({ body: merged });
+      await client.simplify({ body: merged, tolerance: 0.001, nextFaceId: 500000 });
+      await client.decompose({ body: await uploadComponent(sub.components[0]!), nextFaceId: 500000 });
+      await client.hull({ bodies: [a, b], nextFaceId: 600000 });
+      await client.autofold({ body: merged, mesh: cross.components[0]!.mesh, nextFaceId: 700000 });
+    }, 300000);
+
+    it('a sweep and a chain of booleans past 100k halfedges stay identical', async () => {
+      const path: Vec3[] = [];
+      for (let i = 0; i < 160; i++) {
+        const a = i * 0.22;
+        path.push([Math.cos(a) * (1 + i * 0.02), Math.sin(a) * (1 + i * 0.02), i * 0.02]);
+      }
+      const sweep = await client.followMe({ profile: circleProfile(40, 0.05), profileBasis: planeBasis(path[0]!, v3normalize(v3sub(path[1]!, path[0]!))), path, closed: false, nextFaceId: 1 });
+      const body = await uploadComponent(sweep.components[0]!);
+      const a = await torus(0.2, 300, 60, 0.7);
+      const b = await torus(-0.4, 260, 50, 2.0);
+      let current = await client.boolean({ op: 'add', a, b, nextFaceId: 1000000 });
+      const merged = await uploadComponent(current.components[0]!);
+      await client.boolean({ op: 'subtract', a: merged, b: body, nextFaceId: current.nextFaceId });
+      current = await client.boolean({ op: 'intersect', a: merged, b: a, nextFaceId: current.nextFaceId });
+      await client.pushPull({ body: await uploadComponent(current.components[0]!), region: { faceId: 7, basis: planeBasis([0, 0, 0], [0, 0, 1]), polygon: square(0, 0, 0.1), regionIsWholeFace: false }, distance: 0.1, mode: 'merge', nextFaceId: current.nextFaceId });
+    }, 600000);
   });
 
   describe('the comparison itself', () => {

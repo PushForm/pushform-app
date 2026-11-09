@@ -8,6 +8,7 @@ import {
   EDGE_BLEND_MIN_FACE_ANGLE,
   EDGE_PROFILE_SQUARE_TOL,
   formatLength,
+  LENGTH_TOL,
   MERGE_TOL,
   meshSignedVolume,
   PushFormError,
@@ -32,7 +33,7 @@ import { hostOf, kernelOf } from '../host/services';
 import { draftContainerAt, requireContextPath } from './context';
 
 /**
- * Fillet, Chamfer and Profile Edges: round, bevel or shape picked hard edges of one solid.
+ * Round, Chamfer and the router-bit profiles of Profile Edges: shape picked hard edges of one solid.
  *
  * Planning (pure, from the document state) turns every picked edge into a closed tool prism: the
  * cross-section between the two faces beside the edge (a wedge minus the fillet circle, the
@@ -52,9 +53,14 @@ import { draftContainerAt, requireContextPath } from './context';
  * same side of the mitres, so the setbacks of two edges agree where they meet.
  *
  * A chain of picked edges is split where it turns from an outside (convex) edge to an inside
- * (concave) one; each part ends on the face that crosses its end. A profile cuts outside edges
- * only: it leaves the inside edges of a pick out and stops where it meets one, as a router's
- * bearing stops against the face across its path.
+ * (concave) one; each part ends on the face that crosses its end.
+ *
+ * Every profile works on every edge: an inside edge takes the profile as a fill, mirrored in the
+ * corner (a bead also cuts its groove into the reference face). On an edge whose faces do not meet
+ * at a right angle a profile keeps its true shape, measured from the reference face: the other face
+ * cuts it off where they meet, or, when the angle opens past square, a flat continues from the end
+ * of the profile to the other face. A chamfer is the bevel from the reference face's setback to the
+ * other face, and a Round stays tangent to both faces.
  */
 
 export type EdgeBlendKind = 'fillet' | 'chamfer';
@@ -69,6 +75,10 @@ export const DEFAULT_BLEND_SEGMENTS = 24;
 const PAD_FRACTION = 0.25;
 /** Setback lines are tested for fitting on a face with this fraction trimmed off each end. */
 const END_TRIM = 0.01;
+/** How far a fill's corner reaches into the solid behind it. */
+const FILL_EMBED = 4 * MERGE_TOL;
+/** How far a fill's section runs on past a face beside its edge. */
+const FILL_TAIL = 8 * MERGE_TOL;
 /** Width of a bead's quirk (the groove beside it), as a fraction of the bead's radius. */
 const BEAD_QUIRK = 0.5;
 
@@ -100,7 +110,7 @@ export type EdgeBlendParams = z.input<typeof EdgeBlendParamsSchema>;
 export const EdgeProfileParamsSchema = z.object({
   path: pathSchema,
   bodyId: z.number().int().nonnegative(),
-  /** Edge keys of the solid's hard edges; inside (concave) edges among them are left out. */
+  /** Edge keys of the solid's hard edges: outside, inside, angled or along a curve. */
   edges: z.array(z.string()).min(1),
   profile: z.enum(EDGE_PROFILES),
   /**
@@ -127,8 +137,6 @@ export interface EdgeBlendApplyResult {
   bodyId: number;
   /** Faces created by the operation (the fillet, chamfer or profile faces). */
   faceIds: number[];
-  /** Profile Edges: picked inside edges it left out. */
-  skipped?: string[];
 }
 
 /** A hard edge: neither soft, smooth nor hidden. Only these are offered to Fillet, Chamfer and Profile Edges. */
@@ -144,10 +152,38 @@ export const isHardEdge = (e: EdgeRecord): boolean => !e.soft && !e.smooth && !e
 export function blendEdgeGroup(body: Body, key: EdgeKey): EdgeKey[] {
   const e = body.edges.get(key);
   if (!e || !isHardEdge(e)) return [];
-  if (e.curveId === null) return [key];
+  if (e.curveId === null) return rimEdges(body, e);
   const out: EdgeKey[] = [];
   for (const o of body.edges.values()) if (o.curveId === e.curveId && isHardEdge(o)) out.push(o.key);
   return out.length ? out : [key];
+}
+
+/**
+ * The hard edges of the rim of a smooth surface that `start` belongs to: the ring where one flat
+ * face meets the surface, as round the base of a revolved cone, whose edges carry no curve. Empty
+ * rims and edges that are not on such a ring give just `start`.
+ */
+function rimEdges(body: Body, start: EdgeRecord): EdgeKey[] {
+  const surfaceOf = (f: FaceLocalId): SurfaceId | null => body.faces.get(f)?.surfaceId ?? null;
+  const sa = surfaceOf(start.faceA), sb = surfaceOf(start.faceB);
+  if ((sa === null) === (sb === null)) return [start.key];
+  const [cap, surface] = sa === null ? [start.faceA, sb] : [start.faceB, sa];
+  const onRim = (e: EdgeRecord): boolean =>
+    isHardEdge(e) && (e.faceA === cap || e.faceB === cap) && surfaceOf(e.faceA === cap ? e.faceB : e.faceA) === surface;
+  const ring = [...body.edges.values()].filter(onRim);
+  const atVertex = (e: EdgeRecord): Vec3[] => [e.polyline[0]!, e.polyline[e.polyline.length - 1]!];
+  const reached = new Set<EdgeKey>([start.key]);
+  let frontier: Vec3[] = atVertex(start);
+  while (frontier.length) {
+    const next: Vec3[] = [];
+    for (const e of ring) {
+      if (reached.has(e.key) || !atVertex(e).some((v) => frontier.some((w) => v3dist(v, w) <= MERGE_TOL))) continue;
+      reached.add(e.key);
+      next.push(...atVertex(e));
+    }
+    frontier = next;
+  }
+  return [...reached];
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -169,8 +205,6 @@ export interface EdgeBlendPlan {
   readonly blendFaces: ReadonlyMap<number, number>;
   /** Groups whose faces become one smooth surface. */
   readonly smoothGroups: ReadonlySet<number>;
-  /** Picked edges left out: the inside edges of a profile's pick. */
-  readonly skipped: readonly EdgeKey[];
 }
 
 const fail = (code: string, message: string): never => {
@@ -200,8 +234,12 @@ interface EdgeInfo {
   sB: number;
   /** Which face beside the edge is the reference face (two-distance chamfers and profiles), else null. */
   ref: 'a' | 'b' | null;
+  /** Round this edge as a fillet, tangent to both faces. */
+  fillet: boolean;
   /** Fillet: interior angle of the arc (radians); 0 otherwise. */
   sweep: number;
+  /** A profile's section fitted to this edge; null for a fillet or plain chamfer. */
+  fit: FittedProfile | null;
   /** Vertex ids (indices into the vertex list) of the endpoints, in chain order. */
   i0: number;
   i1: number;
@@ -232,27 +270,6 @@ function faceSide(body: Body, faceId: FaceLocalId, p0: Vec3, p1: Vec3): FaceSide
     }
   }
   return undefined;
-}
-
-/**
- * How a router-bit profile treats picked edges: square outside edges are cut,
- * inside edges are left out, and any other edge is refused.
- */
-export function edgeProfileFit(body: Body, keys: readonly EdgeKey[]): { cut: number; inside: number; notSquare: number } {
-  const out = { cut: 0, inside: 0, notSquare: 0 };
-  for (const key of new Set(keys)) {
-    const rec = body.edges.get(key);
-    if (!rec) continue;
-    const v0 = rec.polyline[0], v1 = rec.polyline[rec.polyline.length - 1];
-    if (!v0 || !v1) continue;
-    const a = faceSide(body, rec.faceA, v0, v1), b = faceSide(body, rec.faceB, v0, v1);
-    if (!a || !b) continue;
-    const alpha = Math.acos(Math.max(-1, Math.min(1, v3dot(a.inward, b.inward))));
-    if (v3dot(a.inward, b.n) >= 0) out.inside++;
-    else if (Math.abs(alpha - Math.PI / 2) > EDGE_PROFILE_SQUARE_TOL) out.notSquare++;
-    else out.cut++;
-  }
-  return out;
 }
 
 /** Whether a body edge is convex (the solid lies inside both face planes there). */
@@ -301,6 +318,26 @@ interface ProfileShape {
   points: Vec2[];
   parts: number[];
   smooth: Set<number>;
+  /** Bead only: index of the point where the half round touches the reference face. */
+  crown?: number;
+}
+
+/**
+ * A profile's cross-section on one edge, from where it meets the other face to where it meets the
+ * reference face. x runs along the reference face; y runs along the other face on a square edge,
+ * and square to the reference face on any other, so the shape is never sheared to fit.
+ */
+interface FittedProfile {
+  points: Vec2[];
+  parts: number[];
+  /** The edge is square: y runs along the other face. */
+  square: boolean;
+  /** Setback on the reference face. */
+  wx: number;
+  /** Setback on the other face. */
+  other: number;
+  /** Inside edge: the groove a bead cuts into the reference face, its y into the solid negative. */
+  groove?: { points: Vec2[]; parts: number[] };
 }
 
 /** Points on the arc about `c` of radius `r` from angle t0 to t1 (radians), both ends included. */
@@ -338,10 +375,11 @@ export function profileShape(profile: EdgeProfile, size: number, opts: { depth?:
     case 'bead': {
       // a half round tangent to both faces, then the quirk: a groove beside it on the reference face
       const q = r * BEAD_QUIRK;
-      const round = arc2([r, r], r, Math.PI, 2 * Math.PI, seg);
+      const toCrown = arc2([r, r], r, Math.PI, 3 * H, seg);
+      const round = [...toCrown, ...arc2([r, r], r, 3 * H, 2 * Math.PI, seg).slice(1)];
       const points: Vec2[] = [...round, [2 * r + q, r], [2 * r + q, 0]];
       const parts = [...all(round), 1, 2];
-      return { wx: 2 * r + q, wy: r, points, parts, smooth: new Set([0]) };
+      return { wx: 2 * r + q, wy: r, points, parts, smooth: new Set([0]), crown: toCrown.length - 1 };
     }
     case 'chamfer': {
       const deg = opts.angleDeg ?? 45;
@@ -369,11 +407,82 @@ interface Profile {
 const arcSegments = (sweep: number, segments: number): number => Math.max(1, Math.round((segments * sweep) / (2 * Math.PI)));
 
 /**
- * Cross-section of the tool prism at `p` on the edge line. Convex: [T_A, pads outside both faces,
- * T_B, arc, chamfer or profile back to T_A], removed from the solid. Concave: [T_A, P, T_B, arc or
- * chamfer back to T_A], added to it.
+ * The part of a profile on the solid's side of the other face, for an edge of interior angle
+ * `alpha` that is not square. Walking from the reference face, the other face cuts the profile off
+ * where they first meet; a profile that ends before reaching it, on an edge wider than square,
+ * continues flat, parallel to the reference face, out to the other face.
  */
-function profileAt(e: EdgeInfo, p: Vec3, mode: EdgeBlendMode, size: number, segments: number, shape: ProfileShape | null): Profile {
+function clipToOtherFace(points: readonly Vec2[], parts: readonly number[], alpha: number): { points: Vec2[]; parts: number[]; other: number } {
+  const c = Math.cos(alpha), s = Math.sin(alpha);
+  const side = (q: Vec2): number => q[0] * s - q[1] * c;
+  const same = (p: Vec2, q: Vec2): boolean => Math.hypot(p[0] - q[0], p[1] - q[1]) <= MERGE_TOL;
+  const out: Vec2[] = [points[points.length - 1]!];
+  const outParts: number[] = [];
+  for (let i = points.length - 2; i >= 0; i--) {
+    const a = out[out.length - 1]!, b = points[i]!;
+    const fa = side(a), fb = side(b);
+    if (fb > 0) {
+      if (!same(a, b)) {
+        out.push(b);
+        outParts.push(parts[i]!);
+      }
+      continue;
+    }
+    const t = fa / (fa - fb);
+    const hit: Vec2 = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+    if (!same(a, hit)) {
+      out.push(hit);
+      outParts.push(parts[i]!);
+    }
+    return { points: out.reverse(), parts: outParts.reverse(), other: Math.hypot(hit[0], hit[1]) };
+  }
+  const end = out[out.length - 1]!, before = out[out.length - 2];
+  const hit: Vec2 = [(end[1] * c) / s, end[1]];
+  if (before && Math.abs(before[1] - end[1]) <= MERGE_TOL) out[out.length - 1] = hit;
+  else {
+    out.push(hit);
+    outParts.push(Math.max(...parts) + 1);
+  }
+  return { points: out.reverse(), parts: outParts.reverse(), other: end[1] / s };
+}
+
+/** Fit a profile's section to an edge of the plan: see `FittedProfile`. */
+function fitProfile(shape: ProfileShape, e: EdgeInfo, size: number, profile: EdgeProfile, angleDeg: number | undefined, title: string): FittedProfile {
+  const square = Math.abs(e.alpha - Math.PI / 2) <= EDGE_PROFILE_SQUARE_TOL;
+  // on an inside edge a bead fills up to its crown and cuts the rest as a groove in the reference face
+  const insideBead = !e.convex && shape.crown !== undefined;
+  const points = insideBead ? shape.points.slice(0, shape.crown! + 1) : shape.points;
+  const parts = insideBead ? shape.parts.slice(0, shape.crown!) : shape.parts;
+  const wx = points[points.length - 1]![0];
+  const groove = insideBead
+    ? { points: shape.points.slice(shape.crown!).map((q): Vec2 => [q[0], -q[1]]), parts: shape.parts.slice(shape.crown!) }
+    : undefined;
+  const base = { square, wx, ...(groove ? { groove } : {}) };
+  if (square) return { ...base, points, parts, other: points[0]![1] };
+  if (profile === 'chamfer') {
+    // without an angle it is the plain even chamfer; with one, the bevel runs from the reference
+    // face's setback at that angle until the other face stops it
+    let other = size;
+    if (angleDeg !== undefined) {
+      const theta = (angleDeg * Math.PI) / 180;
+      if (e.alpha + theta >= Math.PI - EDGE_BLEND_MIN_FACE_ANGLE) {
+        fail('angle', `${title}: an angle of ${angleDeg}° is too steep for an edge this wide: the bevel would not reach the other face. Type a smaller angle.`);
+      }
+      other = (size * Math.sin(theta)) / Math.sin(e.alpha + theta);
+    }
+    return { ...base, points: [[other * Math.cos(e.alpha), other * Math.sin(e.alpha)], [wx, 0]], parts: [0], other };
+  }
+  const clipped = clipToOtherFace(points, parts, e.alpha);
+  if (clipped.points.length < 2) fail('tooLarge', `${title}: the size is too large for this edge's angle. Type a smaller size.`);
+  return { ...base, ...clipped };
+}
+
+/**
+ * Cross-section of the tool prism at `p` on the edge line. Outside edge: [T_A, pads outside both
+ * faces, T_B, arc, chamfer or profile back to T_A], removed from the solid. Inside edge:
+ * [T_A, P, T_B, arc, chamfer or profile back to T_A], added to it.
+ */
+function profileAt(e: EdgeInfo, p: Vec3, size: number, segments: number): Profile {
   const { a, b, sA, sB } = e;
   const tA = v3addScaled(p, a.inward, sA);
   const tB = v3addScaled(p, b.inward, sB);
@@ -382,13 +491,14 @@ function profileAt(e: EdgeInfo, p: Vec3, mode: EdgeBlendMode, size: number, segm
     const m = Math.max(sA, sB) * PAD_FRACTION;
     points.push(v3addScaled(tA, a.n, m), v3addScaled(p, v3add(a.n, b.n), m), v3addScaled(tB, b.n, m));
   } else {
-    points.push(p);
+    // into the solid a little: a fill that only touches the faces can come out as a separate piece
+    points.push(v3addScaled(p, v3normalize(v3add(a.inward, b.inward)), -FILL_EMBED));
   }
   const tb = points.length;
   points.push(tB);
   const first = tb;
   const blendEdges = new Map<number, number>();
-  if (mode === 'fillet') {
+  if (e.fillet) {
     const sigma = e.convex ? -1 : 1;
     const c = v3addScaled(tA, a.n, sigma * size);
     const v0 = v3sub(tB, c), v1 = v3sub(tA, c);
@@ -400,18 +510,58 @@ function profileAt(e: EdgeInfo, p: Vec3, mode: EdgeBlendMode, size: number, segm
       const w0 = Math.sin((1 - t) * phi) / sinPhi, w1 = Math.sin(t * phi) / sinPhi;
       points.push(v3add(c, v3add(v3scale(v0, w0), v3scale(v1, w1))));
     }
-  } else if (shape) {
-    // the shape runs from the other face to the reference face; the section from T_B to T_A
+  } else if (e.fit) {
+    // the section runs from the other face to the reference face; the prism's from T_B to T_A
     const refA = e.ref !== 'b';
-    const [xDir, yDir] = refA ? [a.inward, b.inward] : [b.inward, a.inward];
-    const pts = refA ? shape.points : [...shape.points].reverse();
-    const parts = refA ? shape.parts : [...shape.parts].reverse();
+    const { xDir, yDir } = sectionAxes(e);
+    const pts = refA ? e.fit.points : [...e.fit.points].reverse();
+    const parts = refA ? e.fit.parts : [...e.fit.parts].reverse();
     for (let i = 1; i < pts.length - 1; i++) points.push(v3addScaled(v3addScaled(p, xDir, pts[i]![0]), yDir, pts[i]![1]));
     parts.forEach((part, k) => blendEdges.set(first + k, part));
+    if (!e.convex) extendFillEnds(points, tb);
     return { points, ta: 0, tb, blendEdges };
   }
   for (let i = first; i < points.length; i++) blendEdges.set(i, 0);
+  if (!e.convex) extendFillEnds(points, tb);
   return { points, ta: 0, tb, blendEdges };
+}
+
+/**
+ * Run a fill's section past the faces beside its edge along its last segments, so the section
+ * crosses each face at the true end of the profile instead of having a vertex on it. Vertices lying
+ * exactly on a face can come back from the kernel as degenerate slivers.
+ */
+function extendFillEnds(points: Vec3[], tb: number): void {
+  const n = points.length;
+  const out = (at: number, from: number): Vec3 => {
+    const d = v3sub(points[at]!, points[from]!);
+    return v3addScaled(points[at]!, v3normalize(d), FILL_TAIL);
+  };
+  // the section is [T_A, P, T_B, ...]; its arc or profile runs from T_B round to T_A
+  const toA = out(0, n - 1);
+  points[tb] = out(tb, tb + 1 < n ? tb + 1 : 0);
+  points[0] = toA;
+}
+
+/** The axes of a profile's section on an edge: x along the reference face, y as in `FittedProfile`. */
+function sectionAxes(e: EdgeInfo): { xDir: Vec3; yDir: Vec3 } {
+  const [xDir, toward] = e.ref !== 'b' ? [e.a.inward, e.b.inward] : [e.b.inward, e.a.inward];
+  const yDir = e.fit?.square ? toward : v3normalize(v3sub(toward, v3scale(xDir, v3dot(toward, xDir))));
+  return { xDir, yDir };
+}
+
+/** Cross-section of the groove an inside bead cuts into the reference face, padded above that face. */
+function grooveAt(e: EdgeInfo, p: Vec3): Profile {
+  const g = e.fit!.groove!;
+  const { xDir, yDir } = sectionAxes(e);
+  const at = (q: Vec2): Vec3 => v3addScaled(v3addScaled(p, xDir, q[0]), yDir, q[1]);
+  const pts = g.points.map(at);
+  const far = g.points.length - 1;
+  const pad = g.points[far]![0] * PAD_FRACTION;
+  pts.push(at([g.points[far]![0], pad]), at([g.points[0]![0], pad]));
+  const blendEdges = new Map<number, number>();
+  g.parts.forEach((part, k) => blendEdges.set(k, part));
+  return { points: pts, ta: far, tb: far, blendEdges };
 }
 
 /** Earcut of a cross-section, as indices into its points. */
@@ -595,6 +745,7 @@ function planPrisms(state: DocumentState, mode: EdgeBlendMode, params: PlanInput
   const useRef = twoDistance || mode === 'profile';
 
   // --- edges and their frames --------------------------------------------------------------
+  const roundedProfile = mode === 'profile' && params.profile === 'roundover';
   const vertices: Vec3[] = [];
   const vertexId = (p: Vec3): number => {
     const i = vertices.findIndex((v) => v3dist(v, p) <= MERGE_TOL);
@@ -603,8 +754,6 @@ function planPrisms(state: DocumentState, mode: EdgeBlendMode, params: PlanInput
     return vertices.length - 1;
   };
   const edges: EdgeInfo[] = [];
-  const skipped: EdgeKey[] = [];
-  const squareTol = EDGE_PROFILE_SQUARE_TOL;
   for (const key of new Set(params.edges)) {
     const rec = body.edges.get(key as EdgeKey);
     if (!rec) fail('target', `${title}: an edge is no longer part of the solid.`);
@@ -615,25 +764,17 @@ function planPrisms(state: DocumentState, mode: EdgeBlendMode, params: PlanInput
     const cosAlpha = Math.max(-1, Math.min(1, v3dot(a.inward, b.inward)));
     const alpha = Math.acos(cosAlpha);
     if (alpha < EDGE_BLEND_MIN_FACE_ANGLE || alpha > Math.PI - EDGE_BLEND_MIN_FACE_ANGLE) {
-      fail('geometry', `${title}: the faces beside an edge are almost flat or folded shut.`);
+      fail('geometry', `${title}: the faces beside an edge are almost flat or folded shut, so there is no corner to shape. Pick an edge where the faces meet at a clearer angle.`);
     }
     const convex = v3dot(a.inward, b.n) < 0;
-    if (mode === 'profile') {
-      // a router cuts outside edges only; an inside edge of the pick is left out and the profile stops there
-      if (!convex) {
-        skipped.push(rec!.key);
-        continue;
-      }
-      if (Math.abs(alpha - Math.PI / 2) > squareTol) {
-        fail('geometry', `${title} shapes square edges, where the faces meet at a right angle; use Round or Chamfer for an edge whose faces meet at another angle.`);
-      }
-    }
     let ref: 'a' | 'b' | null = null;
     if (useRef && refFace !== undefined) {
       if (rec!.faceA === refFace) ref = 'a';
       else if (rec!.faceB === refFace) ref = 'b';
       else fail('reference', `The reference face ${refFace} is not beside every picked edge: an edge joins faces ${rec!.faceA} and ${rec!.faceB}. Pick edges of the reference face only, such as its outline.`);
     }
+    // a roundover keeps its tangent round on an edge that is not square, like Round
+    const fillet = mode === 'fillet' || (roundedProfile && Math.abs(alpha - Math.PI / 2) > EDGE_PROFILE_SQUARE_TOL);
     edges.push({
       rec: rec!,
       v0,
@@ -646,13 +787,13 @@ function planPrisms(state: DocumentState, mode: EdgeBlendMode, params: PlanInput
       sA: 0,
       sB: 0,
       ref,
-      sweep: mode === 'fillet' ? Math.PI - alpha : 0,
+      fillet,
+      sweep: fillet ? Math.PI - alpha : 0,
+      fit: null,
       i0: vertexId(v0),
       i1: vertexId(v1),
     });
   }
-  if (!edges.length) fail('inside', `${title} cuts outside edges only; every picked edge is an inside corner, where a router cannot reach.`);
-
   // --- chains: picked edges joined end to end ----------------------------------------------
   const incident = new Map<number, number[]>();
   edges.forEach((e, i) => {
@@ -668,7 +809,7 @@ function planPrisms(state: DocumentState, mode: EdgeBlendMode, params: PlanInput
       fail('corner', `${title} can only ${mode === 'profile' ? 'shape' : 'bevel'} picked edges that meet three at a corner where three faces meet.`);
     }
     if (list.some((i) => edges[i]!.convex !== edges[list[0]!]!.convex)) {
-      fail('corner', `${title} cannot bevel a corner where outside and inside picked edges meet.`);
+      fail('corner', `${title} cannot ${mode === 'profile' ? 'shape' : 'bevel'} a corner where outside and inside picked edges meet. Pick the outside or the inside edges there, not both.`);
     }
     corners.add(v);
   }
@@ -744,16 +885,17 @@ function planPrisms(state: DocumentState, mode: EdgeBlendMode, params: PlanInput
         // the face two edges share keeps its role across the mitre
         ref = shared === ref ? ref : next.rec.faceA === shared ? next.rec.faceB : next.rec.faceA;
         if (i === n - 1 && asymmetric && ref !== (e0.ref === 'a' ? e0.a.face.id : e0.b.face.id)) {
-          fail('reference', `${title}: the picked edges loop round faces that take the ${noun} on different sides; name the reference face it is measured from.`);
+          fail('reference', `${title}: the picked edges loop round faces that take the ${noun} on different sides. Pick edges that run round one face, or fewer edges.`);
         }
       }
     }
   }
   for (const e of edges) {
-    if (mode === 'fillet') {
+    if (e.fillet) {
       e.sA = e.sB = size / Math.tan(e.alpha / 2);
     } else if (shape) {
-      [e.sA, e.sB] = e.ref === 'b' ? [shape.wy, shape.wx] : [shape.wx, shape.wy];
+      e.fit = fitProfile(shape, e, size, params.profile ?? 'roundover', params.angleDeg, title);
+      [e.sA, e.sB] = e.ref === 'b' ? [e.fit.other, e.fit.wx] : [e.fit.wx, e.fit.other];
     } else if (twoDistance) {
       let other = params.distance2;
       if (other === undefined) {
@@ -775,7 +917,7 @@ function planPrisms(state: DocumentState, mode: EdgeBlendMode, params: PlanInput
       if (e.ref === side) return fail('tooLarge', `The distance ${fmt(size)} is too large for the picked edges: the chamfer ${why} on the reference face.`);
       return fail('tooLarge2', `The second distance ${fmt(side === 'a' ? e.sA : e.sB)} is too large for the picked edges: the chamfer ${why} on the face beside an edge across from the reference face.`);
     }
-    return fail('tooLarge', `The ${what} ${fmt(size)} is too large for the picked edges: the ${noun} ${why} on the faces beside an edge.`);
+    return fail('tooLarge', `The ${what} ${fmt(size)} is too large for the picked edges: the ${noun} ${why} on the faces beside an edge. Type a smaller ${what}.`);
   };
 
   // --- end planes -----------------------------------------------------------------------------
@@ -784,6 +926,8 @@ function planPrisms(state: DocumentState, mode: EdgeBlendMode, params: PlanInput
     normal: Vec3;
     /** Distance the cap is moved past the plane (away from the edge) so a cut clears the face. */
     extend: number;
+    /** The same for an inside bead's groove, which cuts while its fill does not. */
+    grooveExtend: number;
   }
   const freeEnd = (e: EdgeInfo, v: Vec3): End => {
     // the prism ends on the plane of the face that crosses the edge here (faces along it are passed over)
@@ -797,21 +941,28 @@ function planPrisms(state: DocumentState, mode: EdgeBlendMode, params: PlanInput
       if (others.length === 1) fail('corner', `${title}: an edge meets the face at its end at too shallow an angle.`);
       fail('corner', `${title} can only end an edge at a corner where three faces meet.`);
     }
-    if (crossing.length !== 1) fail('corner', `${title} can only end an edge where one face crosses it; ${crossing.length ? 'several faces cross an edge at its end' : 'the faces at an edge\'s end meet it at too shallow an angle'}.`);
+    if (crossing.length !== 1) fail('corner', `${title} can only end an edge where one face crosses it; ${crossing.length ? 'several faces cross an edge at its end' : 'the faces at an edge\'s end meet it at too shallow an angle'}. Pick edges that end at a plain corner, or a whole rim.`);
     const end = crossing[0]!;
     let extend = 0;
+    let grooveExtend = 0;
+    // past an all-convex corner the space beyond the end face is empty, so a cut may overshoot it
+    const convexWith = (f: FaceLocalId): boolean =>
+      [...body.edges.values()].some(
+        (r) =>
+          ((r.faceA === f && r.faceB === end.id) || (r.faceB === f && r.faceA === end.id)) &&
+          r.polyline.some((p) => v3dist(p, v) <= MERGE_TOL) &&
+          edgeIsConvex(body, r) === true,
+      );
     if (e.convex) {
-      // past an all-convex corner the space beyond the end face is empty, so the cut may overshoot it
-      const convexWith = (f: FaceLocalId): boolean =>
-        [...body.edges.values()].some(
-          (r) =>
-            ((r.faceA === f && r.faceB === end.id) || (r.faceB === f && r.faceA === end.id)) &&
-            r.polyline.some((p) => v3dist(p, v) <= MERGE_TOL) &&
-            edgeIsConvex(body, r) === true,
-        );
       if (convexWith(e.rec.faceA) && convexWith(e.rec.faceB)) extend = Math.max(e.sA, e.sB) * PAD_FRACTION;
+    } else {
+      // a fill that ends on a wall reaches into the wall a little rather than only touching it
+      if (!convexWith(e.rec.faceA) && !convexWith(e.rec.faceB)) extend = FILL_EMBED;
     }
-    return { origin: v, normal: end.plane.n, extend };
+    if (!e.convex && e.fit?.groove && convexWith(e.ref === 'b' ? e.rec.faceB : e.rec.faceA)) {
+      grooveExtend = e.fit.groove.points[e.fit.groove.points.length - 1]![0] * PAD_FRACTION;
+    }
+    return { origin: v, normal: end.plane.n, extend, grooveExtend };
   };
 
   // --- prisms -------------------------------------------------------------------------------
@@ -837,8 +988,8 @@ function planPrisms(state: DocumentState, mode: EdgeBlendMode, params: PlanInput
       const startMitre = i > 0 ? joint(i - 1) : chain.closed ? joint(n - 1) : null;
       const endMitre = joint(i);
       return {
-        start: startMitre ? { origin: e.v0, normal: startMitre, extend: 0 } : freeEnd(e, e.v0),
-        end: endMitre ? { origin: e.v1, normal: endMitre, extend: 0 } : freeEnd(e, e.v1),
+        start: startMitre ? { origin: e.v0, normal: startMitre, extend: 0, grooveExtend: 0 } : freeEnd(e, e.v0),
+        end: endMitre ? { origin: e.v1, normal: endMitre, extend: 0, grooveExtend: 0 } : freeEnd(e, e.v1),
       };
     });
     const allOneCurve = chain.edges.every((e) => e.rec.curveId !== null && e.rec.curveId === chain.edges[0]!.rec.curveId);
@@ -857,36 +1008,50 @@ function planPrisms(state: DocumentState, mode: EdgeBlendMode, params: PlanInput
       return g;
     };
 
-    let previousEnd: Vec3[] | null = null;
-    let firstStart: Vec3[] | null = null;
+    // per section of an edge: the fill and, on an inside bead, its groove
+    const previousEnd: (Vec3[] | undefined)[] = [];
+    const firstStart: (Vec3[] | undefined)[] = [];
     chain.edges.forEach((e, i) => {
       const { start, end } = ends[i]!;
-      const prof0 = profileAt(e, e.v0, mode, size, params.segments, shape);
-      const prof1 = profileAt(e, e.v1, mode, size, params.segments, shape);
-      let s0 = prof0.points.map((q) => projectAlong(q, e.d, start.origin, start.normal));
-      const s1 = prof1.points.map((q) => projectAlong(q, e.d, end.origin, end.normal));
-      // fit checks on the unextended prism: the blend's boundary lines must lie on the faces
-      if (!segmentFitsFace(e.a.face, s0[prof0.ta]!, s1[prof0.ta]!)) tooLarge(e, 'a', 'does not fit');
-      if (!segmentFitsFace(e.b.face, s0[prof0.tb]!, s1[prof0.tb]!)) tooLarge(e, 'b', 'does not fit');
-      strips.push({ face: e.a.face.id, quad: [e.v0, e.v1, s1[prof0.ta]!, s0[prof0.ta]!], edge: e, side: 'a' });
-      strips.push({ face: e.b.face.id, quad: [e.v0, e.v1, s1[prof0.tb]!, s0[prof0.tb]!], edge: e, side: 'b' });
-      // vertices shared with the previous prism's mitre are taken from it exactly
-      const snap = (pts: Vec3[], ref: readonly Vec3[] | null): Vec3[] =>
-        ref ? pts.map((q) => ref.find((r) => v3dist(r, q) <= MERGE_TOL) ?? q) : pts;
-      s0 = snap(s0, previousEnd);
-      if (i === 0) firstStart = s0;
-      let s1f = s1;
-      if (chain.closed && i === n - 1) s1f = snap(s1, firstStart);
-      previousEnd = s1f;
-      if (start.extend > 0) s0 = s0.map((q) => v3addScaled(q, e.d, -start.extend));
-      const s1x = end.extend > 0 ? s1f.map((q) => v3addScaled(q, e.d, end.extend)) : s1f;
-      const u = e.a.inward;
-      const vdir = v3normalize(v3cross(e.d, u));
-      const cap = triangulateSection(prof0.points, e.v0, u, vdir);
-      const soup = prismSoup(s0, s1x, cap, labelBase);
-      for (const [i2, part] of prof0.blendEdges) blendFaces.set(labelBase + 2 + i2, group(i, part));
-      labelBase += prof0.points.length + 2;
-      (e.convex ? cut : add).push(soup);
+      const sectionsAt = (p: Vec3): Profile[] => (e.fit?.groove ? [profileAt(e, p, size, params.segments), grooveAt(e, p)] : [profileAt(e, p, size, params.segments)]);
+      const at1 = sectionsAt(e.v1);
+      sectionsAt(e.v0).forEach((prof0, section) => {
+        const prof1 = at1[section]!;
+        const groove = section === 1;
+        let s0 = prof0.points.map((q) => projectAlong(q, e.d, start.origin, start.normal));
+        const s1 = prof1.points.map((q) => projectAlong(q, e.d, end.origin, end.normal));
+        // fit checks on the unextended prism: the blend's boundary lines must lie on the faces
+        if (groove) {
+          const side = e.ref === 'b' ? 'b' : 'a';
+          const face = side === 'a' ? e.a.face : e.b.face;
+          if (!segmentFitsFace(face, s0[prof0.ta]!, s1[prof0.ta]!)) tooLarge(e, side, 'does not fit');
+          strips.push({ face: face.id, quad: [e.v0, e.v1, s1[prof0.ta]!, s0[prof0.ta]!], edge: e, side });
+        } else {
+          if (!segmentFitsFace(e.a.face, s0[prof0.ta]!, s1[prof0.ta]!)) tooLarge(e, 'a', 'does not fit');
+          if (!segmentFitsFace(e.b.face, s0[prof0.tb]!, s1[prof0.tb]!)) tooLarge(e, 'b', 'does not fit');
+          strips.push({ face: e.a.face.id, quad: [e.v0, e.v1, s1[prof0.ta]!, s0[prof0.ta]!], edge: e, side: 'a' });
+          strips.push({ face: e.b.face.id, quad: [e.v0, e.v1, s1[prof0.tb]!, s0[prof0.tb]!], edge: e, side: 'b' });
+        }
+        // vertices shared with the previous prism's mitre are taken from it exactly
+        const snap = (pts: Vec3[], ref: readonly Vec3[] | undefined): Vec3[] =>
+          ref ? pts.map((q) => ref.find((r) => v3dist(r, q) <= MERGE_TOL) ?? q) : pts;
+        s0 = snap(s0, previousEnd[section]);
+        if (i === 0) firstStart[section] = s0;
+        let s1f = s1;
+        if (chain.closed && i === n - 1) s1f = snap(s1, firstStart[section]);
+        previousEnd[section] = s1f;
+        const extendStart = groove ? start.grooveExtend : start.extend;
+        const extendEnd = groove ? end.grooveExtend : end.extend;
+        if (extendStart > 0) s0 = s0.map((q) => v3addScaled(q, e.d, -extendStart));
+        const s1x = extendEnd > 0 ? s1f.map((q) => v3addScaled(q, e.d, extendEnd)) : s1f;
+        const u = e.a.inward;
+        const vdir = v3normalize(v3cross(e.d, u));
+        const cap = triangulateSection(prof0.points, e.v0, u, vdir);
+        const soup = prismSoup(s0, s1x, cap, labelBase);
+        for (const [i2, part] of prof0.blendEdges) blendFaces.set(labelBase + 2 + i2, group(i, part));
+        labelBase += prof0.points.length + 2;
+        (groove || e.convex ? cut : add).push(soup);
+      });
     });
   }
 
@@ -900,7 +1065,7 @@ function planPrisms(state: DocumentState, mode: EdgeBlendMode, params: PlanInput
       const face = body.faces.get(p.face)!;
       if (quadsOverlap(p.quad.map((x) => to2(face, x)), q.quad.map((x) => to2(face, x)))) {
         if (twoDistance) tooLarge(p.edge, p.side, 'of two picked edges would run into each other');
-        fail('tooLarge', `The ${what} ${fmt(size)} is too large: the ${mode === 'profile' ? 'profiles' : `${mode}s`} of two picked edges would run into each other.`);
+        fail('tooLarge', `The ${what} ${fmt(size)} is too large: the ${mode === 'profile' ? 'profiles' : `${mode}s`} of two picked edges would run into each other. Type a smaller ${what}, or pick fewer edges.`);
       }
     }
   }
@@ -914,7 +1079,6 @@ function planPrisms(state: DocumentState, mode: EdgeBlendMode, params: PlanInput
     request: { body: { bodyId: body.id, version: body.version }, cut, add, nextFaceId: body.nextFaceId },
     blendFaces,
     smoothGroups,
-    skipped,
   };
 }
 
@@ -929,13 +1093,61 @@ export function checkEdgeBlendResult(plan: EdgeBlendPlan, result: EdgeBlendResul
   const first = result.components[0];
   if (!first || result.components.length !== 1) {
     const noun = plan.kind === 'profile' ? 'profile' : plan.kind;
-    fail('tooLarge', `The ${plan.what} is too large: the ${noun} would break the solid apart.`);
+    fail('tooLarge', `The ${plan.what} is too large: the ${noun} would break the solid apart. Type a smaller ${plan.what}.`);
   }
   return first!;
 }
 
 // ---------------------------------------------------------------------------------------------
 // Apply
+
+/**
+ * Give the triangles of faces with no real area (kernel slivers beside a rounded edge, whose corners
+ * can weld together) to the neighbouring face. Such a face has no boundary loop, so its record could
+ * not be saved. Returns the new face ids of the triangles and the face ids it absorbed.
+ */
+function absorbSliverFaces(mesh: MeshData): { faceId: Uint32Array; slivers: number[] } {
+  const { verts, tris } = mesh;
+  const faceId = Uint32Array.from(mesh.faceId);
+  const count = tris.length / 3;
+  // widest a triangle of each face gets, across its longest side: a face this thin has no loop
+  const width = new Map<number, number>();
+  for (let t = 0; t < count; t++) {
+    const a = tris[t * 3]! * 3, b = tris[t * 3 + 1]! * 3, c = tris[t * 3 + 2]! * 3;
+    const p: Vec3 = [verts[a]!, verts[a + 1]!, verts[a + 2]!], q: Vec3 = [verts[b]!, verts[b + 1]!, verts[b + 2]!], r: Vec3 = [verts[c]!, verts[c + 1]!, verts[c + 2]!];
+    const longest = Math.max(v3dist(p, q), v3dist(q, r), v3dist(r, p));
+    const w = longest > 0 ? v3len(v3cross(v3sub(q, p), v3sub(r, p))) / longest : 0;
+    width.set(faceId[t]!, Math.max(width.get(faceId[t]!) ?? 0, w));
+  }
+  const slivers = [...width].filter(([, w]) => w <= 2 * LENGTH_TOL).map(([fid]) => fid);
+  if (!slivers.length) return { faceId, slivers };
+  const isSliver = new Set(slivers);
+  const key = (u: number, v: number): string => (u < v ? `${u}:${v}` : `${v}:${u}`);
+  const atEdge = new Map<string, number[]>();
+  for (let t = 0; t < count; t++) {
+    for (let k = 0; k < 3; k++) {
+      const edge = key(tris[t * 3 + k]!, tris[t * 3 + (k + 1) % 3]!);
+      (atEdge.get(edge) ?? atEdge.set(edge, []).get(edge)!).push(t);
+    }
+  }
+  for (let pending = slivers.length; pending > 0; ) {
+    let moved = 0;
+    for (let t = 0; t < count; t++) {
+      if (!isSliver.has(faceId[t]!)) continue;
+      for (let k = 0; k < 3 && isSliver.has(faceId[t]!); k++) {
+        const neighbours = atEdge.get(key(tris[t * 3 + k]!, tris[t * 3 + (k + 1) % 3]!)) ?? [];
+        const other = neighbours.find((n) => n !== t && !isSliver.has(faceId[n]!));
+        if (other !== undefined) {
+          faceId[t] = faceId[other]!;
+          moved++;
+        }
+      }
+    }
+    if (!moved) break;
+    pending = [...faceId].filter((f) => isSliver.has(f)).length;
+  }
+  return { faceId, slivers };
+}
 
 /** Apply a kernel result for `plan` in a transaction draft: reconcile, then mark the blend surfaces. */
 export function applyEdgeBlendResult(draft: DocumentDraft, plan: EdgeBlendPlan, result: EdgeBlendResult): EdgeBlendApplyResult {
@@ -946,8 +1158,10 @@ export function applyEdgeBlendResult(draft: DocumentDraft, plan: EdgeBlendPlan, 
   }
   const first = checkEdgeBlendResult(plan, result);
   const faceOrigin = first.faceOrigin as unknown as Map<FaceLocalId, KernelFaceOrigin[]>;
+  const { faceId, slivers } = absorbSliverFaces({ verts: first.mesh.verts, tris: first.mesh.tris, faceId: first.mesh.faceId });
+  for (const fid of slivers) faceOrigin.delete(fid as unknown as FaceLocalId);
   const updated = applyKernelResult(draft, plan.body.id, {
-    mesh: { verts: first.mesh.verts, tris: first.mesh.tris, faceId: first.mesh.faceId },
+    mesh: { verts: first.mesh.verts, tris: first.mesh.tris, faceId },
     faceOrigin,
     selfRunId: result.bodyRunId,
     props: first.props,
@@ -981,7 +1195,7 @@ export function applyEdgeBlendResult(draft: DocumentDraft, plan: EdgeBlendPlan, 
       }
     }
   }
-  return plan.skipped.length ? { bodyId: updated.id, faceIds: created, skipped: [...plan.skipped] } : { bodyId: updated.id, faceIds: created };
+  return { bodyId: updated.id, faceIds: created };
 }
 
 async function runPlan(ctx: Parameters<typeof hostOf>[0], path: readonly number[], precomputed: EdgeBlendResult | undefined, plan: (state: DocumentState) => EdgeBlendPlan): Promise<EdgeBlendApplyResult> {
@@ -1020,8 +1234,8 @@ export const chamferApply = defineCommand({
 });
 
 /**
- * Profile Edges: shape the given outside edges of a solid with a router-bit profile (one undo step
- * "Profile Edges"). Inside edges of the pick are left out (`skipped`) and the profile stops at them.
+ * Profile Edges: shape the given edges of a solid with a router-bit profile (one undo step named
+ * after the profile), on outside, inside, angled and curved edges alike.
  */
 export const profileApply = defineCommand({
   id: 'profile.apply',

@@ -1364,7 +1364,7 @@ describe('ModelDocumentApi raised panels and edge profiles', () => {
     expect([...b.faces.values()].filter(face => face.loops.length === 0 || face.loops.some(loop => loop.length < 3))).toEqual([]);
   });
 
-  it('splits a frame\'s front outline where a proud rail turns it to inside edges: profile_edges skips them and fillet_edges rounds the parts', async () => {
+  it('shapes a frame\'s front outline with inside edges where a proud rail turns it: profile_edges fills them and fillet_edges rounds the parts', async () => {
     const { api, root } = setup();
     const made = await api.apply({ expectedRevision: api.revision, label: 'Frame', operations: frameOps(0.006) });
     const frame = made.created.frame!;
@@ -1372,15 +1372,14 @@ describe('ModelDocumentApi raised panels and edge profiles', () => {
     const bead = await api.apply({ expectedRevision: api.revision, label: 'Bead', operations: [
       { op: 'profile_edges', body: box(frame), edges: [{ face: stileFront, which: 'inner' }], profile: 'bead', size: 0.003 },
     ] });
-    const skipped = bead.results[0]!.skipped!;
-    expect(skipped.length).toBeGreaterThan(0);
-    expect(skipped.every(s => s.reason === 'inside_edge' && s.ref.kind === 'edge')).toBe(true);
+    expect(bead.results[0]!.skipped).toBeUndefined();
+    expect(bead.results[0]!.count).toBeGreaterThan(0);
     expect(root().bodies.get(frame as never)!.valid).toBe(true);
     const again = await api.apply({ expectedRevision: api.revision, label: 'Frame 2', operations: frameOps(0.006, 1) });
     const round = await api.apply({ expectedRevision: api.revision, label: 'Round', operations: [
       { op: 'fillet_edges', body: box(again.created.frame!), edges: [{ face: { facing: front, point: [1.019, -0.019, 0.3] }, which: 'inner' }], radius: 0.003 },
     ] });
-    expect(round.results[0]!.count).toBeGreaterThan(skipped.length);
+    expect(round.results[0]!.count).toBeGreaterThan(0);
     expect(root().bodies.get(again.created.frame as never)!.valid).toBe(true);
     expect(api.query({ ...queryAll, kinds: ['body'] }).entities.length).toBeGreaterThan(0);
   });

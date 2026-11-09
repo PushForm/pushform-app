@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { m4translation, type DefId, type Box3, type Id, type Ray, type Vec3 } from '@pushform/core';
 import { InlineBackend, KernelClient, meshTopologyProblems } from '@pushform/kernel';
+import { arcFrom3Points } from '@pushform/geom';
 import { SketchGraph, type EntityRef } from '@pushform/model';
 import { CommandRegistry } from '../registry/CommandRegistry';
 import type { CameraHost, CameraState } from '../camera/CameraHost';
@@ -11,6 +12,7 @@ import { SERVICE_DOCUMENT, SERVICE_KERNEL } from '../host/services';
 import { RevolveTool } from '../tools/impl/Revolve';
 import { NO_MODIFIERS, type ToolPointerEvent } from '../tools/Tool';
 import { ToolManager } from '../tools/ToolManager';
+import { curveCommands } from './curves';
 import { modelCommands } from './model';
 import { groupCommands, type MakeResult } from './groups';
 import { contextCommands } from './context';
@@ -81,6 +83,7 @@ function setup(min = 0, max = 1) {
     ]),
   });
   registry.registerAll(revolveCommands);
+  registry.registerAll(curveCommands);
   registry.registerAll(modelCommands);
   registry.registerAll(groupCommands);
   registry.registerAll(contextCommands);
@@ -145,6 +148,58 @@ describe('Revolve', () => {
     s.host.redo();
     expect(s.root().bodies.size).toBe(1);
     expect(s.root().sketch.faces.size).toBe(0);
+  });
+  it.each(['diameter', 'pie'])('revolves a closed semicircle (%s) into one smooth sphere, including poles and seam', async (closure) => {
+    const s = setup();
+    const arc = arcFrom3Points([5, 0, -1], [6, 0, 0], [5, 0, 1], 24);
+    s.registry.execute('sketch.addCurve', { ...arc, closed: false, ...(closure === 'pie' ? { closeTo: [5, 0, 0] } : {}) });
+    if (closure === 'diameter') s.host.edit('Close semicircle', (draft) => {
+      SketchGraph.for(draft).addEdge([5, 0, -1], [5, 0, 1]);
+    });
+    const face = [...s.root().sketch.faces.values()].find((f) => f.id !== s.face.id)!;
+    const diameter = [...s.root().sketch.edges.values()].find((e) => {
+      const a = s.root().sketch.vertices.get(e.a)!.p;
+      const b = s.root().sketch.vertices.get(e.b)!.p;
+      return a[0] === 5 && b[0] === 5 && Math.abs(a[2] - b[2]) > 0.9;
+    })!;
+    s.tools.click(at([5.5, 0, 0], { kind: 'sketchFace', path: [], id: face.id }));
+    s.tools.click(at([5, 0, 0], { kind: 'sketchEdge', path: [], id: diameter.id }));
+    await s.tool.settled;
+    expect(s.tool.status().instructor).toContain('Check the preview');
+    expect(s.tool.previewSurfaceGroups).toHaveLength(1);
+    expect(s.tool.previewSurfaceGroups![0]).toHaveLength(1);
+    s.tool.onSetting('apply', undefined);
+    await s.tool.settled;
+    const body = [...s.root().bodies.values()][0]!;
+    expect(meshTopologyProblems(body.mesh)).toEqual([]);
+    expect(body.props.volume).toBeCloseTo(4 * Math.PI / 3, 1);
+    expect(body.surfaces.size).toBe(1);
+    expect([...body.surfaces.values()][0]!.faceIds).toHaveLength(body.faces.size);
+    expect([...body.edges.values()].every((e) => e.soft && e.smooth)).toBe(true);
+    s.host.undo();
+    expect(s.root().sketch.faces.has(face.id)).toBe(true);
+    expect(s.root().bodies.size).toBe(0);
+    s.host.redo();
+    expect([...s.root().bodies.values()][0]!.surfaces.size).toBe(1);
+  });
+  it.each([3, 48])('smooths rotation seams but keeps cylinder rims sharp at %i segments', async (segments) => {
+    const s = setup();
+    await s.registry.execute('revolve.apply', { ...s.params, segments });
+    const body = [...s.root().bodies.values()][0]!;
+    expect(body.surfaces.size).toBe(1);
+    expect([...body.edges.values()].filter((e) => e.soft && e.smooth)).toHaveLength(segments);
+    expect([...body.edges.values()].filter((e) => !e.soft && !e.smooth)).toHaveLength(segments * 2);
+  });
+  it('keeps partial-turn caps separate from the smooth rotational surface', async () => {
+    const s = setup(1, 2);
+    await s.registry.execute('revolve.apply', { ...s.params, angleDeg: 90 });
+    const body = [...s.root().bodies.values()][0]!;
+    expect(body.surfaces.size).toBe(2);
+    for (const e of body.edges.values()) {
+      const a = body.faces.get(e.faceA)!.surfaceId;
+      const b = body.faces.get(e.faceB)!.surfaceId;
+      expect(e.soft && e.smooth).toBe(a !== null && a === b);
+    }
   });
   it('makes a capped quarter ring from an offset profile', async () => {
     const s = setup(1, 2);

@@ -22,9 +22,13 @@ Select the geometry, choose **Move**, and click a base point. Move the pointer t
 
 Both gestures show the same live outline and commit the previewed destination as one Undo step. Moving a smooth solid, including a surface that covers the entire solid, preserves its smooth shading and softened edges. Escape cancels either gesture without moving anything.
 
+## Lock Move to an axis or direction
+
 The Right, Left and Up arrow keys lock the move to a straight rail through the base point along the red, green and blue axes of the model. The same key again releases the rail; another axis key replaces it. Down fixes a parallel or perpendicular direction from the last inferred edge and keeps that direction until you press Down again or choose another axis. Infer an edge first if Down reports that none is available. Hold Shift to freeze the current direction of travel or inferred direction; releasing Shift restores any arrow lock. Passing the base point moves smoothly to the other side. Hovering a face does not change the rail's distance calculation. The locks end with the move.
 
-The tool options bar shows **Distance**, **ΔX**, **ΔY** and **ΔZ** in the model's units, plus **Copy** and the current constraint. The offsets are relative to the base point along the model's axes. Pick a base point to enable the fields. Type an offset and press Tab to hold it in the preview while setting the other offsets; press Enter to finish. A typed offset releases direction locks; a typed Distance releases held offsets and follows the current travel direction, including the negative side of an axis. Invalid text keeps the move pending. Just after a move, editing a field adjusts that move as one Undo step.
+## Enter precise Move distances and offsets
+
+The tool options bar starts with **Copy**, then shows **Distance**, **ΔX**, **ΔY** and **ΔZ** in the model's units, plus the current constraint. The offsets are relative to the base point along the model's axes. Pick a base point to enable the fields. Type an offset and press Tab to hold it in the preview while setting the other offsets; press Enter to finish. A typed offset releases direction locks; a typed Distance releases held offsets and follows the current travel direction, including the negative side of an axis. Invalid text keeps the move pending. Just after a move, editing a field adjusts that move as one Undo step.
 
 While moving, type a length and press Enter to move that far in the locked direction or the way the pointer has moved. Before the pointer has moved, lock an axis first. Type [x,y,z] to put the base point at those model coordinates, or <x,y,z> to move by that much. Typed just after a move, a value redoes it as one Undo step.
 
@@ -52,7 +56,11 @@ Before setting the center, the Right, Left and Up arrow keys lock the protractor
 
 With angle snapping on in **Model Info**, the angle snaps to multiples of the snap angle when the pointer is close to one, and the protractor's ticks show that angle. With snapping off, the angle follows the pointer freely.
 
-After setting the starting direction, type an angle in degrees, such as `45` or `45°`, or a rise:run slope, and press Enter. It turns the way the preview turns, and a negative value turns the other way; before you move the pointer it turns counterclockwise. Typing just after a rotation redoes it.
+## Enter a Rotate angle
+
+The tool options bar shows **Copy** first, then **Angle**. Angle becomes editable after you set the starting direction and displays the signed preview angle. Enter degrees, such as `45` or `-45°`, or a rise:run slope, then press Enter to apply. Positive angles turn counterclockwise about the protractor's normal; negative angles turn clockwise. Press Tab to hold a typed angle in the preview, then Enter or a placement click to finish. Invalid input leaves the rotation pending. Editing Angle immediately after a rotation adjusts that rotation as one Undo step.
+
+## Copy with Rotate and make radial arrays
 
 Tap Ctrl, or click **Copy**, to keep the original in place. After a rotated copy, type `3x` for three more copies at the same step, or `/3` to spread three copies over the angle turned. A copy turned 360° and then `/6` makes six evenly round the whole circle, the original counting as one, so no copy lands on it.
 
@@ -60,7 +68,13 @@ Tap Ctrl, or click **Copy**, to keep the original in place. After a rotated copy
 
 Choose **Scale** for the selection. Its box and grips line up with the model's red, green and blue axes. Drag a grip to resize, then release to commit, or click a grip, move and click again. Both gestures show a live outline of the resized geometry and bounding box, and commit the displayed result as one Undo step. Escape cancels the preview. Corner grips keep proportions, and Shift lets a corner scale each axis freely. With an edge or face grip, Shift keeps proportions. Hold Alt or Ctrl to scale about the selection's center instead of the opposite grip. These keys update the preview immediately. Where grips overlap on screen, the one nearest you is used.
 
-The tool options bar shows **Scale**, **Size X**, **Size Y** and **Size Z**. Pick a grip to enable the fields; sizes are the selection's extents along the model's axes, in its display units. Type a size and press Tab to hold it in the preview, then Enter or a placement click to finish. A uniform grip changes the other sizes proportionally. With a free grip, you can hold sizes for separate axes while moving the pointer to set the remaining axes. A typed Scale replaces held sizes. Fields for a flat selection's missing axis stay disabled. Invalid text or a zero scale keeps the operation pending. Editing a field just after a resize adjusts that resize as one Undo step.
+## Hold Scale modifiers with toolbar buttons
+
+The tool options bar starts with momentary **Keep proportions** (or **Free proportions** for a corner grip) and **About center** buttons. Hold a button to apply its constraint and release it to return to the previous constraint; the buttons also show held keyboard modifiers.
+
+## Enter exact Scale factors and sizes
+
+The Scale tool options bar shows **Scale**, **Size X**, **Size Y** and **Size Z**. Pick a grip to enable the fields; sizes are the selection's extents along the model's axes, in its display units. Type a size and press Tab to hold it in the preview, then Enter or a placement click to finish. A uniform grip changes the other sizes proportionally. With a free grip, you can hold sizes for separate axes while moving the pointer to set the remaining axes. A typed Scale replaces held sizes. Fields for a flat selection's missing axis stay disabled. Invalid text or a zero scale keeps the operation pending. Editing a field just after a resize adjusts that resize as one Undo step.
 
 Resizing a smooth solid preserves its smooth shading and softened edges, including when stretching one axis or mirroring. Undo and Redo restore its appearance as well as its dimensions.
 

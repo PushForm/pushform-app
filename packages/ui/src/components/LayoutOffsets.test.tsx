@@ -130,3 +130,28 @@ it('draws the source and offset guides above opaque covering objects with a cont
   expect(page().entities.size).toBe(2);
   session.dispose(); app.dispose();
 });
+
+it('keeps Distance in the options bar through preview, exact entry, cancellation and undo', () => {
+  const { app, session, tab, canvas, click, move, page } = setup();
+  fireEvent.click(screen.getByRole('button', { name: 'Offset' }));
+  const bar = screen.getByRole('toolbar', { name: 'Offset options' });
+  const distance = within(bar).getByRole('textbox', { name: 'Distance' }) as HTMLInputElement;
+  expect(distance.disabled).toBe(true);
+  const original = tab.doc.state;
+  click(80, 40); move(85, 40);
+  expect(distance.disabled).toBe(false); expect(distance.value).toBe('5.0 mm');
+  expect(bar.classList.contains('is-placing')).toBe(false);
+  expect(document.querySelectorAll('input.pf-entry')).toHaveLength(1);
+  expect(tab.doc.state).toBe(original);
+  fireEvent.change(distance, { target: { value: 'broken' } }); fireEvent.keyDown(distance, { key: 'Enter' });
+  expect(distance.getAttribute('aria-invalid')).toBe('true'); expect(tab.doc.state).toBe(original);
+  fireEvent.change(distance, { target: { value: '-3mm' } }); fireEvent.keyDown(distance, { key: 'Enter' });
+  expect(page().entities.size).toBe(2);
+  expect([...page().entities.values()].some(e => JSON.stringify(e.points) === JSON.stringify([[23, 23], [77, 23], [77, 57], [23, 57]]))).toBe(true);
+  act(() => { tab.commands.execute('edit.undo'); }); expect(page().entities.size).toBe(1);
+  click(80, 40); move(85, 40); fireEvent.keyDown(distance, { key: 'Escape' });
+  expect(distance.disabled).toBe(true); expect(page().entities.size).toBe(1);
+  click(80, 40); move(85, 40); fireEvent.pointerCancel(canvas);
+  expect(distance.disabled).toBe(true); expect(page().entities.size).toBe(1);
+  session.dispose(); app.dispose();
+});

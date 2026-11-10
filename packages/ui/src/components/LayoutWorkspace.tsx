@@ -3367,7 +3367,7 @@ export function LayoutWorkspace({
   // click on the page takes focus away. A text field, menu or dialog the user moved to keeps it.
   const entryFieldKey = entryFields.map(f => f.id).join(' ');
   useEffect(() => {
-    if (!entryFieldKey || entryFocus) return;
+    if (!entryFieldKey || entryFields.some(f => f.id === entryFocus)) return;
     const active = document.activeElement;
     const onPage = active instanceof Element && workspaceRef.current?.contains(active) &&
       !active.closest('input, textarea, select, [contenteditable="true"], [role="menu"], [role="dialog"]');
@@ -4236,6 +4236,13 @@ export function LayoutWorkspace({
   const lengthSetting = (id: string, label: string, mm: number): ToolSetting => ({ kind: 'quantity', id, label, value: formatEntryLength(mm), quantity: 'length' });
   const countSetting = (id: string, label: string, n: number): ToolSetting => ({ kind: 'quantity', id, label, value: String(n), quantity: 'count' });
   const barSettings: ToolSetting[] = (() => {
+    if (tool === 'freehand') return [{ kind: 'note', id: 'hint', text: 'Drag to draw · release to finish · Esc to cancel' }];
+    if (tool === 'bezier') return [
+      { kind: 'note', id: 'hint', text: 'Click for corners · drag for curves · Enter to finish', priority: 3 },
+      { kind: 'action', id: 'finish-curve', label: 'Finish curve', disabled: !bezierDraft || bezierDraft.points.length < 2 },
+      { kind: 'action', id: 'remove-anchor', label: 'Remove last anchor', disabled: !bezierDraft?.points.length },
+      { kind: 'action', id: 'cancel-curve', label: 'Cancel curve', disabled: !bezierDraft },
+    ];
     if (tool === 'shape-builder') return [
       { kind: 'choice', id: 'mode', label: 'Shape Builder', value: shapeBuilder.mode, options: [{ value: 'add', label: 'Add' }, { value: 'remove', label: 'Remove' }] },
       { kind: 'toggle', id: 'keepOriginals', label: 'Keep originals', on: shapeBuilder.keepOriginals },
@@ -4265,7 +4272,11 @@ export function LayoutWorkspace({
   const onBarSetting = (id: string, value: ToolSettingValue): void => {
     const count = typeof value === 'object' && value?.kind === 'segments' ? value.count : null;
     const mm = typeof value === 'object' && (value?.kind === 'length' || value?.kind === 'radius') ? value.meters * 1000 : null;
-    if (tool === 'shape-builder') {
+    if (tool === 'bezier') {
+      if (id === 'finish-curve' && bezierDraft) finishBezier(bezierDraft, false);
+      else if (id === 'remove-anchor' && bezierDraft) setBezierDraft(removeLastLayoutBezierAnchor(bezierDraft));
+      else if (id === 'cancel-curve') { setBezierDraft(null); bezierPress.current = null; setCursor(null); setSnapKind(null); }
+    } else if (tool === 'shape-builder') {
       if (id === 'mode' && (value === 'add' || value === 'remove')) shapeBuilder.setMode(value);
       else if (id === 'keepOriginals' && typeof value === 'boolean') shapeBuilder.setKeepOriginals(value);
       else if (id === 'apply') shapeBuilder.apply();
@@ -4308,16 +4319,20 @@ export function LayoutWorkspace({
     },
     onTab: tabEntry, onEnter: applyEntry, onEscape: escapeEntry,
   };
-  /** Move's offsets, distance and angle, or Scale's factor and sizes, in the bar; until a base point is chosen they wait, empty. */
-  const barEntryFields: readonly LayoutEntryField[] = entryKind === 'move'
-    ? moveDraft && entryFields.some(f => f.id === 'x') ? entryFields
-      : (['X', 'Y', 'Distance', 'Angle'] as const).map(label => ({ id: `waiting-${label}`, label, value: '', disabled: true }))
-    : entryKind === 'scale'
-      ? scaleDraft && entryFields.some(f => f.id === 'factor') ? entryFields
-        : (['Scale', 'Width', 'Height'] as const).map(label => ({ id: `waiting-${label}`, label, value: '', disabled: true }))
-      : [];
-  // Move's and Scale's bars hold their own fields, so they stay usable between the tool's clicks.
-  const barPlacing = Boolean(rotationDraft || offsetDraft || arcDraft);
+  // Every tool with drawing values uses one set of fields in the options bar. The page
+  // retains the dimension guides, while the inputs stay in a stable place for entry.
+  const entriesInBar = entryKind !== 'none' && !isLayoutCornerTool(tool);
+  const waitingFields = (labels: readonly string[]): LayoutEntryField[] => labels.map(label => ({ id: entryKind === 'single' ? LAYOUT_POINTER_FIELD : label === 'Distance' ? 'length' : label === 'Scale' ? 'factor' : label.toLowerCase(), label, value: '', disabled: true }));
+  const barEntryFields: readonly LayoutEntryField[] = !entriesInBar ? [] : entryFields.length ? entryFields
+    : entryKind === 'move' ? waitingFields(['X', 'Y', 'Distance', 'Angle'])
+      : entryKind === 'scale' ? waitingFields(['Scale', 'Width', 'Height'])
+        : entryKind === 'line' ? waitingFields(['Length', 'Angle'])
+          : entryKind === 'box' ? waitingFields(['Width', 'Height'])
+            : entryKind === 'radius' || tool === 'arc' || tool === 'pie' ? waitingFields(['Radius'])
+              : entryKind === 'arc' ? waitingFields(['Length'])
+                : waitingFields([entrySingle.label]);
+  // Operation fields remain usable throughout point placement.
+  const barPlacing = false;
   return (
     <>
       {contextMenu ? <LayoutContextMenu x={contextMenu.x} y={contextMenu.y} items={contextItems} onClose={() => { setContextMenu(null); canvasRef.current?.focus(); }} /> : null}
@@ -4453,7 +4468,7 @@ export function LayoutWorkspace({
                 return d + (contour.closed ? 'Z' : '');
               }).join(' ')} fillRule="evenodd" />)}
           </svg> : null}
-          {editingTextId === null ? <LayoutEntryFields fields={entryKind === 'move' || entryKind === 'scale' ? entryFields.filter(f => f.id === LAYOUT_POINTER_FIELD) : entryFields}
+          {editingTextId === null ? <LayoutEntryFields fields={entriesInBar ? [] : entryFields}
             segments={entry.segments} pageSize={page.size} scale={PX_PER_MM * zoom} pointer={cursor} {...entryFieldEvents} /> : null}
           {tool === 'line' && lineGuide && cursor ? <LayoutAlignmentGuide axis={lineGuide.axis}
             from={[lineGuide.reference[0] * PX_PER_MM * zoom, lineGuide.reference[1] * PX_PER_MM * zoom]}
@@ -4504,6 +4519,7 @@ export function LayoutWorkspace({
             onDoubleClick={onDoubleClick}
             onPointerCancel={() => {
               if (tool === 'shape-builder') { shapeBuilder.cancelPointer(); return; }
+              clearEntry();
               eraserStroke.current = null; setEraserMarks({ ids: [], dragging: false });
               if (tableDrag.current) setTableSelection(tableDrag.current);
               tableDrag.current = null;

@@ -158,7 +158,7 @@ it('sets the side count from Measurements or the toolbar and keeps it for later 
   // Typed before the first click: no shape is needed.
   enterLayoutValue('8s');
   expect(sides.value).toBe('8');
-  expect(document.querySelector('input.pf-entry')).toBeNull();
+  expect(document.querySelector('input.pf-entry:not(:disabled)')).toBeNull();
   draw(50);
   expect(latest().points).toHaveLength(8);
   for (const p of latest().points) expect(Math.hypot(p[0] - 50, p[1] - 50)).toBeCloseTo(20);

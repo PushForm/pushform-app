@@ -171,3 +171,36 @@ it('rejects malformed and zero sizes without ending the resize', () => {
   expect(tool.status().instructor).toContain('nonzero');
   expect(a.document.doc.state).toBe(before);
 });
+
+it('momentary modifier buttons hold only while pressed and also reflect the physical keys', () => {
+  const { a, view, point, tool } = mount();
+  const grip = tool.scaleBox!.grips.find((g) => g.kind === 'face' && g.pos[0] === 1)!;
+  fireEvent.pointerDown(view, point(grip.pos, 1));
+  fireEvent.pointerUp(view, point(grip.pos));
+  fireEvent.pointerMove(view, point([2, 0.5, 0.5]));
+  const before = a.document.doc.state;
+  const center = screen.getByRole('button', { name: /About center/ });
+  fireEvent.pointerDown(center, { button: 0 });
+  expect(center.getAttribute('aria-pressed')).toBe('true');
+  expect(tool.dragFactors?.map((f) => +f.toFixed(6))).toEqual([3, 1, 1]);
+  fireEvent.pointerUp(window);
+  expect(center.getAttribute('aria-pressed')).toBe('false');
+  expect(tool.dragFactors?.map((f) => +f.toFixed(6))).toEqual([2, 1, 1]);
+  // Releasing the button must not release a physical modifier still held down.
+  fireEvent.keyDown(view, { key: 'Alt', code: 'AltLeft', altKey: true });
+  fireEvent.pointerDown(center, { button: 0 }); fireEvent.pointerUp(window);
+  expect(center.getAttribute('aria-pressed')).toBe('true');
+  fireEvent.keyUp(view, { key: 'Alt', code: 'AltLeft' });
+  expect(center.getAttribute('aria-pressed')).toBe('false');
+  const uniform = screen.getByRole('button', { name: /Keep proportions/ });
+  fireEvent.keyDown(uniform, { key: ' ', code: 'Space' });
+  expect(tool.dragFactors?.map((f) => +f.toFixed(6))).toEqual([2, 2, 2]);
+  fireEvent.keyUp(uniform, { key: ' ', code: 'Space' });
+  expect(tool.dragFactors?.map((f) => +f.toFixed(6))).toEqual([2, 1, 1]);
+  for (const event of ['pointercancel', 'blur']) {
+    fireEvent.pointerDown(center, { button: 0 });
+    fireEvent(window, new Event(event));
+    expect(center.getAttribute('aria-pressed')).toBe('false');
+  }
+  expect(a.document.doc.state).toBe(before);
+});

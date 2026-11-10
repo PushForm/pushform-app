@@ -22,7 +22,7 @@ Immediately after that copy, type **3x** and press Enter to make three copies in
 
 Choose **Rotate** in Transform, or press **Q**. Click the object where you want its pivot; clicking a member of a group rotates the whole group. To rotate several objects together, select them first, then click a selected object or empty paper to set the pivot. Click a second point away from the pivot to set the reference direction. Move the pointer to preview the angle, then click a third time to finish.
 
-After fixing the reference direction, you can instead type an angle such as **30** and press Enter. Positive angles turn clockwise on the page. Escape cancels the preview. Locked objects stay where they are; the reference and final direction points must differ from the pivot.
+The tool options bar shows **Angle**, disabled until you fix the reference direction. It then displays the live preview angle. Enter a signed angle such as **30** or **-45** and press Enter to finish. Positive angles turn clockwise on the page. Escape cancels the preview. Locked objects stay where they are; the reference and final direction points must differ from the pivot.
 
 Labels stay readable as they turn: the arrow and the bend move around the pivot, while the text stays upright at the end of a level leader. A horizontal or vertical dimension becomes a rotated dimension at its new angle.
 
@@ -64,7 +64,7 @@ Drag the crosshair to change the pivot within the frame. Bringing it near the mi
 
 Choose **Offset** in Modify. Click a visible, unlocked path, move the pointer to preview a parallel copy, then click to place it. The source stays unchanged.
 
-After choosing the source, type a length for an exact offset. A positive value expands a closed shape; a negative value insets it. For an open path, the pointer sets the positive side and a negative value uses the other side. A collapsed or invalid offset creates nothing; correct the distance or press Escape.
+Offset shows **Distance** in the tool options bar. It waits disabled until you choose the source, then follows the live preview and remains editable while placing the offset. Enter a signed length there and press Enter for an exact offset. A positive value expands a closed shape; a negative value insets it. For an open path, the pointer sets the positive side and a negative value uses the other side. A collapsed or invalid offset creates nothing; correct the distance or press Escape.
 
 ## Round or bevel a corner with Corner
 

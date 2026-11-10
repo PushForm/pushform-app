@@ -40,9 +40,11 @@ export interface ToolOptionsBarProps {
   onLeave(): void;
   /**
    * Controls a workspace renders itself, after shortcut controls, such as Layout's text formatting
-   * while text is edited. The bar shows while there are any.
+   * while text is edited. The bar shows when the content offers an editable field or action.
    */
   readonly children?: ReactNode;
+  /** Whether custom content currently offers an editable field or action. */
+  readonly hasEditableContent?: boolean | undefined;
 }
 
 /**
@@ -69,6 +71,7 @@ export function ToolOptionsBar(): JSX.Element {
       settings={styled ? [] : settings}
       placing={placing}
       applied={applied}
+      hasEditableContent={Boolean(styled) || fields.some(f => f.location === 'bar' && !f.disabled)}
       mac={app.keymap.platform === 'mac'}
       onSetting={(id, value) => app.toolManager.setting(id, value)}
       read={(quantity, text) => readQuantity(app, quantity, text)}
@@ -81,11 +84,18 @@ export function ToolOptionsBar(): JSX.Element {
 
 /**
  * The tool options bar, for either workspace: settings and mode toggles floating over the top of
- * the view. Hidden when there are none. Only its controls take the pointer; while the tool
+ * the view. Hidden when no editable controls are available. Only its controls take the pointer; while the tool
  * is placing a point the whole bar lets it through.
  */
-export function ToolOptionsBarView({ tool, settings, placing = false, applied: appliedIn = false, mac, onSetting, read, onLeave, children }: ToolOptionsBarProps): JSX.Element {
-  const shown = settings.length > 0 || Boolean(children);
+export function ToolOptionsBarView({ tool, settings, placing = false, applied: appliedIn = false, mac, onSetting, read, onLeave, children, hasEditableContent = Boolean(children) }: ToolOptionsBarProps): JSX.Element {
+  const shown = hasEditableContent || settings.some(c => {
+    switch (c.kind) {
+      case 'note': return false;
+      case 'toggle': return true;
+      case 'choice': return c.options.some(option => !option.disabled);
+      default: return !c.disabled;
+    }
+  });
   const applied = appliedIn && shown;
   // keep the last controls while fading out
   const last = useRef<{ settings: readonly ToolSetting[]; title: string; id: string }>({ settings: [], title: '', id: '' });
@@ -159,7 +169,7 @@ export function ToolOptionsBarView({ tool, settings, placing = false, applied: a
   const controls = (items: readonly ToolSetting[]) => items.map((c) => <Control key={c.id} read={read} c={c} mac={mac} asList={fold >= 2} send={send} />);
   const cls = [TOOL_OPTIONS_CLASS, shown ? 'is-shown' : '', applied ? 'is-applied' : '', placing ? 'is-placing' : '', resting && !placing ? 'is-resting' : ''].filter(Boolean).join(' ');
   return (
-    <div ref={root} className={cls} role="toolbar" aria-label={`${view.title} options`} aria-hidden={!shown} onKeyDown={onKeyDown}>
+    <div ref={root} className={cls} role="toolbar" aria-label={`${view.title} options`} aria-hidden={!shown} inert={!shown} onKeyDown={onKeyDown}>
       <span className="pf-tob-tool" title={view.title}>
         <Icon name={`tool-${view.id}`} size={16} />
         {applied ? <span aria-hidden="true">✓</span> : null}

@@ -34,16 +34,17 @@ it.each([
 ] as const)('%s keeps its operation inputs in the bar and enables them at the first point', (tool, labels) => {
   const { tab, canvas, click, choose, page, dispose } = setup();
   choose(tool);
-  const bar = screen.getByRole('toolbar', { name: /options$/ });
-  for (const label of labels) expect((within(bar).getByRole('textbox', { name: label }) as HTMLInputElement).disabled).toBe(true);
+  const persistent = ['rounded-rectangle', 'bulged-rectangle', 'polygon', 'circumscribed-polygon', 'table'].includes(tool);
+  expect(Boolean(screen.queryByRole('toolbar', { name: /options$/ }))).toBe(persistent);
   const before = tab.doc.state;
   click(20, 20);
+  const bar = screen.getByRole('toolbar', { name: /options$/ });
   for (const label of labels) expect((within(bar).getByRole('textbox', { name: label }) as HTMLInputElement).disabled).toBe(false);
   expect([...document.querySelectorAll('input.pf-entry')].every(el => el.closest('.pf-tob'))).toBe(true);
   expect(tab.doc.state).toBe(before);
   fireEvent.keyDown(canvas, { key: 'Escape' });
   expect(page().entities.size).toBe(0);
-  for (const label of labels) expect((within(bar).getByRole('textbox', { name: label }) as HTMLInputElement).disabled).toBe(true);
+  expect(Boolean(screen.queryByRole('toolbar', { name: /options$/ }))).toBe(persistent);
   dispose();
 });
 
@@ -60,32 +61,44 @@ it.each([['arc', 'Angle'], ['pie', 'Angle'], ['arc2', 'Bulge']] as const)('%s ad
 it('Bézier bar actions finish, remove an anchor and cancel the pending curve', () => {
   const { tab, click, choose, page, dispose } = setup();
   choose('bezier');
+  expect(screen.queryByRole('toolbar')).toBeNull();
+  click(20, 20);
   const bar = screen.getByRole('toolbar', { name: 'Bézier Curve options' });
   expect((within(bar).getByRole('button', { name: 'Finish curve' }) as HTMLButtonElement).disabled).toBe(true);
   expect(within(bar).getByText(/Click for corners/)).toBeTruthy();
   expect(within(bar).queryByRole('spinbutton')).toBeNull();
-  click(20, 20); click(60, 20); click(80, 40);
+  click(60, 20); click(80, 40);
   fireEvent.click(within(bar).getByRole('button', { name: 'Remove last anchor' }));
   fireEvent.click(within(bar).getByRole('button', { name: 'Finish curve' }));
+  expect(screen.queryByRole('toolbar')).toBeNull();
   const curve = [...page().entities.values()][0]!;
   expect(curve.points).toEqual([[20, 20], [60, 20]]);
   click(100, 60); click(140, 60);
   fireEvent.click(within(bar).getByRole('button', { name: 'Cancel curve' }));
+  expect(screen.queryByRole('toolbar')).toBeNull();
   expect(page().entities.size).toBe(1);
   act(() => { tab.commands.execute('edit.undo'); });
   expect(page().entities.size).toBe(0);
   dispose();
 });
 
-it('Freehand shows drawing hints without adding numeric or style controls', () => {
+it('Freehand leaves the bar hidden when there are no editable options', () => {
   const { canvas, at, choose, page, dispose } = setup();
   choose('freehand');
-  const bar = screen.getByRole('toolbar', { name: 'Freehand options' });
-  expect(within(bar).getByText(/Drag to draw/)).toBeTruthy();
-  expect(within(bar).queryByRole('spinbutton')).toBeNull();
-  expect(within(bar).queryByRole('textbox')).toBeNull();
+  expect(screen.queryByRole('toolbar')).toBeNull();
   fireEvent.pointerDown(canvas, { button: 0, ...at(20, 20) });
   fireEvent.pointerMove(canvas, at(40, 30)); fireEvent.pointerUp(canvas, at(60, 20));
   expect([...page().entities.values()][0]!.closed).toBe(false);
+  dispose();
+});
+
+it.each(['circle', 'rectangle'] as const)('%s hides its bar after placement and restores it for the next shape', tool => {
+  const { canvas, click, choose, page, dispose } = setup();
+  choose(tool); expect(screen.queryByRole('toolbar')).toBeNull();
+  click(20, 20); expect(screen.getByRole('toolbar')).toBeTruthy();
+  click(60, 40); expect(page().entities.size).toBe(1);
+  expect(screen.queryByRole('toolbar')).toBeNull();
+  click(100, 80); expect(screen.getByRole('toolbar')).toBeTruthy();
+  fireEvent.keyDown(canvas, { key: 'Escape' }); expect(screen.queryByRole('toolbar')).toBeNull();
   dispose();
 });

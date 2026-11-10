@@ -54,7 +54,7 @@ function mount(max: Vec3 = [1, 1, 1]) {
 
 it.each(['drag', 'clicks'] as const)('previews and commits Scale with real %s pointer events', async (gesture) => {
   const { a, view, tool, point, corner, size, finish, overlay } = mount();
-  for (const label of ['Scale', 'Size X', 'Size Y', 'Size Z']) expect((screen.getByRole('textbox', { name: label }) as HTMLInputElement).disabled).toBe(true);
+  expect(screen.queryByRole('toolbar', { name: 'Scale options' })).toBeNull();
   const grip = corner();
   const before = a.document.doc.state, entries = a.document.undoStack.length;
   fireEvent.pointerDown(view, point(grip.pos, 1));

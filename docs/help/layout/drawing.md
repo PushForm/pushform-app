@@ -18,7 +18,7 @@ The finished curve remains editable: select it and enter vertex editing to move 
 
 Choose **Freehand** from the Line button's arrow. Press and drag to draw, then release to finish. The stroke is smoothed into an editable curved path and stays open and unfilled. Freehand follows the pointer without grid or object snapping.
 
-The tool options bar reminds you to drag to draw and release to finish. Escape, switching tools, or changing pages cancels an unfinished stroke.
+The status area reminds you to drag to draw and release to finish. Escape, switching tools, or changing pages cancels an unfinished stroke.
 
 ## Draw rectangles, rounded rectangles and lozenges
 
@@ -46,7 +46,7 @@ With a Rectangle variant, Circle, Ellipse, or Polygon active, double-click to pl
 
 ## Type exact values
 
-Drawing values appear in the tool options bar at the top of the page view. Fields wait disabled until the tool can accept a value, then show the live preview as you move the pointer. The fields stay usable while placing a shape; gray dimension guides remain on the page. Inputs show a border only while focused, and shortcut buttons appear before them.
+Drawing values appear in the tool options bar at the top of the page view. The bar appears when the tool can accept values, then shows the live preview as you move the pointer. After placing or cancelling, it hides unless there are editable settings or actions. The fields stay usable while placing a shape; gray dimension guides remain on the page. Inputs show a border only while focused, and shortcut buttons appear before them.
 
 You don't need to click a field. Start typing and the value goes into the first field. Press **Tab** to move to the next field and **Shift+Tab** to go back. Press **Enter** to apply. Any field you didn't type in keeps its live value. Press **Escape** to discard what you typed and cancel the shape. If a value can't be read, its field turns red and the status bar says why.
 

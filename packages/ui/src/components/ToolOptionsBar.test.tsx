@@ -9,7 +9,7 @@ import { freeInference, GROUND_PLANE } from '@pushform/inference';
 import { AppContext } from '../AppContext';
 import { createApp } from '../bootstrap';
 import type { AppInstance } from '../bootstrap';
-import { ToolOptionsBar } from './ToolOptionsBar';
+import { ToolOptionsBar, ToolOptionsBarView } from './ToolOptionsBar';
 
 let app: AppInstance | null = null;
 afterEach(() => {
@@ -135,4 +135,20 @@ it('places shortcut buttons before the operation inputs in DOM and keyboard orde
   expect(copy.compareDocumentPosition(distance) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   const first = bar().querySelector('button, input, select');
   expect(first).toBe(copy);
+});
+
+
+it('hides disabled controls and hints unless an editable field or setting is available', () => {
+  const base = { tool: { id: 'test', title: 'Test' }, mac: false, onSetting: () => {}, onLeave: () => {}, read: () => null };
+  const controls = [{ kind: 'note' as const, id: 'hint', text: 'Pick a point' }, { kind: 'action' as const, id: 'finish', label: 'Finish', disabled: true }];
+  const { rerender } = render(<ToolOptionsBarView {...base} settings={controls} hasEditableContent={false}><input disabled aria-label="Size" /></ToolOptionsBarView>);
+  expect(screen.queryByRole('toolbar')).toBeNull();
+  rerender(<ToolOptionsBarView {...base} settings={controls} hasEditableContent><input aria-label="Size" /></ToolOptionsBarView>);
+  expect(screen.getByRole('textbox', { name: 'Size' })).toBeTruthy();
+  rerender(<ToolOptionsBarView {...base} settings={controls} hasEditableContent={false} />);
+  expect(screen.queryByRole('toolbar')).toBeNull();
+  rerender(<ToolOptionsBarView {...base} settings={[{ kind: 'toggle', id: 'copy', label: 'Copy', on: false }]} hasEditableContent={false} />);
+  expect(screen.getByRole('button', { name: 'Copy' })).toBeTruthy();
+  rerender(<ToolOptionsBarView {...base} settings={[{ kind: 'action', id: 'finish', label: 'Finish' }]} hasEditableContent={false} />);
+  expect(screen.getByRole('button', { name: 'Finish' })).toBeTruthy();
 });

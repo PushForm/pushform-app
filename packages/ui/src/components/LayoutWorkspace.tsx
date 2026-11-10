@@ -4440,6 +4440,7 @@ export function LayoutWorkspace({
             const styled = editing ?? selectedText;
             return <ToolOptionsBarView tool={styled ? { id: styled.kind === 'label' ? 'label' : 'text', title: styled.kind === 'label' ? 'Label' : 'Text' } : { id: tool, title: activeToolTitle }}
               settings={styled ? [] : barSettings} placing={barPlacing} mac={MAC}
+              hasEditableContent={Boolean(styled) || barEntryFields.some(field => !field.disabled)}
               onSetting={onBarSetting} read={readBarQuantity} onLeave={() => canvasRef.current?.focus()}>
               {editing ? <LayoutTextToolbar text={editing.text!} range={textSelection} getSelection={getTextSelection} onCaptureSelection={setTextSelection}
                 onChange={formatEditingText} onReturnToText={returnToText} onFinish={() => setEditingTextId(null)} />

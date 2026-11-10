@@ -204,3 +204,23 @@ it.each(['label', 'text', 'image'] as const)('holds %s pointer rotation at 90-de
   expect(page().entities.get(id)).toEqual(rotateLayoutEntities([source], pivot, -90)[0]);
   session.dispose(); app.dispose();
 });
+
+
+it('keeps Angle in the options bar, enables it after the reference, and commits a signed entry', () => {
+  const { app, session, tab, click, move, sourceId, page } = setup();
+  fireEvent.click(screen.getByRole('button', { name: 'Rotate' }));
+  const angle = screen.getByRole('textbox', { name: 'Angle' }) as HTMLInputElement;
+  expect(angle.closest('.pf-tob')).not.toBeNull();
+  expect(angle.disabled).toBe(true);
+  click(40, 30); expect(angle.disabled).toBe(true);
+  click(60, 30); expect(angle.disabled).toBe(false);
+  const source = page().entities.get(sourceId)!;
+  move(40, 10); expect(angle.value).toBe('-90.0°');
+  expect(page().entities.get(sourceId)).toEqual(source);
+  fireEvent.change(angle, { target: { value: '-45deg' } });
+  fireEvent.keyDown(angle, { key: 'Enter' });
+  expect(page().entities.get(sourceId)).toEqual({ ...source, ...rotateLayoutPath(source, [40, 30], -45) });
+  act(() => { tab.commands.execute('edit.undo'); });
+  expect(page().entities.get(sourceId)).toEqual(source);
+  session.dispose(); app.dispose();
+});

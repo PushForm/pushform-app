@@ -84,10 +84,20 @@ export interface ToolSettingOption {
 
 /**
  * A control in the tool options bar: a tool setting (shapes every operation until changed) or a
- * mode toggle (changes what the next operation produces). Operation values are `EntryField`s and
- * never appear here; held keys are `ToolStatus.held`.
+ * mode toggle (changes what the next operation produces). Operation values are `EntryField`s.
+ * Held constraints use `ToolStatus.held` tags and may also have momentary controls here.
  */
 export type ToolSetting =
+  | {
+      /** A held constraint, never a persistent toggle or an edit to a completed operation. */
+      readonly kind: 'modifier';
+      readonly id: string;
+      readonly label: string;
+      readonly key: ToolSettingKey | 'shift';
+      readonly held: boolean;
+      readonly disabled?: boolean | undefined;
+      readonly priority?: ToolSettingPriority | undefined;
+    }
   | {
       readonly kind: 'choice';
       readonly id: string;

@@ -10,19 +10,21 @@ While placing a segment, hold Shift to constrain it horizontally or vertically. 
 
 Open the Line button's arrow and choose **Bézier Curve**. Click to place a sharp corner, or press and drag to pull out smooth curve handles. Continue placing anchors. Click the first anchor to close and fill the path. Press Enter or Escape to finish an open path, or Delete or Backspace to remove the last anchor placed. Switching tools or pages discards an unfinished Bézier curve.
 
+The tool options bar shows drawing hints plus **Finish curve**, **Remove last anchor**, and **Cancel curve**. Cancel curve discards the pending path.
+
 The finished curve remains editable: select it and enter vertex editing to move its anchors and handles.
 
 ## Draw freehand
 
 Choose **Freehand** from the Line button's arrow. Press and drag to draw, then release to finish. The stroke is smoothed into an editable curved path and stays open and unfilled. Freehand follows the pointer without grid or object snapping.
 
-Escape, switching tools, or changing pages cancels an unfinished stroke.
+The tool options bar reminds you to drag to draw and release to finish. Escape, switching tools, or changing pages cancels an unfinished stroke.
 
 ## Draw rectangles, rounded rectangles and lozenges
 
 Open the Rectangle button's arrow and choose **Rectangle**, **Rounded**, **Bulged**, or **Lozenge**. Drag between opposite corners, or click each corner. Hold Shift for square bounds. Hold Ctrl, or Cmd on macOS, to draw outward from the center. The modifiers can be combined.
 
-After the first point, type the width and height. Rounded and Bulged show their corner radius or bulge in the tool options bar over the page view. Lozenge makes a capsule with fully rounded ends.
+After the first point, enter **Width** and **Height** in the tool options bar. Rounded and Bulged show their corner radius or bulge in the tool options bar over the page view. Lozenge makes a capsule with fully rounded ends.
 
 ## Draw circles and ellipses
 
@@ -44,7 +46,7 @@ With a Rectangle variant, Circle, Ellipse, or Polygon active, double-click to pl
 
 ## Type exact values
 
-While a tool places a shape, the values it can take appear as small fields on the page, next to the part of the preview they measure. Gray dimension lines tie each field to what it measures, and the fields sit outside the shape so they don't cover it. Each field shows the live value as you move the pointer.
+Drawing values appear in the tool options bar at the top of the page view. Fields wait disabled until the tool can accept a value, then show the live preview as you move the pointer. The fields stay usable while placing a shape; gray dimension guides remain on the page. Inputs show a border only while focused, and shortcut buttons appear before them.
 
 You don't need to click a field. Start typing and the value goes into the first field. Press **Tab** to move to the next field and **Shift+Tab** to go back. Press **Enter** to apply. Any field you didn't type in keeps its live value. Press **Escape** to discard what you typed and cancel the shape. If a value can't be read, its field turns red and the status bar says why.
 

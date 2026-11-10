@@ -126,3 +126,13 @@ it('shows a selected model text\'s style row and sets its font size, emphasis an
   act(() => { a.document.selection.set([]); });
   expect(bar().classList.contains('is-shown')).toBe(false);
 });
+
+it('places shortcut buttons before the operation inputs in DOM and keyboard order', () => {
+  const a = mount();
+  act(() => a.toolManager.activate('move'));
+  const copy = screen.getByRole('button', { name: /Copy/ });
+  const distance = screen.getByRole('textbox', { name: 'Distance' });
+  expect(copy.compareDocumentPosition(distance) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const first = bar().querySelector('button, input, select');
+  expect(first).toBe(copy);
+});

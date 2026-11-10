@@ -342,7 +342,8 @@ export class ToolManager implements ToolHost {
   setting(id: string, value: ToolSettingValue): void {
     const tool = this.visualTool;
     if (!tool?.onSetting) return;
-    const adjusting = this.isApplied();
+    const momentary = tool.status().settings?.some((s) => s.id === id && s.kind === 'modifier');
+    const adjusting = !momentary && this.isApplied();
     this.call(() => {
       tool.onSetting?.(id, value);
       // While the bar shows the last operation, the change redoes it; otherwise it is for the next one.

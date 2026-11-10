@@ -354,7 +354,7 @@ describe('Layout value fields', () => {
     app.dispose();
   });
 
-  it('shows value fields on the page; Tab locks a value into the preview and Enter applies the rest', () => {
+  it('shows value fields in the options bar; Tab locks a value into the preview and Enter applies the rest', () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
     vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockReturnValue({
       left: 0, top: 0, width: 891, height: 630, right: 891, bottom: 630,
@@ -420,7 +420,7 @@ describe('Layout value fields', () => {
     fireEvent.keyDown(window, { key: '9' });
     fireEvent.keyDown(layoutEntryField('Width'), { key: 'Escape' });
     move(180, 80);
-    expect(document.querySelector('input.pf-entry')).toBeNull();
+    expect(document.querySelector('input.pf-entry:not(:disabled)')).toBeNull();
     expect(page().entities.size).toBe(count);
     session.dispose();
     app.dispose();

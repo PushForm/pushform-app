@@ -2,6 +2,9 @@
 // Copyright 2026 PushForm contributors
 import type { ProjectActivitySink } from '@pushform/cloud';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useAppStore } from './store';
+import { ExtensionInspectorContext } from './extensions/ExtensionInspectors';
+
 import type { JSX } from 'react';
 import { createPortal } from 'react-dom';
 import { CommonsBrowser } from './components/CommonsBrowser';
@@ -29,11 +32,15 @@ import { WorkspaceFiles } from './components/WorkspaceFiles';
 import { LuFolderOpen, LuLibrary } from 'react-icons/lu';
 import { ModelObjectBrowser } from './components/ModelObjectBrowser';
 import { ExtensionManager } from './extensions/ExtensionManager';
-import { browserRunsExtensions, createBrowserExtensionPlatform, type ExtensionRuntimeSources } from './extensions/browserExtensionPlatform';
+import { browserRunsExtensions, createBrowserExtensionPlatform, type ExtensionRuntimeSources, type AccountExtensionStorage } from './extensions/browserExtensionPlatform';
+import { EXTENSIONS_RAIL_ID, useExtensionWorkspace, type ExtensionsPanelId } from './extensions/useExtensionWorkspace';
 import { ExtensionRuns } from './extensions/ExtensionActivity';
 import { ExtensionPrintDialog, PrintPrompts } from './extensions/extensionPrint';
-import { isExtensionPanelId } from './extensions/extensionContributions';
-import { useExtensionWorkspace } from './extensions/useExtensionWorkspace';
+import { ExtensionFileDialog, FilePrompts } from './extensions/extensionFiles';
+import { isExtensionRailId } from './extensions/extensionContributions';
+import { ExtensionTabs } from './extensions/extensionTabs';
+import { sessionExtensionDocuments, sessionExtensionUnits } from './extensions/extensionDocuments';
+import { sessionExtensionTools } from './extensions/extensionTools';
 import { markDesktopShell, syncDesktopTitleBar } from './desktopShell';
 import { allowOpeningDocument, desktopUpdates } from './desktopUpdates';
 import { DesktopUpdates } from './components/DesktopUpdates';
@@ -104,6 +111,8 @@ export interface AppProps {
   readonly usage?: UsageSink | ((ownerId: string) => UsageSink) | undefined;
   /** The extension runtime's worker sources; without them the extension manager is not offered. */
   readonly extensionRuntime?: ExtensionRuntimeSources | undefined;
+  /** Account-bound storage for official extensions; developer extensions remain on this device. */
+  readonly extensionStorage?: ((ownerId: string) => AccountExtensionStorage) | undefined;
   /** Says whether the account is PushForm staff; extensions are offered only to staff until they open to everyone. */
   readonly staff?: { isStaff(): Promise<boolean> } | undefined;
 }
@@ -126,14 +135,19 @@ function browserSessionStorage(ownerId: string): Pick<Storage, 'getItem' | 'setI
 }
 
 /** The editors' docked side panels. */
-type SidePanel = 'files' | 'requests' | 'objects' | `extension:${string}`;
+type SidePanel = 'files' | 'requests' | 'objects' | `extension:${string}` | ExtensionsPanelId;
+const DEVELOPER_MODE_KEY = 'pushform:extensions:developer-mode';
+function developerModeOn(): boolean {
+  try { return localStorage.getItem(DEVELOPER_MODE_KEY) === 'on'; } catch { return false; }
+}
 const WORKSPACE_SCREEN_KEY = 'pushform:workspace-screen:v1';
 
 /**
  * Required account gate. The document engine is first created after successful sign-in; the workspace stays locked
  * until the account's signup step is complete.
  */
-export function App({ app, cloud: supplied, cloudFiles, profiles, account, billing, buildInfo, initialScreen, requests, usage, activity, commons }: AppProps = {}): JSX.Element {
+export function App({ app, cloud: supplied, cloudFiles, profiles, account, billing, buildInfo, initialScreen, requests, usage, activity, commons, extensionRuntime, extensionStorage, staff }: AppProps = {}): JSX.Element {
+
   const [unconfigured] = useState(() => new CloudSession(null));
   const cloud = supplied ?? unconfigured;
   const state = useSyncExternalStore(cloud.subscribe, cloud.getSnapshot);
@@ -150,7 +164,8 @@ export function App({ app, cloud: supplied, cloudFiles, profiles, account, billi
   useEffect(() => desktopUpdates()?.start(), []);
   useEffect(() => { if (signedIn) setLastOwner(state.user!.id); }, [signedIn, state.user]);
   const screens = <>
-    {workspaceOwner ? <Workspace key={workspaceOwner} ownerId={workspaceOwner} app={app} cloud={cloud} cloudFiles={cloudFiles} buildInfo={buildInfo} initialScreen={initialScreen} requests={requests} activity={typeof activity === 'function' ? activity(workspaceOwner) : activity} usage={typeof usage === 'function' ? usage(workspaceOwner) : usage} commons={commons} locked={!signedIn || !profileReady} /> : null}
+    {workspaceOwner ? <Workspace key={workspaceOwner} ownerId={workspaceOwner} app={app} cloud={cloud} cloudFiles={cloudFiles} buildInfo={buildInfo} initialScreen={initialScreen} requests={requests} activity={typeof activity === 'function' ? activity(workspaceOwner) : activity} usage={typeof usage === 'function' ? usage(workspaceOwner) : usage} commons={commons} extensionRuntime={extensionRuntime} extensionStorage={extensionStorage} staff={staff} locked={!signedIn || !profileReady} /> : null}
+
     {!signedIn ? <SignInScreen cloud={cloud} state={state} /> : null}
     {signedIn && !profileReady && profiles ? <ProfileScreen cloud={cloud} session={state} profiles={profiles} state={profileState} /> : null}
     {signedIn && profileReady && account && accountState.ownerId === state.user!.id ? <DeletionBanner account={account} state={accountState} /> : null}
@@ -202,7 +217,8 @@ function Workspace(props: WorkspaceProps): JSX.Element | null {
 }
 
 /** Keep the document session in memory while locked; unmount all interactive workspace UI. */
-function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScreen, requests, usage: usageSink, activity, extensionRuntime, staff, commons, locked, ownerId, refreshImages, nativeRefresh }: WorkspaceProps & { refreshImages: RefreshImageStore | undefined; nativeRefresh: NativeRefreshSession | undefined }): JSX.Element | null {
+function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScreen, requests, usage: usageSink, activity, extensionRuntime, extensionStorage, staff, commons, locked, ownerId, refreshImages, nativeRefresh }: WorkspaceProps & { refreshImages: RefreshImageStore | undefined; nativeRefresh: NativeRefreshSession | undefined }): JSX.Element | null {
+
   // Home pops the chat down under its header icon; the account email is the requester identity.
   /** Mounted on first open and kept mounted while closed, so the conversation survives closing and reopening. */
   const [requestsPanel, setRequestsPanel] = useState<{ anchor: HTMLElement | null; open: boolean } | null>(null);
@@ -226,26 +242,56 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
   const [recents, setRecents] = useState(() => readCloudRecents(ownerId));
   /** This account's extensions on this device; nothing of theirs runs until one of their contributions is used. */
   const [printPrompts] = useState(() => new PrintPrompts());
-  const [extensions] = useState(() => extensionRuntime ? createBrowserExtensionPlatform({ ownerId, sources: extensionRuntime, printPrompts }) : null);
+  const [filePrompts] = useState(() => new FilePrompts());
+  // The platform exists before the document session; extensions reach the session's tabs once it does.
+  const sessionRef = useRef<DocumentSession | null>(null);
+  /** The extension tabs open in the tab strip; an extension's `ui.open` and its selection calls reach them from the platform. */
+  const [extensionTabs] = useState(() => extensionRuntime ? new ExtensionTabs({
+    activateDocument: (id) => { sessionRef.current?.activate(id); },
+    isOpen: (id) => sessionRef.current?.tabs.some(tab => tab.id === id) ?? false,
+  }) : null);
+  const [inspectorReveal, setInspectorReveal] = useState<{ target: string; seq: number } | null>(null);
+  const [extensions] = useState(() => extensionRuntime
+    ? createBrowserExtensionPlatform({ ownerId, sources: extensionRuntime, printPrompts, filePrompts,
+      ...(extensionStorage ? { accountStorage:extensionStorage(ownerId) } : {}),
+      documents: sessionExtensionDocuments(() => sessionRef.current), units: sessionExtensionUnits(() => sessionRef.current),
+      tools: sessionExtensionTools(() => sessionRef.current),
+      onToolRequested: request => {
+        const entry = extensions?.contributions('modeling').find(item => item.extensionId === request.extensionId && item.id === request.target);
+        if (!entry || !sessionRef.current?.activate(request.documentId)) return;
+        extensionTabs?.activate(null);
+        void extensionRuns?.start(entry, request.documentId);
+      },
+      openUi: request => {
+        if (request.kind === 'inspector') {
+          sessionRef.current?.activate(request.documentId); extensionTabs?.activate(null);
+          useAppStore.setState({ openPanel: 'entityInfo' });
+          setInspectorReveal(previous => ({ target: request.target, seq: (previous?.seq ?? 0) + 1 }));
+        } else extensionTabs?.openRequest(extensions!, request);
+      },
+      onSelectionShown: (extensionId, documentId) => extensionTabs?.selectionShown(extensionId, documentId) }) : null);
   const [extensionRuns] = useState(() => extensions ? new ExtensionRuns(extensions) : null);
+  /** The Extensions window, for Home; beside an editor the Extensions side panel shows the manager instead. */
   const [extensionsOpen, setExtensionsOpen] = useState(false);
   useEffect(() => {
     if (!extensions) return;
     void extensions.load();
     return () => { void extensions.stopAll(); };
   }, [extensions]);
-  // Extensions are offered to staff first; installed ones still run for whoever installed them.
-  const [extensionsOffered, setExtensionsOffered] = useState(false);
+  // Extensions are offered to staff first; installed ones still run for whoever installed them. Null until decided.
+  const [extensionsOffered, setExtensionsOffered] = useState<boolean | null>(null);
   useEffect(() => {
     let live = true;
-    setExtensionsOffered(false);
+    setExtensionsOffered(staff ? null : false);
     void staff?.isStaff().then((yes) => { if (live) setExtensionsOffered(yes); });
     return () => { live = false; };
   }, [staff, ownerId]);
-  const openExtensions = extensions && extensionsOffered ? () => setExtensionsOpen(true) : undefined;
-  const extensionPrint = extensions ? <ExtensionPrintDialog prompts={printPrompts} /> : null;
+  const openExtensionsWindow = extensions && extensionsOffered ? () => setExtensionsOpen(true) : undefined;
+  /** Beside an editor, Manage extensions, View ▸ Extensions and command search open the Extensions side panel. */
+  const openExtensionsPanel = extensions && extensionsOffered ? () => { setGuidanceBrowserTab(null); setSidePanel(EXTENSIONS_RAIL_ID); } : undefined;
+  const extensionPrint = extensions ? <><ExtensionPrintDialog prompts={printPrompts} /><ExtensionFileDialog prompts={filePrompts} /></> : null;
   const extensionManager = extensions && extensionsOpen
-    ? <ExtensionManager platform={extensions} available={browserRunsExtensions()} developerModeAllowed developerModeOn={localStorage.getItem('pushform:extensions:developer-mode') === 'on'}
+    ? <ExtensionManager platform={extensions} available={browserRunsExtensions()} developerModeAllowed developerModeOn={developerModeOn()}
         onClose={() => setExtensionsOpen(false)} />
     : null;
   const [owned] = useState<AppInstance | null>(() => (given ? null : createApp({ demo: false })));
@@ -266,6 +312,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
   const [commonsVisited, setCommonsVisited] = useState(false);
   const [commonsPicker, setCommonsPicker] = useState<ModelTab | null>(null);
   const [commonsIntent, setCommonsIntent] = useState(() => commons?.intent ?? null);
+  sessionRef.current = session;
   const [home, setHome] = useState(() => {
     if (initialScreen) return initialScreen === 'home';
     if (given || !session.restoredForRefresh) return true;
@@ -315,11 +362,12 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
   const active = session.active;
   useEffect(() => { setCommonsShown(false); }, [session.activeId]);
   const modelApp = active.type === 'model' ? active.app : app;
-  useGlobalKeys(modelApp, active.type === 'model' && !locked && !home && !commonsShown && !commonsPicker);
-  useModelClipboard(modelApp, active.type === 'model' ? active : null, active.type === 'model' && !locked && !home && !commonsShown && !commonsPicker);
-  const extensionWorkspace = useExtensionWorkspace({ platform: extensions, runs: extensionRuns, ownerId, active: home || locked ? null : active,
+  const extensionWorkspace = useExtensionWorkspace({ platform: extensions, runs: extensionRuns, tabs: extensionTabs, ownerId, active: home || locked ? null : active,
     openTabs: session.tabs.map(tab => tab.id), sidePanel,
-    openPanel: id => setSidePanel(id), closePanel: () => { setGuidanceBrowserTab(null); setSidePanel(null); } });
+    openPanel: id => setSidePanel(id), closePanel: () => { setGuidanceBrowserTab(null); setSidePanel(null); },
+    manager: { offered: extensionsOffered, available: browserRunsExtensions(), developerModeOn: developerModeOn() } });
+  useGlobalKeys(modelApp, active.type === 'model' && !locked && !home && !commonsShown && !commonsPicker && !extensionWorkspace.tabView);
+  useModelClipboard(modelApp, active.type === 'model' ? active : null, active.type === 'model' && !locked && !home && !commonsShown && !commonsPicker && !extensionWorkspace.tabView);
   useEffect(() => () => session.dispose(), [session]);
   // Product usage events, with AI Chat counted as open in whichever placement shows it.
   const usage = useProductUsage(usageSink, buildInfo, session,
@@ -367,7 +415,8 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     setSidePanel(current => current === id && mode === 'toggle' ? null : id);
   const toggleSidePanel = (id: string): void => {
     setGuidanceBrowserTab(null);
-    if (id === 'files' || id === 'requests' || id === 'objects' || isExtensionPanelId(id)) showSidePanel(id, 'toggle');
+    if (isExtensionRailId(id) || id === EXTENSIONS_RAIL_ID) extensionWorkspace.toggleRail(id);
+    else if (id === 'files' || id === 'requests' || id === 'objects') showSidePanel(id, 'toggle');
   };
   const closeSidePanel = (): void => { setGuidanceBrowserTab(null); setSidePanel(null); };
   /** Home's conversation pops down under its icon; each document's docks beside its editor. */
@@ -426,7 +475,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     ...extensionWorkspace.railItems,
   ];
   /** An extension panel that is no longer available (turned off, or not for this editor) counts as closed. */
-  const shownPanel = sidePanel && isExtensionPanelId(sidePanel) && !extensionWorkspace.shown ? null : sidePanel;
+  const shownPanel = sidePanel && (isExtensionRailId(sidePanel) || sidePanel === EXTENSIONS_RAIL_ID) && !extensionWorkspace.shown ? null : sidePanel;
   /** The rail and its dock open the editor area, in the right-hand panels' band between tool row and status bar. */
   const companionBrowser = guidanceBrowserTab === active.id && sidePanel === 'requests';
   const browserVisible = sidePanel === 'objects' || companionBrowser;
@@ -445,6 +494,8 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
       {extensionWorkspace.panel}
     </SideDock>
   </>;
+  /** An extension tab in front fills the editor area; the viewport and its panels stay mounted behind it. */
+  const extensionTab = extensionWorkspace.tabView ? <div className="pf-xtab-host">{extensionWorkspace.tabView}</div> : null;
   const removeStarter = (): void => {
     const starter = session.tabs.find(tab => tab.id === 'tab-1' && !tab.identity && !session.isDirty(tab));
     if (!given && starter && session.tabs.length > 1) session.close(starter.id, true);
@@ -486,19 +537,19 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     <CloudHome localSession={session} onLocalOpened={() => setHome(false)} onCommons={() => { setHome(false); setCommonsVisited(true); setCommonsShown(true); }} api={cloudFiles} cloud={cloud} recents={recents} ownerId={ownerId} buildInfo={buildInfo}
       openTabs={session.tabs.filter(tab => tab.id !== 'tab-1' || tab.identity || session.isDirty(tab))}
       onResume={tab => { session.activate(tab.id); setHome(false); }} onOpen={open} onCreate={create} onRequests={toggleRequests} requestsOpen={requestsPanel?.open ?? false}
-      onForgetRecents={forgetRecents} onRenamed={renamed} onMoved={moved} onExtensions={openExtensions} />
+      onForgetRecents={forgetRecents} onRenamed={renamed} onMoved={moved} onExtensions={openExtensionsWindow} />
     {panel}
     {extensionManager}
     {extensionPrint}
     {feedback}
   </ThumbnailContext.Provider>;
   return (
-    <ThumbnailContext.Provider value={thumbnails}><AppContext.Provider value={modelApp}>
+    <ThumbnailContext.Provider value={thumbnails}><AppContext.Provider value={modelApp}><ExtensionInspectorContext.Provider value={{ platform: extensions, documentId: active.type === 'model' && !locked ? active.id : null, ownerId, reveal: inspectorReveal }}>
       <div className={`pf-app${commonsShown ? ' pf-commons-active' : ''}`}>
         <TopBar onModelTab={() => setCommonsShown(false)} commons={commons} commonsOpen={commonsVisited} commonsActive={commonsShown}
           onCloseCommons={() => { setCommonsShown(false); setCommonsVisited(false); }} onBrowseCommons={() => { setCommonsVisited(true); setCommonsShown(true); }} session={session} cloud={cloud} cloudFiles={cloudFiles} buildInfo={buildInfo} autosave={autosave} onHome={() => setHome(true)}
           onRequests={() => toggleSidePanel('requests')} onObjects={() => toggleSidePanel('objects')} onClearChat={requestsClient ? clearChat : undefined}
-          onExtensions={openExtensions} />
+          onExtensions={openExtensionsPanel} extensionTabs={extensionWorkspace.tabStrip} />
         {commonsVisited && <div className="pf-commons-tab" hidden={!commonsShown}><CommonsBrowser account={commons?.account} filesUrl={commons?.filesUrl} session={session} onClose={() => setCommonsShown(false)} onOpened={() => setCommonsShown(false)} /></div>}
         {chatPublication && commons?.account ? <PublishSnapshot account={commons.account} filesUrl={commons.filesUrl} snapshot={chatPublication.snapshot}
           preset={chatPublication.preset} autoPublish={chatPublication.auto} onPublication={(modelId, failures) => { chatPublication.made = { modelId, failures }; }}
@@ -508,9 +559,10 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
         {extensionPrint}
         {active.type === 'model' ? (
           <>
-            <MainToolbar onCommons={() => { if (active.type === 'model') setCommonsPicker(active); }} />
-            <div className="pf-main">
+            <MainToolbar extensionTools={extensionWorkspace.toolbarItems} onCommons={() => { if (active.type === 'model') setCommonsPicker(active); }} />
+            <div className={`pf-main${extensionTab ? ' has-xtab' : ''}`}>
               {sideBar}
+              {extensionTab}
               <ViewportView key={active.id} />
               <PanelHost />
               <RightStrip />
@@ -519,8 +571,9 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
               hint={commonsShown ? 'Browse community models. Open a document tab to keep working.' : undefined}/>
           </>
         ) : (
-          <LayoutWorkspace key={active.id} tab={active} session={session} leading={sideBar} saveStatus={saveStatus} catalogActive={commonsShown}
+          <LayoutWorkspace key={active.id} tab={active} session={session} leading={sideBar} editorOverride={extensionTab} saveStatus={saveStatus} catalogActive={commonsShown}
             objectBrowser={{ host: objectHost, open: browserVisible }}
+
             cloud={cloudFiles ? { api: cloudFiles, owner, session, saves: cloudModelSaves } : undefined} />
         )}
       </div>
@@ -529,7 +582,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
       {dockedRequests ? createPortal(dockedRequests, chatNode) : null}
       {extensionWorkspace.activity}
       {feedback}
-    </AppContext.Provider></ThumbnailContext.Provider>
+    </ExtensionInspectorContext.Provider></AppContext.Provider></ThumbnailContext.Provider>
   );
 }
 

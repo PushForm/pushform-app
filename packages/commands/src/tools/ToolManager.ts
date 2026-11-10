@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { Emitter, PushFormError } from '@pushform/core';
+import type { LengthUnit } from '@pushform/core';
 import { z } from 'zod';
 import type { CameraHost } from '../camera/CameraHost';
 import type { CommandRegistry } from '../registry/CommandRegistry';
@@ -45,6 +46,7 @@ const EMPTY_STATUS: ToolStatus = { instructor: '', vcbLabel: '' };
 export class ToolManager implements ToolHost {
   readonly events = new Emitter<ToolManagerEvents>();
   private tools = new Map<string, Tool>();
+  private toolCommands = new Map<string, () => void>();
   private active: Tool | null = null;
   /** Temporary camera tool while the middle button is held. */
   private temp: Tool | null = null;
@@ -135,7 +137,7 @@ export class ToolManager implements ToolHost {
     if (this.tools.has(tool.id)) throw new PushFormError('tool.duplicate', `Tool already registered: ${tool.id}`);
     this.tools.set(tool.id, tool);
     if (this.registerCommands && opts.command !== false) {
-      this.commands.register({
+      const remove = this.commands.register({
         id: `tool.${tool.id}`,
         title: tool.title,
         category: 'tool',
@@ -146,6 +148,24 @@ export class ToolManager implements ToolHost {
         undoable: false,
         run: () => this.activate(tool.id),
       });
+      this.toolCommands.set(tool.id, remove);
+    }
+  }
+
+  /** Remove a dynamically registered tool, including a parked session and its activation command. */
+  unregister(id: string): void {
+    const tool = this.tools.get(id);
+    if (!tool) return;
+    this.tools.delete(id);
+    this.toolCommands.get(id)?.(); this.toolCommands.delete(id);
+    const active = this.active === tool, parked = this.parked === tool;
+    if (parked) this.parked = null;
+    if (active) { this.endTemp(); this.active = null; }
+    if (active || parked) tool.deactivate();
+    if (active && this.tools.has(this.selectToolId)) this.activate(this.selectToolId);
+    else if (active || parked) {
+      if (active) this.events.emit('toolChanged', { id: null, previous: id });
+      this.emitStatus(); this.overlayChanged();
     }
   }
 
@@ -323,6 +343,22 @@ export class ToolManager implements ToolHost {
     this.afterInteraction();
   }
 
+  onRawVcb(text: string, defaultUnit: LengthUnit): boolean {
+    const tool = this.entryTool();
+    if (!tool?.onRawVcb) return false;
+    this.call(() => tool.onRawVcb!(text, defaultUnit)); this.afterInteraction(); return true;
+  }
+  onRawEntry(values: Readonly<Record<string, string>>, defaultUnit: LengthUnit): boolean {
+    const tool = this.entryTool();
+    if (!tool?.onRawEntry) return false;
+    this.call(() => tool.onRawEntry!(values, defaultUnit)); this.afterInteraction(); return true;
+  }
+  lockRawEntry(id: string, text: string | null, defaultUnit: LengthUnit): boolean {
+    const tool = this.entryTool();
+    if (!tool?.onRawEntryLock) return false;
+    this.call(() => tool.onRawEntryLock!(id, text, defaultUnit)); this.afterInteraction(); return true;
+  }
+
   /** Apply typed field values (see `Tool.onEntry`); a tool without `onEntry` gets the single value through `onVcb`. */
   onEntry(values: Readonly<Record<string, VcbValue>>): void {
     const entries = Object.entries(values).filter(([, v]) => v.kind !== 'empty');
@@ -440,7 +476,7 @@ export class ToolManager implements ToolHost {
   /** The tool typed values go to: the active tool, or the set-aside one behind a camera tool that takes none. */
   private entryTool(): Tool | null {
     const a = this.active;
-    if (a && this.camerasParked() && !a.onVcb && !a.onEntry) return this.parked;
+    if (a && this.camerasParked() && !a.onVcb && !a.onEntry && !a.onRawVcb && !a.onRawEntry) return this.parked;
     return a;
   }
 
@@ -484,6 +520,6 @@ function sameFields(a: ToolStatus['fields'], b: ToolStatus['fields']): boolean {
   if (!a || !b || a.length !== b.length) return false;
   return a.every((f, i) => {
     const g = b[i]!;
-    return f.id === g.id && f.label === g.label && f.value === g.value && f.locked === g.locked && f.location === g.location && f.disabled === g.disabled && f.at?.[0] === g.at?.[0] && f.at?.[1] === g.at?.[1] && f.at?.[2] === g.at?.[2];
+    return f.id === g.id && f.kind === g.kind && f.placement === g.placement && f.label === g.label && f.value === g.value && f.locked === g.locked && f.location === g.location && f.disabled === g.disabled && f.at?.[0] === g.at?.[0] && f.at?.[1] === g.at?.[1] && f.at?.[2] === g.at?.[2];
   });
 }

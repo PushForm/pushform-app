@@ -8,13 +8,18 @@ import type { NativeFileSource } from './container';
 export const NATIVE_ROOT_ID = 0xffff_ffff;
 /** Required document capabilities a reader must declare: 1 = mesh parts (record kind 17). */
 export const NATIVE_CAPABILITY_MESH_PARTS = 1;
-export const NATIVE_MODEL_CAPABILITIES: ReadonlySet<number> = new Set([NATIVE_CAPABILITY_MESH_PARTS]);
+/** Older hosts must refuse these files rather than silently losing their plugin section. */
+export const NATIVE_CAPABILITY_PLUGIN_DATA = 2;
+export const NATIVE_CAPABILITY_BODY_FRAMES = 3;
+export const NATIVE_CAPABILITY_TOPOLOGY_REFERENCES = 4;
+export const NATIVE_MODEL_CAPABILITIES: ReadonlySet<number> = new Set([NATIVE_CAPABILITY_MESH_PARTS, NATIVE_CAPABILITY_PLUGIN_DATA, NATIVE_CAPABILITY_BODY_FRAMES, NATIVE_CAPABILITY_TOPOLOGY_REFERENCES]);
 export interface NativeDocumentRoot {
   schemaMajor: number;
   documentKind: 1 | 2;
   metadataChunk: number;
   recordChunks: number[];
   requiredCapabilities: number[];
+  pluginChunks?: number[];
   unknownFields: Uint8Array[];
 }
 const fail = (): never => { throw new NativeChunkError('Invalid or unsupported native document root'); };
@@ -30,11 +35,12 @@ function uint(reader: protobuf.Reader): number {
 function validate(value: NativeDocumentRoot): void {
   if (value.schemaMajor !== 1 || (value.documentKind !== 1 && value.documentKind !== 2) ||
       !Number.isInteger(value.metadataChunk) || value.metadataChunk < 1 || value.metadataChunk >= NATIVE_ROOT_ID) fail();
-  for (const ids of [value.recordChunks, value.requiredCapabilities]) {
+  for (const ids of [value.recordChunks, value.requiredCapabilities, value.pluginChunks ?? []]) {
     if (ids.length > NATIVE_MAX_CHUNKS || new Set(ids).size !== ids.length) fail();
     for (const id of ids) if (!Number.isInteger(id) || id < 1 || id >= NATIVE_ROOT_ID) fail();
   }
   if (value.recordChunks.includes(value.metadataChunk)) fail();
+  for (const id of value.pluginChunks ?? []) if (id === NATIVE_ROOT_ID || id === value.metadataChunk || value.recordChunks.includes(id)) fail();
 }
 export function decodeNativeDocumentRoot(bytes: Uint8Array): NativeDocumentRoot {
   if (bytes.length > NATIVE_MAX_CHUNK_BYTES) return fail();
@@ -47,8 +53,8 @@ export function decodeNativeDocumentRoot(bytes: Uint8Array): NativeDocumentRoot 
       if (id <= 3) {
         if (wire !== 0 || seen.has(id)) return fail(); seen.add(id); const n = uint(reader);
         if (id === 1) value.schemaMajor = n; else if (id === 2) value.documentKind = n as 1 | 2; else value.metadataChunk = n;
-      } else if (id <= 5) {
-        if (wire !== 0 && wire !== 2) return fail(); const list = id === 4 ? value.recordChunks : value.requiredCapabilities;
+      } else if (id <= 6) {
+        if (wire !== 0 && wire !== 2) return fail(); const list = id === 4 ? value.recordChunks : id === 5 ? value.requiredCapabilities : (value.pluginChunks ??= []);
         if (wire === 0) list.push(uint(reader));
         else {
           const length = uint(reader), end = reader.pos + length; if (end > reader.len) return fail();
@@ -66,12 +72,12 @@ export function decodeNativeDocumentRoot(bytes: Uint8Array): NativeDocumentRoot 
 export function encodeNativeDocumentRoot(value: NativeDocumentRoot): Uint8Array {
   validate(value);
   const writer = protobuf.Writer.create().uint32(8).uint32(value.schemaMajor).uint32(16).uint32(value.documentKind).uint32(24).uint32(value.metadataChunk);
-  for (const [index, ids] of [value.recordChunks, value.requiredCapabilities].entries()) if (ids.length) {
+  for (const [index, ids] of [value.recordChunks, value.requiredCapabilities, value.pluginChunks ?? []].entries()) if (ids.length) {
     writer.uint32(((index + 4) << 3) | 2).fork(); for (const id of ids) writer.uint32(id); writer.ldelim();
   }
   const known = writer.finish(); let length = known.length;
   for (const field of value.unknownFields) {
-    if (!field.length || (uint(protobuf.Reader.create(field)) >>> 3) <= 5) return fail(); length += field.length;
+    if (!field.length || (uint(protobuf.Reader.create(field)) >>> 3) <= 6) return fail(); length += field.length;
   }
   if (length > NATIVE_MAX_CHUNK_BYTES) return fail();
   const bytes = new Uint8Array(length); bytes.set(known); let at = known.length;
@@ -95,5 +101,9 @@ export async function openNativeDocumentIndex(
   const metadata = entries.get(root.metadataChunk);
   if (!metadata || metadata.descriptor.kind !== 3 || !metadata.descriptor.required) return fail();
   for (const id of root.recordChunks) if (!entries.has(id) || id === container.root) return fail();
+  for (const id of root.pluginChunks ?? []) {
+    const entry = entries.get(id);
+    if (!entry || entry.descriptor.kind !== 5 || entry.descriptor.schemaId !== 1 || entry.descriptor.required) return fail();
+  }
   return { root, container, metadata };
 }

@@ -30,3 +30,8 @@ export * from './attribution';
 export * from './environment';
 
 export * from './materialAppearance';
+
+export * from './pluginData';
+export * from './pluginDataLifecycle';
+
+export * from './body/TopologyReferences';

@@ -174,7 +174,8 @@ pub fn decode_request(bytes: &[u8]) -> Result<Request, KernelError> {
       let distance = r.f64()?;
       let next_face_id = r.f64()?;
       let polygon = r.polygon()?;
-      Ok(Request::ExtrudeSketch(ExtrudeSketchRequest { basis, polygon, distance, next_face_id }))
+      let validate_profile = r.at < r.bytes.len() && r.u32()? != 0;
+      Ok(Request::ExtrudeSketch(ExtrudeSketchRequest { basis, polygon, distance, next_face_id, validate_profile }))
     }
     OP_BOOLEAN => {
       let op = match r.u32()? {

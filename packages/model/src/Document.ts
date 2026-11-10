@@ -12,6 +12,8 @@ import {
   type TagId,
 } from '@pushform/core';
 import { createEntityContainer, DEFAULT_AXES, DEFAULT_BEHAVIORS, type ComponentDefinition } from './entities/definition';
+import { validatePluginData } from './pluginData';
+import { reconcilePluginTargets } from './pluginDataLifecycle';
 import { reconcileNativeDimensionFields } from './nativeDimensionFields';
 import { reconcileNativeInstanceFields } from './nativeInstanceFields';
 import { reconcileNativeAttributeFields } from './nativeAttributeFields';
@@ -347,11 +349,14 @@ export class TransactionalDocument<S extends DocStateMeta> {
  */
 export class Document extends TransactionalDocument<DocumentState> {
   protected override reconcileCommit(state: DocumentState, patches: Patch[]): [DocumentState, Patch[], Patch[]] | null {
+    if (patches.some(patch => patch.path[0] === 'pluginData') && state.pluginData) validatePluginData(state.pluginData);
     const spatial = reconcilePackedVertexIndexes(state, patches), base = spatial?.[0] ?? state;
     const instances = reconcileNativeInstanceFields(base, patches);
     const dimensions = reconcileNativeDimensionFields(instances?.[0] ?? base, patches);
     const attributes = reconcileNativeAttributeFields(dimensions?.[0] ?? instances?.[0] ?? base, patches);
-    const changes = [spatial, instances, dimensions, attributes].filter((change): change is [DocumentState, Patch[], Patch[]] => change !== null);
+    const metadata = reconcilePluginTargets(this.state, attributes?.[0] ?? dimensions?.[0] ?? instances?.[0] ?? base, patches);
+    if (metadata?.[0].pluginData) validatePluginData(metadata[0].pluginData);
+    const changes = [spatial, instances, dimensions, attributes, metadata].filter((change): change is [DocumentState, Patch[], Patch[]] => change !== null);
     return changes.length ? [changes[changes.length - 1]![0], changes.flatMap(change => change[1]), changes.reverse().flatMap(change => change[2])] : null;
   }
   protected override prepareCommit(draft: Draft<DocumentState>): void {

@@ -8,7 +8,7 @@ import { createApp } from '../bootstrap';
 import type { AppInstance } from '../bootstrap';
 import { installUiCommands } from '../engine/uiCommands';
 import { useAppStore } from '../store';
-import { addInstance, stubInstanceCommands } from '../panels/instances.testutil';
+import { addInstance, addMeshPart, stubInstanceCommands } from '../panels/instances.testutil';
 import { ContextMenuHost } from './ContextMenu';
 
 let app: AppInstance | null = null;
@@ -111,5 +111,42 @@ describe('ContextMenu', () => {
     fireEvent.click(within(sub).getByRole('menuitem', { name: 'Intersect' }));
     await vi.waitFor(() => expect(useAppStore.getState().notice).toMatch(/do not overlap/));
     expect(a.document.doc.rootDefinition.entities.bodies.size).toBe(2);
+  });
+  it('offers Make Components for two or more groups, solids or mesh parts, and runs it on the selection', () => {
+    const a = boot();
+    const ripa = addInstance(a, { name: 'ripa', withBox: true });
+    const tampo = addInstance(a, { name: 'tampo', withBox: true });
+    mount(a);
+    const refs = [ripa, tampo].map((id) => ({ kind: 'instance', path: [], id }) as const);
+    act(() => void a.commands.execute('ui.contextMenu.open', { x: 0, y: 0, refs: [refs[0]!] }));
+    expect(itemLabels(screen.getByRole('menu', { name: 'Context menu' }))).not.toContain('Make Components');
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    act(() => void a.commands.execute('selection.set', { refs }));
+    act(() => void a.commands.execute('ui.contextMenu.open', { x: 0, y: 0, refs: [refs[0]!] }));
+    const menu = screen.getByRole('menu', { name: 'Context menu' });
+    const labels = itemLabels(menu);
+    expect(labels.indexOf('Make Components')).toBe(labels.indexOf('Make Component…') + 1);
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Make Components' }));
+    const root = () => a.document.doc.rootDefinition.entities;
+    expect(root().instances.size).toBe(2);
+    const names = [...root().instances.values()].map((i) => a.document.doc.state.definitions.get(i.definitionId)!.name);
+    expect(names).toEqual(['ripa', 'tampo']);
+    expect(a.document.selection.refs.map((r) => r.kind)).toEqual(['instance', 'instance']);
+
+    // Mesh parts count too, and go through the real converter before being wrapped.
+    const parts = [addMeshPart(a, { name: 'left' }), addMeshPart(a, { name: 'right' })];
+    const partRefs = parts.map((id) => ({ kind: 'meshPart', path: [], id }) as const);
+    act(() => void a.commands.execute('selection.set', { refs: partRefs }));
+    act(() => void a.commands.execute('ui.contextMenu.open', { x: 0, y: 0, refs: [partRefs[0]!] }));
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Context menu' })).getByRole('menuitem', { name: 'Make Components' }));
+    expect(root().meshParts.size).toBe(0);
+    expect(root().instances.size).toBe(4);
+    const partNames = [...root().instances.values()].slice(2).map((i) => a.document.doc.state.definitions.get(i.definitionId)!.name);
+    expect(partNames).toEqual(['left', 'right']);
+    a.document.undo();
+    expect(root().meshParts.size).toBe(2);
+    expect(root().instances.size).toBe(2);
+
   });
 });

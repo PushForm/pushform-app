@@ -1,14 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import { captureContainerOccurrence, componentizePart, isolateContainerOccurrence, type ContainerIdentityChange } from './groups';
+import { copyPhysical } from './physicalCopy';
+import { placeNativeFragment } from './nativePlacement';
+import { physicalStretch } from './physicalStretch';
+import { attachProfileCurves } from './profileCurves';
 import { z } from 'zod';
-import { meshBox, PushFormError } from '@pushform/core';
+import { ANGLE_TOL, meshBox, PushFormError, v3cross, v3len, v3sub } from '@pushform/core';
 import type { Vec3 } from '@pushform/core';
 import { defineCommand } from '../registry/Command';
 import { bodyFromMesh } from '@pushform/model';
-import type { Draft, EntityContainer } from '@pushform/model';
-import type { Id } from '@pushform/core';
+import type { DocumentDraft, Draft, EntityContainer, EntityRef } from '@pushform/model';
+import type { Id, TagId } from '@pushform/core';
 import { activeTagOpt, hostOf, kernelOf } from '../host/services';
 import { draftContainerAt } from './context';
+import type { PushPullResult } from '@pushform/kernel';
+import type { Mat4 } from '@pushform/core';
 
 /** cast: inside a transaction the container is a draft; Body and Draft<Body> differ only in tuple mutability. */
 const asDraft = (c: EntityContainer): Draft<EntityContainer> => c as unknown as Draft<EntityContainer>;
@@ -99,4 +106,41 @@ export const kernelStats = defineCommand({
   },
 });
 
-export const modelCommands = [addBox, fromTriangles, deleteBody, kernelStats];
+/** Only trusted host code supplies normalized kernel components to these installation commands. */
+const profileSolidParams = z.object({ result: z.custom<PushPullResult>(value => typeof value === 'object' && value !== null && Array.isArray((value as PushPullResult).components)),
+  frame: z.array(z.number().finite()).length(16), sideDirection: vec3, smoothSides: z.boolean().default(false), curve: z.object({ points: z.array(vec3).min(3).max(512), normal: vec3, offset: vec3 }).optional() });
+export type ProfileSolidParams = z.infer<typeof profileSolidParams>;
+function installProfile(draft: DocumentDraft, path: readonly Id[], p: ProfileSolidParams, tag: {tagId?: TagId}): Id {
+  const body = bodyFromMesh(draft,p.result.components[0]!.mesh,{container:asDraft(draftContainerAt(draft,path)),...tag});
+  body.referenceFrame=p.frame as unknown as Mat4;
+  if(p.smoothSides)for(const edge of body.edges.values()){
+    const direction=v3sub(edge.polyline.at(-1)!,edge.polyline[0]!);
+    if(v3len(v3cross(direction,p.sideDirection))<=ANGLE_TOL*v3len(direction)){edge.soft=true;edge.smooth=true;}
+  }
+  if(p.curve)attachProfileCurves(draft,body,p.curve);
+  return body.id;
+}
+function validateProfileResult(result: PushPullResult): void {
+  if(result.components.length!==1||!(result.components[0]!.props.volume>0))throw new PushFormError('kernel.invalidMesh','The profile must produce one nonempty solid.');
+}
+/** Install a context-local profile, retaining the existing drawing command's result. */
+export const addProfileSolid = defineCommand({
+  id:'model.addProfileSolid',title:'Draw Part',category:'internal',undoable:true,params:profileSolidParams,
+  run(ctx,p){validateProfileResult(p.result);const host=hostOf(ctx);return host.edit('Draw Part',draft=>installProfile(draft,host.context.path,p,activeTagOpt(ctx))) as number;},
+});
+export interface ScopedProfileResult { ref: EntityRef & {kind:'body'}; isolated:boolean; changes:ContainerIdentityChange[] }
+/** Install in a captured descendant without changing the live editing context. */
+export const addPartProfile = defineCommand({
+  id:'part.addProfileSolid',title:'Create Physical Part',category:'internal',undoable:true,
+  params:profileSolidParams.extend({container:z.array(z.number().int().nonnegative()).max(64),isolate:z.boolean().default(true),componentName:z.string().trim().min(1).max(200).optional()}),
+  run(ctx,p):ScopedProfileResult {
+    validateProfileResult(p.result);const host=hostOf(ctx);captureContainerOccurrence(host,p.container,p.isolate);
+    return host.edit('Create Physical Part',draft=>{
+      const continuation=p.isolate?isolateContainerOccurrence(draft,p.container):{path:p.container as Id[],isolated:false,changes:[]};
+      const id=installProfile(draft,continuation.path,p,activeTagOpt(ctx));
+      const ref:EntityRef&{kind:'body'}={kind:'body',id,path:continuation.path};
+      return{ref:p.componentName?componentizePart(draft,ref,p.componentName):ref,isolated:continuation.isolated,changes:continuation.changes};
+    });
+  },
+});
+export const modelCommands = [addBox, fromTriangles, deleteBody, kernelStats, addProfileSolid, addPartProfile, copyPhysical, placeNativeFragment, physicalStretch];

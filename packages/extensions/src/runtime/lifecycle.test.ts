@@ -101,7 +101,7 @@ describe('context', () => {
         try { void context[name]; } catch (e) { seen[name] = e; }
     } }, { grants: ['model.read'] });
     await session.activate();
-    expect(seen.keys).toEqual(['commands', 'extensionId', 'log', 'model', 'signal', 'ui']);
+    expect(seen.keys).toEqual(['commands', 'document', 'extensionId', 'fragments', 'log', 'metadata', 'model', 'signal', 'ui']);
     expect(seen.selection).toMatchObject({ code: 'permission.denied', details: { permissions: ['selection.read', 'selection.write', 'viewport.presentation'] } });
     expect(seen.clipboard).toMatchObject({ code: 'permission.denied' });
     expect(seen.compute).toMatchObject({ code: 'unavailable' });
@@ -256,6 +256,19 @@ describe('deactivation', () => {
 });
 
 describe('heartbeat', () => {
+  it('asks for a fresh answer when a system modal paused the host beyond the heartbeat deadline', async () => {
+    const { session, failures, hostPort } = connect({ activate() {} }, { limits: { heartbeatMs: 10, unresponsiveMs: 60 } });
+    await session.activate();
+    const post = vi.spyOn(hostPort, 'post'), clock = performance.now.bind(performance);
+    const paused = vi.spyOn(performance, 'now').mockImplementation(() => clock() + 10_000);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 40));
+      expect(post.mock.calls.some(([message]) => typeof message === 'object' && message !== null && 'type' in message && message.type === 'ping')).toBe(true);
+      expect(session.state).toBe('active'); expect(failures).toEqual([]);
+      await session.deactivate('disable');
+    } finally { paused.mockRestore(); }
+  });
+
   it('keeps an extension that answers active across many beats', async () => {
     const { session, failures } = connect({ activate() {} }, { limits: { heartbeatMs: 10, unresponsiveMs: 60 } });
     await session.activate();

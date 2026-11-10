@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrthographicCamera } from 'three';
+import { Text } from 'troika-three-text';
 import type { Vec3 } from '@pushform/core';
 import type { RenderDimension } from '../types';
 import { alignedTextFrame, buildArrowTriangles, buildDimensionEndpoints, buildDimensionLines, DIMENSION_ARROW_PX, DimensionLayer } from './DimensionLayer';
@@ -12,6 +13,9 @@ const item = (over: Partial<RenderDimension> = {}): RenderDimension => ({
 });
 
 describe('dimension geometry', () => {
+  // These tests verify geometry and screen sizing; glyph rasterization requires a real WebGL canvas.
+  beforeEach(() => { vi.spyOn(Text.prototype, 'sync').mockImplementation(callback => { callback?.(); }); });
+  afterEach(() => { vi.restoreAllMocks(); });
   it('lays out lines origin-relative, selected ones apart', () => {
     const { normal, selected } = buildDimensionLines([item(), item({ id: 2, selected: true, lines: [[[5, 5, 5], [6, 5, 5]]] })], [1, 0, 0]);
     expect([...normal]).toEqual([-1, 0, 0, -1, 1, 0, -1, 1, 0, 1, 1, 0]);

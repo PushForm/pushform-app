@@ -808,8 +808,10 @@ describe('ticket images', () => {
     expect(screen.getByRole('img', { name: 'replacement.png' }).getAttribute('src')).toBe(uploaded);
     expect(load).toHaveBeenCalledTimes(2);
     fireEvent.click(screen.getByRole('button', { name: 'Remove replacement.png' }));
-    await waitFor(() => expect(screen.queryByRole('img', { name: 'replacement.png' })).toBeNull());
-    expect(revoke).toHaveBeenCalledWith(uploaded);
+    await waitFor(() => {
+      expect(screen.queryByRole('img', { name: 'replacement.png' })).toBeNull();
+      expect(revoke).toHaveBeenCalledWith(uploaded);
+    });
   });
   it('validates image types and sizes, counts the automatic screenshot toward the limit and releases a removed slot', async () => {
     setup({}, { captureScreenshot: async () => new Blob(['auto'], { type: 'image/png' }) });

@@ -20,7 +20,7 @@ import {
   v3len,
   v3normalize,
 } from '@pushform/core';
-import { allocId, containerAt, contextMatrix, createEntityContainer, DEFAULT_AXES, DEFAULT_BEHAVIORS, imageEntityCorners, loopKey, meshPartBounds, SketchGraph, textureTiles, uvRebaseSides } from '@pushform/model';
+import { copyPluginEntries, movePluginTargets, pluginIdentityMap, reviewPluginTargets, allocId, containerAt, contextMatrix, createEntityContainer, DEFAULT_AXES, DEFAULT_BEHAVIORS, imageEntityCorners, loopKey, meshPartBounds, SketchGraph, textureTiles, uvRebaseSides } from '@pushform/model';
 import type {
   ComponentBehaviors,
   ComponentDefinition,
@@ -39,7 +39,7 @@ import type {
 import { defineCommand } from '../registry/Command';
 import type { AnyCommand } from '../registry/Command';
 import type { DocumentHost } from '../host/DocumentHost';
-import { hostOf } from '../host/services';
+import { hostOf, meshEditableOf } from '../host/services';
 import { contextFrame, currentFrame, draftContainerAt, refsInContext, requireContextPath, sketchGraphAt } from './context';
 import { orthonormalAxes } from './axes';
 import { glueFaceAt } from './componentBehaviors';
@@ -500,11 +500,22 @@ function refsOrSelection(host: DocumentHost, refs: readonly RefParam[] | undefin
 /** Move (or copy) the collected entities into a fresh definition and insert an instance for it. */
 function makeDefinition(host: DocumentHost, refs: readonly EntityRef[], opts: MakeOptions): MakeResult {
   const path = host.context.path;
-  const state = host.doc.state;
-  const srcState = containerAt(state, path);
-  const collected = collect(srcState, refs);
+  const result = host.edit(opts.isGroup ? 'Make Group' : 'Make Component', (draft) => makeDefinitionInDraft(draft, path, refs, opts));
+  if (result.instanceId !== null) host.selection.set([{ kind: 'instance', path, id: result.instanceId as Id }]);
+  return result;
+}
+
+/**
+ * The draft half of `makeDefinition`: reads the container at `path` from the open draft (so entities
+ * created earlier in the same transaction count) and moves or copies the collected entities into a
+ * new definition. Throws when nothing was collected.
+ */
+function makeDefinitionInDraft(draft: DocumentDraft, path: readonly Id[], refs: readonly EntityRef[], opts: MakeOptions): MakeResult {
+  const state = draft as unknown as DocumentState;
+  const src = draftContainerAt(draft, path);
+  const collected = collect(src, refs);
   if (collected.size === 0) throw new PushFormError('group.empty', 'Select something to make a group or component from');
-  const bounds = collectedBounds(state, srcState, collected);
+  const bounds = collectedBounds(state, src, collected);
   const origin: Vec3 = opts.origin ?? bounds?.min ?? [0, 0, 0];
   const frame: MMat4 = opts.frame ?? m4translation(origin);
   const toLocal: MMat4 = m4invert(frame) ?? m4translation([-origin[0], -origin[1], -origin[2]]);
@@ -512,123 +523,140 @@ function makeDefinition(host: DocumentHost, refs: readonly EntityRef[], opts: Ma
   const move = opts.replaceSelection;
   let instanceId: number | null = null;
   let definitionId = 0;
+  const copiedIds = new Map<number, number>();
 
-  host.edit(opts.isGroup ? 'Make Group' : 'Make Component', (draft) => {
-    const src = draftContainerAt(draft, path);
-    const def = createDefinition(draft, opts);
-    definitionId = def.id;
-    const dst = def.entities;
-    const removed = new Set<Id>();
+  const def = createDefinition(draft, opts);
+  definitionId = def.id;
+  const dst = def.entities;
+  const removed = new Set<Id>();
 
-    // bodies
-    for (const id of collected.bodies) {
-      const body = src.bodies.get(id);
-      if (!body) continue;
-      const target = move ? copyBodyRecord(body, body.id) : cloneBody(draft, dst, body);
-      transformBodyInPlace(target, toLocal, textureTiles(draft));
-      if (move) {
-        src.bodies.delete(id);
-        removed.add(id);
-        dst.bodies.set(target.id, target);
-        dst.order.push(target.id);
-      }
-    }
-    // mesh parts
-    for (const id of collected.meshParts) {
-      const part = src.meshParts.get(id);
-      if (!part) continue;
-      const target = move ? copyMeshPartRecord(part, part.id) : cloneMeshPart(draft, dst, part);
-      target.geometry = transformMeshPartGeometry(part.geometry, toLocal);
-      if (move) {
-        src.meshParts.delete(id);
-        removed.add(id);
-        dst.meshParts.set(target.id, target);
-        dst.order.push(target.id);
-      }
-    }
-    // instances
-    for (const id of collected.instances) {
-      const inst = src.instances.get(id);
-      if (!inst) continue;
-      const copy: ComponentInstance = {
-        ...inst,
-        id: move ? inst.id : allocId<Id>(draft),
-        transform: m4mul(toLocal, inst.transform) as unknown as Mat4,
-        attributes: cloneJson(inst.attributes),
-      };
-      if (move) {
-        src.instances.delete(id);
-        removed.add(id);
-      }
-      dst.instances.set(copy.id, copy);
-      dst.order.push(copy.id);
-    }
-    // guides
-    for (const id of collected.guides) {
-      const g = src.guides.get(id);
-      if (!g) continue;
-      const copy = mapGuide(g, move ? g.id : allocId<Id>(draft), localMap);
-      if (move) {
-        src.guides.delete(id);
-        removed.add(id);
-      }
-      dst.guides.set(copy.id, copy);
-      dst.order.push(copy.id);
-    }
-    // placed pictures
-    for (const id of collected.images) {
-      const image = src.images.get(id);
-      if (!image) continue;
-      const copy: ImageEntity = { ...image, id: move ? image.id : allocId<Id>(draft), transform: m4mul(toLocal, image.transform) as unknown as Mat4,
-        attributes: cloneJson(image.attributes) };
-      if (move) {
-        src.images.delete(id);
-        removed.add(id);
-      }
-      dst.images.set(copy.id, copy);
-      dst.order.push(copy.id);
-    }
-    // section planes: a moved plane that was its container's cut becomes the new definition's cut
-    for (const id of collected.sectionPlanes) {
-      const plane = src.sectionPlanes.get(id);
-      if (!plane) continue;
-      const copy = mapSectionPlane(plane, move ? plane.id : allocId<Id>(draft), toLocal);
-      if (move) {
-        src.sectionPlanes.delete(id);
-        removed.add(id);
-        if (src.activeSectionPlaneId === id) {
-          src.activeSectionPlaneId = null;
-          dst.activeSectionPlaneId = copy.id;
-        }
-      }
-      dst.sectionPlanes.set(copy.id, copy);
-      dst.order.push(copy.id);
-    }
-    // sketch
-    if (collected.edges.size) {
-      const srcGraph = sketchGraphAt(draft, path);
-      const dstGraph = SketchGraph.for(draft, def.id);
-      copySketchInto(draft, srcGraph.sketch, collected.edges, collected.faces, dstGraph, localMap);
-      if (move) {
-        for (const id of collected.faces) srcGraph.removeFace(id);
-        for (const id of collected.edges) srcGraph.removeEdge(id);
-      }
-    }
-    removeFromOrder(src, removed);
 
+  // bodies
+  for (const id of collected.bodies) {
+    const body = src.bodies.get(id);
+    if (!body) continue;
+    const target = move ? copyBodyRecord(body, body.id) : cloneBody(draft, dst, body);
+    if (!move) copiedIds.set(body.id, target.id);
+    transformBodyInPlace(target, toLocal, textureTiles(draft));
     if (move) {
-      const inst = newInstance(draft, def.id, frame);
-      // Glue To: glue to the face holding the component's origin across its blue axis
-      const frameOf = contextFrame(state, path);
-      const plane = glueFaceAt(src, def.behaviors.glueTo, m4transformPoint(frame, [0, 0, 0]), m4transformDir(frame, [0, 0, 1]), frameOf.toWorldNormal);
-      if (plane) inst.gluedPlane = plane;
-      src.instances.set(inst.id, inst);
-      src.order.push(inst.id);
-      instanceId = inst.id;
+      src.bodies.delete(id);
+      removed.add(id);
+      dst.bodies.set(target.id, target);
+      dst.order.push(target.id);
     }
-  });
-  if (instanceId !== null) host.selection.set([{ kind: 'instance', path, id: instanceId as Id }]);
+  }
+  // mesh parts
+  for (const id of collected.meshParts) {
+    const part = src.meshParts.get(id);
+    if (!part) continue;
+    const target = move ? copyMeshPartRecord(part, part.id) : cloneMeshPart(draft, dst, part);
+    target.geometry = transformMeshPartGeometry(part.geometry, toLocal);
+    if (move) {
+      src.meshParts.delete(id);
+      removed.add(id);
+      dst.meshParts.set(target.id, target);
+      dst.order.push(target.id);
+    }
+  }
+  // instances
+  for (const id of collected.instances) {
+    const inst = src.instances.get(id);
+    if (!inst) continue;
+    const copy: ComponentInstance = {
+      ...inst,
+      id: move ? inst.id : allocId<Id>(draft),
+      transform: m4mul(toLocal, inst.transform) as unknown as Mat4,
+      attributes: cloneJson(inst.attributes),
+    };
+    if (move) {
+      src.instances.delete(id);
+      removed.add(id);
+    }
+    dst.instances.set(copy.id, copy);
+    dst.order.push(copy.id);
+    if (!move) copiedIds.set(inst.id, copy.id);
+  }
+  // guides
+  for (const id of collected.guides) {
+    const g = src.guides.get(id);
+    if (!g) continue;
+    const copy = mapGuide(g, move ? g.id : allocId<Id>(draft), localMap);
+    if (move) {
+      src.guides.delete(id);
+      removed.add(id);
+    }
+    dst.guides.set(copy.id, copy);
+    dst.order.push(copy.id);
+  }
+  // placed pictures
+  for (const id of collected.images) {
+    const image = src.images.get(id);
+    if (!image) continue;
+    const copy: ImageEntity = { ...image, id: move ? image.id : allocId<Id>(draft), transform: m4mul(toLocal, image.transform) as unknown as Mat4,
+      attributes: cloneJson(image.attributes) };
+    if (move) {
+      src.images.delete(id);
+      removed.add(id);
+    }
+    dst.images.set(copy.id, copy);
+    dst.order.push(copy.id);
+  }
+  // section planes: a moved plane that was its container's cut becomes the new definition's cut
+  for (const id of collected.sectionPlanes) {
+    const plane = src.sectionPlanes.get(id);
+    if (!plane) continue;
+    const copy = mapSectionPlane(plane, move ? plane.id : allocId<Id>(draft), toLocal);
+    if (move) {
+      src.sectionPlanes.delete(id);
+      removed.add(id);
+      if (src.activeSectionPlaneId === id) {
+        src.activeSectionPlaneId = null;
+        dst.activeSectionPlaneId = copy.id;
+      }
+    }
+    dst.sectionPlanes.set(copy.id, copy);
+    dst.order.push(copy.id);
+  }
+  // sketch
+  if (collected.edges.size) {
+    const srcGraph = sketchGraphAt(draft, path);
+    const dstGraph = SketchGraph.for(draft, def.id);
+    copySketchInto(draft, srcGraph.sketch, collected.edges, collected.faces, dstGraph, localMap);
+    if (move) {
+      for (const id of collected.faces) srcGraph.removeFace(id);
+      for (const id of collected.edges) srcGraph.removeEdge(id);
+    }
+  }
+  removeFromOrder(src, removed);
+
+  if (move) {
+    const inst = newInstance(draft, def.id, frame);
+    // Glue To: glue to the face holding the component's origin across its blue axis
+    const frameOf = contextFrame(state, path);
+    const plane = glueFaceAt(src, def.behaviors.glueTo, m4transformPoint(frame, [0, 0, 0]), m4transformDir(frame, [0, 0, 1]), frameOf.toWorldNormal);
+    if (plane) inst.gluedPlane = plane;
+    src.instances.set(inst.id, inst);
+    src.order.push(inst.id);
+    instanceId = inst.id;
+    movePluginTargets(draft, target => {
+      if (target.kind !== 'bodyOccurrence') return undefined;
+      if (collected.bodies.includes(target.id as Id)) return { ...target, path: [...target.path, inst.id] };
+      const index = target.path.findIndex(id => collected.instances.includes(id as Id));
+      return index < 0 ? undefined : { ...target, path: [...target.path.slice(0, index), inst.id, ...target.path.slice(index)] };
+    });
+  } else {
+    const map = pluginIdentityMap(copiedIds);
+    copyPluginEntries(draft, target => target.kind === 'bodyOccurrence' ? undefined : map(target));
+  }
   return { definitionId, instanceId };
+}
+
+/** Wrap one freshly created part without changing the live selection or editing context. */
+export function componentizePart(draft:DocumentDraft,ref:EntityRef&{kind:'body'},name:string):EntityRef&{kind:'body'} {
+  if(!draftContainerAt(draft,ref.path).bodies.has(ref.id))throw new PushFormError('part.target','The created part is missing.');
+  const made=makeDefinitionInDraft(draft,ref.path,[ref],{name:uniqueDefinitionName(draft as unknown as DocumentState,name.trim()),isGroup:false,replaceSelection:true,origin:null});
+  if(made.instanceId===null)throw new PushFormError('part.target','The part component could not be created.');
+  return{kind:'body',id:ref.id,path:[...ref.path,made.instanceId as Id]};
 }
 
 export function mapGuide(g: Guide, id: Id, map: PointMap): Guide {
@@ -701,6 +729,130 @@ export const componentMake = defineCommand({
 });
 
 // ---------------------------------------------------------------------------------------------
+// Make Components (one per object)
+
+/** Group instances, loose solids and mesh parts: the objects Make Components wraps one by one. */
+const GROUP_DEFAULT_NAME = /^Group(?:#\d+)?$/;
+
+/** Objects of the current context that Make Components turns into components, in selection order without repeats. */
+export function makeEachTargets(state: DocumentState, container: EntityContainer, refs: readonly EntityRef[]): EntityRef[] {
+  const out: EntityRef[] = [];
+  const seen = new Set<string>();
+  for (const r of refs) {
+    const key = `${r.kind}:${r.id}`;
+    if (seen.has(key)) continue;
+    let eligible = false;
+    if (r.kind === 'body') eligible = container.bodies.has(r.id);
+    else if (r.kind === 'meshPart') eligible = container.meshParts.has(r.id);
+    else if (r.kind === 'instance') {
+      const inst = container.instances.get(r.id);
+      eligible = inst !== undefined && state.definitions.get(inst.definitionId)?.isGroup === true;
+    }
+    if (!eligible) continue;
+    seen.add(key);
+    out.push(r);
+  }
+  return out;
+}
+
+/** Definition name for a new per-object component: the object's own name, or the next `Component#n`. */
+function makeEachName(state: DocumentState, container: EntityContainer, r: EntityRef): string {
+  let own = '';
+  if (r.kind === 'meshPart') own = container.meshParts.get(r.id)?.name ?? '';
+  else if (r.kind === 'instance') {
+    const inst = container.instances.get(r.id);
+    const def = inst && state.definitions.get(inst.definitionId);
+    own = inst?.name || (def && !GROUP_DEFAULT_NAME.test(def.name) ? def.name : '');
+  }
+  own = own.trim();
+  return own || uniqueDefinitionName(state, 'Component#1', false);
+}
+
+/** Entity refs of `container` at `path` that were not in the `before` snapshot. */
+function newEntityRefs(container: EntityContainer, path: readonly Id[], before: ContainerIds): EntityRef[] {
+  const out: EntityRef[] = [];
+  for (const id of container.bodies.keys()) if (!before.bodies.has(id)) out.push({ kind: 'body', path, id });
+  for (const id of container.instances.keys()) if (!before.instances.has(id)) out.push({ kind: 'instance', path, id });
+  for (const id of container.sketch.faces.keys()) if (!before.faces.has(id)) out.push({ kind: 'sketchFace', path, id });
+  for (const id of container.sketch.edges.keys()) if (!before.edges.has(id)) out.push({ kind: 'sketchEdge', path, id });
+  return out;
+}
+
+interface ContainerIds {
+  readonly bodies: ReadonlySet<Id>;
+  readonly instances: ReadonlySet<Id>;
+  readonly faces: ReadonlySet<Id>;
+  readonly edges: ReadonlySet<Id>;
+}
+
+const containerIds = (c: EntityContainer): ContainerIds => ({
+  bodies: new Set(c.bodies.keys()),
+  instances: new Set(c.instances.keys()),
+  faces: new Set(c.sketch.faces.keys()),
+  edges: new Set(c.sketch.edges.keys()),
+});
+
+export const MakeEachParamsSchema = z.object({
+  /** Objects to wrap; the current selection when omitted. */
+  refs: refsSchema,
+});
+export type MakeEachParams = z.infer<typeof MakeEachParamsSchema>;
+
+export interface MakeEachResult {
+  readonly definitionIds: number[];
+  readonly instanceIds: number[];
+  /** Status-bar text: "Made N components". */
+  readonly message: string;
+}
+
+/**
+ * Make Components: one component per selected object. Each loose solid, group instance and mesh
+ * part of the current context becomes its own component in the same container, keeping its world
+ * placement; the definition is named after the object when it has a name. Components already in
+ * the selection are left alone; faces, edges and other kinds are ignored. A mesh part is first made
+ * editable, and the solids and sheet faces that come out of it form the component. One undo entry.
+ */
+export const componentMakeEach = defineCommand({
+  id: 'component.makeEach',
+  title: 'Make Components',
+  description: 'One component per selected object, named after it',
+  category: 'edit',
+  menu: 'Edit',
+  params: MakeEachParamsSchema,
+  undoable: true,
+  run(ctx, p): MakeEachResult {
+    const host = hostOf(ctx);
+    const refs = refsOrSelection(host, p.refs);
+    const path = host.context.path;
+    const targets = makeEachTargets(host.doc.state, containerAt(host.doc.state, path), refs);
+    if (targets.length === 0) throw new PushFormError('group.empty', 'Select solids, groups or mesh parts to make components from');
+    const definitionIds: number[] = [], instanceIds: number[] = [];
+    const meshEditable = targets.some((r) => r.kind === 'meshPart') ? meshEditableOf(ctx) : null;
+    host.edit('Make Components', (draft) => {
+      const state = draft as unknown as DocumentState;
+      for (const target of targets) {
+        // Re-read the container each time: the mesh converter may replace its sketch or entity maps.
+        const container = draftContainerAt(draft, path);
+        const name = makeEachName(state, container, target);
+        let refsOf: EntityRef[] = [target];
+        if (target.kind === 'meshPart') {
+          const before = containerIds(container);
+          meshEditable!.makeEditable(draft, path, target.id);
+          refsOf = newEntityRefs(draftContainerAt(draft, path), path, before);
+          if (refsOf.length === 0) continue;
+        }
+        const made = makeDefinitionInDraft(draft, path, refsOf, { name, isGroup: false, replaceSelection: true, origin: null });
+        definitionIds.push(made.definitionId);
+        if (made.instanceId !== null) instanceIds.push(made.instanceId);
+      }
+    });
+    host.selection.set(instanceIds.map((id) => ({ kind: 'instance', path, id: id as Id })));
+    const n = instanceIds.length;
+    return { definitionIds, instanceIds, message: `Made ${n} component${n === 1 ? '' : 's'}` };
+  },
+});
+
+// ---------------------------------------------------------------------------------------------
 // Explode
 
 /**
@@ -736,6 +888,7 @@ export const groupExplode = defineCommand({
         const def = state.definitions.get(inst.definitionId);
         if (!def) continue;
         const sole = instanceCount(state, def.id) === 1;
+        const copiedIds = new Map<number, number>();
         const m = inst.transform;
         const map = pointMapFromMatrix(m);
         const inherited = inst.materialId ?? null;
@@ -756,6 +909,8 @@ export const groupExplode = defineCommand({
                 face.backMaterialId ??= inherited;
               }
             }
+            copiedIds.set(body.id, copy.id);
+
             transformBodyAffineInPlace(copy, m, textureTiles(draft));
             container.bodies.set(copy.id, copy);
             container.order.push(copy.id);
@@ -781,6 +936,7 @@ export const groupExplode = defineCommand({
               transform: m4mul(m, nested.transform) as unknown as Mat4,
               attributes: cloneJson(nested.attributes),
             };
+            copiedIds.set(nested.id, copy.id);
             container.instances.set(copy.id, copy);
             container.order.push(copy.id);
             out.push({ kind: 'instance', path, id: copy.id });
@@ -827,6 +983,16 @@ export const groupExplode = defineCommand({
           for (const ids of r2.edgeMap.values()) for (const id of ids) if (!seen.has(id) && seen.add(id)) out.push({ kind: 'sketchEdge', path, id });
           for (const id of r2.faceIds) out.push({ kind: 'sketchFace', path, id });
         }
+        const mapIds = pluginIdentityMap(copiedIds);
+        const copiedEntries = sole ? new Map() : copyPluginEntries(draft, target => target.kind === 'bodyOccurrence' ? undefined : mapIds(target));
+        movePluginTargets(draft, target => {
+          if (target.kind !== 'bodyOccurrence') return undefined;
+          const index = target.path.indexOf(inst.id);
+          if (index < 0) return undefined;
+          return { ...target, id: copiedIds.get(target.id) ?? target.id,
+            path: [...target.path.slice(0, index), ...target.path.slice(index + 1).map(id => copiedIds.get(id) ?? id)] };
+        }, { referencesForMoved: mapIds, copiedEntries });
+        reviewPluginTargets(draft, target => (target.kind === 'instance' || target.kind === 'group') && target.id === inst.id || sole && target.kind === 'definition' && target.id === def.id);
         if (sole && def.id !== state.rootDefinitionId) {
           draft.definitions.delete(def.id);
           deletedDefinitionIds.push(def.id);
@@ -844,8 +1010,12 @@ export const groupExplode = defineCommand({
 const IDENTITY: Mat4 = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
 /** Deep copy of a definition under a new id, guid and name; nested instances keep their definitions. */
-export function cloneDefinition(draft: DocumentDraft, src: ComponentDefinition, name: string): ComponentDefinition {
+export function cloneDefinition(draft: DocumentDraft, src: ComponentDefinition, name: string, ids = new Map<number, number>()): ComponentDefinition {
   const def = createDefinition(draft, { name, isGroup: src.isGroup, description: src.description, behaviors: { ...src.behaviors } });
+  if (src.nativeUnknownFields) def.nativeUnknownFields = { ...src.nativeUnknownFields,
+    ...(src.nativeUnknownFields.envelopeUnknown ? { envelopeUnknown: src.nativeUnknownFields.envelopeUnknown.map(bytes => new Uint8Array(bytes)) } : {}),
+    ...(src.nativeUnknownFields.extensions ? { extensions: new Map([...src.nativeUnknownFields.extensions].map(([name, fields]) => [name, fields.map(bytes => new Uint8Array(bytes))])) } : {}) };
+  ids.set(src.id, def.id);
   def.axes = { origin: mv3(src.axes.origin), x: mv3(src.axes.x), y: mv3(src.axes.y), z: mv3(src.axes.z) };
   const dst = def.entities;
   const identity = pointMapFromMatrix(IDENTITY);
@@ -853,7 +1023,7 @@ export function cloneDefinition(draft: DocumentDraft, src: ComponentDefinition, 
   for (const id of order) {
     const body = src.entities.bodies.get(id);
     if (body) {
-      cloneBody(draft, dst, body);
+      ids.set(body.id, cloneBody(draft, dst, body, ids).id);
       continue;
     }
     const part = src.entities.meshParts.get(id);
@@ -864,6 +1034,7 @@ export function cloneDefinition(draft: DocumentDraft, src: ComponentDefinition, 
     const inst = src.entities.instances.get(id);
     if (inst) {
       const copy: ComponentInstance = { ...inst, id: allocId<Id>(draft), transform: [...inst.transform] as unknown as Mat4, attributes: cloneJson(inst.attributes) };
+      ids.set(inst.id, copy.id);
       dst.instances.set(copy.id, copy);
       dst.order.push(copy.id);
       continue;
@@ -928,15 +1099,80 @@ export const componentMakeUnique = defineCommand({
           for (const inst of insts) definitions[inst.id] = defId;
           continue;
         }
-        const clone = cloneDefinition(draft, def, uniqueDefinitionName(state, def.name, false));
+        const ids = new Map<number, number>();
+        const clone = cloneDefinition(draft, def, uniqueDefinitionName(state, def.name, false), ids);
         created.push(clone.id);
         for (const inst of insts) {
           inst.definitionId = clone.id;
           definitions[inst.id] = clone.id;
         }
+        const selected = new Set(insts.map(inst => inst.id));
+        const map = pluginIdentityMap(ids);
+        const copiedEntries = copyPluginEntries(draft, target => target.kind === 'bodyOccurrence' ? undefined : map(target));
+        movePluginTargets(draft, target => target.kind === 'bodyOccurrence' && target.path.some(id => selected.has(id as Id)) ? map(target) : undefined, { referencesForMoved: map, copiedEntries });
       }
     });
     return { definitions, createdDefinitionIds: created };
+  },
+});
+
+/** Validate one captured assembly path without changing the live editing context. */
+export function captureContainerOccurrence(host: DocumentHost, path: readonly number[], isolate: boolean): void {
+  const state = host.doc.state;
+  if (!host.context.path.every((id, index) => path[index] === id)) throw new PushFormError('context.mismatch', 'Choose an assembly inside the current editing context.');
+  const prefix: Id[] = [];
+  for (const value of path) {
+    const id = value as Id, instance = containerAt(state, prefix).instances.get(id);
+    if (!instance) throw new PushFormError('part.target', 'The captured assembly no longer exists.');
+    if (instance.locked) throw new PushFormError('part.locked', 'Unlock the assembly before editing its parts.');
+    if (isolate && prefix.length < host.context.path.length && instanceCount(state, instance.definitionId) > 1)
+      throw new PushFormError('context.mismatch', 'Leave this shared assembly before editing only one physical placement.');
+    prefix.push(id);
+  }
+}
+/** Validate an explicit physical body without widening it to an enclosing placement. */
+export function capturePartOccurrence(host: DocumentHost, ref: EntityRef, isolate: boolean): asserts ref is EntityRef & { kind: 'body' } {
+  if (ref.kind !== 'body') throw new PushFormError('part.target', 'Choose one solid part.');
+  captureContainerOccurrence(host, ref.path, isolate);
+  const body = containerAt(host.doc.state, ref.path).bodies.get(ref.id);
+  if (!body) throw new PushFormError('part.target', 'The captured solid no longer exists.');
+  if (body.locked) throw new PushFormError('part.locked', 'Unlock the solid before editing it.');
+}
+export interface ContainerIdentityChange { prefix: Id[]; ids: Map<number, number> }
+/** Identity continuation for one physical assembly; return the complete composed ID map for later batch edits. */
+export function isolateContainerOccurrence(draft: DocumentDraft, sourcePath: readonly number[], fromDepth = 0): { path: Id[]; ids: Map<number, number>; changes: ContainerIdentityChange[]; isolated: boolean } {
+  if (!Number.isInteger(fromDepth) || fromDepth < 0 || fromDepth > sourcePath.length) throw new PushFormError('part.target', 'Invalid physical isolation boundary.');
+  const changes: ContainerIdentityChange[] = [];
+  const path = sourcePath.map(id => id as Id), continued = new Map<number, number>(); let isolated = false;
+  for (let depth = fromDepth; depth < path.length; depth++) {
+    const current = draft as unknown as DocumentState, into = path.slice(0, depth);
+    const instance = draftContainerAt(draft, into).instances.get(path[depth]!)!;
+    if (instanceCount(current, instance.definitionId) <= 1) continue;
+    const source = current.definitions.get(instance.definitionId)!, ids = new Map<number, number>();
+    const clone = cloneDefinition(draft, source, uniqueDefinitionName(current, source.name, false), ids);
+    instance.definitionId = clone.id; isolated = true;
+    const selectedPath = path.slice(0, depth + 1), map = pluginIdentityMap(ids);
+    changes.push({ prefix: [...selectedPath], ids: new Map(ids) });
+    const copiedEntries = copyPluginEntries(draft, target => target.kind === 'bodyOccurrence' ? undefined : map(target));
+    movePluginTargets(draft, target => target.kind === 'bodyOccurrence' && selectedPath.every((id, index) => target.path[index] === id) ? map(target) : undefined,
+      { referencesForMoved: map, copiedEntries });
+    for (const [original, prior] of continued) continued.set(original, ids.get(prior) ?? prior);
+    for (const [original, next] of ids) if (!continued.has(original)) continued.set(original, next);
+    for (let index = depth + 1; index < path.length; index++) path[index] = (ids.get(path[index]!) ?? path[index]!) as Id;
+  }
+  return { path, ids: continued, changes, isolated };
+}
+/** Native identity lifecycle shared by physical-part operations. No payload strings are interpreted. */
+export function isolatePartOccurrence(draft: DocumentDraft, ref: EntityRef & { kind: 'body' }): { ref: EntityRef & { kind: 'body' }; isolated: boolean; changes: ContainerIdentityChange[] } {
+  const result = isolateContainerOccurrence(draft, ref.path);
+  return { ref: { kind: 'body', id: (result.ids.get(ref.id) ?? ref.id) as Id, path: result.path }, isolated: result.isolated, changes:result.changes };
+}
+export const partIsolate = defineCommand({
+  id: 'part.isolate', title: 'Make Part Independent', category: 'internal', undoable: true,
+  params: z.object({ ref: EntityRefSchema }),
+  run(ctx, p): { ref: EntityRef & { kind: 'body' }; isolated: boolean; changes: ContainerIdentityChange[] } {
+    const host = hostOf(ctx), ref = toEntityRefs([p.ref])[0]!; capturePartOccurrence(host, ref, true);
+    return host.edit('Make Part Independent', draft => isolatePartOccurrence(draft, ref));
   },
 });
 
@@ -1088,8 +1324,10 @@ export const entitySetShadows = defineCommand({
 export const groupCommands: readonly AnyCommand[] = [
   groupMake,
   componentMake,
+  componentMakeEach,
   groupExplode,
   componentMakeUnique,
+  partIsolate,
   instanceRename,
   definitionRename,
   instanceSetLocked,

@@ -10,6 +10,7 @@ import type { AppInstance } from '../bootstrap';
 import { useAppStore } from '../store';
 import { Icon } from './Icon';
 import { useSelectionRefs } from '../hooks/useSelection';
+import { ToolOptionsFields } from './ToolOptions';
 import { ModelTextStyleRow } from './ModelTextStyleRow';
 import { EntryFields } from './EntryFields';
 
@@ -52,13 +53,15 @@ export interface ToolOptionsBarProps {
 export function ToolOptionsBar(): JSX.Element {
   const app = useApp();
   const settings = useAppStore((s) => s.toolSettings);
+  const fields = useAppStore((s) => s.entryFields);
+  const optionFields = fields.filter(field => field.placement === 'options');
+  const hasBarFields = fields.some((f) => f.location === 'bar' && f.placement !== 'options');
   const placing = useAppStore((s) => s.toolPlacing);
   const applied = useAppStore((s) => s.toolApplied);
   const activeToolId = useAppStore((s) => s.activeToolId);
   const dialog = useAppStore((s) => s.dialog);
   const dialogRef = useAppStore((s) => s.dialogRef);
   const selection = useSelectionRefs();
-  const fields = useAppStore((s) => s.entryFields);
   const tool = app.toolManager.visualTool;
   // A model text's style row: for the text being edited, or one text selected with Select.
   const styled = dialog === 'editText' && dialogRef?.kind === 'text' ? dialogRef
@@ -74,7 +77,10 @@ export function ToolOptionsBar(): JSX.Element {
       read={(quantity, text) => readQuantity(app, quantity, text)}
       onLeave={() => app.viewport.container?.focus()}
     >
-      {styled ? <ModelTextStyleRow app={app} target={styled} /> : fields.some((f) => f.location === 'bar') ? <EntryFields inline /> : null}
+      {styled ? <ModelTextStyleRow app={app} target={styled} /> : hasBarFields || optionFields.length ? <>
+        {hasBarFields ? <EntryFields inline /> : null}
+        {optionFields.length ? <ToolOptionsFields key={activeToolId} app={app} fields={optionFields} /> : null}
+      </> : null}
     </ToolOptionsBarView>
   );
 }
@@ -94,13 +100,14 @@ export function ToolOptionsBarView({ tool, settings, placing = false, applied: a
   const view = last.current;
   const root = useRef<HTMLDivElement>(null);
   const [fold, setFold] = useState<Fold>(0);
+  const [availableWidth, setAvailableWidth] = useState(0);
   const [resting, setResting] = useState(false);
   const [moreAt, setMoreAt] = useState<{ top: number; right: number } | null>(null);
 
   // Fold until the controls fit; start over when the bar or its controls change. Compared by
   // content, since a workspace may build a new but equal settings list on every render.
   const settingsKey = JSON.stringify(settings);
-  useLayoutEffect(() => setFold(0), [settingsKey, view.id]);
+  useLayoutEffect(() => setFold(0), [settingsKey, view.id, availableWidth]);
   useLayoutEffect(() => {
     const el = root.current;
     if (!el) return;
@@ -108,10 +115,14 @@ export function ToolOptionsBarView({ tool, settings, placing = false, applied: a
       if (el.scrollWidth > el.clientWidth + 1) setFold((f) => (f < 3 ? ((f + 1) as Fold) : f));
     };
     check();
-    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => setFold(0));
-    ro?.observe(el.parentElement ?? el);
-    return () => ro?.disconnect();
-  }, [fold, settingsKey, view.id]);
+  }, [fold, settingsKey, view.id, availableWidth]);
+  useLayoutEffect(() => {
+    const el = root.current?.parentElement ?? root.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => setAvailableWidth(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // Fade after the pointer rests over an empty part of the bar.
   useEffect(() => {
@@ -204,7 +215,7 @@ function Control({ read, c, mac, asList, send }: { read: ToolOptionsBarProps['re
         return (
           <label className="pf-tob-item">
             <span className="pf-tob-label">{c.label}</span>
-            <select data-tob-control value={c.value} onChange={(e) => send(c.id, e.target.value, true)}>
+            <select data-tob-control aria-label={c.label} value={c.value} onChange={(e) => send(c.id, e.target.value, true)}>
               {c.options.map((o) => <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>)}
             </select>
             {key}

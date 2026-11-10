@@ -12,6 +12,8 @@ export * from './CloudBilling';
 export * from './CloudUsage';
 export * from './CloudStaff';
 export * from './CloudExtensionSettings';
+export * from './CloudExtensionAssets';
+export * from './CloudExtensionStorage';
 export * from './rpc';
 export type { Database, Json } from './db.types';
 export * from './CommonsCatalog';

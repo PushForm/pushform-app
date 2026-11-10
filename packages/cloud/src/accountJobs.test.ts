@@ -40,7 +40,7 @@ it('deletes a due account: its objects by bucket, then its rows, then its auth u
     cloud_claim_exports: () => [], cloud_expired_exports: () => [],
   });
   expect(await runAccountJobs(deps)).toEqual({ deleted: 1, exported: 0, expired: 0, uploadsPurged: 0, inboxPurged: 0, trashPurged: 0, failed: 0 });
-  expect(calls.filter(c => !c.startsWith('rpc cloud_due') && !c.includes('claim') && !c.includes('expired') && !c.includes('inbox') && !c.includes('pending') && !c.includes('trash'))).toEqual([
+  expect(calls.filter(c => !c.startsWith('rpc cloud_due') && !c.includes('claim') && !c.includes('expired') && !c.includes('inbox') && !c.includes('pending') && !c.includes('trash') && !c.includes('extension_assets'))).toEqual([
     'rpc cloud_account_objects {"p_owner":"u1"}', 'remove cloud-files a/plan,a/door', 'remove fr-attachments r/x.png',
     'rpc cloud_purge_account {"p_owner":"u1"}', 'deleteUser u1',
   ]);
@@ -57,6 +57,25 @@ it('records a failed deletion and still runs the other jobs', async () => {
   expect(calls).not.toContain('deleteUser u1');
   expect(calls).toContain('remove cloud-exports u2/e1.zip');
   expect(calls).toContain('rpc cloud_expire_export {"p_export":"e1"}');
+});
+
+it('acknowledges retired extension assets only after Storage removal and retries failed cleanup', async () => {
+  const run = fakes({
+    cloud_due_account_deletions:() => [],cloud_claim_exports:() => [],cloud_expired_exports:() => [],
+    extension_assets_cleanup:() => [{ upload:'old',path:'owner/old' },{ upload:'retry',path:'owner/retry' }],
+    extension_assets_ack:() => true,
+  });
+  const remove = run.deps.storage.remove;
+  run.deps.storage.remove = async (bucket,paths) => {
+    if (paths.includes('owner/retry')) throw new Error('Storage unavailable');
+    await remove(bucket,paths);
+  };
+  const result = await runAccountJobs(run.deps);
+  expect(result).toMatchObject({ uploadsPurged:1,failed:1 });
+  expect(run.calls).toContain('remove extension-assets owner/old');
+  expect(run.calls).toContain('rpc extension_assets_ack {"p_upload":"old"}');
+  expect(run.calls.indexOf('remove extension-assets owner/old')).toBeLessThan(run.calls.indexOf('rpc extension_assets_ack {"p_upload":"old"}'));
+  expect(run.calls).not.toContain('rpc extension_assets_ack {"p_upload":"retry"}');
 });
 
 it('zips each current revision under its project and folders, uploads it privately and emails a 24-hour link', async () => {

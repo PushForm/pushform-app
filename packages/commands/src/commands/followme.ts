@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Id, MeshData, Vec3, FaceLocalId } from '@pushform/core';
 import { MERGE_TOL, PushFormError, v3dist, v3dot } from '@pushform/core';
 import type { ComponentsResult, KernelClient, KernelComponent, BooleanResult } from '@pushform/kernel';
-import { applyKernelResult, bodyFromMesh, sketchFaceEdgeIds } from '@pushform/model';
+import { applyKernelResult, bodyFromMesh, reviewPluginBodies, sketchFaceEdgeIds } from '@pushform/model';
 import type { Body, DocumentDraft, EntityContainer, Draft, KernelFaceOrigin } from '@pushform/model';
 import { defineCommand } from '../registry/Command';
 import type { AnyCommand } from '../registry/Command';
@@ -151,6 +151,7 @@ export function commitFollowMe(host: ReturnType<typeof hostOf>, work: FollowMeKe
       const cur = root.bodies.get(hostBody.id);
       if (!cur || cur.version !== hostBody.version) throw new PushFormError('followme.stale', 'The solid changed before Follow Me could be applied');
       const [first, ...extras] = merged.components;
+      if (extras.length) reviewPluginBodies(draft, new Set([cur.id]));
       const bodyIds: number[] = [];
       if (first) {
         const updated = applyKernelResult(draft, cur.id, {

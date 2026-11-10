@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { InlineBackend, KernelClient } from '@pushform/kernel';
 import type { EntityRef } from '@pushform/model';
@@ -12,6 +12,14 @@ import { bodiesToRender } from '../engine/renderAdapter';
 import { EntityInfoPanel } from './EntityInfoPanel';
 import { describeSelection } from './entityInfo';
 import { addInstance, addMeshPart } from './instances.testutil';
+
+// These tests edit document properties; jsdom has no GPU on which to rasterize dimension glyphs. Keep real Text
+// objects while settling sync locally, so delayed SDF work cannot outlive a disposed test app.
+vi.mock('../../../render/node_modules/troika-three-text', async original => {
+  const troika = await original<{ Text: new () => { sync(callback?: () => void): void } }>();
+  class Text extends troika.Text { override sync(callback?: () => void): void { callback?.(); } }
+  return { ...troika, Text };
+});
 
 let app: AppInstance | null = null;
 afterEach(() => {

@@ -21,7 +21,8 @@ const manifest = (overrides: Record<string, unknown> = {}): ExtensionManifest =>
 
 const call = (overrides: Partial<ServiceCall> = {}): ServiceCall => ({
   signal: new AbortController().signal, extensionId: 'com.example.prices', generation: 1,
-  document: () => { throw new Error('no documents'); }, progress: () => {}, userActivated: () => true, ...overrides,
+  document: () => { throw new Error('no documents'); }, currentDocument: () => { throw new Error('no documents'); },
+  progress: () => {}, userActivated: () => true, ...overrides,
 });
 const failure = async (promise: unknown): Promise<ExtensionError> => {
   try { await promise; } catch (error) { if (error instanceof ExtensionError) return error; throw error; }
@@ -66,6 +67,7 @@ describe('FetchBroker', () => {
     expect(new TextDecoder().decode(response.body as Uint8Array)).toBe('{"price":4.2}');
     expect(seen[0]).toMatchObject({ method: 'POST', headers: { authorization: 'Bearer own-key' }, maxResponseBytes: FETCH_LIMITS.responseBytes });
     expect(broker.bytesSent.get('https://api.example.com')).toBe(2);
+    expect(broker.traffic.get('https://api.example.com')).toEqual({ requests: 1, bytesSent: 2, bytesReceived: 13 });
   });
 
   it('follows redirects itself, checking every location, and switches to GET after 303', async () => {

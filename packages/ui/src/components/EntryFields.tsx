@@ -49,7 +49,8 @@ const FIELD_KINDS = new Set<VcbValue['kind']>(['length', 'angle', 'slope']);
 
 /** The fields to draw: the tool's, or the pointer field while one is being typed in. */
 export function visibleFields(fields: readonly EntryField[], label: string, drafts: Readonly<Record<string, string>>, focus: string | null): readonly EntryField[] {
-  if (fields.length) return fields;
+  const viewport = fields.filter(field => field.placement !== 'options');
+  if (viewport.length) return viewport;
   if (focus === POINTER_FIELD || POINTER_FIELD in drafts) return [{ id: POINTER_FIELD, label: label || 'Value', kind: 'number', value: '' }];
   return [];
 }
@@ -57,8 +58,8 @@ export function visibleFields(fields: readonly EntryField[], label: string, draf
 /** Start typing `text` into the first visible field (from the global key handler). */
 export function beginEntry(text: string): void {
   const s = useAppStore.getState();
-  if (s.entryFields.length && s.entryFields.every((f) => f.disabled)) return;
-  const first = s.entryFields.find((f) => !f.disabled)?.id ?? POINTER_FIELD;
+  if (s.entryFields.some((f) => f.placement !== 'options') && s.entryFields.filter((f) => f.placement !== 'options').every((f) => f.disabled)) return;
+  const first = s.entryFields.find((f) => f.placement !== 'options' && !f.disabled)?.id ?? POINTER_FIELD;
   s.setEntryDraft(first, text);
 }
 
@@ -102,15 +103,16 @@ export function EntryFields({ pointer, inline = false }: { pointer?: RefObject<r
   if (!shown.length) return null;
 
   const position = (f: EntryField): readonly [number, number] => {
+    const el = inputs.current.get(f.id);
+    const size: readonly [number, number] = el ? [el.offsetWidth, el.offsetHeight] : FIELD_SIZE;
+    const bounds = (p: readonly [number, number]) => withinViewport(p, size, app.viewport.camera.viewportSize());
     if (f.at) {
       const at = app.viewport.project(f.at);
-      if (!f.away) return at;
-      const el = inputs.current.get(f.id);
-      const size: readonly [number, number] = el ? [el.offsetWidth, el.offsetHeight] : FIELD_SIZE;
-      return clearOf(at, app.viewport.project([f.at[0] + f.away[0], f.at[1] + f.away[1], f.at[2] + f.away[2]]), size);
+      if (!f.away) return bounds(at);
+      return bounds(clearOf(at, app.viewport.project([f.at[0] + f.away[0], f.at[1] + f.away[1], f.at[2] + f.away[2]]), size));
     }
     const p = pointer?.current ?? [0, 0];
-    return [p[0] + POINTER_OFFSET[0], p[1] + POINTER_OFFSET[1]];
+    return bounds([p[0] + POINTER_OFFSET[0], p[1] + POINTER_OFFSET[1]]);
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>, f: EntryField) => {
@@ -156,6 +158,7 @@ export function EntryFields({ pointer, inline = false }: { pointer?: RefObject<r
             disabled={f.disabled}
             aria-invalid={error === f.id}
             type="text"
+            maxLength={500}
             autoComplete="off"
             spellCheck={false}
             aria-label={f.label}
@@ -184,6 +187,14 @@ export function EntryFields({ pointer, inline = false }: { pointer?: RefObject<r
   );
 }
 
+/** Keep dimension inputs inside the modeling viewport when their anchor is off-screen or near an edge. */
+export function withinViewport(point: readonly [number, number], size: readonly [number, number], viewport: { width: number; height: number }): readonly [number, number] {
+  return [viewport.width, viewport.height].map((extent, axis) => {
+    const inset = Math.min(extent / 2, size[axis]! / 2 + 6);
+    return Math.max(inset, Math.min(extent - inset, Number.isFinite(point[axis]) ? point[axis]! : extent / 2));
+  }) as [number, number];
+}
+
 function parse(app: AppInstance, text: string) {
   return parseVcb(text, typedLengthUnit(app.document.doc.state.meta.units));
 }
@@ -192,6 +203,10 @@ function parse(app: AppInstance, text: string) {
 function lockField(app: AppInstance, f: EntryField): boolean {
   const st = useAppStore.getState();
   const text = st.entryDrafts[f.id] ?? '';
+  if (app.toolManager.lockRawEntry(f.id, text.trim() ? text : null, typedLengthUnit(app.document.doc.state.meta.units))) {
+    if (!text.trim()) st.clearEntryDraft(f.id);
+    return true;
+  }
   if (!text.trim()) {
     st.clearEntryDraft(f.id);
     app.toolManager.lockEntry(f.id, null);
@@ -216,6 +231,12 @@ function lockField(app: AppInstance, f: EntryField): boolean {
 /** Read every typed field and apply them to the active tool; a field that cannot be read is marked and nothing applies. */
 export function applyEntry(app: AppInstance, shown: readonly EntryField[]): void {
   const st = useAppStore.getState();
+  const raw = Object.fromEntries(shown.flatMap(field => {
+    const text = st.entryDrafts[field.id]; return text?.trim() ? [[field.id, text]] : [];
+  }));
+  const unit = typedLengthUnit(app.document.doc.state.meta.units);
+  const single = shown.some(field => field.id === POINTER_FIELD) && raw[POINTER_FIELD];
+  if (single && app.toolManager.onRawVcb(single, unit) || app.toolManager.onRawEntry(raw, unit)) { leave(app); return; }
   const values: Record<string, VcbValue> = {};
   // Previously held fields already live in the tool. Submit fresh edits, so changing Distance
   // can release held offsets and changing an offset can release a held Distance.

@@ -89,8 +89,10 @@ describe('startAcknowledgment', () => {
     early.abort();
     expect(await early.done).toMatchObject({ outcome: 'aborted', text: '' });
     expect(shown).toEqual([]);
-    const mid = startAcknowledgment({ client: slowClient([{ text: 'A cabinet.', afterMs: 0 }, { text: ' Two doors.', afterMs: 50 }]), model: 'm', content, onText: d => shown.push(d) });
-    await new Promise(r => setTimeout(r, 20));
+    let firstShown!: () => void;
+    const displayed = new Promise<void>(resolve => { firstShown = resolve; });
+    const mid = startAcknowledgment({ client: slowClient([{ text: 'A cabinet.', afterMs: 0 }, { text: ' Two doors.', afterMs: 50 }]), model: 'm', content, onText: d => { shown.push(d); firstShown(); } });
+    await displayed;
     mid.abort();
     expect(await mid.done).toMatchObject({ outcome: 'shown', text: 'A cabinet.' });
     expect(shown).toEqual(['A cabinet.']);

@@ -2,12 +2,13 @@
 // Copyright 2026 PushForm contributors
 import { z } from 'zod';
 import { defineCommand, type CommandRegistry, type ContextMenuItem } from '@pushform/commands';
-import type { ContributionEntry, ExtensionPlatform } from '@pushform/extensions';
+import type { ContributionEntry, ExtensionEntry, ExtensionPlatform } from '@pushform/extensions';
 
 /**
- * Extension contributions as the editors show them. Commands and selection actions are registered in the document's
- * command registry under `extension:` ids, so they reach command search and context menus with the extension's name
- * beside them and can never take a built-in command's id. Registering runs no extension code; running one does.
+ * Extension contributions as the editors show them. Commands, selection actions, toolbar buttons and panels are
+ * registered in the document's command registry under `extension:` ids, so they reach command search and context
+ * menus with the extension's name beside them and can never take a built-in command's id. Registering runs no
+ * extension code; running one does.
  */
 
 export const EXTENSION_COMMAND_PREFIX = 'extension:';
@@ -18,19 +19,40 @@ export type ExtensionEditor = 'modeling' | 'layout';
 
 export const extensionCommandId = (contributionId: string): string => `${EXTENSION_COMMAND_PREFIX}${contributionId}`;
 
-/** The side rail id of an extension panel. */
-export const extensionPanelId = (contributionId: string): `extension:${string}` => `extension:${contributionId}`;
+/** The side rail (activity bar) id of an extension. */
+export const extensionRailId = (extensionId: string): `extension:${string}` => `extension:${extensionId}`;
 
-export const isExtensionPanelId = (id: string): id is `extension:${string}` => id.startsWith(EXTENSION_COMMAND_PREFIX);
+export const isExtensionRailId = (id: string): id is `extension:${string}` => id.startsWith(EXTENSION_COMMAND_PREFIX);
 
-/** The panels the active editor shows: only those of enabled extensions that support it. */
-export function extensionPanels(platform: ExtensionPlatform, editor: ExtensionEditor): ContributionEntry[] {
-  return platform.contributions(editor).filter((entry) => entry.target === 'model.panel');
-}
+/** The extension id behind a rail id. */
+export const railExtensionId = (railId: `extension:${string}`): string => railId.slice(EXTENSION_COMMAND_PREFIX.length);
+
+/** The contributions of an extension that show in its side panel. */
+export const extensionSidebars = (extension: ExtensionEntry): ContributionEntry[] => extension.contributions.filter((c) => c.target === 'model.sidebar');
+
+/** The contributions of an extension that open as tabs of their own. */
+export const extensionPanels = (extension: ExtensionEntry): ContributionEntry[] => extension.contributions.filter((c) => c.target === 'model.panel');
 
 /**
- * Keeps the registry's extension commands in step with what is installed and enabled for `editor`. `run` performs a
- * command or selection action the user started. Returns a function that removes them all.
+ * The extensions the activity bar lists for `editor`: enabled ones that support it and have a side panel or a tab to
+ * open, in name order. Runs no extension code.
+ */
+export function activityExtensions(platform: ExtensionPlatform, editor: ExtensionEditor): ExtensionEntry[] {
+  return platform.extensions(editor).filter((e) => extensionSidebars(e).length > 0 || extensionPanels(e).length > 0);
+}
+
+/** The toolbar buttons enabled extensions add to the modeling toolbar, in extension and manifest order. */
+export function extensionToolbarButtons(platform: ExtensionPlatform, editor: ExtensionEditor): ContributionEntry[] {
+  return platform.extensions(editor).flatMap((e) => e.contributions.filter((c) => c.target === 'model.toolbar'));
+}
+
+/** Contribution targets registered as commands: the user starts them from command search or a menu. */
+const COMMAND_TARGETS = new Set(['model.command', 'model.selection.action', 'model.toolbar', 'model.panel', 'model.tool']);
+
+/**
+ * Keeps the registry's extension commands in step with what is installed and enabled for `editor`: commands,
+ * selection actions, toolbar buttons and panels (whose command opens the panel's tab). `run` performs one the user
+ * started. Returns a function that removes them all.
  */
 export function syncExtensionCommands(registry: CommandRegistry, platform: ExtensionPlatform, editor: ExtensionEditor,
   run: (entry: ContributionEntry) => void): () => void {
@@ -39,7 +61,7 @@ export function syncExtensionCommands(registry: CommandRegistry, platform: Exten
   const sync = (): void => {
     clear();
     for (const entry of platform.contributions(editor)) {
-      if (entry.target !== 'model.command' && entry.target !== 'model.selection.action') continue;
+      if (!COMMAND_TARGETS.has(entry.target)) continue;
       const id = extensionCommandId(entry.id);
       if (registry.has(id)) continue;
       registered.push(registry.register(defineCommand({

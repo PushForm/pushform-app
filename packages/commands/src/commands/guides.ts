@@ -103,6 +103,19 @@ export const guidesAddSegment = defineCommand({
   },
 });
 
+/** One transaction for a complete construction outline, including high-segment curves. */
+export const guidesAddSegments = defineCommand({
+  id: 'guides.addSegments', title: 'Construction Guides', category: 'internal', undoable: true,
+  params: z.object({ segments: z.array(z.tuple([vec3, vec3])).min(1).max(5000) }),
+  run(ctx, { segments }) {
+    const host = hostOf(ctx), frame = currentFrame(host);
+    for (const [a, b] of segments) if (!(v3len([a[0] - b[0], a[1] - b[1], a[2] - b[2]]) > MERGE_TOL)) throw new PushFormError('guides.segment', 'A construction guide needs two different points.');
+    return host.edit('Construction Guides', draft => segments.map(([a, b]) => insertGuide(draft, frame.path, {
+      id: allocId<Id>(draft), kind: 'segment', origin: frame.toLocal(a), end: frame.toLocal(b), ...guideAttrs(draft),
+    })));
+  },
+});
+
 export const guidesDelete = defineCommand({
   id: 'guides.delete',
   title: 'Delete Guides',
@@ -278,4 +291,4 @@ export const modelResize = defineCommand({
   },
 });
 
-export const guideCommands: readonly AnyCommand[] = [guidesAddLine, guidesAddPoint, guidesAddSegment, guidesDelete, deleteAllGuides, modelResize];
+export const guideCommands: readonly AnyCommand[] = [guidesAddLine, guidesAddPoint, guidesAddSegment, guidesAddSegments, guidesDelete, deleteAllGuides, modelResize];

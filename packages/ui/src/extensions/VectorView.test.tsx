@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { DEFAULT_UNITS } from '@pushform/core';
 import { validateUiTree, type UiEvent } from '@pushform/extension-protocol';
 import { ExtensionUiView } from './ExtensionUi';
+import { AUTO_HEIGHT_PX, autoVectorHeight, fittedWidth, wheelZoomFactor } from './VectorView';
 
 afterEach(cleanup);
 
@@ -72,5 +73,58 @@ describe('vector views', () => {
     ]);
     fireEvent.keyDown(canvas, { key: 'ArrowRight' });
     expect(canvas.getAttribute('viewBox')!.startsWith('0.244')).toBe(true);
+  });
+
+  it('zooms with the wheel in proportion to the scroll distance, so a trackpad gesture is not a burst of fixed steps', () => {
+    // 100 px of scroll is one step either way; a trackpad's few-pixel events are a fraction of it; one event is bounded.
+    expect(wheelZoomFactor({ deltaY: -100, deltaMode: 0 })).toBeCloseTo(1 / 0.85, 5);
+    expect(wheelZoomFactor({ deltaY: 100, deltaMode: 0 })).toBeCloseTo(0.85, 5);
+    expect(wheelZoomFactor({ deltaY: -4, deltaMode: 0 })).toBeCloseTo((1 / 0.85) ** 0.04, 5);
+    expect(wheelZoomFactor({ deltaY: -3, deltaMode: 1 })).toBeCloseTo((1 / 0.85) ** 0.48, 5);
+    expect(wheelZoomFactor({ deltaY: -5000, deltaMode: 0 })).toBeCloseTo((1 / 0.85) ** 2, 5);
+    expect(wheelZoomFactor({ deltaY: 0, deltaMode: 0 })).toBe(1);
+  });
+
+  it('size the frame from the drawing at the width available when no height is given, within limits', () => {
+    expect(autoVectorHeight({ width: 2.44, height: 1.22 }, 300)).toBe(150);
+    expect(autoVectorHeight({ width: 10, height: 0.1 }, 300)).toBe(AUTO_HEIGHT_PX.min);
+    expect(autoVectorHeight({ width: 1, height: 10 }, 300)).toBe(AUTO_HEIGHT_PX.max);
+    expect(autoVectorHeight({ width: 1, height: 1 }, 0)).toBe(AUTO_HEIGHT_PX.unmeasured);
+    const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('pf-xui-vector-frame') ? 316 : 0;
+    });
+    try {
+      const { view } = show();
+      expect((view.container.querySelector('.pf-xui-vector-frame') as HTMLElement).style.height).toBe('158px');
+    } finally { width.mockRestore(); }
+  });
+
+  it('size a drawing as if it were as wide as its fit width, so several drawings share one scale', () => {
+    const offcut = { ...sheet, id: 'offcut', label: 'Off-cut', bounds: { x: 0, y: 0, width: 0.61, height: 0.61 }, fitWidth: 2.44 };
+    expect(fittedWidth({ bounds: offcut.bounds, fitWidth: 2.44 })).toBe(2.44);
+    expect(fittedWidth({ bounds: offcut.bounds, fitWidth: 0.1 })).toBe(0.61);
+    const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('pf-xui-vector-frame') ? 488 : 0;
+    });
+    try {
+      const events: UiEvent[] = [];
+      const view = render(<ExtensionUiView tree={validateUiTree(offcut)} units={DEFAULT_UNITS} onEvent={(e) => events.push(e)} />);
+      // The frame is as tall as the off-cut at the sheet's scale (488 px for 2.44 m, so 122 px for 0.61 m), not a square.
+      expect((view.container.querySelector('.pf-xui-vector-frame') as HTMLElement).style.height).toBe('122px');
+      const canvas = screen.getByRole('img', { name: /Off-cut/ });
+      expect(canvas.getAttribute('viewBox')).toBe('0 0 2.44 0.61');
+      expect(canvas.getAttribute('preserveAspectRatio')).toBe('xMinYMid meet');
+      // Fit restores that view after zooming.
+      fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+      expect(canvas.getAttribute('viewBox')).not.toBe('0 0 2.44 0.61');
+      fireEvent.click(screen.getByRole('button', { name: 'Fit' }));
+      expect(canvas.getAttribute('viewBox')).toBe('0 0 2.44 0.61');
+    } finally { width.mockRestore(); }
+  });
+
+  it('keep an explicit height', () => {
+    const events: UiEvent[] = [];
+    const view = render(<ExtensionUiView tree={validateUiTree({ ...sheet, height: 436 })} units={DEFAULT_UNITS} onEvent={(e) => events.push(e)} />);
+    expect((view.container.querySelector('.pf-xui-vector-frame') as HTMLElement).style.height).toBe('436px');
   });
 });

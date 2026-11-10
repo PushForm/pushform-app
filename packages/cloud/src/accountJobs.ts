@@ -175,6 +175,20 @@ async function purgeStaleUploads(deps: AccountJobsDeps, result: AccountJobsResul
   }
 }
 
+/** Expired extension reservations are retired by SQL before their bytes are removed through Storage. */
+async function purgeExtensionAssets(deps: AccountJobsDeps, result: AccountJobsResult): Promise<void> {
+  const stale = ((await deps.rpc('extension_assets_cleanup', { p_limit: 50 })) ?? []) as { upload: string; path: string }[];
+  for (const { upload, path } of stale) {
+    try {
+      await deps.storage.remove('extension-assets', [path]);
+      if (await deps.rpc('extension_assets_ack', { p_upload: upload })) result.uploadsPurged++;
+    } catch (error) {
+      result.failed++;
+      deps.log(`extension asset ${upload} could not be purged: ${errorText(error)}`);
+    }
+  }
+}
+
 /**
  * Documents whose Trash time is up or that were deleted permanently: every revision object and the thumbnail
  * through Storage first, then the rows; then folders and projects that hold nothing any more.
@@ -212,7 +226,7 @@ async function purgeInbox(deps: AccountJobsDeps, result: AccountJobsResult): Pro
 /** One sweeper pass. Each part runs even when another fails. */
 export async function runAccountJobs(deps: AccountJobsDeps): Promise<AccountJobsResult> {
   const result: AccountJobsResult = { deleted: 0, exported: 0, expired: 0, uploadsPurged: 0, inboxPurged: 0, trashPurged: 0, failed: 0 };
-  for (const part of [deleteAccounts, buildExports, expireExports, purgeStaleUploads, purgeTrash, purgeInbox]) {
+  for (const part of [deleteAccounts, buildExports, expireExports, purgeStaleUploads, purgeExtensionAssets, purgeTrash, purgeInbox]) {
     try { await part(deps, result); } catch (error) { result.failed++; deps.log(`${part.name} failed: ${errorText(error)}`); }
   }
   return result;

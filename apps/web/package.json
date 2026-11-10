@@ -13,6 +13,7 @@
     "@pushform/cloud": "workspace:*",
     "@pushform/commands": "workspace:*",
     "@pushform/core": "workspace:*",
+    "@pushform/extension-protocol": "workspace:*",
     "@pushform/extensions": "workspace:*",
     "@pushform/kernel": "workspace:*",
     "@pushform/model": "workspace:*",

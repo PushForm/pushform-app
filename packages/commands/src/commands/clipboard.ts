@@ -19,6 +19,10 @@ import {
 } from '@pushform/core';
 import {
   allocId,
+  copyPluginEntries,
+  recordTopologyContinuation,
+  pluginIdentityMap,
+  pluginTargetResolver,
   containerAt,
   contextMatrix,
   createDocumentState,
@@ -42,6 +46,7 @@ import type {
   ImageStore,
   LoopRef,
   Material,
+  PluginTarget,
   Sketch,
   SketchEdge,
 } from '@pushform/model';
@@ -54,7 +59,8 @@ import { draftContainerAt, refsInContext, sketchGraphAt } from './context';
 import { cloneDefinition, copySketchInto, mapGuide, pointMapFromMatrix, uniqueDefinitionName } from './groups';
 import { mapSectionPlane } from './sectionPlanes';
 import { deleteSelection, type DeleteResult } from './sketch';
-import { reallocateBodyMetadata, copyBodyRecord, copyMeshPartRecord, definitionBounds, transformBodyAffineInPlace, transformMeshPartGeometry } from './transform';
+import { copyBodyRecord, copyMeshPartRecord, definitionBounds, reidentifyBodyCurves, transformBodyAffineInPlace, transformMeshPartGeometry } from './transform';
+
 
 /** Where the copied model is stored, so Layout can show it in a view. */
 export interface ModelClipboardSource {
@@ -65,6 +71,7 @@ export interface ModelClipboardSource {
 
 /** What Copy puts on the clipboard: a small model holding the copied entities in world coordinates. */
 export interface ModelClipboard {
+  readonly metadataOrigin?: { readonly guid: string; readonly path: readonly number[] };
   readonly destination?: { readonly guid: string; readonly path: readonly Id[] };
   /** Identifies this copy, so a paste can tell its own clipboard data from another window's. */
   readonly id: string;
@@ -306,7 +313,7 @@ export function copyModelSelection(
   state: DocumentState,
   path: readonly Id[],
   refs: readonly EntityRef[],
-  opts: { images?: ImageStore | null; camera?: CameraState | null; source?: ModelClipboardSource | null } = {},
+  opts: { images?: ImageStore | null; camera?: CameraState | null; source?: ModelClipboardSource | null; rootMaterial?:MaterialId } = {},
 ): ModelClipboard | null {
   const container = containerAt(state, path);
   const world = contextMatrix(state, path);
@@ -398,6 +405,7 @@ export function copyModelSelection(
   for (const id of order) {
     if (bodies.has(id)) {
       const copy = copyBodyRecord(container.bodies.get(id)!, id);
+      if(copy.materialId===null&&opts.rootMaterial!==undefined)copy.materialId=opts.rootMaterial;
       if (!identity) transformBodyAffineInPlace(copy, world, tiles);
       dst.bodies.set(id, copy);
       dst.order.push(id);
@@ -408,7 +416,7 @@ export function copyModelSelection(
       dst.order.push(id);
     } else if (instances.has(id)) {
       const inst = container.instances.get(id)!;
-      const copy: ComponentInstance = { ...inst, transform: m4mul(world, inst.transform) as unknown as Mat4, attributes: cloneJson(inst.attributes) };
+      const copy: ComponentInstance = { ...inst, materialId:inst.materialId??opts.rootMaterial??null, transform: m4mul(world, inst.transform) as unknown as Mat4, attributes: cloneJson(inst.attributes) };
       dst.instances.set(id, copy);
       dst.order.push(id);
       copyDefinition(inst.definitionId);
@@ -448,8 +456,22 @@ export function copyModelSelection(
     }
   }
 
+  if (state.pluginData?.size) {
+    const exists = pluginTargetResolver(out);
+    const selected = (target: PluginTarget): boolean => {
+      if (target.kind === 'document' || target.kind === 'definition' && target.id === state.rootDefinitionId) return false;
+      if (target.kind !== 'bodyOccurrence') return exists(target);
+      if (!path.every((id, index) => target.path[index] === id)) return false;
+      return exists({ ...target, path: target.path.slice(path.length) });
+    };
+    out.pluginData = new Map([...state.pluginData].flatMap(([owner, record]) => {
+      const entries = new Map([...record.entries].filter(([, entry]) => selected(entry.target)).map(([id, entry]) => [id, { ...structuredClone(entry), payload: new Uint8Array(entry.payload) }]));
+      return entries.size ? [[owner, { dataVersion: record.dataVersion, entries }] as const] : [];
+    }));
+  }
   const clip: ModelClipboard = {
     id: newGuid(),
+    metadataOrigin: { guid: state.meta.guid, path: [...path] },
     state: out,
     images: blobs,
     bounds: { min: [0, 0, 0], max: [0, 0, 0] },
@@ -482,9 +504,23 @@ function sameMaterial(a: Material, b: Material): boolean {
  * Insert a clipboard model into the container at `path`, moved by `placement`
  * (a world-space transform; identity pastes in place). Returns the pasted entities.
  */
-export function pasteModelClipboard(draft: DocumentDraft, clip: ModelClipboard, path: readonly Id[], placement: MMat4 | Mat4, images?: ImageStore | null): EntityRef[] {
+/** Trusted correspondence for an unchanged native import; never accepted from clipboard JSON or runtime input. */
+export interface ModelPasteIdentity {
+  readonly ids: ReadonlyMap<number, number>;
+  readonly definitions: ReadonlyMap<DefId, DefId>;
+  readonly materials: ReadonlyMap<MaterialId, MaterialId>;
+  readonly images: ReadonlyMap<ImageId, ImageId>;
+  readonly tags: ReadonlyMap<TagId, TagId>;
+}
+export interface ModelPasteOptions { readonly reuse?: ModelPasteIdentity; readonly captured?: (identity: ModelPasteIdentity) => void }
+export function pasteModelClipboard(draft: DocumentDraft, clip: ModelClipboard, path: readonly Id[], placement: MMat4 | Mat4, images?: ImageStore | null, options?: ModelPasteOptions): EntityRef[] {
   const target = draft as unknown as DocumentState;
   const src = structuredClone(clip.state);
+  const metadataIds = new Map<number, number>(options?.reuse?.ids);
+  const sameDocument = clip.metadataOrigin?.guid === target.meta.guid;
+  const sharedMetadataIds = new Set<number>();
+  const materialMetadataIds = new Set<number>();
+  for (const record of src.pluginData?.values() ?? []) for (const entry of record.entries.values()) if (entry.target.kind === 'material') materialMetadataIds.add(entry.target.id);
   const notices = [...(draft.meta.attributions ?? [])];
   for (const notice of src.meta.attributions ?? []) if (!notices.some(item => item.modelId === notice.modelId && item.revision === notice.revision && item.assetId === notice.assetId)) notices.push(notice);
   if (notices.length) draft.meta.attributions = notices;
@@ -492,6 +528,8 @@ export function pasteModelClipboard(draft: DocumentDraft, clip: ModelClipboard, 
   const tagMap = new Map<TagId, TagId>([[src.defaultTagId, target.defaultTagId]]), addedTags: TagId[] = [];
   for (const tag of src.tags.values()) {
     if (tagMap.has(tag.id)) continue;
+    const reused = options?.reuse?.tags.get(tag.id);
+    if (reused !== undefined && target.tags.has(reused)) { tagMap.set(tag.id, reused); continue; }
     const same = [...target.tags.values()].find((t) => t.name === tag.name);
     if (same) {
       tagMap.set(tag.id, same.id);
@@ -506,6 +544,8 @@ export function pasteModelClipboard(draft: DocumentDraft, clip: ModelClipboard, 
   const imageMap = new Map<ImageId, ImageId>();
   for (const asset of src.images.values()) {
     const blob = clip.images.get(asset.id);
+    const reused = options?.reuse?.images.get(asset.id);
+    if (reused !== undefined && target.images.has(reused)) { imageMap.set(asset.id, reused); continue; }
     const same = asset.sha256 ? [...target.images.values()].find((a) => a.sha256 === asset.sha256) : undefined;
     if (same) {
       imageMap.set(asset.id, same.id);
@@ -528,11 +568,18 @@ export function pasteModelClipboard(draft: DocumentDraft, clip: ModelClipboard, 
     }
   }
   const materialMap = new Map<MaterialId, MaterialId>([[src.defaultMaterialId, target.defaultMaterialId]]);
+  if (!sameDocument && materialMetadataIds.has(src.defaultMaterialId)) materialMap.delete(src.defaultMaterialId);
   for (const m of src.materials.values()) {
+    const reused = options?.reuse?.materials.get(m.id);
+    if (reused !== undefined && target.materials.has(reused)) { materialMap.set(m.id, reused); sharedMetadataIds.add(m.id); continue; }
+    if (sameDocument && target.materials.has(m.id)) {
+      materialMap.set(m.id, m.id); sharedMetadataIds.add(m.id); continue;
+    }
     if (materialMap.has(m.id)) continue;
     const candidate: Material = { ...m, texture: m.texture ? { ...m.texture, imageId: imageMap.get(m.texture.imageId) ?? m.texture.imageId } : null };
     if (candidate.appearance?.normal) candidate.appearance = { ...candidate.appearance, normal: { ...candidate.appearance.normal, imageId: imageMap.get(candidate.appearance.normal.imageId) ?? candidate.appearance.normal.imageId } };
-    const same = [...target.materials.values()].find((t) => sameMaterial(t, candidate));
+    const same = materialMetadataIds.has(m.id) ? undefined : [...target.materials.values()].find((t) => sameMaterial(t, candidate));
+
     if (same) {
       materialMap.set(m.id, same.id);
       continue;
@@ -544,7 +591,7 @@ export function pasteModelClipboard(draft: DocumentDraft, clip: ModelClipboard, 
 
   rewriteIds(src, {
     tag: (t) => tagMap.get(t) ?? target.defaultTagId,
-    material: (m) => (m === null ? null : (materialMap.get(m) ?? null)),
+    material: (m) => (m === null ? (materialMap.get(src.defaultMaterialId) !== target.defaultMaterialId ? materialMap.get(src.defaultMaterialId) ?? null : null) : (materialMap.get(m) ?? null)),
     definition: (d) => d,
   });
 
@@ -553,12 +600,25 @@ export function pasteModelClipboard(draft: DocumentDraft, clip: ModelClipboard, 
   const created: DefId[] = [];
   for (const def of src.definitions.values()) {
     if (def.id === src.rootDefinitionId) continue;
-    const same = [...target.definitions.values()].find((d) => d.guid === def.guid && d.id !== target.rootDefinitionId);
-    if (same) {
-      defMap.set(def.id, same.id);
+    const reused = options?.reuse?.definitions.get(def.id);
+    if (reused !== undefined && target.definitions.has(reused)) {
+      defMap.set(def.id, reused); sharedMetadataIds.add(def.id);
+      for (const id of def.entities.bodies.keys()) sharedMetadataIds.add(id);
+      for (const id of def.entities.instances.keys()) sharedMetadataIds.add(id);
       continue;
     }
-    const copy = cloneDefinition(draft, def, uniqueDefinitionName(target, def.name));
+    const identity = sameDocument ? target.definitions.get(def.id) : undefined;
+    const same = identity?.guid === def.guid ? identity : src.pluginData?.size ? undefined : [...target.definitions.values()].find((d) => d.guid === def.guid && d.id !== target.rootDefinitionId);
+    if (same) {
+      defMap.set(def.id, same.id);
+      if (sameDocument && same.id === def.id) {
+        sharedMetadataIds.add(def.id);
+        for (const id of def.entities.bodies.keys()) if (same.entities.bodies.has(id)) { metadataIds.set(id, id); sharedMetadataIds.add(id); }
+        for (const id of def.entities.instances.keys()) if (same.entities.instances.has(id)) { metadataIds.set(id, id); sharedMetadataIds.add(id); }
+      }
+      continue;
+    }
+    const copy = cloneDefinition(draft, def, uniqueDefinitionName(target, def.name), metadataIds);
     copy.guid = def.guid;
     defMap.set(def.id, copy.id);
     created.push(copy.id);
@@ -597,8 +657,11 @@ export function pasteModelClipboard(draft: DocumentDraft, clip: ModelClipboard, 
     const body = srcRoot.bodies.get(sid);
     if (body) {
       const copy = copyBodyRecord(body, allocId<Id>(draft));
-      reallocateBodyMetadata(draft, copy);
+      reidentifyBodyCurves(draft,copy);
+      metadataIds.set(body.id, copy.id);
+
       copy.version = 0;
+      recordTopologyContinuation(body.mesh, body.version, copy.mesh, copy.version, null, null);
       if (!identity) transformBodyAffineInPlace(copy, m, tiles);
       container.bodies.set(copy.id, copy);
       container.order.push(copy.id);
@@ -626,6 +689,7 @@ export function pasteModelClipboard(draft: DocumentDraft, clip: ModelClipboard, 
         transform: m4mul(m, inst.transform) as unknown as Mat4,
         locked: false,
       };
+      metadataIds.set(inst.id, copy.id);
       container.instances.set(copy.id, copy);
       container.order.push(copy.id);
       pasted.push({ kind: 'instance', path, id: copy.id });
@@ -654,6 +718,18 @@ export function pasteModelClipboard(draft: DocumentDraft, clip: ModelClipboard, 
     for (const ids of r.edgeMap.values()) for (const id of ids) if (!seenEdges.has(id) && seenEdges.add(id)) pasted.push({ kind: 'sketchEdge', path, id });
     for (const id of r.faceIds) pasted.push({ kind: 'sketchFace', path, id });
   }
+  for (const [from, to] of materialMap) metadataIds.set(from, to);
+  for (const [from, to] of defMap) metadataIds.set(from, to);
+  const originPath = clip.metadataOrigin?.path ?? [];
+  const mapIds = pluginIdentityMap(metadataIds);
+  copyPluginEntries(draft, metadataTarget => {
+    if (metadataTarget.kind !== 'bodyOccurrence') return metadataTarget.kind !== 'document' && sharedMetadataIds.has(metadataTarget.id) ? undefined : mapIds(metadataTarget);
+    if (!originPath.every((id, index) => metadataTarget.path[index] === id)) return undefined;
+    const relative = metadataTarget.path.slice(originPath.length);
+    if (!metadataIds.has(metadataTarget.id) || !relative.every(id => metadataIds.has(id))) return undefined;
+    return { ...metadataTarget, id: metadataIds.get(metadataTarget.id)!, path: [...path, ...relative.map(id => metadataIds.get(id)!)] };
+  }, src.pluginData, !sameDocument);
+  options?.captured?.({ ids: new Map(metadataIds), definitions: new Map(defMap), materials: new Map(materialMap), images: new Map(imageMap), tags: new Map(tagMap) });
   return pasted;
 }
 

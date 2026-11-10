@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import type { CurveId, FaceLocalId, Id, MaterialId, SurfaceId, TagId, Vec3 } from '@pushform/core';
+import type { CurveId, FaceLocalId, Id, MaterialId, Mat4, SurfaceId, TagId, Vec3 } from '@pushform/core';
 import { createSketch, makeEdgeKey } from '@pushform/model';
 import type { Body, Curve, DocumentState, MeshPart, Sketch, ImprintGraph } from '@pushform/model';
 import type { NativePackedMeshPart } from './meshPart';
@@ -47,7 +47,7 @@ export function nativeSketchState(t: NativePackedSketch, properties: NativeCommo
   return s;
 }
 export function nativeBodyState(t: NativePackedBody): Body {
-  const body: Body = { ...t.common, id: t.id as Id, version: t.version, nextFaceId: t.nextFaceId, mesh: t.mesh, materialId: t.materialId as MaterialId | null,
+  const body: Body = { ...t.common, id: t.id as Id, version: t.version, ...(t.referenceFrame ? { referenceFrame: t.referenceFrame as unknown as Mat4 } : {}), nextFaceId: t.nextFaceId, mesh: t.mesh, materialId: t.materialId as MaterialId | null,
     valid: t.valid, props: t.props, faces: new Map(), edges: new Map(), curves: new Map(), surfaces: new Map(), imprints: new Map() };
   const extensions = new Map([...t.extensions].filter(([scope]) => !scope.startsWith('imprints/')));
   if (extensions.size) body.nativeUnknownFields = { extensions };
@@ -123,7 +123,7 @@ export function nativeModelState(model: NativePackedModel): DocumentState {
   const tags = model.catalogs.tagUnknownFields();
   const settings = model.settingsExtensions;
   const hasSettings = settings.records.size || settings.meta.size || settings.shadows.size || settings.fog?.size;
-  return { ...model.settings, ...model.catalogs.values, definitions,
+  return { ...model.settings, ...model.catalogs.values, definitions, ...(model.pluginData.size ? { pluginData: model.pluginData } : {}),
     ...(styles ? { nativeStyleUnknownFields: styles } : {}),
     ...(scenes ? { nativeSceneUnknownFields: scenes } : {}),
     ...(images ? { nativeImageUnknownFields: images } : {}),

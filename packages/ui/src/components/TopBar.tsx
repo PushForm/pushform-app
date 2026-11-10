@@ -23,7 +23,7 @@ import { layoutContentKey, modelContentKey } from '../documentContent';
 import type { DocumentSession, DocumentTab, ModelTab } from '../session';
 import { CommandSearch } from './CommandSearch';
 import { commandSearchSourceFor } from './commandSearchSource';
-import { DocumentTabs } from './DocumentTabs';
+import { DocumentTabs, type DocumentTabStrip } from './DocumentTabs';
 import { LayoutTemplateChooser } from './LayoutTemplateChooser';
 import { LayoutImportDialog } from './LayoutImportDialog';
 import { ModelImportDialog } from './ModelImportDialog';
@@ -85,7 +85,7 @@ function download(bytes: Uint8Array, name: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome, onRequests, onObjects, onClearChat, onExtensions, commons, onBrowseCommons, onCloseCommons, commonsOpen, commonsActive, onModelTab }: {
+export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome, onRequests, onObjects, onClearChat, onExtensions, commons, onBrowseCommons, onCloseCommons, commonsOpen, commonsActive, onModelTab, extensionTabs }: {
   commons?: CommonsOpeningConfig | undefined; onBrowseCommons?: (() => void) | undefined; onCloseCommons?: (() => void) | undefined;
   commonsOpen?: boolean | undefined; commonsActive?: boolean | undefined; onModelTab?: (() => void) | undefined;
   session: DocumentSession; cloud?: CloudSession | undefined; cloudFiles?: CloudFilesApi | undefined;
@@ -93,6 +93,8 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
   autosave?: CloudAutosave | undefined; onHome?: (() => void) | undefined;
   /** Opens the extension manager, from the account dialog and command search. */
   onExtensions?: (() => void) | undefined;
+  /** The open extension tabs, shown after the document tabs. */
+  extensionTabs?: DocumentTabStrip | null | undefined;
   /**
    * Toggles the AI Chat pane from command search;
    * absent when the host embeds no pipeline entry point.
@@ -890,7 +892,7 @@ export function TopBar({ session, cloud, cloudFiles, buildInfo, autosave, onHome
       <DocumentTabs onActivate={onModelTab} activeExtra={commonsActive} extraTab={commonsOpen && onBrowseCommons ? <div className={`pf-document-tab${commonsActive ? ' is-active' : ''}`}>
         <button type="button" className="pf-document-tab-select" aria-current={commonsActive ? 'page' : undefined} onClick={onBrowseCommons}><Icon name="commons" size={16}/><span className="pf-document-tab-name">Commons</span></button>
         <button type="button" className="pf-document-tab-close" aria-label="Close Commons" onClick={onCloseCommons}>×</button>
-      </div> : undefined} session={session} onClose={closeTab} onNewLayout={newLayout} />
+      </div> : undefined} session={session} onClose={closeTab} onNewLayout={newLayout} extensionTabs={extensionTabs} />
       {choosingTemplate ? <LayoutTemplateChooser busy={templateBusy} savedTemplates={cloudFiles ?
         <CloudBrowser api={cloudFiles} session={session} owner={cloudOwner} templatesOnly embedded
           onBusyChange={setTemplateBusy} onClose={() => setChoosingTemplate(false)} /> : undefined} onCancel={() => setChoosingTemplate(false)} onCreate={templateId => {

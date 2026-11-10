@@ -36,6 +36,7 @@ import type {
 } from '@pushform/model';
 import {
   allocId,
+  reviewPluginBodies,
   applyKernelResult,
   bodyFromMesh,
   computeRegions,
@@ -604,8 +605,15 @@ export function applyPushPullResult(draft: DocumentDraft, plan: PushPullPlan, re
     return { bodyIds };
   }
   if (!first || leavesNothing(plan, result)) throw new PushFormError('pushpull.nothingLeft', PUSH_PULL_MESSAGES.nothingLeft);
-  const updated = applyKernelResult(draft, plan.body.id, toKernelResult(first, result.bodyRunId));
+  if (extras.length) reviewPluginBodies(draft, new Set([plan.body.id]));
+  const edit = toKernelResult(first, result.bodyRunId);
+  if (!extras.length && plan.request.region.regionIsWholeFace) {
+    const caps = [...first.faceOrigin].filter(([, origins]) => origins.some(origin => origin.runId === result.toolRunId && origin.faceId === TOOL_FAR_CAP));
+    if (caps.length === 1 && caps[0]![1].every(origin => origin.runId === result.toolRunId && origin.faceId === TOOL_FAR_CAP)) edit.faceContinuations = new Map([[plan.face.id, caps[0]![0] as FaceLocalId]]);
+  }
+  const updated = applyKernelResult(draft, plan.body.id, edit);
   if (result.moved) keepEdgeFlags(plan.body, updated);
+
   updated.nextFaceId = Math.max(updated.nextFaceId, result.nextFaceId);
   if (!plan.request.region.regionIsWholeFace) {
     relocateImprints(updated, plan.face.id, plan.region, first, result.toolRunId);

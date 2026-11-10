@@ -14,4 +14,5 @@ declare module 'virtual:pushform-extension-worker' {
   const workerSource: string;
   export default workerSource;
   export const computeSource: string;
+  export const nativeHostSource: string;
 }

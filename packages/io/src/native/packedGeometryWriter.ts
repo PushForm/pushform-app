@@ -59,7 +59,7 @@ export async function* streamPackedBody(value: NativePackedBody, properties: num
     imprints.push({ faceId, nextId: allocator, version, vertexCount: imprint.vertexIds.length, edgeCount: imprint.edgeIds.length,
       columns: yield* table(columns, options), unknownFields });
   }
-  const ref: NativeBodyReference = { id: value.id, version: value.version, nextFaceId: value.nextFaceId, materialId: value.materialId, properties, valid: value.valid,
+  const ref: NativeBodyReference = { id: value.id, version: value.version, ...(value.referenceFrame ? { referenceFrame: [...value.referenceFrame] } : {}), nextFaceId: value.nextFaceId, materialId: value.materialId, properties, valid: value.valid,
     volume: value.props.volume, area: value.props.area, mesh, faces, edges, curves, surfaces, imprints, unknownFields: ext('') };
   encodeNativeBodyReference(ref); return ref;
 }

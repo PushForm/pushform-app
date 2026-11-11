@@ -5,10 +5,11 @@ import { resizedViewportCamera, layoutModelFields, viewportSourceKey as modelSou
 import { LayoutDocumentHost } from '@pushform/commands';
 import { snapLayoutModelVertex } from './layoutModelSnaps';
 import { peekLayoutViewportModel, retainLayoutViewportModels } from './layoutViewportRenders';
+import { ScaleDrawingPanel } from './ScaleDrawingPanel';
 import { LayoutTableGrid } from './LayoutTableGrid';
 import { cloneLayoutTable, resizeTableAxis, tableFrame } from '@pushform/layout';
 import type { TableCellAddress, TableGridSelection } from './tableGridSelection';
-import { layoutPathArrows, createLayoutTable, createLayoutEllipse, createLayoutPolygon, snapLayoutPolygonReference, LAYOUT_POLYGON_MAX_SIDES, LAYOUT_POLYGON_MIN_SIDES, tableCellAt, LAYOUT_AUTO_TEXT_TAGS, LAYOUT_ACCOUNT_TAGS, LAYOUT_NON_PAGE_NUMBER_TAGS, LAYOUT_PAGE_NUMBER_STYLES, DEFAULT_LAYOUT_PAGE_NUMBERING, layoutPageNumbering, type LayoutPageNumbering, type LayoutPageNumberStyle, layoutAccountFieldsVersion, subscribeLayoutAccountFields, LAYOUT_DEFAULT_TEXT, layoutDashMm, matchLayoutDash, isViewport, type LayoutViewportCamera } from '@pushform/layout';
+import { DRAWING_ANNOTATION_SCALE, layoutPathArrows, createLayoutTable, createLayoutEllipse, createLayoutPolygon, snapLayoutPolygonReference, LAYOUT_POLYGON_MAX_SIDES, LAYOUT_POLYGON_MIN_SIDES, tableCellAt, LAYOUT_AUTO_TEXT_TAGS, LAYOUT_ACCOUNT_TAGS, LAYOUT_NON_PAGE_NUMBER_TAGS, LAYOUT_PAGE_NUMBER_STYLES, DEFAULT_LAYOUT_PAGE_NUMBERING, layoutPageNumbering, type LayoutPageNumbering, type LayoutPageNumberStyle, layoutAccountFieldsVersion, subscribeLayoutAccountFields, LAYOUT_DEFAULT_TEXT, layoutDashMm, matchLayoutDash, isViewport, type LayoutViewportCamera } from '@pushform/layout';
 import { paintLayoutTable } from './layoutTable';
 import { LayoutTablePanel } from './LayoutTablePanel';
 import {
@@ -571,10 +572,12 @@ function paintPage(
   if (transformed?.size) ({ page, state } = withPreviewEntities(page, state, transformed));
   const visibleEntities = state.layerOrder.filter(id => isLayoutLayerVisible(page, state, id)).flatMap(id => entitiesForLayer(page, state, id));
   void prepareLayoutFonts(visibleEntities).catch(() => { /* Keep the readable fallback when offline. */ });
-  const renderScale = outputDpi ? outputDpi / 25.4 : thumbnail
+  let renderScale = outputDpi ? outputDpi / 25.4 : thumbnail
     ? THUMBNAIL_MAX_PX * window.devicePixelRatio / Math.max(...page.size)
     : surround ? surround.pxPerMm * Math.min(window.devicePixelRatio, 2)
-    : PX_PER_MM * Math.max(1, Math.min(zoom * window.devicePixelRatio, 4));
+    : PX_PER_MM * Math.max(state.settings.drawing ? 0.001 : 1, Math.min(zoom * window.devicePixelRatio, 4));
+  // Full-size drawing extents can span meters. Keep the backing canvas bounded at any zoom.
+  if (state.settings.drawing && !surround) renderScale = Math.min(renderScale, 8192 / Math.max(...page.size));
   if (surround) {
     // The surround shows objects past the paper edge; the paper canvas above it covers the page itself.
     canvas.width = Math.round(surround.width * renderScale);
@@ -870,7 +873,9 @@ function paintPage(
         const [vertex, first, second] = geometry.points as [Point, Point, Point];
         ctx.beginPath(); ctx.moveTo(...first); ctx.lineTo(...vertex); ctx.lineTo(...second);
         ctx.setLineDash([1.5, 1]); ctx.strokeStyle = '#1e63d1'; ctx.lineWidth = 0.4; ctx.stroke(); ctx.setLineDash([]);
-        const dim = createAngularDimension(); dim.reflex = geometry.placing && angularPlacementReflex(vertex, first, second, cursor);
+        const dim = createAngularDimension();
+        if (state.settings.drawing) for (const key of ['fontSizePt', 'arrowSizeMm', 'extensionGapMm', 'extensionOverrunMm'] as const) dim[key] *= DRAWING_ANNOTATION_SCALE;
+        dim.reflex = geometry.placing && angularPlacementReflex(vertex, first, second, cursor);
         dim.cachedAngleDeg = angularMeasurement(vertex, first, second, dim.reflex)!;
         const radius = Math.max(2, Math.min(Math.hypot(first[0] - vertex[0], first[1] - vertex[1]), Math.hypot(second[0] - vertex[0], second[1] - vertex[1])) / 2);
         const placement: Point = geometry.placing ? cursor : [vertex[0] + radius, vertex[1]];
@@ -886,6 +891,7 @@ function paintPage(
       ctx.strokeStyle = '#1e63d1'; ctx.lineWidth = 0.4; ctx.stroke();
     } else if (points.length === 2) {
       const dimension = { ...createLinearDimension(), ...layoutDimensionUnits(state) };
+      if (state.settings.drawing) for (const key of ['fontSizePt', 'arrowSizeMm', 'extensionGapMm', 'extensionOverrunMm'] as const) dimension[key] *= DRAWING_ANNOTATION_SCALE;
       dimension.alignment = inferLinearDimensionAlignment(points[0]!, points[1]!);
       dimension.cachedValueMm = linearMeasurement(points[0]!, points[1]!, dimension.alignment);
       const attachments = dimensionDraft.modelAttachments?.filter((a): a is LayoutModelAttachment => a !== null);
@@ -1628,7 +1634,7 @@ export function LayoutWorkspace({
       tab.workspace.zoomToPageOnOpen = false;
       const next = Math.min((workspace.clientWidth - 48) / (page.size[0] * PX_PER_MM),
         (workspace.clientHeight - 48) / (page.size[1] * PX_PER_MM));
-      setZoom(Math.max(0.1, Math.min(8, next)));
+      setZoom(Math.max(tab.doc.state.settings.drawing ? 0.001 : 0.1, Math.min(8, next)));
       workspace.scrollLeft = 0; workspace.scrollTop = 0;
       return true;
     };
@@ -1658,7 +1664,7 @@ export function LayoutWorkspace({
         pageY: overPage ? (event.clientY - rect.top) / rect.height : 0.5,
       };
       const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? workspace.clientHeight : 1);
-      setZoom((value) => Math.max(0.1, Math.min(8, value * Math.exp(-delta * 0.0015))));
+      setZoom((value) => Math.max(tab.doc.state.settings.drawing ? 0.001 : 0.1, Math.min(8, value * Math.exp(-delta * 0.0015))));
     };
     workspace.addEventListener('wheel', onWheel, { passive: false });
     return () => workspace.removeEventListener('wheel', onWheel);
@@ -2498,7 +2504,7 @@ export function LayoutWorkspace({
         : [a, [a[0] + 60, a[1] + 20]];
       const entityId = tab.commands.execute('layout.text.add', {
         pageId: page.id, kind: tool, points,
-        text: { content: '', ...LAYOUT_DEFAULT_TEXT, bold: false, italic: false, underline: false, align,
+        text: { content: '', ...LAYOUT_DEFAULT_TEXT, fontSizePt: LAYOUT_DEFAULT_TEXT.fontSizePt * (state.settings.drawing ? DRAWING_ANNOTATION_SCALE : 1), bold: false, italic: false, underline: false, align,
           vertical: bounded && modifiers.center ? 'middle' : 'top', bounded, leader: 'elbow', endpoint: 'arrow' },
       }) as number;
       setSelectionId(entityId); setEditingTextId(entityId); setTool('select'); setAnchor(null); setCursor(null);
@@ -2681,7 +2687,7 @@ export function LayoutWorkspace({
           const geometry = createLayoutLabelGeometry(labelDraft.tip, labelDraft.bend, p);
           const id = tab.commands.execute('layout.text.add', { pageId: page.id, kind: 'label', points: geometry.points, labelAnchor: labelDraft.attachment,
             ...(labelDraft.modelAttachment ? { modelAttachments: [labelDraft.modelAttachment] } : {}),
-            text: { content: '', ...LAYOUT_DEFAULT_TEXT, bold: false, italic: false, underline: false,
+            text: { content: '', ...LAYOUT_DEFAULT_TEXT, fontSizePt: LAYOUT_DEFAULT_TEXT.fontSizePt * (state.settings.drawing ? DRAWING_ANNOTATION_SCALE : 1), bold: false, italic: false, underline: false,
               align: geometry.align, vertical: geometry.vertical, bounded: true, leader: 'elbow', endpoint: 'arrow' } }) as number;
           initialLabelEditId.current = id;
           setSelectionId(id); setEditingTextId(id); setLabelDraft(null); setTool('select'); setCursor(null); setSnapKind(null);
@@ -3739,7 +3745,7 @@ export function LayoutWorkspace({
       (workspace.clientWidth - 48) / (page.size[0] * PX_PER_MM),
       (workspace.clientHeight - 48 - TOOL_BAND_PX) / (page.size[1] * PX_PER_MM),
     );
-    setZoom(Math.max(0.1, Math.min(8, next)));
+    setZoom(Math.max(tab.doc.state.settings.drawing ? 0.001 : 0.1, Math.min(8, next)));
     workspace.scrollTo(0, 0);
     setZoomMenuOpen(false);
   };
@@ -3763,7 +3769,7 @@ export function LayoutWorkspace({
       (workspace.clientHeight - 48 - TOOL_BAND_PX) / (Math.max(10, maxY - minY) * PX_PER_MM),
     );
     zoomCenter.current = [(minX + maxX) / 2, (minY + maxY) / 2];
-    setZoom(Math.max(0.1, Math.min(8, next)));
+    setZoom(Math.max(tab.doc.state.settings.drawing ? 0.001 : 0.1, Math.min(8, next)));
     setZoomRequest((value) => value + 1);
     setZoomMenuOpen(false);
   };
@@ -4442,9 +4448,9 @@ export function LayoutWorkspace({
               settings={styled ? [] : barSettings} placing={barPlacing} mac={MAC}
               hasEditableContent={Boolean(styled) || barEntryFields.some(field => !field.disabled)}
               onSetting={onBarSetting} read={readBarQuantity} onLeave={() => canvasRef.current?.focus()}>
-              {editing ? <LayoutTextToolbar text={editing.text!} range={textSelection} getSelection={getTextSelection} onCaptureSelection={setTextSelection}
+              {editing ? <LayoutTextToolbar annotationScale={state.settings.drawing ? DRAWING_ANNOTATION_SCALE : 1} text={editing.text!} range={textSelection} getSelection={getTextSelection} onCaptureSelection={setTextSelection}
                 onChange={formatEditingText} onReturnToText={returnToText} onFinish={() => setEditingTextId(null)} />
-                : selectedText ? <LayoutTextToolbar text={selectedText.text!} range={wholeText()} getSelection={wholeText} onCaptureSelection={() => {}}
+                : selectedText ? <LayoutTextToolbar annotationScale={state.settings.drawing ? DRAWING_ANNOTATION_SCALE : 1} text={selectedText.text!} range={wholeText()} getSelection={wholeText} onCaptureSelection={() => {}}
                   onChange={formatSelectedText} onReturnToText={() => canvasRef.current?.focus()} onFinish={() => {}} />
                   : barEntryFields.length ? <LayoutEntryFields inline fields={barEntryFields} segments={[]} pageSize={page.size} scale={1} pointer={null} {...entryFieldEvents} />
                     : null}
@@ -4698,6 +4704,7 @@ export function LayoutWorkspace({
         </main>
         </div>
         <aside className="pf-layout-controls" aria-label="Layout settings">
+          <ScaleDrawingPanel tab={tab} session={session} />
       <input ref={imageImportInput} type="file" hidden aria-label="Import image or DXF file"
         accept=".svg,.png,.jpg,.jpeg,.dxf,image/svg+xml,image/png,image/jpeg" onChange={event => {
           const file = event.currentTarget.files?.[0]; event.currentTarget.value = '';
@@ -4723,11 +4730,11 @@ export function LayoutWorkspace({
           </div>
           {selectedEntity?.table && isLayoutLayerVisible(page, state, selectedEntity.layerId) ? <LayoutTablePanel key={`${page.id}:${selectedEntity.id}`} entity={selectedEntity} selected={tableCell} selection={tableSelection} onSelect={setTableCell} disabled={!canTransform}
             onChange={(table, size) => { tab.commands.execute('layout.table.update', { pageId: page.id, entityId: selectedEntity.id, table, ...size }); }} /> : null}
-          {selectedEntity?.angularDimension ? <LayoutAngularDimensionEditor entity={selectedEntity} disabled={!canTransform}
+          {selectedEntity?.angularDimension ? <LayoutAngularDimensionEditor annotationScale={state.settings.drawing ? DRAWING_ANNOTATION_SCALE : 1} entity={selectedEntity} disabled={!canTransform}
             onChange={(style) => tab.commands.execute('layout.dimension.updateAngular', { pageId: page.id, entityId: selectedEntity.id, style })}
             onDetach={() => tab.commands.execute('layout.dimension.updateAngular', { pageId: page.id, entityId: selectedEntity.id, detach: true })}
           /> : null}
-          {selectedEntity?.dimension ? <LayoutDimensionEditor entity={selectedEntity} disabled={!canTransform}
+          {selectedEntity?.dimension ? <LayoutDimensionEditor annotationScale={state.settings.drawing ? DRAWING_ANNOTATION_SCALE : 1} entity={selectedEntity} disabled={!canTransform}
             onChange={(style) => tab.commands.execute('layout.dimension.update', { pageId: page.id, entityId: selectedEntity.id, style })}
             onDetach={() => tab.commands.execute(selectedEntity.modelAnnotation ? 'layout.annotation.detachModel' : 'layout.dimension.update', { pageId: page.id, entityId: selectedEntity.id, detach: true })}
           /> : null}
@@ -4821,8 +4828,8 @@ export function LayoutWorkspace({
           </label>
           <label>
             Weight (pt)
-            <input type="number" min="0.01" step="0.1" value={currentStyle.strokeWeightPt} onChange={(event) => {
-              const strokeWeightPt = Number(event.target.value);
+            <input type="number" min="0.01" step="0.1" value={currentStyle.strokeWeightPt / (state.settings.drawing ? DRAWING_ANNOTATION_SCALE : 1)} onChange={(event) => {
+              const strokeWeightPt = Number(event.target.value) * (state.settings.drawing ? DRAWING_ANNOTATION_SCALE : 1);
               // A pattern's dashes follow the stroke weight.
               const dash = selectedEntity?.style?.strokeDashMm, pattern = dash?.length ? matchLayoutDash(dash, currentStyle.strokeWeightPt) : null;
               if (strokeWeightPt > 0) setStyle({ strokeWeightPt, ...(pattern ? { strokeDashMm: layoutDashMm(pattern.id, strokeWeightPt, pattern.scale) } : {}) });
@@ -5125,8 +5132,8 @@ function LayoutScaleRatioInput({ scale, onCommit }: { scale: number; onCommit: (
     }} />;
 }
 
-function LayoutDimensionEditor({ entity, disabled, onChange, onDetach }: {
-  entity: LayoutEntity; disabled: boolean;
+function LayoutDimensionEditor({ annotationScale = 1, entity, disabled, onChange, onDetach }: {
+  annotationScale?: number; entity: LayoutEntity; disabled: boolean;
   onChange: (style: Partial<LayoutLinearDimension>) => void; onDetach: () => void;
 }): JSX.Element {
   const dim = entity.dimension!;
@@ -5161,14 +5168,14 @@ function LayoutDimensionEditor({ entity, disabled, onChange, onDetach }: {
     {format === 'architectural' || format === 'fractional'
       ? <label><input type="checkbox" checked={dim.showDashes ?? true} onChange={(event) => onChange({ showDashes: event.target.checked })} /> Dash between feet, inches, and fractions</label>
       : null}
-    <label>Dimension scale<select disabled={!!entity.modelAnnotation} value={presetIndex >= 0 ? String(presetIndex) : 'custom'} onChange={(event) => {
+    <label>Dimension scale<select disabled={!!entity.modelAnnotation || annotationScale !== 1} value={presetIndex >= 0 ? String(presetIndex) : 'custom'} onChange={(event) => {
       const preset = LAYOUT_DIMENSION_SCALES[Number(event.target.value)];
       if (preset) onChange({ scale: preset.scale });
     }}>
       {LAYOUT_DIMENSION_SCALES.map((preset, index) => <option key={preset.label} value={index}>{preset.label}</option>)}
       {presetIndex < 0 ? <option value="custom">{layoutDimensionScaleLabel(scale)}</option> : null}
     </select></label>
-    {!entity.modelAnnotation ? <label>Custom scale 1:<LayoutScaleRatioInput scale={scale} onCommit={ratio => onChange({ scale: 1 / ratio })} /></label> : null}
+    {!entity.modelAnnotation && annotationScale === 1 ? <label>Custom scale 1:<LayoutScaleRatioInput scale={scale} onCommit={ratio => onChange({ scale: 1 / ratio })} /></label> : null}
     <label>Dimension text<input value={dim.text} onChange={(event) => onChange({ text: event.target.value })} /></label>
     <small>Use {'<>'} for the measured value, for example: Overall {'<>'}.</small>
     <label>Dimension font<LayoutFontInput value={dim.fontFamily} onChange={fontFamily => onChange({ fontFamily })} /></label>
@@ -5178,16 +5185,16 @@ function LayoutDimensionEditor({ entity, disabled, onChange, onDetach }: {
     {([['fontSizePt', 'Dimension font size (pt)'], ['arrowSizeMm', 'Endpoint size (mm)'],
       ['extensionGapMm', 'Extension gap (mm)'], ['extensionOverrunMm', 'Extension overrun (mm)']] as const).map(([key, label]) => <label key={key}>
       {label}<input type="number" min={key === 'extensionGapMm' || key === 'extensionOverrunMm' ? 0 : 0.1} step="0.1"
-        value={dim[key]} onChange={(event) => {
+        value={dim[key] / annotationScale} onChange={(event) => {
           const value = Number(event.target.value);
-          if (Number.isFinite(value) && (key === 'extensionGapMm' || key === 'extensionOverrunMm' ? value >= 0 : value > 0)) onChange({ [key]: value });
+          if (Number.isFinite(value) && (key === 'extensionGapMm' || key === 'extensionOverrunMm' ? value >= 0 : value > 0)) onChange({ [key]: value * annotationScale });
         }} />
     </label>)}
   </fieldset>;
 }
 
-function LayoutAngularDimensionEditor({ entity, disabled, onChange, onDetach }: {
-  entity: LayoutEntity; disabled: boolean; onChange: (style: Partial<LayoutAngularDimension>) => void; onDetach: () => void;
+function LayoutAngularDimensionEditor({ annotationScale = 1, entity, disabled, onChange, onDetach }: {
+  annotationScale?: number; entity: LayoutEntity; disabled: boolean; onChange: (style: Partial<LayoutAngularDimension>) => void; onDetach: () => void;
 }): JSX.Element {
   const dim = entity.angularDimension!;
   return <fieldset disabled={disabled}>
@@ -5212,9 +5219,9 @@ function LayoutAngularDimensionEditor({ entity, disabled, onChange, onDetach }: 
     </select></label>
     {([['fontSizePt', 'Angle font size (pt)'], ['arrowSizeMm', 'Angle endpoint size (mm)'],
       ['extensionGapMm', 'Angle extension gap (mm)'], ['extensionOverrunMm', 'Angle extension overrun (mm)']] as const).map(([key, label]) => <label key={key}>
-      {label}<input type="number" step="0.1" min={key.startsWith('extension') ? 0 : 0.1} value={dim[key]} onChange={(event) => {
+      {label}<input type="number" step="0.1" min={key.startsWith('extension') ? 0 : 0.1} value={dim[key] / annotationScale} onChange={(event) => {
         const value = Number(event.target.value);
-        if (Number.isFinite(value) && (key.startsWith('extension') ? value >= 0 : value > 0)) onChange({ [key]: value });
+        if (Number.isFinite(value) && (key.startsWith('extension') ? value >= 0 : value > 0)) onChange({ [key]: value * annotationScale });
       }} />
     </label>)}
   </fieldset>;

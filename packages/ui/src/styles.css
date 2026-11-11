@@ -3677,3 +3677,13 @@ h4.pf-xui-text { font-size: 12px; }
 .pf-tob input:not([type='color']):not([type='checkbox']):not([type='range'])[aria-invalid='true']:focus {
   border-color: var(--pf-danger);
 }
+
+.pf-drawing-dialog {
+  width: min(480px, 90vw); max-height: 90vh; overflow: auto;
+  padding: 20px; border: 1px solid var(--pf-border); border-radius: 8px;
+  color: var(--pf-text); background: var(--pf-surface);
+}
+.pf-drawing-dialog::backdrop { background: rgb(0 0 0 / 25%); }
+.pf-drawing-dialog form { display: grid; gap: 12px; }
+.pf-drawing-dialog h2 { font-size: 16px; margin: 0 0 8px; }
+.pf-drawing-dialog p { margin: 4px 0; }

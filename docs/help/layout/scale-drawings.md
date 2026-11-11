@@ -1,0 +1,27 @@
+# Full-size scale drawings
+
+Choose **+ → Drawing** to open a full-size 2D drawing. Use the existing line, shape, snapping, offset, dimension and editing tools. Typed lengths are real dimensions: enter `6000mm` for a six-meter edge. Drawing documents use the native `.pfl` format, including cloud saves and recovery.
+
+The initial drawing area is 10 × 7 meters. Change its real extents and grid in **Document Settings**. Changing its size does not resize geometry. Use the grid units setting for metric or imperial input.
+
+Drawing annotations use a 1:50 reference size. Font and stroke controls show their printed sizes; geometry and dimension values remain full size. For example, a 10 pt dimension stays 10 pt when the drawing is placed on a sheet at either 1:50 or 1:100.
+
+## Add a drawing to a layout
+
+Open or create a Layout tab. Return to the Drawing, then choose **Add to layout** in the right panel. Select the destination document and page, enter the scale denominator, and set the drawing origin's paper coordinates and rotation. The dialog shows the geometry's full-size and paper bounds before placement. At 1:50, a 6000 mm edge occupies 120 mm on paper.
+
+**Place view** creates a locked vector group. The drawing can be placed multiple times at different scales. In the Layout's **Drawing views** panel, choose **Update / placement** to refresh a view from its open source drawing or change its placement. Updates are explicit and use the source's current working content. Keep the source open, or reopen it before updating. If the source is unavailable, the last placed appearance remains in the layout.
+
+Choose **Detach** to turn a view into an ordinary editable group. It no longer updates from the drawing. Placement, updates and detaching support undo.
+
+## Insert drawing geometry into a model
+
+Open a Model tab, return to the Drawing, and choose **Insert into model**. Select the model and a ground (XY), front (XZ), or side (YZ) plane. Enter the drawing origin's model coordinates in millimeters and its rotation. The drawing origin is the drafting area's top-left; drawing Y points down and is converted to the model plane's negative second axis.
+
+**Insert sketch** adds visible path geometry at full size in the model's current editing context. It creates an independent copy; later source edits do not change it. Text, dimensions, tables and images are excluded. Curves become segmented paths. Closed contours can form faces for Push/Pull; open contours remain edges. Existing sketch geometry can intersect or join the inserted geometry. Bodies are not changed by insertion.
+
+One Undo removes the entire insertion. The source drawing is preserved.
+
+## Initial limits
+
+This version selects destinations from open documents and uses numeric placement on principal model planes. Layout views retain native vector content and source identity; updating requires the source drawing to be open. Calibrated image/PDF tracing, drawing-view crops, linked model references and automatic solid rebuilding are not part of this workflow yet.

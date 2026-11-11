@@ -49,8 +49,8 @@ export function LayoutDocumentSettingsDialog({ state, onCommand, onClose }: {
     <div ref={dialog} className="pf-layer-scope-dialog pf-document-settings" role="dialog" aria-modal="true" aria-labelledby="pf-document-settings-title">
       <h2 id="pf-document-settings-title">Document Settings</h2>
       <fieldset>
-        <legend>Paper</legend>
-        <label>Paper size<select value={preset?.id ?? 'custom'} onChange={event => {
+        <legend>{state.settings.drawing ? 'Drawing area (real size)' : 'Paper'}</legend>
+        {!state.settings.drawing && <label>Paper size<select value={preset?.id ?? 'custom'} onChange={event => {
           // A preset fills in its landscape size and sets its standard's units for the paper, the grid and drawing values.
           const chosen = PAPER_PRESETS.find(item => item.id === event.target.value);
           if (!chosen) return;
@@ -61,7 +61,7 @@ export function LayoutDocumentSettingsDialog({ state, onCommand, onClose }: {
           {(['US', 'International'] as const).map(standard => <optgroup key={standard} label={standard}>
             {PAPER_PRESETS.filter(item => item.standard === standard).map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
           </optgroup>)}
-        </select></label>
+        </select></label>}
         <label>Orientation<select value={portrait ? 'portrait' : 'landscape'} disabled={paper.size[0] === paper.size[1]} onChange={event => {
           // Turning the page swaps its width and height.
           if ((event.target.value === 'portrait') !== portrait) onCommand('layout.document.setup', { widthMm: paper.size[1], heightMm: paper.size[0] });

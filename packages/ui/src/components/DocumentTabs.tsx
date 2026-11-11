@@ -26,10 +26,10 @@ export function DocumentTabs({
   };
   return (
     <nav className="pf-document-tabs" aria-label="Open documents" data-tauri-drag-region>
-      <NewDocumentButton onNewModel={() => { if (allowOpeningDocument()) session.newModel(); }} onNewLayout={onNewLayout} />
+      <NewDocumentButton onNewDrawing={() => { if (allowOpeningDocument()) session.newDrawing(); }} onNewModel={() => { if (allowOpeningDocument()) session.newModel(); }} onNewLayout={onNewLayout} />
       {session.tabs.map((tab) => {
         const name = displayDocumentName(tab);
-        const typeLabel = tab.type === 'model' ? '3D model' : '2D drawing';
+        const typeLabel = tab.type === 'model' ? '3D model' : tab.doc.state.settings.drawing ? 'Scale drawing' : '2D drawing';
         return (
           <div
             key={tab.id}
@@ -92,9 +92,11 @@ export function DocumentTabs({
  * strip scrolls horizontally and would clip an absolutely positioned dropdown.
  */
 function NewDocumentButton({
+  onNewDrawing,
   onNewModel,
   onNewLayout,
 }: {
+  onNewDrawing: () => void;
   onNewModel: () => void;
   onNewLayout: () => void;
 }): JSX.Element {
@@ -160,6 +162,7 @@ function NewDocumentButton({
               <span>Model</span>
             </button>
           </li>
+          <li role="none"><button type="button" role="menuitem" className="pf-menu-item" onClick={() => choose(onNewDrawing)}><TbVector size={16} aria-hidden="true" /><span>Drawing</span></button></li>
           <li role="none">
             <button type="button" role="menuitem" className="pf-menu-item" onClick={() => choose(onNewLayout)}>
               <TbVector size={16} aria-hidden="true" />

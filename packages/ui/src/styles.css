@@ -3687,3 +3687,9 @@ h4.pf-xui-text { font-size: 12px; }
 .pf-drawing-dialog form { display: grid; gap: 12px; }
 .pf-drawing-dialog h2 { font-size: 16px; margin: 0 0 8px; }
 .pf-drawing-dialog p { margin: 4px 0; }
+
+/* Drawing coordinates extend in every direction from the centered origin. */
+.pf-layout-workspace.is-drawing { position: relative; overflow: clip; padding: 0; }
+.pf-layout-workspace.is-drawing .pf-layout-page-wrap { position: absolute; left: 50%; top: 50%; margin: 0; }
+.pf-layout-workspace.is-drawing .pf-layout-page { width: 100%; height: 100%; opacity: 0; pointer-events: none; }
+.pf-layout-workspace.is-drawing .pf-layout-shape-builder-preview > rect { display: none; }

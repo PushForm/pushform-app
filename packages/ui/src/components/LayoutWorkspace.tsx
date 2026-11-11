@@ -310,6 +310,7 @@ const DIMENSION_TOOLS = [
 /** Tools take Cmd on macOS wherever Windows uses Ctrl. */
 const MAC = detectPlatform() === 'mac';
 const PX_PER_MM = 3;
+const MIN_DRAWING_ZOOM = 0.000001;
 /** On-screen radii of the vertex-editing circles; the square resize handles are 9 px across. */
 const VERTEX_HANDLE_RADIUS_PX = { vertex: 4, active: 5, curve: 3.5 };
 /** Height of the tool options bar's band over the page view, kept clear by framing. */
@@ -533,6 +534,37 @@ function pickEntity(p: Point, page: LayoutPage, state: LayoutDocumentState, incl
 /** The visible workspace around the page, in paper millimetres from the page's top-left corner. */
 interface LayoutSurround { x: number; y: number; width: number; height: number; pxPerMm: number }
 
+function paintDrawingGrid(ctx: CanvasRenderingContext2D, state: LayoutDocumentState, view: LayoutSurround): void {
+  const { x: left, y: top, width, height, pxPerMm } = view;
+  const right = left + width, bottom = top + height;
+  ctx.save();
+  if (state.settings.grid.show && state.settings.grid.spacingMm > 0) {
+    const base = state.settings.grid.spacingMm;
+    // Hide intermediate lines when dense; snapping keeps the configured interval.
+    const spacing = base * Math.pow(10, Math.max(0, Math.ceil(Math.log10(12 / (base * pxPerMm)))));
+    ctx.strokeStyle = '#e5eaf0';
+    ctx.lineWidth = 1 / pxPerMm;
+    ctx.beginPath();
+    const firstX = Math.ceil(left / spacing) * spacing, firstY = Math.ceil(top / spacing) * spacing;
+    for (let i = 0; i <= Math.ceil(width / spacing); i++) {
+      const x = firstX + i * spacing; ctx.moveTo(x, top); ctx.lineTo(x, bottom);
+    }
+    for (let i = 0; i <= Math.ceil(height / spacing); i++) {
+      const y = firstY + i * spacing; ctx.moveTo(left, y); ctx.lineTo(right, y);
+    }
+    ctx.stroke();
+  }
+  ctx.lineWidth = 1 / pxPerMm;
+  ctx.strokeStyle = '#c48181';
+  ctx.beginPath(); ctx.moveTo(left, 0); ctx.lineTo(right, 0); ctx.stroke();
+  ctx.strokeStyle = '#76a692';
+  ctx.beginPath(); ctx.moveTo(0, top); ctx.lineTo(0, bottom); ctx.stroke();
+  ctx.fillStyle = '#687584';
+  ctx.font = `${11 / pxPerMm}px sans-serif`;
+  ctx.fillText('0, 0', 6 / pxPerMm, -8 / pxPerMm);
+  ctx.restore();
+}
+
 function paintPage(
   canvas: HTMLCanvasElement,
   page: LayoutPage,
@@ -575,7 +607,7 @@ function paintPage(
   let renderScale = outputDpi ? outputDpi / 25.4 : thumbnail
     ? THUMBNAIL_MAX_PX * window.devicePixelRatio / Math.max(...page.size)
     : surround ? surround.pxPerMm * Math.min(window.devicePixelRatio, 2)
-    : PX_PER_MM * Math.max(state.settings.drawing ? 0.001 : 1, Math.min(zoom * window.devicePixelRatio, 4));
+    : PX_PER_MM * Math.max(state.settings.drawing ? MIN_DRAWING_ZOOM : 1, Math.min(zoom * window.devicePixelRatio, 4));
   // Full-size drawing extents can span meters. Keep the backing canvas bounded at any zoom.
   if (state.settings.drawing && !surround) renderScale = Math.min(renderScale, 8192 / Math.max(...page.size));
   if (surround) {
@@ -583,14 +615,20 @@ function paintPage(
     canvas.width = Math.round(surround.width * renderScale);
     canvas.height = Math.round(surround.height * renderScale);
     ctx.setTransform(renderScale, 0, 0, renderScale, -surround.x * renderScale, -surround.y * renderScale);
-    // The paper's shadow is drawn here, below the objects, so it never darkens their off-page parts.
-    ctx.save();
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.18)';
-    ctx.shadowBlur = 18 * renderScale / surround.pxPerMm;
-    ctx.shadowOffsetY = 3 * renderScale / surround.pxPerMm;
-    ctx.fillStyle = page.background;
-    ctx.fillRect(0, 0, page.size[0], page.size[1]);
-    ctx.restore();
+    if (state.settings.drawing) {
+      ctx.fillStyle = page.background;
+      ctx.fillRect(surround.x, surround.y, surround.width, surround.height);
+      paintDrawingGrid(ctx, state, surround);
+    } else {
+      // The paper's shadow stays below its off-page objects.
+      ctx.save();
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.18)';
+      ctx.shadowBlur = 18 * renderScale / surround.pxPerMm;
+      ctx.shadowOffsetY = 3 * renderScale / surround.pxPerMm;
+      ctx.fillStyle = page.background;
+      ctx.fillRect(0, 0, page.size[0], page.size[1]);
+      ctx.restore();
+    }
   } else {
     canvas.width = Math.round(page.size[0] * renderScale);
     canvas.height = Math.round(page.size[1] * renderScale);
@@ -793,7 +831,7 @@ function paintPage(
   let preview: LayoutRectanglePath | null =
     anchor && cursor && tool !== 'select' && tool !== 'eraser' && tool !== 'dimension' && tool !== 'angular-dimension' && !isLayoutArcTool(tool) && tool !== 'offset' && !isLayoutCornerTool(tool) && tool !== 'move' && tool !== 'rotate' && tool !== 'label'
       ? tool === 'freehand'
-        ? createLayoutFreehand(freehand, FREEHAND_SMOOTHING_PX * page.size[0] / Math.max(1, canvas.getBoundingClientRect().width))
+        ? createLayoutFreehand(freehand, FREEHAND_SMOOTHING_PX / (surround?.pxPerMm ?? Math.max(1, canvas.getBoundingClientRect().width) / page.size[0]))
         : pathPoints(tool === 'text' ? 'rectangle' : tool, anchor, cursor, rectangleAmountMm,
           tool === 'text' ? { ...placementModifiers, square: false } : placementModifiers, polygonSides)
       : null;
@@ -1540,7 +1578,12 @@ export function LayoutWorkspace({
       tool === 'move' && moveDraft ? { base: moveDraft.base, target: cursor ?? moveDraft.base } : null, { rows: tableRows, columns: tableColumns }, placementModifiers,
       navigatingViewportId !== null && viewportCameraPreview ? { entityId: navigatingViewportId, camera: viewportCameraPreview } : null, polygonSides, tableResizePreview, surround, transformPreview,
       tool === 'scale' && scaleDraft ? { base: scaleDraft.base } : null);
-    if (canvasRef.current) paint(canvasRef.current);
+    if (canvasRef.current) {
+      if (state.settings.drawing) {
+        // The invisible canvas supplies the coordinate transform and pointer capture only.
+        canvasRef.current.width = 1; canvasRef.current.height = 1;
+      } else paint(canvasRef.current);
+    }
     paintSurround.current = () => {
       const canvas = canvasRef.current, surround = surroundRef.current;
       if (!canvas || !surround) return;
@@ -1632,9 +1675,13 @@ export function LayoutWorkspace({
       if (!tab.workspace.zoomToPageOnOpen) return true;
       if (workspace.clientWidth <= 48 || workspace.clientHeight <= 48) return false;
       tab.workspace.zoomToPageOnOpen = false;
+      if (tab.doc.state.settings.drawing) {
+        setPanOffset(0, 0);
+        return true;
+      }
       const next = Math.min((workspace.clientWidth - 48) / (page.size[0] * PX_PER_MM),
         (workspace.clientHeight - 48) / (page.size[1] * PX_PER_MM));
-      setZoom(Math.max(tab.doc.state.settings.drawing ? 0.001 : 0.1, Math.min(8, next)));
+      setZoom(Math.max(tab.doc.state.settings.drawing ? MIN_DRAWING_ZOOM : 0.1, Math.min(8, next)));
       workspace.scrollLeft = 0; workspace.scrollTop = 0;
       return true;
     };
@@ -1655,7 +1702,7 @@ export function LayoutWorkspace({
       const canvas = canvasRef.current;
       if (!canvas) return;
       const rect = canvas.getBoundingClientRect();
-      const overPage = event.clientX >= rect.left && event.clientX <= rect.right &&
+      const overPage = tab.doc.state.settings.drawing || event.clientX >= rect.left && event.clientX <= rect.right &&
         event.clientY >= rect.top && event.clientY <= rect.bottom;
       zoomAnchor.current = {
         x: event.clientX,
@@ -1664,7 +1711,7 @@ export function LayoutWorkspace({
         pageY: overPage ? (event.clientY - rect.top) / rect.height : 0.5,
       };
       const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? workspace.clientHeight : 1);
-      setZoom((value) => Math.max(tab.doc.state.settings.drawing ? 0.001 : 0.1, Math.min(8, value * Math.exp(-delta * 0.0015))));
+      setZoom((value) => Math.max(tab.doc.state.settings.drawing ? MIN_DRAWING_ZOOM : 0.1, Math.min(8, value * Math.exp(-delta * 0.0015))));
     };
     workspace.addEventListener('wheel', onWheel, { passive: false });
     return () => workspace.removeEventListener('wheel', onWheel);
@@ -1720,8 +1767,10 @@ export function LayoutWorkspace({
     if (!pending || !workspace || !canvas) return;
     zoomAnchor.current = null;
     const rect = canvas.getBoundingClientRect();
-    workspace.scrollLeft += rect.left + pending.pageX * rect.width - pending.x;
-    workspace.scrollTop += rect.top + pending.pageY * rect.height - pending.y;
+    const dx = rect.left + pending.pageX * rect.width - pending.x;
+    const dy = rect.top + pending.pageY * rect.height - pending.y;
+    if (tab.doc.state.settings.drawing) setPanOffset(panOffset.current[0] - dx, panOffset.current[1] - dy);
+    else { workspace.scrollLeft += dx; workspace.scrollTop += dy; }
   }, [zoom]);
 
   useLayoutEffect(() => {
@@ -1732,10 +1781,12 @@ export function LayoutWorkspace({
     zoomCenter.current = null;
     const pageRect = canvas.getBoundingClientRect();
     const workspaceRect = workspace.getBoundingClientRect();
-    workspace.scrollLeft += pageRect.left + center[0] / page.size[0] * pageRect.width -
+    const dx = pageRect.left + center[0] / page.size[0] * pageRect.width -
       (workspaceRect.left + workspace.clientWidth / 2);
-    workspace.scrollTop += pageRect.top + center[1] / page.size[1] * pageRect.height -
+    const dy = pageRect.top + center[1] / page.size[1] * pageRect.height -
       (workspaceRect.top + workspace.clientHeight / 2);
+    if (tab.doc.state.settings.drawing) setPanOffset(panOffset.current[0] - dx, panOffset.current[1] - dy);
+    else { workspace.scrollLeft += dx; workspace.scrollTop += dy; }
   }, [zoom, zoomRequest, page]);
 
   useEffect(() => {
@@ -3741,11 +3792,15 @@ export function LayoutWorkspace({
     const workspace = workspaceRef.current;
     if (!workspace) return;
     setPanOffset(0, 0);
+    if (state.settings.drawing) {
+      setZoomMenuOpen(false);
+      return;
+    }
     const next = Math.min(
       (workspace.clientWidth - 48) / (page.size[0] * PX_PER_MM),
       (workspace.clientHeight - 48 - TOOL_BAND_PX) / (page.size[1] * PX_PER_MM),
     );
-    setZoom(Math.max(tab.doc.state.settings.drawing ? 0.001 : 0.1, Math.min(8, next)));
+    setZoom(Math.max(tab.doc.state.settings.drawing ? MIN_DRAWING_ZOOM : 0.1, Math.min(8, next)));
     workspace.scrollTo(0, 0);
     setZoomMenuOpen(false);
   };
@@ -3769,7 +3824,7 @@ export function LayoutWorkspace({
       (workspace.clientHeight - 48 - TOOL_BAND_PX) / (Math.max(10, maxY - minY) * PX_PER_MM),
     );
     zoomCenter.current = [(minX + maxX) / 2, (minY + maxY) / 2];
-    setZoom(Math.max(tab.doc.state.settings.drawing ? 0.001 : 0.1, Math.min(8, next)));
+    setZoom(Math.max(tab.doc.state.settings.drawing ? MIN_DRAWING_ZOOM : 0.1, Math.min(8, next)));
     setZoomRequest((value) => value + 1);
     setZoomMenuOpen(false);
   };
@@ -3844,8 +3899,8 @@ export function LayoutWorkspace({
     ].map(([label, axis]) => ({ label: label!, action: contextAction('Center', () => {
       const bounds = selectionExtent();
       tab.commands.execute('layout.shape.move', { pageId: page.id, entityIds: selectionIds,
-        delta: [axis === 'vertical' ? 0 : page.size[0] / 2 - (bounds.minX + bounds.maxX) / 2,
-          axis === 'horizontal' ? 0 : page.size[1] / 2 - (bounds.minY + bounds.maxY) / 2] });
+        delta: [axis === 'vertical' ? 0 : (state.settings.drawing ? 0 : page.size[0] / 2) - (bounds.minX + bounds.maxX) / 2,
+          axis === 'horizontal' ? 0 : (state.settings.drawing ? 0 : page.size[1] / 2) - (bounds.minY + bounds.maxY) / 2] });
     }) })) },
     { label: 'Flip', disabled: !editableSelection, children: [['Horizontally', 'horizontal'], ['Vertically', 'vertical']].map(([label, axis]) => ({
       label: label!, action: contextAction('Flip', () => {
@@ -4458,11 +4513,11 @@ export function LayoutWorkspace({
           })()}
         </div>
         <canvas ref={surroundRef} className="pf-layout-surround" aria-hidden="true" />
-        <main ref={workspaceRef} className="pf-layout-workspace" aria-label="Layout workspace" onContextMenu={openContextMenu}
+        <main ref={workspaceRef} className={`pf-layout-workspace${state.settings.drawing ? ' is-drawing' : ''}`} aria-label={state.settings.drawing ? 'Drawing workspace' : 'Layout workspace'} onContextMenu={openContextMenu}
           data-tool={polygonTool} style={pageCursor}
           onPointerDown={offPage(onPointerDown)} onPointerMove={offPage(onPointerMove)} onPointerUp={offPage(onPointerUp)}
           onDoubleClick={offPage(onDoubleClick)}>
-          <div className="pf-layout-page-wrap" style={{ width: page.size[0] * PX_PER_MM * zoom }}>
+          <div className="pf-layout-page-wrap" style={{ width: page.size[0] * PX_PER_MM * zoom, ...(state.settings.drawing ? { height: page.size[1] * PX_PER_MM * zoom } : {}) }}>
           {tool === 'shape-builder' ? <LayoutShapeBuilderPreview builder={shapeBuilder} size={page.size} defaultStyle={state.defaultStyle} /> : null}
           {booleanPreview?.shapes.length ? <svg className="pf-layout-boolean-preview" aria-label="Boolean result preview" viewBox={`0 0 ${page.size[0]} ${page.size[1]}`}>
             {booleanPreview.shapes.map((shape, index) => <path key={index} style={tool === 'boolean-cut-path' || !shape.closed ? { fill: 'none' } : undefined}
@@ -4486,39 +4541,40 @@ export function LayoutWorkspace({
               state.settings.objectSnap !== false ? <LayoutSnapTooltip
             key={`${page.id}:${tool}:${snapHoverEpoch}:${snapType}:${cursor[0]}:${cursor[1]}`}
             type={snapType ?? snapKind} x={cursor[0] * PX_PER_MM * zoom} y={cursor[1] * PX_PER_MM * zoom}
-            pageWidth={page.size[0] * PX_PER_MM * zoom} pageHeight={page.size[1] * PX_PER_MM * zoom} /> : null}
+            unbounded={Boolean(state.settings.drawing)} pageWidth={page.size[0] * PX_PER_MM * zoom} pageHeight={page.size[1] * PX_PER_MM * zoom} /> : null}
           {activeRotation?.reference && cursor ? <output className="pf-layout-rotation-angle" aria-label="Rotation angle preview"
-            style={{ left: Math.max(0, Math.min(page.size[0] * PX_PER_MM * zoom - 90, cursor[0] * PX_PER_MM * zoom + 14)),
-              top: Math.max(0, Math.min(page.size[1] * PX_PER_MM * zoom - 28, cursor[1] * PX_PER_MM * zoom + 14)) }}>
+            style={{ left: state.settings.drawing ? cursor[0] * PX_PER_MM * zoom + 14 : Math.max(0, Math.min(page.size[0] * PX_PER_MM * zoom - 90, cursor[0] * PX_PER_MM * zoom + 14)),
+              top: state.settings.drawing ? cursor[1] * PX_PER_MM * zoom + 14 : Math.max(0, Math.min(page.size[1] * PX_PER_MM * zoom - 28, cursor[1] * PX_PER_MM * zoom + 14)) }}>
             {activeRotation.angleDeg.toFixed(1)}°
           </output> : null}
           {/* Columns x rows follow the pointer while the button is held. */}
           {tool === 'table' && tableCounting && anchor && cursor && (cursor[0] !== anchor[0] || cursor[1] !== anchor[1])
             ? <output className="pf-layout-rotation-angle" aria-label="Table size preview"
-              style={{ left: Math.max(0, Math.min(page.size[0] * PX_PER_MM * zoom - 80, cursor[0] * PX_PER_MM * zoom + 14)),
-                top: Math.max(0, Math.min(page.size[1] * PX_PER_MM * zoom - 28, cursor[1] * PX_PER_MM * zoom + 14)) }}>
+              style={{ left: state.settings.drawing ? cursor[0] * PX_PER_MM * zoom + 14 : Math.max(0, Math.min(page.size[0] * PX_PER_MM * zoom - 80, cursor[0] * PX_PER_MM * zoom + 14)),
+                top: state.settings.drawing ? cursor[1] * PX_PER_MM * zoom + 14 : Math.max(0, Math.min(page.size[1] * PX_PER_MM * zoom - 28, cursor[1] * PX_PER_MM * zoom + 14)) }}>
               {`${tableColumns} x ${tableRows}`}
             </output> : null}
           {/* The readout gives the move's x, y offsets, positive x right and positive y down, as typed in. */}
           {tool === 'scale' && scaleDraft && cursor ? <output className="pf-layout-rotation-angle" aria-label="Scale preview"
-            style={{ left: Math.max(0, Math.min(page.size[0] * PX_PER_MM * zoom - 90, cursor[0] * PX_PER_MM * zoom + 14)),
-              top: Math.max(0, Math.min(page.size[1] * PX_PER_MM * zoom - 28, cursor[1] * PX_PER_MM * zoom + 14)) }}>
+            style={{ left: state.settings.drawing ? cursor[0] * PX_PER_MM * zoom + 14 : Math.max(0, Math.min(page.size[0] * PX_PER_MM * zoom - 90, cursor[0] * PX_PER_MM * zoom + 14)),
+              top: state.settings.drawing ? cursor[1] * PX_PER_MM * zoom + 14 : Math.max(0, Math.min(page.size[1] * PX_PER_MM * zoom - 28, cursor[1] * PX_PER_MM * zoom + 14)) }}>
             {formatScalePercent(scaleDraft.factor)}
           </output> : null}
           {tool === 'move' && moveDraft && cursor ? <output className="pf-layout-rotation-angle" aria-label="Move distance preview"
-            style={{ left: Math.max(0, Math.min(page.size[0] * PX_PER_MM * zoom - 160, cursor[0] * PX_PER_MM * zoom + 14)),
-              top: Math.max(0, Math.min(page.size[1] * PX_PER_MM * zoom - 28, cursor[1] * PX_PER_MM * zoom + 14)) }}>
+            style={{ left: state.settings.drawing ? cursor[0] * PX_PER_MM * zoom + 14 : Math.max(0, Math.min(page.size[0] * PX_PER_MM * zoom - 160, cursor[0] * PX_PER_MM * zoom + 14)),
+              top: state.settings.drawing ? cursor[1] * PX_PER_MM * zoom + 14 : Math.max(0, Math.min(page.size[1] * PX_PER_MM * zoom - 28, cursor[1] * PX_PER_MM * zoom + 14)) }}>
             {moveDraft.copy ? 'Copy ' : ''}{formatEntryLength(Math.hypot(...(movePreview?.delta ?? [0, 0])))}
           </output> : null}
           {angularPreview && cursor ? <output className="pf-layout-rotation-angle" aria-label="Angular dimension preview"
-            style={{ left: Math.max(0, Math.min(page.size[0] * PX_PER_MM * zoom - 90, cursor[0] * PX_PER_MM * zoom + 14)),
-              top: Math.max(0, Math.min(page.size[1] * PX_PER_MM * zoom - 28, cursor[1] * PX_PER_MM * zoom + 14)) }}>{angularPreview}</output> : null}
+            style={{ left: state.settings.drawing ? cursor[0] * PX_PER_MM * zoom + 14 : Math.max(0, Math.min(page.size[0] * PX_PER_MM * zoom - 90, cursor[0] * PX_PER_MM * zoom + 14)),
+              top: state.settings.drawing ? cursor[1] * PX_PER_MM * zoom + 14 : Math.max(0, Math.min(page.size[1] * PX_PER_MM * zoom - 28, cursor[1] * PX_PER_MM * zoom + 14)) }}>{angularPreview}</output> : null}
           <canvas
             ref={canvasRef}
             tabIndex={-1}
             className="pf-layout-page"
             data-tool={polygonTool}
-            style={pageCursor}
+            style={state.settings.drawing ? { ...pageCursor, width: page.size[0] * PX_PER_MM,
+              height: page.size[1] * PX_PER_MM, transform: `scale(${zoom})`, transformOrigin: '0 0' } : pageCursor}
             aria-label={`${page.name} canvas`}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
@@ -4950,7 +5006,7 @@ export function LayoutWorkspace({
             : tool === 'label' ? labelDraft?.bend ? 'Move horizontally and click to place the text.' : labelDraft ? 'Click to place the leader bend.' : 'Click where the arrow should point.' : ''}
         </StatusHint>
         {saveStatus}
-        <span className="pf-status-units" hidden={catalogActive}>Page {tab.doc.state.pageOrder.indexOf(page.id) + 1}/{tab.doc.state.pageOrder.length}</span>
+        <span className="pf-status-units" hidden={catalogActive}>{state.settings.drawing ? 'Origin: 0, 0' : `Page ${tab.doc.state.pageOrder.indexOf(page.id) + 1}/${tab.doc.state.pageOrder.length}`}</span>
         <div ref={zoomMenuRef} className="pf-layout-zoom" hidden={catalogActive}>
           {zoomMenuOpen ? (
             <div className="pf-layout-zoom-menu" role="menu" aria-label="Layout zoom options">
@@ -4962,7 +5018,7 @@ export function LayoutWorkspace({
                   {percent}%
                 </button>
               ))}
-              <button type="button" role="menuitem" onClick={() => tab.commands.execute('layout.zoom.page')}>Zoom To Page</button>
+              <button type="button" role="menuitem" onClick={() => tab.commands.execute('layout.zoom.page')}>{state.settings.drawing ? 'Return to Origin' : 'Zoom To Page'}</button>
               <button type="button" role="menuitem" onClick={() => tab.commands.execute('layout.zoom.content')}>Fit Content</button>
               <button type="button" role="menuitem" disabled={!selectedEntity} onClick={() => {
                 if (selectedEntity) fitEntities([selectedEntity]);
@@ -4977,7 +5033,7 @@ export function LayoutWorkspace({
             aria-expanded={zoomMenuOpen}
             onClick={() => setZoomMenuOpen((open) => !open)}
           >
-            {Math.round(zoom * 100)}% <span aria-hidden="true">⌄</span>
+            {zoom < 0.01 ? Number((zoom * 100).toPrecision(2)) : Math.round(zoom * 100)}% <span aria-hidden="true">⌄</span>
           </button>
         </div>
         {vcbError ? <span className="pf-layout-vcb-error" role="alert">{vcbError}</span> : null}

@@ -2,7 +2,7 @@
 
 Choose **+ → Drawing** to open a full-size 2D drawing. Drawing uses a vector outline icon; Layout uses a paper-sheet icon in the New menu, document tabs, and Home’s Continue working list. Use the existing line, shape, snapping, offset, dimension and editing tools. Typed lengths are real dimensions: enter `6000mm` for a six-meter edge. Drawing documents use the native `.pfl` format, including cloud saves and recovery.
 
-The initial drawing area is 10 × 7 meters. Change its real extents and grid in **Document Settings**. Changing its size does not resize geometry. Use the grid units setting for metric or imperial input.
+Drawing is an unbounded canvas with no page size, orientation, or margins. The origin **(0, 0)** starts at the center of the workspace. Draw in any direction, including negative coordinates. Drag with the middle mouse button to pan and use the wheel to zoom around the pointer. Choose **Return to Origin** in the zoom menu to recenter the axes, or **Fit Content** to frame your drawing. Set grid spacing and metric or imperial units in **Document Settings**. Paper sizes are chosen in Layout.
 
 Drawing annotations use a 1:50 reference size. Font and stroke controls show their printed sizes; geometry and dimension values remain full size. For example, a 10 pt dimension stays 10 pt when the drawing is placed on a sheet at either 1:50 or 1:100.
 
@@ -16,7 +16,7 @@ Choose **Detach** to turn a view into an ordinary editable group. It no longer u
 
 ## Insert drawing geometry into a model
 
-Open a Model tab, return to the Drawing, and choose **Insert into model**. Select the model and a ground (XY), front (XZ), or side (YZ) plane. Enter the drawing origin's model coordinates in millimeters and its rotation. The drawing origin is the drafting area's top-left; drawing Y points down and is converted to the model plane's negative second axis.
+Open a Model tab, return to the Drawing, and choose **Insert into model**. Select the model and a ground (XY), front (XZ), or side (YZ) plane. Enter the drawing origin's model coordinates in millimeters and its rotation. The drawing origin is the intersection of the axes; drawing X points right and Y points down and is converted to the model plane's negative second axis.
 
 **Insert sketch** adds visible path geometry at full size in the model's current editing context. It creates an independent copy; later source edits do not change it. Text, dimensions, tables and images are excluded. Curves become segmented paths. Closed contours can form faces for Push/Pull; open contours remain edges. Existing sketch geometry can intersect or join the inserted geometry. Bodies are not changed by insertion.
 

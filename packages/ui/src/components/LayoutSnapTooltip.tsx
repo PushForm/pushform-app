@@ -9,8 +9,8 @@ const labels: Record<PaperSnapKind | 'center', string> = {
 };
 
 /** Mounted anew for each hovered snap target, so moving away always restarts the one-second delay. */
-export function LayoutSnapTooltip({ type, x, y, pageWidth, pageHeight }: {
-  type: PaperSnapKind | 'center'; x: number; y: number; pageWidth: number; pageHeight: number;
+export function LayoutSnapTooltip({ type, x, y, pageWidth, pageHeight, unbounded = false }: {
+  type: PaperSnapKind | 'center'; x: number; y: number; pageWidth: number; pageHeight: number; unbounded?: boolean;
 }): JSX.Element | null {
   const [visible, setVisible] = useState(false);
   useEffect(() => {
@@ -18,7 +18,7 @@ export function LayoutSnapTooltip({ type, x, y, pageWidth, pageHeight }: {
     return () => clearTimeout(timer);
   }, []);
   return visible ? <span className="pf-layout-snap-tooltip" role="tooltip" aria-label="Snap type"
-    style={{ left: Math.max(0, Math.min(pageWidth - 85, x + 14)), top: Math.max(0, Math.min(pageHeight - 26, y + 16)) }}>
+    style={{ left: unbounded ? x + 14 : Math.max(0, Math.min(pageWidth - 85, x + 14)), top: unbounded ? y + 16 : Math.max(0, Math.min(pageHeight - 26, y + 16)) }}>
     {labels[type]}
   </span> : null;
 }

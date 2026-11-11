@@ -1,6 +1,6 @@
 # Full-size scale drawings
 
-Choose **+ → Drawing** to open a full-size 2D drawing. Use the existing line, shape, snapping, offset, dimension and editing tools. Typed lengths are real dimensions: enter `6000mm` for a six-meter edge. Drawing documents use the native `.pfl` format, including cloud saves and recovery.
+Choose **+ → Drawing** to open a full-size 2D drawing. Drawing uses a vector outline icon; Layout uses a paper-sheet icon in the New menu, document tabs, and Home’s Continue working list. Use the existing line, shape, snapping, offset, dimension and editing tools. Typed lengths are real dimensions: enter `6000mm` for a six-meter edge. Drawing documents use the native `.pfl` format, including cloud saves and recovery.
 
 The initial drawing area is 10 × 7 meters. Change its real extents and grid in **Document Settings**. Changing its size does not resize geometry. Use the grid units setting for metric or imperial input.
 

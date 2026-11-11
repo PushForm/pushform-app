@@ -462,7 +462,7 @@ export class DocumentSession {
       commands,
       initialVersion: doc.version,
       activePageId: doc.state.pageOrder[0]!,
-      workspace: { ...createLayoutWorkspaceState(), zoomToPageOnOpen: true },
+      workspace: { ...createLayoutWorkspaceState(), ...(doc.state.settings.drawing ? { zoom: 0.02 } : {}), zoomToPageOnOpen: true },
       savedContent,
       recoveryId: newGuid(),
       ...(identity ? { identity } : {}),
@@ -930,7 +930,7 @@ export class DocumentSession {
             initialVersion: doc.version,
             activePageId: doc.state.pages.has(item.activePageId)
               ? item.activePageId : doc.state.pageOrder[0]!,
-            workspace: { ...createLayoutWorkspaceState(), zoomToPageOnOpen: true },
+            workspace: { ...createLayoutWorkspaceState(), ...(doc.state.settings.drawing ? { zoom: 0.02 } : {}), zoomToPageOnOpen: true },
             savedContent: this.nativeRefresh ? item.dirty ? '' : layoutContentKey(doc) : item.savedContent,
             recoveryId: item.recoveryId,
             ...(typeof item.identity === 'string' ? { identity: item.identity } : {}),

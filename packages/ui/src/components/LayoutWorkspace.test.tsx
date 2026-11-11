@@ -498,3 +498,37 @@ describe('Layout value fields', () => {
     app.dispose();
   });
 });
+
+it('draws across the origin and beyond native page extents without paper settings', async () => {
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+  const app = createApp({ demo: false, expose: false });
+  const session = new DocumentSession(app, () => createApp({ demo: false, expose: false }), false, null);
+  const tab = session.newDrawing();
+  const size = tab.doc.state.pages.get(tab.activePageId)!.size;
+  // Center (0,0) in a viewport; the scaffold measures real drawing millimeters.
+  vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockReturnValue({
+    left: 400, top: 300, width: size[0] * 0.06, height: size[1] * 0.06,
+    right: 400 + size[0] * 0.06, bottom: 300 + size[1] * 0.06,
+    x: 400, y: 300, toJSON: () => ({}),
+  });
+  render(<LayoutWorkspace tab={tab} session={session} />);
+  const workspace = screen.getByRole('main', { name: 'Drawing workspace' });
+  expect(screen.queryByText(/Page 1\/1/)).toBeNull();
+  fireEvent.keyDown(window, { key: 'l', code: 'KeyL' });
+  fireEvent.pointerDown(workspace, { button: 0, pointerId: 1, clientX: 340, clientY: 240 });
+  fireEvent.pointerMove(workspace, { pointerId: 1, clientX: 520, clientY: 420 });
+  fireEvent.pointerUp(workspace, { pointerId: 1, clientX: 520, clientY: 420 });
+  const page = tab.doc.state.pages.get(tab.activePageId)!;
+  expect(page.entities.get(page.entityOrder[0]!)?.points).toEqual([[-1000, -1000], [2000, 2000]]);
+  const bytes = await session.saveLayoutBytes(tab.id);
+  const reopened = await openLayoutFile(bytes);
+  const saved = reopened.state.pages.get(tab.activePageId)!;
+  expect(saved.entities.get(saved.entityOrder[0]!)?.points).toEqual([[-1000, -1000], [2000, 2000]]);
+  fireEvent.keyDown(window, { key: 'Escape' });
+  act(() => { tab.commands.execute('layout.document.settings'); });
+  expect(screen.getByRole('dialog', { name: 'Document Settings' })).toBeTruthy();
+  expect(screen.queryByLabelText('Page width (mm)')).toBeNull();
+  expect(screen.queryByLabelText('Orientation')).toBeNull();
+  expect(screen.getByLabelText('Grid size (mm)')).toBeTruthy();
+  session.dispose(); app.dispose();
+});

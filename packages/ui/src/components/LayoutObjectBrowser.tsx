@@ -199,7 +199,7 @@ function buildTree(state: LayoutDocumentState, activePageId: number, selected: R
   const paper = state.pages.get(state.pageOrder[0]!);
   const unit = layoutPaperUnits(state), gridUnit = layoutGridUnits(state);
   const size: BrowserNode[] = paper ? [{ key: PAGE_SIZE_KEY, level: 2,
-    label: `${paperPresetFor(paper.size)?.name ?? 'Custom'}: ${formatPaperLength(paper.size[0], unit)} × ${formatPaperLength(paper.size[1], unit)} ${unit}`,
+    label: state.settings.drawing ? 'Unbounded drawing' : `${paperPresetFor(paper.size)?.name ?? 'Custom'}: ${formatPaperLength(paper.size[0], unit)} × ${formatPaperLength(paper.size[1], unit)} ${unit}`,
     icon: <PiFrameCorners />, target: null, parent: SETTINGS_KEY, children: [] }, { key: UNITS_KEY, level: 2,
     label: `Units: ${unit} · Grid: ${formatPaperLength(state.settings.grid.spacingMm, gridUnit)} ${gridUnit}`,
     icon: <PiGridFour />, target: null, parent: SETTINGS_KEY, children: [] }] : [];

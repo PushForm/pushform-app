@@ -198,9 +198,9 @@ function buildTree(state: LayoutDocumentState, activePageId: number, selected: R
   // Under Document Settings, the document's paper (named by its preset, else Custom) and its units and grid.
   const paper = state.pages.get(state.pageOrder[0]!);
   const unit = layoutPaperUnits(state), gridUnit = layoutGridUnits(state);
-  const size: BrowserNode[] = paper ? [{ key: PAGE_SIZE_KEY, level: 2,
-    label: state.settings.drawing ? 'Unbounded drawing' : `${paperPresetFor(paper.size)?.name ?? 'Custom'}: ${formatPaperLength(paper.size[0], unit)} × ${formatPaperLength(paper.size[1], unit)} ${unit}`,
-    icon: <PiFrameCorners />, target: null, parent: SETTINGS_KEY, children: [] }, { key: UNITS_KEY, level: 2,
+  const size: BrowserNode[] = paper ? [...(state.settings.drawing ? [] : [{ key: PAGE_SIZE_KEY, level: 2,
+    label: `${paperPresetFor(paper.size)?.name ?? 'Custom'}: ${formatPaperLength(paper.size[0], unit)} × ${formatPaperLength(paper.size[1], unit)} ${unit}`,
+    icon: <PiFrameCorners />, target: null, parent: SETTINGS_KEY, children: [] }]), { key: UNITS_KEY, level: 2,
     label: `Units: ${unit} · Grid: ${formatPaperLength(state.settings.grid.spacingMm, gridUnit)} ${gridUnit}`,
     icon: <PiGridFour />, target: null, parent: SETTINGS_KEY, children: [] }] : [];
   // The models the document's views look at, cloud references first; absent while there are none.

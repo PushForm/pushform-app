@@ -74,3 +74,19 @@ it('keeps true dimension values and readable printed type at multiple sheet scal
     expect(dimension.dimension!.fontSizePt).toBe(10);
   }
 });
+
+it('scales physical stroke widths and dashes with a placed drawing without changing its source', () => {
+  const { source, sourceCommands, params, commands, target } = setup();
+  const sourceId = source.state.pages.get(params.sourcePageId)!.entityOrder[0]!;
+  const strokeWeightPt = 10 * 72 / 25.4;
+  sourceCommands.execute('layout.shape.setStyle', { pageId: params.sourcePageId, entityId: sourceId,
+    strokeWeightPt, strokeDashMm: [40, 20] });
+  const entities = visibleDrawingEntities(source.state, params.sourcePageId);
+  for (const denominator of [25, 50, 100]) {
+    const ids = commands.execute('layout.drawing.place', { ...params, entities, denominator }) as number[];
+    const style = target.state.pages.get(params.pageId)!.entities.get(ids[0]!)!.style!;
+    expect(style.strokeWeightPt * 25.4 / 72).toBeCloseTo(10 / denominator);
+    expect(style.strokeDashMm).toEqual([40 / denominator, 20 / denominator]);
+  }
+  expect(source.state.pages.get(params.sourcePageId)!.entities.get(sourceId)!.style!.strokeWeightPt).toBe(strokeWeightPt);
+});

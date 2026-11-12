@@ -33,8 +33,8 @@ export function drawingViewEntities(entities: readonly LayoutEntity[], denominat
   for (const [index, entity] of scaled.entries()) {
     const original = entities[index]!;
     delete entity.drawingView; delete entity.groupId; delete entity.nestedGroupIds;
-    if (entity.style) entity.style = { ...entity.style, strokeWeightPt: entity.style.strokeWeightPt / DRAWING_ANNOTATION_SCALE,
-      ...(entity.style.strokeDashMm ? { strokeDashMm: entity.style.strokeDashMm.map(n => n / DRAWING_ANNOTATION_SCALE) } : {}),
+    if (entity.style) entity.style = { ...entity.style, strokeWeightPt: entity.style.strokeWeightPt / denominator,
+      ...(entity.style.strokeDashMm ? { strokeDashMm: entity.style.strokeDashMm.map(n => n / denominator) } : {}),
       ...(entity.style.startArrow ? { startArrow: { ...entity.style.startArrow, sizePt: entity.style.startArrow.sizePt / DRAWING_ANNOTATION_SCALE } } : {}),
       ...(entity.style.endArrow ? { endArrow: { ...entity.style.endArrow, sizePt: entity.style.endArrow.sizePt / DRAWING_ANNOTATION_SCALE } } : {}) };
     // Embedded model references belong to the source document; this view retains their cached picture only.

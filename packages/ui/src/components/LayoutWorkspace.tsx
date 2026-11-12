@@ -3390,6 +3390,8 @@ export function LayoutWorkspace({
   /** Drawing values are shown and typed in the grid's units. */
   const drawingUnits = layoutDrawingUnits(state);
   const entryUnit = drawingUnits === 'mm' ? 'mm' : 'in';
+  // Native styles store points; Drawing edits their full-size physical length.
+  const strokeUnitsPerPt = state.settings.drawing ? (entryUnit === 'mm' ? 25.4 / 72 : 1 / 72) : 1;
   const formatEntryLength = (mm: number): string => formatLayoutLength(mm / 25.4, {
     units: drawingUnits === 'mm' ? 'mm' : 'inch', format: drawingUnits === 'architectural' ? 'architectural' : 'decimal',
     precision: state.settings.precision, showUnits: true });
@@ -4883,12 +4885,13 @@ export function LayoutWorkspace({
             <input type="color" value={currentStyle.strokeColor} onChange={(event) => setStyle({ strokeColor: event.target.value })} />
           </label>
           <label>
-            Weight (pt)
-            <input type="number" min="0.01" step="0.1" value={currentStyle.strokeWeightPt / (state.settings.drawing ? DRAWING_ANNOTATION_SCALE : 1)} onChange={(event) => {
-              const strokeWeightPt = Number(event.target.value) * (state.settings.drawing ? DRAWING_ANNOTATION_SCALE : 1);
+            {state.settings.drawing ? `Stroke width (${entryUnit})` : 'Weight (pt)'}
+            <input type="number" min={state.settings.drawing ? '0.000001' : '0.01'} step={state.settings.drawing && entryUnit === 'in' ? '0.01' : '0.1'}
+              value={state.settings.drawing ? Number((currentStyle.strokeWeightPt * strokeUnitsPerPt).toFixed(6)) : currentStyle.strokeWeightPt} onChange={(event) => {
+              const strokeWeightPt = Number(event.target.value) / strokeUnitsPerPt;
               // A pattern's dashes follow the stroke weight.
               const dash = selectedEntity?.style?.strokeDashMm, pattern = dash?.length ? matchLayoutDash(dash, currentStyle.strokeWeightPt) : null;
-              if (strokeWeightPt > 0) setStyle({ strokeWeightPt, ...(pattern ? { strokeDashMm: layoutDashMm(pattern.id, strokeWeightPt, pattern.scale) } : {}) });
+              if (Number.isFinite(strokeWeightPt) && strokeWeightPt > 0) setStyle({ strokeWeightPt, ...(pattern ? { strokeDashMm: layoutDashMm(pattern.id, strokeWeightPt, pattern.scale) } : {}) });
             }} />
           </label>
           {selectedEntity && (selectedEntity.kind === 'path' || selectedEntity.table) ? <LayoutDashControls dashMm={selectedEntity.style?.strokeDashMm}

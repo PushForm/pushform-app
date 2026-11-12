@@ -4,7 +4,9 @@ Choose **+ → Drawing** to open a full-size 2D drawing. Drawing uses a vector o
 
 Drawing is an unbounded canvas with no page size, orientation, or margins. The origin **(0, 0)** starts at the center of the workspace. Draw in any direction, including negative coordinates. Drag with the middle mouse button to pan and use the wheel to zoom around the pointer. Choose **Return to Origin** in the zoom menu to recenter the axes, or **Fit Content** to frame your drawing. Set grid spacing and metric or imperial units in **Document Settings**. Paper sizes are chosen in Layout.
 
-Drawing annotations use a 1:50 reference size. Font and stroke controls show their printed sizes; geometry and dimension values remain full size. For example, a 10 pt dimension stays 10 pt when the drawing is placed on a sheet at either 1:50 or 1:100.
+Drawing annotations use a 1:50 reference size. Font controls show their printed sizes; geometry and dimension values remain full size. For example, a 10 pt dimension stays 10 pt when the drawing is placed on a sheet at either 1:50 or 1:100.
+
+**Stroke width** uses real-world millimeters or inches, following the drawing’s grid units, for new shapes and selected objects. Switching units preserves the width. Strokes and dash lengths scale with the drawing when placed in a layout: a 10 mm stroke becomes 0.2 mm on paper at 1:50, or 0.1 mm at 1:100. Layout’s own stroke controls use points.
 
 ## Add a drawing to a layout
 

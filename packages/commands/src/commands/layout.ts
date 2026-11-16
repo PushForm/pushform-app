@@ -1493,6 +1493,12 @@ export const layoutCommands: readonly AnyCommand[] = [
       }),
   }),
   defineCommand({
+    id: 'layout.viewport.setUpdates', title: 'Model View Updates', category: 'layout',
+    params: z.object({ automatic: z.boolean() }), undoable: true,
+    // The drawing renders its model views as it changes, or keeps their pictures until they are updated by hand.
+    run: (ctx, params) => host(ctx).edit(params.automatic ? 'Resume Model View Updates' : 'Pause Model View Updates', draft => { draft.settings.autoRender = params.automatic; }),
+  }),
+  defineCommand({
     id: 'layout.grid.toggle', title: 'Toggle Grid', category: 'layout', menu: 'View',
     params: z.object({}), undoable: true,
     run: (ctx) => host(ctx).edit('Toggle Grid', draft => { draft.settings.grid.show = !draft.settings.grid.show; }),

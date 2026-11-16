@@ -17,6 +17,8 @@ const STATUS: Record<ReturnType<typeof layoutViewportStatus>, string> = {
   empty: 'Rendered from the model, which shows nothing in this view.',
   rendering: 'Rendering…',
   unavailable: 'The model cannot be rendered.',
+  outdated: 'Out of date: updates are paused, so this picture shows an earlier version of the view.',
+  unknown: 'This picture cannot be checked against the view or its model. It is kept as it is.',
 };
 
 /** Selection panel controls for a model view: its scene, standard views, navigation, and render status. */
@@ -27,7 +29,7 @@ function statusText(state: LayoutDocumentState, entity: LayoutEntity): string {
   return status === 'cached' && reference ? `Showing the stored render of revision ${reference.target.revisionNumber}.` : STATUS[status];
 }
 
-export function LayoutViewportPanel({ entity, state, disabled, navigating, onCamera, onNavigate, onResizeMode }: {
+export function LayoutViewportPanel({ entity, state, disabled, navigating, onCamera, onNavigate, onResizeMode, onAutomatic, onUpdate }: {
   entity: LayoutEntity;
   state: LayoutDocumentState;
   disabled: boolean;
@@ -36,6 +38,10 @@ export function LayoutViewportPanel({ entity, state, disabled, navigating, onCam
   onCamera: (camera: LayoutViewportCamera, scene: string | null, cameraModified: boolean) => void;
   onNavigate: (navigating: boolean) => void;
   onResizeMode: (preserve: boolean) => void;
+  /** Pause (false) or resume (true) automatic rendering of every model view in the drawing. */
+  onAutomatic: (automatic: boolean) => void;
+  /** Render this view (`all` false) or every view in the drawing now, without resuming automatic updates. */
+  onUpdate: (all: boolean) => void;
 }): JSX.Element | null {
   const viewport = isViewport(entity) ? entity.image.viewport : null;
   const sourceKey = viewport ? viewportSourceKey(state, viewport.source) : '';
@@ -61,6 +67,11 @@ export function LayoutViewportPanel({ entity, state, disabled, navigating, onCam
     <section className="pf-layout-panel-section" aria-label="Model view">
       <h3>Model view</h3>
       <p className="pf-layout-panel-note" role="status">{failure ? `${STATUS.unavailable} ${failure}` : model ? statusText(state, entity) : 'Loading the model…'}</p>
+      <label><input type="checkbox" checked={!state.settings.autoRender} disabled={disabled} onChange={event => onAutomatic(!event.target.checked)} />Pause updates for the drawing</label>
+      {state.settings.autoRender ? null : <div className="pf-layout-panel-row">
+        <button type="button" onClick={() => onUpdate(false)}>Update selected view</button>
+        <button type="button" onClick={() => onUpdate(true)}>Update all</button>
+      </div>}
       <label>Projection<select value={viewport.camera.projection} disabled={disabled}
         onChange={event => onCamera(projectionViewportCamera(viewport.camera, event.target.value as LayoutViewportCamera['projection'], entity.points), viewport.scene, true)}>
         <option value="parallel">Parallel</option><option value="perspective">Perspective</option>

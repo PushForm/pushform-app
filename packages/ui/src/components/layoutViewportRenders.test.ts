@@ -78,7 +78,7 @@ vi.mock('./layoutImage', () => ({
 
 const { layoutViewportPicture, layoutViewportModel, layoutViewportRender, layoutViewportFailure, layoutViewportProblem, layoutViewportStatus,
   layoutViewportWarnings, setLayoutCloudModelLoader,
-  retainLayoutViewportModels, peekLayoutViewportModel, settleLayoutViewportRenders, whenLayoutViewportRendersIdle, holdLayoutViewportDisplays, layoutViewportDetailWarnings } = await import('./layoutViewportRenders');
+  retainLayoutViewportModels, peekLayoutViewportModel, settleLayoutViewportRenders, whenLayoutViewportRendersIdle, holdLayoutViewportDisplays, layoutViewportDetailWarnings, updateLayoutViewports } = await import('./layoutViewportRenders');
 
 const camera: LayoutViewportCamera = { eye: [10, -10, 10], target: [0, 0, 0], up: [0, 0, 1], projection: 'perspective', fov: 35, scale: 1 };
 let nextId = 1;
@@ -472,4 +472,58 @@ it('reports views whose displayed picture has less detail than the export qualit
   } finally { release(); }
   await settle();
   expect(rendered.snapshots).toHaveLength(before);
+});
+
+describe('Pausing model view updates', () => {
+  const paused = { ...state, settings: { ...state.settings, autoRender: false } };
+  const framed = (width: number): LayoutEntity => ({ ...view(), points: [[0, 0], [width, 0], [width, 30], [0, 30]] });
+
+  it('renders nothing committed while paused, but still previews, and updates by hand without resuming', async () => {
+    const entity = framed(51), before = rendered.snapshots.length;
+    layoutViewportPicture(paused, entity);
+    await settle();
+    expect(rendered.snapshots).toHaveLength(before);
+    expect(layoutViewportStatus(paused, entity)).toBe('outdated');
+    const orbit = { ...camera, eye: [12, -8, 10] as [number, number, number] };
+    layoutViewportPicture(paused, entity, orbit, 3);
+    await settle();
+    expect(rendered.previews.length).toBeGreaterThan(0);
+    updateLayoutViewports(paused, [entity]);
+    await settle();
+    expect(rendered.snapshots).toHaveLength(before + 1);
+    expect(layoutViewportStatus(paused, entity)).toBe('current');
+    expect(paused.settings.autoRender).toBe(false);
+    // Another change is outdated again until it is updated.
+    const moved = { ...entity, image: { ...entity.image!, viewport: { ...entity.image!.viewport!, camera: orbit } } };
+    layoutViewportPicture(paused, moved);
+    await settle();
+    expect(rendered.snapshots).toHaveLength(before + 1);
+    expect(layoutViewportStatus(paused, moved)).toBe('outdated');
+    // Resuming renders it.
+    layoutViewportPicture(state, moved);
+    await settle();
+    expect(rendered.snapshots).toHaveLength(before + 2);
+  });
+
+  it('keeps a saved picture whose freshness cannot be known, and does not call it current', () => {
+    const entity = framed(52);
+    entity.image!.src = 'saved-picture';
+    expect(layoutViewportStatus(paused, entity)).toBe('unknown');
+    expect(layoutViewportPicture(paused, entity)).toBe('saved-picture');
+  });
+
+  it('waits for a drag to finish and renders the views on screen first', async () => {
+    const dragged = framed(53), before = rendered.snapshots.length;
+    layoutViewportPicture(state, dragged, undefined, undefined, false, { defer: true });
+    await settle();
+    expect(rendered.snapshots).toHaveLength(before);
+    // The first request starts at once; of the rest, the view on screen goes before the newer one that is not.
+    const [a, b, c, d] = [framed(41), framed(42), framed(43), framed(44)];
+    layoutViewportPicture(state, a);
+    layoutViewportPicture(state, b);
+    layoutViewportPicture(state, c, undefined, undefined, false, { visible: true });
+    layoutViewportPicture(state, d);
+    await settle();
+    expect(rendered.snapshots.slice(before).map(([width]) => width)).toEqual([242, 254, 260, 248]);
+  });
 });

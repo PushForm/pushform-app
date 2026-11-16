@@ -34,7 +34,11 @@ export interface LayoutViewportModel {
   state: DocumentState;
 }
 
-export type LayoutViewportStatus = 'cached' | 'current' | 'empty' | 'rendering' | 'unavailable';
+/**
+ * `outdated`: updates are paused and the picture shows an earlier configuration of the view. `unknown`: the picture is
+ * kept but cannot be checked against the view or its model (a reopened drawing, or a model that cannot be read).
+ */
+export type LayoutViewportStatus = 'cached' | 'current' | 'empty' | 'rendering' | 'unavailable' | 'outdated' | 'unknown';
 
 type Source = LayoutViewport['source'];
 const sourceKey = viewportSourceKey;
@@ -104,7 +108,15 @@ interface Job {
   width: number; height: number; background: string | null; scene: string | null; display: LayoutViewportDisplay | undefined;
   /** The sheet each section plane is drawn on, by plane, for the section markers. */
   sheets: Readonly<Record<string, string>>;
+  /** The configuration it renders, independent of resolution (`viewConfig`). */
+  config: string;
+  /** Requested by the workspace for a view on screen; these render before the rest. */
+  visible: boolean;
 }
+/** The configuration each view's last committed render shows, to tell a paused view's picture from the current view. */
+const rendered = new Map<number, string>();
+/** Views an explicit update asked to render while updates are paused, by the configuration asked for. */
+const forced = new Map<number, string>();
 const queue: Job[] = [];
 let running = false;
 let offscreen: Viewport | null | undefined;
@@ -348,7 +360,23 @@ export function viewportCameraState(camera: LayoutViewportCamera, heightMm: numb
  * paints nothing, and `LAYOUT_VIEW_FAILED` for a view that cannot be rendered and has no earlier picture; '' means
  * the first picture is still on its way.
  */
-export function layoutViewportPicture(state: LayoutDocumentState, entity: LayoutEntity, camera?: LayoutViewportCamera, pxPerMm?: number, exportResolution = false): string {
+function viewConfig(state: LayoutDocumentState, viewport: LayoutViewport, width: number, height: number): string {
+  return JSON.stringify([sourceKey(state, viewport.source), viewport.camera, width, height, viewport.background, viewport.scene, viewport.display ?? null, viewSheets(state, viewport)]);
+}
+
+/** Whether a committed render of the view may start: updates are automatic, or an explicit update asked for it. */
+function mayRender(state: LayoutDocumentState, entityId: number, config: string): boolean {
+  return state.settings.autoRender || forced.get(entityId) === config;
+}
+
+export interface LayoutViewportPictureOptions {
+  /** The view is on screen: its render goes before those of views that are not. */
+  visible?: boolean;
+  /** The view is being dragged or resized: committed renders wait until it is let go. */
+  defer?: boolean;
+}
+
+export function layoutViewportPicture(state: LayoutDocumentState, entity: LayoutEntity, camera?: LayoutViewportCamera, pxPerMm?: number, exportResolution = false, options: LayoutViewportPictureOptions = {}): string {
   if (!isViewport(entity)) return entity.image?.src ?? '';
   if (!camera) {
     const shown = heldDisplays?.get(entity.id);
@@ -386,8 +414,11 @@ export function layoutViewportPicture(state: LayoutDocumentState, entity: Layout
     if (!done) return fallback || LAYOUT_VIEW_FAILED;
     return fallback && layoutImageReady(fallback) ? fallback : done;
   }
+  const config = viewConfig(state, viewport, width, height);
+  // Committed renders wait for a drag to finish and, while updates are paused, for an explicit update; previews do not.
+  if (!camera && (options.defer || !mayRender(state, entity.id, config))) return fallback;
   enqueue({ key, entityId: entity.id, preview: !!camera, state, source: viewport.source, camera: viewportCameraState(view, height),
-    shift: view.shift, width: pixels[0], height: pixels[1], background: viewport.background, scene: viewport.scene, display: viewport.display, sheets });
+    shift: view.shift, width: pixels[0], height: pixels[1], background: viewport.background, scene: viewport.scene, display: viewport.display, sheets, config, visible: !!options.visible });
   return fallback;
 }
 
@@ -412,8 +443,9 @@ export function layoutViewportRender(state: LayoutDocumentState, entity: LayoutE
   // An empty view stores a transparent picture, so the drawing reopens showing nothing there without the model.
   const done = found === LAYOUT_VIEW_EMPTY ? TRANSPARENT_PNG : found;
   if (done) return { src: done, cache: { camera: viewport.camera, widthMm: width, heightMm: height, sha256: reference.target.sha256, ...(sheet ? { sheet } : {}) } };
-  if (done === undefined) enqueue({ key, entityId: entity.id, preview: false, state, source: viewport.source, camera: viewportCameraState(viewport.camera, height),
-    shift: viewport.camera.shift, width: pixels[0], height: pixels[1], background: viewport.background, scene: viewport.scene, display: viewport.display, sheets });
+  const config = viewConfig(state, viewport, width, height);
+  if (done === undefined && mayRender(state, entity.id, config)) enqueue({ key, entityId: entity.id, preview: false, state, source: viewport.source, camera: viewportCameraState(viewport.camera, height),
+    shift: viewport.camera.shift, width: pixels[0], height: pixels[1], background: viewport.background, scene: viewport.scene, display: viewport.display, sheets, config, visible: false });
   return null;
 }
 
@@ -521,12 +553,39 @@ export async function settleLayoutViewportRenders(state: LayoutDocumentState, en
 export function layoutViewportStatus(state: LayoutDocumentState, entity: LayoutEntity): LayoutViewportStatus {
   if (!isViewport(entity)) return 'current';
   const viewport = entity.image.viewport;
-  if (failures.has(sourceKey(state, viewport.source))) return 'unavailable';
-  if (entity.image.src && viewportCacheCurrent(viewport, entity.points, state)) return 'cached';
+  const cached = !!entity.image.src && viewportCacheCurrent(viewport, entity.points, state);
+  // A picture kept for a model that cannot be read cannot be checked against it.
+  if (failures.has(sourceKey(state, viewport.source))) return entity.image.src && !cached ? 'unknown' : 'unavailable';
+  if (cached) return 'cached';
   const model = loadedModels.get(sourceKey(state, viewport.source));
   if (model && viewShowsNothing(model, viewport.scene)) return 'empty';
   if (queue.some(job => job.entityId === entity.id) || running && current?.entityId === entity.id) return 'rendering';
-  return renderFailures.has(entity.id) ? 'unavailable' : 'current';
+  if (renderFailures.has(entity.id)) return 'unavailable';
+  if (!state.settings.autoRender) {
+    const { width, height } = layoutFrameSize(entity.points);
+    const known = rendered.get(entity.id);
+    if (known !== viewConfig(state, viewport, width, height)) {
+      // Without a record of what the picture shows, a saved picture that names its own configuration is outdated; otherwise it is unknown.
+      return known !== undefined || viewport.cache || !(latest.has(entity.id) || entity.image.src) ? 'outdated' : 'unknown';
+    }
+  }
+  return 'current';
+}
+
+/**
+ * Renders these views now, even while updates are paused, without resuming automatic updates. Views whose picture already
+ * matches are left alone.
+ */
+export function updateLayoutViewports(state: LayoutDocumentState, entities: readonly LayoutEntity[]): void {
+  for (const entity of entities) {
+    if (!isViewport(entity)) continue;
+    const viewport = entity.image.viewport;
+    if (entity.image.src && viewportCacheCurrent(viewport, entity.points, state)) continue;
+    const { width, height } = layoutFrameSize(entity.points);
+    forced.set(entity.id, viewConfig(state, viewport, width, height));
+    layoutViewportPicture(state, entity, undefined, undefined, false, { visible: true });
+  }
+  notifyLayoutImages();
 }
 
 let current: Job | null = null;
@@ -549,7 +608,10 @@ async function drain(): Promise<void> {
   running = true;
   try {
     while (queue.length) {
-      const job = queue.pop()!;
+      // The newest request of a view on screen goes first; otherwise the newest.
+      let next = queue.length - 1;
+      for (let index = queue.length - 1; index >= 0; index--) if (queue[index]!.visible) { next = index; break; }
+      const job = queue.splice(next, 1)[0]!;
       current = job;
       let picture = '', failure: string | null = null;
       try {
@@ -595,6 +657,8 @@ async function drain(): Promise<void> {
       }
       if (!job.preview) {
         remember(job.key, picture);
+        if (picture && !failure) rendered.set(job.entityId, job.config);
+        if (forced.get(job.entityId) === job.config) forced.delete(job.entityId);
         if (failure) renderFailures.set(job.entityId, failure); else renderFailures.delete(job.entityId);
       }
       // A committed render takes over once decoded (layoutViewportPicture); a preview paints at once.

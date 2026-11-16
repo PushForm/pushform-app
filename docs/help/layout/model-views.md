@@ -40,6 +40,12 @@ Model views render as pictures of their model. Their status distinguishes a save
 
 While a view is still rendering, the page shows a pale gray box in its frame; printing waits for the picture, but export does not. A view whose model shows nothing from its camera and scene, such as an empty model or a scene that hides every tag, draws nothing (only its background when Background is on), so anything underneath it on the page shows through. A view that cannot be rendered and has no earlier picture, for example because its model was only linked to an outside file, shows a gray box crossed in red on the page while you edit, and its status gives the reason. Printed and exported pages leave such a view empty instead; PDF export lists it in its notes.
 
-PDF, SVG and image export use whatever each view shows at that moment, including an outdated saved picture. Export does not refresh a view, wait for a render in progress or ask you to confirm.
+## Pausing updates
+
+Model views render automatically as you change the drawing. Views you are dragging or resizing render once you let go, and the views on screen render first. For a large drawing, select a model view and turn on **Pause updates for the drawing** in its panel. While paused, every model view keeps its last picture and a view that no longer matches its settings is marked **Outdated** on the page and in its status; the mark is never printed or exported. Navigating a view still shows a quick preview. Use **Update selected view** or **Update all** to render by hand; updating does not resume automatic updates. Turning the pause off renders every outdated view. Pausing is part of the drawing and can be undone.
+
+A picture that cannot be checked against its view or model, for example one kept for a model that cannot be read, is kept as it is and its status says that it cannot be checked, instead of calling it current.
+
+PDF, SVG and image export use whatever each view shows at that moment, including an outdated saved picture. Export does not refresh a view, wait for a render in progress or ask you to confirm, and it does not change whether updates are paused.
 
 Changing a view's frame does not turn it into ordinary drawing paths. In vector PDF export, the surrounding drawing can remain vector while the model view is a raster image.

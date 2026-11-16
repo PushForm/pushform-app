@@ -39,9 +39,9 @@ import { repeatLayoutShape, type LayoutShapeRepeat } from './layoutShapeRepeat';
 import { lastCreatedLayoutObjects, trackLayoutCreations } from './layoutLastCreated';
 import { LayoutDashControls } from './LayoutDashControls';
 import { LayoutArrowControls } from './LayoutArrowControls';
-import { layoutImageLoads, paintLayoutImage } from './layoutImage';
+import { layoutImageLoads, paintLayoutImage, paintLayoutOutdatedBadge } from './layoutImage';
 import { paintLayoutFillPattern } from './layoutFillPattern';
-import { layoutViewportModel, layoutViewportPicture, layoutViewportSources } from './layoutViewportRenders';
+import { layoutViewportModel, layoutViewportPicture, layoutViewportSources, layoutViewportStatus, updateLayoutViewports } from './layoutViewportRenders';
 import { initialViewportCamera, orbitViewportCamera, panViewportCamera, zoomViewportCamera } from './layoutViewportCameras';
 import { LayoutViewportPanel } from './LayoutViewportPanel';
 import { Icon } from './Icon';
@@ -728,8 +728,13 @@ function paintPage(
       }
       if (entity.image) {
         const preview = pathEdit?.entityId === id && pathEdit.points ? previewedSource(id)! : entity;
-        const picture = layoutViewportPicture(state, preview, viewportPreview?.entityId === id ? viewportPreview.camera : undefined, outputDpi ? undefined : renderScale);
-        if (!moving || moving.copy) paintLayoutImage(ctx, preview, selected.has(id), picture, outputDpi !== undefined);
+        // Committed renders wait while the view is dragged or resized; the workspace asks for the views it shows first.
+        const picture = layoutViewportPicture(state, preview, viewportPreview?.entityId === id ? viewportPreview.camera : undefined, outputDpi ? undefined : renderScale, false,
+          { visible: outputDpi === undefined, defer: !!moving || pathEdit?.entityId === id });
+        if (!moving || moving.copy) {
+          paintLayoutImage(ctx, preview, selected.has(id), picture, outputDpi !== undefined);
+          if (outputDpi === undefined && !thumbnail && layoutViewportStatus(state, preview) === 'outdated') paintLayoutOutdatedBadge(ctx, preview);
+        }
         if (moving) {
           ctx.save(); ctx.translate(...moving.delta);
           paintLayoutImage(ctx, preview, true, picture); ctx.restore();
@@ -4822,6 +4827,8 @@ export function LayoutWorkspace({
             navigating={navigatingViewportId === selectedEntity.id}
             onCamera={(camera, scene, cameraModified) => runPageCommand('layout.viewport.setCamera', { pageId: page.id, entityId: selectedEntity.id, camera, scene, cameraModified })}
             onResizeMode={preserveScale => runPageCommand('layout.viewport.setResizeMode', { pageId: page.id, entityId: selectedEntity.id, preserveScale })}
+            onAutomatic={automatic => runPageCommand('layout.viewport.setUpdates', { automatic })}
+            onUpdate={all => updateLayoutViewports(state, all ? state.pageOrder.flatMap(id => state.layerOrder.flatMap(layerId => entitiesForLayer(state.pages.get(id)!, state, layerId))) : [selectedEntity])}
             onNavigate={on => { if (on) setNavigatingViewportId(selectedEntity.id); else endViewportNavigation(); }} /> : null}
           {/* A model view's layer changes through Move to Layer or the object browser, not the panel. */}
           {selectedEntity && !isViewport(selectedEntity) ? (

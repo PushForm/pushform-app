@@ -859,11 +859,35 @@ describe('SketchUp LayOut import', () => {
     if (reason === 'missing-model') delete files['ref/model.skp'];
     const { doc } = importSketchUpLayout(zipSync(files));
     const exported = await exportSketchUpLayout(doc.state);
-    expect(exported.warnings.some(warning => warning.includes('cached appearance'))).toBe(true);
+    expect(exported.warnings).toHaveLength(1);
+    expect(exported.warnings[0]).toContain('1 model view was exported as page artwork, not editable model views: View 1 (');
+    expect(exported.warnings[0]).toContain('model editing, camera changes and model-linked behavior are lost for these views in the exported file');
     const output = unzipSync(exported.bytes);
     expect(strFromU8(output['pages/page1.xml']!)).not.toContain('skpModelRef');
     expect(Object.keys(output).some(path => path.endsWith('.skp'))).toBe(false);
     expect(doc.state.modelArchives?.size).toBe(1);
+  });
+
+  it('flattens only the views that cannot stay editable, without a prompt, and names them in the report', async () => {
+    const view = (id: string, ref: string) => `<e:skpModelRef id="${id}">
+      <e:placedFileReference><e:rectangleBase x="1" y="1" width="2" height="1" /></e:placedFileReference>
+      <r:skpFileReference r:id="${ref}" /><r:imageFileReference r:id="id2" />
+    </e:skpModelRef>`;
+    const files = unzipSync(layoutFile(page(view('id40', 'idModel') + view('id41', 'idBad') + view('id42', 'idModel'), onLayer('id10', ['id40', 'id41', 'id42']))));
+    files['references.xml'] = strToU8(strFromU8(files['references.xml']!).replace('</references>',
+      '<r:skpFileReference r:id="idModel" internalTarget="ref/model.skp" /><r:skpFileReference r:id="idBad" internalTarget="../model.skp" /></references>'));
+    const { doc } = importSketchUpLayout(zipSync(files));
+    const before = encodeLayoutDocument(doc);
+    const pageName = doc.state.pages.get(doc.state.pageOrder[0]!)!.name;
+    const exported = await exportSketchUpLayout(doc.state);
+    expect(exported.warnings).toHaveLength(1);
+    expect(exported.warnings[0]).toContain(`${pageName}: 1 model view was exported as page artwork`);
+    expect(exported.warnings[0]).toContain('View 2 (');
+    expect(exported.warnings[0]).not.toContain('View 1');
+    expect(exported.warnings[0]).not.toContain('View 3');
+    const output = strFromU8(unzipSync(exported.bytes)['pages/page1.xml']!);
+    expect(output.match(/<e:skpModelRef\b/g)).toHaveLength(2);
+    expect(encodeLayoutDocument(doc)).toEqual(before);
   });
 
   it('does not retain complete source packages for imports without model viewports', () => {

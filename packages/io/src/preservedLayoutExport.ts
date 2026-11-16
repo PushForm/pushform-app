@@ -52,6 +52,9 @@ interface ArchiveContext {
   connections: Map<string, XmlElement[]>;
 }
 
+/** Why a model view is exported as page artwork rather than an editable model view. */
+export type FlattenReason = 'cloud' | 'no-package' | 'unsupported';
+
 export interface ViewportPlacement { xml: string; rect: [number, number, number, number]; width: number; height: number }
 
 /**
@@ -72,7 +75,8 @@ export class PreservedLayoutExport {
 
   constructor(private readonly allocate: () => string, private readonly output: Record<string, Uint8Array>,
     private readonly outputReferences: string[], private readonly warn: (message: string) => void,
-    private readonly placement: (entity: LayoutEntity) => ViewportPlacement | null) {}
+    private readonly placement: (entity: LayoutEntity) => ViewportPlacement | null,
+    private readonly flatten: (entity: LayoutEntity, reason: FlattenReason) => void) {}
 
   prepare(state: LayoutDocumentState): void {
     this.state = state;
@@ -104,7 +108,6 @@ export class PreservedLayoutExport {
           this.warn('This drawing was imported before model connections were preserved; original model annotation connections may be missing');
       } catch {
         this.archives.set(archiveId, null);
-        this.warn('An original model package could not be restored; its viewports are exported as cached appearance');
       }
     }
   }
@@ -116,13 +119,13 @@ export class PreservedLayoutExport {
     const viewport = entity.image.viewport;
     if (isCloudSource(viewport.source) || viewport.templateId === null) {
       // A cloud model has no .skp to embed: its view is exported as its picture.
-      this.warn('A view of a PushForm cloud model was exported as its picture; LayOut cannot edit it as a model viewport');
+      this.flatten(entity, 'cloud');
       return null;
     }
     const archive = this.archives.get(viewport.source.archiveId);
     const template = archive?.originals.get(viewport.templateId);
     if (!archive || !template?.source) {
-      if (archive !== null) this.warn('A SketchUp viewport has no original model package and was exported as cached appearance');
+      this.flatten(entity, 'no-package');
       return null;
     }
     try {
@@ -138,7 +141,7 @@ export class PreservedLayoutExport {
       this.writtenViews.set(entity.id, id);
       return [[id, `      ${standalone(template, this.rewrite(xml, archive, template.source.namespaces, entityIds, true))}\n`]];
     } catch {
-      this.warn('A SketchUp viewport has unsupported or missing dependencies and was exported as cached appearance');
+      this.flatten(entity, 'unsupported');
       return null;
     }
   }

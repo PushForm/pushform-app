@@ -492,13 +492,20 @@ impl Pipeline {
         if !self.finished { return Err("the conversion is not finished".into()); }
         while self.mesh_one() {}
         if !self.is_done() { return Err("the meshing threads have not finished".into()); }
+        // The bodies reach the pipeline in the order the reader happens to finish them, which differs from run to run
+        // with threads. The result lists parts and placements in planned order (the file's), so the same file always
+        // gives the same parts, names and numbering; a part is named and colored by its first placement.
         // Parts that failed to mesh drop out with their placements; the rest are renumbered.
+        let mut order: Vec<usize> = (0..self.jobs.len()).collect();
+        order.sort_by_key(|&job| self.jobs[job].0);
         let mut renumber: HashMap<usize, usize> = HashMap::new();
         let mut parts: Vec<Part> = Vec::new();
-        for (job, mesh) in self.meshes.iter_mut().enumerate() {
-            if let Some(Some(mesh)) = mesh.take() { renumber.insert(job, parts.len()); parts.push(Part { mesh, placement_inverse: self.jobs[job].1 }); }
+        for job in order {
+            if let Some(Some(mesh)) = self.meshes[job].take() { renumber.insert(job, parts.len()); parts.push(Part { mesh, placement_inverse: self.jobs[job].1 }); }
         }
-        let placed: Vec<(usize, &ImportedBody, M4)> = self.placed.iter()
+        let mut by_plan: Vec<&(usize, usize, M4)> = self.placed.iter().collect();
+        by_plan.sort_by_key(|&&(_, i, _)| i);
+        let placed: Vec<(usize, &ImportedBody, M4)> = by_plan.into_iter()
             .filter_map(|&(job, i, m)| Some((*renumber.get(&job)?, self.bodies[i].as_ref()?, m))).collect();
         Ok(write_result(parts, &placed, &self.warnings, &self.schema, &self.system, mode, threshold))
     }

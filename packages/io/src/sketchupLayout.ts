@@ -282,8 +282,8 @@ class Importer {
 
     // LayOut 2015 and earlier keep shared content inline in each shared layer definition's instance.
     const shared = child(document, 'layerEntityManager')
-      ? this.layerEntities(child(document, 'layerEntityManager'), layerIds, context, null)
-      : this.inlineLayerEntities(definitions.flatMap((definition) => childrenNamed(definition, 'layerInstance')), layerIds, context, null);
+      ? this.layerEntities(child(document, 'layerEntityManager'), layerIds, context)
+      : this.inlineLayerEntities(definitions.flatMap((definition) => childrenNamed(definition, 'layerInstance')), layerIds, context);
     const sharedEntities = new Map<number, LayoutEntity>();
     const sharedEntityOrder: number[] = [];
     for (const entity of shared) {
@@ -301,7 +301,6 @@ class Importer {
       const target = this.references.get(pageRef.attrs['r:id'] ?? '')?.attrs.internalTarget;
       if (!target || !this.files[target]) { this.warn('a page whose content is missing was skipped'); continue; }
       const visibility = (child(pageRef, 'layerVisibility')?.text ?? '').split(',').map((value) => value.trim());
-      const hidden = new Set(definitions.flatMap((definition, index) => visibility[index] === '0' ? [layerIds.get(definition.attrs.id ?? '')!] : []));
       const id = this.allocId();
       const page: LayoutPage = {
         id, name: pageRef.attrs.name || `Page ${pageOrder.length + 1}`, size, margin, background,
@@ -312,9 +311,10 @@ class Importer {
       const pageXml = this.xml(target);
       pageXmls.push(pageXml);
       pagePositions.set(id, pageRefIds.indexOf(pageRef.attrs['r:id'] ?? ''));
+      // Content on a layer hidden for this page is kept: the page's layer visibility hides it until the layer is shown.
       const pageEntities = child(pageXml, 'layerEntityManager')
-        ? this.layerEntities(child(pageXml, 'layerEntityManager'), layerIds, context, hidden)
-        : this.inlineLayerEntities(childrenNamed(child(pageXml, 'layerInstanceManager') ?? pageXml, 'layerInstance'), layerIds, context, hidden);
+        ? this.layerEntities(child(pageXml, 'layerEntityManager'), layerIds, context)
+        : this.inlineLayerEntities(childrenNamed(child(pageXml, 'layerInstanceManager') ?? pageXml, 'layerInstance'), layerIds, context);
       for (const entity of pageEntities) {
         if (layers.get(entity.layerId)?.shared) { this.warn('page content on a shared layer was dropped'); continue; }
         page.entities.set(entity.id, entity);
@@ -368,22 +368,19 @@ class Importer {
    * entity list and no references). An instance with only an `l:ref` points at a shared layer's content,
    * which is read from the document instead.
    */
-  private inlineLayerEntities(instances: XmlElement[], layerIds: Map<string, number>,
-    context: EntityContext, hidden: Set<number> | null): LayoutEntity[] {
+  private inlineLayerEntities(instances: XmlElement[], layerIds: Map<string, number>, context: EntityContext): LayoutEntity[] {
     const result: LayoutEntity[] = [];
     for (const instance of instances) {
       const layerId = layerIds.get(child(instance, 'layerDefinition')?.attrs['l:ref'] ?? '');
       const entities = child(instance, 'entityList')?.children ?? [];
       if (layerId === undefined || !entities.length) continue;
-      if (hidden?.has(layerId)) { this.warn('content on layers hidden for its page was skipped'); continue; }
       for (const element of entities) result.push(...this.entity(element, layerId, context));
     }
     return result;
   }
 
   /** Entities of one layerEntityManager in layer and stacking order. */
-  private layerEntities(manager: XmlElement | undefined, layerIds: Map<string, number>,
-    context: EntityContext, hidden: Set<number> | null): LayoutEntity[] {
+  private layerEntities(manager: XmlElement | undefined, layerIds: Map<string, number>, context: EntityContext): LayoutEntity[] {
     if (!manager) return [];
     // Layers reference leaves, so retain each leaf's group ancestry while indexing it.
     const byId = new Map<string, XmlElement>();
@@ -424,13 +421,7 @@ class Importer {
         };
       });
     };
-    for (const [layerId, entities] of assigned) {
-      if (hidden?.has(layerId)) {
-        if (entities.length) this.warn(`content on layers hidden for its page was skipped`);
-        continue;
-      }
-      for (const entity of entities) result.push(...convert(entity, layerId));
-    }
+    for (const [layerId, entities] of assigned) for (const entity of entities) result.push(...convert(entity, layerId));
     const fallback = [...context.layers.keys()].find((id) => !context.layers.get(id)!.shared) ?? [...context.layers.keys()][0]!;
     for (const entity of unassigned) result.push(...convert(entity, fallback));
     return result;

@@ -163,18 +163,15 @@ fn fail(message: String) -> u32 {
     0
 }
 
-/// Threaded build: set up the main thread for the C library's threads (its thread descriptor), which a command does on
-/// start but a library leaves to the host. Call it once after instantiation, before anything else; without it the
-/// first thread-local key the program makes walks an unmade thread list and never returns.
+/// Threaded build: kept for hosts that call it after `_initialize`. The C library's reactor start (`_initialize`) sets up
+/// the main thread's thread descriptor itself, so there is nothing left to do here. Older toolchains also exported
+/// `__wasi_init_tp` for this; newer ones do not, so calling it would fail to link.
 ///
 /// # Safety
-/// Call it once, on the instantiating thread, before any other export.
+/// Call it, if at all, once on the instantiating thread after `_initialize`.
 #[cfg(all(target_arch = "wasm32", feature = "threads"))]
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn pf_init() {
-    unsafe extern "C" { fn __wasi_init_tp(); }
-    unsafe { __wasi_init_tp() };
-}
+pub unsafe extern "C" fn pf_init() {}
 
 /// Allocate `len` bytes the caller fills with the file's text; freed by `pf_free`.
 #[unsafe(no_mangle)]

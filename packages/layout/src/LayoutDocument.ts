@@ -298,6 +298,8 @@ export interface LayoutEntity {
   id: number;
   /** Custom object browser name; absent means the default kind-and-number name. */
   name?: string;
+  /** Source and paper placement of a locked drawing-view group; owned by its first member. */
+  drawingView?: { sourceGuid: string; sourceName: string; sourcePageId: number; denominator: number; x: number; y: number; rotation: number };
   locked?: boolean;
   /** Hidden objects are kept and listed in the object browser but never drawn, printed, exported, picked or snapped to. */
   hidden?: boolean;
@@ -425,6 +427,8 @@ export interface LayoutDocumentState {
   sharedEntityOrder: number[];
   activeLayerId: number;
   settings: {
+    /** Full-size 2D drafting, using the shared native drawing format. */
+    drawing?: boolean;
     /** Absent in older documents means enabled. */
     objectSnap?: boolean;
     units: 'mm' | 'inch' | 'architectural';

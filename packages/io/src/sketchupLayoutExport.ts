@@ -35,6 +35,7 @@ import {
   linearDimensionGeometry,
   rotateLayoutPoint,
   entityOnPage,
+  isLayoutLayerVisible,
   type LayoutAngularDimension,
   type LayoutDimensionAnchor,
   layoutSegmentAnchorFrame,
@@ -206,9 +207,12 @@ class Exporter {
       const layer = state.layers.get(id)!;
       return `    <ld:layerDefinition ver="2" id="${this.layerIds.get(id)}" name="${attr(layer.name)}" visible="${flag(layer.visible)}" locked="${flag(layer.locked)}" shared="${flag(layer.shared)}"/>\n`;
     }).join('');
-    const visibility = state.layerOrder.map(() => '1').join(',');
-    const pageRefXml = state.pageOrder.map((id, index) =>
-      `    <ld:pageRef r:id="${pageRefs[index]}" id="${pageIds[index]}" name="${attr(state.pages.get(id)!.name)}" showMasterLayers="1">\n      <r:layerVisibility>${visibility}</r:layerVisibility>\n    </ld:pageRef>\n`).join('');
+    // A .layout file records layer visibility page by page; a layer hidden on a page keeps its content there.
+    const pageRefXml = state.pageOrder.map((id, index) => {
+      const page = state.pages.get(id)!;
+      const visibility = state.layerOrder.map((layerId) => flag(isLayoutLayerVisible(page, state, layerId))).join(',');
+      return `    <ld:pageRef r:id="${pageRefs[index]}" id="${pageIds[index]}" name="${attr(page.name)}" showMasterLayers="1">\n      <r:layerVisibility>${visibility}</r:layerVisibility>\n    </ld:pageRef>\n`;
+    }).join('');
     const custom = new Map([...this.customTags].map(([field, tag]) => [tag, state.customFields.get(field) ?? layoutAccountFields().get(field) ?? '']));
     const numbered = new Map([...this.pageNumberTags].map(([field, tag]) => [tag, this.pageNumberAttrs(field, pageRefs)]));
     const autoText = [

@@ -39,3 +39,5 @@ export * from './shapeBuilder';
 export * from './svg';
 
 export { cloneLayoutValue, layoutValuesEqual } from './nativeValues';
+
+export * from './scaleDrawings';

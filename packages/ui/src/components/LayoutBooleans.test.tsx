@@ -124,8 +124,11 @@ function setup() {
 }
 
 it('puts tool controls in the tool options bar over the page, not in the side panel or the toolbar', () => {
-  const { choose, dispose } = setup();
+  const { choose, click, dispose } = setup();
   choose('Difference');
+  expect(screen.queryByRole('toolbar')).toBeNull();
+  click(25, 25); expect(screen.queryByRole('toolbar')).toBeNull();
+  click(50, 50);
   const bar = screen.getByRole('toolbar', { name: 'Difference options' });
   expect(bar.closest('aside')).toBeNull();
   expect(bar.classList.contains('is-shown')).toBe(true);
@@ -227,9 +230,7 @@ it.each(['Escape', 'pointer cancel', 'tool change', 'keyboard tool change', 'pag
     expect(screen.queryByLabelText('Boolean result preview')).toBeNull();
     expect(tab.doc.state).toBe(original);
     choose('Union');
-    expect(
-      (within(screen.getByRole('toolbar')).getByRole('button', { name: 'Apply' }) as HTMLButtonElement).disabled,
-    ).toBe(true);
+    expect(screen.queryByRole('toolbar')).toBeNull();
     dispose();
   },
 );

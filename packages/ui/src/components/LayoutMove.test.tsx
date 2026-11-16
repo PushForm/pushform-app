@@ -483,3 +483,12 @@ describe('Layout Move tool', () => {
     dispose();
   });
 });
+
+it('puts the Copy shortcut before the value fields in Layout as well', () => {
+  const { useMove, dispose } = setup();
+  useMove();
+  const copy = screen.getByRole('button', { name: /Copy/ });
+  const x = layoutEntryField('X');
+  expect(copy.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  dispose();
+});

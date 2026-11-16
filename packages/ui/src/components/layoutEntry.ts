@@ -4,7 +4,7 @@ import type { VcbValue } from '@pushform/commands';
 
 type Point = readonly [number, number];
 
-/** A value a Layout tool takes, drawn as a field on the page beside what it sets. Points are in page millimeters. */
+/** A value a Layout tool takes, shown in the options bar, with optional page dimension guides. Points are in page millimeters. */
 export interface LayoutEntryField {
   /** Stable id within the tool (`length`, `angle`, `width`, …). */
   readonly id: string;

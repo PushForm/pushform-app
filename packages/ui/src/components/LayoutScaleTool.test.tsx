@@ -95,8 +95,7 @@ it('drags the far corner of what its first click picks up, about a fixed base po
 it('shows Scale, Width and Height in the tool options bar, waiting until the base point and then focusing Scale', () => {
   const { click, hover, status, run, dispose } = setup();
   run('tool.scale');
-  const bar = screen.getByRole('toolbar', { name: 'Scale options' });
-  for (const label of ['Scale', 'Width', 'Height']) expect(layoutEntryField(label).disabled).toBe(true);
+  expect(screen.queryByRole('toolbar', { name: 'Scale options' })).toBeNull();
   expect(document.querySelector('input.pf-entry[aria-label="Length"]')).toBeNull();
   click(10, 10);
   expect(document.activeElement).toBe(layoutEntryField('Scale'));
@@ -108,7 +107,7 @@ it('shows Scale, Width and Height in the tool options bar, waiting until the bas
   expect(layoutEntryField('Width').value).toBe('30.0 mm');
   // Beside the pointer only the percentage shows, and the bar stays solid between the clicks.
   expect(screen.getByLabelText('Scale preview').textContent).toBe('150%');
-  expect(bar.className).not.toContain('is-placing');
+  expect(screen.getByRole('toolbar', { name: 'Scale options' }).className).not.toContain('is-placing');
   expect(status()).toContain('Scale: 150%');
   dispose();
 });

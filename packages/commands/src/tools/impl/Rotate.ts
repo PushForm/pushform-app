@@ -23,7 +23,6 @@ import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
 import type { ToolKeyEvent, ToolPointerEvent, ToolSettingValue, ToolStatus } from '../Tool';
 import { toggleSetting } from '../settings';
-import { pointerField } from '../entry';
 import { DRAG_PX, entityOverlay, HOVER_COLOR, inferenceOverlay, screenDist, worldPerPixelAt } from '../toolUtil';
 import { AXIS_COLOR, AXIS_DIR, movedOutline, pickRef, sectionPreviewFor, TransformToolBase, withoutSectionPlanes, worldToScreen } from './transformShared';
 import type { TransformRotation } from './transformShared';
@@ -81,6 +80,7 @@ export class RotateTool extends TransformToolBase implements SectionPreviewTool 
   private lockedNormal: Vec3 | null = null;
   private hoverNormal: Vec3 | null = null;
   private copy = false;
+  private angleLock: number | null = null;
   /** The last section preview and what it was made for, so an unchanged one is the same object. */
   private sectionCache: { refs: readonly EntityRef[]; key: string; preview: SectionPreview | null } | null = null;
   private camera: ToolPointerEvent['camera'] | null = null;
@@ -106,12 +106,14 @@ export class RotateTool extends TransformToolBase implements SectionPreviewTool 
     this.copy = false;
     this.hover = null;
     this.notice = null;
+    this.angleLock = null;
   }
   hasPendingWork(): boolean {
     return this.state.kind !== 'idle';
   }
 
   protected override onDeactivate(): void {
+    this.angleLock = null;
     this.state = IDLE;
     this.hover = null;
     this.lockAxis = null;
@@ -148,7 +150,7 @@ export class RotateTool extends TransformToolBase implements SectionPreviewTool 
     const s = this.state;
     if (s.kind === 'rotating') {
       if (!s.moved && screenDist(e.screen, s.downScreen) > DRAG_PX) s.moved = true;
-      s.angle = this.angleFor(e, s);
+      s.angle = this.angleLock ?? this.angleFor(e, s);
       this.ctx?.requestRender();
       this.ctx?.statusChanged();
       return;
@@ -170,7 +172,7 @@ export class RotateTool extends TransformToolBase implements SectionPreviewTool 
     if (s.kind === 'rotating') {
       if (s.pressed) return;
       if (!s.moved && screenDist(e.screen, s.downScreen) <= DRAG_PX) return;
-      this.commit(this.angleFor(e, s));
+      this.finishAt(e);
       return;
     }
     if (!inf) return;
@@ -179,6 +181,8 @@ export class RotateTool extends TransformToolBase implements SectionPreviewTool 
       if (v3dist(start, s.center) < MERGE_TOL) return;
       const baseDir = v3normalize(v3sub(start, s.center));
       this.notice = null;
+      this.angleLock = null;
+      this.cursorScreen = e.screen;
       this.state = { kind: 'rotating', refs: s.refs, center: s.center, axis: s.axis, start, baseDir, downScreen: e.screen, pressed: true, moved: false, angle: 0 };
       this.ctx?.statusChanged();
       this.ctx?.requestRender();
@@ -200,7 +204,7 @@ export class RotateTool extends TransformToolBase implements SectionPreviewTool 
     const s = this.state;
     s.pressed = false;
     if (!s.moved && screenDist(e.screen, s.downScreen) <= DRAG_PX) return;
-    this.commit(this.angleFor(e, s));
+    this.finishAt(e);
   }
 
   // --- keys / VCB -----------------------------------------------------------------------------
@@ -272,6 +276,7 @@ export class RotateTool extends TransformToolBase implements SectionPreviewTool 
   }
 
   onCancel(): void {
+    this.angleLock = null;
     this.notice = null;
     if (this.state.kind !== 'idle') {
       this.state = IDLE;
@@ -317,7 +322,30 @@ export class RotateTool extends TransformToolBase implements SectionPreviewTool 
   status(): ToolStatus {
     // once the center is set the protractor's plane is fixed, and no lock applies
     const held = this.state.kind === 'idle' ? planeTag(this.lockAxis) : [];
-    return { ...this.baseStatus(), settings: [toggleSetting('copy', 'Copy', this.copy, 'primary')], ...(held.length ? { held } : {}) };
+    const angle = this.state.kind === 'rotating' ? this.state.angle : this.state.kind === 'idle' ? this.lastRotation()?.angle : undefined;
+    return { ...this.baseStatus(), placing: false,
+      fields: [{ id: 'angle', label: 'Angle', kind: 'angle', location: 'bar', value: angle === undefined ? '' : this.fmtAngle(angle), disabled: angle === undefined, locked: this.angleLock !== null }],
+      settings: [toggleSetting('copy', 'Copy', this.copy, 'primary')], ...(held.length ? { held } : {}) };
+  }
+
+  onEntry(values: Readonly<Record<string, VcbValue>>): void {
+    const value = values['angle'];
+    const angle = value ? degreesFromVcb(value) : this.state.kind === 'rotating' ? this.state.angle / DEG : null;
+    if (angle === null || !Number.isFinite(angle)) return;
+    if (this.state.kind === 'rotating') this.commit(angle * DEG);
+    else if (this.state.kind === 'idle') {
+      const last = this.lastRotation();
+      if (last) this.reapplyLast(m4rotationAbout(last.center, last.axis, angle * DEG), undefined, { ...last, angle: angle * DEG });
+    }
+  }
+
+  onEntryLock(id: string, value: VcbValue | null): void {
+    if (id !== 'angle' || this.state.kind !== 'rotating') return;
+    const degrees = value ? degreesFromVcb(value) : null;
+    this.angleLock = degrees === null ? null : degrees * DEG;
+    if (this.angleLock !== null) this.state.angle = this.angleLock;
+    this.ctx?.statusChanged();
+    this.ctx?.requestRender();
   }
 
   /** The bar switched Copy (or Ctrl was tapped) just after a commit: redo it as a copy, or as a plain rotation, in one undo step. */
@@ -338,7 +366,7 @@ export class RotateTool extends TransformToolBase implements SectionPreviewTool 
   private baseStatus(): ToolStatus {
     const s = this.state;
     if (s.kind === 'rotating') {
-      return { instructor: `Pick second point or enter angle.`, vcbLabel: 'Angle', vcbValue: this.fmtAngle(s.angle), fields: [pointerField('Angle', 'angle', this.fmtAngle(s.angle))] };
+      return { instructor: `Pick second point or enter angle.`, vcbLabel: 'Angle', vcbValue: this.fmtAngle(s.angle) };
     }
     if (s.kind === 'center') return { instructor: this.notice ?? `Click to set the starting direction.`, vcbLabel: 'Angle' };
     const instructor = this.lastError ? `Rotate failed: ${this.lastError}` : this.lastNotice ?? `Pick the centre of rotation. Hover a face to align the protractor, arrows lock an axis.`;
@@ -450,6 +478,7 @@ export class RotateTool extends TransformToolBase implements SectionPreviewTool 
     const { refs, center, axis } = s;
     const copy = this.copy;
     this.state = IDLE;
+    this.angleLock = null;
     if (Math.abs(angle) < 1e-9) {
       this.ctx?.statusChanged();
       this.ctx?.requestRender();
@@ -457,5 +486,12 @@ export class RotateTool extends TransformToolBase implements SectionPreviewTool 
     }
     const matrix = m4rotationAbout(center, axis, angle);
     this.commitTransform(refs, matrix, copy, 'Rotate', { center, axis, angle });
+  }
+
+  private finishAt(e: ToolPointerEvent): void {
+    const s = this.state;
+    if (s.kind !== 'rotating') return;
+    const unchanged = this.cursorScreen && screenDist(e.screen, this.cursorScreen) === 0;
+    this.commit(this.angleLock ?? (unchanged ? s.angle : this.angleFor(e, s)));
   }
 }

@@ -40,10 +40,12 @@ export interface ToolOptionsBarProps {
   /** Give keyboard focus back to the view. */
   onLeave(): void;
   /**
-   * Controls a workspace renders itself, after the tool's name, such as Layout's text formatting
-   * while text is edited. The bar shows while there are any.
+   * Controls a workspace renders itself, after shortcut controls, such as Layout's text formatting
+   * while text is edited. The bar shows when the content offers an editable field or action.
    */
   readonly children?: ReactNode;
+  /** Whether custom content currently offers an editable field or action. */
+  readonly hasEditableContent?: boolean | undefined;
 }
 
 /**
@@ -72,6 +74,7 @@ export function ToolOptionsBar(): JSX.Element {
       settings={styled ? [] : settings}
       placing={placing}
       applied={applied}
+      hasEditableContent={Boolean(styled) || fields.some(f => f.location === 'bar' && !f.disabled)}
       mac={app.keymap.platform === 'mac'}
       onSetting={(id, value) => app.toolManager.setting(id, value)}
       read={(quantity, text) => readQuantity(app, quantity, text)}
@@ -87,11 +90,18 @@ export function ToolOptionsBar(): JSX.Element {
 
 /**
  * The tool options bar, for either workspace: settings and mode toggles floating over the top of
- * the view. Hidden when there are none. Only its controls take the pointer; while the tool
+ * the view. Hidden when no editable controls are available. Only its controls take the pointer; while the tool
  * is placing a point the whole bar lets it through.
  */
-export function ToolOptionsBarView({ tool, settings, placing = false, applied: appliedIn = false, mac, onSetting, read, onLeave, children }: ToolOptionsBarProps): JSX.Element {
-  const shown = settings.length > 0 || Boolean(children);
+export function ToolOptionsBarView({ tool, settings, placing = false, applied: appliedIn = false, mac, onSetting, read, onLeave, children, hasEditableContent = Boolean(children) }: ToolOptionsBarProps): JSX.Element {
+  const shown = hasEditableContent || settings.some(c => {
+    switch (c.kind) {
+      case 'note': return false;
+      case 'toggle': return true;
+      case 'choice': return c.options.some(option => !option.disabled);
+      default: return !c.disabled;
+    }
+  });
   const applied = appliedIn && shown;
   // keep the last controls while fading out
   const last = useRef<{ settings: readonly ToolSetting[]; title: string; id: string }>({ settings: [], title: '', id: '' });
@@ -106,7 +116,7 @@ export function ToolOptionsBarView({ tool, settings, placing = false, applied: a
 
   // Fold until the controls fit; start over when the bar or its controls change. Compared by
   // content, since a workspace may build a new but equal settings list on every render.
-  const settingsKey = JSON.stringify(settings);
+  const settingsKey = JSON.stringify(settings, (key, value) => key === 'held' ? undefined : value);
   useLayoutEffect(() => setFold(0), [settingsKey, view.id, availableWidth]);
   useLayoutEffect(() => {
     const el = root.current;
@@ -166,16 +176,19 @@ export function ToolOptionsBarView({ tool, settings, placing = false, applied: a
 
   const visible = fold >= 3 ? view.settings.filter((c) => (c.priority ?? 1) < 2) : view.settings;
   const overflow = fold >= 3 ? view.settings.filter((c) => (c.priority ?? 1) >= 2) : [];
+  const shortcut = (c: ToolSetting) => c.kind === 'modifier' || ((c.kind === 'toggle' || c.kind === 'choice') && Boolean(c.key));
+  const controls = (items: readonly ToolSetting[]) => items.map((c) => <Control key={c.id} read={read} c={c} mac={mac} asList={fold >= 2} send={send} />);
   const cls = [TOOL_OPTIONS_CLASS, shown ? 'is-shown' : '', applied ? 'is-applied' : '', placing ? 'is-placing' : '', resting && !placing ? 'is-resting' : ''].filter(Boolean).join(' ');
   return (
-    <div ref={root} className={cls} role="toolbar" aria-label={`${view.title} options`} aria-hidden={!shown} onKeyDown={onKeyDown}>
+    <div ref={root} className={cls} role="toolbar" aria-label={`${view.title} options`} aria-hidden={!shown} inert={!shown} onKeyDown={onKeyDown}>
       <span className="pf-tob-tool" title={view.title}>
         <Icon name={`tool-${view.id}`} size={16} />
         {applied ? <span aria-hidden="true">✓</span> : null}
         {fold < 1 ? <span>{applied ? `${view.title} applied` : view.title}</span> : null}
       </span>
+      {controls(visible.filter(shortcut))}
       {content ? <span className="pf-tob-custom" data-tob-control>{content}</span> : null}
-      {visible.map((c) => <Control key={c.id} read={read} c={c} mac={mac} asList={fold >= 2} send={send} />)}
+      {controls(visible.filter((c) => !shortcut(c)))}
       {applied && fold < 2 ? <span className="pf-tob-note">Changes redo the last operation · click to go on</span> : null}
       {overflow.length ? (
         <span className="pf-tob-more-wrap">
@@ -193,7 +206,7 @@ export function ToolOptionsBarView({ tool, settings, placing = false, applied: a
           </button>
           {moreAt ? (
             <span className="pf-tob-more-pop" role="group" aria-label="More options" style={moreAt}>
-              {overflow.map((c) => <Control key={c.id} read={read} c={c} mac={mac} asList send={send} />)}
+              {[...overflow.filter(shortcut), ...overflow.filter((c) => !shortcut(c))].map((c) => <Control key={c.id} read={read} c={c} mac={mac} asList send={send} />)}
             </span>
           ) : null}
         </span>
@@ -209,6 +222,8 @@ export function keyLabel(key: ToolSettingKey, mac: boolean): string {
 
 function Control({ read, c, mac, asList, send }: { read: ToolOptionsBarProps['read']; c: ToolSetting; mac: boolean; asList: boolean; send: (id: string, value: ToolSettingValue, refocus?: boolean) => void }): JSX.Element {
   switch (c.kind) {
+    case 'modifier':
+      return <MomentaryButton c={c} mac={mac} send={send} />;
     case 'choice': {
       const key = c.key ? <kbd className="pf-tob-key">{keyLabel(c.key, mac)}</kbd> : null;
       if (c.display === 'menu' || (asList && c.display === 'icons')) {
@@ -267,6 +282,42 @@ function Control({ read, c, mac, asList, send }: { read: ToolOptionsBarProps['re
     case 'note':
       return <span className="pf-tob-note">{c.text}</span>;
   }
+}
+
+/** A press holds the modifier; release, cancellation, blur or removal always releases it. */
+function MomentaryButton({ c, mac, send }: { c: Extract<ToolSetting, { kind: 'modifier' }>; mac: boolean; send: (id: string, value: ToolSettingValue) => void }): JSX.Element {
+  const down = useRef(false);
+  const latest = useRef(send);
+  latest.current = send;
+  const release = () => {
+    if (!down.current) return;
+    down.current = false;
+    latest.current(c.id, false);
+  };
+  useEffect(() => {
+    window.addEventListener('pointerup', release);
+    window.addEventListener('pointercancel', release);
+    window.addEventListener('blur', release);
+    return () => {
+      window.removeEventListener('pointerup', release);
+      window.removeEventListener('pointercancel', release);
+      window.removeEventListener('blur', release);
+      release();
+    };
+  }, [c.id]);
+  const press = () => {
+    if (down.current || c.disabled) return;
+    down.current = true;
+    latest.current(c.id, true);
+  };
+  return <button type="button" className="pf-tob-toggle pf-tob-momentary" data-tob-control
+    aria-pressed={c.held} disabled={c.disabled} title={`Hold ${c.label}`}
+    onPointerDown={(e) => { if (e.button === 0) { e.preventDefault(); press(); } }}
+    onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); press(); } }}
+    onKeyUp={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); release(); } }}
+    onBlur={release}>
+    {c.label}<kbd className="pf-tob-key">{c.key === 'shift' ? 'Shift' : keyLabel(c.key, mac)}</kbd>
+  </button>;
 }
 
 function QuantityField({ read, c, send }: { read: ToolOptionsBarProps['read']; c: Extract<ToolSetting, { kind: 'quantity' }>; send: (id: string, value: ToolSettingValue, refocus?: boolean) => void }): JSX.Element {

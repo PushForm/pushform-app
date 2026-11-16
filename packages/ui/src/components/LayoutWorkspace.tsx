@@ -5,10 +5,11 @@ import { resizedViewportCamera, layoutModelFields, viewportSourceKey as modelSou
 import { LayoutDocumentHost } from '@pushform/commands';
 import { snapLayoutModelVertex } from './layoutModelSnaps';
 import { peekLayoutViewportModel, retainLayoutViewportModels } from './layoutViewportRenders';
+import { ScaleDrawingPanel } from './ScaleDrawingPanel';
 import { LayoutTableGrid } from './LayoutTableGrid';
 import { cloneLayoutTable, resizeTableAxis, tableFrame } from '@pushform/layout';
 import type { TableCellAddress, TableGridSelection } from './tableGridSelection';
-import { layoutPathArrows, createLayoutTable, createLayoutEllipse, createLayoutPolygon, snapLayoutPolygonReference, LAYOUT_POLYGON_MAX_SIDES, LAYOUT_POLYGON_MIN_SIDES, tableCellAt, LAYOUT_AUTO_TEXT_TAGS, LAYOUT_ACCOUNT_TAGS, LAYOUT_NON_PAGE_NUMBER_TAGS, LAYOUT_PAGE_NUMBER_STYLES, DEFAULT_LAYOUT_PAGE_NUMBERING, layoutPageNumbering, type LayoutPageNumbering, type LayoutPageNumberStyle, layoutAccountFieldsVersion, subscribeLayoutAccountFields, LAYOUT_DEFAULT_TEXT, layoutDashMm, matchLayoutDash, isViewport, type LayoutViewportCamera } from '@pushform/layout';
+import { DRAWING_ANNOTATION_SCALE, layoutPathArrows, createLayoutTable, createLayoutEllipse, createLayoutPolygon, snapLayoutPolygonReference, LAYOUT_POLYGON_MAX_SIDES, LAYOUT_POLYGON_MIN_SIDES, tableCellAt, LAYOUT_AUTO_TEXT_TAGS, LAYOUT_ACCOUNT_TAGS, LAYOUT_NON_PAGE_NUMBER_TAGS, LAYOUT_PAGE_NUMBER_STYLES, DEFAULT_LAYOUT_PAGE_NUMBERING, layoutPageNumbering, type LayoutPageNumbering, type LayoutPageNumberStyle, layoutAccountFieldsVersion, subscribeLayoutAccountFields, LAYOUT_DEFAULT_TEXT, layoutDashMm, matchLayoutDash, isViewport, type LayoutViewportCamera } from '@pushform/layout';
 import { paintLayoutTable } from './layoutTable';
 import { LayoutTablePanel } from './LayoutTablePanel';
 import {
@@ -309,6 +310,7 @@ const DIMENSION_TOOLS = [
 /** Tools take Cmd on macOS wherever Windows uses Ctrl. */
 const MAC = detectPlatform() === 'mac';
 const PX_PER_MM = 3;
+const MIN_DRAWING_ZOOM = 0.000001;
 /** On-screen radii of the vertex-editing circles; the square resize handles are 9 px across. */
 const VERTEX_HANDLE_RADIUS_PX = { vertex: 4, active: 5, curve: 3.5 };
 /** Height of the tool options bar's band over the page view, kept clear by framing. */
@@ -532,6 +534,37 @@ function pickEntity(p: Point, page: LayoutPage, state: LayoutDocumentState, incl
 /** The visible workspace around the page, in paper millimetres from the page's top-left corner. */
 interface LayoutSurround { x: number; y: number; width: number; height: number; pxPerMm: number }
 
+function paintDrawingGrid(ctx: CanvasRenderingContext2D, state: LayoutDocumentState, view: LayoutSurround): void {
+  const { x: left, y: top, width, height, pxPerMm } = view;
+  const right = left + width, bottom = top + height;
+  ctx.save();
+  if (state.settings.grid.show && state.settings.grid.spacingMm > 0) {
+    const base = state.settings.grid.spacingMm;
+    // Hide intermediate lines when dense; snapping keeps the configured interval.
+    const spacing = base * Math.pow(10, Math.max(0, Math.ceil(Math.log10(12 / (base * pxPerMm)))));
+    ctx.strokeStyle = '#e5eaf0';
+    ctx.lineWidth = 1 / pxPerMm;
+    ctx.beginPath();
+    const firstX = Math.ceil(left / spacing) * spacing, firstY = Math.ceil(top / spacing) * spacing;
+    for (let i = 0; i <= Math.ceil(width / spacing); i++) {
+      const x = firstX + i * spacing; ctx.moveTo(x, top); ctx.lineTo(x, bottom);
+    }
+    for (let i = 0; i <= Math.ceil(height / spacing); i++) {
+      const y = firstY + i * spacing; ctx.moveTo(left, y); ctx.lineTo(right, y);
+    }
+    ctx.stroke();
+  }
+  ctx.lineWidth = 1 / pxPerMm;
+  ctx.strokeStyle = '#c48181';
+  ctx.beginPath(); ctx.moveTo(left, 0); ctx.lineTo(right, 0); ctx.stroke();
+  ctx.strokeStyle = '#76a692';
+  ctx.beginPath(); ctx.moveTo(0, top); ctx.lineTo(0, bottom); ctx.stroke();
+  ctx.fillStyle = '#687584';
+  ctx.font = `${11 / pxPerMm}px sans-serif`;
+  ctx.fillText('0, 0', 6 / pxPerMm, -8 / pxPerMm);
+  ctx.restore();
+}
+
 function paintPage(
   canvas: HTMLCanvasElement,
   page: LayoutPage,
@@ -571,23 +604,31 @@ function paintPage(
   if (transformed?.size) ({ page, state } = withPreviewEntities(page, state, transformed));
   const visibleEntities = state.layerOrder.filter(id => isLayoutLayerVisible(page, state, id)).flatMap(id => entitiesForLayer(page, state, id));
   void prepareLayoutFonts(visibleEntities).catch(() => { /* Keep the readable fallback when offline. */ });
-  const renderScale = outputDpi ? outputDpi / 25.4 : thumbnail
+  let renderScale = outputDpi ? outputDpi / 25.4 : thumbnail
     ? THUMBNAIL_MAX_PX * window.devicePixelRatio / Math.max(...page.size)
     : surround ? surround.pxPerMm * Math.min(window.devicePixelRatio, 2)
-    : PX_PER_MM * Math.max(1, Math.min(zoom * window.devicePixelRatio, 4));
+    : PX_PER_MM * Math.max(state.settings.drawing ? MIN_DRAWING_ZOOM : 1, Math.min(zoom * window.devicePixelRatio, 4));
+  // Full-size drawing extents can span meters. Keep the backing canvas bounded at any zoom.
+  if (state.settings.drawing && !surround) renderScale = Math.min(renderScale, 8192 / Math.max(...page.size));
   if (surround) {
     // The surround shows objects past the paper edge; the paper canvas above it covers the page itself.
     canvas.width = Math.round(surround.width * renderScale);
     canvas.height = Math.round(surround.height * renderScale);
     ctx.setTransform(renderScale, 0, 0, renderScale, -surround.x * renderScale, -surround.y * renderScale);
-    // The paper's shadow is drawn here, below the objects, so it never darkens their off-page parts.
-    ctx.save();
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.18)';
-    ctx.shadowBlur = 18 * renderScale / surround.pxPerMm;
-    ctx.shadowOffsetY = 3 * renderScale / surround.pxPerMm;
-    ctx.fillStyle = page.background;
-    ctx.fillRect(0, 0, page.size[0], page.size[1]);
-    ctx.restore();
+    if (state.settings.drawing) {
+      ctx.fillStyle = page.background;
+      ctx.fillRect(surround.x, surround.y, surround.width, surround.height);
+      paintDrawingGrid(ctx, state, surround);
+    } else {
+      // The paper's shadow stays below its off-page objects.
+      ctx.save();
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.18)';
+      ctx.shadowBlur = 18 * renderScale / surround.pxPerMm;
+      ctx.shadowOffsetY = 3 * renderScale / surround.pxPerMm;
+      ctx.fillStyle = page.background;
+      ctx.fillRect(0, 0, page.size[0], page.size[1]);
+      ctx.restore();
+    }
   } else {
     canvas.width = Math.round(page.size[0] * renderScale);
     canvas.height = Math.round(page.size[1] * renderScale);
@@ -790,7 +831,7 @@ function paintPage(
   let preview: LayoutRectanglePath | null =
     anchor && cursor && tool !== 'select' && tool !== 'eraser' && tool !== 'dimension' && tool !== 'angular-dimension' && !isLayoutArcTool(tool) && tool !== 'offset' && !isLayoutCornerTool(tool) && tool !== 'move' && tool !== 'rotate' && tool !== 'label'
       ? tool === 'freehand'
-        ? createLayoutFreehand(freehand, FREEHAND_SMOOTHING_PX * page.size[0] / Math.max(1, canvas.getBoundingClientRect().width))
+        ? createLayoutFreehand(freehand, FREEHAND_SMOOTHING_PX / (surround?.pxPerMm ?? Math.max(1, canvas.getBoundingClientRect().width) / page.size[0]))
         : pathPoints(tool === 'text' ? 'rectangle' : tool, anchor, cursor, rectangleAmountMm,
           tool === 'text' ? { ...placementModifiers, square: false } : placementModifiers, polygonSides)
       : null;
@@ -870,7 +911,9 @@ function paintPage(
         const [vertex, first, second] = geometry.points as [Point, Point, Point];
         ctx.beginPath(); ctx.moveTo(...first); ctx.lineTo(...vertex); ctx.lineTo(...second);
         ctx.setLineDash([1.5, 1]); ctx.strokeStyle = '#1e63d1'; ctx.lineWidth = 0.4; ctx.stroke(); ctx.setLineDash([]);
-        const dim = createAngularDimension(); dim.reflex = geometry.placing && angularPlacementReflex(vertex, first, second, cursor);
+        const dim = createAngularDimension();
+        if (state.settings.drawing) for (const key of ['fontSizePt', 'arrowSizeMm', 'extensionGapMm', 'extensionOverrunMm'] as const) dim[key] *= DRAWING_ANNOTATION_SCALE;
+        dim.reflex = geometry.placing && angularPlacementReflex(vertex, first, second, cursor);
         dim.cachedAngleDeg = angularMeasurement(vertex, first, second, dim.reflex)!;
         const radius = Math.max(2, Math.min(Math.hypot(first[0] - vertex[0], first[1] - vertex[1]), Math.hypot(second[0] - vertex[0], second[1] - vertex[1])) / 2);
         const placement: Point = geometry.placing ? cursor : [vertex[0] + radius, vertex[1]];
@@ -886,6 +929,7 @@ function paintPage(
       ctx.strokeStyle = '#1e63d1'; ctx.lineWidth = 0.4; ctx.stroke();
     } else if (points.length === 2) {
       const dimension = { ...createLinearDimension(), ...layoutDimensionUnits(state) };
+      if (state.settings.drawing) for (const key of ['fontSizePt', 'arrowSizeMm', 'extensionGapMm', 'extensionOverrunMm'] as const) dimension[key] *= DRAWING_ANNOTATION_SCALE;
       dimension.alignment = inferLinearDimensionAlignment(points[0]!, points[1]!);
       dimension.cachedValueMm = linearMeasurement(points[0]!, points[1]!, dimension.alignment);
       const attachments = dimensionDraft.modelAttachments?.filter((a): a is LayoutModelAttachment => a !== null);
@@ -1537,7 +1581,12 @@ export function LayoutWorkspace({
       tool === 'move' && moveDraft ? { base: moveDraft.base, target: cursor ?? moveDraft.base } : null, { rows: tableRows, columns: tableColumns }, placementModifiers,
       navigatingViewportId !== null && viewportCameraPreview ? { entityId: navigatingViewportId, camera: viewportCameraPreview } : null, polygonSides, tableResizePreview, surround, transformPreview,
       tool === 'scale' && scaleDraft ? { base: scaleDraft.base } : null);
-    if (canvasRef.current) paint(canvasRef.current);
+    if (canvasRef.current) {
+      if (state.settings.drawing) {
+        // The invisible canvas supplies the coordinate transform and pointer capture only.
+        canvasRef.current.width = 1; canvasRef.current.height = 1;
+      } else paint(canvasRef.current);
+    }
     paintSurround.current = () => {
       const canvas = canvasRef.current, surround = surroundRef.current;
       if (!canvas || !surround) return;
@@ -1629,9 +1678,13 @@ export function LayoutWorkspace({
       if (!tab.workspace.zoomToPageOnOpen) return true;
       if (workspace.clientWidth <= 48 || workspace.clientHeight <= 48) return false;
       tab.workspace.zoomToPageOnOpen = false;
+      if (tab.doc.state.settings.drawing) {
+        setPanOffset(0, 0);
+        return true;
+      }
       const next = Math.min((workspace.clientWidth - 48) / (page.size[0] * PX_PER_MM),
         (workspace.clientHeight - 48) / (page.size[1] * PX_PER_MM));
-      setZoom(Math.max(0.1, Math.min(8, next)));
+      setZoom(Math.max(tab.doc.state.settings.drawing ? MIN_DRAWING_ZOOM : 0.1, Math.min(8, next)));
       workspace.scrollLeft = 0; workspace.scrollTop = 0;
       return true;
     };
@@ -1652,7 +1705,7 @@ export function LayoutWorkspace({
       const canvas = canvasRef.current;
       if (!canvas) return;
       const rect = canvas.getBoundingClientRect();
-      const overPage = event.clientX >= rect.left && event.clientX <= rect.right &&
+      const overPage = tab.doc.state.settings.drawing || event.clientX >= rect.left && event.clientX <= rect.right &&
         event.clientY >= rect.top && event.clientY <= rect.bottom;
       zoomAnchor.current = {
         x: event.clientX,
@@ -1661,7 +1714,7 @@ export function LayoutWorkspace({
         pageY: overPage ? (event.clientY - rect.top) / rect.height : 0.5,
       };
       const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? workspace.clientHeight : 1);
-      setZoom((value) => Math.max(0.1, Math.min(8, value * Math.exp(-delta * 0.0015))));
+      setZoom((value) => Math.max(tab.doc.state.settings.drawing ? MIN_DRAWING_ZOOM : 0.1, Math.min(8, value * Math.exp(-delta * 0.0015))));
     };
     workspace.addEventListener('wheel', onWheel, { passive: false });
     return () => workspace.removeEventListener('wheel', onWheel);
@@ -1717,8 +1770,10 @@ export function LayoutWorkspace({
     if (!pending || !workspace || !canvas) return;
     zoomAnchor.current = null;
     const rect = canvas.getBoundingClientRect();
-    workspace.scrollLeft += rect.left + pending.pageX * rect.width - pending.x;
-    workspace.scrollTop += rect.top + pending.pageY * rect.height - pending.y;
+    const dx = rect.left + pending.pageX * rect.width - pending.x;
+    const dy = rect.top + pending.pageY * rect.height - pending.y;
+    if (tab.doc.state.settings.drawing) setPanOffset(panOffset.current[0] - dx, panOffset.current[1] - dy);
+    else { workspace.scrollLeft += dx; workspace.scrollTop += dy; }
   }, [zoom]);
 
   useLayoutEffect(() => {
@@ -1729,10 +1784,12 @@ export function LayoutWorkspace({
     zoomCenter.current = null;
     const pageRect = canvas.getBoundingClientRect();
     const workspaceRect = workspace.getBoundingClientRect();
-    workspace.scrollLeft += pageRect.left + center[0] / page.size[0] * pageRect.width -
+    const dx = pageRect.left + center[0] / page.size[0] * pageRect.width -
       (workspaceRect.left + workspace.clientWidth / 2);
-    workspace.scrollTop += pageRect.top + center[1] / page.size[1] * pageRect.height -
+    const dy = pageRect.top + center[1] / page.size[1] * pageRect.height -
       (workspaceRect.top + workspace.clientHeight / 2);
+    if (tab.doc.state.settings.drawing) setPanOffset(panOffset.current[0] - dx, panOffset.current[1] - dy);
+    else { workspace.scrollLeft += dx; workspace.scrollTop += dy; }
   }, [zoom, zoomRequest, page]);
 
   useEffect(() => {
@@ -2501,7 +2558,7 @@ export function LayoutWorkspace({
         : [a, [a[0] + 60, a[1] + 20]];
       const entityId = tab.commands.execute('layout.text.add', {
         pageId: page.id, kind: tool, points,
-        text: { content: '', ...LAYOUT_DEFAULT_TEXT, bold: false, italic: false, underline: false, align,
+        text: { content: '', ...LAYOUT_DEFAULT_TEXT, fontSizePt: LAYOUT_DEFAULT_TEXT.fontSizePt * (state.settings.drawing ? DRAWING_ANNOTATION_SCALE : 1), bold: false, italic: false, underline: false, align,
           vertical: bounded && modifiers.center ? 'middle' : 'top', bounded, leader: 'elbow', endpoint: 'arrow' },
       }) as number;
       setSelectionId(entityId); setEditingTextId(entityId); setTool('select'); setAnchor(null); setCursor(null);
@@ -2684,7 +2741,7 @@ export function LayoutWorkspace({
           const geometry = createLayoutLabelGeometry(labelDraft.tip, labelDraft.bend, p);
           const id = tab.commands.execute('layout.text.add', { pageId: page.id, kind: 'label', points: geometry.points, labelAnchor: labelDraft.attachment,
             ...(labelDraft.modelAttachment ? { modelAttachments: [labelDraft.modelAttachment] } : {}),
-            text: { content: '', ...LAYOUT_DEFAULT_TEXT, bold: false, italic: false, underline: false,
+            text: { content: '', ...LAYOUT_DEFAULT_TEXT, fontSizePt: LAYOUT_DEFAULT_TEXT.fontSizePt * (state.settings.drawing ? DRAWING_ANNOTATION_SCALE : 1), bold: false, italic: false, underline: false,
               align: geometry.align, vertical: geometry.vertical, bounded: true, leader: 'elbow', endpoint: 'arrow' } }) as number;
           initialLabelEditId.current = id;
           setSelectionId(id); setEditingTextId(id); setLabelDraft(null); setTool('select'); setCursor(null); setSnapKind(null);
@@ -3336,6 +3393,8 @@ export function LayoutWorkspace({
   /** Drawing values are shown and typed in the grid's units. */
   const drawingUnits = layoutDrawingUnits(state);
   const entryUnit = drawingUnits === 'mm' ? 'mm' : 'in';
+  // Native styles store points; Drawing edits their full-size physical length.
+  const strokeUnitsPerPt = state.settings.drawing ? (entryUnit === 'mm' ? 25.4 / 72 : 1 / 72) : 1;
   const formatEntryLength = (mm: number): string => formatLayoutLength(mm / 25.4, {
     units: drawingUnits === 'mm' ? 'mm' : 'inch', format: drawingUnits === 'architectural' ? 'architectural' : 'decimal',
     precision: state.settings.precision, showUnits: true });
@@ -3370,7 +3429,7 @@ export function LayoutWorkspace({
   // click on the page takes focus away. A text field, menu or dialog the user moved to keeps it.
   const entryFieldKey = entryFields.map(f => f.id).join(' ');
   useEffect(() => {
-    if (!entryFieldKey || entryFocus) return;
+    if (!entryFieldKey || entryFields.some(f => f.id === entryFocus)) return;
     const active = document.activeElement;
     const onPage = active instanceof Element && workspaceRef.current?.contains(active) &&
       !active.closest('input, textarea, select, [contenteditable="true"], [role="menu"], [role="dialog"]');
@@ -3738,11 +3797,15 @@ export function LayoutWorkspace({
     const workspace = workspaceRef.current;
     if (!workspace) return;
     setPanOffset(0, 0);
+    if (state.settings.drawing) {
+      setZoomMenuOpen(false);
+      return;
+    }
     const next = Math.min(
       (workspace.clientWidth - 48) / (page.size[0] * PX_PER_MM),
       (workspace.clientHeight - 48 - TOOL_BAND_PX) / (page.size[1] * PX_PER_MM),
     );
-    setZoom(Math.max(0.1, Math.min(8, next)));
+    setZoom(Math.max(tab.doc.state.settings.drawing ? MIN_DRAWING_ZOOM : 0.1, Math.min(8, next)));
     workspace.scrollTo(0, 0);
     setZoomMenuOpen(false);
   };
@@ -3766,7 +3829,7 @@ export function LayoutWorkspace({
       (workspace.clientHeight - 48 - TOOL_BAND_PX) / (Math.max(10, maxY - minY) * PX_PER_MM),
     );
     zoomCenter.current = [(minX + maxX) / 2, (minY + maxY) / 2];
-    setZoom(Math.max(0.1, Math.min(8, next)));
+    setZoom(Math.max(tab.doc.state.settings.drawing ? MIN_DRAWING_ZOOM : 0.1, Math.min(8, next)));
     setZoomRequest((value) => value + 1);
     setZoomMenuOpen(false);
   };
@@ -3841,8 +3904,8 @@ export function LayoutWorkspace({
     ].map(([label, axis]) => ({ label: label!, action: contextAction('Center', () => {
       const bounds = selectionExtent();
       tab.commands.execute('layout.shape.move', { pageId: page.id, entityIds: selectionIds,
-        delta: [axis === 'vertical' ? 0 : page.size[0] / 2 - (bounds.minX + bounds.maxX) / 2,
-          axis === 'horizontal' ? 0 : page.size[1] / 2 - (bounds.minY + bounds.maxY) / 2] });
+        delta: [axis === 'vertical' ? 0 : (state.settings.drawing ? 0 : page.size[0] / 2) - (bounds.minX + bounds.maxX) / 2,
+          axis === 'horizontal' ? 0 : (state.settings.drawing ? 0 : page.size[1] / 2) - (bounds.minY + bounds.maxY) / 2] });
     }) })) },
     { label: 'Flip', disabled: !editableSelection, children: [['Horizontally', 'horizontal'], ['Vertically', 'vertical']].map(([label, axis]) => ({
       label: label!, action: contextAction('Flip', () => {
@@ -4239,6 +4302,13 @@ export function LayoutWorkspace({
   const lengthSetting = (id: string, label: string, mm: number): ToolSetting => ({ kind: 'quantity', id, label, value: formatEntryLength(mm), quantity: 'length' });
   const countSetting = (id: string, label: string, n: number): ToolSetting => ({ kind: 'quantity', id, label, value: String(n), quantity: 'count' });
   const barSettings: ToolSetting[] = (() => {
+    if (tool === 'freehand') return [{ kind: 'note', id: 'hint', text: 'Drag to draw · release to finish · Esc to cancel' }];
+    if (tool === 'bezier') return [
+      { kind: 'note', id: 'hint', text: 'Click for corners · drag for curves · Enter to finish', priority: 3 },
+      { kind: 'action', id: 'finish-curve', label: 'Finish curve', disabled: !bezierDraft || bezierDraft.points.length < 2 },
+      { kind: 'action', id: 'remove-anchor', label: 'Remove last anchor', disabled: !bezierDraft?.points.length },
+      { kind: 'action', id: 'cancel-curve', label: 'Cancel curve', disabled: !bezierDraft },
+    ];
     if (tool === 'shape-builder') return [
       { kind: 'choice', id: 'mode', label: 'Shape Builder', value: shapeBuilder.mode, options: [{ value: 'add', label: 'Add' }, { value: 'remove', label: 'Remove' }] },
       { kind: 'toggle', id: 'keepOriginals', label: 'Keep originals', on: shapeBuilder.keepOriginals },
@@ -4268,7 +4338,11 @@ export function LayoutWorkspace({
   const onBarSetting = (id: string, value: ToolSettingValue): void => {
     const count = typeof value === 'object' && value?.kind === 'segments' ? value.count : null;
     const mm = typeof value === 'object' && (value?.kind === 'length' || value?.kind === 'radius') ? value.meters * 1000 : null;
-    if (tool === 'shape-builder') {
+    if (tool === 'bezier') {
+      if (id === 'finish-curve' && bezierDraft) finishBezier(bezierDraft, false);
+      else if (id === 'remove-anchor' && bezierDraft) setBezierDraft(removeLastLayoutBezierAnchor(bezierDraft));
+      else if (id === 'cancel-curve') { setBezierDraft(null); bezierPress.current = null; setCursor(null); setSnapKind(null); }
+    } else if (tool === 'shape-builder') {
       if (id === 'mode' && (value === 'add' || value === 'remove')) shapeBuilder.setMode(value);
       else if (id === 'keepOriginals' && typeof value === 'boolean') shapeBuilder.setKeepOriginals(value);
       else if (id === 'apply') shapeBuilder.apply();
@@ -4311,16 +4385,20 @@ export function LayoutWorkspace({
     },
     onTab: tabEntry, onEnter: applyEntry, onEscape: escapeEntry,
   };
-  /** Move's offsets, distance and angle, or Scale's factor and sizes, in the bar; until a base point is chosen they wait, empty. */
-  const barEntryFields: readonly LayoutEntryField[] = entryKind === 'move'
-    ? moveDraft && entryFields.some(f => f.id === 'x') ? entryFields
-      : (['X', 'Y', 'Distance', 'Angle'] as const).map(label => ({ id: `waiting-${label}`, label, value: '', disabled: true }))
-    : entryKind === 'scale'
-      ? scaleDraft && entryFields.some(f => f.id === 'factor') ? entryFields
-        : (['Scale', 'Width', 'Height'] as const).map(label => ({ id: `waiting-${label}`, label, value: '', disabled: true }))
-      : [];
-  // Move's and Scale's bars hold their own fields, so they stay usable between the tool's clicks.
-  const barPlacing = Boolean(rotationDraft || offsetDraft || arcDraft);
+  // Every tool with drawing values uses one set of fields in the options bar. The page
+  // retains the dimension guides, while the inputs stay in a stable place for entry.
+  const entriesInBar = entryKind !== 'none' && !isLayoutCornerTool(tool);
+  const waitingFields = (labels: readonly string[]): LayoutEntryField[] => labels.map(label => ({ id: entryKind === 'single' ? LAYOUT_POINTER_FIELD : label === 'Distance' ? 'length' : label === 'Scale' ? 'factor' : label.toLowerCase(), label, value: '', disabled: true }));
+  const barEntryFields: readonly LayoutEntryField[] = !entriesInBar ? [] : entryFields.length ? entryFields
+    : entryKind === 'move' ? waitingFields(['X', 'Y', 'Distance', 'Angle'])
+      : entryKind === 'scale' ? waitingFields(['Scale', 'Width', 'Height'])
+        : entryKind === 'line' ? waitingFields(['Length', 'Angle'])
+          : entryKind === 'box' ? waitingFields(['Width', 'Height'])
+            : entryKind === 'radius' || tool === 'arc' || tool === 'pie' ? waitingFields(['Radius'])
+              : entryKind === 'arc' ? waitingFields(['Length'])
+                : waitingFields([entrySingle.label]);
+  // Operation fields remain usable throughout point placement.
+  const barPlacing = false;
   return (
     <>
       {contextMenu ? <LayoutContextMenu x={contextMenu.x} y={contextMenu.y} items={contextItems} onClose={() => { setContextMenu(null); canvasRef.current?.focus(); }} /> : null}
@@ -4429,10 +4507,11 @@ export function LayoutWorkspace({
             const styled = editing ?? selectedText;
             return <ToolOptionsBarView tool={styled ? { id: styled.kind === 'label' ? 'label' : 'text', title: styled.kind === 'label' ? 'Label' : 'Text' } : { id: tool, title: activeToolTitle }}
               settings={styled ? [] : barSettings} placing={barPlacing} mac={MAC}
+              hasEditableContent={Boolean(styled) || barEntryFields.some(field => !field.disabled)}
               onSetting={onBarSetting} read={readBarQuantity} onLeave={() => canvasRef.current?.focus()}>
-              {editing ? <LayoutTextToolbar text={editing.text!} range={textSelection} getSelection={getTextSelection} onCaptureSelection={setTextSelection}
+              {editing ? <LayoutTextToolbar annotationScale={state.settings.drawing ? DRAWING_ANNOTATION_SCALE : 1} text={editing.text!} range={textSelection} getSelection={getTextSelection} onCaptureSelection={setTextSelection}
                 onChange={formatEditingText} onReturnToText={returnToText} onFinish={() => setEditingTextId(null)} />
-                : selectedText ? <LayoutTextToolbar text={selectedText.text!} range={wholeText()} getSelection={wholeText} onCaptureSelection={() => {}}
+                : selectedText ? <LayoutTextToolbar annotationScale={state.settings.drawing ? DRAWING_ANNOTATION_SCALE : 1} text={selectedText.text!} range={wholeText()} getSelection={wholeText} onCaptureSelection={() => {}}
                   onChange={formatSelectedText} onReturnToText={() => canvasRef.current?.focus()} onFinish={() => {}} />
                   : barEntryFields.length ? <LayoutEntryFields inline fields={barEntryFields} segments={[]} pageSize={page.size} scale={1} pointer={null} {...entryFieldEvents} />
                     : null}
@@ -4440,11 +4519,11 @@ export function LayoutWorkspace({
           })()}
         </div>
         <canvas ref={surroundRef} className="pf-layout-surround" aria-hidden="true" />
-        <main ref={workspaceRef} className="pf-layout-workspace" aria-label="Layout workspace" onContextMenu={openContextMenu}
+        <main ref={workspaceRef} className={`pf-layout-workspace${state.settings.drawing ? ' is-drawing' : ''}`} aria-label={state.settings.drawing ? 'Drawing workspace' : 'Layout workspace'} onContextMenu={openContextMenu}
           data-tool={polygonTool} style={pageCursor}
           onPointerDown={offPage(onPointerDown)} onPointerMove={offPage(onPointerMove)} onPointerUp={offPage(onPointerUp)}
           onDoubleClick={offPage(onDoubleClick)}>
-          <div className="pf-layout-page-wrap" style={{ width: page.size[0] * PX_PER_MM * zoom }}>
+          <div className="pf-layout-page-wrap" style={{ width: page.size[0] * PX_PER_MM * zoom, ...(state.settings.drawing ? { height: page.size[1] * PX_PER_MM * zoom } : {}) }}>
           {tool === 'shape-builder' ? <LayoutShapeBuilderPreview builder={shapeBuilder} size={page.size} defaultStyle={state.defaultStyle} /> : null}
           {booleanPreview?.shapes.length ? <svg className="pf-layout-boolean-preview" aria-label="Boolean result preview" viewBox={`0 0 ${page.size[0]} ${page.size[1]}`}>
             {booleanPreview.shapes.map((shape, index) => <path key={index} style={tool === 'boolean-cut-path' || !shape.closed ? { fill: 'none' } : undefined}
@@ -4457,7 +4536,7 @@ export function LayoutWorkspace({
                 return d + (contour.closed ? 'Z' : '');
               }).join(' ')} fillRule="evenodd" />)}
           </svg> : null}
-          {editingTextId === null ? <LayoutEntryFields fields={entryKind === 'move' || entryKind === 'scale' ? entryFields.filter(f => f.id === LAYOUT_POINTER_FIELD) : entryFields}
+          {editingTextId === null ? <LayoutEntryFields fields={entriesInBar ? [] : entryFields}
             segments={entry.segments} pageSize={page.size} scale={PX_PER_MM * zoom} pointer={cursor} {...entryFieldEvents} /> : null}
           {tool === 'line' && lineGuide && cursor ? <LayoutAlignmentGuide axis={lineGuide.axis}
             from={[lineGuide.reference[0] * PX_PER_MM * zoom, lineGuide.reference[1] * PX_PER_MM * zoom]}
@@ -4468,39 +4547,40 @@ export function LayoutWorkspace({
               state.settings.objectSnap !== false ? <LayoutSnapTooltip
             key={`${page.id}:${tool}:${snapHoverEpoch}:${snapType}:${cursor[0]}:${cursor[1]}`}
             type={snapType ?? snapKind} x={cursor[0] * PX_PER_MM * zoom} y={cursor[1] * PX_PER_MM * zoom}
-            pageWidth={page.size[0] * PX_PER_MM * zoom} pageHeight={page.size[1] * PX_PER_MM * zoom} /> : null}
+            unbounded={Boolean(state.settings.drawing)} pageWidth={page.size[0] * PX_PER_MM * zoom} pageHeight={page.size[1] * PX_PER_MM * zoom} /> : null}
           {activeRotation?.reference && cursor ? <output className="pf-layout-rotation-angle" aria-label="Rotation angle preview"
-            style={{ left: Math.max(0, Math.min(page.size[0] * PX_PER_MM * zoom - 90, cursor[0] * PX_PER_MM * zoom + 14)),
-              top: Math.max(0, Math.min(page.size[1] * PX_PER_MM * zoom - 28, cursor[1] * PX_PER_MM * zoom + 14)) }}>
+            style={{ left: state.settings.drawing ? cursor[0] * PX_PER_MM * zoom + 14 : Math.max(0, Math.min(page.size[0] * PX_PER_MM * zoom - 90, cursor[0] * PX_PER_MM * zoom + 14)),
+              top: state.settings.drawing ? cursor[1] * PX_PER_MM * zoom + 14 : Math.max(0, Math.min(page.size[1] * PX_PER_MM * zoom - 28, cursor[1] * PX_PER_MM * zoom + 14)) }}>
             {activeRotation.angleDeg.toFixed(1)}°
           </output> : null}
           {/* Columns x rows follow the pointer while the button is held. */}
           {tool === 'table' && tableCounting && anchor && cursor && (cursor[0] !== anchor[0] || cursor[1] !== anchor[1])
             ? <output className="pf-layout-rotation-angle" aria-label="Table size preview"
-              style={{ left: Math.max(0, Math.min(page.size[0] * PX_PER_MM * zoom - 80, cursor[0] * PX_PER_MM * zoom + 14)),
-                top: Math.max(0, Math.min(page.size[1] * PX_PER_MM * zoom - 28, cursor[1] * PX_PER_MM * zoom + 14)) }}>
+              style={{ left: state.settings.drawing ? cursor[0] * PX_PER_MM * zoom + 14 : Math.max(0, Math.min(page.size[0] * PX_PER_MM * zoom - 80, cursor[0] * PX_PER_MM * zoom + 14)),
+                top: state.settings.drawing ? cursor[1] * PX_PER_MM * zoom + 14 : Math.max(0, Math.min(page.size[1] * PX_PER_MM * zoom - 28, cursor[1] * PX_PER_MM * zoom + 14)) }}>
               {`${tableColumns} x ${tableRows}`}
             </output> : null}
           {/* The readout gives the move's x, y offsets, positive x right and positive y down, as typed in. */}
           {tool === 'scale' && scaleDraft && cursor ? <output className="pf-layout-rotation-angle" aria-label="Scale preview"
-            style={{ left: Math.max(0, Math.min(page.size[0] * PX_PER_MM * zoom - 90, cursor[0] * PX_PER_MM * zoom + 14)),
-              top: Math.max(0, Math.min(page.size[1] * PX_PER_MM * zoom - 28, cursor[1] * PX_PER_MM * zoom + 14)) }}>
+            style={{ left: state.settings.drawing ? cursor[0] * PX_PER_MM * zoom + 14 : Math.max(0, Math.min(page.size[0] * PX_PER_MM * zoom - 90, cursor[0] * PX_PER_MM * zoom + 14)),
+              top: state.settings.drawing ? cursor[1] * PX_PER_MM * zoom + 14 : Math.max(0, Math.min(page.size[1] * PX_PER_MM * zoom - 28, cursor[1] * PX_PER_MM * zoom + 14)) }}>
             {formatScalePercent(scaleDraft.factor)}
           </output> : null}
           {tool === 'move' && moveDraft && cursor ? <output className="pf-layout-rotation-angle" aria-label="Move distance preview"
-            style={{ left: Math.max(0, Math.min(page.size[0] * PX_PER_MM * zoom - 160, cursor[0] * PX_PER_MM * zoom + 14)),
-              top: Math.max(0, Math.min(page.size[1] * PX_PER_MM * zoom - 28, cursor[1] * PX_PER_MM * zoom + 14)) }}>
+            style={{ left: state.settings.drawing ? cursor[0] * PX_PER_MM * zoom + 14 : Math.max(0, Math.min(page.size[0] * PX_PER_MM * zoom - 160, cursor[0] * PX_PER_MM * zoom + 14)),
+              top: state.settings.drawing ? cursor[1] * PX_PER_MM * zoom + 14 : Math.max(0, Math.min(page.size[1] * PX_PER_MM * zoom - 28, cursor[1] * PX_PER_MM * zoom + 14)) }}>
             {moveDraft.copy ? 'Copy ' : ''}{formatEntryLength(Math.hypot(...(movePreview?.delta ?? [0, 0])))}
           </output> : null}
           {angularPreview && cursor ? <output className="pf-layout-rotation-angle" aria-label="Angular dimension preview"
-            style={{ left: Math.max(0, Math.min(page.size[0] * PX_PER_MM * zoom - 90, cursor[0] * PX_PER_MM * zoom + 14)),
-              top: Math.max(0, Math.min(page.size[1] * PX_PER_MM * zoom - 28, cursor[1] * PX_PER_MM * zoom + 14)) }}>{angularPreview}</output> : null}
+            style={{ left: state.settings.drawing ? cursor[0] * PX_PER_MM * zoom + 14 : Math.max(0, Math.min(page.size[0] * PX_PER_MM * zoom - 90, cursor[0] * PX_PER_MM * zoom + 14)),
+              top: state.settings.drawing ? cursor[1] * PX_PER_MM * zoom + 14 : Math.max(0, Math.min(page.size[1] * PX_PER_MM * zoom - 28, cursor[1] * PX_PER_MM * zoom + 14)) }}>{angularPreview}</output> : null}
           <canvas
             ref={canvasRef}
             tabIndex={-1}
             className="pf-layout-page"
             data-tool={polygonTool}
-            style={pageCursor}
+            style={state.settings.drawing ? { ...pageCursor, width: page.size[0] * PX_PER_MM,
+              height: page.size[1] * PX_PER_MM, transform: `scale(${zoom})`, transformOrigin: '0 0' } : pageCursor}
             aria-label={`${page.name} canvas`}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
@@ -4508,6 +4588,7 @@ export function LayoutWorkspace({
             onDoubleClick={onDoubleClick}
             onPointerCancel={() => {
               if (tool === 'shape-builder') { shapeBuilder.cancelPointer(); return; }
+              clearEntry();
               eraserStroke.current = null; setEraserMarks({ ids: [], dragging: false });
               if (tableDrag.current) setTableSelection(tableDrag.current);
               tableDrag.current = null;
@@ -4685,6 +4766,7 @@ export function LayoutWorkspace({
         </main>
         </div>
         <aside className="pf-layout-controls" aria-label="Layout settings">
+          <ScaleDrawingPanel tab={tab} session={session} />
       <input ref={imageImportInput} type="file" hidden aria-label="Import image or DXF file"
         accept=".svg,.png,.jpg,.jpeg,.dxf,image/svg+xml,image/png,image/jpeg" onChange={event => {
           const file = event.currentTarget.files?.[0]; event.currentTarget.value = '';
@@ -4710,11 +4792,11 @@ export function LayoutWorkspace({
           </div>
           {selectedEntity?.table && isLayoutLayerVisible(page, state, selectedEntity.layerId) ? <LayoutTablePanel key={`${page.id}:${selectedEntity.id}`} entity={selectedEntity} selected={tableCell} selection={tableSelection} onSelect={setTableCell} disabled={!canTransform}
             onChange={(table, size) => { tab.commands.execute('layout.table.update', { pageId: page.id, entityId: selectedEntity.id, table, ...size }); }} /> : null}
-          {selectedEntity?.angularDimension ? <LayoutAngularDimensionEditor entity={selectedEntity} disabled={!canTransform}
+          {selectedEntity?.angularDimension ? <LayoutAngularDimensionEditor annotationScale={state.settings.drawing ? DRAWING_ANNOTATION_SCALE : 1} entity={selectedEntity} disabled={!canTransform}
             onChange={(style) => tab.commands.execute('layout.dimension.updateAngular', { pageId: page.id, entityId: selectedEntity.id, style })}
             onDetach={() => tab.commands.execute('layout.dimension.updateAngular', { pageId: page.id, entityId: selectedEntity.id, detach: true })}
           /> : null}
-          {selectedEntity?.dimension ? <LayoutDimensionEditor entity={selectedEntity} disabled={!canTransform}
+          {selectedEntity?.dimension ? <LayoutDimensionEditor annotationScale={state.settings.drawing ? DRAWING_ANNOTATION_SCALE : 1} entity={selectedEntity} disabled={!canTransform}
             onChange={(style) => tab.commands.execute('layout.dimension.update', { pageId: page.id, entityId: selectedEntity.id, style })}
             onDetach={() => tab.commands.execute(selectedEntity.modelAnnotation ? 'layout.annotation.detachModel' : 'layout.dimension.update', { pageId: page.id, entityId: selectedEntity.id, detach: true })}
           /> : null}
@@ -4807,12 +4889,13 @@ export function LayoutWorkspace({
             <input type="color" value={currentStyle.strokeColor} onChange={(event) => setStyle({ strokeColor: event.target.value })} />
           </label>
           <label>
-            Weight (pt)
-            <input type="number" min="0.01" step="0.1" value={currentStyle.strokeWeightPt} onChange={(event) => {
-              const strokeWeightPt = Number(event.target.value);
+            {state.settings.drawing ? `Stroke width (${entryUnit})` : 'Weight (pt)'}
+            <input type="number" min={state.settings.drawing ? '0.000001' : '0.01'} step={state.settings.drawing && entryUnit === 'in' ? '0.01' : '0.1'}
+              value={state.settings.drawing ? Number((currentStyle.strokeWeightPt * strokeUnitsPerPt).toFixed(6)) : currentStyle.strokeWeightPt} onChange={(event) => {
+              const strokeWeightPt = Number(event.target.value) / strokeUnitsPerPt;
               // A pattern's dashes follow the stroke weight.
               const dash = selectedEntity?.style?.strokeDashMm, pattern = dash?.length ? matchLayoutDash(dash, currentStyle.strokeWeightPt) : null;
-              if (strokeWeightPt > 0) setStyle({ strokeWeightPt, ...(pattern ? { strokeDashMm: layoutDashMm(pattern.id, strokeWeightPt, pattern.scale) } : {}) });
+              if (Number.isFinite(strokeWeightPt) && strokeWeightPt > 0) setStyle({ strokeWeightPt, ...(pattern ? { strokeDashMm: layoutDashMm(pattern.id, strokeWeightPt, pattern.scale) } : {}) });
             }} />
           </label>
           {selectedEntity && (selectedEntity.kind === 'path' || selectedEntity.table) ? <LayoutDashControls dashMm={selectedEntity.style?.strokeDashMm}
@@ -4930,7 +5013,7 @@ export function LayoutWorkspace({
             : tool === 'label' ? labelDraft?.bend ? 'Move horizontally and click to place the text.' : labelDraft ? 'Click to place the leader bend.' : 'Click where the arrow should point.' : ''}
         </StatusHint>
         {saveStatus}
-        <span className="pf-status-units" hidden={catalogActive}>Page {tab.doc.state.pageOrder.indexOf(page.id) + 1}/{tab.doc.state.pageOrder.length}</span>
+        <span className="pf-status-units" hidden={catalogActive}>{state.settings.drawing ? 'Origin: 0, 0' : `Page ${tab.doc.state.pageOrder.indexOf(page.id) + 1}/${tab.doc.state.pageOrder.length}`}</span>
         <div ref={zoomMenuRef} className="pf-layout-zoom" hidden={catalogActive}>
           {zoomMenuOpen ? (
             <div className="pf-layout-zoom-menu" role="menu" aria-label="Layout zoom options">
@@ -4942,7 +5025,7 @@ export function LayoutWorkspace({
                   {percent}%
                 </button>
               ))}
-              <button type="button" role="menuitem" onClick={() => tab.commands.execute('layout.zoom.page')}>Zoom To Page</button>
+              <button type="button" role="menuitem" onClick={() => tab.commands.execute('layout.zoom.page')}>{state.settings.drawing ? 'Return to Origin' : 'Zoom To Page'}</button>
               <button type="button" role="menuitem" onClick={() => tab.commands.execute('layout.zoom.content')}>Fit Content</button>
               <button type="button" role="menuitem" disabled={!selectedEntity} onClick={() => {
                 if (selectedEntity) fitEntities([selectedEntity]);
@@ -4957,7 +5040,7 @@ export function LayoutWorkspace({
             aria-expanded={zoomMenuOpen}
             onClick={() => setZoomMenuOpen((open) => !open)}
           >
-            {Math.round(zoom * 100)}% <span aria-hidden="true">⌄</span>
+            {zoom < 0.01 ? Number((zoom * 100).toPrecision(2)) : Math.round(zoom * 100)}% <span aria-hidden="true">⌄</span>
           </button>
         </div>
         {vcbError ? <span className="pf-layout-vcb-error" role="alert">{vcbError}</span> : null}
@@ -5112,8 +5195,8 @@ function LayoutScaleRatioInput({ scale, onCommit }: { scale: number; onCommit: (
     }} />;
 }
 
-function LayoutDimensionEditor({ entity, disabled, onChange, onDetach }: {
-  entity: LayoutEntity; disabled: boolean;
+function LayoutDimensionEditor({ annotationScale = 1, entity, disabled, onChange, onDetach }: {
+  annotationScale?: number; entity: LayoutEntity; disabled: boolean;
   onChange: (style: Partial<LayoutLinearDimension>) => void; onDetach: () => void;
 }): JSX.Element {
   const dim = entity.dimension!;
@@ -5148,14 +5231,14 @@ function LayoutDimensionEditor({ entity, disabled, onChange, onDetach }: {
     {format === 'architectural' || format === 'fractional'
       ? <label><input type="checkbox" checked={dim.showDashes ?? true} onChange={(event) => onChange({ showDashes: event.target.checked })} /> Dash between feet, inches, and fractions</label>
       : null}
-    <label>Dimension scale<select disabled={!!entity.modelAnnotation} value={presetIndex >= 0 ? String(presetIndex) : 'custom'} onChange={(event) => {
+    <label>Dimension scale<select disabled={!!entity.modelAnnotation || annotationScale !== 1} value={presetIndex >= 0 ? String(presetIndex) : 'custom'} onChange={(event) => {
       const preset = LAYOUT_DIMENSION_SCALES[Number(event.target.value)];
       if (preset) onChange({ scale: preset.scale });
     }}>
       {LAYOUT_DIMENSION_SCALES.map((preset, index) => <option key={preset.label} value={index}>{preset.label}</option>)}
       {presetIndex < 0 ? <option value="custom">{layoutDimensionScaleLabel(scale)}</option> : null}
     </select></label>
-    {!entity.modelAnnotation ? <label>Custom scale 1:<LayoutScaleRatioInput scale={scale} onCommit={ratio => onChange({ scale: 1 / ratio })} /></label> : null}
+    {!entity.modelAnnotation && annotationScale === 1 ? <label>Custom scale 1:<LayoutScaleRatioInput scale={scale} onCommit={ratio => onChange({ scale: 1 / ratio })} /></label> : null}
     <label>Dimension text<input value={dim.text} onChange={(event) => onChange({ text: event.target.value })} /></label>
     <small>Use {'<>'} for the measured value, for example: Overall {'<>'}.</small>
     <label>Dimension font<LayoutFontInput value={dim.fontFamily} onChange={fontFamily => onChange({ fontFamily })} /></label>
@@ -5165,16 +5248,16 @@ function LayoutDimensionEditor({ entity, disabled, onChange, onDetach }: {
     {([['fontSizePt', 'Dimension font size (pt)'], ['arrowSizeMm', 'Endpoint size (mm)'],
       ['extensionGapMm', 'Extension gap (mm)'], ['extensionOverrunMm', 'Extension overrun (mm)']] as const).map(([key, label]) => <label key={key}>
       {label}<input type="number" min={key === 'extensionGapMm' || key === 'extensionOverrunMm' ? 0 : 0.1} step="0.1"
-        value={dim[key]} onChange={(event) => {
+        value={dim[key] / annotationScale} onChange={(event) => {
           const value = Number(event.target.value);
-          if (Number.isFinite(value) && (key === 'extensionGapMm' || key === 'extensionOverrunMm' ? value >= 0 : value > 0)) onChange({ [key]: value });
+          if (Number.isFinite(value) && (key === 'extensionGapMm' || key === 'extensionOverrunMm' ? value >= 0 : value > 0)) onChange({ [key]: value * annotationScale });
         }} />
     </label>)}
   </fieldset>;
 }
 
-function LayoutAngularDimensionEditor({ entity, disabled, onChange, onDetach }: {
-  entity: LayoutEntity; disabled: boolean; onChange: (style: Partial<LayoutAngularDimension>) => void; onDetach: () => void;
+function LayoutAngularDimensionEditor({ annotationScale = 1, entity, disabled, onChange, onDetach }: {
+  annotationScale?: number; entity: LayoutEntity; disabled: boolean; onChange: (style: Partial<LayoutAngularDimension>) => void; onDetach: () => void;
 }): JSX.Element {
   const dim = entity.angularDimension!;
   return <fieldset disabled={disabled}>
@@ -5199,9 +5282,9 @@ function LayoutAngularDimensionEditor({ entity, disabled, onChange, onDetach }: 
     </select></label>
     {([['fontSizePt', 'Angle font size (pt)'], ['arrowSizeMm', 'Angle endpoint size (mm)'],
       ['extensionGapMm', 'Angle extension gap (mm)'], ['extensionOverrunMm', 'Angle extension overrun (mm)']] as const).map(([key, label]) => <label key={key}>
-      {label}<input type="number" step="0.1" min={key.startsWith('extension') ? 0 : 0.1} value={dim[key]} onChange={(event) => {
+      {label}<input type="number" step="0.1" min={key.startsWith('extension') ? 0 : 0.1} value={dim[key] / annotationScale} onChange={(event) => {
         const value = Number(event.target.value);
-        if (Number.isFinite(value) && (key.startsWith('extension') ? value >= 0 : value > 0)) onChange({ [key]: value });
+        if (Number.isFinite(value) && (key.startsWith('extension') ? value >= 0 : value > 0)) onChange({ [key]: value * annotationScale });
       }} />
     </label>)}
   </fieldset>;

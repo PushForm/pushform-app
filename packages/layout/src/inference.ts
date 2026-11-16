@@ -129,7 +129,7 @@ export function snapPaperPoint(
     const bottom = page.size[1] - page.margin.bottom;
     const grid: PaperPoint = [Math.round(raw[0] / spacing) * spacing,
       Math.round(raw[1] / spacing) * spacing];
-    if (raw[0] > left && raw[0] < right && raw[1] > top && raw[1] < bottom &&
+    if (state.settings.drawing || raw[0] > left && raw[0] < right && raw[1] > top && raw[1] < bottom &&
       grid[0] > left && grid[0] < right && grid[1] > top && grid[1] < bottom)
       consider(grid, 'grid', 3);
   }

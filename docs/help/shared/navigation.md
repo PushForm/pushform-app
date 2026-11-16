@@ -2,7 +2,7 @@
 
 ## Switch documents or create another one
 
-Choose a document tab to make it active. The **+** button opens the new-document menu for a Model or a Layout drawing. Each document has its own editing history and tools.
+Choose a document tab to make it active. The **+** button opens the new-document menu for a Model, a full-size Drawing, or a Layout. See [Full-size scale drawings](../layout/scale-drawings.md) for drafting once and reusing the drawing in layouts and models. Each document has its own editing history and tools.
 
 The PushForm logo or name returns Home without closing the open documents. Use Continue working to return to one. The left menu bar is shown in editors, not on Home.
 

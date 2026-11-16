@@ -10,7 +10,7 @@ import { SERVICE_INFERENCE } from '../../host/services';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
 import { NO_MODIFIERS } from '../Tool';
-import type { EntryField, Modifiers, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import type { EntryField, Modifiers, ToolKeyEvent, ToolPointerEvent, ToolSettingValue, ToolStatus } from '../Tool';
 import { DRAG_PX, entityOverlay, HOVER_COLOR, inferenceOverlay, screenDist, worldPerPixelAt } from '../toolUtil';
 import { AXIS_COLOR, AXIS_DIR, movedOutline, pickRef, refsKey, sectionPreviewFor, TransformToolBase, withoutSectionPlanes, worldToScreen } from './transformShared';
 import type { TransformCommit } from './transformShared';
@@ -162,6 +162,8 @@ export class ScaleTool extends TransformToolBase implements SectionPreviewTool {
 
   /** Modifiers of the last pointer event, for the held-key tags. */
   private mods: Modifiers = NO_MODIFIERS;
+  private physicalMods: Modifiers = NO_MODIFIERS;
+  private heldButtons = { shift: false, center: false };
   readonly id = 'scale';
   readonly title = 'Scale';
   readonly cursor = 'default';
@@ -197,6 +199,8 @@ export class ScaleTool extends TransformToolBase implements SectionPreviewTool {
   protected override onActivate(): void {
     this.state = IDLE;
     this.mods = NO_MODIFIERS;
+    this.physicalMods = NO_MODIFIERS;
+    this.heldButtons = { shift: false, center: false };
     this.boxKey = '';
     this.box = null;
     this.entryLocks.clear();
@@ -208,6 +212,7 @@ export class ScaleTool extends TransformToolBase implements SectionPreviewTool {
   }
 
   protected override onDeactivate(): void {
+    this.heldButtons = { shift: false, center: false };
     this.state = IDLE;
     this.box = null;
     this.hoverGrip = null;
@@ -267,6 +272,8 @@ export class ScaleTool extends TransformToolBase implements SectionPreviewTool {
   // --- pointer --------------------------------------------------------------------------------
 
   onPointerMove(e: ToolPointerEvent): void {
+    this.physicalMods = e.modifiers;
+    e = { ...e, modifiers: this.effectiveModifiers() };
     this.mods = e.modifiers;
     this.cursorInference = e.inference;
     this.cursorScreen = e.screen;
@@ -286,6 +293,8 @@ export class ScaleTool extends TransformToolBase implements SectionPreviewTool {
   }
 
   onPointerDown(e: ToolPointerEvent): void {
+    this.physicalMods = e.modifiers;
+    e = { ...e, modifiers: this.effectiveModifiers() };
     if (e.button !== 0) return;
     const s = this.state;
     if (s.kind === 'scaling') {
@@ -339,6 +348,8 @@ export class ScaleTool extends TransformToolBase implements SectionPreviewTool {
   }
 
   onPointerUp(e: ToolPointerEvent): void {
+    this.physicalMods = e.modifiers;
+    e = { ...e, modifiers: this.effectiveModifiers() };
     if (e.button !== 0 || this.state.kind !== 'scaling' || !this.state.pressed) return;
     const s = this.state;
     s.pressed = false;
@@ -356,8 +367,20 @@ export class ScaleTool extends TransformToolBase implements SectionPreviewTool {
 
   /** Shift went down or up: the drag's uniform mode (and its inference lock) follows before the next move. */
   onModifiersChanged(modifiers: Modifiers): void {
-    this.mods = modifiers;
-    if (this.state.kind === 'scaling' && this.pointer) this.updatePreview({ ...this.pointer, modifiers }, true);
+    this.physicalMods = modifiers;
+    this.mods = this.effectiveModifiers();
+    if (this.state.kind === 'scaling' && this.pointer) this.updatePreview({ ...this.pointer, modifiers: this.mods }, true);
+  }
+
+  private effectiveModifiers(): Modifiers {
+    return { ...this.physicalMods, shift: this.physicalMods.shift || this.heldButtons.shift, alt: this.physicalMods.alt || this.heldButtons.center };
+  }
+
+  onSetting(id: string, value: ToolSettingValue): void {
+    if (typeof value !== 'boolean' || (id !== 'held-uniform' && id !== 'held-center')) return;
+    this.heldButtons[id === 'held-uniform' ? 'shift' : 'center'] = value;
+    this.onModifiersChanged(this.physicalMods);
+    this.ctx?.statusChanged();
   }
 
   onVcb(v: VcbValue): void {
@@ -435,7 +458,11 @@ export class ScaleTool extends TransformToolBase implements SectionPreviewTool {
       })),
     ];
     const text = edit ? `${edit.uniform ? 'Keep proportions' : 'Free proportions'} · ${edit.centered ? 'About center' : 'Opposite grip'}` : 'Pick a grip';
-    return { ...this.baseStatus(), fields, placing: false, settings: [{ kind: 'note', id: 'mode', text }] };
+    return { ...this.baseStatus(), fields, placing: false, settings: [
+      { kind: 'modifier', id: 'held-uniform', label: this.state.kind === 'scaling' && this.state.grip.kind === 'corner' ? 'Free proportions' : 'Keep proportions', key: 'shift', held: this.mods.shift, disabled: this.state.kind !== 'scaling' },
+      { kind: 'modifier', id: 'held-center', label: 'About center', key: 'secondary', held: this.mods.alt || this.mods.ctrl, disabled: this.state.kind !== 'scaling' },
+      { kind: 'note', id: 'mode', text },
+    ] };
   }
 
   private baseStatus(): ToolStatus {

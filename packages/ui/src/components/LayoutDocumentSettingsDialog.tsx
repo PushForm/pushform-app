@@ -48,7 +48,7 @@ export function LayoutDocumentSettingsDialog({ state, onCommand, onClose }: {
   return createPortal(<div className="pf-layer-scope-backdrop" onPointerDown={event => { if (event.target === event.currentTarget) onClose(); }}>
     <div ref={dialog} className="pf-layer-scope-dialog pf-document-settings" role="dialog" aria-modal="true" aria-labelledby="pf-document-settings-title">
       <h2 id="pf-document-settings-title">Document Settings</h2>
-      <fieldset>
+      {!state.settings.drawing && <fieldset>
         <legend>Paper</legend>
         <label>Paper size<select value={preset?.id ?? 'custom'} onChange={event => {
           // A preset fills in its landscape size and sets its standard's units for the paper, the grid and drawing values.
@@ -73,7 +73,7 @@ export function LayoutDocumentSettingsDialog({ state, onCommand, onClose }: {
         <LengthField label="Page height" mm={paper.size[1]} unit={paperUnit} onCommit={heightMm => onCommand('layout.document.setup', { heightMm })} />
         <LengthField label="Margin" mm={paper.margin.left} unit={paperUnit} allowZero onCommit={marginMm => onCommand('layout.document.setup', { marginMm })} />
         <UnitField label="Page size units" unit={paperUnit} onChange={units => onCommand('layout.document.setup', { units })} />
-      </fieldset>
+      </fieldset>}
       <fieldset>
         <legend>Grid</legend>
         <label><input type="checkbox" checked={state.settings.grid.show}

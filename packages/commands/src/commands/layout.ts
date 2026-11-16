@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { cloneLayoutValue, layoutDimensionUnits, layoutValuesEqual, setLayoutGridUnits } from '@pushform/layout';
+import { drawingViewEntities, DRAWING_ANNOTATION_SCALE, cloneLayoutValue, layoutDimensionUnits, layoutValuesEqual, setLayoutGridUnits } from '@pushform/layout';
 import { operateLayoutPaths, LAYOUT_PATH_OPERATIONS, createLayoutShapeRegions, replayLayoutShapeBuild, layoutShapeBuildSnapshot, retainedLayoutShapeSources, retainLayoutShapeOpenSource } from '@pushform/layout';
 import { LENGTH_TOL } from '@pushform/core';
 import { resizedViewportCamera, rotateLayoutEntities, scaleLayoutEntities } from '@pushform/layout';
@@ -401,6 +401,43 @@ function pasteEntities(draft: Draft<LayoutDocumentState>, pageId: number, copies
 }
 
 export const layoutCommands: readonly AnyCommand[] = [
+  defineCommand({
+    id: 'layout.drawing.place', title: 'Place Drawing View', category: 'layout', undoable: true,
+    params: z.object({ pageId: id, sourceGuid: z.string().min(1), sourceName: z.string().min(1), sourcePageId: id,
+      denominator: finite.positive(), x: finite, y: finite, rotation: finite, entities: z.array(clipboardEntity).min(1), replaceId: id.optional() }),
+    run: (ctx, p) => host(ctx).edit('Place Drawing View', draft => {
+      if (draft.settings.drawing) throw new Error('Choose a Layout destination.');
+      const target = page(draft, p.pageId), layer = draft.layers.get(draft.activeLayerId);
+      if (!layer || layer.shared || layer.locked || !isLayoutLayerVisible(target, draft, layer.id)) throw new Error('Choose an unlocked visible page layer.');
+      const previous = p.replaceId === undefined ? undefined : target.entities.get(p.replaceId);
+      if (p.replaceId !== undefined && (!previous?.drawingView || previous.groupId === undefined)) throw new Error('Drawing view is unavailable.');
+      if (previous && (draft.layers.get(previous.layerId)?.locked || !isLayoutLayerVisible(target, draft, previous.layerId))) throw new Error('Drawing view layer is unavailable.');
+      const copies = drawingViewEntities(p.entities as LayoutEntity[], p.denominator, p.x, p.y, p.rotation);
+      if (previous) {
+        const ids = new Set([...target.entities.values()].filter(e => e.groupId === previous.groupId).map(e => e.id));
+        for (const id of ids) target.entities.delete(id);
+        target.entityOrder = target.entityOrder.filter(id => !ids.has(id));
+      }
+      const groupId = allocId(draft), result: number[] = [];
+      for (const copy of copies) {
+        const entityId = allocId(draft);
+        const entity: LayoutEntity = { ...copy, id: entityId, layerId: previous?.layerId ?? layer.id, groupId, locked: true };
+        if (!result.length) entity.drawingView = { sourceGuid: p.sourceGuid, sourceName: p.sourceName, sourcePageId: p.sourcePageId, denominator: p.denominator, x: p.x, y: p.y, rotation: p.rotation };
+        target.entities.set(entityId, entity); target.entityOrder.push(entityId); result.push(entityId);
+      }
+      return result;
+    }),
+  }),
+  defineCommand({
+    id: 'layout.drawing.detach', title: 'Detach Drawing View', category: 'layout', undoable: true,
+    params: z.object({ pageId: id, entityId: id }),
+    run: (ctx, p) => host(ctx).edit('Detach Drawing View', draft => {
+      const target = page(draft, p.pageId), first = target.entities.get(p.entityId);
+      if (!first?.drawingView || first.groupId === undefined) throw new Error('Drawing view is unavailable.');
+      if (draft.layers.get(first.layerId)?.locked || !isLayoutLayerVisible(target, draft, first.layerId)) throw new Error('Drawing view layer is unavailable.');
+      for (const entity of target.entities.values()) if (entity.groupId === first.groupId) { delete entity.drawingView; entity.locked = false; }
+    }),
+  }),
   defineCommand({
     id: 'layout.annotation.attachModel', title: 'Attach Annotation to Model', category: 'layout', menu: 'Dimensions',
     params: z.object({ pageId: id, entityId: id, attachments: modelAttachments }),
@@ -823,6 +860,7 @@ export const layoutCommands: readonly AnyCommand[] = [
       if (!layer || layer.locked || !isLayoutLayerVisible(page(draft, params.pageId), draft, layer.id)) throw new Error('Active layer is unavailable');
       const target = page(draft, params.pageId);
       const dimension = createAngularDimension();
+      if (draft.settings.drawing) for (const key of ['fontSizePt', 'arrowSizeMm', 'extensionGapMm', 'extensionOverrunMm'] as const) dimension[key] *= DRAWING_ANNOTATION_SCALE;
       Object.assign(dimension, params.style);
       dimension.anchors = params.anchors ?? [null, null, null];
       const points = params.points.map(point => [...point] as [number, number]);
@@ -898,7 +936,9 @@ export const layoutCommands: readonly AnyCommand[] = [
       const target = page(draft, params.pageId);
       // New dimensions measure in the drawing units unless a style says otherwise.
       const dimension = { ...createLinearDimension(), ...layoutDimensionUnits(draft) };
+      if (draft.settings.drawing) for (const key of ['fontSizePt', 'arrowSizeMm', 'extensionGapMm', 'extensionOverrunMm'] as const) dimension[key] *= DRAWING_ANNOTATION_SCALE;
       Object.assign(dimension, params.style);
+      if (draft.settings.drawing) dimension.scale = 1;
       dimension.anchors = params.anchors ?? [null, null];
       for (const anchor of dimension.anchors) {
         if (!anchor) continue;
@@ -928,6 +968,7 @@ export const layoutCommands: readonly AnyCommand[] = [
     run: (ctx, params) => host(ctx).edit('Edit Dimension', (draft) => {
       const entity = editablePath(draft, params.pageId, params.entityId);
       if (!entity.dimension) throw new Error('Entity is not a dimension');
+      if (draft.settings.drawing && params.style?.scale !== undefined && params.style.scale !== 1) throw new Error('Drawing dimensions measure full-size geometry.');
       if (entity.modelAnnotation && (params.style?.scale !== undefined || params.detach))
         throw new Error('Disconnect the model annotation before changing its measurement scale');
       if (params.style) Object.assign(entity.dimension, params.style);

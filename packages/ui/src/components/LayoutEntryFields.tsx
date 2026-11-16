@@ -48,6 +48,7 @@ export function LayoutEntryFields(props: LayoutEntryFieldsProps): JSX.Element | 
     if (now !== sizes.current) { sizes.current = now; remeasure(); }
   });
 
+  const fieldKey = fields.map(f => `${f.id}:${Boolean(f.disabled)}`).join(' ');
   useEffect(() => {
     if (!focus) return;
     const input = inputs.current.get(focus);
@@ -56,7 +57,7 @@ export function LayoutEntryFields(props: LayoutEntryFieldsProps): JSX.Element | 
     const end = input.value.length;
     if (drafts[focus] === undefined) input.select();
     else input.setSelectionRange(end, end);
-  }, [focus, fields.length]);
+  }, [focus, fieldKey]);
   // A focused field not yet typed in shows the live value selected, so typing replaces it.
   useLayoutEffect(() => {
     const input = focus ? inputs.current.get(focus) : undefined;

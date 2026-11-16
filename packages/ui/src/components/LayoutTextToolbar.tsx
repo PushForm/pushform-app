@@ -15,14 +15,14 @@ function emphasisActive(text: LayoutText, range: Range, key: Emphasis): boolean 
 }
 
 /** Formatting in the tool options bar while an inline text editor is active: one row of style controls. */
-export function LayoutTextToolbar({ text, range, getSelection, onCaptureSelection, onChange, onReturnToText, onFinish }: {
-  text: LayoutText; range: Range; getSelection: () => Range; onCaptureSelection: (range: Range) => void;
+export function LayoutTextToolbar({ annotationScale = 1, text, range, getSelection, onCaptureSelection, onChange, onReturnToText, onFinish }: {
+  annotationScale?: number; text: LayoutText; range: Range; getSelection: () => Range; onCaptureSelection: (range: Range) => void;
   onChange: (patch: Partial<LayoutText>, returnFocus?: boolean) => void;
   onReturnToText: () => void; onFinish: () => void;
 }): JSX.Element {
   const selectedStyle = layoutTextStyleAt(text, range.start);
-  const [size, setSize] = useState(String(selectedStyle.fontSizePt));
-  useEffect(() => setSize(String(selectedStyle.fontSizePt)), [selectedStyle.fontSizePt]);
+  const [size, setSize] = useState(String(selectedStyle.fontSizePt / annotationScale));
+  useEffect(() => setSize(String(selectedStyle.fontSizePt / annotationScale)), [selectedStyle.fontSizePt, annotationScale]);
   return <div className="pf-layout-text-toolbar" role="group" aria-label="Text formatting"
     onPointerDownCapture={() => onCaptureSelection(getSelection())}
     onKeyDown={event => {
@@ -38,8 +38,8 @@ export function LayoutTextToolbar({ text, range, getSelection, onCaptureSelectio
       <LayoutFontOptions value={selectedStyle.fontFamily} />
     </select>
     <label className="pf-layout-text-size"><input aria-label="Text toolbar size" title="Font size in points" type="number" min="1" step="0.5" value={size}
-      onChange={event => { setSize(event.target.value); const value = Number(event.target.value); if (value >= 1 && Number.isFinite(value)) onChange(formatLayoutTextRange(text, getSelection(), { fontSizePt: value }), false); }}
-      onBlur={() => setSize(String(selectedStyle.fontSizePt))}
+      onChange={event => { setSize(event.target.value); const value = Number(event.target.value); if (value >= 1 && Number.isFinite(value)) onChange(formatLayoutTextRange(text, getSelection(), { fontSizePt: value * annotationScale }), false); }}
+      onBlur={() => setSize(String(selectedStyle.fontSizePt / annotationScale))}
       onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); onReturnToText(); } }} />pt</label>
     <span className="pf-layout-text-toolbar-divider" aria-hidden="true" />
     {(['bold', 'italic', 'underline'] as const).map(key => <button key={key} type="button" aria-label={`Text toolbar ${key}`}

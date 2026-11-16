@@ -146,6 +146,7 @@ function isLayoutState(value: unknown): value is LayoutDocumentState {
         (numbering.startPageId !== null && !Number.isSafeInteger(numbering.startPageId))) return false;
     }
   }
+  if (state.settings.drawing !== undefined && typeof state.settings.drawing !== 'boolean') return false;
   if (state.settings.objectSnap !== undefined && typeof state.settings.objectSnap !== 'boolean') return false;
   const unit = (value: unknown): boolean => value === undefined || value === 'mm' || value === 'in';
   if (!unit(state.settings.paperUnits) || !unit(state.settings.grid?.units)) return false;

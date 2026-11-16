@@ -9,7 +9,7 @@ import type { IconType } from 'react-icons';
 import { LuLibrary, LuPuzzle } from 'react-icons/lu';
 import { PiAngle, PiBezierCurve, PiTreeView } from 'react-icons/pi';
 import { RiChatDeleteLine, RiChatAiLine } from 'react-icons/ri';
-import { TbLayersUnion, TbOval, TbPackageImport, TbTextSize, TbWriting } from 'react-icons/tb';
+import { TbVector, TbLayersUnion, TbOval, TbPackageImport, TbTextSize, TbWriting } from 'react-icons/tb';
 import { LayoutDifferenceIcon, LayoutIntersectionIcon, LayoutExclusionIcon, LayoutDivisionIcon, LayoutCutPathIcon } from './LayoutBooleanIcons';
 import { LayoutFilletIcon } from './LayoutFilletIcon';
 import { LayoutShapeBuilderIcon } from './LayoutShapeBuilderIcon';
@@ -97,6 +97,7 @@ const SawBladeIcon: IconType = (props) => <GiCircularSawblade {...props} strokeW
 
 /** Shared outline icons for the tool and panel strips. */
 const REACT_ICONS: Record<string, IconType> = {
+  'document-drawing': TbVector,
   'tool-shape-builder': LayoutShapeBuilderIcon,
   'tool-fillet': LayoutFilletIcon,
   'tool-sectionPlane': SectionPlaneIcon,

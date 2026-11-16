@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { createLayoutTemplateState, createLayoutDocument, LayoutDocument } from '@pushform/layout';
+import { createScaleDrawingState, createLayoutTemplateState, createLayoutDocument, LayoutDocument } from '@pushform/layout';
 import { createLayoutRegistry, ScriptRunner, type CommandRegistry } from '@pushform/commands';
 import { newGuid } from '@pushform/core';
 import type { DefId, ImageId } from '@pushform/core';
@@ -370,6 +370,14 @@ export class DocumentSession {
     return tab;
   }
 
+  newDrawing(): LayoutTab {
+    const doc = new LayoutDocument(createScaleDrawingState());
+    const tab = this.addLayoutTab(doc, `Drawing ${this.sequence}${LAYOUT_FILE_EXTENSION}`, layoutContentKey(doc));
+    tab.workspace.zoom = 0.02;
+    tab.workspace.zoomToPageOnOpen = true;
+    return tab;
+  }
+
   newLayout(templateId?: string): LayoutTab {
     const doc = templateId ? new LayoutDocument(createLayoutTemplateState(templateId)) : createLayoutDocument();
     this.parkActive();
@@ -454,7 +462,7 @@ export class DocumentSession {
       commands,
       initialVersion: doc.version,
       activePageId: doc.state.pageOrder[0]!,
-      workspace: { ...createLayoutWorkspaceState(), zoomToPageOnOpen: true },
+      workspace: { ...createLayoutWorkspaceState(), ...(doc.state.settings.drawing ? { zoom: 0.02 } : {}), zoomToPageOnOpen: true },
       savedContent,
       recoveryId: newGuid(),
       ...(identity ? { identity } : {}),
@@ -922,7 +930,7 @@ export class DocumentSession {
             initialVersion: doc.version,
             activePageId: doc.state.pages.has(item.activePageId)
               ? item.activePageId : doc.state.pageOrder[0]!,
-            workspace: { ...createLayoutWorkspaceState(), zoomToPageOnOpen: true },
+            workspace: { ...createLayoutWorkspaceState(), ...(doc.state.settings.drawing ? { zoom: 0.02 } : {}), zoomToPageOnOpen: true },
             savedContent: this.nativeRefresh ? item.dirty ? '' : layoutContentKey(doc) : item.savedContent,
             recoveryId: item.recoveryId,
             ...(typeof item.identity === 'string' ? { identity: item.identity } : {}),

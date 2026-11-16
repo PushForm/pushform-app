@@ -628,7 +628,25 @@ export const selectionToggle = defineCommand({
   run: (ctx, p) => hostOf(ctx).selection.toggle(asRefs(p.refs)),
 });
 
+export const insertDrawing = defineCommand({
+  id: 'sketch.insertDrawing', title: 'Insert Drawing', category: 'draw', undoable: true,
+  params: z.object({ paths: z.array(z.object({ points: z.array(z.tuple([z.number().finite(), z.number().finite(), z.number().finite()])).min(2).max(100000), closed: z.boolean() })).min(1).max(10000) }),
+  run(ctx, p) {
+    const host = hostOf(ctx), frame = currentFrame(host);
+    return host.edit('Insert Drawing', draft => {
+      const graph = sketchGraphAt(draft, frame.path), ids: number[] = [];
+      for (const path of p.paths) {
+        const points = path.points.map(point => localPoint(frame, point));
+        const count = path.closed ? points.length : points.length - 1;
+        for (let i = 0; i < count; i++) ids.push(...graph.addEdge(points[i]!, points[(i + 1) % points.length]!, activeDrawTagOpts(ctx)));
+      }
+      return ids;
+    });
+  },
+});
+
 export const sketchCommands: readonly AnyCommand[] = [
+  insertDrawing,
   addEdge,
   addPolyline,
   rectangle,

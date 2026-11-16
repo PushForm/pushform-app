@@ -4,7 +4,7 @@
 
 Click **Import** in the toolbar's **Insert** group after Table, or choose **Main menu → Import...**. Select a **PNG**, **JPG/JPEG**, or **SVG** image and confirm the picker. The image is embedded, centered on the active page, and selected for moving and resizing. Use an unlocked, visible layer; cancelling adds nothing.
 
-Import adds a picture to the current drawing; Open opens a document. The same picker also accepts DXF drawings. Use Paste instead when picture data is already on your clipboard.
+Import adds a picture to the current drawing; Open opens a document. The same picker also accepts DXF and DWG drawings. Use Paste instead when picture data is already on your clipboard.
 
 ## Open a LayOut document
 
@@ -22,9 +22,11 @@ If import still reports invalid or nonfinite numeric data, repair the source dra
 
 Shapes with a pattern fill, such as a concrete, brick, soil or gravel hatch, keep it: the pattern picture repeats across the shape with its original position, scale and rotation, over the shape's fill color and under its outline. It shows in the workspace, prints, and exports to PDF, SVG, page images and back to LayOut; DXF leaves the pattern out and keeps the shape's fill color and outline. Pattern fills cannot be added or changed yet, and the pattern stays where it is on the page when you move or reshape its shape. A pattern whose picture is missing from the file is left out and listed in the import notes.
 
-## Import DXF into a drawing
+## Import DXF or DWG into a drawing
 
-Use Import for a DXF drawing. Review its options and import notes, especially units and unsupported content. DXF is an exchange format; do not expect every source application feature to become an editable PushForm object.
+Use Import for a DXF or DWG drawing. The drawing's model space becomes editable lines, curves, fills and text in one group, at a standard scale that fits the page. Review the import notes, especially units and unsupported content. These are exchange formats; do not expect every source application feature to become an editable PushForm object.
+
+A DWG drawing is converted on your device and then imported exactly as a DXF drawing is, so the same content comes across: lines, polylines, arcs, circles, ellipses, splines, solid fills, text, dimensions, leaders and blocks. Pattern hatches, points, pictures and paper space layouts are left out and listed in the import notes. DWG drawings from AutoCAD 2004 and later are the ones tested; a damaged drawing imports what can be read of it and says so. PushForm does not export DWG; export DXF for CAD programs.
 
 Check the drawing's physical size after import before adding annotations or exporting at a particular scale.
 

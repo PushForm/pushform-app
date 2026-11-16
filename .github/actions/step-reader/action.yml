@@ -1,5 +1,5 @@
-name: Prepare STEP modules
-description: Restore matching compiled modules or build both WebAssembly targets
+name: Prepare STEP and DWG modules
+description: Restore matching compiled reader modules or build them for WebAssembly
 runs:
   using: composite
   steps:
@@ -12,12 +12,12 @@ runs:
       id: step-wasm
       with:
         path: packages/io/wasm/*.wasm
-        key: step-wasm-v1-${{ runner.os }}-${{ steps.rust-version.outputs.hash }}-${{ hashFiles('crates/**', '!crates/**/target/**', '.cargo/**', 'rust-toolchain*', 'scripts/build-step-reader.mjs') }}
+        key: step-wasm-v1-${{ runner.os }}-${{ steps.rust-version.outputs.hash }}-${{ hashFiles('crates/**', '!crates/**/target/**', '.cargo/**', 'rust-toolchain*', 'scripts/build-step-reader.mjs', 'scripts/build-dwg-reader.mjs') }}
     - uses: Swatinem/rust-cache@v2
       if: steps.step-wasm.outputs.cache-hit != 'true'
-      with: { workspaces: crates/step-reader }
+      with: { workspaces: "crates/step-reader\ncrates/dwg-reader" }
     - shell: bash
       if: steps.step-wasm.outputs.cache-hit != 'true'
-      run: node scripts/build-step-reader.mjs
+      run: node scripts/build-step-reader.mjs && node scripts/build-dwg-reader.mjs
     - shell: bash
-      run: node scripts/build-step-reader.mjs --check
+      run: node scripts/build-step-reader.mjs --check && node scripts/build-dwg-reader.mjs --check

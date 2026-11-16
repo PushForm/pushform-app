@@ -1,0 +1,23 @@
+[package]
+name = "pushform-dwg-reader"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+description = "PushForm's DWG reader: converts a DWG drawing to DXF text behind a small C ABI, compiled to WebAssembly"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Reads DWG and writes DXF (MPL-2.0; see NOTICE.md). Pinned exactly: the crate is young and changes quickly, so every
+# upgrade is a reviewed change. Its default feature only adds threads, which the WebAssembly build cannot use.
+acadrust = { version = "=0.6.8", default-features = false }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+# Panics unwind through the C ABI as traps either way; abort keeps the module smaller.
+panic = "abort"

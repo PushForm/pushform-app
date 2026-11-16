@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-// @pushform/io: Native .pf/.pfl formats, SketchUp, COLLADA, OBJ, 3DS, STL and DXF model import, STL export, and LayOut and DXF Layout import.
+// @pushform/io: Native .pf/.pfl formats, SketchUp, COLLADA, OBJ, 3DS, STL, DXF and DWG model import, STL export, and LayOut, DXF and DWG Layout import.
 export * from './nativeExtensions';
 export * from './layoutFile';
 export * from './layoutModelArchive';
@@ -23,6 +23,7 @@ export * from './obj';
 export * from './dxf';
 export * from './dxfModel';
 export * from './dxfLayout';
+export * from './dwg';
 export * from './threeDs';
 export * from './step';
 export { decodeStepPreview, type StepPreview, type StepPreviewPart, type StepPreviewPlacement } from './stepWasm';

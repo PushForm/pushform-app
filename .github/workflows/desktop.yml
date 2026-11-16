@@ -74,7 +74,7 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-  # The STEP reader is Rust compiled to WebAssembly, the same on every platform, so it is built once here for the checks
+  # The STEP and DWG readers are Rust compiled to WebAssembly, the same on every platform, so they are built once here for the checks
   # and for each platform's web bundle.
   step-reader:
     needs: prepare
@@ -92,13 +92,13 @@ jobs:
         id: step-wasm
         with:
           path: packages/io/wasm/*.wasm
-          key: step-wasm-v1-${{ runner.os }}-${{ steps.rust-version.outputs.hash }}-${{ hashFiles('crates/**', '!crates/**/target/**', '.cargo/**', 'rust-toolchain*', 'scripts/build-step-reader.mjs') }}
+          key: step-wasm-v1-${{ runner.os }}-${{ steps.rust-version.outputs.hash }}-${{ hashFiles('crates/**', '!crates/**/target/**', '.cargo/**', 'rust-toolchain*', 'scripts/build-step-reader.mjs', 'scripts/build-dwg-reader.mjs') }}
       - uses: Swatinem/rust-cache@v2
         if: steps.step-wasm.outputs.cache-hit != 'true'
-        with: { workspaces: crates/step-reader }
-      - run: node scripts/build-step-reader.mjs
+        with: { workspaces: "crates/step-reader\ncrates/dwg-reader" }
+      - run: node scripts/build-step-reader.mjs && node scripts/build-dwg-reader.mjs
         if: steps.step-wasm.outputs.cache-hit != 'true'
-      - run: node scripts/build-step-reader.mjs --check
+      - run: node scripts/build-step-reader.mjs --check && node scripts/build-dwg-reader.mjs --check
       - uses: actions/upload-artifact@v7
         with:
           name: step-reader-wasm

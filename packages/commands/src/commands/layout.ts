@@ -352,7 +352,7 @@ const clipboardEntity = z.discriminatedUnion('kind', [
 
 /**
  * Place independent copies of clipboard objects as a group centered on a page, on the active layer;
- * returns their ids. DXF import places its converted drawing the same way.
+ * returns their ids. DXF and DWG import place their converted drawings the same way.
  */
 function pasteEntities(draft: Draft<LayoutDocumentState>, pageId: number, copies: readonly z.infer<typeof clipboardEntity>[], position?: [number, number]): number[] {
   const target = page(draft, pageId), layer = draft.layers.get(draft.activeLayerId);
@@ -379,10 +379,11 @@ function pasteEntities(draft: Draft<LayoutDocumentState>, pageId: number, copies
   if (entities.length === 0) throw new Error('Nothing to paste');
   const bounds = entities.flatMap(entity => entity.text ? entity.points.slice(0, 2) : entity.kind === 'path'
     ? flattenLayoutPath(entity.points, entity.handles, entity.closed, 20, entity.contourStarts) : entity.points);
-  const xs = bounds.map(p => p[0]), ys = bounds.map(p => p[1]);
+  // Reduced in a loop: a traced drawing holds more points than a call can take as arguments.
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const [x, y] of bounds) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
   const center = position ?? [target.size[0] / 2, target.size[1] / 2];
-  const delta = [center[0]! - (Math.min(...xs) + Math.max(...xs)) / 2,
-    center[1]! - (Math.min(...ys) + Math.max(...ys)) / 2];
+  const delta = [center[0]! - (minX + maxX) / 2, center[1]! - (minY + maxY) / 2];
   const translate = (p: [number, number]): [number, number] => [p[0] + delta[0]!, p[1] + delta[1]!];
   const store = shapeStore(draft, pageId, layer.id);
   const groups = new Map<number, number>();
@@ -781,6 +782,12 @@ export const layoutCommands: readonly AnyCommand[] = [
     id: 'layout.dxf.import', title: 'Import DXF', category: 'layout', menu: 'File',
     params: z.object({ pageId: id, entities: z.array(clipboardEntity).min(1) }), undoable: true,
     run: (ctx, params) => host(ctx).edit('Import DXF', draft => pasteEntities(draft, params.pageId, params.entities)),
+  }),
+  // A DWG drawing is converted to DXF first and placed the same way; it has its own command for its undo label.
+  defineCommand({
+    id: 'layout.dwg.import', title: 'Import DWG', category: 'layout', menu: 'File',
+    params: z.object({ pageId: id, entities: z.array(clipboardEntity).min(1) }), undoable: true,
+    run: (ctx, params) => host(ctx).edit('Import DWG', draft => pasteEntities(draft, params.pageId, params.entities)),
   }),
   defineCommand({
     id: 'layout.path.corner', title: 'Fillet or Chamfer', category: 'layout', menu: 'Tools',

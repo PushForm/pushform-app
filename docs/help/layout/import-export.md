@@ -18,6 +18,12 @@ Some LayOut files contain objects saved with unusable numbers. A dimension saved
 
 If import still reports invalid or nonfinite numeric data, repair the source drawing and save a new copy in SketchUp LayOut before trying again. The failed import leaves your open drawings unchanged.
 
+## Hidden layers in LayOut documents
+
+A layer that is hidden on a page of a LayOut document stays hidden on that page when you open the file, and its objects on that page are kept. Open the **Object browser** and expand the page: the layer and its objects are listed dimmed. Click the layer's eye there to show them on that page; other pages are unchanged.
+
+Exporting back to SketchUp LayOut keeps each page's hidden layers and the objects on them, so guides or notes hidden on a page are still there when the layer is shown again in LayOut. Objects you hid one by one are left out of the export.
+
 ## Pattern fills in LayOut documents
 
 Shapes with a pattern fill, such as a concrete, brick, soil or gravel hatch, keep it: the pattern picture repeats across the shape with its original position, scale and rotation, over the shape's fill color and under its outline. It shows in the workspace, prints, and exports to PDF, SVG, page images and back to LayOut; DXF leaves the pattern out and keeps the shape's fill color and outline. Pattern fills cannot be added or changed yet, and the pattern stays where it is on the page when you move or reshape its shape. A pattern whose picture is missing from the file is left out and listed in the import notes.

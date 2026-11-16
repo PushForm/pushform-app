@@ -163,18 +163,15 @@ fn fail(message: String) -> u32 {
     0
 }
 
-/// Threaded build: set up the main thread for the C library's threads (its thread descriptor), which a command does on
-/// start but a library leaves to the host. Call it once after instantiation, before anything else; without it the
-/// first thread-local key the program makes walks an unmade thread list and never returns.
+/// Threaded build: kept for hosts that call it after `_initialize`. The C library's reactor start (`_initialize`) sets up
+/// the main thread's thread descriptor itself, so there is nothing left to do here. Older toolchains also exported
+/// `__wasi_init_tp` for this; newer ones do not, so calling it would fail to link.
 ///
 /// # Safety
-/// Call it once, on the instantiating thread, before any other export.
+/// Call it, if at all, once on the instantiating thread after `_initialize`.
 #[cfg(all(target_arch = "wasm32", feature = "threads"))]
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn pf_init() {
-    unsafe extern "C" { fn __wasi_init_tp(); }
-    unsafe { __wasi_init_tp() };
-}
+pub unsafe extern "C" fn pf_init() {}
 
 /// Allocate `len` bytes the caller fills with the file's text; freed by `pf_free`.
 #[unsafe(no_mangle)]
@@ -495,13 +492,20 @@ impl Pipeline {
         if !self.finished { return Err("the conversion is not finished".into()); }
         while self.mesh_one() {}
         if !self.is_done() { return Err("the meshing threads have not finished".into()); }
+        // The bodies reach the pipeline in the order the reader happens to finish them, which differs from run to run
+        // with threads. The result lists parts and placements in planned order (the file's), so the same file always
+        // gives the same parts, names and numbering; a part is named and colored by its first placement.
         // Parts that failed to mesh drop out with their placements; the rest are renumbered.
+        let mut order: Vec<usize> = (0..self.jobs.len()).collect();
+        order.sort_by_key(|&job| self.jobs[job].0);
         let mut renumber: HashMap<usize, usize> = HashMap::new();
         let mut parts: Vec<Part> = Vec::new();
-        for (job, mesh) in self.meshes.iter_mut().enumerate() {
-            if let Some(Some(mesh)) = mesh.take() { renumber.insert(job, parts.len()); parts.push(Part { mesh, placement_inverse: self.jobs[job].1 }); }
+        for job in order {
+            if let Some(Some(mesh)) = self.meshes[job].take() { renumber.insert(job, parts.len()); parts.push(Part { mesh, placement_inverse: self.jobs[job].1 }); }
         }
-        let placed: Vec<(usize, &ImportedBody, M4)> = self.placed.iter()
+        let mut by_plan: Vec<&(usize, usize, M4)> = self.placed.iter().collect();
+        by_plan.sort_by_key(|&&(_, i, _)| i);
+        let placed: Vec<(usize, &ImportedBody, M4)> = by_plan.into_iter()
             .filter_map(|&(job, i, m)| Some((*renumber.get(&job)?, self.bodies[i].as_ref()?, m))).collect();
         Ok(write_result(parts, &placed, &self.warnings, &self.schema, &self.system, mode, threshold))
     }

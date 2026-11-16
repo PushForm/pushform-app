@@ -40,7 +40,7 @@ Check the drawing's physical size after import before adding annotations or expo
 
 Open the main menu's **Export…** action and choose **PDF**. Choose all pages, the current page, or a page range. Each page keeps its physical paper size.
 
-Paths, shapes, annotations, tables and text remain vector, and text remains selectable. Model views are raster images at the chosen 150 or 300 dpi. Export does not change the open drawing or its undo history.
+Paths, shapes, annotations, tables and text remain vector, and text remains selectable. Model views are raster pictures. Choose a **Quality**: Draft (150 dpi), Standard (300 dpi, the default) or High (600 dpi). Export uses the picture each model view shows, and it does not draw a view again at a higher quality, so a view whose picture has fewer pixels per inch than the chosen quality is listed in the export notes. Working in the drawing is not affected by the export quality. Export does not change the open drawing or its undo history.
 
 ## Export page images
 
@@ -50,7 +50,7 @@ Images, fonts and model views are prepared before export. The editor's grid, sel
 
 ## Export SVG or DXF
 
-Choose **SVG** for editable vector artwork, or **DXF** for CAD exchange, in Export. Review the format's setup and limitations before saving. SVG can retain drawing paths, text and supported embedded pictures.
+Choose **SVG** for editable vector artwork, or **DXF** for CAD exchange, in Export. Review the format's setup and limitations before saving. SVG can retain drawing paths, text and supported embedded pictures. SVG also has a **Quality** setting (Draft, Standard or High) for embedded model-view pictures, with the same export notes as PDF.
 
 DXF can keep paths, supported styling and text, but pictures and raster model views are omitted. A drawing-scale denominator converts paper coordinates for CAD use; check it when preparing a scaled drawing.
 
@@ -69,6 +69,12 @@ Presenting is different from exporting: it displays the current drawing and does
 ## Export a native editable copy
 
 Choose **Main menu → Export…**, select **PushForm Layout (.pfl)** in **Format**, then click **Export…** and choose where to save. Browsers without a save picker download the file. This exports the entire document with its embedded assets and all pages. It keeps the open document’s name, cloud destination and saved state. There is no separate Download a copy menu item.
+
+## Model views in exported LayOut files
+
+Exporting to **.layout** keeps each model view editable in LayOut wherever that is possible. A view that cannot be written as an editable model view, such as a view of a PushForm cloud model or a view whose original model is no longer in the document, is exported automatically as page artwork showing what it displays. There is no prompt, and the rest of the drawing exports normally.
+
+When this happens, **Export saved with notes** lists the pages and views affected, naming up to five views per page and up to ten pages and counting the rest. In the exported file, model editing, camera changes and model-linked behavior are lost for those views. Views that stay editable are unchanged, and your PushForm drawing and its model references are not changed by the export.
 
 ### Failed imports
 

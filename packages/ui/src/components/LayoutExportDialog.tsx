@@ -6,11 +6,14 @@ import { isTauri } from '@tauri-apps/api/core';
 import type { LayoutDocumentState } from '@pushform/layout';
 import { chooseSaveTarget } from '../saveFile';
 import { exportLayoutImages, LAYOUT_IMAGE_RESOLUTIONS, layoutImageExportName, layoutImageSize, type LayoutImageFormat } from './layoutImageExport';
-import { exportLayoutPdf, pdfPageRange } from './layoutPdfExport';
+import { DEFAULT_LAYOUT_EXPORT_DPI, exportLayoutPdf, LAYOUT_EXPORT_QUALITIES, pdfPageRange } from './layoutPdfExport';
 import { exportLayoutVectors } from './layoutVectorExport';
 import { encodeLayoutArchiveSync, layoutJson, exportSketchUpLayout, type LayoutExportArea } from '@pushform/io';
 import { rasterizeImage } from '../rasterizeImage';
 import type { LayoutPagePainter } from './layoutPrint';
+
+/** Chrome and Edge show a save picker, which needs the click that started the export, so they cannot also open a viewer tab. */
+const hasSavePicker = (): boolean => !isTauri() && 'showSaveFilePicker' in window;
 
 /** One export setup for LayOut documents, raster images and vector drawings. */
 export function LayoutExportDialog({ state, activePageId, documentName, paint, onClose }: {
@@ -73,7 +76,7 @@ export function LayoutExportDialog({ state, activePageId, documentName, paint, o
     const controller = new AbortController(); job.current = controller;
     setBusy(true); setError(null); setWarnings([]);
     // A browser lets a click open a tab; opened now, the tab shows the PDF once it is written.
-    const viewer = format === 'pdf' && showAfter && !isTauri() ? (window.open?.('', '_blank') ?? null) : null;
+    const viewer = format === 'pdf' && showAfter && !isTauri() && !hasSavePicker() ? (window.open?.('', '_blank') ?? null) : null;
     let shown = false;
     try {
       // Ask first: browsers open their save picker only right after a click, and large pages take a while to paint.
@@ -89,7 +92,7 @@ export function LayoutExportDialog({ state, activePageId, documentName, paint, o
         : format === 'png' ? { description: 'PNG image', mime: 'image/png', extension: 'png' } : { description: 'JPEG image', mime: 'image/jpeg', extension: 'jpg' });
       if (!target || controller.signal.aborted) return;
       const file = format === 'pfl' ? { bytes: encodeLayoutArchiveSync(layoutJson(state)), warnings: [] } : format === 'pdf' ? await exportLayoutPdf(state, ids, documentName, dpi, controller.signal, { jpegQuality: jpeg ? jpegQuality : undefined }) : format === 'layout' ? await exportSketchUpLayout(state, { rasterize: rasterizeImage }) : format === 'svg' || format === 'dxf'
-        ? await exportLayoutVectors(state, ids, documentName, { format, area, scale: Number(scale) }, controller.signal)
+        ? await exportLayoutVectors(state, ids, documentName, { format, area, scale: Number(scale), dpi }, controller.signal)
         : await exportLayoutImages(state, ids, documentName, { format, dpi }, paint, controller.signal);
       if (!file || controller.signal.aborted) return;
       await target.write(file.bytes);
@@ -120,18 +123,22 @@ export function LayoutExportDialog({ state, activePageId, documentName, paint, o
         <label><input type="radio" name="image-export-pages" checked={scope === 'current'} onChange={() => setScope('current')} />Current page ({state.pages.get(activePageId)!.name})</label>
         {format === 'pdf' ? <><label><input type="radio" name="image-export-pages" checked={scope === 'range'} onChange={() => setScope('range')} />Range</label><label>Page range <input aria-label="Page range" value={range} onChange={event => { setRange(event.target.value); setScope('range'); }} /></label></> : null}
       </fieldset> : null}
-      <label>Format <select aria-label="Format" value={format} disabled={busy} onChange={event => { setFormat(event.target.value as LayoutImageFormat | 'svg' | 'dxf' | 'layout' | 'pdf' | 'pfl'); if (event.target.value === 'pdf') setDpi(300); else if (scope === 'range') setScope('all'); }}>
+      <label>Format <select aria-label="Format" value={format} disabled={busy} onChange={event => { setFormat(event.target.value as LayoutImageFormat | 'svg' | 'dxf' | 'layout' | 'pdf' | 'pfl'); if (event.target.value === 'pdf') setDpi(DEFAULT_LAYOUT_EXPORT_DPI); else if (event.target.value === 'svg') setDpi(DEFAULT_LAYOUT_EXPORT_DPI); else if (format === 'pdf' || format === 'svg') setDpi(150); else if (scope === 'range') setScope('all'); }}>
         <option value="pfl">PushForm Layout (.pfl)</option><option value="pdf">PDF</option><option value="layout">SketchUp LayOut (.layout)</option><option value="png">PNG</option><option value="jpeg">JPEG</option><option value="svg">SVG</option><option value="dxf">DXF</option>
       </select></label>
-      {native ? <p>Exports the entire document as an editable PushForm Layout file.</p> : format === 'layout' ? <p>Exports the entire document as an editable SketchUp LayOut file.</p> : !vector ? <label>Resolution <select aria-label="Resolution" value={dpi} disabled={busy} onChange={event => setDpi(Number(event.target.value))}>
-        {(format === 'pdf' ? [150, 300] : LAYOUT_IMAGE_RESOLUTIONS).map(value => <option key={value} value={value}>{value} dpi</option>)}
-      </select></label> : <label>Area <select aria-label="Area" value={area} disabled={busy} onChange={event => setArea(event.target.value as LayoutExportArea)}>
+      {native ? <p>Exports the entire document as an editable PushForm Layout file.</p> : format === 'layout' ? <p>Exports the entire document as an editable SketchUp LayOut file.</p> : format === 'pdf' ? <label>Quality <select aria-label="Quality" value={dpi} disabled={busy} onChange={event => setDpi(Number(event.target.value))}>
+        {LAYOUT_EXPORT_QUALITIES.map(quality => <option key={quality.dpi} value={quality.dpi}>{quality.name} ({quality.dpi} dpi)</option>)}
+      </select></label> : !vector ? <label>Resolution <select aria-label="Resolution" value={dpi} disabled={busy} onChange={event => setDpi(Number(event.target.value))}>
+        {LAYOUT_IMAGE_RESOLUTIONS.map(value => <option key={value} value={value}>{value} dpi</option>)}
+      </select></label> : <><label>Area <select aria-label="Area" value={area} disabled={busy} onChange={event => setArea(event.target.value as LayoutExportArea)}>
         <option value="page">Full page</option><option value="drawing">Drawing only</option>
-      </select></label>}
+      </select></label>{format === 'svg' ? <label>Quality <select aria-label="Quality" value={dpi} disabled={busy} onChange={event => setDpi(Number(event.target.value))}>
+        {LAYOUT_EXPORT_QUALITIES.map(quality => <option key={quality.dpi} value={quality.dpi}>{quality.name} ({quality.dpi} dpi)</option>)}
+      </select></label> : null}</>}
       {format === 'pdf' ? <>
         <label><input type="checkbox" aria-label="JPEG compression" checked={jpeg} disabled={busy} onChange={event => setJpeg(event.target.checked)} />JPEG compression</label>
         {jpeg ? <label>Smaller file <input type="range" aria-label="JPEG quality" min="0.1" max="1" step="0.05" value={jpegQuality} disabled={busy} onChange={event => setJpegQuality(Number(event.target.value))} /> Better quality</label> : null}
-        <label><input type="checkbox" aria-label="Show the PDF after export" checked={showAfter} disabled={busy} onChange={event => setShowAfter(event.target.checked)} />Show the PDF after export</label>
+        {hasSavePicker() ? null : <label><input type="checkbox" aria-label="Show the PDF after export" checked={showAfter} disabled={busy} onChange={event => setShowAfter(event.target.checked)} />Show the PDF after export</label>}
       </> : null}
       {format === 'dxf' ? <><label>Drawing scale 1:<input aria-label="Drawing scale denominator" type="number" min="0" step="any" value={scale} disabled={busy} onChange={event => setScale(event.target.value)} /></label>
         <p>DXF uses millimeters. Pictures and model views are omitted. Text may use substitute CAD fonts; dimensions, labels, and tables become geometry and text. Clipping is not retained.</p></> : null}

@@ -54,6 +54,22 @@ export function layoutImageState(src: string): LayoutImageState {
   return image.naturalWidth > 0 ? 'loaded' : 'failed';
 }
 
+/** The workspace marks a view that updates are paused for with a small label in its corner; print and export never draw it. */
+export function paintLayoutOutdatedBadge(ctx: CanvasRenderingContext2D, entity: LayoutEntity): void {
+  const [corner, right] = entity.points as Point[];
+  if (!corner || !right) return;
+  const unit = 25.4 / 72, angle = Math.atan2(right[1] - corner[1], right[0] - corner[0]);
+  ctx.save();
+  ctx.translate(corner[0], corner[1]); ctx.rotate(angle);
+  ctx.fillStyle = '#b45309';
+  ctx.fillRect(0, 0, 46 * unit, 14 * unit);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `${9 * unit}px sans-serif`;
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Outdated', 6 * unit, 7 * unit);
+  ctx.restore();
+}
+
 /** Paints `canvas` wherever `src` is painted, as it currently looks, until `forgetLayoutImage(src)`. */
 export function setLayoutCanvasPicture(src: string, canvas: HTMLCanvasElement): void {
   canvases.set(src, canvas);

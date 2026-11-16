@@ -380,3 +380,16 @@ it('exports all pages in a native Layout copy and preserves saved state through 
   expect(tab.doc.undoStack.canUndo).toBe(true);
   dispose();
 });
+
+it('opens no viewer tab before a browser save picker, which needs the same click', async () => {
+  const { tab, dispose } = setup();
+  // The picker is the browser's own, so the option to show the PDF afterwards is not offered.
+  Object.defineProperty(window, 'showSaveFilePicker', { value: vi.fn(), configurable: true });
+  try {
+    await pdfWithPicture(tab);
+    expect(screen.queryByLabelText('Show the PDF after export')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Export…' }));
+    await waitFor(() => expect(written.length).toBe(1), { timeout: 10_000 });
+    expect(window.open).not.toHaveBeenCalled();
+  } finally { delete (window as { showSaveFilePicker?: unknown }).showSaveFilePicker; dispose(); }
+});

@@ -12,6 +12,9 @@ import { encodeLayoutArchiveSync, layoutJson, exportSketchUpLayout, type LayoutE
 import { rasterizeImage } from '../rasterizeImage';
 import type { LayoutPagePainter } from './layoutPrint';
 
+/** Chrome and Edge show a save picker, which needs the click that started the export, so they cannot also open a viewer tab. */
+const hasSavePicker = (): boolean => !isTauri() && 'showSaveFilePicker' in window;
+
 /** One export setup for LayOut documents, raster images and vector drawings. */
 export function LayoutExportDialog({ state, activePageId, documentName, paint, onClose }: {
   state: LayoutDocumentState; activePageId: number; documentName: string; paint: LayoutPagePainter; onClose: () => void;
@@ -73,7 +76,7 @@ export function LayoutExportDialog({ state, activePageId, documentName, paint, o
     const controller = new AbortController(); job.current = controller;
     setBusy(true); setError(null); setWarnings([]);
     // A browser lets a click open a tab; opened now, the tab shows the PDF once it is written.
-    const viewer = format === 'pdf' && showAfter && !isTauri() ? (window.open?.('', '_blank') ?? null) : null;
+    const viewer = format === 'pdf' && showAfter && !isTauri() && !hasSavePicker() ? (window.open?.('', '_blank') ?? null) : null;
     let shown = false;
     try {
       // Ask first: browsers open their save picker only right after a click, and large pages take a while to paint.
@@ -135,7 +138,7 @@ export function LayoutExportDialog({ state, activePageId, documentName, paint, o
       {format === 'pdf' ? <>
         <label><input type="checkbox" aria-label="JPEG compression" checked={jpeg} disabled={busy} onChange={event => setJpeg(event.target.checked)} />JPEG compression</label>
         {jpeg ? <label>Smaller file <input type="range" aria-label="JPEG quality" min="0.1" max="1" step="0.05" value={jpegQuality} disabled={busy} onChange={event => setJpegQuality(Number(event.target.value))} /> Better quality</label> : null}
-        <label><input type="checkbox" aria-label="Show the PDF after export" checked={showAfter} disabled={busy} onChange={event => setShowAfter(event.target.checked)} />Show the PDF after export</label>
+        {hasSavePicker() ? null : <label><input type="checkbox" aria-label="Show the PDF after export" checked={showAfter} disabled={busy} onChange={event => setShowAfter(event.target.checked)} />Show the PDF after export</label>}
       </> : null}
       {format === 'dxf' ? <><label>Drawing scale 1:<input aria-label="Drawing scale denominator" type="number" min="0" step="any" value={scale} disabled={busy} onChange={event => setScale(event.target.value)} /></label>
         <p>DXF uses millimeters. Pictures and model views are omitted. Text may use substitute CAD fonts; dimensions, labels, and tables become geometry and text. Clipping is not retained.</p></> : null}

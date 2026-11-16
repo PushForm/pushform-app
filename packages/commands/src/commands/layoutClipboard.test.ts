@@ -64,6 +64,19 @@ it('pastes at an explicit page position in one undoable edit', () => {
   commands.execute('edit.undo'); expect(doc.state.pages.get(pageId)!.entities.size).toBe(0);
 });
 
+it('places a drawing whose paths hold more points than a call takes arguments', () => {
+  const doc = createLayoutDocument(), { commands } = createLayoutRegistry(doc), pageId = doc.state.pageOrder[0]!;
+  // A traced outline: 200,000 points along a line 100 mm long.
+  const points = Array.from({ length: 200_000 }, (_, i): [number, number] => [i / 2000, 0]);
+  const [id] = commands.execute('layout.dxf.import', { pageId, entities: [{ kind: 'path', closed: false, points }] }) as number[];
+  const placed = doc.state.pages.get(pageId)!.entities.get(id!)!, size = doc.state.pages.get(pageId)!.size;
+  expect(placed.points).toHaveLength(200_000);
+  expect((placed.points[0]![0] + placed.points.at(-1)![0]) / 2).toBeCloseTo(size[0] / 2, 6);
+  expect((doc.undoStack.peek() as { label: string } | undefined)?.label).toBe('Import DXF');
+  commands.execute('layout.dwg.import', { pageId, entities: [{ kind: 'path', closed: false, points: [[0, 0], [10, 0]] }] });
+  expect((doc.undoStack.peek() as { label: string } | undefined)?.label).toBe('Import DWG');
+});
+
 it('pastes a PDF picture as the PDF itself', () => {
   const doc = createLayoutDocument(), { commands } = createLayoutRegistry(doc), pageId = doc.state.pageOrder[0]!;
   const src = `data:application/pdf;base64,${btoa('%PDF-1.7')}`;

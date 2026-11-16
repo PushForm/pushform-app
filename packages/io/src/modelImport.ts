@@ -4,6 +4,7 @@ import { strFromU8, unzipSync } from 'fflate';
 import { COLLADA_FORMAT, isXmlBytes, readCollada } from './collada';
 import { isDxfBytes, isDxfFile, parseDxfHeader } from './dxf';
 import { DXF_FORMAT, readDxf } from './dxfModel';
+import { DWG_FORMAT, isDwgBytes, isDwgFile, readDwg } from './dwg';
 import { GLTF_FORMAT, isGlbBytes, isGltfJson, isGltfModelFile, readGltf } from './gltf';
 import { isZipBytes, normalizePath, unpackModelArchive, type MeshExtent, type MeshImportOptions, type MeshPartOptions } from './meshImport';
 import { OBJ_FORMAT, isObjModelFile, isObjText, objExtent, readObj } from './obj';
@@ -14,11 +15,11 @@ import { THREE_DS_FORMAT, is3dsBytes, is3dsModelFile, read3ds, threeDsExtent } f
 
 /**
  * Model files Open… and Import… convert: SketchUp (`.skp`, `.skb`), COLLADA (`.dae`), OBJ (`.obj`), 3DS (`.3ds`), STL
- * (`.stl`), DXF (`.dxf`), glTF (`.gltf`, `.glb`), STEP (`.step`, `.stp`), and `.zip` or `.kmz` archives holding a COLLADA, OBJ,
+ * (`.stl`), DXF (`.dxf`), DWG (`.dwg`), glTF (`.gltf`, `.glb`), STEP (`.step`, `.stp`), and `.zip` or `.kmz` archives holding a COLLADA, OBJ,
  * 3DS or glTF model
  * with its materials and images.
  */
-export function isModelImportFile(name: string): boolean { return isSketchUpModelFile(name) || /\.(dae|zip|kmz|obj|3ds|stl|dxf|gltf|glb|step|stp)$/i.test(name); }
+export function isModelImportFile(name: string): boolean { return isSketchUpModelFile(name) || /\.(dae|zip|kmz|obj|3ds|stl|dxf|dwg|gltf|glb|step|stp)$/i.test(name); }
 
 /** Pictures Import… places in a model as images, by extension, with the MIME type their bytes are stored under. */
 const PICTURE_TYPES: Readonly<Record<string, string>> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', bmp: 'image/bmp', webp: 'image/webp' };
@@ -31,11 +32,11 @@ export function isPictureFile(name: string): boolean { return pictureMime(name) 
 /** The format a model import file name names, for messages, undo labels and import reports; archives read as COLLADA until opened. */
 export function modelImportFormat(name: string): ImportFormat {
   return isObjModelFile(name) ? OBJ_FORMAT : is3dsModelFile(name) ? THREE_DS_FORMAT : isStlModelFile(name) ? STL_FORMAT
-    : isDxfFile(name) ? DXF_FORMAT : isGltfModelFile(name) ? GLTF_FORMAT : isStepModelFile(name) ? STEP_FORMAT : /\.(dae|zip|kmz)$/i.test(name) ? COLLADA_FORMAT : SKETCHUP_FORMAT;
+    : isDxfFile(name) ? DXF_FORMAT : isDwgFile(name) ? DWG_FORMAT : isGltfModelFile(name) ? GLTF_FORMAT : isStepModelFile(name) ? STEP_FORMAT : /\.(dae|zip|kmz)$/i.test(name) ? COLLADA_FORMAT : SKETCHUP_FORMAT;
 }
 
 /** The file name without its model import extension, for the converted `.pf` and the imported group. */
-export function modelImportBaseName(name: string): string { return name.replace(/\.(skp|skb|dae|zip|kmz|obj|3ds|stl|dxf|gltf|glb|step|stp)$/i, ''); }
+export function modelImportBaseName(name: string): string { return name.replace(/\.(skp|skb|dae|zip|kmz|obj|3ds|stl|dxf|dwg|gltf|glb|step|stp)$/i, ''); }
 
 /**
  * Formats whose files record neither their unit nor, for OBJ and STL, their up axis, so import asks; DXF only
@@ -102,7 +103,8 @@ export function probeMeshImport(bytes: Uint8Array): { kind: MeshFormatKind; exte
     if (!found || !data || /\.(dae|gltf|glb)$/i.test(found.path)) return null;
     return /\.obj$/i.test(found.path) ? { kind: 'obj', extent: objExtent(data) } : { kind: '3ds', extent: threeDsExtent(data) };
   }
-  if (isGlbBytes(bytes) || isGltfJson(bytes) || isStepBytes(bytes)) return null;
+  // A DWG drawing is converted before its units can be read, so it never asks: see `readDwg`.
+  if (isGlbBytes(bytes) || isGltfJson(bytes) || isStepBytes(bytes) || isDwgBytes(bytes)) return null;
   if (is3dsBytes(bytes)) return { kind: '3ds', extent: threeDsExtent(bytes) };
   if (isStlBytes(bytes)) return { kind: 'stl', extent: stlExtent(bytes) };
   if (isDxfBytes(bytes)) {
@@ -125,7 +127,8 @@ const parts = (limits: ImportLimits | undefined): MeshPartOptions => limits?.mes
 /**
  * Read model bytes of any supported format, told apart by their content: COLLADA is XML, archives are zip files, 3DS
  * starts with its main chunk, binary glTF with `glTF` and JSON glTF with `{`, STEP with `ISO-10303-21;`, a binary STL's
- * triangle count fits its size and an ASCII STL starts with `solid`, DXF starts with a SECTION group, OBJ with an OBJ
+ * triangle count fits its size and an ASCII STL starts with `solid`, DXF starts with a SECTION group, DWG with its
+ * format version (`AC1027`), OBJ with an OBJ
  * statement, and anything else is read as a .skp file. `limits.stepBytes` is the largest STEP file to read. A STEP read
  * hands its parts to `onPreview` as they are meshed; the other readers have nothing to show before they finish.
  */
@@ -133,6 +136,7 @@ export function readModelImport(bytes: Uint8Array, onProgress?: (p: ImportProgre
   limits?: ImportLimits, signal?: AbortSignal, onPreview?: StepPreviewListener): Promise<SketchUpImport> {
   if (isXmlBytes(bytes)) return readCollada(bytes, onProgress, undefined, parts(limits));
   if (isZipBytes(bytes)) return readModelArchive(bytes, onProgress, options, limits);
+  if (isDwgBytes(bytes)) return readDwg(bytes, options, onProgress);
   if (is3dsBytes(bytes)) return read3ds(bytes, options ?? DEFAULT_MESH_OPTIONS['3ds'], onProgress, undefined, parts(limits));
   if (isGlbBytes(bytes) || isGltfJson(bytes)) return readGltf(bytes, onProgress, undefined, parts(limits));
   // The signal reaches the host's native STEP reader; the other readers run in a worker the caller terminates.

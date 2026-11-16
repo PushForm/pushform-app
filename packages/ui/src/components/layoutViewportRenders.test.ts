@@ -7,7 +7,7 @@ import type * as NativeIO from '@pushform/io';
 import type { ImageId } from '@pushform/core';
 import { allocId, createDocument, ImageStore, DEFAULT_SHADOWS } from '@pushform/model';
 
-const rendered = vi.hoisted(() => ({ snapshots: [] as [number, number][], previews: [] as [number, number][], ready: new Set<string>(),
+const rendered = vi.hoisted(() => ({ canvases: new Map<string, HTMLCanvasElement>(), snapshots: [] as [number, number][], previews: [] as [number, number][], ready: new Set<string>(),
   displays: [] as unknown[], shadows: [] as unknown[], fog: [] as unknown[], texturesReady: vi.fn(async () => {}), failure: null as string | null,
   /** Models loaded while this is set have nothing in them. */
   empty: false, sections: { planes: [], cuts: [] } as { planes: { id: string; sheet?: string }[]; cuts: { key: string }[] }, drawnSections: [] as unknown[],
@@ -70,14 +70,15 @@ vi.mock('./layoutImage', () => ({
   LAYOUT_VIEW_EMPTY: 'pushform-view:empty',
   LAYOUT_VIEW_FAILED: 'pushform-view:failed',
   notifyLayoutImages: () => undefined,
-  setLayoutCanvasPicture: (src: string) => rendered.ready.add(src),
+  setLayoutCanvasPicture: (src: string, canvas?: HTMLCanvasElement) => { rendered.ready.add(src); if (canvas) rendered.canvases.set(src, canvas); },
+  layoutPicture: (src: string) => rendered.canvases.get(src) ?? null,
   layoutImageReady: (src: string) => rendered.ready.has(src),
   forgetLayoutImage: (src: string) => rendered.ready.delete(src),
 }));
 
 const { layoutViewportPicture, layoutViewportModel, layoutViewportRender, layoutViewportFailure, layoutViewportProblem, layoutViewportStatus,
   layoutViewportWarnings, setLayoutCloudModelLoader,
-  retainLayoutViewportModels, peekLayoutViewportModel, settleLayoutViewportRenders, whenLayoutViewportRendersIdle } = await import('./layoutViewportRenders');
+  retainLayoutViewportModels, peekLayoutViewportModel, settleLayoutViewportRenders, whenLayoutViewportRendersIdle, holdLayoutViewportDisplays, layoutViewportDetailWarnings, updateLayoutViewports } = await import('./layoutViewportRenders');
 
 const camera: LayoutViewportCamera = { eye: [10, -10, 10], target: [0, 0, 0], up: [0, 0, 1], projection: 'perspective', fov: 35, scale: 1 };
 let nextId = 1;
@@ -426,4 +427,103 @@ it('waits for model textures before producing a committed page picture', async (
   await vi.waitFor(() => expect(resolve).toBeTypeOf('function'));
   expect(rendered.snapshots).toHaveLength(before);
   resolve(); await settle(); expect(rendered.snapshots).toHaveLength(before + 1);
+});
+
+it('export captures what views display, renders nothing and is unaffected by a render finishing meanwhile', async () => {
+  const entity = view();
+  entity.points = [[0, 0], [60, 0], [60, 30], [0, 30]];
+  entity.image!.src = 'old-picture';
+  const before = rendered.snapshots.length;
+  const release = holdLayoutViewportDisplays(state, [entity]);
+  // The outdated saved picture is exported as it is, with no render requested at any resolution.
+  expect(layoutViewportPicture(state, entity, undefined, 600 / 25.4, true)).toBe('old-picture');
+  expect(layoutViewportPicture(state, entity)).toBe('old-picture');
+  await settle();
+  expect(rendered.snapshots).toHaveLength(before);
+  release();
+  // Afterwards the view renders as usual.
+  layoutViewportPicture(state, entity);
+  await settle();
+  expect(rendered.snapshots).toHaveLength(before + 1);
+});
+
+it('export draws a view with no picture as nothing', () => {
+  const entity = view();
+  entity.points = [[0, 0], [61, 0], [61, 30], [0, 30]];
+  const release = holdLayoutViewportDisplays(state, [entity]);
+  try { expect(layoutViewportPicture(state, entity, undefined, 300 / 25.4, true)).toBe(''); } finally { release(); }
+});
+
+it('reports views whose displayed picture has less detail than the export quality, without rendering them', async () => {
+  const { setLayoutCanvasPicture } = await import('./layoutImage');
+  const entity = view();
+  entity.points = [[0, 0], [25.4, 0], [25.4, 25.4], [0, 25.4]];
+  const picture = document.createElement('canvas');
+  picture.width = 300; picture.height = 300;
+  entity.image!.src = 'low-detail-picture';
+  setLayoutCanvasPicture('low-detail-picture', picture);
+  const before = rendered.snapshots.length;
+  const release = holdLayoutViewportDisplays(state, [entity]);
+  try {
+    // A 300-pixel picture across one inch is 300 dpi: enough for Draft and Standard, not for High.
+    expect(layoutViewportDetailWarnings(state, [entity], 150)).toEqual([]);
+    expect(layoutViewportDetailWarnings(state, [entity], 300)).toEqual([]);
+    expect(layoutViewportDetailWarnings(state, [entity], 600)).toEqual([expect.stringContaining("less detail than 600 dpi (as low as 300 dpi).")]);
+  } finally { release(); }
+  await settle();
+  expect(rendered.snapshots).toHaveLength(before);
+});
+
+describe('Pausing model view updates', () => {
+  const paused = { ...state, settings: { ...state.settings, autoRender: false } };
+  const framed = (width: number): LayoutEntity => ({ ...view(), points: [[0, 0], [width, 0], [width, 30], [0, 30]] });
+
+  it('renders nothing committed while paused, but still previews, and updates by hand without resuming', async () => {
+    const entity = framed(51), before = rendered.snapshots.length;
+    layoutViewportPicture(paused, entity);
+    await settle();
+    expect(rendered.snapshots).toHaveLength(before);
+    expect(layoutViewportStatus(paused, entity)).toBe('outdated');
+    const orbit = { ...camera, eye: [12, -8, 10] as [number, number, number] };
+    layoutViewportPicture(paused, entity, orbit, 3);
+    await settle();
+    expect(rendered.previews.length).toBeGreaterThan(0);
+    updateLayoutViewports(paused, [entity]);
+    await settle();
+    expect(rendered.snapshots).toHaveLength(before + 1);
+    expect(layoutViewportStatus(paused, entity)).toBe('current');
+    expect(paused.settings.autoRender).toBe(false);
+    // Another change is outdated again until it is updated.
+    const moved = { ...entity, image: { ...entity.image!, viewport: { ...entity.image!.viewport!, camera: orbit } } };
+    layoutViewportPicture(paused, moved);
+    await settle();
+    expect(rendered.snapshots).toHaveLength(before + 1);
+    expect(layoutViewportStatus(paused, moved)).toBe('outdated');
+    // Resuming renders it.
+    layoutViewportPicture(state, moved);
+    await settle();
+    expect(rendered.snapshots).toHaveLength(before + 2);
+  });
+
+  it('keeps a saved picture whose freshness cannot be known, and does not call it current', () => {
+    const entity = framed(52);
+    entity.image!.src = 'saved-picture';
+    expect(layoutViewportStatus(paused, entity)).toBe('unknown');
+    expect(layoutViewportPicture(paused, entity)).toBe('saved-picture');
+  });
+
+  it('waits for a drag to finish and renders the views on screen first', async () => {
+    const dragged = framed(53), before = rendered.snapshots.length;
+    layoutViewportPicture(state, dragged, undefined, undefined, false, { defer: true });
+    await settle();
+    expect(rendered.snapshots).toHaveLength(before);
+    // The first request starts at once; of the rest, the view on screen goes before the newer one that is not.
+    const [a, b, c, d] = [framed(41), framed(42), framed(43), framed(44)];
+    layoutViewportPicture(state, a);
+    layoutViewportPicture(state, b);
+    layoutViewportPicture(state, c, undefined, undefined, false, { visible: true });
+    layoutViewportPicture(state, d);
+    await settle();
+    expect(rendered.snapshots.slice(before).map(([width]) => width)).toEqual([242, 254, 260, 248]);
+  });
 });

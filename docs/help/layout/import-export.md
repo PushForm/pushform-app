@@ -4,7 +4,7 @@
 
 Click **Import** in the toolbar's **Insert** group after Table, or choose **Main menu → Import...**. Select a **PNG**, **JPG/JPEG**, or **SVG** image and confirm the picker. The image is embedded, centered on the active page, and selected for moving and resizing. Use an unlocked, visible layer; cancelling adds nothing.
 
-Import adds a picture to the current drawing; Open opens a document. The same picker also accepts DXF drawings. Use Paste instead when picture data is already on your clipboard.
+Import adds a picture to the current drawing; Open opens a document. The same picker also accepts DXF and DWG drawings. Use Paste instead when picture data is already on your clipboard.
 
 ## Open a LayOut document
 
@@ -28,9 +28,11 @@ Exporting back to SketchUp LayOut keeps each page's hidden layers and the object
 
 Shapes with a pattern fill, such as a concrete, brick, soil or gravel hatch, keep it: the pattern picture repeats across the shape with its original position, scale and rotation, over the shape's fill color and under its outline. It shows in the workspace, prints, and exports to PDF, SVG, page images and back to LayOut; DXF leaves the pattern out and keeps the shape's fill color and outline. Pattern fills cannot be added or changed yet, and the pattern stays where it is on the page when you move or reshape its shape. A pattern whose picture is missing from the file is left out and listed in the import notes.
 
-## Import DXF into a drawing
+## Import DXF or DWG into a drawing
 
-Use Import for a DXF drawing. Review its options and import notes, especially units and unsupported content. DXF is an exchange format; do not expect every source application feature to become an editable PushForm object.
+Use Import for a DXF or DWG drawing. The drawing's model space becomes editable lines, curves, fills and text in one group, at a standard scale that fits the page. Review the import notes, especially units and unsupported content. These are exchange formats; do not expect every source application feature to become an editable PushForm object.
+
+A DWG drawing is converted on your device and then imported exactly as a DXF drawing is, so the same content comes across: lines, polylines, arcs, circles, ellipses, splines, solid fills, text, dimensions, leaders and blocks. Pattern hatches, points, pictures and paper space layouts are left out and listed in the import notes. DWG drawings from AutoCAD 2004 and later are the ones tested; a damaged drawing imports what can be read of it and says so. PushForm does not export DWG; export DXF for CAD programs.
 
 Check the drawing's physical size after import before adding annotations or exporting at a particular scale.
 
@@ -38,7 +40,7 @@ Check the drawing's physical size after import before adding annotations or expo
 
 Open the main menu's **Export…** action and choose **PDF**. Choose all pages, the current page, or a page range. Each page keeps its physical paper size.
 
-Paths, shapes, annotations, tables and text remain vector, and text remains selectable. Model views are raster images at the chosen 150 or 300 dpi. Export does not change the open drawing or its undo history.
+Paths, shapes, annotations, tables and text remain vector, and text remains selectable. Model views are raster pictures. Choose a **Quality**: Draft (150 dpi), Standard (300 dpi, the default) or High (600 dpi). Export uses the picture each model view shows, and it does not draw a view again at a higher quality, so a view whose picture has fewer pixels per inch than the chosen quality is listed in the export notes. Working in the drawing is not affected by the export quality. Export does not change the open drawing or its undo history.
 
 ## Export page images
 
@@ -48,7 +50,7 @@ Images, fonts and model views are prepared before export. The editor's grid, sel
 
 ## Export SVG or DXF
 
-Choose **SVG** for editable vector artwork, or **DXF** for CAD exchange, in Export. Review the format's setup and limitations before saving. SVG can retain drawing paths, text and supported embedded pictures.
+Choose **SVG** for editable vector artwork, or **DXF** for CAD exchange, in Export. Review the format's setup and limitations before saving. SVG can retain drawing paths, text and supported embedded pictures. SVG also has a **Quality** setting (Draft, Standard or High) for embedded model-view pictures, with the same export notes as PDF.
 
 DXF can keep paths, supported styling and text, but pictures and raster model views are omitted. A drawing-scale denominator converts paper coordinates for CAD use; check it when preparing a scaled drawing.
 
@@ -67,6 +69,12 @@ Presenting is different from exporting: it displays the current drawing and does
 ## Export a native editable copy
 
 Choose **Main menu → Export…**, select **PushForm Layout (.pfl)** in **Format**, then click **Export…** and choose where to save. Browsers without a save picker download the file. This exports the entire document with its embedded assets and all pages. It keeps the open document’s name, cloud destination and saved state. There is no separate Download a copy menu item.
+
+## Model views in exported LayOut files
+
+Exporting to **.layout** keeps each model view editable in LayOut wherever that is possible. A view that cannot be written as an editable model view, such as a view of a PushForm cloud model or a view whose original model is no longer in the document, is exported automatically as page artwork showing what it displays. There is no prompt, and the rest of the drawing exports normally.
+
+When this happens, **Export saved with notes** lists the pages and views affected, naming up to five views per page and up to ten pages and counting the rest. In the exported file, model editing, camera changes and model-linked behavior are lost for those views. Views that stay editable are unchanged, and your PushForm drawing and its model references are not changed by the export.
 
 ### Failed imports
 

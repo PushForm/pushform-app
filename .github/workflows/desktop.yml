@@ -74,7 +74,7 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-  # The STEP reader is Rust compiled to WebAssembly, the same on every platform, so it is built once here for the checks
+  # The STEP and DWG readers are Rust compiled to WebAssembly, the same on every platform, so they are built once here for the checks
   # and for each platform's web bundle.
   step-reader:
     needs: prepare
@@ -84,21 +84,22 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with: { node-version: 24 }
-      - uses: dtolnay/rust-toolchain@stable
-        with: { targets: 'wasm32-wasip1, wasm32-wasip1-threads' }
+      # Pinned: the STEP reader's threaded build does not link on Rust 1.100 (`__wasi_init_tp` is undefined there).
+      - uses: dtolnay/rust-toolchain@master
+        with: { toolchain: '1.99.1', targets: 'wasm32-wasip1, wasm32-wasip1-threads' }
       - id: rust-version
         run: echo "hash=$(rustc -Vv | sha256sum | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v4
         id: step-wasm
         with:
           path: packages/io/wasm/*.wasm
-          key: step-wasm-v1-${{ runner.os }}-${{ steps.rust-version.outputs.hash }}-${{ hashFiles('crates/**', '!crates/**/target/**', '.cargo/**', 'rust-toolchain*', 'scripts/build-step-reader.mjs') }}
+          key: step-wasm-v1-${{ runner.os }}-${{ steps.rust-version.outputs.hash }}-${{ hashFiles('crates/**', '!crates/**/target/**', '.cargo/**', 'rust-toolchain*', 'scripts/build-step-reader.mjs', 'scripts/build-dwg-reader.mjs') }}
       - uses: Swatinem/rust-cache@v2
         if: steps.step-wasm.outputs.cache-hit != 'true'
-        with: { workspaces: crates/step-reader }
-      - run: node scripts/build-step-reader.mjs
+        with: { workspaces: "crates/step-reader\ncrates/dwg-reader" }
+      - run: node scripts/build-step-reader.mjs && node scripts/build-dwg-reader.mjs
         if: steps.step-wasm.outputs.cache-hit != 'true'
-      - run: node scripts/build-step-reader.mjs --check
+      - run: node scripts/build-step-reader.mjs --check && node scripts/build-dwg-reader.mjs --check
       - uses: actions/upload-artifact@v7
         with:
           name: step-reader-wasm

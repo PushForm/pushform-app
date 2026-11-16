@@ -10,7 +10,7 @@ Use a visible, unlocked drawing layer. Cancelling the file picker changes nothin
 
 ## Choose Import or Paste for an image
 
-Use **Import** when the picture is a file on your computer. Use **Paste** when you already copied picture data in another application. Layout's file picker accepts SVG, PNG and JPEG images, plus DXF drawings; clipboard image support can include additional formats the browser decodes.
+Use **Import** when the picture is a file on your computer. Use **Paste** when you already copied picture data in another application. Layout's file picker accepts SVG, PNG and JPEG images, plus DXF and DWG drawings; clipboard image support can include additional formats the browser decodes.
 
 Importing SVG places the original as an embedded image. Pasting supported SVG artwork instead creates editable vector objects. Choose the embedded-image route when preserving the original appearance matters, or the editable-vector route when you need to change individual paths.
 

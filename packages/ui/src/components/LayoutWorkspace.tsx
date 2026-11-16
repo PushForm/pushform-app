@@ -31,7 +31,7 @@ import { SERVICE_LAYOUT_WORKSPACE, LAYOUT_TOOLS, detectPlatform, parseVcb, type 
 import { removeLayoutPathVertex, nextLayoutPathIndex, layoutPathContours, layoutPathSegmentIndices,isLayoutLayerVisible, labelAnchorAt, layoutLabelDragPart, layoutLabelWholeMovePart, moveLayoutLabel, previewLayoutLabel, type LayoutLabelDragPart, formatLayoutTextRange, layoutTextStyleAt, layoutLabelLeader, createLayoutLabelGeometry, inferLinearDimensionAlignment, layoutRotationAngle, snapLayoutRotationAngle, rotateLayoutEntities, scaleLayoutEntities, rotateLayoutPoint, layoutTextCenter, resizeLayoutTextPoints, createLayoutCornerBetween, isLayoutCornerTool, createLayoutOffset, layoutOffsetDistance, createLayoutArc, isLayoutArcTool, layoutArcSweep, createLayoutRectangle, isLayoutRectangleTool, type LayoutRectanglePath, pointInsideLayoutPath, angularRaysFromPoints, angularEdgesFromPicks, type LayoutAngularEdgeAnchor, angularDimensionError, angularPlacementReflex, angularMeasurement, autoDimensionExtent, entitiesInSelectionBox, selectableLayoutEntities, entitiesInLasso, lassoIsCrossing, layoutEntityBounds, angularDimensionGeometry, formatAngularDimension, createAngularDimension, type LayoutAngularDimension, createLinearDimension, dimensionAnchorAt, linearMeasurement, linearDimensionGeometry, formatLinearDimension, formatLayoutLength, layoutLengthPrecisionLabel, layoutDimensionScaleLabel, LAYOUT_DIMENSION_SCALES, previewLayoutDimension, type LayoutDimensionAnchor, type LayoutLinearDimension, editLayoutTextContent, importLayoutText, entitiesForLayer, entityOnPage, flattenLayoutPath, pathSegment, pointOnPathSegment, splitLayoutPathSegment, snapPaperPoint, alignToPaperReference, addLayoutBezierAnchor, pullLayoutBezierHandle, removeLastLayoutBezierAnchor, previewLayoutBezier, finishLayoutBezier, type LayoutBezierDraft, type PaperAlignment, type LayoutEntity, type LayoutPathHandle, type LayoutPage, type LayoutDocumentState, type PaperSnapKind } from '@pushform/layout';
 import { FREEHAND_SMOOTHING_PX, LENGTH_TOL } from '@pushform/core';
 import { createLayoutFreehand } from '@pushform/layout';
-import { dxfLayoutEntities, isDxfFile } from '@pushform/io';
+import { convertDwg, dxfLayoutEntities, isDwgBytes, isDwgFile, isDxfFile } from '@pushform/io';
 import type { DocumentSession, LayoutTab, LayoutToolId } from '../session';
 import { paintAngularDimension, paintLayoutDimension } from './layoutDimension';
 import { fittedLayoutTextBounds, layoutEditorLineHeight, layoutEditorTabSizeMm, layoutFontLineHeight, layoutTextBlock, layoutTextInset, paintLayoutLabelLeader, paintLayoutText } from './layoutText';
@@ -39,9 +39,9 @@ import { repeatLayoutShape, type LayoutShapeRepeat } from './layoutShapeRepeat';
 import { lastCreatedLayoutObjects, trackLayoutCreations } from './layoutLastCreated';
 import { LayoutDashControls } from './LayoutDashControls';
 import { LayoutArrowControls } from './LayoutArrowControls';
-import { layoutImageLoads, paintLayoutImage } from './layoutImage';
+import { layoutImageLoads, paintLayoutImage, paintLayoutOutdatedBadge } from './layoutImage';
 import { paintLayoutFillPattern } from './layoutFillPattern';
-import { layoutViewportModel, layoutViewportPicture, layoutViewportSources } from './layoutViewportRenders';
+import { layoutViewportModel, layoutViewportPicture, layoutViewportSources, layoutViewportStatus, updateLayoutViewports } from './layoutViewportRenders';
 import { initialViewportCamera, orbitViewportCamera, panViewportCamera, zoomViewportCamera } from './layoutViewportCameras';
 import { LayoutViewportPanel } from './LayoutViewportPanel';
 import { Icon } from './Icon';
@@ -728,8 +728,13 @@ function paintPage(
       }
       if (entity.image) {
         const preview = pathEdit?.entityId === id && pathEdit.points ? previewedSource(id)! : entity;
-        const picture = layoutViewportPicture(state, preview, viewportPreview?.entityId === id ? viewportPreview.camera : undefined, outputDpi ? undefined : renderScale);
-        if (!moving || moving.copy) paintLayoutImage(ctx, preview, selected.has(id), picture, outputDpi !== undefined);
+        // Committed renders wait while the view is dragged or resized; the workspace asks for the views it shows first.
+        const picture = layoutViewportPicture(state, preview, viewportPreview?.entityId === id ? viewportPreview.camera : undefined, outputDpi ? undefined : renderScale, false,
+          { visible: outputDpi === undefined, defer: !!moving || pathEdit?.entityId === id });
+        if (!moving || moving.copy) {
+          paintLayoutImage(ctx, preview, selected.has(id), picture, outputDpi !== undefined);
+          if (outputDpi === undefined && !thumbnail && layoutViewportStatus(state, preview) === 'outdated') paintLayoutOutdatedBadge(ctx, preview);
+        }
         if (moving) {
           ctx.save(); ctx.translate(...moving.delta);
           paintLayoutImage(ctx, preview, true, picture); ctx.restore();
@@ -4247,15 +4252,18 @@ export function LayoutWorkspace({
     const request = ++imageImportRequest.current;
     setVcbError(null);
     try {
-      if (isDxfFile(file.name)) {
-        // A DXF drawing becomes native objects in one group at a standard scale that fits the page.
-        const bytes = new Uint8Array(await file.arrayBuffer());
+      if (isDxfFile(file.name) || isDwgFile(file.name)) {
+        // A DXF or DWG drawing becomes native objects in one group at a standard scale that fits the page. A DWG
+        // drawing is converted to DXF on this device first.
+        let bytes: Uint8Array = new Uint8Array(await file.arrayBuffer());
+        const converted = isDwgBytes(bytes) ? await convertDwg(bytes) : null;
+        if (converted) bytes = converted.dxf;
         if (request !== imageImportRequest.current) return;
         const drawing = dxfLayoutEntities(bytes, page.size);
-        const ids = tab.commands.execute('layout.dxf.import', { pageId: page.id, entities: drawing.entities }) as number[];
+        const ids = tab.commands.execute(converted ? 'layout.dwg.import' : 'layout.dxf.import', { pageId: page.id, entities: drawing.entities }) as number[];
         chooseTool('select'); setSelectionIds(ids); setCursor(null); setSnapKind(null); setFreehand([]);
         const unit = drawing.unitRecorded ? '' : ` The drawing does not record its units; it is read in ${drawing.unit === 'in' ? 'inches' : 'millimeters'}.`;
-        setImportNote([`Imported ${file.name} at 1:${drawing.scale}.${unit}`, ...drawing.warnings].join(' '));
+        setImportNote([`Imported ${file.name} at 1:${drawing.scale}.${unit}`, ...(converted?.notes ?? []), ...drawing.warnings].join(' '));
         return;
       }
       const entity = await layoutClipboardImage(file, page);
@@ -4263,7 +4271,7 @@ export function LayoutWorkspace({
       const ids = tab.commands.execute('layout.clipboard.paste', { pageId: page.id, entities: [entity] }) as number[];
       chooseTool('select'); setSelectionIds(ids); setCursor(null); setSnapKind(null); setFreehand([]);
     } catch (error) {
-      if (request === imageImportRequest.current) setVcbError(error instanceof Error ? error.message : `Could not import this ${isDxfFile(file.name) ? 'drawing' : 'image'}.`);
+      if (request === imageImportRequest.current) setVcbError(error instanceof Error ? error.message : `Could not import this ${isDxfFile(file.name) || isDwgFile(file.name) ? 'drawing' : 'image'}.`);
     }
   };
   // Keep workspace commands bound to the latest page and content while mounted.
@@ -4767,8 +4775,8 @@ export function LayoutWorkspace({
         </div>
         <aside className="pf-layout-controls" aria-label="Layout settings">
           <ScaleDrawingPanel tab={tab} session={session} />
-      <input ref={imageImportInput} type="file" hidden aria-label="Import image or DXF file"
-        accept=".svg,.png,.jpg,.jpeg,.dxf,image/svg+xml,image/png,image/jpeg" onChange={event => {
+      <input ref={imageImportInput} type="file" hidden aria-label="Import image, DXF or DWG file"
+        accept=".svg,.png,.jpg,.jpeg,.dxf,.dwg,image/svg+xml,image/png,image/jpeg" onChange={event => {
           const file = event.currentTarget.files?.[0]; event.currentTarget.value = '';
           if (file) void importImageFile(file);
         }} />
@@ -4826,6 +4834,8 @@ export function LayoutWorkspace({
             navigating={navigatingViewportId === selectedEntity.id}
             onCamera={(camera, scene, cameraModified) => runPageCommand('layout.viewport.setCamera', { pageId: page.id, entityId: selectedEntity.id, camera, scene, cameraModified })}
             onResizeMode={preserveScale => runPageCommand('layout.viewport.setResizeMode', { pageId: page.id, entityId: selectedEntity.id, preserveScale })}
+            onAutomatic={automatic => runPageCommand('layout.viewport.setUpdates', { automatic })}
+            onUpdate={all => updateLayoutViewports(state, all ? state.pageOrder.flatMap(id => state.layerOrder.flatMap(layerId => entitiesForLayer(state.pages.get(id)!, state, layerId))) : [selectedEntity])}
             onNavigate={on => { if (on) setNavigatingViewportId(selectedEntity.id); else endViewportNavigation(); }} /> : null}
           {/* A model view's layer changes through Move to Layer or the object browser, not the panel. */}
           {selectedEntity && !isViewport(selectedEntity) ? (

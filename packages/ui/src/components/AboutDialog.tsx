@@ -35,6 +35,7 @@ export function AboutDialog({ build, onClose }: { build: BuildInfo; onClose: () 
       <p className="pf-about-copyright">© 2026 JobCraft, Inc.</p>
       <p>Open source under the <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener noreferrer">GNU GPLv3 license</a>. <a href="https://github.com/PushForm/pushform-app" target="_blank" rel="noopener noreferrer">Source code on GitHub</a>. <a href={THIRD_PARTY_NOTICES_URL} target="_blank" rel="noopener noreferrer" onClick={event => { void openThirdPartyNotices(event).then(opened => setNoticesMissing(!opened)); }}>Third-party notices</a></p>
       {noticesMissing ? <p role="status">The third-party notices file is installed with release builds only.</p> : null}
+      <p className="pf-about-credits">Icons include <a href="https://game-icons.net/" target="_blank" rel="noopener noreferrer">Game Icons</a> by Lorc, Delapouite and contributors, <a href="https://creativecommons.org/licenses/by/3.0/" target="_blank" rel="noopener noreferrer">CC BY 3.0</a>.</p>
     </div>
   </div>, document.body);
 }

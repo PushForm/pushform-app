@@ -7,9 +7,20 @@
  */
 
 /** Contribution targets an extension can declare. */
-export const EXTENSION_TARGETS = ['model.command', 'model.selection.action', 'model.inspector.block', 'model.panel',
-  'model.tool', 'model.overlay', 'model.importer', 'model.exporter', 'app.settings.block'] as const;
+export const EXTENSION_TARGETS = ['model.command', 'model.selection.action', 'model.toolbar', 'model.inspector.block', 'model.sidebar',
+  'model.panel', 'model.tool', 'model.overlay', 'model.importer', 'model.exporter', 'app.settings.block'] as const;
 export type ExtensionTarget = (typeof EXTENSION_TARGETS)[number];
+
+/**
+ * Targets whose contribution is an interface the host shows (`ui.mount`): `model.sidebar` in the extension's side
+ * panel beside the editor, `model.panel` as a tab of its own in the tab strip, filling the editor area, and the
+ * inspector and settings blocks in place.
+ */
+export const UI_MOUNT_TARGETS = ['model.sidebar', 'model.panel', 'model.inspector.block', 'app.settings.block'] as const satisfies readonly ExtensionTarget[];
+
+/** The groups of the modeling toolbar a `model.toolbar` button can join; it is added at the end of its group. */
+export const TOOLBAR_CATEGORIES = ['transform', 'draw', 'modify', 'inspect', 'organize', 'navigate'] as const;
+export type ToolbarCategory = (typeof TOOLBAR_CATEGORIES)[number];
 
 /**
  * Permissions an extension can request. Each one is granted separately: model write does not imply file, clipboard
@@ -21,7 +32,7 @@ export const EXTENSION_PERMISSIONS = ['model.read', 'model.write', 'selection.re
 export type ExtensionPermission = (typeof EXTENSION_PERMISSIONS)[number];
 
 /** What starts an extension's code. Code never runs at install or load; only one of these does. */
-export const ACTIVATION_EVENTS = ['onCommand', 'onSelectionAction', 'onInspectorShow', 'onPanelOpen', 'onToolActivate',
+export const ACTIVATION_EVENTS = ['onCommand', 'onSelectionAction', 'onInspectorShow', 'onSidebarOpen', 'onPanelOpen', 'onToolActivate',
   'onOverlayShow', 'onImport', 'onExport', 'onSettingsOpen'] as const;
 export type ActivationEvent = (typeof ACTIVATION_EVENTS)[number];
 
@@ -29,7 +40,9 @@ export type ActivationEvent = (typeof ACTIVATION_EVENTS)[number];
 export const TARGET_ACTIVATION: Readonly<Record<ExtensionTarget, ActivationEvent>> = {
   'model.command': 'onCommand',
   'model.selection.action': 'onSelectionAction',
+  'model.toolbar': 'onCommand',
   'model.inspector.block': 'onInspectorShow',
+  'model.sidebar': 'onSidebarOpen',
   'model.panel': 'onPanelOpen',
   'model.tool': 'onToolActivate',
   'model.overlay': 'onOverlayShow',

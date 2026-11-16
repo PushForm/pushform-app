@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 /* global URL */
-import { join } from 'node:path';
+import { join, dirname, basename } from 'node:path';
+import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, rmSync, realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { crateLabel, noticesText, rustNotices, verbatimNoticeFiles } from './third-party-notices.mjs';
+import { cargoAboutReports, RUST_WORKSPACES, crateLabel, noticesText, rustNotices, verbatimNoticeFiles } from './third-party-notices.mjs';
 
 const root = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
@@ -18,6 +20,28 @@ const report = (crates, licenses) => ({
 });
 
 describe('third-party notices', () => {
+  it('reads cargo-about UTF-8 output files and caches reports without using redirected stdout', () => {
+    const fixture = mkdtempSync(join(tmpdir(), 'pushform-notices-test-'));
+    try {
+      for (const manifest of ['scripts/notices/about.toml', ...RUST_WORKSPACES.flatMap(workspace => [workspace.manifest, join(dirname(workspace.manifest), 'Cargo.lock')])]) {
+        const path = join(fixture, manifest); mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, 'fixture');
+      }
+      let calls = 0;
+      const runCommand = (command, args, options) => {
+        calls++; expect(command).toBe('cargo'); expect(options.stdio[1]).toBe('ignore');
+        const path = args[args.indexOf('--output-file') + 1]; expect(path).toBeTruthy();
+        writeFileSync(path, JSON.stringify({ crates: [], licenses: [{ text: 'Caf\u00e9 license', source_path: 'LICENSE', used_by: [] }] }), 'utf8');
+        return 'Not JSON: stdout is not the report';
+      };
+      expect(cargoAboutReports(fixture, 'version', { runCommand })[0].report.licenses[0].text).toBe('Caf\u00e9 license');
+      cargoAboutReports(fixture, 'version', { runCommand }); expect(calls).toBe(RUST_WORKSPACES.length);
+      expect(readdirSync(join(fixture, 'node_modules/.cache/pushform-notices')).every(file => !file.startsWith('cargo-about-'))).toBe(true);
+    } finally {
+      expect(dirname(realpathSync(fixture))).toBe(realpathSync(tmpdir())); expect(basename(fixture).startsWith('pushform-notices-test-')).toBe(true);
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
   it('groups Rust crates by license text across workspaces and records the builds each ships in', () => {
     const step = report([['a@1.0.0', 'MIT'], ['b@2.0.0', 'MIT OR Apache-2.0']],
       [['MIT text\r\n', true, ['a@1.0.0', 'b@2.0.0']]]);

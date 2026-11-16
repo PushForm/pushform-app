@@ -145,7 +145,7 @@ describe('document handles', () => {
     session.closeDocument('doc-a');
     expect((await failureOf(running)).code).toBe('cancelled');
     try { (session as unknown as { resolveDocument(h: unknown): string }).resolveDocument(handle); } catch (e) { later = (e as ExtensionError).code; }
-    expect(later).toBe('permission.denied');
+    expect(later).toBe('document.closed');
   });
 });
 

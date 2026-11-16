@@ -5,10 +5,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { zipSync } from 'fflate';
 import { buildManifest, type ExtensionManifestInput } from '@pushform/extension-protocol';
-import { ExtensionPlatform, memoryDeveloperMode, memoryExtensionStore, memorySettingsStore, type InstalledExtension, type SettingsStore } from '@pushform/extensions';
-import { ExtensionManager } from './ExtensionManager';
+import {
+  ExtensionPlatform, memoryActivityStore, memoryDeveloperMode, memoryExtensionStore, memorySettingsStore, type ActivityEntry, type ExtensionActivityStore,
+  type InstalledExtension, type SettingsStore,
+} from '@pushform/extensions';
+import { ExtensionManager, ExtensionManagerPanel } from './ExtensionManager';
 import { browserRunsExtensions } from './browserExtensionPlatform';
-import { indexedDbExtensionStore } from './indexedDbExtensionStore';
+import { indexedDbActivityStore, indexedDbExtensionStore } from './indexedDbExtensionStore';
 
 afterEach(cleanup);
 const encode = (s: string) => new TextEncoder().encode(s);
@@ -27,15 +30,19 @@ async function zipBytes(overrides: Partial<Omit<ExtensionManifestInput, 'files'>
 const zip = async (overrides: Partial<Omit<ExtensionManifestInput, 'files'>> = {}): Promise<File> =>
   new File([(await zipBytes(overrides)) as Uint8Array<ArrayBuffer>], 'prices.zip', { type: 'application/zip' });
 
-function setup() {
+function setup(activity: ExtensionActivityStore = memoryActivityStore(), placement: 'window' | 'panel' = 'window') {
   const settings = new Map<string, SettingsStore>();
   const settingsFor = (r: InstalledExtension) => settings.get(r.id) ?? (settings.set(r.id, memorySettingsStore()), settings.get(r.id)!);
   const platform = new ExtensionPlatform({
     store: memoryExtensionStore(), developerMode: memoryDeveloperMode(false),
-    startRuntime: async () => { throw new Error('no runtime in this test'); }, settingsStore: settingsFor,
+    startRuntime: async () => { throw new Error('no runtime in this test'); }, settingsStore: settingsFor, activity,
   });
-  render(<ExtensionManager platform={platform} developerModeAllowed developerModeOn={false} onClose={() => {}} />);
-  return { platform, settingsFor };
+  const closed: number[] = [];
+  const onClose = () => closed.push(1);
+  render(placement === 'window'
+    ? <ExtensionManager platform={platform} developerModeAllowed developerModeOn={false} onClose={onClose} />
+    : <div className="pf-app"><ExtensionManagerPanel platform={platform} developerModeAllowed developerModeOn={false} onClose={onClose} /></div>);
+  return { platform, settingsFor, closed };
 }
 
 async function loadFile(file: File): Promise<void> {
@@ -69,6 +76,39 @@ describe('ExtensionManager', () => {
     expect(platform.state('com.example.prices')?.record.grants).toEqual(['model.read', 'settings', 'network']);
   });
 
+  it('shows the same content in the Extensions side panel, with the install dialog over the editor, not inside the panel', async () => {
+    const { platform, closed } = setup(undefined, 'panel');
+    const panel = screen.getByRole('region', { name: 'Extensions side panel' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(within(panel).getByRole('heading', { name: 'Extensions' })).toBeTruthy();
+    expect(within(panel).getByRole('heading', { name: 'Browse' })).toBeTruthy();
+    expect(within(panel).getByText('The extension directory is coming soon.')).toBeTruthy();
+    expect(within(panel).queryByRole('link')).toBeNull();
+    expect(within(panel).getByText('No extensions are installed.')).toBeTruthy();
+    fireEvent.click(within(panel).getByRole('checkbox', { name: 'Allow unsigned extensions on this device' }));
+    fireEvent.click(within(panel).getByRole('button', { name: 'Turn on developer mode' }));
+    await within(panel).findByRole('button', { name: 'Load extension from file…' });
+    await loadFile(await zip());
+    const dialog = await screen.findByRole('dialog', { name: 'Install Lumber Prices?' });
+    expect(panel.contains(dialog)).toBe(false);
+    expect(dialog.closest('.pf-dialog-backdrop')?.parentElement).toBe(document.querySelector('.pf-app'));
+    // The panel stays while the dialog is open.
+    expect(screen.getByRole('region', { name: 'Extensions side panel' })).toBe(panel);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Install' }));
+    const row = await within(panel).findByText('Lumber Prices');
+    expect(row.closest('li')!.textContent).toMatch(/Unsigned \(developer\)/);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(platform.state('com.example.prices')?.record.grants).toEqual(['model.read', 'settings', 'network']);
+    // Cancelling an install closes only the dialog.
+    await loadFile(await zip({ version: '1.1.0' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Update Lumber Prices?' })).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByRole('region', { name: 'Extensions side panel' })).toBeTruthy();
+    expect(closed).toEqual([]);
+    fireEvent.click(within(panel).getByRole('button', { name: 'Close Extensions' }));
+    expect(closed).toEqual([1]);
+  });
+
   it('marks what a reload newly asks for', async () => {
     const { platform } = setup();
     await platform.setDeveloperMode(true);
@@ -96,6 +136,85 @@ describe('ExtensionManager', () => {
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Uninstall' }));
     await screen.findByText('No extensions are installed.');
     expect(await settingsFor(record).load(record.id)).toBeNull();
+  });
+});
+
+describe('the activity record in the manager', () => {
+  it('lists what happened in plain language with network use per address, and clears it on request', async () => {
+    const activity = memoryActivityStore();
+    const { platform } = setup(activity);
+    await platform.setDeveloperMode(true);
+    const record = await platform.install(await platform.sideload(await zipBytes()), manifest.permissions);
+    await activity.addEgress(record.id, 'https://api.example.com', { requests: 3, bytesSent: 1536, bytesReceived: 4 * 1024 * 1024 }, new Date().toISOString());
+    await activity.put({ key: 'e1', extensionId: record.id, at: new Date(Date.now() + 1000).toISOString(), seq: 99,
+      event: { type: 'egress', origin: 'https://api.example.com', requests: 3, bytesSent: 1536, bytesReceived: 4 * 1024 * 1024 } });
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Lumber Prices turned on' }));
+    await waitFor(() => expect(platform.state(record.id)?.record.enabled).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+
+    const list = await screen.findByRole('list', { name: 'Activity' });
+    await waitFor(() => expect(within(list).getAllByRole('listitem').map((li) => li.querySelector('span')!.textContent)).toEqual([
+      'Sent 1.5 KB to api.example.com and received 4.0 MB (3 requests)',
+      'Turned off',
+      'Allowed to read the model; keep its own settings; connect to its internet addresses',
+      'Installed version 1.0.0 (unsigned)',
+    ]));
+    expect(within(list).getAllByRole('listitem')[0]!.querySelector('time')!.getAttribute('dateTime')).toMatch(/^\d{4}-/);
+    const network = screen.getByRole('table', { name: 'Network use of Lumber Prices' });
+    expect(within(network).getByRole('row', { name: /api\.example\.com/ }).textContent).toBe('api.example.com0 bytes1.5 KB4.0 MB');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear activity…' }));
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Clear activity' }));
+    await screen.findByText('Nothing recorded yet.');
+    expect(within(network).getByRole('row', { name: /api\.example\.com/ }).textContent).toBe('api.example.com0 bytes0 bytes0 bytes');
+  });
+
+  it('keeps the activity of an uninstalled extension until it is cleared', async () => {
+    const { platform } = setup();
+    await platform.setDeveloperMode(true);
+    await platform.install(await platform.sideload(await zipBytes({ destinations: [], permissions: ['settings'] })), ['settings']);
+    fireEvent.click(await screen.findByRole('button', { name: 'Details' }));
+    expect(await screen.findByText('No internet access')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Uninstall…' }));
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Uninstall' }));
+    const section = await screen.findByRole('region', { name: 'Uninstalled extensions' });
+    fireEvent.click(within(section).getByRole('button', { name: 'Activity' }));
+    expect(await within(section).findByText('Uninstalled version 1.0.0, keeping its settings')).toBeTruthy();
+    fireEvent.click(within(section).getByRole('button', { name: 'Clear activity…' }));
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Clear activity' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Uninstalled extensions' })).toBeNull());
+  });
+});
+
+describe('indexedDbActivityStore', () => {
+  const entry = (extensionId: string, i: number): ActivityEntry =>
+    ({ key: `${extensionId}:${i}`, extensionId, at: new Date(i * 1000).toISOString(), seq: i, event: { type: 'activated' } });
+
+  it('keeps the newest entries per extension and overall, totals per address, and clears one extension', async () => {
+    const store = indexedDbActivityStore('carol', indexedDB, { perExtension: 3, total: 5 });
+    for (let i = 0; i < 5; i++) await store.put(entry('a', i));
+    for (let i = 10; i < 13; i++) await store.put(entry('b', i));
+    expect((await store.list('a')).map((e) => e.key)).toEqual(['a:3', 'a:4']);
+    expect((await store.list('b')).map((e) => e.key)).toEqual(['b:10', 'b:11', 'b:12']);
+    await store.addEgress('a', 'https://x.example', { requests: 1, bytesSent: 2, bytesReceived: 3 }, '2026-01-01T00:00:00.000Z');
+    await store.addEgress('a', 'https://x.example', { requests: 2, bytesSent: 2, bytesReceived: 3 }, '2026-01-02T00:00:00.000Z');
+    expect(await store.egress('a')).toMatchObject([{ origin: 'https://x.example', requests: 3, bytesSent: 4, bytesReceived: 6, first: '2026-01-01T00:00:00.000Z' }]);
+    expect((await store.extensions()).sort()).toEqual(['a', 'b']);
+    await store.clear('a');
+    expect([await store.list('a'), await store.egress('a'), await store.extensions()]).toEqual([[], [], ['b']]);
+    expect(await indexedDbActivityStore('dave').list('b')).toEqual([]);
+  });
+
+  it('adds the record to a database made before it existed, keeping the installed extensions', async () => {
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open('pushform-extensions:erin', 1);
+      request.onupgradeneeded = () => { request.result.createObjectStore('extensions', { keyPath: 'id' }).put({ id: 'com.example.old' }); };
+      request.onsuccess = () => { request.result.close(); resolve(); };
+      request.onerror = () => reject(request.error);
+    });
+    expect((await indexedDbExtensionStore('erin').list()).map((r) => r.id)).toEqual(['com.example.old']);
+    await indexedDbActivityStore('erin').put(entry('com.example.old', 1));
+    expect(await indexedDbActivityStore('erin').list('com.example.old')).toHaveLength(1);
   });
 });
 

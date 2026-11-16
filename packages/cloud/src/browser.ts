@@ -13,6 +13,7 @@ import { CloudProfiles } from './CloudProfile';
 import { CloudSession, type AuthCallback } from './CloudSession';
 import { CloudStaff } from './CloudStaff';
 import { CloudUsage } from './CloudUsage';
+import { accountExtensionStorage, type CloudExtensionStorage } from './CloudExtensionStorage';
 import { validateBrowserCloudConfig, type BrowserCloudConfig } from './cloudConfig';
 
 export { releaseCloudConfig, serverCredentialsIn, validateBrowserCloudConfig, type BrowserCloudConfig } from './cloudConfig';
@@ -51,6 +52,8 @@ function browserClient(config: BrowserCloudConfig, browser: Pick<Window, 'locati
 /** Construct once at app boot; SDK owns persistence, refresh, locks and cross-tab auth notifications. */
 export function createBrowserCloud(config: BrowserCloudConfig, browser: Pick<Window, 'location' | 'history'> = window): {
   session: CloudSession; files: CloudFiles; profiles: CloudProfiles; account: CloudAccount; billing: CloudBilling; usage: CloudUsage; staff: CloudStaff; campaign: CloudCampaign; activity: CloudProjectActivity; commons: { client: SupabaseClient<Database>; session: CloudSession; profiles: CommonsProfiles };
+  extensionStorage: (ownerId: string) => CloudExtensionStorage;
+
 } {
   const returned = billingReturnFromUrl(new URL(browser.location.href));
   if (returned) {
@@ -65,7 +68,13 @@ export function createBrowserCloud(config: BrowserCloudConfig, browser: Pick<Win
   const profiles = new CloudProfiles(client, session);
   const account = new CloudAccount(client, session);
   const billing = new CloudBilling(client, session, returned);
-  return { session, files, profiles, account, billing, commons: { client, session, profiles: new CommonsProfiles(client) }, usage: new CloudUsage(client, session), staff: new CloudStaff(client), campaign: new CloudCampaign(client), activity: new CloudProjectActivity(client, session, profiles) };
+  return { session, files, profiles, account, billing, commons: { client, session, profiles: new CommonsProfiles(client) }, usage: new CloudUsage(client, session), staff: new CloudStaff(client), campaign: new CloudCampaign(client), activity: new CloudProjectActivity(client, session, profiles),
+    extensionStorage:ownerId => accountExtensionStorage(validateBrowserCloudConfig(config),ownerId,async () => {
+      if (session.getSnapshot().status !== 'signedIn') return null;
+      const current = await client.auth.getSession();
+      return current.error || session.getSnapshot().status !== 'signedIn' ? null : current.data.session;
+    }) };
+
 }
 
 /**

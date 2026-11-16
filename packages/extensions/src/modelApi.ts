@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import {
+  captureContainerOccurrence, capturePartOccurrence, runPhysicalBooleanKernel, type PhysicalBooleanResult,
+  preparePhysicalStretch, type PhysicalStretchResult, physicalCopySize, PHYSICAL_COPY_LIMITS, prepareNativePlacement, type NativePhysicalPlacement, type PhysicalCopySize, type PhysicalCopyResult,
+  type ContainerIdentityChange, type ScopedProfileResult,
   BuilderPlanError, materialKey, DEFAULT_BLEND_SEGMENTS, SERVICE_FONTS, grainMapping, planCabinet, checkEdgeBlendResult, Text3DParamsSchema, isHardEdge, libraryMaterial, loadLibraryMaterial, planEdgeBlend, planEdgeProfile, runEdgeBlendKernel, runIntersectKernel,
   runText3DKernel, BUILTIN_LIBRARY, LIBRARY_CATEGORIES, activeTagOpt, applyTransformPlan, arrayMatrices, contextFrame, curvePoints, definitionBounds, hostOf, instanceCount, kernelOf, localPushPullDistance,
   m4rotationAbout, m4scaleAbout, planPushPull, planTransform, runRevolveKernel, runFollowMeKernel, runPushPullKernel, runSolidsKernel, runTransformKernel, sceneRuntimeOf, solidsResultIsEmpty,
@@ -8,14 +11,15 @@ import {
   type EdgeBlendMode, type EdgeBlendPlan, type MakeResult, type StandardView, type PushPullApplyResult, type PushPullTarget, type SolidsApplyResult, type SolidsKernelWork, type SolidsPairMode, type TransformKernelWork, type TransformPlan,
 } from '@pushform/commands';
 import {
-  LOCAL_REFERENCE, MODEL_BUILDERS, MODEL_BUILDER_KEYS, modelBuilderInfo, modelBuilderInfoSchema, type ModelBuilderKey, MODEL_API_VERSION, MODEL_LIMITS, MODEL_RENDER_LIMITS, modelRenderSchema, modelRenderViewName, modelRenderViews, type ModelRenderImage, type ModelRenderResult, MODEL_PLANNED_OPERATIONS, MODEL_TOOLS, modelBatchSchema, modelMaterialLibrarySchema, modelOperationSchema, modelOverlapsSchema, modelQuerySchema,
+  LOCAL_REFERENCE, MODEL_BUILDERS, MODEL_BUILDER_KEYS, modelBuilderInfo, modelBuilderInfoSchema, type ModelBuilderKey, MODEL_API_VERSION, MODEL_LIMITS, MODEL_RENDER_LIMITS, modelRenderSchema, modelRenderViewName, modelRenderViews, type ModelRenderImage, type ModelRenderResult, MODEL_PLANNED_OPERATIONS, MODEL_TOOLS, modelBatchSchema, modelExtensionBatchSchema, modelMaterialLibrarySchema, modelOperationSchema, modelOverlapsSchema, modelQuerySchema,
+
   type ModelLibraryResult, type ModelOverlap, type ModelOverlapsResult,
   modelViewSchema, type ModelApiError, type ModelApiErrorCode, type ModelBatchResult, type ModelBounds, type ModelCameraInput, type ModelCameraSummary,
   type ModelDocumentSnapshot, type ModelEntitySummary, type ModelOperation, type ModelQueryResult, type ModelRef, type ModelRefInput, type ModelSceneSaves,
-  type ModelNameEntry, type ModelSkipped, type ModelVec3, type ModelViewResult,
+  type MetadataTarget, type ModelNameEntry, type ModelSkipped, type ModelVec3, type ModelViewResult,
 } from '@pushform/extension-protocol';
 import {
-  basisToLocal, box3Empty, box3Expand, box3IsEmpty, MERGE_TOL, m4invert, m4mul, m4transformPoint, m4translation, meshBounds, planeDistance, PushFormError,
+  ANGLE_TOL, basisToLocal, box3Empty, box3Expand, box3IsEmpty, COPLANAR_TOL, MERGE_TOL, m4fromBasis, m4identity, m4invert, m4mul, m4transformPoint, m4translation, meshBounds, planeDistance, PushFormError,
   v3add, v3cross, v3dot, v3len, v3scale, v3sub,
   type Box3, type DefId, type FaceLocalId, type Id, type MMat4, type PlaneBasis, type Plane, type Vec3,
 } from '@pushform/core';
@@ -26,7 +30,15 @@ import {
 } from '@pushform/model';
 import { planBuilder } from './builders';
 import { summarizeLabels, type ToolCallResult } from './layoutApi';
+import { simplifyLoop } from './loopSimplify';
+import { readMaterialAppearance, type StagedMaterialAppearance } from './materialAssets';
+import type { materialReadSchema } from '@pushform/extension-protocol';
+import type { z } from 'zod';
 import { frameCamera } from './modelCamera';
+import { ModelBatchIdentity } from './modelBatchIdentity';
+import { physicalPartProfile } from './physicalPartProfile';
+import type { NativePlacementAccess } from './nativePlacementAccess';
+import { stagedModelBatchSchema } from '@pushform/extension-protocol';
 
 /** A structured API error; the message is safe to show to the user and to a model. */
 export class ModelApiFailure extends Error {
@@ -42,7 +54,9 @@ interface Shape { edges: number[]; faces: number[]; imprinted: { bodyId: number;
  * What a batch names with `as`: the entity's kind and id (with `faceId` for a face of a solid), for a group or
  * placement its definition, and for a drawn shape everything it made.
  */
-interface Named { kind: ModelRef['kind'] | 'tag' | 'material' | 'scene'; id: number; definitionId?: number; faceId?: number; shape?: Shape }
+export interface ModelBatchCreated { kind: ModelRef['kind'] | 'tag' | 'material' | 'scene'; id: number; definitionId?: number; path?: number[] }
+export type ModelBatchFinalize = ((created: ReadonlyMap<string, ModelBatchCreated>, continueTarget?: (target: MetadataTarget) => MetadataTarget) => void) & { prepare?: () => void };
+interface Named { kind: ModelRef['kind'] | 'tag' | 'material' | 'scene'; id: number; definitionId?: number; faceId?: number; shape?: Shape; path?: number[] }
 /**
  * A name in the API's table: what it names, the container that holds it, the batch that gave it (a sequence number
  * of this API object), and that batch's undo entry once it committed, so an undone batch's names can be dropped.
@@ -107,7 +121,7 @@ const readsName = (op: unknown, name: string): boolean => {
   return walk(op);
 };
 /** Operations that move or copy entities; with `as`, they name the copy. */
-const TRANSFORM_OPS = new Set<string>(['move', 'rotate', 'scale', 'mirror']);
+const TRANSFORM_OPS = new Set<string>(['move', 'rotate', 'scale', 'mirror', 'transform']);
 const samePath = (a: readonly number[], b: readonly number[]): boolean => a.length === b.length && a.every((x, i) => x === b[i]);
 
 /**
@@ -132,6 +146,7 @@ const samePath = (a: readonly number[], b: readonly number[]): boolean => a.leng
  */
 export class ModelDocumentApi {
   private readonly host: DocumentHost;
+  private nativePlacements: NativePlacementAccess | undefined;
   /** Names that committed batches gave, with what they name. */
   private readonly names = new Map<string, NameEntry>();
   /** Names dropped because their batch was undone, so a use of one can say why it fails. */
@@ -154,6 +169,12 @@ export class ModelDocumentApi {
   }
 
   get revision(): number { return this.host.doc.version; }
+  /** Host-only session binding; no native input is accepted from a model request. */
+  bindNativePlacements(access: NativePlacementAccess): void { this.nativePlacements = access; }
+  /** The host captures this cheap path when beginning a staged edit; no full model snapshot is needed. */
+  get container(): number[] { return [...this.host.context.path]; }
+
+  materialRead(input: z.infer<typeof materialReadSchema>) { return readMaterialAppearance(this.host, input); }
 
   /**
    * What this object's committed batches changed, for one line about all of them: `label` names them as their undo
@@ -204,7 +225,7 @@ export class ModelDocumentApi {
     if (action.type !== 'play' && action.type !== 'stop') runtime.stop();
     switch (action.type) {
       case 'set_camera':
-        shown = this.cameraFor(action.camera, path, this.resolver(path, this.names, -1).ref);
+        shown = this.cameraFor(action.camera, path, this.resolver(path, this.names, -1, 'any').ref);
         runtime.animateCamera(camera, shown, action.animate ?? true ? runtime.animationSettings.transitionSeconds : 0);
         break;
       case 'activate_scene': {
@@ -228,6 +249,30 @@ export class ModelDocumentApi {
     }
     const active = runtime.activeSceneId === null ? undefined : this.host.doc.state.scenes.get(runtime.activeSceneId as never);
     return { ok: true, revision: this.revision, camera: cameraOut(shown ?? camera.getState()), activeScene: active ? { id: active.id, name: active.name } : null, playing: runtime.playing };
+  }
+
+  /** The selection, as references carrying the instance path of their container. */
+  selection(): ModelRef[] { return this.host.selection.refs.map(refOut); }
+
+  /**
+   * Replaces the selection; an empty list clears it. A reference without a path names an entity of the container
+   * open in the editor; one with a path names an entity inside a group or component, which is selected in place, as
+   * the Object browser selects a nested entity: the editor's open container stays as it is. Makes no undo entry.
+   * Rejects with `ModelApiFailure` naming the first reference that does not exist, selecting nothing.
+   */
+  select(refs: readonly ModelRefInput[]): ModelRef[] {
+    const { ref } = this.resolver([...this.host.context.path] as Id[], new Map(), -1, 'any');
+    const resolved = refs.map(ref);
+    this.host.selection.set(resolved);
+    return this.selection();
+  }
+
+  /**
+   * Frames the camera on the world bounds of entities, keeping the view direction; with a path, an entity inside a
+   * group or component.
+   */
+  frame(refs: readonly ModelRefInput[], animate = true): ModelViewResult {
+    return this.view({ action: { type: 'set_camera', camera: { mode: 'framed', subject: { refs: [...refs] } }, animate } });
   }
 
   private get camera(): CameraHost | null { return this.commands.ctx.camera ?? null; }
@@ -364,16 +409,16 @@ export class ModelDocumentApi {
     const keep = (kind: string, id: number): boolean => kinds.has(kind) && (!ids || ids.has(id));
     for (const inst of container.instances.values()) if (keep('instance', inst.id)) all.push(() => summarizeInstance(state, path, inst.id, fields));
     for (const body of container.bodies.values()) {
-      if (keep('body', body.id)) all.push(() => summarizeBody(path, container, body.id, fields));
+      if (keep('body', body.id)) all.push(() => summarizeBody(path, container, body.id, fields, query.projection ?? undefined));
       if ((!kinds.has('face') && !kinds.has('edge')) || (ids && !ids.has(body.id))) continue;
       if (kinds.has('face')) for (const face of body.faces.values()) {
         if (query.facing && v3dot(face.plane.n, unit(query.facing)) < FACING_TOLERANCE) continue;
         if (query.containing && !faceContains(face, query.containing)) continue;
-        all.push(() => summarizeFace(path, body.id, face, fields, frontMaterial(state, face, body, inherited)));
+        all.push(() => summarizeFace(path, body.id, body.version, face, fields, frontMaterial(state, face, body, inherited)));
       }
       if (kinds.has('edge')) for (const edge of body.edges.values()) {
         if (!edgeMatches(edge.polyline, query.facing, query.containing)) continue;
-        all.push(() => summarizeEdge(path, body.id, edge, fields));
+        all.push(() => summarizeEdge(path, body.id, body.version, edge, fields));
       }
     }
     const sketch = container.sketch;
@@ -403,8 +448,18 @@ export class ModelDocumentApi {
       ...(fields.has('geometry') ? { points: [vec(plane.origin)], normal: vec(plane.plane.n) } : {}),
     }));
     const offset = query.offset ?? 0, limit = query.limit ?? DEFAULT_QUERY_LIMIT;
+    // A page ends early once the face loops on it reach the point budget, so a page of curved, holed faces stays
+    // within one message; `next` says where to continue.
+    const entities: ModelEntitySummary[] = [];
+    let points = 0;
+    for (let i = offset; i < all.length && entities.length < limit && points < MODEL_LIMITS.loopPointsPerQueryPage; i++) {
+      const entity = all[i]!();
+      entities.push(entity);
+      points += loopPointsOf(entity);
+    }
+    const next = offset + entities.length;
     return { revision: this.revision, container: [...path], worldTransform: contextMatrix(state, path).map(round), total: all.length, offset,
-      entities: all.slice(offset, offset + limit).map(make => make()), next: offset + limit < all.length ? offset + limit : null };
+      entities, next: next < all.length ? next : null };
   }
 
   /**
@@ -479,8 +534,20 @@ export class ModelDocumentApi {
   }
 
   /** Validate, check the revision, then run every operation as one undo entry; rejects with `ModelApiFailure`. */
-  async apply(input: unknown, signal?: AbortSignal): Promise<ModelBatchResult> {
-    const parsed = modelBatchSchema.safeParse(input);
+  apply(input: unknown, signal?: AbortSignal, finalize?: ModelBatchFinalize, assets?: ReadonlyMap<string, StagedMaterialAppearance>, amend = false): Promise<ModelBatchResult> {
+    return this.applyValidated(input,finalize ? modelBatchSchema.extend({ operations: modelExtensionBatchSchema.shape.operations }) : modelBatchSchema,signal,finalize,assets,false,undefined,amend);
+  }
+
+  /** Trusted draft commit entry; ordinary clients cannot opt out of model.apply's message/batch limits. */
+  applyStaged(input: unknown, signal?: AbortSignal, finalize?: ModelBatchFinalize,
+    assets?: ReadonlyMap<string, StagedMaterialAppearance>, progress?: (value: number) => void): Promise<ModelBatchResult> {
+    return this.applyValidated(input,stagedModelBatchSchema,signal,finalize,assets,true,progress);
+  }
+
+  private async applyValidated(input: unknown, schema: typeof modelBatchSchema, signal: AbortSignal | undefined,
+    finalize: ModelBatchFinalize | undefined, assets: ReadonlyMap<string, StagedMaterialAppearance> | undefined,
+    staged: boolean, progress?: (value: number) => void, amend = false): Promise<ModelBatchResult> {
+    const parsed = schema.safeParse(input);
     if (!parsed.success) {
       const index = parsed.error.issues.find(i => i.path[0] === 'operations' && typeof i.path[1] === 'number')?.path[1];
       throw this.failure(parsed.error.issues.some(i => i.code === 'too_big' && i.path.length === 1) ? 'limit_exceeded' : 'invalid_operation', zodMessage(parsed.error), typeof index === 'number' ? index : undefined);
@@ -492,14 +559,32 @@ export class ModelDocumentApi {
       if (!op.success) throw this.failure('invalid_operation', `Operation ${index}: ${operationMessage(raw, op.error)}`, index);
       return op.data;
     });
+    for (const operation of operations) if ((operation.op === 'add_material_appearance' || operation.op === 'set_material_appearance') && !assets?.has(operation.asset))
+      throw this.failure('unavailable', 'A completed appearance must be staged by this extension session before it can be committed.');
     const points = operations.reduce((sum, op) => sum + pointCount(op), 0);
     if (points > MODEL_LIMITS.pointsPerBatch) throw this.failure('limit_exceeded', `The batch names ${points} entities and points; the limit is ${MODEL_LIMITS.pointsPerBatch}.`);
     this.checkNames(batch.operations, operations);
+    const handles = operations.flatMap(op => op.op === 'place_fragment' ? [op.fragment] : []);
+    if (!handles.length) return this.applyPrepared(batch, operations, signal, finalize, assets, staged, progress, amend);
+    if (!this.nativePlacements) throw this.failure('unavailable', 'Native modules must be opened by this extension session before placement.');
+    const revision = this.revision, context = this.host.context;
+    return this.nativePlacements.withPlacements(handles, signal ?? new AbortController().signal, async (placements, active) => {
+      if (this.revision !== revision || this.host.context !== context)
+        throw this.failure('stale_revision', 'The model or edit context changed while preparing the native module. Nothing was changed.');
+      return this.applyPrepared(batch, operations, active, finalize, assets, staged, progress, amend, placements);
+    });
+  }
+
+  private async applyPrepared(batch: z.infer<typeof modelBatchSchema>, operations: ModelOperation[], signal: AbortSignal | undefined,
+    finalize: ModelBatchFinalize | undefined, assets: ReadonlyMap<string, StagedMaterialAppearance> | undefined,
+    staged: boolean, progress?: (value: number) => void, amend = false, placements?: ReadonlyMap<string, NativePhysicalPlacement>): Promise<ModelBatchResult> {
     const start = this.revision;
-    const own = this.ownTo === start;
+    const own = !staged && this.ownTo === start;
     if (batch.expectedRevision !== start && !(own && batch.expectedRevision >= this.ownFrom && batch.expectedRevision < start))
       throw this.failure('stale_revision', `The model changed since revision ${batch.expectedRevision}; it is now at revision ${start}. Read it again before editing.`);
     const host = this.host, undo = host.undoStack;
+    if (amend && (batch.expectedRevision !== start || !own || !this.step || undo.peek() !== this.step.entry))
+      throw this.failure('stale_revision', 'The last tool gesture is no longer the current Undo entry.');
     const path = (batch.container ?? [...host.context.path]) as Id[];
     this.containerOrFail(path);
     this.runtime.stop();
@@ -507,31 +592,47 @@ export class ModelDocumentApi {
     const dropped = this.dropUndone();
     // Earlier batches' names, and this batch's as they are given; the table changes only when the batch commits.
     const names = new Map(this.names), batchNo = ++this.batches;
-    const created = new Map<string, Named>(), rebound: string[] = [];
+    const created = new Map<string, Named>(), rebound: string[] = [], identity = new ModelBatchIdentity(), copies:PhysicalCopySize={entities:0,vertices:0};
     const results: ModelBatchResult['results'] = [];
     // Nothing but this object's own batches changed the model since its last commit, so this batch joins that entry.
-    const joins = own && this.step && undo.peek() === this.step.entry ? this.step : null;
+    const joins = !staged && (!finalize || amend) && !assets?.size && !placements?.size && own && this.step && undo.peek() === this.step.entry ? this.step : null;
     const savedPath = [...host.context.path], savedSelection = host.selection.snapshot();
     const deadline = Date.now() + MODEL_LIMITS.kernelSeconds * 1000;
     let at = 0, failed: ModelApiFailure | null = null, committed: UndoEntry | null = null;
     undo.beginGroup(label);
     try {
       undo.withinGroup(() => { if (!samePath(path, savedPath)) host.setContext(path); });
+      if (signal?.aborted) throw this.failure('cancelled', 'The batch was stopped before it finished. Nothing was changed.', at);
+      if (finalize?.prepare) undo.withinGroup(finalize.prepare);
       for (const [index, op] of operations.entries()) {
         at = index;
+        if (staged && index % 32 === 0) {
+          reportProgress(progress, index / Math.max(1,operations.length));
+          if (index) await new Promise<void>(resolve => setTimeout(resolve,0));
+        }
         if (signal?.aborted) throw this.failure('cancelled', 'The batch was stopped before it finished. Nothing was changed.', index);
         if (Date.now() > deadline) throw this.failure('limit_exceeded', `The batch ran longer than ${MODEL_LIMITS.kernelSeconds} seconds and was cancelled. Nothing was changed.`, index);
-        const { named, ...result } = await this.run(op, path, names, batchNo, label);
+        const identityVersion = identity.version;
+        const { named, ...result } = await this.run(op, path, names, batchNo, label, identity, copies, assets, placements, signal, deadline);
+        if(identity.version!==identityVersion)for (const [name, entry] of names) {
+          if (DOCUMENT_KINDS.has(entry.named.kind)) continue;
+          const next = identity.occurrence(entry.named.id,entry.path), actual = { ...entry.named,id:next.id,path:next.path };
+          if(actual.kind==='instance'){try{const definition=containerAt(host.doc.state,next.path as Id[]).instances.get(actual.id as Id)?.definitionId;if(definition!==undefined)actual.definitionId=definition;}catch{/* Dead names remain unavailable through the normal resolver. */}}
+          names.set(name,{...entry,named:actual,path:next.path});if(created.has(name))created.set(name,actual);
+        }
         if ('as' in op && op.as) {
           if (named) {
             // checkNames allowed a second use only by an operation that reads the name, so it now names the result.
             if (names.has(op.as) && !created.has(op.as)) rebound.push(op.as);
-            names.set(op.as, { named, path: [...path], batch: batchNo, undo: null });
-            created.set(op.as, named);
+            const actual = {...named,path:[...named.path??path]};
+            names.set(op.as, { named:actual, path: [...actual.path], batch: batchNo, undo: null });
+            created.set(op.as, actual);
           }
         }
         results.push({ op: op.op, ...result });
       }
+      if (signal?.aborted) throw this.failure('cancelled', 'The batch was stopped before it finished. Nothing was changed.', at);
+      if (finalize) undo.withinGroup(() => finalize(created,identity.target));
       if (signal?.aborted) throw this.failure('cancelled', 'The batch was stopped before it finished. Nothing was changed.', at);
     } catch (cause) {
       failed = cause instanceof ModelApiFailure ? new ModelApiFailure({ ...cause.error, operationIndex: cause.error.operationIndex ?? at })
@@ -552,14 +653,18 @@ export class ModelDocumentApi {
     }
     // Reverting the batch is itself a change, so a failure reports the revision after it.
     if (failed) throw new ModelApiFailure({ ...failed.error, revision: this.revision });
+    reportProgress(progress, 1);
     const earlier: Record<string, ModelNameEntry> = {};
-    for (const [name, entry] of this.names) if (!created.has(name) && this.alive(entry)) earlier[name] = nameOut(entry.named);
+    for (const [name, entry] of names) if (!created.has(name)) { this.names.set(name,entry); if(this.alive(entry))earlier[name] = nameOut(entry.named); }
     for (const [name, named] of created) {
-      this.names.set(name, { named, path: [...path], batch: batchNo, undo: committed });
+      this.names.set(name, { named, path: [...named.path??path], batch: batchNo, undo: committed });
       this.undone.delete(name);
     }
     return { ok: true, revision: this.revision, label, created: Object.fromEntries([...created].map(([name, value]) => [name, value.id])),
-      ...(Object.keys(earlier).length ? { names: earlier } : {}), ...(rebound.length ? { rebound } : {}), ...(dropped.length ? { dropped } : {}), results };
+      ...(Object.keys(earlier).length ? { names: earlier } : {}), ...(rebound.length ? { rebound } : {}), ...(dropped.length ? { dropped } : {}), results:results.map(result=>{
+        if(!result.refs)return result;const refs=result.refs.map(ref=>({...ref,...identity.occurrence(ref.id,ref.path)}));
+        return{...result,refs,...(result.id!==undefined&&result.refs[0]?.id===result.id?{id:refs[0]!.id}:{})};
+      }) };
   }
 
   /**
@@ -643,9 +748,11 @@ export class ModelDocumentApi {
   /**
    * Resolves `"$name"`s and entity references of the container at `path` for batch number `batch`. A name an earlier
    * batch gave must still name something, in this container unless it is a tag, material or scene; with
-   * `definition`, a group or placement named in another container still stands for its definition.
+   * `definition`, a group or placement named in another container still stands for its definition. A reference may
+   * carry its own path: `containers` says whether any container is accepted (selecting and framing) or only `path`
+   * itself (a batch, whose operations act on one container).
    */
-  private resolver(path: Id[], names: ReadonlyMap<string, NameEntry>, batch: number) {
+  private resolver(path: Id[], names: ReadonlyMap<string, NameEntry>, batch: number, containers: 'batch' | 'any' = 'batch') {
     const host = this.host;
     const named = (value: string, use: 'entity' | 'definition' = 'entity'): Named => {
       const name = LOCAL_REFERENCE.exec(value)?.[1];
@@ -658,16 +765,28 @@ export class ModelDocumentApi {
       if (entry.batch === batch) return entry.named;
       const what = describeNamed(entry.named);
       if (use === 'definition' && entry.named.definitionId !== undefined && host.doc.state.definitions.has(entry.named.definitionId as DefId)) return entry.named;
-      if (!DOCUMENT_KINDS.has(entry.named.kind) && !samePath(entry.path, path))
+      if (containers === 'batch' && !DOCUMENT_KINDS.has(entry.named.kind) && !samePath(entry.path, path))
         throw this.failure('invalid_reference', `"${value}" names ${what} in the container at instance path [${entry.path.join(', ')}], but this batch edits [${path.join(', ')}]. Edit that container, or use {kind, id} from ${MODEL_TOOLS.query.name} for this one.`);
       if (!this.alive(entry))
         throw this.failure('invalid_reference', `"${value}" named ${what}, which no longer exists: it was deleted, used up by a later operation (a union, subtract or push/pull of a drawn face), or moved into a group. Call ${MODEL_TOOLS.query.name} for current ids.`);
       return entry.named;
     };
     const ref = (input: ModelRefInput): EntityRef => {
-      const state = host.doc.state, container = containerAt(state, path);
+      const state = host.doc.state;
       if (typeof input === 'object' && 'body' in input) return this.selectFace(path, input, named).ref;
       const target: { kind: string; id: number; faceId?: number | undefined; edgeKey?: string | undefined } = typeof input === 'string' ? named(input) : input;
+      const own = typeof input === 'string' ? ('path' in target ? target.path as number[] : undefined) : input.path;
+      let at = path;
+      if (own && !samePath(own, path)) {
+        if (containers === 'batch') throw this.failure('invalid_reference', `${target.kind} ${target.id} is at instance path [${own.join(', ')}], not in the container this batch edits [${path.join(', ')}]; set the batch's container to edit it.`);
+        at = [...own] as Id[];
+      }
+      let container: EntityContainer;
+      try {
+        container = containerAt(state, at);
+      } catch {
+        throw this.failure('invalid_reference', `No group or component at instance path [${at.join(', ')}]. Call ${MODEL_TOOLS.query.name} for current ids.`);
+      }
       const exists = (() => {
         switch (target.kind) {
           case 'instance': return container.instances.has(target.id as Id);
@@ -684,10 +803,11 @@ export class ModelDocumentApi {
         }
       })();
       const shown = typeof input === 'string' ? input : `${input.kind} ${input.id}${'faceId' in input ? ` face ${input.faceId}` : 'edgeKey' in input ? ` edge ${input.edgeKey}` : ''}`;
-      if (!exists) throw this.failure('invalid_reference', `There is no ${shown} in the container being edited${typeof input === 'string' ? ' any more' : ''}. Call ${MODEL_TOOLS.query.name} for current ids.`);
-      if (target.kind === 'face') return { kind: 'face', path, id: target.id as Id, faceId: target.faceId as never, region: null };
-      if (target.kind === 'edge') return { kind: 'edge', path, id: target.id as Id, edgeKey: target.edgeKey as never };
-      return { kind: target.kind as 'instance', path, id: target.id as Id };
+      const where = at === path ? 'in the container being edited' : `at instance path [${at.join(', ')}]`;
+      if (!exists) throw this.failure('invalid_reference', `There is no ${shown} ${where}${typeof input === 'string' ? ' any more' : ''}. Call ${MODEL_TOOLS.query.name} for current ids.`);
+      if (target.kind === 'face') return { kind: 'face', path: at, id: target.id as Id, faceId: target.faceId as never, region: null };
+      if (target.kind === 'edge') return { kind: 'edge', path: at, id: target.id as Id, edgeKey: target.edgeKey as never };
+      return { kind: target.kind as 'instance', path: at, id: target.id as Id };
     };
     /** References, with a drawn shape's "$name" standing for every edge and face it made that still exists. */
     const refsOf = (inputs: readonly ModelRefInput[]): EntityRef[] => inputs.flatMap(input => {
@@ -704,10 +824,14 @@ export class ModelDocumentApi {
     return { named, ref, refsOf };
   }
 
-  private async run(op: ModelOperation, path: Id[], names: ReadonlyMap<string, NameEntry>, batch: number, label: string): Promise<OpResult> {
+  private async run(op: ModelOperation, path: Id[], names: ReadonlyMap<string, NameEntry>, batch: number, label: string, identity: ModelBatchIdentity, copies:PhysicalCopySize, assets?: ReadonlyMap<string, StagedMaterialAppearance>, placements?: ReadonlyMap<string, NativePhysicalPlacement>, signal?:AbortSignal, deadline?:number): Promise<OpResult> {
     const host = this.host, undo = host.undoStack;
     const exec = <T>(command: string, params: Record<string, unknown>): T => undo.withinGroup(() => this.commands.execute(command, params) as T);
     const { named, ref, refsOf } = this.resolver(path, names, batch);
+    const physicalRef = (input:ModelRefInput):EntityRef => {
+      const continued=typeof input==='object'&&'kind'in input?{...input,...identity.occurrence(input.id,input.path??path)}:input;
+      return this.resolver(path,names,batch,'any').ref(continued);
+    };
     const sceneId = (input: number | string): number => this.resolveScene(input, names);
     const capture = (camera: ModelCameraInput | undefined, what: string): CameraState | undefined => {
       if (camera) return this.cameraFor(camera, path, ref);
@@ -831,6 +955,57 @@ export class ModelDocumentApi {
         const parsed = spec.schema.safeParse(op.params);
         if (!parsed.success) throw this.failure('invalid_operation', `Parameters for ${op.builder}: ${zodMessage(parsed.error)}. Call ${MODEL_TOOLS.builderInfo.name} for them. Nothing was changed.`);
         return generate(() => planBuilder(op.builder, parsed.data as never));
+      }
+      case 'boolean_part': {
+        const originalTarget=physicalRef(op.target),originalTool=physicalRef(op.tool),placement=(op.scope??'placement')==='placement',keepTool=op.keepTool??true;
+        capturePartOccurrence(host,originalTarget,placement);capturePartOccurrence(host,originalTool,!keepTool&&placement);
+        if(originalTarget.id===originalTool.id&&samePath(originalTarget.path,originalTool.path))throw this.failure('invalid_operation','A physical part cannot be its own tool.');
+        if(!keepTool&&containerAt(host.doc.state,originalTool.path).bodies.get(originalTool.id)!.locked)throw this.failure('invalid_operation','Unlock the tool part before consuming it.');
+        const continued=(r:EntityRef)=>({kind:'body' as const,...identity.occurrence(r.id,r.path)});
+        if(placement){
+          const target=exec<{changes:ContainerIdentityChange[]}>('part.isolate',{ref:originalTarget});identity.append(target.changes);
+          if(!keepTool){const tool=exec<{changes:ContainerIdentityChange[]}>('part.isolate',{ref:continued(originalTool)});identity.append(tool.changes);}
+        }
+        const target=continued(originalTarget),tool=continued(originalTool);
+        if(!keepTool&&target.id===tool.id)throw this.failure('invalid_operation','The target and consumed tool share one body definition. Separate their placements first.');
+        const work=await runPhysicalBooleanKernel(host,kernelOf(this.commands.ctx),op.mode,target,tool);
+        const result=exec<PhysicalBooleanResult>('part.boolean',{work,keepTool}),first=result.refs[0]!;
+        return{id:first.id,refs:result.refs,deleted:result.deleted,named:{kind:'body',id:first.id,path:[...first.path]}};
+      }
+      case 'add_part': {
+        let into:number[];
+        if(typeof op.container==='string'){
+          const target=this.resolver(path,names,batch,'any').ref(op.container);
+          if(target.kind!=='body')throw this.failure('invalid_reference','The destination alias must name a solid whose container can be reused.');
+          into=[...target.path];
+        }else into=identity.path(op.container??path);
+        captureContainerOccurrence(host,into,(op.scope??'placement')==='placement');
+        const prepared=await physicalPartProfile(kernelOf(this.commands.ctx),op,contextMatrix(host.doc.state,into as Id[]),(code,message)=>{throw this.failure(code,message);});
+        const made=exec<ScopedProfileResult>('part.addProfileSolid',{...prepared,container:into,isolate:(op.scope??'placement')==='placement',...(op.componentName?{componentName:op.componentName}:{})});
+        identity.append(made.changes);
+        return{id:made.ref.id,refs:[refOut(made.ref)],named:{kind:'body',id:made.ref.id,path:[...made.ref.path]}};
+      }
+      case 'add_prism': {
+        if (op.closedCurve && op.points.length > 512) throw this.failure('limit_exceeded', 'A closed profile curve supports up to 512 points.');
+        if (Math.abs(op.distance) <= COPLANAR_TOL) throw this.failure('invalid_geometry', 'A part needs nonzero thickness.');
+        const normal = v3scale(op.normal, 1 / v3len(op.normal)), first = op.points[0]!, along = v3sub(op.points[1]!, first);
+        const inPlane = v3sub(along, v3scale(normal, v3dot(along, normal)));
+        if (v3len(inPlane) <= MERGE_TOL) throw this.failure('invalid_geometry', 'The profile needs a nonzero first edge in its plane.');
+        const u = v3scale(inPlane, 1 / v3len(inPlane)), basis: PlaneBasis = { origin: first, u, v: v3cross(normal, u), n: normal };
+        const polygon = [op.points, ...(op.holes ?? [])].map(ring => ring.map(point => {
+          const [x, y, z] = basisToLocal(basis, point);
+          if (Math.abs(z) > COPLANAR_TOL) throw this.failure('invalid_geometry', 'The part profile must be planar.');
+          return [x, y];
+        }));
+        const extrusion = op.extrusionDirection ? unit(op.extrusionDirection) : normal;
+        if (Math.abs(v3dot(extrusion, normal)) <= ANGLE_TOL) throw this.failure('invalid_geometry', 'The extrusion direction must leave the profile plane.');
+        const frame = op.referenceFrame ?? [...m4fromBasis(basis.origin, basis.u, basis.v, basis.n)];
+        if (frame[3] !== 0 || frame[7] !== 0 || frame[11] !== 0 || frame[15] !== 1) throw this.failure('invalid_geometry', 'The reference frame must be affine.');
+        if (!m4invert(frame as MMat4)) throw this.failure('invalid_geometry', 'The reference frame must be invertible.');
+        const result = await kernelOf(this.commands.ctx).extrudeSketch({ basis: { ...basis, n: extrusion }, polygon, distance: op.distance, nextFaceId: 0, validateProfile: true });
+        const id = exec<number>('model.addProfileSolid', { result, frame, smoothSides: op.smoothSides ?? false, sideDirection: extrusion, ...(op.closedCurve ? { curve: { points: op.points, normal, offset: v3scale(extrusion, op.distance) } } : {}) });
+        return { id, named: { kind: 'body', id } };
+
       }
       case 'add_edges': {
         const at = op.edges.findIndex(([a, b]) => !(dist(a, b) > MERGE_TOL));
@@ -1104,6 +1279,12 @@ export class ModelDocumentApi {
           : exec<{ id: number }>('guides.addPoint', { point: world(op.point) }).id;
         return { id, named: { kind: 'guide', id } };
       }
+      case 'add_guides': {
+        for (const [a, b] of op.segments) if (!(dist(a, b) > MERGE_TOL)) throw this.failure('invalid_geometry', 'A guide segment needs two different points.');
+        const ids = exec<number[]>('guides.addSegments', { segments: op.segments.map(([a, b]) => [world(a), world(b)]) });
+        const refs = ids.map(id => ({ kind: 'guide' as const, path: [...path], id }));
+        return { refs, count: refs.length };
+      }
       case 'add_dimension': {
         const along = v3sub(op.end, op.start), normal = v3cross(along, op.offset);
         if (!(v3len(along) > MERGE_TOL)) throw this.failure('invalid_geometry', 'A dimension needs two different points.');
@@ -1150,6 +1331,45 @@ export class ModelDocumentApi {
         exec('material.update', { id, ...(op.name ? { name: op.name } : {}), ...(op.color ? { color: rgb(op.color) } : {}), ...(op.opacity !== undefined ? { alpha: op.opacity } : {}) });
         return { id };
       }
+      case 'add_material_appearance':
+      case 'set_material_appearance': {
+        const source = assets!.get(op.asset)!, a = source.appearance;
+        const target = op.op === 'set_material_appearance' ? idOf(op.materialId, 'material') : undefined;
+        if (target !== undefined && (!host.doc.state.materials.has(target as never) || host.doc.state.nativeMaterialUnknownFields?.has(target)))
+          throw this.failure('invalid_reference', 'The destination material is missing or needs a compatible appearance reader.');
+        let texture: Record<string, unknown> | null = null;
+        if (a.texture) {
+          const t = a.texture, revision = this.revision;
+          // Prepare runtime bytes outside the document transaction; the normal material command copies the
+          // asset descriptor into the model within its authored edit and the enclosing batch's undo group.
+          const image = await host.images.put(source.bytes, t.image.mime, t.image.name, { width: t.image.width, height: t.image.height });
+          if (this.revision !== revision) throw this.failure('stale_revision', 'The model changed while preparing the appearance.');
+          texture = { imageId: image.id, ...(t.image.name !== image.name ? { imageName: t.image.name } : {}), widthM: t.widthM, heightM: t.heightM, colorize: t.colorize,
+            ...(t.colorizeType !== undefined ? { colorizeType: t.colorizeType } : {}), ...(t.grain !== undefined ? { grain: t.grain } : {}) };
+        }
+        const patch = { name: op.op === 'add_material_appearance' ? op.name ?? a.name : a.name, color: [...a.color], alpha: a.opacity, texture };
+        if (target !== undefined) {
+          const previous = host.doc.state.materials.get(target as never)!.texture;
+          // A complete appearance replaces optional fields too; ordinary material.update remains a partial edit.
+          if (texture && previous && (texture.colorizeType === undefined && previous.colorizeType !== undefined || texture.grain === undefined && previous.grain !== undefined || texture.imageName === undefined && previous.imageName !== undefined))
+            exec('material.update', { id: target, texture: null });
+          exec('material.update', { id: target, ...patch }); return {};
+        }
+        const id = exec<number>('material.create', { ...patch, ...(texture ? { texture } : { texture: undefined }), activate: false });
+        return { id, named: { kind: 'material', id } };
+      }
+      case 'duplicate_material': {
+        const source = idOf(op.materialId, 'material');
+        if (!host.doc.state.materials.has(source as never)) throw this.failure('invalid_reference', `There is no material ${source}.`);
+        const id = exec<number>('material.duplicate', { id: source, activate: false });
+        if (op.name) exec('material.update', { id, name: op.name });
+        return { id, named: { kind: 'material', id } };
+      }
+      case 'remove_material': {
+        const id = idOf(op.materialId, 'material');
+        return { count: exec<number>('material.delete', { id }) };
+      }
+      case 'purge_materials': return { count: exec<number>('material.purgeUnused', {}) };
       case 'set_texture': {
         const container = containerAt(host.doc.state, path);
         const faces = only(refsOf(op.refs), ['face', 'sketchFace', 'body'], 'Only faces and solids have textures').flatMap((r): EntityRef[] => r.kind === 'body'
@@ -1187,6 +1407,12 @@ export class ModelDocumentApi {
       case 'place_component': {
         const world = m4transformPoint(contextMatrix(host.doc.state, path), op.position);
         return instanceResult(exec<number>('component.place', { definitionId: definitionOf(op.definitionId), point: world }));
+      }
+      case 'transform': {
+        const matrix = op.matrix as MMat4;
+        if (matrix[3] !== 0 || matrix[7] !== 0 || matrix[11] !== 0 || matrix[15] !== 1 || !m4invert(matrix)?.every(Number.isFinite))
+          throw this.failure('invalid_operation', 'Transform needs an invertible affine matrix.');
+        return transform(refsOf(op.refs), matrix, op.copy ?? false, undefined, !!op.as);
       }
       case 'move': return transform(refsOf(op.refs), m4translation(op.offset), op.copy ?? false, op.copies, !!op.as);
       case 'rotate': return transform(refsOf(op.refs), m4rotationAbout(op.origin, unit(op.axis), (op.angleDeg * Math.PI) / 180), op.copy ?? false, op.copies, !!op.as);
@@ -1234,6 +1460,82 @@ export class ModelDocumentApi {
         }
         const id = exec<number>('material.create', { name: op.name ?? 'Material', color: rgb(op.color!), ...(op.opacity !== undefined ? { alpha: op.opacity } : {}), activate: false });
         return { id, named: { kind: 'material', id } };
+      }
+      case 'transform_part': {
+        const matrix = op.worldMatrix as MMat4;
+        if (matrix[3] !== 0 || matrix[7] !== 0 || matrix[11] !== 0 || matrix[15] !== 1 || !m4invert(matrix)?.every(Number.isFinite))
+          throw this.failure('invalid_operation', 'Physical part transform needs an invertible affine world matrix.');
+        const target = physicalRef(op.ref);
+        const isolated = exec<{ ref: EntityRef;changes:ContainerIdentityChange[] }>('part.isolate', { ref: target });
+        identity.append(isolated.changes);
+        return this.transform([planTransform(host.doc.state, [isolated.ref], matrix, false, label)]);
+      }
+      case 'place_fragment': {
+        const placement = placements?.get(op.fragment);
+        if (!placement) throw this.failure('unavailable', 'This native module was not prepared by this extension session.');
+        copies.entities += placement.size.entities; copies.vertices += placement.size.vertices;
+        if (copies.entities > PHYSICAL_COPY_LIMITS.entities || copies.vertices > PHYSICAL_COPY_LIMITS.vertices)
+          throw this.failure('limit_exceeded', 'The complete batch exceeds its copied geometry budget. Prepare fewer modules or copies at once.');
+        let into: number[];
+        if (typeof op.container === 'string') {
+          const target = this.resolver(path, names, batch, 'any').ref(op.container);
+          if (target.kind !== 'body') throw this.failure('invalid_reference', 'The destination alias must name a body whose container can be reused.');
+          into = [...target.path];
+        } else into = identity.path(op.container ?? path);
+        if (!path.every((id, i) => into[i] === id)) throw this.failure('invalid_reference', 'Choose a module destination inside the captured batch context.');
+        const prepared = prepareNativePlacement(host, placement, op.independent ?? false);
+        let made: PhysicalCopyResult;
+        try { made = exec<PhysicalCopyResult>('part.placeNative', { prepared: prepared.token, container: into, worldMatrix: op.worldMatrix }); prepared.committed(); }
+        finally { prepared.dispose(); }
+        identity.append(made.changes);
+        const actual = made.ref, definitionId = containerAt(host.doc.state, actual.path).instances.get(actual.id)!.definitionId;
+        return { id: actual.id, refs: [refOut(actual)], named: { kind: 'instance', id: actual.id, path: [...actual.path], definitionId } };
+      }
+      case 'stretch_physical': {
+        const target = physicalRef(op.ref);
+        const prepared = await preparePhysicalStretch(host, kernelOf(this.commands.ctx), target, { planes: op.planes, scope: op.scope ?? 'placement', ...(op.anchor ? { anchor: op.anchor } : {}), ...(signal ? { signal } : {}), ...(deadline === undefined ? {} : {deadline}) });
+        try {
+          copies.entities += prepared.size.entities; copies.vertices += prepared.size.vertices;
+          if (copies.entities > PHYSICAL_COPY_LIMITS.entities || copies.vertices > PHYSICAL_COPY_LIMITS.vertices) throw this.failure('limit_exceeded', 'The complete batch exceeds its physical geometry budget. Stretch fewer assemblies at once.');
+          const made = exec<PhysicalStretchResult>('part.stretch', { prepared: prepared.token }); identity.append(made.changes);
+          const actual = made.ref, definitionId = actual.kind === 'instance' ? containerAt(host.doc.state, actual.path).instances.get(actual.id)!.definitionId : undefined;
+          return { id: actual.id, refs: [refOut(actual)], count: made.refs.length, named: { kind: actual.kind, id: actual.id, path: [...actual.path], ...(definitionId === undefined ? {} : { definitionId }) } };
+        } finally { prepared.dispose(); }
+      }
+      case 'copy_part':
+      case 'copy_physical': {
+        let source=physicalRef(op.ref);
+        if(op.op==='copy_part'){
+          if(source.kind!=='body'||!source.path.length)throw this.failure('invalid_reference','Linked part copies need a body in a one-body component.');
+          const at=containerAt(host.doc.state,source.path),parent=containerAt(host.doc.state,source.path.slice(0,-1)),instance=parent.instances.get(source.path.at(-1)!);
+          const definition=instance?host.doc.state.definitions.get(instance.definitionId):undefined;
+          if(!definition||definition.isGroup||at.order.length!==1||at.bodies.size!==1||!at.bodies.has(source.id)||at.sketch.vertices.size||at.sketch.edges.size||at.sketch.faces.size)
+            throw this.failure('invalid_reference','Linked part copies need a body that is the sole entity of a component.');
+          source={kind:'instance',id:instance!.id,path:source.path.slice(0,-1)};
+        }
+        const size=physicalCopySize(host,source);copies.entities+=size.entities;copies.vertices+=size.vertices;
+        if(copies.entities>PHYSICAL_COPY_LIMITS.entities||copies.vertices>PHYSICAL_COPY_LIMITS.vertices)throw this.failure('limit_exceeded','The complete batch exceeds its copied geometry budget. Prepare fewer copies at once.');
+        let into:number[];
+        if(typeof op.container==='string'){
+          const target=this.resolver(path,names,batch,'any').ref(op.container);if(target.kind!=='body')throw this.failure('invalid_reference','The destination alias must name a body whose container can be reused.');into=[...target.path];
+        }else into=identity.path(op.container??path);
+        if(!path.every((id,i)=>into[i]===id))throw this.failure('invalid_reference','Choose a copy destination inside the captured batch context.');
+        const made=exec<PhysicalCopyResult>('part.copy',{ref:source,container:into,worldMatrix:op.worldMatrix,independent:op.op==='copy_physical'?(op.independent??false):false});identity.append(made.changes);
+        if(op.op==='copy_part'){
+          const root=made.ref;if(root.kind!=='instance')throw this.failure('invalid_reference','A linked part copy did not produce a component.');
+          const instance=containerAt(host.doc.state,root.path).instances.get(root.id)!,body=[...host.doc.state.definitions.get(instance.definitionId)!.entities.bodies.values()][0]!;
+          const actual={kind:'body' as const,id:body.id,path:[...root.path,root.id]};return{id:actual.id,refs:[refOut(actual)],named:actual};
+        }
+        const actual=made.ref,definitionId=actual.kind==='instance'?containerAt(host.doc.state,actual.path).instances.get(actual.id)!.definitionId:undefined;
+        return{id:actual.id,refs:[refOut(actual)],named:{kind:actual.kind,id:actual.id,path:[...actual.path],...(definitionId===undefined?{}:{definitionId})}};
+      }
+      case 'paint_part': {
+        const materialId = op.materialId === null ? null : idOf(op.materialId, 'material');
+        if (materialId !== null && !host.doc.state.materials.has(materialId as never)) throw this.failure('invalid_reference', `There is no material ${materialId}.`);
+        const target = physicalRef(op.ref);
+        const painted = exec<{ ref: EntityRef;changes:ContainerIdentityChange[] }>('paint.part', { ref: target, materialId, scope: op.scope });
+        identity.append(painted.changes);
+        return { refs: [refOut(painted.ref)], count: 1 };
       }
       case 'paint': {
         const materialId = op.materialId === null ? null : idOf(op.materialId, 'material');
@@ -1566,10 +1868,15 @@ function nameOut(n: Named): ModelNameEntry {
 function pointCount(op: ModelOperation): number {
   switch (op.op) {
     case 'add_edges': return op.edges.length * 2;
+    case 'add_guides': return op.segments.length * 2;
     case 'add_polyline': return op.points.length;
+    case 'add_part':
+    case 'add_prism': return op.points.length + (op.holes ?? []).reduce((sum, ring) => sum + ring.length, 0);
     case 'add_rectangle': return 4;
     case 'add_circle': return op.segments ?? 24;
     case 'add_polygon': return op.sides;
+    case 'boolean_part': return 2;
+    case 'stretch_physical': return op.planes.length * 2 + (op.anchor ? 1 : 0);
     case 'subtract': return op.cutters.length + 1;
     case 'revolve': return 3;
     case 'follow_me': return (op.pathPoints?.length ?? 0) + (op.pathEdges?.length ?? 0) + 1;
@@ -1700,7 +2007,9 @@ function errorCode(cause: unknown): ModelApiErrorCode {
   if (cause instanceof Error && cause.name === 'KernelError') return 'invalid_geometry';
   const code = cause instanceof PushFormError ? cause.code : '';
   if (code === 'service.missing') return 'unavailable';
+  if (code === 'part.limit') return 'limit_exceeded';
   if (/invalidSolid|invalid_geometry|kernel|notSolid|^solids\.empty|degenerate|^path\.|^followme\.(path|empty)|^revolve\.(axis|crossing|empty)|^edgeblend\.(?!target|stale)|^fillet\.|^offset\.|^dimension\.|^text3d\./i.test(code)) return 'invalid_geometry';
+
   if (/missing|notFound|target/i.test(code)) return 'invalid_reference';
   return 'operation_failed';
 }
@@ -1780,12 +2089,29 @@ function summarizeInstance(state: DocumentState, path: readonly Id[], id: Id, fi
   return out;
 }
 
-function summarizeBody(path: readonly Id[], container: EntityContainer, id: Id, fields: ReadonlySet<string>): ModelEntitySummary {
+function projectedBounds(body: Body, axes: readonly ModelVec3[], offset: readonly number[] = [0, 0, 0]): ModelBounds {
+  const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity], points = body.mesh.verts;
+  for (let i = 0; i < points.length; i += 3) for (let a = 0; a < 3; a++) {
+    const axis = axes[a]!, value = points[i]! * axis[0] + points[i + 1]! * axis[1] + points[i + 2]! * axis[2] + offset[a]!;
+    min[a] = Math.min(min[a]!, value); max[a] = Math.max(max[a]!, value);
+  }
+  if (![...min, ...max].every(Number.isFinite)) throw new Error('The body projection exceeds the supported numeric range');
+  return { min: min as [number, number, number], max: max as [number, number, number] };
+}
+function summarizeBody(path: readonly Id[], container: EntityContainer, id: Id, fields: ReadonlySet<string>, projection?: readonly ModelVec3[]): ModelEntitySummary {
   const body = container.bodies.get(id)!;
   const out = base(path, 'body', id, body);
-  if (fields.has('geometry')) Object.assign(out, { volume: round(body.props.volume), area: round(body.props.area), faceCount: body.faces.size });
+  if (fields.has('geometry')) Object.assign(out, { referenceFrame: [...(body.referenceFrame ?? m4identity())], geometryVersion: body.version, volume: round(body.props.volume), area: round(body.props.area), faceCount: body.faces.size });
   if (fields.has('appearance')) out.materialId = body.materialId;
-  if (fields.has('bounds')) out.bounds = boundsOut(meshBounds(body.mesh));
+  if (fields.has('bounds')) {
+    out.bounds = boundsOut(meshBounds(body.mesh));
+    if (body.referenceFrame) {
+      const inverse = m4invert(body.referenceFrame);
+      if (!inverse) throw new Error('Invalid body reference frame');
+      out.referenceBounds = projectedBounds(body, [[inverse[0]!, inverse[4]!, inverse[8]!], [inverse[1]!, inverse[5]!, inverse[9]!], [inverse[2]!, inverse[6]!, inverse[10]!]], [inverse[12]!, inverse[13]!, inverse[14]!]);
+    } else if (out.bounds) out.referenceBounds = out.bounds;
+    if (projection) out.projectedBounds = projectedBounds(body, projection);
+  }
   return out;
 }
 
@@ -1803,27 +2129,43 @@ function pointOnSegment(p: Vec3, a: Vec3, b: Vec3): boolean {
   const t = Math.min(1, Math.max(0, v3dot(v3sub(p, a), ab) / (length * length)));
   return dist(p, v3add(a, v3scale(ab, t))) <= MERGE_TOL;
 }
-function summarizeEdge(path: readonly Id[], bodyId: Id, edge: EdgeRecord, fields: ReadonlySet<string>): ModelEntitySummary {
+function summarizeEdge(path: readonly Id[], bodyId: Id, bodyVersion: number, edge: EdgeRecord, fields: ReadonlySet<string>): ModelEntitySummary {
   const out: ModelEntitySummary = { ref: { path: [...path], kind: 'edge', id: bodyId, edgeKey: edge.key }, hidden: edge.hidden };
   const a = edge.polyline[0]!, b = edge.polyline[edge.polyline.length - 1]!;
-  if (fields.has('geometry')) Object.assign(out, { start: vec(a), end: vec(b), length: round(edge.polyline.reduce((sum, p, i) => sum + (i ? dist(p, edge.polyline[i - 1]!) : 0), 0)),
+  if (fields.has('geometry')) Object.assign(out, { element: { kind: 'edge', edgeKey: edge.key, bodyVersion }, start: vec(a), end: vec(b), length: round(edge.polyline.reduce((sum, p, i) => sum + (i ? dist(p, edge.polyline[i - 1]!) : 0), 0)),
     faces: [edge.faceA, edge.faceB], soft: edge.soft, smooth: edge.smooth, curve: edge.curveId !== null });
   if (fields.has('bounds')) out.bounds = boundsOut(boxOf(edge.polyline));
   return out;
 }
 
-function summarizeFace(path: readonly Id[], bodyId: Id, face: FaceRecord, fields: ReadonlySet<string>, material: Material | null): ModelEntitySummary {
+function summarizeFace(path: readonly Id[], bodyId: Id, bodyVersion: number, face: FaceRecord, fields: ReadonlySet<string>, material: Material | null): ModelEntitySummary {
   const out: ModelEntitySummary = { ref: { path: [...path], kind: 'face', id: bodyId, faceId: face.id }, tagId: face.tagId, hidden: face.hidden };
-  if (fields.has('geometry')) Object.assign(out, loopFields(face.plane.n, face.loops));
+  if (fields.has('geometry')) Object.assign(out, { element: { kind: 'face', faceId: face.id, bodyVersion } }, loopFields(face.plane.n, face.loops));
   if (fields.has('bounds')) out.bounds = boundsOut(boxOf(face.loops[0] ?? []));
   if (fields.has('appearance')) Object.assign(out, { frontMaterialId: face.frontMaterialId, backMaterialId: face.backMaterialId }, grainFields(face, material));
   return out;
 }
 
+/**
+ * A face's outline as the API reports it: the outer loop counterclockwise about the normal, holes clockwise, each
+ * simplified to the per-loop point limit with `truncated` saying whether any was. The area comes from the full loops.
+ */
 function loopFields(normal: Vec3, loops: readonly (readonly Vec3[])[]): Partial<ModelEntitySummary> {
   const outer = loops[0] ?? [];
   const area = loops.reduce((sum, loop, i) => sum + (i === 0 ? 1 : -1) * Math.abs(v3dot(newell(loop), normal)) / 2, 0);
-  return { normal: vec(normal), area: round(area), outerLoop: outer.slice(0, MODEL_LIMITS.loopPointsPerFace).map(vec), loopPointCount: outer.length, holes: loops.length - 1 };
+  let truncated = false;
+  const report = (loop: readonly Vec3[], counterclockwise: boolean): ModelVec3[] => {
+    const kept = simplifyLoop(loop, MODEL_LIMITS.loopPointsPerFace);
+    if (kept.length < loop.length) truncated = true;
+    const out = kept.map(vec);
+    return (v3dot(newell(loop), normal) >= 0) === counterclockwise ? out : out.reverse();
+  };
+  return { normal: vec(normal), area: round(area), outerLoop: report(outer, true), loopPointCount: outer.length, holes: loops.slice(1).map(loop => report(loop, false)), truncated };
+}
+
+/** Points a face's loops put on a page, counted so that a page of faces stays within one message. */
+function loopPointsOf(entity: ModelEntitySummary): number {
+  return (entity.outerLoop?.length ?? 0) + (entity.holes?.reduce((sum, hole) => sum + hole.length, 0) ?? 0);
 }
 
 /** Even-odd test in the face basis: on the face's plane, inside the outer loop and outside every hole. */
@@ -1861,6 +2203,11 @@ function boxOf(points: readonly Vec3[]): Box3 {
 export type ModelRenderer = (camera: CameraState, width: number, height: number) => Promise<ModelRenderImage | null>;
 /** A tool result; `images` are the pictures of a render, in view order. */
 export interface ModelToolCallResult extends ToolCallResult { images?: ModelRenderImage[] }
+
+function reportProgress(callback: ((value: number) => void) | undefined, value: number): void {
+  // A disconnected progress observer cannot turn an already committed edit into a reported failure.
+  try { callback?.(value); } catch { /* Progress is advisory. */ }
+}
 
 /** Run one model tool call by name; failures come back as error results, never as exceptions. */
 export async function runModelTool(api: ModelDocumentApi, name: string, input: unknown, signal?: AbortSignal, options: { renderer?: ModelRenderer | null | undefined } = {}): Promise<ModelToolCallResult> {

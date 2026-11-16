@@ -18,6 +18,8 @@ Tests: `pnpm vitest run --project node packages/kernel`.
 
 The kernel module is compiled from Rust and C++ and is not committed. `pnpm build:kernel-wasm` builds it, using the Rust and
 Emscripten versions pinned in `scripts/kernel-wasm-artifact.mjs`, plus cmake. See "Develop" in the root README for setup.
+On Windows, load `emsdk_env.bat` and make Ninja available on PATH. For a deeply nested checkout, set
+`CARGO_TARGET_DIR` to a short local path; the build script reads its outputs there.
 Each build is stamped with a hash over the kernel crates, the vendored binding, the build script and the pinned toolchain.
 `pnpm test` and production web builds stop with a message if the module is missing or no longer matches its sources, so
 run `pnpm build:kernel-wasm` again after pulling a kernel change. CI builds it too, caching by that hash.

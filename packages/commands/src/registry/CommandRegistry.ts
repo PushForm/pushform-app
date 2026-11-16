@@ -15,6 +15,7 @@ export const SERVICE_COMMANDS = 'commands';
 export interface CommandInfo {
   readonly id: string;
   readonly title: string;
+  readonly description?: string | undefined;
   readonly category: CommandCategory;
   readonly icon: string | undefined;
   readonly menu: string | undefined;
@@ -82,6 +83,7 @@ export class CommandRegistry {
       out.push({
         id: c.id,
         title: c.title,
+        description: c.description,
         category: c.category,
         icon: c.icon,
         menu: c.menu,

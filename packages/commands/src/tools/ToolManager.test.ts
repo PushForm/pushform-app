@@ -471,3 +471,34 @@ describe('ToolManager: a tapped Ctrl or Alt just after an operation', () => {
     expect(tool.redone).toEqual([]);
   });
 });
+
+describe('dynamic tools', () => {
+  it('removes an active or parked tool and its command without leaving a resumable session', () => {
+    const { tools, line } = setup();
+    tools.activate('line'); tools.unregister('line');
+    expect(tools.activeToolId).toBe('select'); expect(tools.commands.has('tool.line')).toBe(false);
+    expect(line.log).toEqual(['activate', 'deactivate']);
+    const dynamic = new WorkTool('dynamic'); tools.register(dynamic, { command: false }); tools.activate('dynamic'); dynamic.pending = true;
+    tools.activate('orbit'); tools.unregister('dynamic');
+    expect(tools.activeToolId).toBe('orbit'); expect(tools.parkedToolId).toBeNull(); expect(tools.overlay()).toEqual([]);
+    expect(dynamic.log).toEqual(['activate', 'suspend', 'deactivate']);
+    tools.keyDown(key('Escape')); expect(tools.parkedToolId).toBeNull();
+    tools.unregister('dynamic');
+  });
+  it('routes raw measurements to the parked extension tool while preserving built-in parsing', () => {
+    const { tools, line } = setup(); const received: unknown[] = [];
+    const dynamic: Tool = { ...new SelectStub(), id: 'extension', role: undefined,
+      activate() {}, deactivate() {}, onCancel() {}, overlay: () => [], status: () => ({ instructor: '', vcbLabel: 'Length' }),
+      onRawVcb: (text, unit) => received.push([text, unit]),
+      onRawEntry: (values, unit) => received.push([values, unit]),
+      onRawEntryLock: (id, text, unit) => received.push([id, text, unit]) };
+    tools.register(dynamic, { command: false }); tools.activate('extension'); tools.activate('orbit');
+    expect(tools.onRawVcb('@+10mm', 'mm')).toBe(true);
+    expect(tools.onRawEntry({ width: '2*30cm' }, 'cm')).toBe(true);
+    expect(tools.lockRawEntry('width', null, 'cm')).toBe(true);
+    expect(received).toEqual([['@+10mm', 'mm'], [{ width: '2*30cm' }, 'cm'], ['width', null, 'cm']]);
+    tools.activate('line'); expect(tools.onRawVcb('10', 'mm')).toBe(false);
+    tools.onVcb({ kind: 'length', meters: 0.01, raw: 10, unit: 'mm' }); expect(line.values).toHaveLength(1);
+
+  });
+});

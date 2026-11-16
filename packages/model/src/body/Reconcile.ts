@@ -7,6 +7,8 @@ import type { ComponentDefinition, EntityContainer } from '../entities/definitio
 import type { DocumentState } from '../entities/document';
 import { registerFreshRecordTable, type DocumentDraft } from '../Document';
 import { analysisOf, buildFaceLayer, carryEdgeProps, computeBodyProps, rememberAnalysis } from './BodyBuilder';
+import { recordKernelTopology } from './TopologyReferences';
+
 
 /** Where a new face came from: a face of the body identified by `runId` (kernel `runOriginalID`). */
 export interface KernelFaceOrigin {
@@ -20,6 +22,8 @@ export interface KernelFaceOrigin {
  */
 export interface KernelResult {
   mesh: MeshData;
+  /** Explicit semantic identity proof from a host command, e.g. a whole-face push/pull cap. */
+  faceContinuations?: ReadonlyMap<FaceLocalId, FaceLocalId>;
   faceOrigin: Map<FaceLocalId, KernelFaceOrigin[]>;
   /** The runId of this body's own upload; when omitted every origin is treated as this body's. */
   selfRunId?: number;
@@ -179,6 +183,8 @@ export function reconcileBody(body: Body, result: KernelResult): void {
 
   registerFreshRecordTable(faces);
   registerFreshRecordTable(edges);
+  recordKernelTopology(body, result, faces, edges);
+
   body.faces = faces;
   body.nextFaceId = Math.max(body.nextFaceId, nextFaceId);
   body.edges = edges;

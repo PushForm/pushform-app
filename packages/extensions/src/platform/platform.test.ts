@@ -2,13 +2,17 @@
 // Copyright 2026 PushForm contributors
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { zipSync } from 'fflate';
-import { ExtensionError, buildManifest, type ExtensionManifestInput } from '@pushform/extension-protocol';
+import { ExtensionError, buildManifest, sha256Hex, type ExtensionManifestInput } from '@pushform/extension-protocol';
+import { memoryAssetStore } from '../assetStore';
+import type { FileReadDescription, FileReadChunk, FileStageResult } from '@pushform/extension-protocol';
 import { startGuest } from '../runtime/guest';
 import { messagePortTransport } from '../runtime/port';
 import { memorySettingsStore, type SettingsStore } from '../runtime/settings';
 import { memoryDeveloperMode } from './developerMode';
 import { ExtensionPlatform, type ExtensionPlatformOptions } from './platform';
 import { memoryExtensionStore, type InstalledExtension } from './store';
+import type { ToolInput, ToolSource, ToolStopReason, ToolView } from '@pushform/extension-protocol';
+import type { ExtensionToolRequest } from '../runtime/tools';
 
 const encode = (s: string) => new TextEncoder().encode(s);
 const base = {
@@ -62,6 +66,43 @@ const failure = async (promise: Promise<unknown>): Promise<ExtensionError> => {
   throw new Error('expected an ExtensionError');
 };
 
+it('moves a file larger than one runtime message through bounded guest calls and expires handles on restart', async () => {
+  const bytes = Uint8Array.from({ length:5 * 1024 * 1024 + 3 },(_,i) => i % 251), hash = await sha256Hex(bytes);
+  type Context = { commands: { register(id: string,fn: (params: { old?: string }) => Promise<unknown>): void }; files: Record<string,(input: unknown) => Promise<unknown>> };
+  const module = { activate(c: Context) { c.commands.register('com.example.stairs.make',async params => {
+    if (params.old) return c.files.read!({ transfer:params.old });
+    const source = await c.files.openRead!({ purpose:'Import test library' }) as FileReadDescription;
+    const received = new Uint8Array(source.byteLength);
+    for (let at = 0; at < source.byteLength;) {
+      const part = await c.files.read!({ transfer:source.transfer,offset:at }) as FileReadChunk;
+      received.set(part.bytes,at); at += part.bytes.length;
+    }
+    let tooLarge = '';
+    try { await c.files.save!({ purpose:'Legacy oversized export',data:received }); } catch (error) { tooLarge = (error as ExtensionError).code; }
+    let upload = '';
+    for (let at = 0; at < received.length; at += 256 * 1024) {
+      const result = await c.files.stage!({ ...(upload ? { upload,offset:at } : { byteLength:received.length,sha256:hash }),bytes:received.slice(at,at + 256 * 1024) }) as FileStageResult;
+      upload = result.upload;
+    }
+    await c.files.saveStaged!({ upload,purpose:'Export test library',suggestedName:'materials.zip' });
+    return { source,hash:await sha256Hex(received),tooLarge };
+  }); } };
+  const save = vi.fn(async (_request: unknown,received: Uint8Array) => { expect(await sha256Hex(received)).toBe(hash); return { name:'materials.zip' }; });
+  const filePicker = { open:async () => ({ name:'materials.zip',type:'application/zip',data:bytes }),save };
+  const { platform } = setup({ [base.id]:module },{ filePicker });
+  await platform.install(await platform.sideload(await archive({ permissions:['file.read','file.export'] })),['file.read','file.export']);
+  try {
+    const result = await platform.invoke(base.id,'com.example.stairs.make',{}) as { source:FileReadDescription;hash:string;tooLarge:string };
+    expect(result.hash).toBe(hash); expect(result.tooLarge).toBe('limit.exceeded'); expect(save).toHaveBeenCalledOnce();
+    await platform.setEnabled(base.id,false); await platform.setEnabled(base.id,true);
+    await expect(platform.invoke(base.id,'com.example.stairs.make',{ old:result.source.transfer })).rejects.toMatchObject({ code:'validation.failed' });
+  } finally { await platform.stopAll(); }
+  const denied = setup({ [base.id]:module },{ filePicker }).platform;
+  await denied.install(await denied.sideload(await archive({ permissions:['file.read','file.export'] })),[]);
+  try { await expect(denied.invoke(base.id,'com.example.stairs.make',{})).rejects.toMatchObject({ code:'permission.denied' }); }
+  finally { await denied.stopAll(); }
+});
+
 describe('side-loading', () => {
   it('needs developer mode, and refuses reserved ids, signed packages and anything the validator refuses', async () => {
     const { platform, developerMode } = setup({});
@@ -88,6 +129,20 @@ describe('side-loading', () => {
     const reload = await platform.sideload(await archive({ version: '1.0.1', permissions: ['settings', 'file.export'] }));
     expect(reload.replaces?.version).toBe('1.0.0');
     expect(reload.newPermissions).toEqual(['file.export']);
+  });
+
+  it('a reload stops the running release and lets open panels run the new one', async () => {
+    const { platform, started, terminated } = setup({ 'com.example.stairs': { activate(c: { commands: { register(i: string, h: () => unknown): void } }) {
+      c.commands.register('com.example.stairs.make', () => 'made');
+    } } });
+    await platform.install(await platform.sideload(await archive()), []);
+    expect(platform.state('com.example.stairs')!.generation).toBe(0);
+    await platform.invoke('com.example.stairs', 'com.example.stairs.make');
+    await platform.install(await platform.sideload(await archive({ version: '1.0.1' })), []);
+    expect(terminated).toEqual(['com.example.stairs']);
+    expect(platform.state('com.example.stairs')).toMatchObject({ run: 'stopped', generation: 1, record: { version: '1.0.1' } });
+    expect(await platform.invoke('com.example.stairs', 'com.example.stairs.make')).toBe('made');
+    expect(started).toEqual(['com.example.stairs', 'com.example.stairs']);
   });
 });
 
@@ -119,15 +174,19 @@ describe('running', () => {
   });
 
   it('uninstalls keeping or deleting settings, never anything else', async () => {
-    const { platform, settings, settingsFor } = setup({});
+    const assets = memoryAssetStore();
+    const { platform, settings, settingsFor } = setup({}, { assetStore: () => assets });
     await platform.install(await platform.sideload(await archive()), ['settings']);
     const record = platform.state('com.example.stairs')!.record;
     await settingsFor(record).save(record.id, 1, { kerf: 1 }, null);
+    await assets.put(record.id, { key:'Library',version:1,contentType:'application/octet-stream',byteLength:0,sha256:await sha256Hex(new Uint8Array()) }, new Uint8Array(),null);
     await platform.uninstall('com.example.stairs', { deleteSettings: false });
     expect(await settings.get('com.example.stairs')!.load('com.example.stairs')).not.toBeNull();
+    expect(await assets.read(record.id,'Library')).not.toBeNull();
     await platform.install(await platform.sideload(await archive()), []);
     await platform.uninstall('com.example.stairs', { deleteSettings: true });
     expect(await settings.get('com.example.stairs')!.load('com.example.stairs')).toBeNull();
+    expect(await assets.read(record.id,'Library')).toBeNull();
     expect(platform.list()).toEqual([]);
   });
 
@@ -186,5 +245,133 @@ describe('running', () => {
     await platform.install(await platform.sideload(await archive()), []);
     await platform.invoke('com.example.stairs', 'com.example.stairs.make');
     expect(platform.state('com.example.stairs')?.logs.map((l) => l.entry)).toEqual([{ step: 'made' }]);
+  });
+});
+
+describe('documents', () => {
+  it('serves the document services over the documents it is given, scoped to each invocation, until the document closes', async () => {
+    const units = (lengthUnit: 'mm' | 'in') => ({ system: lengthUnit === 'mm' ? 'metric' as const : 'imperial' as const, lengthUnit, format: 'decimal' as const, lengthPrecision: 2 });
+    const open = new Map([['tab-a', units('mm')], ['tab-b', units('in')]]);
+    const documents = { get: (id: string) => {
+      const u = open.get(id);
+      return u ? { name: () => 'Stairs', units: () => u, model: () => null, listen: () => () => {} } : null;
+    } };
+    const module = { activate(context: { commands: { register(id: string, h: () => unknown): void }; document: { units(): Promise<unknown> } }) {
+      context.commands.register('com.example.stairs.make', () => context.document.units());
+    } };
+    const { platform } = setup({ 'com.example.stairs': module }, { documents });
+    await platform.install(await platform.sideload(await archive()), ['settings']);
+    expect(await platform.invoke('com.example.stairs', 'com.example.stairs.make', {}, { document: 'tab-a' })).toEqual(units('mm'));
+    expect(await platform.invoke('com.example.stairs', 'com.example.stairs.make', {}, { document: 'tab-b' })).toEqual(units('in'));
+    open.delete('tab-b');
+    platform.closeDocument('tab-b');
+    expect((await failure(platform.invoke('com.example.stairs', 'com.example.stairs.make', {}))).code).toBe('document.closed');
+    await platform.stopAll();
+  });
+});
+
+it('serves permission-bound durable assets through the real guest and keeps them across runtime restart', async () => {
+  const assets = memoryAssetStore(), bytes = new Uint8Array([1,2,3]), sha256 = await sha256Hex(bytes);
+  type Context = { commands: { register(id: string, fn: (params: { save?: boolean }) => unknown): void }; assets: Record<'list'|'stage'|'commit', (input: unknown) => Promise<unknown>> };
+  const module = { activate(c: Context) { c.commands.register('com.example.stairs.make',async params => {
+    if (params.save) { const staged = await c.assets.stage({ description:{key:'Library',version:1,contentType:'application/octet-stream',byteLength:bytes.length,sha256},expectedRevision:null,bytes }) as {upload:string}; return c.assets.commit({upload:staged.upload}); }
+    return c.assets.list({});
+  }); } };
+  const { platform } = setup({ 'com.example.stairs':module },{assetStore:()=>assets});
+  await platform.install(await platform.sideload(await archive()),['settings']);
+  const saved = await platform.invoke(base.id,'com.example.stairs.make',{save:true}) as {revision:number}; expect(saved.revision).toBe(1);
+  await platform.setEnabled(base.id,false); await platform.setEnabled(base.id,true);
+  expect(await platform.invoke(base.id,'com.example.stairs.make',{})).toMatchObject({entries:[{key:'Library',revision:1}]});
+  await platform.stopAll();
+  const denied = setup({ 'com.example.stairs':module },{assetStore:()=>assets}).platform;
+  await denied.install(await denied.sideload(await archive()),[]);
+  await expect(denied.invoke(base.id,'com.example.stairs.make',{})).rejects.toMatchObject({code:'permission.denied'}); await denied.stopAll();
+});
+
+
+describe('host-activated modeling tools', () => {
+  type ToolContext = {
+    commands: { register(id: string, handler: (params: unknown, invocation: { document?: string; signal: AbortSignal }) => unknown): void };
+    tools: {
+      present(input: { session: string; sequence: number; view: unknown }): Promise<null>;
+      ack(input: { session: string; sequence: number }): Promise<null>;
+      end(input: { session: string }): Promise<null>;
+      onEvent(handler: (input: ToolInput) => void): () => void;
+      onEnd(handler: (event: { session: string; reason: ToolStopReason }) => void): () => void;
+    };
+  };
+  const toolId = 'com.example.stairs.tool';
+  const toolManifest = { permissions: ['model.read', 'tool.interaction'], contributions: [{ target: 'model.tool', id: toolId, name: 'Draw stairs' }] } satisfies Partial<ExtensionManifestInput>;
+  const key: ToolSource = { kind: 'keyDown', data: { key: 'Shift', code: 'ShiftLeft', repeat: false, modifiers: { shift: true, ctrl: false, alt: false, meta: false } } };
+  function viewport() {
+    let request: ExtensionToolRequest | undefined;
+    const views: (ToolView | null)[] = [], stopped: ToolStopReason[] = [];
+    return { views, stopped, request: () => request!, adapter: { open(value: ExtensionToolRequest) {
+      request = value;
+      return { stamp: () => ({ revision: 4, contextVersion: 0, cameraVersion: 0, context: [2] }),
+        present: (view: ToolView | null) => views.push(view), close: (reason: ToolStopReason) => stopped.push(reason) };
+    } } };
+  }
+  it('routes declared tools through guest proxies, owns their session and ends before runtime cleanup', async () => {
+    const v = viewport(), heard: ToolInput[] = [], ended: ToolStopReason[] = [];
+    let context!: ToolContext;
+    const module = { activate(c: ToolContext) {
+      context = c;
+      c.tools.onEvent(input => { heard.push(input); void c.tools.present({ session: input.session, sequence: input.sequence, view: { instructor: input.kind } }); });
+      c.tools.onEnd(event => ended.push(event.reason));
+      c.commands.register(toolId, async (params, invocation) => {
+        const { tool } = params as { tool: ToolInput };
+        expect(invocation.document).toMatch(/^doc_/); expect(invocation.document).not.toBe('model-A');
+        await c.tools.present({ session: tool.session, sequence: tool.sequence, view: { instructor: 'Ready' } });
+        return tool;
+      });
+    } };
+    const { platform } = setup({ [base.id]: module }, { tools: v.adapter });
+    await platform.install(await platform.sideload(await archive(toolManifest)), ['model.read', 'tool.interaction']);
+    try {
+      const activation = await platform.invoke(base.id, toolId, {}, { document: 'model-A', userAction: true }) as ToolInput;
+      expect(activation).toMatchObject({ kind: 'activate', sequence: 0, revision: 4, context: [2] });
+      expect(v.views.at(-1)?.instructor).toBe('Ready');
+      await expect(context.tools.ack({ session: 'guessed', sequence: 0 })).rejects.toMatchObject({ code: 'cancelled' });
+      expect(v.stopped).toEqual([]);
+      v.request().input(key);
+      await vi.waitFor(() => expect(v.views.at(-1)?.instructor).toBe('keyDown'));
+      expect(heard.map(input => input.sequence)).toEqual([1]);
+      const stopping = platform.stop(base.id);
+      // stop() invalidates input/preview synchronously, before awaiting guest deactivate().
+      expect(v.views.at(-1)).toBeNull(); expect(v.stopped).toEqual(['disabled']);
+      await stopping;
+      expect(ended).toEqual(['disabled']);
+      v.request().input(key); expect(heard).toHaveLength(1);
+    } finally { await platform.stopAll(); }
+  });
+  it('does not open a viewport without both grants, an open model target and a viewport adapter', async () => {
+    const v = viewport(), module = { activate(c: ToolContext) { c.commands.register(toolId, () => null); } };
+    const denied = setup({ [base.id]: module }, { tools: v.adapter }).platform;
+    await denied.install(await denied.sideload(await archive(toolManifest)), ['tool.interaction']);
+    try { await expect(denied.invoke(base.id, toolId, {}, { document: 'model-A' })).rejects.toMatchObject({ code: 'permission.denied' }); expect(v.request()).toBeUndefined(); }
+    finally { await denied.stopAll(); }
+    const absent = setup({ [base.id]: module }).platform;
+    await absent.install(await absent.sideload(await archive(toolManifest)), ['model.read', 'tool.interaction']);
+    try {
+      await expect(absent.invoke(base.id, toolId)).rejects.toMatchObject({ code: 'unavailable' });
+      await expect(absent.invoke(base.id, toolId, {}, { document: 'model-A' })).rejects.toMatchObject({ code: 'unavailable' });
+    } finally { await absent.stopAll(); }
+  });
+  it('document close and viewport cancellation invalidate late responses and only their own document', async () => {
+    const v = viewport(); let context!: ToolContext;
+    const module = { activate(c: ToolContext) { context = c; c.commands.register(toolId, params => (params as { tool: ToolInput }).tool); } };
+    const { platform } = setup({ [base.id]: module }, { tools: v.adapter });
+    await platform.install(await platform.sideload(await archive(toolManifest)), ['model.read', 'tool.interaction']);
+    try {
+      const first = await platform.invoke(base.id, toolId, {}, { document: 'model-A' }) as ToolInput;
+      platform.closeDocument('model-B'); expect(v.stopped).toEqual([]);
+      platform.closeDocument('model-A'); expect(v.stopped).toEqual(['document.closed']);
+      await expect(context.tools.present({ session: first.session, sequence: 0, view: { instructor: 'Too late' } })).rejects.toMatchObject({ code: 'cancelled' });
+      const second = await platform.invoke(base.id, toolId, {}, { document: 'model-B' }) as ToolInput;
+      expect(second.session).not.toBe(first.session);
+      v.request().ended('cancelled'); expect(v.stopped).toEqual(['document.closed', 'cancelled']);
+      await expect(context.tools.ack({ session: second.session, sequence: 0 })).rejects.toMatchObject({ code: 'cancelled' });
+    } finally { await platform.stopAll(); }
   });
 });

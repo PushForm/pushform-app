@@ -104,7 +104,7 @@ function definitionDigest(definition: ComponentDefinition): Uint8Array {
  * Mesh buffers follow the model's immutable ownership contract. No JSON or serialized graph is retained. */
 export function modelContentIdentity(state: DocumentState): string {
   const cached = identities.get(state); if (cached) return cached;
-  const stream = new Fingerprint((object, key) => object === state.meta && key === 'nextId', state.definitions);
+  const stream = new Fingerprint((object, key) => object === state.meta && key === 'nextId' || object === state && key === 'pluginData' && !state.pluginData?.size, state.definitions);
   stream.write('pushform-model-content-v1'); stream.write(state);
   const result = `pf-model-v1-sha256:${hex(stream.finish())}`;
   if (Object.isFrozen(state)) identities.set(state, result);

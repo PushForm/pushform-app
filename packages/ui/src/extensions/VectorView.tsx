@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { memo, useEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent, type PointerEvent } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent, type PointerEvent, type RefObject } from 'react';
 import type { UiEvent, UiVector, UiVectorShape, UiVectorStyle } from '@pushform/extension-protocol';
 
 /**
@@ -9,19 +9,65 @@ import type { UiEvent, UiVector, UiVectorShape, UiVectorStyle } from '@pushform/
  * dragging pans, and Fit shows the whole drawing. Pointing at a shape with an item reports `hover` and shows its tip;
  * clicking reports `select`. From the keyboard, arrows pan, + and − zoom, 0 fits, ] and [ step through the items,
  * Enter selects the current one and Escape clears it. Drawings show on white paper in both themes, as they print and
- * export, so the extension's colors keep their contrast.
+ * export, so the extension's colors keep their contrast. Without a height from the extension, the frame takes the
+ * drawing's proportions at the width it has (within `AUTO_HEIGHT_PX`), so the drawing fills it. With `fitWidth`, the
+ * drawing is sized as if it were that wide, so several drawings share one scale: the fitted view spans `fitWidth`
+ * drawing units, and a narrower drawing sits at its left with the rest left blank.
  */
 
 interface ViewBox { x: number; y: number; width: number; height: number }
 
 const ZOOM_STEP = 1.25;
+/** Wheel zoom per 100 px of scroll, like the model viewport: a trackpad's many small events add up to one step. */
+const WHEEL_ZOOM_PER_NOTCH = 1 / 0.85;
+/** Pixels per wheel unit when the browser reports lines or pages instead of pixels. */
+const WHEEL_LINE_PX = 16, WHEEL_PAGE_PX = 400;
+
+/** The zoom factor one wheel event applies (> 1 zooms in), bounded so one jump never exceeds two steps. */
+export function wheelZoomFactor(e: Pick<WheelEvent, 'deltaY' | 'deltaMode'>): number {
+  const px = e.deltaY * (e.deltaMode === 1 ? WHEEL_LINE_PX : e.deltaMode === 2 ? WHEEL_PAGE_PX : 1);
+  const notches = Math.max(-2, Math.min(2, -px / 100));
+  return WHEEL_ZOOM_PER_NOTCH ** notches;
+}
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 200;
+/** The frame's height range when it follows the drawing's proportions, and its height before the width is known. */
+export const AUTO_HEIGHT_PX = { min: 120, max: 800, unmeasured: 300 } as const;
+
+/** The width the fitted view spans: the drawing's own, or `fitWidth` when that is wider. */
+export function fittedWidth(node: Pick<UiVector, 'bounds' | 'fitWidth'>): number {
+  return Math.max(node.bounds.width, node.fitWidth ?? 0);
+}
+
+/** The frame height that shows a drawing of `bounds` whole at `width` pixels, within `AUTO_HEIGHT_PX`. */
+export function autoVectorHeight(bounds: { width: number; height: number }, width: number): number {
+  if (!(width > 0)) return AUTO_HEIGHT_PX.unmeasured;
+  return Math.round(Math.min(AUTO_HEIGHT_PX.max, Math.max(AUTO_HEIGHT_PX.min, (width * bounds.height) / bounds.width)));
+}
+
+/** The width of `element`'s content box, followed as it resizes; 0 until measured. */
+function useWidth(element: RefObject<HTMLElement | null>, active: boolean): number {
+  const [width, setWidth] = useState(0);
+  useLayoutEffect(() => {
+    const el = element.current;
+    if (!active || !el) return;
+    setWidth(el.clientWidth);
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => setWidth(el.clientWidth));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [element, active]);
+  return width;
+}
 
 export function VectorView({ node, onEvent }: { readonly node: UiVector; readonly onEvent: (event: UiEvent) => void }): JSX.Element {
   const svg = useRef<SVGSVGElement>(null);
+  const frame = useRef<HTMLDivElement>(null);
   const { bounds } = node;
-  const fit = useMemo<ViewBox>(() => ({ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }), [bounds.x, bounds.y, bounds.width, bounds.height]);
+  const fitWidth = fittedWidth(node);
+  const frameWidth = useWidth(frame, node.height === undefined);
+  const height = node.height ?? autoVectorHeight({ width: fitWidth, height: bounds.height }, frameWidth);
+  const fit = useMemo<ViewBox>(() => ({ x: bounds.x, y: bounds.y, width: fitWidth, height: bounds.height }), [bounds.x, bounds.y, fitWidth, bounds.height]);
   const [view, setView] = useState<ViewBox>(fit);
   useEffect(() => setView(fit), [fit]);
   const [hover, setHover] = useState<{ item: string; x: number; y: number } | null>(null);
@@ -65,7 +111,7 @@ export function VectorView({ node, onEvent }: { readonly node: UiVector; readonl
     if (!element) return;
     const wheel = (e: WheelEvent): void => {
       e.preventDefault();
-      zoom(e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP, toDrawing(e.clientX, e.clientY));
+      zoom(wheelZoomFactor(e), toDrawing(e.clientX, e.clientY));
     };
     element.addEventListener('wheel', wheel, { passive: false });
     return () => element.removeEventListener('wheel', wheel);
@@ -137,10 +183,10 @@ export function VectorView({ node, onEvent }: { readonly node: UiVector; readonl
         <button type="button" className="pf-btn pf-xui-vector-tool" aria-label="Zoom out" onClick={() => zoom(1 / ZOOM_STEP)}>−</button>
         <button type="button" className="pf-btn pf-xui-vector-tool" onClick={() => setView(fit)}>Fit</button>
       </div>
-      <div className="pf-xui-vector-frame" style={{ height: node.height ?? 300 }}>
+      <div ref={frame} className={`pf-xui-vector-frame${node.height === undefined ? ' is-auto-height' : ''}`} style={{ height }}>
         <svg ref={svg} className="pf-xui-vector-canvas" role="img" tabIndex={0}
           aria-label={`${node.label}. Arrow keys pan, plus and minus zoom, 0 fits, ] and [ step through items, Enter selects.`}
-          viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`} preserveAspectRatio="xMidYMid meet"
+          viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`} preserveAspectRatio={fitWidth > bounds.width ? 'xMinYMid meet' : 'xMidYMid meet'}
           onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp}
           onPointerLeave={() => { if (!drag.current) { setHover(null); reportHover(cursor); } }} onKeyDown={keyDown}>
           <Patterns styles={node.styles} bounds={bounds} />

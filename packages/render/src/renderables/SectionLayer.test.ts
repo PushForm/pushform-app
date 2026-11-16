@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { M4_IDENTITY, meshBox } from '@pushform/core';
 import { BufferGeometry, Group, Mesh, OrthographicCamera } from 'three';
 import type { BufferAttribute } from 'three';
+import { Text } from 'troika-three-text';
+
 import type { RenderBody, RenderSections } from '../types';
 import { EMPTY_SECTIONS } from '../types';
 import { SectionLayer } from './SectionLayer';
@@ -37,6 +39,9 @@ describe('sectionSegments', () => {
 });
 
 describe('SectionLayer', () => {
+  // These checks cover scene objects and clipping; font rasterization requires a real WebGL canvas.
+  beforeEach(() => { vi.spyOn(Text.prototype, 'sync').mockImplementation(callback => { callback?.(); }); });
+  afterEach(() => { vi.restoreAllMocks(); });
   const sections = (over: Partial<RenderSections> = {}): RenderSections => ({
     ...EMPTY_SECTIONS,
     planes: [{ id: '/9', path: [], entityId: 9, corners: [[0, 0, 1], [2, 0, 1], [2, 2, 1], [0, 2, 1]], normal: [0, 0, -1], symbol: 'A', active: true, selected: false }],
@@ -51,6 +56,7 @@ describe('SectionLayer', () => {
     expect(layer.clipPlanesFor([7])).toHaveLength(1);
     expect(layer.clipPlanesFor([7, 8])).toHaveLength(1);
     expect(layer.clipPlanesFor([6])).toHaveLength(0);
+    layer.dispose();
   });
 
   it('draws a plane, the cut fill passes and the section lines', () => {

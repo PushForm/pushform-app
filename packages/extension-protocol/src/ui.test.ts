@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { describe, expect, it } from 'vitest';
-import { UI_LIMITS, UiTreeError, validateUiTree, type UiNode } from './ui.ts';
+import { UI_ICONS, UI_LIMITS, UiTreeError, uiCloseDialogSchema, uiDialogSchema, validateUiTree, type UiNode } from './ui.ts';
 
 const table = (overrides: Record<string, unknown> = {}) => ({
   type: 'table', id: 'parts', label: 'Parts',
@@ -25,6 +25,19 @@ const problem = (input: unknown): { code: string; message: string } => {
 };
 
 describe('validateUiTree', () => {
+  it('bounds a subtree display-unit override without altering numeric values', () => {
+    const tree = { type: 'stack', id: 'scope', displayUnits: { lengthUnit: 'in', format: 'decimal', lengthPrecision: 3 }, children: [
+      { type: 'numberField', id: 'length', label: 'Length', value: 0.0254, quantity: 'length' },
+    ] };
+    expect(validateUiTree(tree)).toEqual(tree);
+    for (const displayUnits of [
+      { ...tree.displayUnits, lengthUnit: 'parsecs' },
+      { ...tree.displayUnits, lengthPrecision: -1 },
+      { ...tree.displayUnits, lengthPrecision: 1000 },
+      { ...tree.displayUnits, script: 'run' },
+    ]) expect(problem({ ...tree, displayUnits }).code).toBe('validation.failed');
+  });
+
   it('accepts a full tree and returns it typed', () => {
     const tree = validateUiTree({ type: 'stack', id: 'root', children: [
       { type: 'text', id: 'title', text: 'Cut list', variant: 'heading' },
@@ -82,6 +95,47 @@ describe('validateUiTree', () => {
     const many = Array.from({ length: UI_LIMITS.treeItems + 1 }, (_, i) => ({ id: `i${i}`, label: 'x' }));
     expect(problem({ type: 'tree', id: 't', label: 'T', items: many }).code).toBe('limit.exceeded');
     expect(problem({ type: 'tree', id: 't', label: 'T', items: [{ id: 'a', label: 'A', children: [{ id: 'a', label: 'again' }] }] }).message).toMatch(/used twice/);
+  });
+
+  it('accepts sections with actions, menus and icon buttons, with ids unique within each and bounded lists', () => {
+    const tree = validateUiTree({ type: 'section', id: 'oak', title: 'Oak, 19 mm', subtitle: '3 parts', badge: '3', collapsed: false,
+      actions: [{ id: 'hide', label: 'Hide', icon: 'hide' }, { id: 'print', label: 'Print', disabled: true }],
+      children: [
+        { type: 'menu', id: 'more', label: 'More', icon: 'more', variant: 'icon', items: [
+          { id: 'expand', label: 'Expand all' }, { id: 'collapse', label: 'Collapse all' }, { id: 'reset', label: 'Reset numbers', separator: true, disabled: true },
+        ] },
+        { type: 'button', id: 'add', label: 'Add part', icon: 'add', variant: 'icon' },
+        { type: 'button', id: 'save', label: 'Save', icon: 'save', variant: 'primary' },
+      ] }) as Extract<UiNode, { type: 'section' }>;
+    expect(tree.children).toHaveLength(3);
+    expect(problem({ type: 'section', id: 's', title: 'S', actions: [{ id: 'a', label: 'A' }, { id: 'a', label: 'B' }], children: [] }).message).toMatch(/action id "a" is used twice/);
+    expect(problem({ type: 'section', id: 's', title: 'S', actions: Array.from({ length: UI_LIMITS.sectionActions + 1 }, (_, i) => ({ id: `a${i}`, label: 'A' })), children: [] }).code).toBe('validation.failed');
+    expect(problem({ type: 'section', id: 's', title: ' ', children: [] }).code).toBe('validation.failed');
+    expect(problem({ type: 'menu', id: 'm', label: 'M', items: [] }).code).toBe('validation.failed');
+    expect(problem({ type: 'menu', id: 'm', label: 'M', items: [{ id: 'x', label: 'X' }, { id: 'x', label: 'Y' }] }).message).toMatch(/item id "x" is used twice/);
+    expect(problem({ type: 'menu', id: 'm', label: 'M', items: Array.from({ length: UI_LIMITS.menuItems + 1 }, (_, i) => ({ id: `i${i}`, label: 'I' })) }).code).toBe('validation.failed');
+    expect(problem({ type: 'menu', id: 'm', label: 'M', variant: 'icon', items: [{ id: 'x', label: 'X' }] }).message).toMatch(/icon menu needs an icon/);
+    expect(problem({ type: 'button', id: 'b', label: 'B', variant: 'icon' }).message).toMatch(/icon button needs an icon/);
+    expect(problem({ type: 'button', id: 'b', label: 'B', icon: 'skull' }).code).toBe('validation.failed');
+    expect(problem({ type: 'button', id: 'b', label: 'B', icon: '<svg/>' }).code).toBe('validation.failed');
+    expect(UI_ICONS).toContain('add');
+    // Section children count towards the tree's bounds and must have unique ids.
+    expect(problem({ type: 'section', id: 's', title: 'S', children: [{ type: 'divider', id: 's' }] }).message).toMatch(/"s" is used twice/);
+  });
+
+  it('accepts a vector fit width, which must be positive', () => {
+    const vector = { type: 'vector', id: 'v', label: 'Off-cut', units: 'length', bounds: { x: 0, y: 0, width: 0.6, height: 0.4 }, styles: [{}], shapes: [] };
+    expect((validateUiTree({ ...vector, fitWidth: 2.44 }) as Extract<UiNode, { type: 'vector' }>).fitWidth).toBe(2.44);
+    expect(problem({ ...vector, fitWidth: 0 }).code).toBe('validation.failed');
+    expect(problem({ ...vector, fitWidth: Infinity }).code).toBe('validation.failed');
+  });
+
+  it('describes dialog requests', () => {
+    expect(uiDialogSchema.safeParse({ target: 'p', seq: 1, title: 'Edit material', tree: { type: 'divider', id: 'd' } }).success).toBe(true);
+    expect(uiDialogSchema.safeParse({ target: 'p', seq: 1, title: '', tree: {} }).success).toBe(false);
+    expect(uiDialogSchema.safeParse({ target: 'p', seq: 1, title: 'T', tree: {}, html: '<b/>' }).success).toBe(false);
+    expect(uiCloseDialogSchema.safeParse({ target: 'p' }).success).toBe(true);
+    expect(uiCloseDialogSchema.safeParse({}).success).toBe(false);
   });
 
   it('bounds the length of text values', () => {

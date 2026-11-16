@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { useEffect, useMemo, useState } from 'react';
-import type { JSX } from 'react';
+import type { JSX, ReactNode } from 'react';
 import type { CommandInfo } from '@pushform/commands';
+import type { ToolbarCategory } from '@pushform/extension-protocol';
 import { useApp } from '../AppContext';
 import { useAppStore } from '../store';
 import { Icon } from './Icon';
@@ -10,8 +11,23 @@ import { ToolButton } from './ToolButton';
 import { ToolStack } from './ToolStack';
 import { resolveGroups } from './toolbarLayout';
 
-/** Horizontal tool row beneath document tabs, ordered by `TOOLBAR_LAYOUT`. */
-export function MainToolbar({ onCommons }: { onCommons?: (() => void) | undefined }): JSX.Element {
+/**
+ * A button an extension adds to the toolbar: it joins the end of the group named by `category`, after a thin
+ * separator, and pressing it runs the extension's contribution as a user action.
+ */
+export interface ExtensionToolbarItem {
+  readonly id: string;
+  readonly category: ToolbarCategory;
+  /** The tooltip: the contribution's name. */
+  readonly title: string;
+  /** The accessible name: the contribution's name, then the extension's. */
+  readonly accessibleLabel: string;
+  readonly icon: ReactNode;
+  readonly onPress: () => void;
+}
+
+/** Horizontal tool row beneath document tabs, ordered by `TOOLBAR_LAYOUT`, with extension buttons at the end of their groups. */
+export function MainToolbar({ extensionTools = [], onCommons }: { readonly extensionTools?: readonly ExtensionToolbarItem[]; readonly onCommons?: (() => void) | undefined } = {}): JSX.Element {
   const app = useApp();
   const activeToolId = useAppStore((s) => s.activeToolId);
   const [commands, setCommands] = useState<CommandInfo[]>(() => app.commands.list());
@@ -38,7 +54,9 @@ export function MainToolbar({ onCommons }: { onCommons?: (() => void) | undefine
       data-orientation="horizontal"
       aria-label="Tools"
     >
-      {groups.map((group) => (
+      {groups.map((group) => {
+        const added = extensionTools.filter((item) => item.category === group.title.toLowerCase());
+        return (
         <div
           key={group.title}
           className="pf-layout-ribbon-group"
@@ -78,12 +96,27 @@ export function MainToolbar({ onCommons }: { onCommons?: (() => void) | undefine
                 </ToolButton>
               );
             })}
+            {added.length ? <div className="pf-toolbar-sep pf-toolbar-sep-extensions" /> : null}
+            {added.map((item) => (
+              <ToolButton
+                key={item.id}
+                data-guidance-id={`toolbar:extension:${item.id}`}
+                type="button"
+                className="pf-toolbtn pf-toolbtn-extension"
+                title={item.title}
+                aria-label={item.accessibleLabel}
+                onClick={() => { item.onPress(); app.viewport.container?.focus(); }}
+              >
+                {item.icon}
+              </ToolButton>
+            ))}
           </div>
           <span className="pf-layout-ribbon-caption" aria-hidden="true">
             {group.title}
           </span>
         </div>
-      ))}
+        );
+      })}
       {onCommons && <div className="pf-layout-ribbon-group" role="group" aria-label="Import">
         <div className="pf-layout-ribbon-buttons">
           <ToolButton type="button" className="pf-toolbtn" title="From file" aria-label="From file"

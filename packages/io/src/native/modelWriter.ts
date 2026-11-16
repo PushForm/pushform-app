@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import { encodeNativePluginData } from './pluginData';
 import type { ImageId } from '@pushform/core';
 import type { CommonAttrs, DocumentState, ImageBlob } from '@pushform/model';
 import { NativeChunkError, encodeNativeChunks, NATIVE_CHUNK_BYTES, NATIVE_MAX_CHUNK_BYTES } from './chunks';
@@ -7,7 +8,7 @@ import type { NativeChunkOptions } from './chunks';
 import { describeNativeChunk } from './chunkDescriptor';
 import { writeNativeContainer } from './container';
 import type { NativeFileSink, NativeStoredChunk } from './container';
-import { encodeNativeDocumentRoot, NATIVE_ROOT_ID, NATIVE_CAPABILITY_MESH_PARTS } from './documentRoot';
+import { encodeNativeDocumentRoot, NATIVE_ROOT_ID, NATIVE_CAPABILITY_TOPOLOGY_REFERENCES, NATIVE_CAPABILITY_BODY_FRAMES, NATIVE_CAPABILITY_MESH_PARTS, NATIVE_CAPABILITY_PLUGIN_DATA } from './documentRoot';
 import { encodeNativeModelSettings, validateNativeModelCatalogs } from './modelSettings';
 import { encodeNativeModelRecord, encodeNativePropertyModelRecord } from './modelRecord';
 import type { NativeModelRecord } from './modelRecord';
@@ -32,6 +33,9 @@ export async function writeNativeModel(state: DocumentState, sink: NativeFileSin
   const pool = new NativeCommonPropertyWriter(), recordChunks: number[] = [];
   // A document with mesh parts needs a reader that knows them; older readers refuse it with a clear message.
   const capabilities = [...state.definitions.values()].some(d => d.entities.meshParts.size) ? [NATIVE_CAPABILITY_MESH_PARTS] : [];
+  if (state.pluginData?.size) capabilities.push(NATIVE_CAPABILITY_PLUGIN_DATA);
+  if ([...state.pluginData?.values() ?? []].some(record => [...record.entries.values()].some(entry => entry.references.some(ref => ref.element)))) capabilities.push(NATIVE_CAPABILITY_TOPOLOGY_REFERENCES);
+  if ([...state.definitions.values()].some(def => [...def.entities.bodies.values()].some(body => body.referenceFrame))) capabilities.push(NATIVE_CAPABILITY_BODY_FRAMES);
   const propertyId = (value: CommonAttrs): number => pool.intern(value).id;
   let pending: Uint8Array[] = [], pendingBytes = 0, recordCount = 0;
   async function* flush(): AsyncGenerator<NativeStoredChunk> {
@@ -93,7 +97,11 @@ export async function writeNativeModel(state: DocumentState, sink: NativeFileSin
     }
     for (let id = 1; id <= pool.size; id++) yield* enqueue(encodeNativePropertyModelRecord(pool.encodeRecord(id), pool.envelope(id)));
     yield* flush();
-    yield* single(encodeNativeDocumentRoot({ schemaMajor: 1, documentKind: 1, metadataChunk, recordChunks, requiredCapabilities: capabilities, unknownFields: state.nativeRootUnknownFields ?? [] }), NATIVE_ROOT_ID, 1);
+    const pluginChunks: number[] = [];
+    if (state.pluginData?.size) for await (const chunk of encodeNativeChunks([encodeNativePluginData(state.pluginData)], options)) {
+      const id = nextId(); pluginChunks.push(id); yield { descriptor: describeNativeChunk(id, 5, 1, false, chunk), data: chunk.data };
+    }
+    yield* single(encodeNativeDocumentRoot({ schemaMajor: 1, documentKind: 1, metadataChunk, recordChunks, pluginChunks, requiredCapabilities: capabilities, unknownFields: state.nativeRootUnknownFields ?? [] }), NATIVE_ROOT_ID, 1);
   }
   return writeNativeContainer({ kind: 1, root: NATIVE_ROOT_ID }, packNativeNumericPages(chunks(), options), sink, options.signal);
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { describe, expect, it } from 'vitest';
-import { isHostMessage, measureMessage } from './runtimeCore.ts';
+import { TokenBucket, isHostMessage, measureMessage } from './runtimeCore.ts';
 
 const small = { bytes: 1000, nodes: 100, depth: 4 };
 
@@ -39,5 +39,25 @@ describe('isHostMessage', () => {
     expect(isHostMessage({ type: 'response', id: -1, ok: true })).toBe(false);
     expect(isHostMessage({ type: 'eval', code: '1' })).toBe(false);
     expect(isHostMessage(null)).toBe(false);
+  });
+});
+
+describe('TokenBucket', () => {
+  it('allows a burst, then refills at its rate up to the burst', () => {
+    const bucket = new TokenBucket(10, 100, 0);
+    expect(bucket.take(10, 0)).toBe(true);
+    expect(bucket.take(1, 0)).toBe(false);
+    expect(bucket.wait(1, 0)).toBe(10);
+    expect(bucket.take(1, 10)).toBe(true);
+    expect(bucket.take(5, 1000)).toBe(true);
+    expect(bucket.take(6, 1000)).toBe(false);
+    expect(bucket.wait(5, 1000)).toBe(0);
+  });
+
+  it('takes nothing when it cannot take all, and ignores time going backwards', () => {
+    const bucket = new TokenBucket(4, 1, 100);
+    expect(bucket.take(5, 100)).toBe(false);
+    expect(bucket.take(4, 50)).toBe(true);
+    expect(bucket.take(1, 60)).toBe(false);
   });
 });

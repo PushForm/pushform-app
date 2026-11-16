@@ -82,6 +82,22 @@ function FailureNotice({ state, platform }: { readonly state: ExtensionState; re
   const name = state.record.manifest.name;
   const id = state.record.id;
   const minutes = Math.round(CRASH_WINDOW_MS / 60_000);
+  if (state.failure?.kind === 'verification-failed') {
+    // None of its code ran, so there is no work to discard; restarting would only refuse it again.
+    return (
+      <div className="pf-xactivity-item is-failed is-notice" role="alert">
+        <span>
+          <strong>{name}</strong> was not started because its installed files could not be verified. Uninstall it and
+          install it again from its package.
+          <span className="pf-xactivity-detail">{state.failure.error.message}</span>
+        </span>
+        <span className="pf-xactivity-actions">
+          {state.record.enabled ? <button type="button" className="pf-btn" onClick={() => void platform.setEnabled(id, false)}>Disable</button> : null}
+          <button type="button" className="pf-iconbtn pf-xactivity-dismiss" aria-label={`Dismiss the notice about ${name}`} onClick={() => platform.dismissFailure(id)}>×</button>
+        </span>
+      </div>
+    );
+  }
   return (
     <div className="pf-xactivity-item is-failed is-notice" role="alert">
       <span>

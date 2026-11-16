@@ -104,6 +104,9 @@ export function materialsInUse(state: DocumentState): Set<MaterialId> {
       for (const id of part.geometry.faceMaterials) if (id) add(id as MaterialId);
     }
   }
+  // Typed plugin dependencies can use a material without painting it onto geometry.
+  for (const record of state.pluginData?.values() ?? []) for (const entry of record.entries.values())
+    for (const ref of entry.references) if (!ref.unresolved && ref.target.kind === 'material' && state.materials.has(ref.target.id as MaterialId)) add(ref.target.id as MaterialId);
   return used;
 }
 

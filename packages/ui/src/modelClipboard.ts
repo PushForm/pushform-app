@@ -14,6 +14,7 @@ export const MODEL_CLIPBOARD_TYPE = 'application/x-pushform-model';
 
 interface ModelClipboardJson {
   version: 1;
+  metadataOrigin?: NonNullable<ModelClipboard['metadataOrigin']>;
   id: string;
   /** The clipboard model as a session snapshot. */
   state: string;
@@ -36,6 +37,7 @@ export interface ModelClipboardView {
 
 export function encodeModelClipboard(clip: ModelClipboard): string {
   const json: ModelClipboardJson = {
+    ...(clip.metadataOrigin ? { metadataOrigin: clip.metadataOrigin } : {}),
     version: 1, id: clip.id, state: modelSessionJson(clip.state),
     images: [...clip.images].map(([id, blob]) => ({ id, mime: blob.mime, data: bytesToBase64(blob.bytes) })),
     bounds: clip.bounds, insertionPoint: clip.insertionPoint, camera: clip.camera, source: clip.source, skipped: clip.skipped,
@@ -47,13 +49,14 @@ export function encodeModelClipboard(clip: ModelClipboard): string {
 function parse(text: string): ModelClipboardJson {
   const json = JSON.parse(text) as ModelClipboardJson;
   if (json?.version !== 1 || typeof json.state !== 'string' || typeof json.id !== 'string') throw new Error('Unsupported model clipboard data');
+  if (json.metadataOrigin && (typeof json.metadataOrigin.guid !== 'string' || !Array.isArray(json.metadataOrigin.path) || json.metadataOrigin.path.length > 32 || !json.metadataOrigin.path.every(id => Number.isInteger(id) && id > 0 && id <= 0xffff_ffff))) throw new Error('Invalid clipboard metadata origin');
   return json;
 }
 
 export function decodeModelClipboard(text: string): ModelClipboard {
   const json = parse(text);
   const images = new Map<ImageId, ImageBlob>(json.images.map(image => [image.id as ImageId, { mime: image.mime, bytes: base64ToBytes(image.data) }]));
-  return { id: json.id, state: decodeModelSessionJson(json.state), images, bounds: json.bounds, insertionPoint: json.insertionPoint,
+  return { ...(json.metadataOrigin ? { metadataOrigin: json.metadataOrigin } : {}), id: json.id, state: decodeModelSessionJson(json.state), images, bounds: json.bounds, insertionPoint: json.insertionPoint,
     camera: json.camera, source: json.source, skipped: json.skipped };
 }
 

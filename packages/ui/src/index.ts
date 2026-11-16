@@ -58,3 +58,5 @@ export { layoutViewportPicture, layoutViewportWarnings, settleLayoutViewportRend
 export type { ExtensionRuntimeSources } from './extensions/browserExtensionPlatform';
 
 export { modelPicture, type ModelPictureOptions } from './modelPicture';
+
+export { desktopExtensionRuntime } from './extensions/desktopExtensionRuntime';

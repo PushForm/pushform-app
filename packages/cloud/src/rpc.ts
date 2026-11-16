@@ -23,7 +23,8 @@ export interface RpcResult<T> {
  * Call a database function by its generated contract: the name and arguments are checked against the function's.
  * Most return `jsonb`, so the data is `unknown` for the caller to read as the shape it expects.
  */
-export async function callRpc<F extends RpcName>(client: Pick<SupabaseClient<Database>, 'rpc'>, fn: F, args?: RpcArgs<F>): Promise<RpcResult<unknown>> {
-  const result = await client.rpc(fn, args as Functions[F]['Args']);
+export async function callRpc<F extends RpcName>(client: Pick<SupabaseClient<Database>, 'rpc'>, fn: F, args?: RpcArgs<F>, signal?: AbortSignal): Promise<RpcResult<unknown>> {
+  const request = client.rpc(fn, args as Functions[F]['Args']);
+  const result = await (signal ? request.abortSignal(signal) : request);
   return result as RpcResult<unknown>;
 }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import type { FaceLocalId, MeshData } from '@pushform/core';
+import { m4invert, type FaceLocalId, type MeshData, type Mat4 } from '@pushform/core';
 import type { Body, CommonAttrs } from '@pushform/model';
 import { validateSolidMesh } from '@pushform/kernel';
 import { NativeRecordCodec } from './record';
@@ -24,6 +24,7 @@ import type { NativeImprintReference, NativePackedImprint } from './imprint';
 
 export interface NativeBodyReference {
   id: number; version: number; nextFaceId: number; materialId: number | null; properties: number; valid: boolean; volume: number; area: number;
+  referenceFrame?: number[];
   mesh: NativeMeshReference; faces: NativeBodyFacesReference; edges: NativeBodyEdgesReference; curves: NativeBodyCurvesReference;
   surfaces: NativeBodySurfacesReference; imprints: NativeImprintReference[]; unknownFields: Uint8Array[];
 }
@@ -32,9 +33,24 @@ const codec = new NativeRecordCodec({ id: { id: 1, kind: 'uint32', required: tru
   nextFaceId: { id: 3, kind: 'uint53', required: true }, materialId: { id: 4, kind: 'uint32', required: false }, properties: { id: 5, kind: 'uint32', required: true },
   valid: { id: 6, kind: 'bool', required: true }, volume: { id: 7, kind: 'double', required: true }, area: { id: 8, kind: 'double', required: true },
   mesh: { id: 9, kind: 'bytes', required: true }, faces: { id: 10, kind: 'bytes', required: true }, edges: { id: 11, kind: 'bytes', required: true },
-  curves: { id: 12, kind: 'bytes', required: true }, surfaces: { id: 13, kind: 'bytes', required: true }, imprints: { id: 14, kind: 'bytes', required: false, repeated: true } });
+  curves: { id: 12, kind: 'bytes', required: true }, surfaces: { id: 13, kind: 'bytes', required: true }, imprints: { id: 14, kind: 'bytes', required: false, repeated: true }, referenceFrame: { id: 15, kind: 'bytes', required: false } });
 const fail = (): never => { throw new NativeChunkError('Invalid native body'); };
+function frameBytes(frame: readonly number[]): Uint8Array {
+  const bytes = new Uint8Array(128), view = new DataView(bytes.buffer);
+  frame.forEach((value, index) => view.setFloat64(index * 8, value, true)); return bytes;
+}
+function readFrame(bytes: Uint8Array): number[] {
+  if (bytes.length !== 128) return fail();
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return Array.from({ length: 16 }, (_, index) => view.getFloat64(index * 8, true));
+}
 function validate(ref: NativeBodyReference): void {
+  if (ref.referenceFrame) {
+    const frame = ref.referenceFrame;
+    if (frame.length !== 16 || !frame.every(Number.isFinite) || frame[3] !== 0 || frame[7] !== 0 || frame[11] !== 0 || frame[15] !== 1) fail();
+    const inverse = m4invert(frame as unknown as Mat4);
+    if (!inverse || !inverse.every(Number.isFinite)) fail();
+  }
   if (!Number.isInteger(ref.properties) || ref.properties < 1 || ref.properties > 0xffff_ffff || !Number.isSafeInteger(ref.nextFaceId) ||
     ref.nextFaceId < 0 || ref.nextFaceId > 0x1_0000_0000 || !Number.isFinite(ref.volume) || !Number.isFinite(ref.area)) fail();
   const used = new Set<number>(), faces = new Set<number>();
@@ -47,13 +63,14 @@ function validate(ref: NativeBodyReference): void {
 }
 export function encodeNativeBodyReference(ref: NativeBodyReference): Uint8Array {
   validate(ref); return codec.encode({ fields: { id: ref.id, version: ref.version, nextFaceId: ref.nextFaceId, properties: ref.properties, valid: ref.valid,
-    volume: ref.volume, area: ref.area, ...(ref.materialId === null ? {} : { materialId: ref.materialId }),
+    volume: ref.volume, area: ref.area, ...(ref.referenceFrame ? { referenceFrame: frameBytes(ref.referenceFrame) } : {}), ...(ref.materialId === null ? {} : { materialId: ref.materialId }),
     mesh: encodeNativeMeshReference(ref.mesh), faces: encodeNativeBodyFacesReference(ref.faces), edges: encodeNativeBodyEdgesReference(ref.edges),
     curves: encodeNativeBodyCurvesReference(ref.curves), surfaces: encodeNativeBodySurfacesReference(ref.surfaces), imprints: ref.imprints.map(encodeNativeImprintReference) }, unknownFields: ref.unknownFields });
 }
 export function decodeNativeBodyReference(bytes: Uint8Array): NativeBodyReference {
   const decoded = codec.decode(bytes), f = decoded.fields;
   const ref: NativeBodyReference = { id: f.id as number, version: f.version as number, nextFaceId: f.nextFaceId as number,
+    ...(f.referenceFrame ? { referenceFrame: readFrame(f.referenceFrame as Uint8Array) } : {}),
     materialId: f.materialId === undefined ? null : f.materialId as number, properties: f.properties as number, valid: f.valid as boolean,
     volume: f.volume as number, area: f.area as number, mesh: decodeNativeMeshReference(f.mesh as Uint8Array), faces: decodeNativeBodyFacesReference(f.faces as Uint8Array),
     edges: decodeNativeBodyEdgesReference(f.edges as Uint8Array), curves: decodeNativeBodyCurvesReference(f.curves as Uint8Array),
@@ -71,7 +88,7 @@ export async function* streamNativeBody(body: Body, propertyId: (value: CommonAt
     surfaces = yield* streamNativeBodySurfaces(body.surfaces, nextId, options);
   const imprints: NativeImprintReference[] = [];
   for (const [faceId, graph] of body.imprints) imprints.push(yield* streamNativeImprint(faceId, graph, nextId, options));
-  const ref: NativeBodyReference = { id: body.id, version: body.version, nextFaceId: body.nextFaceId, materialId: body.materialId, properties: propertyId(body),
+  const ref: NativeBodyReference = { id: body.id, version: body.version, ...(body.referenceFrame ? { referenceFrame: [...body.referenceFrame] } : {}), nextFaceId: body.nextFaceId, materialId: body.materialId, properties: propertyId(body),
     valid: body.valid, volume: body.props.volume, area: body.props.area, mesh, faces, edges, curves, surfaces, imprints, unknownFields: [] };
   for (const [name, value] of scopes(ref)) value.unknownFields = extensions.get(name) ?? [];
   for (const imprint of ref.imprints) imprint.unknownFields = body.imprints.get(imprint.faceId as FaceLocalId)!.nativeUnknownFields ?? imprint.unknownFields;
@@ -97,7 +114,7 @@ export async function readNativeBody(ref: NativeBodyReference, columns: NativeCo
   const imprints: NativePackedImprint[] = [];
   for (const imprint of ref.imprints) imprints.push(await readNativeImprint(imprint, columns, id => faceIndex.has(id), id => curveIndex.has(id), signal));
   const extensions: NativeBodyExtensions = new Map(); for (const [name, value] of scopes(ref)) if (value.unknownFields.length) extensions.set(name, value.unknownFields);
-  return { id: ref.id, version: ref.version, nextFaceId: ref.nextFaceId, materialId: ref.materialId, common: common.value, valid: ref.valid,
+  return { id: ref.id, version: ref.version, ...(ref.referenceFrame ? { referenceFrame: [...ref.referenceFrame] } : {}), nextFaceId: ref.nextFaceId, materialId: ref.materialId, common: common.value, valid: ref.valid,
     props: { volume: ref.volume, area: ref.area }, mesh, faces, edges, curves, surfaces, imprints, indexes: { faces: faceIndex, curves: curveIndex, surfaces: surfaceIndex }, extensions };
 }
 export type NativePackedBody = Awaited<ReturnType<typeof readNativeBody>>;

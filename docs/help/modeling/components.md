@@ -12,6 +12,12 @@ Select the component placements you want to replace. In Components, open the des
 
 **Select Instances** selects placements in the current editing context. A component cannot be placed inside itself or inside one of its own descendants.
 
+## Make one component per object
+
+Select two or more loose solids, groups or imported mesh parts and choose **Make Components** from the context menu (next to Make Component) or from command search. Each selected object becomes its own component in the same place, so a model imported as many named parts inside one container turns into one component per part in a single step.
+
+A component is named after its object when it has a name; a group's instance name or an imported part's name is used as the definition name, and two objects with the same name give two definitions with that name. Objects without a name get the next numbered Component name. A mesh part is made editable first, so a closed part becomes a component holding one solid. Components already in the selection, faces and edges are left alone. The new components are selected afterwards, and one Undo restores everything.
+
 ## Change component properties
 
 Use the Components **Edit** tab for the name, description and supported behaviors such as Glue to, Cut opening, Always face camera and Shadows face sun. A name already used by another group or component is refused.

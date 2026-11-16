@@ -4,7 +4,7 @@ import { entitiesForLayer, type LayoutDocumentState } from '@pushform/layout';
 import { GOOGLE_LAYOUT_FONTS } from './layoutFontCatalog';
 import { prepareLayoutPages } from './layoutPrint';
 import { prepareLayoutImages } from './layoutImage';
-import { layoutViewportPicture, layoutViewportWarnings } from './layoutViewportRenders';
+import { layoutViewportDetailWarnings, layoutViewportPicture, layoutViewportWarnings } from './layoutViewportRenders';
 import { drawLayoutVectorPage } from './layoutVectorDrawing';
 import { safeLayoutExportName } from './layoutImageExport';
 import { encodeImage, rasterizeImage } from '../rasterizeImage';
@@ -52,9 +52,13 @@ export const loadPdfWebFont: PdfFontLoader = async (family, bold, italic) => {
   }));
 };
 
+/** Model-view export quality: the resolution of raster faces, textures and shadows at paper size. Lines stay vector. */
+export const LAYOUT_EXPORT_QUALITIES = [{ name: 'Draft', dpi: 150 }, { name: 'Standard', dpi: 300 }, { name: 'High', dpi: 600 }] as const;
+export const DEFAULT_LAYOUT_EXPORT_DPI = 300;
+
 export async function exportLayoutPdf(state: LayoutDocumentState, ids: readonly number[], documentName: string, dpi: number, signal?: AbortSignal, options: LayoutPdfOptions = {}) {
   if (!ids.length || ids.some(id => !state.pages.has(id))) throw new Error('Choose available pages to export.');
-  if (dpi !== 150 && dpi !== 300) throw new Error('Choose 150 or 300 dpi.');
+  if (!LAYOUT_EXPORT_QUALITIES.some(quality => quality.dpi === dpi)) throw new Error('Choose Draft, Standard or High quality.');
   const { jpegQuality } = options;
   if (jpegQuality !== undefined && !(jpegQuality > 0 && jpegQuality <= 1)) throw new Error('Choose a JPEG quality between 0 and 1.');
   const release = await prepareLayoutPages(state, ids, { displayed: true });
@@ -75,7 +79,7 @@ export async function exportLayoutPdf(state: LayoutDocumentState, ids: readonly 
     const { writeLayoutPdf } = await import('./layoutPdf');
     const result = await writeLayoutPdf(pages, loadPdfWebFont);
     // A view without a picture exports as nothing; the export notes say which could not be rendered and why.
-    const warnings = [...layoutViewportWarnings(state, entities), ...result.warnings];
+    const warnings = [...layoutViewportWarnings(state, entities), ...layoutViewportDetailWarnings(state, entities, dpi), ...result.warnings];
     return signal?.aborted ? null : { ...result, warnings, name: `${safeLayoutExportName(documentName.replace(/\.(pfl|layout)$/i, ''))}.pdf`, mime: 'application/pdf', extension: 'pdf' };
   } finally { release(); }
 }

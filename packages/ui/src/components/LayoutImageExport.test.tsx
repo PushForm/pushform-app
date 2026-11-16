@@ -244,7 +244,11 @@ it('exports selected pages as one PDF with a 300 dpi default (–4430)', async (
   const { tab, dispose } = setup();
   act(() => { tab.commands.execute('layout.page.add', {}); tab.commands.execute('layout.export.image'); });
   fireEvent.change(screen.getByLabelText('Format'), { target: { value: 'pdf' } });
-  expect(screen.getByLabelText<HTMLSelectElement>('Resolution').value).toBe('300');
+  // Draft, Standard (the default) and High replace the PDF's resolution choices.
+  expect(screen.queryByLabelText('Resolution')).toBeNull();
+  const quality = screen.getByLabelText<HTMLSelectElement>('Quality');
+  expect(quality.value).toBe('300');
+  expect([...quality.options].map(option => option.textContent)).toEqual(['Draft (150 dpi)', 'Standard (300 dpi)', 'High (600 dpi)']);
   fireEvent.change(screen.getByLabelText('Page range'), { target: { value: '0' } });
   expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Export…' }).disabled).toBe(true);
   fireEvent.change(screen.getByLabelText('Page range'), { target: { value: '2' } });

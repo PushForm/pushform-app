@@ -32,7 +32,7 @@ Check the drawing's physical size after import before adding annotations or expo
 
 Open the main menu's **Export…** action and choose **PDF**. Choose all pages, the current page, or a page range. Each page keeps its physical paper size.
 
-Paths, shapes, annotations, tables and text remain vector, and text remains selectable. Model views are raster images at the chosen 150 or 300 dpi. Export does not change the open drawing or its undo history.
+Paths, shapes, annotations, tables and text remain vector, and text remains selectable. Model views are raster pictures. Choose a **Quality**: Draft (150 dpi), Standard (300 dpi, the default) or High (600 dpi). Export uses the picture each model view shows, and it does not draw a view again at a higher quality, so a view whose picture has fewer pixels per inch than the chosen quality is listed in the export notes. Working in the drawing is not affected by the export quality. Export does not change the open drawing or its undo history.
 
 ## Export page images
 
@@ -42,7 +42,7 @@ Images, fonts and model views are prepared before export. The editor's grid, sel
 
 ## Export SVG or DXF
 
-Choose **SVG** for editable vector artwork, or **DXF** for CAD exchange, in Export. Review the format's setup and limitations before saving. SVG can retain drawing paths, text and supported embedded pictures.
+Choose **SVG** for editable vector artwork, or **DXF** for CAD exchange, in Export. Review the format's setup and limitations before saving. SVG can retain drawing paths, text and supported embedded pictures. SVG also has a **Quality** setting (Draft, Standard or High) for embedded model-view pictures, with the same export notes as PDF.
 
 DXF can keep paths, supported styling and text, but pictures and raster model views are omitted. A drawing-scale denominator converts paper coordinates for CAD use; check it when preparing a scaled drawing.
 

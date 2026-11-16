@@ -11,7 +11,7 @@ import { createDocument, ImageStore, type DocumentState, type ModelingColors, ty
 import { Viewport, type CameraState, type RenderBody, type RenderDisplay, type RenderImage, type RenderSections, type RenderSketch } from '@pushform/render';
 import { bodiesToRender, displayToRender, fogToRender, imagesToRender, shadowsToRender, sketchesToRender, withRenderImageStore } from '../engine/renderAdapter';
 import { sectionsToRender } from '../engine/sectionAdapter';
-import { forgetLayoutImage, LAYOUT_VIEW_EMPTY, LAYOUT_VIEW_FAILED, layoutImageReady, notifyLayoutImages, setLayoutCanvasPicture } from './layoutImage';
+import { forgetLayoutImage, LAYOUT_VIEW_EMPTY, LAYOUT_VIEW_FAILED, layoutImageReady, layoutPicture, notifyLayoutImages, setLayoutCanvasPicture } from './layoutImage';
 import { layoutEmbeddedModelIdentity } from './layoutEmbeddedModelIdentity';
 
 /**
@@ -309,6 +309,26 @@ export function layoutViewportWarnings(state: LayoutDocumentState, entities: rea
     if (problem) reasons.set(problem, (reasons.get(problem) ?? 0) + 1);
   }
   return [...reasons].map(([reason, count]) => `${count === 1 ? 'A model view' : `${count} model views`} could not be rendered: ${reason}`);
+}
+
+/**
+ * Model views whose displayed picture has fewer pixels per inch than an export quality asks for. Export draws the picture
+ * a view displays (it never renders it again), so a higher quality cannot add detail to it: this reports those views
+ * instead of presenting the result as rendered at that quality. Call while the displayed pictures are held and loaded.
+ */
+export function layoutViewportDetailWarnings(state: LayoutDocumentState, entities: readonly LayoutEntity[], dpi: number): string[] {
+  let count = 0, lowest = Infinity;
+  for (const entity of entities) {
+    if (!isViewport(entity)) continue;
+    const { width } = layoutFrameSize(entity.points);
+    const picture = layoutPicture(layoutViewportPicture(state, entity));
+    const pixels = picture instanceof HTMLImageElement ? picture.naturalWidth : picture?.width;
+    // Vector pictures and views without a picture have no pixel resolution to compare.
+    if (!pixels || width <= 0) continue;
+    const have = pixels / (width / 25.4);
+    if (have < dpi * 0.98) { count++; lowest = Math.min(lowest, have); }
+  }
+  return count ? [`${count === 1 ? 'A model view shows' : `${count} model views show`} a picture with less detail than ${dpi} dpi (as low as ${Math.round(lowest)} dpi). Export uses the picture each view displays, so choosing a higher quality does not add detail to it.`] : [];
 }
 
 /** The renderer's camera for a viewport camera across a frame `heightMm` tall. */

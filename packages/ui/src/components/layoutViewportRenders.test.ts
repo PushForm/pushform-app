@@ -7,7 +7,7 @@ import type * as NativeIO from '@pushform/io';
 import type { ImageId } from '@pushform/core';
 import { allocId, createDocument, ImageStore, DEFAULT_SHADOWS } from '@pushform/model';
 
-const rendered = vi.hoisted(() => ({ snapshots: [] as [number, number][], previews: [] as [number, number][], ready: new Set<string>(),
+const rendered = vi.hoisted(() => ({ canvases: new Map<string, HTMLCanvasElement>(), snapshots: [] as [number, number][], previews: [] as [number, number][], ready: new Set<string>(),
   displays: [] as unknown[], shadows: [] as unknown[], fog: [] as unknown[], texturesReady: vi.fn(async () => {}), failure: null as string | null,
   /** Models loaded while this is set have nothing in them. */
   empty: false, sections: { planes: [], cuts: [] } as { planes: { id: string; sheet?: string }[]; cuts: { key: string }[] }, drawnSections: [] as unknown[],
@@ -70,14 +70,15 @@ vi.mock('./layoutImage', () => ({
   LAYOUT_VIEW_EMPTY: 'pushform-view:empty',
   LAYOUT_VIEW_FAILED: 'pushform-view:failed',
   notifyLayoutImages: () => undefined,
-  setLayoutCanvasPicture: (src: string) => rendered.ready.add(src),
+  setLayoutCanvasPicture: (src: string, canvas?: HTMLCanvasElement) => { rendered.ready.add(src); if (canvas) rendered.canvases.set(src, canvas); },
+  layoutPicture: (src: string) => rendered.canvases.get(src) ?? null,
   layoutImageReady: (src: string) => rendered.ready.has(src),
   forgetLayoutImage: (src: string) => rendered.ready.delete(src),
 }));
 
 const { layoutViewportPicture, layoutViewportModel, layoutViewportRender, layoutViewportFailure, layoutViewportProblem, layoutViewportStatus,
   layoutViewportWarnings, setLayoutCloudModelLoader,
-  retainLayoutViewportModels, peekLayoutViewportModel, settleLayoutViewportRenders, whenLayoutViewportRendersIdle, holdLayoutViewportDisplays } = await import('./layoutViewportRenders');
+  retainLayoutViewportModels, peekLayoutViewportModel, settleLayoutViewportRenders, whenLayoutViewportRendersIdle, holdLayoutViewportDisplays, layoutViewportDetailWarnings } = await import('./layoutViewportRenders');
 
 const camera: LayoutViewportCamera = { eye: [10, -10, 10], target: [0, 0, 0], up: [0, 0, 1], projection: 'perspective', fov: 35, scale: 1 };
 let nextId = 1;
@@ -451,4 +452,24 @@ it('export draws a view with no picture as nothing', () => {
   entity.points = [[0, 0], [61, 0], [61, 30], [0, 30]];
   const release = holdLayoutViewportDisplays(state, [entity]);
   try { expect(layoutViewportPicture(state, entity, undefined, 300 / 25.4, true)).toBe(''); } finally { release(); }
+});
+
+it('reports views whose displayed picture has less detail than the export quality, without rendering them', async () => {
+  const { setLayoutCanvasPicture } = await import('./layoutImage');
+  const entity = view();
+  entity.points = [[0, 0], [25.4, 0], [25.4, 25.4], [0, 25.4]];
+  const picture = document.createElement('canvas');
+  picture.width = 300; picture.height = 300;
+  entity.image!.src = 'low-detail-picture';
+  setLayoutCanvasPicture('low-detail-picture', picture);
+  const before = rendered.snapshots.length;
+  const release = holdLayoutViewportDisplays(state, [entity]);
+  try {
+    // A 300-pixel picture across one inch is 300 dpi: enough for Draft and Standard, not for High.
+    expect(layoutViewportDetailWarnings(state, [entity], 150)).toEqual([]);
+    expect(layoutViewportDetailWarnings(state, [entity], 300)).toEqual([]);
+    expect(layoutViewportDetailWarnings(state, [entity], 600)).toEqual([expect.stringContaining("less detail than 600 dpi (as low as 300 dpi).")]);
+  } finally { release(); }
+  await settle();
+  expect(rendered.snapshots).toHaveLength(before);
 });

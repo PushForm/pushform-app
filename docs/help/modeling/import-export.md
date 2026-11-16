@@ -8,9 +8,11 @@ Imported models can retain hierarchy, materials, textures, curves, annotations, 
 
 ## Import other model formats
 
-Model import supports formats including COLLADA, OBJ, 3DS, STL, glTF, DXF and STEP. For OBJ, 3DS and unitless DXF, check the import units so the model is the intended size. Supply related material and picture files with the source where its format requires them.
+Model import supports formats including COLLADA, OBJ, 3DS, STL, glTF, DXF, DWG and STEP. For OBJ, 3DS and unitless DXF, check the import units so the model is the intended size. Supply related material and picture files with the source where its format requires them.
 
 Read the import notes for omitted annotations, materials or unsupported objects. DXF import handles supported drawing geometry and blocks but does not import every CAD entity type.
+
+A DWG drawing is converted on your device and imported as a DXF drawing is: lines, curves, faces, blocks and layers come across, and text, dimensions, hatches and paper space layouts do not. A DWG drawing that records no units is read in inches when it was started in imperial units and in millimeters otherwise, and the import notes say which; check the model's size after import. PushForm does not export DWG.
 
 ## Import STEP files from CAD tools
 

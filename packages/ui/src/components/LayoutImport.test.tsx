@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import { readFileSync } from 'node:fs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { openLayoutFile } from '@pushform/io';
@@ -8,13 +10,13 @@ import { DocumentSession } from '../session';
 import { LayoutWorkspace } from './LayoutWorkspace';
 import { TopBar } from './TopBar';
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 function setup() {
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
   const app = createApp({ demo: false, expose: false }), session = new DocumentSession(app, () => createApp({ demo: false, expose: false }), false, null);
   const tab = session.newLayout(), pageId = tab.activePageId;
   const view = render(<><TopBar session={session} /><LayoutWorkspace tab={tab} session={session} /></>);
-  const input = screen.getByLabelText('Import image or DXF file') as HTMLInputElement;
+  const input = screen.getByLabelText('Import image, DXF or DWG file') as HTMLInputElement;
   return { tab, pageId, session, input, view, entities: () => [...tab.doc.state.pages.get(pageId)!.entities.values()],
     dispose: () => { view.unmount(); session.dispose(); app.dispose(); } };
 }
@@ -121,6 +123,35 @@ it('imports a DXF drawing as one selected, undoable group of native objects at a
   expect(screen.getByRole('status').textContent).toBe('Imported Plan.dxf at 1:50. 1 entity is not imported: 1 POINT.');
   expect((tab.doc.undoStack.peek() as { label: string } | undefined)?.label).toBe('Import DXF');
   act(() => { tab.commands.execute('edit.undo'); }); expect(entities()).toHaveLength(0);
+  dispose();
+});
+
+it('imports a DWG drawing as a DXF drawing is imported, converted on this device', async () => {
+  // The DOM test environment gives modules no file URL, so the reader module is named by path.
+  const root = fileURLToPath(new URL('../../../io/', pathToFileURL(`${process.cwd()}/packages/ui/src/components/`)));
+  vi.stubEnv('PF_DWG_WASM', `${root}wasm/pushform-dwg.wasm`);
+  const bytes = new Uint8Array(readFileSync(`${root}src/__fixtures__/dwg/plan-mm.dwg`));
+  const file = new File([bytes], 'Plan.dwg');
+  Object.defineProperty(file, 'arrayBuffer', { value: async () => bytes.buffer });
+  const { tab, input, entities, dispose } = setup();
+  fireEvent.change(input, { target: { files: [file] } });
+  await waitFor(() => expect(entities()).toHaveLength(4));
+  expect(entities().filter(entity => entity.text).map(entity => entity.text!.content)).toEqual(['PLAN']);
+  expect(new Set(entities().map(entity => entity.groupId)).size).toBe(1);
+  expect(screen.getByRole('status').textContent).toMatch(/^Imported Plan\.dwg at 1:\d+\.$/);
+  expect((tab.doc.undoStack.peek() as { label: string } | undefined)?.label).toBe('Import DWG');
+  act(() => { tab.commands.execute('edit.undo'); }); expect(entities()).toHaveLength(0);
+  dispose();
+});
+
+it('reports a DWG drawing that cannot be read without document changes', async () => {
+  const root = fileURLToPath(new URL('../../../io/', pathToFileURL(`${process.cwd()}/packages/ui/src/components/`)));
+  vi.stubEnv('PF_DWG_WASM', `${root}wasm/pushform-dwg.wasm`);
+  const { tab, input, entities, dispose } = setup();
+  const version = tab.doc.version;
+  fireEvent.change(input, { target: { files: [textFile('AC1027 and then nothing a drawing holds', 'Broken.dwg')] } });
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('This DWG drawing could not be read'));
+  expect(tab.doc.version).toBe(version); expect(entities()).toHaveLength(0);
   dispose();
 });
 

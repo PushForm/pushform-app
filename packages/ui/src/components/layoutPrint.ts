@@ -3,7 +3,7 @@
 import { entitiesForLayer, isViewport, type LayoutDocumentState, type LayoutPage } from '@pushform/layout';
 import { prepareLayoutFonts } from './layoutFonts';
 import { prepareLayoutImages } from './layoutImage';
-import { layoutViewportPicture, settleLayoutViewportRenders } from './layoutViewportRenders';
+import { holdLayoutViewportDisplays, layoutViewportPicture, settleLayoutViewportRenders } from './layoutViewportRenders';
 
 export type LayoutPagePainter = (canvas: HTMLCanvasElement, page: LayoutPage, state: LayoutDocumentState, dpi: number) => void;
 let previousFrame: HTMLIFrameElement | null = null;
@@ -41,12 +41,20 @@ export function buildLayoutPrintDocument(doc: Document, state: LayoutDocumentSta
   }
 }
 
-/** Wait until the pages' model views are rendered and their pictures and fonts are loaded, for print or export. */
-export async function prepareLayoutPages(state: LayoutDocumentState, pageIds: readonly number[]): Promise<void> {
+/**
+ * Wait until the pages' pictures and fonts are loaded. Print also waits for the model views' renders. With `displayed`
+ * (export), views are not rendered or waited for: what each shows now is captured and drawn, and the returned function
+ * releases it when the export ends.
+ */
+export async function prepareLayoutPages(state: LayoutDocumentState, pageIds: readonly number[], options: { displayed?: boolean } = {}): Promise<() => void> {
   const entities = [...new Map(pageIds.flatMap(id => state.layerOrder.flatMap(layerId =>
     entitiesForLayer(state.pages.get(id)!, state, layerId))).map(entity => [entity.id, entity])).values()];
-  if (entities.some(isViewport)) await settleLayoutViewportRenders(state, entities);
-  await Promise.all([prepareLayoutFonts(entities), document.fonts?.ready, prepareLayoutImages(entities, entity => layoutViewportPicture(state, entity))]);
+  const release = options.displayed ? holdLayoutViewportDisplays(state, entities) : () => {};
+  try {
+    if (!options.displayed && entities.some(isViewport)) await settleLayoutViewportRenders(state, entities);
+    await Promise.all([prepareLayoutFonts(entities), document.fonts?.ready, prepareLayoutImages(entities, entity => layoutViewportPicture(state, entity))]);
+  } catch (error) { release(); throw error; }
+  return release;
 }
 
 /** Prepare pictures/fonts before opening the browser's printer/PDF dialog. */

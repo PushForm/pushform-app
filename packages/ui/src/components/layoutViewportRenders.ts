@@ -330,6 +330,10 @@ export function viewportCameraState(camera: LayoutViewportCamera, heightMm: numb
  */
 export function layoutViewportPicture(state: LayoutDocumentState, entity: LayoutEntity, camera?: LayoutViewportCamera, pxPerMm?: number, exportResolution = false): string {
   if (!isViewport(entity)) return entity.image?.src ?? '';
+  if (!camera) {
+    const shown = heldDisplays?.get(entity.id);
+    if (shown !== undefined) return shown;
+  }
   const viewport = entity.image.viewport;
   const view = camera ?? viewport.camera;
   if (!camera && !exportResolution && entity.image.src && viewportCacheCurrent(viewport, entity.points, state)) return entity.image.src;
@@ -443,6 +447,30 @@ function showPicture(entityId: number, src: string): void {
     previews.delete(entityId);
     forgetLayoutImage(preview.src);
   }
+}
+
+/** Pictures captured for an export, by view; while set, committed requests return them and render nothing. */
+let heldDisplays: Map<number, string> | null = null;
+
+/** What a view displays now, without requesting a render: its current saved picture, else its last picture, else nothing. */
+function displayedPicture(state: LayoutDocumentState, entity: LayoutEntity & { image: { viewport: LayoutViewport } }): string {
+  const viewport = entity.image.viewport;
+  if (entity.image.src && viewportCacheCurrent(viewport, entity.points, state)) return entity.image.src;
+  const model = loadedModels.get(sourceKey(state, viewport.source));
+  if (model && viewShowsNothing(model, viewport.scene)) return LAYOUT_VIEW_EMPTY;
+  return latest.get(entity.id) ?? entity.image.src ?? '';
+}
+
+/**
+ * Captures what each model view displays right now, so an export draws exactly that: it never refreshes a view, waits
+ * for a pending render or changes the drawing's automatic or paused updates, and a render that finishes meanwhile
+ * cannot replace a picture. Call the returned function when the export ends.
+ */
+export function holdLayoutViewportDisplays(state: LayoutDocumentState, entities: readonly LayoutEntity[]): () => void {
+  const held = new Map<number, string>();
+  for (const entity of entities) if (isViewport(entity)) held.set(entity.id, displayedPicture(state, entity));
+  heldDisplays = held;
+  return () => { if (heldDisplays === held) heldDisplays = null; };
 }
 
 /** Resolves when the queue has drained: the rendering's own completion, not a timer (settled by `drain`). */

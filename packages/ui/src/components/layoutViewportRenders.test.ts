@@ -77,7 +77,7 @@ vi.mock('./layoutImage', () => ({
 
 const { layoutViewportPicture, layoutViewportModel, layoutViewportRender, layoutViewportFailure, layoutViewportProblem, layoutViewportStatus,
   layoutViewportWarnings, setLayoutCloudModelLoader,
-  retainLayoutViewportModels, peekLayoutViewportModel, settleLayoutViewportRenders, whenLayoutViewportRendersIdle } = await import('./layoutViewportRenders');
+  retainLayoutViewportModels, peekLayoutViewportModel, settleLayoutViewportRenders, whenLayoutViewportRendersIdle, holdLayoutViewportDisplays } = await import('./layoutViewportRenders');
 
 const camera: LayoutViewportCamera = { eye: [10, -10, 10], target: [0, 0, 0], up: [0, 0, 1], projection: 'perspective', fov: 35, scale: 1 };
 let nextId = 1;
@@ -426,4 +426,29 @@ it('waits for model textures before producing a committed page picture', async (
   await vi.waitFor(() => expect(resolve).toBeTypeOf('function'));
   expect(rendered.snapshots).toHaveLength(before);
   resolve(); await settle(); expect(rendered.snapshots).toHaveLength(before + 1);
+});
+
+it('export captures what views display, renders nothing and is unaffected by a render finishing meanwhile', async () => {
+  const entity = view();
+  entity.points = [[0, 0], [60, 0], [60, 30], [0, 30]];
+  entity.image!.src = 'old-picture';
+  const before = rendered.snapshots.length;
+  const release = holdLayoutViewportDisplays(state, [entity]);
+  // The outdated saved picture is exported as it is, with no render requested at any resolution.
+  expect(layoutViewportPicture(state, entity, undefined, 600 / 25.4, true)).toBe('old-picture');
+  expect(layoutViewportPicture(state, entity)).toBe('old-picture');
+  await settle();
+  expect(rendered.snapshots).toHaveLength(before);
+  release();
+  // Afterwards the view renders as usual.
+  layoutViewportPicture(state, entity);
+  await settle();
+  expect(rendered.snapshots).toHaveLength(before + 1);
+});
+
+it('export draws a view with no picture as nothing', () => {
+  const entity = view();
+  entity.points = [[0, 0], [61, 0], [61, 30], [0, 30]];
+  const release = holdLayoutViewportDisplays(state, [entity]);
+  try { expect(layoutViewportPicture(state, entity, undefined, 300 / 25.4, true)).toBe(''); } finally { release(); }
 });

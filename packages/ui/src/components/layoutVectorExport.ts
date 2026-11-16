@@ -17,12 +17,14 @@ export async function exportLayoutVectors(state: LayoutDocumentState, pageIds: r
   if (!pageIds.length) throw new Error('Choose at least one page to export.');
   for (const id of pageIds) if (!state.pages.has(id)) throw new Error('A selected page is no longer available.');
   // DXF omits pictures, so broken or pending pictures must not prevent CAD export.
-  if (options.format === 'svg') await prepareLayoutPages(state, pageIds);
+  let release = () => {};
+  if (options.format === 'svg') release = await prepareLayoutPages(state, pageIds, { displayed: true });
   else {
     await prepareLayoutFonts(pageIds.flatMap(id => state.layerOrder.flatMap(layer => entitiesForLayer(state.pages.get(id)!, state, layer))));
   }
-  if (signal?.aborted) return null;
+  if (signal?.aborted) { release(); return null; }
   const files: Uint8Array[] = [], warnings = new Set<string>();
+  try {
   for (const id of pageIds) {
     const page = drawLayoutVectorPage(state, state.pages.get(id)!, { includeImages: options.format === 'svg', editableTextBlocks: options.format === 'svg' });
     if (options.format === 'svg') files.push(strToU8(writeLayoutSvg(page, options.area)));
@@ -32,6 +34,7 @@ export async function exportLayoutVectors(state: LayoutDocumentState, pageIds: r
     }
     if (signal?.aborted) return null;
   }
+  } finally { release(); }
   const name = layoutImageExportName(documentName, state, pageIds, options.format);
   if (files.length === 1) return { bytes: files[0]!, name, extension: options.format,
     mime: options.format === 'svg' ? 'image/svg+xml' : 'application/dxf', warnings: [...warnings] };

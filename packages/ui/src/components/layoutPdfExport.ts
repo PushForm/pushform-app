@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { entitiesForLayer, isViewport, layoutFrameSize, type LayoutDocumentState } from '@pushform/layout';
+import { entitiesForLayer, type LayoutDocumentState } from '@pushform/layout';
 import { GOOGLE_LAYOUT_FONTS } from './layoutFontCatalog';
 import { prepareLayoutPages } from './layoutPrint';
 import { prepareLayoutImages } from './layoutImage';
-import { layoutViewportPicture, layoutViewportWarnings, settleLayoutViewportRenders } from './layoutViewportRenders';
+import { layoutViewportPicture, layoutViewportWarnings } from './layoutViewportRenders';
 import { drawLayoutVectorPage } from './layoutVectorDrawing';
 import { safeLayoutExportName } from './layoutImageExport';
 import { encodeImage, rasterizeImage } from '../rasterizeImage';
@@ -57,29 +57,25 @@ export async function exportLayoutPdf(state: LayoutDocumentState, ids: readonly 
   if (dpi !== 150 && dpi !== 300) throw new Error('Choose 150 or 300 dpi.');
   const { jpegQuality } = options;
   if (jpegQuality !== undefined && !(jpegQuality > 0 && jpegQuality <= 1)) throw new Error('Choose a JPEG quality between 0 and 1.');
-  await prepareLayoutPages(state, ids);
-  const entities = ids.flatMap(id => state.layerOrder.flatMap(layer => entitiesForLayer(state.pages.get(id)!, state, layer)));
-  for (const entity of entities) if (isViewport(entity)) {
-    const { width, height } = layoutFrameSize(entity.points);
-    const w = Math.ceil(width * dpi / 25.4), h = Math.ceil(height * dpi / 25.4);
-    if (w > 16384 || h > 16384 || w * h > 100_000_000) throw new Error('A model view is too large at this resolution. Choose a lower resolution.');
-  }
-  await settleLayoutViewportRenders(state, entities, 60_000, dpi);
-  await prepareLayoutImages(entities, entity => layoutViewportPicture(state, entity, undefined, dpi / 25.4, true));
-  if (signal?.aborted) return null;
-  const pages = ids.map(id => drawLayoutVectorPage(state, state.pages.get(id)!, { exportDpi: dpi }));
-  // PDF directly accepts PNG/JPEG; normalize other image formats without rasterizing any page geometry.
-  for (const page of pages) for (const item of page.items) if (item.kind === 'image' && !/^data:image\/(png|jpe?g)[;,]/i.test(item.src)) {
-    item.src = await dataUrl(await rasterizeImage(item.src, Math.max(1, Math.ceil(item.width * dpi / 25.4)), Math.max(1, Math.ceil(item.height * dpi / 25.4))), 'image/png');
-  }
-  // JPEG compression: every image at its own pixel size, transparent areas over white, as JPEG has no alpha.
-  if (jpegQuality !== undefined) for (const page of pages) for (const item of page.items) if (item.kind === 'image') {
+  const release = await prepareLayoutPages(state, ids, { displayed: true });
+  try {
+    const entities = ids.flatMap(id => state.layerOrder.flatMap(layer => entitiesForLayer(state.pages.get(id)!, state, layer)));
+    await prepareLayoutImages(entities, entity => layoutViewportPicture(state, entity, undefined, dpi / 25.4, true));
     if (signal?.aborted) return null;
-    item.src = await dataUrl(await encodeImage(item.src, { mime: 'image/jpeg', quality: jpegQuality, fill: '#ffffff' }), 'image/jpeg');
-  }
-  const { writeLayoutPdf } = await import('./layoutPdf');
-  const result = await writeLayoutPdf(pages, loadPdfWebFont);
-  // A view without a picture exports as nothing; the export notes say which could not be rendered and why.
-  const warnings = [...layoutViewportWarnings(state, entities), ...result.warnings];
-  return signal?.aborted ? null : { ...result, warnings, name: `${safeLayoutExportName(documentName.replace(/\.(pfl|layout)$/i, ''))}.pdf`, mime: 'application/pdf', extension: 'pdf' };
+    const pages = ids.map(id => drawLayoutVectorPage(state, state.pages.get(id)!, { exportDpi: dpi }));
+    // PDF directly accepts PNG/JPEG; normalize other image formats without rasterizing any page geometry.
+    for (const page of pages) for (const item of page.items) if (item.kind === 'image' && !/^data:image\/(png|jpe?g)[;,]/i.test(item.src)) {
+      item.src = await dataUrl(await rasterizeImage(item.src, Math.max(1, Math.ceil(item.width * dpi / 25.4)), Math.max(1, Math.ceil(item.height * dpi / 25.4))), 'image/png');
+    }
+    // JPEG compression: every image at its own pixel size, transparent areas over white, as JPEG has no alpha.
+    if (jpegQuality !== undefined) for (const page of pages) for (const item of page.items) if (item.kind === 'image') {
+      if (signal?.aborted) return null;
+      item.src = await dataUrl(await encodeImage(item.src, { mime: 'image/jpeg', quality: jpegQuality, fill: '#ffffff' }), 'image/jpeg');
+    }
+    const { writeLayoutPdf } = await import('./layoutPdf');
+    const result = await writeLayoutPdf(pages, loadPdfWebFont);
+    // A view without a picture exports as nothing; the export notes say which could not be rendered and why.
+    const warnings = [...layoutViewportWarnings(state, entities), ...result.warnings];
+    return signal?.aborted ? null : { ...result, warnings, name: `${safeLayoutExportName(documentName.replace(/\.(pfl|layout)$/i, ''))}.pdf`, mime: 'application/pdf', extension: 'pdf' };
+  } finally { release(); }
 }

@@ -42,24 +42,26 @@ export async function exportLayoutImages(state: LayoutDocumentState, pageIds: re
     if (width > MAX_LAYOUT_IMAGE_SIDE || height > MAX_LAYOUT_IMAGE_SIDE || width * height > MAX_LAYOUT_IMAGE_PIXELS)
       throw new Error(`${page.name} would be ${width} × ${height} pixels at ${options.dpi} dpi, too large to export. Choose a lower resolution.`);
   }
-  await prepareLayoutPages(state, pageIds);
-  if (signal?.aborted) return null;
-  const mime = options.format === 'png' ? 'image/png' : 'image/jpeg', extension = options.format === 'png' ? 'png' : 'jpg';
-  const pictures: Uint8Array[] = [];
-  for (const id of pageIds) {
-    const canvas = document.createElement('canvas');
-    paint(canvas, state.pages.get(id)!, state, options.dpi);
-    const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, mime, JPEG_QUALITY));
-    if (!blob) throw new Error(`${state.pages.get(id)!.name} could not be turned into a picture. Choose a lower resolution.`);
-    pictures.push(new Uint8Array(await blob.arrayBuffer()));
+  const release = await prepareLayoutPages(state, pageIds, { displayed: true });
+  try {
     if (signal?.aborted) return null;
-  }
-  const name = layoutImageExportName(documentName, state, pageIds, options.format);
-  if (pictures.length === 1) return { bytes: pictures[0]!, name, mime, extension };
-  const digits = String(pageIds.length).length, entries: Zippable = {};
-  // Numbered so the pages keep their order and pages with the same name stay apart; pictures are already compressed.
-  pageIds.forEach((id, index) => {
-    entries[`${String(index + 1).padStart(digits, '0')} ${safeLayoutExportName(state.pages.get(id)!.name)}.${extension}`] = [pictures[index]!, { level: 0 }];
-  });
-  return { bytes: zipSync(entries), name, mime: 'application/zip', extension: 'zip' };
+    const mime = options.format === 'png' ? 'image/png' : 'image/jpeg', extension = options.format === 'png' ? 'png' : 'jpg';
+    const pictures: Uint8Array[] = [];
+    for (const id of pageIds) {
+      const canvas = document.createElement('canvas');
+      paint(canvas, state.pages.get(id)!, state, options.dpi);
+      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, mime, JPEG_QUALITY));
+      if (!blob) throw new Error(`${state.pages.get(id)!.name} could not be turned into a picture. Choose a lower resolution.`);
+      pictures.push(new Uint8Array(await blob.arrayBuffer()));
+      if (signal?.aborted) return null;
+    }
+    const name = layoutImageExportName(documentName, state, pageIds, options.format);
+    if (pictures.length === 1) return { bytes: pictures[0]!, name, mime, extension };
+    const digits = String(pageIds.length).length, entries: Zippable = {};
+    // Numbered so the pages keep their order and pages with the same name stay apart; pictures are already compressed.
+    pageIds.forEach((id, index) => {
+      entries[`${String(index + 1).padStart(digits, '0')} ${safeLayoutExportName(state.pages.get(id)!.name)}.${extension}`] = [pictures[index]!, { level: 0 }];
+    });
+    return { bytes: zipSync(entries), name, mime: 'application/zip', extension: 'zip' };
+  } finally { release(); }
 }

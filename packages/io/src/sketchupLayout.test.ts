@@ -381,10 +381,17 @@ describe('SketchUp LayOut import', () => {
     const identities = new Set([...doc.state.layers.keys(), ...doc.state.pages.keys(), ...imported.entities.keys()]);
     expect(identities.has(outer!)).toBe(false); expect(identities.has(inner![0]!)).toBe(false);
     expect(decodeLayoutDocument(encodeLayoutDocument(doc)).state.pages.get(imported.id)).toEqual(imported);
+    // A member on a layer hidden for the page stays in its groups, hidden with its layer.
     const { doc: hidden } = importSketchUpLayout(layoutFile(content, '', '1,0,1'));
-    const visible = [...hidden.state.pages.values()][0]!.entities;
-    expect(visible.size).toBe(5);
-    expect([...visible.values()].find(entity => entity.kind === 'text')!.nestedGroupIds).toHaveLength(1);
+    const hiddenPage = [...hidden.state.pages.values()][0]!;
+    expect(hiddenPage.entities.size).toBe(6);
+    const shown = hidden.state.layerOrder.flatMap(layerId => entitiesForLayer(hiddenPage, hidden.state, layerId));
+    expect(shown).toHaveLength(5);
+    const shownText = shown.find(entity => entity.kind === 'text')!;
+    expect(shownText.nestedGroupIds).toHaveLength(1);
+    const member = [...hiddenPage.entities.values()].find(entity => !shown.includes(entity))!;
+    expect(hidden.state.layers.get(member.layerId)!.name).toBe('Notes');
+    expect([member.groupId, member.nestedGroupIds]).toEqual([shownText.groupId, shownText.nestedGroupIds]);
   });
 
   it('draws a placed CAD file from LayOut\'s converted paths as one group', () => {
@@ -1485,6 +1492,16 @@ describe('SketchUp LayOut import', () => {
     const inches = (mm: number) => Math.round(mm / 25.4 * 1e6) / 1e6;
     expect(pageState!.entityOrder.map((id) => inches(pageState!.entities.get(id)!.points[0]![0]))).toEqual([1, 3]);
     expect([...doc.state.sharedEntities.values()].map((entity) => inches(entity.points[0]![0]))).toEqual([5]);
+
+    // A layer hidden for the page keeps its inline content, hidden there.
+    const hidden = importSketchUpLayout(zipSync({
+      'document.xml': strToU8(document.replace('showMasterLayers="1" />', 'showMasterLayers="1"><r:layerVisibility>1,0</r:layerVisibility></ld:pageRef>')),
+      'references.xml': strToU8(references), 'pages/page8.xml': strToU8(pageXml),
+    }));
+    const [hiddenPage] = [...hidden.doc.state.pages.values()];
+    expect(hidden.warnings).toEqual([]);
+    expect(hiddenPage!.entityOrder).toHaveLength(2);
+    expect(hidden.doc.state.layerOrder.flatMap((layerId) => entitiesForLayer(hiddenPage!, hidden.doc.state, layerId))).toHaveLength(1);
   });
 
   it('paints a viewport\'s model background behind its cached render when Background is on', () => {
@@ -1587,7 +1604,7 @@ describe('SketchUp LayOut import', () => {
     expect(oddWarnings).toContain('tables were imported as lines and text');
   });
 
-  it('keeps shared-layer content once for every page and skips content hidden for its page', () => {
+  it('keeps shared-layer content once for every page and keeps page content on a layer hidden for its page', () => {
     const master = `<e:rectangle id="id90" shape="0" rounding="0"><e:rectangleBase x="0" y="0" width="1" height="1" /></e:rectangle>`;
     const content = page('<e:path id="id60" rotationAngle="0"><e:elements>0,1</e:elements><e:points2f>0,0,1,1</e:points2f></e:path>', onLayer('id11', ['id60']));
     const { doc } = importSketchUpLayout(layoutFile(content, master));
@@ -1595,9 +1612,19 @@ describe('SketchUp LayOut import', () => {
     expect(doc.state.layers.get(doc.state.sharedEntities.values().next().value!.layerId)!.shared).toBe(true);
     expect([...doc.state.pages.values()][0]!.entityOrder).toHaveLength(1);
 
+    // The content stays in the document, hidden on its page until the layer is shown there.
     const { doc: hidden, warnings } = importSketchUpLayout(layoutFile(content, master, '1,0,1'));
-    expect([...hidden.state.pages.values()][0]!.entityOrder).toHaveLength(0);
-    expect(warnings).toContain('content on layers hidden for its page was skipped');
+    const hiddenPage = [...hidden.state.pages.values()][0]!;
+    const notes = [...hidden.state.layers.values()].find(layer => layer.name === 'Notes')!.id;
+    expect(hiddenPage.entityOrder).toHaveLength(1);
+    expect(hiddenPage.entities.get(hiddenPage.entityOrder[0]!)!.layerId).toBe(notes);
+    expect(isLayoutLayerVisible(hiddenPage, hidden.state, notes)).toBe(false);
+    expect(hidden.state.layerOrder.flatMap(layerId => entitiesForLayer(hiddenPage, hidden.state, layerId)).map(entity => entity.layerId)).not.toContain(notes);
+    expect(entitiesForLayer({ ...hiddenPage, layerVisibility: new Map([[notes, true]]) }, hidden.state, notes)).toHaveLength(1);
+    expect(warnings.some(warning => warning.includes('hidden'))).toBe(false);
+    const reopened = decodeLayoutDocument(encodeLayoutDocument(hidden)).state.pages.get(hiddenPage.id)!;
+    expect(reopened.entityOrder).toHaveLength(1);
+    expect(reopened.layerVisibility?.get(notes)).toBe(false);
   });
 
   it('keeps scaled dash-dot curves and filled outlines as whole paths through save/reopen', () => {

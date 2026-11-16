@@ -74,7 +74,7 @@ export function ToolOptionsBar(): JSX.Element {
       settings={styled ? [] : settings}
       placing={placing}
       applied={applied}
-      hasEditableContent={Boolean(styled) || fields.some(f => f.location === 'bar' && !f.disabled)}
+      hasEditableContent={Boolean(styled) || fields.some(f => (f.location === 'bar' || f.placement === 'options') && !f.disabled)}
       mac={app.keymap.platform === 'mac'}
       onSetting={(id, value) => app.toolManager.setting(id, value)}
       read={(quantity, text) => readQuantity(app, quantity, text)}

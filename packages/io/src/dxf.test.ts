@@ -38,8 +38,10 @@ describe('DXF reading', () => {
     expect(isDxfBytes(file)).toBe(true);
     expect(isDxfBytes(strToU8('AutoCAD Binary DXF\r\n\x1a\0'))).toBe(true);
     expect(isDxfBytes(strToU8('v 0 0 0\n'))).toBe(false);
-    expect(parseDxfHeader(file)).toEqual({ units: { unit: 'mm', meters: 0.001 }, extent: { min: [-1, -2, 0], max: [3, 4, 0] } });
-    expect(parseDxfHeader(dxf({ entities: [line('0', [0, 0], [1, 0])] }))).toEqual({ units: null, extent: null });
+    expect(parseDxfHeader(file)).toEqual({ units: { unit: 'mm', meters: 0.001 }, measurement: null, extent: { min: [-1, -2, 0], max: [3, 4, 0] } });
+    expect(parseDxfHeader(dxf({ entities: [line('0', [0, 0], [1, 0])] }))).toEqual({ units: null, measurement: null, extent: null });
+    expect(parseDxfHeader(dxf({ header: [[9, '$MEASUREMENT'], [70, 0]] })).measurement).toBe('imperial');
+    expect(parseDxfHeader(dxf({ header: [[9, '$MEASUREMENT'], [70, 1]] })).measurement).toBe('metric');
     expect(modelImportFormat('Plan.DXF').name).toBe('DXF');
     expect(() => parseDxf(strToU8('AutoCAD Binary DXF\r\n\x1a\0'))).toThrow(/Binary DXF/);
   });
@@ -76,6 +78,22 @@ describe('DXF reading', () => {
 });
 
 describe('DXF model import', () => {
+  it('reads a multileader as its leader line to the landing and its text', () => {
+    const multileader: Group[] = [[0, 'MULTILEADER'], [8, 'Notes'], [100, 'AcDbMLeader'], [300, 'CONTEXT_DATA{'], [40, 10],
+      [10, 5], [20, 5], [30, 0], [41, 2.5], [304, '\\fArial;Line of\\Pwall'], [11, 0], [21, 0], [31, 1], [12, 30], [22, 12], [32, 0],
+      [13, 1], [23, 0], [33, 0], [171, 1],
+      [302, 'LEADER{'], [290, 1], [291, 1], [10, 28], [20, 10], [30, 0], [11, 1], [21, 0], [31, 0], [40, 1.5],
+      [304, 'LEADER_LINE{'], [10, 0], [20, 0], [30, 0], [10, 20], [20, 10], [30, 0], [305, '}'], [303, '}'], [301, '}'], [10, 99], [20, 99], [30, 99]];
+    const drawing = parseDxf(dxf({ header: MM, entities: [multileader] }));
+    expect(drawing.unsupported.size).toBe(0);
+    const [leader, label] = drawing.items;
+    expect(leader).toMatchObject({ kind: 'path', layer: 'Notes', closed: false, source: 'MULTILEADER' });
+    // Arrow end, bend, landing, then the dogleg along its direction.
+    expect((leader as Extract<typeof leader, { kind: 'path' }>).curves).toEqual([
+      { kind: 'line', a: [0, 0, 0], b: [20, 10, 0] }, { kind: 'line', a: [20, 10, 0], b: [28, 10, 0] }, { kind: 'line', a: [28, 10, 0], b: [29.5, 10, 0] }]);
+    expect(label).toMatchObject({ kind: 'text', text: 'Line of\nwall', anchor: [30, 12, 0], x: [2.5, 0, 0], y: [0, 2.5, 0], align: 'left', vertical: 'top', source: 'MULTILEADER' });
+  });
+
   it('imports lines, arcs and circles in the file units, with layers as tags and circles as curves', async () => {
     const file = dxf({ header: MM, layers: [[[2, 'Walls'], [70, 0], [62, 1], [6, 'CONTINUOUS']], [[2, 'Off'], [70, 0], [62, -3], [6, 'CONTINUOUS']]],
       entities: [line('Walls', [0, 0], [1000, 0]), circle('0', [0, 0], 100), arc('Off', [0, 0], 200, 0, 90), [[0, 'POINT'], [8, '0'], [10, 0], [20, 0], [30, 0]]] });

@@ -1,1 +1,1 @@
-# Built by `pnpm build:step-reader`; the .wasm is not committed.
+# Built by `pnpm build:step-reader` and `pnpm build:dwg-reader`; the .wasm files are not committed.

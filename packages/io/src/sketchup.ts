@@ -302,7 +302,7 @@ export function sketchUpDisplay(options: Record<string, RenderingOption> | null 
  * The source format a converted model came from: its name in messages, and the standing limitations every
  * import of it reports.
  */
-export interface ImportFormat { kind: 'sketchup' | 'collada' | 'obj' | '3ds' | 'stl' | 'dxf' | 'gltf' | 'step'; name: string; notes: readonly string[] }
+export interface ImportFormat { kind: 'sketchup' | 'collada' | 'obj' | '3ds' | 'stl' | 'dxf' | 'dwg' | 'gltf' | 'step'; name: string; notes: readonly string[] }
 export const SKETCHUP_FORMAT: ImportFormat = { kind: 'sketchup', name: 'SketchUp', notes: [
   'SketchUp import: the model opens in its current style (face, edge, background and modeling settings); the saved style list, per-scene styles, watermarks, sketchy edges, fog, radial and diameter dimensions, and extension data are not imported.',
 ] };

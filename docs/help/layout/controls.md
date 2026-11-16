@@ -32,7 +32,7 @@ These Annotate controls explain existing drawing content. Changing annotation te
 
 ## Table, Import and Model View
 
-These buttons are in Insert. **Table** creates editable rows and columns. **Import**, the image button after Table, adds a PNG, JPG/JPEG or SVG image file, or a DXF drawing, to the active page. **Model View** creates a framed view of an available 3D model.
+These buttons are in Insert. **Table** creates editable rows and columns. **Import**, the image button after Table, adds a PNG, JPG/JPEG or SVG image file, or a DXF or DWG drawing, to the active page. **Model View** creates a framed view of an available 3D model.
 
 Choose Import for a picture file; choose Model View when you need a camera view linked to a model. **Main menu → Import...** opens the same picker as the toolbar Import button.
 

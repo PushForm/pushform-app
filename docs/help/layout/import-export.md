@@ -62,6 +62,12 @@ Presenting is different from exporting: it displays the current drawing and does
 
 Choose **Main menu → Export…**, select **PushForm Layout (.pfl)** in **Format**, then click **Export…** and choose where to save. Browsers without a save picker download the file. This exports the entire document with its embedded assets and all pages. It keeps the open document’s name, cloud destination and saved state. There is no separate Download a copy menu item.
 
+## Model views in exported LayOut files
+
+Exporting to **.layout** keeps each model view editable in LayOut wherever that is possible. A view that cannot be written as an editable model view, such as a view of a PushForm cloud model or a view whose original model is no longer in the document, is exported automatically as page artwork showing what it displays. There is no prompt, and the rest of the drawing exports normally.
+
+When this happens, **Export saved with notes** lists the pages and views affected, naming up to five views per page and up to ten pages and counting the rest. In the exported file, model editing, camera changes and model-linked behavior are lost for those views. Views that stay editable are unchanged, and your PushForm drawing and its model references are not changed by the export.
+
 ### Failed imports
 
 If a supported file fails during import, PushForm automatically saves the original file and import report in a hidden, private folder on your account and queues a support ticket. Your file stays in PushForm and can be retrieved only by you and authorized administrators; it is not attached to the ticket or shared with other users. Cancelled imports do not create tickets. If you are offline or the upload cannot finish, the original error still appears, but the file may not be saved for support.

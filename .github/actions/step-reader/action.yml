@@ -3,8 +3,9 @@ description: Restore matching compiled modules or build both WebAssembly targets
 runs:
   using: composite
   steps:
-    - uses: dtolnay/rust-toolchain@stable
-      with: { targets: 'wasm32-wasip1, wasm32-wasip1-threads' }
+    # Pinned: the threaded target fails to link with Rust 1.100.0 (undefined symbol __wasi_init_tp). Unpin once that is fixed.
+    - uses: dtolnay/rust-toolchain@master
+      with: { toolchain: 1.99.1, targets: 'wasm32-wasip1, wasm32-wasip1-threads' }
     - id: rust-version
       shell: bash
       run: echo "hash=$(rustc -Vv | sha256sum | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"

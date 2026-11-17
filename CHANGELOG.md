@@ -2,6 +2,68 @@
 
 Notable changes in each PushForm desktop release. Versions are `<year>.<week>.<build>`.
 
+## 26.46.145
+
+### Desktop
+
+- **Navigation Cube.** The modeling viewport now has a navigation cube in the corner that shows the view direction. Click a face, edge or corner to turn to that view. New views start from a standing viewpoint with the sky at the top. The ground grid is hidden by default, and the model axes are drawn above the sky background.
+
+- **Fog.** Fog now covers the ground and sky as well as the model geometry. It fades edges and blends into the horizon.
+
+- **Select Solids.** Selecting a face or edge of a solid now outlines the solid's edges and marks it in the Object browser.
+
+### Import and Export
+
+- **Native STEP Import.** STEP files are converted on your device by a new native reader in the desktop app using every CPU core. The reader handles files up to 256 MiB and shows progress with part count, meshing progress and timing. The browser also has improved STEP conversion on background threads.
+
+- **Large Mesh Imports.** Large STL, OBJ, 3DS, glTF and COLLADA files now import as mesh parts for better performance in big models. Mesh parts can be selected, moved, copied, grouped, tagged, hidden, erased and painted.
+
+- **Make Editable.** Turn a mesh part into ordinary faces and edges when you need to model on it.
+
+- **Radial Dimensions.** Radial dimensions are now read from SketchUp files saved before 2021.
+
+### Layout
+
+- **Layout Scale Tool.** The Scale tool no longer asks for a reference point. After choosing the base point, you drag the corner of the box around what you're scaling. The tool options bar shows Scale, Length, Width and Height with live values. The toolbar also shows Length and typed reference lengths.
+
+- **Select All.** Select every object on a Layout page with Cmd+A (macOS) or Ctrl+A (Windows/Linux).
+
+- **Draw Past Edge.** Objects that run off the paper are drawn in full on the gray area around the page. Every tool works there, and all Layout tools can draw past the page edge.
+
+- **Linked Units.** A paper preset sets the page to landscape and picks the units. A new Orientation option turns the page. Grid units now control the units of drawing values and new dimensions, and templates start in their paper's units.
+
+- **Older Layout Files.** More .layout files open now. Dimensions and viewport cameras that can't be read are skipped instead of stopping the import.
+
+### Extensions
+
+- **Extension System.** A new extension system adds a way to extend PushForm with custom tools, views and dialogs. Extensions run in an isolated web runtime with a sandboxed frame, strict CSP, and a locked-down worker. The extension manager adds a panel for managing installed extensions, and developer tools allow side-loading extensions.
+
+- **Extension Manifests.** Extensions use a manifest with typed component trees and host-rendered components. A package validator checks manifests against the schema. Extension messages are brokered with size limits, document handles and generation tracking.
+
+### Kernel
+
+- **Rust Geometry Kernel.** The geometry kernel has been rebuilt in Rust for faster push/pull operations. It runs as WebAssembly on a compute worker on the web and desktop. All edge profiles now work on every kind of edge (circular, straight, spline) with proper divisions for each profile shape.
+
+- **Kernel Migration.** A migration script handles old documents saved with the old TypeScript kernel. The kernel module includes a SHA-256 hash of the git sources for integrity checking.
+
+### Performance
+
+- **Faster Import.** Large STEP files convert faster with the new native reader on desktop and improved threading on the web.
+
+- **Memory Usage.** Shows memory usage during import for large files.
+
+### Commons
+
+- **Catalog Integration.** Commons is now connected to the reviewed catalog service with improved indexing and performance. Commons profiles and collections now show profile pictures and banners with cropping, handle addresses, public collections on profiles, and featured creators.
+
+### Other
+
+- **Tool Organization.** Modeling tools have been reorganized into a labeled ribbon. Section planes sit with measurement tools under Inspect, and the View group is now Navigate.
+
+- **Mac App Icons.** The Mac app icon now has a sunken mark on figured oak and is native vector artwork for crispness at any size.
+
+- **Layout Materials.** In the Material Surface Editor, you can paint materials to objects in Layout documents.
+
 ## 26.45.144
 
 - **AI Chat limits use token credits** instead of a message count. You can queue follow-ups while it works, each request is a single Undo step, and a status line shows progress on 3D models.
@@ -49,7 +111,7 @@ Notable changes in each PushForm desktop release. Versions are `<year>.<week>.<b
 | Organic | 6 |
 | Solid colors | 24 |
 | Glass tints | 6 |
-| **Overall total** | **368** |
+- **Overall total** | **368** |
 
 - The Materials panel switches between List and Preview with two icon buttons.
 
@@ -77,69 +139,3 @@ Notable changes in each PushForm desktop release. Versions are `<year>.<week>.<b
 
 - **Mailing list.** Join or leave the mailing list from your account details at any time; the choice saves immediately.
 - About PushForm links to the public source code on GitHub.
-
-## 26.44.367
-
-### Import and export
-
-- **SketchUp export.** Choose **Export… → SketchUp (.skp)** to save the visible model, or only the selected geometry. The file is written on your device in the 2017 format. Each face is written as one face with its holes, and soft, smooth and hidden edges keep their settings, so curved surfaces stay smooth and flat faces show no diagonals. Components keep their placements, names and per-placement paint. Every material is included, with colours and PNG/JPEG textures. Tags, scenes, guides, dimensions, text and section planes are not exported; the export notes list what was left out or simplified.
-- Older `.skp` files saved in the 2020 format without components now open with their geometry. Before, they could open empty.
-
-### Typing values in the viewport
-
-- **Value fields replace the Measurements box.** Drawing tools show their values in fields next to the geometry, linked to it by gray dimension lines. Line takes a length and an angle, Rectangle a width and height, Circle and Polygon a diameter, and Arc and Pie a diameter and then an angle. Start typing to fill the first field. Tab moves to the next field and locks the value you leave, Enter applies and Escape cancels.
-- **The same fields in Layout.** Line, the rectangle tools, Ellipse, Table, Circle, Polygon and the arc tools take values on the page. Move, Rotate and Offset show their value next to the pointer.
-- Fields size to their text, sit outside the shape they label so they don't cover it, and have a translucent background.
-- Push/Pull shows a loose face's distance as positive in either direction, and a typed distance goes the way you are pulling.
-
-### Modeling
-
-- **Chamfer all edges of a box.** Chamfer now works where three picked edges meet at a corner, and the three bevels meet in a point. Fillet still can't round such a corner.
-- **Orbit without losing your work.** Choosing Orbit, Pan, Zoom or Zoom Window no longer ends the tool you're using. Picked edges, a line in progress and previews all stay, and Esc or choosing the tool again takes you back. Enter still applies, so you can orbit while picking chamfer edges. Select and Space set a tool aside the same way when it has an operation in progress.
-
-### Layout
-
-- **Draw past the page edge.** Objects that run off the paper are drawn in full on the gray area around the page, and every tool works there. Printing, export and presentation still show only what's on the paper.
-- **Linked units.** A paper preset sets the page to landscape and picks inches for US sizes or millimeters for international ones. A new Orientation option turns the page. The grid units now set the units of drawing values and new dimensions, and templates start in their paper's units.
-- The Models list in the Layout panel can now be collapsed like the other sections.
-
-## 26.44.356
-
-### Import and export
-
-- **Faster STEP import.** STEP files are converted on your device by a new reader. The desktop app uses every core and reads files up to 256 MiB. The browser converts on background threads. While a file converts, PushForm shows the part count, meshing progress and how long a slow step has been running. Cancel stops the conversion.
-- **STEP export.** Export a model as STEP from the Export dialog, including on desktop. Face colours and opacity are kept.
-- **Large mesh imports.** Large STL, OBJ, 3DS, glTF, COLLADA and STEP files now import as mesh parts, which stay fast in big models. You can select, move, copy, group, tag, hide, erase and paint them.
-- **Make Editable.** Turn a mesh part into ordinary faces and edges when you need to model on it.
-- **More `.layout` files open.** Dimensions and viewport cameras that can't be read are skipped instead of stopping the import.
-- **Older `.skp` files.** Radial dimensions are now read from files saved before 2021.
-
-### Modeling viewport
-
-- A navigation cube in the corner of the viewport shows the view direction. Click a face, edge or corner to turn the view.
-- Fog now covers the ground and sky as well as the model. It fades edges and blends into the horizon.
-- New views start from a standing viewpoint with the sky at the top. The ground grid is hidden by default.
-- Selecting a face or edge of a solid outlines the solid's edges and marks it in the Object browser.
-
-### Interface
-
-- Modeling tools are grouped into a labeled ribbon. Section planes sit with the measurement tools under Inspect, and the View group is now Navigate.
-- On desktop, document tabs share the title bar.
-- New app icon on macOS and new installer artwork.
-- The Layout panels match the look of the Modeling workspace.
-- On a Mac, Paint Bucket's adjacent-fill and replace modes now work: Option stands in for Ctrl, and Cmd samples a material.
-- Several toolbar icons were redrawn, including Shape Builder.
-
-### AI Chat
-
-- AI Chat can edit 3D models, create and update scenes, and frame the camera.
-
-### Scenes
-
-- Scenes save and restore the visibility of objects inside groups and components.
-- Dragging a scene's grip to reorder it works again.
-
-### Reliability
-
-- Saving a large model no longer freezes the editor while its thumbnail is made, and recovery checkpoints are spaced out so they interrupt work less.
-- When an import fails, the source file can be captured privately for the support report.

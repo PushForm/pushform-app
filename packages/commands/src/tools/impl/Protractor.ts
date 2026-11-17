@@ -5,7 +5,8 @@ import { MERGE_TOL, v3addScaled, v3cross, v3dot, v3len, v3normalize, v3sub } fro
 import type { Axis, InferenceOptions, InferenceResult } from '@pushform/inference';
 import type { VcbKind, VcbValue } from '../../vcb/parse';
 import type { OverlayPrimitive } from '../overlay';
-import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolSettingValue, ToolStatus } from '../Tool';
+import { toggleSetting } from '../settings';
 import { pointerField } from '../entry';
 import { inferenceOverlay, PREVIEW_COLOR, worldPerPixelAt } from '../toolUtil';
 import { AXIS_COLORS, AXIS_NORMAL, fmtAngle, GUIDE_COLOR, projectToPlane } from './constructionUtil';
@@ -26,7 +27,8 @@ const IDLE: State = { kind: 'idle' };
  * Protractor. The plane comes from the hovered face, an arrow-key axis lock, or Shift (holds the
  * current plane). Click the vertex (center), click the baseline direction, rotate to the angle
  * (15° ticks while the cursor is inside the protractor) and click → a guide line at that angle
- * (`guides.addLine`). VCB takes degrees or `rise:run`; Ctrl toggles guide creation.
+ * (`guides.addLine`). VCB takes degrees or `rise:run`; Ctrl toggles guide creation, which is on
+ * again each time the tool is chosen.
  */
 export class ProtractorTool implements Tool {
   readonly id = 'protractor';
@@ -68,6 +70,8 @@ export class ProtractorTool implements Tool {
   activate(ctx: ToolContext): void {
     this.ctx = ctx;
     this.state = IDLE;
+    // every time the tool is chosen it starts creating guides again
+    this.createGuides = true;
   }
   deactivate(): void {
     this.reset();
@@ -115,7 +119,6 @@ export class ProtractorTool implements Tool {
   onKeyDown(e: ToolKeyEvent): boolean {
     switch (e.key) {
       case 'Control':
-      case 'Alt':
         if (!e.repeat) {
           this.createGuides = !this.createGuides;
           this.ctx?.statusChanged();
@@ -208,12 +211,22 @@ export class ProtractorTool implements Tool {
   }
 
   status(): ToolStatus {
+    return { ...this.baseStatus(), settings: [toggleSetting('guides', 'Create guides', this.createGuides, 'primary')] };
+  }
+
+  onSetting(id: string, value: ToolSettingValue): void {
+    if (id !== 'guides' || typeof value !== 'boolean') return;
+    this.createGuides = value;
+    this.ctx?.requestRender();
+    this.ctx?.statusChanged();
+  }
+
+  private baseStatus(): ToolStatus {
     const s = this.state;
-    const guide = this.createGuides ? '' : ' [Guide creation off: Ctrl toggles]';
-    if (s.kind === 'idle') return { instructor: `Click to place the protractor (hover a face to align it).${guide}`, vcbLabel: 'Angle' };
-    if (s.kind === 'center') return { instructor: `Click to set the baseline.${guide}`, vcbLabel: 'Angle' };
+    if (s.kind === 'idle') return { instructor: `Click to place the protractor (hover a face to align it).`, vcbLabel: 'Angle' };
+    if (s.kind === 'center') return { instructor: `Click to set the baseline.`, vcbLabel: 'Angle' };
     const deg = this.cursorInference ? this.angleFor(this.cursorInference.point, this.cursorCamera) : (this.lastAngle ?? 0);
-    return { instructor: `Click to set the angle or enter value (degrees or rise:run).${guide}`, vcbLabel: 'Angle', vcbValue: fmtAngle(deg), fields: [pointerField('Angle', 'angle', fmtAngle(deg))] };
+    return { instructor: `Click to set the angle or enter value (degrees or rise:run).`, vcbLabel: 'Angle', vcbValue: fmtAngle(deg), fields: [pointerField('Angle', 'angle', fmtAngle(deg))] };
   }
 
   // --- internals ------------------------------------------------------------------------------

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
+import type { MaterialAppearance } from '@pushform/model';
 import type { Box3, Mat4, MeshData, PlaneBasis, Vec3 } from '@pushform/core';
 
 /**
@@ -87,6 +88,8 @@ export interface RenderBody {
 
 /** A material as the renderer sees it (CSS color, opacity and an optional texture image URL). */
 export interface RenderMaterial {
+  readonly appearance?: MaterialAppearance | undefined;
+  readonly normalUrl?: string | undefined;
   readonly id: number;
   readonly color: string;
   readonly alpha: number;
@@ -217,6 +220,13 @@ export interface RenderText {
   /** CSS color. */
   readonly color: string;
   readonly fontSizePt: number;
+  readonly bold?: boolean | undefined;
+  readonly italic?: boolean | undefined;
+  /**
+   * URL of the font file (woff2, woff, ttf or otf) for the text's family and emphasis; absent draws the default
+   * typeface in the text's weight and style.
+   */
+  readonly fontUrl?: string | undefined;
   readonly selected: boolean;
 }
 
@@ -518,9 +528,13 @@ export interface RenderSectionPlane {
   /** Unit normal pointing to the side the cut keeps. */
   readonly normal: Vec3;
   readonly symbol: string;
+  /** The sheet the section is drawn on, shown under the symbol; absent or empty leaves that half of the bubble blank. */
+  readonly sheet?: string | undefined;
   /** The active cut of its container. */
   readonly active: boolean;
   readonly selected: boolean;
+  /** Hidden, drawn because hidden geometry is shown: outline only, without the fill. */
+  readonly hidden?: boolean | undefined;
 }
 
 /**

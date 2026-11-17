@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import type { DefId, Id, Vec2, Vec3 } from '@pushform/core';
-import { m4translation } from '@pushform/core';
+import type { DefId, Id, MMat4, Vec2, Vec3 } from '@pushform/core';
+import { m4mul, m4translation } from '@pushform/core';
 import type { InferenceResult } from '@pushform/inference';
 import { createEntityContainer } from '@pushform/model';
 import type { ComponentDefinition, DocumentState, EntityRef } from '@pushform/model';
 import { componentPlacement, type ComponentPlacementStore } from '../../commands/components';
+import { currentFrame } from '../../commands/context';
 import type { OverlayPrimitive } from '../overlay';
 import type { Tool, ToolContext, ToolPointerEvent, ToolStatus } from '../Tool';
 import { hostOfTool, inferenceOverlay } from '../toolUtil';
@@ -75,9 +76,21 @@ export class PlaceComponentTool implements Tool {
 
   overlay(): readonly OverlayPrimitive[] {
     const out: OverlayPrimitive[] = [];
-    if (this.preview && this.point) out.push(...movedOutline(this.preview.state, this.preview.refs, m4translation(this.point)));
+    const placement = this.placementMatrix();
+    if (this.preview && placement) out.push(...movedOutline(this.preview.state, this.preview.refs, placement));
     out.push(...inferenceOverlay(this.inference, this.screen ?? undefined));
     return out;
+  }
+
+  /**
+   * World transform the placement would get at the cursor: `component.place` puts the insertion point there in the
+   * open context's axes, so inside a rotated or scaled group the preview turns and scales with it.
+   */
+  private placementMatrix(): MMat4 | null {
+    if (!this.ctx || !this.point) return null;
+    const host = hostOfTool(this.ctx);
+    const frame = currentFrame(host);
+    return frame.identity ? m4translation(this.point) : m4mul(frame.matrix, m4translation(frame.toLocal(this.point)));
   }
 
   status(): ToolStatus {

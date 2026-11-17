@@ -9,6 +9,7 @@ import type { OverlayPrimitive } from '../overlay';
 import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
 import { inferenceOverlay, PREVIEW_COLOR, screenDist } from '../toolUtil';
 import { AXIS_NORMAL, drawingPlaneAt, planeLockFromKey, toggleLock } from './drawingUtil';
+import { planeTag } from '../held';
 
 /** Minimum pointer travel (CSS px) between two samples. */
 export const FREEHAND_SAMPLE_PX = 2;
@@ -130,6 +131,12 @@ export class FreehandTool implements Tool {
   }
 
   status(): ToolStatus {
+    const held = [...planeTag(this.lockNormal)];
+    const s = this.statusWithoutHeld();
+    return held.length ? { ...s, held } : s;
+  }
+
+  private statusWithoutHeld(): ToolStatus {
     return this.drawing
       ? { instructor: 'Release to finish the curve (release on the start to close it).', vcbLabel: '' }
       : { instructor: 'Click and drag to draw a freehand curve.', vcbLabel: '' };

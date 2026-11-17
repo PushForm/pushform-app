@@ -19,11 +19,10 @@ const root = (): Location => ({ project: null, folder: null, search: '', page: 0
 interface Listing { key: string; projects: CloudProject[]; folders: CloudFolder[]; files: CloudFile[]; error?: string }
 
 /** The editor's project → root → folder navigation stack. */
-export function WorkspaceFiles({ api, open, onOpen, onClose, onRenamed, onMoved, onForgetRecents }: {
+export function WorkspaceFiles({ api, open, onOpen, onRenamed, onMoved, onForgetRecents }: {
   api: CloudFilesApi | undefined;
   open: boolean;
   onOpen: (file: CloudFile) => Promise<void>;
-  onClose: () => void;
   onRenamed: (fileId: string, name: string) => void;
   onMoved: (fileId: string, projectId: string, folderId: string | null) => void;
   onForgetRecents: (ids: string[]) => void;
@@ -106,7 +105,7 @@ export function WorkspaceFiles({ api, open, onOpen, onClose, onRenamed, onMoved,
   const files = current?.files ?? [];
   return <section className="pf-workspace-files" aria-label="Files" aria-busy={busy} onKeyDown={event => {
     event.stopPropagation();
-    if (event.key === 'Escape') { event.preventDefault(); if (!busy) { if (creating) setCreating(false); else onClose(); } }
+    if (event.key === 'Escape') { event.preventDefault(); if (!busy && creating) setCreating(false); }
     if (event.altKey && event.key === 'ArrowLeft' && !busy) { event.preventDefault(); back(); }
   }} onKeyUp={event => event.stopPropagation()} onCopy={event => event.stopPropagation()} onCut={event => event.stopPropagation()} onPaste={event => event.stopPropagation()}>
     <header className="pf-files-header">

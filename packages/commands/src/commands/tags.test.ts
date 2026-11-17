@@ -13,6 +13,8 @@ import { sketchCommands } from './sketch';
 import { groupCommands } from './groups';
 import { styleCommands } from './styles';
 import { tagCommands, tagEffectivelyVisible, tagInfos, tagUsage } from './tags';
+import { addCurveToDraft, curveCommands, type AddCurveParams } from './curves';
+import { tessellateCircle } from '@pushform/geom';
 
 function setup() {
   const host = new DocumentHost();
@@ -30,6 +32,7 @@ function setup() {
   registry.registerAll(groupCommands);
   registry.registerAll(styleCommands);
   registry.registerAll(tagCommands);
+  registry.registerAll(curveCommands);
   const state = () => host.doc.state;
   return { host, registry, display, state };
 }
@@ -113,6 +116,65 @@ describe('tag.assign / setActive / visibility', () => {
     expect(tagEffectivelyVisible(state(), tag as TagId)).toBe(false);
     // selectAll
     expect(registry.execute('tag.selectAll', { id: tag })).toBe(2); // body + sketch edge
+  });
+});
+
+describe('drawing on the active tag', () => {
+  const circle = (center: [number, number, number], r: number) => {
+    const t = tessellateCircle(center, [0, 0, 1], r, 12, 0);
+    return { points: t.points, closed: true, curve: t.curve };
+  };
+
+  it('curves put their edges and the faces they form on the active tag; Pie closing edges too', () => {
+    const { registry, host } = setup();
+    const tag = registry.execute('tag.create', { name: 'Trim' }) as number;
+    registry.execute('tag.setActive', { id: tag });
+    const sketch = () => host.doc.rootDefinition.entities.sketch;
+    registry.execute('sketch.addCurve', circle([0, 0, 0], 1));
+    const pts: [number, number, number][] = [[5, 0, 0], [5 + Math.SQRT1_2, Math.SQRT1_2, 0], [5, 1, 0]];
+    registry.execute('sketch.addCurve', { points: pts, closed: false, curve: { kind: 'arc', center: [4, 0, 0], normal: [0, 0, 1], radius: 1, startAngle: 0, endAngle: Math.PI / 2, segments: 2 }, closeTo: [4, 0, 0] });
+    expect(sketch().faces.size).toBe(2);
+    expect([...sketch().edges.values()].every((e) => e.tagId === tag)).toBe(true);
+    expect([...sketch().faces.values()].every((f) => f.tagId === tag)).toBe(true);
+    // rectangles: the face goes on the active tag as well
+    registry.execute('sketch.rectangle', { a: [10, 0, 0], b: [11, 0, 0], c: [11, 1, 0], d: [10, 1, 0] });
+    expect([...sketch().faces.values()].every((f) => f.tagId === tag)).toBe(true);
+  });
+
+  it('the piece of a split face that takes over keeps its tag; re-tessellating a curve keeps its tags', () => {
+    const { registry, host, state } = setup();
+    const a = registry.execute('tag.create', { name: 'A' }) as number;
+    const b = registry.execute('tag.create', { name: 'B' }) as number;
+    const sketch = () => host.doc.rootDefinition.entities.sketch;
+    registry.execute('tag.setActive', { id: a });
+    registry.execute('sketch.rectangle', { a: [0, 0, 0], b: [2, 0, 0], c: [2, 1, 0], d: [0, 1, 0] });
+    const res = registry.execute('sketch.addCurve', circle([5, 0, 0], 1)) as { curveId: number };
+    registry.execute('tag.setActive', { id: b });
+    registry.execute('sketch.addEdge', { a: [1, 0, 0], b: [1, 1, 0] });
+    const rectFaces = [...sketch().faces.values()].filter((f) => f.plane.n[2] !== 0 && f.loops[0]!.length === 4);
+    expect(rectFaces).toHaveLength(2);
+    // one piece takes over the face (and its tag); the other is a new face, on the active tag
+    expect(rectFaces.map((f) => f.tagId).sort()).toEqual([a, b].sort());
+    registry.execute('tag.setActive', { id: null });
+    registry.execute('sketch.setCurveSegments', { curveId: res.curveId, segments: 20 });
+    const curveEdges = [...sketch().edges.values()].filter((e) => e.curveId === res.curveId);
+    expect(curveEdges).toHaveLength(20);
+    expect(curveEdges.every((e) => e.tagId === a)).toBe(true);
+    const curveFaces = [...sketch().faces.values()].filter((f) => !rectFaces.some((r) => r.id === f.id));
+    expect(curveFaces).toHaveLength(1);
+    expect(curveFaces[0]!.tagId).toBe(a);
+    expect(state().defaultTagId).not.toBe(a);
+  });
+
+  it('addCurveToDraft without a tag (imports and other callers) leaves the default tag', () => {
+    const { registry, host, state } = setup();
+    const tag = registry.execute('tag.create', { name: 'Trim' }) as number;
+    registry.execute('tag.setActive', { id: tag });
+    host.edit('Import', (draft) => addCurveToDraft(draft, circle([0, 0, 0], 1) as AddCurveParams));
+    const sketch = host.doc.rootDefinition.entities.sketch;
+    expect(sketch.faces.size).toBe(1);
+    expect([...sketch.edges.values()].every((e) => e.tagId === state().defaultTagId)).toBe(true);
+    expect([...sketch.faces.values()].every((f) => f.tagId === state().defaultTagId)).toBe(true);
   });
 });
 

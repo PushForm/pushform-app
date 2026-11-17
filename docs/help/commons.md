@@ -1,10 +1,24 @@
 # Download models from Commons
 
+## Preview finishes
+
+Generated thumbnails show supported material finishes with studio lighting. The interactive preview also preserves smooth shading, roughness, metallic reflections, opacity and emission. It uses neutral studio lighting, so highlights move as you rotate the model. Source textures and normal maps are omitted from the interactive preview; open the native model in PushForm to inspect its complete materials. If WebGL is unavailable, the viewer falls back to geometry and base colors.
+
+## Download and open a model
+
 PushForm Commons is a community model catalog with its own website. Browse models, search by name or description, and filter by category or license. A search finds models containing every word you type. Put words in double quotes to match that exact phrase as whole words: `"Ann Lee"` finds Ann Lee but not Joann Leeds or Lee, Ann. The commercial-use filter includes models only when every listed license explicitly permits commercial use; read all listed conditions before reuse.
 
 The unfiltered browse view omits models marked low interest by Commons admins. Search or apply any category, license, or commercial-use filter to find matching models from the full library. These models remain available through direct links, creator pages, and collections.
 
 Open a model to see its original creator next to the title. Select a creator's name, on a model page or a model card, to see more of their work. A creator with a Commons profile opens that profile; any other creator name searches the library for that exact name. Source information, licenses and required credits are grouped under **Licenses & attribution**. When files are available, choose **Download ZIP** next to a filename. The package contains the unchanged original in `files/`, an `ATTRIBUTION.json` record and a README. Keep required credits and license notices with reused files. A free download does not remove license conditions.
+
+On a model page, **Revision** shows the last six characters of the revision identifier. Hover over it to see the full identifier.
+
+## Find products to buy
+
+Some model pages include **Where to buy**, with purchase options selected by PushForm. A generic model may link to products from several manufacturers. **Reference product** identifies a product used as a reference; **Similar option** identifies an alternative with the same general form. Neither label guarantees an exact fit. Open **Product details** for the manufacturer, part number, marketplace identifier, variant and verification date where known. Check the retailer's current dimensions, availability and package quantity before purchasing.
+
+**View on** opens the retailer or its approved affiliate destination directly. Active affiliate links show a disclosure beside the purchase action. Purchase sources are managed by PushForm staff, separately from model ownership, licenses and creator credits. Publishing or editing a model does not let a contributor add or change purchase links. Descriptions display as plain text.
 
 ## Browse featured projects and collections
 
@@ -19,6 +33,10 @@ Any signed-in PushForm user can create collections. Choose **New Collection** be
 On a model page, **Save to collection** adds or removes that model using your collection checkboxes. **New private collection** creates a collection and saves the model into it in one action.
 
 On your collection's page, choose **Edit collection** to change its details or visibility, remove models, and use **Move up** or **Move down** to set their order. To add models, open a model's page and choose **Save to collection**. The first four available models form its cover. Choose **Save collection** to apply your edits. You can keep up to 100 collections with up to 100 models each. If someone edits the same collection in another tab, reload before saving again; a failed save keeps your draft available for correction.
+
+## Add a model to collections while publishing
+
+Open the **Collections** dropdown in the publishing dialog to see your collections; check the ones the model belongs in, or type a name and choose **Add** to create a new private collection. The model is added when you choose **Publish model**, because collections only hold published models; saving a draft does not keep these choices. When you edit a model that is already published, its current collections are checked. Unchecking one removes the model, and if nothing else changed, **Save collections** applies the change without publishing a new version. If a collection can't be updated, the model stays published and the dialog names the collection so you can fix it from the model page.
 
 ## Collection visibility and credits
 
@@ -97,7 +115,7 @@ Choose **My profile**, then open a card under **My Models**. Your model's detail
 
 ## Preview a model
 
-Commons renders thumbnails from supported model geometry on its server; a contributor does not need to upload a screenshot. An optional uploaded PNG or JPEG is used as the listing image instead. Choose **Explore in 3D** on a model page to rotate the geometry, zoom, or reset the view. Drag to orbit, use the labeled controls, or focus the viewer and use arrow keys, plus/minus, and zero to reset. Previews are available without signing in; original downloads require your PushForm account and initial account setup.
+Commons renders thumbnails from supported model geometry on its server; a contributor does not need to upload a screenshot. Generated thumbnails use Bright studio lighting and a transparent background, so the Commons backdrop shows through. Sharing a saved model from the editor uses the same lighting and transparency with your current camera. An optional uploaded PNG or JPEG is used as the listing image instead. Choose **Explore in 3D** on a model page to rotate the geometry, zoom, or reset the view. Drag to orbit, use the labeled controls, or focus the viewer and use arrow keys, plus/minus, and zero to reset. Previews are available without signing in; original downloads require your PushForm account and initial account setup.
 
 Commons converts every format it accepts as soon as the upload is checked: native PushForm, STEP, FreeCAD, SketchUp (SKP and SKB), DXF, KMZ and mesh files (STL, OBJ, GLB/glTF, COLLADA, 3DS and model ZIPs). Drafts get previews too, visible only to you until you publish. It accepts originals up to 128 MiB for conversion and displays up to 12,000 triangles. It shows geometry and material colors, with no textures, annotations, recorded dimensions, units or fabrication suitability. Unsupported content and models over those limits show an unavailable preview; try **Open in PushForm** or download the original where supported. A failed image falls back to the generated thumbnail when possible.
 

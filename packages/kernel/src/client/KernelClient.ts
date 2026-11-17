@@ -3,6 +3,8 @@
 import type { MeshData } from '@pushform/core';
 import type { KernelBackend } from '../backends/KernelBackend';
 import type {
+  HardwareRequest,
+  HardwareResult,
   BooleanRequest,
   BooleanResult,
   ComponentsResult,
@@ -20,6 +22,8 @@ import type {
   MeshWire,
   PropertiesRequest,
   PropertiesResult,
+  PushPullPreview,
+  PushPullPreviewRequest,
   PushPullRequest,
   PushPullResult,
   ReleaseResult,
@@ -100,8 +104,10 @@ export class KernelClient {
     return this.backend.request(version === undefined ? { type: 'release', bodyId } : { type: 'release', bodyId, version });
   }
 
-  pushPull(params: Params<PushPullRequest>): Promise<PushPullResult> {
-    return this.backend.request({ type: 'pushPull', ...params });
+  pushPull(params: Params<PushPullPreviewRequest>): Promise<PushPullPreview>;
+  pushPull(params: Params<PushPullRequest>): Promise<PushPullResult>;
+  pushPull(params: Params<PushPullRequest> | Params<PushPullPreviewRequest>): Promise<PushPullResult | PushPullPreview> {
+    return this.backend.request({ type: 'pushPull', ...params } as PushPullRequest | PushPullPreviewRequest);
   }
   extrudeSketch(params: Params<ExtrudeSketchRequest>): Promise<PushPullResult> {
     return this.backend.request({ type: 'extrudeSketch', ...params });
@@ -141,6 +147,9 @@ export class KernelClient {
   }
   edgeBlend(params: Params<EdgeBlendRequest>): Promise<EdgeBlendResult> {
     return this.backend.request({ type: 'edgeBlend', ...params });
+  }
+  hardware(params: Params<HardwareRequest>): Promise<HardwareResult> {
+    return this.backend.request({ type: 'hardware', ...params });
   }
   stats(): Promise<StatsResult> {
     return this.backend.request({ type: 'stats' });

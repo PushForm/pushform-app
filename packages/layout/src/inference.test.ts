@@ -111,3 +111,21 @@ it('offers centers from visible shared entities on every page', () => {
   const second = { ...first, id: 5, entities: new Map(), entityOrder: [] };
   for (const page of [first, second]) expect(snapPaperPoint([50.2, 40.3], page, state, 2)).toEqual({ point: [50, 40], kind: 'midpoint', type: 'center' });
 });
+
+it('snaps the drawing grid in every quadrant and far beyond the native page container', () => {
+  const state = createLayoutDocumentState();
+  state.settings.drawing = true;
+  state.settings.grid.snap = true;
+  state.settings.grid.spacingMm = 100;
+  const page = state.pages.get(state.pageOrder[0]!)!;
+  for (const point of [[-200, -300], [-200, 300], [200, -300], [2000000, 3000000], [0, 0]]) {
+    const raw: [number, number] = [point[0]! + 0.3, point[1]! - 0.2];
+    const snapped = snapPaperPoint(raw, page, state, 1);
+    expect(snapped.kind).toBe('grid');
+    expect(snapped.point[0]).toBeCloseTo(point[0]!);
+    expect(snapped.point[1]).toBeCloseTo(point[1]!);
+    state.settings.drawing = false;
+    expect(snapPaperPoint(raw, page, state, 1).kind).toBeNull();
+    state.settings.drawing = true;
+  }
+});

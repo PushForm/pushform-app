@@ -65,7 +65,7 @@ export function validateNativeModelCatalogs(settings: NativeModelSettings, state
   for (const id of settings.sceneOrder) if (!state.scenes.has(id)) fail();
   validateNativeTagHierarchy(state.tags, state.tagFolders);
   for (const tag of state.tags.values()) if (tag.texture && !state.images.has(tag.texture.imageId)) fail();
-  for (const [id, material] of state.materials) if (material.id !== id || (material.texture && !state.images.has(material.texture.imageId))) fail();
+  for (const [id, material] of state.materials) if (material.id !== id || (material.texture && !state.images.has(material.texture.imageId)) || (material.appearance?.normal && !state.images.has(material.appearance.normal.imageId))) fail();
   for (const [id, image] of state.images) if (image.id !== id) fail();
   for (const [id, style] of state.styles) {
     if (style.id !== id) fail(); for (const watermark of style.watermarks) if (!state.images.has(watermark.imageId)) fail();

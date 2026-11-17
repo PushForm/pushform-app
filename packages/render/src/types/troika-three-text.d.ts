@@ -5,6 +5,10 @@ declare module 'troika-three-text' {
   export class Text extends Mesh {
     text: string;
     fontSize: number;
+    /** URL of a font file; null uses the default typeface for the text's characters. */
+    font: string | null;
+    fontWeight: number | 'normal' | 'bold';
+    fontStyle: 'normal' | 'italic';
     color: Color | number | string;
     anchorX: number | string;
     anchorY: number | string;

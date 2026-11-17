@@ -3,14 +3,15 @@
 import type { Box3, Vec3, Guid } from '@pushform/core';
 import { applySketchUpImport, openModelFile, readPreservedSketchUpModel, readSketchUpInWorker, type ImportedScene } from '@pushform/io';
 import {
-  isCloudReference, isCloudSource, isViewport, layoutFrameSize, viewportCacheCurrent, viewportCloudReference, viewportOrthoHeight, viewportSourceKey,
+  isCloudReference, isCloudSource, isViewport, layoutFrameSize, viewportCacheCurrent, viewportCloudReference, viewportOrthoHeight, viewportSourceKey, viewportSourceSectionViews, viewportSourceSheetsKey,
   type CloudModelReference, type LayoutDocumentState, type LayoutEntity, type LayoutViewport, type LayoutViewportCamera, type LayoutViewportDisplay,
+  type LayoutViewportSections,
 } from '@pushform/layout';
-import { createDocument, ImageStore, type DocumentState } from '@pushform/model';
-import { Viewport, type CameraState, type RenderBody, type RenderDisplay, type RenderImage, type RenderSketch } from '@pushform/render';
+import { createDocument, ImageStore, type DocumentState, type ModelingColors, type Scene } from '@pushform/model';
+import { Viewport, type CameraState, type RenderBody, type RenderDisplay, type RenderImage, type RenderSections, type RenderSketch } from '@pushform/render';
 import { bodiesToRender, displayToRender, fogToRender, imagesToRender, shadowsToRender, sketchesToRender, withRenderImageStore } from '../engine/renderAdapter';
 import { sectionsToRender } from '../engine/sectionAdapter';
-import { forgetLayoutImage, LAYOUT_VIEW_EMPTY, LAYOUT_VIEW_FAILED, layoutImageReady, notifyLayoutImages, setLayoutCanvasPicture } from './layoutImage';
+import { forgetLayoutImage, LAYOUT_VIEW_EMPTY, LAYOUT_VIEW_FAILED, layoutImageReady, layoutPicture, notifyLayoutImages, setLayoutCanvasPicture } from './layoutImage';
 import { layoutEmbeddedModelIdentity } from './layoutEmbeddedModelIdentity';
 
 /**
@@ -33,7 +34,11 @@ export interface LayoutViewportModel {
   state: DocumentState;
 }
 
-export type LayoutViewportStatus = 'cached' | 'current' | 'empty' | 'rendering' | 'unavailable';
+/**
+ * `outdated`: updates are paused and the picture shows an earlier configuration of the view. `unknown`: the picture is
+ * kept but cannot be checked against the view or its model (a reopened drawing, or a model that cannot be read).
+ */
+export type LayoutViewportStatus = 'cached' | 'current' | 'empty' | 'rendering' | 'unavailable' | 'outdated' | 'unknown';
 
 type Source = LayoutViewport['source'];
 const sourceKey = viewportSourceKey;
@@ -101,7 +106,17 @@ let previewSerial = 0;
 interface Job {
   key: string; entityId: number; preview: boolean; state: LayoutDocumentState; source: Source; camera: CameraState; shift: readonly [number, number] | undefined;
   width: number; height: number; background: string | null; scene: string | null; display: LayoutViewportDisplay | undefined;
+  /** The sheet each section plane is drawn on, by plane, for the section markers. */
+  sheets: Readonly<Record<string, string>>;
+  /** The configuration it renders, independent of resolution (`viewConfig`). */
+  config: string;
+  /** Requested by the workspace for a view on screen; these render before the rest. */
+  visible: boolean;
 }
+/** The configuration each view's last committed render shows, to tell a paused view's picture from the current view. */
+const rendered = new Map<number, string>();
+/** Views an explicit update asked to render while updates are paused, by the configuration asked for. */
+const forced = new Map<number, string>();
 const queue: Job[] = [];
 let running = false;
 let offscreen: Viewport | null | undefined;
@@ -170,13 +185,71 @@ export function viewGeometry(model: LayoutViewportModel, scene: string | null): 
   if (!byScene) sceneGeometry.set(model, byScene = new Map());
   const cached = byScene.get(saved.name);
   if (cached) return cached;
-  const hidden = new Set(saved.hiddenTags);
-  const tags = new Map([...model.state.tags].map(([id, tag]) => [id, { ...tag, visible: !hidden.has(tag.name) }]));
-  const state = { ...model.state, tags };
+  const state = withSceneTags(model.state, saved);
   const geometry = { ...withRenderImageStore(model.images, () => ({ bodies: bodiesToRender(state), sketches: sketchesToRender(state) })),
     pictures: imagesToRender(state, model.images) };
   byScene.set(saved.name, geometry);
   return geometry;
+}
+
+/** The model with a scene's hidden tags hidden and every other tag shown. */
+function withSceneTags(state: DocumentState, saved: ImportedScene): DocumentState {
+  const hidden = new Set(saved.hiddenTags);
+  return { ...state, tags: new Map([...state.tags].map(([id, tag]) => [id, { ...tag, visible: !hidden.has(tag.name) }])) };
+}
+
+/** The style settings that decide how section planes and cuts are drawn. */
+const SECTION_SETTINGS = ['sectionPlanesVisible', 'sectionCutsVisible', 'sectionFillEnabled', 'activeSection', 'inactiveSection', 'sectionFill',
+  'sectionLine', 'sectionLineWidth'] as const satisfies readonly (keyof ModelingColors)[];
+
+const sceneSections = new WeakMap<LayoutViewportModel, Map<string, DocumentState>>();
+/**
+ * The model as a view of `scene` shows its section planes and cuts, and picks through them: with the scene's tag
+ * visibility when it saves tags, the active section plane it saved for each container when it saves section planes,
+ * and its style's section display settings when it saves its style. Otherwise, and for a view without a scene, the
+ * model's own. The view's own section display settings (`sections`), when it has them, replace the scene's or model's.
+ */
+export function viewSectionState(model: LayoutViewportModel, scene: string | null, sections?: LayoutViewportSections): DocumentState {
+  if (scene === null && !sections) return model.state;
+  let byScene = sceneSections.get(model);
+  if (!byScene) sceneSections.set(model, byScene = new Map());
+  const key = JSON.stringify([scene, sections ?? null]);
+  const cached = byScene.get(key);
+  if (cached) return cached;
+  const imported = model.scenes.find(candidate => candidate.name === scene);
+  let saved: Scene | undefined;
+  for (const id of model.state.sceneOrder) {
+    const candidate = model.state.scenes.get(id);
+    if (candidate?.name === scene) { saved = candidate; break; }
+  }
+  let state = imported?.usesTags ? withSceneTags(model.state, imported) : model.state;
+  if (saved?.flags.useSectionPlanes) {
+    // Each container cuts with the scene's plane among its own, or not at all.
+    const active = new Set<number>(saved.activeSectionPlanes);
+    state = { ...state, definitions: new Map([...state.definitions].map(([id, definition]) => {
+      const entities = definition.entities;
+      const plane = [...entities.sectionPlanes.keys()].find(planeId => active.has(planeId)) ?? null;
+      return [id, plane === entities.activeSectionPlaneId ? definition : { ...definition, entities: { ...entities, activeSectionPlaneId: plane } }];
+    })) };
+  }
+  const style = saved?.flags.useStyle && saved.styleId !== null ? state.styles.get(saved.styleId) : undefined;
+  const current = state.styles.get(state.activeStyleId);
+  if (current && ((style && style !== current) || sections)) {
+    const modeling = { ...current.modeling };
+    if (style) for (const setting of SECTION_SETTINGS) (modeling as Record<string, unknown>)[setting] = style.modeling[setting];
+    if (sections) {
+      modeling.sectionPlanesVisible = sections.planes; modeling.sectionCutsVisible = sections.cuts;
+      if (sections.fill !== undefined) modeling.sectionFillEnabled = sections.fill;
+      if (sections.lineWidth !== undefined) modeling.sectionLineWidth = sections.lineWidth;
+      if (sections.activeColor) modeling.activeSection = sections.activeColor;
+      if (sections.inactiveColor) modeling.inactiveSection = sections.inactiveColor;
+      if (sections.fillColor) modeling.sectionFill = sections.fillColor;
+      if (sections.lineColor) modeling.sectionLine = sections.lineColor;
+    }
+    state = { ...state, styles: new Map(state.styles).set(state.activeStyleId, { ...current, modeling }) };
+  }
+  byScene.set(key, state);
+  return state;
 }
 
 /** Whether a view of `scene` draws nothing at all: no bodies, edges or pictures are shown in it. */
@@ -250,6 +323,26 @@ export function layoutViewportWarnings(state: LayoutDocumentState, entities: rea
   return [...reasons].map(([reason, count]) => `${count === 1 ? 'A model view' : `${count} model views`} could not be rendered: ${reason}`);
 }
 
+/**
+ * Model views whose displayed picture has fewer pixels per inch than an export quality asks for. Export draws the picture
+ * a view displays (it never renders it again), so a higher quality cannot add detail to it: this reports those views
+ * instead of presenting the result as rendered at that quality. Call while the displayed pictures are held and loaded.
+ */
+export function layoutViewportDetailWarnings(state: LayoutDocumentState, entities: readonly LayoutEntity[], dpi: number): string[] {
+  let count = 0, lowest = Infinity;
+  for (const entity of entities) {
+    if (!isViewport(entity)) continue;
+    const { width } = layoutFrameSize(entity.points);
+    const picture = layoutPicture(layoutViewportPicture(state, entity));
+    const pixels = picture instanceof HTMLImageElement ? picture.naturalWidth : picture?.width;
+    // Vector pictures and views without a picture have no pixel resolution to compare.
+    if (!pixels || width <= 0) continue;
+    const have = pixels / (width / 25.4);
+    if (have < dpi * 0.98) { count++; lowest = Math.min(lowest, have); }
+  }
+  return count ? [`${count === 1 ? 'A model view shows' : `${count} model views show`} a picture with less detail than ${dpi} dpi (as low as ${Math.round(lowest)} dpi). Export uses the picture each view displays, so choosing a higher quality does not add detail to it.`] : [];
+}
+
 /** The renderer's camera for a viewport camera across a frame `heightMm` tall. */
 export function viewportCameraState(camera: LayoutViewportCamera, heightMm: number): CameraState {
   return { eye: camera.eye, target: camera.target, up: camera.up, fov: camera.fov, projection: camera.projection,
@@ -267,8 +360,28 @@ export function viewportCameraState(camera: LayoutViewportCamera, heightMm: numb
  * paints nothing, and `LAYOUT_VIEW_FAILED` for a view that cannot be rendered and has no earlier picture; '' means
  * the first picture is still on its way.
  */
-export function layoutViewportPicture(state: LayoutDocumentState, entity: LayoutEntity, camera?: LayoutViewportCamera, pxPerMm?: number, exportResolution = false): string {
+function viewConfig(state: LayoutDocumentState, viewport: LayoutViewport, width: number, height: number): string {
+  return JSON.stringify([sourceKey(state, viewport.source), viewport.camera, width, height, viewport.background, viewport.scene, viewport.display ?? null, viewSheets(state, viewport)]);
+}
+
+/** Whether a committed render of the view may start: updates are automatic, or an explicit update asked for it. */
+function mayRender(state: LayoutDocumentState, entityId: number, config: string): boolean {
+  return state.settings.autoRender || forced.get(entityId) === config;
+}
+
+export interface LayoutViewportPictureOptions {
+  /** The view is on screen: its render goes before those of views that are not. */
+  visible?: boolean;
+  /** The view is being dragged or resized: committed renders wait until it is let go. */
+  defer?: boolean;
+}
+
+export function layoutViewportPicture(state: LayoutDocumentState, entity: LayoutEntity, camera?: LayoutViewportCamera, pxPerMm?: number, exportResolution = false, options: LayoutViewportPictureOptions = {}): string {
   if (!isViewport(entity)) return entity.image?.src ?? '';
+  if (!camera) {
+    const shown = heldDisplays?.get(entity.id);
+    if (shown !== undefined) return shown;
+  }
   const viewport = entity.image.viewport;
   const view = camera ?? viewport.camera;
   if (!camera && !exportResolution && entity.image.src && viewportCacheCurrent(viewport, entity.points, state)) return entity.image.src;
@@ -285,7 +398,8 @@ export function layoutViewportPicture(state: LayoutDocumentState, entity: Layout
     ? Math.min(pxPerMm ?? PREVIEW_PX_PER_MM, PREVIEW_MAX_PX / Math.max(width, height))
     : exportResolution ? Math.min(pxPerMm ?? PRINT_PX_PER_MM, 16384 / Math.max(width, height)) : Math.min(committedPxPerMm(pxPerMm), RENDER_MAX_PX / Math.max(width, height));
   const pixels = [Math.max(1, Math.round(width * scale)), Math.max(1, Math.round(height * scale))] as const;
-  const key = JSON.stringify([sourceKey(state, viewport.source), view, pixels, viewport.background, viewport.scene, viewport.display ?? null]);
+  const sheets = viewSheets(state, viewport);
+  const key = JSON.stringify([sourceKey(state, viewport.source), view, pixels, viewport.background, viewport.scene, viewport.display ?? null, sheets]);
   const preview = previews.get(entity.id);
   if (camera && preview?.key === key) return preview.src;
   const done = camera ? undefined : renders.get(key);
@@ -300,8 +414,11 @@ export function layoutViewportPicture(state: LayoutDocumentState, entity: Layout
     if (!done) return fallback || LAYOUT_VIEW_FAILED;
     return fallback && layoutImageReady(fallback) ? fallback : done;
   }
+  const config = viewConfig(state, viewport, width, height);
+  // Committed renders wait for a drag to finish and, while updates are paused, for an explicit update; previews do not.
+  if (!camera && (options.defer || !mayRender(state, entity.id, config))) return fallback;
   enqueue({ key, entityId: entity.id, preview: !!camera, state, source: viewport.source, camera: viewportCameraState(view, height),
-    shift: view.shift, width: pixels[0], height: pixels[1], background: viewport.background, scene: viewport.scene, display: viewport.display });
+    shift: view.shift, width: pixels[0], height: pixels[1], background: viewport.background, scene: viewport.scene, display: viewport.display, sheets, config, visible: !!options.visible });
   return fallback;
 }
 
@@ -318,14 +435,54 @@ export function layoutViewportRender(state: LayoutDocumentState, entity: LayoutE
   if (width <= 0 || height <= 0) return null;
   const scale = Math.min(PRINT_PX_PER_MM, RENDER_MAX_PX / Math.max(width, height));
   const pixels = [Math.max(1, Math.round(width * scale)), Math.max(1, Math.round(height * scale))] as const;
-  const key = JSON.stringify([sourceKey(state, viewport.source), viewport.camera, pixels, viewport.background, viewport.scene, viewport.display ?? null]);
+  const sheets = viewSheets(state, viewport);
+  const key = JSON.stringify([sourceKey(state, viewport.source), viewport.camera, pixels, viewport.background, viewport.scene, viewport.display ?? null, sheets]);
+  // A picture whose markers show sheets goes stale when they change.
+  const sheet = Object.keys(sheets).length ? viewportSourceSheetsKey(state, viewport.source) : '';
   const found = renders.get(key);
   // An empty view stores a transparent picture, so the drawing reopens showing nothing there without the model.
   const done = found === LAYOUT_VIEW_EMPTY ? TRANSPARENT_PNG : found;
-  if (done) return { src: done, cache: { camera: viewport.camera, widthMm: width, heightMm: height, sha256: reference.target.sha256 } };
-  if (done === undefined) enqueue({ key, entityId: entity.id, preview: false, state, source: viewport.source, camera: viewportCameraState(viewport.camera, height),
-    shift: viewport.camera.shift, width: pixels[0], height: pixels[1], background: viewport.background, scene: viewport.scene, display: viewport.display });
+  if (done) return { src: done, cache: { camera: viewport.camera, widthMm: width, heightMm: height, sha256: reference.target.sha256, ...(sheet ? { sheet } : {}) } };
+  const config = viewConfig(state, viewport, width, height);
+  if (done === undefined && mayRender(state, entity.id, config)) enqueue({ key, entityId: entity.id, preview: false, state, source: viewport.source, camera: viewportCameraState(viewport.camera, height),
+    shift: viewport.camera.shift, width: pixels[0], height: pixels[1], background: viewport.background, scene: viewport.scene, display: viewport.display, sheets, config, visible: false });
   return null;
+}
+
+/**
+ * Section markers name the sheet their section is drawn on, in every view of the model, so a plan's markers point
+ * to the page that draws the section. Planes without one keep that half of the bubble blank.
+ */
+export function withSectionSheets(sections: RenderSections, sheets: Readonly<Record<string, string>>): RenderSections {
+  if (!sections.planes.some((plane) => sheets[plane.id])) return sections;
+  return { ...sections, planes: sections.planes.map((plane) => sheets[plane.id] ? { ...plane, sheet: sheets[plane.id] } : plane) };
+}
+
+const drawnSections = new WeakMap<DocumentState, RenderSections>();
+/** The section planes and cuts a view of `scene` with `sections` draws. */
+function viewSections(model: LayoutViewportModel, scene: string | null, sections: LayoutViewportSections | undefined): RenderSections {
+  const state = viewSectionState(model, scene, sections);
+  let drawn = drawnSections.get(state);
+  if (!drawn) drawnSections.set(state, drawn = sectionsToRender(state));
+  return drawn;
+}
+
+/**
+ * The sheets a view's section markers show, by plane: each plane is drawn on the first page with a view of the model
+ * that cuts with it, each view cut as its scene and section settings decide. Empty while the model is not loaded, so
+ * views without section markers are not drawn again when pages move.
+ */
+function viewSheets(state: LayoutDocumentState, viewport: LayoutViewport): Record<string, string> {
+  const model = loadedModels.get(sourceKey(state, viewport.source));
+  const sheets: Record<string, string> = {};
+  if (!model) return sheets;
+  const drawn = new Set(viewSections(model, viewport.scene, viewport.display?.sections).planes.map((plane) => plane.id));
+  if (!drawn.size) return sheets;
+  // In the order their first pages come, so the first page cutting with a plane names it.
+  for (const views of viewportSourceSectionViews(state, viewport.source)) {
+    for (const cut of viewSections(model, views.scene, views.sections).cuts) if (drawn.has(cut.key) && !(cut.key in sheets)) sheets[cut.key] = views.sheet;
+  }
+  return sheets;
 }
 
 /** Print resolution, or the next doubling of it that keeps up with the screen (few distinct renders while zooming). */
@@ -342,6 +499,30 @@ function showPicture(entityId: number, src: string): void {
     previews.delete(entityId);
     forgetLayoutImage(preview.src);
   }
+}
+
+/** Pictures captured for an export, by view; while set, committed requests return them and render nothing. */
+let heldDisplays: Map<number, string> | null = null;
+
+/** What a view displays now, without requesting a render: its current saved picture, else its last picture, else nothing. */
+function displayedPicture(state: LayoutDocumentState, entity: LayoutEntity & { image: { viewport: LayoutViewport } }): string {
+  const viewport = entity.image.viewport;
+  if (entity.image.src && viewportCacheCurrent(viewport, entity.points, state)) return entity.image.src;
+  const model = loadedModels.get(sourceKey(state, viewport.source));
+  if (model && viewShowsNothing(model, viewport.scene)) return LAYOUT_VIEW_EMPTY;
+  return latest.get(entity.id) ?? entity.image.src ?? '';
+}
+
+/**
+ * Captures what each model view displays right now, so an export draws exactly that: it never refreshes a view, waits
+ * for a pending render or changes the drawing's automatic or paused updates, and a render that finishes meanwhile
+ * cannot replace a picture. Call the returned function when the export ends.
+ */
+export function holdLayoutViewportDisplays(state: LayoutDocumentState, entities: readonly LayoutEntity[]): () => void {
+  const held = new Map<number, string>();
+  for (const entity of entities) if (isViewport(entity)) held.set(entity.id, displayedPicture(state, entity));
+  heldDisplays = held;
+  return () => { if (heldDisplays === held) heldDisplays = null; };
 }
 
 /** Resolves when the queue has drained: the rendering's own completion, not a timer (settled by `drain`). */
@@ -372,12 +553,39 @@ export async function settleLayoutViewportRenders(state: LayoutDocumentState, en
 export function layoutViewportStatus(state: LayoutDocumentState, entity: LayoutEntity): LayoutViewportStatus {
   if (!isViewport(entity)) return 'current';
   const viewport = entity.image.viewport;
-  if (failures.has(sourceKey(state, viewport.source))) return 'unavailable';
-  if (entity.image.src && viewportCacheCurrent(viewport, entity.points, state)) return 'cached';
+  const cached = !!entity.image.src && viewportCacheCurrent(viewport, entity.points, state);
+  // A picture kept for a model that cannot be read cannot be checked against it.
+  if (failures.has(sourceKey(state, viewport.source))) return entity.image.src && !cached ? 'unknown' : 'unavailable';
+  if (cached) return 'cached';
   const model = loadedModels.get(sourceKey(state, viewport.source));
   if (model && viewShowsNothing(model, viewport.scene)) return 'empty';
   if (queue.some(job => job.entityId === entity.id) || running && current?.entityId === entity.id) return 'rendering';
-  return renderFailures.has(entity.id) ? 'unavailable' : 'current';
+  if (renderFailures.has(entity.id)) return 'unavailable';
+  if (!state.settings.autoRender) {
+    const { width, height } = layoutFrameSize(entity.points);
+    const known = rendered.get(entity.id);
+    if (known !== viewConfig(state, viewport, width, height)) {
+      // Without a record of what the picture shows, a saved picture that names its own configuration is outdated; otherwise it is unknown.
+      return known !== undefined || viewport.cache || !(latest.has(entity.id) || entity.image.src) ? 'outdated' : 'unknown';
+    }
+  }
+  return 'current';
+}
+
+/**
+ * Renders these views now, even while updates are paused, without resuming automatic updates. Views whose picture already
+ * matches are left alone.
+ */
+export function updateLayoutViewports(state: LayoutDocumentState, entities: readonly LayoutEntity[]): void {
+  for (const entity of entities) {
+    if (!isViewport(entity)) continue;
+    const viewport = entity.image.viewport;
+    if (entity.image.src && viewportCacheCurrent(viewport, entity.points, state)) continue;
+    const { width, height } = layoutFrameSize(entity.points);
+    forced.set(entity.id, viewConfig(state, viewport, width, height));
+    layoutViewportPicture(state, entity, undefined, undefined, false, { visible: true });
+  }
+  notifyLayoutImages();
 }
 
 let current: Job | null = null;
@@ -400,7 +608,10 @@ async function drain(): Promise<void> {
   running = true;
   try {
     while (queue.length) {
-      const job = queue.pop()!;
+      // The newest request of a view on screen goes first; otherwise the newest.
+      let next = queue.length - 1;
+      for (let index = queue.length - 1; index >= 0; index--) if (queue[index]!.visible) { next = index; break; }
+      const job = queue.splice(next, 1)[0]!;
       current = job;
       let picture = '', failure: string | null = null;
       try {
@@ -413,8 +624,8 @@ async function drain(): Promise<void> {
           const geometry = viewGeometry(model, job.scene);
           withRenderImageStore(model.images, () => { view.setBodies(geometry.bodies); view.setSketches(geometry.sketches); });
           view.setImages(geometry.pictures);
-          view.setSections(sectionsToRender(model.state));
-          const { shadows, ...display }: Partial<LayoutViewportDisplay> = job.display ?? {};
+          view.setSections(withSectionSheets(viewSections(model, job.scene, job.display?.sections), job.sheets));
+          const { shadows, sections: _sections, ...display }: Partial<LayoutViewportDisplay> = job.display ?? {};
           view.setDisplay({ ...model.display, ...display });
           // The view's own sun and shadows, else the model's.
           view.setShadows(shadowsToRender(shadows ? { ...model.state, shadows } : model.state));
@@ -425,6 +636,8 @@ async function drain(): Promise<void> {
             const urls = [...model.images.entries()].map(([id]) => model.images.objectUrl(id)).filter((url): url is string => !!url);
             await view.sceneSync.textures.whenReady(30_000, urls);
             await view.environmentReady;
+            // Section markers' symbols and sheet numbers are laid out before the picture is taken.
+            await view.sceneSync.sections.ready;
           }
           const opts = { shift: job.shift, background: job.background };
           if (job.preview) {
@@ -444,6 +657,8 @@ async function drain(): Promise<void> {
       }
       if (!job.preview) {
         remember(job.key, picture);
+        if (picture && !failure) rendered.set(job.entityId, job.config);
+        if (forced.get(job.entityId) === job.config) forced.delete(job.entityId);
         if (failure) renderFailures.set(job.entityId, failure); else renderFailures.delete(job.entityId);
       }
       // A committed render takes over once decoded (layoutViewportPicture); a preview paints at once.

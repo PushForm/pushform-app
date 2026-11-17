@@ -491,8 +491,8 @@ function emptyItems(opts: ContextMenuOptions): ContextMenuItem[] {
 }
 
 /**
- * Section planes: Erase, Hide, Reverse, Active Cut (checked when the plane is its container's cut, for one
- * plane), and Align View for one plane.
+ * Section planes: Erase, Hide (Unhide when every one is hidden), Reverse, Active Cut (checked when the plane is its
+ * container's cut, for one plane), and Align View for one plane.
  */
 function sectionPlaneItems(state: DocumentState, refs: readonly EntityRef[]): ContextMenuItem[] {
   const planes = refs.map((r) => ({ path: [...r.path], id: r.id }));
@@ -505,10 +505,17 @@ function sectionPlaneItems(state: DocumentState, refs: readonly EntityRef[]): Co
       active = false;
     }
   }
+  const allHidden = refs.length > 0 && refs.every((r) => {
+    try {
+      return containerAt(state, r.path).sectionPlanes.get(r.id)?.hidden === true;
+    } catch {
+      return false;
+    }
+  });
   const items: ContextMenuItem[] = [
     entityInfo(),
     erase(),
-    { label: 'Hide', command: 'sectionPlane.setHidden', params: { refs: planes, hidden: true } },
+    { label: allHidden ? 'Unhide' : 'Hide', command: 'sectionPlane.setHidden', params: { refs: planes, hidden: !allHidden } },
     { label: 'Reverse', command: 'sectionPlane.reverse', params: { refs: planes }, separator: true },
   ];
   if (single) {

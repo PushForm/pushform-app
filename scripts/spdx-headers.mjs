@@ -10,8 +10,8 @@ import { extname } from 'node:path';
 const TAG = ['SPDX-License-Identifier: GPL-3.0-or-later', 'Copyright 2026 PushForm contributors'];
 const STYLE = { '.ts': '//', '.tsx': '//', '.mjs': '//', '.js': '//', '.cjs': '//', '.rs': '//', '.sql': '--', '.css': 'block' };
 // Generated output and reference tooling are not first-party source for the release.
-// crates/solidcraft is third-party code carried with its own licenses (see its README).
-const SKIP = [/(^|\/)db\.types\.ts$/, /(^|\/)node_modules\//, /(^|\/)crates\/solidcraft\//];
+// crates/solidcraft and crates/native-kernel/vendor are third-party code carried with their own licenses (see their READMEs).
+const SKIP = [/(^|\/)db\.types\.ts$/, /(^|\/)node_modules\//, /(^|\/)crates\/solidcraft\//, /(^|\/)crates\/native-kernel\/vendor\//];
 
 const check = process.argv.includes('--check');
 const files = execFileSync('git', ['ls-files'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).split('\n').filter(Boolean);

@@ -3,16 +3,16 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   CommandRegistry, DocumentHost, SERVICE_DOCUMENT, SERVICE_FONTS, SERVICE_KERNEL, componentCommands, contextCommands, curveCommands, dimensionCommands,
-  edgeBlendCommands, edgeCommands, editCommands, followMeCommands, groupCommands, guideCommands, intersectCommands, materialCommands, modelCommands,
-  offsetCommands, pushPullCommands, sectionPlaneCommands, sketchCommands, solidCommands, tagCommands, text3dCommands, textCommands, transformCommands,
+  edgeBlendCommands, edgeCommands, editCommands, revolveCommands, followMeCommands, groupCommands, guideCommands, intersectCommands, materialCommands, modelCommands,
+  offsetCommands, pushPullCommands, sectionPlaneCommands, sketchCommands, solidCommands, tagCommands, text3dCommands, textCommands, transformCommands, builderCommands,
   type FontSource,
 } from '@pushform/commands';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { MODEL_TOOLS, type ModelBatchResult, type ModelOperation } from '@pushform/extension-protocol';
+import { modelOperationSchema, MODEL_TOOLS, type ModelBatchResult, type ModelOperation } from '@pushform/extension-protocol';
 import { basisToLocal } from '@pushform/core';
-import { uvAt } from '@pushform/model';
-import { InlineBackend, KernelClient } from '@pushform/kernel';
+import { containerAt, uvAt } from '@pushform/model';
+import { InlineBackend, KernelClient, meshTopologyProblems } from '@pushform/kernel';
 import { ModelApiFailure, ModelDocumentApi, runModelTool } from './modelApi';
 
 const kernels: KernelClient[] = [];
@@ -33,8 +33,8 @@ function setup(options: { fonts?: boolean } = {}) {
   if (options.fonts) services.set(SERVICE_FONTS, fonts);
   const commands = new CommandRegistry({ tx: host, services });
   for (const group of [editCommands, modelCommands, sketchCommands, transformCommands, groupCommands, componentCommands, contextCommands, tagCommands, materialCommands,
-    curveCommands, pushPullCommands, solidCommands, followMeCommands, edgeBlendCommands, offsetCommands, intersectCommands, edgeCommands, guideCommands,
-    dimensionCommands, textCommands, text3dCommands, sectionPlaneCommands])
+    curveCommands, pushPullCommands, solidCommands, revolveCommands, followMeCommands, edgeBlendCommands, offsetCommands, intersectCommands, edgeCommands, guideCommands,
+    dimensionCommands, textCommands, text3dCommands, sectionPlaneCommands, builderCommands])
     commands.registerAll(group);
   const api = new ModelDocumentApi(commands, 'AI Chat');
   const root = () => host.doc.rootDefinition.entities;
@@ -227,6 +227,206 @@ describe('ModelDocumentApi batches', () => {
     expect(host.undoStack.canUndo).toBe(true);
     host.undoStack.undo();
     expect(root().instances.size + root().bodies.size).toBe(0);
+  });
+
+  describe('add_cabinet', () => {
+    const inch = 0.0254;
+    const cabinet = async (setupResult: ReturnType<typeof setup>, params: Record<string, unknown>) => {
+      const { api } = setupResult;
+      const result = await api.apply({ expectedRevision: api.revision, label: 'Cabinet', operations: [{ op: 'add_cabinet', as: 'cab', ...params }] });
+      return { result, entry: result.results[0]! };
+    };
+
+    it('mounts a selected component with its material inside a drawer and undoes the whole cabinet', async () => {
+      const s = setup();
+      const made = await s.api.apply({ expectedRevision: s.api.revision, label: 'Hardware template', operations: [
+        { op: 'add_box', as: 'solid', min: [-0.02, -0.02, -0.01], max: [0.02, 0, 0.01] },
+        { op: 'make_component', as: 'pull', refs: ['$solid'], name: 'Selected brass pull' },
+      ] });
+      const template = s.root().instances.get(made.created.pull as never)!;
+      const { entry } = await cabinet(s, { type: 'base', width: 18 * inch, hardwarePlacement: { drawers: { definitionId: template.definitionId, width: 0.04, height: 0.02, kind: 'pull' } } });
+      const mounted = entry.parts!.find(p => p.name === 'Drawer: Cabinet Pull')!;
+      expect(mounted.path).toHaveLength(3);
+      expect(containerAt(s.host.doc.state, mounted.path.slice(0, -1) as never).instances.get(mounted.id as never)!.definitionId).toBe(template.definitionId);
+      s.host.undoStack.undo(); expect(s.root().instances.size).toBe(0);
+      s.host.undoStack.redo(); expect(s.root().instances.size).toBe(2);
+    });
+
+    it('keeps satin paint distinct from an existing white paint', async () => {
+      const s = setup();
+      await cabinet(s, { type: 'base', width: 18 * inch, finish: { paint: '#ffffff' } });
+      await cabinet(s, { type: 'base', width: 18 * inch, at: [1, 0, 0], finish: { paint: '#ffffff', roughness: 0.4 }, boxFinish: { paint: '#ffffff', roughness: 0.4 } });
+      const materials = [...s.host.doc.state.materials.values()];
+      expect(materials.find(m => m.name === 'Paint #ffffff roughness 0.4')?.appearance).toMatchObject({ roughness: 0.4, metalness: 0 });
+      expect(materials.find(m => m.name === 'Paint #ffffff')?.appearance?.roughness).not.toBe(0.4);
+    });
+
+    it('builds a whole cabinet from type and width as one undo step', async () => {
+      const s = setup();
+      const { result, entry } = await cabinet(s, { type: 'base', width: 24 * inch });
+      expect(result.created.cab).toBe(entry.id);
+      expect(entry.name).toBe('Base Cabinet 24 in');
+      expect(entry.used).toMatchObject({ doors: 1, drawers: 1, frame: 'frameless', doorStyle: 'shaker' });
+      expect(s.root().instances.size).toBe(1);
+      expect(s.root().instances.get(entry.id as never)?.name).toBe('Base Cabinet 24 in');
+      const names = entry.parts!.map(p => p.name);
+      expect(names).toEqual(expect.arrayContaining(['Left Side', 'Bottom', 'Toe Kick', 'Door: Left Stile', 'Door: Panel', 'Drawer: Front', 'Drawer: Box Bottom']));
+      expect(s.host.undoStack.canUndo).toBe(true);
+      s.host.undoStack.undo();
+      expect(s.root().instances.size).toBe(0);
+    });
+
+    it('reports a size that matches the part as the cut list reads it', async () => {
+      const s = setup();
+      const { entry } = await cabinet(s, { type: 'base', width: 24 * inch });
+      const side = entry.parts!.find(p => p.name === 'Left Side')!;
+      expect(side.size![0]).toBeCloseTo(34.5 * inch, 3);
+      expect(side.size![2]).toBeCloseTo(0.75 * inch, 3);
+      const definition = s.api.getDocument().definitions.find(d => d.name.startsWith('Left Side'))!;
+      expect(definition.type).toBe('group');
+      expect(definition.bounds!.max[0]).toBeCloseTo(34.5 * inch, 6);
+      expect(definition.bounds!.max[2]).toBeCloseTo(0.75 * inch, 6);
+    });
+
+    it('leaves no unintended overlaps', async () => {
+      for (const params of [{ type: 'base', width: 36 * inch, frame: 'face_frame' }, { type: 'wall', width: 30 * inch, doorStyle: 'raised' }, { type: 'tall', width: 24 * inch, drawers: 2, frame: 'face_frame', overlay: 'inset' }, { type: 'base', width: 18 * inch, doors: 0 }]) {
+        const s = setup();
+        await cabinet(s, params);
+        const report = await s.api.findOverlaps({ container: null, minVolume: null });
+        expect(report.overlaps, JSON.stringify(params)).toEqual([]);
+      }
+    }, 60_000);
+
+    it('leaves no overlaps across stacked, glass and every corner style', async () => {
+      const cases: Record<string, unknown>[] = [
+        { type: 'tall', width: 36 * inch, stackedDoors: true, doorStyle: 'shaker', upperDoorStyle: 'glass', frame: 'face_frame' },
+        { type: 'wall', width: 18 * inch, height: 42 * inch, stackedDoors: true, doorStyle: 'glass' },
+      ];
+      for (const frame of ['frameless', 'face_frame']) for (const side of ['left', 'right']) {
+        cases.push({ type: 'base', width: 42 * inch, frame, corner: { style: 'blind', side } });
+        cases.push({ type: 'base', width: 36 * inch, frame, corner: { style: 'diagonal', side, lazySusan: true } });
+        cases.push({ type: 'wall', width: 24 * inch, depth: 12 * inch, frame, corner: { style: 'diagonal', side } });
+        cases.push({ type: 'base', width: 36 * inch, frame, corner: { style: 'l_shaped', side } });
+        cases.push({ type: 'base', width: 36 * inch, frame, corner: { style: 'l_shaped', side, lazySusan: true } });
+        cases.push({ type: 'tall', width: 36 * inch, frame, corner: { style: 'l_shaped', side } });
+      }
+      for (const overlay of ['full', 'inset']) cases.push({ type: 'base', width: 36 * inch, frame: 'face_frame', overlay, corner: { style: 'l_shaped' } });
+      for (const params of cases) {
+        const s = setup();
+        await cabinet(s, params);
+        const report = await s.api.findOverlaps({ container: null, minVolume: null });
+        expect(report.overlaps.map(o => `${o.a.name} / ${o.b.name}`), JSON.stringify(params)).toEqual([]);
+      }
+    }, 120_000);
+
+    it('leaves no overlaps across every glass pattern', async () => {
+      const glassCases: Record<string, unknown>[] = [{ pattern: 'grid', across: 3, down: 4 }, { pattern: 'prairie' }, { pattern: 'mission' }].flatMap(g => [
+        { type: 'wall', width: 24 * inch, height: 42 * inch, doors: 1, doorStyle: 'glass', glass: g },
+        { type: 'wall', width: 36 * inch, height: 42 * inch, doors: 2, frame: 'face_frame', overlay: 'inset', doorStyle: 'glass', glass: g },
+      ]);
+      for (const params of glassCases) {
+        const s = setup();
+        await cabinet(s, params);
+        const report = await s.api.findOverlaps({ container: null, minVolume: null });
+        expect(report.overlaps.map(o => `${o.a.name} / ${o.b.name}`), JSON.stringify(params)).toEqual([]);
+      }
+    }, 60_000);
+
+    it('uses the library glass that was asked for, and finishes the inside of a side only', async () => {
+      const s = setup();
+      const { entry } = await cabinet(s, { type: 'wall', width: 18 * inch, doorStyle: 'glass', glass: { type: 'reeded' }, finishedInterior: true, finishedEnds: 'none', finish: { paint: '#123456' } });
+      const materials = s.api.getDocument().materials;
+      expect(materials.some(m => m.name === 'Reeded Glass')).toBe(true);
+      const side = entry.parts!.find(p => p.name === 'Left Side')!;
+      const body = [...(await import('@pushform/model')).containerAt(s.host.doc.state, side.path as never).bodies.values()][0]!;
+      const finished = [...body.faces.values()].filter(f => f.frontMaterialId !== null);
+      expect(finished).toHaveLength(1);
+      expect(finished[0]!.plane.n[2]).toBeCloseTo(-1, 9);
+    });
+
+    it('leaves no overlaps with hardware, beaded frames and matched fronts', async () => {
+      for (const params of [
+        { type: 'base', width: 30 * inch, hardware: 'bar', drawerFronts: 'match' },
+        { type: 'wall', width: 18 * inch, hardware: 'knob', frame: 'face_frame', overlay: 'inset', beadedFrame: true },
+        { type: 'base', width: 36 * inch, frame: 'face_frame', beadedFrame: true, doors: 2, hardware: 'bar', corner: { style: 'blind', side: 'left' } },
+        { type: 'tall', width: 24 * inch, stackedDoors: true, doors: 2, hardware: 'bar' },
+        { type: 'base', width: 36 * inch, hardware: 'knob', corner: { style: 'l_shaped' } },
+        { type: 'base', width: 36 * inch, hardware: 'bar', corner: { style: 'diagonal', side: 'right' } },
+      ]) {
+        const s = setup();
+        await cabinet(s, params);
+        const report = await s.api.findOverlaps({ container: null, minVolume: null });
+        expect(report.overlaps.map(o => `${o.a.name} / ${o.b.name}`), JSON.stringify(params)).toEqual([]);
+      }
+    }, 60_000);
+
+    it('glazes a glass door with the library clear glass, once across cabinets', async () => {
+      const s = setup();
+      await s.api.apply({ expectedRevision: s.api.revision, label: 'Run', operations: [
+        { op: 'add_cabinet', type: 'wall', width: 18 * inch, doorStyle: 'glass' },
+        { op: 'add_cabinet', type: 'wall', width: 18 * inch, doorStyle: 'glass', at: [1, 0, 1.37] },
+      ] });
+      expect(s.api.getDocument().materials.filter(m => m.name === 'Clear Glass')).toHaveLength(1);
+    });
+
+    it('lets a later batch edit a part through its path', async () => {
+      const s = setup();
+      const { entry } = await cabinet(s, { type: 'wall', width: 18 * inch });
+      const shelf = entry.parts!.find(p => p.name === 'Shelf 1')!;
+      const body = s.api.query({ container: shelf.path, kinds: ['body'], ids: null, facing: null, containing: null, fields: null, offset: null, limit: null }).entities[0]!;
+      await s.api.apply({ expectedRevision: s.api.revision, container: shelf.path, label: 'Notch', operations: [
+        { op: 'add_box', as: 'cut', min: [0, 0, -0.01], max: [0.05, 0.05, 0.05] },
+        { op: 'subtract', target: body.ref, cutters: ['$cut'] },
+      ] });
+      const after = s.api.query({ container: shelf.path, kinds: ['body'], ids: null, facing: null, containing: null, fields: null, offset: null, limit: null }).entities;
+      expect(after).toHaveLength(1);
+    });
+
+    it('moves the cabinet by its name in the same batch', async () => {
+      const s = setup();
+      await s.api.apply({ expectedRevision: s.api.revision, label: 'Run', operations: [
+        { op: 'add_cabinet', as: 'a', type: 'base', width: 24 * inch },
+        { op: 'add_cabinet', as: 'b', type: 'base', width: 30 * inch, at: [24 * inch, 0, 0] },
+        { op: 'make_group', refs: ['$a', '$b'] },
+      ] });
+      expect(s.root().instances.size).toBe(1);
+    });
+
+    it('shares one paint and reuses library woods across cabinets', async () => {
+      const s = setup();
+      await s.api.apply({ expectedRevision: s.api.revision, label: 'Run', operations: [
+        { op: 'add_cabinet', type: 'base', width: 24 * inch, finish: { paint: '#123456' } },
+        { op: 'add_cabinet', type: 'base', width: 24 * inch, at: [1, 0, 0], finish: { paint: '#123456' } },
+      ] });
+      const materials = s.api.getDocument().materials;
+      expect(materials.filter(m => m.name === 'Paint #123456')).toHaveLength(1);
+      expect(materials.filter(m => m.name === 'White Maple Veneer')).toHaveLength(1);
+    });
+
+    it('finishes a finished end on its outside face only, and runs the grain along each part', async () => {
+      const s = setup();
+      const { entry } = await cabinet(s, { type: 'base', width: 24 * inch, finishedEnds: 'left', finish: { paint: '#123456' } });
+      const side = entry.parts!.find(p => p.name === 'Left Side')!;
+      const faces = (await import('@pushform/model')).containerAt(s.host.doc.state, side.path as never);
+      const body = [...faces.bodies.values()][0]!;
+      const finished = [...body.faces.values()].filter(f => f.frontMaterialId !== null);
+      expect(finished).toHaveLength(1);
+      expect(finished[0]!.plane.n[2]).toBeCloseTo(1, 9);
+      expect([...body.faces.values()].some(f => f.uv.kind === 'sized')).toBe(true);
+    });
+
+    it('refuses contradictions, unknown stains and sizes it cannot build, changing nothing', async () => {
+      const s = setup();
+      const revision = s.api.revision;
+      const apply = (params: Record<string, unknown>) => failure(() => s.api.apply({ expectedRevision: revision, label: 'x', operations: [{ op: 'add_cabinet', ...params }] }));
+      expect((await apply({ type: 'base', width: 0.6, overlay: 'inset' })).error).toMatchObject({ code: 'invalid_operation', operationIndex: 0 });
+      expect((await apply({ type: 'base', width: 0.6, finish: { stain: 'Nope' } })).error.code).toBe('invalid_reference');
+      const wide = await apply({ type: 'base', width: 3 });
+      expect(wide.error.code).toBe('invalid_geometry');
+      expect(wide.error.message).toContain('add_box');
+      expect(wide.error.message).toContain('Nothing was changed');
+      expect(s.root().instances.size).toBe(0);
+    });
   });
 
   it('refuses a box that is flat or inverted on any axis without changing anything', async () => {
@@ -1164,7 +1364,7 @@ describe('ModelDocumentApi raised panels and edge profiles', () => {
     expect([...b.faces.values()].filter(face => face.loops.length === 0 || face.loops.some(loop => loop.length < 3))).toEqual([]);
   });
 
-  it('splits a frame\'s front outline where a proud rail turns it to inside edges: profile_edges skips them and fillet_edges rounds the parts', async () => {
+  it('shapes a frame\'s front outline with inside edges where a proud rail turns it: profile_edges fills them and fillet_edges rounds the parts', async () => {
     const { api, root } = setup();
     const made = await api.apply({ expectedRevision: api.revision, label: 'Frame', operations: frameOps(0.006) });
     const frame = made.created.frame!;
@@ -1172,15 +1372,14 @@ describe('ModelDocumentApi raised panels and edge profiles', () => {
     const bead = await api.apply({ expectedRevision: api.revision, label: 'Bead', operations: [
       { op: 'profile_edges', body: box(frame), edges: [{ face: stileFront, which: 'inner' }], profile: 'bead', size: 0.003 },
     ] });
-    const skipped = bead.results[0]!.skipped!;
-    expect(skipped.length).toBeGreaterThan(0);
-    expect(skipped.every(s => s.reason === 'inside_edge' && s.ref.kind === 'edge')).toBe(true);
+    expect(bead.results[0]!.skipped).toBeUndefined();
+    expect(bead.results[0]!.count).toBeGreaterThan(0);
     expect(root().bodies.get(frame as never)!.valid).toBe(true);
     const again = await api.apply({ expectedRevision: api.revision, label: 'Frame 2', operations: frameOps(0.006, 1) });
     const round = await api.apply({ expectedRevision: api.revision, label: 'Round', operations: [
       { op: 'fillet_edges', body: box(again.created.frame!), edges: [{ face: { facing: front, point: [1.019, -0.019, 0.3] }, which: 'inner' }], radius: 0.003 },
     ] });
-    expect(round.results[0]!.count).toBeGreaterThan(skipped.length);
+    expect(round.results[0]!.count).toBeGreaterThan(0);
     expect(root().bodies.get(again.created.frame as never)!.valid).toBe(true);
     expect(api.query({ ...queryAll, kinds: ['body'] }).entities.length).toBeGreaterThan(0);
   });
@@ -1264,5 +1463,99 @@ describe('recursive assembly painting', () => {
     await api.apply({ expectedRevision: api.revision, label: 'Default', operations: [{ op: 'paint', refs, materialId: null, recursive: true, side: 'both' }] });
     expect(body().materialId).toBeNull();
     for (const face of body().faces.values()) expect([face.frontMaterialId, face.backMaterialId]).toEqual([null, null]);
+  });
+});
+
+describe('Revolve model operations', () => {
+  const profile: ModelOperation = { op: 'add_rectangle', as: 'profile', corner: [0, 0, 0], side1: [1, 0, 0], side2: [0, 0, 2] };
+  const revolve: ModelOperation = { op: 'revolve', as: 'turned', profile: '$profile', axisOrigin: [0, 0, 0], axisDir: [0, 0, 1] };
+
+  it('draws, revolves and groups a named part through the agent tool in one undo step', async () => {
+    const { api, host, root } = setup();
+    const depth = host.undoStack.length;
+    const response = await runModelTool(api, MODEL_TOOLS.applyOperations.name, { expectedRevision: api.revision, label: 'Turned leg', operations: [
+      profile, revolve, { op: 'make_group', as: 'leg', refs: ['$turned'], name: 'Turned leg' },
+    ] });
+    expect(response.isError).toBe(false);
+    const result = JSON.parse(response.content) as ModelBatchResult;
+    const instance = root().instances.get(result.created.leg as never)!;
+    const container = host.doc.state.definitions.get(instance.definitionId)!.entities;
+    const body = container.bodies.get(result.created.turned as never)!;
+    expect(body.props.volume).toBeCloseTo(48 * Math.sin(Math.PI / 24), 5);
+    expect(meshTopologyProblems(body.mesh)).toEqual([]);
+    expect(root().sketch.faces.size).toBe(0);
+    expect(host.undoStack.length).toBe(depth + 1);
+    host.undo(); expect(root().instances.size).toBe(0); expect(root().sketch.edges.size).toBe(0);
+    host.redo(); expect(root().instances.size).toBe(1);
+  });
+
+  it('accepts an existing sketch-face reference and caps a partial turn at the requested segment count', async () => {
+    const { api, root } = setup();
+    const drawn = await api.apply({ expectedRevision: api.revision, label: 'Draw', operations: [profile] });
+    const face = drawn.results[0]!.refs!.find(ref => ref.kind === 'sketchFace')!;
+    const made = await api.apply({ expectedRevision: api.revision, label: 'Quarter turn', operations: [
+      { ...revolve, profile: { kind: 'sketchFace', id: face.id }, angleDeg: 90, segments: 24 },
+    ] });
+    const body = root().bodies.get(made.created.turned as never)!;
+    expect(body.props.volume).toBeCloseTo(6 * Math.sin(Math.PI / 12), 5);
+    expect(meshTopologyProblems(body.mesh)).toEqual([]);
+    expect(made.results[0]!.refs).toEqual([{ path: [], kind: 'body', id: body.id }]);
+  });
+
+  it('selects a source solid face by direction and keeps that solid', async () => {
+    const { api, root, addBox } = setup();
+    const source = addBox([0, 0, 0], [1, 1, 2]);
+    const before = root().bodies.get(source as never);
+    const result = await api.apply({ expectedRevision: api.revision, label: 'Revolve face', operations: [
+      { ...revolve, profile: { body: source, facing: [0, 0, 1] }, axisOrigin: [0, 0, 2], axisDir: [1, 0, 0] },
+    ] });
+    expect(root().bodies.size).toBe(2);
+    expect(root().bodies.get(source as never)).toBe(before);
+    expect(result.created.turned).not.toBe(source);
+  });
+
+  it('converts local axis points and directions inside a translated and rotated group', async () => {
+    const { api, host } = setup();
+    const grouped = await api.apply({ expectedRevision: api.revision, label: 'Profile group', operations: [profile,
+      { op: 'make_group', as: 'g', refs: ['$profile'] },
+      { op: 'rotate', refs: ['$g'], origin: [0, 0, 0], axis: [0, 1, 0], angleDeg: 90 },
+      { op: 'move', refs: ['$g'], offset: [5, 3, 2] },
+    ] });
+    const path = [grouped.created.g!];
+    const container = containerAt(host.doc.state, path as never);
+    const face = [...container.sketch.faces.values()][0]!;
+    const made = await api.apply({ expectedRevision: api.revision, container: path, label: 'Turn inside group', operations: [
+      { ...revolve, profile: { kind: 'sketchFace', id: face.id } },
+    ] });
+    const body = containerAt(host.doc.state, path as never).bodies.get(made.created.turned as never)!;
+    expect(body.props.volume).toBeCloseTo(48 * Math.sin(Math.PI / 24), 5);
+    expect(meshTopologyProblems(body.mesh)).toEqual([]);
+    expect(host.context.path).toEqual([]);
+  });
+
+  it.each([
+    { axisOrigin: [0, 1, 0] }, { axisDir: [0, 1, 0] }, { axisOrigin: [0.5, 0, 0] },
+  ])('reports invalid geometry and rolls the entire batch back: %j', async patch => {
+    const { api, host, root } = setup(); const depth = host.undoStack.length;
+    const error = await failure(() => api.apply({ expectedRevision: api.revision, label: 'Invalid revolve', operations: [profile, { ...revolve, ...patch }] }));
+    expect(error.error).toMatchObject({ code: 'invalid_geometry', operationIndex: 1 });
+    expect(root().bodies.size).toBe(0); expect(root().sketch.edges.size).toBe(0);
+    expect(host.undoStack.length).toBe(depth);
+  });
+
+  it('restores a consumed profile and removes the revolved solid when a later operation fails', async () => {
+    const { api, host, root } = setup();
+    await api.apply({ expectedRevision: api.revision, label: 'Draw', operations: [profile] });
+    const faceIds = [...root().sketch.faces.keys()], depth = host.undoStack.length;
+    const error = await failure(() => api.apply({ expectedRevision: api.revision, label: 'Turn then fail', operations: [revolve,
+      { op: 'move', refs: [{ kind: 'body', id: 999999 }], offset: [1, 0, 0] },
+    ] }));
+    expect(error.error).toMatchObject({ code: 'invalid_reference', operationIndex: 1 });
+    expect(root().bodies.size).toBe(0); expect([...root().sketch.faces.keys()]).toEqual(faceIds);
+    expect(host.undoStack.length).toBe(depth);
+  });
+
+  it.each([{ angleDeg: 0 }, { angleDeg: 361 }, { segments: 2 }, { segments: 721 }, { axisDir: [0, 0, 0] }])('rejects malformed revolve parameters: %j', patch => {
+    expect(modelOperationSchema.safeParse({ ...revolve, ...patch }).success).toBe(false);
   });
 });

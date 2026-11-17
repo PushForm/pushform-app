@@ -47,6 +47,8 @@ export class LassoTool implements Tool {
   /** Where the pointer went down, while a freehand drag may start. */
   private downScreen: Vec2 | null = null;
   private freehand = false;
+  /** The left button is down (freehand drag or a click on the way). */
+  private pressed = false;
   private suppressNextClick = false;
   private hoverScreen: Vec2 | null = null;
   private message: string | null = null;
@@ -69,8 +71,11 @@ export class LassoTool implements Tool {
   }
 
   onPointerDown(e: ToolPointerEvent): void {
-    if (e.button !== 0 || this.points.length) return;
-    this.downScreen = e.screen;
+    if (e.button !== 0) return;
+    this.pressed = true;
+    // A new press means any click owed to the last release has come or never will.
+    this.suppressNextClick = false;
+    if (!this.points.length) this.downScreen = e.screen;
   }
 
   onPointerMove(e: ToolPointerEvent): void {
@@ -87,6 +92,7 @@ export class LassoTool implements Tool {
 
   onPointerUp(e: ToolPointerEvent): void {
     if (e.button !== 0) return;
+    this.pressed = false;
     this.downScreen = null;
     if (!this.freehand) return;
     this.freehand = false;
@@ -127,8 +133,11 @@ export class LassoTool implements Tool {
     return true;
   }
 
+  /** Esc drops the outline; pressed mid-drag, the click that follows the release is swallowed too. */
   onCancel(): void {
+    const wasPressed = this.pressed;
     this.reset();
+    this.suppressNextClick = wasPressed;
     this.ctx?.statusChanged();
     this.ctx?.requestRender();
   }
@@ -164,6 +173,7 @@ export class LassoTool implements Tool {
 
   private reset(): void {
     this.points = [];
+    this.pressed = false;
     this.downScreen = null;
     this.freehand = false;
     this.message = null;

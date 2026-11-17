@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { describe, expect, it } from 'vitest';
-import { offsetPolygon, offsetPolygonFull, offsetPolyline, type OffsetArc } from './offset';
+import { offsetPolygon, offsetPolygonFull, offsetPolyline, offsetPolylineFull, type OffsetArc } from './offset';
 import { polygonArea, signedArea, type PolygonsWithHoles } from './polygon2d';
 
 const sq = (s: number, o = 0): number[][] => [
@@ -168,5 +168,28 @@ describe('offsetPolyline', () => {
     expect(o[1]![1]).toBeCloseTo(-0.1);
     expect(o[2]![0]).toBeCloseTo(1.1);
     expect(o[2]![1]).toBeCloseTo(1);
+  });
+
+  it('offsets tagged arc segments of a chain concentrically, keeping their count', () => {
+    const n = 8;
+    const arc: OffsetArc = { key: 7, center: [0, 0], radius: 1 };
+    // a half circle from (1, 0) counterclockwise to (-1, 0), then a straight run down
+    const pts: [number, number][] = [];
+    for (let i = 0; i <= n; i++) {
+      const a = (Math.PI * i) / n;
+      pts.push([Math.cos(a), Math.sin(a)]);
+    }
+    pts.push([-1, -1]);
+    const tags = [...Array.from({ length: n }, () => arc), null];
+    // right of travel on a counterclockwise arc is away from the center
+    const r = offsetPolylineFull(pts, 0.25, { arcs: [tags] });
+    const onArc = r.tags.filter((t) => t?.key === 7);
+    expect(onArc).toHaveLength(n);
+    for (let i = 0; i <= n; i++) expect(Math.hypot(r.points[i]![0], r.points[i]![1])).toBeCloseTo(1.25, 9);
+    expect(r.points[r.points.length - 1]![0]).toBeCloseTo(-1.25);
+    expect(r.points[r.points.length - 1]![1]).toBeCloseTo(-1);
+    // untagged, the same chain keeps straight segments (the arc points move along the chords' normals)
+    const plain = offsetPolyline(pts, 0.25);
+    expect(Math.hypot(plain[1]![0], plain[1]![1])).not.toBeCloseTo(1.25, 6);
   });
 });

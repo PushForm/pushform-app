@@ -92,7 +92,8 @@ export interface SuspendedTurn {
 export interface MessagePicture { id: string; name: string; mime: string }
 /** A visible chat message; `tool` messages record the model's tool use and are hidden from the UI. */
 export type ConversationMessage =
-  | { role: 'user'; text: string; at: string; attachments?: MessagePicture[] }
+  /** `handoff`: the first message of a clone's chat, with the summary the agent wrote in the document it was cloned from. */
+  | { role: 'user'; text: string; at: string; attachments?: MessagePicture[]; handoff?: { from: string; summary: string } }
   /** `acknowledgment`: the opening line that restates a request while the agent works; shown, but never sent to a model. */
   | { role: 'assistant'; text: string; at: string; turn?: SuspendedTurn; acknowledgment?: true }
   /** `views`: a render review's views; its pictures are not kept, and `output` names them in a placeholder. */

@@ -34,6 +34,18 @@ describe('Layout model views', () => {
     expect(() => commands.execute('layout.viewport.setCamera', { pageId, entityId: id, camera: { ...camera, fov: 180 }, scene: null })).toThrow();
   });
 
+  it("keeps a view's scene when only its camera changes, and forgets the change when a scene is chosen", () => {
+    const { commands, pageId, add, entity } = withModel(), id = add();
+    const viewport = () => entity(id).image!.viewport!;
+    commands.execute('layout.viewport.setCamera', { pageId, entityId: id, camera: { ...camera, fov: 50 }, scene: 'Front', cameraModified: true });
+    expect(viewport()).toMatchObject({ scene: 'Front', cameraModified: true });
+    commands.execute('layout.viewport.setCamera', { pageId, entityId: id, camera, scene: 'Front' });
+    expect(viewport().scene).toBe('Front');
+    expect(Object.hasOwn(viewport(), 'cameraModified')).toBe(false);
+    commands.execute('layout.viewport.setCamera', { pageId, entityId: id, camera, scene: null, cameraModified: true });
+    expect(Object.hasOwn(viewport(), 'cameraModified')).toBe(false);
+  });
+
   it('changes resize mode undoably, preserves paper positions, and carries the mode through copying', () => {
     const { commands, pageId, add, entity } = withModel(), id = add();
     const paper = () => viewportPaperPoint(entity(id).points, entity(id).image!.viewport!.camera, [0, 0, 1])!;

@@ -244,7 +244,11 @@ it('exports selected pages as one PDF with a 300 dpi default (–4430)', async (
   const { tab, dispose } = setup();
   act(() => { tab.commands.execute('layout.page.add', {}); tab.commands.execute('layout.export.image'); });
   fireEvent.change(screen.getByLabelText('Format'), { target: { value: 'pdf' } });
-  expect(screen.getByLabelText<HTMLSelectElement>('Resolution').value).toBe('300');
+  // Draft, Standard (the default) and High replace the PDF's resolution choices.
+  expect(screen.queryByLabelText('Resolution')).toBeNull();
+  const quality = screen.getByLabelText<HTMLSelectElement>('Quality');
+  expect(quality.value).toBe('300');
+  expect([...quality.options].map(option => option.textContent)).toEqual(['Draft (150 dpi)', 'Standard (300 dpi)', 'High (600 dpi)']);
   fireEvent.change(screen.getByLabelText('Page range'), { target: { value: '0' } });
   expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Export…' }).disabled).toBe(true);
   fireEvent.change(screen.getByLabelText('Page range'), { target: { value: '2' } });
@@ -375,4 +379,17 @@ it('exports all pages in a native Layout copy and preserves saved state through 
   expect(tab.doc.version).toBe(version);
   expect(tab.doc.undoStack.canUndo).toBe(true);
   dispose();
+});
+
+it('opens no viewer tab before a browser save picker, which needs the same click', async () => {
+  const { tab, dispose } = setup();
+  // The picker is the browser's own, so the option to show the PDF afterwards is not offered.
+  Object.defineProperty(window, 'showSaveFilePicker', { value: vi.fn(), configurable: true });
+  try {
+    await pdfWithPicture(tab);
+    expect(screen.queryByLabelText('Show the PDF after export')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Export…' }));
+    await waitFor(() => expect(written.length).toBe(1), { timeout: 10_000 });
+    expect(window.open).not.toHaveBeenCalled();
+  } finally { delete (window as { showSaveFilePicker?: unknown }).showSaveFilePicker; dispose(); }
 });

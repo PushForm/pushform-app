@@ -152,6 +152,35 @@ describe('Layout commands', () => {
     })).toThrow();
   });
 
+  it('rotates and scales several objects together about a pivot in one undoable step, with attached dimensions following', () => {
+    const doc = createLayoutDocument();
+    const { commands } = createLayoutRegistry(doc);
+    const pageId = doc.state.pageOrder[0]!;
+    const first = commands.execute('layout.shape.add', { pageId, points: [[0, 0], [20, 0]], closed: false }) as number;
+    const second = commands.execute('layout.shape.add', { pageId, points: [[0, 10], [20, 10]], closed: false }) as number;
+    // A dimension measuring the first line, attached to its ends, is left out of the selection.
+    const dimension = commands.execute('layout.dimension.add', { pageId, points: [[0, 0], [20, 0], [10, -5]],
+      anchors: [{ entityId: first, pointIndex: 0, pointCount: 2 }, { entityId: first, pointIndex: 1, pointCount: 2 }] }) as number;
+    const entity = (id: number) => doc.state.pages.get(pageId)!.entities.get(id)!;
+    commands.execute('layout.shape.rotate', { pageId, entityIds: [first, second], pivot: [0, 0], angleDeg: 90 });
+    expect(entity(first).points[1]![0]).toBeCloseTo(0); expect(entity(first).points[1]![1]).toBeCloseTo(20);
+    expect(entity(second).points[0]![0]).toBeCloseTo(-10); expect(entity(second).points[0]![1]).toBeCloseTo(0);
+    expect(entity(dimension).points[1]![0]).toBeCloseTo(0); expect(entity(dimension).points[1]![1]).toBeCloseTo(20);
+    // One undo restores them both.
+    commands.execute('edit.undo');
+    expect(entity(first).points).toEqual([[0, 0], [20, 0]]);
+    expect(entity(second).points).toEqual([[0, 10], [20, 10]]);
+    commands.execute('layout.shape.scale', { pageId, entityIds: [first, second], pivot: [0, 0], scaleX: 2, scaleY: 3 });
+    expect(entity(first).points).toEqual([[0, 0], [40, 0]]);
+    expect(entity(second).points).toEqual([[0, 30], [40, 30]]);
+    expect(entity(dimension).dimension!.cachedValueMm).toBeCloseTo(40);
+    commands.execute('edit.undo');
+    expect(entity(second).points).toEqual([[0, 10], [20, 10]]);
+    // Several objects need a pivot to turn or scale about.
+    expect(() => commands.execute('layout.shape.rotate', { pageId, entityIds: [first, second], angleDeg: 90 })).toThrow();
+    expect(() => commands.execute('layout.shape.scale', { pageId, entityIds: [first, second], scaleX: 2, scaleY: 2 })).toThrow();
+  });
+
   it('reorders layers and paths, and assigns a path to another layer', () => {
     const doc = createLayoutDocument();
     const { commands } = createLayoutRegistry(doc);

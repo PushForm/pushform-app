@@ -6,7 +6,8 @@
   "license": "GPL-3.0-or-later",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./preview-geometry": "./src/renderables/buildGeometry.ts"
   },
   "types": "./src/index.ts",
   "sideEffects": false,

@@ -117,7 +117,7 @@ export class AxesTool implements Tool {
   }
 
   onKeyDown(e: ToolKeyEvent): boolean {
-    if (e.key !== 'Alt' && e.key !== 'Control') return false;
+    if (e.key !== 'Control') return false;
     if (!e.repeat && this.state.kind !== 'first') {
       this.orderIndex = (this.orderIndex + 1) % ORDERS.length;
       this.ctx?.statusChanged();

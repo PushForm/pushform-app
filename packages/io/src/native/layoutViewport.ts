@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import type { LayoutViewport, LayoutViewportCamera, LayoutViewportDisplay, LayoutViewportSource, ModelReference, LayoutModelArchive } from '@pushform/layout';
+import type { LayoutViewport, LayoutViewportCamera, LayoutViewportDisplay, LayoutViewportSections, LayoutViewportSource, ModelReference, LayoutModelArchive } from '@pushform/layout';
 import { NativeChunkError } from './chunks';
 import { NativeRecordCodec } from './record';
 import type { NativeField, NativeFieldKind, NativeScalar } from './record';
@@ -28,10 +28,27 @@ export function attachNativeLayoutViewportFields(value: LayoutViewport, extensio
 const f = (id: number, kind: NativeFieldKind, required = true): NativeField => ({ id, kind, required });
 const camera = new NativeRecordCodec({ eye: f(1, 'bytes'), target: f(2, 'bytes'), up: f(3, 'bytes'), projection: f(4, 'uint32'), fov: f(5, 'double'), scale: f(6, 'double'), shift: f(7, 'bytes', false) } satisfies Record<Exclude<keyof LayoutViewportCamera, 'nativeUnknownFields'>, NativeField>);
 const source = new NativeRecordCodec({ kind: f(1, 'uint32'), archiveId: f(2, 'string', false), modelReferenceId: f(3, 'string', false), referenceId: f(4, 'uint32', false) });
-const display = new NativeRecordCodec({ faceStyle: f(1, 'uint32'), edges: f(2, 'bool'), profiles: f(3, 'bool'), backEdges: f(4, 'bool'), xray: f(5, 'bool'), hiddenGeometry: f(6, 'bool'), shadows: f(7, 'bytes', false) } satisfies Record<Exclude<keyof LayoutViewportDisplay, 'nativeUnknownFields'>, NativeField>);
-const cache = new NativeRecordCodec({ camera: f(1, 'bytes'), widthMm: f(2, 'double'), heightMm: f(3, 'double'), sha256: f(4, 'bytes', false) } satisfies Record<Exclude<keyof NonNullable<LayoutViewport['cache']>, 'nativeUnknownFields'>, NativeField>);
+const display = new NativeRecordCodec({ faceStyle: f(1, 'uint32'), edges: f(2, 'bool'), profiles: f(3, 'bool'), backEdges: f(4, 'bool'), xray: f(5, 'bool'), hiddenGeometry: f(6, 'bool'), shadows: f(7, 'bytes', false), sections: f(8, 'bytes', false) } satisfies Record<Exclude<keyof LayoutViewportDisplay, 'nativeUnknownFields'>, NativeField>);
+const sections = new NativeRecordCodec({ planes: f(1, 'bool'), cuts: f(2, 'bool'), fill: f(3, 'bool', false), lineWidth: f(4, 'double', false),
+  activeColor: f(5, 'bytes', false), inactiveColor: f(6, 'bytes', false), fillColor: f(7, 'bytes', false), lineColor: f(8, 'bytes', false) } satisfies Record<keyof LayoutViewportSections, NativeField>);
+const SECTION_COLORS = ['activeColor', 'inactiveColor', 'fillColor', 'lineColor'] as const;
+function writeSections(value: LayoutViewportSections, ext: LayoutViewportExtensions): Uint8Array {
+  const fields: Record<string, NativeScalar> = { planes: value.planes, cuts: value.cuts };
+  if (value.fill !== undefined) fields.fill = value.fill;
+  if (value.lineWidth !== undefined) fields.lineWidth = finite(value.lineWidth);
+  for (const key of SECTION_COLORS) { const color = value[key]; if (color !== undefined) fields[key] = encodeNativeNumbers(color.map(finite), 3); }
+  return write(sections, fields, 'display.sections', ext);
+}
+function readSections(bytes: Uint8Array, ext: LayoutViewportExtensions): LayoutViewportSections {
+  const s = read(sections, bytes, 'display.sections', ext), value: LayoutViewportSections = { planes: s.planes as boolean, cuts: s.cuts as boolean };
+  if (Object.hasOwn(s, 'fill')) value.fill = s.fill as boolean;
+  if (Object.hasOwn(s, 'lineWidth')) value.lineWidth = finite(s.lineWidth);
+  for (const key of SECTION_COLORS) if (Object.hasOwn(s, key)) value[key] = decodeNativeNumbers(s[key] as Uint8Array, 3) as [number, number, number];
+  return value;
+}
+const cache = new NativeRecordCodec({ camera: f(1, 'bytes'), widthMm: f(2, 'double'), heightMm: f(3, 'double'), sha256: f(4, 'bytes', false), sheet: f(5, 'bytes', false) } satisfies Record<Exclude<keyof NonNullable<LayoutViewport['cache']>, 'nativeUnknownFields'>, NativeField>);
 const viewport = new NativeRecordCodec({ source: f(1, 'bytes'), templateId: f(2, 'string', false), originalId: f(3, 'string', false), camera: f(4, 'bytes'), preserveScaleOnResize: f(5, 'uint32', false),
-  scene: f(6, 'string', false), background: f(7, 'string', false), cache: f(8, 'bytes', false), display: f(9, 'bytes', false) } satisfies Record<Exclude<keyof LayoutViewport, 'nativeUnknownFields'>, NativeField>);
+  scene: f(6, 'string', false), background: f(7, 'string', false), cache: f(8, 'bytes', false), display: f(9, 'bytes', false), cameraModified: f(10, 'bool', false) } satisfies Record<Exclude<keyof LayoutViewport, 'nativeUnknownFields'>, NativeField>);
 const optional = new NativeRecordCodec({ state: f(1, 'uint32'), value: f(2, 'bytes', false) });
 const optionalString = new NativeRecordCodec({ state: f(1, 'uint32'), value: f(2, 'string', false) });
 const styles = ['wireframe', 'hiddenLine', 'shaded', 'shadedTextured', 'monochrome'] as const;
@@ -87,6 +104,7 @@ export function encodeNativeLayoutViewport(value: LayoutViewport, ext: LayoutVie
   }
   const fields: Record<string, NativeScalar> = { source: encodeNativeLayoutViewportSource(value.source, ext.records, 'source'), camera: writeCamera(value.camera, 'camera', ext) };
   for (const key of ['templateId', 'originalId', 'scene', 'background'] as const) if (value[key] !== null) fields[key] = value[key];
+  if (value.cameraModified) fields.cameraModified = true;
   if (Object.hasOwn(value, 'preserveScaleOnResize')) {
     if (value.preserveScaleOnResize !== undefined && typeof value.preserveScaleOnResize !== 'boolean') return fail();
     fields.preserveScaleOnResize = value.preserveScaleOnResize === undefined ? 0 : value.preserveScaleOnResize ? 2 : 1;
@@ -94,6 +112,7 @@ export function encodeNativeLayoutViewport(value: LayoutViewport, ext: LayoutVie
   if (value.cache !== null) {
     const c = value.cache, cf: Record<string, NativeScalar> = { camera: writeCamera(c.camera, 'cache.camera', ext), widthMm: finite(c.widthMm), heightMm: finite(c.heightMm) };
     if (Object.hasOwn(c, 'sha256')) cf.sha256 = wrap(optionalString, c.sha256, 'cache.sha256', ext);
+    if (Object.hasOwn(c, 'sheet')) cf.sheet = wrap(optionalString, c.sheet, 'cache.sheet', ext);
     fields.cache = write(cache, cf, 'cache', ext);
   }
   if (Object.hasOwn(value, 'display')) {
@@ -102,6 +121,7 @@ export function encodeNativeLayoutViewport(value: LayoutViewport, ext: LayoutVie
       const d = value.display, faceStyle = styles.indexOf(d.faceStyle); if (faceStyle < 0) return fail();
       const df: Record<string, NativeScalar> = { faceStyle, edges: d.edges, profiles: d.profiles, backEdges: d.backEdges, xray: d.xray, hiddenGeometry: d.hiddenGeometry };
       if (Object.hasOwn(d, 'shadows')) df.shadows = wrap(optional, d.shadows === undefined ? undefined : writeShadows(d.shadows, ext.shadows), 'display.shadows', ext);
+      if (d.sections !== undefined) df.sections = writeSections(d.sections, ext);
       bytes = write(display, df, 'display.value', ext);
     }
     fields.display = wrap(optional, bytes, 'display', ext);
@@ -113,6 +133,7 @@ export function decodeNativeLayoutViewport(bytes: Uint8Array): { value: LayoutVi
   const target = decodeNativeLayoutViewportSource(v.source as Uint8Array, ext.records, 'source');
   const value: LayoutViewport = { source: target, templateId: v.templateId as string | undefined ?? null, originalId: v.originalId as string | undefined ?? null,
     scene: v.scene as string | undefined ?? null, background: v.background as string | undefined ?? null, camera: readCamera(v.camera as Uint8Array, 'camera', ext), cache: null };
+  if (v.cameraModified === true) value.cameraModified = true;
   if (Object.hasOwn(v, 'preserveScaleOnResize')) {
     if (v.preserveScaleOnResize === 0) present(value, 'preserveScaleOnResize', undefined);
     else if (v.preserveScaleOnResize === 1 || v.preserveScaleOnResize === 2) value.preserveScaleOnResize = v.preserveScaleOnResize === 2; else return fail();
@@ -121,6 +142,7 @@ export function decodeNativeLayoutViewport(bytes: Uint8Array): { value: LayoutVi
     const c = read(cache, v.cache as Uint8Array, 'cache', ext);
     value.cache = { camera: readCamera(c.camera as Uint8Array, 'cache.camera', ext), widthMm: finite(c.widthMm), heightMm: finite(c.heightMm) };
     if (Object.hasOwn(c, 'sha256')) value.cache.sha256 = unwrap(optionalString, c.sha256 as Uint8Array, 'cache.sha256', ext) as string | undefined;
+    if (Object.hasOwn(c, 'sheet')) value.cache.sheet = unwrap(optionalString, c.sheet as Uint8Array, 'cache.sheet', ext) as string | undefined;
   }
   if (Object.hasOwn(v, 'display')) {
     const bytes = unwrap(optional, v.display as Uint8Array, 'display', ext);
@@ -128,6 +150,7 @@ export function decodeNativeLayoutViewport(bytes: Uint8Array): { value: LayoutVi
     else {
       const d = read(display, bytes as Uint8Array, 'display.value', ext), faceStyle = styles[d.faceStyle as number]; if (!faceStyle) return fail();
       value.display = { faceStyle, edges: d.edges as boolean, profiles: d.profiles as boolean, backEdges: d.backEdges as boolean, xray: d.xray as boolean, hiddenGeometry: d.hiddenGeometry as boolean };
+      if (Object.hasOwn(d, 'sections')) value.display.sections = readSections(d.sections as Uint8Array, ext);
       if (Object.hasOwn(d, 'shadows')) {
         const bytes = unwrap(optional, d.shadows as Uint8Array, 'display.shadows', ext);
         if (bytes === undefined) present(value.display, 'shadows', undefined);

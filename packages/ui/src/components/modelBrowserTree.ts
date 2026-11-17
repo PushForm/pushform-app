@@ -5,7 +5,7 @@ import { entityRefKey, pathKey } from '@pushform/model';
 import type { ComponentDefinition, ComponentInstance, DocumentState, EntityContainer, EntityRef } from '@pushform/model';
 
 /** What a Model object browser item lists. */
-export type ModelBrowserKind = 'group' | 'component' | 'solid' | 'meshPart' | 'text';
+export type ModelBrowserKind = 'group' | 'component' | 'solid' | 'meshPart' | 'text' | 'sectionPlane';
 
 /** One item of the Model object browser tree; `key` is the `entityRefKey` of its ref, so it matches selection keys. */
 export interface ModelBrowserNode {
@@ -33,6 +33,8 @@ export interface ModelBrowserNode {
   readonly selected: boolean;
   /** The group or component open for editing. */
   readonly current: boolean;
+  /** Section planes: the active cut of the group, component or model holding it. */
+  readonly activeCut?: boolean;
 }
 
 /** Display name of an instance: its own name, else its definition's. */
@@ -47,9 +49,9 @@ export function solidNumbers(state: Pick<DocumentState, 'definitions'>): Map<Id,
   return new Map(ids.sort((a, b) => a - b).map((id, index) => [id, index + 1]));
 }
 
-type OrderedEntity = { kind: 'body'; id: Id } | { kind: 'meshPart'; id: Id } | { kind: 'text'; id: Id } | { kind: 'instance'; inst: ComponentInstance };
+type OrderedEntity = { kind: 'body'; id: Id } | { kind: 'meshPart'; id: Id } | { kind: 'text'; id: Id } | { kind: 'sectionPlane'; id: Id } | { kind: 'instance'; inst: ComponentInstance };
 
-/** A container's solids, mesh parts, text and instances in creation order (`order`), with any not listed there appended. */
+/** A container's solids, mesh parts, text, section planes and instances in creation order (`order`), with any not listed there appended. */
 function orderedEntities(container: EntityContainer): OrderedEntity[] {
   const seen = new Set<Id>();
   const out: OrderedEntity[] = [];
@@ -60,17 +62,19 @@ function orderedEntities(container: EntityContainer): OrderedEntity[] {
     else if (container.bodies.has(id)) { seen.add(id); out.push({ kind: 'body', id }); }
     else if (container.meshParts.has(id)) { seen.add(id); out.push({ kind: 'meshPart', id }); }
     else if (container.texts.has(id)) { seen.add(id); out.push({ kind: 'text', id }); }
+    else if (container.sectionPlanes.has(id)) { seen.add(id); out.push({ kind: 'sectionPlane', id }); }
   };
   for (const id of container.order) take(id);
   for (const id of container.bodies.keys()) take(id);
   for (const id of container.meshParts.keys()) take(id);
   for (const id of container.instances.keys()) take(id);
   for (const id of container.texts.keys()) take(id);
+  for (const id of container.sectionPlanes.keys()) take(id);
   return out;
 }
 
 /**
- * The model's tree: the root's solids, mesh parts, text, groups and components, each group or component holding its definition's
+ * The model's tree: the root's solids, mesh parts, text, section planes, groups and components, each group or component holding its definition's
  * in turn. A definition already on the current path is not descended into again, so a self-containing one is a leaf.
  */
 export function modelBrowserTree(state: Pick<DocumentState, 'definitions' | 'rootDefinitionId'>, contextPath: readonly Id[], selectedKeys: ReadonlySet<string>): ModelBrowserNode[] {
@@ -100,6 +104,13 @@ export function modelBrowserTree(state: Pick<DocumentState, 'definitions' | 'roo
         const key = entityRefKey(ref);
         return [{ key, level, kind: 'text', label: text.text.replace(/\s+/g, ' ').trim() || 'Text', ref, parent, children: [],
           tagId: text.tagId, hidden: text.hidden, inHidden, selected: selectedKeys.has(key), current: false }];
+      }
+      if (entry.kind === 'sectionPlane') {
+        const plane = container.sectionPlanes.get(entry.id)!;
+        const ref: EntityRef = { kind: 'sectionPlane', path, id: entry.id };
+        const key = entityRefKey(ref);
+        return [{ key, level, kind: 'sectionPlane', label: plane.name || 'Section Plane', ref, parent, children: [],
+          tagId: plane.tagId, hidden: plane.hidden, inHidden, selected: selectedKeys.has(key), current: false, activeCut: container.activeSectionPlaneId === entry.id }];
       }
       const { inst } = entry;
       const def = state.definitions.get(inst.definitionId);

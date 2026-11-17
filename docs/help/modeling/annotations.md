@@ -6,6 +6,8 @@ Choose **Text** from the **Draw** group. Click a face, edge or snapped point to 
 
 The text opens for editing after placement. Type your wording, then press Enter or click elsewhere to keep it. Shift+Enter starts a new line. Escape cancels the text edit, or cancels a leader before its second placement click. To edit existing text, double-click it with Select or choose **Edit Text** from its context menu.
 
+To change how text looks, select one text with Select, or edit it. The bar above the model shows its font, size in points, **Bold**, **Italic** and color. Each change applies at once and can be undone. Fonts from the font list draw in their own typeface; other fonts, and styles a font doesn't have, draw in the nearest face available.
+
 ## Add a model dimension
 
 Choose **Dimension** from the Measure stack. Click two points or an edge, then place the dimension line. Clicking an arc starts a radius dimension; clicking a circle starts a diameter dimension. A following click places its leader.

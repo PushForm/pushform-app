@@ -23,6 +23,7 @@
     { "key": "G", "command": "ui.makeComponent" },
     { "key": "Mod+G", "command": "group.make" },
     { "key": "Mod+K", "command": "view.search" },
+    { "key": "Mod+L", "command": "view.focusToolOptions" },
     { "key": "Shift+S", "command": "view.search" },
     { "key": "K", "command": "view.backEdges" },
     { "key": "I", "command": "view.xray" },

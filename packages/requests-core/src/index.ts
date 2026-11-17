@@ -42,3 +42,5 @@ export * from './agents/brief.ts';
 export * from './agents/store.ts';
 
 export * from './guidance.ts';
+export * from './clone.ts';
+export * from './publish.ts';

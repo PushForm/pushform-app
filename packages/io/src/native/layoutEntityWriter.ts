@@ -18,7 +18,7 @@ const payloads = ['table', 'image', 'dimension', 'angularDimension', 'text', 'la
 export type NativeLayoutEntityPayload = typeof payloads[number];
 export type NativeLayoutEntityRecordKind = 'header' | NativeLayoutEntityPayload | 'tableCell';
 const kinds: readonly NativeLayoutEntityRecordKind[] = ['header', ...payloads, 'tableCell'];
-const sections = { nativeUnknownFields: 'payload', id: 'metadata', kind: 'metadata', layerId: 'metadata', name: 'metadata', locked: 'metadata', hidden: 'metadata', groupId: 'metadata', nestedGroupIds: 'metadata', style: 'metadata',
+const sections = { nativeUnknownFields: 'payload', drawingView: 'metadata', id: 'metadata', kind: 'metadata', layerId: 'metadata', name: 'metadata', locked: 'metadata', hidden: 'metadata', groupId: 'metadata', nestedGroupIds: 'metadata', style: 'metadata',
   points: 'geometry', closed: 'geometry', handles: 'geometry', contourStarts: 'geometry', openContours: 'geometry',
   table: 'payload', image: 'payload', dimension: 'payload', angularDimension: 'payload', text: 'payload', labelAnchor: 'payload', modelAnnotation: 'payload', preservedModelConnections: 'payload' } as const satisfies Record<keyof LayoutEntity, 'metadata' | 'geometry' | 'payload'>;
 const envelope = new NativeRecordCodec({ ownerId: { id: 1, kind: 'uint32', required: true }, kind: { id: 2, kind: 'uint32', required: true }, state: { id: 3, kind: 'uint32', required: true }, payload: { id: 4, kind: 'bytes', required: false } });

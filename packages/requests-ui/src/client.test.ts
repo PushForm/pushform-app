@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { describe, expect, it, vi } from 'vitest';
-import { RequestsClient, RequestsError, parseEventStream, type StreamEvent } from './client';
+import { normalizeConversation, RequestsClient, RequestsError, parseEventStream, type StreamEvent } from './client';
 import { BASE, fakeBackend, filedTurn, makeFiledRequest, sseResponse } from './fakeBackend';
 
 const client = (backend = fakeBackend(), token: string | null = 'jwt-token'): RequestsClient =>
@@ -161,3 +161,29 @@ describe('regional invocation', () => {
   expect(blob.size).toBe(3);
   expect(fetch.mock.calls[1]).toEqual(['https://storage.example/private?token=short-lived', { mode: 'cors', credentials: 'omit' }]);
  });
+
+describe('clone records in a stored conversation', () => {
+  it('reads a clone\'s handoff and what each clone card came to', () => {
+    const conversation = normalizeConversation({ id: 'c', messages: [
+      { role: 'user', text: 'clone this, 36 wide', at: 't1', handoff: { from: 'Bookcase', summary: 'Make it 36 in wide.' } },
+      { role: 'tool', name: 'document_clone', toolUseId: 'a', input: {}, output: '{"ok":true,"choice":"clone","name":"Wide bookcase"}', at: 't2' },
+      { role: 'tool', name: 'document_clone', toolUseId: 'b', input: {}, output: '{"ok":true,"choice":"cancel"}', at: 't3' },
+      { role: 'tool', name: 'model_query', toolUseId: 'c', input: {}, output: '{}', at: 't4' },
+    ] });
+    expect(conversation.messages[0]!.handoff).toEqual({ from: 'Bookcase', summary: 'Make it 36 in wide.' });
+    expect(conversation.messages[1]!.cloned).toEqual({ name: 'Wide bookcase' });
+    expect(conversation.messages[2]!.cloned).toEqual({ name: null });
+    expect(conversation.messages[3]!.cloned).toBeUndefined();
+  });
+});
+
+describe('publication records in a stored conversation', () => {
+  it('reads what each publication card came to', () => {
+    const conversation = normalizeConversation({ id: 'c', messages: [
+      { role: 'tool', name: 'commons_publish_propose', toolUseId: 'a', input: {}, output: '{"ok":true,"outcome":"published","title":"Shaker base","url":"https://commons.pushform.io/#models/d"}', at: 't1' },
+      { role: 'tool', name: 'commons_publish_propose', toolUseId: 'b', input: {}, output: '{"ok":true,"outcome":"cancel"}', at: 't2' },
+    ] });
+    expect(conversation.messages[0]!.published).toEqual({ title: 'Shaker base', url: 'https://commons.pushform.io/#models/d' });
+    expect(conversation.messages[1]!.published).toBeNull();
+  });
+});

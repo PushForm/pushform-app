@@ -29,3 +29,4 @@ export * from './CloudCampaign';
 export * from './ProjectActivity';
 export * from './CommonsBrowse';
 export * from './CommonsSearch';
+export * from './CommonsCommerce';

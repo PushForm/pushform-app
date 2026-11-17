@@ -19,14 +19,18 @@ import {
   sectionPlaneCommands,
   imageCommands,
   text3dCommands,
+  builderCommands,
+  hardwareCommands,
   SERVICE_FONTS,
   detectPlatform,
   editCommands,
   placeholderTool,
 } from '@pushform/commands';
-import type { DisplayState, Platform, Tool } from '@pushform/commands';
+import type { DisplayState, Platform, SectionPreviewTool, Tool } from '@pushform/commands';
 import type { Mat4, MeshData } from '@pushform/core';
-import { InlineBackend, KernelClient, WorkerBackend } from '@pushform/kernel';
+import { InlineBackend, KernelClient } from '@pushform/kernel';
+import { desktopKernelBackend } from './desktopKernel';
+import { rustKernelBackend } from './rustKernel';
 import { bodyFromMesh } from '@pushform/model';
 import { Viewport, renderKey } from '@pushform/render';
 import type { RenderBody, RenderDisplay } from '@pushform/render';
@@ -54,7 +58,9 @@ import {
   axesCommands,
   offsetCommands,
   followMeCommands,
+  revolveCommands,
   edgeBlendCommands,
+  edgeToolAliasCommands,
   solidCommands,
   intersectCommands,
   contextCommands,
@@ -134,7 +140,7 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
   const store = useAppStore;
   const tx = new DocumentHost();
   const kernel =
-    opts.kernel ?? new KernelClient(typeof Worker !== 'undefined' ? new WorkerBackend() : new InlineBackend());
+    opts.kernel ?? new KernelClient(typeof Worker !== 'undefined' ? desktopKernelBackend(rustKernelBackend()) : new InlineBackend());
   const viewport = new Viewport();
   const inference = createInferenceEngine();
   inference.setState(tx.doc.state);
@@ -153,6 +159,8 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
   commands.registerAll(sectionPlaneCommands);
   commands.registerAll(imageCommands);
   commands.registerAll(text3dCommands);
+  commands.registerAll(builderCommands);
+  commands.registerAll(hardwareCommands);
   commands.registerAll(pushPullCommands);
   commands.registerAll(curveCommands);
   commands.registerAll(transformCommands);
@@ -165,7 +173,9 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
   commands.registerAll(axesCommands);
   commands.registerAll(offsetCommands);
   commands.registerAll(followMeCommands);
+  commands.registerAll(revolveCommands);
   commands.registerAll(edgeBlendCommands);
+  commands.registerAll(edgeToolAliasCommands);
   commands.registerAll(solidCommands);
   commands.registerAll(intersectCommands);
   commands.registerAll(contextCommands);
@@ -222,13 +232,20 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
   offs.push(toolManager.events.on('renderRequested', () => viewport.requestRender()));
   const syncUndo = () => store.getState().setUndoState(tx.canUndo(), tx.canRedo());
   offs.push(tx.onChange(syncUndo));
+  // an undo or another command ends the bar's applied state
+  offs.push(tx.onChange(() => toolManager.refreshStatus()));
   let bodies: readonly RenderBody[] = [];
   let hoverRef: EntityRef | null = null;
+  // section planes a tool is dragging are drawn, and cut, where they would go
+  const syncSections = () => {
+    const tool = toolManager.visualTool as (Tool & Partial<SectionPreviewTool>) | null;
+    viewport.setSections(sectionsToRender(tx.doc.state, tx.selection.refs, tool?.sectionPreview ?? null));
+  };
   const syncHighlights = () => {
     viewport.setHighlight(highlightsFor(tx.doc.state, hoverRef, tx.selection.refs));
     viewport.setDimensions(dimensionsToRender(tx.doc.state, tx.selection.refs));
     viewport.setTexts(textsToRender(tx.doc.state, tx.selection.refs));
-    viewport.setSections(sectionsToRender(tx.doc.state, tx.selection.refs));
+    syncSections();
   };
   setRenderImageStore(tx.images);
   // The inference index catches up with the document in short slices between frames, so that opening a large model
@@ -278,8 +295,9 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
   // Tool-driven visuals: hover highlight (Select/Eraser) and push/pull real preview.
   const syncToolVisuals = () => {
     const tool = toolManager.visualTool as
-      | (Tool & { hoverRef?: EntityRef | null; previewMeshes?: readonly MeshData[]; previewReplacesBodyId?: number | null; previewMatrix?: Mat4 })
+      | (Tool & { hoverRef?: EntityRef | null; previewMeshes?: readonly MeshData[]; previewReplacesBodyId?: number | null; previewMatrix?: Mat4; previewSurfaceGroups?: readonly (readonly { faceIds: readonly number[] }[])[] })
       | null;
+    syncSections();
     const nextHover = tool?.hoverRef ?? null;
     if (nextHover !== hoverRef) {
       hoverRef = nextHover;
@@ -287,7 +305,7 @@ export function createApp(opts: CreateAppOptions = {}): AppInstance {
     }
     const preview = tool?.previewMeshes ?? [];
     const replaced = preview.length ? (tool?.previewReplacesBodyId ?? null) : null;
-    viewport.setPreview(preview.length ? preview : null, tool?.previewMatrix);
+    viewport.setPreview(preview.length ? preview : null, tool?.previewMatrix, tool?.previewSurfaceGroups);
     const replacedKey = replaced === null ? null : renderKey(tx.context.path, replaced);
     viewport.setBodies(replacedKey === null ? bodies : bodies.filter((b) => b.id !== replacedKey));
     // Position Texture: live UV mapping while a pin is dragged (materials agent).

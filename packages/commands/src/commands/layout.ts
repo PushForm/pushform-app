@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { cloneLayoutValue, layoutDimensionUnits, layoutValuesEqual, setLayoutGridUnits } from '@pushform/layout';
+import { drawingViewEntities, DRAWING_ANNOTATION_SCALE, cloneLayoutValue, layoutDimensionUnits, layoutValuesEqual, setLayoutGridUnits } from '@pushform/layout';
 import { operateLayoutPaths, LAYOUT_PATH_OPERATIONS, createLayoutShapeRegions, replayLayoutShapeBuild, layoutShapeBuildSnapshot, retainedLayoutShapeSources, retainLayoutShapeOpenSource } from '@pushform/layout';
 import { LENGTH_TOL } from '@pushform/core';
-import { resizedViewportCamera } from '@pushform/layout';
+import { resizedViewportCamera, rotateLayoutEntities, scaleLayoutEntities } from '@pushform/layout';
 import { detachedLayoutModelAnnotation, copyLayoutModelAnnotation, refreshLayoutModelAnnotations, validLayoutModelAttachment, validLayoutModelAnnotation, type LayoutModelAttachment, type LayoutAnnotationModels } from '@pushform/layout';
 import { LAYOUT_ARROW_TYPES, createLayoutTable, cloneLayoutTable, validLayoutTable, validTableFrame, tableFrame, copyLayoutImage, isViewport, isCloudSource, isCloudReference, LAYOUT_OBJECT_NAME_MAX, LAYOUT_NON_PAGE_NUMBER_TAGS, LAYOUT_PAGE_NUMBER_STYLES, type LayoutTable } from '@pushform/layout';
 import { z } from 'zod';
 import { allocId, type Draft } from '@pushform/model';
-import { layoutAnchorOnPath, validLayoutContourStarts, isLayoutLayerVisible, moveLayoutLabel, layoutLabelWholeMovePart, refreshLayoutLabels, resolveLayoutLabelAnchor, rotateLayoutEntity, layoutTextCenter, resizeLayoutTextPoints, createLayoutCornerBetween, createLayoutOffset, createLayoutArc, LAYOUT_ARC_KINDS, createLayoutRectangle, LAYOUT_RECTANGLE_KINDS, addLayoutLine, angularRaysFromPoints, resolveAngularEdgePoints, angularMeasurement, angularDimensionError, createAngularDimension, createLinearDimension, refreshLayoutDimensions, linearMeasurement, normalizeDimensionAngle, flattenLayoutPath, snapPaperPoint, type LayoutDocument, type LayoutDocumentState, type LayoutEntity, type LayoutPathHandle, type LayoutLinearDimension, type LayoutAngularDimension } from '@pushform/layout';
+import { layoutAnchorOnPath, validLayoutContourStarts, isLayoutLayerVisible, moveLayoutLabel, layoutLabelWholeMovePart, refreshLayoutLabels, resolveLayoutLabelAnchor, layoutTextCenter, resizeLayoutTextPoints, createLayoutCornerBetween, createLayoutOffset, createLayoutArc, LAYOUT_ARC_KINDS, createLayoutRectangle, LAYOUT_RECTANGLE_KINDS, addLayoutLine, angularRaysFromPoints, resolveAngularEdgePoints, angularMeasurement, angularDimensionError, createAngularDimension, createLinearDimension, refreshLayoutDimensions, linearMeasurement, normalizeDimensionAngle, flattenLayoutPath, snapPaperPoint, type LayoutDocument, type LayoutDocumentState, type LayoutEntity, type LayoutPathHandle, type LayoutLinearDimension, type LayoutAngularDimension } from '@pushform/layout';
 import type { TransactionHost, AnyCommand } from '../registry/Command';
 import { defineCommand } from '../registry/Command';
 import { CommandRegistry } from '../registry/CommandRegistry';
@@ -352,7 +352,7 @@ const clipboardEntity = z.discriminatedUnion('kind', [
 
 /**
  * Place independent copies of clipboard objects as a group centered on a page, on the active layer;
- * returns their ids. DXF import places its converted drawing the same way.
+ * returns their ids. DXF and DWG import place their converted drawings the same way.
  */
 function pasteEntities(draft: Draft<LayoutDocumentState>, pageId: number, copies: readonly z.infer<typeof clipboardEntity>[], position?: [number, number]): number[] {
   const target = page(draft, pageId), layer = draft.layers.get(draft.activeLayerId);
@@ -379,10 +379,11 @@ function pasteEntities(draft: Draft<LayoutDocumentState>, pageId: number, copies
   if (entities.length === 0) throw new Error('Nothing to paste');
   const bounds = entities.flatMap(entity => entity.text ? entity.points.slice(0, 2) : entity.kind === 'path'
     ? flattenLayoutPath(entity.points, entity.handles, entity.closed, 20, entity.contourStarts) : entity.points);
-  const xs = bounds.map(p => p[0]), ys = bounds.map(p => p[1]);
+  // Reduced in a loop: a traced drawing holds more points than a call can take as arguments.
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const [x, y] of bounds) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
   const center = position ?? [target.size[0] / 2, target.size[1] / 2];
-  const delta = [center[0]! - (Math.min(...xs) + Math.max(...xs)) / 2,
-    center[1]! - (Math.min(...ys) + Math.max(...ys)) / 2];
+  const delta = [center[0]! - (minX + maxX) / 2, center[1]! - (minY + maxY) / 2];
   const translate = (p: [number, number]): [number, number] => [p[0] + delta[0]!, p[1] + delta[1]!];
   const store = shapeStore(draft, pageId, layer.id);
   const groups = new Map<number, number>();
@@ -401,6 +402,43 @@ function pasteEntities(draft: Draft<LayoutDocumentState>, pageId: number, copies
 }
 
 export const layoutCommands: readonly AnyCommand[] = [
+  defineCommand({
+    id: 'layout.drawing.place', title: 'Place Drawing View', category: 'layout', undoable: true,
+    params: z.object({ pageId: id, sourceGuid: z.string().min(1), sourceName: z.string().min(1), sourcePageId: id,
+      denominator: finite.positive(), x: finite, y: finite, rotation: finite, entities: z.array(clipboardEntity).min(1), replaceId: id.optional() }),
+    run: (ctx, p) => host(ctx).edit('Place Drawing View', draft => {
+      if (draft.settings.drawing) throw new Error('Choose a Layout destination.');
+      const target = page(draft, p.pageId), layer = draft.layers.get(draft.activeLayerId);
+      if (!layer || layer.shared || layer.locked || !isLayoutLayerVisible(target, draft, layer.id)) throw new Error('Choose an unlocked visible page layer.');
+      const previous = p.replaceId === undefined ? undefined : target.entities.get(p.replaceId);
+      if (p.replaceId !== undefined && (!previous?.drawingView || previous.groupId === undefined)) throw new Error('Drawing view is unavailable.');
+      if (previous && (draft.layers.get(previous.layerId)?.locked || !isLayoutLayerVisible(target, draft, previous.layerId))) throw new Error('Drawing view layer is unavailable.');
+      const copies = drawingViewEntities(p.entities as LayoutEntity[], p.denominator, p.x, p.y, p.rotation);
+      if (previous) {
+        const ids = new Set([...target.entities.values()].filter(e => e.groupId === previous.groupId).map(e => e.id));
+        for (const id of ids) target.entities.delete(id);
+        target.entityOrder = target.entityOrder.filter(id => !ids.has(id));
+      }
+      const groupId = allocId(draft), result: number[] = [];
+      for (const copy of copies) {
+        const entityId = allocId(draft);
+        const entity: LayoutEntity = { ...copy, id: entityId, layerId: previous?.layerId ?? layer.id, groupId, locked: true };
+        if (!result.length) entity.drawingView = { sourceGuid: p.sourceGuid, sourceName: p.sourceName, sourcePageId: p.sourcePageId, denominator: p.denominator, x: p.x, y: p.y, rotation: p.rotation };
+        target.entities.set(entityId, entity); target.entityOrder.push(entityId); result.push(entityId);
+      }
+      return result;
+    }),
+  }),
+  defineCommand({
+    id: 'layout.drawing.detach', title: 'Detach Drawing View', category: 'layout', undoable: true,
+    params: z.object({ pageId: id, entityId: id }),
+    run: (ctx, p) => host(ctx).edit('Detach Drawing View', draft => {
+      const target = page(draft, p.pageId), first = target.entities.get(p.entityId);
+      if (!first?.drawingView || first.groupId === undefined) throw new Error('Drawing view is unavailable.');
+      if (draft.layers.get(first.layerId)?.locked || !isLayoutLayerVisible(target, draft, first.layerId)) throw new Error('Drawing view layer is unavailable.');
+      for (const entity of target.entities.values()) if (entity.groupId === first.groupId) { delete entity.drawingView; entity.locked = false; }
+    }),
+  }),
   defineCommand({
     id: 'layout.annotation.attachModel', title: 'Attach Annotation to Model', category: 'layout', menu: 'Dimensions',
     params: z.object({ pageId: id, entityId: id, attachments: modelAttachments }),
@@ -637,12 +675,15 @@ export const layoutCommands: readonly AnyCommand[] = [
   }),
   defineCommand({
     id: 'layout.viewport.setCamera', title: 'Change View', category: 'layout', menu: 'Tools', undoable: true,
-    params: z.object({ pageId: id, entityId: id, camera: viewportCamera, scene: z.string().nullable() }),
+    // `cameraModified`: the camera is no longer the scene's own, while the scene's other settings still apply.
+    params: z.object({ pageId: id, entityId: id, camera: viewportCamera, scene: z.string().nullable(), cameraModified: z.boolean().default(false) }),
     run: (ctx, params) => host(ctx).edit('Change View', draft => {
       const entity = editablePath(draft, params.pageId, params.entityId);
       if (!isViewport(entity)) throw new Error('Object is not a model view');
       entity.image.viewport.camera = params.camera;
       entity.image.viewport.scene = params.scene;
+      if (params.scene !== null && params.cameraModified) entity.image.viewport.cameraModified = true;
+      else delete entity.image.viewport.cameraModified;
     }),
   }),
   defineCommand({
@@ -742,6 +783,12 @@ export const layoutCommands: readonly AnyCommand[] = [
     params: z.object({ pageId: id, entities: z.array(clipboardEntity).min(1) }), undoable: true,
     run: (ctx, params) => host(ctx).edit('Import DXF', draft => pasteEntities(draft, params.pageId, params.entities)),
   }),
+  // A DWG drawing is converted to DXF first and placed the same way; it has its own command for its undo label.
+  defineCommand({
+    id: 'layout.dwg.import', title: 'Import DWG', category: 'layout', menu: 'File',
+    params: z.object({ pageId: id, entities: z.array(clipboardEntity).min(1) }), undoable: true,
+    run: (ctx, params) => host(ctx).edit('Import DWG', draft => pasteEntities(draft, params.pageId, params.entities)),
+  }),
   defineCommand({
     id: 'layout.path.corner', title: 'Fillet or Chamfer', category: 'layout', menu: 'Tools',
     params: z.object({ pageId: id, kind: z.enum(['fillet', 'chamfer']), amountMm: finite.positive(),
@@ -820,6 +867,7 @@ export const layoutCommands: readonly AnyCommand[] = [
       if (!layer || layer.locked || !isLayoutLayerVisible(page(draft, params.pageId), draft, layer.id)) throw new Error('Active layer is unavailable');
       const target = page(draft, params.pageId);
       const dimension = createAngularDimension();
+      if (draft.settings.drawing) for (const key of ['fontSizePt', 'arrowSizeMm', 'extensionGapMm', 'extensionOverrunMm'] as const) dimension[key] *= DRAWING_ANNOTATION_SCALE;
       Object.assign(dimension, params.style);
       dimension.anchors = params.anchors ?? [null, null, null];
       const points = params.points.map(point => [...point] as [number, number]);
@@ -895,7 +943,9 @@ export const layoutCommands: readonly AnyCommand[] = [
       const target = page(draft, params.pageId);
       // New dimensions measure in the drawing units unless a style says otherwise.
       const dimension = { ...createLinearDimension(), ...layoutDimensionUnits(draft) };
+      if (draft.settings.drawing) for (const key of ['fontSizePt', 'arrowSizeMm', 'extensionGapMm', 'extensionOverrunMm'] as const) dimension[key] *= DRAWING_ANNOTATION_SCALE;
       Object.assign(dimension, params.style);
+      if (draft.settings.drawing) dimension.scale = 1;
       dimension.anchors = params.anchors ?? [null, null];
       for (const anchor of dimension.anchors) {
         if (!anchor) continue;
@@ -925,6 +975,7 @@ export const layoutCommands: readonly AnyCommand[] = [
     run: (ctx, params) => host(ctx).edit('Edit Dimension', (draft) => {
       const entity = editablePath(draft, params.pageId, params.entityId);
       if (!entity.dimension) throw new Error('Entity is not a dimension');
+      if (draft.settings.drawing && params.style?.scale !== undefined && params.style.scale !== 1) throw new Error('Drawing dimensions measure full-size geometry.');
       if (entity.modelAnnotation && (params.style?.scale !== undefined || params.detach))
         throw new Error('Disconnect the model annotation before changing its measurement scale');
       if (params.style) Object.assign(entity.dimension, params.style);
@@ -1449,6 +1500,12 @@ export const layoutCommands: readonly AnyCommand[] = [
       }),
   }),
   defineCommand({
+    id: 'layout.viewport.setUpdates', title: 'Model View Updates', category: 'layout',
+    params: z.object({ automatic: z.boolean() }), undoable: true,
+    // The drawing renders its model views as it changes, or keeps their pictures until they are updated by hand.
+    run: (ctx, params) => host(ctx).edit(params.automatic ? 'Resume Model View Updates' : 'Pause Model View Updates', draft => { draft.settings.autoRender = params.automatic; }),
+  }),
+  defineCommand({
     id: 'layout.grid.toggle', title: 'Toggle Grid', category: 'layout', menu: 'View',
     params: z.object({}), undoable: true,
     run: (ctx) => host(ctx).edit('Toggle Grid', draft => { draft.settings.grid.show = !draft.settings.grid.show; }),
@@ -1722,17 +1779,24 @@ export const layoutCommands: readonly AnyCommand[] = [
     title: 'Rotate Shape',
     category: 'layout',
     menu: 'Arrange',
-    params: z.object({ pageId: id, entityId: id, angleDeg: finite, pivot: point.optional() }),
+    // One object turns about its center unless a pivot is given; several objects turn together about the pivot.
+    params: z.object({ pageId: id, entityId: id.optional(), entityIds: z.array(id).min(1).optional(), angleDeg: finite, pivot: point.optional() })
+      .refine((params) => params.entityId !== undefined || (params.entityIds !== undefined && params.pivot !== undefined),
+        { message: 'entityId, or entityIds with a pivot, is required' }),
     undoable: true,
     run: (ctx, params) =>
       host(ctx).edit('Rotate Shape', (draft) => {
-        const entity = editablePath(draft, params.pageId, params.entityId);
-        const pivot = params.pivot ?? (entity.text ? layoutTextCenter(entity) : pathCenter(entity.kind === 'path'
-          ? flattenLayoutPath(entity.points, entity.handles, entity.closed, 20, entity.contourStarts) : entity.points));
-        const rotated = rotateLayoutEntity(entity, pivot, params.angleDeg);
-        entity.points = rotated.points; entity.handles = rotated.handles;
-        if (rotated.text) entity.text = rotated.text;
-        if (entity.dimension && rotated.dimension?.angleDeg !== undefined) entity.dimension.angleDeg = rotated.dimension.angleDeg;
+        const entities = [...new Set(params.entityIds ?? [params.entityId!])].map(entityId => editablePath(draft, params.pageId, entityId));
+        const first = entities[0]!;
+        const pivot = params.pivot ?? (first.text ? layoutTextCenter(first) : pathCenter(first.kind === 'path'
+          ? flattenLayoutPath(first.points, first.handles, first.closed, 20, first.contourStarts) : first.points));
+        const rotated = rotateLayoutEntities(entities, pivot, params.angleDeg);
+        entities.forEach((entity, index) => {
+          const next = rotated[index]!;
+          entity.points = next.points; entity.handles = next.handles;
+          if (next.text) entity.text = next.text;
+          if (next.dimension) entity.dimension = next.dimension;
+        });
       }),
   }),
   defineCommand({
@@ -1740,14 +1804,32 @@ export const layoutCommands: readonly AnyCommand[] = [
     title: 'Scale Shape',
     category: 'layout',
     menu: 'Arrange',
+    // One object scales in its own frame, keeping its type; several scale together along the page's axes about the
+    // pivot, their type with them (`scaleLayoutEntities`).
     params: z.object({
-      pageId: id, entityId: id,
+      pageId: id, entityId: id.optional(), entityIds: z.array(id).min(1).optional(),
       scaleX: finite.positive(), scaleY: finite.positive(), pivot: point.optional(),
-    }),
+    }).refine((params) => params.entityId !== undefined || (params.entityIds !== undefined && params.pivot !== undefined),
+      { message: 'entityId, or entityIds with a pivot, is required' }),
     undoable: true,
     run: (ctx, params) =>
       host(ctx).edit('Scale Shape', (draft) => {
-        const entity = editablePath(draft, params.pageId, params.entityId);
+        if (params.entityIds) {
+          const entities = [...new Set(params.entityIds)].map(entityId => editablePath(draft, params.pageId, entityId));
+          const scaled = scaleLayoutEntities(entities, params.pivot!, params.scaleX, params.scaleY);
+          entities.forEach((entity, index) => {
+            const next = scaled[index]!;
+            entity.points = next.points; entity.handles = next.handles;
+            if (next.text) entity.text = next.text;
+            if (next.image) entity.image = next.image;
+            if (next.table) entity.table = next.table;
+            if (next.dimension) entity.dimension = next.dimension;
+            if (next.angularDimension) entity.angularDimension = next.angularDimension;
+            if (entity.table && !validTableFrame(entity.points)) throw new Error('Invalid table size');
+          });
+          return;
+        }
+        const entity = editablePath(draft, params.pageId, params.entityId!);
         const pivot = params.pivot ?? pathCenter(entity.kind === 'path'
           ? flattenLayoutPath(entity.points, entity.handles, entity.closed, 20, entity.contourStarts) : entity.points);
         const angle = entity.image || entity.table ? Math.atan2(entity.points[1]![1] - entity.points[0]![1], entity.points[1]![0] - entity.points[0]![0]) : 0;

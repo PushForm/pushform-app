@@ -7,18 +7,25 @@ import type * as NativeIO from '@pushform/io';
 import type { ImageId } from '@pushform/core';
 import { allocId, createDocument, ImageStore, DEFAULT_SHADOWS } from '@pushform/model';
 
-const rendered = vi.hoisted(() => ({ snapshots: [] as [number, number][], previews: [] as [number, number][], ready: new Set<string>(),
+const rendered = vi.hoisted(() => ({ canvases: new Map<string, HTMLCanvasElement>(), snapshots: [] as [number, number][], previews: [] as [number, number][], ready: new Set<string>(),
   displays: [] as unknown[], shadows: [] as unknown[], fog: [] as unknown[], texturesReady: vi.fn(async () => {}), failure: null as string | null,
   /** Models loaded while this is set have nothing in them. */
-  empty: false, read: vi.fn(async (_bytes: Uint8Array, _options?: unknown): Promise<unknown> => ({ scenes: [] })) }));
+  empty: false, sections: { planes: [], cuts: [] } as { planes: { id: string; sheet?: string }[]; cuts: { key: string }[] }, drawnSections: [] as unknown[],
+  read: vi.fn(async (_bytes: Uint8Array, _options?: unknown): Promise<unknown> => ({ scenes: [] })) }));
 
 vi.mock('@pushform/io', () => ({
   readPreservedSketchUpModel: (_state: unknown, _archive: string, model: string) => model === 'linked' ? null : new Uint8Array(1),
   readSketchUpInWorker: rendered.read,
   applySketchUpImport: () => undefined,
-  openModelFile: vi.fn(async (bytes: Uint8Array) => ({ images: new Map(), state: { images: new Map(), styles: new Map(), sceneOrder: [1], tags: new Map(),
+  openModelFile: vi.fn(async (bytes: Uint8Array) => bytes.length === 7 ? { images: new Map(), state: {
+    // A model cut by plane 1, with a plan scene that keeps that cut and a section scene that cuts with plane 2.
+    images: new Map(), styles: new Map([[1, { modeling: { sectionCutsVisible: true } }]]), activeStyleId: 1, tags: new Map(), rootDefinitionId: 1, sceneOrder: [1, 2],
+    definitions: new Map([[1, { id: 1, entities: { sectionPlanes: new Map([[1, {}], [2, {}]]), activeSectionPlaneId: 1 } }]]),
+    scenes: new Map([[1, { name: 'Plan', flags: { useCamera: true, useTags: false, useSectionPlanes: false }, hiddenTags: [], activeSectionPlanes: [], camera: {} }],
+      [2, { name: 'Section B', flags: { useCamera: true, useTags: false, useSectionPlanes: true }, hiddenTags: [], activeSectionPlanes: [2], camera: {} }]]) } }
+    : { images: new Map(), state: { images: new Map(), styles: new Map(), sceneOrder: [1], tags: new Map(),
     scenes: new Map([[1, { name: `Scene ${bytes.length}`, flags: { useCamera: true, useTags: false }, hiddenTags: [],
-      camera: { eye: [1, 2, 3], target: [0, 0, 0], up: [0, 0, 1], perspective: false, fov: 35, height: 4 } }]]) } })),
+      camera: { eye: [1, 2, 3], target: [0, 0, 0], up: [0, 0, 1], perspective: false, fov: 35, height: 4 } }]]) } }),
 }));
 vi.mock('../engine/renderAdapter', () => ({
   bodiesToRender: () => [], sketchesToRender: () => rendered.empty ? [] : [{}], imagesToRender: () => [], displayToRender: () => ({}),
@@ -26,15 +33,23 @@ vi.mock('../engine/renderAdapter', () => ({
   fogToRender: () => ({ enabled: true, near: 1, far: 20, color: '#eeece6' }),
   withRenderImageStore: (_images: unknown, run: () => unknown) => run(),
 }));
-vi.mock('../engine/sectionAdapter', () => ({ sectionsToRender: () => null }));
+vi.mock('../engine/sectionAdapter', () => ({
+  // A model with definitions draws both its planes and cuts with its root's active plane.
+  sectionsToRender: (state: { definitions?: Map<number, { entities: { activeSectionPlaneId: number | null } }>; activeStyleId?: number;
+    styles: Map<number, { modeling: { sectionCutsVisible: boolean } }> }) => {
+    if (!state.definitions) return rendered.sections;
+    const active = state.styles.get(state.activeStyleId!)!.modeling.sectionCutsVisible ? state.definitions.get(1)!.entities.activeSectionPlaneId : null;
+    return { planes: [{ id: '/1' }, { id: '/2' }], cuts: active === null ? [] : [{ key: `/${active}` }] };
+  },
+}));
 vi.mock('@pushform/render', () => ({
   Viewport: class {
-    sceneSync = { textures: { whenReady: rendered.texturesReady } };
+    sceneSync = { textures: { whenReady: rendered.texturesReady }, sections: { ready: Promise.resolve() } };
     mountOffscreen(): boolean { return true; }
     setBodies(): void {}
     setSketches(): void {}
     setImages(): void {}
-    setSections(): void {}
+    setSections(sections: unknown): void { rendered.drawnSections.push(sections); }
     setDisplay(display: unknown): void { rendered.displays.push(display); }
     setShadows(shadows: unknown): void { rendered.shadows.push(shadows); }
     setFog(fog: unknown): void { rendered.fog.push(fog); }
@@ -55,14 +70,15 @@ vi.mock('./layoutImage', () => ({
   LAYOUT_VIEW_EMPTY: 'pushform-view:empty',
   LAYOUT_VIEW_FAILED: 'pushform-view:failed',
   notifyLayoutImages: () => undefined,
-  setLayoutCanvasPicture: (src: string) => rendered.ready.add(src),
+  setLayoutCanvasPicture: (src: string, canvas?: HTMLCanvasElement) => { rendered.ready.add(src); if (canvas) rendered.canvases.set(src, canvas); },
+  layoutPicture: (src: string) => rendered.canvases.get(src) ?? null,
   layoutImageReady: (src: string) => rendered.ready.has(src),
   forgetLayoutImage: (src: string) => rendered.ready.delete(src),
 }));
 
 const { layoutViewportPicture, layoutViewportModel, layoutViewportRender, layoutViewportFailure, layoutViewportProblem, layoutViewportStatus,
   layoutViewportWarnings, setLayoutCloudModelLoader,
-  retainLayoutViewportModels, peekLayoutViewportModel, settleLayoutViewportRenders, whenLayoutViewportRendersIdle } = await import('./layoutViewportRenders');
+  retainLayoutViewportModels, peekLayoutViewportModel, settleLayoutViewportRenders, whenLayoutViewportRendersIdle, holdLayoutViewportDisplays, layoutViewportDetailWarnings, updateLayoutViewports } = await import('./layoutViewportRenders');
 
 const camera: LayoutViewportCamera = { eye: [10, -10, 10], target: [0, 0, 0], up: [0, 0, 1], projection: 'perspective', fov: 35, scale: 1 };
 let nextId = 1;
@@ -311,6 +327,71 @@ describe('Cloud model views', () => {
     expect(rendered.snapshots.at(-1)).toEqual([591, 295]);
   });
 
+  it('numbers section markers with the first page showing the model, and stamps the picture with that sheet', async () => {
+    setLayoutCloudModelLoader(async () => new Uint8Array(6));
+    const state = cloudState(), entity = cloudView();
+    state.references.get(5)!.target = { kind: 'cloud', documentId: 'sections', revisionId: 'rev-6', revisionNumber: 6, sha256: '6'.repeat(64), pinned: false };
+    const page = state.pages.get(state.pageOrder[0]!)!;
+    page.entities.set(entity.id, entity); page.entityOrder.push(entity.id);
+    rendered.sections = { planes: [{ id: '/1' }, { id: '/2' }], cuts: [{ key: '/1' }] };
+    try {
+      // The model is loaded by the first render; the next one knows its section planes and draws the sheet.
+      expect(layoutViewportRender(state, entity)).toBeNull();
+      await settle();
+      expect(layoutViewportRender(state, entity)).toBeNull();
+      await settle();
+      // only the plane that cuts is drawn on the sheet
+      expect(rendered.drawnSections.at(-1)).toEqual({ planes: [{ id: '/1', sheet: '1' }, { id: '/2' }], cuts: [{ key: '/1' }] });
+      expect(layoutViewportRender(state, entity)).toMatchObject({ cache: { sha256: '6'.repeat(64), sheet: '[[null,null,"1"]]' } });
+    } finally { rendered.sections = { planes: [], cuts: [] }; }
+  });
+
+  it('records no sheet for a picture of a model whose planes cut no view', async () => {
+    setLayoutCloudModelLoader(async () => new Uint8Array(8));
+    const state = cloudState(), entity = cloudView();
+    state.references.get(5)!.target = { kind: 'cloud', documentId: 'uncut', revisionId: 'rev-8', revisionNumber: 8, sha256: '8'.repeat(64), pinned: false };
+    const page = state.pages.get(state.pageOrder[0]!)!;
+    page.entities.set(entity.id, entity); page.entityOrder.push(entity.id);
+    rendered.sections = { planes: [{ id: '/2' }], cuts: [] };
+    try {
+      layoutViewportRender(state, entity);
+      await settle();
+      expect(rendered.drawnSections.at(-1)).toEqual({ planes: [{ id: '/2' }], cuts: [] });
+      expect(layoutViewportRender(state, entity)!.cache).not.toHaveProperty('sheet');
+    } finally { rendered.sections = { planes: [], cuts: [] }; }
+  });
+
+  it("numbers every plane's markers with the first page whose view cuts with it", async () => {
+    setLayoutCloudModelLoader(async () => new Uint8Array(7));
+    const state = cloudState();
+    state.references.get(5)!.target = { kind: 'cloud', documentId: 'scenes', revisionId: 'rev-7', revisionNumber: 7, sha256: '7'.repeat(64), pinned: false };
+    const plan = cloudView(), section = cloudView();
+    plan.image!.viewport!.scene = 'Plan';
+    section.image!.viewport!.scene = 'Section B';
+    const second = 9;
+    state.pages.set(second, { ...state.pages.get(state.pageOrder[0]!)!, id: second, name: 'Sections', entities: new Map(), entityOrder: [] });
+    state.pageOrder.push(second);
+    for (const [pageId, entity] of [[state.pageOrder[0]!, plan], [second, section]] as const) {
+      const page = state.pages.get(pageId)!;
+      page.entities.set(entity.id, entity); page.entityOrder.push(entity.id);
+    }
+    const drawn = async (entity: LayoutEntity) => {
+      layoutViewportRender(state, entity);
+      await settle();
+      layoutViewportRender(state, entity);
+      await settle();
+      return rendered.drawnSections.at(-1);
+    };
+    // The plan keeps the model's cut, plane 1; its markers name page 1 for plane 1 and page 2, where the section view
+    // cuts with it, for plane 2. The section view's markers name the same pages.
+    expect(await drawn(plan)).toEqual({ planes: [{ id: '/1', sheet: '1' }, { id: '/2', sheet: '2' }], cuts: [{ key: '/1' }] });
+    expect(await drawn(section)).toEqual({ planes: [{ id: '/1', sheet: '1' }, { id: '/2', sheet: '2' }], cuts: [{ key: '/2' }] });
+    expect(layoutViewportRender(state, plan)!.cache.sheet).toBe('[["Plan",null,"1"],["Section B",null,"2"]]');
+    // turning cuts off in the section view leaves plane 2 drawn on no sheet
+    section.image!.viewport!.display = { faceStyle: 'shaded', edges: true, profiles: true, backEdges: false, xray: false, hiddenGeometry: false, sections: { planes: true, cuts: false } };
+    expect(await drawn(plan)).toEqual({ planes: [{ id: '/1', sheet: '1' }, { id: '/2' }], cuts: [{ key: '/1' }] });
+  });
+
   it('stores a transparent picture for a view of a cloud model that shows nothing', async () => {
     setLayoutCloudModelLoader(async () => new Uint8Array(4));
     const state = cloudState(), entity = cloudView();
@@ -346,4 +427,103 @@ it('waits for model textures before producing a committed page picture', async (
   await vi.waitFor(() => expect(resolve).toBeTypeOf('function'));
   expect(rendered.snapshots).toHaveLength(before);
   resolve(); await settle(); expect(rendered.snapshots).toHaveLength(before + 1);
+});
+
+it('export captures what views display, renders nothing and is unaffected by a render finishing meanwhile', async () => {
+  const entity = view();
+  entity.points = [[0, 0], [60, 0], [60, 30], [0, 30]];
+  entity.image!.src = 'old-picture';
+  const before = rendered.snapshots.length;
+  const release = holdLayoutViewportDisplays(state, [entity]);
+  // The outdated saved picture is exported as it is, with no render requested at any resolution.
+  expect(layoutViewportPicture(state, entity, undefined, 600 / 25.4, true)).toBe('old-picture');
+  expect(layoutViewportPicture(state, entity)).toBe('old-picture');
+  await settle();
+  expect(rendered.snapshots).toHaveLength(before);
+  release();
+  // Afterwards the view renders as usual.
+  layoutViewportPicture(state, entity);
+  await settle();
+  expect(rendered.snapshots).toHaveLength(before + 1);
+});
+
+it('export draws a view with no picture as nothing', () => {
+  const entity = view();
+  entity.points = [[0, 0], [61, 0], [61, 30], [0, 30]];
+  const release = holdLayoutViewportDisplays(state, [entity]);
+  try { expect(layoutViewportPicture(state, entity, undefined, 300 / 25.4, true)).toBe(''); } finally { release(); }
+});
+
+it('reports views whose displayed picture has less detail than the export quality, without rendering them', async () => {
+  const { setLayoutCanvasPicture } = await import('./layoutImage');
+  const entity = view();
+  entity.points = [[0, 0], [25.4, 0], [25.4, 25.4], [0, 25.4]];
+  const picture = document.createElement('canvas');
+  picture.width = 300; picture.height = 300;
+  entity.image!.src = 'low-detail-picture';
+  setLayoutCanvasPicture('low-detail-picture', picture);
+  const before = rendered.snapshots.length;
+  const release = holdLayoutViewportDisplays(state, [entity]);
+  try {
+    // A 300-pixel picture across one inch is 300 dpi: enough for Draft and Standard, not for High.
+    expect(layoutViewportDetailWarnings(state, [entity], 150)).toEqual([]);
+    expect(layoutViewportDetailWarnings(state, [entity], 300)).toEqual([]);
+    expect(layoutViewportDetailWarnings(state, [entity], 600)).toEqual([expect.stringContaining("less detail than 600 dpi (as low as 300 dpi).")]);
+  } finally { release(); }
+  await settle();
+  expect(rendered.snapshots).toHaveLength(before);
+});
+
+describe('Pausing model view updates', () => {
+  const paused = { ...state, settings: { ...state.settings, autoRender: false } };
+  const framed = (width: number): LayoutEntity => ({ ...view(), points: [[0, 0], [width, 0], [width, 30], [0, 30]] });
+
+  it('renders nothing committed while paused, but still previews, and updates by hand without resuming', async () => {
+    const entity = framed(51), before = rendered.snapshots.length;
+    layoutViewportPicture(paused, entity);
+    await settle();
+    expect(rendered.snapshots).toHaveLength(before);
+    expect(layoutViewportStatus(paused, entity)).toBe('outdated');
+    const orbit = { ...camera, eye: [12, -8, 10] as [number, number, number] };
+    layoutViewportPicture(paused, entity, orbit, 3);
+    await settle();
+    expect(rendered.previews.length).toBeGreaterThan(0);
+    updateLayoutViewports(paused, [entity]);
+    await settle();
+    expect(rendered.snapshots).toHaveLength(before + 1);
+    expect(layoutViewportStatus(paused, entity)).toBe('current');
+    expect(paused.settings.autoRender).toBe(false);
+    // Another change is outdated again until it is updated.
+    const moved = { ...entity, image: { ...entity.image!, viewport: { ...entity.image!.viewport!, camera: orbit } } };
+    layoutViewportPicture(paused, moved);
+    await settle();
+    expect(rendered.snapshots).toHaveLength(before + 1);
+    expect(layoutViewportStatus(paused, moved)).toBe('outdated');
+    // Resuming renders it.
+    layoutViewportPicture(state, moved);
+    await settle();
+    expect(rendered.snapshots).toHaveLength(before + 2);
+  });
+
+  it('keeps a saved picture whose freshness cannot be known, and does not call it current', () => {
+    const entity = framed(52);
+    entity.image!.src = 'saved-picture';
+    expect(layoutViewportStatus(paused, entity)).toBe('unknown');
+    expect(layoutViewportPicture(paused, entity)).toBe('saved-picture');
+  });
+
+  it('waits for a drag to finish and renders the views on screen first', async () => {
+    const dragged = framed(53), before = rendered.snapshots.length;
+    layoutViewportPicture(state, dragged, undefined, undefined, false, { defer: true });
+    await settle();
+    expect(rendered.snapshots).toHaveLength(before);
+    // The first request starts at once; of the rest, the view on screen goes before the newer one that is not.
+    const [a, b, c, d] = [framed(41), framed(42), framed(43), framed(44)];
+    layoutViewportPicture(state, a);
+    layoutViewportPicture(state, b);
+    layoutViewportPicture(state, c, undefined, undefined, false, { visible: true });
+    layoutViewportPicture(state, d);
+    await settle();
+    expect(rendered.snapshots.slice(before).map(([width]) => width)).toEqual([242, 254, 260, 248]);
+  });
 });

@@ -13,6 +13,7 @@
     "build": "pnpm --filter @pushform/app-web build",
     "desktop": "pnpm --filter @pushform/app-desktop tauri dev",
     "desktop:local": "pnpm --filter @pushform/app-desktop tauri dev --config src-tauri/tauri.localdb.conf.json",
+    "desktop:native": "PF_NATIVE_KERNEL=1 pnpm --filter @pushform/app-desktop tauri dev --features native-kernel",
     "deploy:pages": "node scripts/deploy.mjs",
     "verify-deploy": "node scripts/verify-deploy.mjs",
     "dev:local": "pnpm --filter @pushform/app-web exec vite --mode localdb",
@@ -27,7 +28,11 @@
     "spec-check": "node scripts/spec-ids.mjs",
     "commons:dev": "pnpm --filter @pushform/app-commons dev",
     "commons:build": "pnpm --filter @pushform/app-commons build",
-    "build:step-reader": "node scripts/build-step-reader.mjs"
+    "docs:dev": "pnpm --filter @pushform/docs dev",
+    "docs:build": "pnpm --filter @pushform/docs build",
+    "build:step-reader": "node scripts/build-step-reader.mjs",
+    "build:dwg-reader": "node scripts/build-dwg-reader.mjs",
+    "build:kernel-wasm": "node scripts/build-kernel-wasm.mjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.11",
@@ -38,6 +43,7 @@
     "prettier": "^3.6.0",
     "typescript": "~5.9.0",
     "typescript-eslint": "^8.46.0",
+    "vite": "^7.1.0",
     "vitest": "^4.0.0",
     "wrangler": "^4.151.3"
   },

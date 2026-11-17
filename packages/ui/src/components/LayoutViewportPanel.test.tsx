@@ -12,7 +12,9 @@ vi.mock('./layoutViewportRenders', () => ({
 }));
 afterEach(cleanup);
 
+const updates: boolean[] = [];
 function setup() {
+  updates.length = 0;
   const doc = createLayoutDocument(), { commands } = createLayoutRegistry(doc), pageId = doc.state.pageOrder[0]!;
   const referenceId = commands.execute('layout.reference.add', { displayName: 'House', documentId: 'model', revisionId: 'revision', revisionNumber: 1, sha256: 'a'.repeat(64) });
   const id = commands.execute('layout.viewport.add', { pageId, first: [10, 10], second: [110, 110], source: { referenceId }, scene: null,
@@ -22,7 +24,8 @@ function setup() {
     useSyncExternalStore(notify => doc.events.on('change', notify), () => doc.version);
     return <LayoutViewportPanel entity={entity()} state={doc.state} disabled={!!entity().locked} navigating={false} onNavigate={() => {}}
       onCamera={(camera, scene) => { commands.execute('layout.viewport.setCamera', { pageId, entityId: id, camera, scene }); }}
-      onResizeMode={preserveScale => { commands.execute('layout.viewport.setResizeMode', { pageId, entityId: id, preserveScale }); }} />;
+      onResizeMode={preserveScale => { commands.execute('layout.viewport.setResizeMode', { pageId, entityId: id, preserveScale }); }}
+      onAutomatic={automatic => { commands.execute('layout.viewport.setUpdates', { automatic }); }} onUpdate={all => updates.push(all)} />;
   }
   render(<Harness />);
   return { doc, commands, entity, id, pageId };
@@ -69,4 +72,20 @@ it('disables projection, scale and resize settings for a locked view', async () 
   act(() => { doc.undoStack.transact('Lock', draft => { draft.pages.get(pageId)!.entities.get(id)!.locked = true; }); });
   for (const name of ['Projection', 'Drawing scale', 'Custom drawing scale ratio', 'Preserve scale on resize'])
     expect((screen.getByLabelText(name) as HTMLInputElement).disabled).toBe(true);
+});
+
+it('pauses and resumes updates for the drawing, and offers manual updates only while paused', async () => {
+  const { doc, commands } = setup();
+  await act(async () => {});
+  expect(screen.queryByRole('button', { name: 'Update selected view' })).toBeNull();
+  fireEvent.click(screen.getByLabelText('Pause updates for the drawing'));
+  expect(doc.state.settings.autoRender).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: 'Update selected view' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Update all' }));
+  // Updating by hand does not resume automatic updates.
+  expect(updates).toEqual([false, true]);
+  expect(doc.state.settings.autoRender).toBe(false);
+  act(() => { commands.execute('edit.undo'); });
+  expect(doc.state.settings.autoRender).toBe(true);
+  expect(screen.queryByRole('button', { name: 'Update all' })).toBeNull();
 });

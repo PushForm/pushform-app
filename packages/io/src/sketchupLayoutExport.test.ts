@@ -3,7 +3,7 @@
 import { strFromU8, unzipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
 import {
-  createLayoutDocumentState, layoutDashMm, createLinearDimension, createAngularDimension, formatLinearDimension,
+  createLayoutDocumentState, isLayoutLayerVisible, layoutDashMm, createLinearDimension, createAngularDimension, formatLinearDimension,
   type LayoutDocumentState, type LayoutEntity, type LayoutLinearDimension, type LayoutText,
 } from '@pushform/layout';
 import { exportSketchUpLayout } from './sketchupLayoutExport';
@@ -76,6 +76,43 @@ describe('SketchUp LayOut export', () => {
     });
     const { files } = await roundTrip(state);
     expect(pageEntities(files)).toHaveLength(1);
+  });
+
+  it('keeps each page\'s layer visibility and the content of layers hidden on a page', async () => {
+    const state = documentState((draft, add) => {
+      const first = draft.pages.get(draft.pageOrder[0]!)!;
+      add({ kind: 'path', points: [[0, 0], [10, 0]], closed: false });
+      first.layerVisibility = new Map([[draft.activeLayerId, false]]);
+    });
+    const layerId = state.activeLayerId, layerIndex = state.layerOrder.indexOf(layerId);
+    const secondId = state.meta.nextId++;
+    state.pages.set(secondId, { ...state.pages.get(state.pageOrder[0]!)!, id: secondId, name: 'Shown', entities: new Map(), entityOrder: [], layerVisibility: new Map() });
+    state.pageOrder.push(secondId);
+    const { files, imported } = await roundTrip(state);
+    // The hidden layer's object is written to its page, and only that page hides the layer.
+    expect(pageEntities(files)).toHaveLength(1);
+    const visibility = childrenNamed(child(xml(files, 'document.xml'), 'pageManager')!, 'pageRef').map(ref => child(ref, 'layerVisibility')!.text!.split(','));
+    expect(visibility.map(values => values[layerIndex])).toEqual(['0', '1']);
+    expect(visibility.every(values => values.length === state.layerOrder.length)).toBe(true);
+    const reopened = imported.doc.state, [hidden, shown] = reopened.pageOrder.map(id => reopened.pages.get(id)!);
+    const reopenedLayer = reopened.layerOrder[layerIndex]!;
+    expect(hidden!.entityOrder).toHaveLength(1);
+    expect(isLayoutLayerVisible(hidden!, reopened, reopenedLayer)).toBe(false);
+    expect(isLayoutLayerVisible(shown!, reopened, reopenedLayer)).toBe(true);
+    expect(imported.warnings.some(warning => warning.includes('hidden'))).toBe(false);
+  });
+
+  it('exports a layer hidden in the whole document as hidden on every page', async () => {
+    const state = documentState((draft, add) => {
+      add({ kind: 'path', points: [[0, 0], [10, 0]], closed: false });
+      draft.layers.get(draft.activeLayerId)!.visible = false;
+    });
+    const { files, imported } = await roundTrip(state);
+    const layerIndex = state.layerOrder.indexOf(state.activeLayerId);
+    expect(child(childrenNamed(child(xml(files, 'document.xml'), 'pageManager')!, 'pageRef')[0]!, 'layerVisibility')!.text!.split(',')[layerIndex]).toBe('0');
+    const reopened = imported.doc.state, page = reopened.pages.get(reopened.pageOrder[0]!)!;
+    expect(page.entityOrder).toHaveLength(1);
+    expect(isLayoutLayerVisible(page, reopened, reopened.layerOrder[layerIndex]!)).toBe(false);
   });
 
   it('writes the parts LayOut expects with consistent cross-references', async () => {

@@ -31,14 +31,15 @@ const KIND_ICONS: Record<ModelBrowserKind, ReactNode> = {
   solid: <PiCube />,
   meshPart: <PiCube />,
   text: <Icon name="tool-text" size={18} />,
+  sectionPlane: <Icon name="tool-sectionPlane" size={18} />,
 };
-const KIND_NAMES: Record<ModelBrowserKind, string> = { group: 'Group', component: 'Component', solid: 'Solid', meshPart: 'Mesh Part', text: 'Text' };
+const KIND_NAMES: Record<ModelBrowserKind, string> = { group: 'Group', component: 'Component', solid: 'Solid', meshPart: 'Mesh Part', text: 'Text', sectionPlane: 'Section Plane' };
 
 /**
  * The Model object browser: the model's solids, text, groups and components in the left menu bar's docked
  * panel, with the Layout object browser's look and keys. Selection, hiding, locking and renames go through commands.
  */
-export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void) | undefined }): JSX.Element {
+export function ModelObjectBrowser(): JSX.Element {
   const app = useApp();
   const refs = useSelectionRefs();
   const context = useEditContext();
@@ -142,8 +143,8 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
     }
   };
   const startRename = (node: ModelBrowserNode): void => {
-    // Only group and component instance names are editable here.
-    if (node.kind !== 'group' && node.kind !== 'component') return;
+    // Group and component instance names and section plane names are editable here.
+    if (node.kind !== 'group' && node.kind !== 'component' && node.kind !== 'sectionPlane') return;
     pendingFocus.current = null;
     editingRef.current = node; setEditing(node); setFocusKey(node.key);
   };
@@ -155,10 +156,18 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
     if (refocus) pendingFocus.current = node.key;
     if (value === null) return;
     const name = value.trim();
+    // a section plane always has a name: an empty one changes nothing
+    if (node.kind === 'sectionPlane') {
+      if (name && name !== node.label) run('sectionPlane.rename', { path: node.ref.path, id: node.ref.id, name });
+      return;
+    }
     if (name ? name !== node.label : node.custom) run('instance.rename', { ref: node.ref, name });
   };
-  const setHidden = (node: ModelBrowserNode, hidden: boolean): void =>
-    run(node.kind === 'text' ? 'text.setHidden' : node.kind === 'solid' || node.kind === 'meshPart' ? 'bodies.setHidden' : 'instance.setHidden', { refs: [node.ref], hidden });
+  const setHidden = (node: ModelBrowserNode, hidden: boolean): void => {
+    const command = node.kind === 'text' ? 'text.setHidden' : node.kind === 'sectionPlane' ? 'sectionPlane.setHidden'
+      : node.kind === 'solid' || node.kind === 'meshPart' ? 'bodies.setHidden' : 'instance.setHidden';
+    run(command, { refs: [node.ref], hidden });
+  };
   /** The modeler's own context menu for the item, which selects it first as a right-click in the viewport does. */
   const openMenu = (node: ModelBrowserNode, x: number, y: number): void => {
     setFocusKey(node.key);
@@ -172,7 +181,7 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
     event.stopPropagation();
     const item = event.target instanceof Element ? event.target.closest('[role="treeitem"]') : null;
     const node = byKey.get(item?.getAttribute('data-key') ?? tabKey ?? '');
-    if (event.key === 'Escape') { event.preventDefault(); if (tagTooltip) setTagTooltip(null); else onClose?.(); return; }
+    if (event.key === 'Escape') { event.preventDefault(); setTagTooltip(null); return; }
     if (!node) return;
     const index = visible.indexOf(node);
     const go = (key: string | undefined): void => { if (key) moveFocus(key); };
@@ -225,7 +234,7 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
       onFocus={event => { if (event.target === event.currentTarget) { setFocusKey(node.key); showTagTooltip(node.key, event.currentTarget.querySelector(':scope > .pf-layout-browser-row .pf-model-browser-tag-dot')); } }}
       onBlur={event => { if (event.target === event.currentTarget) setTagTooltip(null); }}>
       <div className={`pf-layout-browser-row${selected ? ' is-selected' : ''}`} style={{ '--pf-browser-level': node.level - 1 } as CSSProperties}
-        title={`${KIND_NAMES[node.kind]}: ${node.label}${node.definitionName ? ` <${node.definitionName}>` : ''}`}
+        title={`${KIND_NAMES[node.kind]}: ${node.label}${node.definitionName ? ` <${node.definitionName}>` : ''}${node.activeCut ? ' (active cut)' : ''}`}
         onClick={onRowClick} onDoubleClick={() => startRename(node)}
         onContextMenu={event => { event.preventDefault(); if (!renaming) openMenu(node, event.clientX, event.clientY); }}>
         {expandable(node)
@@ -237,7 +246,8 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
         {renaming
           ? <RenameField label={node.label} id={labelId} onFinish={finishRename} />
           : <span id={labelId} className="pf-layout-browser-name">{node.label}
-            {node.definitionName ? <span className="pf-model-browser-def"> &lt;{node.definitionName}&gt;</span> : null}</span>}
+            {node.definitionName ? <span className="pf-model-browser-def"> &lt;{node.definitionName}&gt;</span> : null}
+            {node.activeCut ? <span className="pf-model-browser-def"> · Active cut</span> : null}</span>}
         {tag ? <span className="pf-model-browser-tag-dot" role="img" aria-label={`Tag: ${tag.name}`} title=""
           aria-describedby={tagTooltip?.key === node.key ? `${idPrefix}-tag-tooltip` : undefined}
           style={{ backgroundColor: rgbToCss(tag.color) }}
@@ -275,21 +285,17 @@ export function ModelObjectBrowser({ onClose }: { readonly onClose?: (() => void
             event.preventDefault(); event.stopPropagation();
             const next = event.key === 'Home' ? 'objects' : event.key === 'End' ? 'tags' : section === 'objects' ? 'tags' : 'objects';
             setSection(next); document.getElementById(`${idPrefix}-${next}-tab`)?.focus();
-          } else if (event.key === 'Escape') { event.stopPropagation(); onClose?.(); }
-          else if (!modelBrowserPassesKey(event.nativeEvent)) event.stopPropagation();
+          } else if (!modelBrowserPassesKey(event.nativeEvent)) event.stopPropagation();
         }}>{name === 'objects' ? 'Objects' : 'Tags'}</button>)}
     </div>
     <div role="tabpanel" id={`${idPrefix}-objects-panel`} aria-labelledby={`${idPrefix}-objects-tab`} hidden={section !== 'objects'}>
       <ul ref={treeRef} role="tree" aria-label="Object browser" aria-multiselectable="true" className="pf-layout-browser-tree" onKeyDown={onTreeKeyDown}>
         {tree.map((node, index) => renderNode(node, tree.length, index + 1))}
       </ul>
-      {tree.length ? null : <p className="pf-model-browser-empty">Solids, groups, components and text you make appear here.</p>}
+      {tree.length ? null : <p className="pf-model-browser-empty">Solids, groups, components, text and section planes you make appear here.</p>}
     </div>
     <div role="tabpanel" id={`${idPrefix}-tags-panel`} aria-labelledby={`${idPrefix}-tags-tab`} hidden={section !== 'tags'}
-      onKeyDown={event => {
-        if (event.key === 'Escape') { event.stopPropagation(); onClose?.(); }
-        else if (!modelBrowserPassesKey(event.nativeEvent)) event.stopPropagation();
-      }}>
+      onKeyDown={event => { if (!modelBrowserPassesKey(event.nativeEvent)) event.stopPropagation(); }}>
       {section === 'tags' ? <TagsPanel /> : null}
     </div>
   </div>;

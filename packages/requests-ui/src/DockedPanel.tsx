@@ -6,9 +6,6 @@ import { useKeyIsolation } from './useKeyIsolation';
 export interface DockedPanelProps {
   readonly label: string;
   readonly className?: string | undefined;
-  /** The left menu bar icon that toggles the panel; focus returns to it when Escape hides the panel. */
-  readonly anchor?: HTMLElement | null | undefined;
-  readonly onClose: () => void;
   /** False keeps the panel mounted but hidden, so a conversation survives hiding and showing within the session. */
   readonly open?: boolean | undefined;
   readonly children: ReactNode;
@@ -16,17 +13,12 @@ export interface DockedPanelProps {
 
 /**
  * Docked shell of AI Chat in an editor: an inline region that fills the host's
- * side dock, with no portal or fixed position. It shares the pop-down's key isolation and Escape, but a pointer press
- * outside never hides it, so it stays open while the user works in the editor. Focus moves to the `[data-autofocus]`
- * element when shown and returns to the anchor when Escape hides it.
+ * side dock, with no portal or fixed position. It shares the pop-down's key isolation, but neither Escape nor a
+ * pointer press outside hides it: only its left menu bar icon does. Focus moves to the `[data-autofocus]` element when shown.
  */
-export function DockedPanel({ label, className, anchor, onClose, open = true, children }: DockedPanelProps): JSX.Element {
-  const panel = useRef<HTMLDivElement>(null), close = useRef(onClose), back = useRef(anchor);
-  close.current = onClose; back.current = anchor;
-  useKeyIsolation(panel, { active: open, onEscape: () => {
-    close.current();
-    if (back.current?.isConnected) back.current.focus();
-  } });
+export function DockedPanel({ label, className, open = true, children }: DockedPanelProps): JSX.Element {
+  const panel = useRef<HTMLDivElement>(null);
+  useKeyIsolation(panel, { active: open });
   useEffect(() => {
     if (!open) return;
     (panel.current?.querySelector<HTMLElement>('[data-autofocus]:not(:disabled)') ?? panel.current)?.focus();

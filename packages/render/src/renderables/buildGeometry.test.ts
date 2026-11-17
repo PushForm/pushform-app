@@ -104,6 +104,56 @@ function meshCylinder(segments: number, radius = 1, height = 2): MeshData {
   return { verts: new Float64Array(verts), tris: new Uint32Array(tris), faceId: new Uint32Array(faceId) };
 }
 
+describe('corner normals from smooth edge flags', () => {
+  const segments = 24, mesh = meshCylinder(segments);
+  const edges: RenderBodyEdge[] = Array.from({length:segments}, (_,i) => {
+    const x = mesh.verts[i*6]!, y = mesh.verts[i*6+1]!;
+    return {points:[[x,y,0],[x,y,2]],smooth:true,soft:false,hidden:false,faceA:(i+segments-1)%segments,faceB:i};
+  });
+  it('smooths round sides without surface records, while retaining planar caps and the mesh', () => {
+    const flat = buildFaceArrays(mesh,M4_IDENTITY,[0,0,0]);
+    const smooth = buildFaceArrays(mesh,M4_IDENTITY,[0,0,0],{smoothEdges:edges});
+    expect(smooth.positions).toEqual(flat.positions); expect(smooth.faceIds).toEqual(flat.faceIds);
+    for (let t=0;t<mesh.tris.length/3;t++) for (let k=0;k<3;k++) {
+      const offset=t*9+k*3, face=mesh.faceId[t]!;
+      if(face<segments) {
+        expect(smooth.normals[offset]).toBeCloseTo(smooth.positions[offset]!,6);
+        expect(smooth.normals[offset+1]).toBeCloseTo(smooth.positions[offset+1]!,6);
+        expect(smooth.normals[offset+2]).toBeCloseTo(0,6);
+      } else {
+        expect(smooth.normals[offset]).toBeCloseTo(0,6); expect(smooth.normals[offset+1]).toBeCloseTo(0,6);
+        expect(Math.abs(smooth.normals[offset+2]!)).toBeCloseTo(1,6);
+      }
+    }
+  });
+  it('smooths duplicate vertex positions as well as shared indices', () => {
+    const verts=Float64Array.from(Array.from(mesh.tris).flatMap(v=>Array.from(mesh.verts.slice(v*3,v*3+3))));
+    const unwelded={verts,tris:Uint32Array.from(mesh.tris,(_,i)=>i),faceId:mesh.faceId};
+    expect(buildFaceArrays(unwelded,M4_IDENTITY,[0,0,0],{smoothEdges:edges}).normals)
+      .toEqual(buildFaceArrays(mesh,M4_IDENTITY,[0,0,0],{smoothEdges:edges}).normals);
+  });
+  it('does not smooth a hard seam even when the faces connect elsewhere around the cylinder', () => {
+    const changed=edges.map((e,i)=>i===0?{...e,smooth:false}:e);
+    const smooth=buildFaceArrays(mesh,M4_IDENTITY,[0,0,0],{smoothEdges:changed,smoothGroups:[{faceIds:Array.from({length:segments},(_,i)=>i)}]});
+    const flat=buildFaceArrays(mesh,M4_IDENTITY,[0,0,0]);
+    let checked=0;
+    for(let t=0;t<mesh.tris.length/3;t++) if(mesh.faceId[t]!<segments) for(let k=0;k<3;k++) {
+      const offset=t*9+k*3;
+      if(smooth.positions[offset]===1 && smooth.positions[offset+1]===0) {
+        expect(Array.from(smooth.normals.slice(offset,offset+3))).toEqual(Array.from(flat.normals.slice(offset,offset+3))); checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+  it('keeps soft-only edges flat and uses surface-group fallback when face pairs are unavailable', () => {
+    const groups=[{faceIds:Array.from({length:segments},(_,i)=>i)}];
+    const hard=buildFaceArrays(mesh,M4_IDENTITY,[0,0,0],{smoothEdges:edges.map(e=>({...e,soft:true,smooth:false})),smoothGroups:groups});
+    expect(hard.normals).toEqual(buildFaceArrays(mesh,M4_IDENTITY,[0,0,0]).normals);
+    const unknown=buildFaceArrays(mesh,M4_IDENTITY,[0,0,0],{smoothEdges:edges.map(e=>({...e,faceA:-1,faceB:-1})),smoothGroups:groups});
+    expect(unknown.normals).toEqual(buildFaceArrays(mesh,M4_IDENTITY,[0,0,0],{smoothGroups:groups}).normals);
+  });
+});
+
 describe('buildFaceArrays smooth groups', () => {
   const mesh = meshCylinder(24);
   const sideIds = Array.from({ length: 24 }, (_, i) => i);

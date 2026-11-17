@@ -17,7 +17,7 @@ In Line and Rectangle, a value you leave with **Tab** is locked: the preview kee
 - **Rotated Rectangle**: Length for the first edge, then Width and Angle.
 - **Circle and Polygon**: Diameter. Type a radius with an **r** suffix, such as **12r**. For a polygon, type **24c** for a circumscribed size, or **8s** for eight sides.
 - **Arc and Pie**: Diameter first, then Angle for the sweep.
-- **2 Point Arc**: Length of the chord, then the bulge. **3 Point Arc**: Length of the first chord.
+- **2 Point Arc**: Length of the chord, then the bulge. **3 Point Arc**: Length of the first chord, then the distance from the second point to the end, toward the pointer.
 
 Move, Rotate, Scale, Push/Pull, Offset, Tape Measure, Protractor, Fillet and Chamfer show their single value in a field beside the pointer while an operation is in progress.
 

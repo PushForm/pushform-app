@@ -2,8 +2,8 @@
 // Copyright 2026 PushForm contributors
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { CommonsRenderEvent, CommonsUpload, CommonsUploadProgress } from '@pushform/cloud';
-import { UploadDialog, fileStatus } from './UploadDialog';
+import type { CommonsCollection, CommonsRenderEvent, CommonsUpload, CommonsUploadProgress } from '@pushform/cloud';
+import { UploadDialog, collectionChanges, collectionChosen, fileStatus } from './UploadDialog';
 import { publishRoute } from './PublishPage';
 import { OwnModelsProvider, OwnModelGrid, OwnedDraftDetail, useOwnModels } from './OwnModels';
 import { detailsFromMetadata, detailsProblem, metadataFor, titleFromFileName } from './modelDetails';
@@ -22,8 +22,11 @@ const profile = { id: profileId, handle: 'example-maker', displayName: 'Example 
 const snapshot = { user: { id: 'user-1' } };
 const asset = (overrides: Partial<CommonsUpload> = {}): CommonsUpload => ({ id: assetId, revision_id: revisionId, filename: 'shop_bench.skb', format: 'skb', size_bytes: 2048, sha256: 'a'.repeat(64), status: 'ready', created_at: '2026-11-03T00:00:00Z', verified_at: '2026-11-03T00:00:01Z', ...overrides });
 
-function setup({ models = [] as unknown[], revisions = [] as Record<string, unknown>[], assets = [] as CommonsUpload[], activeProfile = true } = {}) {
-  const state = { models: [...models] as Record<string, unknown>[], revisions: [...revisions], assets: [...assets] };
+const collection = (overrides: Partial<CommonsCollection> = {}): CommonsCollection => ({ id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', title: 'Shop jigs', description: 'Jigs I use.', visibility: 'public', version: 4,
+  updatedAt: '2026-11-03T00:00:00Z', curator: { handle: 'example-maker', displayName: 'Example Maker' }, modelIds: ['model-other'], ...overrides });
+
+function setup({ models = [] as unknown[], revisions = [] as Record<string, unknown>[], assets = [] as CommonsUpload[], activeProfile = true, collections = [] as CommonsCollection[], failCollection = null as string | null } = {}) {
+  const state = { models: [...models] as Record<string, unknown>[], revisions: [...revisions], assets: [...assets], collections: structuredClone(collections) };
   const rpc = vi.fn((name: string, args: Record<string, unknown>) => {
     const run = async () => {
       if (name === 'commons_my_models') return { data: structuredClone(state), error: null };
@@ -40,6 +43,14 @@ function setup({ models = [] as unknown[], revisions = [] as Record<string, unkn
       }
       if (name === 'commons_publish_model') { state.revisions = [{ ...state.revisions[0]!, status: 'published' }]; state.models = [{ ...state.models[0]!, published_revision: revisionId }]; return { data: state.revisions[0], error: null }; }
       if (name === 'commons_withdraw_model') return { data: null, error: null };
+      if (name === 'commons_my_collections') return { data: structuredClone(state.collections), error: null };
+      if (name === 'commons_save_collection') {
+        if (args.p_id && args.p_id === failCollection) return { data: null, error: { message: 'commons_collection_conflict' } };
+        const current = state.collections.find((item) => item.id === args.p_id);
+        const saved = { ...(current ?? collection({ id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', version: 0 })), title: args.p_title as string, description: args.p_description as string,
+          visibility: (args.p_public ? 'public' : 'private') as CommonsCollection['visibility'], modelIds: args.p_model_ids as string[], version: (current?.version ?? 0) + 1 };
+        state.collections = [...state.collections.filter((item) => item.id !== saved.id), saved]; return { data: saved, error: null };
+      }
       throw new Error('unexpected ' + name);
     };
     const promise = run(); return Object.assign(promise, { abortSignal: () => promise });
@@ -309,4 +320,117 @@ it('lets the publisher retry a failed current-view upload before publication', a
   expect(cloud.upload.mock.calls.filter(call => call[3] === image)).toHaveLength(2);
   fireEvent.click(screen.getByRole('button', { name: 'Publish model' }));
   await waitFor(() => expect(f.rpc).toHaveBeenCalledWith('commons_publish_model', expect.objectContaining({ p_rights_confirmed: true })));
+});
+
+it('adds a new model to chosen and newly named collections once it is published', async () => {
+  const jigs = collection(), full = collection({ id: 'ffffffff-ffff-4fff-8fff-ffffffffffff', title: 'Everything', modelIds: Array.from({ length: 100 }, (_, index) => `model-${index}`) });
+  const f = setup({ collections: [jigs, full] }); const published = vi.fn(); const changed = vi.fn();
+  window.addEventListener('commons:catalog-changed', changed);
+  const file = new File(['saved snapshot bytes'], 'Garden bench.pf');
+  cloud.upload.mockResolvedValue(asset({ filename: file.name, format: 'pf', size_bytes: file.size }));
+  cloud.stream.mockResolvedValue({ state: 'pending' });
+  const close = vi.fn();
+  render(<UploadDialog account={f.account} filesUrl="https://files.example.com" modelId={null} newModelId="design-snapshot" initialFile={file} snapshotLabel="Private cloud revision 12" onClose={close} onPublished={published}/>);
+  // A closed dropdown keeps the form short: it summarizes the choice and lists nothing until opened.
+  const trigger = await screen.findByRole('button', { name: 'Collections None' });
+  expect(trigger.getAttribute('aria-expanded')).toBe('false');
+  expect(screen.queryByRole('checkbox', { name: /Shop jigs/ })).toBeNull();
+  fireEvent.click(trigger);
+  const shopJigs = screen.getByRole('checkbox', { name: /Shop jigs/ }) as HTMLInputElement;
+  expect(shopJigs.checked).toBe(false);
+  expect((screen.getByRole('checkbox', { name: /Everything · full/ }) as HTMLInputElement).disabled).toBe(true);
+  fireEvent.click(shopJigs);
+  fireEvent.change(screen.getByLabelText('New collection name'), { target: { value: 'Garden projects' } });
+  fireEvent.keyDown(screen.getByLabelText('New collection name'), { key: 'Enter' });
+  expect((screen.getByRole('checkbox', { name: /Garden projects · new, private/ }) as HTMLInputElement).checked).toBe(true);
+  fireEvent.change(screen.getByLabelText('New collection name'), { target: { value: 'shop JIGS' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Add new collection' }));
+  expect(screen.getByText(/already have a collection called/)).toBeTruthy();
+  // Escape closes only the dropdown, which then summarizes what will be applied.
+  fireEvent.keyDown(shopJigs, { key: 'Escape' });
+  expect(close).not.toHaveBeenCalled();
+  expect(screen.queryByRole('checkbox', { name: /Shop jigs/ })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Collections Shop jigs, Garden projects' }).getAttribute('aria-expanded')).toBe('false');
+  // Nothing is saved to a collection before the model is public.
+  expect(f.rpc.mock.calls.some(([name]) => name === 'commons_save_collection')).toBe(false);
+
+  const publish = await screen.findByRole('button', { name: 'Publish model' });
+  await waitFor(() => expect((publish as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(publish);
+  await waitFor(() => expect(published).toHaveBeenCalledWith('design-snapshot'));
+  const names = f.rpc.mock.calls.map(([name]) => name);
+  expect(names.lastIndexOf('commons_publish_model')).toBeLessThan(names.indexOf('commons_save_collection'));
+  expect(f.rpc).toHaveBeenCalledWith('commons_save_collection', expect.objectContaining({ p_id: jigs.id, p_title: 'Shop jigs', p_description: 'Jigs I use.', p_public: true,
+    p_model_ids: ['model-other', 'design-snapshot'], p_expected_version: 4 }));
+  expect(f.rpc).toHaveBeenCalledWith('commons_save_collection', expect.objectContaining({ p_id: null, p_title: 'Garden projects', p_public: false, p_model_ids: ['design-snapshot'], p_expected_version: null }));
+  expect(f.rpc.mock.calls.filter(([name]) => name === 'commons_save_collection')).toHaveLength(2);
+  expect(changed).toHaveBeenCalled();
+  window.removeEventListener('commons:catalog-changed', changed);
+});
+
+it('changes only the collections of a published model without republishing it', async () => {
+  const published = { id: revisionId, model_id: 'model-bench', number: 1, status: 'published', asset_version: 2, rights_basis: 'x'.repeat(30), creator_profile_id: profileId, self_service: true, details_version: 3,
+    metadata: metadataFor({ title: 'Bench', description: '', category: 'Furniture', license: 'CC0 1.0', terms: '' }, 'Example Maker', ['bench.skb']) };
+  const jigs = collection({ modelIds: ['model-other', 'model-bench', 'model-last'] });
+  const f = setup({ models: [{ id: 'model-bench', latest_submission: revisionId, published_revision: revisionId }], revisions: [published], assets: [asset({ filename: 'bench.skb' })], collections: [jigs] });
+  cloud.stream.mockResolvedValue({ state: 'ready', triangles: 10, durationMs: 1 });
+  const done = vi.fn();
+  render(<UploadDialog account={f.account} filesUrl="https://files.example.com" modelId="model-bench" onClose={vi.fn()} onPublished={done}/>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Collections Shop jigs' }));
+  const member = screen.getByRole('checkbox', { name: /Shop jigs/ }) as HTMLInputElement;
+  expect(member.checked).toBe(true);
+  expect((screen.getByRole('button', { name: 'Publish changes' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(member);
+  fireEvent.click(screen.getByRole('button', { name: 'Save collections' }));
+  await waitFor(() => expect(done).toHaveBeenCalledWith('model-bench'));
+  expect(f.rpc).toHaveBeenCalledWith('commons_save_collection', expect.objectContaining({ p_id: jigs.id, p_model_ids: ['model-other', 'model-last'], p_expected_version: 4 }));
+  expect(f.rpc.mock.calls.some(([name]) => name === 'commons_submit_model' || name === 'commons_publish_model')).toBe(false);
+});
+
+it('keeps the publication and explains a collection that could not be updated', async () => {
+  const jigs = collection();
+  const f = setup({ collections: [jigs], failCollection: jigs.id }); const published = vi.fn();
+  const file = new File(['saved snapshot bytes'], 'Garden bench.pf');
+  cloud.upload.mockResolvedValue(asset({ filename: file.name, format: 'pf', size_bytes: file.size }));
+  cloud.stream.mockResolvedValue({ state: 'pending' });
+  render(<UploadDialog account={f.account} filesUrl="https://files.example.com" modelId={null} newModelId="design-snapshot" initialFile={file} snapshotLabel="Private cloud revision 12" onClose={vi.fn()} onPublished={published}/>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Collections None' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: /Shop jigs/ }));
+  const publish = await screen.findByRole('button', { name: 'Publish model' });
+  await waitFor(() => expect((publish as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(publish);
+  expect(await screen.findByText(/Published, but some collections were not updated\. “Shop jigs”: This collection changed in another tab/)).toBeTruthy();
+  expect(f.rpc).toHaveBeenCalledWith('commons_publish_model', expect.objectContaining({ p_rights_confirmed: true }));
+  expect(published).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button', { name: 'Publish model' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+  expect(published).toHaveBeenCalledWith('design-snapshot');
+});
+
+it('computes collection saves only for collections whose membership the publisher changed', () => {
+  const a = collection({ id: '11111111-1111-4111-8111-111111111111', modelIds: ['x', 'm'] }), b = collection({ id: '22222222-2222-4222-8222-222222222222', modelIds: [] }), c = collection({ id: '33333333-3333-4333-8333-333333333333', modelIds: ['y'] });
+  expect(collectionChosen(a, 'm', {})).toBe(true);
+  expect(collectionChosen(a, null, {})).toBe(false);
+  expect(collectionChosen(a, 'm', { [a.id]: false })).toBe(false);
+  // b is already a member in fresh state (added in another tab), so it needs no save; c was not touched.
+  const changes = collectionChanges([a, { ...b, modelIds: ['m'] }, c], 'm', { [a.id]: false, [b.id]: true });
+  expect(changes).toEqual([{ collection: a, fields: { title: a.title, description: a.description, visibility: a.visibility, modelIds: ['x'] } }]);
+});
+
+it('starts from AI Chat\'s preset and publishes on its own once the upload is ready, applying the preset collections', async () => {
+  const jigs = collection();
+  const f = setup({ collections: [jigs] }); const published = vi.fn(), publication = vi.fn();
+  const file = new File(['saved snapshot bytes'], 'Garden bench.pf');
+  cloud.upload.mockResolvedValue(asset({ filename: file.name, format: 'pf', size_bytes: file.size }));
+  cloud.stream.mockResolvedValue({ state: 'pending' });
+  render(<UploadDialog account={f.account} filesUrl="https://files.example.com" modelId={null} newModelId="design-snapshot" initialFile={file} snapshotLabel="Private cloud revision 12"
+    preset={{ details: { title: 'Cedar garden bench', description: 'A two-seat bench.', category: 'Outdoor and garden', license: 'CC BY-NC 4.0' }, collections: { ids: [jigs.id], names: ['Garden projects'] } }}
+    autoPublish onClose={vi.fn()} onPublished={published} onPublication={publication}/>);
+  await waitFor(() => expect(published).toHaveBeenCalledWith('design-snapshot'));
+  expect(publication).toHaveBeenCalledWith('design-snapshot', []);
+  const submitted = f.rpc.mock.calls.filter(([name]) => name === 'commons_submit_model' || name === 'commons_update_draft').at(-1)![1] as { p_metadata: { title: string; description: string; licenses: { name: string }[] } };
+  expect(submitted.p_metadata).toMatchObject({ title: 'Cedar garden bench', description: 'A two-seat bench.' });
+  expect(submitted.p_metadata.licenses[0]!.name).toBe('CC BY-NC 4.0');
+  expect(f.rpc).toHaveBeenCalledWith('commons_save_collection', expect.objectContaining({ p_id: jigs.id, p_model_ids: ['model-other', 'design-snapshot'] }));
+  expect(f.rpc).toHaveBeenCalledWith('commons_save_collection', expect.objectContaining({ p_id: null, p_title: 'Garden projects', p_public: false, p_model_ids: ['design-snapshot'] }));
 });

@@ -3,6 +3,7 @@
 import { fileURLToPath } from 'node:url';
 import protobuf from 'protobufjs';
 import type { ImageId, MaterialId } from '@pushform/core';
+import { DEFAULT_MATERIAL_APPEARANCE } from '@pushform/model';
 import type { Material } from '@pushform/model';
 import { describe, expect, it } from 'vitest';
 import { decodeNativeMaterial, encodeNativeMaterial } from './material';
@@ -33,6 +34,14 @@ describe('native material adapter', () => {
     }
     const wire = schema.decode(encodeNativeMaterial(fixture())) as unknown as { texture: { value: { grain?: number } } };
     wire.texture.value.grain = 7; expect(() => decodeNativeMaterial(schema.encode(wire).finish())).toThrow();
+  });
+  it('round-trips appearance, zero values and normal-only assets with the protobuf schema', () => {
+    const value = fixture(); value.texture = null;
+    value.appearance = { ...DEFAULT_MATERIAL_APPEARANCE, roughness: 0, metalness: 1, emissionColor: [0, 0.25, 1], emissionStrength: 7,
+      normal: { imageId: 8 as ImageId, strength: 0, flipGreen: true, widthM: 0.5, heightM: 0.2 } };
+    const bytes = encodeNativeMaterial(value); expect(decodeNativeMaterial(bytes).value).toEqual(value);
+    expect(Array.from(schema.encode(schema.decode(bytes)).finish())).toEqual(Array.from(bytes));
+    value.appearance.roughness = 2; expect(() => encodeNativeMaterial(value)).toThrow();
   });
   it('retains unknown texture fields while editing width', () => {
     const future = protobuf.Root.fromJSON(root.toJSON()); future.lookupType('pushform.native.MaterialTexture').add(new protobuf.Field('futureData', 90, 'bytes')); future.resolveAll();

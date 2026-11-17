@@ -210,7 +210,38 @@ describe('solids.*', () => {
     host.edit('invalidate', (draft) => {
       draft.definitions.get(draft.rootDefinitionId)!.entities.bodies.get(b as Id)!.valid = false;
     });
-    await expect(registry.execute('solids.union', { a: bodyRef(a), b: bodyRef(b) })).rejects.toMatchObject({ code: 'solids.notSolid' });
+    const refused = registry.execute('solids.union', { a: bodyRef(a), b: bodyRef(b) }) as Promise<unknown>;
+    await expect(refused).rejects.toMatchObject({ code: 'solids.notSolid' });
+    // the message is for the user: no internal ids
+    await expect(refused).rejects.toThrow(/^[^0-9]*$/);
+    await expect(registry.execute('solids.subtract', { a: bodyRef(a), b: bodyRef(a) })).rejects.toThrow(/^Subtract needs two different solids\.$/);
+    await expect(registry.execute('solids.intersect', { a: bodyRef(a), b: bodyRef(987) })).rejects.toThrow(/^[^0-9]*$/);
+  });
+
+  it.each([
+    ['intersect', 'apart', /do not overlap/],
+    ['subtract', 'inside', /covers all of the other solid/],
+    ['trim', 'inside', /covers all of the other solid/],
+  ] as const)('refuses %s when nothing would be left, and changes nothing', async (mode, arrangement, message) => {
+    const { registry, bodies, addBox, bodyRef, host, tools } = setup();
+    // subtract and trim: the cutter (a) swallows the body cut (b); intersect: two solids apart
+    const a = arrangement === 'inside' ? addBox([-1, -1, -1], [2, 2, 2]) : addBox([0, 0, 0], [1, 1, 1]);
+    const b = arrangement === 'inside' ? addBox([0, 0, 0], [1, 1, 1]) : addBox([5, 0, 0], [6, 1, 1]);
+    const entries = host.undoStack.length;
+    const before = volumes(bodies());
+    const refused = registry.execute(`solids.${mode}`, { a: bodyRef(a), b: bodyRef(b) }) as Promise<unknown>;
+    await expect(refused).rejects.toMatchObject({ code: 'solids.empty' });
+    await expect(refused).rejects.toThrow(message);
+    await expect(refused).rejects.toThrow(/Nothing was changed\.$/);
+    expect(bodies().map((x) => x.id).sort()).toEqual([a, b].sort());
+    expect(volumes(bodies())).toEqual(before);
+    expect(host.undoStack.length).toBe(entries);
+    // the tool says why in the status bar
+    host.selection.set([bodyRef(a) as never, bodyRef(b) as never]);
+    tools.activate(`solid.${mode}`);
+    await (tools.activeTool as SolidTool).settled;
+    expect(tools.status().instructor).toMatch(message);
+    expect(bodies()).toHaveLength(2);
   });
 
   it('SolidTool runs on two preselected bodies when activated and by a click sequence', async () => {

@@ -22,11 +22,11 @@ Check whether the content should be shared before changing it. Duplicating indiv
 
 Expand the page and layer to find an object. Clicking selects it. Double-click its name, or press F2 on a focused item, to rename it. Use the eye and lock controls for visibility and editability.
 
-A selection made on the page expands its ancestors and reveals it in the browser. Arrow keys navigate the tree while it has focus; Escape closes the panel rather than reaching a drawing tool.
+A selection made on the page expands its ancestors and reveals it in the browser. Arrow keys navigate the tree while it has focus. Escape stays in the browser, so it neither closes the panel nor reaches a drawing tool.
 
 ## Set paper, units and grid
 
-Open **Document Settings** in the Object browser. Configure the paper size, orientation, margin, units and grid there. Tool-specific settings live separately in the temporary pane at the top of the right-side panel.
+Open **Document Settings** in the Object browser. Configure the paper size, orientation, margin, units and grid there. Tool-specific settings live separately in the tool options bar over the page view.
 
 Choosing a paper size sets it in landscape. Use **Orientation** to turn the page to portrait. A US size such as Letter also switches the page size, the grid and drawing values to inches; an international size such as A4 switches them to millimeters.
 

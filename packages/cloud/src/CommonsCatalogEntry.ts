@@ -3,6 +3,7 @@
 /** The public catalog schema and file-URL helper without the Supabase client, for edge workers and other light bundles. */
 export { catalogModelSchema, catalogSchema, catalogUrlSchema, parseCommonsCatalog, type CatalogModel } from './CommonsCatalog';
 export { commonsFileUrl } from './CommonsFiles';
+export { commonsCollectionSchema, type CommonsCollection } from './CommonsCollections';
 export { commonsProfileImageUrl } from './CommonsProfileImages';
 export { commonsPublicProfileSchema } from './CommonsProfiles';
 export { commonsExactSearch, commonsSearchMatcher } from './CommonsSearch';

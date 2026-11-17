@@ -2,7 +2,7 @@
 // Copyright 2026 PushForm contributors
 import { describe, expect, it } from 'vitest';
 import { M4_IDENTITY, m4translation, meshBox, planeBasis } from '@pushform/core';
-import type { Mat4 } from '@pushform/core';
+import type { Mat4, MeshData } from '@pushform/core';
 import { Color, Matrix4, Mesh, OrthographicCamera, Vector3 } from 'three';
 import type { BufferAttribute, WebGLRenderer } from 'three';
 import { BACK_COLOR, FADE_OPACITY, hiddenLineShade, shadowDisplay } from './renderables/BodyRenderable';
@@ -74,6 +74,34 @@ describe('SceneSync (sketch, highlight, preview)', () => {
     expect(s.setPreview(null)).toBe(true);
     expect(s.preview.group.children).toHaveLength(0);
     expect(s.setPreview(null)).toBe(false);
+    s.dispose();
+  });
+
+  it('smooths preview facets and hides their seam, retaining hard boundaries after rebasing', () => {
+    const s = new SceneSync();
+    const mesh: MeshData = {
+      verts: new Float64Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 2, 0, 1, 2, 1, 1]),
+      tris: new Uint32Array([0, 1, 2, 0, 2, 3, 1, 4, 5, 1, 5, 2]),
+      faceId: new Uint32Array([0, 0, 1, 1]),
+    };
+    const meshes = [mesh];
+    const groups = [[{ faceIds: [0, 1] }]];
+    const transform = m4translation([5, 0, 0]) as unknown as Mat4;
+    s.setPreview(meshes, transform);
+    const edgeCount = () => (s.preview.group.children[2] as unknown as { segmentCount: number }).segmentCount;
+    expect(edgeCount()).toBe(7);
+    expect(s.setPreview(meshes, transform, groups)).toBe(true);
+    expect(edgeCount()).toBe(6);
+    const front = s.preview.group.children[0] as Mesh;
+    const normals = front.geometry.getAttribute('normal');
+    // The shared corner blends the horizontal and sloped face normals.
+    expect(normals.getX(1)).toBeLessThan(0);
+    expect(normals.getZ(1)).toBeGreaterThan(Math.SQRT1_2);
+    s.setOrigin([100, 0, 0]);
+    expect(edgeCount()).toBe(6);
+    expect(s.preview.matrix).toBe(transform);
+    expect(s.preview.surfaces).toBe(groups);
+    expect(mesh.faceId).toEqual(new Uint32Array([0, 0, 1, 1]));
     s.dispose();
   });
 

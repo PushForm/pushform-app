@@ -9,6 +9,7 @@ import type { OverlayPrimitive } from '../overlay';
 import type { EntryField, Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
 import { DIMENSION_OFFSET_PX, field, leftOf, lengthDimension, pxAt } from '../entry';
 import { hostOfTool, inferenceOverlay, PREVIEW_COLOR, rubberBandColor } from '../toolUtil';
+import { planeTag, SHIFT_HELD } from '../held';
 import {
   AXIS_NORMAL,
   ClickGesture,
@@ -230,6 +231,12 @@ export class RotatedRectangleTool implements Tool {
   }
 
   status(): ToolStatus {
+    const held = [...planeTag(this.lockNormal), ...(this.heldPlane ? [SHIFT_HELD] : [])];
+    const s = this.statusWithoutHeld();
+    return held.length ? { ...s, held } : s;
+  }
+
+  private statusWithoutHeld(): ToolStatus {
     switch (this.stage) {
       case 'corner':
         return { instructor: 'Select first corner.', vcbLabel: 'Length' };

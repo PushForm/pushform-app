@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { describe, expect, it } from 'vitest';
-import { createLayoutDocumentState, type LayoutViewport, type LayoutViewportCamera, type ModelReference } from './LayoutDocument';
-import { layoutFrameSize, viewportCacheCurrent, viewportPaperPoint, viewportSourceKey } from './viewports';
+import { createLayoutDocumentState, type LayoutEntity, type LayoutViewport, type LayoutViewportCamera, type ModelReference } from './LayoutDocument';
+import { layoutFrameSize, viewportCacheCurrent, viewportPaperPoint, viewportSourceKey, viewportSourceSectionViews, viewportSourceSheetsKey } from './viewports';
 
 const IN = 0.0254, MM = 25.4;
 const m = (v: number[]) => v.map(x => x * IN) as [number, number, number];
@@ -99,5 +99,71 @@ describe('cloud model sources', () => {
     expect(viewportCacheCurrent(cloudView(cache), points)).toBe(false);
     state.references.get(7)!.target = { ...state.references.get(7)!.target as Extract<ModelReference['target'], { kind: 'cloud' }>, sha256: newer };
     expect(viewportCacheCurrent(cloudView(cache), points, state)).toBe(false);
+  });
+});
+
+describe('section sheets', () => {
+  const house = { archiveId: 'a', modelReferenceId: 'house' }, shed = { archiveId: 'a', modelReferenceId: 'shed' };
+  const view = (id: number, source: LayoutViewport['source'], scene: string | null = null, hidden = false): LayoutEntity => ({
+    id, kind: 'image', layerId: 1, closed: true, points: frame(0, 0, 4, 2),
+    image: { src: '', viewport: { source, templateId: null, originalId: null, camera: perspective, scene, background: null, cache: null } }, ...(hidden ? { hidden } : {}),
+  });
+  const document = () => {
+    const state = createLayoutDocumentState();
+    for (const [id, name] of [[3, 'Plan'], [4, 'Sections']] as const) { state.pages.set(id, { ...state.pages.get(2)!, id, name, entities: new Map(), entityOrder: [] }); state.pageOrder.push(id); }
+    return state;
+  };
+  const place = (state: ReturnType<typeof document>, pageId: number, entity: LayoutEntity) => {
+    const page = state.pages.get(pageId)!;
+    page.entities.set(entity.id, entity);
+    page.entityOrder.push(entity.id);
+  };
+  const sheets = (state: ReturnType<typeof document>, source: LayoutViewport['source']) =>
+    viewportSourceSectionViews(state, source).map(({ scene, sections, sheet }) => [scene, sections?.cuts ?? null, sheet]);
+
+  it('numbers the first page that draws each kind of view of the model', () => {
+    const state = document();
+    expect(sheets(state, house)).toEqual([]);
+    place(state, 4, view(10, house, 'Section A'));
+    place(state, 3, view(11, shed));
+    place(state, 3, view(12, house, 'Plan'));
+    expect(sheets(state, house)).toEqual([['Plan', null, '2'], ['Section A', null, '3']]);
+    expect(sheets(state, shed)).toEqual([[null, null, '2']]);
+    place(state, 2, view(13, house, 'Section A'));
+    expect(sheets(state, house)).toEqual([['Section A', null, '1'], ['Plan', null, '2']]);
+    // a view of the same scene with its own section settings is another kind of view
+    const uncut = view(14, house, 'Section A');
+    uncut.image!.viewport!.display = { faceStyle: 'shaded', edges: true, profiles: true, backEdges: false, xray: false, hiddenGeometry: false, sections: { planes: true, cuts: false } };
+    place(state, 4, uncut);
+    expect(sheets(state, house)).toEqual([['Section A', null, '1'], ['Plan', null, '2'], ['Section A', false, '3']]);
+    // the page moves, and its number with it
+    state.pageOrder = [4, 3, 2];
+    expect(sheets(state, house)).toEqual([['Section A', null, '1'], ['Section A', false, '1'], ['Plan', null, '2']]);
+    expect(viewportSourceSheetsKey(state, house)).toBe('[["Section A",null,"1"],["Section A",{"planes":true,"cuts":false},"1"],["Plan",null,"2"]]');
+  });
+
+  it('skips hidden views and layers hidden on a page, and follows the page-number field', () => {
+    const state = document();
+    place(state, 3, view(10, house, null, true));
+    place(state, 4, view(11, house));
+    expect(sheets(state, house)).toEqual([[null, null, '3']]);
+    state.pages.get(4)!.layerVisibility = new Map([[1, false]]);
+    expect(sheets(state, house)).toEqual([]);
+    delete state.pages.get(4)!.layerVisibility;
+    state.pageNumberFields = new Map([['PageNumber', { startPageId: 3, startNumber: 1, style: 'upper-letter' }]]);
+    expect(sheets(state, house)).toEqual([[null, null, 'B']]);
+  });
+
+  it('makes a picture stale when the sheets its section markers show change', () => {
+    const state = document(), points = frame(0, 0, 4, 2);
+    const entity = view(10, house);
+    place(state, 3, entity);
+    entity.image!.viewport!.cache = { camera: perspective, widthMm: 4 * MM, heightMm: 2 * MM, sheet: viewportSourceSheetsKey(state, house) };
+    expect(viewportCacheCurrent(entity.image!.viewport!, points, state)).toBe(true);
+    state.pageOrder = [3, 2, 4];
+    expect(viewportCacheCurrent(entity.image!.viewport!, points, state)).toBe(false);
+    // a picture that shows no sheet does not depend on page order
+    delete entity.image!.viewport!.cache!.sheet;
+    expect(viewportCacheCurrent(entity.image!.viewport!, points, state)).toBe(true);
   });
 });

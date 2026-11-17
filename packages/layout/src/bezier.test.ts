@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { describe, expect, it } from 'vitest';
-import { addLayoutBezierAnchor, finishLayoutBezier, previewLayoutBezier, pullLayoutBezierHandle } from './bezier';
+import { addLayoutBezierAnchor, finishLayoutBezier, previewLayoutBezier, pullLayoutBezierHandle, removeLastLayoutBezierAnchor } from './bezier';
 
 describe('Bézier tool drafts', () => {
   it('adds corner anchors and pulls mirrored handles from the last one', () => {
@@ -11,6 +11,14 @@ describe('Bézier tool drafts', () => {
     draft = pullLayoutBezierHandle(draft, [14, 3]);
     expect(draft.handles[1]).toEqual({ in: [6, -3], out: [14, 3] });
     expect(previewLayoutBezier(draft, [20, 5]).points).toEqual([[0, 0], [10, 0], [20, 5]]);
+  });
+
+  it('removes the newest anchor, keeping the handles of the one before, and ends with the last anchor', () => {
+    let draft = pullLayoutBezierHandle(addLayoutBezierAnchor(null, [0, 0]), [0, 5]);
+    draft = addLayoutBezierAnchor(draft, [10, 0]);
+    const shorter = removeLastLayoutBezierAnchor(draft);
+    expect(shorter).toEqual({ points: [[0, 0]], handles: [{ in: [0, -5], out: [0, 5] }] });
+    expect(removeLastLayoutBezierAnchor(shorter!)).toBeNull();
   });
 
   it('drops dangling handles from an open path and keeps them when closing', () => {

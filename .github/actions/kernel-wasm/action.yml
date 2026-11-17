@@ -1,0 +1,33 @@
+name: Prepare the kernel WebAssembly module
+description: Build the module with the pinned Rust and Emscripten, or restore it from the cache for these sources
+runs:
+  using: composite
+  steps:
+    # The source hash and pinned toolchain, read from the repository so there is one place to change them.
+    - id: plan
+      shell: bash
+      run: node scripts/kernel-wasm-artifact.mjs ci-plan >> "$GITHUB_OUTPUT"
+    # Rust and Emscripten are pinned together: only this pair is tested.
+    - uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ steps.plan.outputs.rust }}
+        targets: wasm32-unknown-emscripten
+    - uses: mymindstorm/setup-emsdk@v14
+      with:
+        version: ${{ steps.plan.outputs.emscripten }}
+        cache-key: emsdk-${{ steps.plan.outputs.emscripten }}
+    # A built module is cached by source hash, so the same sources do not rebuild.
+    - uses: actions/cache@v4
+      id: kernel-wasm
+      with:
+        path: |
+          packages/kernel/wasm/*.wasm
+          packages/kernel/wasm/pushform-kernel*.js
+          packages/kernel/wasm/kernel-wasm.stamp.json
+        key: kernel-wasm-v3-${{ runner.os }}-${{ steps.plan.outputs.source_hash }}
+    # No cache of Cargo's target directory: its CMake files name this run's Emscripten path, which changes every run.
+    - shell: bash
+      if: steps.kernel-wasm.outputs.cache-hit != 'true'
+      run: node scripts/build-kernel-wasm.mjs --faults
+    - shell: bash
+      run: node scripts/kernel-wasm-artifact.mjs status

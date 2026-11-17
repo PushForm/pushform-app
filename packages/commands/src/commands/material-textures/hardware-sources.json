@@ -1,0 +1,124 @@
+{
+  "license": "CC0-1.0",
+  "textures": [
+    {
+      "asset": "hardware_brushed_nickel",
+      "authors": [
+        "PushForm"
+      ],
+      "license": "CC0-1.0",
+      "source": "Original deterministic periodic procedural texture",
+      "sha256": "329debb38177c8191b03bc8b57938aa828d553946fabf7f725e04c80638fdabc",
+      "widthPx": 1024,
+      "heightPx": 1024,
+      "widthM": 0.064,
+      "heightM": 0.064,
+      "grain": "width",
+      "key": "Hardware_satin-nickel",
+      "previewWidthPx": 128,
+      "previewHeightPx": 128
+    },
+    {
+      "asset": "hardware_brushed_brass",
+      "authors": [
+        "PushForm"
+      ],
+      "license": "CC0-1.0",
+      "source": "Original deterministic periodic procedural texture",
+      "sha256": "668ea3ada08b63e64966f726be6437e138d6e4a9364c7765706b4d95c5dcb81d",
+      "widthPx": 1024,
+      "heightPx": 1024,
+      "widthM": 0.064,
+      "heightM": 0.064,
+      "grain": "width",
+      "key": "Hardware_brass",
+      "previewWidthPx": 128,
+      "previewHeightPx": 128
+    },
+    {
+      "asset": "hardware_champagne_bronze",
+      "authors": [
+        "PushForm"
+      ],
+      "license": "CC0-1.0",
+      "source": "Original deterministic periodic procedural texture",
+      "sha256": "76c3a5416418a16c2c552f9847019b44c214a880d2dca6c68c3caada7e9e0df9",
+      "widthPx": 1024,
+      "heightPx": 1024,
+      "widthM": 0.064,
+      "heightM": 0.064,
+      "grain": "width",
+      "key": "Hardware_champagne-bronze",
+      "previewWidthPx": 128,
+      "previewHeightPx": 128
+    },
+    {
+      "asset": "hardware_oil_bronze",
+      "authors": [
+        "PushForm"
+      ],
+      "license": "CC0-1.0",
+      "source": "Original deterministic periodic procedural texture",
+      "sha256": "08b51a61c8257a8f7d9e1d9d9cfdba49f110837ac5f8ac7b17b593cbce92c791",
+      "widthPx": 1024,
+      "heightPx": 1024,
+      "widthM": 0.064,
+      "heightM": 0.064,
+      "grain": "width",
+      "key": "Hardware_oil-rubbed-bronze",
+      "previewWidthPx": 128,
+      "previewHeightPx": 128
+    },
+    {
+      "asset": "hardware_walnut",
+      "authors": [
+        "PushForm"
+      ],
+      "license": "CC0-1.0",
+      "source": "Original deterministic periodic procedural texture",
+      "sha256": "874225ca13c003e72e12930517c6db6cb8815259bed2b63f14b211a716bc5d42",
+      "widthPx": 1024,
+      "heightPx": 1024,
+      "widthM": 0.064,
+      "heightM": 0.064,
+      "grain": "width",
+      "key": "Hardware_walnut",
+      "previewWidthPx": 128,
+      "previewHeightPx": 128
+    },
+    {
+      "asset": "hardware_maple",
+      "authors": [
+        "PushForm"
+      ],
+      "license": "CC0-1.0",
+      "source": "Original deterministic periodic procedural texture",
+      "sha256": "6a38c75e1b52ca2c65b085686bb441324ba349b87bee706424b83abb3192150d",
+      "widthPx": 1024,
+      "heightPx": 1024,
+      "widthM": 0.064,
+      "heightM": 0.064,
+      "grain": "width",
+      "key": "Hardware_maple",
+      "previewWidthPx": 128,
+      "previewHeightPx": 128
+    },
+    {
+      "asset": "hardware_powder_black",
+      "authors": [
+        "PushForm"
+      ],
+      "license": "CC0-1.0",
+      "source": "Original deterministic periodic procedural texture",
+      "sha256": "6736529128f4398a4d252f96956833cb05bf6b3f0e7b4ce6b7ae463db588efdc",
+      "widthPx": 1024,
+      "heightPx": 1024,
+      "widthM": 0.064,
+      "heightM": 0.064,
+      "grain": "none",
+      "key": "Hardware_matte-black",
+      "previewWidthPx": 128,
+      "previewHeightPx": 128
+    }
+  ]
+}

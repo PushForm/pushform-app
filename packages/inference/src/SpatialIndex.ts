@@ -740,7 +740,7 @@ export class SpatialIndex {
       for (const sp of container.sectionPlanes.values()) {
         const { normal, d } = worldSectionPlane(sp.plane, matrix ?? IDENTITY);
         if (container.activeSectionPlaneId === sp.id && style?.sectionCutsVisible !== false) cuts.push({ path, normal, d });
-        if (style?.sectionPlanesVisible === false || sp.hidden || !tagVisible(state, sp.tagId)) continue;
+        if (style?.sectionPlanesVisible === false || (sp.hidden && style?.hiddenGeometry !== true) || !tagVisible(state, sp.tagId)) continue;
         bounds ??= contentWorldBounds(state, path);
         const c = sectionPlaneCorners(normal, d, bounds);
         planes.push({ segments: [[c[0], c[1]], [c[1], c[2]], [c[2], c[3]], [c[3], c[0]]], ref: { kind: 'sectionPlane', path, id: sp.id } });

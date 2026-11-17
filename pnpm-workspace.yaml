@@ -2,6 +2,7 @@ packages:
   - packages/*
   - apps/*
   - workers/*
+  - docs
 allowBuilds:
   esbuild: true
   workerd: true
@@ -10,3 +11,5 @@ patchedDependencies:
 # PDF.js's Node canvas; the app draws PDFs with the browser's canvas.
 ignoredOptionalDependencies:
   - '@napi-rs/canvas'
+minimumReleaseAgeExclude:
+  - '@astrojs/starlight@0.42.10'

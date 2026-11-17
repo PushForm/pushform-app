@@ -1,5 +1,21 @@
 # Selection and objects in Modeling
 
+## Select with the Select tool
+
+Choose **Select** in the toolbar or press **Space**. Click something to select it; Ctrl (Cmd on a Mac) adds to the selection, Shift adds or removes, and Ctrl+Shift removes. Clicking empty space clears the selection.
+
+Double-click a face to select it with its edges, an edge to select it with the faces it bounds, and a face of a solid to select the whole solid. Triple-click to select everything connected to what you click.
+
+Drag to draw a selection box. Dragging left to right selects only what lies entirely inside the box; dragging right to left, drawn dashed, selects everything the box touches. A box takes everything visible in the group you are editing: geometry, groups and components, images, imported meshes, guides, dimensions, text and section planes. Guide lines that run on forever are taken only by a right-to-left box.
+
+**Select All** (Ctrl+A, or Cmd+A on a Mac) selects everything visible in the group you are editing, and **Select None** (Ctrl+T or Cmd+T) clears the selection. Press **Delete** or **Backspace** to delete what is selected.
+
+## Open and close a group with Select
+
+Double-click a group or component, or select it and press **Enter**, to edit inside it. A locked group or component is selected instead of opened, and the status bar says it is locked; unlock it first.
+
+While you edit inside a group, **Esc** clears the selection, and a second **Esc** closes the group, one level at a time. Clicking empty space also closes it. Clicking something outside the group closes it, and any groups around it, out to the one that holds what you clicked, and selects that.
+
 ## Find a solid, group or component
 
 Open **Object browser** in the left menu bar and choose **Objects**. It lists loose solids, groups, components and text annotations. Screen and leader text appear by their contents, including inside groups and components. Groups and components start collapsed. Expand the ones you want to inspect; selecting an item elsewhere reveals its ancestors. Loose solids appear as **Solid N** in creation order; those numbers can change as the model changes.
@@ -32,7 +48,7 @@ A standalone sketch edge not bounding a face or belonging to a curve can have an
 
 ## Select a curved surface
 
-The side of a pulled circle or arc is made of flat faces joined by soft edges, and it works as one surface. Click any part of it with **Select** to select the whole surface; Ctrl adds, Shift toggles and Ctrl+Shift removes all of it at once. Hovering highlights the whole surface, outlined along its hard edges such as a cylinder's rims.
+The side of a pulled circle or arc is made of flat faces joined by soft edges, and it works as one surface. Click any part of it with **Select** to select the whole surface; Ctrl adds, Shift toggles and Ctrl+Shift removes all of it at once. Hovering highlights the whole surface uniformly, without picking out the flat face beneath the pointer, and outlines it only along its hard edges such as a cylinder's rims.
 
 Entity Info shows a selected surface as **Surface** with its total area. The Paint Bucket paints the whole surface, and Move, Rotate or Scale on a hovered surface moves all of it. Faces whose shared edges you soften become one surface too; unsoften an edge to split them again.
 

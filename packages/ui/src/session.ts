@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { createLayoutTemplateState, createLayoutDocument, LayoutDocument } from '@pushform/layout';
+import { createScaleDrawingState, createLayoutTemplateState, createLayoutDocument, LayoutDocument } from '@pushform/layout';
 import { createLayoutRegistry, ScriptRunner, type CommandRegistry } from '@pushform/commands';
 import { newGuid } from '@pushform/core';
 import type { DefId, ImageId } from '@pushform/core';
@@ -370,6 +370,14 @@ export class DocumentSession {
     return tab;
   }
 
+  newDrawing(): LayoutTab {
+    const doc = new LayoutDocument(createScaleDrawingState());
+    const tab = this.addLayoutTab(doc, `Drawing ${this.sequence}${LAYOUT_FILE_EXTENSION}`, layoutContentKey(doc));
+    tab.workspace.zoom = 0.02;
+    tab.workspace.zoomToPageOnOpen = true;
+    return tab;
+  }
+
   newLayout(templateId?: string): LayoutTab {
     const doc = templateId ? new LayoutDocument(createLayoutTemplateState(templateId)) : createLayoutDocument();
     this.parkActive();
@@ -454,7 +462,7 @@ export class DocumentSession {
       commands,
       initialVersion: doc.version,
       activePageId: doc.state.pageOrder[0]!,
-      workspace: { ...createLayoutWorkspaceState(), zoomToPageOnOpen: true },
+      workspace: { ...createLayoutWorkspaceState(), ...(doc.state.settings.drawing ? { zoom: 0.02 } : {}), zoomToPageOnOpen: true },
       savedContent,
       recoveryId: newGuid(),
       ...(identity ? { identity } : {}),
@@ -605,6 +613,42 @@ export class DocumentSession {
     // Edits during encoding stay dirty; closing the tab does not invalidate the completed download.
     if (this._tabs.includes(tab)) this.markModelSaved(id, name, identity, savedContent);
     return bytes;
+  }
+
+  /**
+   * A copy of an open document in a new, active tab: its contents as they are now, unsaved edits included, with a new
+   * document identity, the given name (made unique among open tabs) and empty undo history. It has no file identity, so its
+   * first save makes a new document, in `draft`'s project and folder when given. The original tab does not change.
+   */
+  async cloneDocument(id: string, name: string, draft?: { projectId?: string | undefined; folderId?: string | null | undefined }): Promise<DocumentTab> {
+    const source = this._tabs.find(item => item.id === id);
+    if (!source || source.placeholder) throw new Error('The document to clone is no longer open.');
+    const base = name.trim() || source.name;
+    let tab: DocumentTab;
+    if (source.type === 'model') {
+      const state = source.app.document.doc.state;
+      const camera = source.app.viewport.camera.getState();
+      const opened = await openModelFile(await encodeModelSnapshot(state, modelArchiveImages(state, source.app.document.images)));
+      tab = this.addModelTab({ ...opened.state, meta: { ...opened.state.meta, guid: newGuid() } }, this.uniqueTabName(base, MODEL_FILE_EXTENSION), '', undefined, opened.images);
+      tab.app.viewport.camera.setState(camera, false);
+    } else {
+      const opened = await openLayoutFile(await encodeLayoutSnapshot(source.doc.state));
+      const doc = new LayoutDocument({ ...opened.state, meta: { ...opened.state.meta, guid: newGuid() } });
+      tab = this.addLayoutTab(doc, this.uniqueTabName(base, LAYOUT_FILE_EXTENSION), '');
+    }
+    this.projectActivity.opened(tab, 'local', true);
+    this.setCloudDraft(tab.id, draft?.projectId, draft?.folderId);
+    return tab;
+  }
+
+  /** `base` with `extension`, numbered when an open tab already has that name. */
+  private uniqueTabName(base: string, extension: string): string {
+    const stem = base.toLowerCase().endsWith(extension) ? base.slice(0, -extension.length) : base;
+    const taken = new Set(this._tabs.map(tab => tab.name.toLowerCase()));
+    for (let n = 1; ; n++) {
+      const candidate = `${n === 1 ? stem : `${stem} ${n}`}${extension}`;
+      if (!taken.has(candidate.toLowerCase())) return candidate;
+    }
   }
 
   /** Rename workspace metadata without changing geometry or the saved content baseline. */
@@ -886,7 +930,7 @@ export class DocumentSession {
             initialVersion: doc.version,
             activePageId: doc.state.pages.has(item.activePageId)
               ? item.activePageId : doc.state.pageOrder[0]!,
-            workspace: { ...createLayoutWorkspaceState(), zoomToPageOnOpen: true },
+            workspace: { ...createLayoutWorkspaceState(), ...(doc.state.settings.drawing ? { zoom: 0.02 } : {}), zoomToPageOnOpen: true },
             savedContent: this.nativeRefresh ? item.dirty ? '' : layoutContentKey(doc) : item.savedContent,
             recoveryId: item.recoveryId,
             ...(typeof item.identity === 'string' ? { identity: item.identity } : {}),

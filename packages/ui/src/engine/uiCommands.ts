@@ -42,6 +42,7 @@ const store = () => useAppStore.getState();
  * `contextMenu.itemsFor` in `@pushform/commands`.
  */
 export const uiCommands: readonly AnyCommand[] = [
+  defineCommand({ id: 'ui.hardware', title: 'Cabinet Hardware…', category: 'tool', menu: 'Tools', params: z.object({}), undoable: false, run: () => store().openDialog('hardware') }),
   defineCommand({
     id: 'view.navigationCube',
     title: 'Navigation Cube',
@@ -120,6 +121,23 @@ export const uiCommands: readonly AnyCommand[] = [
     params: z.object({}),
     undoable: false,
     run: () => store().closeDialog(),
+  }),
+  defineCommand({
+    // Ctrl+L (Cmd+L on macOS) moves focus into the tool options bar; again, back to the view.
+    id: 'view.focusToolOptions',
+    title: 'Focus Tool Options',
+    category: 'view',
+    params: z.object({}),
+    undoable: false,
+    run: () => {
+      const bar = document.querySelector<HTMLElement>('.pf-tob.is-shown');
+      if (!bar) return;
+      if (bar.contains(document.activeElement)) {
+        document.querySelector<HTMLElement>('.pf-viewport')?.focus();
+        return;
+      }
+      bar.querySelector<HTMLElement>('[data-tob-control]:not(:disabled)')?.focus();
+    },
   }),
   defineCommand({
     id: 'view.search',

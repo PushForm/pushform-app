@@ -3,9 +3,11 @@
 import { strToU8, zipSync } from 'fflate';
 import { DASH_PATTERN_TOL, type LengthFormat } from '@pushform/core';
 import { encodePng, PNG_MAX_PX } from './png';
-import { PreservedLayoutExport } from './preservedLayoutExport';
+import { PreservedLayoutExport, type FlattenReason } from './preservedLayoutExport';
 import {
   bakeLayoutModelText,
+  layoutDefaultObjectNames,
+  layoutObjectName,
   layoutModelFields,
   matchLayoutDash,
   nearestLayoutDash,
@@ -35,6 +37,7 @@ import {
   linearDimensionGeometry,
   rotateLayoutPoint,
   entityOnPage,
+  isLayoutLayerVisible,
   type LayoutAngularDimension,
   type LayoutDimensionAnchor,
   layoutSegmentAnchorFrame,
@@ -134,6 +137,9 @@ export async function exportSketchUpLayout(state: LayoutDocumentState, options: 
   return new Exporter(state, options).run();
 }
 
+const MAX_REPORTED_VIEWS = 5;
+const MAX_REPORTED_PAGES = 10;
+
 class Exporter {
   private nextId = 1;
   private readonly warnings = new Map<string, number>();
@@ -148,9 +154,14 @@ class Exporter {
   private readonly pageNumberTags = new Map<string, string>();
   /** The LayOut id each exported path, dimension and label was written with, by PushForm id. */
   private readonly writtenIds = new Map<number, string>();
-  private readonly preserved = new PreservedLayoutExport(() => this.allocId(), this.files, this.references, message => this.warn(message), entity => this.placement(entity));
+  private readonly preserved = new PreservedLayoutExport(() => this.allocId(), this.files, this.references, message => this.warn(message), entity => this.placement(entity), (entity, reason) => this.flatten(entity, reason));
+  /** Model views exported as page artwork, in document order, with the page each is on (null: shared by every page). */
+  private readonly flattened: { pageId: number | null; page: string; view: string; reason: FlattenReason }[] = [];
+  private currentPage: { id: number | null; name: string } = { id: null, name: '' };
+  private readonly objectNames: Map<number, string>;
 
   constructor(private readonly state: LayoutDocumentState, private readonly options: SketchUpLayoutExportOptions) {
+    this.objectNames = layoutDefaultObjectNames(state);
     this.timestamp = (options.now ?? new Date()).toISOString().replace(/\.\d+Z$/, 'Z');
     for (const name of state.customFields.keys()) if (name !== 'FileName') this.customTags.set(name, autoTextName(name));
     for (const name of state.pageNumberFields?.keys() ?? []) if (name !== 'PageNumber') this.pageNumberTags.set(name, autoTextName(name));
@@ -181,10 +192,12 @@ class Exporter {
     for (const layerId of state.layerOrder) this.layerIds.set(layerId, this.allocId());
 
     for (const [index, page] of pages.entries()) {
+      this.currentPage = { id: page.id, name: page.name };
       const manager = await this.layerEntityManager(page.entities, page.entityOrder, false, '');
       this.files[`pages/page${index + 1}.xml`] = strToU8(
         `${XML_HEADER}<page xmlns="${NS.page}" id="${pageIds[index]}" ${COMMON_NS}>\n${manager}</page>\n`);
     }
+    this.currentPage = { id: null, name: '' };
     const master = await this.layerEntityManager(state.sharedEntities, state.sharedEntityOrder, true, 'n0:');
 
     this.files['document.xml'] = strToU8(this.documentXml(first, pageRefs, pageIds, master));
@@ -194,7 +207,7 @@ class Exporter {
     this.files['references.xml'] = strToU8(`${XML_HEADER}<references xmlns="${NS.references}" xmlns:r="${NS.references}" xmlns:xsi="${NS.xsi}" checkForUpdatesOnStartup="1" nextId="${this.allocId()}">\n${this.references.map((line) => `  ${line}\n`).join('')}</references>\n`);
     return {
       bytes: zipSync(this.files, { level: 6 }),
-      warnings: [...this.warnings].map(([message, count]) => count > 1 ? `${message} (${count}×)` : message),
+      warnings: [...[...this.warnings].map(([message, count]) => count > 1 ? `${message} (${count}×)` : message), ...this.flattenReport()],
     };
   }
 
@@ -206,9 +219,12 @@ class Exporter {
       const layer = state.layers.get(id)!;
       return `    <ld:layerDefinition ver="2" id="${this.layerIds.get(id)}" name="${attr(layer.name)}" visible="${flag(layer.visible)}" locked="${flag(layer.locked)}" shared="${flag(layer.shared)}"/>\n`;
     }).join('');
-    const visibility = state.layerOrder.map(() => '1').join(',');
-    const pageRefXml = state.pageOrder.map((id, index) =>
-      `    <ld:pageRef r:id="${pageRefs[index]}" id="${pageIds[index]}" name="${attr(state.pages.get(id)!.name)}" showMasterLayers="1">\n      <r:layerVisibility>${visibility}</r:layerVisibility>\n    </ld:pageRef>\n`).join('');
+    // A .layout file records layer visibility page by page; a layer hidden on a page keeps its content there.
+    const pageRefXml = state.pageOrder.map((id, index) => {
+      const page = state.pages.get(id)!;
+      const visibility = state.layerOrder.map((layerId) => flag(isLayoutLayerVisible(page, state, layerId))).join(',');
+      return `    <ld:pageRef r:id="${pageRefs[index]}" id="${pageIds[index]}" name="${attr(page.name)}" showMasterLayers="1">\n      <r:layerVisibility>${visibility}</r:layerVisibility>\n    </ld:pageRef>\n`;
+    }).join('');
     const custom = new Map([...this.customTags].map(([field, tag]) => [tag, state.customFields.get(field) ?? layoutAccountFields().get(field) ?? '']));
     const numbered = new Map([...this.pageNumberTags].map(([field, tag]) => [tag, this.pageNumberAttrs(field, pageRefs)]));
     const autoText = [
@@ -701,6 +717,33 @@ ${placed.xml}        <r:imageFileReference r:id="${refId}"/>
 
   private allocId(): string {
     return `id${this.nextId++}`;
+  }
+
+  private flatten(entity: LayoutEntity, reason: FlattenReason): void {
+    this.flattened.push({ pageId: this.currentPage.id, page: this.currentPage.name, view: layoutObjectName(entity, this.objectNames), reason });
+  }
+
+  /**
+   * One note per page that lost editable model views: the views by name, why, and what the exported file can no
+   * longer do. Long lists are cut short, and a document with many such pages names the first few.
+   */
+  private flattenReport(): string[] {
+    if (!this.flattened.length) return [];
+    const reasons: Record<FlattenReason, string> = {
+      cloud: 'a PushForm cloud model', 'no-package': 'its original model could not be restored', unsupported: 'its model data cannot be written to LayOut',
+    };
+    const groups = new Map<number | null, typeof this.flattened>();
+    for (const item of this.flattened) groups.set(item.pageId, [...groups.get(item.pageId) ?? [], item]);
+    const lost = 'model editing, camera changes and model-linked behavior are lost for these views in the exported file';
+    const lines = [...groups.values()].map(items => {
+      const shown = items.slice(0, MAX_REPORTED_VIEWS).map(item => `${item.view} (${reasons[item.reason]})`);
+      const more = items.length > shown.length ? ` and ${items.length - shown.length} more` : '';
+      const where = items[0]!.page || 'Shared by all pages';
+      const noun = items.length === 1 ? 'view was' : 'views were';
+      return `${where}: ${items.length} model ${noun} exported as page artwork, not editable model views: ${shown.join(', ')}${more}. In LayOut, ${lost}.`;
+    });
+    const hidden = lines.length - MAX_REPORTED_PAGES;
+    return hidden > 0 ? [...lines.slice(0, MAX_REPORTED_PAGES), `and ${hidden} more ${hidden === 1 ? 'page' : 'pages'} with model views exported as page artwork`] : lines;
   }
 
   private warn(message: string): void {

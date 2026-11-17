@@ -4,28 +4,24 @@ import { LENGTH_TOL, m4transformPoint, v3addScaled, v3dot, v3normalize, v3sub, t
 import { bodyVertexAt, bodyVertexFaces, containerAt, pathWithin } from '@pushform/model';
 import { PickService, SpatialIndex } from '@pushform/inference';
 import { entitiesForLayer, flattenLayoutPath, isLayoutLayerVisible, isViewport, pointInsideLayoutPath, viewportCameraBasis, viewportPaperPoint,
-  type LayoutDocumentState, type LayoutEntity, type LayoutModelAttachment, type LayoutPage } from '@pushform/layout';
-import { peekLayoutViewportModel, viewGeometry, type LayoutViewportModel } from './layoutViewportRenders';
+  type LayoutDocumentState, type LayoutEntity, type LayoutModelAttachment, type LayoutPage, type LayoutViewportSections } from '@pushform/layout';
+import { peekLayoutViewportModel, viewGeometry, viewSectionState, type LayoutViewportModel } from './layoutViewportRenders';
 
 type Candidate = { point: Vec3; hidden: boolean; anchor: LayoutModelAttachment['anchor'] };
 const candidates = new WeakMap<LayoutViewportModel, Map<string | null, Candidate[]>>();
-const pickers = new WeakMap<LayoutViewportModel, Map<string | null, PickService>>();
+const pickers = new WeakMap<LayoutViewportModel, Map<string, PickService>>();
 
-/** Reuse Modeling's surface and section-cut picking with the viewport's scene tag visibility. */
-function picker(model: LayoutViewportModel, scene: string | null): PickService {
+/** Reuse Modeling's surface and section-cut picking with the viewport's scene tag visibility and section cuts. */
+function picker(model: LayoutViewportModel, scene: string | null, sections: LayoutViewportSections | undefined): PickService {
   let scenes = pickers.get(model);
   if (!scenes) pickers.set(model, scenes = new Map());
-  const cached = scenes.get(scene);
+  const key = JSON.stringify([scene, sections ?? null]);
+  const cached = scenes.get(key);
   if (cached) return cached;
-  const saved = model.scenes.find(candidate => candidate.name === scene);
-  const hidden = new Set(saved?.hiddenTags);
-  const state = saved?.usesTags ? { ...model.state,
-    tags: new Map([...model.state.tags].map(([id, tag]) => [id, { ...tag, visible: !hidden.has(tag.name) }])),
-  } : model.state;
   const index = new SpatialIndex();
-  index.setState(state);
+  index.setState(viewSectionState(model, scene, sections));
   const result = new PickService(index);
-  scenes.set(scene, result);
+  scenes.set(key, result);
   return result;
 }
 
@@ -94,7 +90,7 @@ export function snapLayoutModelVertex(point: [number, number], page: LayoutPage,
       const viewport = view.image.viewport, model = peekLayoutViewportModel(state, viewport.source);
       if (!model) return { unavailable: true };
       const display = { ...model.display, ...viewport.display }, { forward } = viewportCameraBasis(viewport.camera);
-      const picking = picker(model, viewport.scene);
+      const picking = picker(model, viewport.scene, viewport.display?.sections);
       let best: { point: [number, number]; candidate: Candidate; distance: number; depth: number } | null = null;
       for (const candidate of vertices(model, viewport.scene)) {
         if (candidate.hidden && !display.hiddenGeometry) continue;

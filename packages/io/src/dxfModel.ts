@@ -22,6 +22,9 @@ const CIRCLE_SEGMENTS = 24;
 const RELEASES: Record<string, string> = { AC1006: 'R10', AC1009: 'R12', AC1012: 'R13', AC1014: 'R14', AC1015: '2000', AC1018: '2004',
   AC1021: '2007', AC1024: '2010', AC1027: '2013', AC1032: '2018' };
 
+/** The AutoCAD release a format version code such as AC1027 names, or undefined when it is not a known one. */
+export function autocadRelease(code: string): string | undefined { return RELEASES[code]; }
+
 /** The AutoCAD release that wrote the file, for the import report's source version. */
 export function dxfVersion(drawing: DxfDrawing): string {
   if (!drawing.version) return 'DXF';
@@ -112,8 +115,11 @@ function placement(transform: Mat4, meters: number): number[] {
 
 /**
  * Read a DXF file's model space as a model. A drawing without units is read in `options.unit`, or millimeters.
+ * `source` names the format and version the drawing was converted from (a DWG drawing), for its notes and import
+ * report.
  */
-export async function readDxf(bytes: Uint8Array, options?: MeshImportOptions, onProgress?: (p: ImportProgress) => void): Promise<SketchUpImport> {
+export async function readDxf(bytes: Uint8Array, options?: MeshImportOptions, onProgress?: (p: ImportProgress) => void,
+  source?: { format: ImportFormat; version: string }): Promise<SketchUpImport> {
   onProgress?.({ stage: 'Reading DXF drawing', current: 0, total: 1 });
   const drawing = parseDxf(bytes);
   const meters = drawing.units?.meters ?? MESH_UNITS.find(u => u.unit === (options?.unit ?? 'mm'))!.meters;
@@ -169,7 +175,7 @@ export async function readDxf(bytes: Uint8Array, options?: MeshImportOptions, on
     const layer = drawing.layers.get(name), [r, g, b] = resolveColor(layer?.color ?? { aci: 7 }, layer, null);
     return { name, color: { r, g, b }, hidden: !(layer?.visible ?? true) };
   });
-  const model = { version: dxfVersion(drawing), definitions, root, layers, pages: [], scenesUnread: 0, dimensions: [], materials: [],
+  const model = { version: source?.version ?? dxfVersion(drawing), definitions, root, layers, pages: [], scenesUnread: 0, dimensions: [], materials: [],
     materialsById: new Map(), styles: [], units: null, unitsOptions: null, sectionDisplay: null } as unknown as SkpModel;
-  return finishMeshImport(model, new Map(), DXF_FORMAT, warnings, onProgress);
+  return finishMeshImport(model, new Map(), source?.format ?? DXF_FORMAT, warnings, onProgress);
 }

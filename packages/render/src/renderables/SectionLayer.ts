@@ -3,7 +3,7 @@
 import type { Box3, Vec3 } from '@pushform/core';
 import {
   BackSide, BufferAttribute, BufferGeometry, Color, DecrementWrapStencilOp, DoubleSide, FrontSide, Group, IncrementWrapStencilOp, Mesh,
-  MeshBasicMaterial, NotEqualStencilFunc, ReplaceStencilOp, AlwaysStencilFunc, Vector2, Vector3,
+  MeshBasicMaterial, NotEqualStencilFunc, Quaternion, ReplaceStencilOp, AlwaysStencilFunc, Vector2, Vector3,
 } from 'three';
 import type { Camera, Plane } from 'three';
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
@@ -26,13 +26,36 @@ export interface SectionBody {
 const CUT_ORDER = 2;
 /** Opacity of a section plane's translucent fill. */
 export const SECTION_PLANE_OPACITY = 0.2;
-/** Symbol label size and arrow length in CSS px. */
-const SYMBOL_PX = 13;
-const ARROW_PX = 22;
+/** Radius of a section marker's bubble in CSS px; the rest of the marker is sized in bubble radii. */
+const BUBBLE_PX = 14;
+/** Outline and divider width, in bubble radii (1.5 px). */
+const STROKE = 1.5 / BUBBLE_PX;
+/** Text height in each half of the bubble, and the widest a text may be before it is shrunk to fit. */
+const TEXT_SIZE = 0.62;
+const TEXT_WIDTH = 1.4;
+/** The arrow: half its base width, and its length when it lies square to the view. */
+const ARROW_HALF = 0.55;
+const ARROW_LENGTH = 0.9;
+/** How far, in bubble radii, a marker is drawn toward the camera, so it covers the plane's outline at its corner. */
+const LIFT = 2;
+/** Below this share of its length on screen an arrow, seen end on, is not drawn. */
+const ARROW_MIN = 0.15;
+const PAPER = 0xffffff;
+
+/** One section marker: a bubble facing the camera at a corner of a plane, with its arrow. */
+interface Marker {
+  readonly group: Group;
+  readonly arrow: Mesh<BufferGeometry, MeshBasicMaterial>;
+  readonly at: Vec3;
+  /** `at` in render coordinates. */
+  readonly position: Vec3;
+  readonly dir: Vec3;
+}
 
 /**
- * Section planes and cuts: each plane as a translucent rectangle outlined in the active or inactive
- * color, with its symbol and arrows toward the kept side at two opposite sides; for each active cut, the faces of the
+ * Section planes and cuts: each plane as a translucent rectangle outlined in the active or inactive color, with a
+ * section marker at each corner: a bubble split across its middle holding the plane's symbol over the sheet the
+ * section is drawn on, and an arrow pointing to the side the cut keeps. For each active cut, the faces of the
  * solids it cuts filled through the stencil buffer (valid because every Body is a closed manifold) and the section
  * lines where it crosses them.
  */
@@ -41,12 +64,14 @@ export class SectionLayer {
   sections: RenderSections = EMPTY_SECTIONS;
   private readonly cutGroup = new Group();
   private readonly planeGroup = new Group();
-  private labels: { text: Text; at: Vec3 }[] = [];
-  private arrows: { mesh: Mesh<BufferGeometry, MeshBasicMaterial>; at: Vec3; dir: Vec3 }[] = [];
+  private labels: Text[] = [];
+  private markers: Marker[] = [];
   private lineMaterials: LineMaterial[] = [];
   private resolution = new Vector2(1, 1);
   private origin: Vec3 = [0, 0, 0];
   private readonly view = new Vector3();
+  private readonly facing = new Quaternion();
+  private readonly inverse = new Quaternion();
   /** Resolves once every symbol label has been laid out. */
   ready: Promise<void> = Promise.resolve();
 
@@ -81,9 +106,9 @@ export class SectionLayer {
       });
       g.clear();
     }
-    for (const { text } of this.labels) text.dispose();
+    for (const text of this.labels) text.dispose();
     this.labels = [];
-    this.arrows = [];
+    this.markers = [];
     this.lineMaterials = [];
   }
 
@@ -149,12 +174,6 @@ export class SectionLayer {
     for (const p of sections.planes) {
       const color = new Color(p.selected ? palette.select.getHex() : p.active ? sections.activeColor : sections.inactiveColor);
       const c = p.corners.map(rel) as [Vec3, Vec3, Vec3, Vec3];
-      const fill = new BufferGeometry();
-      fill.setAttribute('position', new BufferAttribute(new Float32Array([...c[0], ...c[1], ...c[2], ...c[0], ...c[2], ...c[3]]), 3));
-      // The fill is neutral grey; the outline carries the active or inactive color.
-      const quad = new Mesh(fill, new MeshBasicMaterial({ color: new Color(sections.inactiveColor), transparent: true, opacity: SECTION_PLANE_OPACITY, side: DoubleSide, depthWrite: false }));
-      quad.renderOrder = 5;
-      quad.userData['sectionPlane'] = p.id;
       const outline = new LineSegmentsGeometry();
       outline.setPositions([...c[0], ...c[1], ...c[1], ...c[2], ...c[2], ...c[3], ...c[3], ...c[0]]);
       const material = new LineMaterial({ color: color.getHex(), linewidth: p.active || p.selected ? 2 : 1, worldUnits: false });
@@ -163,53 +182,85 @@ export class SectionLayer {
       const line = new LineSegments2(outline, material);
       line.renderOrder = 5;
       line.frustumCulled = false;
-      this.planeGroup.add(quad, line);
-      // Symbol and arrow at the middles of two opposite sides, pointing to the side the cut keeps.
-      for (const [a, b] of [[p.corners[0], p.corners[1]], [p.corners[2], p.corners[3]]] as const) {
-        const at: Vec3 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
-        const text = new Text();
-        text.text = p.symbol;
-        text.fontSize = 1;
-        text.anchorX = 'center';
-        text.anchorY = 'middle';
-        text.color = color.getHex();
-        text.outlineWidth = '12%';
-        text.outlineColor = '#ffffff';
-        text.position.set(...rel(at));
-        (text.material as { depthWrite?: boolean }).depthWrite = false;
-        text.renderOrder = 6;
-        this.planeGroup.add(text);
-        this.labels.push({ text, at });
-        const arrow = new Mesh(new BufferGeometry(), new MeshBasicMaterial({ color, side: DoubleSide, depthWrite: false }));
-        arrow.renderOrder = 6;
-        arrow.frustumCulled = false;
-        this.planeGroup.add(arrow);
-        this.arrows.push({ mesh: arrow, at, dir: p.normal });
+      // a hidden plane, shown with hidden geometry, has no fill
+      if (!p.hidden) {
+        const fill = new BufferGeometry();
+        fill.setAttribute('position', new BufferAttribute(new Float32Array([...c[0], ...c[1], ...c[2], ...c[0], ...c[2], ...c[3]]), 3));
+        // The fill is neutral grey; the outline carries the active or inactive color.
+        const quad = new Mesh(fill, new MeshBasicMaterial({ color: new Color(sections.inactiveColor), transparent: true, opacity: SECTION_PLANE_OPACITY, side: DoubleSide, depthWrite: false }));
+        quad.renderOrder = 5;
+        quad.userData['sectionPlane'] = p.id;
+        this.planeGroup.add(quad);
       }
+      this.planeGroup.add(line);
+      // A marker at each corner, so one can be read from any side.
+      for (const at of p.corners) this.addMarker(p.symbol, p.sheet ?? '', color, at, p.normal, rel(at));
     }
-    this.ready = Promise.all(this.labels.map(({ text }) => new Promise<void>((resolve) => text.sync(() => resolve())))).then(() => undefined);
+    this.ready = Promise.all(this.labels.map((text) => new Promise<void>((resolve) => text.sync(() => { fitText(text); resolve(); })))).then(() => undefined);
   }
 
-  /** Per frame: labels face the camera at a fixed screen size; arrows keep their screen length. */
-  update(camera: Camera, wppAt: (p: Vec3) => number): void {
-    for (const { text, at } of this.labels) {
-      text.quaternion.copy(camera.quaternion);
-      const s = wppAt(at) * SYMBOL_PX;
-      text.scale.set(s, s, s);
+  /**
+   * A bubble of one bubble radius, split by a horizontal line, with `symbol` in its top half and `sheet` in its bottom
+   * half, and its arrow; `update` turns it to the camera, sizes it and points the arrow.
+   */
+  private addMarker(symbol: string, sheet: string, color: Color, at: Vec3, dir: Vec3, position: Vec3): void {
+    const group = new Group();
+    group.position.set(...position);
+    // Transparent, so the marker draws after the plane's translucent fill, in render order.
+    const part = (geometry: BufferGeometry, hex: number, order: number): Mesh<BufferGeometry, MeshBasicMaterial> => {
+      const mesh = new Mesh(geometry, new MeshBasicMaterial({ color: hex, side: DoubleSide, transparent: true, depthWrite: false }));
+      mesh.renderOrder = order;
+      mesh.frustumCulled = false;
+      group.add(mesh);
+      return mesh;
+    };
+    part(discGeometry(0, 1), PAPER, 6);
+    part(discGeometry(1 - STROKE, 1), color.getHex(), 7);
+    part(rectGeometry(1 - STROKE / 2, STROKE / 2), color.getHex(), 7);
+    const arrow = part(new BufferGeometry(), color.getHex(), 7);
+    arrow.geometry.setAttribute('position', new BufferAttribute(new Float32Array(9), 3));
+    for (const [content, y] of [[symbol, 0.45], [sheet, -0.45]] as const) {
+      if (!content) continue;
+      const text = new Text();
+      text.text = content;
+      text.fontSize = TEXT_SIZE;
+      text.anchorX = 'center';
+      text.anchorY = 'middle';
+      text.color = color.getHex();
+      text.position.set(0, y, 0);
+      (text.material as { depthWrite?: boolean }).depthWrite = false;
+      text.renderOrder = 8;
+      text.frustumCulled = false;
+      group.add(text);
+      this.labels.push(text);
     }
-    for (const { mesh, at, dir } of this.arrows) {
-      const len = wppAt(at) * ARROW_PX, w = len * 0.25;
-      // Across the arrow, in the plane facing the camera.
-      const view = camera.getWorldDirection(this.view);
-      let across: Vec3 = [dir[1] * view.z - dir[2] * view.y, dir[2] * view.x - dir[0] * view.z, dir[0] * view.y - dir[1] * view.x];
-      const l = Math.hypot(...across);
-      across = l > 1e-9 ? [across[0] / l, across[1] / l, across[2] / l] : [0, 0, 0];
-      const o = this.origin;
-      const start: Vec3 = [at[0] - o[0] + dir[0] * len * 0.4, at[1] - o[1] + dir[1] * len * 0.4, at[2] - o[2] + dir[2] * len * 0.4];
-      const tip: Vec3 = [start[0] + dir[0] * len, start[1] + dir[1] * len, start[2] + dir[2] * len];
-      const tri = [...tip, start[0] + across[0] * w, start[1] + across[1] * w, start[2] + across[2] * w, start[0] - across[0] * w, start[1] - across[1] * w, start[2] - across[2] * w];
-      mesh.geometry.setAttribute('position', new BufferAttribute(new Float32Array(tri), 3));
-      mesh.geometry.computeBoundingSphere();
+    this.planeGroup.add(group);
+    this.markers.push({ group, arrow, at, position, dir });
+  }
+
+  /** Per frame: markers face the camera at a fixed screen size, and each arrow points along its plane's normal as seen. */
+  update(camera: Camera, wppAt: (p: Vec3) => number): void {
+    const facing = camera.getWorldQuaternion(this.facing);
+    this.inverse.copy(facing).invert();
+    const view = camera.getWorldDirection(this.view);
+    const [vx, vy, vz] = [view.x, view.y, view.z];
+    for (const { group, arrow, at, position, dir } of this.markers) {
+      group.quaternion.copy(facing);
+      const radius = wppAt(at) * BUBBLE_PX;
+      group.scale.setScalar(radius);
+      group.position.set(position[0] - vx * radius * LIFT, position[1] - vy * radius * LIFT, position[2] - vz * radius * LIFT);
+      // The normal in the bubble's own axes: x right and y up on screen.
+      const seen = this.view.set(dir[0], dir[1], dir[2]).applyQuaternion(this.inverse);
+      const share = Math.hypot(seen.x, seen.y);
+      arrow.visible = share >= ARROW_MIN;
+      if (!arrow.visible) continue;
+      const x = seen.x / share, y = seen.y / share;
+      // From the bubble's edge, foreshortened as the normal turns toward or away from the viewer.
+      const base = 1 - STROKE, tip = base + ARROW_LENGTH * share;
+      const corners = arrow.geometry.getAttribute('position') as BufferAttribute;
+      corners.array.set([x * tip, y * tip, 0, x * base - y * ARROW_HALF, y * base + x * ARROW_HALF, 0, x * base + y * ARROW_HALF, y * base - x * ARROW_HALF, 0]);
+      corners.needsUpdate = true;
+      arrow.geometry.computeBoundingSphere();
     }
   }
 
@@ -241,6 +292,35 @@ function capGeometry(cut: RenderSectionCut, bounds: Box3, origin: Vec3): BufferG
   const g = new BufferGeometry();
   g.setAttribute('position', new BufferAttribute(new Float32Array([...corner(-1, -1), ...corner(1, -1), ...corner(1, 1), ...corner(-1, -1), ...corner(1, 1), ...corner(-1, 1)]), 3));
   return g;
+}
+
+/** A ring between radii `inner` and `outer` in the xy plane; a disc when `inner` is 0. */
+function discGeometry(inner: number, outer: number, segments = 40): BufferGeometry {
+  const out: number[] = [];
+  for (let i = 0; i < segments; i++) {
+    const a = (i / segments) * Math.PI * 2, b = ((i + 1) / segments) * Math.PI * 2;
+    const p = (r: number, t: number): number[] => [Math.cos(t) * r, Math.sin(t) * r, 0];
+    out.push(...p(inner, a), ...p(outer, a), ...p(outer, b));
+    if (inner > 0) out.push(...p(inner, a), ...p(outer, b), ...p(inner, b));
+  }
+  const g = new BufferGeometry();
+  g.setAttribute('position', new BufferAttribute(new Float32Array(out), 3));
+  return g;
+}
+
+/** A rectangle centred on the origin, `halfWidth` by `halfHeight`, in the xy plane. */
+function rectGeometry(halfWidth: number, halfHeight: number): BufferGeometry {
+  const w = halfWidth, h = halfHeight;
+  const g = new BufferGeometry();
+  g.setAttribute('position', new BufferAttribute(new Float32Array([-w, -h, 0, w, -h, 0, w, h, 0, -w, -h, 0, w, h, 0, -w, h, 0]), 3));
+  return g;
+}
+
+/** Shrinks a laid-out label that is wider than the bubble's half allows. */
+function fitText(text: Text): void {
+  const bounds = text.textRenderInfo?.blockBounds;
+  const width = bounds ? bounds[2]! - bounds[0]! : 0;
+  text.scale.setScalar(width > TEXT_WIDTH ? TEXT_WIDTH / width : 1);
 }
 
 const cross = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];

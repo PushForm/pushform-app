@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import type { ProjectActivitySink } from '@pushform/cloud';
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { JSX } from 'react';
 import { createPortal } from 'react-dom';
 import { CommonsBrowser } from './components/CommonsBrowser';
@@ -11,6 +11,9 @@ import { createApp } from './bootstrap';
 import type { AppInstance } from './bootstrap';
 import { MainToolbar } from './components/MainToolbar';
 import { documentToolsFor } from './documentTools';
+import { chatPublishing, type PublicationPreset } from './chatPublishing';
+import { PublishSnapshot } from './components/PublishSnapshot';
+import type { PublishingSnapshot } from './components/SaveVersionDialog';
 import { captureRequestScreenshot } from './requestScreenshot';
 import { PanelHost } from './components/PanelHost';
 import { RightStrip } from './components/RightStrip';
@@ -62,7 +65,7 @@ import { ThumbnailContext } from './useThumbnails';
 import { DocumentLoading } from './components/DocumentLoading';
 import { cloudLocation, openCloudDocument } from './cloudDocuments';
 import { forgetCloudRecents, readCloudRecents, recordCloudRecent, updateCloudRecent } from './cloudRecents';
-import { Chat, DockedPanel, HOME_SCOPE, Popover, RequestsClient, type ScreenInfo } from '@pushform/requests-ui';
+import { Chat, DockedPanel, HOME_SCOPE, Popover, RequestsClient, type ClonedDocument, type CloneRequest, type Handoff, type ScreenInfo } from '@pushform/requests-ui';
 import { PiTreeView } from 'react-icons/pi';
 import { RiChatAiLine } from 'react-icons/ri';
 
@@ -207,14 +210,14 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
   const chats = useRef(new Set<string>());
   /** Clear Chat raises the counter of the conversation it clears. */
   const [clearSignals, setClearSignals] = useState<Record<string, number>>({});
+  /** A clone made from AI Chat, by its tab: its chat opens with the handoff and sends the request that made it. */
+  const [handoffs, setHandoffs] = useState<Record<string, Handoff & { request: string }>>({});
   /** The editors' one docked side panel at a time; a document's chat mounts on first open and then only hides. */
   const [sidePanel, setSidePanel] = useState<SidePanel | null>(null);
   const [guidanceBrowserTab, setGuidanceBrowserTab] = useState<string | null>(null);
   const [requestsIcon, setRequestsIcon] = useState<HTMLButtonElement | null>(null);
-  const [filesIcon, setFilesIcon] = useState<HTMLButtonElement | null>(null);
   const filesOpened = useRef(false);
   const [filesNode] = useState(() => { const node = document.createElement('div'); node.className = 'pf-side-dock-files'; return node; });
-  const [objectsIcon, setObjectsIcon] = useState<HTMLButtonElement | null>(null);
   const [objectHost, setObjectHost] = useState<HTMLDivElement | null>(null);
   /** The docked chats render into this one element from a fixed place, so switching editors never remounts them. */
   const [chatNode] = useState(() => { const node = document.createElement('div'); node.className = 'pf-side-dock-chat'; return node; });
@@ -342,6 +345,15 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     };
     return () => { if (target.pushform?.session === session) delete target.pushform; };
   }, [given, session, active.id, modelApp, locked, home]);
+  /**
+   * AI Chat's publishing dialog: opened from a publication card with the card's values. `made` records the publication
+   * (even one whose collections failed) so closing the dialog reports it.
+   */
+  const [chatPublication, setChatPublication] = useState<{ snapshot: PublishingSnapshot; preset: PublicationPreset; auto: boolean;
+    made: { modelId: string; failures: readonly string[] } | null; resolve(made: { modelId: string; failures: readonly string[] } | null): void } | null>(null);
+  const publishingForChat = useMemo(() => (autosave && cloudFiles ? chatPublishing({ files: cloudFiles, saves: autosave, commons,
+    openPublishing: (snapshot, preset, auto) => new Promise(resolve => setChatPublication({ snapshot, preset, auto, made: null, resolve })) }) : undefined),
+  [autosave, cloudFiles, commons?.account]);
   if (locked) return null;
   const accountEmail = cloud?.getSnapshot().user?.email ?? '';
   const screenOf = (tab: DocumentTab | null): ScreenInfo => ({ editor: tab ? tab.type : 'home', ...(tab ? { documentType: tab.type } : {}),
@@ -358,13 +370,6 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     if (id === 'files' || id === 'requests' || id === 'objects' || isExtensionPanelId(id)) showSidePanel(id, 'toggle');
   };
   const closeSidePanel = (): void => { setGuidanceBrowserTab(null); setSidePanel(null); };
-  /** The object browser hides itself on Escape; focus inside it then returns to its rail icon. */
-  const closeObjects = (): void => {
-    setGuidanceBrowserTab(null);
-    const focused = !!objectHost?.contains(document.activeElement);
-    setSidePanel(current => current === 'objects' ? null : current);
-    if (focused && objectsIcon?.isConnected) objectsIcon.focus();
-  };
   /** Home's conversation pops down under its icon; each document's docks beside its editor. */
   const chatKey = home ? HOME_SCOPE : active.id;
   if (home ? requestsPanel?.open : sidePanel === 'requests') chats.current.add(chatKey);
@@ -375,15 +380,35 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     setClearSignals(current => ({ ...current, [chatKey]: (current[chatKey] ?? 0) + 1 }));
     showSidePanel('requests', 'open');
   };
+  /**
+   * Clone a document the requester confirmed on a chat card: the copy opens in a new, active tab, unsaved, headed for the
+   * original's project and folder, and its own chat takes over from the handoff.
+   */
+  const cloneFromChat = async (source: DocumentTab, request: CloneRequest): Promise<ClonedDocument> => {
+    if (!allowOpeningDocument()) throw new Error('A downloaded update must be installed before another document opens.');
+    const location = cloudLocation(source.identity);
+    let draft = source.cloudDraft?.projectId ? { projectId: source.cloudDraft.projectId, folderId: source.cloudDraft.folderId ?? null } : undefined;
+    if (location) {
+      const head = cloudFiles ? await cloudFiles.head(location.fileId).catch(() => null) : null;
+      draft = { projectId: head?.file.project_id ?? location.projectId, folderId: head?.file.folder_id ?? null };
+    }
+    const tab = await session.cloneDocument(source.id, request.name, draft);
+    const plain = (name: string): string => name.replace(/\.(pfl?)$/i, '');
+    setHandoffs(current => ({ ...current, [tab.id]: { from: plain(source.name), summary: request.summary, request: request.request } }));
+    chats.current.add(tab.id);
+    showSidePanel('requests', 'open');
+    return { name: plain(tab.name), show: () => { if (session.tabs.includes(tab)) session.activate(tab.id); } };
+  };
   const chatPanel = (key: string, client: RequestsClient): JSX.Element => {
     const tab = key === HOME_SCOPE ? null : session.tabs.find(item => item.id === key) ?? null;
     // A saved document resumes its conversation after a reload; an unsaved one keeps it for the session.
     const scope = !tab ? HOME_SCOPE : tab.identity ? `document:${tab.identity}` : `tab:${tab.id}`;
     return <Chat key={key} placement={tab ? 'docked' : 'popover'} client={client} account={{ id: ownerId, email: accountEmail }} screen={screenOf(tab)} scope={scope}
       documentId={tab ? cloudLocation(tab.identity)?.fileId : undefined}
-      anchor={tab ? requestsIcon : requestsPanel?.anchor ?? null} onClose={tab ? closeSidePanel : closeRequests}
+      anchor={requestsPanel?.anchor ?? null} onClose={closeRequests}
       open={key === chatKey && (tab ? sidePanel === 'requests' : !!requestsPanel?.open)}
-      documentTools={tab ? () => documentToolsFor(session, tab, panel => { if (panel === 'objects' && sidePanel === 'requests') setGuidanceBrowserTab(tab.id); else showSidePanel(panel, 'open'); }) : undefined} captureScreenshot={tab ? () => captureRequestScreenshot(session, tab) : undefined} onMessage={() => usage?.record('help_message')} clearSignal={clearSignals[key] ?? 0} />;
+      documentTools={tab ? () => documentToolsFor(session, tab, panel => { if (panel === 'objects' && sidePanel === 'requests') setGuidanceBrowserTab(tab.id); else showSidePanel(panel, 'open'); }, cloneFromChat, publishingForChat) : undefined}
+      handoff={handoffs[key]} onHandoffStarted={() => setHandoffs(({ [key]: _used, ...rest }) => rest)} captureScreenshot={tab ? () => captureRequestScreenshot(session, tab) : undefined} onMessage={() => usage?.record('help_message')} clearSignal={clearSignals[key] ?? 0} />;
   };
   const panel = requestsPanel ? (requestsClient
     ? chats.current.has(HOME_SCOPE) ? chatPanel(HOME_SCOPE, requestsClient) : null
@@ -394,9 +419,9 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     : <RequestsUnavailable placement="docked" anchor={requestsIcon} open={sidePanel === 'requests'} onClose={closeSidePanel} />;
   if (sidePanel === 'files') filesOpened.current = true;
   const railItems: SideRailItem[] = [
-    { id: 'files', label: 'Files', icon: <LuFolderOpen aria-hidden="true" />, ref: setFilesIcon },
+    { id: 'files', label: 'Files', icon: <LuFolderOpen aria-hidden="true" /> },
     { id: 'requests', label: 'AI Chat', icon: <RiChatAiLine aria-hidden="true" />, ref: setRequestsIcon },
-    { id: 'objects', label: 'Object browser', icon: <PiTreeView aria-hidden="true" />, ref: setObjectsIcon },
+    { id: 'objects', label: 'Object browser', icon: <PiTreeView aria-hidden="true" /> },
     { id: 'commons', label: 'Commons', icon: <LuLibrary aria-hidden="true" /> },
     ...extensionWorkspace.railItems,
   ];
@@ -415,7 +440,7 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
       <DockSlot node={chatNode} attached={sidePanel === 'requests'} />
       {/* Layout portals its browser into this element; the model's renders here directly. */}
       <div ref={setObjectHost} className={`pf-side-dock-objects${companionBrowser ? ' is-guidance-companion' : ''}`} hidden={!browserVisible}>
-        {active.type === 'model' && browserVisible ? <ModelObjectBrowser key={active.id} onClose={closeObjects} /> : null}
+        {active.type === 'model' && browserVisible ? <ModelObjectBrowser key={active.id} /> : null}
       </div>
       {extensionWorkspace.panel}
     </SideDock>
@@ -475,6 +500,9 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
           onRequests={() => toggleSidePanel('requests')} onObjects={() => toggleSidePanel('objects')} onClearChat={requestsClient ? clearChat : undefined}
           onExtensions={openExtensions} />
         {commonsVisited && <div className="pf-commons-tab" hidden={!commonsShown}><CommonsBrowser account={commons?.account} filesUrl={commons?.filesUrl} session={session} onClose={() => setCommonsShown(false)} onOpened={() => setCommonsShown(false)} /></div>}
+        {chatPublication && commons?.account ? <PublishSnapshot account={commons.account} filesUrl={commons.filesUrl} snapshot={chatPublication.snapshot}
+          preset={chatPublication.preset} autoPublish={chatPublication.auto} onPublication={(modelId, failures) => { chatPublication.made = { modelId, failures }; }}
+          onClose={() => { setChatPublication(null); chatPublication.resolve(chatPublication.made); }} /> : null}
         {commonsPicker && createPortal(<div className="pf-modal-backdrop"><section className="pf-modal pf-commons-picker" role="dialog" aria-modal="true" aria-label="Import from Commons"><CommonsBrowser account={commons?.account} filesUrl={commons?.filesUrl} session={session} target={commonsPicker} onClose={() => setCommonsPicker(null)} onOpened={() => setCommonsPicker(null)} /></section></div>, document.body)}
         {extensionManager}
         {extensionPrint}
@@ -492,13 +520,12 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
           </>
         ) : (
           <LayoutWorkspace key={active.id} tab={active} session={session} leading={sideBar} saveStatus={saveStatus} catalogActive={commonsShown}
-            objectBrowser={{ host: objectHost, open: browserVisible, onClose: closeObjects }}
+            objectBrowser={{ host: objectHost, open: browserVisible }}
             cloud={cloudFiles ? { api: cloudFiles, owner, session, saves: cloudModelSaves } : undefined} />
         )}
       </div>
       {filesOpened.current ? createPortal(<WorkspaceFiles api={cloudFiles} open={sidePanel === 'files'} onOpen={open}
-        onRenamed={renamed} onMoved={moved} onForgetRecents={forgetRecents}
-        onClose={() => { closeSidePanel(); filesIcon?.focus(); }} />, filesNode) : null}
+        onRenamed={renamed} onMoved={moved} onForgetRecents={forgetRecents} />, filesNode) : null}
       {dockedRequests ? createPortal(dockedRequests, chatNode) : null}
       {extensionWorkspace.activity}
       {feedback}

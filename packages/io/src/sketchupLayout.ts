@@ -32,7 +32,7 @@ import {
   type LayoutDocumentState,
   type LayoutTable,
   type LayoutTableEdge,
-  type LayoutViewportDisplay,
+  type LayoutViewportDisplay, type LayoutViewportSections,
   type LayoutModelArchive,
   type LayoutEntity,
   type LayoutImage,
@@ -282,8 +282,8 @@ class Importer {
 
     // LayOut 2015 and earlier keep shared content inline in each shared layer definition's instance.
     const shared = child(document, 'layerEntityManager')
-      ? this.layerEntities(child(document, 'layerEntityManager'), layerIds, context, null)
-      : this.inlineLayerEntities(definitions.flatMap((definition) => childrenNamed(definition, 'layerInstance')), layerIds, context, null);
+      ? this.layerEntities(child(document, 'layerEntityManager'), layerIds, context)
+      : this.inlineLayerEntities(definitions.flatMap((definition) => childrenNamed(definition, 'layerInstance')), layerIds, context);
     const sharedEntities = new Map<number, LayoutEntity>();
     const sharedEntityOrder: number[] = [];
     for (const entity of shared) {
@@ -301,7 +301,6 @@ class Importer {
       const target = this.references.get(pageRef.attrs['r:id'] ?? '')?.attrs.internalTarget;
       if (!target || !this.files[target]) { this.warn('a page whose content is missing was skipped'); continue; }
       const visibility = (child(pageRef, 'layerVisibility')?.text ?? '').split(',').map((value) => value.trim());
-      const hidden = new Set(definitions.flatMap((definition, index) => visibility[index] === '0' ? [layerIds.get(definition.attrs.id ?? '')!] : []));
       const id = this.allocId();
       const page: LayoutPage = {
         id, name: pageRef.attrs.name || `Page ${pageOrder.length + 1}`, size, margin, background,
@@ -312,9 +311,10 @@ class Importer {
       const pageXml = this.xml(target);
       pageXmls.push(pageXml);
       pagePositions.set(id, pageRefIds.indexOf(pageRef.attrs['r:id'] ?? ''));
+      // Content on a layer hidden for this page is kept: the page's layer visibility hides it until the layer is shown.
       const pageEntities = child(pageXml, 'layerEntityManager')
-        ? this.layerEntities(child(pageXml, 'layerEntityManager'), layerIds, context, hidden)
-        : this.inlineLayerEntities(childrenNamed(child(pageXml, 'layerInstanceManager') ?? pageXml, 'layerInstance'), layerIds, context, hidden);
+        ? this.layerEntities(child(pageXml, 'layerEntityManager'), layerIds, context)
+        : this.inlineLayerEntities(childrenNamed(child(pageXml, 'layerInstanceManager') ?? pageXml, 'layerInstance'), layerIds, context);
       for (const entity of pageEntities) {
         if (layers.get(entity.layerId)?.shared) { this.warn('page content on a shared layer was dropped'); continue; }
         page.entities.set(entity.id, entity);
@@ -368,22 +368,19 @@ class Importer {
    * entity list and no references). An instance with only an `l:ref` points at a shared layer's content,
    * which is read from the document instead.
    */
-  private inlineLayerEntities(instances: XmlElement[], layerIds: Map<string, number>,
-    context: EntityContext, hidden: Set<number> | null): LayoutEntity[] {
+  private inlineLayerEntities(instances: XmlElement[], layerIds: Map<string, number>, context: EntityContext): LayoutEntity[] {
     const result: LayoutEntity[] = [];
     for (const instance of instances) {
       const layerId = layerIds.get(child(instance, 'layerDefinition')?.attrs['l:ref'] ?? '');
       const entities = child(instance, 'entityList')?.children ?? [];
       if (layerId === undefined || !entities.length) continue;
-      if (hidden?.has(layerId)) { this.warn('content on layers hidden for its page was skipped'); continue; }
       for (const element of entities) result.push(...this.entity(element, layerId, context));
     }
     return result;
   }
 
   /** Entities of one layerEntityManager in layer and stacking order. */
-  private layerEntities(manager: XmlElement | undefined, layerIds: Map<string, number>,
-    context: EntityContext, hidden: Set<number> | null): LayoutEntity[] {
+  private layerEntities(manager: XmlElement | undefined, layerIds: Map<string, number>, context: EntityContext): LayoutEntity[] {
     if (!manager) return [];
     // Layers reference leaves, so retain each leaf's group ancestry while indexing it.
     const byId = new Map<string, XmlElement>();
@@ -424,13 +421,7 @@ class Importer {
         };
       });
     };
-    for (const [layerId, entities] of assigned) {
-      if (hidden?.has(layerId)) {
-        if (entities.length) this.warn(`content on layers hidden for its page was skipped`);
-        continue;
-      }
-      for (const entity of entities) result.push(...convert(entity, layerId));
-    }
+    for (const [layerId, entities] of assigned) for (const entity of entities) result.push(...convert(entity, layerId));
     const fallback = [...context.layers.keys()].find((id) => !context.layers.get(id)!.shared) ?? [...context.layers.keys()][0]!;
     for (const entity of unassigned) result.push(...convert(entity, fallback));
     return result;
@@ -1136,7 +1127,9 @@ class Importer {
       entity.image!.viewport = {
         source: { archiveId: this.archiveId, modelReferenceId }, templateId: originalId, originalId,
         camera: viewportCamera, preserveScaleOnResize: element.attrs.constantSize === '1',
-        scene: element.attrs.cameraModified === '1' ? null : element.attrs.defaultPageName ?? null,
+        // A view whose camera was changed after its scene was chosen still shows the scene's tags and section cuts.
+        scene: element.attrs.defaultPageName ?? null,
+        ...(element.attrs.cameraModified === '1' && element.attrs.defaultPageName !== undefined ? { cameraModified: true } : {}),
         background: backgroundColor,
         cache: picture ? { camera: viewportCamera, widthMm: width * MM_PER_INCH, heightMm: height * MM_PER_INCH } : null,
         ...viewportDisplay(element),
@@ -1417,10 +1410,33 @@ function viewportDisplay(element: XmlElement): { display?: LayoutViewportDisplay
   const mode = entries.get('RenderMode'), textured = on('Texture', true);
   const faceStyle: LayoutViewportDisplay['faceStyle'] = mode === '0' ? 'wireframe' : mode === '1' ? 'hiddenLine' : mode === '5' ? 'monochrome'
     : textured ? 'shadedTextured' : 'shaded';
-  const shadows = viewportShadows(element);
+  const shadows = viewportShadows(element), sections = viewportSections(entries);
   return { display: { faceStyle, edges: entries.get('EdgeDisplayMode') !== '0', profiles: on('DrawSilhouettes', true),
     backEdges: on('DrawBackEdges', false), xray: on('ModelTransparency', false), hiddenGeometry: on('DrawHidden', false),
-    ...(shadows ? { shadows } : {}) } };
+    ...(shadows ? { shadows } : {}), ...(sections ? { sections } : {}) } };
+}
+
+/**
+ * A view's own section display from its rendering options: Display Section Planes and Cuts, the fill, the cut line width,
+ * and the colors, each an int32 whose little-endian bytes are red, green, blue and alpha. Null without either switch.
+ */
+function viewportSections(entries: Map<string | undefined, string | undefined>): LayoutViewportSections | null {
+  if (!entries.has('DisplaySectionPlanes') && !entries.has('DisplaySectionCuts')) return null;
+  const color = (key: string): [number, number, number] | undefined => {
+    const value = Number(entries.get(key));
+    if (!entries.has(key) || !Number.isInteger(value)) return undefined;
+    return [value & 255, (value >>> 8) & 255, (value >>> 16) & 255].map(c => c / 255) as [number, number, number];
+  };
+  const width = Number(entries.get('SectionCutWidth'));
+  const sections: LayoutViewportSections = { planes: entries.get('DisplaySectionPlanes') === '1', cuts: entries.get('DisplaySectionCuts') === '1' };
+  if (entries.has('SectionCutFilled')) sections.fill = entries.get('SectionCutFilled') === '1';
+  if (entries.has('SectionCutWidth') && Number.isFinite(width) && width > 0) sections.lineWidth = width;
+  for (const [key, field] of [['SectionActiveColor', 'activeColor'], ['SectionInactiveColor', 'inactiveColor'],
+    ['SectionDefaultFillColor', 'fillColor'], ['SectionDefaultCutColor', 'lineColor']] as const) {
+    const value = color(key);
+    if (value) sections[field] = value;
+  }
+  return sections;
 }
 
 /**

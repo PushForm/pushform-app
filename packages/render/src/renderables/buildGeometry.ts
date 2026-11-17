@@ -4,10 +4,15 @@ import { LENGTH_TOL, basisToLocal, m4transformPoint } from '@pushform/core';
 import type { Mat4, MeshData, Vec3 } from '@pushform/core';
 import { BufferAttribute, BufferGeometry, Color } from 'three';
 import { EDGE_FLAG_BOUNDARY, EDGE_FLAG_HIDDEN, EDGE_FLAG_SMOOTH, EDGE_FLAG_SOFT, cssToRgb, edgeStyleFlags } from '../types';
+import { applySmoothEdgeNormals } from './smoothEdgeNormals';
+import { cornerAngle } from './cornerAngle';
+export { cornerAngle } from './cornerAngle';
 import { palette } from './palette';
 import type { EdgeSegments, RenderBodyEdge, RenderBodySurface, RenderFaceGroup, RenderFaceMaterial, RenderMaterial, RenderUvMapping } from '../types';
 
 export interface FaceGeometryOptions {
+  /** Known face-pair edges are authoritative for corner smoothing; surface groups remain a fallback for mesh parts. */
+  readonly smoothEdges?: readonly RenderBodyEdge[] | undefined;
   /**
    * Smooth face groups: triangles of these faces get per-vertex normals averaged over the group's
    * triangles sharing a vertex position (welded by position within the group only), so the sides
@@ -70,7 +75,7 @@ export function writeFaceUv(out: { [i: number]: number }, at: number, uv: Render
 
 /** A face side needs its own draw group when it has a texture or is translucent. */
 export function faceMaterialNeedsGroup(m: RenderMaterial | null | undefined): boolean {
-  return !!m && (!!m.textureUrl || m.alpha < 1);
+  return !!m && (!!m.textureUrl || m.alpha < 1 || !!m.appearance);
 }
 
 /**
@@ -130,7 +135,8 @@ export function buildFaceArrays(mesh: MeshData, transform: Mat4, origin: Vec3, o
       faceIds[t * 3 + k] = mesh.faceId[t] ?? 0;
     }
   }
-  if (opts.smoothGroups && opts.smoothGroups.length) applySmoothNormals(mesh, world, normals, opts.smoothGroups);
+  if (opts.smoothEdges?.some(edge => edge.faceA >= 0 && edge.faceB >= 0)) applySmoothEdgeNormals(mesh, world, normals, opts.smoothEdges);
+  else if (opts.smoothGroups && opts.smoothGroups.length) applySmoothNormals(mesh, world, normals, opts.smoothGroups);
   const colored = buildFaceColors(mesh, opts);
   if (!colored.order) return { positions, normals, faceIds, flags, ...colored.arrays, frontGroups: [], backGroups: [] };
   // Permute every per-triangle array into material order so each material's triangles are contiguous.
@@ -210,8 +216,8 @@ function buildFaceColors(mesh: MeshData, opts: FaceGeometryOptions): { arrays: F
     }
     if (entry) {
       // Each side uses its own texture size; an untextured side follows the textured one.
-      const tex = entry.front?.textureUrl ? entry.front : entry.back?.textureUrl ? entry.back : entry.front ?? entry.back;
-      const frontTex = entry.front?.textureUrl ? entry.front : tex, backTex = entry.back?.textureUrl ? entry.back : tex;
+      const tex = (entry.front?.textureUrl || entry.front?.normalUrl) ? entry.front : (entry.back?.textureUrl || entry.back?.normalUrl) ? entry.back : entry.front ?? entry.back;
+      const frontTex = (entry.front?.textureUrl || entry.front?.normalUrl) ? entry.front : tex, backTex = (entry.back?.textureUrl || entry.back?.normalUrl) ? entry.back : tex;
       const backUv = entry.uvBack ?? entry.uv;
       for (let k = 0; k < 3; k++) {
         const vi = mesh.tris[t * 3 + k]!;
@@ -409,14 +415,6 @@ export function extractEdgeSegments(mesh: MeshData, world: Float64Array): EdgeSe
     normalB: new Float32Array(nB),
     flags: new Uint8Array(flags),
   };
-}
-
-/** Angle at p between the directions to q and r. */
-export function cornerAngle(px: number, py: number, pz: number, qx: number, qy: number, qz: number, rx: number, ry: number, rz: number): number {
-  const ux = qx - px, uy = qy - py, uz = qz - pz;
-  const vx = rx - px, vy = ry - py, vz = rz - pz;
-  const d = (ux * vx + uy * vy + uz * vz) / ((Math.hypot(ux, uy, uz) || 1) * (Math.hypot(vx, vy, vz) || 1));
-  return Math.acos(Math.max(-1, Math.min(1, d)));
 }
 
 /** Unit normal per faceId (from the first non-degenerate triangle of each face), in `world` space. */

@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { afterEach, expect, it, vi } from 'vitest';
-import { meshBox, type Id, type Vec3 } from '@pushform/core';
-import { bodyFromMesh, createDocument, ImageStore } from '@pushform/model';
+import { meshBox, type Id, type SceneId, type Vec3 } from '@pushform/core';
+import { bodyFromMesh, createDocument, DEFAULT_SCENE_FLAGS, ImageStore } from '@pushform/model';
 import { createLayoutDocumentState, type LayoutEntity } from '@pushform/layout';
+import type * as ViewportRenders from './layoutViewportRenders';
 import type { LayoutViewportModel } from './layoutViewportRenders';
 import { snapLayoutModelVertex } from './layoutModelSnaps';
 
 const loaded = vi.hoisted(() => ({ model: undefined as LayoutViewportModel | undefined }));
-vi.mock('./layoutViewportRenders', () => ({ peekLayoutViewportModel: () => loaded.model, viewGeometry: (model: LayoutViewportModel) => model }));
+vi.mock('./layoutViewportRenders', async importOriginal => ({ viewSectionState: (await importOriginal<typeof ViewportRenders>()).viewSectionState,
+  peekLayoutViewportModel: () => loaded.model, viewGeometry: (model: LayoutViewportModel) => model }));
 afterEach(() => { loaded.model = undefined; });
 
 function fixture(edges: { a: Vec3; b: Vec3; hidden?: boolean; soft?: boolean }[]) {
@@ -79,6 +81,34 @@ it('does not snap to a vertex removed by an active section cut', () => {
     root.order.push(id);
   });
   loaded.model!.state = model.state;
+  expect(snap()).toBeNull();
+});
+
+it("snaps with the section cuts the view's scene saved, not the model's", () => {
+  const { snap, model, view } = fixture([{ a: [0, 0, 0], b: [2, 0, 0] }]);
+  model.transact('Plane at z=1 and scenes', draft => {
+    const root = draft.definitions.get(draft.rootDefinitionId)!.entities, id = 200 as Id;
+    root.sectionPlanes.set(id, { id, name: 'Cut', symbol: 'A', plane: { n: [0, 0, 1], d: -1 }, origin: [0, 0, 1],
+      tagId: draft.defaultTagId, hidden: false, locked: false, castShadows: false, receiveShadows: false, attributes: {} });
+    root.order.push(id);
+    for (const [index, name, planes] of [[300, 'Cut', [id]], [301, 'Uncut', []]] as const) {
+      const sceneId = index as SceneId;
+      draft.scenes.set(sceneId, { id: sceneId, name, description: '', camera: { eye: [0, 0, 10], target: [0, 0, 0], up: [0, 1, 0], perspective: false, fov: 30, height: 2 },
+        flags: { ...DEFAULT_SCENE_FLAGS, useTags: false, useStyle: false }, hiddenEntities: [], hiddenTags: [], hiddenTagFolders: [], styleId: null,
+        shadows: null, activeSectionPlanes: [...planes], axesVisible: true });
+      draft.sceneOrder.push(sceneId);
+    }
+  });
+  loaded.model!.state = model.state;
+  expect(snap()).not.toBeNull();
+  view.image!.viewport!.scene = 'Cut';
+  expect(snap()).toBeNull();
+  model.transact('Activate the cut', draft => { draft.definitions.get(draft.rootDefinitionId)!.entities.activeSectionPlaneId = 200 as Id; });
+  // A changed model is a new viewport model; views are cached per model.
+  loaded.model = { ...loaded.model!, state: model.state };
+  view.image!.viewport!.scene = 'Uncut';
+  expect(snap()).not.toBeNull();
+  view.image!.viewport!.scene = null;
   expect(snap()).toBeNull();
 });
 

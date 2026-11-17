@@ -57,7 +57,8 @@ export function visibleFields(fields: readonly EntryField[], label: string, draf
 /** Start typing `text` into the first visible field (from the global key handler). */
 export function beginEntry(text: string): void {
   const s = useAppStore.getState();
-  const first = s.entryFields[0]?.id ?? POINTER_FIELD;
+  if (s.entryFields.length && s.entryFields.every((f) => f.disabled)) return;
+  const first = s.entryFields.find((f) => !f.disabled)?.id ?? POINTER_FIELD;
   s.setEntryDraft(first, text);
 }
 
@@ -66,7 +67,7 @@ export function beginEntry(text: string): void {
  * field's live value, Tab moves between fields and locks the value left, Enter applies the
  * fields to the active tool and Escape cancels.
  */
-export function EntryFields({ pointer }: { pointer: RefObject<readonly [number, number]> }): JSX.Element | null {
+export function EntryFields({ pointer, inline = false }: { pointer?: RefObject<readonly [number, number]>; inline?: boolean }): JSX.Element | null {
   const app = useApp();
   const fields = useAppStore((s) => s.entryFields);
   const label = useAppStore((s) => s.vcbLabel);
@@ -84,15 +85,18 @@ export function EntryFields({ pointer }: { pointer: RefObject<readonly [number, 
     if (now !== sizes.current) { sizes.current = now; rerender(); }
   });
 
-  const shown = visibleFields(fields, label, drafts, focus);
+  const shown = visibleFields(fields, label, drafts, focus).filter((f) => inline ? f.location === 'bar' : f.location !== 'bar');
 
   useEffect(() => {
     if (!focus) return;
     const input = inputs.current.get(focus);
     if (!input || document.activeElement === input) return;
     input.focus();
-    const end = input.value.length;
-    input.setSelectionRange(end, end);
+    if (inline && drafts[focus] === undefined) input.select();
+    else {
+      const end = input.value.length;
+      input.setSelectionRange(end, end);
+    }
   }, [focus, shown.length]);
 
   if (!shown.length) return null;
@@ -105,7 +109,7 @@ export function EntryFields({ pointer }: { pointer: RefObject<readonly [number, 
       const size: readonly [number, number] = el ? [el.offsetWidth, el.offsetHeight] : FIELD_SIZE;
       return clearOf(at, app.viewport.project([f.at[0] + f.away[0], f.at[1] + f.away[1], f.at[2] + f.away[2]]), size);
     }
-    const p = pointer.current ?? [0, 0];
+    const p = pointer?.current ?? [0, 0];
     return [p[0] + POINTER_OFFSET[0], p[1] + POINTER_OFFSET[1]];
   };
 
@@ -122,9 +126,12 @@ export function EntryFields({ pointer }: { pointer: RefObject<readonly [number, 
       e.preventDefault();
       if (!lockField(app, f)) return;
       const i = shown.findIndex((g) => g.id === f.id);
-      const next = shown[(i + (e.shiftKey ? shown.length - 1 : 1)) % shown.length]!;
+      const enabled = shown.filter((g) => !g.disabled);
+      const j = enabled.findIndex((g) => g.id === shown[i]!.id);
+      const next = enabled[(j + (e.shiftKey ? enabled.length - 1 : 1)) % enabled.length]!;
       const st = useAppStore.getState();
-      st.setEntryDraft(next.id, st.entryDrafts[next.id] ?? '');
+      if (inline) st.setEntryFocus(next.id);
+      else st.setEntryDraft(next.id, st.entryDrafts[next.id] ?? '');
     }
   };
 
@@ -134,8 +141,8 @@ export function EntryFields({ pointer }: { pointer: RefObject<readonly [number, 
         const [x, y] = position(f);
         const draft = drafts[f.id];
         const editing = draft !== undefined;
-        const cls = ['pf-entry', editing ? 'is-editing' : '', f.locked ? 'is-locked' : '', error === f.id ? 'is-error' : ''].filter(Boolean).join(' ');
-        return (
+        const cls = ['pf-entry', inline ? 'is-inline' : '', editing ? 'is-editing' : '', f.locked ? 'is-locked' : '', error === f.id ? 'is-error' : ''].filter(Boolean).join(' ');
+        const input = (
           <input
             key={f.id}
             id={entryInputId(f.id)}
@@ -144,7 +151,10 @@ export function EntryFields({ pointer }: { pointer: RefObject<readonly [number, 
               else inputs.current.delete(f.id);
             }}
             className={cls}
-            style={{ left: x, top: y, width: entryWidth(editing ? draft : f.value) }}
+            style={{ ...(inline ? {} : { left: x, top: y }), width: entryWidth(editing ? draft : f.value) }}
+            data-tob-control={inline || undefined}
+            disabled={f.disabled}
+            aria-invalid={error === f.id}
             type="text"
             autoComplete="off"
             spellCheck={false}
@@ -155,7 +165,8 @@ export function EntryFields({ pointer }: { pointer: RefObject<readonly [number, 
             onKeyDown={(e) => onKeyDown(e, f)}
             onFocus={() => {
               const st = useAppStore.getState();
-              if (st.entryDrafts[f.id] === undefined) st.setEntryDraft(f.id, '');
+              if (inline) { st.setEntryFocus(f.id); if (st.entryDrafts[f.id] === undefined) inputs.current.get(f.id)?.select(); }
+              else if (st.entryDrafts[f.id] === undefined) st.setEntryDraft(f.id, '');
               else st.setEntryFocus(f.id);
             }}
             onBlur={() => {
@@ -167,6 +178,7 @@ export function EntryFields({ pointer }: { pointer: RefObject<readonly [number, 
             }}
           />
         );
+        return inline ? <label key={f.id} className="pf-tob-item"><span className="pf-tob-label">{f.label}</span>{input}</label> : input;
       })}
     </>
   );
@@ -190,7 +202,14 @@ function lockField(app: AppInstance, f: EntryField): boolean {
     st.setEntryError(f.id);
     return false;
   }
-  if (FIELD_KINDS.has(r.value.kind)) app.toolManager.lockEntry(f.id, r.value);
+  if (FIELD_KINDS.has(r.value.kind)) {
+    const held = st.entryFields.filter((g) => g.locked).map((g) => g.id);
+    app.toolManager.lockEntry(f.id, r.value);
+    const next = useAppStore.getState();
+    for (const id of f.location === 'bar' ? held : []) {
+      if (!next.entryFields.find((g) => g.id === id)?.locked) next.clearEntryDraft(id);
+    }
+  }
   return true;
 }
 
@@ -198,7 +217,10 @@ function lockField(app: AppInstance, f: EntryField): boolean {
 export function applyEntry(app: AppInstance, shown: readonly EntryField[]): void {
   const st = useAppStore.getState();
   const values: Record<string, VcbValue> = {};
+  // Previously held fields already live in the tool. Submit fresh edits, so changing Distance
+  // can release held offsets and changing an offset can release a held Distance.
   for (const f of shown) {
+    if (f.location === 'bar' && f.locked && st.entryFocus !== f.id) continue;
     const text = st.entryDrafts[f.id];
     if (text === undefined || !text.trim()) continue;
     const r = parse(app, text);

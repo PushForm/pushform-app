@@ -15,7 +15,7 @@ import type { DocumentHost } from '../../host/DocumentHost';
 import { contextFrame, samePath, type ContextFrame } from '../../commands/context';
 import { EntityRefSchema } from '../../commands/sketch';
 import type { OverlayPrimitive } from '../overlay';
-import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolStatus } from '../Tool';
+import type { Tool, ToolContext, ToolKeyEvent, ToolPointerEvent, ToolSetting, ToolStatus } from '../Tool';
 import { hostOfTool, screenDist } from '../toolUtil';
 import { worldToScreen } from './transformShared';
 
@@ -32,6 +32,17 @@ const PIN_TILE: readonly Vec2[] = [
 ];
 /** Pick radius of a pin in CSS px. */
 export const PIN_PICK_PX = 12;
+
+/** Tool options bar actions: id, label, and the pin-menu command (with params) each one runs. */
+const BAR_ACTIONS: readonly (readonly [id: string, label: string, command: string, params: Record<string, unknown>])[] = [
+  ['done', 'Done', 'texture.pin.done', {}],
+  ['reset', 'Reset', 'texture.pin.reset', {}],
+  ['flipLeftRight', 'Flip Left/Right', 'texture.pin.flip', { axis: 'leftRight' }],
+  ['flipUpDown', 'Flip Up/Down', 'texture.pin.flip', { axis: 'upDown' }],
+  ['rotate90', 'Rotate 90°', 'texture.pin.rotate', { degrees: 90 }],
+  ['rotate180', 'Rotate 180°', 'texture.pin.rotate', { degrees: 180 }],
+  ['rotate270', 'Rotate 270°', 'texture.pin.rotate', { degrees: 270 }],
+];
 
 export interface TextureTarget {
   readonly ref: EntityRef;
@@ -108,6 +119,7 @@ export function reflectionAcross(c: Vec2, d: Vec2): UvAffine | null {
  * scales/rotates about the red one, the blue pin scales/shears (red and green fixed), the yellow
  * pin distorts (a projective placement through the four pins). Each drag commits one
  * `texture.position` step; Enter/Done keeps the result, Esc restores the original mapping.
+ * Done, Reset, Flip and Rotate are in the tool options bar and the right-click menu.
  * Entered from the context menu `Texture › Position` (`texture.positionTool`).
  */
 export class PositionTextureTool implements Tool {
@@ -306,9 +318,18 @@ export class PositionTextureTool implements Tool {
 
   status(): ToolStatus {
     const base = this.target
-      ? 'Drag a pin: red = move, green = scale/rotate, blue = scale/shear, yellow = distort. Right-click for Done, Reset, Flip, Rotate. Enter = done, Esc = cancel.'
+      ? 'Drag a pin: red = move, green = scale/rotate, blue = scale/shear, yellow = distort. Use the tool bar or right-click for Done, Reset, Flip, Rotate. Enter = done, Esc = cancel.'
       : 'Right-click a textured face and choose Texture › Position.';
-    return { instructor: this.message ? `${this.message} ${base}` : base, vcbLabel: '' };
+    const idle = this.target === null;
+    const settings: ToolSetting[] = BAR_ACTIONS.map(([id, label], i) => ({ kind: 'action', id, label, disabled: idle, priority: i < 2 ? 1 : 2, ...(id === 'done' ? { primary: true } : {}) }));
+    return { instructor: this.message ? `${this.message} ${base}` : base, vcbLabel: '', settings };
+  }
+
+  /** Tool options bar: the same Done, Reset, Flip and Rotate as the right-click menu, through its commands. */
+  onSetting(id: string): void {
+    if (!this.ctx || !this.target) return;
+    const action = BAR_ACTIONS.find(([actionId]) => actionId === id);
+    if (action) this.ctx.commands.execute(action[2], action[3]);
   }
 
   // --- internals ------------------------------------------------------------------------------

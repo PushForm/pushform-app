@@ -137,6 +137,10 @@ export class TextLayer {
       const label = new Text();
       label.text = t.text;
       label.fontSize = BASE_FONT;
+      // a family's own file when one is given; otherwise the default typeface in the text's weight and style
+      if (t.fontUrl) label.font = t.fontUrl;
+      label.fontWeight = t.bold ? 'bold' : 'normal';
+      label.fontStyle = t.italic ? 'italic' : 'normal';
       const screen = t.kind === 'screen';
       label.anchorX = 'left';
       label.anchorY = screen ? 'top' : 'middle';

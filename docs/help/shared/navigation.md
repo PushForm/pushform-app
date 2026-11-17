@@ -2,7 +2,7 @@
 
 ## Switch documents or create another one
 
-Choose a document tab to make it active. The **+** button opens the new-document menu for a Model or a Layout drawing. Each document has its own editing history and tools.
+Choose a document tab to make it active. The **+** button opens the new-document menu for a Model, a full-size Drawing, or a Layout. See [Full-size scale drawings](../layout/scale-drawings.md) for drafting once and reusing the drawing in layouts and models. Each document has its own editing history and tools.
 
 The PushForm logo or name returns Home without closing the open documents. Use Continue working to return to one. The left menu bar is shown in editors, not on Home.
 
@@ -18,13 +18,13 @@ Exact command names appear before longer matches. For example, typing **Save As*
 
 The left menu bar opens **Files** at the top, followed by **AI Chat**, the **Object browser** and a button for each panel of an extension you have turned on. Choosing one replaces the other in that dock. Drag the dock's right edge to resize it; the width is remembered by the browser.
 
-A focused panel resize handle also responds to Left and Right arrows. Holding Shift makes larger steps. Escape within the Object browser closes it and returns focus to its menu-bar button.
+A focused panel resize handle also responds to Left and Right arrows. Holding Shift makes larger steps. Left menu bar panels stay open until you click their icon again or choose another panel; Escape doesn't close them.
 
 ## Browse files without leaving your drawing
 
 Click **Files**, the top icon in the left menu bar in either workspace. Start by choosing a project. Its root shows folders first, followed by files with preview images when available. Click a folder to go inside; **Back** returns one level, eventually to the projects. The panel keeps your location when you switch between Modeling and Layout or hide and reopen it.
 
-Click a file to open it. A file already open switches to its existing tab, keeping unsaved edits. Opening a Layout template creates a new drawing. **Search projects** filters the project list; **Search project files** finds files throughout the selected project. Use **Previous** and **Next** for more files, or **Refresh files** to reload. Previews load from the local cache first, then the cloud; missing previews are generated in a background queue. Cached previews remain available offline. Files whose previews cannot yet be generated show their document icon. Escape inside Files closes the panel.
+Click a file to open it. A file already open switches to its existing tab, keeping unsaved edits. Opening a Layout template creates a new drawing. **Search projects** filters the project list; **Search project files** finds files throughout the selected project. Use **Previous** and **Next** for more files, or **Refresh files** to reload. Previews load from the local cache first, then the cloud; missing previews are generated in a background queue. Cached previews remain available offline. Files whose previews cannot yet be generated show their document icon.
 
 ## Organize files from the sidebar
 

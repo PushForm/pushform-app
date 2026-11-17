@@ -20,7 +20,11 @@ export type {
   ToolKeyEvent,
   ToolWheelEvent,
   ToolStatus,
-  ToolChoice,
+  ToolSetting,
+  ToolSettingKey,
+  ToolSettingOption,
+  ToolSettingPriority,
+  ToolSettingValue,
   EntryField,
   EntryFieldKind,
   Modifiers,
@@ -89,6 +93,7 @@ export { MoveTool } from './tools/impl/Move';
 export { PasteTool } from './tools/impl/Paste';
 export { PlaceComponentTool } from './tools/impl/PlaceComponent';
 export { SectionPlaneTool } from './tools/impl/SectionPlane';
+export type { SectionPreview, SectionPreviewTool, WorldSectionPlane } from './tools/sectionPreview';
 export { RotateTool, PROTRACTOR_PX } from './tools/impl/Rotate';
 export { ScaleTool, buildScaleBox, pickGrip, GRIP_PICK_PX } from './tools/impl/Scale';
 export type { ScaleBox, ScaleGrip, GripKind } from './tools/impl/Scale';
@@ -101,6 +106,8 @@ export * from './commands/texts';
 export * from './commands/axes';
 export * from './commands/offset';
 export * from './commands/followme';
+export * from './commands/revolve';
+export { RevolveTool } from './tools/impl/Revolve';
 export * from './commands/solids';
 export * from './commands/edgeBlend';
 export * from './commands/intersect';
@@ -112,6 +119,16 @@ export * from './commands/components';
 export * from './commands/sectionPlanes';
 export * from './commands/images';
 export * from './commands/text3d';
+export * from './commands/cabinet/dimensions';
+export * from './commands/cabinet/plan';
+export * from './commands/cabinet/door';
+export * from './commands/builders/parts';
+export * from './commands/builders/mesh';
+export * from './commands/builders/generate';
+export * from './commands/countertop/plan';
+export * from './commands/filler/plan';
+export * from './commands/endPanel/plan';
+export * from './commands/kitchen-run/plan';
 export { TapeTool } from './tools/impl/Tape';
 export type { TapeMode, TapeMeasurement, PendingResize } from './tools/impl/Tape';
 export { ProtractorTool } from './tools/impl/Protractor';
@@ -119,7 +136,7 @@ export { AxesTool, type PickedAxes } from './tools/impl/AxesTool';
 export { ComponentAxesTool, componentAxesPick, type ComponentAxesRequest } from './tools/impl/ComponentAxesTool';
 export { OffsetTool } from './tools/impl/Offset';
 export { FollowMeTool } from './tools/impl/FollowMe';
-export { EdgeBlendTool, edgeBlendTools, PROFILE_LABELS } from './tools/impl/EdgeBlend';
+export { EdgeBlendTool, edgeBlendTools, edgeToolAliasCommands, EDGE_TOOL_PROFILES, EDGE_TOOL_PROFILE_LABELS, PROFILE_LABELS, type EdgeToolProfile } from './tools/impl/EdgeBlend';
 export { SolidTool, solidTools } from './tools/impl/SolidTool';
 export { constructionTools } from './tools/constructionTools';
 export * from './commands/contextMenu';
@@ -144,3 +161,5 @@ export { PaintTool, paintModeOf, hitSide } from './tools/impl/Paint';
 export { PositionTextureTool, positionTextureCommands, textureTargetOf, PIN_COLORS, PIN_KINDS, PIN_PICK_PX } from './tools/impl/PositionTexture';
 export type { PinKind, TextureTarget } from './tools/impl/PositionTexture';
 export { paintTools } from './tools/paintTools';
+
+export * from './commands/hardware';

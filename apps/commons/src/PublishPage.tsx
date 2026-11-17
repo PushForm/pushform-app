@@ -5,15 +5,9 @@ import type { CommonsAccount } from './account';
 import { CommonsAccessGate } from './CommonsAccess';
 import { UploadDialog } from './UploadDialog';
 import { openOwnProfile } from './OwnModels';
-import { modelPath, navigateCommons } from './route';
+import { modelPath, navigateCommons, type PublishRoute } from './route';
 
-/** Upload and edit routes open the contributor dialog. */
-export type PublishRoute = { kind: 'upload' } | { kind: 'edit'; model: string };
-export function publishRoute(hash: string): PublishRoute | null {
-  if (hash === '#upload' || hash === '#publish') return { kind: 'upload' };
-  const edit = /^#edit\/([a-z0-9][a-z0-9-]{0,95})$/.exec(hash);
-  return edit ? { kind: 'edit', model: edit[1]! } : null;
-}
+export { publishRoute, type PublishRoute } from './route';
 
 export function PublishPage({ account, filesUrl, route, catalogReady }: { account: CommonsAccount; filesUrl?: string | undefined; route: PublishRoute; catalogReady: boolean }): JSX.Element {
   const user = useSyncExternalStore(account.session.subscribe, account.session.getSnapshot).user;

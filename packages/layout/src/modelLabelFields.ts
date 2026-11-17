@@ -10,7 +10,8 @@ export function layoutModelLabelFields(attachment: LayoutModelAttachment, view: 
   model: DocumentState, point: Vec3): Record<string, string> {
   const fields: Record<string, string> = {};
   const viewport = view.image!.viewport!;
-  fields.SceneName = viewport.scene ?? 'Last saved view';
+  // A view whose camera changed after its scene was chosen no longer shows that scene's view.
+  fields.SceneName = viewport.scene !== null && !viewport.cameraModified ? viewport.scene : 'Last saved view';
   if (viewport.camera.projection === 'parallel') {
     const scale = viewport.camera.scale;
     fields.Ratio = scale <= 1 ? `1:${Number((1 / scale).toPrecision(12))}` : `${Number(scale.toPrecision(12))}:1`;

@@ -8,7 +8,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { availableParallelism } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -24,11 +24,8 @@ const flag = args.indexOf('--threads');
 const threads = flag >= 0 ? Number(args[flag + 1]) : Math.min(8, availableParallelism());
 
 const plugins = [
-  { name: 'manifold-external', setup(b) { b.onResolve({ filter: /^manifold-3d$/ }, async a => {
-    if (a.pluginData === 'inner') return undefined;
-    const r = await b.resolve('manifold-3d', { kind: 'import-statement', resolveDir: join(root, 'packages/kernel/src'), pluginData: 'inner' });
-    return r.errors.length ? { errors: r.errors } : { path: pathToFileURL(r.path).href, external: true };
-  }); } },
+  // The kernel's WebAssembly glue is loaded from where the kernel resolves it, beside its .wasm.
+  { name: 'kernel-wasm-external', setup(b) { b.onResolve({ filter: /pushform-kernel\.js$/ }, a => ({ path: pathToFileURL(join(dirname(a.importer), a.path)).href, external: true })); } },
   { name: 'asset-url-external', setup(b) { b.onResolve({ filter: /\?url$/ }, a => ({ path: a.path, external: true })); } },
 ];
 const bundle = async (contents, format) => (await build({

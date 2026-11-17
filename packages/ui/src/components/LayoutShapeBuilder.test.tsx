@@ -110,12 +110,12 @@ it('keeps added regions highlighted blue away from the pointer and updates highl
 it('supports Remove mode, Shift reversal, Keep originals and an explicit empty-result action', async () => {
   const t = setup(); await t.start();
   expect((screen.getByRole('button', { name: 'Apply' }) as HTMLButtonElement).disabled).toBe(true);
-  fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+  fireEvent.click(screen.getByRole('radio', { name: 'Remove' }));
   t.click(50, 50, true); expect(t.previewCount()).toBe(1);
   t.click(50, 50); expect(t.previewCount()).toBe(0);
   expect((screen.getByRole('button', { name: 'Apply: delete selected shapes' }) as HTMLButtonElement).disabled).toBe(false);
   t.click(25, 25, true);
-  fireEvent.click(screen.getByLabelText('Keep originals'));
+  fireEvent.click(screen.getByRole('button', { name: /Keep originals/ }));
   fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
   const page = t.tab.doc.state.pages.get(t.pageId)!;
   expect(page.entities.size).toBe(2);
@@ -171,7 +171,7 @@ it('shows the same toast from the toolbar button and menu without changing docum
 it.each([false, true])('previews deletion-only trimming and preserves the rest with Keep originals %s', async keepOriginals => {
   const t = setup(), before = t.tab.doc.state;
   await t.start();
-  if (keepOriginals) fireEvent.click(screen.getByLabelText('Keep originals'));
+  if (keepOriginals) fireEvent.click(screen.getByRole('button', { name: /Keep originals/ }));
   t.click(50, 50, true);
   expect(t.previewCount()).toBe(1);
   expect(screen.getByLabelText('Shape Builder preview').querySelector('[data-result]')!.getAttribute('fill')).toBe('#ff0000');

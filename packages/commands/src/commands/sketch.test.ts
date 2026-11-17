@@ -26,6 +26,36 @@ function setup() {
 const edgeRef = (id: number): EntityRef => ({ kind: 'sketchEdge', path: [], id: id as Id });
 
 describe('sketch.* commands', () => {
+  it('Select All and Invert take every visible kind in the open context and skip hidden ones', () => {
+    const { host, registry, rect } = setup();
+    rect();
+    const visibleBody = host.doc.transact('bodies', (d) => {
+      const root = d.definitions.get(d.rootDefinitionId)!.entities;
+      const shown = bodyFromMesh(d, meshBox([2, 0, 0], [3, 1, 1]), { container: root as never }).id;
+      const hidden = bodyFromMesh(d, meshBox([4, 0, 0], [5, 1, 1]), { container: root as never });
+      hidden.hidden = true;
+      const base = { tagId: d.defaultTagId, hidden: false, locked: false, castShadows: false, receiveShadows: false, attributes: {} };
+      const g = d.meta.nextId++ as Id, t = d.meta.nextId++ as Id, sp = d.meta.nextId++ as Id;
+      root.guides.set(g, { ...base, id: g, kind: 'point', origin: [0, 0, 2] } as never);
+      root.texts.set(t, { ...base, id: t, kind: 'leader', text: 'Note', position: [0, 0, 0], offset: [1, 0, 0], leader: 'pushpin', fontFamily: 'Arial', fontSizePt: 12, color: [0, 0, 0] } as never);
+      root.sectionPlanes.set(sp, { ...base, id: sp, name: 'Section 1', symbol: '1', plane: { n: [0, 0, -1], d: 0.5 }, origin: [0, 0, 0.5] } as never);
+      return shown;
+    }).value;
+    registry.execute('edit.selectAll', {});
+    const kinds = host.selection.refs.map((r) => r.kind).sort();
+    expect(kinds).toEqual(['body', 'guide', 'sectionPlane', 'sketchEdge', 'sketchEdge', 'sketchEdge', 'sketchEdge', 'sketchFace', 'text']);
+    expect(host.selection.refs.find((r) => r.kind === 'body')?.id).toBe(visibleBody);
+    // with hidden geometry shown, the hidden solid counts too
+    host.doc.transact('show hidden', (d) => { d.styles.get(d.activeStyleId)!.modeling.hiddenGeometry = true; });
+    registry.execute('edit.selectAll', {});
+    expect(host.selection.refs.filter((r) => r.kind === 'body')).toHaveLength(2);
+    // Invert takes the rest of what is visible
+    host.selection.set([{ kind: 'body', path: [], id: visibleBody }]);
+    registry.execute('edit.invertSelection', {});
+    expect(host.selection.refs.some((r) => r.kind === 'body' && r.id === visibleBody)).toBe(false);
+    expect(host.selection.refs.some((r) => r.kind === 'text')).toBe(true);
+  });
+
   it('addEdge / addPolyline / rectangle build faces inside one undo step each', () => {
     const { registry, sketch, host, rect } = setup();
     const ids = registry.execute('sketch.addEdge', { a: [0, 0, 0], b: [1, 0, 0] }) as number[];

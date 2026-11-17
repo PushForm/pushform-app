@@ -11,7 +11,6 @@ import { DisplayPanel } from './DisplayPanel';
 import { ModelInfoPanel } from './ModelInfoPanel';
 import { SoftenEdgesPanel } from './SoftenEdgesPanel';
 import { InstructorPanel } from './InstructorPanel';
-import { LastOperationPanel } from './LastOperationPanel';
 import { FogPanel } from './FogPanel';
 
 export interface PanelSpec {
@@ -30,6 +29,5 @@ export const PANELS: readonly PanelSpec[] = [
   { id: 'modelInfo', title: 'Model Info', component: ModelInfoPanel },
   { id: 'softenEdges', title: 'Soften Edges', component: SoftenEdgesPanel },
   { id: 'instructor', title: 'Instructor', component: InstructorPanel },
-  { id: 'lastOperation', title: 'Last Operation', component: LastOperationPanel },
   { id: 'fog', title: 'Fog', component: FogPanel },
 ];

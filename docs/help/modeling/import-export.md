@@ -4,13 +4,15 @@
 
 Open a supported **.skp** or **.skb** file to make it the model you work on, or use Import to bring content into the current model. Review the conversion report for unsupported data or changes.
 
-Imported models can retain hierarchy, materials, textures, curves, annotations, images and section information where supported. A successful import is not a guarantee that every SketchUp feature is editable in PushForm. Keep the source file for comparison.
+Imported models can retain hierarchy, materials, textures, curves, annotations, images and section information where supported. Opened scenes keep the section planes they saved as active, so showing a scene turns its own cuts on and the other cuts off; a scene saved without section planes leaves the cuts as they are. A successful import is not a guarantee that every SketchUp feature is editable in PushForm. Keep the source file for comparison.
 
 ## Import other model formats
 
-Model import supports formats including COLLADA, OBJ, 3DS, STL, glTF, DXF and STEP. For OBJ, 3DS and unitless DXF, check the import units so the model is the intended size. Supply related material and picture files with the source where its format requires them.
+Model import supports formats including COLLADA, OBJ, 3DS, STL, glTF, DXF, DWG and STEP. For OBJ, 3DS and unitless DXF, check the import units so the model is the intended size. Supply related material and picture files with the source where its format requires them.
 
 Read the import notes for omitted annotations, materials or unsupported objects. DXF import handles supported drawing geometry and blocks but does not import every CAD entity type.
+
+A DWG drawing is converted on your device and imported as a DXF drawing is: lines, curves, faces, blocks and layers come across, and text, dimensions, hatches and paper space layouts do not. A DWG drawing that records no units is read in inches when it was started in imperial units and in millimeters otherwise, and the import notes say which; check the model's size after import. PushForm does not export DWG.
 
 ## Import STEP files from CAD tools
 

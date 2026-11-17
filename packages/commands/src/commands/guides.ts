@@ -5,13 +5,14 @@ import type { FaceLocalId, Id, MVec3, Vec3 } from '@pushform/core';
 import { LENGTH_TOL, MERGE_TOL, PushFormError, basisToLocal, basisToWorld, m4mul, m4scaling, m4translation, planeFromPointNormal, v3len, v3normalize } from '@pushform/core';
 import { cellKey } from '@pushform/geom';
 import { allocId, reconcileBody } from '@pushform/model';
-import type { Body, CommonAttrs, DocumentDraft, Guide, Draft } from '@pushform/model';
+import type { Body, CommonAttrs, DocumentDraft, Guide, Draft, MeshPartGeometry } from '@pushform/model';
 import { containerAt } from '@pushform/model';
 import { defineCommand } from '../registry/Command';
 import type { AnyCommand, CommandContext } from '../registry/Command';
 import { DocumentHost } from '../host/DocumentHost';
 import { hostOf, SERVICE_DOCUMENT } from '../host/services';
 import { currentFrame, draftContainerAt } from './context';
+import { transformMeshPartGeometry } from './transform';
 
 /**
  * Guides (Tape Measure / Protractor output) and the Tape Measure's "resize model". Guides are
@@ -155,9 +156,10 @@ export type ResizeParams = z.infer<typeof ResizeParamsSchema>;
 
 /**
  * Tape Measure "Resize model?": uniformly scale everything in the root context about `about`
- * (always the root: nested instances follow through their transforms).
- * Bodies are scaled directly (a uniform scale keeps a solid valid), sketch geometry, guides,
- * curves, section planes, dimensions, leader texts and instance transforms follow.
+ * (always the root, even while a group or component is open: nested instances follow through
+ * their transforms). Bodies are scaled directly (a uniform scale keeps a solid valid); sketch
+ * geometry, guides, curves, section planes, dimensions, leader texts, instance and image
+ * transforms, mesh parts and placed scene lights follow.
  */
 export const modelResize = defineCommand({
   id: 'model.resize',
@@ -256,6 +258,20 @@ export const modelResize = defineCommand({
       }
       for (const img of root.images.values()) {
         img.transform = m4mul(scaleMatrix, img.transform) as unknown as typeof img.transform;
+      }
+      // mesh part arrays are immutable: each part gets a new, scaled geometry object
+      for (const part of root.meshParts.values()) {
+        part.geometry = transformMeshPartGeometry(part.geometry as MeshPartGeometry, scaleMatrix) as Draft<MeshPartGeometry>;
+        n++;
+      }
+      // scene lights are model-space placements; an area light's panel scales with the model
+      for (const light of draft.sceneLights ?? []) {
+        light.position = sp(light.position);
+        light.target = sp(light.target);
+        if (light.type === 'area') {
+          light.width *= f;
+          light.height *= f;
+        }
       }
       return n;
     });

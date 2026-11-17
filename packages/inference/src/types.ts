@@ -109,12 +109,16 @@ export interface InferenceOptions {
   readonly lockAxis?: Axis | null | undefined;
   /** Shift lock: freeze this snap's constraint (line or plane). */
   readonly lockSnap?: Snap | null | undefined;
+  /** Move's fixed direction rail: use pointer distance, without hovered face/edge intersections. */
+  readonly lineMode?: 'rail' | undefined;
   /** Restrict picking to these entity kinds (default: all). */
   readonly kinds?: readonly EntityRef['kind'][] | undefined;
   /** Ignore these entities (e.g. the geometry being dragged). */
   readonly ignore?: readonly EntityRef[] | undefined;
   /** When true, only pick, do not snap (Select / Eraser tools). */
   readonly pickOnly?: boolean | undefined;
+  /** Also pick dimensions and section planes while snapping, as a pick-only query does (Move picking them up). */
+  readonly annotations?: boolean | undefined;
   /**
    * Which inferences to offer (the Line tool's Alt modes): all of them (default); none, so points land on the
    * face under the cursor or the free plane; or only Parallel / Perpendicular to Edge through the anchor. Locks still apply.

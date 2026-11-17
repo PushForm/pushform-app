@@ -381,10 +381,17 @@ describe('SketchUp LayOut import', () => {
     const identities = new Set([...doc.state.layers.keys(), ...doc.state.pages.keys(), ...imported.entities.keys()]);
     expect(identities.has(outer!)).toBe(false); expect(identities.has(inner![0]!)).toBe(false);
     expect(decodeLayoutDocument(encodeLayoutDocument(doc)).state.pages.get(imported.id)).toEqual(imported);
+    // A member on a layer hidden for the page stays in its groups, hidden with its layer.
     const { doc: hidden } = importSketchUpLayout(layoutFile(content, '', '1,0,1'));
-    const visible = [...hidden.state.pages.values()][0]!.entities;
-    expect(visible.size).toBe(5);
-    expect([...visible.values()].find(entity => entity.kind === 'text')!.nestedGroupIds).toHaveLength(1);
+    const hiddenPage = [...hidden.state.pages.values()][0]!;
+    expect(hiddenPage.entities.size).toBe(6);
+    const shown = hidden.state.layerOrder.flatMap(layerId => entitiesForLayer(hiddenPage, hidden.state, layerId));
+    expect(shown).toHaveLength(5);
+    const shownText = shown.find(entity => entity.kind === 'text')!;
+    expect(shownText.nestedGroupIds).toHaveLength(1);
+    const member = [...hiddenPage.entities.values()].find(entity => !shown.includes(entity))!;
+    expect(hidden.state.layers.get(member.layerId)!.name).toBe('Notes');
+    expect([member.groupId, member.nestedGroupIds]).toEqual([shownText.groupId, shownText.nestedGroupIds]);
   });
 
   it('draws a placed CAD file from LayOut\'s converted paths as one group', () => {
@@ -636,6 +643,33 @@ describe('SketchUp LayOut import', () => {
     expect(p.entityOrder.map(id => reopened.entities.get(id)!.image!.viewport!.display)).toEqual(displays);
   });
 
+  it("keeps each model view's section display from LayOut's rendering options", () => {
+    const entry = (key: string, value: string) => `<e:entry key="${key}" type="3" value="${value}" />`;
+    const model = (id: string, options: string) => `<e:skpModelRef id="${id}">
+      <e:placedFileReference><e:rectangleBase x="1" y="1" width="4" height="4" /></e:placedFileReference>
+      <e:renderingOptions>${entry('RenderMode', '1')}${options}</e:renderingOptions><r:skpFileReference r:id="idModel" /><r:imageFileReference r:id="id2" />
+    </e:skpModelRef>`;
+    // Colors are int32s whose little-endian bytes are red, green, blue and alpha: -16742401 is orange (255, 135, 0).
+    const full = entry('DisplaySectionPlanes', '1') + entry('DisplaySectionCuts', '0') + entry('SectionCutFilled', '1') + entry('SectionCutWidth', '3') +
+      entry('SectionActiveColor', '-16742401') + entry('SectionInactiveColor', '-10393232') + entry('SectionDefaultFillColor', '-16777216') +
+      entry('SectionDefaultCutColor', '-16776961');
+    const files = unzipSync(layoutFile(page(model('id40', full) + model('id41', entry('DisplaySectionCuts', '1')) + model('id42', ''),
+      onLayer('id10', ['id40', 'id41', 'id42']))));
+    files['references.xml'] = strToU8(strFromU8(files['references.xml']!).replace('</references>',
+      '<r:skpFileReference r:id="idModel" internalTarget="ref/model.skp" /></references>'));
+    const { doc } = importSketchUpLayout(zipSync(files));
+    const p = doc.state.pages.get(doc.state.pageOrder[0]!)!;
+    const sections = p.entityOrder.map(id => p.entities.get(id)!.image!.viewport!.display!.sections);
+    expect(sections).toEqual([
+      { planes: true, cuts: false, fill: true, lineWidth: 3, activeColor: [1, 135 / 255, 0], inactiveColor: [112 / 255, 105 / 255, 97 / 255],
+        fillColor: [0, 0, 0], lineColor: [1, 0, 0] },
+      { planes: false, cuts: true },
+      undefined,
+    ]);
+    const reopened = decodeLayoutDocument(encodeLayoutDocument(doc)).state.pages.get(p.id)!;
+    expect(p.entityOrder.map(id => reopened.entities.get(id)!.image!.viewport!.display!.sections)).toEqual(sections);
+  });
+
   it('keeps each model view\'s sun and shadows from LayOut\'s shadow options, reading the local time as SketchUp stores it', () => {
     const entry = (key: string, value: string) => `<e:entry key="${key}" type="3" value="${value}" />`;
     // ShadowTime shows the saving computer's zone; ShadowTime_time_t's UTC reading (10:42) is the local time in TZOffset.
@@ -731,6 +765,34 @@ describe('SketchUp LayOut import', () => {
     expect(legacy.warnings).toContain('This drawing was imported before model connections were preserved; original model annotation connections may be missing');
   });
 
+  it('keeps the scene of a view whose camera was changed after its scene was chosen, through import and export', async () => {
+    const model = (id: string, modified: string) => `<e:skpModelRef id="${id}" defaultPageName="Plan" cameraModified="${modified}">
+      <e:placedFileReference><e:rectangleBase x="1" y="1" width="2" height="1" /></e:placedFileReference>
+      <e:camera projection="1" height="48" fov="35" twoDCamera="0" twoDScale="1" twoDxCenter="0" twoDyCenter="0" aspectRatio="0">
+        <e:eye x="10" y="20" z="500" /><e:target x="10" y="20" z="0" /><e:up x="0" y="1" z="0" /><e:offset x="0" y="0" />
+      </e:camera>
+      <r:skpFileReference r:id="idModel" /><e:imageRect x="1" y="1" width="2" height="1" />
+    </e:skpModelRef>`;
+    const files = unzipSync(layoutFile(page(model('id40', '1') + model('id41', '0'), onLayer('id10', ['id40', 'id41']))));
+    files['references.xml'] = strToU8(strFromU8(files['references.xml']!).replace('</references>',
+      '<r:skpFileReference r:id="idModel" internalTarget="ref/model.skp" /></references>'));
+    const { doc } = importSketchUpLayout(zipSync(files));
+    const page0 = () => doc.state.pages.get(doc.state.pageOrder[0]!)!;
+    const [modified, plain] = page0().entityOrder.map(id => page0().entities.get(id)!);
+    expect(modified!.image!.viewport).toMatchObject({ scene: 'Plan', cameraModified: true });
+    expect(plain!.image!.viewport!.scene).toBe('Plan');
+    expect(Object.hasOwn(plain!.image!.viewport!, 'cameraModified')).toBe(false);
+    const tags = async () => [...strFromU8(unzipSync((await exportSketchUpLayout(doc.state)).bytes)['pages/page1.xml']!)
+      .matchAll(/<e:skpModelRef\b[^>]*>/g)].map(([tag]) => [/defaultPageName="([^"]*)"/.exec(tag)?.[1], /cameraModified="(\d)"/.exec(tag)?.[1]]);
+    expect(await tags()).toEqual([['Plan', '1'], ['Plan', '0']]);
+    // Choosing the scene again shows its camera, and the view is exported as unmodified.
+    doc.undoStack.transact('Choose the scene', draft => {
+      const viewport = draft.pages.get(draft.pageOrder[0]!)!.entities.get(modified!.id)!.image!.viewport!;
+      delete viewport.cameraModified; viewport.camera = { ...viewport.camera, scale: viewport.camera.scale / 2 };
+    });
+    expect(await tags()).toEqual([['Plan', '0'], ['Plan', '0']]);
+  });
+
   it('exports moved, copied, re-aimed and grouped viewports as LayOut viewports', async () => {
     const model = (id: string) => `<e:skpModelRef id="${id}" unknownSetting="keep-me" defaultPageName="Plan" cameraModified="0">
       <e:placedFileReference><e:rectangleBase x="1" y="1" width="2" height="1" /></e:placedFileReference>
@@ -804,11 +866,35 @@ describe('SketchUp LayOut import', () => {
     if (reason === 'missing-model') delete files['ref/model.skp'];
     const { doc } = importSketchUpLayout(zipSync(files));
     const exported = await exportSketchUpLayout(doc.state);
-    expect(exported.warnings.some(warning => warning.includes('cached appearance'))).toBe(true);
+    expect(exported.warnings).toHaveLength(1);
+    expect(exported.warnings[0]).toContain('1 model view was exported as page artwork, not editable model views: View 1 (');
+    expect(exported.warnings[0]).toContain('model editing, camera changes and model-linked behavior are lost for these views in the exported file');
     const output = unzipSync(exported.bytes);
     expect(strFromU8(output['pages/page1.xml']!)).not.toContain('skpModelRef');
     expect(Object.keys(output).some(path => path.endsWith('.skp'))).toBe(false);
     expect(doc.state.modelArchives?.size).toBe(1);
+  });
+
+  it('flattens only the views that cannot stay editable, without a prompt, and names them in the report', async () => {
+    const view = (id: string, ref: string) => `<e:skpModelRef id="${id}">
+      <e:placedFileReference><e:rectangleBase x="1" y="1" width="2" height="1" /></e:placedFileReference>
+      <r:skpFileReference r:id="${ref}" /><r:imageFileReference r:id="id2" />
+    </e:skpModelRef>`;
+    const files = unzipSync(layoutFile(page(view('id40', 'idModel') + view('id41', 'idBad') + view('id42', 'idModel'), onLayer('id10', ['id40', 'id41', 'id42']))));
+    files['references.xml'] = strToU8(strFromU8(files['references.xml']!).replace('</references>',
+      '<r:skpFileReference r:id="idModel" internalTarget="ref/model.skp" /><r:skpFileReference r:id="idBad" internalTarget="../model.skp" /></references>'));
+    const { doc } = importSketchUpLayout(zipSync(files));
+    const before = encodeLayoutDocument(doc);
+    const pageName = doc.state.pages.get(doc.state.pageOrder[0]!)!.name;
+    const exported = await exportSketchUpLayout(doc.state);
+    expect(exported.warnings).toHaveLength(1);
+    expect(exported.warnings[0]).toContain(`${pageName}: 1 model view was exported as page artwork`);
+    expect(exported.warnings[0]).toContain('View 2 (');
+    expect(exported.warnings[0]).not.toContain('View 1');
+    expect(exported.warnings[0]).not.toContain('View 3');
+    const output = strFromU8(unzipSync(exported.bytes)['pages/page1.xml']!);
+    expect(output.match(/<e:skpModelRef\b/g)).toHaveLength(2);
+    expect(encodeLayoutDocument(doc)).toEqual(before);
   });
 
   it('does not retain complete source packages for imports without model viewports', () => {
@@ -1430,6 +1516,16 @@ describe('SketchUp LayOut import', () => {
     const inches = (mm: number) => Math.round(mm / 25.4 * 1e6) / 1e6;
     expect(pageState!.entityOrder.map((id) => inches(pageState!.entities.get(id)!.points[0]![0]))).toEqual([1, 3]);
     expect([...doc.state.sharedEntities.values()].map((entity) => inches(entity.points[0]![0]))).toEqual([5]);
+
+    // A layer hidden for the page keeps its inline content, hidden there.
+    const hidden = importSketchUpLayout(zipSync({
+      'document.xml': strToU8(document.replace('showMasterLayers="1" />', 'showMasterLayers="1"><r:layerVisibility>1,0</r:layerVisibility></ld:pageRef>')),
+      'references.xml': strToU8(references), 'pages/page8.xml': strToU8(pageXml),
+    }));
+    const [hiddenPage] = [...hidden.doc.state.pages.values()];
+    expect(hidden.warnings).toEqual([]);
+    expect(hiddenPage!.entityOrder).toHaveLength(2);
+    expect(hidden.doc.state.layerOrder.flatMap((layerId) => entitiesForLayer(hiddenPage!, hidden.doc.state, layerId))).toHaveLength(1);
   });
 
   it('paints a viewport\'s model background behind its cached render when Background is on', () => {
@@ -1532,7 +1628,7 @@ describe('SketchUp LayOut import', () => {
     expect(oddWarnings).toContain('tables were imported as lines and text');
   });
 
-  it('keeps shared-layer content once for every page and skips content hidden for its page', () => {
+  it('keeps shared-layer content once for every page and keeps page content on a layer hidden for its page', () => {
     const master = `<e:rectangle id="id90" shape="0" rounding="0"><e:rectangleBase x="0" y="0" width="1" height="1" /></e:rectangle>`;
     const content = page('<e:path id="id60" rotationAngle="0"><e:elements>0,1</e:elements><e:points2f>0,0,1,1</e:points2f></e:path>', onLayer('id11', ['id60']));
     const { doc } = importSketchUpLayout(layoutFile(content, master));
@@ -1540,9 +1636,19 @@ describe('SketchUp LayOut import', () => {
     expect(doc.state.layers.get(doc.state.sharedEntities.values().next().value!.layerId)!.shared).toBe(true);
     expect([...doc.state.pages.values()][0]!.entityOrder).toHaveLength(1);
 
+    // The content stays in the document, hidden on its page until the layer is shown there.
     const { doc: hidden, warnings } = importSketchUpLayout(layoutFile(content, master, '1,0,1'));
-    expect([...hidden.state.pages.values()][0]!.entityOrder).toHaveLength(0);
-    expect(warnings).toContain('content on layers hidden for its page was skipped');
+    const hiddenPage = [...hidden.state.pages.values()][0]!;
+    const notes = [...hidden.state.layers.values()].find(layer => layer.name === 'Notes')!.id;
+    expect(hiddenPage.entityOrder).toHaveLength(1);
+    expect(hiddenPage.entities.get(hiddenPage.entityOrder[0]!)!.layerId).toBe(notes);
+    expect(isLayoutLayerVisible(hiddenPage, hidden.state, notes)).toBe(false);
+    expect(hidden.state.layerOrder.flatMap(layerId => entitiesForLayer(hiddenPage, hidden.state, layerId)).map(entity => entity.layerId)).not.toContain(notes);
+    expect(entitiesForLayer({ ...hiddenPage, layerVisibility: new Map([[notes, true]]) }, hidden.state, notes)).toHaveLength(1);
+    expect(warnings.some(warning => warning.includes('hidden'))).toBe(false);
+    const reopened = decodeLayoutDocument(encodeLayoutDocument(hidden)).state.pages.get(hiddenPage.id)!;
+    expect(reopened.entityOrder).toHaveLength(1);
+    expect(reopened.layerVisibility?.get(notes)).toBe(false);
   });
 
   it('keeps scaled dash-dot curves and filled outlines as whole paths through save/reopen', () => {

@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import type { AppInstance } from './bootstrap';
 import { beginEntry } from './components/EntryFields';
+import { toolKeyName, toolModifiers } from './platformKeys';
 
 const VCB_START = /^[0-9.,'"\-+[\]<>:*/a-zA-Z°]$/;
 
@@ -18,8 +19,9 @@ export function useGlobalKeys(app: AppInstance, enabled = true): void {
       if (target && isTextField(target)) {
         return; // the field (including a value field) handles its own keys
       }
-      const modifiers = { shift: e.shiftKey, ctrl: e.ctrlKey, alt: e.altKey, meta: e.metaKey };
-      if (app.toolManager.keyDown({ key: e.key, code: e.code, modifiers, repeat: e.repeat })) {
+      const mac = app.keymap.platform === 'mac';
+      const modifiers = toolModifiers(e, mac);
+      if (app.toolManager.keyDown({ key: toolKeyName(e.key, mac), code: e.code, modifiers, repeat: e.repeat })) {
         e.preventDefault();
         return;
       }
@@ -37,8 +39,8 @@ export function useGlobalKeys(app: AppInstance, enabled = true): void {
     const onKeyUp = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && isTextField(target)) return;
-      const modifiers = { shift: e.shiftKey, ctrl: e.ctrlKey, alt: e.altKey, meta: e.metaKey };
-      app.toolManager.keyUp({ key: e.key, code: e.code, modifiers, repeat: e.repeat });
+      const mac = app.keymap.platform === 'mac';
+      app.toolManager.keyUp({ key: toolKeyName(e.key, mac), code: e.code, modifiers: toolModifiers(e, mac), repeat: e.repeat });
     };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);

@@ -9,7 +9,7 @@
 //   pnpm deploy:pages -- --branch staging  # upload under another branch name
 //   pnpm deploy:pages -- --working-tree    # build this checkout as-is instead of HEAD
 import { execSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -57,6 +57,13 @@ if (useWorkingTree) {
 try {
   console.log(`deploy: building ${branch} @ ${sha.slice(0, 7)} in ${buildRoot}`);
   if (worktree) run('pnpm', ['install', '--frozen-lockfile', '--prefer-offline'], buildRoot);
+  // The kernel module is a build input: bring it from this checkout when it matches these sources, else compile it.
+  if (worktree && existsSync(join(repo, 'packages/kernel/wasm'))) cpSync(join(repo, 'packages/kernel/wasm'), join(buildRoot, 'packages/kernel/wasm'), { recursive: true });
+  try {
+    run('node', ['scripts/kernel-wasm-artifact.mjs', 'status'], buildRoot);
+  } catch {
+    run('node', ['scripts/build-kernel-wasm.mjs'], buildRoot);
+  }
   // A deployed build must list every third-party crate, so it fails without cargo-about.
   run('pnpm', ['build'], buildRoot, { VITE_RELEASE: sha.slice(0, 7), PUSHFORM_NOTICES: 'complete' });
   const dist = join(buildRoot, 'apps/web/dist');

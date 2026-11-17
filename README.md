@@ -4,18 +4,26 @@
 
 ## Stack
 
-TypeScript monorepo (pnpm). Geometry kernel: [Manifold](https://github.com/elalish/manifold) (wasm, in a Web Worker). Renderer: three.js (WebGL2). UI: React. Desktop: Tauri 2. Cloud: Supabase.
+TypeScript monorepo (pnpm). Geometry kernel: Rust on [Manifold](https://github.com/elalish/manifold), compiled to WebAssembly and run in a Web Worker. Renderer: three.js (WebGL2). UI: React. Desktop: Tauri 2. Cloud: Supabase.
 
 ## Develop
+
+The kernel needs Rust, Emscripten and cmake. The tested versions are in `scripts/kernel-wasm-artifact.mjs`:
+
+```sh
+rustup target add wasm32-unknown-emscripten   # tested with Rust 1.98
+brew install cmake emscripten                 # macOS; elsewhere, install cmake and use emsdk for Emscripten 6.0.13
+```
 
 ```sh
 corepack enable            # provides pnpm
 pnpm install
+pnpm build:kernel-wasm     # compile the WebAssembly kernel; do this first, and again when its sources change
 pnpm dev                   # web app at http://localhost:5174 (uses apps/web/.env.local)
 pnpm commons:dev           # community catalog frontend at http://localhost:5176
 pnpm commons:build         # build the independent catalog frontend
 pnpm desktop               # Tauri desktop app (needs Rust)
-pnpm test                  # unit tests (vitest)
+pnpm test                  # unit tests (vitest); stops with a message if the kernel module is missing or stale
 pnpm typecheck
 pnpm lint
 pnpm license-check         # fails on licenses that are not GPLv3-compatible
@@ -28,10 +36,12 @@ The app requires sign-in and stores documents in Supabase. Point `apps/web/.env.
 ```
 packages/   core geom kernel model inference commands render io ui mcp cloud testing
 apps/       web desktop commons
-docs/help/  user-facing help guides
+docs/       documentation site published at docs.pushform.io
+docs/help/  in-app help guides that AI Chat searches (not part of the site)
 ```
 
 The standalone Commons frontend has its own build and catalog configuration; see [apps/commons](apps/commons/README.md).
+The documentation site has its own build; see [docs](docs/README.md).
 
 ## License
 

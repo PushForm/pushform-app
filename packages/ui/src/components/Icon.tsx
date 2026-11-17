@@ -8,11 +8,13 @@ import type { IconType } from 'react-icons';
 import { LuLibrary, LuPuzzle } from 'react-icons/lu';
 import { PiAngle, PiBezierCurve, PiTreeView } from 'react-icons/pi';
 import { RiChatDeleteLine, RiChatAiLine } from 'react-icons/ri';
-import { TbLayersUnion, TbOval, TbPackageImport, TbTextSize, TbWriting } from 'react-icons/tb';
+import { TbVector, TbLayersUnion, TbOval, TbPackageImport, TbTextSize, TbWriting } from 'react-icons/tb';
 import { LayoutDifferenceIcon, LayoutIntersectionIcon, LayoutExclusionIcon, LayoutDivisionIcon, LayoutCutPathIcon } from './LayoutBooleanIcons';
 import { LayoutFilletIcon } from './LayoutFilletIcon';
 import { LayoutShapeBuilderIcon } from './LayoutShapeBuilderIcon';
 import { SectionPlaneIcon } from './SectionPlaneIcon';
+import { RevolveIcon } from './RevolveIcon';
+import { ArcIcon, TwoPointArcIcon, ThreePointArcIcon, PieIcon } from './ArcIcons';
 import {
   LuSave,
   LuArrowDown,
@@ -84,6 +86,7 @@ const FogIcon: IconType = (props) => <BsCloudFog2 {...props} strokeWidth={0} />;
 
 /** Shared outline icons for the tool and panel strips. */
 const REACT_ICONS: Record<string, IconType> = {
+  'document-drawing': TbVector,
   'tool-shape-builder': LayoutShapeBuilderIcon,
   'tool-fillet': LayoutFilletIcon,
   'tool-sectionPlane': SectionPlaneIcon,
@@ -136,6 +139,11 @@ const REACT_ICONS: Record<string, IconType> = {
   'tool-tape': LuRuler,
   'tool-rotrect': LuDiamond,
   'tool-followme': LuRoute,
+  'tool-revolve': RevolveIcon,
+  'tool-arc': ArcIcon,
+  'tool-arc2': TwoPointArcIcon,
+  'tool-arc3': ThreePointArcIcon,
+  'tool-pie': PieIcon,
   'tool-protractor': LuDraftingCompass,
   'tool-tag': LuTag,
   'tool-texturePosition': LuImage,
@@ -190,16 +198,19 @@ const PATHS: Record<string, string> = {
   /** `assets/push-pull.svg` refit to the 24-unit grid: a face pulled out of a box; the Push/Pull tool. */
   'tool-pushpull':
     'M7.37 2.8H6.28L2 7.08V21.2H3.85M6.25 7.34L10.68 2.8H17.17V16.05L12.64 21.2H6.25ZM6.25 7.34H12.64V21.2M12.64 7.34L17.17 2.8M15.65 12.2H22M20.29 10.46L22 12.2L20.29 13.94',
-  'tool-arc2': 'M4 18A14 14 0 0 1 20 18M4 18h.01M20 18h.01',
-  'tool-arc3': 'M4 18A14 14 0 0 1 20 18M4 18h.01M20 18h.01M12 9.5h.01',
-  'tool-arc': 'M6 18h.01M6 18V5M6 18h13M6 5a13 13 0 0 1 13 13',
-  'tool-pie': 'M12 12V4a8 8 0 0 1 6.9 12L12 12z',
   'tool-rounded-rectangle':
     'M7 4h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3Z',
   'tool-bulged-rectangle': 'M6 4h12Q23 12 18 20H6Q1 12 6 4Z',
   'tool-lozenge': 'M9 5h6a7 7 0 0 1 0 14H9A7 7 0 0 1 9 5Z',
   'tool-axes': 'M12 20V4M12 20l-8 -4M12 20l8 -4M12 4l-2 2M12 4l2 2',
   'tool-chamfer': 'M4 20V12l8-8h8M4 4v3M8 4H4',
+  // Profile Edges profiles: the end of a board, its top-right edge shaped by the profile.
+  'profile-roundover': 'M4 20V5h8a8 8 0 0 1 8 8v7z',
+  'profile-cove': 'M4 20V5h8a8 8 0 0 0 8 8v7z',
+  'profile-ogee': 'M4 20V5h7q4 0 4.5 4t4.5 4v7z',
+  'profile-bead': 'M4 20V5h11v2a3 3 0 0 1 0 6h5v7z',
+  'profile-chamfer': 'M4 20V5h8l8 8v7z',
+  'profile-step': 'M4 20V5h8v8h8v7z',
   'tool-profile': 'M4 20V14a2 2 0 0 1 2-2 2 2 0 0 0 2-2 4 4 0 0 1 4-4h8M4 4v3M8 4H4',
   'tool-offset': 'M4 4h16v16H4zM8 8h8v8H8z',
   'tool-zoomWindow': 'M4 4h5M4 4v5M20 4h-5M20 4v5M4 20h5M4 20v-5M20 20h-5M20 20v-5M10 10h4v4h-4z',
@@ -215,7 +226,6 @@ const PATHS: Record<string, string> = {
   command: 'M5 7l5 5-5 5M12 17h7',
   'panel-softenEdges': 'M4 20V9a5 5 0 0 1 5-5h11M4 20h11a5 5 0 0 0 5-5V4M9 15a2 2 0 0 1 2-2h4',
   'panel-instructor': 'M3 9l9-4 9 4-9 4-9-4zM7 11v4c0 1.5 2.5 3 5 3s5-1.5 5-3v-4M21 9v6',
-  'panel-lastOperation': 'M4 12a8 8 0 1 0 2.3-5.7M4 4v4h4M12 8v4l3 2',
 };
 
 export function Icon({

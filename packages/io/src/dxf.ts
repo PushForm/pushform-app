@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
-import { M4_IDENTITY, m4mul, m4rotationAxis, m4scaling, m4translation, v3cross, v3len, v3normalize, type Mat4, type Vec3 } from '@pushform/core';
+import { M4_IDENTITY, m4mul, m4rotationAxis, m4scaling, m4translation, v3add, v3cross, v3len, v3normalize, type Mat4, type Vec3 } from '@pushform/core';
 
 // AutoCAD DXF reading shared by model import and Layout import: the ASCII group-code file,
 // its header units, layers, linetypes and blocks, and its entities as curves, faces, fills, text and block inserts.
@@ -93,23 +93,24 @@ const HEADER_SCAN_BYTES = 1 << 20;
  * A DXF file's units and extent from its header alone, for the import options: null units when unitless,
  * and null extent when the header records none. A binary DXF reports its units as known, since it is not read.
  */
-export function parseDxfHeader(bytes: Uint8Array): { units: { unit: DxfUnit; meters: number } | null; extent: { min: Vec3; max: Vec3 } | null } {
+export function parseDxfHeader(bytes: Uint8Array): { units: { unit: DxfUnit; meters: number } | null; extent: { min: Vec3; max: Vec3 } | null; measurement: 'imperial' | 'metric' | null } {
   const text = new TextDecoder('latin1').decode(bytes.subarray(0, HEADER_SCAN_BYTES));
-  if (text.startsWith(BINARY_SENTINEL)) return { units: { unit: 'mm', meters: 0.001 }, extent: null };
+  if (text.startsWith(BINARY_SENTINEL)) return { units: { unit: 'mm', meters: 0.001 }, extent: null, measurement: null };
   const lines = text.split(/\r?\n/);
-  let variable = '', units: { unit: DxfUnit; meters: number } | null = null;
+  let variable = '', units: { unit: DxfUnit; meters: number } | null = null, measurement: 'imperial' | 'metric' | null = null;
   const min: number[] = [], max: number[] = [];
   for (let i = 0; i + 1 < lines.length; i += 2) {
     const code = Number(lines[i]!.trim()), value = lines[i + 1]!.trim();
     if (code === 0 && value === 'ENDSEC') break;
     if (code === 9) variable = value;
     else if (variable === '$INSUNITS' && code === 70) units = dxfUnitMeters(Number(value));
+    else if (variable === '$MEASUREMENT' && code === 70) measurement = Number(value) === 1 ? 'metric' : 'imperial';
     else if ((variable === '$EXTMIN' || variable === '$EXTMAX') && (code === 10 || code === 20 || code === 30))
       (variable === '$EXTMIN' ? min : max)[(code - 10) / 10] = Number(value);
   }
   // An empty drawing's extent is recorded inverted, at ±1e20.
   const valid = [0, 1].every(k => Number.isFinite(min[k]) && Number.isFinite(max[k]) && max[k]! >= min[k]! && Math.abs(min[k]!) < 1e19 && Math.abs(max[k]!) < 1e19);
-  return { units, extent: valid ? { min: [min[0]!, min[1]!, min[2] ?? 0], max: [max[0]!, max[1]!, max[2] ?? 0] } : null };
+  return { units, measurement, extent: valid ? { min: [min[0]!, min[1]!, min[2] ?? 0], max: [max[0]!, max[1]!, max[2] ?? 0] } : null };
 }
 
 /** Text of the file: UTF-8 (AutoCAD 2007 and later), else the Windows code page older files are written in. */
@@ -487,6 +488,61 @@ function readMText(rec: Rec, out: DxfItem[]): void {
   out.push({ ...style(rec), kind: 'text', text, anchor: rec.point(10), x: scale(x, height), y: scale(y, height), align, vertical, widthFactor: 1, underline: false, source: 'MTEXT' });
 }
 
+/**
+ * A multileader: each leader line as a path from its arrow end to the landing beside the content, and multiline text
+ * content as text. Arrowheads and block content are not drawn. The entity nests its data in named sections: the
+ * content first, then each `LEADER{` with its `LEADER_LINE{` point lists.
+ */
+function readMultiLeader(rec: Rec, out: DxfItem[]): void {
+  const list = rec.pairs, start = list.findIndex(p => p[0] === 300 && p[1].trim() === 'CONTEXT_DATA{');
+  if (start < 0) return;
+  // Points are three consecutive codes: x at `code`, y at `code + 10`, z at `code + 20`.
+  const pointAt = (i: number): Vec3 => [Number(list[i]![1]), Number(list[i + 1]?.[1] ?? 0), Number(list[i + 2]?.[1] ?? 0)];
+  const finite = (p: Vec3): boolean => p.every(Number.isFinite);
+  let depth: 'content' | 'leader' | 'line' = 'content';
+  let text = '', height = 0, anchor: Vec3 | null = null, normal: Vec3 = [0, 0, 1], direction: Vec3 = [1, 0, 0], attachment = 1;
+  let landing: Vec3 | null = null, dogleg: Vec3 = [0, 0, 0], doglegLength = 0, lines: Vec3[][] = [];
+  const endLeader = (): void => {
+    for (const points of lines) {
+      const path = [...points];
+      if (landing) {
+        path.push(landing);
+        if (doglegLength > 0 && v3len(dogleg) > 0) path.push(v3add(landing, scale(v3normalize(dogleg), doglegLength)));
+      }
+      const curves: DxfCurve[] = [];
+      for (let i = 0; i + 1 < path.length; i++) curves.push({ kind: 'line', a: path[i]!, b: path[i + 1]! });
+      if (curves.length) out.push({ ...style(rec), kind: 'path', curves, closed: false, source: 'MULTILEADER' });
+    }
+    landing = null; dogleg = [0, 0, 0]; doglegLength = 0; lines = [];
+  };
+  for (let i = start + 1; i < list.length; i++) {
+    const [code, value] = list[i]!;
+    if (code === 301) break;
+    if (code === 302 && value.trim() === 'LEADER{') { depth = 'leader'; continue; }
+    if (code === 303) { endLeader(); depth = 'content'; continue; }
+    if (code === 304 && value.trim() === 'LEADER_LINE{') { depth = 'line'; lines.push([]); continue; }
+    if (code === 305) { depth = 'leader'; continue; }
+    if (depth === 'content') {
+      if (code === 304) text = value;
+      else if (code === 41) height = Number(value);
+      else if (code === 12) { const p = pointAt(i); if (finite(p)) anchor = p; }
+      else if (code === 11) { const p = pointAt(i); if (finite(p) && v3len(p) > 0) normal = p; }
+      else if (code === 13) { const p = pointAt(i); if (finite(p) && v3len(p) > 0) direction = p; }
+      else if (code === 171) attachment = Number(value);
+    } else if (depth === 'leader') {
+      if (code === 10) { const p = pointAt(i); if (finite(p)) landing = p; }
+      else if (code === 11) { const p = pointAt(i); if (finite(p)) dogleg = p; }
+      else if (code === 40) doglegLength = Number(value);
+    } else if (code === 10) { const p = pointAt(i); if (finite(p)) lines.at(-1)!.push(p); }
+  }
+  endLeader();
+  const plain = mtextPlain(text);
+  if (!anchor || !(height > 0) || !plain.trim()) return;
+  const x = v3normalize(direction), y = v3normalize(v3cross(normal, x));
+  const [align] = ATTACHMENTS[attachment - 1] ?? ATTACHMENTS[0]!;
+  out.push({ ...style(rec), kind: 'text', text: plain, anchor, x: scale(x, height), y: scale(y, height), align, vertical: 'top', widthFactor: 1, underline: false, source: 'MULTILEADER' });
+}
+
 /** The items of one entity list, joining POLYLINE vertices and INSERT attributes to their entity. */
 function readEntities(records: Rec[], reader: Reader, out: DxfItem[], paper: boolean): void {
   for (let k = 0; k < records.length; k++) {
@@ -569,6 +625,7 @@ function readEntities(records: Rec[], reader: Reader, out: DxfItem[], paper: boo
         if (curves.length) out.push({ ...style(rec), kind: 'path', curves, closed: false, source: 'LEADER' });
         break;
       }
+      case 'MULTILEADER': case 'MLEADER': readMultiLeader(rec, out); break;
       case 'HATCH': readHatch(rec, out, reader.count); break;
       case 'MESH': readMesh(rec, out); break;
       case 'ATTDEF': case 'VIEWPORT': case 'SEQEND': case 'VERTEX': break;

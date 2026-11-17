@@ -46,6 +46,42 @@ AI Chat can change the document open in the tab you send from: a Layout document
 
 Each change applies all at once, without a confirmation step. The chat then shows a line such as “Changed the document: Group the shelves. Undo reverts it.” One request is one undo step, so **Undo** reverts the whole change, even when the agent made it in several parts; the chat keeps one such line for the request and updates it as the parts apply. If you edit the document while the agent is still working, its later parts become a separate undo step, and the line says how many steps **Undo** takes. If any part of a change fails, nothing changes and the agent says what could not be done.
 
+## Save a version from AI Chat
+
+Ask AI Chat to save, such as “Save this” or “Save it with the note: added the drawer runners.” It saves a private cloud version, exactly as **Save version** does, and the chat shows “Saved version” with the number. If nothing changed since the last version, the chat says so and no new version is made. Add notes in your own words, or ask the agent to describe the changes it made in this conversation. Saving never publishes or shares the document.
+
+## Publish a 3D model to Commons from AI Chat
+
+In a 3D model, ask AI Chat to publish, such as “Publish this to Commons in my Shaker cabinets collection.” The agent saves a version first, then shows a **Publish to Commons** card with the title, a description it drafted, the category, the license and the collections. If you don't name a license, it suggests CC BY 4.0 and says so. Collections you name are matched to yours; a name that matches none becomes a new private collection.
+
+Nothing is public until you choose **Publish model** on the card (**Publish changes** for a model you already published). That opens the publishing dialog with the card's values, and it publishes as soon as the upload finishes. The first time, it asks you to create your public profile. Choose **Edit details** to review or change everything in the dialog before you choose **Publish model** yourself, or **Cancel** to publish nothing. When it's done, the card shows “Published” with a link to the model in Commons.
+
+## Clone a document and change the copy
+
+Ask for a new document based on the one you have open, such as “Clone this model, but make it 36″ wide” or “Start a new drawing from this one.” Before anything is copied, the chat shows a **Clone this document?** card with a name for the copy, which you can change. Choose:
+
+- **Clone document** to open a copy in a new tab. The copy includes edits you haven't saved yet, and the original doesn't change. The copy isn't saved until you choose **Save version**, and its first save goes into the original's project and folder.
+- **Copy within this model** (or **Copy within this drawing**) if you meant to copy something inside the document you have open.
+- **Cancel** to leave everything as it is.
+
+After cloning, the copy's chat starts with “Continued from” and the original's name, followed by the agent's short summary of the earlier conversation and your request. The agent then makes the change in the copy. The original's chat shows “Cloned to” and the copy's name, with **Show it** to switch to the copy. Sending another message before you choose leaves the card unanswered, and nothing is copied.
+
+## Generate a kitchen cabinet
+
+In a 3D model, the agent can generate a standard kitchen cabinet in one step, for example “Add a 30″ base cabinet with shaker doors and a drawer.” Base, wall and tall cabinets come complete with a toe kick, back, shelves, doors and drawers with their boxes, in frameless or face-frame construction, with slab, shaker, raised-panel or glass doors. Glass doors can be a single pane or divided into a grid, prairie or mission pattern, in clear, frosted, seeded or reeded glass, and you can ask for the inside of the cabinet to match the doors.
+
+Wall and tall cabinets can have stacked doors, such as glass above and shaker below. Blind, diagonal and L-shaped corner cabinets are included too, for either side of a room's corner, with a lazy Susan if you want one.
+
+The agent can also add a filler strip to close a gap beside a cabinet, or a finished end panel for the exposed side of a run, in the same paint or stain as the doors, for example “Add a 3″ filler between this cabinet and the wall.” A base end panel is notched for the toe kick unless you say otherwise.
+
+Every part is named, and each door and drawer is a group, so you can ask for changes to a single part afterwards. Identical parts, such as matching shelves, share one component, so changing one changes them all unless you ask otherwise. The agent builds furniture and other unusual shapes piece by piece instead, and adds hardware separately. Changing a cabinet's parameters later doesn't rebuild it; ask for the change and the agent edits its parts, or generates a new one.
+
+## Generate a whole kitchen
+
+The agent can also lay out a kitchen in one step, for example “Lay out an L-shaped kitchen with a diagonal corner, a sink base under the window and openings for a range and dishwasher.” It places base and wall cabinets along one wall or around one corner, adds fillers at blind corners, and runs a countertop with sink openings. It can also add a countertop, filler, end panel or bathroom vanity on its own, or build a single cabinet door. Appliances are left as openings. Build U-shaped kitchens and islands as separate runs.
+
+Keep a base cabinet at least 9 inches wide between an appliance opening and an inside corner on either run. A corner cabinet or filler alone does not provide this buffer. The kitchen generator refuses appliance openings directly beside its corner; use the same spacing when arranging separate runs into a U-shaped kitchen.
+
 ## Ask for a change to a 3D model
 
 In a 3D model the agent can:
@@ -66,6 +102,7 @@ Beyond boxes, the agent can:
 - push or pull a face of a solid, or a shape drawn on it, to make it bigger or to cut a pocket or a hole;
 - combine overlapping solids: join them, cut one out of another, keep what they share, or split them. This is how it cuts grooves, dadoes, rabbets, cutouts and holes, for example “Make a shaker door with its panel set in grooves” or “Cut a sink opening in the countertop”;
 - sweep a profile along a path with Follow Me, for a moulding or a rail;
+- revolve a profile around an axis for a turned leg, bowl, knob or column, including a full turn or a capped partial turn, for example “Revolve this profile 360° around its straight inner edge”;
 - round over or bevel edges, draw arcs, offset outlines, round corners, and mirror parts.
 
 When a change would not leave a valid solid, for example pushing a face all the way through, the agent tells you and changes nothing. After building, it checks that no parts overlap by mistake.

@@ -36,6 +36,13 @@ export interface LibraryMaterial {
 const c = (r: number, g: number, b: number): Rgb => [r / 255, g / 255, b / 255];
 
 export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
+  { key: 'Hardware_satin-nickel', name: 'Hardware — satin nickel', category: 'Metal', color: c(164,165,158), texture: { widthM: .064, heightM: .064, widthPx: 1024, heightPx: 1024, grain: 'width', url: new URL('./material-textures/hardware_brushed_nickel.jpg', import.meta.url).href, previewUrl: new URL('./material-textures/hardware_brushed_nickel-preview.jpg?no-inline', import.meta.url).href } },
+  { key: 'Hardware_brass', name: 'Hardware — brass', category: 'Metal', color: c(185,143,68), texture: { widthM: .064, heightM: .064, widthPx: 1024, heightPx: 1024, grain: 'width', url: new URL('./material-textures/hardware_brushed_brass.jpg', import.meta.url).href, previewUrl: new URL('./material-textures/hardware_brushed_brass-preview.jpg?no-inline', import.meta.url).href } },
+  { key: 'Hardware_champagne-bronze', name: 'Hardware — champagne bronze', category: 'Metal', color: c(174,146,101), texture: { widthM: .064, heightM: .064, widthPx: 1024, heightPx: 1024, grain: 'width', url: new URL('./material-textures/hardware_champagne_bronze.jpg', import.meta.url).href, previewUrl: new URL('./material-textures/hardware_champagne_bronze-preview.jpg?no-inline', import.meta.url).href } },
+  { key: 'Hardware_oil-rubbed-bronze', name: 'Hardware — oil rubbed bronze', category: 'Metal', color: c(55,38,26), texture: { widthM: .064, heightM: .064, widthPx: 1024, heightPx: 1024, grain: 'width', url: new URL('./material-textures/hardware_oil_bronze.jpg', import.meta.url).href, previewUrl: new URL('./material-textures/hardware_oil_bronze-preview.jpg?no-inline', import.meta.url).href } },
+  { key: 'Hardware_walnut', name: 'Hardware — walnut', category: 'Wood', color: c(90,52,29), texture: { widthM: .064, heightM: .064, widthPx: 1024, heightPx: 1024, grain: 'width', url: new URL('./material-textures/hardware_walnut.jpg', import.meta.url).href, previewUrl: new URL('./material-textures/hardware_walnut-preview.jpg?no-inline', import.meta.url).href } },
+  { key: 'Hardware_maple', name: 'Hardware — maple', category: 'Wood', color: c(195,156,105), texture: { widthM: .064, heightM: .064, widthPx: 1024, heightPx: 1024, grain: 'width', url: new URL('./material-textures/hardware_maple.jpg', import.meta.url).href, previewUrl: new URL('./material-textures/hardware_maple-preview.jpg?no-inline', import.meta.url).href } },
+  { key: 'Hardware_matte-black', name: 'Hardware — matte black', category: 'Metal', color: c(25,25,27), texture: { widthM: .064, heightM: .064, widthPx: 1024, heightPx: 1024, grain: 'none', url: new URL('./material-textures/hardware_powder_black.jpg', import.meta.url).href, previewUrl: new URL('./material-textures/hardware_powder_black-preview.jpg?no-inline', import.meta.url).href } },
   // Colors
   { key: 'Color_A01', name: 'Color_A01', category: 'Colors', color: c(255, 255, 255) },
   { key: 'Color_A02', name: 'Color_A02', category: 'Colors', color: c(230, 230, 230) },
@@ -63,6 +70,23 @@ export const BUILTIN_LIBRARY: readonly LibraryMaterial[] = [
   { key: 'Color_E03', name: 'Color_E03', category: 'Colors', color: c(68, 136, 48) },
   // Transparent glass tints; these intentionally have no surface pattern.
   { key: 'Translucent_Glass_Clear', name: 'Clear Glass', category: 'Glass', color: c(230, 242, 242), alpha: 0.18 },
+  { key: 'Translucent_Glass_Frosted', name: 'Frosted Glass', category: 'Glass', color: c(238, 243, 243), alpha: 0.72 },
+  {
+    key: 'Translucent_Glass_Seeded', name: 'Seeded Glass', category: 'Glass', color: c(226, 236, 234), alpha: 0.45,
+    texture: {
+      widthM: 0.25, heightM: 0.25, widthPx: 1024, heightPx: 1024, grain: 'none',
+      url: new URL('./material-textures/glass_seeded.jpg', import.meta.url).href,
+      previewUrl: new URL('./material-textures/glass_seeded-preview.jpg?no-inline', import.meta.url).href,
+    },
+  },
+  {
+    key: 'Translucent_Glass_Reeded', name: 'Reeded Glass', category: 'Glass', color: c(212, 226, 226), alpha: 0.6,
+    texture: {
+      widthM: 0.1016, heightM: 0.1016, widthPx: 1024, heightPx: 1024, grain: 'width',
+      url: new URL('./material-textures/glass_reeded.jpg', import.meta.url).href,
+      previewUrl: new URL('./material-textures/glass_reeded-preview.jpg?no-inline', import.meta.url).href,
+    },
+  },
   { key: 'Translucent_Glass_Blue', name: 'Blue Glass', category: 'Glass', color: c(170, 205, 235), alpha: 0.45 },
   { key: 'Translucent_Glass_Gray', name: 'Smoke Glass', category: 'Glass', color: c(180, 185, 190), alpha: 0.5 },
   { key: 'Translucent_Glass_Green', name: 'Green Glass', category: 'Glass', color: c(157, 205, 181), alpha: 0.35 },

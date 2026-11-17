@@ -2,6 +2,7 @@
 // Copyright 2026 PushForm contributors
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, CSSProperties, JSX, KeyboardEvent, MouseEvent } from 'react';
+import { imageSizeFromHeader } from '@pushform/model';
 import { BUILTIN_LIBRARY, LIBRARY_CATEGORIES } from '@pushform/commands';
 import { colorizedImageUrl } from '@pushform/render';
 import type { LibraryMaterial, PaintTool } from '@pushform/commands';
@@ -12,6 +13,7 @@ import { rgbToCss } from '../engine/format';
 import { useSelectionRefs } from '../hooks/useSelection';
 import { useAppStore } from '../store';
 import type { MaterialsTab } from '../store';
+import { MaterialSurfaceEditor } from './MaterialSurfaceEditor';
 
 /** `#rrggbb` → [r, g, b] in 0..1. */
 export function cssToRgb01(css: string): Rgb {
@@ -68,8 +70,8 @@ const colorizedSwatches = new Map<string, string | null>();
 
 /** Swatch style for a material: its color (texture image when it has one), opacity as alpha. */
 function swatchStyle(m: Material | null, textureUrl: string | undefined): CSSProperties {
-  if (!m) return { background: '#ffffff' };
-  const base: CSSProperties = { background: rgbToCss(m.color), opacity: m.alpha };
+  if (!m) return { backgroundColor: '#ffffff' };
+  const base: CSSProperties = { backgroundColor: rgbToCss(m.color), opacity: m.alpha };
   if (textureUrl) base.backgroundImage = `url("${textureUrl}")`;
   return base;
 }
@@ -111,7 +113,9 @@ export function MaterialsPanel(): JSX.Element {
   const [lockAspect, setLockAspect] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const libraryRequest = useRef(0);
-  useEffect(() => () => { libraryRequest.current++; }, [app]);
+  const normalRequest = useRef(0);
+  useEffect(() => { normalRequest.current++; }, [activeId]);
+  useEffect(() => () => { libraryRequest.current++; normalRequest.current++; }, [app]);
   const selectMaterial = (id: number | null): void => {
     libraryRequest.current++;
     setActiveId(id);
@@ -190,6 +194,21 @@ export function MaterialsPanel(): JSX.Element {
       setError(err instanceof Error ? err.message : String(err));
     }
     e.target.value = '';
+  };
+  const onNormalFile = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0], materialId = active?.id; e.target.value = '';
+    if (!file || materialId === undefined) return;
+    const request = ++normalRequest.current;
+    setError('Loading normal image…');
+    try {
+      if (!['image/png', 'image/jpeg'].includes(file.type) || file.size > 16 * 1024 * 1024) throw new Error('Choose a PNG or JPEG image up to 16 MiB.');
+      const bytes = new Uint8Array(await file.arrayBuffer()), size = imageSizeFromHeader(bytes);
+      if (!size || size.width < 1 || size.height < 1 || size.width > 8192 || size.height > 8192 || size.width * size.height > 16 * 1024 * 1024) throw new Error('Choose an image up to 8192 pixels per side and 16 megapixels.');
+      const bitmap = await createImageBitmap(file); bitmap.close();
+      if (request !== normalRequest.current) return;
+      await app.commands.execute('material.setNormalImage', { id: materialId, bytes, name: file.name, mime: file.type });
+      setError(null);
+    } catch (error) { if (request === normalRequest.current) setError(error instanceof Error ? error.message : String(error)); }
   };
   const onItemContextMenu = (e: MouseEvent, id: number | null) => {
     e.preventDefault();
@@ -314,14 +333,14 @@ export function MaterialsPanel(): JSX.Element {
           ) : null}
         </>
       ) : (
-        <EditTab material={active} textureUrl={textureUrl(active)} lockAspect={lockAspect} setLockAspect={setLockAspect} update={update} onFile={onFile} />
+        <EditTab key={active?.id ?? 'default'} material={active} onNormalFile={onNormalFile} normalUrl={active?.appearance?.normal ? images.objectUrl(active.appearance.normal.imageId) : undefined} imageName={active?.appearance?.normal ? state.images.get(active.appearance.normal.imageId)?.name : undefined} textureUrl={textureUrl(active)} lockAspect={lockAspect} setLockAspect={setLockAspect} update={update} onFile={onFile} />
       )}
     </div>
   );
 }
 
 function EditTab({
-  material,
+  material, normalUrl, imageName, onNormalFile,
   textureUrl,
   lockAspect,
   setLockAspect,
@@ -329,6 +348,9 @@ function EditTab({
   onFile,
 }: {
   material: Material | null;
+  normalUrl?: string | undefined;
+  imageName?: string | undefined;
+  onNormalFile: (e: ChangeEvent<HTMLInputElement>) => void;
   textureUrl: string | undefined;
   lockAspect: boolean;
   setLockAspect: (v: boolean) => void;
@@ -373,6 +395,9 @@ function EditTab({
           }}
         />
       </div>
+      <MaterialSurfaceEditor material={material} textureUrl={textureUrl} normalUrl={normalUrl} imageName={imageName} update={update} onNormalFile={onNormalFile}
+        openLights={() => useAppStore.getState().showPanel('shadows')} />
+      <details className="pf-material-section"><summary>Color and texture</summary>
       <div className="pf-form-section">Color</div>
       <div className="pf-materials-color">
         <input type="color" aria-label="Color" value={css} onChange={(e) => update({ color: cssToRgb01(e.target.value) })} />
@@ -448,6 +473,7 @@ function EditTab({
           {textureUrl ? <img src={textureUrl} alt="" style={{ maxWidth: '100%', maxHeight: 96, border: '1px solid var(--pf-border)' }} /> : null}
         </>
       ) : null}
+      </details>
     </div>
   );
 }

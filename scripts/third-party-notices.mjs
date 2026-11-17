@@ -4,8 +4,9 @@
 /* global Buffer, console, process */
 // Writes THIRD_PARTY_NOTICES.txt, the license texts and notices of the third-party software in PushForm's builds:
 // - the npm packages the web and desktop apps ship (scripts/license-check.mjs --notices),
-// - the STEP reader's and its geometry kernel's notices, verbatim (crates/step-reader, crates/solidcraft),
-// - the Rust crates of the STEP reader and of the desktop app, from `cargo about` (scripts/notices/about.toml).
+// - the STEP reader's, its geometry kernel's, the native kernel's and the DWG reader's notices, verbatim
+//   (crates/step-reader, crates/solidcraft, crates/native-kernel, crates/dwg-reader),
+// - the Rust crates of the STEP reader, the DWG reader and the desktop app, from `cargo about` (scripts/notices/about.toml).
 // The web build copies it into apps/web/dist/third-party-notices.txt, and desktop release builds bundle that file.
 //
 //   node scripts/third-party-notices.mjs [--out file] [--complete]
@@ -25,15 +26,20 @@ import { formatGroups, normalizeText, npmNoticesSection } from './license-check.
 export const RUST_WORKSPACES = [
   { manifest: 'crates/step-reader/Cargo.toml', ships: 'web app STEP reader',
     targets: ['wasm32-wasip1', 'wasm32-wasip1-threads'] },
+  { manifest: 'crates/dwg-reader/Cargo.toml', ships: 'web and desktop app DWG reader', targets: ['wasm32-wasip1'] },
   { manifest: 'apps/desktop/src-tauri/Cargo.toml', ships: 'desktop app',
     targets: ['x86_64-pc-windows-msvc', 'aarch64-apple-darwin', 'x86_64-unknown-linux-gnu'] },
+  { manifest: 'crates/native-kernel/Cargo.toml', ships: 'desktop app, native kernel builds (off by default)',
+    targets: ['x86_64-pc-windows-msvc', 'aarch64-apple-darwin', 'x86_64-unknown-linux-gnu'] },
+  { manifest: 'crates/kernel-wasm/Cargo.toml', ships: 'web and desktop app kernel',
+    targets: ['wasm32-unknown-emscripten'] },
 ];
 
-/** Notice and license files carried with the STEP reader and the SolidCraft kernel, included verbatim. */
+/** Notice and license files carried with the STEP reader, the SolidCraft kernel and the DWG reader, included verbatim. */
 export function verbatimNoticeFiles(root) {
   const vendor = join(root, 'crates/solidcraft/vendor');
   return ['crates/step-reader/NOTICE.md', 'crates/solidcraft/NOTICE-solidcraft.txt', 'crates/solidcraft/LICENSE-MIT',
-    'crates/solidcraft/LICENSE-APACHE',
+    'crates/solidcraft/LICENSE-APACHE', 'crates/native-kernel/NOTICE.md', 'crates/dwg-reader/NOTICE.md',
     ...readdirSync(vendor, { withFileTypes: true }).filter((entry) => entry.isDirectory())
       .map((entry) => `crates/solidcraft/vendor/${entry.name}/LICENSE`).sort()];
 }
@@ -146,7 +152,8 @@ export function noticesText(root, npm, rust) {
     '',
   ].join('\n');
   const verbatim = [rule, 'STEP reader and geometry kernel', rule, '',
-    'The STEP reader (WebAssembly in the web app, native code in the desktop app) carries these notices and licenses.', '',
+    'The STEP reader (WebAssembly in the web app, native code in the desktop app) carries these notices and licenses.',
+    'native-kernel/NOTICE.md applies only to desktop builds made with the native kernel feature.', '',
     ...files.flatMap((file) => ['-'.repeat(100), file.replace(/^crates\//, ''), '-'.repeat(100), '',
       normalizeText(readFileSync(join(root, file), 'utf8')), ''])].join('\n');
   const crates = rust

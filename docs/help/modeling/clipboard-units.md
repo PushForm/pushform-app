@@ -4,7 +4,7 @@
 
 Select geometry in the open editing context and use Ctrl/Cmd+C, then Ctrl/Cmd+V. The copy follows the pointer; click to place it or press Escape to cancel. Supported materials, tags and textures travel with the geometry.
 
-The current model clipboard does not copy every entity type. Model text, dimensions, section planes and placed images can be left out with a status message. Copying a solid's face copies it as sheet geometry rather than as a closed solid.
+The current model clipboard does not copy every entity type. Model text, dimensions and placed images can be left out with a status message. Copying a solid's face copies it as sheet geometry rather than as a closed solid.
 
 ## Paste geometry in its original location
 

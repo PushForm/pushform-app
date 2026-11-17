@@ -28,3 +28,5 @@ export * from './statistics';
 
 export * from './attribution';
 export * from './environment';
+
+export * from './materialAppearance';

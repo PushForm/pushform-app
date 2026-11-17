@@ -8,14 +8,15 @@ import type { NativeField, NativeFieldKind, NativeScalar } from './record';
 import { encodeNativeIds, decodeNativeIds } from './idList';
 import { encodeNativeLayoutStyle, decodeNativeLayoutStyle } from './layoutStyle';
 import type { LayoutStyleExtensions } from './layoutStyle';
-export type NativeLayoutEntityMetadata = Pick<LayoutEntity, 'id' | 'kind' | 'layerId' | 'name' | 'locked' | 'hidden' | 'groupId' | 'nestedGroupIds' | 'style'>;
+export type NativeLayoutEntityMetadata = Pick<LayoutEntity, 'id' | 'kind' | 'layerId' | 'name' | 'locked' | 'hidden' | 'groupId' | 'nestedGroupIds' | 'style' | 'drawingView'>;
 /** `fillPatternAsset` is the decoded pattern's picture asset; the pattern's `src` is empty until the document's assets resolve it. */
 export interface LayoutEntityMetadataExtensions { records: Map<string, Uint8Array[]>; style: LayoutStyleExtensions; fillPatternAsset?: number }
 /** Registers a pattern picture in the document's asset catalog and returns its asset ID. */
 export type NativeLayoutAssetRegistrar = (src: string) => number;
 const f = (id: number, kind: NativeFieldKind, required = true): NativeField => ({ id, kind, required });
 const record = new NativeRecordCodec({ id: f(1, 'uint32'), kind: f(2, 'uint32'), layerId: f(3, 'uint32'), name: f(4, 'bytes', false), locked: f(5, 'uint32', false),
-  hidden: f(6, 'uint32', false), groupId: f(7, 'uint32', false), nestedGroupIds: f(8, 'bytes', false), style: f(9, 'bytes', false) } satisfies Record<keyof NativeLayoutEntityMetadata, NativeField>);
+  hidden: f(6, 'uint32', false), groupId: f(7, 'uint32', false), nestedGroupIds: f(8, 'bytes', false), style: f(9, 'bytes', false), drawingView: f(10, 'bytes', false) } satisfies Record<keyof NativeLayoutEntityMetadata, NativeField>);
+const drawingView = new NativeRecordCodec({ sourceGuid: f(1, 'string'), sourceName: f(2, 'string'), sourcePageId: f(3, 'uint32'), denominator: f(4, 'double'), x: f(5, 'double'), y: f(6, 'double'), rotation: f(7, 'double') });
 const optionalString = new NativeRecordCodec({ state: f(1, 'uint32'), value: f(2, 'string', false) });
 const optionalBytes = new NativeRecordCodec({ state: f(1, 'uint32'), value: f(2, 'bytes', false) });
 const style = new NativeRecordCodec({ base: f(1, 'bytes'), strokeDashMm: f(2, 'bytes', false), fillPattern: f(3, 'bytes', false) });
@@ -40,6 +41,10 @@ function validate(value: NativeLayoutEntityMetadata): void {
     if (!Array.isArray(ids) || !ids.length || ids.length > 65536 || value.groupId === undefined || new Set(ids).size !== ids.length) fail();
     for (const n of ids) { id(n); if (n === value.groupId) fail(); }
   }
+  if (value.drawingView) {
+    const v = value.drawingView; id(v.sourcePageId);
+    if (!v.sourceGuid || !v.sourceName || !Number.isFinite(v.denominator) || v.denominator <= 0 || ![v.x, v.y, v.rotation].every(Number.isFinite)) fail();
+  }
   const dash = value.style?.strokeDashMm;
   if (dash !== undefined) {
     if (!Array.isArray(dash) || dash.length % 2 || dash.length > 131070) fail();
@@ -51,6 +56,7 @@ function validate(value: NativeLayoutEntityMetadata): void {
 export function encodeNativeLayoutEntityMetadata(value: NativeLayoutEntityMetadata, ext: LayoutEntityMetadataExtensions = { records: new Map(), style: new Map() }, registerAsset?: NativeLayoutAssetRegistrar): Uint8Array {
   if (value.style?.nativeUnknownFields) ext = { records: new Map([...ext.records, ...value.style.nativeUnknownFields.records]), style: value.style.nativeUnknownFields.style };
   validate(value); const fields: Record<string, NativeScalar> = { id: value.id, kind: kinds.indexOf(value.kind), layerId: value.layerId };
+  if (value.drawingView) fields.drawingView = write(drawingView, value.drawingView, 'drawingView', ext);
   if (Object.hasOwn(value, 'name')) fields.name = wrap(optionalString, value.name, 'name', ext);
   for (const key of ['hidden', 'locked'] as const) if (Object.hasOwn(value, key)) {
     if (value[key] !== undefined && typeof value[key] !== 'boolean') return fail(); fields[key] = value[key] === undefined ? 0 : value[key] ? 2 : 1;
@@ -85,6 +91,7 @@ export function encodeNativeLayoutEntityMetadata(value: NativeLayoutEntityMetada
 export function decodeNativeLayoutEntityMetadata(bytes: Uint8Array): { value: NativeLayoutEntityMetadata; extensions: LayoutEntityMetadataExtensions } {
   const ext: LayoutEntityMetadataExtensions = { records: new Map(), style: new Map() }, r = read(record, bytes, '', ext), kind = kinds[r.kind as number]; if (!kind) return fail();
   const value: NativeLayoutEntityMetadata = { id: r.id as number, kind, layerId: r.layerId as number };
+  if (Object.hasOwn(r, 'drawingView')) value.drawingView = read(drawingView, r.drawingView as Uint8Array, 'drawingView', ext) as unknown as NonNullable<LayoutEntity['drawingView']>;
   if (Object.hasOwn(r, 'name')) present(value, 'name', unwrap(optionalString, r.name as Uint8Array, 'name', ext));
   for (const key of ['hidden', 'locked'] as const) if (Object.hasOwn(r, key)) {
     if (r[key] !== 0 && r[key] !== 1 && r[key] !== 2) return fail(); present(value, key, r[key] === 0 ? undefined : r[key] === 2);

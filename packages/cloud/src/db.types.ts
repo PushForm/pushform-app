@@ -601,6 +601,86 @@ isOneToOne: false
                   Relationships: [
 
                   ]
+                },"commons_purchase_affiliates": {
+                  Row: {
+                    "details": NonNullable<Json>,"id": string,"marketplace_id": string,"updated_at": string,"version": number
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "details": NonNullable<Json>,"id"?: string,"marketplace_id": string,"updated_at"?: string,"version"?: number
+                  }
+                  Update: {
+                    "details"?: NonNullable<Json>,"id"?: string,"marketplace_id"?: string,"updated_at"?: string,"version"?: number
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "commons_purchase_affiliates_marketplace_id_fkey"
+      columns: ["marketplace_id"]
+isOneToOne: false
+      referencedRelation: "commons_purchase_marketplaces"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"commons_purchase_clicks": {
+                  Row: {
+                    "affiliate": boolean,"affiliate_account_id": string | null,"click_id": string,"created_at": string,"marketplace_id": string,"model_id": string,"source_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "affiliate": boolean,"affiliate_account_id"?: string | null,"click_id": string,"created_at"?: string,"marketplace_id": string,"model_id": string,"source_id": string
+                  }
+                  Update: {
+                    "affiliate"?: boolean,"affiliate_account_id"?: string | null,"click_id"?: string,"created_at"?: string,"marketplace_id"?: string,"model_id"?: string,"source_id"?: string
+                  }
+                  Relationships: [
+
+                  ]
+                },"commons_purchase_marketplaces": {
+                  Row: {
+                    "details": NonNullable<Json>,"id": string,"updated_at": string,"version": number
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "details": NonNullable<Json>,"id": string,"updated_at"?: string,"version"?: number
+                  }
+                  Update: {
+                    "details"?: NonNullable<Json>,"id"?: string,"updated_at"?: string,"version"?: number
+                  }
+                  Relationships: [
+
+                  ]
+                },"commons_purchase_sources": {
+                  Row: {
+                    "affiliate_account_id": string | null,"details": NonNullable<Json>,"id": string,"marketplace_id": string,"model_id": string,"updated_at": string,"version": number,"commons_purchase_source_json": Json | null
+                  }
+                  ComputedFields: "commons_purchase_source_json"
+                  Insert: {
+                    "affiliate_account_id"?: string | null,"details": NonNullable<Json>,"id"?: string,"marketplace_id": string,"model_id": string,"updated_at"?: string,"version"?: number
+                  }
+                  Update: {
+                    "affiliate_account_id"?: string | null,"details"?: NonNullable<Json>,"id"?: string,"marketplace_id"?: string,"model_id"?: string,"updated_at"?: string,"version"?: number
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "commons_purchase_sources_affiliate_account_id_fkey"
+      columns: ["affiliate_account_id"]
+isOneToOne: false
+      referencedRelation: "commons_purchase_affiliates"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "commons_purchase_sources_marketplace_id_fkey"
+      columns: ["marketplace_id"]
+isOneToOne: false
+      referencedRelation: "commons_purchase_marketplaces"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "commons_purchase_sources_model_id_fkey"
+      columns: ["model_id"]
+isOneToOne: false
+      referencedRelation: "commons_models"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"commons_render_jobs": {
                   Row: {
                     "attempts": number,"created_at": string,"error_code": string | null,"format": string,"geometry_sha256": string | null,"geometry_size": number | null,"id": string,"lease_expires_at": string | null,"lease_token": string | null,"metrics": NonNullable<Json>,"next_attempt_at": string,"renderer_version": string,"requested_by": string | null,"source_sha256": string,"status": string,"thumbnail_sha256": string | null,"thumbnail_size": number | null,"updated_at": string,"warnings": NonNullable<Json>
@@ -1091,6 +1171,9 @@ isOneToOne: false
 "admin_commons_browse_visibility":
 { Args: { "p_after_id"?: string,"p_limit"?: number,"p_query"?: string,"p_visibility"?: string }; Returns: Json
                            },
+"admin_commons_commerce_settings":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
 "admin_commons_feature":
 { Args: { "p_target_id": string,"p_type": string }; Returns: Json
                            },
@@ -1099,6 +1182,15 @@ isOneToOne: false
                            },
 "admin_commons_publish":
 { Args: { "p_expected_asset_version"?: number,"p_expected_published": string,"p_note": string,"p_revision": string,"p_rights_confirmed": boolean }; Returns: Json
+                           },
+"admin_commons_purchase_clicks":
+{ Args: { "p_days"?: number,"p_marketplace"?: string,"p_model"?: string }; Returns: Json
+                           },
+"admin_commons_purchase_models":
+{ Args: { "p_after_id"?: string,"p_limit"?: number,"p_query"?: string }; Returns: Json
+                           },
+"admin_commons_purchase_sources":
+{ Args: { "p_model": string }; Returns: Json
                            },
 "admin_commons_reject":
 { Args: { "p_reason": string,"p_revision": string }; Returns: undefined
@@ -1111,6 +1203,15 @@ isOneToOne: false
                            },
 "admin_commons_rollout":
 { Args: { "p_enabled": boolean,"p_policy_version": string }; Returns: undefined
+                           },
+"admin_commons_save_affiliate":
+{ Args: { "p_expected_version": number,"p_fields": Json,"p_id": string }; Returns: Json
+                           },
+"admin_commons_save_marketplace":
+{ Args: { "p_expected_version": number,"p_fields": Json,"p_id": string }; Returns: Json
+                           },
+"admin_commons_save_purchase_source":
+{ Args: { "p_expected_version": number,"p_fields": Json,"p_id": string,"p_model": string }; Returns: Json
                            },
 "admin_commons_set_low_interest":
 { Args: { "p_low_interest": boolean,"p_models": Json }; Returns: undefined
@@ -1531,6 +1632,15 @@ isOneToOne: false
 "commons_collection_json":
 { Args: { "p": Omit<Database["public"]['Tables']["commons_collections"]['Row'], Database["public"]['Tables']["commons_collections"]['ComputedFields']>,"p_owner"?: boolean }; Returns: Json
                            },
+"commons_commerce_domains_valid":
+{ Args: { "allow_empty"?: boolean,"v": Json }; Returns: boolean
+                           },
+"commons_commerce_fields_valid":
+{ Args: { "d": Json,"kind": string }; Returns: boolean
+                           },
+"commons_commerce_url_valid":
+{ Args: { "domains"?: Json,"v": string }; Returns: boolean
+                           },
 "commons_credited_creator":
 { Args: { "p_id": string }; Returns: Json
                            },
@@ -1605,6 +1715,15 @@ isOneToOne: false
                            },
 "commons_publish_model":
 { Args: { "p_expected_asset_version": number,"p_expected_published": string,"p_revision": string,"p_rights_confirmed": boolean }; Returns: Json
+                           },
+"commons_purchase_source_json":
+{ Args: { "s": Omit<Database["public"]['Tables']["commons_purchase_sources"]['Row'], Database["public"]['Tables']["commons_purchase_sources"]['ComputedFields']> }; Returns: Json
+                           },
+"commons_purchase_sources":
+{ Args: { "p_model": string }; Returns: Json
+                           },
+"commons_record_purchase_click":
+{ Args: { "p_click": string,"p_destination_version": string,"p_expected_version": number,"p_source": string }; Returns: boolean
                            },
 "commons_remove_profile_image":
 { Args: { "p_kind": string }; Returns: Json

@@ -1,0 +1,52 @@
+name: docs
+# The public documentation site at docs.pushform.io. Runs only when the site changes: docs/ except the in-app help
+# guides in docs/help, which the site does not build from.
+on:
+  pull_request:
+    paths: ['docs/**', '!docs/help/**', '.github/workflows/docs.yml']
+  push:
+    branches: [main]
+    paths: ['docs/**', '!docs/help/**', '.github/workflows/docs.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ASTRO_TELEMETRY_DISABLED: 1
+
+jobs:
+  build:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: pnpm docs:build
+
+  # Publishes to the Cloudflare Pages project pushform-docs. Needs the Production environment's
+  # CLOUDFLARE_API_TOKEN secret (Workers & Pages: Edit) and CLOUDFLARE_ACCOUNT_ID variable.
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: Production
+    concurrency: { group: deploy-docs-production, cancel-in-progress: false }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: pnpm docs:build
+      - uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy docs/dist --project-name pushform-docs --branch main --commit-hash ${{ github.sha }} --commit-dirty=false
+      - name: Verify the docs site serves this build
+        shell: bash
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if node scripts/verify-static-deploy.mjs https://docs.pushform.io docs/dist; then
+              exit 0
+            fi
+            if [[ "$attempt" -lt 6 ]]; then sleep 10; fi
+          done
+          exit 1

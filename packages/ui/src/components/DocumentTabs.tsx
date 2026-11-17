@@ -2,7 +2,6 @@
 // Copyright 2026 PushForm contributors
 import { useEffect, useRef, useState } from 'react';
 import type { JSX, ReactNode } from 'react';
-import { TbVector } from 'react-icons/tb';
 import type { DocumentSession } from '../session';
 import { displayDocumentName } from '../documentName';
 import { allowOpeningDocument } from '../desktopUpdates';
@@ -26,10 +25,10 @@ export function DocumentTabs({
   };
   return (
     <nav className="pf-document-tabs" aria-label="Open documents" data-tauri-drag-region>
-      <NewDocumentButton onNewModel={() => { if (allowOpeningDocument()) session.newModel(); }} onNewLayout={onNewLayout} />
+      <NewDocumentButton onNewDrawing={() => { if (allowOpeningDocument()) session.newDrawing(); }} onNewModel={() => { if (allowOpeningDocument()) session.newModel(); }} onNewLayout={onNewLayout} />
       {session.tabs.map((tab) => {
         const name = displayDocumentName(tab);
-        const typeLabel = tab.type === 'model' ? '3D model' : '2D drawing';
+        const typeLabel = tab.type === 'model' ? '3D model' : tab.doc.state.settings.drawing ? 'Scale drawing' : '2D drawing';
         return (
           <div
             key={tab.id}
@@ -57,11 +56,7 @@ export function DocumentTabs({
               onClick={() => { session.activate(tab.id); onActivate?.(); }}
               onDoubleClick={() => { cancelRename.current = false; setEditing({ id: tab.id, name }); }}
             >
-              {tab.type === 'model' ? (
-                <Icon name="document-model" size={16} />
-              ) : (
-                <TbVector size={16} aria-hidden="true" />
-              )}
+              <Icon name={tab.type === 'model' ? 'document-model' : tab.doc.state.settings.drawing ? 'document-drawing' : 'document-layout'} size={16} />
               <span className="pf-document-tab-name">{name}</span>
               {session.isDirty(tab) ? <span className="pf-document-tab-dirty" aria-label="Unsaved changes">•</span> : null}
             </button>}
@@ -87,14 +82,16 @@ export function DocumentTabs({
 }
 
 /**
- * The tab bar's single + button. It opens a menu with a Model and a Layout entry, each
+ * The tab bar's single + button. It opens a menu with Model, Drawing and Layout entries, each
  * carrying its document-type icon. The menu is fixed-positioned under the button because the tab
  * strip scrolls horizontally and would clip an absolutely positioned dropdown.
  */
 function NewDocumentButton({
+  onNewDrawing,
   onNewModel,
   onNewLayout,
 }: {
+  onNewDrawing: () => void;
   onNewModel: () => void;
   onNewLayout: () => void;
 }): JSX.Element {
@@ -160,9 +157,10 @@ function NewDocumentButton({
               <span>Model</span>
             </button>
           </li>
+          <li role="none"><button type="button" role="menuitem" className="pf-menu-item" onClick={() => choose(onNewDrawing)}><Icon name="document-drawing" size={16} /><span>Drawing</span></button></li>
           <li role="none">
             <button type="button" role="menuitem" className="pf-menu-item" onClick={() => choose(onNewLayout)}>
-              <TbVector size={16} aria-hidden="true" />
+              <Icon name="document-layout" size={16} />
               <span>Layout</span>
             </button>
           </li>

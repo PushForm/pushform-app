@@ -182,8 +182,6 @@ export const NOT_SHIPPED = new Map([
  * name the license, authors and source from package.json and give the license's standard terms.
  */
 export const NO_LICENSE_FILE = new Map([
-  ['@jscadui/3mf-export', 'published without a license file; MIT per its package.json'],
-  ['@nodable/entities', 'published without a license file; MIT per its package.json and README'],
   ['@pdf-lib/fontkit', 'published without a license file; MIT per its package.json and README'],
   ['openskp', 'published without a license file; MIT per its package.json and README'],
   ['splaytree', 'published without a license file; MIT per its package.json'],

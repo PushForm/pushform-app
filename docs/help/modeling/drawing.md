@@ -28,13 +28,15 @@ Modeling Freehand creates a segmented sketch curve. To turn a closed planar face
 
 Open the Arc dropdown and choose the variant matching your reference points. **Arc** uses three clicks: center, start point, then end direction. **2 Point Arc** uses start, end, then bulge. **3 Point Arc** uses start, an intermediate point on the arc, then end. The last click completes the arc.
 
-**Pie** uses center, start and end like Arc, but closes back to the center with two radii to form a face. For Arc and Pie, you can type the circle's diameter after the center, then the angle of the sweep. Escape cancels unfinished placement. Repeated or collinear points cannot define a valid curved arc; choose distinct points.
+**Pie** uses center, start and end like Arc, but closes back to the center with two radii to form a face. For Arc and Pie, you can type the circle's diameter after the center, then the angle of the sweep. Before the first click, type a segment count followed by **s**, such as **12s**, or set **Segments** in the tool options bar; a plain number there changes nothing. Escape cancels unfinished placement. Repeated or collinear points cannot define a valid curved arc; choose distinct points.
 
 ## Draw an eight-sided polygon in Modeling
 
 Choose **Polygon** from its toolbar stack or command search. Before placing the center, type **8s** and press Enter. Click the center and then the radius point to place the polygon, or type its diameter.
 
 The Modeling Polygon tool starts with six segments. Typing a number followed by **s** changes the segment count even while positioning the radius. For an existing curve, select one of its edges and use **Segments** in Entity Info where available.
+
+**Circumscribed** in the tool options bar, or a tap of Ctrl (Cmd on a Mac), puts the polygon's sides against the radius instead of its corners. It goes back to inscribed each time you choose Polygon. Right after you draw a polygon, switching it redraws that polygon in the other mode, and changing Sides keeps its mode.
 
 ## Draw a circle and set its segments
 

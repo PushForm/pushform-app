@@ -20,11 +20,13 @@ import {
   planeFlip,
   planeFromPointNormal,
   PushFormError,
+  v3add,
   v3anyPerpendicular,
   v3cross,
   v3dot,
   v3len,
   v3normalize,
+  v3scale,
   v3sub,
 } from '@pushform/core';
 import { cellKey, pointInPolygon } from '@pushform/geom';
@@ -38,7 +40,7 @@ import { draftContainerAt } from './context';
 import { mapGuide, mapDimension, pointMapFromMatrix } from './groups';
 import { mapNormal, mapSectionPlane } from './sectionPlanes';
 import { EntityRefSchema } from './sketch';
-import { toEntityRefs, transformBodyInPlace } from './transform';
+import { toEntityRefs, transformBodyInPlace, transformVerb } from './transform';
 import { componentAxesPick } from '../tools/impl/ComponentAxesTool';
 
 /**
@@ -203,11 +205,13 @@ export const componentChangeAxesPick = defineCommand({
 // Glue
 
 /**
- * World matrix placing instance `ref` on a face: its origin moves to `point`, its blue axis turns to
- * `normal`, and its red axis stays as close to where it pointed as the face allows. Rotations only, so a
- * mirrored or scaled placement keeps its handedness and scale.
+ * World matrix placing instance `ref` on a face: its blue axis turns to `normal`, its red axis stays as close
+ * to where it pointed as the face allows, and its origin moves to `point`, or, with `grab` (the world point
+ * the placement was picked up by), to `point` plus the offset from `grab` to the origin, turned with the
+ * placement and laid in the face, so the pointer keeps its place on the component as it slides. Rotations
+ * only, so a mirrored or scaled placement keeps its handedness and scale.
  */
-export function placeOnFaceMatrix(state: DocumentState, ref: EntityRef, point: Vec3, normal: Vec3): MMat4 {
+export function placeOnFaceMatrix(state: DocumentState, ref: EntityRef, point: Vec3, normal: Vec3, grab?: Vec3): MMat4 {
   const world = contextMatrix(state, [...ref.path, ref.id]);
   const origin = m4transformPoint(world, [0, 0, 0]);
   const blue = v3normalize(m4transformDir(world, [0, 0, 1]));
@@ -227,25 +231,31 @@ export function placeOnFaceMatrix(state: DocumentState, ref: EntityRef, point: V
     const angle = Math.atan2(v3dot(n, v3cross(turnedRed, w)), v3dot(turnedRed, w));
     r = m4mul(m4rotationAxis(n, angle), r1);
   }
-  return m4mul(m4translation(point), m4mul(r, m4translation([-origin[0], -origin[1], -origin[2]])));
+  let target = point;
+  if (grab) {
+    const offset = m4transformDir(r, v3sub(origin, grab));
+    target = v3add(point, v3sub(offset, v3scale(n, v3dot(offset, n))));
+  }
+  return m4mul(m4translation(target), m4mul(r, m4translation([-origin[0], -origin[1], -origin[2]])));
 }
 
 export const componentPlaceOnFace = defineCommand({
   id: 'component.placeOnFace',
   title: 'Move',
   category: 'internal',
-  params: z.object({ ref: EntityRefSchema, point: vec3, normal: vec3, copy: z.boolean().optional() }),
+  /** `grab`: the world point the placement was picked up by, kept under the pointer (see `placeOnFaceMatrix`). */
+  params: z.object({ ref: EntityRefSchema, point: vec3, normal: vec3, copy: z.boolean().optional(), grab: vec3.optional() }),
   undoable: true,
   run(ctx, p): EntityRef {
     const host = hostOf(ctx);
     const ref = toEntityRefs([p.ref])[0]!;
     const state = host.doc.state;
     const inst = componentInstance(state, ref, 'place it');
-    if (inst.locked && !p.copy) throw new PushFormError('instance.locked', 'A locked group/component cannot be moved');
+    if (inst.locked && !p.copy) throw new PushFormError('instance.locked', `A locked group or component cannot be ${transformVerb('Move')}`);
     const parent = contextMatrix(state, ref.path);
     const parentInv = m4invert(parent);
     if (!parentInv) throw new PushFormError('context.singular', 'The context transform is singular');
-    const local = m4mul(parentInv, m4mul(placeOnFaceMatrix(state, ref, p.point, p.normal), parent));
+    const local = m4mul(parentInv, m4mul(placeOnFaceMatrix(state, ref, p.point, p.normal, p.grab), parent));
     const plane = mapPlane(parentInv, planeFromPointNormal(p.point, p.normal));
     let placed: Id = ref.id;
     host.edit(p.copy ? 'Copy' : 'Move', (draft) => {
@@ -253,7 +263,8 @@ export const componentPlaceOnFace = defineCommand({
       const source = container.instances.get(ref.id)!;
       let target = source;
       if (p.copy) {
-        target = { ...source, id: allocId<Id>(draft), attributes: JSON.parse(JSON.stringify(source.attributes)) as typeof source.attributes };
+        // a copy is never locked, whatever its original is
+        target = { ...source, id: allocId<Id>(draft), locked: false, attributes: JSON.parse(JSON.stringify(source.attributes)) as typeof source.attributes };
         container.instances.set(target.id, target);
         container.order.push(target.id);
       }

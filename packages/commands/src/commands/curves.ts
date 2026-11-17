@@ -2,13 +2,13 @@
 // Copyright 2026 PushForm contributors
 import { z } from 'zod';
 import { basisToLocal, MERGE_TOL, planeBasis, PushFormError, v3cross, v3dist, v3len, v3normalize, v3sub } from '@pushform/core';
-import type { CurveId, FaceLocalId, Id, MVec3, Vec3 } from '@pushform/core';
+import type { CurveId, FaceLocalId, Id, MVec3, TagId, Vec3 } from '@pushform/core';
 import { tessellateCurve } from '@pushform/geom';
 import { addImprintEdge, allocId, FaceFinder, findFaceContainingPoints, removeImprintEdge, sketchFaceEdgeIds } from '@pushform/model';
 import type { Body, Curve, CurveKind, DocumentDraft, Draft, SketchFace, SketchGraph } from '@pushform/model';
 import { defineCommand } from '../registry/Command';
 import type { AnyCommand } from '../registry/Command';
-import { hostOf } from '../host/services';
+import { activeDrawTagOpts, hostOf } from '../host/services';
 import { asDraftBody, currentFrame, draftContainerAt, sketchGraphAt, type ContextFrame } from './context';
 
 const vec3 = z.tuple([z.number(), z.number(), z.number()]);
@@ -168,9 +168,16 @@ function polylineSegments(points: readonly Vec3[], closed: boolean): [Vec3, Vec3
  * Add a tessellated curve, routed like `sketch.addEdge`: when every point lies on one body face the
  * segments become imprint edges of that face carrying the curve id (the Curve record lives in
  * `body.curves`), otherwise they are sketch edges with the record in `sketch.curves`. The face
- * finder runs once over all new edges, so a closed curve forms a face.
+ * finder runs once over all new edges, so a closed curve forms a face. New sketch edges go on `tag.tagId`
+ * and the faces they form on `tag.faceTagId` (both default to the document's default tag); imprint
+ * edges belong to their body and carry no tag.
  */
-export function addCurveToDraft(draft: DocumentDraft, p: AddCurveParams, path: readonly number[] = []): AddCurveResult {
+export function addCurveToDraft(
+  draft: DocumentDraft,
+  p: AddCurveParams,
+  path: readonly number[] = [],
+  tag: { readonly tagId?: TagId; readonly faceTagId?: TagId } = {},
+): AddCurveResult {
   const container = draftContainerAt(draft, path);
   const points = p.points as Vec3[];
   const segments = polylineSegments(points, p.closed);
@@ -204,16 +211,16 @@ export function addCurveToDraft(draft: DocumentDraft, p: AddCurveParams, path: r
   const g = sketchGraphAt(draft, path);
   const ids: Id[] = [];
   for (const [a, b] of segments) {
-    for (const id of g.addEdge(a, b, { curveId, findFaces: false })) {
+    for (const id of g.addEdge(a, b, { ...tag, curveId, findFaces: false })) {
       const e = g.sketch.edges.get(id);
       if (e && e.curveId === null) e.curveId = curveId;
       ids.push(id);
     }
   }
   const extraIds: Id[] = [];
-  for (const [a, b] of extra) extraIds.push(...g.addEdge(a, b, { findFaces: false }));
+  for (const [a, b] of extra) extraIds.push(...g.addEdge(a, b, { ...tag, findFaces: false }));
   g.sketch.curves.set(curveId, curveRecord(curveId, p.curve, points, [...ids]));
-  FaceFinder.onEdgesAdded(g, [...ids, ...extraIds]);
+  FaceFinder.onEdgesAdded(g, [...ids, ...extraIds], tag.faceTagId);
   return { curveId, edgeIds: ids.map((id) => id as number), routed: 'sketch' };
 }
 
@@ -226,7 +233,8 @@ export const addCurve = defineCommand({
   run(ctx, p): AddCurveResult {
     const host = hostOf(ctx);
     const frame = currentFrame(host);
-    return host.edit('Curve', (draft) => addCurveToDraft(draft, localizeCurveParams(frame, p), frame.path));
+    const tag = activeDrawTagOpts(ctx);
+    return host.edit('Curve', (draft) => addCurveToDraft(draft, localizeCurveParams(frame, p), frame.path, tag));
   },
 });
 
@@ -273,8 +281,8 @@ function facesOfCurve(g: SketchGraph, curve: Curve): SketchFace[] {
 
 /**
  * Replace the edges of a circle/arc/polygon curve with a fresh tessellation of `next`. Sketch faces
- * bounded by the old edges are deleted with them and re-found from the new edges (materials of a
- * single bounded face are carried over). Imprint curves are rebuilt on their face.
+ * bounded by the old edges are deleted with them and re-found from the new edges (the edges' tag, and
+ * the materials and tag of a single bounded face, are carried over). Imprint curves are rebuilt on their face.
  */
 function retessellate(draft: DocumentDraft, path: readonly number[], home: CurveHome, next: Curve): number[] {
   const points = curvePoints(next);
@@ -293,13 +301,16 @@ function retessellate(draft: DocumentDraft, path: readonly number[], home: Curve
   }
   const g = sketchGraphAt(draft, path);
   const faces = facesOfCurve(g, home.curve);
-  const material = faces.length === 1 ? { front: faces[0]!.frontMaterialId, back: faces[0]!.backMaterialId } : null;
+  const material = faces.length === 1 ? { front: faces[0]!.frontMaterialId, back: faces[0]!.backMaterialId, tagId: faces[0]!.tagId } : null;
+  // the new edges keep the tag of the edges they replace
+  const firstRef = home.curve.edgeRefs.find((r): r is Id => typeof r === 'number');
+  const edgeTag = firstRef === undefined ? undefined : g.sketch.edges.get(firstRef)?.tagId;
   const before = new Set(g.sketch.faces.keys());
   // copy: removeEdge splices the record's edgeRefs while we walk them
   for (const ref of [...home.curve.edgeRefs]) if (typeof ref === 'number') g.removeEdge(ref);
   const ids: Id[] = [];
   for (const [a, b] of segments) {
-    for (const id of g.addEdge(a, b, { curveId: next.id, findFaces: false })) {
+    for (const id of g.addEdge(a, b, { ...(edgeTag === undefined ? {} : { tagId: edgeTag }), curveId: next.id, findFaces: false })) {
       const e = g.sketch.edges.get(id);
       if (e && e.curveId === null) e.curveId = next.id;
       ids.push(id);
@@ -312,6 +323,7 @@ function retessellate(draft: DocumentDraft, path: readonly number[], home: Curve
       if (before.has(fid)) continue;
       f.frontMaterialId = material.front;
       f.backMaterialId = material.back;
+      f.tagId = material.tagId;
     }
   }
   return ids.map((id) => id as number);

@@ -146,6 +146,7 @@ function isLayoutState(value: unknown): value is LayoutDocumentState {
         (numbering.startPageId !== null && !Number.isSafeInteger(numbering.startPageId))) return false;
     }
   }
+  if (state.settings.drawing !== undefined && typeof state.settings.drawing !== 'boolean') return false;
   if (state.settings.objectSnap !== undefined && typeof state.settings.objectSnap !== 'boolean') return false;
   const unit = (value: unknown): boolean => value === undefined || value === 'mm' || value === 'in';
   if (!unit(state.settings.paperUnits) || !unit(state.settings.grid?.units)) return false;
@@ -191,6 +192,7 @@ function validViewport(entity: LayoutEntity, references: LayoutDocumentState['re
   if (entity.kind !== 'image' || !viewport || !viewport.source) return false;
   if (viewport.preserveScaleOnResize !== undefined && typeof viewport.preserveScaleOnResize !== 'boolean') return false;
   if (viewport.cache !== null && viewport.cache.sha256 !== undefined && typeof viewport.cache.sha256 !== 'string') return false;
+  if (viewport.cache !== null && viewport.cache.sheet !== undefined && typeof viewport.cache.sheet !== 'string') return false;
   const display = viewport.display;
   if (display !== undefined && (!display || !LAYOUT_VIEWPORT_FACE_STYLES.includes(display.faceStyle) ||
     ![display.edges, display.profiles, display.backEdges, display.xray, display.hiddenGeometry].every(value => typeof value === 'boolean') ||

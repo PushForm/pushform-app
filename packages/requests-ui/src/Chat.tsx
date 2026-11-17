@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type JSX } from 'react';
-import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_REPORT, formatBytes, RequestsError, SCREENSHOT_TYPES, type Attachment, type AttachmentFile, type Conversation, type ConversationPath, type Credits, type ConversationSummary, type DocumentDescriptor, type IntentPath, type Me, type Message, type RequestsClient, type ScreenInfo, type ToolCall, type ToolCallResult, type ToolImage } from './client';
+import { CLONE_NAME_MAX_CHARS, CLONE_TOOL, HANDOFF_SUMMARY_MAX_CHARS, PUBLISH_TOOL, type CloneChoice, type PublishOutcome, type PublishProposal } from '@pushform/requests-core';
+import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_REPORT, formatBytes, RequestsError, SCREENSHOT_TYPES, type Attachment, type AttachmentFile, type Conversation, type ConversationPath, type Credits, type ConversationSummary, type DocumentDescriptor, type Handoff, type IntentPath, type Me, type Message, type RequestsClient, type ScreenInfo, type ToolCall, type ToolCallResult, type ToolImage } from './client';
 import { draftScope, forgetDraft, HOME_SCOPE, readDrafts, rememberDraft } from './drafts';
 import { DockedPanel } from './DockedPanel';
 import { Popover } from './Popover';
@@ -14,10 +15,11 @@ export interface ChatProps {
   /** The signed-in account: its id scopes remembered drafts, its email receives notifications. */
   readonly account: { readonly id: string; readonly email: string };
   readonly screen: ScreenInfo;
-  /** The icon that opens the panel: the pop-down hangs under it; focus returns to it on close (docked: on Escape). */
+  /** The icon that opens the pop-down, which hangs under it; focus returns to it on close. Docked ignores it. */
   readonly anchor?: HTMLElement | null | undefined;
   /** 'popover' (default, Home) hangs under its icon; 'docked' fills an editor's side dock. */
   readonly placement?: 'popover' | 'docked' | undefined;
+  /** Hides the pop-down. Docked ignores it: only its left menu bar icon hides that panel. */
   readonly onClose: () => void;
   /** False hides the pop-down without unmounting it: the conversation stays in memory for the next open. */
   readonly open?: boolean | undefined;
@@ -47,7 +49,33 @@ export interface ChatProps {
   readonly captureScreenshot?: (() => Promise<Blob | null>) | undefined;
   /** Called once per message the requester sends to the agent (not for chat commands), for the host's usage count. */
   readonly onMessage?: (() => void) | undefined;
+  /**
+   * A clone's chat: on mount it shows where the clone came from and the agent's summary, then sends the request that made the
+   * clone as its first message, without the greeting. Read once; `onHandoffStarted` tells the host it was used.
+   */
+  readonly handoff?: (Handoff & { readonly request: string }) | undefined;
+  readonly onHandoffStarted?: (() => void) | undefined;
 }
+
+/** What the host made for a confirmed clone: its name and a way to bring its tab forward. */
+export interface ClonedDocument { readonly name: string; show(): void }
+/** A clone the agent proposed: the requester's chosen name, the agent's handoff summary and the request that asked for it. */
+export interface CloneRequest { readonly name: string; readonly summary: string; readonly request: string }
+/**
+ * A Commons publication the agent proposed, after the host saved the version it publishes: what the card shows.
+ * `host` is the host's own state for publishing it.
+ */
+export interface PreparedPublication {
+  readonly revision: number; readonly savedLine: string; readonly update: boolean;
+  readonly title: string; readonly description: string; readonly category: string;
+  readonly license: { readonly name: string; readonly summary: string; readonly url: string | null } | null;
+  readonly retained: readonly string[] | null;
+  readonly collections: readonly { readonly name: string; readonly isNew: boolean }[];
+  readonly picture?: string | undefined;
+  readonly host: unknown;
+}
+/** A publication made from the card: its title, public page and any collection that could not be updated. */
+export interface PublishedModel { readonly title: string; readonly url: string; readonly failedCollections: readonly string[] }
 
 /** The active document as a file, for a problem report's attachment. */
 export interface DocumentCopy { readonly name: string; readonly blob: Blob }
@@ -59,10 +87,25 @@ export interface DocumentToolSession {
   run(call: ToolCall, signal?: AbortSignal): Promise<DocumentToolOutcome> | DocumentToolOutcome;
   /** What the chat shows while a call runs, for a call that takes noticeable time; undefined keeps the usual placeholder. */
   progress?(call: ToolCall): string | undefined;
+  /** The open document's name, as a clone card names it. */
+  readonly name?: string | undefined;
+  /**
+   * Clones the document into a new, active tab once the requester confirms on the chat's card; rejects with a readable
+   * error when it cannot. A session that offers it says `clone: 1` in its descriptor.
+   */
+  clone?(request: CloneRequest): Promise<ClonedDocument>;
+  /** Saves the version a proposed publication publishes and prepares its card; rejects with a readable reason. A session that offers it says `publish: 1`. */
+  preparePublication?(proposal: PublishProposal): Promise<PreparedPublication>;
+  /**
+   * Opens the publishing dialog with the card's values. `auto` (Publish on the card) publishes as soon as it can.
+   * Resolves with the publication, or null when the dialog closed without publishing.
+   */
+  publish?(prepared: PreparedPublication, auto: boolean): Promise<PublishedModel | null>;
 }
 /** `images` are a render's pictures for the agent, and `views` name them for the review line. */
+/** `line` is a transcript line of its own, such as a save's "Saved version 4.", never merged into the change line. */
 export interface DocumentToolOutcome {
-  readonly content: string; readonly isError: boolean; readonly notice?: string | undefined;
+  readonly content: string; readonly isError: boolean; readonly notice?: string | undefined; readonly line?: string | undefined;
   readonly images?: readonly ToolImage[] | undefined; readonly views?: readonly string[] | undefined;
 }
 
@@ -77,7 +120,21 @@ type View =
  * reload: the backend does not keep them). Review lines are transcript-only, never change lines.
  */
 type Entry = (Message & { readonly local?: readonly AttachmentFile[] | undefined }) | { readonly role: 'system'; readonly text: string; readonly at: string }
-  | { readonly role: 'review'; readonly views: readonly string[]; readonly images: readonly ToolImage[]; readonly at: string };
+  | { readonly role: 'review'; readonly views: readonly string[]; readonly images: readonly ToolImage[]; readonly at: string }
+  | CloneCard | PublishCard;
+/** `publish`: the card that proposes a Commons publication; only its Publish button (or the dialog's) publishes. */
+interface PublishCard {
+  readonly role: 'publish'; readonly id: string; readonly prepared: PreparedPublication;
+  readonly state: 'pending' | 'open' | 'published' | 'not' | 'failed'; readonly result?: PublishedModel | undefined; readonly reason?: string | undefined; readonly at: string;
+}
+/**
+ * `clone`: the card that asks before a clone. Pending, it offers Clone document, copying within this document and Cancel;
+ * afterwards it reads what happened.
+ */
+interface CloneCard {
+  readonly role: 'clone'; readonly id: string; readonly from: string; readonly name: string; readonly documentType: 'layout' | 'model';
+  readonly state: 'pending' | 'cloning' | 'cloned' | 'copy' | 'not' | 'failed'; readonly reason?: string | undefined; readonly show?: (() => void) | undefined; readonly at: string;
+}
 
 interface ChatState {
   /**
@@ -111,9 +168,18 @@ export const SLASH_COMMANDS: readonly { readonly name: string; readonly descript
 ];
 const slashName = (message: string): string => message.slice(1).split(/\s/, 1)[0]!.toLowerCase();
 const visible = (messages: readonly Message[]): Entry[] => messages.flatMap((message): Entry[] => {
+  if (message.role === 'tool' && message.published !== undefined) return [{ role: 'system', text: message.published ? `Published ${message.published.title}.` : 'Not published.', at: message.at }];
+  if (message.role === 'tool' && message.cloned) return [{ role: 'system', text: message.cloned.name !== null ? `Cloned to ${message.cloned.name}.` : 'Not cloned.', at: message.at }];
   if (message.role === 'tool') return message.reviewed?.length ? [{ role: 'review', views: message.reviewed, images: [], at: message.at }] : [];
+  if (message.role === 'user' && message.handoff) return handoffEntries(message.handoff, message.at, message);
   return message.role !== 'assistant' || !!message.text.trim() ? [message] : [];
 });
+/** A clone's chat opens with where it came from and the agent's summary, before the request that made it. */
+function handoffEntries(handoff: Handoff, at: string, request: Entry): Entry[] {
+  return [{ role: 'system', text: `Continued from ${handoff.from}`, at }, { role: 'assistant', text: handoff.summary, at }, request];
+}
+const cloneResult = (choice: CloneChoice, extra: { name?: string; error?: string } = {}): string => JSON.stringify({ ok: !extra.error, choice, ...extra });
+const publishResult = (outcome: PublishOutcome, extra: { title?: string; url?: string; error?: string } = {}): string => JSON.stringify({ ok: !extra.error, outcome, ...extra });
 /** The placeholder adds the turn's running time once the turn has run this long. */
 export const ELAPSED_AFTER_SECONDS = 10;
 /** Screen readers hear that the agent is still working at this interval, never every second. */
@@ -133,9 +199,9 @@ function fromConversation(conversation: Conversation): ChatState {
  * happens in the conversation: the agent gathers the brief, writes it back as text, asks for confirmation and
  * files on an explicit yes; the panel only shows the resulting "Filed as" or "Added you to" line. Closing keeps
  * the conversation; reopening resumes it; asking the agent to start over, Clear Chat or `/clear` discards it. There is no header row:
- * Escape or the icon hide it, and on Home also a click outside (user decisions 2026-10-24, 2026-10-25).
+ * docked in an editor only the icon hides it; on Home the icon, Escape or a click outside (user decisions 2026-10-24, 2026-10-25).
  */
-export function Chat({ client, account, screen, anchor, placement = 'popover', onClose, open = true, storage, documentTools, captureScreenshot, onMessage, scope = HOME_SCOPE, documentId, clearSignal = 0 }: ChatProps): JSX.Element {
+export function Chat({ client, account, screen, anchor, placement = 'popover', onClose, open = true, storage, documentTools, captureScreenshot, onMessage, scope = HOME_SCOPE, documentId, clearSignal = 0, handoff, onHandoffStarted }: ChatProps): JSX.Element {
   // The greeting, cards and composer draw at once; the profile and any resumable conversation load behind them.
   const [view, setView] = useState<View>({ kind: 'chat' });
   const [me, setMe] = useState<Me | null>(null);
@@ -268,7 +334,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
   };
 
   /** Sends a typed message or an intent card; the first one also creates the conversation with `path: 'open'`. */
-  const send = (message: string, intent?: IntentPath, pending?: QueuedMessage): void => {
+  const send = (message: string, intent?: IntentPath, pending?: QueuedMessage, opening?: Handoff): void => {
     const body = message.trim();
     if (!intent && body.startsWith('/')) { runSlash(body); return; }
     if (!attachmentsReady) return;
@@ -283,12 +349,14 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
     }
     if (busy && !waitingForGuidance) return;
     if (waitingForGuidance) { generation.current += 1; turn.current?.abort(); setWaitingForGuidance(false); }
-    onMessage?.();
+    // A handoff forwards the request that made the clone; the requester did not send it again.
+    if (!opening) onMessage?.();
     const at = new Date().toISOString();
     started.current = true;
-    if (!pending) { setText(''); if (outgoing.length) setPictures([]); }
+    if (!pending && !opening) { setText(''); if (outgoing.length) setPictures([]); }
     setNotice(null); setError(null); setQueuePaused(false);
-    setChat(current => ({ ...current, transcript: [...current.transcript, { role: 'user', text: body, at, ...(outgoing.length ? { local: outgoing } : {}) }], streaming: '' }));
+    const sent: Entry = { role: 'user', text: body, at, ...(outgoing.length ? { local: outgoing } : {}) };
+    setChat(current => ({ ...current, transcript: [...current.transcript, ...(opening ? handoffEntries(opening, at, sent) : [sent])], streaming: '' }));
     const controller = new AbortController(); turn.current = controller;
     const gen = generation.current;
     const live = (): boolean => alive.current && generation.current === gen;
@@ -333,7 +401,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
         // The turn's one change line, as the transcript holds it and in its newest wording: each applied change
         // updates it in place rather than adding a line.
         let shownChange = null as Entry | null, change = null as Entry | null;
-        let stream = client.sendMessage(id, body, { ...(intent ? { intent } : {}), document: tools?.document ?? null, signal: controller.signal, attachments: pictureIds });
+        let stream = client.sendMessage(id, body, { ...(intent ? { intent } : {}), ...(opening ? { handoff: opening } : {}), document: tools?.document ?? null, signal: controller.signal, attachments: pictureIds });
         for (;;) {
           let requested: readonly ToolCall[] = [];
           for await (const event of stream) {
@@ -382,7 +450,12 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
             const progress = reviewProgress(call) ?? tools.progress?.(call);
             setStatusLine(null);
             if (progress) setToolProgress(progress);
-            try { outcome = await tools.run(call, controller.signal); } catch (cause) { outcome = { content: `The editor could not run ${call.name}: ${errorText(cause)}`, isError: true }; }
+            try {
+              outcome = call.name === CLONE_TOOL && tools.clone ? await askClone(call, tools, body, controller.signal)
+                : call.name === PUBLISH_TOOL && tools.preparePublication && tools.publish ? await askPublish(call, tools, controller.signal)
+                : await tools.run(call, controller.signal);
+            }
+            catch (cause) { outcome = { content: `The editor could not run ${call.name}: ${errorText(cause)}`, isError: true }; }
             if (!live()) return;
             setWaitingForGuidance(false);
             stopped();
@@ -394,6 +467,7 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
               else if (!change) lines.push(line);
               change = line;
             }
+            if (outcome.line) lines.push({ role: 'system', text: outcome.line, at });
             if (outcome.images?.length) lines.push({ role: 'review', views: outcome.views ?? [], images: outcome.images, at });
           }
           if (!live()) return;
@@ -437,6 +511,99 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
     });
   };
   const submit = (event: FormEvent): void => { event.preventDefault(); send(text); };
+
+  /** The requester's answer to each pending clone card, by tool call id, and the name typed on it. */
+  const cloneAnswers = useRef(new Map<string, (choice: CloneChoice) => void>());
+  const cloneNames = useRef(new Map<string, string>());
+  const updateCard = (id: string, patch: Partial<CloneCard>): void => setChat(current => ({ ...current,
+    transcript: current.transcript.map(item => item.role === 'clone' && item.id === id ? { ...item, ...patch } : item) }));
+  /**
+   * A proposed clone: the card asks first. A new message, Stop or Clear Chat aborts the turn and leaves the card unanswered,
+   * read as not cloned. Clone document makes the copy through the host; its chat carries on from the handoff.
+   */
+  const askClone = async (call: ToolCall, tools: DocumentToolSession, request: string, signal: AbortSignal): Promise<DocumentToolOutcome> => {
+    const input = (call.input ?? {}) as { name?: unknown; summary?: unknown };
+    const proposed = (typeof input.name === 'string' ? input.name.trim() : '').slice(0, CLONE_NAME_MAX_CHARS) || `${tools.name ?? 'Document'} copy`;
+    const summary = (typeof input.summary === 'string' ? input.summary.trim() : '').slice(0, HANDOFF_SUMMARY_MAX_CHARS);
+    cloneNames.current.set(call.id, proposed);
+    const card: CloneCard = { role: 'clone', id: call.id, from: tools.name ?? 'this document', name: proposed, documentType: tools.document.type, state: 'pending', at: new Date().toISOString() };
+    setChat(current => ({ ...current, transcript: [...current.transcript, card] }));
+    setWaitingForGuidance(true);
+    const choice = await new Promise<CloneChoice | 'aborted'>(resolve => {
+      if (signal.aborted) { resolve('aborted'); return; }
+      signal.addEventListener('abort', () => resolve('aborted'), { once: true });
+      cloneAnswers.current.set(call.id, resolve);
+    });
+    cloneAnswers.current.delete(call.id);
+    setWaitingForGuidance(false);
+    if (choice === 'aborted' || choice === 'cancel') {
+      updateCard(call.id, { state: 'not' });
+      return { content: cloneResult('cancel'), isError: false };
+    }
+    if (choice === 'copy') { updateCard(call.id, { state: 'copy' }); return { content: cloneResult('copy'), isError: false }; }
+    const name = (cloneNames.current.get(call.id) ?? proposed).trim().slice(0, CLONE_NAME_MAX_CHARS) || proposed;
+    updateCard(call.id, { state: 'cloning', name });
+    try {
+      if (!tools.clone || !summary) throw new Error(summary ? 'This editor cannot clone documents.' : 'The proposal had no summary to hand over.');
+      const made = await tools.clone({ name, summary, request });
+      updateCard(call.id, { state: 'cloned', name: made.name, show: () => made.show() });
+      return { content: cloneResult('clone', { name: made.name }), isError: false };
+    } catch (cause) {
+      const reason = errorText(cause);
+      updateCard(call.id, { state: 'failed', reason });
+      return { content: cloneResult('clone', { error: reason }), isError: true };
+    }
+  };
+  /** The requester's answer to each pending publication card, by tool call id. */
+  const publishAnswers = useRef(new Map<string, (choice: 'publish' | 'edit' | 'cancel') => void>());
+  const updatePublishCard = (id: string, patch: Partial<PublishCard>): void => setChat(current => ({ ...current,
+    transcript: current.transcript.map(item => item.role === 'publish' && item.id === id ? { ...item, ...patch } : item) }));
+  /**
+   * A proposed publication: the host saves the version it publishes, then the card waits. Publish opens the publishing
+   * dialog and publishes as soon as it can; Edit details opens it to review first. A dialog closed without publishing
+   * leaves the card available. A new message, Stop or Clear Chat leaves it not published.
+   */
+  const askPublish = async (call: ToolCall, tools: DocumentToolSession, signal: AbortSignal): Promise<DocumentToolOutcome> => {
+    let prepared: PreparedPublication;
+    try { prepared = await tools.preparePublication!((call.input ?? {}) as PublishProposal); }
+    catch (cause) { return { content: publishResult('unavailable', { error: errorText(cause) }), isError: true }; }
+    const card: PublishCard = { role: 'publish', id: call.id, prepared, state: 'pending', at: new Date().toISOString() };
+    setChat(current => ({ ...current, transcript: [...current.transcript, { role: 'system', text: prepared.savedLine, at: card.at }, card] }));
+    setWaitingForGuidance(true);
+    try {
+      for (;;) {
+        const choice = await new Promise<'publish' | 'edit' | 'cancel' | 'aborted'>(resolve => {
+          if (signal.aborted) { resolve('aborted'); return; }
+          signal.addEventListener('abort', () => resolve('aborted'), { once: true });
+          publishAnswers.current.set(call.id, resolve);
+        });
+        publishAnswers.current.delete(call.id);
+        if (choice === 'aborted' || choice === 'cancel') { updatePublishCard(call.id, { state: 'not' }); return { content: publishResult('cancel'), isError: false }; }
+        updatePublishCard(call.id, { state: 'open' });
+        let made: PublishedModel | null;
+        try { made = await tools.publish!(prepared, choice === 'publish'); }
+        catch (cause) {
+          const reason = errorText(cause);
+          updatePublishCard(call.id, { state: 'failed', reason });
+          return { content: publishResult('failed', { error: reason }), isError: true };
+        }
+        if (made) {
+          updatePublishCard(call.id, { state: 'published', result: made });
+          return { content: publishResult('published', { title: made.title, url: made.url }), isError: false };
+        }
+        if (signal.aborted) { updatePublishCard(call.id, { state: 'not' }); return { content: publishResult('cancel'), isError: false }; }
+        updatePublishCard(call.id, { state: 'pending' });
+      }
+    } finally { setWaitingForGuidance(false); }
+  };
+  // A clone's chat sends the request that made it once the chat is ready, as its first message.
+  const handedOff = useRef(false);
+  useEffect(() => {
+    if (!handoff || handedOff.current || view.kind !== 'chat') return;
+    handedOff.current = true;
+    onHandoffStarted?.();
+    sendRef.current(handoff.request, undefined, undefined, { from: handoff.from, summary: handoff.summary });
+  }, [handoff, view.kind]);
 
   // Local images remain removable before they are uploaded with the next message.
   const [attachments, setAttachments] = useState<readonly Attachment[]>([]);
@@ -585,6 +752,8 @@ export function Chat({ client, account, screen, anchor, placement = 'popover', o
           })}
         </div> : null}
         {current.transcript.map((entry, index) => entry.role === 'review' ? <ReviewLine key={index} entry={entry} />
+          : entry.role === 'publish' ? <PublishCardView key={entry.id} card={entry} answer={choice => publishAnswers.current.get(entry.id)?.(choice)} />
+          : entry.role === 'clone' ? <CloneCardView key={entry.id} card={entry} names={cloneNames.current} answer={choice => cloneAnswers.current.get(entry.id)?.(choice)} />
           : entry.role === 'system'
           ? <p key={index} className="pf-fr-message is-system pf-fr-muted" role="status">{entry.text}</p>
           // A reply split by tool calls reads as one message, under one label.
@@ -677,6 +846,62 @@ function Elapsed({ since }: { since: number }): JSX.Element | null {
  * A render review in the transcript: "Checked the result" with small previews, collapsed, opening to the full pictures.
  * The pictures are the ones the browser drew for the agent; after a reload only the views are named.
  */
+/** The card that proposes a Commons publication of the version just saved, with what will become public. */
+function PublishCardView({ card, answer }: { card: PublishCard; answer: (choice: 'publish' | 'edit' | 'cancel') => void }): JSX.Element {
+  const { prepared } = card;
+  if (card.state === 'published' && card.result) {
+    const failed = card.result.failedCollections;
+    return <p className="pf-fr-message is-system pf-fr-muted" role="status">Published <a href={card.result.url} target="_blank" rel="noreferrer">{card.result.title}</a>.
+      {failed.length ? ` Some collections were not updated: ${failed.join(' ')}` : ''}</p>;
+  }
+  if (card.state === 'not') return <p className="pf-fr-message is-system pf-fr-muted" role="status">Not published.</p>;
+  if (card.state === 'failed') return <p className="pf-fr-message is-system pf-fr-muted" role="status">Not published. {card.reason}</p>;
+  const license = prepared.license;
+  return <section className="pf-fr-publish" aria-label="Publish to Commons">
+    <h3>Publish to Commons</h3>
+    <p className="pf-fr-muted">Private cloud revision {prepared.revision}</p>
+    {prepared.picture ? <img className="pf-fr-publish-picture" src={prepared.picture} alt="Listing picture: the current view" /> : null}
+    <dl>
+      <dt>Title</dt><dd>{prepared.title}</dd>
+      <dt>Description</dt><dd className="pf-fr-publish-description">{prepared.description || 'None'}</dd>
+      <dt>Category</dt><dd>{prepared.category}</dd>
+      <dt>License</dt><dd>{license ? <>{license.url ? <a href={license.url} target="_blank" rel="noreferrer">{license.name}</a> : license.name}. {license.summary}</> : `Keeps its source licenses: ${(prepared.retained ?? []).join(', ')}`}</dd>
+      <dt>Collections</dt><dd>{prepared.collections.length ? prepared.collections.map(collection => collection.isNew ? `${collection.name} (new, private)` : collection.name).join(', ') : 'None'}</dd>
+    </dl>
+    <p className="pf-fr-muted">Publishing makes this model public{license ? ` under ${license.name}` : ' under its source licenses'}. Copies others make keep that license even if you unpublish it later. Publishing confirms you have the right to share it.</p>
+    <div className="pf-fr-clone-actions">
+      <button type="button" className="pf-fr-primary" disabled={card.state !== 'pending'} onClick={() => answer('publish')}>{prepared.update ? 'Publish changes' : 'Publish model'}</button>
+      <button type="button" disabled={card.state !== 'pending'} onClick={() => answer('edit')}>Edit details</button>
+      <button type="button" disabled={card.state !== 'pending'} onClick={() => answer('cancel')}>Cancel</button>
+    </div>
+    {card.state === 'open' ? <p role="status" className="pf-fr-muted">Publishing in the dialog…</p> : null}
+  </section>;
+}
+
+/**
+ * The card that asks before a clone. The clone's name can be changed until it is confirmed. Copying within the document
+ * is offered beside cloning, since "copy this" can mean either.
+ */
+function CloneCardView({ card, names, answer }: { card: CloneCard; names: Map<string, string>; answer: (choice: CloneChoice) => void }): JSX.Element {
+  const [name, setName] = useState(names.get(card.id) ?? card.name);
+  const within = card.documentType === 'layout' ? 'Copy within this drawing' : 'Copy within this model';
+  if (card.state !== 'pending') {
+    const text = card.state === 'cloning' ? `Cloning to ${card.name}…` : card.state === 'cloned' ? `Cloned to ${card.name}.`
+      : card.state === 'copy' ? 'Copying within this document instead.' : card.state === 'failed' ? `Not cloned. ${card.reason ?? ''}`.trim() : 'Not cloned.';
+    return <p className="pf-fr-message is-system pf-fr-muted pf-fr-clone-result" role="status">{text}{card.state === 'cloned' && card.show
+      ? <> <button type="button" className="pf-fr-link" onClick={card.show}>Show it</button></> : null}</p>;
+  }
+  return <section className="pf-fr-clone" aria-label="Clone this document?">
+    <h3>Clone this document?</h3>
+    <p>A copy of <strong>{card.from}</strong> opens in a new tab as an unsaved document, and the chat continues there. {card.from} does not change.</p>
+    <label>Name of the copy<input value={name} maxLength={CLONE_NAME_MAX_CHARS} onChange={event => { setName(event.target.value); names.set(card.id, event.target.value); }} /></label>
+    <div className="pf-fr-clone-actions">
+      <button type="button" className="pf-fr-primary" disabled={!name.trim()} onClick={() => answer('clone')}>Clone document</button>
+      <button type="button" onClick={() => answer('copy')}>{within}</button>
+      <button type="button" onClick={() => answer('cancel')}>Cancel</button>
+    </div>
+  </section>;
+}
 function ReviewLine({ entry }: { entry: Extract<Entry, { role: 'review' }> }): JSX.Element {
   const [open, setOpen] = useState(false);
   const src = (image: ToolImage): string => `data:${image.mime};base64,${image.data}`;

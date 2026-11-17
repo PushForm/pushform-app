@@ -80,7 +80,6 @@ export interface LayoutObjectBrowserProps {
   /** The pin button of a cloud model row. */
   readonly onPinModel?: ((referenceId: number, pinned: boolean) => void) | undefined;
   /** Escape on a tree item hides the docked panel. */
-  readonly onClose?: (() => void) | undefined;
 }
 
 const SETTINGS_KEY = 'settings', PAGE_SIZE_KEY = 'settings:page-size', UNITS_KEY = 'settings:units', MODELS_KEY = 'models';
@@ -199,9 +198,9 @@ function buildTree(state: LayoutDocumentState, activePageId: number, selected: R
   // Under Document Settings, the document's paper (named by its preset, else Custom) and its units and grid.
   const paper = state.pages.get(state.pageOrder[0]!);
   const unit = layoutPaperUnits(state), gridUnit = layoutGridUnits(state);
-  const size: BrowserNode[] = paper ? [{ key: PAGE_SIZE_KEY, level: 2,
+  const size: BrowserNode[] = paper ? [...(state.settings.drawing ? [] : [{ key: PAGE_SIZE_KEY, level: 2,
     label: `${paperPresetFor(paper.size)?.name ?? 'Custom'}: ${formatPaperLength(paper.size[0], unit)} × ${formatPaperLength(paper.size[1], unit)} ${unit}`,
-    icon: <PiFrameCorners />, target: null, parent: SETTINGS_KEY, children: [] }, { key: UNITS_KEY, level: 2,
+    icon: <PiFrameCorners />, target: null, parent: SETTINGS_KEY, children: [] }]), { key: UNITS_KEY, level: 2,
     label: `Units: ${unit} · Grid: ${formatPaperLength(state.settings.grid.spacingMm, gridUnit)} ${gridUnit}`,
     icon: <PiGridFour />, target: null, parent: SETTINGS_KEY, children: [] }] : [];
   // The models the document's views look at, cloud references first; absent while there are none.
@@ -227,7 +226,7 @@ const DEFAULT_VIEW: LayoutBrowserView = { collapsedPages: new Set(), expandedLay
 export const LayoutObjectBrowser = memo(function LayoutObjectBrowser({
   state, activePageId, selectionIds, onActivatePage, onActivateLayer, onSelectObject, onSelectGroup, onUngroup, onDeleteObjects, onRename, onDocumentSettings,
   onSetVisible, onSetLocked, onMoveObject, onMoveLayer, onMovePage, onAddPageAfter, onAddLayer, onDeletePage,
-  onDuplicatePage, onDuplicateLayer, onSetShared, onDeleteLayer, onPinModel, onClose, view: initialView, onViewChange,
+  onDuplicatePage, onDuplicateLayer, onSetShared, onDeleteLayer, onPinModel, view: initialView, onViewChange,
 }: LayoutObjectBrowserProps): JSX.Element {
   const selectionAnchor = useRef<string | null>(null);
   const idPrefix = useId();
@@ -532,7 +531,20 @@ export const LayoutObjectBrowser = memo(function LayoutObjectBrowser({
         break;
       case 'Enter': activate(node, 'replace'); break;
       case 'F2': startRename(node); break;
-      case 'Escape': onClose?.(); break;
+      case 'Delete': case 'Backspace': {
+        // An object or group erases as its context menu's Delete does; pages and layers are deleted from their menus.
+        const target = node.target;
+        if ((target?.kind !== 'object' && target?.kind !== 'group') || node.lock?.disabled || node.lock?.locked) break;
+        // Focus moves on to the next item outside the erased one, or back to the previous item.
+        const inside = (item: BrowserNode): boolean => {
+          for (let key: string | null = item.key; key !== null; key = allByKey.get(key)?.parent ?? null) if (key === node.key) return true;
+          return false;
+        };
+        const next = visible.slice(index + 1).find(item => !inside(item)) ?? visible[index - 1];
+        onDeleteObjects(target.pageId, target.kind === 'group' ? target.entityIds : [target.entityId]);
+        go(next?.key);
+        break;
+      }
       default: handled = false;
     }
     if (handled) event.preventDefault();

@@ -17,6 +17,7 @@ export * from './arcs';
 export * from './offset';
 export * from './corners';
 export * from './rotation';
+export * from './transforms';
 export * from './labels';
 export * from './arrows';
 export * from './templates';
@@ -38,3 +39,5 @@ export * from './shapeBuilder';
 export * from './svg';
 
 export { cloneLayoutValue, layoutValuesEqual } from './nativeValues';
+
+export * from './scaleDrawings';

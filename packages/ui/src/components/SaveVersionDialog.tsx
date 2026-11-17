@@ -12,6 +12,14 @@ import type { DocumentSession, DocumentTab } from '../session';
 
 export interface PublishingSnapshot extends CloudSavedFile { bytes: Uint8Array; view?: { camera: CameraState; width: number; height: number }; selection?: { bytes: Uint8Array; name: string; key: string } }
 
+/** The model tab's current view, at most 1200 pixels on its longer side: the camera a publication's listing picture is drawn from. */
+export function editorView(tab: DocumentTab): PublishingSnapshot['view'] {
+  if (tab.type !== 'model') return undefined;
+  const current = tab.app.viewport.camera.getState(), canvas = tab.app.viewport.renderer?.domElement;
+  const w = canvas?.width || 720, h = canvas?.height || 600, scale = 1200 / Math.max(w, h);
+  return { camera: structuredClone(current), width: Math.max(1, Math.round(w * scale)), height: Math.max(1, Math.round(h * scale)) };
+}
+
 export function SaveVersionDialog({ tab, session, files, saves, onClose, onShare }: {
   tab: DocumentTab; session: DocumentSession; files: CloudFilesApi; saves: CloudAutosave;
   onClose(): void; onShare?: ((snapshot: PublishingSnapshot) => void) | undefined;
@@ -32,11 +40,7 @@ export function SaveVersionDialog({ tab, session, files, saves, onClose, onShare
   const save = async () => {
     if (busy) return; setBusy(true); setError('');
     try {
-      const view = share && tab.type === 'model' ? (() => {
-        const current = tab.app.viewport.camera.getState(), canvas = tab.app.viewport.renderer?.domElement;
-        const w = canvas?.width || 720, h = canvas?.height || 600, scale = 1200 / Math.max(w, h);
-        return { camera: structuredClone(current), width: Math.max(1, Math.round(w * scale)), height: Math.max(1, Math.round(h * scale)) };
-      })() : undefined;
+      const view = share ? editorView(tab) : undefined;
       const selection = share && tab.type === 'model' ? copyModelSelection(tab.app.document.doc.state, tab.app.document.context.path, tab.app.document.selection.refs, { images: tab.app.document.images }) : null;
       const selectionBytes = selection ? encodeModelSnapshot(selection.state, [...selection.images].map(([id, blob]) => ({ id, blob }))) : null;
       await saves.saveNow(tab, notes);

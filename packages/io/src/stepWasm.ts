@@ -112,8 +112,8 @@ export async function instantiateStepReader(source: BufferSource | WebAssembly.M
   const exports = instance.exports as unknown as StepReaderModule & { _initialize?: () => void; pf_init?: () => void };
   holder.memory = exports.memory;
   exports._initialize?.();
-  // The threaded build's main thread is set up by the host (a library has no start function to do it), and its
-  // threads number themselves from a counter in the shared memory.
+  // Older threaded builds needed this call to set up the main thread; the C library now does it in `_initialize`, and the
+  // export is a no-op kept for hosts that still call it. The threads number themselves from a counter in the shared memory.
   exports.pf_init?.();
   if (threads) await threads.start(exports.pf_alloc(threadTableBytes(threads.capacity)));
   // The exports object is frozen, so the module handed out is a copy that can carry the thread pool.

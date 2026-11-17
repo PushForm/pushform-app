@@ -1,0 +1,35 @@
+[package]
+name = "pushform-native-kernel"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+description = "PushForm's geometry kernel on Manifold, built natively for the desktop app and to WebAssembly for the web app"
+
+[lib]
+name = "pushform_native_kernel"
+path = "src/lib.rs"
+
+# The differential test's process: reads framed kernel requests on stdin, answers on stdout. Not part of any app build.
+[[bin]]
+name = "pushform-native-kernel-harness"
+path = "src/bin/harness.rs"
+required-features = ["harness"]
+
+[dependencies]
+# Manifold's Rust binding, carried here with one addition: setting a mesh's face ids (see vendor/README.md).
+manifold-csg = { path = "vendor/manifold-csg", default-features = false }
+# The status codes Manifold reports (`ManifoldError`) and the fault-injection requests, which call its C API directly.
+manifold-csg-sys = { path = "vendor/manifold-csg-sys", default-features = false }
+
+[features]
+default = ["parallel"]
+# Multithreaded Manifold (oneTBB). Off gives the single-threaded build.
+parallel = ["manifold-csg/parallel"]
+harness = []
+# Adds requests that fail on purpose (`faults.rs`), for the failure tests of the WebAssembly build. Never in a shipped build.
+fault-injection = []
+
+[profile.release]
+opt-level = 3
+lto = "thin"

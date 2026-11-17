@@ -39,10 +39,13 @@ describe('third-party notices', () => {
     expect(files.slice(0, 4)).toEqual(['crates/step-reader/NOTICE.md', 'crates/solidcraft/NOTICE-solidcraft.txt',
       'crates/solidcraft/LICENSE-MIT', 'crates/solidcraft/LICENSE-APACHE']);
     expect(files).toContain('crates/solidcraft/vendor/truck-shapeops/LICENSE');
+    expect(files).toContain('crates/native-kernel/NOTICE.md');
+    expect(files).toContain('crates/dwg-reader/NOTICE.md');
     const npm = { count: 1, text: 'NPM SECTION' };
     const without = noticesText(root, npm, null);
     expect(without).toContain('NPM SECTION');
     expect(without).toContain('Third-party notices for the STEP reader');
+    expect(without).toContain('Third-party notices for the DWG reader');
     expect(without).toContain('Rust crates (not listed in this build)');
     expect(without).toContain('This build was made without cargo-about');
     const rust = rustNotices([{ ships: 'desktop app', report: report([['a@1.0.0', 'MIT']], [['MIT text', true, ['a@1.0.0']]]) }]);

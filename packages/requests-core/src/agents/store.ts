@@ -109,7 +109,7 @@ export interface ConversationAgent<Store = ConversationStore> {
 }
 
 /** Every tag the backend uses to delimit the model's input; none may appear literally inside requester-derived text. */
-export const FRAMING_TAGS: readonly string[] = ['requester_message', 'brief', 'issue', 'context', 'design_notes', 'build_summary', 'known_limitations', 'trial_script', 'checklist'];
+export const FRAMING_TAGS: readonly string[] = ['requester_message', 'brief', 'issue', 'context', 'design_notes', 'build_summary', 'known_limitations', 'trial_script', 'checklist', 'handoff_summary'];
 const FRAMING_TAG_PATTERN = new RegExp(`<(/?)(${FRAMING_TAGS.join('|')})\\b`, 'gi');
 /** Escape every framing tag in requester-derived text, so it can neither close its own frame nor forge a `<context>` block. */
 export function defuseFraming(text: string): string { return text.replace(FRAMING_TAG_PATTERN, '&lt;$1$2'); }

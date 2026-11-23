@@ -11,7 +11,7 @@ TypeScript monorepo (pnpm). Geometry kernel: Rust on [Manifold](https://github.c
 The kernel needs Rust, Emscripten and cmake. The tested versions are in `scripts/kernel-wasm-artifact.mjs`:
 
 ```sh
-rustup target add wasm32-unknown-emscripten   # tested with Rust 1.98
+rustup target add wasm32-unknown-emscripten wasm32-wasip1 wasm32-wasip1-threads   # tested with Rust 1.98
 brew install cmake emscripten                 # macOS; elsewhere, install cmake and use emsdk for Emscripten 6.0.13
 ```
 
@@ -19,6 +19,8 @@ brew install cmake emscripten                 # macOS; elsewhere, install cmake 
 corepack enable            # provides pnpm
 pnpm install
 pnpm build:kernel-wasm     # compile the WebAssembly kernel; do this first, and again when its sources change
+pnpm build:dwg-reader      # compile the DWG reader; pnpm build and pnpm dev need it
+pnpm build:step-reader     # compile the STEP reader; pnpm build and pnpm dev need it
 pnpm dev                   # web app at http://localhost:5174 (uses apps/web/.env.local)
 pnpm commons:dev           # community catalog frontend at http://localhost:5176
 pnpm commons:build         # build the independent catalog frontend
@@ -30,6 +32,7 @@ pnpm license-check         # fails on licenses that are not GPLv3-compatible
 ```
 
 The app requires sign-in and stores documents in Supabase. Point `apps/web/.env.local` at a Supabase project (see [apps/web/.env.example](apps/web/.env.example)).
+The hosted schema is not published. For a fresh project, [supabase/minimal/documents.sql](supabase/minimal/documents.sql) sets up sign-in profiles and cloud documents (run it once in the SQL editor); Commons, billing, AI Chat and exports stay unavailable.
 
 ## Layout
 

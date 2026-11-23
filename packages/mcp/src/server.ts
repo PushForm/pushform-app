@@ -8,6 +8,7 @@ import { contentWorldBounds, definitionAt, sketchFaceLoops, type DocumentState }
 import { z } from 'zod';
 import type { HeadlessSession } from './session';
 import { commandTools, objectSchema } from './tools';
+import { SERVER_INSTRUCTIONS, documentTools, isDocumentTool, runDocumentTool } from './documentTools';
 
 export const SERVER_NAME = 'pushform-mcp';
 export const SERVER_VERSION = '0.0.1';
@@ -174,17 +175,18 @@ function errorResult(error: unknown): CallToolResult {
 }
 
 /**
- * The MCP server over a headless session. Registry commands and the built-in
+ * The MCP server over a headless session. AI Chat's model document tools, registry commands and the built-in
  * read and file tools are listed together; calls run one at a time, in arrival order, so a
  * command never sees the model change under it.
  */
 export function createMcpServer(session: HeadlessSession, files: FileAccess = nodeFiles): Server {
-  const server = new Server({ name: SERVER_NAME, version: SERVER_VERSION }, { capabilities: { tools: {} } });
+  const server = new Server({ name: SERVER_NAME, version: SERVER_VERSION }, { capabilities: { tools: {} }, instructions: SERVER_INSTRUCTIONS });
   const builtins = builtinTools(files);
   let queue: Promise<unknown> = Promise.resolve();
 
   server.setRequestHandler(ListToolsRequestSchema, () => {
     const tools: Tool[] = Object.entries(builtins).map(([name, t]) => ({ name, description: t.description, inputSchema: objectSchema(t.params) as Tool['inputSchema'] }));
+    for (const t of documentTools()) tools.push({ name: t.name, description: t.description, inputSchema: t.inputSchema as Tool['inputSchema'] });
     for (const t of commandTools(session.model.registry)) tools.push({ name: t.name, description: t.description, inputSchema: t.inputSchema as Tool['inputSchema'] });
     return { tools };
   });
@@ -198,6 +200,10 @@ export function createMcpServer(session: HeadlessSession, files: FileAccess = no
           const parsed = builtin.params.safeParse(args);
           if (!parsed.success) throw new PushFormError('command.params', `Invalid params for ${name}: ${parsed.error.message}`);
           return { content: [{ type: 'text', text: toJson(await builtin.run(session, parsed.data as never)) }] };
+        }
+        if (isDocumentTool(name)) {
+          const result = await runDocumentTool(session.model, name, args);
+          return { content: [{ type: 'text', text: result.text }], ...(result.isError ? { isError: true } : {}) };
         }
         const tool = commandTools(session.model.registry).find((t) => t.name === name);
         if (!tool) throw new PushFormError('command.unknown', `Unknown tool: ${name}`);

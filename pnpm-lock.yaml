@@ -590,6 +590,12 @@ importers:
       '@pushform/core':
         specifier: workspace:*
         version: link:../core
+      '@pushform/extension-protocol':
+        specifier: workspace:*
+        version: link:../extension-protocol
+      '@pushform/extensions':
+        specifier: workspace:*
+        version: link:../extensions
       '@pushform/io':
         specifier: workspace:*
         version: link:../io

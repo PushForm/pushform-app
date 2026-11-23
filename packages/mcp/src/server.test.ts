@@ -48,6 +48,23 @@ function tempDir(): string {
 }
 
 describe('headless MCP server', () => {
+  it('offers the AI Chat model document tools, which edit the open model in one undoable batch', async () => {
+    const { client, call } = await connect();
+    const names = (await client.listTools()).tools.map((t) => t.name);
+    for (const n of ['model_get_document', 'model_query', 'model_apply_operations', 'model_builder_info', 'model_find_overlaps', 'model_material_library'])
+      expect(names).toContain(n);
+    expect(names).not.toContain('model_render'); // no viewport headless
+    expect(client.getInstructions()).toContain('model_apply_operations');
+    const doc = await call('model_get_document');
+    const applied = await call('model_apply_operations', { expectedRevision: doc.revision, label: 'Add a box', operations: [{ op: 'add_box', min: [0, 0, 0], max: [1, 1, 1], as: 'box' }] });
+    expect(applied).toMatchObject({ ok: true, label: 'MCP: Add a box' });
+    const info = await call('model_info');
+    expect(info.root.bodies).toBe(1);
+    await call('edit_undo');
+    expect((await call('model_info')).root.bodies).toBe(0);
+    await expect(call('model_apply_operations', { expectedRevision: 0, label: 'Bad', operations: [{ op: 'nope' }] })).rejects.toThrow();
+  });
+
   it('lists the registry commands and the read and file tools, with object input schemas', async () => {
     const { client } = await connect();
     const { tools } = await client.listTools();

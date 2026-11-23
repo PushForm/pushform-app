@@ -1,15 +1,49 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 /**
- * `pushform-mcp --headless [file.pf]`: an MCP server on stdio over a headless model. There is
- * no mode that connects to a running app (the live bridge was removed), so the command refuses
- * to start without `--headless`. Logs go to stderr: stdout carries the protocol.
+ * `pushform-mcp --headless [file.pf]`: an MCP server on stdio over a headless model.
+ * `pushform-mcp --live [--port N] [--code CODE]`: an MCP server on stdio that edits the model open in a running
+ * PushForm window, which connects to it over a loopback WebSocket (see live.ts). Logs go to stderr: stdout carries the protocol.
  */
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { AGENT_BRIDGE_DEFAULT_PORT } from '@pushform/extension-protocol';
+import { LiveBridge, createLiveMcpServer, normalizeCode, pairingSteps } from './live';
 import { createMcpServer, nodeFiles } from './server';
 import { HeadlessSession } from './session';
 
-export const USAGE = 'Usage: pushform-mcp --headless [model.pf]';
+export const USAGE = `Usage: pushform-mcp --headless [model.pf]
+       pushform-mcp --live [--port N] [--code CODE]   (port ${AGENT_BRIDGE_DEFAULT_PORT} by default; CODE also from PUSHFORM_AGENT_CODE)`;
+
+/** `--live`: serve the paired app's model until the client closes stdin. */
+async function live(args: string[]): Promise<number> {
+  let port = AGENT_BRIDGE_DEFAULT_PORT;
+  let code = process.env['PUSHFORM_AGENT_CODE'] || undefined;
+  for (let i = 0; i < args.length; i++) {
+    const flag = args[i], value = args[i + 1];
+    if (flag === '--port' && value !== undefined && /^\d+$/.test(value) && Number(value) < 65536) { port = Number(value); i++; }
+    else if (flag === '--code' && value !== undefined && normalizeCode(value).length >= 6) { code = value; i++; }
+    else {
+      process.stderr.write(`pushform-mcp: unexpected argument ${flag}${flag === '--code' ? ' (a code needs at least 6 letters or digits)' : ''}\n${USAGE}\n`);
+      return 2;
+    }
+  }
+  const log = (line: string): void => void process.stderr.write(`pushform-mcp: ${line}\n`);
+  const bridge = new LiveBridge({ port, code, log });
+  try {
+    await bridge.start();
+  } catch (e) {
+    log(`cannot listen on 127.0.0.1:${port}: ${e instanceof Error ? e.message : String(e)}. Is another pushform-mcp --live running? Use --port to pick another port.`);
+    return 1;
+  }
+  const server = createLiveMcpServer(bridge);
+  server.onerror = (e) => log(e instanceof Error ? (e.stack ?? e.message) : String(e));
+  await server.connect(new StdioServerTransport());
+  log(`waiting for PushForm on ws://127.0.0.1:${bridge.port}. ${pairingSteps(bridge.status())}`);
+  return new Promise<number>((resolve) => {
+    server.onclose = () => void bridge.close().then(() => resolve(0));
+    process.stdin.once('end', () => void server.close());
+  });
+}
 
 export async function main(argv: readonly string[]): Promise<number> {
   const args = [...argv];
@@ -17,9 +51,14 @@ export async function main(argv: readonly string[]): Promise<number> {
     process.stderr.write(`${USAGE}\n`);
     return 0;
   }
+  const liveFlag = args.indexOf('--live');
+  if (liveFlag >= 0) {
+    args.splice(liveFlag, 1);
+    return live(args);
+  }
   const headless = args.indexOf('--headless');
   if (headless < 0) {
-    process.stderr.write(`pushform-mcp: only --headless is available; it does not connect to a running app.\n${USAGE}\n`);
+    process.stderr.write(`pushform-mcp: choose --headless (a model of its own) or --live (the model open in PushForm).\n${USAGE}\n`);
     return 2;
   }
   args.splice(headless, 1);

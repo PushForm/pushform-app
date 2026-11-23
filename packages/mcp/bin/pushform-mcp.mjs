@@ -41,6 +41,13 @@ const result = await build({
       },
     },
     {
+      // ws is CommonJS, which an ESM bundle cannot require; Node loads it from this package's node_modules instead.
+      name: 'ws-external',
+      setup(b) {
+        b.onResolve({ filter: /^ws$/ }, () => ({ path: import.meta.resolve('ws'), external: true }));
+      },
+    },
+    {
       // `?url` imports (the STEP reader's wasm) only run in a browser; Node reads the file beside the package.
       name: 'asset-url-external',
       setup(b) {

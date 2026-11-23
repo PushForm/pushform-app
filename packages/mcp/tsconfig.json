@@ -28,6 +28,9 @@
     },
     {
       "path": "../extensions"
+    },
+    {
+      "path": "../requests-core"
     }
   ]
 }

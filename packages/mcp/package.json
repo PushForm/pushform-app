@@ -2,7 +2,7 @@
   "name": "@pushform/mcp",
   "version": "0.0.1",
   "private": true,
-  "description": "MCP server and headless CLI over the command registry",
+  "description": "MCP server and headless CLI over the command registry, and the live bridge to a running PushForm",
   "license": "GPL-3.0-or-later",
   "type": "module",
   "exports": {
@@ -26,6 +26,7 @@
     "@pushform/io": "workspace:*",
     "@pushform/kernel": "workspace:*",
     "@pushform/model": "workspace:*",
+    "@pushform/requests-core": "workspace:*",
     "ws": "^8.18.0",
     "zod": "^4.0.0"
   },

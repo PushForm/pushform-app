@@ -605,6 +605,9 @@ importers:
       '@pushform/model':
         specifier: workspace:*
         version: link:../model
+      '@pushform/requests-core':
+        specifier: workspace:*
+        version: link:../requests-core
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2

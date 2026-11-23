@@ -11,4 +11,5 @@ export * from './runtimeCore.ts';
 export * from './ui.ts';
 export * from './wasm.ts';
 export * from './vocabulary.ts';
+export * from './agentBridge.ts';
 export * from './builders/index';

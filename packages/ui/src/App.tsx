@@ -11,6 +11,8 @@ import { createApp } from './bootstrap';
 import type { AppInstance } from './bootstrap';
 import { MainToolbar } from './components/MainToolbar';
 import { documentToolsFor } from './documentTools';
+import { AgentBridgeConnection } from './agentBridge';
+import { AgentConnect } from './components/AgentConnect';
 import { chatPublishing, type PublicationPreset } from './chatPublishing';
 import { PublishSnapshot } from './components/PublishSnapshot';
 import type { PublishingSnapshot } from './components/SaveVersionDialog';
@@ -310,6 +312,9 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
     return () => window.removeEventListener('beforeunload', warn);
   }, [autosave]);
   useSyncExternalStore(session.subscribe, () => session.revision);
+  /** The live agent bridge: an AI agent on this computer (pushform-mcp --live) edits the active model as the user watches. */
+  const [agentBridge] = useState(() => new AgentBridgeConnection(session));
+  useEffect(() => () => agentBridge.dispose(), [agentBridge]);
   const commonsOpening = !locked && commonsIntent ? <CommonsOpening intent={commonsIntent} filesUrl={commons?.filesUrl} cloud={cloud} session={session}
     done={() => { setCommonsIntent(null); commons?.handled(); }} opened={() => setHome(false)} /> : null;
   const active = session.active;
@@ -430,9 +435,11 @@ function WorkspaceSession({ app: given, cloud, cloudFiles, buildInfo, initialScr
   /** The rail and its dock open the editor area, in the right-hand panels' band between tool row and status bar. */
   const companionBrowser = guidanceBrowserTab === active.id && sidePanel === 'requests';
   const browserVisible = sidePanel === 'objects' || companionBrowser;
-  const saveStatus = commonsShown ? <span className="pf-local-file-status">Commons</span> : autosave ? <AutosaveIndicator autosave={autosave} session={session} files={cloudFiles} tab={active}
+  const agentControl = commonsShown ? null : <AgentConnect bridge={agentBridge} />;
+  const fileStatus = commonsShown ? <span className="pf-local-file-status">Commons</span> : autosave ? <AutosaveIndicator autosave={autosave} session={session} files={cloudFiles} tab={active}
     onSave={() => session.activeCommands.tryExecute('file.save')} onSaveCopy={() => session.activeCommands.tryExecute('file.saveAs')}/>
     : <span className="pf-local-file-status">{session.isDirty(active) ? 'Unsaved changes' : active.identity ? 'File saved' : 'Not saved yet'}</span>;
+  const saveStatus = <>{agentControl}{fileStatus}</>;
   const sideBar = <>
     <SideRail items={railItems} active={commonsShown ? 'commons' : shownPanel} onToggle={id => { if (id === 'commons') { setCommonsVisited(true); setCommonsShown(true); } else { setCommonsShown(false); toggleSidePanel(id); } }} />
     <SideDock open={shownPanel !== null}>

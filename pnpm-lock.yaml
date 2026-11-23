@@ -590,6 +590,9 @@ importers:
       '@pushform/core':
         specifier: workspace:*
         version: link:../core
+      '@pushform/extension-protocol':
+        specifier: workspace:*
+        version: link:../extension-protocol
       '@pushform/io':
         specifier: workspace:*
         version: link:../io
@@ -599,6 +602,9 @@ importers:
       '@pushform/model':
         specifier: workspace:*
         version: link:../model
+      '@pushform/requests-core':
+        specifier: workspace:*
+        version: link:../requests-core
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2

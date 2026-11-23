@@ -3693,3 +3693,18 @@ h4.pf-xui-text { font-size: 12px; }
 .pf-layout-workspace.is-drawing .pf-layout-page-wrap { position: absolute; left: 50%; top: 50%; margin: 0; }
 .pf-layout-workspace.is-drawing .pf-layout-page { width: 100%; height: 100%; opacity: 0; pointer-events: none; }
 .pf-layout-workspace.is-drawing .pf-layout-shape-builder-preview > rect { display: none; }
+
+/* Live agent bridge: the status bar's Connect agent control. */
+.pf-agent-connect { position: relative; flex: none; color: var(--pf-text-muted); font-size: 11px; }
+.pf-agent-connect-trigger { display: flex; align-items: center; gap: 5px; padding: 3px 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; white-space: nowrap; }
+.pf-agent-connect-dot { width: 7px; height: 7px; border-radius: 50%; border: 1px solid currentColor; }
+.pf-agent-connect.is-connecting .pf-agent-connect-dot { border-color: var(--pf-text-muted); animation: pf-agent-pulse 1.4s ease-in-out infinite; }
+.pf-agent-connect.is-connected { color: var(--pf-text); }
+.pf-agent-connect.is-connected .pf-agent-connect-dot { border-color: #1a9b4b; background: #1a9b4b; }
+@keyframes pf-agent-pulse { 50% { opacity: 0.3; } }
+.pf-agent-connect-panel { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 100; width: min(320px, 80vw); padding: 16px; border: 1px solid var(--pf-border); border-radius: 6px; background: var(--pf-surface); color: var(--pf-text); box-shadow: 0 8px 24px #0002; font: 12px/1.5 var(--pf-font); }
+.pf-agent-connect-panel p { margin: 0 0 10px; }
+.pf-agent-connect-panel [role='alert'] { color: var(--pf-danger); }
+.pf-agent-connect-field { display: flex; flex-direction: column; gap: 4px; margin: 0 0 10px; color: var(--pf-text-muted); }
+.pf-app[inert] .pf-agent-connect-panel { visibility: hidden; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .pf-agent-connect.is-connecting .pf-agent-connect-dot { animation: none; } }

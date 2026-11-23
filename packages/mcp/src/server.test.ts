@@ -135,11 +135,13 @@ describe('headless MCP server', () => {
     expect((await call('model_info')).root.sketchFaces).toBe(1);
   });
 
-  it('starts only with --headless', async () => {
+  it('starts with --headless or --live only', async () => {
     const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     cleanups.push(() => write.mockRestore());
     expect(await main([])).toBe(2);
     expect(await main(['--headless', '--bogus'])).toBe(2);
+    expect(await main(['--live', '--bogus'])).toBe(2);
+    expect(await main(['--live', '--code', 'ab'])).toBe(2);
     expect(await main(['--headless', join(tempDir(), 'missing.pf')])).toBe(1);
     expect(await main(['--help'])).toBe(0);
   });

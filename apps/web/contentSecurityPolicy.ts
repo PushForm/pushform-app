@@ -95,6 +95,8 @@ export function contentSecurityPolicy(surface: CspSurface, input: CspInput): str
       product && 'https://fonts.gstatic.com',
       product && 'blob:',
       product && 'data:',
+      // The live agent bridge: pushform-mcp --live on this computer, on the port the user enters.
+      product && 'ws://127.0.0.1:*',
     ])],
     ['object-src', "'none'"],
     ['base-uri', "'self'"],

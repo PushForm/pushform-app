@@ -4,6 +4,7 @@ import type { CurveId, Id, MaterialId, TagId } from '@pushform/core';
 import { containerAt, instanceAt, parseEdgeKey } from '@pushform/model';
 import type { DocumentState, EntityContainer, EntityRef, UvMapping } from '@pushform/model';
 import { connectedSketchRefs, facesUsingEdge } from './sketchQueries';
+import { makeEachTargets } from './groups';
 import { geometryHidden } from './sketch';
 import { chainEdges } from './curves';
 
@@ -38,6 +39,7 @@ export const MENU_COMMANDS = {
   entityInfo: 'ui.panel.open',
   softenEdges: 'ui.panel.open',
   makeComponent: 'ui.makeComponent',
+  makeComponents: 'component.makeEach',
   renameInstance: 'ui.renameInstance',
   makeGroup: 'group.make',
   makeEditable: 'ui.makeEditable',
@@ -123,6 +125,13 @@ const makeGroup = (refs: readonly EntityRef[], separator = true): ContextMenuIte
   separator,
 });
 const makeComponent = (): ContextMenuItem => ({ label: 'Make Component…', command: MENU_COMMANDS.makeComponent });
+/** "Make Components" (one per object) when the refs hold at least two solids, group instances or mesh parts. */
+function makeComponents(state: DocumentState, refs: readonly EntityRef[], disabled = false): ContextMenuItem[] {
+  const container = refs[0] ? containerOf(state, refs[0]) : null;
+  if (!container) return [];
+  const targets = makeEachTargets(state, container, refs.filter((r) => containerOf(state, r) === container));
+  return targets.length >= 2 ? [{ label: 'Make Components', command: MENU_COMMANDS.makeComponents, params: { refs: targets }, disabled }] : [];
+}
 const zoomSelection = (): ContextMenuItem => ({ label: 'Zoom Selection', command: MENU_COMMANDS.zoomSelection, separator: true });
 const softenSmooth = (): ContextMenuItem => ({ label: 'Soften/Smooth Edges', command: MENU_COMMANDS.softenEdges, params: { id: 'softenEdges' } });
 
@@ -416,6 +425,7 @@ function bodyItems(state: DocumentState, refs: readonly EntityRef[]): ContextMen
     { label: 'Hide', command: MENU_COMMANDS.hideBodies, params: { refs, hidden: true } },
     makeGroup(refs),
     makeComponent(),
+    ...makeComponents(state, refs),
     flipSubmenu(refs, false),
     solidToolsSubmenu(state, refs),
     zoomSelection(),
@@ -432,6 +442,7 @@ function meshPartItems(state: DocumentState, refs: readonly EntityRef[]): Contex
     { label: 'Make Editable', command: MENU_COMMANDS.makeEditable, params: { refs }, separator: true },
     makeGroup(refs),
     makeComponent(),
+    ...makeComponents(state, refs),
     zoomSelection(),
   ];
 }
@@ -468,6 +479,7 @@ function instanceItems(state: DocumentState, refs: readonly EntityRef[]): Contex
   }
   items.push({ label: 'Explode', command: MENU_COMMANDS.explode, params: { refs }, separator: !single, disabled: allLocked });
   items.push({ label: 'Make Component…', command: MENU_COMMANDS.makeComponent, disabled: allLocked });
+  items.push(...makeComponents(state, refs, allLocked));
   if (anyComponent) items.push({ label: 'Make Unique', command: MENU_COMMANDS.makeUnique, params: { refs }, disabled: allLocked });
   // Change Axes on one component, Unglue on glued placements
   if (single && singleDef && !singleDef.isGroup) items.push({ label: 'Change Axes', command: MENU_COMMANDS.changeAxes, params: { ref: single }, disabled: allLocked });
@@ -543,6 +555,7 @@ function mixedItems(state: DocumentState, refs: readonly EntityRef[]): ContextMe
     ...(geometry ? [hideGeometry(state, refs)] : []),
     makeGroup(refs),
     makeComponent(),
+    ...makeComponents(state, refs),
     ...(faces ? [intersectSubmenu(refs)] : []),
     zoomSelection(),
   ];

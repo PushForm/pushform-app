@@ -29,12 +29,20 @@ const ISO: CameraState = { eye: [10, -10, 8], target: [0, 0, 1], up: [0, 0, 1], 
 it('round-trips a copy through the system clipboard format', () => {
   const app = createApp({ demo: false, expose: false }), other = createApp({ demo: false, expose: false });
   const box = app.commands.execute('model.addBox', { min: [1, 1, 0], max: [2, 2, 1] }) as number;
+  app.document.doc.transact('Attach clipboard metadata', draft => {
+    draft.pluginData = new Map([['io.example.parts', { dataVersion: 9, entries: new Map([['part', { target: { kind: 'bodyOccurrence', id: box, path: [] }, references: [], payload: new Uint8Array([255, 0, 128]), needsReview: true }]]) }]]);
+  });
   app.commands.execute('selection.set', { refs: [{ kind: 'body', path: [], id: box }] });
   app.commands.execute('edit.copy');
   const text = encodeModelClipboard(modelClipboard.current!);
   modelClipboard.set(decodeModelClipboard(text));
   const [ref] = other.commands.execute('edit.pasteInPlace') as EntityRef[];
   const pasted = other.document.doc.rootDefinition.entities.bodies.get(ref!.id)!;
+  const metadata = other.document.doc.state.pluginData!.get('io.example.parts')!;
+  expect(metadata.dataVersion).toBe(9);
+  expect([...metadata.entries.values()][0]!.target).toEqual({ kind: 'bodyOccurrence', id: pasted.id, path: [] });
+  expect([...metadata.entries.values()][0]!.needsReview).toBe(true);
+  expect(modelClipboard.current!.metadataOrigin?.guid).toBe(app.document.doc.state.meta.guid);
   expect(Math.min(...Array.from(pasted.mesh.verts).filter((_, i) => i % 3 === 0))).toBe(1);
   app.dispose(); other.dispose();
 });

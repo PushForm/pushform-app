@@ -31,7 +31,7 @@ export function useGlobalKeys(app: AppInstance, enabled = true): void {
         if (app.commands.isEnabled(cmd)) app.commands.tryExecute(cmd);
         return;
       }
-      if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1 && VCB_START.test(e.key)) {
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1 && (VCB_START.test(e.key) || e.key === '@' && app.toolManager.visualTool?.onRawVcb)) {
         e.preventDefault();
         beginEntry(e.key);
       }

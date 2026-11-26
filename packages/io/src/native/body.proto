@@ -21,4 +21,5 @@ message Body {
   required BodyCurves curves = 12;
   required BodySurfaces surfaces = 13;
   repeated Imprint imprints = 14;
+  optional bytes reference_frame = 15; // 16 column-major float64 values, little endian
 }

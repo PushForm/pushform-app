@@ -279,6 +279,9 @@ importers:
       '@pushform/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@pushform/extension-protocol':
+        specifier: workspace:*
+        version: link:../../packages/extension-protocol
       '@pushform/extensions':
         specifier: workspace:*
         version: link:../../packages/extensions
@@ -356,6 +359,9 @@ importers:
       '@pushform/core':
         specifier: workspace:*
         version: link:../core
+      '@pushform/extension-protocol':
+        specifier: workspace:*
+        version: link:../extension-protocol
       '@pushform/io':
         specifier: workspace:*
         version: link:../io
@@ -477,6 +483,9 @@ importers:
       es-module-lexer:
         specifier: ^2.3.2
         version: 2.3.2
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
     devDependencies:
       '@pushform/kernel':
         specifier: workspace:*

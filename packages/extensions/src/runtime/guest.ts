@@ -2,8 +2,8 @@
 // Copyright 2026 PushForm contributors
 // Only the dependency-free core: this file runs inside every extension runtime, where size matters.
 import {
-  EXTENSION_SERVICES, ExtensionError, RUNTIME_PROTOCOL_VERSION, isHostMessage, methodPermission, serviceAvailable,
-  servicePermissions, type ExtensionErrorData, type ExtensionServiceName, type ServiceAccess,
+  EXTENSION_SERVICES, ExtensionError, HOST_EVENT_TARGET, MESSAGE_RATE_LIMITS, RUNTIME_PROTOCOL_VERSION, TokenBucket, isHostMessage,
+  methodPermission, serviceAvailable, servicePermissions, type ExtensionErrorData, type ExtensionServiceName, type ServiceAccess,
 } from '@pushform/extension-protocol/runtime-core';
 import type { ExtensionPermission, HostMessage } from '@pushform/extension-protocol';
 import type { RuntimePort } from './port';
@@ -37,6 +37,19 @@ export type ContributionHandler = (params: unknown, invocation: InvocationContex
 
 /** A user event on an interface the extension mounted: the target, the component, the event and its payload. */
 export type UiEventHandler = (event: { target: string; component: string; event: string } & Record<string, unknown>) => void;
+
+/** An event the host sends about a document, such as its units changing; the payload depends on the event. */
+export type HostEventHandler = (event: Record<string, unknown>) => void;
+
+/**
+ * Listeners the guest adds to a service for host events: the method name, and the host event's component and name.
+ * Kept here, not in the runtime core, as only this file needs them.
+ */
+const HOST_LISTENERS: Partial<Record<ExtensionServiceName, readonly { method: string; component: string; event: string }[]>> = {
+  document: [{ method: 'onUnitsChange', component: 'document', event: 'units' }, { method: 'onChange', component: 'document', event: 'change' }],
+  model: [{ method: 'onChange', component: 'model', event: 'change' }],
+  tools: [{ method: 'onEvent', component: 'tools', event: 'input' }, { method: 'onEnd', component: 'tools', event: 'ended' }],
+};
 
 type ServiceProxy = Readonly<Record<string, (input?: unknown, options?: CallOptions) => Promise<unknown>>>;
 
@@ -85,18 +98,48 @@ export async function startGuest(port: RuntimePort, loadMain: () => Promise<unkn
   const handlers = new Map<string, ContributionHandler>();
   const invocations = new Map<number, AbortController>();
   const uiHandlers = new Set<UiEventHandler>();
+  const hostHandlers = new Map<string, Set<HostEventHandler>>();
   const lifetime = new AbortController();
   let contributions = new Set<string>();
   let state: 'loaded' | 'activating' | 'active' | 'stopped' = 'loaded';
+
+  // Host calls are paced below the host's message budget, so an extension calling in a tight loop waits for its
+  // turn instead of being failed for flooding. Calls keep their order; a call cancelled while waiting is never sent.
+  const pace = new TokenBucket(MESSAGE_RATE_LIMITS.requests.burst, MESSAGE_RATE_LIMITS.requests.perSecond, performance.now());
+  let waiting: (() => void)[] = [];
+  let next = 0;
+  let drainTimer: ReturnType<typeof setTimeout> | null = null;
+  const drain = () => {
+    drainTimer = null;
+    while (next < waiting.length) {
+      const wait = pace.wait(1, performance.now());
+      if (wait > 0) {
+        drainTimer = setTimeout(drain, Math.max(1, Math.ceil(wait)));
+        return;
+      }
+      pace.take(1, performance.now());
+      const send = waiting[next]!;
+      waiting[next++] = () => {};
+      send();
+    }
+    waiting = [];
+    next = 0;
+  };
+  const paced = (send: () => void) => {
+    if (next === waiting.length && pace.take(1, performance.now())) return send();
+    waiting.push(send);
+    if (drainTimer === null) drain();
+  };
 
   const request = (service: string, method: string, input: unknown, options: CallOptions = {}): Promise<unknown> => {
     const signal = options.signal ? AbortSignal.any([options.signal, lifetime.signal]) : lifetime.signal;
     if (signal.aborted) return Promise.reject(cancelled());
     const id = nextRequest++;
     return new Promise((resolve, reject) => {
+      let sent = false;
       const onAbort = () => {
         if (!pending.delete(id)) return;
-        port.post({ type: 'cancel-request', id });
+        if (sent) port.post({ type: 'cancel-request', id });
         reject(cancelled());
       };
       signal.addEventListener('abort', onAbort, { once: true });
@@ -105,7 +148,18 @@ export async function startGuest(port: RuntimePort, loadMain: () => Promise<unkn
         reject: (error) => { signal.removeEventListener('abort', onAbort); reject(error); },
         ...(typeof options.onProgress === 'function' ? { progress: options.onProgress } : {}),
       });
-      port.post({ type: 'request', id, service, method, input });
+      paced(() => {
+        const waiter = pending.get(id);
+        if (!waiter) return;
+        try {
+          port.post({ type: 'request', id, service, method, input });
+          sent = true;
+        } catch (error) {
+          // Input that cannot be cloned fails the call, as it would have failed sending it.
+          pending.delete(id);
+          waiter.reject(error as Error);
+        }
+      });
     });
   };
 
@@ -137,6 +191,16 @@ export async function startGuest(port: RuntimePort, loadMain: () => Promise<unkn
           if (typeof handler !== 'function') throw new ExtensionError('validation.failed', 'onEvent needs a function.');
           uiHandlers.add(handler);
           return () => uiHandlers.delete(handler);
+        };
+      }
+      for (const listener of HOST_LISTENERS[service] ?? []) {
+        // Host events about documents; returns a function that stops listening.
+        (methods as Record<string, unknown>)[listener.method] = (handler: HostEventHandler) => {
+          if (typeof handler !== 'function') throw new ExtensionError('validation.failed', `${listener.method} needs a function.`);
+          const key = `${listener.component}.${listener.event}`;
+          const set = hostHandlers.get(key) ?? new Set<HostEventHandler>();
+          hostHandlers.set(key, set.add(handler));
+          return () => set.delete(handler);
         };
       }
       context[service] = Object.freeze(methods) satisfies ServiceProxy;
@@ -247,6 +311,17 @@ export async function startGuest(port: RuntimePort, loadMain: () => Promise<unkn
       case 'event': {
         if (state !== 'active') return;
         const { type: _type, ...event } = message as unknown as { type: string; target: string; component: string; event: string };
+        if (event.target === HOST_EVENT_TARGET) {
+          const { target: _target, component, event: name, ...payload } = event;
+          for (const handler of hostHandlers.get(`${component}.${name}`) ?? []) {
+            try {
+              handler(payload);
+            } catch {
+              // As for interface events, one failing handler must not stop the others.
+            }
+          }
+          return;
+        }
         for (const handler of uiHandlers) {
           try {
             handler(event);

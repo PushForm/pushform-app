@@ -4,6 +4,8 @@ import { z } from 'zod';
 import { cabinetHardwarePlacement } from './builders/cabinetHardware';
 import { LOCAL_REFERENCE } from './layout.ts';
 import { MODEL_BUILDER_KEYS, modelBuilderList } from './builders/index';
+import type { MetadataApplyResult } from './metadata.ts';
+
 
 /**
  * Model document API, version 1. Lengths are meters in right-handed Z-up coordinates, local to the container a
@@ -13,9 +15,15 @@ import { MODEL_BUILDER_KEYS, modelBuilderList } from './builders/index';
  */
 export const MODEL_API_VERSION = 1;
 
-/** Bounds a host applies before any work; requests over them fail with `limit_exceeded`. */
+/**
+ * Bounds a host applies before any work; requests over them fail with `limit_exceeded`. The loop bounds shape query
+ * results instead of failing them: a face loop (outer or hole) of more than `loopPointsPerFace` points is simplified
+ * to that many and the face reports `truncated`, and a query page ends early, with `next` set, once the loops of the
+ * faces on it hold `loopPointsPerQueryPage` points, so a page of faces with curved outlines and many holes stays
+ * within one message.
+ */
 export const MODEL_LIMITS = {
-  operationsPerBatch: 200, pointsPerBatch: 10_000, copiesPerArray: 100, entitiesPerQuery: 200, loopPointsPerFace: 64, kernelSeconds: 30,
+  operationsPerBatch: 200, pointsPerBatch: 10_000, copiesPerArray: 100, entitiesPerQuery: 200, loopPointsPerFace: 512, loopPointsPerQueryPage: 40_000, kernelSeconds: 30,
 } as const;
 
 /**
@@ -40,15 +48,19 @@ const instancePath = z.array(id).max(64).describe('Instance ids from the model d
 export const MODEL_ENTITY_KINDS = ['instance', 'body', 'face', 'edge', 'sketchEdge', 'sketchFace', 'guide', 'text', 'dimension', 'sectionPlane'] as const;
 export type ModelEntityKind = (typeof MODEL_ENTITY_KINDS)[number];
 
+const refPath = instancePath.optional()
+  .describe('The instance path of the entity\'s container, as reads report it. Default: the container of the request. Selecting and framing accept entities of any container; a batch\'s operations accept only its own.');
+
 /**
- * An entity of the batch's container. A face is a face of a body: `id` is the body and `faceId` the face.
- * `"$name"` refers to an instance, body or other entity created earlier in the batch.
+ * An entity of the batch's container, or, with `path`, of the container at that instance path. A face is a face of
+ * a body: `id` is the body and `faceId` the face. `"$name"` refers to an instance, body or other entity created
+ * earlier in the batch.
  */
 export const modelRefSchema = z.union([
   z.string().regex(LOCAL_REFERENCE),
-  z.object({ kind: z.enum(['instance', 'body', 'sketchEdge', 'sketchFace', 'guide', 'text', 'dimension', 'sectionPlane']), id }),
-  z.object({ kind: z.literal('face'), id: id.describe('The body.'), faceId: id }),
-  z.object({ kind: z.literal('edge'), id: id.describe('The body.'), edgeKey: z.string().describe('From model_query; valid only for the revision it was read at.') }),
+  z.object({ kind: z.enum(['instance', 'body', 'sketchEdge', 'sketchFace', 'guide', 'text', 'dimension', 'sectionPlane']), id, path: refPath }),
+  z.object({ kind: z.literal('face'), id: id.describe('The body.'), faceId: id, path: refPath }),
+  z.object({ kind: z.literal('edge'), id: id.describe('The body.'), edgeKey: z.string().describe('From model_query; valid only for the revision it was read at.'), path: refPath }),
   z.object({
     body: idOrName.describe('The solid: its id, or "$name" of a solid made earlier in the batch.'),
     facing: direction.describe('The face\'s outward direction, within 1 degree: [0, 0, 1] is the top, [0, -1, 0] the front.'),
@@ -140,6 +152,9 @@ export const modelOperationSchema = z.discriminatedUnion('op', [
     distance: meters.describe('Meters along the way the face faces: for a drawn shape, its normal; for a face of a solid, outward, so positive adds material and negative cuts in.'),
     mode: z.enum(['merged', 'new_body']).optional().describe('Face of a solid only: merged (default) changes that solid; new_body makes the pulled part a separate solid.') })
     .describe('Push or pull a face. A loose face becomes a new solid, using up the face and its edges. A face of a solid, or a shape drawn on it, changes that solid: pull to add, push in to cut a pocket or a hole through. Returns the solid; as names it.'),
+  z.object({ op: z.literal('boolean_part'), as: localName.optional(), mode: z.enum(['union','subtract','intersect']), target:modelRefSchema, tool:modelRefSchema,
+    keepTool:z.boolean().optional(), scope:z.enum(['placement','shared']).optional() })
+    .describe('Boolean two captured physical parts in descendant containers. Results stay in the target container; target identity survives. Default: retain tool and isolate the edited placement. Refuses empty results and cuts removing no volume. This does not validate manufacturing groove depth.'),
   z.object({ op: z.literal('union'), as: localName.optional(), refs: z.array(modelRefSchema).min(2).max(100).describe('Solids that touch or overlap; the first one survives.') })
     .describe('Join solids into one. Solids that do not touch cannot join: group them instead.'),
   z.object({ op: z.literal('subtract'), as: localName.optional(), target: modelRefSchema.describe('The solid to cut.'),
@@ -166,6 +181,13 @@ export const modelOperationSchema = z.discriminatedUnion('op', [
     .describe('Sweep a profile face along a path, starting at the end nearest the profile, to make a solid such as a moulding, a rail or a turned part. Draw the profile square to the path where they meet.'),
   z.object({ op: z.literal('add_box'), as: localName.optional(), min: point.describe('One corner: the smallest x, y and z.'), max: point.describe('The opposite corner: the largest x, y and z.') })
     .describe('Add a rectangular solid with its sides along the container\'s axes, between two opposite corners; each side must be longer than zero. Returns the solid\'s id. A part such as a cabinet side or a shelf is one box, made into its own group or component.'),
+  z.object({ op: z.literal('add_prism'), as: localName.optional(), points: pointList.min(3), holes: z.array(pointList.min(3)).max(100).optional(), normal: shapeNormal,
+    distance: meters, extrusionDirection: direction.optional(), referenceFrame: z.array(meters).length(16).optional(), smoothSides: z.boolean().optional(), closedCurve: z.boolean().optional() })
+    .describe('Extrude a simple planar profile into a new independent solid without drawing on or changing existing bodies. Holes must lie inside the outer loop. distance is signed along normal; smoothSides smooths joins between adjacent side faces.'),
+  z.object({ op: z.literal('add_part'), as: localName.optional(), container: z.union([instancePath,z.string().regex(LOCAL_REFERENCE)]).optional().describe('Descendant assembly path, or a body alias whose containing path is reused. Default: this batch container.'),
+    scope: z.enum(['placement','shared']).optional(), points: pointList.min(3), holes: z.array(pointList.min(3)).max(100).optional(), normal: shapeNormal,
+    distance: meters, extrusionDirection: direction.optional(), referenceFrame: z.array(meters).length(16).optional(), smoothSides: z.boolean().optional(), closedCurve: z.boolean().optional(), componentName:z.string().trim().min(1).max(200).optional() })
+    .describe('Create one independent physical part from a world-space profile. distance is signed physical meters along the world extrusion direction; referenceFrame is also world-space. Placement scope separates shared ancestor definitions only as needed. The live editing context is preserved.'),
   z.object({ op: z.literal('fillet_edges'), body: modelRefSchema.describe('The solid.'), edges: edgeSelectors, radius: z.number().positive().finite(),
     segments: z.number().int().min(3).max(96).optional().describe('Faces a full circle of rounding would have; default 24.') })
     .describe('Round over edges of a solid, such as the top edges of a table top ({face: {facing: [0, 0, 1]}}) or a bead along a face frame\'s opening ({face: {facing: [0, -1, 0]}, which: "inner"}). A chain that turns from an outside edge to an inside one is rounded in parts, each ending on the face across its end. A radius too big for the edge\'s faces fails with invalid_geometry and the largest radius that fits.'),
@@ -206,6 +228,8 @@ export const modelOperationSchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('add_guide'), as: localName.optional(), point,
     direction: direction.optional().describe('An endless guide line through point.'), end: point.optional().describe('A guide segment from point to end.') })
     .describe('Add a construction guide: a point, a line or a segment. Guides print nowhere and are not geometry.'),
+  z.object({ op: z.literal('add_guides'), segments: z.array(z.tuple([point, point])).min(1).max(MODEL_LIMITS.pointsPerBatch / 2) })
+    .describe('Add a bounded set of construction guide segments as one operation. Returns their references; creates no body or sketch face.'),
   z.object({ op: z.literal('add_dimension'), as: localName.optional(), start: point, end: point,
     offset: vector.describe('From the measured points to the dimension line, such as [0, -0.1, 0] to put it in front.') })
     .describe('Add a linear dimension between two points.'),
@@ -248,6 +272,11 @@ export const modelOperationSchema = z.discriminatedUnion('op', [
     reverse: z.boolean().optional().describe('Keep the other side.') }),
   z.object({ op: z.literal('set_material'), materialId: idOrName, name: name.optional(), color: color.optional(), opacity: z.number().min(0).max(1).optional() })
     .describe('Change a material\'s name, color or opacity everywhere it is used.'),
+  z.object({ op: z.literal('add_material_appearance'), asset: z.string().min(1).max(100), as: localName.optional(), name: name.optional() }).describe('Create a material using a completed appearance staged by this extension session.'),
+  z.object({ op: z.literal('set_material_appearance'), asset: z.string().min(1).max(100), materialId: idOrName }).describe('Replace a material appearance using completed session staging; painted users and attached properties keep their identities.'),
+  z.object({ op: z.literal('duplicate_material'), materialId: idOrName, as: localName.optional(), name: name.optional() }).describe('Duplicate a material and its saved properties without changing its painted users.'),
+  z.object({ op: z.literal('remove_material'), materialId: idOrName }).describe('Delete a material; painted users revert to the default. The default material cannot be deleted.'),
+  z.object({ op: z.literal('purge_materials') }).describe('Remove materials the host considers unused.'),
   z.object({ op: z.literal('set_texture'), refs: refs.describe('Faces or solids painted with a textured material.'),
     grain: direction.nullable().describe('Run the visible wood grain along this direction on every face, such as [0, 0, 1] for vertical grain on a stile; null restores the default placement.') })
     .describe('Turn a texture, such as wood grain, on faces. Faces with no texture, a pattern with no grain (parquet), or end grain are skipped and listed in skipped.'),
@@ -261,6 +290,8 @@ export const modelOperationSchema = z.discriminatedUnion('op', [
     .describe('Give the placements their own copy of the component definition, so later edits change only them.'),
   z.object({ op: z.literal('place_component'), as: localName.optional(), definitionId: idOrName.describe('A component definition (not a group), or "$name" of a placement made earlier in the batch.'), position: point })
     .describe('Place another instance of a component with its origin at position. Returns its instance id.'),
+  z.object({ op: z.literal('transform'), as: copyName, refs, matrix: z.array(z.number().finite()).length(16), copy: z.boolean().optional() })
+    .describe('Apply an invertible affine matrix in the container coordinates.'),
   z.object({ op: z.literal('move'), as: copyName, refs, offset: point.describe('[dx, dy, dz] in meters.'), copy: z.boolean().optional().describe('Move a copy and leave the originals.'), copies: copies.optional() })
     .describe('Move entities by an offset. Returns the moved entities, or the copies.'),
   z.object({ op: z.literal('rotate'), as: copyName, refs, origin: point, axis: direction.describe('Rotation axis through origin, for example [0, 0, 1] to turn about the vertical.'),
@@ -283,6 +314,20 @@ export const modelOperationSchema = z.discriminatedUnion('op', [
     library: z.string().max(100).optional().describe('A key from model_material_library, such as Wood_Oak, instead of name and color: a textured material such as a wood veneer.') })
     .refine(o => (o.color === undefined) !== (o.library === undefined), 'Give either color or library.')
     .describe('Create a plain-color material, or add one from the built-in library. Returns its id; "$name" then works wherever a material id is accepted.'),
+  z.object({ op: z.literal('transform_part'), ref: modelRefSchema, worldMatrix: z.array(z.number().finite()).length(16) })
+    .describe('Transform one physical solid by an invertible affine world matrix, isolating shared ancestor geometry only as needed. Returns the resulting body reference; the target may be a descendant of this context.'),
+  z.object({ op: z.literal('place_fragment'), as: localName.optional(), fragment: z.string().regex(/^fragment_[a-f0-9]{32}$/),
+    container: z.union([instancePath, z.string().regex(LOCAL_REFERENCE)]).optional(), worldMatrix: z.array(z.number().finite()).length(16), independent: z.boolean().optional() })
+    .describe('Place a complete native snapshot owned by this extension runtime. worldMatrix transforms snapshot coordinates into world coordinates. Destination is this context or a descendant path/body-container alias; shared ancestors isolate. Components link unless independent is true. Returns the actual assembly root, retaining all native geometry and opaque properties.'),
+  z.object({op:z.literal('copy_physical'),as:localName.optional(),ref:modelRefSchema,container:z.union([instancePath,z.string().regex(LOCAL_REFERENCE)]).optional(),worldMatrix:z.array(z.number().finite()).length(16),independent:z.boolean().optional()})
+    .describe('Copy one captured body or assembly into a descendant container (path or a body alias). worldMatrix transforms the captured physical geometry; the destination isolates shared ancestors. Components remain linked unless independent is true; groups stay independent. Preserves native geometry and opaque attachments without changing the clipboard or live editing context.'),
+  z.object({ op:z.literal('stretch_physical'), as:localName.optional(), ref:modelRefSchema, scope:z.enum(['placement','shared']).optional(), anchor:point.optional(),
+    planes:z.array(z.object({normal:point,offset:z.number().finite(),side:z.enum(['positive','negative']),displacement:point})).min(1).max(32) })
+    .describe('Stretch one captured native solid or solid assembly using world-space planes (normal dot point = offset) and translations. Contributions classify original coordinates simultaneously. Optional world anchor stays fixed. Default placement scope isolates only necessary shared geometry; explicit shared scope edits all uses of the selected definition. Protects curves and retained details; unsupported drawings/display meshes are refused. Returns the actual root and affected refs in one atomic batch. This does not certify target fitting dimensions.'),
+  z.object({op:z.literal('copy_part'),as:localName.optional(),ref:modelRefSchema,container:z.union([instancePath,z.string().regex(LOCAL_REFERENCE)]).optional(),worldMatrix:z.array(z.number().finite()).length(16)})
+    .describe('Copy a body that is the sole entity in a component as another linked physical placement, returning its nested body reference. Loose bodies, groups and multi-entity components are refused.'),
+  z.object({ op: z.literal('paint_part'), ref: modelRefSchema, materialId: idOrName.nullable(), scope: z.enum(['placement', 'shared']) })
+    .describe('Assign a solid material in this context or a descendant. Placement scope isolates shared geometry as needed; shared scope paints every use of that body. Returns the resulting body reference.'),
   z.object({ op: z.literal('paint'), refs: refs.describe('Faces, solids, sketch faces, groups or placements.'),
     materialId: idOrName.nullable().describe('null restores the default material.'), side: z.enum(['front', 'back', 'both']).optional().describe('Face sides to replace; default front.'),
     recursive: z.boolean().optional().describe('true paints all nested parts and explicit face materials inside groups/components in one operation. Shared component definitions change every placement. Default false: groups only set an inherited material, leaving explicit child materials unchanged.') })
@@ -316,6 +361,7 @@ export type ModelBatch = z.infer<typeof modelBatchToolSchema>;
 // The query is a strict tool, so it spells these shapes out rather than referring to shared definitions.
 const queryPoint = z.tuple([meters, meters, meters]).describe('[x, y, z] in meters, in the coordinates of the container; z is up.');
 const queryDirection = z.tuple([meters, meters, meters]).refine(v => Math.hypot(...v) > 1e-9, 'A direction must not be zero.').describe('[x, y, z] direction; need not be unit length.');
+const projectionVector = z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]).refine(v => v.some(n => n !== 0), 'A projection vector must not be zero.');
 /** Field-selected, bounded read of one container's entities; nullable fields so the schema stays strict. */
 export const modelQuerySchema = z.object({
   container: instancePath.nullable().describe('null: the container open in the editor.'),
@@ -323,9 +369,10 @@ export const modelQuerySchema = z.object({
   ids: z.array(id).max(MODEL_LIMITS.entitiesPerQuery).nullable().describe('null: all. For faces and edges, the body ids whose faces or edges to list.'),
   facing: queryDirection.nullable().describe('Faces: keep faces whose outward normal is within 1 degree of this direction. Edges: keep edges running this way.'),
   containing: queryPoint.nullable().describe('Faces and edges: keep those that contain this point.'),
-  fields: z.array(z.enum(['bounds', 'geometry', 'appearance'])).nullable().describe('null: all. bounds: bounding boxes; geometry: transforms, points, normals, areas and volumes; appearance: materials and, for textured faces, the visible grain direction.'),
+  fields: z.array(z.enum(['bounds', 'geometry', 'appearance'])).nullable().describe(`null: all. bounds: bounding boxes; geometry: transforms, points, normals, areas, volumes and face outlines (outerLoop and holes, each loop simplified to at most ${MODEL_LIMITS.loopPointsPerFace} points, with truncated: true when that happened); appearance: materials and, for textured faces, the visible grain direction.`),
+  projection: z.tuple([projectionVector, projectionVector, projectionVector]).nullable().optional().describe('Bodies: bounds along three local linear projection vectors, including their scale. Exact vertex extents, no mesh transfer.'),
   offset: z.number().int().min(0).nullable(),
-  limit: z.number().int().min(1).max(MODEL_LIMITS.entitiesPerQuery).nullable().describe('null: 50.'),
+  limit: z.number().int().min(1).max(MODEL_LIMITS.entitiesPerQuery).nullable().describe(`null: 50. A page of faces with geometry may end before the limit, once its loops hold ${MODEL_LIMITS.loopPointsPerQueryPage} points; next says where to continue.`),
 });
 export type ModelQuery = z.infer<typeof modelQuerySchema>;
 export const modelBuilderInfoSchema = z.object({ builder: z.string().describe('A builder name from this tool\'s description.') });
@@ -425,6 +472,8 @@ export interface ModelDocumentSnapshot {
   playing: boolean;
 }
 export interface ModelEntitySummary {
+  element?: { kind: 'face'; faceId: number; bodyVersion: number } | { kind: 'edge'; edgeKey: string; bodyVersion: number };
+
   ref: ModelRef;
   tagId?: number;
   hidden: boolean;
@@ -446,14 +495,27 @@ export interface ModelEntitySummary {
   /** Faces whose front shows a texture: whether the texture has its default placement (never turned). */
   defaultPlacement?: boolean;
   /** Solids. */
+  /** Changes when the body geometry changes; independent of metadata and document revision. */
+  geometryVersion?: number;
+  /** Body reference-to-container affine transform, independent of container axes. */
+  referenceFrame?: number[];
+  referenceBounds?: ModelBounds;
+  projectedBounds?: ModelBounds;
   volume?: number;
   area?: number;
   faceCount?: number;
-  /** Faces. */
+  /**
+   * Faces and sketch faces. `outerLoop` runs counterclockwise about `normal` and each hole in `holes` runs clockwise,
+   * so a loop's signed area about the normal is positive for the outline and negative for every hole. Loops are in
+   * the container's coordinates and do not repeat their first point. A loop of more than `MODEL_LIMITS.loopPointsPerFace`
+   * points is simplified to that many, dropping the points that change its outline least, and `truncated` is then
+   * true; `loopPointCount` is the outer loop's count before simplification.
+   */
   normal?: ModelVec3;
   outerLoop?: ModelVec3[];
   loopPointCount?: number;
-  holes?: number;
+  holes?: ModelVec3[][];
+  truncated?: boolean;
   /** Sketch edges and edges of solids. */
   start?: ModelVec3;
   /** Edges of solids: their length and the two faces they join. */
@@ -496,6 +558,8 @@ export interface ModelNameEntry { kind: string; id: number; definitionId?: numbe
 /** A part of a generated object; `path` runs from the model down to and including it. `copies` counts the placements sharing its definition. */
 export interface ModelBuilderPart { name: string; id: number; path: number[]; size?: [number, number, number]; copies?: number }
 export interface ModelBatchResult {
+  /** Extension calls may attach a same-transaction metadata result. */
+  metadata?: MetadataApplyResult | undefined;
   ok: true;
   revision: number;
   label: string;
@@ -525,7 +589,7 @@ export const MODEL_TOOLS = {
   },
   query: {
     name: 'model_query',
-    description: 'List entities of one container (the model, or an open group or component): groups and component placements, solids, loose edges and faces, guides, texts, dimensions and section planes, with ids, tags, bounds, transforms and materials in meters. Faces and edges of solids are listed only when kinds includes face or edge, filtered by body id, direction or a point on them; edge keys are valid only for the revision they were read at. Paged: pass offset from the previous result\'s next.',
+    description: 'List entities of one container (the model, or an open group or component): groups and component placements, solids, loose edges and faces, guides, texts, dimensions and section planes, with ids, tags, bounds, transforms and materials in meters. Faces and edges of solids are listed only when kinds includes face or edge, filtered by body id, direction or a point on them; edge keys are valid only for the revision they were read at. Geometry gives each face\'s outline and holes as loops of up to 512 points, simplified and flagged truncated past that. Paged: pass offset from the previous result\'s next, which comes before the limit when a page of face loops is large.',
   },
   applyOperations: {
     name: 'model_apply_operations',
@@ -545,7 +609,7 @@ export const MODEL_TOOLS = {
   },
   view: {
     name: 'model_view',
-    description: 'Change what the requester sees, with no undo entry: set the camera (exact, or framed around the model, the selection or entities from a view direction), go to a scene or the next or previous one, or play and stop the animation. Returns the camera, the active scene and whether the animation is playing. Fails with unavailable where there is no viewport.',
+    description: 'Change what the requester sees, with no undo entry: set the camera (exact, or framed around the model, the selection or entities from a view direction; an entity of another container is named with its path), go to a scene or the next or previous one, or play and stop the animation. Returns the camera, the active scene and whether the animation is playing. Fails with unavailable where there is no viewport.',
   },
   render: {
     name: 'model_render',

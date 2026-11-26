@@ -59,6 +59,10 @@ export type { Script, ScriptStep, ScriptStepResult, ScriptRunOptions } from './s
 export * from './host/DocumentHost';
 export * from './host/services';
 export * from './commands/model';
+export * from './commands/physicalCopy';
+export * from './commands/physicalStretch';
+export type { StretchPlane } from './commands/stretchGeometry';
+export * from './commands/nativePlacement';
 export * from './commands/sketch';
 export * from './commands/sketchQueries';
 export * from './commands/pushpull';

@@ -38,6 +38,7 @@ pub struct ExtrudeSketchRequest {
   pub polygon: Vec<Vec<Pt>>,
   pub distance: f64,
   pub next_face_id: f64,
+  pub validate_profile: bool,
 }
 
 /// Checked between pipeline stages; the op stops with `Aborted` once the kernel has been reset.
@@ -533,6 +534,7 @@ fn choose_id_for(body_run_id: u32, tool_run_id: u32, far_cap_id: Option<f64>) ->
 
 /// Extrude a sketch polygon into a new solid: the new-body path of push/pull without a source body.
 pub fn extrude_sketch(req: &ExtrudeSketchRequest, checkpoint: &dyn Checkpoint) -> Result<PushPullOutput, KernelError> {
+  if req.validate_profile { crate::profile_validation::validate_profile(&req.polygon)?; }
   if !req.distance.is_finite() || req.distance.abs() <= COPLANAR_TOL {
     return Err(KernelError::invalid("extrudeSketch.distance must be a non-zero finite number"));
   }

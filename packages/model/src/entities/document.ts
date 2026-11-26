@@ -11,6 +11,7 @@ import type {
   TagId,
   UnitSettings,
 } from '@pushform/core';
+import type { PluginData } from '../pluginData';
 import type { ModelAttribution } from '../attribution';
 import type { SceneLight } from '../environment';
 import type { ComponentDefinition } from './definition';
@@ -40,6 +41,8 @@ export interface NativeCatalogUnknownFields {
 
 /** Persistent immer-managed document state; selection, camera and tool state live outside. */
 export interface DocumentState {
+  /** Separate, document-owned plugin envelopes and opaque payload bytes. */
+  pluginData?: PluginData;
   nativeStyleUnknownFields?: Map<number, NativeCatalogUnknownFields>;
   nativeSceneUnknownFields?: Map<number, {
     required?: boolean; envelopeUnknown?: Uint8Array[];

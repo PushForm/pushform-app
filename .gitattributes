@@ -1,0 +1,2 @@
+# Node module shebangs must keep LF line endings on every platform.
+*.mjs text eol=lf

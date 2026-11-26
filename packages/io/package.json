@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./vector": "./src/vector.ts",
+    "./native-files": "./src/nativeFileClient.ts",
     "./attribution": "./src/attributionPackage.ts"
   },
   "types": "./src/index.ts",

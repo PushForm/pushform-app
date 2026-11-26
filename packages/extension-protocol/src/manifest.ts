@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { z } from 'zod';
-import { ACTIVATION_EVENTS, EXTENSION_EDITORS, EXTENSION_PERMISSIONS, EXTENSION_TARGETS, TARGET_ACTIVATION } from './vocabulary.ts';
+import { metadataDeclarationSchema } from './metadata.ts';
+import { inspectorDeclarationSchema } from './inspector.ts';
+import { UI_ICONS, type UiIcon } from './ui.ts';
+import { ACTIVATION_EVENTS, EXTENSION_EDITORS, EXTENSION_PERMISSIONS, EXTENSION_TARGETS, TARGET_ACTIVATION, TOOLBAR_CATEGORIES } from './vocabulary.ts';
 
 /**
  * Extension manifest, the `manifest.json` at the root of every extension package. It is the only description of an
@@ -27,6 +30,24 @@ export const MANIFEST_LIMITS = {
   wasmMaxPages: 4096,
   wasmMaxTimeoutMs: 10 * 60 * 1000,
 } as const;
+
+/**
+ * Bounds on an icon image an extension ships: the extension's own icon, shown in the activity bar and on its tabs,
+ * and the icons of its toolbar buttons. A PNG, square, from 64 to 512 pixels a side, at most 256 KiB.
+ */
+export const ICON_LIMITS = {
+  bytes: 256 * 1024,
+  minPx: 64,
+  maxPx: 512,
+} as const;
+
+/**
+ * Whether an icon value names one of the host's own icons (`UI_ICONS`) rather than a PNG file in the package. A host
+ * icon has no slash and no file extension; anything else must be a package path.
+ */
+export function isHostIcon(value: string): value is UiIcon {
+  return !value.includes('/') && !value.includes('.') && (UI_ICONS as readonly string[]).includes(value);
+}
 
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
@@ -54,6 +75,10 @@ const semver = z.string().regex(SEMVER, 'must be a semantic version such as 1.2.
 const versionRange = z.string().max(100).refine((range) => parseRange(range) !== null,
   { message: 'must be a version range such as ^0.1.0 or >=1.0.0 <2.0.0' });
 
+/** A host icon name, or a package path to a PNG file (checked against the file when the package is validated). */
+const iconRef = z.string().max(MANIFEST_LIMITS.pathChars).refine((value) => isHostIcon(value) || (isPackagePath(value) && /\.png$/i.test(value)),
+  { message: 'must be one of the host icon names or a .png file inside the package' });
+
 const contribution = z.strictObject({
   target: z.enum(EXTENSION_TARGETS),
   id: z.string().max(200),
@@ -61,6 +86,11 @@ const contribution = z.strictObject({
   activation: z.enum(ACTIVATION_EVENTS).optional(),
   /** Permissions the contribution needs; each must also be requested by the manifest. */
   capabilities: z.array(z.enum(EXTENSION_PERMISSIONS)).max(EXTENSION_PERMISSIONS.length).optional(),
+  /** `model.toolbar` only: the toolbar group the button joins. */
+  category: z.enum(TOOLBAR_CATEGORIES).optional(),
+  /** `model.toolbar` only: the button's icon. */
+  icon: iconRef.optional(),
+  inspector: inspectorDeclarationSchema.optional(),
 });
 
 const destination = z.strictObject({
@@ -115,7 +145,11 @@ export const extensionManifestSchema = z.strictObject({
   name: text,
   publisher: text,
   description: z.string().max(2000).optional(),
-  icon: packagePath.optional(),
+  /**
+   * The extension's icon, in the activity bar and on its tabs: a host icon name or a PNG in the package. Without it
+   * the host's generic extension icon is used.
+   */
+  icon: iconRef.optional(),
   version: semver,
   apiVersion: versionRange,
   /** The single JavaScript entry point: an ES module exporting `activate(context)` and optionally `deactivate()`. */
@@ -126,6 +160,7 @@ export const extensionManifestSchema = z.strictObject({
   destinations: z.array(destination).max(MANIFEST_LIMITS.destinations).default([]),
   wasm: z.array(wasmModule).max(MANIFEST_LIMITS.wasmModules).default([]),
   settings: settings.optional(),
+  metadata: metadataDeclarationSchema.optional(),
   defaultLocale: z.string().regex(LOCALE),
   /** Locale files by language tag, for example `{ "fr": "locales/fr.json" }`. */
   locales: z.record(z.string().regex(LOCALE), packagePath).default({}),
@@ -140,12 +175,20 @@ export const extensionManifestSchema = z.strictObject({
   if (permissions.size !== manifest.permissions.length) issue(['permissions'], 'lists a permission more than once');
   const ids = new Set<string>();
   manifest.contributions.forEach((c, i) => {
+    if (c.inspector !== undefined && c.target !== 'model.inspector.block') issue(['contributions', i, 'inspector'], 'applies only to model.inspector.block');
     const suffix = c.id.startsWith(manifest.id) ? c.id.slice(manifest.id.length) : null;
     if (suffix === null || !CONTRIBUTION_SUFFIX.test(suffix)) issue(['contributions', i, 'id'], `must start with "${manifest.id}."`);
     if (ids.has(c.id)) issue(['contributions', i, 'id'], 'is declared twice');
     ids.add(c.id);
     if (c.activation && c.activation !== TARGET_ACTIVATION[c.target])
       issue(['contributions', i, 'activation'], `must be ${TARGET_ACTIVATION[c.target]} for ${c.target}`);
+    if (c.target === 'model.toolbar') {
+      if (!c.category) issue(['contributions', i, 'category'], `is required for ${c.target}`);
+      if (!c.icon) issue(['contributions', i, 'icon'], `is required for ${c.target}`);
+    } else {
+      if (c.category !== undefined) issue(['contributions', i, 'category'], 'applies only to model.toolbar');
+      if (c.icon !== undefined) issue(['contributions', i, 'icon'], 'applies only to model.toolbar');
+    }
     c.capabilities?.forEach((p, j) => {
       if (!permissions.has(p)) issue(['contributions', i, 'capabilities', j], `${p} is not in the manifest's permissions`);
     });

@@ -24,7 +24,7 @@ export type NativeFileRequest =
   | { type: 'encode-native-model'; state: DocumentState; images: readonly ModelArchiveImage[] }
   | { type: 'encode-model'; content: string; images: readonly ModelArchiveImage[] }
   | { type: 'encode-layout'; content: string }
-  | { type: 'decode-model'; bytes: Uint8Array }
+  | { type: 'decode-model'; bytes: Uint8Array;decodedBytes?:number;nativeOnly?:boolean }
   | { type: 'decode-layout'; bytes: Uint8Array };
 
 /** A decoded .pf with a compact semantic saved-state identity, never a JSON copy of the model. */
@@ -45,6 +45,7 @@ export function runNativeFileRequest<R extends NativeFileRequest>(request: R): N
     case 'encode-model': return encodeModelArchiveSync(request.content, request.images) as NativeFileResult<R>;
     case 'encode-layout': return encodeLayoutArchiveSync(request.content) as NativeFileResult<R>;
     case 'decode-model': {
+      if(request.nativeOnly)throw new Error('Choose a current native model file.');
       const file = decodeModelFile(request.bytes);
       return { ...file, contentIdentity: modelContentIdentity(file.state) } as NativeFileResult<R>;
     }
@@ -55,17 +56,18 @@ export function runNativeFileRequest<R extends NativeFileRequest>(request: R): N
   }
 }
 
-export async function runNativeFileRequestAsync<R extends NativeFileRequest>(request: R): Promise<NativeFileResult<R>> {
+export async function runNativeFileRequestAsync<R extends NativeFileRequest>(request: R,signal?:AbortSignal): Promise<NativeFileResult<R>> {
+  signal?.throwIfAborted();
   if (request.type === 'encode-native-layout') return await encodeNativeLayoutFile(request.state) as NativeFileResult<R>;
   if (request.type === 'decode-layout' && isNativeModelFile(request.bytes)) {
     const bytes = request.bytes;
     const state = await decodeNativeLayoutFile({ size: bytes.length, read: async (offset, length) => bytes.subarray(offset, offset + length) });
     return { state, contentIdentity: layoutContentIdentity(state) } as NativeFileResult<R>;
   }
-  if (request.type === 'encode-native-model') return await encodeNativeModelFile(request.state, new Map(request.images.map(image => [image.id, image.blob]))) as NativeFileResult<R>;
+  if (request.type === 'encode-native-model') return await encodeNativeModelFile(request.state, new Map(request.images.map(image => [image.id, image.blob])),signal?{signal}:{}) as NativeFileResult<R>;
   if (request.type === 'decode-model' && isNativeModelFile(request.bytes)) {
     const bytes = request.bytes;
-    const file = await decodeNativeModelFile({ size: bytes.length, read: async (offset, length) => bytes.subarray(offset, offset + length) });
+    const file = await decodeNativeModelFile({ size: bytes.length, read: async (offset, length) => bytes.subarray(offset, offset + length) },{...(signal?{signal}:{}),...(request.decodedBytes===undefined?{}:{decodedBytes:request.decodedBytes})});
     return { ...file, contentIdentity: modelContentIdentity(file.state) } as NativeFileResult<R>;
   }
   return runNativeFileRequest(request);
@@ -92,18 +94,22 @@ export function nativeFileTransferables(result: unknown): ArrayBuffer[] {
   return [...buffers];
 }
 
-function dispatch<R extends NativeFileRequest>(request: R, prepare?: () => { copy: R; transfer: ArrayBuffer[] }): Promise<NativeFileResult<R>> {
-  if (typeof Worker === 'undefined') return runNativeFileRequestAsync(request);
+async function dispatch<R extends NativeFileRequest>(request: R, prepare?: () => { copy: R; transfer: ArrayBuffer[] },signal?:AbortSignal): Promise<NativeFileResult<R>> {
+  signal?.throwIfAborted();
+  const inline=async()=>{signal?.throwIfAborted();const result=await runNativeFileRequestAsync(request,signal);signal?.throwIfAborted();return result;};
+  if (typeof Worker === 'undefined') return inline();
   return new Promise((resolve, reject) => {
     let worker: Worker;
     try {
       worker = new Worker(new URL('./nativeFileWorker.ts', import.meta.url), { type: 'module' });
     } catch {
       // No worker support in this host: do the work here rather than failing the save or open.
-      resolve(runNativeFileRequestAsync(request)); return;
+      resolve(inline()); return;
     }
     let settled = false;
-    const finish = (): void => { settled = true; worker.terminate(); };
+    const aborted=()=>{if(!settled){finish();reject(signal?.reason??new DOMException('The native file operation was cancelled.','AbortError'));}};
+    const finish = (): void => { settled = true; worker.terminate();signal?.removeEventListener('abort',aborted); };
+    signal?.addEventListener('abort',aborted,{once:true});if(signal?.aborted){aborted();return;}
     worker.onmessage = (event: MessageEvent<WorkerMessage>) => {
       if (settled) return;
       finish();
@@ -112,7 +118,7 @@ function dispatch<R extends NativeFileRequest>(request: R, prepare?: () => { cop
       try { resolve(checkResult(request, msg.result)); } catch (cause) { reject(cause); }
     };
     // The worker script failing to load leaves the request intact; finish it inline.
-    worker.onerror = () => { if (!settled) { finish(); resolve(runNativeFileRequestAsync(request)); } };
+    worker.onerror = () => { if (!settled) { finish(); resolve(inline()); } };
     worker.onmessageerror = () => { if (!settled) { finish(); reject(new Error('Could not receive the document result.')); } };
     try {
       const { copy, transfer } = prepare?.() ?? { copy: request, transfer: [] };
@@ -154,9 +160,9 @@ export function encodeModelArchive(content: string, images: readonly ModelArchiv
 }
 
 /** Capture immutable state and asset entries before dispatch; live geometry buffers are never detached. */
-export function encodeModelSnapshot(state: DocumentState, images: readonly ModelArchiveImage[]): Promise<Uint8Array> {
+export function encodeModelSnapshot(state: DocumentState, images: readonly ModelArchiveImage[],options:{signal?:AbortSignal}={}): Promise<Uint8Array> {
   const request = { type: 'encode-native-model', state, images } as const;
-  return dispatch(request);
+  return dispatch(request,undefined,options.signal);
 }
 
 /** Compress a captured `layoutJson` snapshot into .pfl bytes. */
@@ -172,12 +178,12 @@ export function encodeLayoutSnapshot(state: LayoutDocumentState): Promise<Uint8A
 }
 
 /** Inflate, parse, and hydrate a .pf archive; the caller's bytes are left intact. */
-export function openModelFile(bytes: Uint8Array): Promise<OpenedModelFile> {
-  const request = { type: 'decode-model', bytes } as const;
+export function openModelFile(bytes: Uint8Array,options:{signal?:AbortSignal;decodedBytes?:number;nativeOnly?:boolean}={}): Promise<OpenedModelFile> {
+  const request = { type: 'decode-model', bytes,...(options.decodedBytes===undefined?{}:{decodedBytes:options.decodedBytes}),...(options.nativeOnly===undefined?{}:{nativeOnly:options.nativeOnly}) } as const;
   return dispatch(request, () => {
     const copy = new Uint8Array(bytes);
     return { copy: { ...request, bytes: copy }, transfer: [copy.buffer as ArrayBuffer] };
-  });
+  },options.signal);
 }
 
 /** Inflate, parse, and validate a .pfl archive; the caller's bytes are left intact. */

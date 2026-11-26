@@ -66,4 +66,14 @@ describe('complete packed body staging', () => {
     await expect(readNativeBody({ ...ref, nextFaceId: 0 }, new NativeColumnReader(opened, new NativeColumnBudget()), properties, () => true, () => true, async () => {})).rejects.toThrow();
     await expect(readNativeBody(ref, new NativeColumnReader(opened, new NativeColumnBudget()), properties, () => true, () => false, async () => {})).rejects.toThrow();
   });
+
+  it('round trips an affine reference frame and refuses malformed or singular frames', async () => {
+    const { ref } = await fixture();
+    const referenceFrame = [-2, 0, 0, 0, 0, .5, 0, 0, 0, 0, 1.3, 0, 2, 3, 1, 1];
+    const packed = encodeNativeBodyReference({ ...ref, referenceFrame });
+    expect(decodeNativeBodyReference(packed).referenceFrame).toEqual(referenceFrame);
+    for (const frame of [[], [...referenceFrame.slice(0, 15), 0], referenceFrame.map((value, index) => index === 0 ? 0 : value), referenceFrame.map((value, index) => index === 6 ? Infinity : value)]) {
+      expect(() => encodeNativeBodyReference({ ...ref, referenceFrame: frame })).toThrow();
+    }
+  });
 });

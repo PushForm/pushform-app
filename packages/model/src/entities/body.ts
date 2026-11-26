@@ -5,6 +5,7 @@ import type {
   FaceLocalId,
   Id,
   MaterialId,
+  Mat4,
   MeshData,
   Plane,
   PlaneBasis,
@@ -22,6 +23,8 @@ import type { NativeCatalogUnknownFields } from './document';
  * opaque value; the face layer (`faces`, `edges`, `imprints`, `curves`, `surfaces`) decorates it.
  */
 export interface Body extends CommonAttrs {
+  /** Reference coordinates carried by whole-body transforms; identity for older or newly created bodies. */
+  referenceFrame?: Mat4;
   nativeUnknownFields?: NativeCatalogUnknownFields;
   id: Id;
   /** Bumped on every mesh replacement; keys kernel caches and region caches. */

@@ -10,6 +10,7 @@ import { formatArea, formatLength, formatVolume, rgbToCss } from '../engine/form
 import { useSelectionRefs } from '../hooks/useSelection';
 import { describeSelection } from './entityInfo';
 import type { EntityInfo, InstanceInfo } from './entityInfo';
+import { ExtensionInspectors } from '../extensions/ExtensionInspectors';
 
 function Row({ label, children }: { label: string; children: ReactNode }): JSX.Element {
   return (
@@ -387,6 +388,7 @@ export function EntityInfoPanel(): JSX.Element {
     <div className="pf-entity-info">
       <h3 className="pf-ei-title">{info.title}</h3>
       <Fields state={state} info={info} refs={refs} />
+      <ExtensionInspectors state={state} refs={refs} />
     </div>
   );
 }

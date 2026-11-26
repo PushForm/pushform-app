@@ -13,6 +13,7 @@ import type { Plugin } from 'vite';
 export const EXTENSION_WORKER_MODULE = 'virtual:pushform-extension-worker';
 const RESOLVED = `\0${EXTENSION_WORKER_MODULE}`;
 export const WORKER_BOOTSTRAP_ENTRY = fileURLToPath(new URL('../../packages/extensions/src/runtime/web/workerBootstrap.ts', import.meta.url));
+export const NATIVE_HOST_ENTRY = fileURLToPath(new URL('../../packages/extensions/src/runtime/native/nativeHost.ts', import.meta.url));
 export const COMPUTE_BOOTSTRAP_ENTRY = fileURLToPath(new URL('../../packages/extensions/src/runtime/web/computeBootstrap.ts', import.meta.url));
 
 /** A bootstrap bundled as a minified classic script; the extension worker's by default. */
@@ -30,9 +31,9 @@ export function extensionWorkerPlugin(): Plugin {
     resolveId: (id) => (id === EXTENSION_WORKER_MODULE ? RESOLVED : null),
     async load(id) {
       if (id !== RESOLVED) return null;
-      const [worker, compute] = await Promise.all([bundleWorkerBootstrap(), bundleWorkerBootstrap(COMPUTE_BOOTSTRAP_ENTRY)]);
-      for (const input of [...worker.inputs, ...compute.inputs]) this.addWatchFile(fileURLToPath(new URL(input, `file://${process.cwd()}/`)));
-      return `export default ${JSON.stringify(worker.source)};\nexport const computeSource = ${JSON.stringify(compute.source)};`;
+      const [worker, compute, native] = await Promise.all([bundleWorkerBootstrap(), bundleWorkerBootstrap(COMPUTE_BOOTSTRAP_ENTRY), bundleWorkerBootstrap(NATIVE_HOST_ENTRY)]);
+      for (const input of [...worker.inputs, ...compute.inputs, ...native.inputs]) this.addWatchFile(fileURLToPath(new URL(input, `file://${process.cwd()}/`)));
+      return `export default ${JSON.stringify(worker.source)};\nexport const computeSource = ${JSON.stringify(compute.source)};\nexport const nativeHostSource = ${JSON.stringify(native.source)};`;
     },
   };
 }

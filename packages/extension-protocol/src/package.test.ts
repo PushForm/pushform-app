@@ -4,7 +4,7 @@ import { zipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
 import { extensionManifestSchema, satisfiesRange, type ExtensionManifestInput } from './manifest.ts';
 import {
-  ExtensionPackageError, MANIFEST_FILE, SIGNATURE_FILE, buildManifest, readPackageArchive, sha256Hex, validatePackage,
+  ExtensionPackageError, MANIFEST_FILE, SIGNATURE_FILE, buildManifest, pngSize, readPackageArchive, sha256Hex, validatePackage,
   type PackageProblem,
 } from './package.ts';
 
@@ -58,6 +58,14 @@ async function problemOf(run: Promise<unknown>): Promise<{ problem: PackageProbl
 }
 
 describe('validatePackage', () => {
+  it('hashes native model assets as data while still refusing executable content', async () => {
+    const files = await makePackage({}, { 'examples/cabinet.pf': new Uint8Array([8, 1, 18, 0]) });
+    await expect(validatePackage(files)).resolves.toMatchObject({ integrity: 'unsigned' });
+    files.set('examples/cabinet.pf', new Uint8Array([8, 2]));
+    expect(await problemOf(validatePackage(files))).toMatchObject({ problem: 'file.hash', path: 'examples/cabinet.pf' });
+    const executable = await makePackage({}, { 'examples/cabinet.pf': new Uint8Array([0x7f, 0x45, 0x4c, 0x46]) });
+    expect(await problemOf(validatePackage(executable))).toMatchObject({ problem: 'file.native', path: 'examples/cabinet.pf' });
+  });
   it('accepts a consistent unsigned package and reports its content hash', async () => {
     const files = await makePackage();
     const result = await validatePackage(files);
@@ -146,7 +154,7 @@ describe('validatePackage', () => {
   });
 
   it('requires declared icons and locale files to exist', async () => {
-    expect((await problemOf(validatePackage(await makePackage({ icon: 'icon.svg' })))).problem).toBe('icon.missing');
+    expect((await problemOf(validatePackage(await makePackage({ icon: 'icon.png' })))).problem).toBe('icon.missing');
     const locales = { en: 'locales/en.json', fr: 'locales/fr.json' };
     const partial = await makePackage({ locales }, { 'locales/en.json': encode('{}') });
     expect(await problemOf(validatePackage(partial))).toMatchObject({ problem: 'locale.missing', path: 'locales/fr.json' });
@@ -166,6 +174,48 @@ describe('validatePackage', () => {
   });
 });
 
+/** A PNG's signature and IHDR chunk with the given dimensions; enough of a PNG for the validator, padded to `bytes`. */
+export function png(width: number, height: number, bytes = 64): Uint8Array {
+  const out = new Uint8Array(Math.max(bytes, 24));
+  out.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
+  new DataView(out.buffer).setUint32(16, width);
+  new DataView(out.buffer).setUint32(20, height);
+  return out;
+}
+
+describe('icons', () => {
+  const toolbar = (icon: string) => [{ target: 'model.toolbar' as const, id: 'com.example.stairs.draw', name: 'Draw stairs', category: 'draw' as const, icon }];
+
+  it('reads a PNG\'s dimensions from its header', () => {
+    expect(pngSize(png(128, 96))).toEqual({ width: 128, height: 96 });
+    expect(pngSize(encode('<svg/>'))).toBeNull();
+    expect(pngSize(png(0, 10))).toBeNull();
+  });
+
+  it('accepts a square PNG within the limits, as the extension icon or a toolbar button', async () => {
+    const files = await makePackage({ icon: 'assets/icon.png', contributions: [...baseManifest.contributions, ...toolbar('assets/icon.png')] }, { 'assets/icon.png': png(128, 128) });
+    await expect(validatePackage(files)).resolves.toMatchObject({ manifest: { icon: 'assets/icon.png' } });
+  });
+
+  it('accepts one of the host\'s own icon names without a file', async () => {
+    await expect(validatePackage(await makePackage({ icon: 'saw-blade', contributions: [...baseManifest.contributions, ...toolbar('ruler')] }))).resolves.toBeDefined();
+    expect(extensionManifestSchema.safeParse({ ...baseManifest, files: {}, icon: 'sparkle' }).success).toBe(false);
+  });
+
+  it('refuses an icon that is not a PNG, too large, not square or outside 64 to 512 pixels', async () => {
+    const refused = async (icon: Uint8Array) => problemOf(validatePackage(await makePackage({ icon: 'icon.png' }, { 'icon.png': icon })));
+    expect(await refused(encode('<svg/>'))).toMatchObject({ problem: 'icon.invalid', path: 'icon.png' });
+    expect((await refused(png(256, 256, 256 * 1024 + 1))).problem).toBe('icon.invalid');
+    expect((await refused(png(128, 64))).problem).toBe('icon.invalid');
+    expect((await refused(png(32, 32))).problem).toBe('icon.invalid');
+    expect((await refused(png(1024, 1024))).problem).toBe('icon.invalid');
+    // A toolbar button's icon is checked the same way.
+    const button = await makePackage({ contributions: [...baseManifest.contributions, ...toolbar('button.png')] }, { 'button.png': png(100, 50) });
+    expect(await problemOf(validatePackage(button))).toMatchObject({ problem: 'icon.invalid', path: 'button.png' });
+    expect(extensionManifestSchema.safeParse({ ...baseManifest, files: {}, icon: 'icon.svg' }).success).toBe(false);
+  });
+});
+
 describe('manifest rules', () => {
   const parse = (overrides: Overrides) => extensionManifestSchema.safeParse({ ...baseManifest, files: {}, ...overrides });
 
@@ -179,6 +229,28 @@ describe('manifest rules', () => {
   it('ties activation events to targets and capabilities to requested permissions', () => {
     expect(parse({ contributions: [{ target: 'model.panel', id: 'com.example.stairs.p', name: 'P', activation: 'onCommand' }] }).success).toBe(false);
     expect(parse({ contributions: [{ target: 'model.panel', id: 'com.example.stairs.p', name: 'P', capabilities: ['file.export'] }] }).success).toBe(false);
+  });
+
+  it('knows the sidebar, panel and toolbar targets and their activation events', () => {
+    expect(parse({ contributions: [{ target: 'model.sidebar', id: 'com.example.stairs.side', name: 'Stairs', activation: 'onSidebarOpen' }] }).success).toBe(true);
+    expect(parse({ contributions: [{ target: 'model.sidebar', id: 'com.example.stairs.side', name: 'Stairs', activation: 'onPanelOpen' }] }).success).toBe(false);
+    expect(parse({ contributions: [{ target: 'model.panel', id: 'com.example.stairs.p', name: 'P', activation: 'onPanelOpen' }] }).success).toBe(true);
+    const button = { target: 'model.toolbar' as const, id: 'com.example.stairs.draw', name: 'Draw stairs', category: 'draw' as const, icon: 'ruler' };
+    expect(parse({ contributions: [button] }).success).toBe(true);
+    expect(parse({ contributions: [{ ...button, activation: 'onCommand' }] }).success).toBe(true);
+    expect(parse({ contributions: [{ ...button, activation: 'onPanelOpen' }] }).success).toBe(false);
+  });
+
+  it('needs a known toolbar category and an icon on toolbar buttons, and nowhere else', () => {
+    const button = { target: 'model.toolbar' as const, id: 'com.example.stairs.draw', name: 'Draw stairs', icon: 'ruler' };
+    expect(parse({ contributions: [button] }).success).toBe(false);
+    expect(parse({ contributions: [{ ...button, category: 'tools' as never }] }).success).toBe(false);
+    expect(parse({ contributions: [{ ...button, category: 'modify' }] }).success).toBe(true);
+    expect(parse({ contributions: [{ ...button, category: 'modify', icon: undefined }] }).success).toBe(false);
+    expect(parse({ contributions: [{ ...button, category: 'modify', icon: 'assets/draw.png' }] }).success).toBe(true);
+    expect(parse({ contributions: [{ ...button, category: 'modify', icon: 'assets/draw.svg' }] }).success).toBe(false);
+    expect(parse({ contributions: [{ target: 'model.command', id: 'com.example.stairs.c', name: 'C', category: 'draw' }] }).success).toBe(false);
+    expect(parse({ contributions: [{ target: 'model.command', id: 'com.example.stairs.c', name: 'C', icon: 'ruler' }] }).success).toBe(false);
   });
 
   it('requires network for destinations and model.egress exactly when a destination receives model data', () => {

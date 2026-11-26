@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 PushForm contributors
 import { z } from 'zod';
+import { copyPluginEntries, pluginIdentityMap } from '@pushform/model';
 import { planeBasis, planeFlip, PushFormError, v3dot, v3len, v3scale, v3sub } from '@pushform/core';
 import type { FaceLocalId, Id, ImageId, MaterialId, PlaneBasis, Vec3 } from '@pushform/core';
+
 import {
   base64ToBytes,
   materialAppearance,
@@ -29,6 +31,7 @@ import { draftContainerAt, requireContextPath, samePath } from './context';
 import { EntityRefSchema } from './sketch';
 import { surfaceRefs } from './sketchQueries';
 import { BUILTIN_LIBRARY, loadLibraryTexture, libraryMaterial } from './materialLibrary';
+import { capturePartOccurrence, isolatePartOccurrence, type ContainerIdentityChange } from './groups';
 import { positionTextureCommands } from '../tools/impl/PositionTexture';
 
 /**
@@ -47,6 +50,7 @@ const idSchema = z.number().int().nonnegative();
 const materialIdSchema = z.number().int().nonnegative().nullable();
 const textureSchema = z.object({
   imageId: idSchema,
+  imageName: z.string().min(1).max(200).optional(),
   widthM: z.number().positive(),
   heightM: z.number().positive(),
   /** Colorize the texture toward the material color. */
@@ -467,7 +471,8 @@ export const materialCreate = defineCommand({
       let texture: MaterialTexture | null = null;
       if (p.texture) {
         texture = { imageId: ensureDocumentImage(host, draft, p.texture.imageId), widthM: p.texture.widthM, heightM: p.texture.heightM, colorize: p.texture.colorize ?? false,
-          ...(p.texture.colorizeType ? { colorizeType: p.texture.colorizeType } : {}), ...(p.texture.grain ? { grain: p.texture.grain } : {}) };
+          ...(p.texture.colorizeType ? { colorizeType: p.texture.colorizeType } : {}), ...(p.texture.grain ? { grain: p.texture.grain } : {}),
+          ...(p.texture.imageName ? { imageName: p.texture.imageName } : {}) };
       }
       const appearance = p.appearance ? mergeAppearance(host, draft, undefined, p.appearance) : undefined;
       const m = createMaterial(draft, { appearance, name: p.name ?? 'Material', color: p.color as Rgb, alpha: p.alpha, texture });
@@ -510,8 +515,10 @@ export const materialUpdate = defineCommand({
         const prev = m.texture;
         const imageId = p.texture.imageId !== undefined ? ensureDocumentImage(host, draft, p.texture.imageId) : prev?.imageId;
         if (imageId === undefined) throw new PushFormError('command.params', 'material.update: a texture needs an imageId');
+        const imageName = p.texture.imageName ?? (imageId === prev?.imageId ? prev.imageName : undefined);
         m.texture = {
           imageId,
+          ...(imageName !== undefined ? { imageName } : {}),
           widthM: p.texture.widthM ?? prev?.widthM ?? 1,
           heightM: p.texture.heightM ?? prev?.heightM ?? 1,
           colorize: p.texture.colorize ?? prev?.colorize ?? false,
@@ -554,7 +561,12 @@ export const materialDuplicate = defineCommand({
   run(ctx, p): number {
     const host = hostOf(ctx);
     const src = requireMaterial(host.doc.state, p.id);
-    const id = host.edit('Duplicate Material', (draft) => createMaterial(draft, { name: src.name, color: src.color, alpha: src.alpha, texture: src.texture, appearance: src.appearance }).id as number);
+    const id = host.edit('Duplicate Material', (draft) => {
+      const id = createMaterial(draft, { name: src.name, color: src.color, alpha: src.alpha, texture: src.texture, appearance: src.appearance }).id as number;
+      copyPluginEntries(draft, pluginIdentityMap(new Map([[src.id, id]])));
+      return id;
+    });
+
     if (p.activate) activeMaterialOf(ctx).set(id);
     return id;
   },
@@ -825,6 +837,23 @@ export const paintApply = defineCommand({
   },
 });
 
+/** Assign a solid without widening a nested hit to its containing assembly. */
+export const paintPart = defineCommand({
+  id: 'paint.part', title: 'Paint Part', category: 'edit', undoable: true,
+  params: z.object({ ref: EntityRefSchema, materialId: materialIdSchema, scope: z.enum(['placement', 'shared']) }),
+  run(ctx, p): { ref: EntityRef; isolated: boolean; changes:ContainerIdentityChange[] } {
+    const host = hostOf(ctx), state = host.doc.state, materialId = normalizeMaterialId(state, p.materialId);
+    const ref = paramRefs([p.ref])[0]!;
+    capturePartOccurrence(host, ref, p.scope === 'placement');
+    return host.edit('Paint Part', draft => {
+      const result = p.scope === 'placement' ? isolatePartOccurrence(draft, ref) : { ref, isolated: false, changes:[] };
+      const { path, id: bodyId } = result.ref;
+      applyTargets(draft, path, [{ kind: 'body', id: bodyId, sides: ['front', 'back'] }], materialId);
+      return result;
+    });
+  },
+});
+
 export const paintSample = defineCommand({
   id: 'paint.sample',
   title: 'Sample Material',
@@ -977,6 +1006,7 @@ export const materialCommands: readonly AnyCommand[] = [
   materialSelectFaces,
   paintApply,
   paintSample,
+  paintPart,
   texturePosition,
   textureReset,
   textureProjected,

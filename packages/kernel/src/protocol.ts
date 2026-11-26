@@ -113,6 +113,8 @@ export interface ExtrudeSketchRequest {
   polygon: PolygonsWithHoles;
   distance: number;
   nextFaceId: number;
+  /** Reject crossing/touching contours rather than repairing them. Validated in the kernel worker. */
+  validateProfile?: boolean;
 }
 export interface BooleanRequest {
   type: 'boolean';

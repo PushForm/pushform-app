@@ -19,7 +19,8 @@
     "@pushform/io": "workspace:*",
     "@pushform/layout": "workspace:*",
     "@pushform/model": "workspace:*",
-    "es-module-lexer": "^2.3.2"
+    "es-module-lexer": "^2.3.2",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@pushform/kernel": "workspace:*",

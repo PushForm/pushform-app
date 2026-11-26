@@ -100,6 +100,24 @@ describe('lockDownRuntime', () => {
     expect(() => Object.defineProperty(url, 'createObjectURL', { value: () => 'again' })).toThrow();
     expect(() => Object.defineProperty(scope, 'Worker', { value: () => {} })).toThrow();
   });
+
+  it('closes persistent storage on named origins, including prototype access to navigator storage', () => {
+    const { scope, proto } = fakeWorkerScope();
+    const navigatorPrototype = { storage: { getDirectory: () => 'files' }, storageBuckets: {}, serviceWorker: {} };
+    scope.navigator = Object.create(navigatorPrototype);
+    Object.assign(proto, { indexedDB: { open: () => 'database' }, caches: { open: () => 'cache' }, cookieStore: {}, BroadcastChannel: class {} });
+    lockDownRuntime(scope);
+    for (const name of ['indexedDB', 'caches', 'cookieStore', 'BroadcastChannel']) {
+      expect(scope[name]).toBeUndefined();
+      expect(Reflect.get(proto, name)).toBeUndefined();
+      expect(() => Object.defineProperty(proto, name, { value: {} })).toThrow();
+    }
+    for (const name of ['storage', 'storageBuckets', 'serviceWorker']) {
+      expect(Reflect.get(scope.navigator as object, name)).toBeUndefined();
+      expect(Reflect.get(navigatorPrototype, name)).toBeUndefined();
+      expect(() => Object.defineProperty(navigatorPrototype, name, { value: {} })).toThrow();
+    }
+  });
 });
 
 describe('runtime frame', () => {

@@ -15,6 +15,8 @@ export type TextureGrain = 'width' | 'height' | 'none';
 
 export interface MaterialTexture {
   imageId: ImageId;
+  /** Source filename for this material when identical pixels are shared by differently named images. */
+  imageName?: string;
   widthM: number;
   heightM: number;
   /** The texture is colorized toward the material color; false shows its image colors. */

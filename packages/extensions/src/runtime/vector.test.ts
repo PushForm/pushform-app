@@ -98,6 +98,18 @@ describe('ui.print', () => {
   const label = (id: string, width: number, height: number) => ({ type: 'vector', id, label: `Labels ${id}`, units: 'length',
     bounds: { x: 0, y: 0, width, height }, styles: [{}], shapes: [{ kind: 'rect', x: 0, y: 0, width, height, style: 0 }] });
 
+  it('keeps text bounds local to its transform so PDF alignment cannot shift a later label column off paper', () => {
+    const view = validateUiTree({ ...label('columns', 0.2, 0.3), shapes: [
+      { kind: 'text', text: 'Left label', x: 0.05, y: 0.04, size: 0.004, anchor: 'middle', style: 0 },
+      { kind: 'text', text: 'Right label', x: 0.15, y: 0.04, size: 0.004, anchor: 'middle', style: 0 },
+    ] }) as UiVector;
+    const page = vectorPage(view, { width: 200, height: 300 });
+    expect(page.items).toMatchObject([
+      { kind: 'text', point: [0, 0], bounds: [0, -4, 24, 0], matrix: [1, -0, 0, 1, 50, 40] },
+      { kind: 'text', point: [0, 0], bounds: [0, -4, 26.4, 0], matrix: [1, -0, 0, 1, 150, 40] },
+    ]);
+  });
+
   it('centers a drawing that fits at its real size, and scales down one that does not', () => {
     const small = vectorPage(validateUiTree(label('a', 0.1, 0.05)) as UiVector, { width: 210, height: 297 });
     expect(small).toMatchObject({ width: 210, height: 297 });
@@ -121,9 +133,30 @@ describe('ui.print', () => {
     expect(requests[0]!.pages).toHaveLength(2);
     outcome = null;
     await expect(print(input)).rejects.toMatchObject({ code: 'cancelled' });
-    await expect(print({ ...input, components: ['r'] })).rejects.toThrow(/not a vector view/);
+    outcome = 'printed';
+    // A stack of vector views prints each of them.
+    expect(await print({ ...input, components: ['r'] })).toEqual({ outcome: 'printed' });
+    expect(requests.at(-1)!.pages).toHaveLength(2);
+    await expect(print({ ...input, components: ['nope'] })).rejects.toThrow(/not shown/);
     await expect(print({ ...input, page: { width: 5, height: 1 } })).rejects.toMatchObject({ code: 'validation.failed' });
     await expect(vectorPrintServices(manifest, () => ui, null)['ui.print']!(input, {} as never)).rejects.toMatchObject({ code: 'unavailable' });
     expect(methodPermission('ui', 'print')).toBe('file.export');
   });
+});
+
+it('retains ancestor display units when only a nested table is printed', async () => {
+  const manifest = { name: 'Parts', contributions: [{ target: 'model.panel', id: 'p', name: 'P' }] } as unknown as ExtensionManifest;
+  const ui = new ExtensionUiHost(manifest, () => {});
+  ui.services()['ui.mount']!({ target: 'p', seq: 1, tree: { type: 'stack', id: 'root',
+    displayUnits: { lengthUnit: 'in', format: 'decimal', lengthPrecision: 2 }, children: [
+      { type: 'table', id: 'parts', label: 'Parts', columns: [{ id: 'length', label: 'Length', kind: 'number', quantity: 'length' }],
+        rows: [{ id: 'one', cells: { length: 0.0254 } }] },
+    ] } }, {} as never);
+  let request: PrintRequest | undefined;
+  const service = vectorPrintServices(manifest, () => ui, {
+    formatter: (_document, units) => () => units?.lengthUnit === 'in' ? 'INCH' : 'MODEL',
+    print: async value => { request = value; return 'printed'; },
+  })['ui.print']!;
+  await service({ target: 'p', components: ['parts'], page: { width: 0.21, height: 0.297 }, purpose: 'Print job parts' }, { currentDocument: () => 'doc' } as never);
+  expect(request!.pages.flatMap(page => page.items).some(item => item.kind === 'text' && item.text === 'INCH')).toBe(true);
 });

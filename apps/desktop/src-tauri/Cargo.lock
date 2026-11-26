@@ -3108,6 +3108,8 @@ dependencies = [
  "clipboard-rs",
  "log",
  "pushform-native-kernel",
+ "pushform-extension-runtime",
+
  "pushform-step-reader",
  "serde",
  "serde_json",
@@ -3126,6 +3128,19 @@ version = "0.1.0"
 dependencies = [
  "manifold-csg",
  "manifold-csg-sys",
+]
+
+[[package]]
+name = "pushform-extension-runtime"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tao",
+ "uuid",
+ "windows-sys 0.61.2",
+ "wry",
+
 ]
 
 [[package]]

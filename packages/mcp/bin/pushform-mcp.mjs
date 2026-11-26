@@ -5,7 +5,7 @@
 // pushform-mcp. Workspace packages export TypeScript sources, which Node cannot run, so
 // this launcher bundles src/cli.ts with esbuild into a temporary module and runs it. The Rust kernel's
 // WebAssembly glue stays external, loaded from where the kernel resolves it, so its WASM file is found beside it.
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -26,6 +26,25 @@ const result = await build({
       name: 'kernel-wasm-external',
       setup(b) {
         b.onResolve({ filter: /pushform-kernel\.js$/ }, (args) => ({ path: pathToFileURL(join(dirname(args.importer), args.path)).href, external: true }));
+      },
+    },
+    {
+      // The bundle runs from a temporary directory, so a workspace source's `new URL('./asset', import.meta.url)`
+      // (the material library's textures) must keep pointing beside that source file.
+      name: 'source-import-meta-url',
+      setup(b) {
+        b.onLoad({ filter: /[\\/]packages[\\/][^\\/]+[\\/]src[\\/].*\.ts$/ }, (args) => {
+          const text = readFileSync(args.path, 'utf8');
+          if (!text.includes('import.meta.url')) return undefined;
+          return { contents: text.replaceAll('import.meta.url', JSON.stringify(pathToFileURL(args.path).href)), loader: 'ts' };
+        });
+      },
+    },
+    {
+      // ws is CommonJS, which an ESM bundle cannot require; Node loads it from this package's node_modules instead.
+      name: 'ws-external',
+      setup(b) {
+        b.onResolve({ filter: /^ws$/ }, () => ({ path: import.meta.resolve('ws'), external: true }));
       },
     },
     {

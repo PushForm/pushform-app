@@ -22,6 +22,15 @@
     },
     {
       "path": "../kernel"
+    },
+    {
+      "path": "../extension-protocol"
+    },
+    {
+      "path": "../extensions"
+    },
+    {
+      "path": "../requests-core"
     }
   ]
 }

@@ -76,10 +76,11 @@ function withNotice(result: DocumentToolOutcome, api: { readonly changes: { labe
  * AI Chat's view of one tab's document: the Layout document API for a Layout tab, the model document API for a
  * model tab. Each document's conversation edits only its own tab, and only while that tab is active.
  * A call that arrives after the tab was closed or another tab was brought forward changes nothing and reports why.
- * `clone` makes a confirmed clone of the tab's document; without it the chat offers no cloning.
+ * `clone` makes a confirmed clone of the tab's document; without it the chat offers no cloning. `client` names the
+ * undo entries of its batches (the live agent bridge passes its own).
  */
 export function documentToolsFor(session: DocumentSession, tab: DocumentTab, openPanel?: (panel: 'objects' | 'requests') => void,
-  clone?: (tab: DocumentTab, request: CloneRequest) => Promise<ClonedDocument>, publishing?: ChatPublishing): DocumentToolSession | null {
+  clone?: (tab: DocumentTab, request: CloneRequest) => Promise<ClonedDocument>, publishing?: ChatPublishing, client: string = CLIENT): DocumentToolSession | null {
   const guidance = openPanel ? guidanceFor(session, tab, openPanel) : null;
   const cloning = clone ? {
     name: tab.name.replace(/\.(pfl?)$/i, ''),
@@ -119,7 +120,7 @@ export function documentToolsFor(session: DocumentSession, tab: DocumentTab, ope
     }
   };
   if (tab.type === 'model') {
-    const api = new ModelDocumentApi(tab.app.commands, CLIENT);
+    const api = new ModelDocumentApi(tab.app.commands, client);
     const renderer = viewportRenderer(tab.app.viewport);
     return {
       document: { type: 'model', apiVersion: MODEL_API_VERSION, edit: 1, ...(guidance ? { guidance: 1 as const } : {}), ...capabilities },
@@ -145,7 +146,7 @@ export function documentToolsFor(session: DocumentSession, tab: DocumentTab, ope
   const api = new LayoutDocumentApi(tab.doc, tab.commands, {
     activePageId: () => tab.activePageId,
     selectedEntityIds: () => (tab.workspace.selectedEntityId === null ? [] : [tab.workspace.selectedEntityId]),
-  }, CLIENT);
+  }, client);
   return {
     document: { type: 'layout', apiVersion: LAYOUT_API_VERSION, ...(guidance ? { guidance: 1 as const } : {}), ...capabilities },
     ...cloning,

@@ -6,7 +6,8 @@
   "license": "GPL-3.0-or-later",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./document-rules": "./src/agents/document.ts"
   },
   "types": "./src/index.ts",
   "sideEffects": false,
